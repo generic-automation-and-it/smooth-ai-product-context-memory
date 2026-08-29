@@ -1,14 +1,33 @@
-# Project
+# SmoothAiProductContextMemory
 
-[![Skill Security Scan](https://github.com/generic-automation-and-it/smooth-devex-template/actions/workflows/skill-scan.yml/badge.svg)](https://github.com/generic-automation-and-it/smooth-devex-template/actions/workflows/skill-scan.yml)
+> Persistent memory for AI agents: store and retrieve summarized, labelled context across long time spans — so agents can recall decisions and context long after a session ends.
 
-> AI agent skills in `.agents/skills/` are scanned by [NVIDIA SkillSpector](https://github.com/NVIDIA/SkillSpector) on pull requests that touch `.agents/skills/**` (or the workflow itself), once the PR is marked ready for review. A green badge means the latest scan found no HIGH/CRITICAL findings; results are published to the repository's **Security → Code scanning** tab.
+## What We're Building
 
-> One-line description of what the service does and who it is for. _(Placeholder — update once the project is named.)_
+AI language models are stateless — they forget everything between sessions. This project builds **persistent AI memory** so coding agents can recall relevant context over long periods, even after their working memory is gone.
 
-`Project` is a **combined AI DevEx template** — a starting point for teams that want structured, tool-agnostic AI-assisted development from day one. It ships a ready-to-use AI agent toolchain (Claude Code, Cursor, GitHub Copilot, OpenAI Codex) wired up via a single `.agents/` directory, alongside a **.NET 10 / ASP.NET Core** reference implementation built with **Clean Architecture**.
+The core idea (inspired by the [unified-database approach to agent memory](https://www.tigerdata.com/learn/building-ai-agents-with-persistent-memory-a-unified-database-approach)):
 
-> **⚠️ Template repository.** `Project` is a placeholder name used throughout the solution (`Project.slnx`, `src/Project.*`, `tests/Project.*`), the `.agents` tree, and this README. When the project is given a real name, rename every `Project`/`project` occurrence and update the descriptions below. See the Template Notice in [`AGENTS.md`](AGENTS.md) for the full checklist.
+- **Summarized contexts with labels** — distilled knowledge captured from sessions, tagged with labels such as issue/ticket numbers so related context can be linked and retrieved.
+- **Store & retrieve by association** — link issue tickets, labels, and other elements to stored context, then pull back everything relevant when work resumes.
+- **HTTP Docker API** — the memory service runs as a containerized HTTP API.
+- **Agent skill** — a get/set skill lets AI agents persist and recall context during their work.
+
+### Memory model
+
+Drawing on the three memory types from the unified-database approach:
+
+| Memory type | What it holds | Role here |
+|---|---|---|
+| Semantic | Summarized contexts, embedded & labelled | The primary store — distilled knowledge retrievable by label/ticket and similarity |
+| Episodic | Timestamped events (sessions, decisions) | Provenance — when and where a context was captured |
+| Procedural | Preferences, learned behaviors | Agent/user settings that persist across sessions |
+
+Temporal validity (`valid_from` / `valid_until`) keeps retrieved context current, and hybrid search (label + keyword + semantic) finds the right context fast.
+
+---
+
+Built on the **smooth-devex-template** AI DevEx scaffold — a ready-to-use AI agent toolchain (Claude Code, Cursor, GitHub Copilot, OpenAI Codex) wired up via a single `.agents/` directory, alongside a **.NET 10 / ASP.NET Core** implementation built with **Clean Architecture**.
 
 ---
 
@@ -31,7 +50,7 @@
 |---|---|
 | Framework | ASP.NET Core (.NET 10) |
 | Architecture | Clean Architecture — `Domain` / `Application` / `Infrastructure` / `Host` |
-| API style | Minimal API endpoints (`src/Project.Host`) |
+| API style | Minimal API endpoints (`src/SmoothAiProductContextMemory.Host`) |
 | Mediator | [`martinothamar/Mediator`](https://github.com/martinothamar/Mediator) — source-gen CQRS dispatch |
 | Validation | FluentValidation in a fail-fast Mediator pipeline |
 | Persistence | EF Core + PostgreSQL (`Npgsql.EntityFrameworkCore.PostgreSQL`) |
@@ -66,17 +85,17 @@ powershell -ExecutionPolicy Bypass -File .agents/setup/scripts/agents-setup.ps1
 ### Build & Test
 
 ```bash
-dotnet restore Project.slnx
-dotnet build   Project.slnx --configuration Release
-dotnet test    Project.slnx
+dotnet restore SmoothAiProductContextMemory.slnx
+dotnet build   SmoothAiProductContextMemory.slnx --configuration Release
+dotnet test    SmoothAiProductContextMemory.slnx
 ```
 
-Target a single test project directly when iterating, e.g. `dotnet test tests/Project.Domain.UnitTest`.
+Target a single test project directly when iterating, e.g. `dotnet test tests/SmoothAiProductContextMemory.Domain.UnitTest`.
 
 ### Run locally
 
 ```bash
-dotnet run --project src/Project.Host      # start the API
+dotnet run --project src/SmoothAiProductContextMemory.Host      # start the API
 ```
 
 Once the stack is up:
@@ -88,7 +107,7 @@ Once the stack is up:
 
 ---
 
-## Project Structure
+## SmoothAiProductContextMemory Structure
 
 ```
 .agents/                         # All AI tooling — single source of truth
@@ -101,17 +120,17 @@ Once the stack is up:
   settings.json                  # Tool permissions, compile/test commands
 
 src/
-  Project.Domain/          # Entities, value objects, invariants — no external deps
-  Project.Application/     # Vertical-slice use cases (Features/<Name>/) + Mediator handlers
-  Project.Infrastructure/  # EF Core + PostgreSQL persistence, HTTP clients
-  Project.Host/            # Minimal API composition, middleware, observability
+  SmoothAiProductContextMemory.Domain/          # Entities, value objects, invariants — no external deps
+  SmoothAiProductContextMemory.Application/     # Vertical-slice use cases (Features/<Name>/) + Mediator handlers
+  SmoothAiProductContextMemory.Infrastructure/  # EF Core + PostgreSQL persistence, HTTP clients
+  SmoothAiProductContextMemory.Host/            # Minimal API composition, middleware, observability
 
 tests/
-  Project.*.UnitTest/          # L0 — no I/O, in-process
-  Project.*.ComponentTest/     # L1 — in-memory EF Core / real isolated DB + Respawn
-  Project.*.IntegrationTest/   # L2 — full stack, real PostgreSQL
-  Project.TestFramework/       # Shared fixtures
-  Project.TestFramework.Aspire/# Aspire dependency host (PostgreSQL + WireMock)
+  SmoothAiProductContextMemory.*.UnitTest/          # L0 — no I/O, in-process
+  SmoothAiProductContextMemory.*.ComponentTest/     # L1 — in-memory EF Core / real isolated DB + Respawn
+  SmoothAiProductContextMemory.*.IntegrationTest/   # L2 — full stack, real PostgreSQL
+  SmoothAiProductContextMemory.TestFramework/       # Shared fixtures
+  SmoothAiProductContextMemory.TestFramework.Aspire/# Aspire dependency host (PostgreSQL + WireMock)
 ```
 
 ---
