@@ -65,7 +65,7 @@ This is a unified AI development experience folder that centralizes skills, prom
 
 - **Date**: 2026-02-12
 - **Status**: Accepted
-- **Context**: Project was using `.claude` folder, but team wanted to support multiple AI coding tools without duplicating configuration or creating vendor lock-in
+- **Context**: SmoothAiProductContextMemory was using `.claude` folder, but team wanted to support multiple AI coding tools without duplicating configuration or creating vendor lock-in
 - **Decision**: Create tool-agnostic `.agents` folder as single source of truth, with symbolic links for tool-specific compatibility
 - **Consequences**:
   - Single configuration folder to maintain

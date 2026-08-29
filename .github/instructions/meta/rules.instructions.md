@@ -77,7 +77,7 @@ Claude Code auto-loads all `.md` files in `.claude/rules/` (symlinked to `.agent
 
 | Rule scope | Place in | `alwaysApply` | `globs` / `paths` / `applyTo` |
 |------------|----------|---------------|-------------------------------|
-| Project-wide (git, PR, workflow) | `.agents/rules/` (flat) or a category folder | `true` | `"**"` |
+| SmoothAiProductContextMemory-wide (git, PR, workflow) | `.agents/rules/` (flat) or a category folder | `true` | `"**"` |
 | Backend only | `.agents/rules/backend/` | `false` | `"**/*.cs"` |
 | Domain-specific | nearest `*AGENTS.md` instead | n/a | n/a |
 

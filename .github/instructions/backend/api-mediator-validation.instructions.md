@@ -13,7 +13,7 @@ Updated: 2026-05-09
 
 ## Non-Negotiables
 
-- Create APIs as ASP.NET Core minimal APIs in `src/Project.Host`.
+- Create APIs as ASP.NET Core minimal APIs in `src/SmoothAiProductContextMemory.Host`.
 - Endpoints must mediate to Application via [`martinothamar/Mediator`](https://github.com/martinothamar/Mediator) packages; do not use MediatR.
 - Every request/query must pass through a FluentValidation-based Mediator pipeline so invalid input fails fast.
 - When generating a new request model, always create a default validator for it (even if initially permissive).

@@ -25,11 +25,11 @@ The secret value flows: **runtime environment → script → tool**. It is never
 
 ## Reference Pattern
 
-`.github/workflows/skill-scan.yml` is the canonical example: the SkillSpector LLM key lives in `secrets.SKILLSPECTOR_OPENAI_API_KEY`, is injected as the `OPENAI_API_KEY` env var on the scan step, and is consumed only by the scan process. No file in the repo contains the value. Mirror this shape for any skill that needs a secret: declare the env var name, read it in a script, never persist it.
+A GitHub Actions workflow step that needs a secret should inject it as an env var scoped to that step only (e.g. `env: MY_API_KEY: ${{ secrets.MY_API_KEY }}`) and have the invoked script read it via `os.environ` / `"$VAR"` — never interpolate the secret into a command string, log line, or committed file.
 
 ## Current Status
 
-**No skill handles a real secret today.** The only SkillSpector "data exfiltration / context leakage" signal ever raised on this tree was a false positive on a natural-language prompt phrase (no secret value, no external send), since reworded. This rule is a **standing guardrail** so that if a future skill needs a secret, it is added the safe way — and so the SkillSpector gate's exfiltration detection stays meaningful rather than being trained to ignore real leaks.
+**No skill handles a real secret today.** This rule is a **standing guardrail** so that if a future skill needs a secret, it is added the safe way from the start.
 
 ## Changelog
 
@@ -37,4 +37,5 @@ The secret value flows: **runtime environment → script → tool**. It is never
 
 | Date | Change |
 |:-----|:-------|
-| 2026-06-21 | Initial version — env-via-script secret handling for skills; mirrors the skill-scan workflow's key handling. |
+| 2026-06-21 | Initial version — env-via-script secret handling for skills. |
+| 2026-08-29 | Dropped the skill-scan.yml reference example after that workflow was removed. |

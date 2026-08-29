@@ -1,18 +1,10 @@
 # AGENTS.md
 
-This file provides guidance for AI coding agents working in the Project repository.
+This file provides guidance for AI coding agents working in the SmoothAiProductContextMemory repository.
 
-> **⚠️ TEMPLATE NOTICE — read before working.**
-> This repository is currently a **template**. `Project` is a placeholder name used throughout the `.agents` tree, root `AGENTS.md`, rule files, skill docs, and the solution/project layout (`Project.slnx`, `src/Project.*`, `tests/Project.*`).
->
-> **As soon as the project is given a real name, you MUST:**
-> 1. Replace every occurrence of `Project` / `project` (PascalCase namespaces/paths and lowercase prose) across all `.agents` files, root `AGENTS.md`, rule files, skill docs, `Project.slnx`, and the GitHub URL/slug with the chosen name.
-> 2. Update the glossary and the Project Overview description below to describe the real project.
-> 3. **Remove this entire TEMPLATE NOTICE block** — including this instruction — once the rename is complete.
+## SmoothAiProductContextMemory Overview
 
-## Project Overview
-
-Project is an AI-spec-driven, AI-agnostic development project. It documents reusable patterns, blueprints, and component specifications that guide automated and AI-assisted software delivery. _(Placeholder description — update once the project is named; see Template Notice above.)_
+SmoothAiProductContextMemory is a persistent memory service for AI agents. It stores summarized, labelled context — linked to issue/ticket numbers and other elements — so agents can retrieve relevant history during long gaps where their working memory is gone. The service is exposed as an HTTP Docker API, plus an agent skill for getting and setting stored context.
 
 **Tech stack:** .NET 10 · ASP.NET Core · Clean Architecture (Domain / Application / Infrastructure / Host) · EF Core + PostgreSQL · Mediator (source-gen CQRS) · xunit.v3
 
@@ -53,11 +45,11 @@ All planned work is tracked as worktasks under `.context/work-tasks/` (gitignore
 
 | Layer | Path | Purpose |
 |---|---|---|
-| Domain | `src/Project.Domain/` | Core entities, value objects — no external deps |
-| Application | `src/Project.Application/` | Vertical-slice use cases via Mediator — `Features/<Name>/`, shared code in `Common/` |
-| Infrastructure | `src/Project.Infrastructure/` | EF Core + PostgreSQL (`Persistence/`), HTTP clients (`Clients/`) |
-| Host | `src/Project.Host/` | ASP.NET Core Web API, Serilog, Scalar OpenAPI |
-| ChatHost | `src/Project.ChatHost/` | Standalone LLM microservice — owns Anthropic SDK; talks to Host via HTTP only |
+| Domain | `src/SmoothAiProductContextMemory.Domain/` | Core entities, value objects — no external deps |
+| Application | `src/SmoothAiProductContextMemory.Application/` | Vertical-slice use cases via Mediator — `Features/<Name>/`, shared code in `Common/` |
+| Infrastructure | `src/SmoothAiProductContextMemory.Infrastructure/` | EF Core + PostgreSQL (`Persistence/`), HTTP clients (`Clients/`) |
+| Host | `src/SmoothAiProductContextMemory.Host/` | ASP.NET Core Web API, Serilog, Scalar OpenAPI |
+| ChatHost | `src/SmoothAiProductContextMemory.ChatHost/` | Standalone LLM microservice — owns Anthropic SDK; talks to Host via HTTP only |
 
 Detailed backend coding rules are maintained in `.agents/rules/backend/` and scoped per-file via frontmatter (see Rules section).
 
@@ -77,13 +69,13 @@ All rules live under `.agents/rules/` as `*.instructions.md` files and are auto-
 ## Build / Test Commands
 
 ```bash
-dotnet build Project.slnx                     # build
-dotnet test  Project.slnx                     # run all tests
-dotnet run --project src/Project.AppHost      # dev Aspire AppHost
-dotnet run --project src/Project.ChatHost     # ChatHost standalone (separate process from the API Host)
+dotnet build SmoothAiProductContextMemory.slnx                     # build
+dotnet test  SmoothAiProductContextMemory.slnx                     # run all tests
+dotnet run --project src/SmoothAiProductContextMemory.AppHost      # dev Aspire AppHost
+dotnet run --project src/SmoothAiProductContextMemory.ChatHost     # ChatHost standalone (separate process from the API Host)
 ```
 
-Target a single test project directly when needed (e.g. `dotnet test tests/Project.Domain.UnitTest`); `ls tests/` lists them — no Trait annotations required. **Gotcha:** the dev Aspire dashboard runs at `http://localhost:15278`; when started from a terminal, use the printed `/login?t=...` URL on first browser visit.
+Target a single test project directly when needed (e.g. `dotnet test tests/SmoothAiProductContextMemory.Domain.UnitTest`); `ls tests/` lists them — no Trait annotations required. **Gotcha:** the dev Aspire dashboard runs at `http://localhost:15278`; when started from a terminal, use the printed `/login?t=...` URL on first browser visit.
 
 ## Test Framework
 
@@ -93,7 +85,7 @@ xunit.v3 · Shouldly · Bogus · Respawn. Three tiers (the distinction is non-ob
 - **L1** component — `Application.ComponentTest` uses in-memory EF Core; `Infrastructure.ComponentTest` uses a real isolated DB + Respawn.
 - **L2** `*.IntegrationTest` — full stack, real PostgreSQL.
 
-Shared fixtures live in `tests/Project.TestFramework/`; the Aspire dependency host (PostgreSQL + WireMock containers) in `tests/Project.TestFramework.Aspire/`. See `.docs/wiki/testing.md`.
+Shared fixtures live in `tests/SmoothAiProductContextMemory.TestFramework/`; the Aspire dependency host (PostgreSQL + WireMock containers) in `tests/SmoothAiProductContextMemory.TestFramework.Aspire/`. See `.docs/wiki/testing.md`.
 
 ## Style and Dependencies
 
@@ -107,8 +99,6 @@ Human-facing reviewer documentation lives in `.docs/wiki/`. Detailed high-level 
 
 PR gate — `.github/workflows/pr-gate.yml` (triggers: `pull_request` → `main`, `push` → `main`, `workflow_dispatch`): restore → build (Release) → Aspire-backed test with coverage via the local action `.github/actions/aspire-test-with-coverage`, then publish + upload the coverage report. Full step list, service ports, timing, and local .NET tools: `.docs/wiki/ci.md`.
 
-Skill security gate — `.github/workflows/skill-scan.yml` (triggers on changes to `.agents/skills/**`, the workflow, the report script, or the baseline): scans AI agent skills with [NVIDIA SkillSpector](https://github.com/NVIDIA/SkillSpector) (pinned commit; non-blocking warning when upstream `main` moves past the pin). **Baseline-aware gate, not a raw-score gate.** These are first-party skills that legitimately run shell/`gh`/`git`/template operations, which SkillSpector (correctly, for an untrusted third party) rates HIGH — so its raw risk score is pinned at 100 (exit `1`) by design. The gate decision therefore comes from `.github/scripts/skillspector-report.py`, which subtracts the accepted findings listed in **`.github/skillspector-baseline.yml`** (each entry matched by `(id, file)` and carrying a written justification) and **fails only on ACTIVE, non-baselined findings**; a scan error (exit `2`) still hard-fails. A genuinely new dangerous pattern (real exfiltration, hidden instructions, supply-chain) is not baselined, so it still blocks the PR — adding a finding to the baseline is a reviewed, justified act, never a blanket mute. **Scan-mode policy (A):** the gate keys off a **deterministic static scan (`--no-llm`)** whose baseline-aware decision is authoritative; the LLM semantic stage is nondeterministic across model/prompt drift, so it runs as a **separate non-blocking advisory scan** whose findings are rendered in the run summary for human review and **never affect the gate decision** (see `.agents/skills/AGENTS.md`, LADR-001). The report script derives a findings report (raw score + **Active** and **Accepted/baselined** tables, plus stale-entry detection) and, when the advisory LLM report is present, a clearly-labeled **non-gating** advisory section — all written to the **Actions run summary** on every run, plus a SARIF file (from the gating static scan; baselined findings marked `suppressions`) published to the **Security → Code scanning** tab (requires GitHub Advanced Security / Code scanning enabled — otherwise the run summary is the place to read findings). Skills that need a secret must follow `.github/instructions/skill-secret-handling.instructions.md` (read it from the runtime env via a script; never embed the value). The advisory LLM scan runs when the API key is present and self-skips otherwise. Provider config comes from org/repo settings: variables `SKILLSPECTOR_PROVIDER` (default `openai`), `SKILLSPECTOR_MODEL` (bare model id), `SKILLSPECTOR_OPENAI_BASE_URL` (OpenAI-compatible base, must end at `/v1`), and secret `SKILLSPECTOR_OPENAI_API_KEY`.
-
 ## Git Constraints
 
 This repository is hosted on **GitHub** at `https://github.com/generic-automation-and-it/project`.
@@ -119,10 +109,10 @@ This repository is hosted on **GitHub** at `https://github.com/generic-automatio
 
 ## Glossary
 
-<!-- TODO: Add domain-specific terms and abbreviations as the project evolves. -->
-
 | Term | Description |
 |---|---|
-| Blueprint | A reusable, parameterised specification for a component or service |
-| Catalogue | The collection of all blueprints and templates in this repository |
-| Spec-driven | Development approach where machine-readable specifications are the source of truth |
+| Context | A summarized, labelled unit of knowledge stored for later retrieval |
+| Label | A tag (e.g. an issue/ticket number) used to link and retrieve related contexts |
+| Semantic memory | Embedded, labelled knowledge — the primary store for retrieval by label or similarity |
+| Episodic memory | Timestamped record of when/where a context was captured |
+| Procedural memory | Persisted agent/user preferences and learned behaviors |
