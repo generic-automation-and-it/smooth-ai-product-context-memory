@@ -91,7 +91,7 @@ def parse_name_status(name_status):
 def classify_horizontal_slice(paths):
     """Return the horizontal technical layers touched by the diff."""
     layers = []
-    if any(p.startswith(("src/", "Project")) for p in paths):
+    if any(p.startswith(("src/", "SmoothAiProductContextMemory")) for p in paths):
         layers.append("backend")
     if any("test" in p.lower() or "spec" in p.lower() for p in paths):
         layers.append("tests")
@@ -144,7 +144,7 @@ def build_task_body(branch_name, base_ref, base_sha, paths, status_counts, diff_
     area_str = ", ".join(f"`{a}`" for a in areas)
 
     checklist = ["- [ ] Diff reviewed and scope confirmed against parent Feature."]
-    if any(p.startswith(("src/", "Project")) for p in paths):
+    if any(p.startswith(("src/", "SmoothAiProductContextMemory")) for p in paths):
         checklist.append("- [ ] Build succeeds or follow-up issue raised.")
     if any("test" in p.lower() or "spec" in p.lower() for p in paths):
         checklist.append("- [ ] Tests updated and passing, or follow-up recorded.")

@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>SmoothAiProductContextMemory.Domain</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="SmoothAiProductContextMemory.Domain.UnitTest" />
+  </ItemGroup>
+
+</Project>

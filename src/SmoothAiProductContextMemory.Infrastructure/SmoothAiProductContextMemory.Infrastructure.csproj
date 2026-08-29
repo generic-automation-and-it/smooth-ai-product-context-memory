@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>SmoothAiProductContextMemory.Infrastructure</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SmoothAiProductContextMemory.Application\SmoothAiProductContextMemory.Application.csproj" />
+    <ProjectReference Include="..\SmoothAiProductContextMemory.Domain\SmoothAiProductContextMemory.Domain.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="SmoothAiProductContextMemory.Infrastructure.UnitTest" />
+    <InternalsVisibleTo Include="SmoothAiProductContextMemory.Infrastructure.ComponentTest" />
+  </ItemGroup>
+
+</Project>

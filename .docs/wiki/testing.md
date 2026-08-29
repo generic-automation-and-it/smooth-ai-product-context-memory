@@ -10,14 +10,14 @@
 
 ## Test Infrastructure
 
-Shared fixtures live in `tests/Project.TestFramework/`. Container orchestration (PostgreSQL, WireMock) lives in `tests/Project.TestFramework.Aspire/`.
+Shared fixtures live in `tests/SmoothAiProductContextMemory.TestFramework/`. Container orchestration (PostgreSQL, WireMock) lives in `tests/SmoothAiProductContextMemory.TestFramework.Aspire/`.
 
 ### AspireFixture
 
 `AspireFixture` provisions and shares test containers across all test assemblies in a process. It tries three strategies in order:
 
 1. **Reuse** — if another fixture in the same process already initialised, adopt the shared state
-2. **Fixed endpoints** — probe `127.0.0.1:15432` (Postgres) and `127.0.0.1:19091` (WireMock) — succeeds if containers are pre-warmed (CI or local `dotnet run --project tests/Project.TestFramework.Aspire`)
+2. **Fixed endpoints** — probe `127.0.0.1:15432` (Postgres) and `127.0.0.1:19091` (WireMock) — succeeds if containers are pre-warmed (CI or local `dotnet run --project tests/SmoothAiProductContextMemory.TestFramework.Aspire`)
 3. **Docker port discovery** — query `docker`/`podman port` for the persistent named containers (`project-test-postgres`, `project-test-wiremock`)
 4. **Start Aspire host** — provision fresh containers (takes ~30s on first run)
 
@@ -32,7 +32,7 @@ Base class for L2 integration tests. Initialises `AspireFixture`, then boots `We
 - `RecreateDatabaseOnInitialize` — set `true` to drop/recreate the database before the fixture starts
 - `DatabaseName` — default is a Guid-suffixed name for isolation; override for deterministic names
 
-### ProjectTestDatabase
+### SmoothAiProductContextMemoryTestDatabase
 
 Factory for per-test isolated databases in L1 Infrastructure tests. Drops/recreates a named database and returns a connection string handle. When EF Core migrations are added, extend `CreateAsync` to run migrations before returning.
 
@@ -74,21 +74,21 @@ Tests opt in via `[Collection("Aspire")]` and receive `AspireFixture` via constr
 
 ```bash
 # All tests (L0 + L1 + L2) — requires Docker
-dotnet test Project.slnx
+dotnet test SmoothAiProductContextMemory.slnx
 
 # L0 only — no containers required
-dotnet test tests/Project.Domain.UnitTest
-dotnet test tests/Project.Application.UnitTest
-dotnet test tests/Project.Infrastructure.UnitTest
-dotnet test tests/Project.Host.UnitTest
+dotnet test tests/SmoothAiProductContextMemory.Domain.UnitTest
+dotnet test tests/SmoothAiProductContextMemory.Application.UnitTest
+dotnet test tests/SmoothAiProductContextMemory.Infrastructure.UnitTest
+dotnet test tests/SmoothAiProductContextMemory.Host.UnitTest
 
 # L1 component tests
-dotnet test tests/Project.Application.ComponentTest
-dotnet test tests/Project.Infrastructure.ComponentTest
+dotnet test tests/SmoothAiProductContextMemory.Application.ComponentTest
+dotnet test tests/SmoothAiProductContextMemory.Infrastructure.ComponentTest
 
 # L2 integration tests
-dotnet test tests/Project.Host.IntegrationTest
+dotnet test tests/SmoothAiProductContextMemory.Host.IntegrationTest
 
 # Pre-warm containers (speeds up first test run)
-dotnet run --project tests/Project.TestFramework.Aspire
+dotnet run --project tests/SmoothAiProductContextMemory.TestFramework.Aspire
 ```

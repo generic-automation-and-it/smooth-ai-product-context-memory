@@ -21,5 +21,5 @@ trim_trailing_whitespace = false
 
 # EF Core migration files — tell Roslyn-based analysers that these are generated
 # code so they are skipped during analysis, reducing build-time overhead.
-[src/Project.Infrastructure/Persistence/Migrations/**]
+[src/SmoothAiProductContextMemory.Infrastructure/Persistence/Migrations/**]
 generated_code = true

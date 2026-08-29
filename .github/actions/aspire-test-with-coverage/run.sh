@@ -7,7 +7,7 @@ artifacts_root="${ARTIFACTS_ROOT:-artifacts}"
 timeout_seconds="${DEPENDENCY_TIMEOUT_SECONDS:-120}"
 results_directory="${artifacts_root}/testresults"
 coverage_directory="${artifacts_root}/coverage"
-coverage_collect="XPlat Code Coverage;Format=cobertura;Include=[Project.*]*;ExcludeByFile=**/*.g.cs,**/obj/**,**/Migrations/*.cs,**/*ModelSnapshot.cs"
+coverage_collect="XPlat Code Coverage;Format=cobertura;Include=[SmoothAiProductContextMemory.*]*;ExcludeByFile=**/*.g.cs,**/obj/**,**/Migrations/*.cs,**/*ModelSnapshot.cs"
 aspire_pid=""
 
 cleanup() {
@@ -119,7 +119,7 @@ export ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL="http://localhost:19889"
 export ASPIRE_ALLOW_UNSECURED_TRANSPORT="true"
 
 dotnet run \
-  --project tests/Project.TestFramework.Aspire \
+  --project tests/SmoothAiProductContextMemory.TestFramework.Aspire \
   --configuration "${build_configuration}" \
   --no-build &
 
@@ -137,27 +137,27 @@ rm -rf "${results_directory}" "${coverage_directory}"
 mkdir -p "${results_directory}" "${coverage_directory}"
 
 echo "Phase 1 — integration tests..."
-run_test_project tests/Project.Host.IntegrationTest/Project.Host.IntegrationTest.csproj \
+run_test_project tests/SmoothAiProductContextMemory.Host.IntegrationTest/SmoothAiProductContextMemory.Host.IntegrationTest.csproj \
   || record_failure "Host integration tests failed."
 ensure_aspire_alive
 
 echo "Phase 2 — component tests (parallel)..."
-run_test_project tests/Project.Application.ComponentTest/Project.Application.ComponentTest.csproj &
+run_test_project tests/SmoothAiProductContextMemory.Application.ComponentTest/SmoothAiProductContextMemory.Application.ComponentTest.csproj &
 app_component_pid=$!
-run_test_project tests/Project.Infrastructure.ComponentTest/Project.Infrastructure.ComponentTest.csproj &
+run_test_project tests/SmoothAiProductContextMemory.Infrastructure.ComponentTest/SmoothAiProductContextMemory.Infrastructure.ComponentTest.csproj &
 infra_component_pid=$!
 wait "${app_component_pid}"   || record_failure "Application component tests failed."
 wait "${infra_component_pid}" || record_failure "Infrastructure component tests failed."
 ensure_aspire_alive
 
 echo "Phase 3 — unit tests (parallel)..."
-run_test_project tests/Project.Domain.UnitTest/Project.Domain.UnitTest.csproj &
+run_test_project tests/SmoothAiProductContextMemory.Domain.UnitTest/SmoothAiProductContextMemory.Domain.UnitTest.csproj &
 domain_unit_pid=$!
-run_test_project tests/Project.Application.UnitTest/Project.Application.UnitTest.csproj &
+run_test_project tests/SmoothAiProductContextMemory.Application.UnitTest/SmoothAiProductContextMemory.Application.UnitTest.csproj &
 app_unit_pid=$!
-run_test_project tests/Project.Infrastructure.UnitTest/Project.Infrastructure.UnitTest.csproj &
+run_test_project tests/SmoothAiProductContextMemory.Infrastructure.UnitTest/SmoothAiProductContextMemory.Infrastructure.UnitTest.csproj &
 infra_unit_pid=$!
-run_test_project tests/Project.Host.UnitTest/Project.Host.UnitTest.csproj &
+run_test_project tests/SmoothAiProductContextMemory.Host.UnitTest/SmoothAiProductContextMemory.Host.UnitTest.csproj &
 host_unit_pid=$!
 wait "${domain_unit_pid}" || record_failure "Domain unit tests failed."
 wait "${app_unit_pid}"    || record_failure "Application unit tests failed."

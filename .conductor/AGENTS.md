@@ -153,7 +153,7 @@ This section describes the kit's repo-agnostic behavior. It ships with the kit i
   regardless of platform. If a workspace's snapshot doesn't have `uv` on `PATH`, the generated MCP configs are
   written successfully but the servers themselves cannot start — `code-review-graph build` still exits 0 in
   that case, so the graph looks built but no agent can reach it over MCP.
-- **Project-scoped MCP configs are hidden via `.git/info/exclude`, not `.gitignore`.** `setup.sh` seeds
+- **SmoothAiProductContextMemory-scoped MCP configs are hidden via `.git/info/exclude`, not `.gitignore`.** `setup.sh` seeds
   `.mcp.json` (from `claude-code`) and `opencode.jsonc` (from `opencode`) into `.git/info/exclude` so they
   never show up in a workspace diff, without editing the tracked `.gitignore`. `code-review-graph install`
   still appends `.code-review-graph/` to the tracked `.gitignore` directly (all platforms, predates this

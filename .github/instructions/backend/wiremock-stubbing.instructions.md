@@ -12,9 +12,9 @@ alwaysApply: false
 
 Applies to the single remaining Aspire WireMock stub helper:
 
-- `tests/Project.TestFramework.Aspire/WireMockUserStubsHelper.cs`
+- `tests/SmoothAiProductContextMemory.TestFramework.Aspire/WireMockUserStubsHelper.cs`
 
-> **Note (HLD-12):** `src/Project.AppHost/WireMockUserStubsHelper.cs` has been deleted. The dev AppHost no longer runs WireMock — it reads from the real upstream API directly. Only the test-framework copy remains.
+> **Note (HLD-12):** `src/SmoothAiProductContextMemory.AppHost/WireMockUserStubsHelper.cs` has been deleted. The dev AppHost no longer runs WireMock — it reads from the real upstream API directly. Only the test-framework copy remains.
 
 ## Rules
 
