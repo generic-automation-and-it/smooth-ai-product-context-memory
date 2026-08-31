@@ -81,8 +81,10 @@ public sealed class S3BlobStorage : IBlobStorage, IAsyncDisposable
             ObjectStat response = await _client.GetObjectAsync(args, cancellationToken);
             string? contentType = response.ContentType;
 
-            Stream decompressed = BlobCompressor.Decompress(download.ToArray());
-            return new BlobContent(decompressed, contentType);
+            byte[] body = download.ToArray();
+            bool isGzip = string.Equals(GetMetadataValue(response.MetaData, "encoding"), BlobCompressor.EncodingName, StringComparison.OrdinalIgnoreCase);
+            Stream content = isGzip ? BlobCompressor.Decompress(body) : new MemoryStream(body, writable: false);
+            return new BlobContent(content, contentType);
         }
         catch (ObjectNotFoundException)
         {
@@ -107,7 +109,11 @@ public sealed class S3BlobStorage : IBlobStorage, IAsyncDisposable
         _logger.LogDebug("Deleted blob {Address}", address);
     }
 
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    public ValueTask DisposeAsync()
+    {
+        _client.Dispose();
+        return ValueTask.CompletedTask;
+    }
 
     private async Task<bool> ObjectExistsAsync(string objectKey, CancellationToken cancellationToken)
     {
@@ -138,11 +144,34 @@ public sealed class S3BlobStorage : IBlobStorage, IAsyncDisposable
             return;
         }
 
-        MakeBucketArgs makeArgs = new MakeBucketArgs().WithBucket(_bucket);
-        await _client.MakeBucketAsync(makeArgs, cancellationToken);
+        try
+        {
+            await _client.MakeBucketAsync(new MakeBucketArgs().WithBucket(_bucket), cancellationToken);
+        }
+        catch (Minio.Exceptions.MinioException)
+        {
+            // A concurrent writer may have created the bucket between the exists check and MakeBucket.
+            if (!await _client.BucketExistsAsync(existsArgs, cancellationToken))
+            {
+                throw;
+            }
+        }
     }
 
     private static string ToObjectKey(string address) => address;
+
+    private static string? GetMetadataValue(IReadOnlyDictionary<string, string> metadata, string keySuffix)
+    {
+        foreach (KeyValuePair<string, string> entry in metadata)
+        {
+            if (entry.Key.EndsWith(keySuffix, StringComparison.OrdinalIgnoreCase))
+            {
+                return entry.Value;
+            }
+        }
+
+        return null;
+    }
 
     private static async Task<byte[]> ReadAllAsync(Stream stream, CancellationToken cancellationToken)
     {

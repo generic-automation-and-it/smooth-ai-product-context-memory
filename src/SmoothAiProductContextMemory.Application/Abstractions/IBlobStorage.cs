@@ -20,7 +20,7 @@ public interface IBlobStorage
     Task DeleteAsync(string address, CancellationToken cancellationToken = default);
 }
 
-public sealed record BlobContent(Stream Content, string? ContentType)
+public sealed record BlobContent(Stream Content, string? ContentType) : IAsyncDisposable
 {
     public ValueTask DisposeAsync() => Content.DisposeAsync();
 }

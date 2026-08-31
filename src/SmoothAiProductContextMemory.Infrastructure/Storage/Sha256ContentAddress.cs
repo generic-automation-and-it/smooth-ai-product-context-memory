@@ -9,14 +9,6 @@ namespace SmoothAiProductContextMemory.Infrastructure.Storage;
 /// </summary>
 public static class Sha256ContentAddress
 {
-    public static string Compute(Stream content)
-    {
-        ArgumentNullException.ThrowIfNull(content);
-
-        string hash = Convert.ToHexStringLower(SHA256.HashData(content));
-        return $"{hash[..2]}/{hash[2..4]}/{hash}";
-    }
-
     public static string Compute(byte[] content)
     {
         ArgumentNullException.ThrowIfNull(content);
