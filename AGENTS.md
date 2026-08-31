@@ -46,10 +46,11 @@ All planned work is tracked as worktasks under `.context/work-tasks/` (gitignore
 | Layer | Path | Purpose |
 |---|---|---|
 | Domain | `src/SmoothAiProductContextMemory.Domain/` | Core entities, value objects — no external deps |
-| Application | `src/SmoothAiProductContextMemory.Application/` | Vertical-slice use cases via Mediator — `Features/<Name>/`, shared code in `Common/` |
-| Infrastructure | `src/SmoothAiProductContextMemory.Infrastructure/` | EF Core + PostgreSQL (`Persistence/`), HTTP clients (`Clients/`) |
+| Application | `src/SmoothAiProductContextMemory.Application/` | Vertical-slice use cases via Mediator — `Features/<Name>/`, shared code in `Common/` + `Abstractions/` |
+| Infrastructure | `src/SmoothAiProductContextMemory.Infrastructure/` | EF Core + PostgreSQL (`Persistence/`), HTTP clients (`Clients/`), blob storage (`Storage/`) |
 | Host | `src/SmoothAiProductContextMemory.Host/` | ASP.NET Core Web API, Serilog, Scalar OpenAPI |
-| ChatHost | `src/SmoothAiProductContextMemory.ChatHost/` | Standalone LLM microservice — owns Anthropic SDK; talks to Host via HTTP only |
+| AppHost | `src/SmoothAiProductContextMemory.AppHost/` | Aspire dev orchestrator — Postgres + MinIO blob storage + Seq |
+| ChatHost | `src/SmoothAiProductContextMemory.ChatHost/` | Standalone LLM microservice — owns Anthropic SDK; talks to Host via HTTP only (project not yet in tree) |
 
 Detailed backend coding rules are maintained in `.agents/rules/backend/` and scoped per-file via frontmatter (see Rules section).
 

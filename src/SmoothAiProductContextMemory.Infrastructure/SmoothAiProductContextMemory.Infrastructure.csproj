@@ -10,6 +10,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Configuration" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" />
+    <PackageReference Include="Minio" />
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="SmoothAiProductContextMemory.Infrastructure.UnitTest" />
     <InternalsVisibleTo Include="SmoothAiProductContextMemory.Infrastructure.ComponentTest" />
   </ItemGroup>

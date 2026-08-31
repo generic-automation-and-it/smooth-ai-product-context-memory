@@ -6,6 +6,9 @@ namespace SmoothAiProductContextMemory.TestFramework.Aspire;
 internal static class DistributedApplicationBuilderExtensions
 {
     private const string DockerDesktopGroupName = "project";
+    private const string BlobContainerName = "project-test-blob";
+    private const string BlobAccessKey = "minioadmin";
+    private const string BlobSecretKey = "LocalMachineAccessNoInterestingDataTestDev#Passw0rd!FirewallNotExposed";
 
     internal static void AddSmoothAiProductContextMemoryTestDependencies(this IDistributedApplicationBuilder builder)
     {
@@ -17,6 +20,22 @@ internal static class DistributedApplicationBuilderExtensions
         builder.AddPostgresDependency(postgresPassword);
         builder.AddRedisDependency();
         builder.AddWireMockDependency();
+        builder.AddBlobDependency();
+    }
+
+    private static void AddBlobDependency(this IDistributedApplicationBuilder builder)
+    {
+        builder.AddContainer("blob", "minio/minio")
+            .WithArgs("server", "/data", "--console-address", ":9001")
+            .WithHttpEndpoint(port: 9002, targetPort: 9000, name: "s3")
+            .WithHttpEndpoint(port: 19192, targetPort: 9001, name: "console")
+            .WithEnvironment("MINIO_ROOT_USER", BlobAccessKey)
+            .WithEnvironment("MINIO_ROOT_PASSWORD", BlobSecretKey)
+            .WithContainerName(BlobContainerName)
+            .WithContainerRuntimeArgs(
+                "--label", $"com.docker.compose.project={DockerDesktopGroupName}",
+                "--label", $"com.docker.compose.service={BlobContainerName}")
+            .WithLifetime(ContainerLifetime.Persistent);
     }
 
     private static void AddPostgresDependency(

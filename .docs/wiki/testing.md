@@ -5,23 +5,30 @@
 | Level | Label | Projects | Containers? | Description |
 |---|---|---|---|---|
 | L0 | Unit | `*.UnitTest` | None | Isolated logic, no I/O — pure in-process |
-| L1 | Component | `Application.ComponentTest`, `Infrastructure.ComponentTest` | PostgreSQL + WireMock | End-to-end within a layer; real DB and HTTP stubs via Aspire |
-| L2 | Integration | `Host.IntegrationTest` | PostgreSQL + WireMock | Full stack via `WebApplicationFactory` + Aspire containers |
+| L1 | Component | `Application.ComponentTest`, `Infrastructure.ComponentTest` | PostgreSQL + MinIO | End-to-end within a layer; real DB and object storage via Aspire |
+| L2 | Integration | `Host.IntegrationTest` | PostgreSQL + MinIO | Full stack via `WebApplicationFactory` + Aspire containers |
 
 ## Test Infrastructure
 
-Shared fixtures live in `tests/SmoothAiProductContextMemory.TestFramework/`. Container orchestration (PostgreSQL, WireMock) lives in `tests/SmoothAiProductContextMemory.TestFramework.Aspire/`.
+Shared fixtures live in `tests/SmoothAiProductContextMemory.TestFramework/`. Container orchestration (PostgreSQL, Redis, WireMock, MinIO) lives in `tests/SmoothAiProductContextMemory.TestFramework.Aspire/`.
 
 ### AspireFixture
 
 `AspireFixture` provisions and shares test containers across all test assemblies in a process. It tries three strategies in order:
 
 1. **Reuse** — if another fixture in the same process already initialised, adopt the shared state
-2. **Fixed endpoints** — probe `127.0.0.1:15432` (Postgres) and `127.0.0.1:19091` (WireMock) — succeeds if containers are pre-warmed (CI or local `dotnet run --project tests/SmoothAiProductContextMemory.TestFramework.Aspire`)
-3. **Docker port discovery** — query `docker`/`podman port` for the persistent named containers (`project-test-postgres`, `project-test-wiremock`)
+2. **Fixed endpoints** — probe `127.0.0.1:15432` (Postgres), `127.0.0.1:19091` (WireMock) and `127.0.0.1:9002` (MinIO) — succeeds if containers are pre-warmed (CI or local `dotnet run --project tests/SmoothAiProductContextMemory.TestFramework.Aspire`)
+3. **Container port discovery** — query `docker`/`podman port` for the persistent named containers (`project-test-postgres`, `project-test-wiremock`, `project-test-blob`)
 4. **Start Aspire host** — provision fresh containers (takes ~30s on first run)
 
 Container lifetimes are `Persistent` — they survive test runs and are reused on subsequent runs.
+
+### Blob (MinIO) isolation
+
+`AspireFixture` exposes `BlobEndpoint`, `BlobAccessKey` and `BlobSecretKey` (test-fixed credentials). L1
+storage tests build an `S3BlobStorage` per test with a **unique bucket name** — the adapter creates the
+bucket lazily on first write and treats a missing bucket as a missing object, so each test is isolated
+exactly as Respawn isolates the database. There is no shared state between tests' buckets.
 
 ### WebAppFixture&lt;T&gt;
 
@@ -57,6 +64,7 @@ await admin.ResetAsync(); // clear stubs between tests
 |---|---|---|
 | `project-test-postgres` | 15432 | PostgreSQL |
 | `project-test-wiremock` | 19091 | WireMock HTTP admin + stubbed endpoints |
+| `project-test-blob` | 9002 (s3), 19192 (console) | MinIO S3-compatible object storage |
 
 ## Collection Fixture Pattern
 
