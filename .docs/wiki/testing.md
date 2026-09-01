@@ -64,7 +64,7 @@ await admin.ResetAsync(); // clear stubs between tests
 |---|---|---|
 | `project-test-postgres` | 15432 | PostgreSQL |
 | `project-test-wiremock` | 19091 | WireMock HTTP admin + stubbed endpoints |
-| `project-test-blob` | 9002 (s3), 19192 (console) | MinIO S3-compatible object storage |
+| `project-test-blob` | 9002 (s3), 19092 (console) | MinIO S3-compatible object storage |
 
 ## Collection Fixture Pattern
 
