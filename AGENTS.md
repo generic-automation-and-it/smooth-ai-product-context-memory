@@ -1,47 +1,18 @@
 # AGENTS.md
 
-This file provides guidance for AI coding agents working in the SmoothAiProductContextMemory repository.
+Guidance for AI coding agents in SmoothAiProductContextMemory.
 
-## SmoothAiProductContextMemory Overview
+## Overview
 
-SmoothAiProductContextMemory is a persistent memory service for AI agents. It stores summarized, labelled context — linked to issue/ticket numbers and other elements — so agents can retrieve relevant history during long gaps where their working memory is gone. The service is exposed as an HTTP Docker API, plus an agent skill for getting and setting stored context.
+Persistent memory service for AI agents: stores summarized, labelled context (linked to issue/ticket numbers) for retrieval across long gaps. HTTP Docker API + an agent skill for get/set.
 
 **Tech stack:** .NET 10 · ASP.NET Core · Clean Architecture (Domain / Application / Infrastructure / Host) · EF Core + PostgreSQL · Mediator (source-gen CQRS) · xunit.v3
 
 ## AI Context Files
 
-`AGENTS.md` and `*AGENTS.md` are **AI-coder contextual knowledge documents**. Read them like `CLAUDE.md` (or your agent's equivalent standard context file): they are first-class, authoritative context — not optional reference material. Before changing code, treat any `AGENTS.md` / `*AGENTS.md` in scope as required reading.
+`AGENTS.md` and `*AGENTS.md` are first-class AI-coder context — read like `CLAUDE.md`, not optional reference. Layered domain → sub-domain → feature → technology; read every level that governs code you touch, nearest `*AGENTS.md` most authoritative. Keep `*AGENTS.md` synced with code; every PR updates at least one. Prefer local context over adding to this root file — avoid restating the same plan at multiple levels.
 
-These documents capture the **functional requirements and intent behind the code** — the "why", constraints, boundaries, and non-obvious behaviors that source code alone does not communicate. Use them to understand what the code is supposed to do before you change how it does it.
-
-Contextual knowledge is layered, and applies at **multiple levels** — read every level that governs the code you touch (specific overrides general):
-
-- **Domain** — the broad business/functional area.
-- **Sub-domain** — a bounded slice within a domain.
-- **Feature** — a specific capability or vertical slice.
-- **Technology** — cross-cutting technical concerns (persistence, messaging, logging, etc.).
-
-This root `AGENTS.md` is the top-level document; nested `*AGENTS.md` files inherit from it and add local context closest to the code. When working in a folder, the nearest `*AGENTS.md` is the most authoritative for that code.
-
-Keep `*AGENTS.md` files synchronised with code and documentation changes. Functional `*AGENTS.md` files in feature folders are auto-loaded by the `load-agents-context` PostToolUse hook on the first Read/Edit in their directory tree — no manual registration required.
-
-### Required Maintenance
-
-- Every PR should create or update at least one `*AGENTS.md` file.
-- Update the closest context file to the code you change. Prefer local context over adding more content to this root file.
-- When domain model or structural shape changes, also update the relevant implementation or architecture context.
-
-### Placement Rules
-
-- Functional feature context belongs close to the feature code.
-- Cross-cutting concerns belong under `.docs/hlds/02-nfrs/` or the nearest `*AGENTS.md`.
-- Avoid creating duplicate context files that restate the same plan at multiple levels without adding new information.
-
-## Implementation Docs
-
-All planned work is tracked as worktasks under `.context/work-tasks/` (gitignored — local only). Use `/create worktask` to scaffold a new one from the template.
-
-## Repository Layout (Navigation)
+## Repository Layout
 
 | Layer | Path | Purpose |
 |---|---|---|
@@ -52,70 +23,55 @@ All planned work is tracked as worktasks under `.context/work-tasks/` (gitignore
 | AppHost | `src/SmoothAiProductContextMemory.AppHost/` | Aspire dev orchestrator — Postgres + MinIO blob storage + Seq |
 | ChatHost | `src/SmoothAiProductContextMemory.ChatHost/` | Standalone LLM microservice — owns Anthropic SDK; talks to Host via HTTP only (project not yet in tree) |
 
-Detailed backend coding rules are maintained in `.agents/rules/backend/` and scoped per-file via frontmatter (see Rules section).
+Planned work tracked as worktasks under `.context/work-tasks/` (gitignored). Use `/create worktask`.
 
 ## Rules
 
-All rules live under `.agents/rules/` as `*.instructions.md` files and are auto-loaded every session by Claude Code, Cursor, Copilot, and Codex via the symlinks/path-references documented in `.agents/AI_DEVELOPMENT_AGENTS.md`. Applicability is scoped **per-file** via frontmatter (`paths` for Claude, `globs`+`alwaysApply` for Cursor, `applyTo` for Copilot) — e.g. backend rules carry `**/*.cs` so they attach when a C# file is opened. Rules are organized into category subfolders for navigation; the folder is organizational only and does not change loading. One exception to "auto-loaded every session": prompt-scoped rules may be **deferred for Claude** and re-injected on demand by a `UserPromptSubmit` hook (e.g. `code-review-standards` loads only on review prompts via `.agents/hooks/code-review-standards-context.sh`; Cursor/Copilot still load it always). See `.agents/rules/meta/rules.instructions.md` ("Hook-deferred rules") for the file convention and `.agents/skills/manage-rule-system/SKILL.md` for the directory contract.
-
-### Rule Categories
+Rules live under `.agents/rules/` as `*.instructions.md`, auto-loaded every session by Claude Code / Cursor / Copilot / Codex (symlinks in `.agents/AI_DEVELOPMENT_AGENTS.md`). Scoping is **per-file** frontmatter: `paths` (Claude), `globs`+`alwaysApply` (Cursor), `applyTo` (Copilot). Category subfolders are organizational only — they don't change loading. One exception: prompt-scoped rules may be deferred for Claude and re-injected on demand by a `UserPromptSubmit` hook (e.g. `code-review-standards`). See `.agents/rules/meta/rules.instructions.md`.
 
 | Category | Folder | Contents |
 |----------|--------|----------|
-| _(cross-cutting)_ | `.agents/rules/` (flat) | `ai-workflow-rules`, `code-review-standards` (Claude: hook-deferred to review prompts), `project-overview` |
+| _(cross-cutting)_ | `.agents/rules/` | `ai-workflow-rules`, `code-review-standards` (hook-deferred), `project-overview`, `skill-secret-handling` |
 | git | `.agents/rules/git/` | `git-policy`, `pr-standards` |
 | meta | `.agents/rules/meta/` | `rules` (file convention), `knowledge-conventional-contexts-quality` (AGENTS.md quality) |
-| backend (`**/*.cs`) | `.agents/rules/backend/` | `api-mediator-validation` (Minimal API + Mediator + FluentValidation fail-fast); `architecture-slices` (clean-architecture boundaries, vertical-slice Features); `backend-logging-conventions` (Information vs Debug levels); `external-api-clients` (Refit list vs singular client split, HybridCache adapter); `migrations` (`[ExcludeFromCodeCoverage]` requirement); `wiremock-stubbing` (TestFramework.Aspire single-source stub helper) |
+| backend (`**/*.cs`) | `.agents/rules/backend/` | api-mediator-validation, architecture-slices, backend-logging, external-api-clients, migrations, wiremock-stubbing |
 
-## Build / Test Commands
+## Build / Test
 
 ```bash
 dotnet build SmoothAiProductContextMemory.slnx                     # build
 dotnet test  SmoothAiProductContextMemory.slnx                     # run all tests
 dotnet run --project src/SmoothAiProductContextMemory.AppHost      # dev Aspire AppHost
-dotnet run --project src/SmoothAiProductContextMemory.ChatHost     # ChatHost standalone (separate process from the API Host)
+dotnet run --project src/SmoothAiProductContextMemory.ChatHost     # ChatHost standalone (separate from API Host)
 ```
 
-Target a single test project directly when needed (e.g. `dotnet test tests/SmoothAiProductContextMemory.Domain.UnitTest`); `ls tests/` lists them — no Trait annotations required. **Gotcha:** the dev Aspire dashboard runs at `http://localhost:15278`; when started from a terminal, use the printed `/login?t=...` URL on first browser visit.
+Target a single test project (`dotnet test tests/<Project>`) or `ls tests/` to list. **Gotcha:** dev Aspire dashboard at `http://localhost:15278`; first browser visit needs the printed `/login?t=...` URL.
 
 ## Test Framework
 
-xunit.v3 · Shouldly · Bogus · Respawn. Three tiers (the distinction is non-obvious and drives where a test belongs):
+xunit.v3 · Shouldly · Bogus · Respawn. Three tiers (drives where a test belongs):
 
-- **L0** `*.UnitTest` — no I/O, all in-process.
-- **L1** component — `Application.ComponentTest` uses in-memory EF Core; `Infrastructure.ComponentTest` uses a real isolated DB + Respawn.
+- **L0** `*.UnitTest` — no I/O, in-process.
+- **L1** component — `Application.ComponentTest` (in-memory EF Core); `Infrastructure.ComponentTest` (real isolated DB + Respawn).
 - **L2** `*.IntegrationTest` — full stack, real PostgreSQL.
 
-Shared fixtures live in `tests/SmoothAiProductContextMemory.TestFramework/`; the Aspire dependency host (PostgreSQL + WireMock containers) in `tests/SmoothAiProductContextMemory.TestFramework.Aspire/`. See `.docs/wiki/testing.md`.
-
-## Style and Dependencies
-
-Authoritative stack and coding conventions for AI coders are in `.agents/rules/project-overview.instructions.md` and backend-specific rules under `.agents/rules/backend/` (scoped per-file via `**/*.cs` frontmatter).
-
-## Architecture Decisions (NFRs)
-
-Human-facing reviewer documentation lives in `.docs/wiki/`. Detailed high-level designs, non-functional requirements, and lightweight architecture decision records live under `.docs/hlds/`.
+Shared fixtures in `tests/SmoothAiProductContextMemory.TestFramework/`; Aspire dependency host (PostgreSQL + WireMock) in `tests/SmoothAiProductContextMemory.TestFramework.Aspire/`. See `.docs/wiki/testing.md`.
 
 ## CI/CD
 
-PR gate — `.github/workflows/pr-gate.yml` (triggers: `pull_request` → `main`, `push` → `main`, `workflow_dispatch`): restore → build (Release) → Aspire-backed test with coverage via the local action `.github/actions/aspire-test-with-coverage`, then publish + upload the coverage report. Full step list, service ports, timing, and local .NET tools: `.docs/wiki/ci.md`.
-
-AI PR review — `.github/workflows/pipeline-code-review-report.yml` is a thin caller for the `smooth-ai-report-review` reusable workflow; it posts an OpenCode review report on PRs (triggers: opened/synchronize/reopened/ready_for_review, `/ai-review` comment, manual dispatch). `.github/workflows/pipeline-ai-analyse.yml` runs after it and auto-fixes 🟡 Medium / 🔵 Low findings (bounded by `OPENCODE_ANALYSE_MAX_INCREMENTAL`). Both need org-level `OPENCODE_*` secrets/variables (provider OpenAI). The local-only `/ai-review` consumer skill lives at `.agents/skills/ai-review` — the report *generator* stays remote. See `.agents/skills/ai-review/AGENTS.md`.
+- **PR gate** — `.github/workflows/pr-gate.yml` (PR→main, push→main, dispatch): restore → build (Release) → Aspire-backed test with coverage via local action `.github/actions/aspire-test-with-coverage`, then publish + upload coverage. Full step list, ports, timings, local tools: `.docs/wiki/ci.md`.
+- **AI PR review** — `.github/workflows/pipeline-code-review-report.yml` is a thin caller for the `smooth-ai-report-review` reusable workflow; posts an OpenCode review report on PRs (opened/synchronize/reopened/ready_for_review, `/ai-review` comment, dispatch). `.github/workflows/pipeline-ai-analyse.yml` runs after it, auto-fixes 🟡 Medium / 🔵 Low findings (bounded by `OPENCODE_ANALYSE_MAX_INCREMENTAL`). Both need org-level `OPENCODE_*` secrets/variables (provider OpenAI). Local-only consumer skill at `.agents/skills/ai-review`; report *generator* stays remote. To commit+push a branch so the pushed PR gets a **full** review, use `/git-commit-review-push` (`.agents/skills/git-commit-review-push`) — embeds `/ai-review` in the last commit.
 
 ## Git Constraints
 
-This repository is hosted on **GitHub** at `https://github.com/generic-automation-and-it/project`.
-
-- **CLI tool:** Use `gh` (GitHub CLI) for PR and repository operations.
-- **PR template:** `.github/pull_request_template.md`
-- **Code owners:** `.github/CODEOWNERS` — all files owned by `@generic-automation-and-it/project`
+Hosted on **GitHub** at `https://github.com/generic-automation-and-it/project`. Use `gh` for PR/repo ops. PR template: `.github/pull_request_template.md`. Code owners: `.github/CODEOWNERS` — all files by `@generic-automation-and-it/project`. Commit/PR formats and branch naming: `.agents/rules/git/`.
 
 ## Glossary
 
 | Term | Description |
 |---|---|
-| Context | A summarized, labelled unit of knowledge stored for later retrieval |
-| Label | A tag (e.g. an issue/ticket number) used to link and retrieve related contexts |
-| Semantic memory | Embedded, labelled knowledge — the primary store for retrieval by label or similarity |
+| Context | Summarized, labelled unit of knowledge stored for later retrieval |
+| Label | Tag (e.g. issue/ticket number) linking/retrieving related contexts |
+| Semantic memory | Embedded, labelled knowledge — primary store for retrieval by label or similarity |
 | Episodic memory | Timestamped record of when/where a context was captured |
 | Procedural memory | Persisted agent/user preferences and learned behaviors |
