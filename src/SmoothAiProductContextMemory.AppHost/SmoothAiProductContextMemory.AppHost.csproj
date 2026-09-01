@@ -1,0 +1,22 @@
+<Project Sdk="Aspire.AppHost.Sdk/13.3.0">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>SmoothAiProductContextMemory.AppHost</RootNamespace>
+    <IsAspireHost>true</IsAspireHost>
+    <UserSecretsId>smooth-project-memory-host</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SmoothAiProductContextMemory.Host\SmoothAiProductContextMemory.Host.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting.PostgreSQL" />
+    <PackageReference Include="Aspire.Hosting.Seq" />
+    <!-- MessagePack pinned transitively (via Aspire) to the patched 2.5.301+ line — fixes NU1902/NU1903 audit advisories on CI. -->
+    <PackageReference Include="MessagePack" />
+  </ItemGroup>
+
+</Project>

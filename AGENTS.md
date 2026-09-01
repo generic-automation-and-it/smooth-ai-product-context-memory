@@ -16,11 +16,12 @@ Persistent memory service for AI agents: stores summarized, labelled context (li
 
 | Layer | Path | Purpose |
 |---|---|---|
-| Domain | `src/SmoothAiProductContextMemory.Domain/` | Entities, value objects — no external deps |
-| Application | `src/SmoothAiProductContextMemory.Application/` | Vertical-slice use cases via Mediator — `Features/<Name>/`, shared in `Common/` |
-| Infrastructure | `src/SmoothAiProductContextMemory.Infrastructure/` | EF Core + PostgreSQL (`Persistence/`), HTTP clients (`Clients/`) |
+| Domain | `src/SmoothAiProductContextMemory.Domain/` | Core entities, value objects — no external deps |
+| Application | `src/SmoothAiProductContextMemory.Application/` | Vertical-slice use cases via Mediator — `Features/<Name>/`, shared code in `Common/` + `Abstractions/` |
+| Infrastructure | `src/SmoothAiProductContextMemory.Infrastructure/` | EF Core + PostgreSQL (`Persistence/`), HTTP clients (`Clients/`), blob storage (`Storage/`) |
 | Host | `src/SmoothAiProductContextMemory.Host/` | ASP.NET Core Web API, Serilog, Scalar OpenAPI |
-| ChatHost | `src/SmoothAiProductContextMemory.ChatHost/` | Standalone LLM microservice — owns Anthropic SDK; talks to Host via HTTP only |
+| AppHost | `src/SmoothAiProductContextMemory.AppHost/` | Aspire dev orchestrator — Postgres + MinIO blob storage + Seq |
+| ChatHost | `src/SmoothAiProductContextMemory.ChatHost/` | Standalone LLM microservice — owns Anthropic SDK; talks to Host via HTTP only (project not yet in tree) |
 
 Planned work tracked as worktasks under `.context/work-tasks/` (gitignored). Use `/create worktask`.
 

@@ -129,6 +129,7 @@ echo "Aspire host started with PID ${aspire_pid}."
 wait_for_tcp 15432 "PostgreSQL" || exit 1
 wait_for_tcp 16379 "Redis" || exit 1
 wait_for_http "http://127.0.0.1:19091/__admin/health" "WireMock" || exit 1
+wait_for_http "http://127.0.0.1:9002/minio/health/live" "MinIO" || exit 1
 echo "All Aspire test dependencies are healthy."
 
 dotnet tool restore || exit 1

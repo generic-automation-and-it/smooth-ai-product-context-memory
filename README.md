@@ -95,15 +95,25 @@ Target a single test project directly when iterating, e.g. `dotnet test tests/Sm
 ### Run locally
 
 ```bash
-dotnet run --project src/SmoothAiProductContextMemory.Host      # start the API
+dotnet run --project src/SmoothAiProductContextMemory.AppHost   # Aspire: Postgres + MinIO + Seq + the API
+dotnet run --project src/SmoothAiProductContextMemory.Host      # start the API on its own
+```
+
+Aspire uses Docker by default. To run the same AppHost on Podman, start the machine and set the runtime:
+
+```bash
+podman machine start
+DOTNET_ASPIRE_CONTAINER_RUNTIME=podman dotnet run --project src/SmoothAiProductContextMemory.AppHost
 ```
 
 Once the stack is up:
 
 | Interface | URL |
 |---|---|
+| Aspire dashboard | `http://localhost:15278` (use the `/login?t=…` URL printed at startup) |
 | Scalar API Docs | `/scalar/v1` on the Host |
 | OpenAPI schema | `/openapi/v1.json` on the Host |
+| MinIO console | `http://localhost:9001` |
 
 ---
 

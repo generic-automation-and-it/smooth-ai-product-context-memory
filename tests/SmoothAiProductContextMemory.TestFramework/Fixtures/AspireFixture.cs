@@ -17,20 +17,27 @@ public sealed class AspireFixture : IAsyncLifetime
     private const string PostgresResourceName = "postgres";
     private const string WireMockResourceName = "wiremock";
     private const string RedisResourceName = "redis";
+    private const string BlobResourceName = "blob";
     private const string PostgresContainerName = "project-test-postgres";
     private const string RedisContainerName = "project-test-redis";
     private const string WireMockContainerName = "project-test-wiremock";
+    private const string BlobContainerName = "project-test-blob";
     private const string PostgresPassword = "LocalMachineAccessNoInterestingDataTestDev#Passw0rd!FirewallNotExposed";
+    public const string BlobAccessKey = "minioadmin";
+    public const string BlobSecretKey = "LocalMachineAccessNoInterestingDataTestDev#Passw0rd!FirewallNotExposed";
     private const int PostgresPort = 15432;
     private const int RedisPort = 16379;
     private const int WireMockPort = 19091;
+    private const int BlobPort = 9002;
     private const int MaxEndpointCheckAttempts = 3;
+    private const int CommandTimeoutMilliseconds = 2000;
 
     private static readonly SemaphoreSlim _initSemaphore = new(1, 1);
     private static DistributedApplication? _sharedApp;
     private static string? _sharedPostgresBaseConnectionString;
     private static string _sharedRedisConnectionString = string.Empty;
     private static string _sharedWireMockBaseUrl = string.Empty;
+    private static string _sharedBlobEndpoint = string.Empty;
 
     private bool _ownsSharedApp;
     private string? _postgresBaseConnectionString;
@@ -40,6 +47,7 @@ public sealed class AspireFixture : IAsyncLifetime
 
     public string RedisConnectionString { get; private set; } = string.Empty;
     public string WireMockBaseUrl { get; private set; } = string.Empty;
+    public string BlobEndpoint { get; private set; } = string.Empty;
 
     public WireMockAdminClient CreateWireMockAdminClient() => WireMockAdminClient.Create(WireMockBaseUrl);
 
@@ -66,6 +74,7 @@ public sealed class AspireFixture : IAsyncLifetime
                 _postgresBaseConnectionString = _sharedPostgresBaseConnectionString;
                 RedisConnectionString = _sharedRedisConnectionString;
                 WireMockBaseUrl = _sharedWireMockBaseUrl;
+                BlobEndpoint = _sharedBlobEndpoint;
                 Log($"Reusing shared postgres connection: {LogPostgresAddress(_postgresBaseConnectionString)}");
                 return;
             }
@@ -73,20 +82,22 @@ public sealed class AspireFixture : IAsyncLifetime
             Log("Attempting to use fixed well-known endpoints (pre-warmed containers)...");
             if (await TryUseFixedEndpointsAsync())
             {
-                Log($"Using fixed endpoints — postgres=127.0.0.1:{PostgresPort} redis=127.0.0.1:{RedisPort} wiremock=127.0.0.1:{WireMockPort}");
+                Log($"Using fixed endpoints — postgres=127.0.0.1:{PostgresPort} redis=127.0.0.1:{RedisPort} wiremock=127.0.0.1:{WireMockPort} blob=127.0.0.1:{BlobPort}");
                 _sharedPostgresBaseConnectionString = _postgresBaseConnectionString;
                 _sharedRedisConnectionString = RedisConnectionString;
                 _sharedWireMockBaseUrl = WireMockBaseUrl;
+                _sharedBlobEndpoint = BlobEndpoint;
                 return;
             }
 
             Log("Fixed endpoints not available. Querying Docker for persistent container ports...");
             if (await TryUsePersistentContainerEndpointsAsync())
             {
-                Log($"Using persistent container endpoints — postgres={LogPostgresAddress(_postgresBaseConnectionString)} redis={RedisConnectionString} wiremock={WireMockBaseUrl}");
+                Log($"Using persistent container endpoints — postgres={LogPostgresAddress(_postgresBaseConnectionString)} redis={RedisConnectionString} wiremock={WireMockBaseUrl} blob={BlobEndpoint}");
                 _sharedPostgresBaseConnectionString = _postgresBaseConnectionString;
                 _sharedRedisConnectionString = RedisConnectionString;
                 _sharedWireMockBaseUrl = WireMockBaseUrl;
+                _sharedBlobEndpoint = BlobEndpoint;
                 return;
             }
 
@@ -107,8 +118,9 @@ public sealed class AspireFixture : IAsyncLifetime
                 _postgresBaseConnectionString = await app.GetConnectionStringAsync(PostgresResourceName, cts.Token);
                 RedisConnectionString = await app.GetConnectionStringAsync(RedisResourceName, cts.Token) ?? string.Empty;
                 WireMockBaseUrl = app.GetEndpoint(WireMockResourceName).AbsoluteUri.TrimEnd('/');
+                BlobEndpoint = app.GetEndpoint(BlobResourceName).AbsoluteUri.TrimEnd('/');
 
-                Log($"Aspire host provisioned — postgres={LogPostgresAddress(_postgresBaseConnectionString)} redis={RedisConnectionString} wiremock={WireMockBaseUrl}");
+                Log($"Aspire host provisioned — postgres={LogPostgresAddress(_postgresBaseConnectionString)} redis={RedisConnectionString} wiremock={WireMockBaseUrl} blob={BlobEndpoint}");
 
                 await WaitUntilPostgresAcceptsConnectionsAsync(cts.Token);
 
@@ -118,10 +130,14 @@ public sealed class AspireFixture : IAsyncLifetime
                 await app.ResourceNotifications
                     .WaitForResourceHealthyAsync(WireMockResourceName, cts.Token);
 
+                await app.ResourceNotifications
+                    .WaitForResourceHealthyAsync(BlobResourceName, cts.Token);
+
                 _sharedApp = app;
                 _sharedPostgresBaseConnectionString = _postgresBaseConnectionString;
                 _sharedRedisConnectionString = RedisConnectionString;
                 _sharedWireMockBaseUrl = WireMockBaseUrl;
+                _sharedBlobEndpoint = BlobEndpoint;
                 _ownsSharedApp = true;
             }
             catch (Exception aspireEx)
@@ -142,6 +158,7 @@ public sealed class AspireFixture : IAsyncLifetime
                         _sharedPostgresBaseConnectionString = _postgresBaseConnectionString;
                         _sharedRedisConnectionString = RedisConnectionString;
                         _sharedWireMockBaseUrl = WireMockBaseUrl;
+                        _sharedBlobEndpoint = BlobEndpoint;
                         return;
                     }
 
@@ -151,6 +168,7 @@ public sealed class AspireFixture : IAsyncLifetime
                         _sharedPostgresBaseConnectionString = _postgresBaseConnectionString;
                         _sharedRedisConnectionString = RedisConnectionString;
                         _sharedWireMockBaseUrl = WireMockBaseUrl;
+                        _sharedBlobEndpoint = BlobEndpoint;
                         return;
                     }
 
@@ -217,19 +235,22 @@ public sealed class AspireFixture : IAsyncLifetime
             _postgresBaseConnectionString = BuildConnectionString(PostgresPort, MaintenanceDatabaseName);
             RedisConnectionString = $"127.0.0.1:{RedisPort}";
             WireMockBaseUrl = $"http://127.0.0.1:{WireMockPort}";
+            BlobEndpoint = $"http://127.0.0.1:{BlobPort}";
 
             bool[] results = await Task.WhenAll(
                 TryPostgresAsync(),
                 TryRedisAsync(),
-                TryWireMockAsync());
+                TryWireMockAsync(),
+                TryBlobAsync());
 
             bool postgresOk = results[0];
             bool redisOk = results[1];
             bool wireMockOk = results[2];
+            bool blobOk = results[3];
 
-            Log($"Fixed endpoint check (attempt {attempt}/{MaxEndpointCheckAttempts}): postgres={postgresOk} redis={redisOk} wiremock={wireMockOk}");
+            Log($"Fixed endpoint check (attempt {attempt}/{MaxEndpointCheckAttempts}): postgres={postgresOk} redis={redisOk} wiremock={wireMockOk} blob={blobOk}");
 
-            if (postgresOk && redisOk && wireMockOk)
+            if (postgresOk && redisOk && wireMockOk && blobOk)
             {
                 return true;
             }
@@ -238,6 +259,7 @@ public sealed class AspireFixture : IAsyncLifetime
         _postgresBaseConnectionString = null;
         RedisConnectionString = string.Empty;
         WireMockBaseUrl = string.Empty;
+        BlobEndpoint = string.Empty;
         return false;
     }
 
@@ -246,10 +268,11 @@ public sealed class AspireFixture : IAsyncLifetime
         int? mappedPostgresPort = TryGetPublishedPort(PostgresContainerName, "5432/tcp");
         int? mappedRedisPort = TryGetPublishedPort(RedisContainerName, "6379/tcp");
         int? mappedWireMockPort = TryGetPublishedPort(WireMockContainerName, "8080/tcp");
+        int? mappedBlobPort = TryGetPublishedPort(BlobContainerName, "9000/tcp");
 
-        Log($"Persistent container port discovery — postgres={mappedPostgresPort?.ToString() ?? "not found"} redis={mappedRedisPort?.ToString() ?? "not found"} wiremock={mappedWireMockPort?.ToString() ?? "not found"}");
+        Log($"Persistent container port discovery — postgres={mappedPostgresPort?.ToString() ?? "not found"} redis={mappedRedisPort?.ToString() ?? "not found"} wiremock={mappedWireMockPort?.ToString() ?? "not found"} blob={mappedBlobPort?.ToString() ?? "not found"}");
 
-        if (mappedPostgresPort is null || mappedRedisPort is null || mappedWireMockPort is null)
+        if (mappedPostgresPort is null || mappedRedisPort is null || mappedWireMockPort is null || mappedBlobPort is null)
         {
             return false;
         }
@@ -257,19 +280,22 @@ public sealed class AspireFixture : IAsyncLifetime
         _postgresBaseConnectionString = BuildConnectionString(mappedPostgresPort.Value, MaintenanceDatabaseName);
         RedisConnectionString = $"127.0.0.1:{mappedRedisPort.Value}";
         WireMockBaseUrl = $"http://127.0.0.1:{mappedWireMockPort.Value}";
+        BlobEndpoint = $"http://127.0.0.1:{mappedBlobPort.Value}";
 
         bool[] results = await Task.WhenAll(
             TryPostgresAsync(),
             TryRedisAsync(),
-            TryWireMockAsync());
+            TryWireMockAsync(),
+            TryBlobAsync());
 
         bool postgresOk = results[0];
         bool redisOk = results[1];
         bool wireMockOk = results[2];
+        bool blobOk = results[3];
 
-        Log($"Persistent container endpoint check: postgres={postgresOk} redis={redisOk} wiremock={wireMockOk}");
+        Log($"Persistent container endpoint check: postgres={postgresOk} redis={redisOk} wiremock={wireMockOk} blob={blobOk}");
 
-        if (postgresOk && redisOk && wireMockOk)
+        if (postgresOk && redisOk && wireMockOk && blobOk)
         {
             return true;
         }
@@ -277,6 +303,7 @@ public sealed class AspireFixture : IAsyncLifetime
         _postgresBaseConnectionString = null;
         RedisConnectionString = string.Empty;
         WireMockBaseUrl = string.Empty;
+        BlobEndpoint = string.Empty;
         return false;
     }
 
@@ -337,6 +364,25 @@ public sealed class AspireFixture : IAsyncLifetime
         }
     }
 
+    private async Task<bool> TryBlobAsync()
+    {
+        if (string.IsNullOrWhiteSpace(BlobEndpoint))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
+            using HttpResponseMessage response = await http.GetAsync($"{BlobEndpoint}/minio/health/live");
+            return response.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private static string BuildConnectionString(int port, string databaseName)
     {
         var builder = new NpgsqlConnectionStringBuilder
@@ -356,7 +402,8 @@ public sealed class AspireFixture : IAsyncLifetime
 
     private static int? TryGetPublishedPort(string containerName, string containerPort)
     {
-        foreach (string containerRuntime in new[] { "podman", "docker" })
+        // Docker is the default runtime; Podman is probed as the fallback.
+        foreach (string containerRuntime in new[] { "docker", "podman" })
         {
             string? output = TryRunCommand(containerRuntime, "port", containerName, containerPort);
             if (string.IsNullOrWhiteSpace(output))
@@ -410,14 +457,40 @@ public sealed class AspireFixture : IAsyncLifetime
                 return null;
             }
 
-            string output = process.StandardOutput.ReadToEnd();
-            process.WaitForExit(2000);
+            // Read asynchronously: a stalled runtime CLI (for example Podman with a stopped machine)
+            // keeps stdout open indefinitely, and a synchronous ReadToEnd would block forever —
+            // the WaitForExit timeout below would never be reached.
+            Task<string> outputTask = process.StandardOutput.ReadToEndAsync();
+            Task<string> errorTask = process.StandardError.ReadToEndAsync();
 
-            return process.ExitCode == 0 ? output.Trim() : null;
+            if (!process.WaitForExit(CommandTimeoutMilliseconds))
+            {
+                TryKill(process);
+                return null;
+            }
+
+            if (!Task.WhenAll(outputTask, errorTask).Wait(CommandTimeoutMilliseconds))
+            {
+                return null;
+            }
+
+            return process.ExitCode == 0 ? outputTask.Result.Trim() : null;
         }
         catch
         {
             return null;
+        }
+    }
+
+    private static void TryKill(Process process)
+    {
+        try
+        {
+            process.Kill(entireProcessTree: true);
+        }
+        catch
+        {
+            // Process already exited or cannot be killed — nothing further to do.
         }
     }
 

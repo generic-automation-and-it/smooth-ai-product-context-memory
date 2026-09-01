@@ -4,6 +4,7 @@
     <Project Path="src/SmoothAiProductContextMemory.Application/SmoothAiProductContextMemory.Application.csproj" />
     <Project Path="src/SmoothAiProductContextMemory.Infrastructure/SmoothAiProductContextMemory.Infrastructure.csproj" />
     <Project Path="src/SmoothAiProductContextMemory.Host/SmoothAiProductContextMemory.Host.csproj" />
+    <Project Path="src/SmoothAiProductContextMemory.AppHost/SmoothAiProductContextMemory.AppHost.csproj" />
   </Folder>
   <Folder Name="/tests/TestFramework/">
     <Project Path="tests/SmoothAiProductContextMemory.TestFramework/SmoothAiProductContextMemory.TestFramework.csproj" />

@@ -11,6 +11,18 @@ Shared xunit.v3 test fixtures and helpers reused across the L0/L1/L2 test projec
 
 ## Key Behaviors
 
+- **`AspireFixture`** owns L1/L2 container dependencies, provisioned by `tests/SmoothAiProductContextMemory.TestFramework.Aspire`. It resolves endpoints in three steps: (1) probe the fixed well-known ports of already-running persistent containers, (2) ask the container CLI for the published port of each `project-test-*` container, (3) only then boot the Aspire `DistributedApplication` itself. The `DistributedApplication` is shared process-wide via `[CollectionDefinition("Aspire")]` and disposal is a deliberate no-op — containers are `ContainerLifetime.Persistent` and outlive the test run.
+- **Container runtime is Aspire's concern, not the fixture's.** Aspire selects Docker by default and honours `DOTNET_ASPIRE_CONTAINER_RUNTIME=podman` when Podman is preferred. The fixture only shells out for *port discovery*, probing `docker` first and `podman` second; both calls are timeout-bounded and read stdout asynchronously so a stalled CLI (for example Podman with a stopped machine) cannot hang the test run.
+- **Test dependency ports** (fixed, must never collide with the dev AppHost's `smooth-project-memory-dev-*` resources):
+
+  | Resource | Container | Port |
+  |---|---|---:|
+  | PostgreSQL | `project-test-postgres` | `15432` |
+  | Redis | `project-test-redis` | `16379` |
+  | WireMock | `project-test-wiremock` | `19091` |
+  | MinIO (blob) | `project-test-blob` | `9002` (s3), `19092` (console) |
+
+  Databases provisioned on the test Postgres: `app-component`, `app-integration`, `infra-component`, `infra-integration`, `host-integration`.
 - **`WebAppFixture<TProgram>`** wraps `WebApplicationFactory<TProgram>` and is generic over a Host's entry point. Because xunit.v3 compiles test assemblies as executables (each gets its own auto-generated `Program`), an integration test must reference the Host with `Aliases="HostApp"` and close the fixture as `WebAppFixture<HostApp::Program>` to avoid an ambiguous `Program`.
 - **`ServiceProviderFixture`** builds an isolated `IServiceCollection`/`IServiceProvider` for L0/L1 tests and routes logging to the test output via `XUnitLoggerFactory`.
 - **`XUnitLogger*`** bridges `ILogger` to xunit's `ITestOutputHelper`, with optional per-category minimum levels.
@@ -20,4 +32,5 @@ Shared xunit.v3 test fixtures and helpers reused across the L0/L1/L2 test projec
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-01 | Documented `AspireFixture` endpoint resolution, container-runtime handling and the fixed test dependency ports. Blob console port moved `19192` → `19092` to sit in the test port band; port discovery now probes `docker` before `podman` and is timeout-safe. | — |
 | 2026-05-30 | Created — lean fixtures (`ServiceProviderFixture`, `WebAppFixture<TProgram>`), xunit output logging, and test-case ordering helpers. | — |
