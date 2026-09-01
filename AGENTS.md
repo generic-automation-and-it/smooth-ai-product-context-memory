@@ -99,6 +99,8 @@ Human-facing reviewer documentation lives in `.docs/wiki/`. Detailed high-level 
 
 PR gate — `.github/workflows/pr-gate.yml` (triggers: `pull_request` → `main`, `push` → `main`, `workflow_dispatch`): restore → build (Release) → Aspire-backed test with coverage via the local action `.github/actions/aspire-test-with-coverage`, then publish + upload the coverage report. Full step list, service ports, timing, and local .NET tools: `.docs/wiki/ci.md`.
 
+AI PR review — `.github/workflows/pipeline-code-review-report.yml` is a thin caller for the `smooth-ai-report-review` reusable workflow; it posts an OpenCode review report on PRs (triggers: opened/synchronize/reopened/ready_for_review, `/ai-review` comment, manual dispatch). `.github/workflows/pipeline-ai-analyse.yml` runs after it and auto-fixes 🟡 Medium / 🔵 Low findings (bounded by `OPENCODE_ANALYSE_MAX_INCREMENTAL`). Both need org-level `OPENCODE_*` secrets/variables (provider OpenAI). The local-only `/ai-review` consumer skill lives at `.agents/skills/ai-review` — the report *generator* stays remote. See `.agents/skills/ai-review/AGENTS.md`.
+
 ## Git Constraints
 
 This repository is hosted on **GitHub** at `https://github.com/generic-automation-and-it/project`.
