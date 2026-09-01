@@ -1,0 +1,138 @@
+---
+name: git-commit-review-push
+description: Commit current changes with conventional commits format, include the /ai-review trigger in the final commit while preserving Git trailers, and push to remote repository. Use when committing and pushing changes so the pushed PR gets a full AI review.
+allowed-tools:
+  - Bash(git add:*)
+  - Bash(git commit:*)
+  - Bash(git log:*)
+  - Bash(git push:*)
+models:
+  claude: sonnet      # medium-complexity; branch rename logic and upstream tracking require broader reasoning
+  copilot: auto
+  codex: gpt-5.4
+---
+
+# Git Commit, Review-Trigger, and Push
+
+Commit current changes using conventional commits format, embed the `/ai-review` full-review trigger in the last commit, and push to the remote repository.
+
+## Workflow Steps
+
+1. Check if there are any changes to commit using `git status --porcelain`
+2. If there are changes, analyze the diff and group it into **logical units of work** (chunks). Commit each chunk separately with a [Conventional Commits](https://www.conventionalcommits.org) message — `<type>[optional scope]: <description>` with type one of `feat`/`fix`/`chore`/`docs`/`refactor`/`test`/`ci`/`perf`/`build`; subject lowercase, imperative, no trailing period, ≤ 72 chars:
+   - If a commit message was provided as an argument, use it (single-chunk commit)
+   - Otherwise generate an appropriate conventional commit message per chunk from the staged diff
+3. **Review trigger (mandatory)**: the **last** chunk commit — or the only commit when there is a single chunk — MUST include `/ai-review`. The review gate (`pipeline-code-review-report.yml`) greps the whole commit message and forces a full PR review when found, so its position does not matter. It may be in the subject, on its own body line, or have trailing text:
+
+   Trigger in the subject (the natural shape when the whole commit *is* the review request):
+
+   ```
+   ci: /ai-review
+   ```
+
+   Trigger on its own body line:
+
+   ```
+   feat(auth): add user authentication system
+
+   /ai-review
+   ```
+
+   Trigger with trailing text:
+
+   ```
+   feat(auth): add user authentication system
+
+   /ai-review — full sweep after the provider swap
+   ```
+
+   Prefer a body line immediately before any `Co-authored-by:` / `Signed-off-by:` / `Refs:` trailer block, so Git continues to parse those trailers.
+
+   Earlier chunk commits must NOT carry the trigger — only the final one.
+4. If a commit was made in step 2, verify the trigger using the gate's matcher over the full commit message before pushing (the no-commit path is handled by step 5 instead):
+
+   ```bash
+   git log -1 --format='%B' | grep -qiE '/ai-review'
+   ```
+
+   If the check fails, echo the full commit message:
+
+   ```bash
+   git log -1 --format='%B'
+   ```
+
+   then amend the final commit to add the trigger. Reuse the **full** existing message (`%B` — subject, body, and any `Co-authored-by:` / `Signed-off-by:` / `Refs:` trailers); do **not** rebuild from `%s`, which would drop the body and every trailer. If the message has trailers, insert the trigger immediately before their final paragraph so Git continues to parse them. Otherwise, append it as a new paragraph:
+
+   ```bash
+   if git log -1 --format='%(trailers)' | grep -q .; then
+     git log -1 --format='%B' | awk '
+       BEGIN { RS=""; ORS="\n\n" }
+       { para[NR]=$0 }
+       END {
+         # Single-paragraph message: inserting "before the last paragraph"
+         # would put the trigger above the subject — append instead.
+         if (NR < 2) { printf "%s\n\n/ai-review\n", para[1]; exit }
+         for (i = 1; i < NR; i++) print para[i]
+         print "/ai-review"
+         printf "%s\n", para[NR]
+       }' | git commit --amend -F -
+   else
+     git commit --amend -m "$(git log -1 --format='%B')" -m "/ai-review"
+   fi
+   ```
+5. If there are no changes to commit, check for unpushed commits before going anywhere near `git push`:
+
+   ```bash
+   git log @{u}..HEAD --oneline
+   ```
+
+   (If the branch has no upstream yet, this command fails — treat that as "unpushed commits exist": everything local is unpushed.)
+
+   - **Unpushed commits exist**: run step 4's trigger check on HEAD. If the trigger is missing, amend HEAD with step 4's recipe — safe precisely because the commit is unpushed — so the pushed HEAD still triggers a full review. Then continue to step 6.
+   - **No unpushed commits either**: report to the user that there is nothing to commit or push and **stop** — do not push (this is not an error).
+6. **If `--issue <number>` was passed** — rename the local branch before pushing (see Branch Rename below)
+7. Push to remote repository using `git push` (use `git push --set-upstream origin <new-branch>` if the branch was renamed)
+
+**Note**: This command ONLY commits and pushes. It does not create or update PRs.
+
+## Branch Rename (when `--issue <number>` is passed)
+
+This step enforces the branch naming convention (same type vocabulary as Conventional Commits):
+
+```
+<type>/<issue>-short-description
+```
+
+**How to derive the new branch name:**
+
+1. **`<type>`** — take the type from the conventional commit just made (e.g. `feat`, `fix`, `chore`). If the branch already has a conforming name with the correct type, use that type.
+2. **`<issue>`** — the number passed via `--issue`.
+3. **`short-description`** — generate a concise, lowercase, hyphen-separated description (3–6 words) that summarises what was changed. Derive it from the commit message subject or the staged diff — do not reuse the current branch name verbatim.
+
+**Execution:**
+```bash
+git branch -m <new-branch-name>     # rename local branch
+```
+Then push with upstream tracking:
+```bash
+git push --set-upstream origin <new-branch-name>
+```
+
+**Constraints:**
+- Only rename if the current branch name does NOT already conform to `<type>/<issue>-*` for the given issue number.
+- If the current branch already matches (e.g. `feat/42-add-auth`), skip the rename and push normally.
+- Tell the user the old and new branch names when a rename happens.
+
+## Arguments
+
+- Optional: pre-defined commit message (if not provided, will analyze changes and generate appropriate conventional commit message). The `/ai-review` trigger line is appended to the final commit regardless of whether the message was provided or generated.
+- `--issue <number>` — renames the local branch to `<type>/<number>-short-description` before pushing, ensuring branch naming consistency
+
+## Usage Examples
+
+```
+/git-commit-review-push
+/git-commit-review-push feat: add user authentication system
+/git-commit-review-push --issue 42
+/git-commit-review-push --issue 42 feat: add user authentication system
+```

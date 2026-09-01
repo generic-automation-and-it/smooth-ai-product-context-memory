@@ -19,6 +19,7 @@ Skills live **flat**, one directory per skill directly under `.agents/skills/`. 
 | **git-commit** | Commit with conventional format | `/git-commit [--autonomous]` |
 | **git-commit-push** | Commit and push to remote | `/git-commit-push [--autonomous]` |
 | **git-commit-push-pr** | Commit, push, and create/update PR | `/git-commit-push-pr [--autonomous]` |
+| **git-commit-review-push** | Commit, push, and embed `/ai-review` trigger for a full AI review | `/git-commit-review-push [--issue <n>]` |
 | **git-sync** | Sync with main (optionally auto-resolve conflicts) | `/git-sync` |
 | **manage-rule-system** | Create/update rule files in `.agents/rules/` | `/manage-rule-system` |
 
@@ -69,6 +70,7 @@ Skills are classified by complexity tier. Each SKILL.md carries a `models` front
 | **git-sync** | low | Fetch + merge; straightforward git operations |
 | **git-commit-push** | medium | Branch rename logic + upstream tracking |
 | **git-commit-push-pr** | medium | PR template authoring + state management |
+| **git-commit-review-push** | medium | Branch rename logic + `/ai-review` trigger placement + upstream tracking |
 | **agile-github-task-from-diff** | medium | Diff classification + issue authoring |
 | **manage-rule-system** | medium | Cross-tool frontmatter authoring |
 | **ai-terse** | low | Single-turn reply reformatting; no tools or deep reasoning |
@@ -92,7 +94,7 @@ Skills are flat under `.agents/skills/`; the category lives in the folder-name p
 | `agile-` | `agile-github-task-from-diff` |
 | `ai-` | `ai-brain-dump`, `ai-review`, `ai-terse`, `ai-template-sync` |
 | `context-` | `context-load-agents-context`, `context-load-context` |
-| `git-` | `git-commit`, `git-commit-push`, `git-commit-push-pr`, `git-sync` |
+| `git-` | `git-commit`, `git-commit-push`, `git-commit-push-pr`, `git-commit-review-push`, `git-sync` |
 | _(none)_ | `create-hld`, `manage-rule-system` |
 
 A skill's folder name MUST equal its `name:` frontmatter (this is the slash-command name). When adding a skill, pick the prefix of its category and keep the folder one level under `.agents/skills/`.
