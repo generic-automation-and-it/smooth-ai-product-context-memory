@@ -8,6 +8,8 @@ internal static class DistributedApplicationBuilderExtensions
 {
     private const int DefaultPostgresPort = 5432;
     private const int DefaultBlobPort = 9000;
+    private const int DefaultBlobConsolePort = 9001;
+    private const string BlobImage = "docker.io/minio/minio";
     private const int DefaultSeqPort = 5341;
     private const string DockerDesktopGroupName = "smooth-project-memory";
     private const string PostgresContainerName = "smooth-project-memory-dev-postgres";
@@ -62,6 +64,7 @@ internal static class DistributedApplicationBuilderExtensions
                 builder.Configuration["BlobConfiguration:AccessKey"] ?? "smooth-local",
                 builder.Configuration["BlobConfiguration:SecretKey"] ?? "LocalMachineAccessNoInterestingDataDev#Passw0rd!FirewallNotExposed",
                 builder.Configuration.GetValue("BlobConfiguration:Port", DefaultBlobPort),
+                builder.Configuration.GetValue("BlobConfiguration:ConsolePort", DefaultBlobConsolePort),
                 builder.Configuration.GetValue("SeqConfiguration:Port", DefaultSeqPort),
                 Path.GetFullPath(Path.Combine(builder.AppHostDirectory, "..", "..")));
         }
@@ -91,10 +94,11 @@ internal static class DistributedApplicationBuilderExtensions
             // and .NET client auth fully deterministic. SeaweedFS was rejected: its S3 gateway needs
             // a JSON credentials file and an admin JWT to create buckets, which is impractical to
             // automate inside an Aspire container (see ADR).
-            return builder.AddContainer("blob", "minio/minio")
+            // The image is registry-qualified so Podman never has to resolve a short name.
+            return builder.AddContainer("blob", BlobImage)
                 .WithArgs("server", "/data", "--console-address", ":9001")
                 .WithHttpEndpoint(port: configuration.BlobPort, targetPort: 9000, name: "s3")
-                .WithHttpEndpoint(port: 9101, targetPort: 9001, name: "console")
+                .WithHttpEndpoint(port: configuration.BlobConsolePort, targetPort: 9001, name: "console")
                 .WithEnvironment("MINIO_ROOT_USER", configuration.BlobAccessKey)
                 .WithEnvironment("MINIO_ROOT_PASSWORD", configuration.BlobSecretKey)
                 .WithVolume(BlobDataVolume, "/data")
@@ -141,6 +145,7 @@ internal static class DistributedApplicationBuilderExtensions
         string BlobAccessKey,
         string BlobSecretKey,
         int BlobPort,
+        int BlobConsolePort,
         int SeqPort,
         string RepoRoot);
 }

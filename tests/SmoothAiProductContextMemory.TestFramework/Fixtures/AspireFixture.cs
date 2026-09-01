@@ -30,6 +30,7 @@ public sealed class AspireFixture : IAsyncLifetime
     private const int WireMockPort = 19091;
     private const int BlobPort = 9002;
     private const int MaxEndpointCheckAttempts = 3;
+    private const int CommandTimeoutMilliseconds = 2000;
 
     private static readonly SemaphoreSlim _initSemaphore = new(1, 1);
     private static DistributedApplication? _sharedApp;
@@ -401,7 +402,8 @@ public sealed class AspireFixture : IAsyncLifetime
 
     private static int? TryGetPublishedPort(string containerName, string containerPort)
     {
-        foreach (string containerRuntime in new[] { "podman", "docker" })
+        // Docker is the default runtime; Podman is probed as the fallback.
+        foreach (string containerRuntime in new[] { "docker", "podman" })
         {
             string? output = TryRunCommand(containerRuntime, "port", containerName, containerPort);
             if (string.IsNullOrWhiteSpace(output))
@@ -455,14 +457,40 @@ public sealed class AspireFixture : IAsyncLifetime
                 return null;
             }
 
-            string output = process.StandardOutput.ReadToEnd();
-            process.WaitForExit(2000);
+            // Read asynchronously: a stalled runtime CLI (for example Podman with a stopped machine)
+            // keeps stdout open indefinitely, and a synchronous ReadToEnd would block forever —
+            // the WaitForExit timeout below would never be reached.
+            Task<string> outputTask = process.StandardOutput.ReadToEndAsync();
+            Task<string> errorTask = process.StandardError.ReadToEndAsync();
 
-            return process.ExitCode == 0 ? output.Trim() : null;
+            if (!process.WaitForExit(CommandTimeoutMilliseconds))
+            {
+                TryKill(process);
+                return null;
+            }
+
+            if (!Task.WhenAll(outputTask, errorTask).Wait(CommandTimeoutMilliseconds))
+            {
+                return null;
+            }
+
+            return process.ExitCode == 0 ? outputTask.Result.Trim() : null;
         }
         catch
         {
             return null;
+        }
+    }
+
+    private static void TryKill(Process process)
+    {
+        try
+        {
+            process.Kill(entireProcessTree: true);
+        }
+        catch
+        {
+            // Process already exited or cannot be killed — nothing further to do.
         }
     }
 

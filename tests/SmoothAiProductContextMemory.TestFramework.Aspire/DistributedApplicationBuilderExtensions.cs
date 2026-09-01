@@ -8,6 +8,11 @@ internal static class DistributedApplicationBuilderExtensions
     private const string DockerDesktopGroupName = "project";
     private const string BlobContainerName = "project-test-blob";
     private const string BlobAccessKey = "minioadmin";
+    private const int BlobPort = 9002;
+    private const int BlobConsolePort = 19092;
+    // Registry-qualified so Podman never has to resolve a short image name.
+    private const string BlobImage = "docker.io/minio/minio";
+    private const string WireMockImage = "docker.io/wiremock/wiremock";
     private const string BlobSecretKey = "LocalMachineAccessNoInterestingDataTestDev#Passw0rd!FirewallNotExposed";
 
     internal static void AddSmoothAiProductContextMemoryTestDependencies(this IDistributedApplicationBuilder builder)
@@ -25,10 +30,10 @@ internal static class DistributedApplicationBuilderExtensions
 
     private static void AddBlobDependency(this IDistributedApplicationBuilder builder)
     {
-        builder.AddContainer("blob", "minio/minio")
+        builder.AddContainer("blob", BlobImage)
             .WithArgs("server", "/data", "--console-address", ":9001")
-            .WithHttpEndpoint(port: 9002, targetPort: 9000, name: "s3")
-            .WithHttpEndpoint(port: 19192, targetPort: 9001, name: "console")
+            .WithHttpEndpoint(port: BlobPort, targetPort: 9000, name: "s3")
+            .WithHttpEndpoint(port: BlobConsolePort, targetPort: 9001, name: "console")
             .WithEnvironment("MINIO_ROOT_USER", BlobAccessKey)
             .WithEnvironment("MINIO_ROOT_PASSWORD", BlobSecretKey)
             .WithContainerName(BlobContainerName)
@@ -68,7 +73,7 @@ internal static class DistributedApplicationBuilderExtensions
 
     private static void AddWireMockDependency(this IDistributedApplicationBuilder builder)
     {
-        builder.AddContainer("wiremock", "wiremock/wiremock")
+        builder.AddContainer("wiremock", WireMockImage)
             .WithHttpEndpoint(port: 19091, targetPort: 8080)
             .WithContainerName("project-test-wiremock")
             .WithContainerRuntimeArgs(
