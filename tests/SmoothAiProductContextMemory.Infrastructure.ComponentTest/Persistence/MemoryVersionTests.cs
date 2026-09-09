@@ -13,14 +13,24 @@ public sealed class MemoryVersionTests : PersistenceTestBase
     /// new current. The trigger permits only the pointer transfer, so the flip is a legitimate
     /// history mutation. The partial unique index on <c>is_current</c> allows exactly one current,
     /// so the flip must land before the insert — the ordering here is explicit.
+    /// <para>
+    /// Both statements run in one transaction. The flip and the insert are separate round-trips, so
+    /// a failure between them would otherwise leave the memory with <em>zero</em> current versions —
+    /// a state no constraint forbids and nothing would detect. This is the reference pattern the
+    /// write path will copy, so it is transactional here.
+    /// </para>
     /// </summary>
     private async Task BumpVersionAsync(MemoryVersion oldCurrent, MemoryVersion newVersion)
     {
+        await using var tx = await Db.Database.BeginTransactionAsync(Ct);
+
         oldCurrent.IsCurrent = false;
         await Db.SaveChangesAsync(Ct);
 
         Db.MemoryVersions.Add(newVersion);
         await Db.SaveChangesAsync(Ct);
+
+        await tx.CommitAsync(Ct);
     }
 
     private async Task<(MemoryGroup Group, Memory Memory)> CreateMemoryWithGroupAsync(
