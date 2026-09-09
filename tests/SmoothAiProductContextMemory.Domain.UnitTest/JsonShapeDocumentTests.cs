@@ -46,4 +46,29 @@ public class JsonShapeDocumentTests
         TicketDocument.Create("a", "b", "c").V.ShouldBe(JsonShapeDocument.CurrentShapeVersion);
         SourceDocument.Create("a", "b").V.ShouldBe(JsonShapeDocument.CurrentShapeVersion);
     }
+
+    [Fact]
+    public void TicketDocument_round_trips_preserving_v_marker()
+    {
+        string json = JsonSerializer.Serialize(TicketDocument.Create("jira", "ACM-1", "https://example.com/ACM-1"), Web);
+        TicketDocument? back = JsonSerializer.Deserialize<TicketDocument>(json, Web);
+
+        back.ShouldNotBeNull();
+        back!.V.ShouldBe(JsonShapeDocument.CurrentShapeVersion);
+        back.Provider.ShouldBe("jira");
+        back.Key.ShouldBe("ACM-1");
+        back.Url.ShouldBe("https://example.com/ACM-1");
+    }
+
+    [Fact]
+    public void SourceDocument_round_trips_preserving_v_marker()
+    {
+        string json = JsonSerializer.Serialize(SourceDocument.Create("ticket", "ACM-1", DateTimeOffset.UtcNow), Web);
+        SourceDocument? back = JsonSerializer.Deserialize<SourceDocument>(json, Web);
+
+        back.ShouldNotBeNull();
+        back!.V.ShouldBe(JsonShapeDocument.CurrentShapeVersion);
+        back.Kind.ShouldBe("ticket");
+        back.Reference.ShouldBe("ACM-1");
+    }
 }
