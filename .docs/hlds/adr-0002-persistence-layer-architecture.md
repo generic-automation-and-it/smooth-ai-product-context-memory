@@ -1,6 +1,6 @@
 # ADR-0002: Persistence layer architecture
 
-**Status:** Accepted — implemented (`.context/work-tasks/domain-model-and-migrations.md`)
+**Status:** Accepted — implemented
 **Date:** 2026-09-08
 **Revised:** 2026-09-08 — hybrid relational/document model adopted; entity count reduced from 13 to 7
 **Revised:** 2026-09-09 — implementation resolved the open items and confirmed the schemas: validity as two `timestamptz` columns (`valid_from`/`valid_until`) with a GIST index over `tstzrange(valid_from, valid_until)`; `subject_slug` application-computed in the Domain; `is_current` flag with a partial unique index (no `current_version` FK); `ticket_keys text[]` deferred (GIN over `tickets` jsonb suffices); append-only history enforced by a `BEFORE UPDATE OR DELETE` trigger that permits only the one legal `memory_version` UPDATE (a `is_current` pointer transfer with content unchanged), blocks everything else, and allows a history delete only when the session sets `app.allow_history_delete='true'` (gating cascade deletes of history); columns are snake_case matching the diagram.
@@ -26,8 +26,12 @@ A fifth constraint is operational: this is a **single-user, local-first service*
 negligible and read latency is uncritical. **Schema complexity is a real cost; performance is not.** That
 inverts the usual normalisation trade-off and is the basis for the hybrid model below.
 
-The design is specified in `.context/braindump/ai-context-memory-handoff_2026-08-29_1331.md` and its two
-deltas, and was validated across three file-based simulation trials.
+> **Provenance.** This ADR is self-contained; the Context, Decision, Alternatives and Consequences
+> sections below carry everything needed to understand and challenge the design. It was derived from a
+> design-session record and an implementation worktask held under `.context/`, which is **gitignored and
+> local-only** — those paths will not resolve in a fresh clone and are deliberately not cited as
+> references. The design was additionally validated across three file-based simulation trials before
+> implementation.
 
 ## Decision
 
