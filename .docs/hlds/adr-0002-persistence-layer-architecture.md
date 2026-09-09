@@ -308,7 +308,11 @@ the database, making memories findable without their bodies being indexed.
 - **Full-text** over `name`, `description` (stable row), `statement`, `content_summary` (version row)
 - **GIN** over `tags`, `facets` and `tickets` for containment
 - **GIST** over the validity range
-- **B-tree** over `kind`, `status`, `repo`, `initiative_id`
+- **B-tree** over `kind`, `status`, `initiative_id`
+
+`repo` carries no index yet. It is a documented filter dimension, but the retrieval query that would use
+it does not exist, so the index is deferred until there is something to measure — the same treatment
+given to the embedding column below.
 
 Semantic search is deferred but pre-wired: the embedding column is nullable and can be populated by an
 additive migration.

@@ -55,7 +55,10 @@ findable without their bodies being indexed. Indexes:
 - **GIN** over `tags`, `facets`, `tickets` (containment)
 - **GIST** over `tstzrange(valid_from, valid_until)`
 - **full-text** over `name`/`description` and `statement`/`content_summary`
-- **B-tree** over `kind`, `status`, `repo`, `initiative_id`
+- **B-tree** over `kind`, `status`, `initiative_id`
+
+`repo` is not indexed yet — the retrieval query that would use it does not exist, so the index is
+deferred (see ADR-0002).
 
 `label.usage_count` is not a column — it is the derived `label_usage` view.
 
