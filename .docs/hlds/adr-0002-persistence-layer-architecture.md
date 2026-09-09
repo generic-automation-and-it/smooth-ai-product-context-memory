@@ -107,7 +107,9 @@ levels. Sources sit on the **version**, because provenance records where *this c
 
 A changed claim on an unchanged subject is a **version bump**. A `supersedes` link survives only for the
 rare case where a *different* subject renders a memory obsolete. Implementation is slowly-changing
-dimension type 2: insert-only, one current version per lineage enforced by a partial unique index.
+dimension type 2: insert-only, one current version per **logical memory** enforced by a partial unique
+index. Not per lineage — clones share a lineage while remaining distinct logical memories, so a
+lineage legitimately has one current version per clone.
 
 Nothing is deleted or overwritten. The store retains all versions; **current-only is a retrieval default,
 never a storage rule.**
