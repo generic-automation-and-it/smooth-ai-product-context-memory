@@ -19,6 +19,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\SmoothAiProductContextMemory.Infrastructure\SmoothAiProductContextMemory.Infrastructure.csproj" />
     <ProjectReference Include="..\SmoothAiProductContextMemory.TestFramework.Aspire\SmoothAiProductContextMemory.TestFramework.Aspire.csproj" />
   </ItemGroup>
 

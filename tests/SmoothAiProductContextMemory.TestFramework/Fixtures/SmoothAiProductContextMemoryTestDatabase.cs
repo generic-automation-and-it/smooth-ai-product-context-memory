@@ -1,4 +1,8 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
+using SmoothAiProductContextMemory.Infrastructure.Persistence;
+using SmoothAiProductContextMemory.Infrastructure.Persistence.Extensions;
 using Xunit.v3;
 
 namespace SmoothAiProductContextMemory.TestFramework.Fixtures;
@@ -41,11 +45,7 @@ public sealed class SmoothAiProductContextMemoryTestDatabase : IAsyncDisposable
 
         string connectionString = aspire.CreateDatabaseConnectionString(databaseName);
 
-        // TODO: Run EF Core migrations here when the application DbContext is available:
-        // var services = new ServiceCollection();
-        // services.AddDbContext<SmoothAiProductContextMemoryDbContext>(opts => opts.UseNpgsql(connectionString));
-        // await using var provider = services.BuildServiceProvider();
-        // await provider.MigrateSmoothAiProductContextMemoryAsync(cancellationToken);
+        await ApplyMigrationsAsync(connectionString, cancellationToken);
 
         Log(output, connectionString, $"Database '{databaseName}' ready.");
 
@@ -55,7 +55,17 @@ public sealed class SmoothAiProductContextMemoryTestDatabase : IAsyncDisposable
     public async Task ResetAsync()
     {
         await PostgreSqlDatabaseManager.RecreateDatabaseAsync(_maintenanceConnectionString, DatabaseName);
-        // TODO: Re-run migrations after reset when EF Core is wired up.
+        await ApplyMigrationsAsync(ConnectionString);
+    }
+
+    private static async Task ApplyMigrationsAsync(string connectionString, CancellationToken cancellationToken = default)
+    {
+        var services = new ServiceCollection();
+        services.AddDbContext<SmoothAiProductContextMemoryDbContext>(options =>
+            options.UseNpgsql(connectionString));
+
+        await using ServiceProvider provider = services.BuildServiceProvider();
+        await provider.MigrateSmoothAiProductContextMemoryAsync(cancellationToken);
     }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
