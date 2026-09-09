@@ -53,7 +53,11 @@ public sealed class MemoryVersionTests : PersistenceTestBase
         var v2 = TestEntities.NewVersion(memory.Id, 2, "Second claim", isCurrent: true);
         await BumpVersionAsync(v1, v2);
 
+        // AsNoTracking so the assertions read persisted rows rather than the change tracker's copies
+        // of the entities this test just mutated — otherwise the test would pass even if the flip
+        // never reached the database.
         var versions = await Db.MemoryVersions
+            .AsNoTracking()
             .Where(v => v.MemoryId == memory.Id)
             .OrderBy(v => v.Version)
             .ToListAsync(Ct);
