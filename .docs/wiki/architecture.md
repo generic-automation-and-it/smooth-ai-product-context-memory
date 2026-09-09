@@ -65,6 +65,7 @@ deferred (see ADR-0002).
 ### Constraints
 
 Hard: one current version per memory (partial unique index), version chain (unique `(memory_id,
-version)`), logical identity (unique `uuid`), initiative always assigned (not-null FK). Soft (both
-checked in the write path's read-before-write): subject uniqueness across a group, ticket
-uniqueness across groups.
+version)`), logical identity (unique `uuid`), initiative always assigned (not-null FK). Soft (both to
+be enforced by the write path's read-before-write once the skill exists — see ADR-0002): subject
+uniqueness across a group (exact-slug duplicates are already rejected by the unique
+`(group_id, subject_slug)` backstop index), ticket uniqueness across groups.

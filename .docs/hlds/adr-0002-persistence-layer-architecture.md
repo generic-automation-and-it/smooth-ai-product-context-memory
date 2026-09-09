@@ -169,7 +169,7 @@ erDiagram
         text scope_identifier "required for customer|program"
         bigint initiative_id FK "NOT NULL"
         text repo "denormalised, nullable"
-        text repo_url
+        text repo_url "nullable"
         jsonb tickets "GIN - [{provider,key,url}]"
         timestamptz created_on
     }
@@ -199,7 +199,7 @@ erDiagram
         boolean is_current "partial unique index"
         text statement "CLAIM - volatile"
         text content_summary "AI-generated TL;DR"
-        text blob_address "SHA-256, see ADR-0001"
+        text blob_address "SHA-256, see ADR-0001, nullable"
         text kind "open vocabulary"
         smallint confidence
         text status "proposed|approved"
@@ -399,7 +399,8 @@ migration when semantic search is warranted. No such column exists today.
 - **Tables grow monotonically.** Accepted; mitigated by the current flag so retrieval cost is unaffected.
 - **The write path depends on an LLM call** for summary and keywords. If that output is poor the memory
   becomes hard to find, with no full-text fallback over content. The model identifier and prompt version
-  are stored so summaries can be regenerated in bulk.
+  will be stored on the version row (additive columns, arriving with the write path) so summaries can
+  be regenerated in bulk.
 - **Grouping is episodic while retrieval is semantic.** A trial showed that, given free choice, an agent
   groups by subject rather than by work item. Cross-group deduplication is the mitigation; the friction
   may be structural and is being watched.
