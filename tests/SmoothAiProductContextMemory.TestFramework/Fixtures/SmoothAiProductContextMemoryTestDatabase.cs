@@ -6,11 +6,9 @@ namespace SmoothAiProductContextMemory.TestFramework.Fixtures;
 /// <summary>
 /// Factory for per-test isolated databases used in L1 Infrastructure component tests.
 /// Creates a fresh database on demand against the Aspire-hosted PostgreSQL container.
+/// Domain-agnostic: it creates and drops databases but knows nothing about the application
+/// DbContext or its migrations — the caller owns migrating the returned database.
 /// </summary>
-/// <remarks>
-/// Once EF Core is wired up, extend <see cref="CreateAsync"/> to register the DbContext
-/// and run migrations before returning the handle.
-/// </remarks>
 public sealed class SmoothAiProductContextMemoryTestDatabase : IAsyncDisposable
 {
     private readonly string _maintenanceConnectionString;
@@ -41,24 +39,23 @@ public sealed class SmoothAiProductContextMemoryTestDatabase : IAsyncDisposable
 
         string connectionString = aspire.CreateDatabaseConnectionString(databaseName);
 
-        // TODO: Run EF Core migrations here when the application DbContext is available:
-        // var services = new ServiceCollection();
-        // services.AddDbContext<SmoothAiProductContextMemoryDbContext>(opts => opts.UseNpgsql(connectionString));
-        // await using var provider = services.BuildServiceProvider();
-        // await provider.MigrateSmoothAiProductContextMemoryAsync(cancellationToken);
-
         Log(output, connectionString, $"Database '{databaseName}' ready.");
 
         return new SmoothAiProductContextMemoryTestDatabase(connectionString, databaseName, maintenanceConnectionString);
     }
 
-    public async Task ResetAsync()
+    /// <summary>Recreates the database. Migration is the caller's responsibility.</summary>
+    public async Task ResetAsync(CancellationToken cancellationToken = default)
     {
         await PostgreSqlDatabaseManager.RecreateDatabaseAsync(_maintenanceConnectionString, DatabaseName);
-        // TODO: Re-run migrations after reset when EF Core is wired up.
     }
 
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    public async ValueTask DisposeAsync()
+    {
+        // Per-test databases are never needed again; the test Postgres outlives the run, so an
+        // orphaned database would accumulate on the persistent container indefinitely.
+        await PostgreSqlDatabaseManager.DropDatabaseIfExistsAsync(_maintenanceConnectionString, DatabaseName);
+    }
 
     private static void Log(ITestOutputHelper? output, string connectionString, string message)
     {

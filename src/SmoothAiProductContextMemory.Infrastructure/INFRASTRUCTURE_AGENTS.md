@@ -19,4 +19,5 @@ Implements the contracts defined in Application — EF Core + PostgreSQL persist
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-09 | Persistence delivered. Entity POCOs live in `Domain/Entities/`; the empty `Persistence/{Entities,Repositories,Stores}/` skeleton folders were removed (unused). `Persistence/{Configurations,DesignTime,Extensions,Migrations}/` are populated. DbContext + migration + seed + triggers + `label_usage` view. See `Persistence/PERSISTENCE_AGENTS.md`. | [ADR-0002] |
 | 2026-05-30 | Created — empty persistence + clients skeleton (`Clients/`, `Extensions/`, `Persistence/{Configurations,Entities,Migrations,Repositories,Stores,Extensions,DesignTime}/`). | — |

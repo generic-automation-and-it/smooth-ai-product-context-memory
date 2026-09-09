@@ -25,6 +25,7 @@ Shared xunit.v3 test fixtures and helpers reused across the L0/L1/L2 test projec
   Databases provisioned on the test Postgres: `app-component`, `app-integration`, `infra-component`, `infra-integration`, `host-integration`.
 - **`WebAppFixture<TProgram>`** wraps `WebApplicationFactory<TProgram>` and is generic over a Host's entry point. Because xunit.v3 compiles test assemblies as executables (each gets its own auto-generated `Program`), an integration test must reference the Host with `Aliases="HostApp"` and close the fixture as `WebAppFixture<HostApp::Program>` to avoid an ambiguous `Program`.
 - **`ServiceProviderFixture`** builds an isolated `IServiceCollection`/`IServiceProvider` for L0/L1 tests and routes logging to the test output via `XUnitLoggerFactory`.
+- **`SmoothAiProductContextMemoryTestDatabase`** creates a fresh isolated PostgreSQL database per L1 test against the Aspire test Postgres, and **drops it on dispose** so the persistent test container never accumulates orphans. It is domain-agnostic: it creates/drops databases but knows nothing about the application DbContext or migrations — the caller owns migrating the returned database.
 - **`XUnitLogger*`** bridges `ILogger` to xunit's `ITestOutputHelper`, with optional per-category minimum levels.
 - **`PriorityOrderer` + `[TestPriority]`** order test cases when sequencing matters; opt in with `[TestCaseOrderer(typeof(PriorityOrderer))]` on the test class.
 
@@ -32,5 +33,6 @@ Shared xunit.v3 test fixtures and helpers reused across the L0/L1/L2 test projec
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-09 | `SmoothAiProductContextMemoryTestDatabase` made domain-agnostic — removed the Infrastructure ProjectReference and the EF wiring (migrations moved to the caller, `PersistenceTestBase`); it now drops the per-test database on dispose so the persistent test Postgres never accumulates orphans. | PR #11 |
 | 2026-09-01 | Documented `AspireFixture` endpoint resolution, container-runtime handling and the fixed test dependency ports. Blob console port moved `19192` → `19092` to sit in the test port band; port discovery now probes `docker` before `podman` and is timeout-safe. | — |
 | 2026-05-30 | Created — lean fixtures (`ServiceProviderFixture`, `WebAppFixture<TProgram>`), xunit output logging, and test-case ordering helpers. | — |
