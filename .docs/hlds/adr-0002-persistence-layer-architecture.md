@@ -314,8 +314,8 @@ the database, making memories findable without their bodies being indexed.
 it does not exist, so the index is deferred until there is something to measure — the same treatment
 given to the embedding column below.
 
-Semantic search is deferred but pre-wired: the embedding column is nullable and can be populated by an
-additive migration.
+Semantic search is deferred but pre-wired: a nullable embedding column can be added by an additive
+migration when semantic search is warranted. No such column exists today.
 
 ## Alternatives considered
 
