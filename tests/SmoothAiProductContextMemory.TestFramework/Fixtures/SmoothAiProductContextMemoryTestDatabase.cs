@@ -1,8 +1,4 @@
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
-using SmoothAiProductContextMemory.Infrastructure.Persistence;
-using SmoothAiProductContextMemory.Infrastructure.Persistence.Extensions;
 using Xunit.v3;
 
 namespace SmoothAiProductContextMemory.TestFramework.Fixtures;
@@ -10,11 +6,9 @@ namespace SmoothAiProductContextMemory.TestFramework.Fixtures;
 /// <summary>
 /// Factory for per-test isolated databases used in L1 Infrastructure component tests.
 /// Creates a fresh database on demand against the Aspire-hosted PostgreSQL container.
+/// Domain-agnostic: it creates and drops databases but knows nothing about the application
+/// DbContext or its migrations — the caller owns migrating the returned database.
 /// </summary>
-/// <remarks>
-/// Once EF Core is wired up, extend <see cref="CreateAsync"/> to register the DbContext
-/// and run migrations before returning the handle.
-/// </remarks>
 public sealed class SmoothAiProductContextMemoryTestDatabase : IAsyncDisposable
 {
     private readonly string _maintenanceConnectionString;
@@ -45,30 +39,23 @@ public sealed class SmoothAiProductContextMemoryTestDatabase : IAsyncDisposable
 
         string connectionString = aspire.CreateDatabaseConnectionString(databaseName);
 
-        await ApplyMigrationsAsync(connectionString, cancellationToken);
-
         Log(output, connectionString, $"Database '{databaseName}' ready.");
 
         return new SmoothAiProductContextMemoryTestDatabase(connectionString, databaseName, maintenanceConnectionString);
     }
 
-    public async Task ResetAsync()
+    /// <summary>Recreates the database. Migration is the caller's responsibility.</summary>
+    public async Task ResetAsync(CancellationToken cancellationToken = default)
     {
         await PostgreSqlDatabaseManager.RecreateDatabaseAsync(_maintenanceConnectionString, DatabaseName);
-        await ApplyMigrationsAsync(ConnectionString);
     }
 
-    private static async Task ApplyMigrationsAsync(string connectionString, CancellationToken cancellationToken = default)
+    public async ValueTask DisposeAsync()
     {
-        var services = new ServiceCollection();
-        services.AddDbContext<SmoothAiProductContextMemoryDbContext>(options =>
-            options.UseNpgsql(connectionString));
-
-        await using ServiceProvider provider = services.BuildServiceProvider();
-        await provider.MigrateSmoothAiProductContextMemoryAsync(cancellationToken);
+        // Per-test databases are never needed again; the test Postgres outlives the run, so an
+        // orphaned database would accumulate on the persistent container indefinitely.
+        await PostgreSqlDatabaseManager.DropDatabaseIfExistsAsync(_maintenanceConnectionString, DatabaseName);
     }
-
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
     private static void Log(ITestOutputHelper? output, string connectionString, string message)
     {
