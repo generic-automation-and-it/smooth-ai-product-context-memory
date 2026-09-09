@@ -33,4 +33,24 @@ public class SlugTests
             (char.IsLetterOrDigit(c) || c == '-').ShouldBeTrue();
         }
     }
+
+    [Fact]
+    public void Subject_rejects_null_description()
+    {
+        Should.Throw<ArgumentNullException>(() => Slug.Subject(null!));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("!!!")]
+    [InlineData("---")]
+    [InlineData("?!@#$%^&*()")]
+    public void Subject_rejects_descriptions_that_would_slug_to_empty(string input)
+    {
+        // An empty slug is not merely useless: every letterless description would collapse to the
+        // same value and collide on the unique (group_id, subject_slug) backstop, so two unrelated
+        // subjects would be treated as duplicates of one another.
+        Should.Throw<ArgumentException>(() => Slug.Subject(input));
+    }
 }

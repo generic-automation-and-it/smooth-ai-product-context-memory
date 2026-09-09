@@ -10,6 +10,16 @@ namespace SmoothAiProductContextMemory.Domain;
 /// </summary>
 public static class Slug
 {
+    /// <summary>
+    /// Normalises <paramref name="description"/> into a subject slug.
+    /// </summary>
+    /// <exception cref="ArgumentNullException">The description is null.</exception>
+    /// <exception cref="ArgumentException">
+    /// The description contains no letters or digits, which would produce an empty slug. Empty slugs
+    /// are rejected rather than stored: every such description would collapse to the same value and
+    /// collide on the unique (group_id, subject_slug) backstop, so two unrelated subjects would be
+    /// treated as duplicates of one another.
+    /// </exception>
     public static string Subject(string description)
     {
         ArgumentNullException.ThrowIfNull(description);
@@ -45,6 +55,15 @@ public static class Slug
             }
         }
 
-        return slug.ToString().Trim('-');
+        string result = slug.ToString().Trim('-');
+
+        if (result.Length == 0)
+        {
+            throw new ArgumentException(
+                "Description contains no letters or digits; subject slug would be empty.",
+                nameof(description));
+        }
+
+        return result;
     }
 }
