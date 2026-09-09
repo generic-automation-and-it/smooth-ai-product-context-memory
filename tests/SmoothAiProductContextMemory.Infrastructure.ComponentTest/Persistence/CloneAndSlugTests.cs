@@ -42,8 +42,8 @@ public sealed class CloneAndSlugTests : PersistenceTestBase
         Db.Memories.AddRange(memoryA, memoryB);
         await Db.SaveChangesAsync(Ct);
 
-        Db.Memories.AsNoTracking().Single(m => m.Id == memoryA.Id).Uuid.ShouldNotBe(memoryB.Uuid);
-        Db.Memories.AsNoTracking().Single(m => m.Id == memoryB.Id).LineageId.ShouldBe(lineage);
+        (await Db.Memories.AsNoTracking().SingleAsync(m => m.Id == memoryA.Id, Ct)).Uuid.ShouldNotBe(memoryB.Uuid);
+        (await Db.Memories.AsNoTracking().SingleAsync(m => m.Id == memoryB.Id, Ct)).LineageId.ShouldBe(lineage);
     }
 
     [Fact]
@@ -87,6 +87,6 @@ public sealed class CloneAndSlugTests : PersistenceTestBase
         Db.Memories.Add(memory);
         await Db.SaveChangesAsync(Ct);
 
-        Db.Memories.AsNoTracking().Single(m => m.Id == memory.Id).SubjectSlug.ShouldBe("postgresql-persistence-layer");
+        (await Db.Memories.AsNoTracking().SingleAsync(m => m.Id == memory.Id, Ct)).SubjectSlug.ShouldBe("postgresql-persistence-layer");
     }
 }

@@ -71,6 +71,7 @@ public sealed class MemoryGroupTests : PersistenceTestBase
         Db.MemoryGroups.Add(group);
         await Db.SaveChangesAsync(Ct);
 
-        (await Db.MemoryGroups.CountAsync(Ct)).ShouldBeGreaterThanOrEqualTo(1);
+        // Fresh isolated DB per test, so this table contains exactly this one group.
+        (await Db.MemoryGroups.CountAsync(Ct)).ShouldBe(1);
     }
 }

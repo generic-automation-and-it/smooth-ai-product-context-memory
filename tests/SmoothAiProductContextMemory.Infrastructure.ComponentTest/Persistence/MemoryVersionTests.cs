@@ -87,7 +87,11 @@ public sealed class MemoryVersionTests : PersistenceTestBase
         Db.MemoryVersions.Add(TestEntities.NewVersion(memory.Id, 1, "First", isCurrent: true));
         Db.MemoryVersions.Add(TestEntities.NewVersion(memory.Id, 2, "Second", isCurrent: true));
 
-        await Should.ThrowAsync<DbUpdateException>(() => Db.SaveChangesAsync(Ct));
+        // Pin the enforcement mechanism: the partial unique index on is_current, not some other
+        // constraint that happens to reject two currents.
+        var ex = await Should.ThrowAsync<DbUpdateException>(() => Db.SaveChangesAsync(Ct));
+        ex.InnerException.ShouldBeOfType<PostgresException>()
+            .ConstraintName.ShouldBe("IX_memory_version_memory_id");
     }
 
     [Fact]

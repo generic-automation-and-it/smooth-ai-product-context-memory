@@ -13,7 +13,6 @@ public class EntityInvariantTests
         memory.Description.ShouldBe("The subject");
         version.Statement.ShouldBe("The claim");
         // The split is structural: the subject is unversioned, the claim is versioned.
-        version.ShouldNotBeNull();
     }
 
     [Fact]
@@ -28,7 +27,6 @@ public class EntityInvariantTests
 
         version.ValidUntil.ShouldNotBeNull();
         version.ValidFrom.ShouldBeLessThan(version.ValidUntil.Value);
-        version.CreatedOn.ShouldBeGreaterThanOrEqualTo(DateTimeOffset.MinValue);
     }
 
     [Fact]

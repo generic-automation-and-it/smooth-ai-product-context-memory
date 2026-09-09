@@ -25,6 +25,5 @@ public sealed class SeedTests : PersistenceTestBase
         var names = await Db.Labels.Select(l => l.Name).ToListAsync(Ct);
 
         names.OrderBy(n => n).ShouldBe(expected.OrderBy(n => n));
-        expected.Length.ShouldBe(10);
     }
 }

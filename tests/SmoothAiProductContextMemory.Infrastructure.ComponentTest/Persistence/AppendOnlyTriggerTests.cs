@@ -121,7 +121,8 @@ public sealed class AppendOnlyTriggerTests : PersistenceTestBase
 
         await tx.CommitAsync(Ct);
 
-        // With the transaction-scoped bypass, the cascade delete of history is admitted.
-        (await Db.MemoryGroups.IgnoreQueryFilters().CountAsync(g => g.Id == group.Id, Ct)).ShouldBe(0);
+        // With the transaction-scoped bypass, the cascade delete of history is admitted. No global
+        // query filter exists, so a plain count is sufficient to prove the hard delete.
+        (await Db.MemoryGroups.CountAsync(g => g.Id == group.Id, Ct)).ShouldBe(0);
     }
 }
