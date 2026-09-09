@@ -42,7 +42,7 @@ erDiagram
 
 - **Subject/claim**: `description` (stable, what dedup matches on) vs `statement` (volatile, what versioning replaces) must never be collapsed — that would destroy "same subject, new claim".
 - **`sources` sits on the version**, because provenance records where *this claim* came from. v1 and v2 legitimately carry different sources.
-- **`is_current` flag**: exactly one current version per memory, enforced by a partial unique index `WHERE "IsCurrent"`. Version chain integrity is the unique `(memory_id, version)`.
+- **`is_current` flag**: exactly one current version per memory, enforced by a partial unique index `WHERE "is_current"`. Version chain integrity is the unique `(memory_id, version)`.
 - **`MemoryGroup` is keyed by its own GUID**, not by its tickets — tickets accumulate over time. A group holds many tickets, an optional repo, the scope, and a mandatory initiative FK (defaulting to the seeded `to-be-decided` row, id 1).
 - **Two constraints are deliberately soft**: subject uniqueness (unique `(group_id, subject_slug)` is an exact-match backstop only) and ticket-to-group uniqueness (application-enforced read-before-write). Do not attempt to enforce either in-database — see ADR-0002.
 - **`label_usage` is a derived view**, not a column. A maintained counter drifts; a derived one cannot.
