@@ -137,7 +137,8 @@ public sealed class MemoryVersionTests : PersistenceTestBase
         // Registry is advisory; a facet absent from the seeded labels must be accepted.
         await Db.SaveChangesAsync(Ct);
 
-        Db.Memories.AsNoTracking().Single(m => m.Id == memory.Id).Facets.ShouldBe(["brand-new-facet"]);
+        (await Db.Memories.AsNoTracking().SingleAsync(m => m.Id == memory.Id, Ct))
+            .Facets.ShouldBe(["brand-new-facet"]);
     }
 
     [Fact]
