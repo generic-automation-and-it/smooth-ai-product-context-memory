@@ -142,10 +142,13 @@ public sealed class MemoryVersionTests : PersistenceTestBase
         var loaded = await Db.MemoryVersions.AsNoTracking().SingleAsync(v => v.Id == v1.Id, Ct);
 
         // Business time (valid_until closed) and system time (created_on) are independent axes.
+        // Compare within a tolerance: timestamptz stores microsecond precision, so the round-trip
+        // drops sub-microsecond ticks and exact equality is not meaningful here.
+        var tolerance = TimeSpan.FromSeconds(1);
         loaded.ValidUntil.ShouldNotBeNull();
-        loaded.ValidFrom.ShouldBe(v1.ValidFrom);
-        loaded.ValidUntil.ShouldBe(v1.ValidUntil);
-        loaded.CreatedOn.ShouldBe(v1.CreatedOn);
+        (loaded.ValidFrom - v1.ValidFrom).Duration().ShouldBeLessThanOrEqualTo(tolerance);
+        (loaded.ValidUntil!.Value - v1.ValidUntil!.Value).Duration().ShouldBeLessThanOrEqualTo(tolerance);
+        (loaded.CreatedOn - v1.CreatedOn).Duration().ShouldBeLessThanOrEqualTo(tolerance);
     }
 
     [Fact]
