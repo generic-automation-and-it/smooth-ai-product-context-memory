@@ -334,8 +334,10 @@ namespace SmoothAiProductContextMemory.Infrastructure.Persistence.Migrations
             // moves history into a JSONB array would lose concurrent appends silently; the trigger
             // makes the rule explicit. Corrections are new versions, never updates.
             // The one permitted UPDATE is a version bump: transferring the current pointer
-            // (is_current) with all content unchanged. Everything else raises. A session may opt
-            // into a cascade delete of history by setting app.allow_history_delete='true'.
+            // (is_current) with all content unchanged. Everything else raises. A caller may opt
+            // into a cascade delete of history with SET LOCAL app.allow_history_delete='true'
+            // inside an explicit transaction — SET LOCAL, never plain SET, so the bypass reverts
+            // at COMMIT rather than persisting on a pooled connection.
             migrationBuilder.Sql(
                 """
                 CREATE FUNCTION public.append_only_guard() RETURNS trigger AS $$

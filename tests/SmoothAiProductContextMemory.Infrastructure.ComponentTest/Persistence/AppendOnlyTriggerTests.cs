@@ -103,16 +103,25 @@ public sealed class AppendOnlyTriggerTests : PersistenceTestBase
         await using var conn = new NpgsqlConnection(connStr);
         await conn.OpenAsync(Ct);
 
-        await using (var set = new NpgsqlCommand("SET app.allow_history_delete = 'true'", conn))
+        // SET LOCAL, not SET: the bypass must auto-revert at COMMIT so it cannot outlive this
+        // operation on a pooled connection and hand a later unrelated caller permission to delete
+        // history. This is the idiom pinned in PERSISTENCE_AGENTS.md.
+        await using var tx = await conn.BeginTransactionAsync(Ct);
+
+        await using (var set = new NpgsqlCommand("SET LOCAL app.allow_history_delete = 'true'", conn, tx))
         {
             await set.ExecuteNonQueryAsync(Ct);
         }
 
-        await using var del = new NpgsqlCommand("DELETE FROM memory_group WHERE id = @id", conn);
-        del.Parameters.AddWithValue("id", group.Id);
-        await del.ExecuteNonQueryAsync(Ct);
+        await using (var del = new NpgsqlCommand("DELETE FROM memory_group WHERE id = @id", conn, tx))
+        {
+            del.Parameters.AddWithValue("id", group.Id);
+            await del.ExecuteNonQueryAsync(Ct);
+        }
 
-        // With the session bypass set, the cascade delete of history is admitted.
+        await tx.CommitAsync(Ct);
+
+        // With the transaction-scoped bypass, the cascade delete of history is admitted.
         (await Db.MemoryGroups.IgnoreQueryFilters().CountAsync(g => g.Id == group.Id, Ct)).ShouldBe(0);
     }
 }

@@ -48,8 +48,19 @@ erDiagram
 - **`label_usage` is a derived view**, not a column. A maintained counter drifts; a derived one cannot.
 - **Append-only guard (DB trigger `append_only_guard`)**:
   - The one permitted `memory_version` UPDATE is a **version-bump pointer transfer** (`is_current` flips with all content unchanged). Any content edit raises.
-  - All `group_description` UPDATEs and any DELETE raise unless the session sets `app.allow_history_delete = 'true'`.
-  - A **cascade delete** of a group/memory that has history therefore needs that session flag — set it inside the deleting transaction.
+  - All `group_description` UPDATEs and any DELETE raise unless the bypass GUC `app.allow_history_delete` is set to `'true'`.
+  - A **cascade delete** of a group/memory that has history therefore needs the bypass. **Always use `SET LOCAL` inside an explicit transaction:**
+
+    ```sql
+    BEGIN;
+    SET LOCAL app.allow_history_delete = 'true';   -- auto-reverts at COMMIT/ROLLBACK
+    DELETE FROM memory_group WHERE id = ...;
+    COMMIT;
+    ```
+
+    **Never plain `SET`.** A session-scoped GUC survives the statement and, on a pooled connection,
+    outlives the operation — the next unrelated caller to borrow that connection inherits a live
+    permission to delete history. That silently defeats the guarantee the trigger exists to provide.
 - **Version bump ordering**: because the partial unique index only allows one current version, a bump must flip the old version's `is_current` to `false` *before* inserting the new current version. Inserting the new current while the old is still current violates the index (both current at insert time). See `BumpVersionAsync` in the L1 tests.
 
 ## Test References
