@@ -289,8 +289,9 @@ explicit in the schema itself.
 | One subject per group | **Soft** — unique `(group_id, subject_slug)` is an exact-match backstop only |
 | A ticket belongs to at most one group | **Soft** — application-enforced |
 
-Two constraints are deliberately soft, and both are enforced in the **same read-before-write pass the
-write path already performs** for deduplication, so neither costs an extra traversal.
+Two constraints are deliberately soft, and both will be enforced in the **same read-before-write pass the
+write path performs** for deduplication, so neither costs an extra traversal. The write path is the agent
+skill, which is not yet implemented — until it exists, neither constraint is enforced at all.
 
 Subject uniqueness cannot be hard-enforced regardless of schema: *"PostgreSQL is the storage engine"* and
 *"we store in Postgres"* are the same subject with different strings, and semantic equivalence is not
@@ -324,7 +325,7 @@ migration when semantic search is warranted. No such column exists today.
 - **A fully normalised model (rejected — this revision).** The original design used thirteen entities with
   separate tables for tickets, repositories, tags, facets and sources. Rejected because the constraints
   those tables bought are either unneeded (repository, sources), actively contrary to the design
-  (facet-to-registry FK), or replaceable at zero cost by a check the write path already performs (ticket
+  (facet-to-registry FK), or replaceable at zero cost by a check the write path will perform (ticket
   uniqueness). For a single-user local service, **schema complexity is a real cost and normalisation
   bought little.**
 - **Full denormalisation, including history as JSONB arrays (rejected).** Appending to a JSONB array is
