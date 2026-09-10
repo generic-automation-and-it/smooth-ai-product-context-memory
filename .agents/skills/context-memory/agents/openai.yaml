@@ -1,0 +1,5 @@
+interface:
+  display_name: "Context Memory"
+  short_description: "Get and set persistent context-memory records across sessions"
+  default_prompt: "Capture durable facts and decisions from this work and write them to context memory at the end-of-task checkpoint; use get to recall what has been previously captured about a subject, ticket, repository, or scope."
+  model: gpt-5.5
