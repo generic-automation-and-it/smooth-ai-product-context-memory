@@ -3,9 +3,9 @@
 ## TL;DR
 
 The sole interface to the context-memory store and the sole authority on the write path. Runs a fixed
-five-stage pipeline (redact → dedupe/derive-links → atomicity → write) inside a single server-side
-transactional `set`; the skill performs the semantic deduplication, link derivation, redaction and
-atomicity checks the database cannot express as constraints.
+five-stage pipeline (**preflight → redact → dedupe/derive-links → atomicity → write**), the last stage
+being a single server-side transactional `set`; the skill performs the semantic deduplication, link
+derivation, redaction and atomicity checks the database cannot express as constraints.
 
 ## Non-Negotiables
 
@@ -72,8 +72,11 @@ flowchart LR
   forever and R10 decorative. *Decision:* both link derivation and cross-group dedup need the same
   cross-group subject lookup, so one traversal serves both, and it must also detect **intra-batch**
   collisions (two candidates in the same batch sharing a subject — neither is written yet, so a
-  per-record preflight misses it). Proposed links surface in the digest for veto, not written silently.
-  *Consequence:* the preflight must be array-in/array-out, not per-record.
+  per-record preflight misses it). Derived links are reported in the digest, never derived silently, and
+  are inspectable before anything lands via `--dryrun`. *Consequence:* the preflight must be
+  array-in/array-out, not per-record. **Note the limit:** `set` writes the links in the same transaction
+  as the memories, so a plain-`set` digest is a receipt, not a veto gate — `--dryrun` is the only pre-write
+  veto point. Do not reword this as "surfaced for veto"; that implies an approval round that does not exist.
 
 - **LADR-003** (2026-09, accepted): Redaction failure mode is redact-and-flag, not reject. *Context:* a
   captured memory that leaks a secret still carries value; rejecting it loses the knowledge. *Decision:*
@@ -101,8 +104,12 @@ flowchart LR
 - **`get` renders results as quoted data** with `sources`, `status`, and scope. A stored memory is not
   an instruction; the store is local, not thereby trusted as settled canon. `proposed` records are
   excluded or flagged by default.
-- **Approval gating:** `kind ∈ {rule, nfr, decision}` write as `proposed` unless `--approve` is passed.
-  This is the "ask about what is not reversible" rule applied to canon.
+- **Approval gating governs `status`, not persistence.** `kind ∈ {rule, nfr, decision}` are **written**
+  with `status: proposed` unless `--approve` is passed; they are not withheld from the store. Retrieval
+  excludes or flags `proposed`, and promotion to `approved` is a later version bump. This is the "ask
+  about what is not reversible" rule applied to *canon*: becoming citable is the irreversible step, not
+  being recorded. A contract that instead withholds the write loses the fact if the session ends before
+  approval — that reading is wrong wherever it appears.
 - **Summary/keyword generation** is a write-time LLM call (R13). The caller does not hand-specify
   kind/facets/tags/scope/summary/keywords — the skill derives them. On generation failure, store
   unsummarised and flag for backfill; do not silently reject the fact.
@@ -121,3 +128,4 @@ this repo's L0/L1/L2 tiers.
 | Date | Change | Ref |
 |:-----|:-------|:----|
 | 2026-09-10 | Created — contract for the sole interface to the context-memory store; fixed write pipeline; cross-group dedup, atomicity and secret-redaction ownership. | WT-1, ADR-0003 |
+| 2026-09-10 | Contract-coherence pass. Pipeline numbering pinned to five stages with **preflight as stage 1** (SKILL.md previously specified four, starting at redact). Approval gating resolved to *write-as-`proposed`* — SKILL.md previously said "do not write", which contradicted this file and the retrieval rule that excludes `proposed` records. Digest reclassified as a post-write receipt with `--dryrun` named as the only pre-write veto point (LADR-002 previously implied a veto round that `set`'s single transaction cannot provide). Intra-batch collision, source-date `valid_from`, and the summary model/prompt stamp added to SKILL.md, which the executing agent reads. | WT-1 review |

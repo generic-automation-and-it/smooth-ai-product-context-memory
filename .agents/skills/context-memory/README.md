@@ -21,8 +21,10 @@ It has 4 phases:
 3. **Compare-or-Clarify** (the bounded pre-write round: cross-group dedup + link derivation + ticket-uniqueness)
 4. **Write** (the explicit `set` checkpoint)
 
-…plus a fixed write pipeline inside the write (redact → dedupe/derive-links → atomicity → write) and a
-retrieval (`get`) path that returns cheap fields by default and touches the blob only on drill-down.
+…plus a fixed five-stage write pipeline (preflight → redact → dedupe/derive-links → atomicity → write)
+and a retrieval (`get`) path that returns cheap fields by default and touches the blob only on drill-down.
+Phase 3 above **is** pipeline stage 1 — the phases and the stages overlap rather than nest, which is why
+the pipeline table in `SKILL.md` is the canonical numbering.
 
 ## Where the tokens actually go
 
@@ -71,10 +73,11 @@ default. Get the cost model wrong and the skill becomes more expensive than the 
 | Switch | Cost impact | Why |
 |--------|-------------|-----|
 | _(none)_ | **Baseline** | Silent capture; write only at checkpoint; no approval override. |
-| `--dryrun` | **Same as a real write** | Full pipeline, no persistence. Costs the LLM judgements but writes nothing. Safe inspection of a non-trivial batch. |
-| `--approve` | **No extra cost, narrower gate** | Skips the approval gate for `rule`/`nfr`/`decision`. Saves a human round-trip at the cost of writing canon without review — the "ask about what is not reversible" rule. |
+| `--dryrun` | **Same as a real write** | Full pipeline, no persistence. Costs the LLM judgements but writes nothing. The **only** pre-write inspection point — a plain `set`'s digest arrives after the transaction has committed. |
+| `--approve` | **No extra cost, narrower gate** | Writes `rule`/`nfr`/`decision` as `approved` rather than `proposed`. Saves a human round-trip at the cost of canon becoming citable without review — the "ask about what is not reversible" rule. Without it the fact is still stored, just not yet citable. |
+| `--deepsearch` | **V1 — not implemented** | Would widen candidate recall past the facet/kind-narrowed top-N. More LLM judgement per candidate; no extra irreversibility. |
 
 **Bottom line:** writes are expensive by design (R13) and cheap by default for reads. The skill's value
 is not that it is cheap — it is that it is the *only* way to make real, long-lived memory, and it makes
-retrieval cheap. Use `--dryrun` (or a plain `set`) deliberately; skip `--approve` unless the human has
-explicitly confirmed.
+retrieval cheap. Reach for `--dryrun` when a batch is large or unfamiliar — paying the pipeline twice is
+cheaper than untangling a wrong dedup decision. Skip `--approve` unless the human has explicitly confirmed.

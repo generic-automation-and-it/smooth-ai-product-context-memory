@@ -1,7 +1,9 @@
 # ADR-0003: Context-memory write pipeline and skill contract
 
 **Status:** Accepted — specification
-**Date:** 2026-09-10
+**Date:** 2026-09-10 · **Revised:** 2026-09-10 (contract-coherence pass — canonical five-stage numbering,
+approval gating resolved to `status`-gating, digest reclassified as a post-write receipt, redaction column
+withdrawn to match the digest-only decision, `set` stamp / dry-run / group-description operations added)
 **Related:** [ADR-0001](./adr-0001-blob-storage-backend-and-addressing.md) (blob storage),
 [ADR-0002](./adr-0002-persistence-layer-architecture.md) (persistence layer)
 
@@ -21,6 +23,20 @@ database constraints. Until the skill contract exists, the store is a schema nob
 Five decisions are entangled and must be specified together, because four of them are **stages of one
 write pipeline** and the fifth is a property of that pipeline's pre-write round. Specifying them
 separately produces the wrong shape. This is why this task exists as its own deliverable.
+
+**The five decisions and the five pipeline stages are two different lists.** They are not a
+one-to-one mapping, and conflating them is the easiest way to misread this document:
+
+| Decision | Lands in pipeline stage |
+|---|---|
+| Redaction | 2 (Redact) |
+| Deduplication | 1 (Preflight, candidate recall) → 3 (Dedupe, the decision) |
+| Link derivation | 1 (Preflight, same traversal) → 3 (Dedupe / derive links) |
+| Atomicity check | 4 (Atomicity check) |
+| Ticket uniqueness | 1 (Preflight — same read, no extra traversal) |
+
+The **pipeline stage numbers below are canonical**. Where a section heading carries a stage number, it
+refers to that table.
 
 Two constraints pin the design:
 
@@ -53,7 +69,7 @@ stable hash and an immutable object; the only remedy is to orphan it and write a
 loses the original and pollutes the store with addresses that no longer resolve to wanted content.
 Preventing the secret from reaching the blob at all is the only clean remedy.
 
-### 1. Redaction
+### Redaction — pipeline stage 2
 
 - **Detection strategy:** fingerprint-based — pattern match against well-known secret shapes
   (long-lived API keys, JWT-shaped tokens, `postgres://`/`mysql://` connection strings, cloud
@@ -67,7 +83,7 @@ Preventing the secret from reaching the blob at all is the only clean remedy.
   digest; the scrubbed content and the secret itself are **never logged** (PERSISTENCE_AGENTS logistic
   constraint — never log memory content). See LADR-003 in the skill's AGENTS.md.
 
-### 2. Deduplication
+### Deduplication — pipeline stage 3 (recall in stage 1)
 
 - **Match on `description`** (the subject, stable side of the subject/claim split), **across groups**,
   not within.
@@ -81,16 +97,22 @@ Preventing the secret from reaching the blob at all is the only clean remedy.
   subject, new claim), not a duplicate insert. Two trials independently named semantic subject-matching
   the top write-path risk in the whole project.
 
-### 3. Link derivation
+### Link derivation — pipeline stage 3, batched with dedup (recall in stage 1)
 
 - Nothing currently creates `MemoryLink`, so without this stage R10 would stay decorative forever.
   Three trials produced zero links without anyone noticing.
 - **Placed in the pre-write clarification round, batched with deduplication** (D47 confirmed), because
   both need the same cross-group subject lookup — one traversal serves two purposes.
-- Proposed links appear in the digest for veto, never written silently. Each link carries a mandatory
+- Derived links are reported in the digest, never derived silently. Each link carries a mandatory
   `reason` (non-null in the schema, which structurally forces a justification per edge).
+- **Veto is `--dryrun`, not the digest.** `set` writes links in the same transaction as the memories, so
+  a plain-`set` digest is a receipt — the links already exist when the human reads it. The pre-write
+  inspection point is `--dryrun`, which runs the identical pipeline and renders the identical digest
+  without persisting. Splitting link creation into a second, separately-confirmed call was considered
+  and rejected (see Alternatives): it costs a round-trip and leaves a window where a memory exists with
+  its justified edges missing.
 
-### 4. Atomicity check
+### Atomicity check — pipeline stage 4
 
 - All three trials showed the model bundles several facts into one record under pressure and will not
   self-police.
@@ -100,7 +122,7 @@ Preventing the secret from reaching the blob at all is the only clean remedy.
   against drift, not redundancy.
 - The digest carries a **`skipped` count**.
 
-### 5. Ticket uniqueness
+### Ticket uniqueness — pipeline stage 1, inside the preflight
 
 - A ticket belongs to at most one group. Soft by design (ADR-0002); enforced in the same read-before-write
   pass as dedup, so it costs no extra traversal.
@@ -121,7 +143,13 @@ Preventing the secret from reaching the blob at all is the only clean remedy.
   and the model drills into the blob on demand, proxied through the API. The consuming model judges
   relevance; it holds task context the store does not.
 - **Digest format:** created / versioned / linked / diverged / skipped / labels-proposed, each with a
-  count. Every write reports; nothing mutates silently.
+  count. Every write reports; nothing mutates silently. On a plain `set` the digest is a **post-write
+  receipt** — it is rendered after the transaction commits, so it supports auditing and promotion of
+  `proposed` records, not veto. **The pre-write inspection point is `--dryrun`**, which runs the identical
+  pipeline and renders the identical digest while persisting nothing. `diverged` is always `0` until V2.
+- **Approval gating semantics:** the gate governs `status`, not persistence. A gated kind without
+  `--approve` is **written** as `proposed` and promoted to `approved` by a later version bump. Withholding
+  the write was rejected (see Alternatives) — it discards the fact if the session ends before approval.
 - **Switches with implication rules:** `--deepsearch` (V1, deferred), `--dryrun` (full pipeline, digest
   without writing), `--approve` (skip approval gate for gated kinds). Cheap by default, expensive opt-in.
   `--dryrun` and `--approve` are mutually exclusive.
@@ -141,9 +169,11 @@ Preventing the secret from reaching the blob at all is the only clean remedy.
 
 ### Schema impact (raised, not silently assumed)
 
-The contract as specified requires **additive columns** on `memory_version`: the model/prompt stamp
-(D42) and a `redactions jsonb` marker. No schema change is required to the septet of entities — the
-model-shape guard test (seven entity types) is unaffected, since these are columns, not tables.
+The contract as specified requires **one additive column** on `memory_version`: the model/prompt stamp
+(D42), so a summary batch can be regenerated in bulk. **No redaction column is owed** — the redaction
+record is digest-only (see Alternatives), which is precisely what keeps this to a single column. No
+schema change is required to the septet of entities — the model-shape guard test (seven entity types) is
+unaffected, since this is a column, not a table.
 
 **However:** `append_only_guard` (in the migration) hardcodes a fixed equality list of content columns
 at the top of its `UPDATE` branch. Any new column not added to that list becomes **silently mutable**
@@ -160,7 +190,9 @@ is `uuid`, never the surrogate `bigint`.**
 | Operation | Method + path | Inputs | Outputs |
 |---|---|---|---|
 | **Write preflight** | `POST /api/context/preflight` | Batch of candidate facts (subject, claim, content, kind, scope, ticket refs, source date). | Per candidate: dedup decision (new / version-of-`uuid` / skip + reason), proposed links `[{target_uuid, relation, reason}]`, ticket-uniqueness conflicts, intra-batch collision notices. **Writes nothing.** |
-| **Set (write)** | `POST /api/context/memories` | The resolved write(s) from preflight: new memories or version bumps, each with derived subject/claim/kind/facets/tags/summary/keywords/sources/valid_from/valid_until/confidence/status, and proposed links. Also optional group resolve-or-create params. | The digest: `{created, versioned, linked, diverged, skipped, labels_proposed}` each with count, plus per-item `uuid` and `blob_address`. One transactional call; owns `is_current`. |
+| **Set (write)** | `POST /api/context/memories` | The resolved write(s) from preflight: new memories or version bumps, each with derived subject/claim/kind/facets/tags/summary/keywords/sources/valid_from/valid_until/confidence/status, **the summary model identifier and prompt version (D42 stamp — the one additive column)**, and derived links. `status` is `proposed` for gated kinds unless the caller passed `--approve`. Also optional group resolve-or-create params. | The digest: `{created, versioned, linked, diverged, skipped, labels_proposed}` each with count, plus per-item `uuid` and `blob_address`. One transactional call; owns `is_current`. |
+| **Set (dry run)** | `POST /api/context/memories?dryRun=true` | Identical body to `set`. | Identical digest shape, **nothing persisted, no `blob_address`**. This is the pre-write veto point; the endpoint must share one code path with the real write, or the dry run stops predicting it. |
+| **Append group description** | `POST /api/context/groups/{uuid}/descriptions` | group `uuid` + description text. | New `GroupDescription` version. `GroupDescription` is append-only history with its own version chain (ADR-0002), so it cannot be updated in place and is not covered by group resolve-or-create, which only sets the first one. |
 | **Resolve-or-create group** | `POST /api/context/groups/resolve` | ticket(s) / repo / initiative / scope. | Match existing group `uuid` by ticket, or create one (synthetic `local:<guid>` ticket when untracked). |
 | **Get (cheap fields)** | `POST /api/context/query` | Free-text query and/or filters (label/ticket/repo/initiative/scope/kind, plus current-only default). | Array of cheap-field rows (no blob). |
 | **Get blob drill-down** | `GET /api/context/memories/{uuid}/versions/{version}/blob` | memory `uuid` + version. | Blob content, **proxied through the API** so scope enforcement cannot be bypassed. |
@@ -202,7 +234,16 @@ enforcement. The skill owns judgement; the API owns mechanics.
 - **Blob `DeleteAsync` on a redaction orphan (rejected).** Identical bytes share one address; deleting
   can destroy content a different version still references. "Orphan" = drop the DB reference only.
 - **Approval gating OFF by default (rejected).** The "ask about what is not reversible" rule makes
-  gated kinds (`rule`/`nfr`/`decision`) default to a proposal pending approval.
+  gated kinds (`rule`/`nfr`/`decision`) default to `status: proposed`.
+- **Gating by withholding the write vs gating the `status` (decision: gate the `status`).** Withholding
+  the write until a human approves loses the fact outright if the session ends first, and the checkpoint
+  is precisely the moment the session is ending. Gating `status` instead persists the fact, keeps it out
+  of retrieval (`proposed` is excluded or flagged), and makes promotion to `approved` an ordinary version
+  bump. Becoming *citable canon* is the irreversible step; being recorded is not.
+- **Link creation as a second, separately-confirmed call (rejected).** It would give a true pre-write
+  veto for links, but at the cost of a second round-trip and a window in which a memory exists without
+  the edges that justify it. `--dryrun` already provides pre-write inspection over the whole batch, so the
+  digest is deliberately a receipt rather than a gate.
 - **`valid_from` defaulting to `now()` (rejected).** Makes bitemporality decorative; derive from the
   source date when known.
 
@@ -224,7 +265,8 @@ enforcement. The skill owns judgement; the API owns mechanics.
 - **Semantic dedup is the top risk.** A wrong match is expensive and silent (near-duplicate insert vs
   false version bump rewriting canon). Tested adversarially; restated three times in SKILL.md.
 - **FTS is `'simple'`** — candidate recall is weaker than ideal until `pg_trgm` or stemming lands.
-- **Additive columns + trigger-list change** are owed in WT-2 (model/prompt stamp, redaction marker).
+- **One additive column + a trigger-list change** are owed in WT-2 (the model/prompt stamp). The
+  digest-only redaction record is what keeps it to one.
 - **Memory poisoning is mitigated, not eliminated.** Quoted-data rendering and approval gating reduce,
   but do not remove, the risk of a stored memory reading as an instruction.
 - **The skill is the single point of trust** for the soft constraints. A wrong judgement is uncorrected
@@ -288,8 +330,8 @@ Divergence needs a separate adversarial fixture, not a design-doc capture. The s
   kind plus `contradicts` links), semantic/vector search (deferred; index-first below ~1k records),
   `pg_trgm`/stemming for candidate recall (until measurement), `keywords` as a separate column (until
   search quality demands). Each is recorded so WT-3/WT-2 know it is not forgotten, not silently dropped.
-- **WT-2 owns:** the additive migration(s) (model/prompt stamp, redaction marker) including the
-  `append_only_guard` equality-list extension.
+- **WT-2 owns:** the additive migration for the model/prompt stamp, including the `append_only_guard`
+  equality-list extension in that same migration. No redaction column is owed (digest-only).
 - **V2 divergence fixture:** take documented design reversals from the design history, capture both the
   original and reversed position with reversal metadata stripped, and genuine unordered conflicts result.
   See the Testing section.
