@@ -15,6 +15,7 @@ Skills live **flat**, one directory per skill directly under `.agents/skills/`. 
 | **ai-template-sync** | UPSERT smooth-devex-template scaffold into an existing repo | `/ai-template-sync` |
 | **context-load-agents-context** | Load ancestor AGENTS.md context for a file | `/context-load-agents-context` |
 | **context-load-context** | Load domain context before implementation | `/context-load-context auth` |
+| **context-memory** | Get/set persistent context-memory records; sole interface to the store | `/context-memory [--dryrun] [--approve]` |
 | **create-hld** | Author a design-only High-Level Design under `.docs/hlds/NNN-<slug>/` | `/create-hld <kebab-slug>` |
 | **git-commit** | Commit with conventional format | `/git-commit [--autonomous]` |
 | **git-commit-push** | Commit and push to remote | `/git-commit-push [--autonomous]` |
@@ -38,6 +39,21 @@ Opt-in switches relax that, at different token costs (see `ai-brain-dump/README.
 
 The tool switches (`--oktoreaddocs`, `--oktowebsearch`) re-enable the file/web payload bloat the
 listen-first default avoids — use deliberately.
+
+### context-memory switches
+
+Default (no switch) accumulates candidate facts silently during work and writes them in one transaction at
+an explicit end-of-task `set`. See `context-memory/README.md` for the cost model — **every write is an LLM
+call** (R13), so the switches trade inspection against irreversibility, not against speed:
+
+| Switch | Effect | Cost |
+|--------|--------|------|
+| _(none)_ | Silent capture; one transactional write at the `set` checkpoint | baseline (1 LLM call per fact) |
+| `--dryrun` | Full pipeline, digest rendered, **nothing persisted** — the only pre-write veto point | same as a real write |
+| `--approve` | Write `rule`/`nfr`/`decision` as `approved` instead of `proposed` | no extra tokens; widens what becomes citable canon |
+
+`--dryrun` and `--approve` are **mutually exclusive** — one writes nothing, the other is the permission to
+write canon. A plain `set`'s digest is a receipt, not a gate: it is rendered after the transaction commits.
 
 ### git-commit / git-commit-push / git-commit-push-pr switches
 
@@ -77,6 +93,7 @@ Skills are classified by complexity tier. Each SKILL.md carries a `models` front
 | **ai-brain-dump** | high | Multi-turn synthesis + deep requirement reasoning |
 | **ai-template-sync** | high | Interactive multi-turn Q&A + conditional file sync across tools |
 | **create-hld** | high | Multi-turn clarification gates + architectural judgment (LADRs, NFRs, diagrams) |
+| **context-memory** | high | Write path performs semantic cross-group dedup, link derivation, atomicity splitting and summary/keyword generation — judgement the database cannot express as constraints |
 
 ### Sub-skill invocation model guidance
 
@@ -93,7 +110,7 @@ Skills are flat under `.agents/skills/`; the category lives in the folder-name p
 |--------|--------|
 | `agile-` | `agile-github-task-from-diff` |
 | `ai-` | `ai-brain-dump`, `ai-review`, `ai-terse`, `ai-template-sync` |
-| `context-` | `context-load-agents-context`, `context-load-context` |
+| `context-` | `context-load-agents-context`, `context-load-context`, `context-memory` |
 | `git-` | `git-commit`, `git-commit-push`, `git-commit-push-pr`, `git-commit-review-push`, `git-sync` |
 | _(none)_ | `create-hld`, `manage-rule-system` |
 

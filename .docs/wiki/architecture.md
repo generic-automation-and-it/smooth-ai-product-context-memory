@@ -5,7 +5,10 @@
 The context-memory store is an **index over content**, not a content store. Document bodies live in
 blob storage (see [ADR-0001](../hlds/adr-0001-blob-storage-backend-and-addressing.md)); PostgreSQL
 holds metadata, relationships, and everything filtered on. The authoritative persistence model is
-[ADR-0002](../hlds/adr-0002-persistence-layer-architecture.md).
+[ADR-0002](../hlds/adr-0002-persistence-layer-architecture.md). The write-path pipeline and the
+agent-facing skill contract (the **sole interface** to the store) are specified in
+[ADR-0003](../hlds/adr-0003-context-memory-write-pipeline.md); the skill lives at
+`.agents/skills/context-memory/`.
 
 ### Three-level hierarchy
 

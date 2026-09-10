@@ -312,6 +312,12 @@ integers to use `intarray`. That is real complexity for a check the skill perfor
 Blob content is not indexable, so at write time an AI-generated **summary** and **keywords** are stored in
 the database, making memories findable without their bodies being indexed.
 
+> **Refinement (ADR-0003).** There is no `keywords` column — keywords are written **into the
+> `content_summary` prose**, so they are already covered by the full-text index below. A separate
+> `keywords text[]` + GIN remains a clean additive migration if search quality ever demands it; routing
+> them into `tags` is rejected, as that pollutes the GIN containment filter and breaks "tags are
+> classification, not derived".
+
 - **Full-text** over `name`, `description` (stable row), `statement`, `content_summary` (version row)
 - **GIN** over `tags`, `facets` and `tickets` for containment
 - **GIST** over the validity range
