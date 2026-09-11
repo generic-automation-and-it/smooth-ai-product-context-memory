@@ -73,6 +73,48 @@ public class SetMemoriesValidatorTests
         result.ShouldHaveValidationErrorFor("Links[0]");
     }
 
+    /// <summary>An empty batch is a caller bug, not a no-op write.</summary>
+    [Fact]
+    public void Rejects_empty_item_list()
+    {
+        var request = new SetMemories.Request(Guid.NewGuid(), [], null, null);
+
+        _validator.TestValidate(request).ShouldHaveValidationErrorFor(x => x.Items);
+    }
+
+    [Fact]
+    public void Rejects_overlong_relation_and_inverted_validity()
+    {
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        var request = new SetMemories.Request(
+            Guid.NewGuid(),
+            [
+                new SetMemories.MemoryWrite(
+                    null,
+                    "n",
+                    "d",
+                    "s",
+                    "c",
+                    MemoryVersion.KindValue.Decision,
+                    null,
+                    null,
+                    MemoryVersion.MemoryVersionStatus.Approved,
+                    80,
+                    null,
+                    null,
+                    now,
+                    now.AddDays(-1),
+                    null,
+                    null)
+            ],
+            [new SetMemories.LinkWrite(Guid.NewGuid(), Guid.NewGuid(), new string('x', 33), "why")],
+            null);
+
+        var result = _validator.TestValidate(request);
+        result.ShouldHaveValidationErrorFor("Items[0].ValidUntil");
+        result.ShouldHaveValidationErrorFor("Links[0].Relation");
+    }
+
     [Fact]
     public void Accepts_valid_write()
     {
