@@ -52,7 +52,7 @@ Target a single test project (`dotnet test tests/<Project>`) or `ls tests/` to l
 xunit.v3 · Shouldly · Bogus · Respawn. Three tiers (drives where a test belongs):
 
 - **L0** `*.UnitTest` — no I/O, in-process.
-- **L1** component — `Application.ComponentTest` (in-memory EF Core); `Infrastructure.ComponentTest` (real isolated DB + Respawn).
+- **L1** component — `Application.ComponentTest` (handlers vs real Postgres via Aspire); `Infrastructure.ComponentTest` (real isolated DB).
 - **L2** `*.IntegrationTest` — full stack, real PostgreSQL.
 
 Shared fixtures in `tests/SmoothAiProductContextMemory.TestFramework/`; Aspire dependency host (PostgreSQL + WireMock) in `tests/SmoothAiProductContextMemory.TestFramework.Aspire/`. See `.docs/wiki/testing.md`.
