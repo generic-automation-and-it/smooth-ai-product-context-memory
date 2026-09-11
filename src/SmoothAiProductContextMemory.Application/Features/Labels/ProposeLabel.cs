@@ -2,6 +2,7 @@ using FluentValidation;
 using Mediator;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using SmoothAiProductContextMemory.Application.Abstractions;
 using SmoothAiProductContextMemory.Application.Common.Exceptions;
 using SmoothAiProductContextMemory.Application.Common.Persistence;
 using SmoothAiProductContextMemory.Domain.Entities;
@@ -22,7 +23,10 @@ public static class ProposeLabel
         }
     }
 
-    public sealed class Handler(IApplicationDbContext db, ILogger<Handler> logger) : IRequestHandler<Request, Response>
+    public sealed class Handler(
+        IApplicationDbContext db,
+        IDbErrorMapper errorMapper,
+        ILogger<Handler> logger) : IRequestHandler<Request, Response>
     {
         public async ValueTask<Response> Handle(Request request, CancellationToken cancellationToken)
         {
@@ -41,7 +45,7 @@ public static class ProposeLabel
                 Status = Label.LabelStatus.Draft,
             };
             db.Labels.Add(label);
-            await DbExceptionMapping.SaveOrMapAsync(() => db.SaveChangesAsync(cancellationToken));
+            await errorMapper.SaveOrMapAsync(() => db.SaveChangesAsync(cancellationToken));
 
             logger.LogInformation("Propose label completed");
             return new Response(label.Name, label.Status);

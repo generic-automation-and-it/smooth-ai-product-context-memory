@@ -2,6 +2,7 @@ using FluentValidation;
 using Mediator;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using SmoothAiProductContextMemory.Application.Abstractions;
 using SmoothAiProductContextMemory.Application.Common.Exceptions;
 using SmoothAiProductContextMemory.Application.Common.Models;
 using SmoothAiProductContextMemory.Application.Common.Persistence;
@@ -55,7 +56,10 @@ public static class ResolveGroup
         }
     }
 
-    public sealed class Handler(IApplicationDbContext db, ILogger<Handler> logger) : IRequestHandler<Request, Response>
+    public sealed class Handler(
+        IApplicationDbContext db,
+        IDbErrorMapper errorMapper,
+        ILogger<Handler> logger) : IRequestHandler<Request, Response>
     {
         public async ValueTask<Response> Handle(Request request, CancellationToken cancellationToken)
         {
@@ -117,7 +121,7 @@ public static class ResolveGroup
                 });
             }
 
-            await DbExceptionMapping.SaveOrMapAsync(() => db.SaveChangesAsync(cancellationToken));
+            await errorMapper.SaveOrMapAsync(() => db.SaveChangesAsync(cancellationToken));
 
             logger.LogInformation("Group resolve completed. Created: {Created}", true);
             return ToResponse(group, initiative.Name, created: true);

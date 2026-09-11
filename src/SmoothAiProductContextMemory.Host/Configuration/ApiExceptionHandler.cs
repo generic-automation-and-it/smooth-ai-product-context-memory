@@ -1,13 +1,23 @@
 using FluentValidation;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
+using SmoothAiProductContextMemory.Application.Abstractions;
 using SmoothAiProductContextMemory.Application.Common.Exceptions;
 
 namespace SmoothAiProductContextMemory.Host.Configuration;
 
-internal sealed class ApiExceptionHandler : IExceptionHandler
+/// <summary>
+/// The single error contract: RFC 7807 for every failure.
+/// </summary>
+/// <remarks>
+/// Database failures are classified by <see cref="IDbErrorMapper"/>, not by inspecting message text
+/// here — the Host has no business knowing SQLSTATEs, and substring matching mis-classifies. Details
+/// are fixed strings for anything database-originated, so no SQL, column name or value can leak.
+/// </remarks>
+internal sealed class ApiExceptionHandler(IDbErrorMapper errorMapper) : IExceptionHandler
 {
+    private const string ProblemContentType = "application/problem+json";
+
     public async ValueTask<bool> TryHandleAsync(
         HttpContext httpContext,
         Exception exception,
@@ -16,7 +26,7 @@ internal sealed class ApiExceptionHandler : IExceptionHandler
         if (exception is ValidationException validation)
         {
             httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
-            var errors = validation.Errors
+            Dictionary<string, string[]> errors = validation.Errors
                 .GroupBy(e => e.PropertyName)
                 .ToDictionary(g => g.Key, g => g.Select(e => e.ErrorMessage).ToArray());
             await httpContext.Response.WriteAsJsonAsync(
@@ -25,16 +35,20 @@ internal sealed class ApiExceptionHandler : IExceptionHandler
                     Status = StatusCodes.Status400BadRequest,
                     Title = "Validation failed",
                 },
+                options: null,
+                contentType: ProblemContentType,
                 cancellationToken);
             return true;
         }
 
-        (int status, string title, string detail) = exception switch
+        Exception effective = errorMapper.TryMap(exception, out Exception mapped) ? mapped : exception;
+
+        (int status, string title, string detail) = effective switch
         {
-            NotFoundException => (StatusCodes.Status404NotFound, "Not found", exception.Message),
-            ConflictException => (StatusCodes.Status409Conflict, "Conflict", exception.Message),
-            DbUpdateException db => MapDatabase(db),
-            _ => MapUnhandled(exception),
+            NotFoundException => (StatusCodes.Status404NotFound, "Not found", effective.Message),
+            ConflictException => (StatusCodes.Status409Conflict, "Conflict", effective.Message),
+            ForbiddenException => (StatusCodes.Status403Forbidden, "Forbidden", effective.Message),
+            _ => (StatusCodes.Status500InternalServerError, "Server error", "An unexpected error occurred."),
         };
 
         httpContext.Response.StatusCode = status;
@@ -45,30 +59,9 @@ internal sealed class ApiExceptionHandler : IExceptionHandler
                 Title = title,
                 Detail = detail,
             },
+            options: null,
+            contentType: ProblemContentType,
             cancellationToken);
         return true;
-    }
-
-    private static (int Status, string Title, string Detail) MapDatabase(DbUpdateException exception)
-    {
-        Exception mapped = DbExceptionMapping.Map(exception);
-        if (mapped is ConflictException conflict)
-        {
-            return (StatusCodes.Status409Conflict, "Conflict", conflict.Message);
-        }
-
-        return (StatusCodes.Status409Conflict, "Conflict", "The request conflicted with stored data.");
-    }
-
-    private static (int Status, string Title, string Detail) MapUnhandled(Exception exception)
-    {
-        string text = exception.Message;
-        if (text.Contains("Append-only history", StringComparison.Ordinal)
-            || text.Contains("23505", StringComparison.Ordinal))
-        {
-            return (StatusCodes.Status409Conflict, "Conflict", "The request conflicted with stored data.");
-        }
-
-        return (StatusCodes.Status500InternalServerError, "Server error", "An unexpected error occurred.");
     }
 }

@@ -21,6 +21,12 @@ public abstract class HandlerTestBase(AspireFixture aspire) : IAsyncLifetime
 
     protected IBlobStorage Blob { get; private set; } = default!;
 
+    /// <summary>Real Npgsql translation — the mapper is the thing under test in constraint cases.</summary>
+    protected IDbErrorMapper ErrorMapper { get; } = new NpgsqlDbErrorMapper();
+
+    /// <summary>Real provider search so predicates are proven against PostgreSQL, not LINQ-to-objects.</summary>
+    protected IMemorySearch Search { get; private set; } = default!;
+
     protected ILoggerFactory Loggers { get; private set; } = default!;
 
     protected CancellationToken Ct => TestContext.Current.CancellationToken;
@@ -39,6 +45,7 @@ public abstract class HandlerTestBase(AspireFixture aspire) : IAsyncLifetime
             .Options;
 
         Db = new SmoothAiProductContextMemoryDbContext(options);
+        Search = new NpgsqlMemorySearch(Db);
         Loggers = LoggerFactory.Create(b => b.SetMinimumLevel(LogLevel.Debug));
 
         var blobOptions = Microsoft.Extensions.Options.Options.Create(new BlobStorageOptions
