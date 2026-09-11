@@ -14,7 +14,7 @@ public sealed class PreflightHandlerTests(AspireFixture aspire) : HandlerTestBas
         Db.MemoryGroups.Add(group);
         await Db.SaveChangesAsync(Ct);
 
-        var set = new SetMemories.Handler(AppDb, Blob, Loggers.CreateLogger<SetMemories.Handler>());
+        var set = new SetMemories.Handler(AppDb, Blob, ErrorMapper, Loggers.CreateLogger<SetMemories.Handler>());
         await set.Handle(
             new SetMemories.Request(
                 group.Uuid,

@@ -9,6 +9,14 @@ using SmoothAiProductContextMemory.Domain.Entities;
 
 namespace SmoothAiProductContextMemory.Application.Features.Preflight;
 
+/// <summary>
+/// Exact-match recall that makes deduplication, contradiction detection and ticket uniqueness
+/// enforceable. Writes nothing and judges nothing — the caller decides new / version / skip.
+/// </summary>
+/// <remarks>
+/// Subject lookup is deliberately not scoped to a group: the same subject asserted in another group
+/// is exactly what the caller needs to see.
+/// </remarks>
 public static class Preflight
 {
     public const int MaxCandidates = 20;
@@ -47,6 +55,12 @@ public static class Preflight
         public Validator()
         {
             RuleFor(x => x.Candidates).NotNull().NotEmpty();
+
+            // Guarded rather than RuleFor(x => x.Candidates.Count): every rule is evaluated, so
+            // dereferencing the list here would throw on a null body instead of returning 400.
+            RuleFor(x => x.Candidates)
+                .Must(c => c is null || c.Count <= MaxCandidates)
+                .WithMessage($"At most {MaxCandidates} candidates per request.");
             RuleForEach(x => x.Candidates).ChildRules(c =>
             {
                 c.RuleFor(x => x.Description).NotEmpty();
@@ -96,11 +110,18 @@ public static class Preflight
                     }
                 }
 
-                List<Memory> matches = await query.Take(MaxCandidates).ToListAsync(cancellationToken);
+                // Kind narrows before the cap, not after: filtering a truncated page would report
+                // "no match" for a subject that does match on a row the cap dropped.
                 if (!string.IsNullOrWhiteSpace(candidate.Kind))
                 {
-                    matches = [.. matches.Where(m => m.Versions.Any(v => v.Kind == candidate.Kind))];
+                    string kind = candidate.Kind;
+                    query = query.Where(m => m.Versions.Any(v => v.IsCurrent && v.Kind == kind));
                 }
+
+                List<Memory> matches = await query
+                    .OrderBy(m => m.Id)
+                    .Take(MaxCandidates)
+                    .ToListAsync(cancellationToken);
 
                 TicketConflict? ticketConflict = null;
                 if (candidate.Ticket is { } ticket)

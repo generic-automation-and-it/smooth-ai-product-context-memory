@@ -31,6 +31,12 @@ public static class DependencyInjection
         services.AddScoped<IApplicationDbContext>(sp =>
             sp.GetRequiredService<SmoothAiProductContextMemoryDbContext>());
 
+        // Retrieval and error translation are provider-specific: matching the full-text and array
+        // indexes needs Npgsql operators, and constraint identity is a SQLSTATE. Application depends
+        // on the abstractions only.
+        services.AddScoped<IMemorySearch, NpgsqlMemorySearch>();
+        services.AddSingleton<IDbErrorMapper, NpgsqlDbErrorMapper>();
+
         return services;
     }
 
