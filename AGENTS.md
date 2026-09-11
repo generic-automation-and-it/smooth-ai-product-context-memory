@@ -17,7 +17,7 @@ Persistent memory service for AI agents: stores summarized, labelled context (li
 | Layer | Path | Purpose |
 |---|---|---|
 | Domain | `src/SmoothAiProductContextMemory.Domain/` | Core entities, value objects — no external deps |
-| Application | `src/SmoothAiProductContextMemory.Application/` | Vertical-slice use cases via Mediator — `Features/<Name>/`, shared code in `Common/` + `Abstractions/` |
+| Application | `src/SmoothAiProductContextMemory.Application/` | Vertical-slice use cases via Mediator — `Features/<Name>/` (contract: `Features/FEATURES_AGENTS.md`), shared code in `Common/` + `Abstractions/` |
 | Infrastructure | `src/SmoothAiProductContextMemory.Infrastructure/` | EF Core + PostgreSQL (`Persistence/`), HTTP clients (`Clients/`), blob storage (`Storage/`) |
 | Host | `src/SmoothAiProductContextMemory.Host/` | ASP.NET Core Web API, Serilog, Scalar OpenAPI |
 | AppHost | `src/SmoothAiProductContextMemory.AppHost/` | Aspire dev orchestrator — Postgres + MinIO blob storage + Seq |
