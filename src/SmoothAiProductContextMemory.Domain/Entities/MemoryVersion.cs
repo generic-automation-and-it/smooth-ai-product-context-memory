@@ -44,6 +44,9 @@ public sealed class MemoryVersion
 
     public DateTimeOffset CreatedOn { get; set; }
 
+    /// <summary>D42 stamp — model identifier and prompt version used to generate <see cref="ContentSummary"/>.</summary>
+    public SummaryStampDocument? SummaryStamp { get; set; }
+
     public static class MemoryVersionStatus
     {
         public const string Proposed = "proposed";

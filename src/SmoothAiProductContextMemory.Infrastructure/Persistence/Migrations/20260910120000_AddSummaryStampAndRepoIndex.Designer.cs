@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using SmoothAiProductContextMemory.Infrastructure.Persistence;
 
 #nullable disable
@@ -12,9 +13,11 @@ using SmoothAiProductContextMemory.Infrastructure.Persistence;
 namespace SmoothAiProductContextMemory.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(SmoothAiProductContextMemoryDbContext))]
-    partial class SmoothAiProductContextMemoryDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260910120000_AddSummaryStampAndRepoIndex")]
+    partial class AddSummaryStampAndRepoIndex
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

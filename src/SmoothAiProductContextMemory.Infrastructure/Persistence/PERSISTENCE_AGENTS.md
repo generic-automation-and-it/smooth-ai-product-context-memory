@@ -77,4 +77,5 @@ erDiagram
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-10 | Additive `memory_version.summary_stamp` jsonb (D42) + `append_only_guard` equality-list extension + btree on `memory_group.repo`. | WT-2, ADR-0003 |
 | 2026-09-09 | Created — entity map, subject/claim and system/business-time splits, constraint rationale, versioning, JSONB `v` contract. | ADR-0002 |
