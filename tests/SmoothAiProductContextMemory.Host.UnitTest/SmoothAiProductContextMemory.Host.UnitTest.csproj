@@ -7,6 +7,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <ProjectReference Include="..\..\src\SmoothAiProductContextMemory.Host\SmoothAiProductContextMemory.Host.csproj" />
     <ProjectReference Include="..\SmoothAiProductContextMemory.TestFramework\SmoothAiProductContextMemory.TestFramework.csproj" />
   </ItemGroup>

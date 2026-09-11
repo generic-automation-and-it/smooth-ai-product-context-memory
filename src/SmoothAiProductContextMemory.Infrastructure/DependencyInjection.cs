@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using SmoothAiProductContextMemory.Application.Abstractions;
+using SmoothAiProductContextMemory.Application.Common.Persistence;
 using SmoothAiProductContextMemory.Infrastructure.Persistence;
 using SmoothAiProductContextMemory.Infrastructure.Storage;
 
@@ -19,12 +20,16 @@ public static class DependencyInjection
 
     private static IServiceCollection AddPersistence(this IServiceCollection services, IConfiguration configuration)
     {
-        string connectionString = configuration.GetConnectionString("SmoothAiProductContextMemory")
-            ?? throw new InvalidOperationException(
-                "A connection string named 'SmoothAiProductContextMemory' is required.");
-
-        services.AddDbContext<SmoothAiProductContextMemoryDbContext>(options =>
-            options.UseNpgsql(connectionString));
+        services.AddDbContext<SmoothAiProductContextMemoryDbContext>((sp, options) =>
+        {
+            string connectionString = sp.GetRequiredService<IConfiguration>()
+                .GetConnectionString("SmoothAiProductContextMemory")
+                ?? throw new InvalidOperationException(
+                    "A connection string named 'SmoothAiProductContextMemory' is required.");
+            options.UseNpgsql(connectionString);
+        });
+        services.AddScoped<IApplicationDbContext>(sp =>
+            sp.GetRequiredService<SmoothAiProductContextMemoryDbContext>());
 
         return services;
     }

@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\SmoothAiProductContextMemory.Host\SmoothAiProductContextMemory.Host.csproj" Aliases="HostApp" />
+    <ProjectReference Include="..\..\src\SmoothAiProductContextMemory.Domain\SmoothAiProductContextMemory.Domain.csproj" />
     <ProjectReference Include="..\SmoothAiProductContextMemory.TestFramework\SmoothAiProductContextMemory.TestFramework.csproj" />
   </ItemGroup>
 
