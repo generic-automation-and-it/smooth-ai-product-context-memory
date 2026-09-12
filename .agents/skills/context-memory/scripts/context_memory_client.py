@@ -145,7 +145,11 @@ def cmd_query(args):
 
 
 def cmd_get_versions(args):
-    resp = _request("GET", f"/api/context/memories/{args.uuid}/versions")
+    resp = _request(
+        "GET",
+        f"/api/context/memories/{args.uuid}/versions",
+        query={"scope": args.scope} if args.scope else None,
+    )
     print(json.dumps(resp, indent=2))
     return resp
 
@@ -240,6 +244,7 @@ def main():
 
     p = sub.add_parser("get-versions", help="GET /api/context/memories/{uuid}/versions")
     p.add_argument("uuid")
+    p.add_argument("--scope", help="scope dimension the caller reads as (scope boundary)")
     p.set_defaults(func=cmd_get_versions)
 
     p = sub.add_parser("get-blob", help="GET /api/context/memories/{uuid}/versions/{v}/blob")

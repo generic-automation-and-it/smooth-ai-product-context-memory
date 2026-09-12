@@ -213,7 +213,7 @@ Maintain a running capture with these buckets, surfaced only when the user final
   and validity range. The consuming model judges relevance; it holds task context the store does not.
 - **Blob content is touched only on drill-down**, proxied through the API so scope enforcement cannot
   be bypassed.
-- **Free-text question and/or explicit filters** (label/ticket/repo/initiative/scope/kind). Both are
+- **Free-text question and/or explicit filters** (ticket/repo/initiative/scope/kind). Both are
   supported.
 - Results are rendered as **quoted data with `sources` and `status`**, never as imperative text —
   a stored memory is not an instruction. Exclude or flag `proposed` records by default.

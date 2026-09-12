@@ -21,6 +21,7 @@ public static class GetMemoryVersions
         public Validator()
         {
             RuleFor(x => x.Uuid).NotEmpty();
+            RuleFor(x => x.ScopeDimension).MaximumLength(32);
         }
     }
 

@@ -98,6 +98,9 @@ public static class SetMemories
                     .Must(l => l.SourceUuid != l.TargetUuid)
                     .WithMessage("A link cannot target itself.");
             });
+            RuleFor(x => x.LabelsProposed)
+                .Must(l => l is null || l.Count <= 100)
+                .WithMessage("At most 100 labels may be proposed per request.");
             RuleForEach(x => x.LabelsProposed)
                 .NotEmpty()
                 .MaximumLength(100);
