@@ -81,6 +81,9 @@ wait_for_http() {
   while ! curl -sf --max-time 2 "${url}" > /dev/null 2>&1; do
     if ! check_aspire_alive; then
       echo "ERROR: Aspire host exited unexpectedly while waiting for ${name} HTTP health"
+      if [ "${name}" = "MinIO" ]; then
+        dump_minio_diagnostics
+      fi
       return 1
     fi
 
@@ -89,7 +92,9 @@ wait_for_http() {
 
     if [ "${elapsed}" -ge "${timeout_seconds}" ]; then
       echo "ERROR: Timed out after ${timeout_seconds}s waiting for ${name} HTTP health"
-      dump_minio_diagnostics
+      if [ "${name}" = "MinIO" ]; then
+        dump_minio_diagnostics
+      fi
       return 1
     fi
   done

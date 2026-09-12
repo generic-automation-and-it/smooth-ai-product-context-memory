@@ -69,6 +69,9 @@ public static class SetMemories
         {
             RuleFor(x => x.GroupUuid).NotEmpty();
             RuleFor(x => x.Items).NotNull().NotEmpty();
+            RuleFor(x => x.Items)
+                .Must(i => i is null || i.Count <= 200)
+                .WithMessage("At most 200 items may be written per request.");
             RuleForEach(x => x.Items).ChildRules(item =>
             {
                 item.RuleFor(i => i.Name).NotEmpty().MaximumLength(200);

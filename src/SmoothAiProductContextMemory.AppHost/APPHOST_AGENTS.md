@@ -17,9 +17,9 @@ ports/container names.
 - **Container runtime agnostic, and runtime selection is Aspire's job.** Registering containers through
   Aspire means the same AppHost runs against Docker (the default) or Podman with no code or config
   change; set `DOTNET_ASPIRE_CONTAINER_RUNTIME=podman` to switch. Verified working under both. Do not
-  add runtime-specific wiring to the AppHost. Container images are **registry-qualified**
-  (`quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z`) because Podman refuses to resolve short names non-interactively unless the
-  host's `registries.conf` happens to allow it.
+  add runtime-specific wiring to the AppHost. Container images are **registry-qualified and pinned**
+  (`quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z`) because Podman refuses to resolve short names
+  non-interactively unless the host's `registries.conf` happens to allow it.
 - **Project-references the Host as `Projects.SmoothAiProductContextMemory_Host`.** The Host stays
   runnable as a plain `Program` (`WebApplicationFactory<Program>` integration tests must keep working
   without an AppHost).

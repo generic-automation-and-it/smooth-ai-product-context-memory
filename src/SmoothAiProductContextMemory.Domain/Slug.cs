@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Text;
 
@@ -72,7 +73,7 @@ public static class Slug
     /// produce an empty slug (no letters or digits). Lets a validator reject the input as a 400
     /// instead of letting <see cref="Subject"/> throw an unmapped <see cref="ArgumentException"/>.
     /// </summary>
-    public static bool TrySubject(string? description, out string? slug)
+    public static bool TrySubject(string? description, [NotNullWhen(true)] out string? slug)
     {
         if (string.IsNullOrWhiteSpace(description))
         {

@@ -129,6 +129,8 @@ def cmd_preflight(args):
 def cmd_set(args):
     """POST /api/context/memories. --dryrun appends ?dryRun=true."""
     payload = read_payload(args.payload)
+    if not isinstance(payload, dict):
+        raise ClientError(0, "bad-input", "'set' payload must be an object with 'items'")
     if len(payload.get("items", [])) > MAX_CANDIDATES:
         raise ClientError(
             0,
@@ -145,6 +147,8 @@ def cmd_set(args):
 def cmd_query(args):
     """POST /api/context/query. Semantic-dedup recall surface."""
     payload = read_payload(args.payload)
+    if not isinstance(payload, dict):
+        raise ClientError(0, "bad-input", "'query' payload must be an object")
     if "limit" not in payload:
         payload["limit"] = MAX_QUERY_LIMIT
     resp = _request("POST", "/api/context/query", payload)
