@@ -73,6 +73,9 @@ public static class SetMemories
             {
                 item.RuleFor(i => i.Name).NotEmpty().MaximumLength(200);
                 item.RuleFor(i => i.Description).NotEmpty();
+                item.RuleFor(i => i.Description)
+                    .Must(d => Slug.TrySubject(d, out _))
+                    .WithMessage("Description must contain at least one letter or digit.");
                 item.RuleFor(i => i.Statement).NotEmpty();
                 item.RuleFor(i => i.Kind).NotEmpty().MaximumLength(64);
                 item.RuleFor(i => i.Status)
@@ -95,6 +98,9 @@ public static class SetMemories
                     .Must(l => l.SourceUuid != l.TargetUuid)
                     .WithMessage("A link cannot target itself.");
             });
+            RuleForEach(x => x.LabelsProposed)
+                .NotEmpty()
+                .MaximumLength(100);
         }
     }
 
@@ -165,6 +171,7 @@ public static class SetMemories
         {
             var items = new List<PlannedItem>(request.Items.Count);
             var plannedSlugs = new HashSet<string>(StringComparer.Ordinal);
+            var plannedVersionTargets = new HashSet<Guid>();
 
             for (int index = 0; index < request.Items.Count; index++)
             {
@@ -173,6 +180,12 @@ public static class SetMemories
 
                 if (item.Uuid is { } target)
                 {
+                    if (!plannedVersionTargets.Add(target))
+                    {
+                        throw new ConflictException(
+                            $"Memory '{target}' is versioned twice in this batch. Merge the items or send them separately.");
+                    }
+
                     Memory memory = await db.Memories
                         .SingleOrDefaultAsync(m => m.Uuid == target, cancellationToken)
                         ?? throw new NotFoundException($"Memory '{target}' was not found.");

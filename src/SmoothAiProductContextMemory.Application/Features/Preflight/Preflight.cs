@@ -64,6 +64,9 @@ public static class Preflight
             RuleForEach(x => x.Candidates).ChildRules(c =>
             {
                 c.RuleFor(x => x.Description).NotEmpty();
+                c.RuleFor(x => x.Description)
+                    .Must(d => Slug.TrySubject(d, out _))
+                    .WithMessage("Description must contain at least one letter or digit.");
             });
         }
     }

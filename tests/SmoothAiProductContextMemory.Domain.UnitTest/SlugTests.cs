@@ -53,4 +53,25 @@ public class SlugTests
         // subjects would be treated as duplicates of one another.
         Should.Throw<ArgumentException>(() => Slug.Subject(input));
     }
+
+    [Theory]
+    [InlineData("The PostgreSQL persistence layer", true)]
+    [InlineData("Café déjà vu", true)]
+    [InlineData("", false)]
+    [InlineData("   ", false)]
+    [InlineData("!!!", false)]
+    [InlineData("---", false)]
+    public void TrySubject_returns_slug_or_false(string input, bool expected)
+    {
+        bool ok = Slug.TrySubject(input, out string? slug);
+        ok.ShouldBe(expected);
+        if (expected)
+        {
+            slug.ShouldNotBeNullOrWhiteSpace();
+        }
+        else
+        {
+            slug.ShouldBeNull();
+        }
+    }
 }

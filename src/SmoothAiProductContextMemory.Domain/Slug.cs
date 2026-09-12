@@ -66,4 +66,29 @@ public static class Slug
 
         return result;
     }
+
+    /// <summary>
+    /// True when <paramref name="description"/> yields a non-empty subject slug; false when it would
+    /// produce an empty slug (no letters or digits). Lets a validator reject the input as a 400
+    /// instead of letting <see cref="Subject"/> throw an unmapped <see cref="ArgumentException"/>.
+    /// </summary>
+    public static bool TrySubject(string? description, out string? slug)
+    {
+        if (string.IsNullOrWhiteSpace(description))
+        {
+            slug = null;
+            return false;
+        }
+
+        try
+        {
+            slug = Subject(description);
+            return true;
+        }
+        catch (ArgumentException)
+        {
+            slug = null;
+            return false;
+        }
+    }
 }
