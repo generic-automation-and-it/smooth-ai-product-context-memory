@@ -48,7 +48,7 @@ RULES = [
     ),
     (
         "aws-secret-access-key",
-        re.compile(r"(?i)\b(aws_secret_access_key\s*=\s*)(['\"]?[^'\"]+['\"]?)"),
+        re.compile(r"(?i)\b(aws_secret_access_key\s*=\s*)(['\"]?)\S+\2"),
         r"\1<redacted>",
     ),
     (

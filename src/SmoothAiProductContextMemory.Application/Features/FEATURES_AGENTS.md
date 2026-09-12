@@ -122,6 +122,7 @@ sequenceDiagram
 ## Key Behaviors
 
 - Retrieval defaults to **current-only** and **excludes `proposed`**. History is `GET .../versions`. Empty query is `200 []`. `limit` defaults to 50 and is capped at 200 — an uncapped read floods the caller's context.
+- A `set` request accepts at most 200 items; larger batches are a `400` — the write-side sibling of the read `limit` cap.
 - `asOf` narrows to claims valid at a business-time instant. Absent means no temporal narrowing.
 - API digest is a persist receipt: `created` / `versioned` / `linked` / `skipped` / `labelsProposed`; `diverged` is always 0 here. Skill composes the human digest.
 - API persists `status` as given — no re-gate by kind.
@@ -156,4 +157,5 @@ sequenceDiagram
 |:-----|:-------|:----|
 | 2026-09-11 | Review fixes: dry run shares the write plan (LADR-002); retrieval pushed into PostgreSQL behind `IMemorySearch` with `asOf` + `limit` (LADR-005); scope rule as data and enforced on the blob proxy (LADR-003); errors classified by SQLSTATE (LADR-006); facet endpoint reads the view (LADR-007); stale links skipped (LADR-008); `PATCH /groups/{uuid}` and initiative registry added; preflight narrows by kind before the cap. | WT-2 review |
 | 2026-09-12 | /ai-review fixes: `GetMemoryVersions` scope-gated like the blob proxy (LADR-003 now covers versions too); `LabelsProposed` capped at 100; duplicate version-target in a batch is a `ConflictException` on both dry-run and write; letter/digit-free `Description` rejected as a 400 via `Slug.TrySubject`. | /ai-review PR #14 |
+| 2026-09-12 | /ai-analyse: 200-items-per-`set` write cap documented in Key Behaviors (shipped as a validator `400` in `SetMemories`); contract previously omitted the write cap while documenting the sibling read caps. | /ai-analyse |
 | 2026-09-10 | Created — ADR-0003 API surface, uuid wire, dry-run persist gate, scope filter, D42 stamp. | WT-2 |

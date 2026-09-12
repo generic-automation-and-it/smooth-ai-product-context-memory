@@ -106,7 +106,13 @@ def cmd_preflight(args):
     collisions, so over-cap batches are refused outright — same contract as cmd_set.
     """
     payload = read_payload(args.payload)
-    candidates = payload.get("candidates", payload)
+    if not isinstance(payload, (dict, list)):
+        raise ClientError(
+            0,
+            "bad-input",
+            "'preflight' payload must be an object with 'candidates' or an array",
+        )
+    candidates = payload.get("candidates", payload) if isinstance(payload, dict) else payload
     if not isinstance(candidates, list):
         raise ClientError(0, "bad-input", "'candidates' must be a list")
     if len(candidates) > MAX_CANDIDATES:
