@@ -25,6 +25,31 @@ def load_fixtures():
         return json.load(fh)["scenarios"]
 
 
+# Expected-side fields compared by equality against the model verdict object when declared.
+# "reason" is authored explanation text, not a criterion; "reason_must_be_nonempty" and
+# "must_not_contain" carry their own assertion semantics below.
+AUX_EQUALITY_FIELDS = ("target_uuid", "link_uuid", "relation", "count", "diverged", "not_product_fact")
+
+
+def scenario_matches(expected, got):
+    """True only when the verdict word AND every declared auxiliary expectation hold."""
+    got_dict = got if isinstance(got, dict) else {}
+    got_verdict = got_dict.get("verdict") if isinstance(got, dict) else got
+    if got_verdict != expected["verdict"]:
+        return False
+    for field in AUX_EQUALITY_FIELDS:
+        if field in expected and got_dict.get(field) != expected[field]:
+            return False
+    if expected.get("reason_must_be_nonempty") and not got_dict.get("reason"):
+        return False
+    banned = expected.get("must_not_contain", [])
+    if banned:
+        rendered = json.dumps(got_dict) if isinstance(got, dict) else str(got)
+        if any(token in rendered for token in banned):
+            return False
+    return True
+
+
 def main():
     parser = argparse.ArgumentParser(prog="score_fixtures")
     parser.add_argument("--model-verdicts", required=True, help="JSON array of the model's verdicts, in scenario order")
@@ -41,14 +66,14 @@ def main():
     correct = 0
     rows = []
     for fixture, got in zip(fixtures, model):
-        expected = fixture["expected"]["verdict"]
+        expected = fixture["expected"]
         got_verdict = got.get("verdict") if isinstance(got, dict) else got
-        ok = got_verdict == expected
+        ok = scenario_matches(expected, got)
         correct += 1 if ok else 0
         rows.append(
             {
                 "id": fixture["id"],
-                "expected": expected,
+                "expected": expected["verdict"],
                 "got": got_verdict,
                 "match": ok,
                 "reason_present": bool((got if isinstance(got, dict) else {}).get("reason")),
