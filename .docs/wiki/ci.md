@@ -14,7 +14,7 @@ The pipeline is a single PR gate that builds and tests every change before it ca
 3. **Restore** — `dotnet restore SmoothAiProductContextMemory.slnx`.
 4. **Build** — `dotnet build --no-restore --configuration Release`.
 5. **Aspire test with coverage** — local action `.github/actions/aspire-test-with-coverage`:
-   - Starts `tests/SmoothAiProductContextMemory.TestFramework.Aspire`, keeps its PID inside the action script, and waits for PostgreSQL (`127.0.0.1:15432`), Redis (`127.0.0.1:16379`), WireMock (`http://127.0.0.1:19091/__admin/health`), and MinIO (`http://127.0.0.1:9002/minio/health/live`).
+    - Starts `tests/SmoothAiProductContextMemory.TestFramework.Aspire`, keeps its PID inside the action script, and waits for PostgreSQL (`127.0.0.1:15432`), Redis (`127.0.0.1:16379`), WireMock (`http://127.0.0.1:19091/__admin/health`), MinIO TCP (`127.0.0.1:9002`), then MinIO HTTP (`http://127.0.0.1:9002/minio/health/live`). On MinIO timeout the action dumps `docker logs project-test-blob`. Image is pinned to `docker.io/minio/minio:RELEASE.2025-10-15T17-29-55Z`.
    - Restores .NET tools (`dotnet tool restore`) after the dependency pre-warm, matching the proven CI timing before tests start.
    - Prepares `artifacts/testresults/` and `artifacts/coverage/`.
    - Runs test projects in order: Host integration → Application/Infrastructure component → Domain/Application/Infrastructure/Host unit tests.

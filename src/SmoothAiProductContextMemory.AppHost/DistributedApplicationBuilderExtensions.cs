@@ -9,7 +9,7 @@ internal static class DistributedApplicationBuilderExtensions
     private const int DefaultPostgresPort = 5432;
     private const int DefaultBlobPort = 9000;
     private const int DefaultBlobConsolePort = 9001;
-    private const string BlobImage = "docker.io/minio/minio";
+    private const string BlobImage = "docker.io/minio/minio:RELEASE.2025-10-15T17-29-55Z";
     private const int DefaultSeqPort = 5341;
     private const string DockerDesktopGroupName = "smooth-project-memory";
     private const string PostgresContainerName = "smooth-project-memory-dev-postgres";
