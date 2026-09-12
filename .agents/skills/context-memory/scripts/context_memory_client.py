@@ -97,23 +97,31 @@ def read_payload(path):
     return json.load(sys.stdin)
 
 
-def _chunks(items, size):
-    for i in range(0, len(items), size):
-        yield items[i : i + size]
-
-
 def cmd_preflight(args):
-    """POST /api/context/preflight. Array-in/array-out, chunked to the cap."""
+    """POST /api/context/preflight. Array-in/array-out, refuses over-cap batches.
+
+    The API numbers candidate indices (and intra-batch collision left/right indices)
+    from position within a single request. Chunking an over-cap batch and merging
+    responses would report chunk-local indices as batch indices and lose cross-chunk
+    collisions, so over-cap batches are refused outright — same contract as cmd_set.
+    """
     payload = read_payload(args.payload)
     candidates = payload.get("candidates", payload)
     if not isinstance(candidates, list):
         raise ClientError(0, "bad-input", "'candidates' must be a list")
+    if len(candidates) > MAX_CANDIDATES:
+        raise ClientError(
+            0,
+            "bad-input",
+            f"Batch has {len(candidates)} candidates; cap is {MAX_CANDIDATES}. "
+            "Split into multiple checkpoints.",
+        )
 
-    out = {"candidates": [], "intra_batch_collisions": []}
-    for chunk in _chunks(candidates, MAX_CANDIDATES):
-        resp = _request("POST", "/api/context/preflight", {"candidates": chunk})
-        out["candidates"].extend(resp.get("candidates", []))
-        out["intra_batch_collisions"].extend(resp.get("intraBatchCollisions", []))
+    resp = _request("POST", "/api/context/preflight", {"candidates": candidates})
+    out = {
+        "candidates": resp.get("candidates", []),
+        "intra_batch_collisions": resp.get("intraBatchCollisions", []),
+    }
     print(json.dumps(out, indent=2))
     return out
 
