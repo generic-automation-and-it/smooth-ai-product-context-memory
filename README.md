@@ -65,6 +65,21 @@ Built on the **smooth-devex-template** AI DevEx scaffold — a ready-to-use AI a
 
 - **.NET 10 SDK**
 - A container runtime — Docker Desktop, Rancher Desktop, Colima, or Podman (for PostgreSQL via Aspire)
+- **Python 3 runtime** — required for agent skills (stdlib-only scripts). Do not rely on macOS `/usr/bin/python3` (Xcode stub).
+
+  macOS ([Homebrew `python@3.14`](https://formulae.brew.sh/formula/python@3.14)):
+
+  ```bash
+  brew install python@3.14
+  ```
+
+  Windows ([WinGet `Python.Python.3.14`](https://learn.microsoft.com/en-us/windows/dev-environment/python/beginners)):
+
+  ```powershell
+  winget install -e --id Python.Python.3.14
+  ```
+
+  Latest installers: [macOS](https://www.python.org/downloads/macos/) · [Windows](https://www.python.org/downloads/windows/)
 
 ### One-time AI-agent setup
 
