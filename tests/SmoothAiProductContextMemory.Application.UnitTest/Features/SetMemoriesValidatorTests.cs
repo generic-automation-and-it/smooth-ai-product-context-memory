@@ -144,4 +144,64 @@ public class SetMemoriesValidatorTests
 
         _validator.TestValidate(request).ShouldNotHaveAnyValidationErrors();
     }
+
+    [Fact]
+    public void Rejects_overlong_labels_proposed()
+    {
+        var request = new SetMemories.Request(
+            Guid.NewGuid(),
+            [
+                new SetMemories.MemoryWrite(
+                    null,
+                    "Name",
+                    "Subject",
+                    "Claim",
+                    "Summary",
+                    MemoryVersion.KindValue.Decision,
+                    null,
+                    null,
+                    MemoryVersion.MemoryVersionStatus.Approved,
+                    80,
+                    null,
+                    null,
+                    DateTimeOffset.UtcNow,
+                    null,
+                    null,
+                    null)
+            ],
+            null,
+            [new string('x', 101)]);
+
+        _validator.TestValidate(request).ShouldHaveValidationErrorFor("LabelsProposed[0]");
+    }
+
+    [Fact]
+    public void Rejects_letter_free_description()
+    {
+        var request = new SetMemories.Request(
+            Guid.NewGuid(),
+            [
+                new SetMemories.MemoryWrite(
+                    null,
+                    "Name",
+                    "!!! ###",
+                    "Claim",
+                    "Summary",
+                    MemoryVersion.KindValue.Decision,
+                    null,
+                    null,
+                    MemoryVersion.MemoryVersionStatus.Approved,
+                    80,
+                    null,
+                    null,
+                    DateTimeOffset.UtcNow,
+                    null,
+                    null,
+                    null)
+            ],
+            null,
+            null);
+
+        _validator.TestValidate(request).ShouldHaveValidationErrorFor("Items[0].Description");
+    }
 }

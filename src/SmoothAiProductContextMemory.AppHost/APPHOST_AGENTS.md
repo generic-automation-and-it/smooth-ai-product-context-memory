@@ -17,9 +17,9 @@ ports/container names.
 - **Container runtime agnostic, and runtime selection is Aspire's job.** Registering containers through
   Aspire means the same AppHost runs against Docker (the default) or Podman with no code or config
   change; set `DOTNET_ASPIRE_CONTAINER_RUNTIME=podman` to switch. Verified working under both. Do not
-  add runtime-specific wiring to the AppHost. Container images are **registry-qualified**
-  (`docker.io/minio/minio`) because Podman refuses to resolve short names non-interactively unless the
-  host's `registries.conf` happens to allow it.
+  add runtime-specific wiring to the AppHost. Container images are **registry-qualified and pinned**
+  (`quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z`) because Podman refuses to resolve short names
+  non-interactively unless the host's `registries.conf` happens to allow it.
 - **Project-references the Host as `Projects.SmoothAiProductContextMemory_Host`.** The Host stays
   runnable as a plain `Program` (`WebApplicationFactory<Program>` integration tests must keep working
   without an AppHost).
@@ -75,5 +75,6 @@ Test fixture (separate AppHost) uses `15432` / `project-test-postgres` — see
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-12 | Pin MinIO to last community release `quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z`. Upstream archived the repo and Docker Hub `minio/minio` is no longer publicly pullable (registry returns UNAUTHORIZED), so images must come from quay.io. | PR #17 |
 | 2026-09-01 | Aligned the blob ports across code, `appsettings.json` and this document (s3 `9000`, console `9001`; the leftover SeaweedFS `8333` is gone), made the console port configurable, registry-qualified the MinIO image for Podman, and corrected the false claim that the blob resource injects `ConnectionStrings:blob`. Docker/Podman startup verified end to end. | — |
 | 2026-08-30 | Created — Aspire AppHost orchestrating Postgres + MinIO blob storage + Seq for local dev, mirroring the `builder-catalogue` house style. No ChatHost (project not yet in tree). | — |

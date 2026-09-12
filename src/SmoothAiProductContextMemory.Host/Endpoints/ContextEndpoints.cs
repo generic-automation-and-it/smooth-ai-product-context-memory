@@ -23,13 +23,17 @@ internal static class ContextEndpoints
             IMediator mediator,
             CancellationToken ct,
             [FromQuery] bool dryRun = false) =>
-            mediator.Send(body with { DryRun = dryRun }, ct));
+            mediator.Send(body with { DryRun = dryRun || body.DryRun }, ct));
 
         group.MapPost("/query", (QueryMemories.Request body, IMediator mediator, CancellationToken ct) =>
             mediator.Send(body, ct));
 
-        group.MapGet("/memories/{uuid:guid}/versions", (Guid uuid, IMediator mediator, CancellationToken ct) =>
-            mediator.Send(new GetMemoryVersions.Request(uuid), ct));
+        group.MapGet("/memories/{uuid:guid}/versions", (
+            Guid uuid,
+            IMediator mediator,
+            CancellationToken ct,
+            [FromQuery] string? scope = null) =>
+            mediator.Send(new GetMemoryVersions.Request(uuid, scope), ct));
 
         // scope is the caller declaring which dimension it is reading as. Without it, the scope rule
         // hides the same dimensions it hides from an open query — the proxy is the boundary, not a

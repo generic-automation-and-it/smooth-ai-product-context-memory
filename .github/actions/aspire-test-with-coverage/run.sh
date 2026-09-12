@@ -81,6 +81,9 @@ wait_for_http() {
   while ! curl -sf --max-time 2 "${url}" > /dev/null 2>&1; do
     if ! check_aspire_alive; then
       echo "ERROR: Aspire host exited unexpectedly while waiting for ${name} HTTP health"
+      if [ "${name}" = "MinIO" ]; then
+        dump_minio_diagnostics
+      fi
       return 1
     fi
 
@@ -89,11 +92,32 @@ wait_for_http() {
 
     if [ "${elapsed}" -ge "${timeout_seconds}" ]; then
       echo "ERROR: Timed out after ${timeout_seconds}s waiting for ${name} HTTP health"
+      if [ "${name}" = "MinIO" ]; then
+        dump_minio_diagnostics
+      fi
       return 1
     fi
   done
 
   echo "${name} HTTP health OK at ${url} (${elapsed}s)"
+}
+
+dump_minio_diagnostics() {
+  echo "==== MinIO diagnostics ===="
+  echo "curl -sv http://127.0.0.1:9002/minio/health/live"
+  curl -sv --max-time 5 "http://127.0.0.1:9002/minio/health/live" || true
+  echo
+  echo "nc 127.0.0.1:9002"
+  nc -zv 127.0.0.1 9002 || true
+  echo
+  if command -v docker >/dev/null 2>&1; then
+    echo "docker ps -a --filter name=project-test-blob"
+    docker ps -a --filter name=project-test-blob || true
+    echo
+    echo "docker logs project-test-blob (tail 80)"
+    docker logs --tail 80 project-test-blob 2>&1 || true
+  fi
+  echo "==== end MinIO diagnostics ===="
 }
 
 run_test_project() {
@@ -129,6 +153,7 @@ echo "Aspire host started with PID ${aspire_pid}."
 wait_for_tcp 15432 "PostgreSQL" || exit 1
 wait_for_tcp 16379 "Redis" || exit 1
 wait_for_http "http://127.0.0.1:19091/__admin/health" "WireMock" || exit 1
+wait_for_tcp 9002 "MinIO" || { dump_minio_diagnostics; exit 1; }
 wait_for_http "http://127.0.0.1:9002/minio/health/live" "MinIO" || exit 1
 echo "All Aspire test dependencies are healthy."
 

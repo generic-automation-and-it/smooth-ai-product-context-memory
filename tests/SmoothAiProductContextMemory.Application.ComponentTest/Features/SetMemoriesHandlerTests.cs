@@ -148,6 +148,32 @@ public sealed class SetMemoriesHandlerTests(AspireFixture aspire) : HandlerTestB
             await handler.Handle(Write(group.Uuid, "Taken subject", "Other claim"), Ct));
     }
 
+    /// <summary>A batch versioning the same uuid twice must fail on both paths, not pass dry run then 500.</summary>
+    [Fact]
+    public async Task Duplicate_version_target_is_a_conflict_on_both_paths()
+    {
+        var group = TestEntities.NewGroup();
+        Db.MemoryGroups.Add(group);
+        await Db.SaveChangesAsync(Ct);
+
+        SetMemories.Handler handler = NewHandler();
+        Guid uuid = (await handler.Handle(Write(group.Uuid, "Subject", "Claim 1"), Ct)).Items[0].Uuid!.Value;
+
+        SetMemories.Request batch = Write(group.Uuid, "Subject", "Claim 2", uuid) with
+        {
+            Items =
+            [
+                Write(group.Uuid, "Subject", "Claim 2", uuid).Items[0],
+                Write(group.Uuid, "Subject", "Claim 3", uuid).Items[0],
+            ],
+        };
+
+        await Should.ThrowAsync<ConflictException>(async () =>
+            await handler.Handle(batch with { DryRun = true }, Ct));
+        await Should.ThrowAsync<ConflictException>(async () =>
+            await handler.Handle(batch, Ct));
+    }
+
     [Fact]
     public async Task Jsonb_v_round_trips_on_sources()
     {

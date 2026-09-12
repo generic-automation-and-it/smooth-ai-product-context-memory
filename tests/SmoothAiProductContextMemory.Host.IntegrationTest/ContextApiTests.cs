@@ -90,6 +90,29 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
         (await allowed.Content.ReadAsStringAsync(Ct)).ShouldBe("programme-body");
     }
 
+    /// <summary>
+    /// Version history is a read path too, so it carries the same scope rule as the blob drill-down.
+    /// </summary>
+    [Fact]
+    public async Task Program_versions_need_an_explicit_scope()
+    {
+        Guid group = await ResolveGroup(MemoryGroup.ScopeDimensionValue.Program);
+        JsonElement created = await SetMemory(
+            group,
+            "Programme versions subject",
+            "Programme claim",
+            MemoryVersion.MemoryVersionStatus.Approved);
+        Guid uuid = created.GetProperty("items")[0].GetProperty("uuid").GetGuid();
+
+        using HttpResponseMessage blocked = await _http.GetAsync($"/api/context/memories/{uuid}/versions", Ct);
+        blocked.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+
+        using HttpResponseMessage allowed = await _http.GetAsync(
+            $"/api/context/memories/{uuid}/versions?scope={MemoryGroup.ScopeDimensionValue.Program}",
+            Ct);
+        allowed.StatusCode.ShouldBe(HttpStatusCode.OK);
+    }
+
     [Fact]
     public async Task Dry_run_persists_nothing()
     {
@@ -105,6 +128,56 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
         digest.GetProperty("items")[0].GetProperty("uuid").ValueKind.ShouldBe(JsonValueKind.Null);
 
         using HttpResponseMessage query = await _http.PostAsJsonAsync("/api/context/query", new { query = "Dry subject" }, Ct);
+        JsonElement items = (await query.Content.ReadFromJsonAsync<JsonElement>(Json, Ct)).GetProperty("items");
+        items.GetArrayLength().ShouldBe(0);
+    }
+
+    /// <summary>
+    /// A body-supplied dryRun is a dry run too — it must not be silently overwritten by the absent
+    /// query default and turned into a real write.
+    /// </summary>
+    [Fact]
+    public async Task Body_dry_run_is_honoured()
+    {
+        Guid group = await ResolveGroup(MemoryGroup.ScopeDimensionValue.Product);
+        using HttpResponseMessage dry = await _http.PostAsJsonAsync(
+            "/api/context/memories",
+            new
+            {
+                groupUuid = group,
+                items = new[]
+                {
+                    new
+                    {
+                        uuid = (Guid?)null,
+                        name = "Name",
+                        description = "Body dry subject",
+                        statement = "Body dry claim",
+                        contentSummary = "Summary",
+                        kind = MemoryVersion.KindValue.Decision,
+                        facets = new[] { "architecture" },
+                        tags = Array.Empty<string>(),
+                        status = MemoryVersion.MemoryVersionStatus.Approved,
+                        confidence = (short)80,
+                        content = (string?)null,
+                        sources = Array.Empty<object>(),
+                        validFrom = DateTimeOffset.UtcNow.AddDays(-1),
+                        validUntil = (DateTimeOffset?)null,
+                        summaryModel = "test-model",
+                        summaryPromptVersion = "1",
+                    }
+                },
+                links = (object?)null,
+                labelsProposed = (object?)null,
+                dryRun = true,
+            },
+            Ct);
+        dry.StatusCode.ShouldBe(HttpStatusCode.OK);
+        JsonElement digest = await dry.Content.ReadFromJsonAsync<JsonElement>(Json, Ct);
+        digest.GetProperty("created").GetInt32().ShouldBe(1);
+        digest.GetProperty("items")[0].GetProperty("blobAddress").ValueKind.ShouldBe(JsonValueKind.Null);
+
+        using HttpResponseMessage query = await _http.PostAsJsonAsync("/api/context/query", new { query = "Body dry subject" }, Ct);
         JsonElement items = (await query.Content.ReadFromJsonAsync<JsonElement>(Json, Ct)).GetProperty("items");
         items.GetArrayLength().ShouldBe(0);
     }

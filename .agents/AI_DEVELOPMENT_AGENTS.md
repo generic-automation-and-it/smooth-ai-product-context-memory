@@ -30,14 +30,17 @@ This is a unified AI development experience folder that centralizes skills, prom
 | `.agents/skills/` | Executable skills (multi-file workflows) — flat dirs, category-prefixed folder names |
 | `.agents/skills/agile-github-task-from-diff/` | Create a GitHub Task (sub-issue) from the current git diff vs main |
 | `.agents/skills/ai-brain-dump/` | Listen-first capture session; synthesize on request |
+| `.agents/skills/ai-review/` | Local consumer of a remote AI code-review report |
 | `.agents/skills/ai-terse/` | Reformat this turn's reply into terse, high-density output with a TL;DR |
 | `.agents/skills/ai-template-sync/` | UPSERT the smooth-devex-template agentic scaffold into an existing repo |
 | `.agents/skills/context-load-context/` | Load or create functional `*AGENTS.md` context files |
 | `.agents/skills/context-load-agents-context/` | Load ancestor AGENTS.md context for a target file |
+| `.agents/skills/context-memory/` | Skill to store/retrieve persistent context memories (sole interface to the context-memory store) |
 | `.agents/skills/create-hld/` | Author a design-only High-Level Design under `.docs/hlds/NNN-<slug>/` |
 | `.agents/skills/git-commit/` | Commit with conventional format |
 | `.agents/skills/git-commit-push/` | Commit and push to remote |
 | `.agents/skills/git-commit-push-pr/` | Commit, push, and create/update PRs |
+| `.agents/skills/git-commit-review-push/` | Commit + push + open a PR with an embedded full AI review |
 | `.agents/skills/git-sync/` | Sync with main (optionally auto-resolve conflicts) |
 | `.agents/skills/manage-rule-system/` | Create/update rule files in `.agents/rules/` |
 | `.agents/templates/` | Document templates (AGENTS.md, README.md, work task promote templates) |

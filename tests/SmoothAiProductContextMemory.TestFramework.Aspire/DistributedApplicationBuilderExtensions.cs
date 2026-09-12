@@ -11,7 +11,9 @@ internal static class DistributedApplicationBuilderExtensions
     private const int BlobPort = 9002;
     private const int BlobConsolePort = 19092;
     // Registry-qualified so Podman never has to resolve a short image name.
-    private const string BlobImage = "docker.io/minio/minio";
+    // docker.io/minio/minio is no longer publicly pullable (upstream removed Hub images);
+    // quay.io hosts the last community server releases.
+    private const string BlobImage = "quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z";
     private const string WireMockImage = "docker.io/wiremock/wiremock";
     private const string BlobSecretKey = "LocalMachineAccessNoInterestingDataTestDev#Passw0rd!FirewallNotExposed";
 

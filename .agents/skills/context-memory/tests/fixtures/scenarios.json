@@ -1,0 +1,78 @@
+{
+  "$schema_note": "On-demand LLM-eval fixtures for the context-memory semantic/atomicity stages. Each scenario carries a candidate, a fixed recall set, and an independently-authored EXPECTED verdict. Scored for recall AND precision against the expected set, never derived from the rules (the anti-pattern run-trial.js fell into). Not CI-gated; run on demand via score_fixtures.py.",
+  "scenarios": [
+    {
+      "id": "s1-redact-planted-credential",
+      "stage": "redact",
+      "candidate_description": "Deployment uses AKIAIOSFODNN7EXAMPLE for the build pipeline.",
+      "candidate_statement": "The CI pipeline authenticates with an AWS access key.",
+      "expected": { "verdict": "scrub", "must_not_contain": ["AKIAIOSFODNN7EXAMPLE"], "reason": "secret redacted before blob write" }
+    },
+    {
+      "id": "s2-same-subject-version-bump",
+      "stage": "dedup",
+      "candidate_description": "PostgreSQL is the storage engine we use for memories.",
+      "candidate_statement": "We store in Postgres.",
+      "recall_set": [
+        { "uuid": "m-001", "group_uuid": "g-01", "description": "We store in Postgres", "statement": "PostgreSQL is the storage engine.", "kind": "architecture", "content_summary": "Postgres is the chosen storage engine." }
+      ],
+      "expected": { "verdict": "version_bump", "target_uuid": "m-001", "reason": "same subject, different wording, not a new memory" }
+    },
+    {
+      "id": "s3-bundled-split-counted",
+      "stage": "atomicity",
+      "candidate_description": "We chose PostgreSQL, and it also explains why we need JSONB, but it further means the index is GIN.",
+      "candidate_statement": "Postgres, JSONB and GIN are connected decisions.",
+      "expected": { "verdict": "split", "count": 3, "reason": "three atomic facts bundled into one record" }
+    },
+    {
+      "id": "s4-cross-group-version-bump",
+      "stage": "dedup",
+      "candidate_description": "A memory is one atomic fact with four content fields.",
+      "candidate_statement": "Each memory is a single atomic fact.",
+      "recall_set": [
+        { "uuid": "m-002", "group_uuid": "g-99", "description": "A memory is one atomic fact with four content fields", "statement": "Each memory carries four content fields.", "kind": "domain-model", "content_summary": "Memory is a single atomic fact." }
+      ],
+      "expected": { "verdict": "version_bump", "target_uuid": "m-002", "reason": "same subject captured under a different group/ticket" }
+    },
+    {
+      "id": "s5-link-derivation",
+      "stage": "links",
+      "candidate_description": "The memory service is local-first and private to our workspace.",
+      "candidate_statement": "Storage is local-first.",
+      "recall_set": [
+        { "uuid": "m-003", "group_uuid": "g-01", "description": "The memory service is local-first and private to our workspace", "statement": "The service is local-first.", "kind": "positioning", "content_summary": "Local-first, private service." }
+      ],
+      "expected": { "verdict": "link", "relation": "relates_to", "link_uuid": "m-003", "reason": "a reason must be supplied", "reason_must_be_nonempty": true }
+    },
+    {
+      "id": "s6-programme-scoped-not-product",
+      "stage": "scope",
+      "candidate_description": "The programme requires monthly reporting.",
+      "candidate_statement": "Programme-level knowledge must not be cited as shipped product behaviour.",
+      "expected": { "verdict": "set_scope_program", "not_product_fact": true, "reason": "programme scope, not product behaviour" }
+    },
+    {
+      "id": "s7-adversarial-divergence",
+      "stage": "divergence",
+      "candidate_description": "The storage engine will be SQLite.",
+      "candidate_statement": "We decided to use SQLite for persistence.",
+      "recall_set": [
+        { "uuid": "m-004", "group_uuid": "g-01", "description": "Storage engine is PostgreSQL", "statement": "We use PostgreSQL for storage.", "kind": "storage", "content_summary": "PostgreSQL stores our data." }
+      ],
+      "expected": { "verdict": "leave_both", "diverged": 0, "reason": "conflicting claim; no silent winner, record as separate memory" },
+      "note": "V2 divergence lands later; V1 must not collapse or pick a winner."
+    },
+    {
+      "id": "s8-near-miss-negative",
+      "stage": "dedup",
+      "candidate_description": "Postgres stores our search index.",
+      "candidate_statement": "The search index lives in Postgres.",
+      "recall_set": [
+        { "uuid": "m-001", "group_uuid": "g-01", "description": "PostgreSQL is the storage engine", "statement": "We store in Postgres.", "kind": "architecture", "content_summary": "Postgres is the storage engine." }
+      ],
+      "expected": { "verdict": "new_memory", "reason": "different claim: index storage vs chosen storage engine; must NOT dedup" },
+      "note": "Negative control — near-miss must not collapse into a version bump."
+    }
+  ]
+}

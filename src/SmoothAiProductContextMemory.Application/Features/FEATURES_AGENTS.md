@@ -17,7 +17,7 @@ HTTP API the context-memory skill consumes — uuid-only wire, Mediator slices, 
 - **Never classify a database error by message text.** `IDbErrorMapper` matches SQLSTATE. Substring matching mis-fires on any message containing a word like "unique", and provider text must never reach the caller.
 - **Do not add a LabelUsage entity** for the `label_usage` view — the seven-type model-shape guard fails on purpose.
 - **`kind` is an open string**, not an enum or check constraint.
-- **Programme scope is never citable as product fact.** `MemoryScopeFilter.Plan` is the one source of truth and is expressed as *data* so the provider can push it into SQL. Default query omits `scope_dimension = program` unless the caller filters by that scope, a group uuid, or a ticket (in-group context). `self` is always returned with `scopeDimension`. The same plan gates the blob proxy. Write path does not reject programme.
+- **Programme scope is never citable as product fact.** `MemoryScopeFilter.Plan` is the one source of truth and is expressed as *data* so the provider can push it into SQL. Default query omits `scope_dimension = program` unless the caller filters by that scope, a group uuid, or a ticket (in-group context). `self` is always returned with `scopeDimension`. The same plan gates the blob proxy and version history. Write path does not reject programme.
 - **Never log statement, summary, content, or blob address at Information.** Counts and lifecycle at `Information`, per-operation decisions at `Debug`.
 
 ## System Context
@@ -76,8 +76,8 @@ sequenceDiagram
 - **Date**: 2026-09-11 (extends the 2026-09-10 scope-filter decision)
 - **Status**: Accepted
 - **Context**: Programme knowledge must not appear as shipped product behaviour. The rule was originally a boolean predicate, which forced the query handler to materialise rows and filter them in memory — and left the blob proxy unguarded, so a caller holding a uuid could read what the query hid.
-- **Decision**: `MemoryScopeFilter.Plan` returns `(RequiredDimension, ExcludedDimensions)`. The query handler passes it into `MemorySearchCriteria` so it becomes SQL. `GetMemoryBlob` takes `?scope=` and applies the same plan, returning `403` when the dimension is hidden. `IncludeGroup` is kept as the readable statement of the rule and is derived from `Plan`, so the two cannot drift.
-- **Consequences**: Scope is enforced at L0 (plan + predicate), L1 (SQL against real Postgres) and L2 (HTTP query and blob). Blob drill-down now requires the caller to declare the dimension it is reading as.
+- **Decision**: `MemoryScopeFilter.Plan` returns `(RequiredDimension, ExcludedDimensions)`. The query handler passes it into `MemorySearchCriteria` so it becomes SQL. `GetMemoryBlob` and `GetMemoryVersions` take `?scope=` and apply the same plan, returning `403` when the dimension is hidden. `IncludeGroup` is kept as the readable statement of the rule and is derived from `Plan`, so the two cannot drift.
+- **Consequences**: Scope is enforced at L0 (plan + predicate), L1 (SQL against real Postgres) and L2 (HTTP query, blob and version history). Reading a programme-scoped memory's blob or version history now requires the caller to declare the dimension it is reading as.
 
 ### LADR-004: SET LOCAL has no HTTP caller
 
@@ -122,6 +122,7 @@ sequenceDiagram
 ## Key Behaviors
 
 - Retrieval defaults to **current-only** and **excludes `proposed`**. History is `GET .../versions`. Empty query is `200 []`. `limit` defaults to 50 and is capped at 200 — an uncapped read floods the caller's context.
+- A `set` request accepts at most 200 items; larger batches are a `400` — the write-side sibling of the read `limit` cap.
 - `asOf` narrows to claims valid at a business-time instant. Absent means no temporal narrowing.
 - API digest is a persist receipt: `created` / `versioned` / `linked` / `skipped` / `labelsProposed`; `diverged` is always 0 here. Skill composes the human digest.
 - API persists `status` as given — no re-gate by kind.
@@ -143,7 +144,7 @@ sequenceDiagram
 - L0: `tests/SmoothAiProductContextMemory.Host.UnitTest/` (ProblemDetails mapping, 403, no-leak on unmapped)
 - L0: `tests/SmoothAiProductContextMemory.Infrastructure.UnitTest/NpgsqlDbErrorMapperTests` (SQLSTATE classification, no provider text in messages)
 - L1: `tests/SmoothAiProductContextMemory.Application.ComponentTest/Features/` (handlers vs real Postgres — ordered version bump, dry-run/write parity, skipped links, full text, facet/tag containment, `asOf`, current-only, limit)
-- L2: `tests/SmoothAiProductContextMemory.Host.IntegrationTest/` (HTTP round-trips, scope enforcement on query **and** blob, dry run, subject-collision 409, group patch, initiatives, facet vocabulary, Scalar/OpenAPI)
+- L2: `tests/SmoothAiProductContextMemory.Host.IntegrationTest/` (HTTP round-trips, scope enforcement on query, blob **and** version history, dry run, subject-collision 409, group patch, initiatives, facet vocabulary, Scalar/OpenAPI)
 
 ## Quality Constraints
 
@@ -155,4 +156,6 @@ sequenceDiagram
 | Date | Change | Ref |
 |:-----|:-------|:----|
 | 2026-09-11 | Review fixes: dry run shares the write plan (LADR-002); retrieval pushed into PostgreSQL behind `IMemorySearch` with `asOf` + `limit` (LADR-005); scope rule as data and enforced on the blob proxy (LADR-003); errors classified by SQLSTATE (LADR-006); facet endpoint reads the view (LADR-007); stale links skipped (LADR-008); `PATCH /groups/{uuid}` and initiative registry added; preflight narrows by kind before the cap. | WT-2 review |
+| 2026-09-12 | /ai-review fixes: `GetMemoryVersions` scope-gated like the blob proxy (LADR-003 now covers versions too); `LabelsProposed` capped at 100; duplicate version-target in a batch is a `ConflictException` on both dry-run and write; letter/digit-free `Description` rejected as a 400 via `Slug.TrySubject`. | /ai-review PR #14 |
+| 2026-09-12 | /ai-analyse: 200-items-per-`set` write cap documented in Key Behaviors (shipped as a validator `400` in `SetMemories`); contract previously omitted the write cap while documenting the sibling read caps. | /ai-analyse |
 | 2026-09-10 | Created — ADR-0003 API surface, uuid wire, dry-run persist gate, scope filter, D42 stamp. | WT-2 |

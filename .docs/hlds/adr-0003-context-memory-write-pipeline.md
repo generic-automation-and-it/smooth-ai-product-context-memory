@@ -133,7 +133,7 @@ Preventing the secret from reaching the blob at all is the only clean remedy.
 
 - **Trigger cadence:** batched at an explicit end-of-task checkpoint (`set`). Never per-fact mid-work.
   Manual trigger (D29), the "synthesize-on-request" model.
-- **`get` parameters:** free-text question **and** explicit filters (label/ticket/repo/initiative/
+- **`get` parameters:** free-text question **and** explicit filters (ticket/repo/initiative/
   scope/kind). Both supported.
 - **`set` parameters:** the caller passes the evidence and pointers (ticket/repo/initiative/scope,
   content, business-time source date). The skill **derives** kind, facets, tags, scope, subject,
@@ -189,15 +189,15 @@ is `uuid`, never the surrogate `bigint`.**
 
 | Operation | Method + path | Inputs | Outputs |
 |---|---|---|---|
-| **Write preflight** | `POST /api/context/preflight` | Batch of candidate facts (subject, claim, content, kind, scope, ticket refs, source date). | Per candidate: dedup decision (new / version-of-`uuid` / skip + reason), proposed links `[{target_uuid, relation, reason}]`, ticket-uniqueness conflicts, intra-batch collision notices. **Writes nothing.** |
+| **Write preflight** | `POST /api/context/preflight` | Batch of candidates (subject description, kind, facets, ticket refs). | **Judges nothing.** Per candidate: exact-match candidates (`uuid`, `group_uuid`, description, subject slug, kind, facets), ticket-uniqueness conflicts, intra-batch collision notices. **Writes nothing.** The semantic dedup decision (new / version-of-`uuid` / skip) and proposed links `[{target_uuid, relation, reason}]` are produced by the skill's `/query`-recall + LLM-judgement step, not by this endpoint. |
 | **Set (write)** | `POST /api/context/memories` | The resolved write(s) from preflight: new memories or version bumps, each with derived subject/claim/kind/facets/tags/summary/keywords/sources/valid_from/valid_until/confidence/status, **the summary model identifier and prompt version (D42 stamp — the one additive column)**, and derived links. `status` is `proposed` for gated kinds unless the caller passed `--approve`. Also optional group resolve-or-create params. | The digest: `{created, versioned, linked, diverged, skipped, labels_proposed}` each with count, plus per-item `uuid` and `blob_address`. One transactional call; owns `is_current`. |
 | **Set (dry run)** | `POST /api/context/memories?dryRun=true` | Identical body to `set`. | Identical digest shape, **nothing persisted, no `blob_address`, no `uuid` for planned creates** (identity is minted at persist time). This is the pre-write veto point; the endpoint must share one code path with the real write, or the dry run stops predicting it. **Implemented as one shared plan:** every verdict — subject collision, missing version target, unknown link endpoint, already-present link, already-present label — is reached before the persist step branches, so both paths return the same counts and fail on the same requests. |
 | **Append group description** | `POST /api/context/groups/{uuid}/descriptions` | group `uuid` + description text. | New `GroupDescription` version. `GroupDescription` is append-only history with its own version chain (ADR-0002), so it cannot be updated in place and is not covered by group resolve-or-create, which only sets the first one. |
 | **Resolve-or-create group** | `POST /api/context/groups/resolve` | ticket(s) / repo / initiative / scope. | Match existing group `uuid` by ticket, or create one (synthetic `local:<guid>` ticket when untracked). Repo, initiative and scope apply **on create only**. |
 | **Update group** | `PATCH /api/context/groups/{uuid}` | Any of repo / repo_url / initiative name / scope dimension / scope identifier. Null leaves a field unchanged. | The updated group. Resolve only ever sets these at creation, so this is the only way to correct them. A dimension of `customer`/`program` without an identifier is rejected **against stored state**, not just the request body. |
-| **Get (cheap fields)** | `POST /api/context/query` | Free-text query and/or filters: facets, tags, label, ticket, repo, initiative, scope, kind, status, `includeProposed`, `currentOnly` (default true), **`asOf` (business-time instant the claim must be valid at)** and **`limit` (default 50, max 200)**. | Array of cheap-field rows (no blob). Empty is a normal `200`. |
+| **Get (cheap fields)** | `POST /api/context/query` | Free-text query and/or filters: facets, tags, ticket, repo, initiative, scope, kind, status, `includeProposed`, `currentOnly` (default true), **`asOf` (business-time instant the claim must be valid at)** and **`limit` (default 50, max 200)**. | Array of cheap-field rows (no blob). Empty is a normal `200`. |
 | **Get blob drill-down** | `GET /api/context/memories/{uuid}/versions/{version}/blob?scope={dimension}` | memory `uuid` + version, plus the scope the caller is reading as. | Blob content, **proxied through the API** so the store's own URLs never reach the caller *and* the scope rule applies: a dimension hidden from an open query is `403` here unless the caller names it. Holding a `uuid` is not authority to read programme knowledge as product fact. |
-| **Get version history** | `GET /api/context/memories/{uuid}/versions` | memory `uuid`. | Version chain (cheap fields per version). |
+| **Get version history** | `GET /api/context/memories/{uuid}/versions?scope={dimension}` | memory `uuid`, plus the scope the caller is reading as. | Version chain (cheap fields per version). The same scope rule as drill-down applies — `403` when the memory's dimension is hidden from an open query unless the caller names it. |
 | **Create link** | `POST /api/context/links` | `{source_uuid, target_uuid, relation, reason}`. | Confirmed link, or rejection (self-link `400`, duplicate `409`). Inside `set`, a duplicate is **skipped and counted**, not fatal — a stale derived link must not discard the capture it came with. |
 | **Read facet vocabulary** | `GET /api/context/labels` | — | The derived `label_usage` view **unioned with** the advisory registry: every facet in use plus every registered label. `status` is the registry status, or null for a facet in use that was never registered — that drift is what the endpoint exists to reveal. |
 | **Propose label** | `POST /api/context/labels` | `{name}`. | Draft label (registry is advisory — no FK; proposed, not enforcing). |
@@ -318,6 +318,11 @@ because a coherent corpus contains no live contradictions.
     cookie"` → NOT dedup (distinct claims).
 - **Pass criterion is countable and non-circular**: e.g. N equivalent pairs across groups collapse to
   M unique subjects; the digest shows an exact `skipped` count; each pair yields its asserted decision.
+- **Test home (WT-3 implemented):** the committed L0 harness `.agents/skills/context-memory/tests/run_tests.py`
+  unit-tests the deterministic plumbing (redact.py no-leak + rule-name digest, atomicity bundle detection)
+  and is CI-gatable. The on-demand LLM fixture set at `.agents/skills/context-memory/tests/fixtures/scenarios.json`
+  (with `score_fixtures.py`) provides authored positive/negative scenarios — the adversarial dedup pairs,
+  the negative controls, and the V2 divergence strip — scored here for recall AND precision, not CI-gated.
 
 ### Divergence fixture (V2)
 

@@ -69,10 +69,16 @@ public static class SetMemories
         {
             RuleFor(x => x.GroupUuid).NotEmpty();
             RuleFor(x => x.Items).NotNull().NotEmpty();
+            RuleFor(x => x.Items)
+                .Must(i => i is null || i.Count <= 200)
+                .WithMessage("At most 200 items may be written per request.");
             RuleForEach(x => x.Items).ChildRules(item =>
             {
                 item.RuleFor(i => i.Name).NotEmpty().MaximumLength(200);
                 item.RuleFor(i => i.Description).NotEmpty();
+                item.RuleFor(i => i.Description)
+                    .Must(d => Slug.TrySubject(d, out _))
+                    .WithMessage("Description must contain at least one letter or digit.");
                 item.RuleFor(i => i.Statement).NotEmpty();
                 item.RuleFor(i => i.Kind).NotEmpty().MaximumLength(64);
                 item.RuleFor(i => i.Status)
@@ -95,6 +101,12 @@ public static class SetMemories
                     .Must(l => l.SourceUuid != l.TargetUuid)
                     .WithMessage("A link cannot target itself.");
             });
+            RuleFor(x => x.LabelsProposed)
+                .Must(l => l is null || l.Count <= 100)
+                .WithMessage("At most 100 labels may be proposed per request.");
+            RuleForEach(x => x.LabelsProposed)
+                .NotEmpty()
+                .MaximumLength(100);
         }
     }
 
@@ -165,6 +177,7 @@ public static class SetMemories
         {
             var items = new List<PlannedItem>(request.Items.Count);
             var plannedSlugs = new HashSet<string>(StringComparer.Ordinal);
+            var plannedVersionTargets = new HashSet<Guid>();
 
             for (int index = 0; index < request.Items.Count; index++)
             {
@@ -173,6 +186,12 @@ public static class SetMemories
 
                 if (item.Uuid is { } target)
                 {
+                    if (!plannedVersionTargets.Add(target))
+                    {
+                        throw new ConflictException(
+                            $"Memory '{target}' is versioned twice in this batch. Merge the items or send them separately.");
+                    }
+
                     Memory memory = await db.Memories
                         .SingleOrDefaultAsync(m => m.Uuid == target, cancellationToken)
                         ?? throw new NotFoundException($"Memory '{target}' was not found.");

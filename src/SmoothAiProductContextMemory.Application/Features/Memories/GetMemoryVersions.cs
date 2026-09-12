@@ -5,13 +5,14 @@ using Microsoft.Extensions.Logging;
 using SmoothAiProductContextMemory.Application.Common.Exceptions;
 using SmoothAiProductContextMemory.Application.Common.Models;
 using SmoothAiProductContextMemory.Application.Common.Persistence;
+using SmoothAiProductContextMemory.Application.Common.Retrieval;
 using SmoothAiProductContextMemory.Domain.Entities;
 
 namespace SmoothAiProductContextMemory.Application.Features.Memories;
 
 public static class GetMemoryVersions
 {
-    public sealed record Request(Guid Uuid) : IRequest<Response>;
+    public sealed record Request(Guid Uuid, string? ScopeDimension = null) : IRequest<Response>;
 
     public sealed record Response(IReadOnlyList<CheapMemory> Items);
 
@@ -20,6 +21,7 @@ public static class GetMemoryVersions
         public Validator()
         {
             RuleFor(x => x.Uuid).NotEmpty();
+            RuleFor(x => x.ScopeDimension).MaximumLength(32);
         }
     }
 
@@ -35,6 +37,14 @@ public static class GetMemoryVersions
                 .Include(m => m.Versions)
                 .SingleOrDefaultAsync(m => m.Uuid == request.Uuid, cancellationToken)
                 ?? throw new NotFoundException($"Memory '{request.Uuid}' was not found.");
+
+            string dimension = memory.Group!.ScopeDimension;
+            if (!MemoryScopeFilter.IncludeGroup(dimension, request.ScopeDimension, hasGroupContext: false))
+            {
+                logger.LogDebug("Memory version history blocked by scope. Dimension: {Dimension}", dimension);
+                throw new ForbiddenException(
+                    $"This memory is '{dimension}'-scoped. Request it with scope '{dimension}' to read it.");
+            }
 
             List<CheapMemory> items =
             [
