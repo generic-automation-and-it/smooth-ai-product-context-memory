@@ -189,7 +189,7 @@ is `uuid`, never the surrogate `bigint`.**
 
 | Operation | Method + path | Inputs | Outputs |
 |---|---|---|---|
-| **Write preflight** | `POST /api/context/preflight` | Batch of candidate facts (subject, claim, content, kind, scope, ticket refs, source date). | Per candidate: dedup decision (new / version-of-`uuid` / skip + reason), proposed links `[{target_uuid, relation, reason}]`, ticket-uniqueness conflicts, intra-batch collision notices. **Writes nothing.** |
+| **Write preflight** | `POST /api/context/preflight` | Batch of candidate facts (subject, claim, content, kind, scope, ticket refs, source date). | **Judges nothing.** Per candidate: exact-match candidates (`uuid`, `group_uuid`, description, subject slug, kind, facets), ticket-uniqueness conflicts, intra-batch collision notices. **Writes nothing.** The semantic dedup decision (new / version-of-`uuid` / skip) and proposed links `[{target_uuid, relation, reason}]` are produced by the skill's `/query`-recall + LLM-judgement step, not by this endpoint. |
 | **Set (write)** | `POST /api/context/memories` | The resolved write(s) from preflight: new memories or version bumps, each with derived subject/claim/kind/facets/tags/summary/keywords/sources/valid_from/valid_until/confidence/status, **the summary model identifier and prompt version (D42 stamp — the one additive column)**, and derived links. `status` is `proposed` for gated kinds unless the caller passed `--approve`. Also optional group resolve-or-create params. | The digest: `{created, versioned, linked, diverged, skipped, labels_proposed}` each with count, plus per-item `uuid` and `blob_address`. One transactional call; owns `is_current`. |
 | **Set (dry run)** | `POST /api/context/memories?dryRun=true` | Identical body to `set`. | Identical digest shape, **nothing persisted, no `blob_address`, no `uuid` for planned creates** (identity is minted at persist time). This is the pre-write veto point; the endpoint must share one code path with the real write, or the dry run stops predicting it. **Implemented as one shared plan:** every verdict — subject collision, missing version target, unknown link endpoint, already-present link, already-present label — is reached before the persist step branches, so both paths return the same counts and fail on the same requests. |
 | **Append group description** | `POST /api/context/groups/{uuid}/descriptions` | group `uuid` + description text. | New `GroupDescription` version. `GroupDescription` is append-only history with its own version chain (ADR-0002), so it cannot be updated in place and is not covered by group resolve-or-create, which only sets the first one. |
@@ -318,6 +318,11 @@ because a coherent corpus contains no live contradictions.
     cookie"` → NOT dedup (distinct claims).
 - **Pass criterion is countable and non-circular**: e.g. N equivalent pairs across groups collapse to
   M unique subjects; the digest shows an exact `skipped` count; each pair yields its asserted decision.
+- **Test home (WT-3 implemented):** the committed L0 harness `.agents/skills/context-memory/tests/run_tests.py`
+  unit-tests the deterministic plumbing (redact.py no-leak + rule-name digest, atomicity bundle detection)
+  and is CI-gatable. The on-demand LLM fixture set at `.agents/skills/context-memory/tests/fixtures/scenarios.json`
+  (with `score_fixtures.py`) provides authored positive/negative scenarios — the adversarial dedup pairs,
+  the negative controls, and the V2 divergence strip — scored here for recall AND precision, not CI-gated.
 
 ### Divergence fixture (V2)
 
