@@ -133,7 +133,7 @@ Preventing the secret from reaching the blob at all is the only clean remedy.
 
 - **Trigger cadence:** batched at an explicit end-of-task checkpoint (`set`). Never per-fact mid-work.
   Manual trigger (D29), the "synthesize-on-request" model.
-- **`get` parameters:** free-text question **and** explicit filters (label/ticket/repo/initiative/
+- **`get` parameters:** free-text question **and** explicit filters (ticket/repo/initiative/
   scope/kind). Both supported.
 - **`set` parameters:** the caller passes the evidence and pointers (ticket/repo/initiative/scope,
   content, business-time source date). The skill **derives** kind, facets, tags, scope, subject,
@@ -195,9 +195,9 @@ is `uuid`, never the surrogate `bigint`.**
 | **Append group description** | `POST /api/context/groups/{uuid}/descriptions` | group `uuid` + description text. | New `GroupDescription` version. `GroupDescription` is append-only history with its own version chain (ADR-0002), so it cannot be updated in place and is not covered by group resolve-or-create, which only sets the first one. |
 | **Resolve-or-create group** | `POST /api/context/groups/resolve` | ticket(s) / repo / initiative / scope. | Match existing group `uuid` by ticket, or create one (synthetic `local:<guid>` ticket when untracked). Repo, initiative and scope apply **on create only**. |
 | **Update group** | `PATCH /api/context/groups/{uuid}` | Any of repo / repo_url / initiative name / scope dimension / scope identifier. Null leaves a field unchanged. | The updated group. Resolve only ever sets these at creation, so this is the only way to correct them. A dimension of `customer`/`program` without an identifier is rejected **against stored state**, not just the request body. |
-| **Get (cheap fields)** | `POST /api/context/query` | Free-text query and/or filters: facets, tags, label, ticket, repo, initiative, scope, kind, status, `includeProposed`, `currentOnly` (default true), **`asOf` (business-time instant the claim must be valid at)** and **`limit` (default 50, max 200)**. | Array of cheap-field rows (no blob). Empty is a normal `200`. |
+| **Get (cheap fields)** | `POST /api/context/query` | Free-text query and/or filters: facets, tags, ticket, repo, initiative, scope, kind, status, `includeProposed`, `currentOnly` (default true), **`asOf` (business-time instant the claim must be valid at)** and **`limit` (default 50, max 200)**. | Array of cheap-field rows (no blob). Empty is a normal `200`. |
 | **Get blob drill-down** | `GET /api/context/memories/{uuid}/versions/{version}/blob?scope={dimension}` | memory `uuid` + version, plus the scope the caller is reading as. | Blob content, **proxied through the API** so the store's own URLs never reach the caller *and* the scope rule applies: a dimension hidden from an open query is `403` here unless the caller names it. Holding a `uuid` is not authority to read programme knowledge as product fact. |
-| **Get version history** | `GET /api/context/memories/{uuid}/versions` | memory `uuid`. | Version chain (cheap fields per version). |
+| **Get version history** | `GET /api/context/memories/{uuid}/versions?scope={dimension}` | memory `uuid`, plus the scope the caller is reading as. | Version chain (cheap fields per version). The same scope rule as drill-down applies — `403` when the memory's dimension is hidden from an open query unless the caller names it. |
 | **Create link** | `POST /api/context/links` | `{source_uuid, target_uuid, relation, reason}`. | Confirmed link, or rejection (self-link `400`, duplicate `409`). Inside `set`, a duplicate is **skipped and counted**, not fatal — a stale derived link must not discard the capture it came with. |
 | **Read facet vocabulary** | `GET /api/context/labels` | — | The derived `label_usage` view **unioned with** the advisory registry: every facet in use plus every registered label. `status` is the registry status, or null for a facet in use that was never registered — that drift is what the endpoint exists to reveal. |
 | **Propose label** | `POST /api/context/labels` | `{name}`. | Draft label (registry is advisory — no FK; proposed, not enforcing). |
