@@ -191,19 +191,28 @@ is `uuid`, never the surrogate `bigint`.**
 |---|---|---|---|
 | **Write preflight** | `POST /api/context/preflight` | Batch of candidate facts (subject, claim, content, kind, scope, ticket refs, source date). | Per candidate: dedup decision (new / version-of-`uuid` / skip + reason), proposed links `[{target_uuid, relation, reason}]`, ticket-uniqueness conflicts, intra-batch collision notices. **Writes nothing.** |
 | **Set (write)** | `POST /api/context/memories` | The resolved write(s) from preflight: new memories or version bumps, each with derived subject/claim/kind/facets/tags/summary/keywords/sources/valid_from/valid_until/confidence/status, **the summary model identifier and prompt version (D42 stamp — the one additive column)**, and derived links. `status` is `proposed` for gated kinds unless the caller passed `--approve`. Also optional group resolve-or-create params. | The digest: `{created, versioned, linked, diverged, skipped, labels_proposed}` each with count, plus per-item `uuid` and `blob_address`. One transactional call; owns `is_current`. |
-| **Set (dry run)** | `POST /api/context/memories?dryRun=true` | Identical body to `set`. | Identical digest shape, **nothing persisted, no `blob_address`**. This is the pre-write veto point; the endpoint must share one code path with the real write, or the dry run stops predicting it. |
+| **Set (dry run)** | `POST /api/context/memories?dryRun=true` | Identical body to `set`. | Identical digest shape, **nothing persisted, no `blob_address`, no `uuid` for planned creates** (identity is minted at persist time). This is the pre-write veto point; the endpoint must share one code path with the real write, or the dry run stops predicting it. **Implemented as one shared plan:** every verdict — subject collision, missing version target, unknown link endpoint, already-present link, already-present label — is reached before the persist step branches, so both paths return the same counts and fail on the same requests. |
 | **Append group description** | `POST /api/context/groups/{uuid}/descriptions` | group `uuid` + description text. | New `GroupDescription` version. `GroupDescription` is append-only history with its own version chain (ADR-0002), so it cannot be updated in place and is not covered by group resolve-or-create, which only sets the first one. |
-| **Resolve-or-create group** | `POST /api/context/groups/resolve` | ticket(s) / repo / initiative / scope. | Match existing group `uuid` by ticket, or create one (synthetic `local:<guid>` ticket when untracked). |
-| **Get (cheap fields)** | `POST /api/context/query` | Free-text query and/or filters (label/ticket/repo/initiative/scope/kind, plus current-only default). | Array of cheap-field rows (no blob). |
-| **Get blob drill-down** | `GET /api/context/memories/{uuid}/versions/{version}/blob` | memory `uuid` + version. | Blob content, **proxied through the API** so scope enforcement cannot be bypassed. |
+| **Resolve-or-create group** | `POST /api/context/groups/resolve` | ticket(s) / repo / initiative / scope. | Match existing group `uuid` by ticket, or create one (synthetic `local:<guid>` ticket when untracked). Repo, initiative and scope apply **on create only**. |
+| **Update group** | `PATCH /api/context/groups/{uuid}` | Any of repo / repo_url / initiative name / scope dimension / scope identifier. Null leaves a field unchanged. | The updated group. Resolve only ever sets these at creation, so this is the only way to correct them. A dimension of `customer`/`program` without an identifier is rejected **against stored state**, not just the request body. |
+| **Get (cheap fields)** | `POST /api/context/query` | Free-text query and/or filters: facets, tags, label, ticket, repo, initiative, scope, kind, status, `includeProposed`, `currentOnly` (default true), **`asOf` (business-time instant the claim must be valid at)** and **`limit` (default 50, max 200)**. | Array of cheap-field rows (no blob). Empty is a normal `200`. |
+| **Get blob drill-down** | `GET /api/context/memories/{uuid}/versions/{version}/blob?scope={dimension}` | memory `uuid` + version, plus the scope the caller is reading as. | Blob content, **proxied through the API** so the store's own URLs never reach the caller *and* the scope rule applies: a dimension hidden from an open query is `403` here unless the caller names it. Holding a `uuid` is not authority to read programme knowledge as product fact. |
 | **Get version history** | `GET /api/context/memories/{uuid}/versions` | memory `uuid`. | Version chain (cheap fields per version). |
-| **Create link** | `POST /api/context/links` | `{source_uuid, target_uuid, relation, reason}`. | Confirmed link, or rejection (self-link, duplicate). |
-| **Read label registry** | `GET /api/context/labels` | — | `label_usage` view (derived facets + usage counts, active/draft/deleted status). |
+| **Create link** | `POST /api/context/links` | `{source_uuid, target_uuid, relation, reason}`. | Confirmed link, or rejection (self-link `400`, duplicate `409`). Inside `set`, a duplicate is **skipped and counted**, not fatal — a stale derived link must not discard the capture it came with. |
+| **Read facet vocabulary** | `GET /api/context/labels` | — | The derived `label_usage` view **unioned with** the advisory registry: every facet in use plus every registered label. `status` is the registry status, or null for a facet in use that was never registered — that drift is what the endpoint exists to reveal. |
 | **Propose label** | `POST /api/context/labels` | `{name}`. | Draft label (registry is advisory — no FK; proposed, not enforcing). |
+| **Read initiatives** | `GET /api/context/initiatives?status={status}` | Optional status filter. | Registry rows (name, description, status). Groups reference an initiative **by name**, so the caller needs to discover which names exist. |
+| **Upsert initiative** | `POST /api/context/initiatives` | `{name, description?, status?}`. | The initiative and whether it was created. Idempotent by name because the name is the wire identity (the entity has no `uuid`); archiving is the same call with `status`. |
 
 **Rules the API enforces (so the skill need not):** version-bump ordering and the single transaction;
-`is_current` ownership; source ≠ target on links; `uuid`-based addressing; blob proxying for scope
-enforcement. The skill owns judgement; the API owns mechanics.
+`is_current` ownership; source ≠ target on links; `uuid`-based addressing; blob proxying *with* scope
+enforcement; subject uniqueness within a group, reported before the write as well as at it; scope
+filtering on every retrieval path. The skill owns judgement; the API owns mechanics.
+
+**Retrieval is executed by the database, not by the handler.** Every predicate above — full text,
+facets, tags, scope, kind, status, validity, current-only — is translated to SQL against the indexes
+ADR-0002 defines. Materialising rows and filtering them in the handler would defeat those indexes and
+would pull whole version chains across the wire on a current-only query, which is the default.
 
 ## Alternatives considered
 

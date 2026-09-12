@@ -35,6 +35,23 @@ public sealed class AppendOnlyTriggerTests : PersistenceTestBase
     }
 
     [Fact]
+    public async Task MemoryVersion_SummaryStamp_Update_Raises()
+    {
+        var (_, _, v1) = await SeedHistoryAsync();
+        string connStr = Db.Database.GetConnectionString()!;
+
+        await using var conn = new NpgsqlConnection(connStr);
+        await conn.OpenAsync(Ct);
+        await using var cmd = new NpgsqlCommand(
+            """UPDATE memory_version SET summary_stamp = '{"v":1,"model":"x","promptVersion":"y"}'::jsonb WHERE id = @id""",
+            conn);
+        cmd.Parameters.AddWithValue("id", v1.Id);
+
+        var ex = await Should.ThrowAsync<PostgresException>(() => cmd.ExecuteNonQueryAsync(Ct));
+        ex.Message.ShouldContain("Append-only history");
+    }
+
+    [Fact]
     public async Task MemoryVersion_Update_Raises()
     {
         var (_, memory, v1) = await SeedHistoryAsync();

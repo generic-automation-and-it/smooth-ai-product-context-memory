@@ -26,4 +26,11 @@ internal static class JsonbConverter
         => new(
             value => JsonSerializer.Serialize(value, Options),
             value => JsonSerializer.Deserialize<List<SourceDocument>>(value, Options) ?? new List<SourceDocument>());
+
+    public static ValueConverter<SummaryStampDocument?, string?> ForSummaryStamp()
+        => new(
+            value => value == null ? null : JsonSerializer.Serialize(value, Options),
+            value => string.IsNullOrWhiteSpace(value)
+                ? null
+                : JsonSerializer.Deserialize<SummaryStampDocument>(value, Options));
 }

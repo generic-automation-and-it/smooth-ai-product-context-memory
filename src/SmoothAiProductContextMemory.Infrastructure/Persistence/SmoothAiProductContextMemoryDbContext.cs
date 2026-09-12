@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using SmoothAiProductContextMemory.Application.Common.Persistence;
 using SmoothAiProductContextMemory.Domain.Entities;
 using SmoothAiProductContextMemory.Infrastructure.Persistence.Configurations;
 
@@ -10,7 +11,7 @@ namespace SmoothAiProductContextMemory.Infrastructure.Persistence;
 /// repositories/tickets fails the build rather than passing review unnoticed.
 /// </summary>
 public sealed class SmoothAiProductContextMemoryDbContext(DbContextOptions<SmoothAiProductContextMemoryDbContext> options)
-    : DbContext(options)
+    : DbContext(options), IApplicationDbContext
 {
     public DbSet<Initiative> Initiatives => Set<Initiative>();
 
@@ -25,6 +26,9 @@ public sealed class SmoothAiProductContextMemoryDbContext(DbContextOptions<Smoot
     public DbSet<MemoryVersion> MemoryVersions => Set<MemoryVersion>();
 
     public DbSet<MemoryLink> MemoryLinks => Set<MemoryLink>();
+
+    public IQueryable<LabelUsageRow> QueryLabelUsage() =>
+        Database.SqlQueryRaw<LabelUsageRow>("SELECT name AS \"Name\", uses AS \"Uses\" FROM label_usage");
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

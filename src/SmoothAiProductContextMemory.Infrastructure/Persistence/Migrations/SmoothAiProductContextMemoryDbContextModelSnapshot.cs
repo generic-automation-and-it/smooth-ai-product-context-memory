@@ -321,6 +321,8 @@ namespace SmoothAiProductContextMemory.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("InitiativeId");
 
+                    b.HasIndex("Repo");
+
                     b.HasIndex("Tickets");
 
                     NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("Tickets"), "gin");
@@ -416,6 +418,10 @@ namespace SmoothAiProductContextMemory.Infrastructure.Persistence.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)")
                         .HasColumnName("status");
+
+                    b.Property<string>("SummaryStamp")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("summary_stamp");
 
                     b.Property<DateTimeOffset>("ValidFrom")
                         .HasColumnType("timestamptz")

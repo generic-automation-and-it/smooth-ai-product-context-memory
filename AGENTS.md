@@ -17,7 +17,7 @@ Persistent memory service for AI agents: stores summarized, labelled context (li
 | Layer | Path | Purpose |
 |---|---|---|
 | Domain | `src/SmoothAiProductContextMemory.Domain/` | Core entities, value objects — no external deps |
-| Application | `src/SmoothAiProductContextMemory.Application/` | Vertical-slice use cases via Mediator — `Features/<Name>/`, shared code in `Common/` + `Abstractions/` |
+| Application | `src/SmoothAiProductContextMemory.Application/` | Vertical-slice use cases via Mediator — `Features/<Name>/` (contract: `Features/FEATURES_AGENTS.md`), shared code in `Common/` + `Abstractions/` |
 | Infrastructure | `src/SmoothAiProductContextMemory.Infrastructure/` | EF Core + PostgreSQL (`Persistence/`), HTTP clients (`Clients/`), blob storage (`Storage/`) |
 | Host | `src/SmoothAiProductContextMemory.Host/` | ASP.NET Core Web API, Serilog, Scalar OpenAPI |
 | AppHost | `src/SmoothAiProductContextMemory.AppHost/` | Aspire dev orchestrator — Postgres + MinIO blob storage + Seq |
@@ -52,7 +52,7 @@ Target a single test project (`dotnet test tests/<Project>`) or `ls tests/` to l
 xunit.v3 · Shouldly · Bogus · Respawn. Three tiers (drives where a test belongs):
 
 - **L0** `*.UnitTest` — no I/O, in-process.
-- **L1** component — `Application.ComponentTest` (in-memory EF Core); `Infrastructure.ComponentTest` (real isolated DB + Respawn).
+- **L1** component — `Application.ComponentTest` (handlers vs real Postgres via Aspire); `Infrastructure.ComponentTest` (real isolated DB).
 - **L2** `*.IntegrationTest` — full stack, real PostgreSQL.
 
 Shared fixtures in `tests/SmoothAiProductContextMemory.TestFramework/`; Aspire dependency host (PostgreSQL + WireMock) in `tests/SmoothAiProductContextMemory.TestFramework.Aspire/`. See `.docs/wiki/testing.md`.

@@ -35,6 +35,8 @@ public sealed class MemoryGroupConfiguration : IEntityTypeConfiguration<MemoryGr
 
         builder.HasIndex(g => g.Tickets).HasMethod("gin");
 
+        builder.HasIndex(g => g.Repo);
+
         builder.Property(g => g.InitiativeId).HasColumnName("initiative_id");
 
         builder.HasOne(g => g.Initiative)

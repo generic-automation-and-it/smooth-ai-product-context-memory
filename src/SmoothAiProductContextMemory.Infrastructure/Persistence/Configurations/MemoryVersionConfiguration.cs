@@ -43,6 +43,11 @@ public sealed class MemoryVersionConfiguration : IEntityTypeConfiguration<Memory
 
         builder.Property(v => v.CreatedOn).HasColumnName("created_on").HasColumnType("timestamptz").HasDefaultValueSql("now()");
 
+        builder.Property(v => v.SummaryStamp)
+            .HasColumnName("summary_stamp")
+            .HasColumnType("jsonb")
+            .HasConversion(JsonbConverter.ForSummaryStamp());
+
         builder.HasIndex(v => new { v.MemoryId, v.Version }).IsUnique();
 
         builder.HasIndex(v => v.MemoryId).IsUnique().HasFilter("\"is_current\"");
