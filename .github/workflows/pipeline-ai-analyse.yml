@@ -332,13 +332,27 @@ jobs:
       - name: Initialize OPENCODE
         run: |
           set -euo pipefail
+          # Install opencode via the shared lib (LADR-048) so this workflow
+          # honours OPENCODE_CLI_VERSION the same way the review
+          # gate does. Post-install orchestration below stays inline because
+          # it is analyse-specific.
           export PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH"
-          echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          if ! command -v opencode >/dev/null 2>&1; then
-            curl -fsSL https://opencode.ai/install | bash
+          bash "${REVIEW_SKILL_DIR}/scripts/lib/install-opencode.sh"
+          # Two-name dispatch: this workflow is workflow_run-triggered, so its
+          # YAML always executes from the DEFAULT branch while the scripts come
+          # from the fetched tooling checkout. Across the LADR-071 rename
+          # (setup-opencode-config.sh → prepare-opencode-config.sh) the two can
+          # disagree in either direction — run 34604214652 died with exit 127
+          # exactly this way (main's YAML calling the deleted old name against
+          # post-rename tooling). Prefer the new lib (sourced — it exports
+          # OPENCODE_CONFIG); fall back to the old installer for stale checkouts
+          # that predate the rename.
+          if [ -f "${REVIEW_SKILL_DIR}/scripts/lib/prepare-opencode-config.sh" ]; then
+            . "${REVIEW_SKILL_DIR}/scripts/lib/prepare-opencode-config.sh"
+          else
+            bash "${REVIEW_SKILL_DIR}/scripts/lib/setup-opencode-config.sh"
           fi
-          bash "${REVIEW_SKILL_DIR}/scripts/lib/setup-opencode-config.sh"
           opencode stats >/dev/null || true
           bash "${REVIEW_SKILL_DIR}/scripts/lib/opencode-health.sh" || true
           bash "${REVIEW_SKILL_DIR}/scripts/lib/resolve-provider.sh"
