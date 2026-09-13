@@ -14,14 +14,16 @@ HLDs and their LADRs justify themselves against.
 - **Never add technology, data structures or implementation detail to the BRD.** The document opens by declaring it contains none. A schema, an API shape or a library name here makes business intent unreviewable without technical review, which is the failure the BRD/HLD split exists to prevent.
 - **Authority runs BRD → HLD, never back.** When implementation contradicts a `BR-NN`, that is a business decision to escalate — not a doc-sync task. Editing the BRD to match shipped behaviour destroys the only record of what was actually asked for.
 - **Never renumber or reuse a `BR-NN`.** Numbers are cited from HLDs, LADRs, success measures and risks. Amend in place or append; a reused number silently redirects every existing citation.
-- **The HLD set is listed in three places — the `Related` header row, §11, and the HLD's own `AGENTS.md` back-reference.** Adding an HLD under `../../hlds/` means updating all three; one missed place makes the BRD look complete while it is not.
+- **The HLD set is listed in three places — the `Related` header row, §11, and the HLD's own `AGENTS.md` back-reference.** Adding an HLD under `../../hlds/` means updating all three; one missed place makes the BRD look complete while it is not. **An HLD owned by a sibling BRD is listed in that BRD's three places, not this one** — this document then carries only a pointer to the sibling BRD (see [BRD-002](../002-contextual-export/)).
 - **Single-user is a decision, not a missing feature.** §4 states the reasoning: an intelligence layer over shared content makes pre-existing over-broad permissions easier to exploit, so remaining single-user avoids the class of problem rather than solving it. Do not propose auth, tenancy or sharing as a gap.
 - **§5 out-of-scope rows carry reasons, not a backlog.** Each excluded item was rejected on stated grounds. Treating one as future work reverses a decision without recording that it was reversed.
 
 ## System Context
 
 One BRD governs one product. Below it sit three HLDs — storage, write pipeline, graph edges — each an
-independent design that must trace back to at least one `BR-NN`. The BRD is written for a business
+independent design that must trace back to at least one `BR-NN`. A sibling BRD
+([BRD-002](../002-contextual-export/)) extends the same requirement space for bulk export and owns
+HLD 005. The BRD is written for a business
 reader: it names no store, no framework and no interface, so it can be validated against the
 practitioner's actual working problem rather than against the code that exists.
 
@@ -50,7 +52,7 @@ on them by design:
 - **"Same subject, new claim" has no requirement.** Subject-versus-claim is load-bearing upstream (dedup matches subject, versioning replaces claim) and nothing in §6 requires capture to recognise a known subject rather than accumulate restatements.
 - **The automation gradient is unstated.** "Automate what is reversible; ask about what is not" generates BR-10, BR-13, BR-14 and the agentic-action exclusion. The BRD lists those consequences without the rule that produces them.
 - **Four requirements have no validating evidence** — divergence, bitemporality, typed links, and provenance-with-confidence were never exercised by the fixtures used so far. §7 assumes they work.
-- **BR-17 is stated as settled and is not.** Content-addressed bodies are not human-navigable, so readability depends on a reconstruction step across two stores; the BRD does not mention export at all.
+- **BR-17 is stated as settled and is not.** Content-addressed bodies are not human-navigable, so readability depends on a reconstruction step across two stores; the BRD does not mention export at all. *Partly answered on 2026-09-13 by [BRD-002](../002-contextual-export/) `BR-21` for the curated case; the whole-store readability half remains unstated here.*
 - **Losing the store is not a risk.** BR-16 covers control of a personal asset; nothing covers its durability across two stores under monotonic growth.
 
 Closed on 2026-09-13 (second amendment): findability risk row in §9; BR-10 rewritten to state
@@ -64,3 +66,4 @@ multi-tracker in BR-04.
 |:-----|:-------|:----|
 | 2026-09-13 | Created alongside promoting the BRD from a flat file to `docs/brd/001-context-memory/`. Records the BRD/HLD authority direction, the three-place HLD reference rule, and eleven known gaps found against the braindump record. | — |
 | 2026-09-13 | Second amendment applied to the BRD: BR-10 authority ranking, BR-11 checkpoint clause, findability risk, preferences in scope, multi-tracker tickets, terseness pass on §1/§2/§7. Five of eleven gaps closed; gap list pruned to the six remaining. | — |
+| 2026-09-13 | BRD-002 recorded as extending this requirement space and owning HLD 005; three-place rule clarified for sibling-BRD-owned HLDs; BR-17 export gap marked partly answered. | BRD-002 |
