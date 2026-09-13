@@ -39,10 +39,10 @@ Rules live under `.agents/rules/` as `*.instructions.md`, auto-loaded every sess
 
 | Category | Folder | Contents |
 |----------|--------|----------|
-| _(cross-cutting)_ | `.agents/rules/` | `ai-workflow-rules`, `code-review-standards` (hook-deferred), `project-overview`, `skill-secret-handling` |
+| _(cross-cutting)_ | `.agents/rules/` | `ai-workflow-rules`, `code-review-standards` (hook-deferred), `project-overview`, `skill-secret-handling`, `clean-code`, `solid-principles` |
 | git | `.agents/rules/git/` | `git-policy`, `pr-standards` |
 | meta | `.agents/rules/meta/` | `rules` (file convention), `knowledge-conventional-contexts-quality` (AGENTS.md quality) |
-| backend (`**/*.cs`) | `.agents/rules/backend/` | api-mediator-validation, architecture-slices, backend-logging, external-api-clients, migrations, wiremock-stubbing |
+| backend (`**/*.cs`) | `.agents/rules/backend/` | api-mediator-validation, architecture-slices, backend-logging, external-api-clients, migrations, readonly-collections, wiremock-stubbing |
 
 ## Build / Test
 
