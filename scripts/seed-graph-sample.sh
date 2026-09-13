@@ -20,6 +20,11 @@ TEMPLATE_DB="${3:-app}"
 MEMORIES="${4:-200}"
 EDGES="${5:-500}"
 
+if [ "$TARGET_DB" = "$TEMPLATE_DB" ]; then
+    echo "FAIL: target-db '$TARGET_DB' is the template itself; dropping it would destroy the schema source" >&2
+    exit 1
+fi
+
 if ! docker inspect "$CONTAINER" >/dev/null 2>&1; then
     echo "FAIL: container '$CONTAINER' not found" >&2
     exit 1
@@ -40,7 +45,10 @@ psql_in() {
 # hand-written schema script would have to reproduce and could get wrong.
 echo "== creating $TARGET_DB from template $TEMPLATE_DB"
 psql_in -d postgres -tAc "DROP DATABASE IF EXISTS \"$TARGET_DB\";" >/dev/null
-psql_in -d postgres -tAc "CREATE DATABASE \"$TARGET_DB\" TEMPLATE \"$TEMPLATE_DB\";" >/dev/null
+if ! psql_in -d postgres -tAc "CREATE DATABASE \"$TARGET_DB\" TEMPLATE \"$TEMPLATE_DB\";" >/dev/null; then
+    echo "FAIL: could not clone '$TEMPLATE_DB' — CREATE DATABASE ... TEMPLATE requires no other connections to the template; stop the AppHost (it holds pooled connections) and re-run" >&2
+    exit 1
+fi
 
 echo "== seeding $MEMORIES memories and $EDGES edges"
 psql_in -d "$TARGET_DB" <<SQL
