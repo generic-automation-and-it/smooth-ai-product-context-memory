@@ -299,7 +299,7 @@ public static class ExportRenderer
 
     private static readonly HashSet<string> BooleanOrNullAliases = new(StringComparer.OrdinalIgnoreCase)
     {
-        "true", "false", "null", "yes", "no", "on", "off",
+        "true", "false", "null", "yes", "no", "on", "off", "y", "n", "~",
     };
 
     private static bool NeedsQuotes(string value)
