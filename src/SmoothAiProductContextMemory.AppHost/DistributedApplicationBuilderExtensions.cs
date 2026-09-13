@@ -13,6 +13,8 @@ internal static class DistributedApplicationBuilderExtensions
     // docker.io/minio/minio is no longer publicly pullable; quay.io hosts the last community releases.
     private const string BlobImage = "quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z";
     private const int DefaultSeqPort = 5341;
+    private const string HostConnectionStringName = "SmoothAiProductContextMemory";
+    private const string HostReadinessPath = "/health";
     private const string DockerDesktopGroupName = "smooth-project-memory";
     private const string PostgresContainerName = "smooth-project-memory-dev-postgres";
     private const string BlobContainerName = "smooth-project-memory-dev-blob";
@@ -94,7 +96,11 @@ internal static class DistributedApplicationBuilderExtensions
                     "--label", $"com.docker.compose.service={PostgresContainerName}")
                 .WithLifetime(ContainerLifetime.Persistent);
 
-            return postgres.AddDatabase("app");
+            // The resource name is the connection-string key Aspire injects, and the Host reads
+            // `ConnectionStrings:SmoothAiProductContextMemory`. Naming the resource "app" published
+            // `ConnectionStrings__app`, which nothing consumed — the Host died on start-up. The
+            // physical database stays "app" so the persistent data volume keeps its dev data.
+            return postgres.AddDatabase(HostConnectionStringName, databaseName: "app");
         }
 
         private IResourceBuilder<ContainerResource> AddBlobResource(AppHostConfiguration configuration)
@@ -143,6 +149,7 @@ internal static class DistributedApplicationBuilderExtensions
                 .WithEnvironment("BlobStorage__AccessKey", configuration.BlobAccessKey)
                 .WithEnvironment("BlobStorage__SecretKey", configuration.BlobSecretKey)
                 .WithEnvironment("BlobStorage__Bucket", "smooth-project-memory")
+                .WithHttpHealthCheck(HostReadinessPath)
                 .WaitFor(postgres)
                 .WaitFor(blob)
                 .WaitFor(seq);
