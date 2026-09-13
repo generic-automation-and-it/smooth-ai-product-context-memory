@@ -42,8 +42,14 @@ public sealed class Nfr02BenchmarkTests : PersistenceTestBase
     /// overhead which narrows as the store grows. "Narrows" is a prediction, and an unasserted
     /// prediction is a comment. This is the executable form of the recorded reopening condition: the
     /// delta widening rather than narrowing fails the build instead of being noticed later.
+    /// <para>
+    /// Four rather than three, on measurement: a repeat run on a machine already busy with back-to-back
+    /// benchmarks produced 1.256 ms against a 3× ceiling of 1.287 ms — a near-miss on noise alone, and a
+    /// guard that cries wolf gets deleted rather than investigated. The regression this exists to catch
+    /// was 14.2×, which fails either ceiling by a wide margin, so widening it costs nothing that matters.
+    /// </para>
     /// </remarks>
-    private const double OneHopAdjudicatedCeilingFactor = 3.0;
+    private const double OneHopAdjudicatedCeilingFactor = 4.0;
 
     private const double DepthThreeTargetMs = 50.0;
     private const double OneHopTargetMs = 10.0;
@@ -79,12 +85,15 @@ public sealed class Nfr02BenchmarkTests : PersistenceTestBase
             MaxDepth = 3,
             Relation = MemoryRelation.RelatesTo,
         };
+        // The scope plan an undeclared read actually produces. Leaving this empty short-circuits the
+        // intermediate-hop gate, so the shape measured would not be the shape the API serves.
         var composed = new MemoryPathQuery
         {
             SourceUuid = source,
             MaxDepth = 3,
             Relation = MemoryRelation.RelatesTo,
             Kind = Domain.Entities.MemoryVersion.KindValue.Decision,
+            ExcludedScopeDimensions = [Domain.Entities.MemoryGroup.ScopeDimensionValue.Program],
         };
 
         Measurement depthThreeResult = await MeasureAsync(

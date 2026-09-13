@@ -19,9 +19,9 @@ pre-cutover relational baseline in [NFR-02-one-hop-baseline.md](./NFR-02-one-hop
 
 | Shape | p50 (ms) | p95 (ms) | Target | Verdict |
 |---|---|---|---|---|
-| Depth-3 bounded path between two known identities, filtered by relation type | 0.869 | **1.057** | p95 ≤ 50 ms | **met** (47× margin) |
-| One-hop reverse lookup | 0.549 | **0.616** | p95 ≤ 10 ms | **met** (16× margin) |
-| Composed traversal plus relational filter | 8.217 | **8.522** | p95 ≤ 100 ms | **met** (12× margin) |
+| Depth-3 bounded path between two known identities, filtered by relation type | 0.873 | **1.042** | p95 ≤ 50 ms | **met** (48× margin) |
+| One-hop reverse lookup | 0.533 | **0.621** | p95 ≤ 10 ms | **met** (16× margin) |
+| Composed traversal plus relational filter | 13.491 | **14.053** | p95 ≤ 100 ms | **met** (7× margin) |
 
 All three absolute targets are met with an order of magnitude to spare.
 
@@ -30,8 +30,8 @@ All three absolute targets are met with an order of magnitude to spare.
 | | p95 |
 |---|---|
 | Relational `memory_link`, reverse-only, bitmap index scan (pre-cutover baseline) | 0.429 ms |
-| AGE `:LINKS`, both directions, fully indexed (this run) | **0.616 ms** |
-| Delta | **+0.187 ms — 1.4×** |
+| AGE `:LINKS`, both directions, fully indexed (this run) | **0.621 ms** |
+| Delta | **+0.192 ms — 1.4×** |
 
 **On the strict reading of NFR-02 this is a regression, and NFR-02 says a regression blocks the
 change.** The figure is recorded here rather than argued away. Three facts bear on how it should be
@@ -39,11 +39,14 @@ adjudicated, and none of them are a reason to call 0.595 ms "not slower than" 0.
 
 1. **It is not the same question.** The baseline query was `WHERE target_memory_id = $1` — inbound edges only. `ListTouchingAsync` returns inbound *and* outbound edges, which is two anchored index lookups unioned rather than one. The comparison is unfavourable to AGE by construction, because the graph implementation answers a strictly larger question. A reverse-only Cypher equivalent was not measured separately; that would be a fairer comparison and a less honest one, since it is not the method the store exposes.
 2. **The residual is `cypher()` overhead, not access-path cost.** The plan (below) is index scans throughout — `ix_memory_vertex_uuid` for the anchor, AGE's own `LINKS_start_id_idx` / `LINKS_end_id_idx` for the hop, `Memory_pkey` for the far endpoint. What remains is the extension's own cost: parsing the Cypher, building `agtype` vertex and edge values, and rendering them to text for the driver. That cost is roughly constant, so the ratio narrows rather than widens as the store grows.
-3. **The absolute figure is 16× inside the target.** 0.187 ms of added latency on a lookup budgeted at 10 ms.
+3. **The absolute figure is 16× inside the target.** 0.192 ms of added latency on a lookup budgeted at 10 ms.
 
 The accepted multiple is now **asserted**, not merely recorded: the benchmark fails if the one-hop p95
-exceeds three times the baseline. NFR-02 accepted 1.4×; it did not accept any multiple, and an
+exceeds four times the baseline. NFR-02 accepted 1.4×; it did not accept any multiple, and an
 unasserted prediction that the ratio "narrows as the store grows" is a comment rather than a guard.
+The ceiling is four rather than three on measurement: a repeat run on a machine already busy with
+back-to-back benchmarks produced 1.256 ms against a 3× ceiling of 1.287 ms, and a guard that cries wolf
+gets deleted instead of investigated. The regression it exists to catch was 14.2×.
 
 ## Adjudication
 
@@ -111,18 +114,30 @@ a path from a product-scoped memory through a programme-scoped one disclosed tha
 its edges' reasons — descriptive content on a read path, which this HLD's own non-negotiables forbid. An
 L1 test reproduced the leak before the fix.
 
-Gating intermediates cost more than expected on the first attempt:
+Gating intermediates costs real time, and an earlier version of this file understated it. **The
+correction is recorded rather than quietly overwritten**, because the mistake is instructive.
 
-| Composed shape | p95 |
-|---|---|
-| Before the gate existed (leaky) | 8.374 ms |
-| Gate written as a join per path | **16.106 ms** |
-| Gate written as a membership test against the hidden set | **8.522 ms** |
+| Composed shape | p95 | Gate actually running? |
+|---|---|---|
+| Before the gate existed (leaky) | 8.374 ms | n/a |
+| Gate as a join per path | 16.106 ms | yes |
+| Gate as a membership test against the hidden set | 17.940 ms | yes |
+| Gate as a join per path, short-circuit present | **14.053 ms** | yes |
 
-**Cause.** Joining `memory` inside the `NOT EXISTS` made the planner hash all 3,000 rows for *every*
-candidate path: it estimates 100 rows from `jsonb_array_elements` and cannot know that a bounded path
-holds four. Reshaped as a membership test against the set of memories in excluded scopes — computed
-once, and a minority of the store — the correctness fix costs 0.15 ms instead of 7.7 ms.
+**What the earlier version got wrong.** It reported the membership form at 8.522 ms and concluded the
+correctness fix cost 0.15 ms. That number was measured with the benchmark's own query leaving
+`ExcludedScopeDimensions` empty, which trips the `cardinality(...) = 0` short-circuit — so the gate did
+not run at all. It compared a gate that ran against a gate that did not. The benchmark now sets the
+excluded list an undeclared read actually produces, so the measured shape is the shape the API serves.
+
+**What is true.** Gating every vertex a path crosses roughly **doubles** the composed shape, 8.4 → 14.1
+ms, and the two SQL formulations are equivalent within run-to-run noise. The simpler join form is
+therefore kept and the membership rewrite reverted. The `cardinality(...) = 0` short-circuit stays: it is
+a genuine saving for a caller reading as programme, who hides nothing and so should pay nothing.
+
+14.1 ms against a 100 ms target is a price worth paying to stop disclosing a hidden memory's identity
+and its edges' reasons. If the composed shape ever becomes the dominant access pattern, the endpoint
+enumeration is the thing to attack, not this gate.
 
 The node list is converted to JSON by plain text replacement, which would be unsafe on the *edge* list:
 a vertex carries `memory_uuid` and nothing else (LADR-02), so no caller-supplied string can appear in

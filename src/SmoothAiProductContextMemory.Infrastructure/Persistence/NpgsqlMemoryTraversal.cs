@@ -145,20 +145,16 @@ public sealed class NpgsqlMemoryTraversal(SmoothAiProductContextMemoryDbContext 
           -- carries memory_uuid and nothing else (LADR-02), so no caller-supplied string can appear in
           -- its rendering. Edges carry `reason` and are parsed by AgtypeArrayReader instead.
           --
-          -- Shaped as a membership test against the hidden set rather than a join per path. Joining
-          -- `memory` inside the subquery made the planner hash all 3,000 rows for every candidate path
-          -- (it estimates 100 rows from jsonb_array_elements and cannot know a path holds four): the
-          -- composed shape measured 16.1 ms that way against 8.4 ms before the gate existed. The hidden
-          -- set is computed once and is a minority of the store.
+          -- Gating hops roughly doubles this shape — 8.4 ms without it, ~14 ms with — and two SQL
+          -- formulations measured the same, so the simpler one is kept. The short-circuit is a real win
+          -- rather than cosmetic: a caller reading as programme hides nothing, and pays nothing.
           AND (cardinality(@excludedScopes) = 0 OR NOT EXISTS (
               SELECT 1
               FROM jsonb_array_elements(replace(tr.nodes::text, '::vertex', '')::jsonb) AS hop_node
-              WHERE (hop_node -> 'properties' ->> 'memory_uuid')::uuid IN (
-                  SELECT hidden_memory.uuid
-                  FROM memory hidden_memory
-                  JOIN memory_group hidden_group ON hidden_group.id = hidden_memory.group_id
-                  WHERE hidden_group.scope_dimension = ANY(@excludedScopes)
-              )
+              JOIN memory hop_memory
+                  ON hop_memory.uuid = (hop_node -> 'properties' ->> 'memory_uuid')::uuid
+              JOIN memory_group hop_group ON hop_group.id = hop_memory.group_id
+              WHERE hop_group.scope_dimension = ANY(@excludedScopes)
           ))
         LIMIT @limit;
         """;
