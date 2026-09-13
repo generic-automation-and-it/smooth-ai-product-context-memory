@@ -1,6 +1,6 @@
 # NFR-02 — One-hop reverse lookup baseline (relational)
 
-Recorded at HLD-003 WT-01, **before** `memory_link` is dropped. WT-03 compares the AGE one-hop against these figures. After WT-02 the comparison cannot be reconstructed.
+Recorded at HLD-003 foundation, **before** `memory_link` is dropped. The post-cutover verification compares the AGE one-hop against these figures. After the cutover the comparison cannot be reconstructed.
 
 | | |
 |---|---|

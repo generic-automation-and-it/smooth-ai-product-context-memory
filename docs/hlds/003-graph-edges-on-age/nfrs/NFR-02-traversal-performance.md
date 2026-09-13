@@ -19,7 +19,7 @@ Accepted:
 - Generate 3,000 memories and 10,000 edges with a realistic relation-type distribution — most edges `relates_to` and `depends_on`, few `contradicts`.
 - Measure each of the three query shapes over at least 100 iterations, discarding a warm-up set, and record p50 and p95.
 - Capture the query plan for each shape and confirm the access path is an index or graph traversal, not a sequential scan of the edge storage.
-- Re-run the one-hop measurement against the pre-change implementation on the same data, so the comparison is a measurement rather than an assertion. WT-01 baseline: [NFR-02-one-hop-baseline.md](./NFR-02-one-hop-baseline.md) (p50 0.320 ms, p95 0.429 ms, bitmap index scan).
+- Re-run the one-hop measurement against the pre-change implementation on the same data, so the comparison is a measurement rather than an assertion. Pre-cutover baseline: [NFR-02-one-hop-baseline.md](./NFR-02-one-hop-baseline.md) (p50 0.320 ms, p95 0.429 ms, bitmap index scan).
 
 ## Acceptance Criteria
 

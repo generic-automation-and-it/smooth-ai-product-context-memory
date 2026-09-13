@@ -33,7 +33,7 @@ Shared xunit.v3 test fixtures and helpers reused across the L0/L1/L2 test projec
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
-| 2026-09-13 | Test Postgres image pinned to `docker.io/apache/age:release_PG17_1.7.0`. Recreate `project-test-postgres` once after the pin — `ContainerLifetime.Persistent` keeps the previous image until the container is removed. | HLD-003 WT-01 |
+| 2026-09-13 | Test Postgres image pinned to `docker.io/apache/age:release_PG17_1.7.0`. Recreate `project-test-postgres` once after the pin — `ContainerLifetime.Persistent` keeps the previous image until the container is removed. | HLD-003 |
 | 2026-09-12 | Test Aspire MinIO image pinned to `quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z` (same tag as the dev AppHost). CI wait now probes TCP `:9002` before `/minio/health/live` and dumps container logs on timeout. | PR #17 |
 | 2026-09-09 | `SmoothAiProductContextMemoryTestDatabase` made domain-agnostic — removed the Infrastructure ProjectReference and the EF wiring (migrations moved to the caller, `PersistenceTestBase`); it now drops the per-test database on dispose so the persistent test Postgres never accumulates orphans. | PR #11 |
 | 2026-09-01 | Documented `AspireFixture` endpoint resolution, container-runtime handling and the fixed test dependency ports. Blob console port moved `19192` → `19092` to sit in the test port band; port discovery now probes `docker` before `podman` and is timeout-safe. | — |

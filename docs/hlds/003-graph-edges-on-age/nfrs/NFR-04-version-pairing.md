@@ -1,6 +1,6 @@
 # NFR-04 — Postgres / AGE version pairing
 
-Recorded at HLD-003 WT-01 adoption. Update this file whenever either version changes.
+Recorded at HLD-003 foundation adoption. Update this file whenever either version changes.
 
 | | |
 |---|---|
@@ -26,4 +26,4 @@ Before any Postgres major upgrade:
 
 ## Restore
 
-Graph catalog objects live in the same database as the relational model, so a single `pg_dump` / restore includes them. WT-01 verified a custom-format dump of an empty `memory_graph` round-trips: after restore, `age` 1.7.0 is present and `ag_graph` still lists `memory_graph`. Non-zero edge-count restore is verified in WT-03 after cutover.
+Graph catalog objects live in the same database as the relational model, so a single `pg_dump` / restore includes them. At adoption, a custom-format dump of an empty `memory_graph` was verified to round-trip: after restore, `age` 1.7.0 is present and `ag_graph` still lists `memory_graph`. Non-zero edge-count restore is verified after the cutover.
