@@ -57,6 +57,12 @@ public static class FindPaths
         public Validator()
         {
             RuleFor(x => x.SourceUuid).NotEmpty();
+            // An omitted target walks everything reachable; an all-zero one is a caller mistake that
+            // would otherwise return an empty path list and look like "no connection found".
+            RuleFor(x => x.TargetUuid)
+                .NotEqual(Guid.Empty)
+                .When(x => x.TargetUuid.HasValue)
+                .WithMessage("TargetUuid must be a real uuid when supplied; omit it to walk every reachable memory.");
             RuleFor(x => x.MaxDepth)
                 .InclusiveBetween(1, MemoryTraversalDefaults.MaxDepth)
                 .WithMessage($"MaxDepth must be between 1 and {MemoryTraversalDefaults.MaxDepth}.");
