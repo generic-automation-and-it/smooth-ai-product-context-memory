@@ -39,7 +39,9 @@ public static class DependencyInjection
 
         services.AddDbContext<SmoothAiProductContextMemoryDbContext>((sp, options) =>
         {
-            options.UseNpgsql(sp.GetRequiredService<NpgsqlDataSource>());
+            options.UseNpgsql(
+                sp.GetRequiredService<NpgsqlDataSource>(),
+                npgsql => npgsql.UseSmoothAiProductContextMemoryHistory());
         });
         services.AddScoped<IApplicationDbContext>(sp =>
             sp.GetRequiredService<SmoothAiProductContextMemoryDbContext>());
