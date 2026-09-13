@@ -12,6 +12,7 @@ memory identity, version, and capture time. Zero uncited substantive statements.
 - Statements the composition made itself — an ordering rationale, a finding, a summary of a section — are marked as **composition**, not left to look like stored claims. An unmarked inference is the failure this requirement exists to prevent.
 - Superseded and no-longer-true material carries its status alongside its citation, so a reader never has to infer currency from position in the document.
 - The document declares itself a generated projection of the store at a stated moment, and does so where a reader cannot miss it.
+- **A focused document states its focus with the same prominence.** A lens mistaken for the whole is the likeliest misuse of the focus feature (LADR-12), and the only thing that prevents it is the document saying which focus produced it and that material was set aside.
 
 ## Verification
 
@@ -27,7 +28,7 @@ memory identity, version, and capture time. Zero uncited substantive statements.
 - Every collapsed claim carries every origin.
 - Composition-authored text is distinguishable from stored claims without reading for tone.
 - Supersession and staleness are marked at the point of use, not only in a header.
-- The document identifies itself as a generated projection, with the moment it describes.
+- The document identifies itself as a generated projection, with the moment it describes, and — when focused — the focus that produced it.
 
 ## Applies To
 

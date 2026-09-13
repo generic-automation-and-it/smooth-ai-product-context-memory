@@ -11,7 +11,7 @@
 
 > This document states **what the business needs and why**. Technology choices, data structures
 > and implementation belong in the HLDs. It extends BRD-001 and continues its requirement space
-> at `BR-18` through `BR-34`.
+> at `BR-18` through `BR-36`.
 
 ---
 
@@ -34,6 +34,12 @@ earlier work. A recipient can read the document without access to the applicatio
 The export must preserve the details that determine how knowledge applies. A summary that loses an
 exception can produce an incorrect spec; a document that includes too much can overwhelm the task.
 The practitioner must be able to understand and adjust that tradeoff.
+
+One slice of knowledge feeds several different kinds of work, so the document can be **focused** on the
+work it is about to feed — gathering requirements, deciding architecture, writing a specification,
+implementing, or reviewing. A focus changes ordering, weighting and depth. It never changes what was
+selected, and it never hides a finding: a focused document that quietly omits is worse than an
+unfocused one, because its emphasis reads as the store's. The unfocused document remains the default.
 
 Success is less repeated explanation and more consistent subsequent work, with uncertainty visible.
 The export provides evidence for that work; it does not make unresolved product decisions.
@@ -77,6 +83,12 @@ BO-8 and BO-9 apply trustworthy recall (BO-4) to a composed document.
 | **The AI assistant** | Assembles and consumes attributed context; brings unresolved product choices back to the practitioner |
 | **Recipient — human or agent** | Uses the exported context without needing access to the application or store |
 
+**There is no single primary consumer, and that is deliberate.** The practitioner is always the
+*requester*; who reads the result varies by occasion — themselves months later, a colleague, an agent
+about to do the work. Naming one of them primary would optimise the document for that one and quietly
+degrade it for the others. The design instead names the **work** the document is about to feed
+(BR-35), which is knowable at request time in a way the reader's identity is not.
+
 BRD-001's single-user boundary is unchanged. The file is the sharing mechanism; multi-user access
 and a shared team corpus are out of scope. The practitioner reviews the file before handing it on.
 
@@ -100,6 +112,8 @@ and a shared team corpus are out of scope. The practitioner reviews the file bef
 - Selecting knowledge by repository, initiative, ticket and tags, individually or in combination.
 - Widening through recorded relationships between memories within stated limits.
 - Composing one readable, attributed document with the detail needed to apply its claims correctly.
+- Focusing that document on the work it is about to feed — requirements, architecture, specification,
+  implementation, review — while leaving the unfocused document as the default.
 - Consolidating equivalent restatements while preserving all origins and meaningful distinctions.
 - Distinguishing current, proposed, superseded and no-longer-true knowledge.
 - Reporting gaps, conflicts, quality problems and omissions within the examined material.
@@ -265,6 +279,32 @@ destination and any subsequent distribution.
 destination is neither committed nor synchronised. Generation does not publish or transmit it.
 If a safe default destination cannot be established, the practitioner must choose one before saving.
 
+### Focus
+
+**BR-35 — An export must be focusable on what the reader is about to produce.**
+"For anyone" is not a target reader, and a document with no target reader is optimised for nothing —
+BR-06's problem returning at document scale. The same slice of knowledge serves different work
+differently: gathering requirements wants constraints, business rules and open questions; making an
+architectural decision wants what was decided and what was rejected; writing a specification wants
+what must observably be true; implementing wants concrete constraints, prior failures and known
+limitations; reviewing wants the problems first. The unfocused form remains the default, because a
+complete dump is itself a legitimate and frequent need.
+
+*Accepted when:* the practitioner can request a focus and receive a document ordered and weighted for
+the work named, the available focuses are a stated set, and requesting none yields the complete
+unfocused document.
+
+**BR-36 — A focus must not change what was selected, and must never suppress a finding.**
+The dangerous reading of BR-35 is a focus that quietly narrows selection. That produces the
+confidently incomplete document BR-19 and BR-30 exist to prevent, and it makes two focuses of one
+slice incomparable — a reader cannot tell whether a difference is the lens or the store. Findings are
+the honesty mechanism, so they survive every focus: a contradiction is *more* consequential to
+implementation than to requirements, not less.
+
+*Accepted when:* two focuses of one slice contain the same selected knowledge and differ only in
+ordering, weighting and depth; whatever a focus does not surface is listed as omitted with a reason;
+and gaps, contradictions and quality problems appear under every focus.
+
 ## 7. Success measures
 
 Evaluate spec preparation, handover and re-entry using representative examples reviewed by the
@@ -279,6 +319,7 @@ product owner. Identify expected critical details and unresolved questions befor
 | **Integrity** | No excluded material is disclosed and no stored knowledge is changed by export |
 | **Practitioner effort** | Measure time and repeated explanation needed to complete an acceptable spec or resume work, compared with the current workflow |
 | **Transferability** | A recipient without store access uses the document for the intended task; record missing context and corrections needed |
+| **Focus earns its keep** | A focused export is used to produce the artefact it was focused for, without the practitioner falling back to the unfocused document; consistent fallback means the focuses are wrong or unnecessary |
 
 Establish effort baselines and improvement targets during validation. Document size should be
 assessed alongside fidelity; fewer words or tokens alone is not success. Trust means less need to
@@ -327,6 +368,8 @@ hidden related material and a reached selection or composition limit. This scena
 | **Vague findings** | The practitioner cannot turn the report into useful action | Findings name evidence, affected knowledge and a question or next action (BR-27–29) |
 | **Sensitive content becomes portable** | Excluded knowledge leaks through the document or its metadata | Retrieval exclusions throughout the output and local controlled delivery (BR-33–34) |
 | **A stale or edited copy becomes authoritative** | Subsequent work relies on outdated or unrecorded decisions | Dated projection, no import path, corrections through normal capture (BR-21, BR-31) |
+| **A focus is mistaken for the whole** | A focused document is read as everything the store knows, and its emphasis is read as the store's | Focus never narrows selection and never hides a finding (BR-36); the document states which focus produced it |
+| **Focuses proliferate** | Five becomes fifteen, each thinly different, and no two exports are comparable | The set is stated and bounded (BR-35); adding one requires naming the work it feeds and how it differs from the nearest existing focus |
 
 ## 10. Glossary
 
@@ -339,6 +382,7 @@ Extends BRD-001 §10; its terms continue to apply.
 | **Widening** | Following recorded relationships to include eligible supporting knowledge beyond the initial labels |
 | **Export** | The act of composing a slice and the portable document it produces |
 | **Composition** | Organising knowledge and reasoning, consolidating equivalent claims and presenting findings without changing the store |
+| **Focus** | The work a document is about to feed — requirements, architecture, specification, implementation, review. Changes ordering, weighting and depth; never what was selected. Optional; unfocused is the default |
 | **Findings** | Gaps, disagreements, quality problems and omissions identified within the examined scope |
 | **Contradiction** | Incompatible claims applying to the same circumstances; a genuine conflict remains when no stated authority settles them |
 | **Gap** | An unanswered question within the examined material, needed for the task, an included claim or an explicit practitioner expectation |

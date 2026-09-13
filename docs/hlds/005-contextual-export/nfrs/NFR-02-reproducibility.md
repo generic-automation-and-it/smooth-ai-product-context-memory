@@ -10,6 +10,10 @@ calls and across process restarts.
 This binds the bundle only. The dossier is judgement (LADR-02) and is deliberately **not** required to be
 identical between runs; requiring it would either forbid the judgement or make the guarantee untrue.
 
+**Focus does not enter this requirement.** A focus is applied after selection and is not part of the
+request that produces a bundle (LADR-12), so this stays a single guarantee rather than one per focus —
+which is the main reason focus is a lens and not a selection predicate.
+
 Concretely, the bundle must be free of every ordinary source of run-to-run variance:
 
 - No timestamp of its own generation anywhere in the payload. Stored times are data; a generation time is variance.

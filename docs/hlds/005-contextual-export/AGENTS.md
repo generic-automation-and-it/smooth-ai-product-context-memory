@@ -23,6 +23,9 @@ it is the reason anchor-level widening is absent. Do not implement around it.
 - **Never resolve a contradiction silently.** Apply a stated authority and show it, or report the conflict. Recency is not authority (LADR-04).
 - **Never let a collapse discard an origin.** Three captures of one conclusion are one claim and three pieces of corroboration (LADR-05).
 - **Never truncate silently.** Everything selected is present, collapsed into something present, or listed as omitted with a reason from the bounded set (NFR-04).
+- **Never implement focus as a selection filter.** It is a presentation lens applied *after* selection, over one unfocused bundle (LADR-12). Filtering is the reading an implementer reaches for first; it produces a confidently incomplete document, splinters NFR-02 into one guarantee per focus, and makes two focuses of one slice incomparable.
+- **Never suppress a finding under a focus.** Reorder by relevance, never drop. Implementation is where a contradiction becomes a defect, so the focus that seems least interested is the one that needs it most.
+- **Focus is a bounded enum and a single-valued switch.** Not free text — that is unauditable and a channel for text that steers composition. Not five booleans — that makes two focuses at once representable.
 - **Do not invent an answer for LADR-09 / 10 / 11.** Specifically: do not add a non-`Memory` vertex label, and do not project ticket or tag relationships onto memory edges. The second is the tempting one and it corrupts both ordering and contradiction detection.
 
 ## Architecture Decisions
@@ -42,6 +45,7 @@ See [./ladrs/](./ladrs/). LADRs 01–08 Draft; 09–11 **Blocked**.
 | [LADR-09](./ladrs/LADR-09-ticket-anchors-have-no-graph-representation.md) | Ticket vertices — **Blocked** | No ticket vertex exists; ticket-to-ticket relationships are unreachable |
 | [LADR-10](./ladrs/LADR-10-tag-anchors-have-no-graph-representation.md) | Tag vertices — **Blocked** | Tags are open strings with no identity; synonyms are invisible |
 | [LADR-11](./ladrs/LADR-11-no-writer-derives-anchor-edges.md) | Anchor-edge derivation — **Blocked** | Even with vertices, nothing would write the edges |
+| [LADR-12](./ladrs/LADR-12-focus-is-a-composition-lens.md) | Focus is a lens over one unfocused bundle | Filtering by focus breaks completeness, reproducibility and comparability at once |
 
 **"Blocked" is not in the shared status vocabulary.** It is used here for a decision with a missing input:
 an upstream gap makes at least one option unbuildable, so the options cannot be compared. Each blocked
@@ -58,6 +62,9 @@ than Draft — a Draft may be revised by this work, a Blocked may not be resolve
 - **Registering an observed facet is the most plausible accidental write.** It looks helpful. It is a write (NFR-06).
 - **Byte-equality applies to the bundle only.** A test asserting dossier byte-equality contradicts LADR-02 and must not be written.
 - **The manifest-only path must hydrate no blob.** It exists to price the request, so touching bodies defeats it (NFR-03).
+- **One bundle, many dossiers.** Several focuses of one slice reuse a single selection, so the traversal is paid for once. A design that re-selects per focus throws that away and re-introduces the comparability problem it was meant to avoid.
+- **`review` inverts the document** — findings first, narrative as supporting evidence — rather than re-weighting it. Treat that as a consequence of LADR-12, not as a second axis to model, and expect `review` to be the focus most likely to turn out to be a different document shape.
+- **`specification` versus `architecture` must stay sharply separated:** specification carries what must observably be true (acceptance criteria, behaviours, interfaces); architecture carries why the shape is what it is (decisions, rejected alternatives, boundaries). If the distinction stops holding, merge them — do not let both exist while blurring.
 
 ## Quality Constraints
 
@@ -72,6 +79,7 @@ Targets and verification live in [./nfrs/](./nfrs/). Three shape how code is wri
 - **`context-memory` documentation must be amended in the same change** that introduces the dossier skill: its stated invariant narrows from sole *interface* to sole **writer** (LADR-08). Unamended, the two skills' documentation contradicts each other — the exact defect this design reports on elsewhere.
 - **LADR-09 and LADR-10 both depend on a decision owned by HLD-003** (whether a non-`Memory` vertex label is permissible against its thin-vertex rule). Neither can be resolved here. LADR-11 depends on both, and on HLD-002, which owns link derivation.
 - **LADR-06's Open question belongs to HLD-004.** Whether an export counts as a recall event — and whether "findings already dismissed" is recorded anywhere — must be settled with recall feedback, not ahead of it.
+- **The five focuses are unvalidated** (LADR-12 Open). They were named from how the practitioner works, not derived. Whether `specification` survives beside `architecture`, and whether `review` is a focus at all, is answerable only by use. Do not add a sixth before the five have been used, and do not build a focus-registry abstraction for five enum values.
 - **Gap detection has no expectation model.** BRD-002 records this: `BR-27` measures against "what a slice should reasonably contain" without saying where that comes from. Until settled, gap findings are whatever the composition finds conspicuous. Do not build a rule engine for it on a guess.
 
 ## Changelog
@@ -79,3 +87,4 @@ Targets and verification live in [./nfrs/](./nfrs/). Three shape how code is wri
 | Date | Change | Ref |
 |:-----|:-------|:----|
 | 2026-09-13 | Created — discovery HLD for contextual knowledge export. Selection/composition boundary set at the judgement line; ticket and tag anchor traversal recorded as three Blocked LADRs rather than designed around. | BRD-002 |
+| 2026-09-13 | LADR-12 added — focus (requirements / architecture / specification / implementation / review) is a presentation lens over one unfocused bundle, never a selection filter. NFR-02 records that focus does not enter reproducibility; NFR-04 gains the `outside-focus` omission reason and a per-focus reconciliation test; NFR-05 requires the document to state its focus. | BR-35, BR-36 |
