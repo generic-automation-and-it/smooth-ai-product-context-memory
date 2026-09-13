@@ -19,7 +19,6 @@ on:
         description: 'Pre-release version tag (e.g. 1.0.0-rc.1). Must be a semver-compatible identifier without the leading "v".'
         required: true
         type: string
-        pattern: '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'
 
 concurrency:
   group: publish-image-${{ github.ref }}
@@ -42,6 +41,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Validate dispatch version
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::version '$VERSION' is not a valid semver identifier (without leading 'v')."
+            exit 1
+          fi
+          if [[ "$VERSION" == "latest" ]]; then
+            echo "::error::version 'latest' is not allowed — manual dispatch never publishes :latest."
+            exit 1
+          fi
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
 
@@ -60,6 +73,10 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # latest=auto would also tag :latest on non-prerelease v* tag pushes;
+          # only push to main may produce :latest (explicit raw rule below).
+          flavor: |
+            latest=false
           tags: |
             type=raw,value=latest,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
             type=raw,value=${{ inputs.version }},enable=${{ github.event_name == 'workflow_dispatch' }}
