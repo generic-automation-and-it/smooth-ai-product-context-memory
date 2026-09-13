@@ -140,7 +140,7 @@ stale, not an alternative reading.
 ## Deterministic Components
 
 The judgement below runs through three thin scripts under `.agents/skills/context-memory/scripts/`.
-They carry no secrets, never read/write the store themselves, and move JSON over the WT-2 API. The
+They carry no secrets, never read/write the store themselves, and move JSON over the store's HTTP API. The
 agent assembles payloads and interprets results; the scripts do not decide. Root the base URL via
 `CONTEXT_MEMORY_BASE_URL` (fallback `http://localhost:5141`); always `probe` first for an honest
 NOT-AVAILABLE, never a silent miss.

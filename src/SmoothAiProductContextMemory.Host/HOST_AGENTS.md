@@ -26,9 +26,9 @@ ASP.NET Core composition root (Minimal API). Wires the application together and 
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
-| 2026-09-13 | `export` CLI branch before `WebApplication.CreateBuilder` — generated Markdown dump, no HTTP. | WT-4 |
-| 2026-09-11 | Error handler classifies via `IDbErrorMapper` instead of message text; `application/problem+json`; `403` for scope. Added `PATCH /groups/{uuid}`, `GET|POST /initiatives`, `?scope=` on the blob route. | WT-2 review |
+| 2026-09-13 | `export` CLI branch before `WebApplication.CreateBuilder` — generated Markdown dump, no HTTP. | PR #18 |
+| 2026-09-11 | Error handler classifies via `IDbErrorMapper` instead of message text; `application/problem+json`; `403` for scope. Added `PATCH /groups/{uuid}`, `GET|POST /initiatives`, `?scope=` on the blob route. | PR #14 review |
 | 2026-09-12 | `GET .../versions` now takes `?scope=` (scope-gated like the blob route); `POST /memories` OR-merges a body-supplied `dryRun` so it is not silently treated as a real write. | /ai-review PR #14 |
-| 2026-09-10 | Composed Mediator API: OpenAPI/Scalar, ProblemDetails, ADR-0003 endpoints under `Endpoints/`. | WT-2 |
+| 2026-09-10 | Composed Mediator API: OpenAPI/Scalar, ProblemDetails, ADR-0003 endpoints under `Endpoints/`. | PR #14 |
 | 2026-09-01 | Moved local ports `5080`/`7080` → `5141`/`7141`, derived from the set-bit count of the product name's ASCII binary, to avoid collisions with unrelated local containers. | — |
 | 2026-05-30 | Created — minimal runnable Host (`Program.cs`, `appsettings(.Development).json`, `Properties/launchSettings.json`) with empty `Configuration/`, `Endpoints/`, `HealthChecks/`, `Workers/`. | — |
