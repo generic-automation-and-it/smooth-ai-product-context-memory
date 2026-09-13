@@ -69,6 +69,11 @@ internal static class ContextEndpoints
         group.MapPost("/links", (CreateLink.Request body, IMediator mediator, CancellationToken ct) =>
             mediator.Send(body, ct));
 
+        // maxDepth is on the body, not defaulted server-side: a bound the caller never stated is a
+        // bound the caller never considered, and nothing in the graph store stops an unbounded walk.
+        group.MapPost("/paths", (FindPaths.Request body, IMediator mediator, CancellationToken ct) =>
+            mediator.Send(body, ct));
+
         group.MapGet("/labels", (IMediator mediator, CancellationToken ct) =>
             mediator.Send(new GetLabels.Request(), ct));
 
