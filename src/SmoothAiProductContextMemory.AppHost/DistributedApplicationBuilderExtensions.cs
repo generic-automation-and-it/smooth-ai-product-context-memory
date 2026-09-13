@@ -27,6 +27,9 @@ internal static class DistributedApplicationBuilderExtensions
     private const string PostgresDataVolume = "mimisbrunnr-postgres-data";
     private const string BlobDataVolume = "mimisbrunnr-blob-data";
     private const string SeqDataVolume = "mimisbrunnr-seq-data";
+    // S3 bucket names are DNS labels: lowercase ASCII, digits and hyphens only, so the brand is
+    // transliterated here for the same reason container names are.
+    private const string BlobBucketName = "smooth-mimisbrunnr-memory-well";
     // Aspire 13.3.0 defaults to library/postgres:17.6. AGE's PG17 image keeps the same major so the
     // persistent data volume stays compatible. Pairing recorded in HLD 003 / NFR-04.
     // Keep this pin identical to tests/SmoothAiProductContextMemory.TestFramework.Aspire.
@@ -160,7 +163,7 @@ internal static class DistributedApplicationBuilderExtensions
                 .WithEnvironment("BlobStorage__Endpoint", blob.GetEndpoint("s3"))
                 .WithEnvironment("BlobStorage__AccessKey", configuration.BlobAccessKey)
                 .WithEnvironment("BlobStorage__SecretKey", configuration.BlobSecretKey)
-                .WithEnvironment("BlobStorage__Bucket", "smooth-project-memory")
+                .WithEnvironment("BlobStorage__Bucket", BlobBucketName)
                 .WithHttpHealthCheck(HostReadinessPath)
                 .WaitFor(postgres)
                 .WaitFor(blob)

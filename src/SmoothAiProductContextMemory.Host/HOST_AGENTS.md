@@ -32,7 +32,7 @@ ASP.NET Core composition root (Minimal API). Wires the application together and 
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
-| 2026-09-13 | Delivered the observability wiring: Serilog → console/Seq forwarding to the OpenTelemetry provider for OTLP logs/traces/metrics, real `Logging:Serilog` sections, `AddServiceDefaults`, `ConfidentialityTraceProcessor`, and `/health` + `/alive` gated on migration completion. Verified from a published artifact in Production — Serilog console, Seq ingestion and all three OTLP signals. | WT-obs |
+| 2026-09-13 | Delivered the observability wiring: Serilog → console/Seq forwarding to the OpenTelemetry provider for OTLP logs/traces/metrics, real `Logging:Serilog` sections, `AddServiceDefaults`, `ConfidentialityTraceProcessor`, and `/health` + `/alive` gated on migration completion. Verified from a published artifact in Production — Serilog console, Seq ingestion and all three OTLP signals. | PR #36 |
 | 2026-09-13 | `export` CLI branch before `WebApplication.CreateBuilder` — generated Markdown dump, no HTTP. | PR #18 |
 | 2026-09-11 | Error handler classifies via `IDbErrorMapper` instead of message text; `application/problem+json`; `403` for scope. Added `PATCH /groups/{uuid}`, `GET|POST /initiatives`, `?scope=` on the blob route. | PR #14 review |
 | 2026-09-12 | `GET .../versions` now takes `?scope=` (scope-gated like the blob route); `POST /memories` OR-merges a body-supplied `dryRun` so it is not silently treated as a real write. | /ai-review PR #14 |

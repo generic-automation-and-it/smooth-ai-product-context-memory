@@ -53,7 +53,7 @@ Shared xunit.v3 test fixtures and helpers reused across the L0/L1/L2 test projec
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
-| 2026-09-13 | Added `Telemetry/TelemetryCapture` + `CapturedSpan`, `Logging/CapturingLoggerProvider`, `Fixtures/TestHttpClientFactory`, and a `ConfigureTestServices` hook on `WebAppFixture` so L2 can assert OTLP export, health and NFR-05 confidentiality. | WT-obs |
+| 2026-09-13 | Added `Telemetry/TelemetryCapture` + `CapturedSpan`, `Logging/CapturingLoggerProvider`, `Fixtures/TestHttpClientFactory`, and a `ConfigureTestServices` hook on `WebAppFixture` so L2 can assert OTLP export, health and NFR-05 confidentiality. | PR #36 |
 | 2026-09-13 | Test Docker Desktop group is `Mímisbrunnr-Testing`; containers are `mimisbrunnr-testcontainer-{tech}`. Recreate persistent containers once so Aspire does not keep the old names/labels. | — |
 | 2026-09-13 | Test Postgres image pinned to `docker.io/apache/age:release_PG17_1.7.0`. Recreate `mimisbrunnr-testcontainer-postgres` once after the pin — `ContainerLifetime.Persistent` keeps the previous image until the container is removed. | HLD-003 |
 | 2026-09-12 | Test Aspire MinIO image pinned to `quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z` (same tag as the dev AppHost). CI wait now probes TCP `:9002` before `/minio/health/live` and dumps container logs on timeout. | PR #17 |
