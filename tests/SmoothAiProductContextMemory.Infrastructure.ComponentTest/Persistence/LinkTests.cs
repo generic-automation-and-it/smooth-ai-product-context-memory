@@ -184,23 +184,29 @@ public sealed class LinkTests : PersistenceTestBase
         await using var cmd = new NpgsqlCommand(
             $"""
             SELECT keys::text FROM ag_catalog.cypher('{AgeSession.GraphName}', $$
-                MATCH (v:Memory)
+                MATCH (v:{AgeSession.VertexLabel})
                 RETURN keys(v)
             $$) AS (keys agtype);
             """,
             conn);
         await using var reader = await cmd.ExecuteReaderAsync(Ct);
+        var keys = new List<string>();
         while (await reader.ReadAsync(Ct))
         {
-            string keys = reader.GetString(0);
-            keys.ShouldContain("memory_uuid");
-            keys.ShouldNotContain("subject");
-            keys.ShouldNotContain("description");
-            keys.ShouldNotContain("kind");
-            keys.ShouldNotContain("scope");
-            keys.ShouldNotContain("claim");
-            keys.ShouldNotContain("reason");
-            keys.ShouldBe("[\"memory_uuid\"]");
+            keys.Add(reader.GetString(0));
+        }
+
+        keys.Count.ShouldBeGreaterThan(0);
+        foreach (string row in keys)
+        {
+            row.ShouldContain("memory_uuid");
+            row.ShouldNotContain("subject");
+            row.ShouldNotContain("description");
+            row.ShouldNotContain("kind");
+            row.ShouldNotContain("scope");
+            row.ShouldNotContain("claim");
+            row.ShouldNotContain("reason");
+            row.ShouldBe("[\"memory_uuid\"]");
         }
     }
 
