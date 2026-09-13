@@ -7,10 +7,14 @@ AI Context: HLD for graph edges on Apache AGE. Updated: 2026-09-13
 Memory relationships move from a relational table to graph edges inside the same PostgreSQL instance
 via the Apache AGE extension. Intent and goals in [README.md](./README.md); decisions in
 [./ladrs/](./ladrs/); measurable quality bar in [./nfrs/](./nfrs/); boundary and flows in
-[./diagrams/c4-context.md](./diagrams/c4-context.md).
+[./diagrams/c4-context.md](./diagrams/c4-context.md). The business requirement this design exists to
+satisfy is BR-11 in [BRD 001](../../brd/001-context-memory/) — related knowledge is connected, and the
+connection's reason is recorded. The reason is not optional decoration: it is half of what BR-11 asks
+for.
 
 ## Non-Negotiables
 
+- **An edge without a recorded reason does not satisfy BR-11.** The BRD's case for relationships is the chain "a measurement produced a finding, which justified a decision" — an untyped, unexplained edge preserves adjacency and loses the chain.
 - **Never put a descriptive property on a vertex.** A vertex holds the memory's identity and nothing else. Subject, claim, scope, kind, validity and tags stay relational (LADR-02). A vertex with a second descriptive attribute is the failure this design exists to avoid.
 - **Never write a relationship to both a table and the graph.** There is one representation, not two with a reconciler (LADR-03).
 - **Never delete a memory without removing its edges in the same transaction.** No foreign key cascades into the graph; a two-statement delete outside one transaction can strand orphan edges (LADR-05).
@@ -61,4 +65,5 @@ operability and compatibility. Two shape how code is written rather than merely 
 |:-----|:-------|:----|
 | 2026-09-13 | Foundation review: both Aspire hosts stay on `docker.io/apache/age:release_PG17_1.7.0`; do not revert to `library/postgres`. | HLD-003 |
 | 2026-09-13 | AGE foundation shipped: image pin, per-connection init, empty graph + labels, relational one-hop baseline. `memory_link` untouched. | HLD-003 |
-| 2026-09-14 | Created — edges-only graph adoption, five LADRs, four NFRs, C1 + ER + sequence diagrams. | Amends HLD 001 |
+| 2026-09-13 | Added the upstream BRD as cited business authority; BR-11 requires the connection's reason, not only the edge. | BRD 001 |
+| 2026-09-13 | Created — edges-only graph adoption, five LADRs, four NFRs, C1 + ER + sequence diagrams. | Amends HLD 001 |
