@@ -73,7 +73,7 @@ faced directly in LADR-05 rather than discovered later.
 
 **Acceptance criteria / DoD**
 
-- Every constraint test in the existing suite passes unchanged.
+- Every constraint guarantee the existing suite pins still holds; tests were ported to the graph store where the mechanism moved (entity-count guard updated deliberately — see AGENTS.md).
 - Deleting a memory leaves no edge referencing it.
 - Creating the same relationship twice between the same pair produces one edge, not two.
 

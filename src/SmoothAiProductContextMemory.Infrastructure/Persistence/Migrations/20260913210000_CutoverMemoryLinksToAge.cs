@@ -180,7 +180,7 @@ public partial class CutoverMemoryLinksToAge : Migration
             INSERT INTO memory_link (source_memory_id, target_memory_id, relation, reason)
             SELECT s.id, t.id, r.relation, r.reason
             FROM (
-                SELECT
+                SELECT DISTINCT
                     trim(both '"' from s::text) AS source_uuid,
                     trim(both '"' from t::text) AS target_uuid,
                     rel::text::jsonb #>> '{}' AS relation,

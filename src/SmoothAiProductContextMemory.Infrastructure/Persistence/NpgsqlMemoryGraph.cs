@@ -177,15 +177,13 @@ public sealed class NpgsqlMemoryGraph(SmoothAiProductContextMemoryDbContext db) 
     private static string ReadAgtypeString(NpgsqlDataReader reader, int ordinal)
     {
         string raw = reader.GetString(ordinal);
-        int typeSuffix = raw.IndexOf("::", StringComparison.Ordinal);
-        if (typeSuffix >= 0)
+        if (raw.Length >= 2 && raw[0] == '"')
         {
-            raw = raw[..typeSuffix];
-        }
-
-        if (raw.Length >= 2 && raw[0] == '"' && raw[^1] == '"')
-        {
-            return System.Text.Json.JsonSerializer.Deserialize<string>(raw) ?? string.Empty;
+            int closingQuote = raw.LastIndexOf('"');
+            if (closingQuote > 0)
+            {
+                return System.Text.Json.JsonSerializer.Deserialize<string>(raw[..(closingQuote + 1)]) ?? string.Empty;
+            }
         }
 
         return raw;
