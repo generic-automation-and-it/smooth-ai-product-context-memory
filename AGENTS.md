@@ -67,7 +67,7 @@ xunit.v3 · Shouldly · Bogus · Respawn. Three tiers (drives where a test belon
 - **L1** component — `Application.ComponentTest` (handlers vs real Postgres via Aspire); `Infrastructure.ComponentTest` (real isolated DB).
 - **L2** `*.IntegrationTest` — full stack, real PostgreSQL.
 
-Shared fixtures in `tests/SmoothAiProductContextMemory.TestFramework/`; Aspire dependency host (PostgreSQL+AGE + WireMock + MinIO) in `tests/SmoothAiProductContextMemory.TestFramework.Aspire/`. Both orchestration hosts pin `docker.io/apache/age:release_PG17_1.7.0` — pairing in `docs/hlds/003-graph-edges-on-age/nfrs/NFR-04-version-pairing.md`. See `docs/wiki/testing.md`.
+Shared fixtures in `tests/SmoothAiProductContextMemory.TestFramework/`; Aspire dependency host (PostgreSQL+AGE + Redis + WireMock + MinIO) in `tests/SmoothAiProductContextMemory.TestFramework.Aspire/`. Both orchestration hosts pin `docker.io/apache/age:release_PG17_1.7.0` — pairing in `docs/hlds/003-graph-edges-on-age/nfrs/NFR-04-version-pairing.md`. See `docs/wiki/testing.md`.
 
 ## CI/CD
 

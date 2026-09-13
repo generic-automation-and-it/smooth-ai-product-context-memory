@@ -137,6 +137,6 @@ target, a verification mechanism, and acceptance criteria. See [`./nfrs/`](./nfr
 | NFR | Attribute | Target (summary) | Status |
 |-----|-----------|------------------|--------|
 | [NFR-01](./nfrs/NFR-01-referential-integrity.md) | Integrity | Zero orphan edges; zero duplicate edges | Draft |
-| [NFR-02](./nfrs/NFR-02-traversal-performance.md) | Performance | Depth-3 bounded path p95 ≤ 50 ms at 10k edges | Draft |
+| [NFR-02](./nfrs/NFR-02-traversal-performance.md) | Performance | Depth-3 bounded path p95 ≤ 50 ms at 10k edges | Draft — one-hop baseline recorded in [NFR-02-one-hop-baseline.md](./nfrs/NFR-02-one-hop-baseline.md) |
 | [NFR-03](./nfrs/NFR-03-operability.md) | Operability | No added container; one backup; one-command start | Draft |
 | [NFR-04](./nfrs/NFR-04-compatibility.md) | Compatibility | Extension must not pin us below a supported Postgres | Draft — pairing recorded in [NFR-04-version-pairing.md](./nfrs/NFR-04-version-pairing.md) |
