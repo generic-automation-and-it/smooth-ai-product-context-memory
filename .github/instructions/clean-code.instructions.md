@@ -37,6 +37,10 @@ shape (array vs `List`) lives in [`backend/readonly-collections`](backend/readon
   workaround), never the what, in one line.
 - Never leave commented-out code, changelog comments, or banner blocks. Delete them.
 
+This section deliberately restates the comments policy in
+[`code-review-standards`](code-review-standards.instructions.md) — that rule is hook-deferred for
+Claude, so this copy keeps the policy session-visible.
+
 ## Layout
 
 - Formatting is owned by `.editorconfig` — never hand-format, never review it

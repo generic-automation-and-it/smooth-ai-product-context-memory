@@ -297,6 +297,11 @@ public static class ExportRenderer
         return value;
     }
 
+    private static readonly HashSet<string> BooleanOrNullAliases = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "true", "false", "null", "yes", "no", "on", "off",
+    };
+
     private static bool NeedsQuotes(string value)
     {
         if (value.Length == 0)
@@ -304,7 +309,7 @@ public static class ExportRenderer
             return true;
         }
 
-        if (value is "true" or "false" or "null" or "yes" or "no")
+        if (IsBooleanOrNullAlias(value))
         {
             return true;
         }
@@ -326,6 +331,8 @@ public static class ExportRenderer
 
         return false;
     }
+
+    private static bool IsBooleanOrNullAlias(string value) => BooleanOrNullAliases.Contains(value);
 
     private static string Finish(StringBuilder builder)
     {
