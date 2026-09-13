@@ -19,10 +19,10 @@ namespace SmoothAiProductContextMemory.Infrastructure.Persistence;
 /// </para>
 /// <list type="bullet">
 /// <item>
-/// Facet and tag matching goes through a small <c>FROM</c> fragment so the predicate is array
-/// containment (<c>@&gt;</c>), which the GIN indexes on those columns serve. LINQ's
-/// <c>List.Contains</c> translates to <c>= ANY(column)</c>, which they do not. Column names are
-/// literals; every value is a parameter.
+/// Facet and tag matching goes through a small <c>FROM</c> fragment so the predicate uses a GIN-
+/// served array operator — <c>&amp;&amp;</c> (overlap, the default "any" mode) or <c>@&gt;</c>
+/// (containment, "all"). Both are indexed; LINQ's <c>List.Contains</c> translates to
+/// <c>= ANY(column)</c>, which they are not. Column names are literals; every value is a parameter.
 /// </item>
 /// <item>
 /// The as-of predicate is scalar rather than range containment: <c>ix_memory_version_validity</c> is
@@ -152,15 +152,19 @@ public sealed class NpgsqlMemorySearch(SmoothAiProductContextMemoryDbContext db)
         var conditions = new List<string>();
         var parameters = new List<object>();
 
+        // "any" matches rows carrying at least one requested value (array overlap, `&&`); "all" is
+        // array containment (`@>`). Both are GIN-indexed, so neither introduces a sequential scan.
+        string matchOperator = criteria.FacetMatchMode == FacetMatchModeValue.All ? "@>" : "&&";
+
         if (criteria.Facets.Count > 0)
         {
-            conditions.Add("facets @> {" + parameters.Count.ToString(CultureInfo.InvariantCulture) + "}");
+            conditions.Add("facets " + matchOperator + " {" + parameters.Count.ToString(CultureInfo.InvariantCulture) + "}");
             parameters.Add(criteria.Facets.ToArray());
         }
 
         if (criteria.Tags.Count > 0)
         {
-            conditions.Add("tags @> {" + parameters.Count.ToString(CultureInfo.InvariantCulture) + "}");
+            conditions.Add("tags " + matchOperator + " {" + parameters.Count.ToString(CultureInfo.InvariantCulture) + "}");
             parameters.Add(criteria.Tags.ToArray());
         }
 

@@ -105,5 +105,6 @@ Hosted on **GitHub** at `https://github.com/generic-automation-and-it/project`. 
 
 | Date | Change | Ref |
 |---|---|---|
+| 2026-09-13 | Facet/tag query match is ANY by default (indexed overlap), containment (`all`) opt-in — fixes silent empty recall on multi-facet dedup batches; `FacetMatchMode` on `QueryMemories.Request`/`MemorySearchCriteria`. Added `paths` subcommand to the context-memory skill client (bounded traversal, `maxDepth` required). | BUG-02, BUG-04 |
 | 2026-09-13 | Documented `scripts/` operational verification (NFR-03 restore round-trip, NFR-04 pre-upgrade check) and the `SMOOTH_AGE_BENCH`-gated NFR-02 benchmark command. | `scripts/` |
 | 2026-09-13 | Documented publish-image tag derivation, manual-dispatch validation, concurrency, cache, and revision behavior. | `.github/workflows/publish-image.yml` |

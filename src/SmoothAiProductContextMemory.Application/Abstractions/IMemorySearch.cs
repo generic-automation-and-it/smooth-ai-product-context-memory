@@ -26,6 +26,13 @@ public sealed record MemorySearchCriteria
 
     public IReadOnlyList<string> Tags { get; init; } = [];
 
+    /// <summary>
+    /// How the facet and tag arrays match a row. <see cref="FacetMatchModeValue.Any"/> (the default)
+    /// returns rows carrying <b>any</b> requested value; <see cref="FacetMatchModeValue.All"/> returns
+    /// only rows carrying <b>every</b> requested value (array containment).
+    /// </summary>
+    public string FacetMatchMode { get; init; } = FacetMatchModeValue.Any;
+
     public string? Kind { get; init; }
 
     /// <summary>Exact status match. When null, <see cref="ExcludeProposed"/> applies instead.</summary>
@@ -61,4 +68,18 @@ public static class MemorySearchDefaults
     public const int Limit = 50;
 
     public const int MaxLimit = 200;
+}
+
+/// <summary>
+/// Wire spellings of the facet/tag array match mode. <see cref="Any"/> is the default so the
+/// semantic-dedup recall step unifies rows across a batch's facets; containment is the deliberate
+/// narrowing form, available as <see cref="All"/>.
+/// </summary>
+public static class FacetMatchModeValue
+{
+    public const string Any = "any";
+
+    public const string All = "all";
+
+    public static readonly string[] Allowed = [Any, All];
 }

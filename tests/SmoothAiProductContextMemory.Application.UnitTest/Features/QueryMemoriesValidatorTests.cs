@@ -19,6 +19,22 @@ public class QueryMemoriesValidatorTests
 
     /// <summary>A half-specified ticket would silently widen the search instead of narrowing it.</summary>
     [Fact]
+    public void Rejects_an_unknown_facet_match_mode()
+    {
+        _validator.TestValidate(Request() with { FacetMatchMode = "every" })
+            .ShouldHaveValidationErrorFor(x => x.FacetMatchMode);
+    }
+
+    [Fact]
+    public void Accepts_known_facet_match_modes()
+    {
+        _validator.TestValidate(Request() with { FacetMatchMode = FacetMatchModeValue.All })
+            .ShouldNotHaveAnyValidationErrors();
+        _validator.TestValidate(Request() with { FacetMatchMode = FacetMatchModeValue.Any })
+            .ShouldNotHaveAnyValidationErrors();
+    }
+
+    [Fact]
     public void Rejects_a_partial_ticket_reference()
     {
         _validator.TestValidate(Request() with { TicketProvider = "jira" })
