@@ -20,12 +20,12 @@ HLDs and their LADRs justify themselves against.
 
 ## System Context
 
-One BRD governs one product. Below it sit three HLDs — storage, write pipeline, graph edges — each an
-independent design that must trace back to at least one `BR-NN`. A sibling BRD
+One BRD governs one product. Below it sit four HLDs — storage, write pipeline, graph edges, recall
+feedback — each an independent design that must trace back to at least one `BR-NN`. A sibling BRD
 ([BRD-002](../002-contextual-export/)) extends the same requirement space for bulk export and owns
-HLD 005. The BRD is written for a business
-reader: it names no store, no framework and no interface, so it can be validated against the
-practitioner's actual working problem rather than against the code that exists.
+HLD 005. The BRD is written for a business reader: it names no store, no framework and no interface,
+so it can be validated against the practitioner's actual working problem rather than against the code
+that exists.
 
 Its reasoning was accumulated through recorded braindump sessions rather than drafted in one pass,
 which is why §2 states the problem in three independently-observed forms and §6 attributes several
@@ -67,3 +67,4 @@ multi-tracker in BR-04.
 | 2026-09-13 | Created alongside promoting the BRD from a flat file to `docs/brd/001-context-memory/`. Records the BRD/HLD authority direction, the three-place HLD reference rule, and eleven known gaps found against the braindump record. | — |
 | 2026-09-13 | Second amendment applied to the BRD: BR-10 authority ranking, BR-11 checkpoint clause, findability risk, preferences in scope, multi-tracker tickets, terseness pass on §1/§2/§7. Five of eleven gaps closed; gap list pruned to the six remaining. | — |
 | 2026-09-13 | BRD-002 recorded as extending this requirement space and owning HLD 005; three-place rule clarified for sibling-BRD-owned HLDs; BR-17 export gap marked partly answered. | BRD-002 |
+| 2026-09-13 | HLD 004 added to the `Related` row and §11 — the three-place rule had been missed when it landed. | HLD 004 |
