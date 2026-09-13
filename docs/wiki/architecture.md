@@ -3,11 +3,11 @@
 ## Persistence
 
 The context-memory store is an **index over content**, not a content store. Document bodies live in
-blob storage (see [ADR-0001](../hlds/adr-0001-blob-storage-backend-and-addressing.md)); PostgreSQL
+blob storage (see [HLD 001](../hlds/001-context-memory-storage/)); PostgreSQL
 holds metadata, relationships, and everything filtered on. The authoritative persistence model is
-[ADR-0002](../hlds/adr-0002-persistence-layer-architecture.md). The write-path pipeline and the
+[HLD 001](../hlds/001-context-memory-storage/). The write-path pipeline and the
 agent-facing skill contract (the **sole interface** to the store) are specified in
-[ADR-0003](../hlds/adr-0003-context-memory-write-pipeline.md); the skill lives at
+[HLD 002](../hlds/002-context-memory-write-pipeline/); the skill lives at
 `.agents/skills/context-memory/`.
 
 ### Three-level hierarchy
@@ -60,8 +60,8 @@ findable without their bodies being indexed. Indexes:
 - **full-text** over `name`/`description` and `statement`/`content_summary`
 - **B-tree** over `kind`, `status`, `initiative_id`
 
-`repo` is not indexed yet — the retrieval query that would use it does not exist, so the index is
-deferred (see ADR-0002).
+`repo` is indexed — `IX_memory_group_repo` (B-tree, added 2026-09-10) — and the retrieval query filters
+on it (see [HLD 001](../hlds/001-context-memory-storage/)).
 
 `label.usage_count` is not a column — it is the derived `label_usage` view.
 

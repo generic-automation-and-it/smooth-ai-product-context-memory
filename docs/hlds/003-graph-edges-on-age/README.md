@@ -16,7 +16,7 @@
 
 Memory relationships are currently a relational table (`memory_link`) serving exactly one access
 pattern: a one-hop reverse lookup — *what points at this memory?* The stated ambition is larger.
-R10 exists so the store can reconstruct **why** something is true: the chain from a measurement, to
+R10 (Context-memory V2 tracker) exists so the store can reconstruct **why** something is true: the chain from a measurement, to
 the finding it produced, to the decision it justified. That is a variable-depth path query, and SQL
 serves it poorly.
 

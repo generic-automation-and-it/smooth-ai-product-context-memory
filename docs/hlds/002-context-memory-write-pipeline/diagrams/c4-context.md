@@ -94,7 +94,7 @@ sequenceDiagram
         A-->>S: Digest
     end
 
-    S-->>H: Receipt — created / versioned / linked / skipped(atomicity) / skipped(duplicate-link) / proposed
+    S-->>H: Receipt — created / versioned / linked / diverged / skipped(atomicity) / skipped(duplicate-link) / labels-proposed
     Note over H,S: Dry-run executes stages 1–5 identically<br/>and renders this same digest, persisting nothing.<br/>That is the pre-write veto — the digest is not.
 ```
 

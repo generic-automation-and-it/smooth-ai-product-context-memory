@@ -126,7 +126,7 @@ flowchart LR
   `.agents/skills/context-memory/tests/fixtures/scenarios.json` plus `score_fixtures.py`. Authored
   positive/negative scenarios for the semantic-dedup, atomicity, link and divergence stages, scored
   for recall AND precision against a countable expected-verdict set.
-- WT-3's test approach is specified in `docs/hlds/adr-0003-context-memory-write-pipeline.md`. These
+- WT-3's test approach is specified in `docs/hlds/002-context-memory-write-pipeline/nfrs/NFR-02-deduplication-accuracy.md`. These
   are not this repo's L0/L1/L2 tiers, which apply to the C# API (WT-2).
 
 ## Requirements

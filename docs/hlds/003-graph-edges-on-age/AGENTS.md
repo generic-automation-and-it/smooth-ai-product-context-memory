@@ -57,4 +57,4 @@ operability and compatibility. Two shape how code is written rather than merely 
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
-| 2026-09-14 | Created — edges-only graph adoption, five LADRs, four NFRs, C1 + ER + sequence diagrams. | HLD 001 |
+| 2026-09-14 | Created — edges-only graph adoption, five LADRs, four NFRs, C1 + ER + sequence diagrams. | Amends HLD 001 |

@@ -21,4 +21,4 @@ Authoring skill for design-only HLD folders under `docs/hlds/NNN-<slug>/`. The s
 | Date | Change | Ref |
 |:-----|:-------|:----|
 | 2026-06-16 | Initial version — ported from upstream `create-hld`, made project-agnostic (Linear→tracker, `.docs/hld`→`.docs/hlds`, dropped historical TEMPLATE_HLD.md and repo-specific reference HLDs). | |
-| 2026-09-14 | Output dir moved `.docs/hlds/` → `docs/hlds/` so docs are visible. | |
+| 2026-09-13 | Output dir moved `.docs/hlds/` → `docs/hlds/` so docs are visible. | |

@@ -11,6 +11,7 @@
 ## Verification
 
 - Plant a representative secret of each supported shape in candidate content, run the pipeline, and assert the stored body contains no occurrence of the planted value.
+- Force detection to fail (non-zero exit or timeout from the redaction script) and assert the write is blocked, or the candidate flagged unverified — never silently persisted unscrubbed.
 - Assert the digest names the rule and candidate but contains neither the matched span nor surrounding content.
 - Capture all log output during a redacting write and assert the planted value appears nowhere in it.
 - Assert a candidate with no secret passes through byte-identical, so detection is not corrupting ordinary content.

@@ -14,5 +14,6 @@ Merged with ADR-0001, which described the other half of the same design.
 | Constraint strategy, triggers, guard test, soft constraints | [LADR-07](./001-context-memory-storage/ladrs/LADR-07-enforcement-tiers.md) |
 | Entity model diagram | [diagrams](./001-context-memory-storage/diagrams/c4-context.md) |
 | Search surface and index strategy | [NFR-02 Performance](./001-context-memory-storage/nfrs/NFR-02-performance.md) |
+| Relationships as a relational table (`memory_link`) | [LADR-02](./001-context-memory-storage/ladrs/LADR-02-hybrid-placement-rule.md) — superseded in discovery by [HLD 003](./003-graph-edges-on-age/) |
 
 Retained as a pointer so existing references resolve. Do not extend this file.

@@ -235,7 +235,7 @@ complete it is.
 | Constraint | Implication |
 |---|---|
 | Single practitioner, single machine | No multi-user design, no access-control model |
-| Operates offline | No dependency on external services at capture or recall |
+| Operates offline | The store and its data path are fully local; capture-time summarisation uses the assistant's model and degrades to unsummarised + backfill when unavailable |
 | Capture happens through the AI assistant | The assistant's judgement determines capture quality |
 | Sensitive commercial reasoning | Privacy is a requirement, not a preference |
 

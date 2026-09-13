@@ -12,7 +12,8 @@
 | Approval gating semantics | [LADR-06](./002-context-memory-write-pipeline/ladrs/LADR-06-gate-status-not-persistence.md) |
 | Digest as receipt; dry-run as veto | [LADR-07](./002-context-memory-write-pipeline/ladrs/LADR-07-digest-is-a-receipt.md) |
 | Pipeline sequence | [diagrams](./002-context-memory-write-pipeline/diagrams/c4-context.md) |
-| Dedup test approach and divergence fixture | [NFR-02](./002-context-memory-write-pipeline/nfrs/NFR-02-deduplication-accuracy.md) |
+| Dedup test approach | [NFR-02](./002-context-memory-write-pipeline/nfrs/NFR-02-deduplication-accuracy.md) |
+| Divergence fixture (V2, deferred) | [Migration Plans](./002-context-memory-write-pipeline/AGENTS.md) — strip rule retained in the skill contract |
 
 **The API surface list** — the operation-by-operation contract — is implementation detail rather than
 design, and now lives with the API it specifies rather than in the HLD.

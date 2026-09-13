@@ -223,10 +223,9 @@ This section contains SmoothLlmImposter-specific details that do not ship with t
 _For the live route mappings, see `.conductor/scripts/imposter-container.sh` — this table is regenerated
 from the script's `-e Imposter__Providers__*` exports on each kit release and is not the source of truth._
 
-These are setup-specific mappings chosen for this Conductor environment. They intentionally differ from the
-illustrative mappings and caching choices in
-[HLD 001](../../hlds/001-llm-imposter-routing/README.md#configuration); the HLD is not the runtime source of
-truth for this script. OpenCode Go target IDs are bare upstream strings with no `opencode-go/` prefix,
+These are setup-specific mappings chosen for this Conductor environment; the live source of truth is
+`.conductor/scripts/imposter-container.sh` (this table is regenerated from its `-e Imposter__Providers__*`
+exports on each kit release). OpenCode Go target IDs are bare upstream strings with no `opencode-go/` prefix,
 consistent with the live-upstream
 [`OpencodeToolNormalizationEvalTests.cs`](../../../tests/SmoothLlmImposter.Upstream.EvalTest/OpencodeToolNormalizationEvalTests.cs).
 OpenRouter targets keep the provider-prefixed slug the OpenRouter API expects (here `inclusionai/ling-3.0-flash:free`).

@@ -101,6 +101,7 @@ erDiagram
         text scope_identifier
         bigint initiative_id FK "NOT NULL"
         text repo "denormalised column, nullable"
+        text repo_url "denormalised column, nullable"
         jsonb tickets "GIN - accumulates over time"
         timestamptz created_on
     }
@@ -114,6 +115,7 @@ erDiagram
         uuid uuid UK "stable across versions"
         uuid lineage_id "shared across clones"
         text description "SUBJECT - stable"
+        text name "FTS-indexed with description"
         text subject_slug "unique per group"
         text_array tags "GIN - unversioned"
         text_array facets "GIN - unversioned"
@@ -124,6 +126,8 @@ erDiagram
         boolean is_current "partial unique index"
         text statement "CLAIM - volatile"
         text content_summary
+        smallint confidence
+        jsonb summary_stamp "D42 stamp"
         text blob_address "SHA-256"
         text kind "open vocabulary"
         text status "proposed|approved"

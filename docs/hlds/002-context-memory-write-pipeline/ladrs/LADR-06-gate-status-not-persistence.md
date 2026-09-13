@@ -4,7 +4,7 @@
 
 ## Context
 
-Some kinds of knowledge — rules, requirements, decisions — become **citable canon** once recorded, and
+Some kinds of knowledge — rules (`rule`), requirements (`nfr`), decisions (`decision`) — become **citable canon** once recorded, and
 a wrong one propagates into future work as though settled. The risk posture says to ask about what is
 irreversible.
 

@@ -9,7 +9,7 @@ future instruction**. The store is local, but local is not the same as trusted.
 
 - Retrieved memories render as **quoted data** carrying provenance, status and scope — never as imperative text.
 - **Proposed records are excluded or explicitly flagged** by default.
-- **Programme-scoped knowledge is never returned as shipped product fact**, and holding an identifier is not authority to read it as one.
+- **Programme-scoped knowledge (scope dimension `program`) is never returned as shipped product fact**, and holding an identifier is not authority to read it as one.
 
 ## Verification
 

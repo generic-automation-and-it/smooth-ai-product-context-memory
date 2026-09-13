@@ -56,7 +56,7 @@ Targets and verification live in [./nfrs/](./nfrs/). Two shape how code is writt
 
 - Unreferenced objects accumulate in the object store; a garbage-collection sweep is deferred, not solved. Orphaning drops the database reference only — deleting the object can destroy content another version still references.
 - Candidate-recall improvements (trigram similarity, stemming) are deferred until measurement justifies them; the text search configuration performs no stemming today.
-- A generated Markdown projection is owed to pay down the inspectability debt content addressing introduces (NFR-04).
+- The generated Markdown projection (`dotnet run --project src/SmoothAiProductContextMemory.Host -- export`) pays down the inspectability debt content addressing introduces; any remaining NFR-04 acceptance item (byte-identical idempotency assertion) is tracked, not the projection itself.
 
 ## Changelog
 

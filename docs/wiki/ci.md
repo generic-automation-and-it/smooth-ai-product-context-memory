@@ -1,11 +1,12 @@
 # CI/CD
 
-The pipeline is a single PR gate that builds and tests every change before it can merge to `main`.
+The pipeline is a single PR gate that builds and tests code changes before they can merge to `main`.
 
 ## PR Gate
 
 - **Workflow:** `.github/workflows/pr-gate.yml`
 - **Triggers:** `pull_request` → `main` (including PR branch updates), `push` → `main`, and manual `workflow_dispatch`.
+- **Paths filter:** the `push` and `pull_request` triggers fire only when `Directory.Packages.props`, `src/**`, `tests/**`, `.github/actions/**` or `.github/workflows/pr-gate.yml` change — docs-only PRs skip the gate; `workflow_dispatch` always runs.
 
 ### Steps
 

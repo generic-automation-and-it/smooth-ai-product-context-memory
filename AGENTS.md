@@ -22,7 +22,7 @@ Persistent memory service for AI agents: stores summarized, labelled context (li
 | Host | `src/SmoothAiProductContextMemory.Host/` | ASP.NET Core Web API, Serilog, Scalar OpenAPI |
 | AppHost | `src/SmoothAiProductContextMemory.AppHost/` | Aspire dev orchestrator — Postgres + MinIO blob storage + Seq |
 | ChatHost | `src/SmoothAiProductContextMemory.ChatHost/` | Standalone LLM microservice — owns Anthropic SDK; talks to Host via HTTP only (project not yet in tree) |
-| Docs | `docs/` | Wiki, HLDs, ADR pointer stubs — visible (not hidden `.docs`) |
+| Docs | `docs/` | Wiki, HLDs, BRDs, ADR pointer stubs — visible (not hidden `.docs`) |
 
 Planned work tracked as worktasks under `.context/work-tasks/` (gitignored). Use `/create worktask`.
 

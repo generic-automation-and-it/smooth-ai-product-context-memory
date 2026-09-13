@@ -46,4 +46,5 @@ abstraction only, so the S3 implementation can be replaced without touching Appl
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-13 | `.docs`→`docs` move recorded — the HLD 001 LADR-06 reference path now resolves under the visible `docs/hlds/` tree. | — |
 | 2026-08-30 | Created — blob storage abstraction + MinIO S3 implementation, content addressing, gzip compression, lazy bucket creation. | — |
