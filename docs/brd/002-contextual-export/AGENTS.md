@@ -4,10 +4,7 @@ AI Context: BRD for contextual knowledge export. Updated: 2026-09-13
 
 ## TL;DR
 
-Business authority for exporting a **slice** of the store as one composed document plus a findings
-report. Requirements in [README.md](./README.md), numbered `BR-18` … `BR-36`, continuing
-[BRD-001](../001-context-memory/)'s space. Technology-free by construction — every "how" lives in
-[HLD 005](../../hlds/005-contextual-export/).
+Business authority for a portable grounding document that preserves product meaning and exposes its limits; [README.md](./README.md) continues BRD-001 at `BR-18` … `BR-36`, with implementation owned by HLD 005.
 
 ## Non-Negotiables
 
@@ -23,26 +20,21 @@ report. Requirements in [README.md](./README.md), numbered `BR-18` … `BR-36`, 
 
 ## System Context
 
-BRD-001 covers capture and recall — knowledge going in, and answers coming out one question at a time.
-This BRD covers the third movement: knowledge coming out **in bulk, as a document**. It exists because
-BRD-001's narrowness (BR-06) is correct for answering and insufficient for understanding, and because
-its trust requirements (BR-10 contradictions, BR-15 gaps) only fire when a retrieval happens to touch
-the problem.
-
-One HLD sits below it — [HLD 005](../../hlds/005-contextual-export/). Two others are load-bearing
-dependencies rather than children: HLD 003 supplies the relationship traversal BR-19 needs, and HLD 004
-overlaps BR-29's weak-summary finding.
-
-This BRD also closes a gap recorded against BRD-001: its `AGENTS.md` notes that "BR-17 is stated as
-settled and is not … the BRD does not mention export at all." BR-21 here is the curated half of that
-answer. The whole-store dump is the other half and predates this document.
+BRD-001 governs capture and recall; this BRD governs a composed document for spec preparation,
+handover and re-entry. The existing whole-store dump already provides readable access to records;
+contextual export adds composition and findings rather than replacing that path. HLD 005 owns its
+design, with HLD 003 supplying relationships and HLD 004 supplying relevant findability evidence.
 
 ## Key Behaviors
 
 - **`Accepted when:` clauses are the contract, not the prose above them.** The paragraph explains why; the clause is what a reviewer tests.
 - **BR-19 and BR-30 are one idea seen twice.** Widening is only safe because its limits are reported. A design that widens well but reports its reach poorly fails both, and fails worse than one that under-reaches loudly.
 - **BR-20 constrains selection only, never composition.** Selection must be reproducible; wording may vary between runs because composition is judgement. Reading BR-20 as "identical document" would forbid the judgement the capability exists to apply.
-- **BR-23 is collapse, not deduplication.** Every origin survives the merge. A design that picks a winner and discards the rest satisfies the word "once" and breaks the requirement.
+- **The snapshot date belongs to the document, not a claim's validity.** BR-21 dates the export; it does not certify that its claims are current or require generation time inside the deterministic selection described by HLD 005.
+- **Compression and consolidation must preserve applicability.** BR-22 and BR-23 retain conditions, exceptions and all origins. Similar wording across customers or lifecycle states is not sufficient to merge; repeated captures of the same source are not necessarily independent evidence.
+- **Proposed is not shipped.** BR-24 preserves recorded lifecycle and unknown status. Neither capture recency nor confident prose establishes current product behavior.
+- **BR-25 distinguishes stored claims from generated analysis.** Questions and inferences need a stated basis, not a fabricated source memory. Headings and navigation are not substantive claims.
+- **BR-27 bounds gap detection.** Its basis is the task, interpretation of included knowledge or an explicit practitioner expectation. General suggestions remain analysis; absence from a slice is not absence from the product or store.
 - **BR-28 inherits BR-10's two-case structure.** Where a stated authority settles a disagreement, apply it and say so; where nothing does, the contradiction *is* the finding. Do not flatten these into "report everything" or "resolve everything".
 - **BR-31 is why findings are output and not a write.** An export that records its own findings has turned a read into a capture and bypassed the judgement BR-01 depends on.
 - **BR-32 is not a performance requirement.** It is about consent: the practitioner sees the size of what they asked for before paying for it. Making composition faster does not satisfy it.
@@ -52,19 +44,23 @@ answer. The whole-store dump is the other half and predates this document.
 
 ## Migration Plans
 
-Known incompleteness as of 2026-09-13, deliberately left open rather than guessed at:
+Design follow-up after review of the revised business requirements:
 
-- **"What a slice should reasonably contain" is undefined** (BR-27). Gap detection needs an expectation to measure against, and the BRD asserts one exists without stating where it comes from. Until that is settled, gap findings will be whatever the composing model considers conspicuous — useful, but not a specification. Resolve when the first exports show which absences actually matter.
+- **HLD 005 still describes the earlier gap definition as unresolved.** Align its gap findings with BR-27's stated basis. Do not implement generic expectations as established product rules. The HLD's analysis taxonomy and BR-25 attribution language also need to distinguish findings from stored claims.
+- **HLD 005's collapse and lifecycle criteria need the fidelity cases in §7.** Preserve scope and proposed status, and do not count repeated copies of one source as independent corroboration. This BRD does not decide how those distinctions are stored.
+- **Combined selection semantics and history policy need explicit design treatment.** BR-18 requires visible combination behavior without choosing an unstated AND/OR rule. BR-24 retains selected history, BR-30 accounts for limits, and BR-33 still excludes hidden material.
+- **Preview consistency needs a design decision.** Define behavior when knowledge changes between preview and composition so the cost and scope reviewed by the practitioner remain meaningful (BR-20, BR-32).
+- **Size and usability limits remain unmeasured.** Validate using the reference workflows before setting operational limits; do not assume a memory count guarantees a useful document or one-pass composition.
+- **BR-29's overlap with HLD 004 remains open.** A bulk-reading hypothesis about a weak summary and an observed recall signal are different evidence. Keep that distinction when connecting the mechanisms.
+- **Comparing exports over time is not required.** A dated snapshot and reproducible selection do not imply automatic refresh or document diffing.
 - **No requirement governs export age.** A document is a projection at a moment, and nothing says whether a three-month-old export handed to a colleague should announce that it is stale. Trigger: the first time an export is re-read rather than regenerated.
-- **The slice-size assumption (§8, tens to low hundreds) is unmeasured.** Every cost and readability judgement rests on it. Trigger: the first export whose slice exceeds it.
-- **BR-29's overlap with HLD 004 is unreconciled.** Both address weak summaries — HLD 004 from never-recalled signal, this from bulk reading. Two mechanisms answering one question will eventually disagree about which memories are weak. Resolve when HLD 004 leaves discovery.
-- **Nothing requires exports to be comparable over time.** BR-20 makes selection reproducible, which is not the same as making two exports of the same slice diffable across a month of capture. Whether that matters is unknown.
 - **The focus set is stated but not yet validated** (BR-35). Five were named from how the practitioner actually works; only use will show whether *specification* is distinct enough from *architecture* to survive, or whether *review* is a focus at all rather than a different document shape. Trigger: the first focused exports. Do not add a sixth before the five have been used.
 
 ## Changelog
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-13 | Refined the PM grounding workflow, fidelity and lifecycle acceptance criteria, bounded gap findings, snapshot meaning and size preview; preserved BR-18 … BR-34 and single-user scope. Recorded downstream design alignment separately from business requirements. | BRD-002 §§4, 6–8 |
 | 2026-09-13 | Created — BRD-002 for contextual knowledge export. Continues BRD-001's requirement space at `BR-18`; adds BO-6 … BO-10; closes BRD-001's recorded "BRD does not mention export at all" gap for the curated case. | HLD 005 |
 | 2026-09-13 | Added the three-place HLD-reference rule (owned: HLD 005; §11 rows for 003/004 are dependency pointers). | BRD-001 |
 | 2026-09-13 | Added BR-35 (focus on the work the document feeds) and BR-36 (a focus never changes selection and never suppresses a finding), plus §4's statement that there is deliberately no single primary consumer. Raised by review asking who the primary user is; the answer is that the work is knowable at request time and the reader is not. | BR-35, BR-36 |
