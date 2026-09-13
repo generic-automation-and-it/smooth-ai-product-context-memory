@@ -14,7 +14,7 @@ Recorded at HLD-003 foundation, **before** `memory_link` is dropped. The post-cu
 | **p95** | 0.429 ms |
 | **NFR-02 one-hop target** | p95 ≤ 10 ms, and no slower than this baseline after cutover |
 | **Hardware** | local Docker AGE image `docker.io/apache/age:release_PG17_1.7.0` (Postgres 17), Apple Silicon |
-| **Re-run** | `SMOOTH_AGE_BASELINE=1 dotnet test tests/SmoothAiProductContextMemory.Infrastructure.ComponentTest --filter FullyQualifiedName~AgeOneHopBaselineTests` |
+| **Re-run** | Relational one-hop harness removed at the AGE cutover (PR #38). Recorded numbers remain the baseline. Post-cutover AGE re-run lands with the NFR-02 follow-up. |
 
 ## Plan
 
