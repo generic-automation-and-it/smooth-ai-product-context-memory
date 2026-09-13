@@ -12,6 +12,11 @@ Recorded at HLD-003 WT-01 adoption. Update this file whenever either version cha
 
 ## Pre-upgrade check
 
+The pairing is also asserted at runtime: `MigrateSmoothAiProductContextMemoryAsync` verifies
+PG major 17 + AGE `1.7.0` (constants in `AgeSession`) after applying migrations and fails
+startup on mismatch. A version bump therefore updates `AgeSession` constants, this file, and
+the image pins in both Aspire hosts together.
+
 Before any Postgres major upgrade:
 
 1. Confirm Apache AGE publishes a release tag for the target major (`release_PG<major>_*`, not `dev_snapshot_*`).
