@@ -2,7 +2,7 @@
 
 ## TL;DR
 
-EF Core + PostgreSQL index over blob-stored content. Seven entities: `Initiative`, `Label`, `MemoryGroup`, `GroupDescription`, `Memory`, `MemoryVersion`, `MemoryLink`. Authoritative model is `.docs/hlds/adr-0002-persistence-layer-architecture.md`; where this file and the code disagree with it, the ADR wins and should be reconciled.
+EF Core + PostgreSQL index over blob-stored content. Seven entities: `Initiative`, `Label`, `MemoryGroup`, `GroupDescription`, `Memory`, `MemoryVersion`, `MemoryLink`. Authoritative model is `docs/hlds/001-context-memory-storage/`; where this file and the code disagree with it, the HLD wins and should be reconciled.
 
 ## Non-Negotiables
 

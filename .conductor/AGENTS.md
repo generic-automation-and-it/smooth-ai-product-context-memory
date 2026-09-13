@@ -2,7 +2,7 @@
 
 AI Context: shared Conductor repository scripts (`.conductor/settings.toml` + `.conductor/scripts/`) that
 bring up the SmoothLlmImposter Docker container and wire `code-review-graph` on every teammate's workspace.
-Human-facing walkthrough and the manual UI paste-in alternative: `.docs/wiki/setups/conductor.build-smooth-llm-imposter.md`.
+Human-facing walkthrough and the manual UI paste-in alternative: `docs/wiki/setups/conductor.build-smooth-llm-imposter.md`.
 Updated: 2026-08-01
 
 ## TL;DR
