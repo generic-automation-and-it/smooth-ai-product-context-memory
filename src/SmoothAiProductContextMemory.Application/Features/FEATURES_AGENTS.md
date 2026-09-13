@@ -15,7 +15,7 @@ HTTP API the context-memory skill consumes — uuid-only wire, Mediator slices, 
 - **Never `DeleteAsync` on the write path.** Content-addressed blobs are shared; "orphan" means drop the DB reference only.
 - **No predicate is evaluated in the handler.** Retrieval goes through `IMemorySearch`; filtering materialised rows defeats the full-text/array/validity indexes and drags whole version chains over the wire.
 - **Never classify a database error by message text.** `IDbErrorMapper` matches SQLSTATE. Substring matching mis-fires on any message containing a word like "unique", and provider text must never reach the caller.
-- **Do not add a LabelUsage entity** for the `label_usage` view — the seven-type model-shape guard fails on purpose.
+- **Do not add a LabelUsage entity** for the `label_usage` view — the six-type model-shape guard fails on purpose.
 - **`kind` is an open string**, not an enum or check constraint.
 - **Programme scope is never citable as product fact.** `MemoryScopeFilter.Plan` is the one source of truth and is expressed as *data* so the provider can push it into SQL. Default query omits `scope_dimension = program` unless the caller filters by that scope, a group uuid, or a ticket (in-group context). `self` is always returned with `scopeDimension`. The same plan gates the blob proxy and version history. Write path does not reject programme.
 - **Never log statement, summary, content, or blob address at Information.** Counts and lifecycle at `Information`, per-operation decisions at `Debug`.
@@ -61,7 +61,7 @@ sequenceDiagram
 - **Status**: Accepted
 - **Context**: Handlers need `DbSet` and transactions; Application must not reference Infrastructure types.
 - **Decision**: `IApplicationDbContext` in `Common/Persistence/`; `SmoothAiProductContextMemoryDbContext` implements it; DI maps scoped.
-- **Consequences**: Application references EF Core abstractions. Seven `DbSet`s only. `label_usage` is queried as SQL into an unmapped DTO.
+- **Consequences**: Application references EF Core abstractions. Six `DbSet`s only. Relationships go through `IMemoryGraph`. `label_usage` is queried as SQL into an unmapped DTO.
 
 ### LADR-002: Dry run is the real plan, gated at persist
 
@@ -158,6 +158,7 @@ sequenceDiagram
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-13 | CreateLink / SetMemories / Export re-pointed at `IMemoryGraph`. Duplicate skip vs 409 unchanged. Persistence no longer has `MemoryLink`. | HLD-003 |
 | 2026-09-13 | Intra-batch duplicate link skip characterised (`Duplicate_link_in_same_batch_is_skipped_not_fatal`). Store-vs-app self-link split recorded as a known limitation. | HLD-003 |
 | 2026-09-13 | Markdown export is an Application slice (`Features/Export/`), not an HTTP endpoint. Forensic dump bypasses `MemoryScopeFilter`. | PR #18 |
 | 2026-09-11 | Review fixes: dry run shares the write plan (LADR-002); retrieval pushed into PostgreSQL behind `IMemorySearch` with `asOf` + `limit` (LADR-005); scope rule as data and enforced on the blob proxy (LADR-003); errors classified by SQLSTATE (LADR-006); facet endpoint reads the view (LADR-007); stale links skipped (LADR-008); `PATCH /groups/{uuid}` and initiative registry added; preflight narrows by kind before the cap. | PR #14 review |

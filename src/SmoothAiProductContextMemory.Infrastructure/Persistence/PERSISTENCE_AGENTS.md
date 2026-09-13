@@ -2,11 +2,11 @@
 
 ## TL;DR
 
-EF Core + PostgreSQL index over blob-stored content. Seven entities: `Initiative`, `Label`, `MemoryGroup`, `GroupDescription`, `Memory`, `MemoryVersion`, `MemoryLink`. Apache AGE is installed in the same instance (empty `memory_graph` until the HLD 003 cutover). Authoritative model is `docs/hlds/001-context-memory-storage/`; graph rules live in `docs/hlds/003-graph-edges-on-age/`.
+EF Core + PostgreSQL index over blob-stored content. **Six** entities: `Initiative`, `Label`, `MemoryGroup`, `GroupDescription`, `Memory`, `MemoryVersion`. Relationships are Apache AGE edges in `memory_graph` (HLD 003 cutover) — not an EF entity. Authoritative model is `docs/hlds/001-context-memory-storage/`; graph rules live in `docs/hlds/003-graph-edges-on-age/`.
 
 ## Non-Negotiables
 
-- **Seven entities, no more.** Tags, facets, sources, repositories and tickets are deliberately denormalised, not tables. Reintroducing one fails the model-shape guard test (`Infrastructure.UnitTest/ModelShapeGuardTests`) by design — the failure is the point.
+- **Six entities, no more.** The seventh (`MemoryLink`) was dropped deliberately in the HLD 003 cutover — update the guard's literal list **and** `Length.ShouldBe(6)` together, never one. Tags, facets, sources, repositories and tickets stay denormalised. Reintroducing one fails `Infrastructure.UnitTest/ModelShapeGuardTests` by design.
 - **Domain entities carry no EF attributes** and reference nothing from `Microsoft.EntityFrameworkCore`; all mapping is fluent in `Persistence/Configurations/`.
 - **`MemoryVersion` and `GroupDescription` are append-only**, enforced by DB triggers. Never edit or delete a row in place — a correction is a new version with a higher version number.
 - **Every JSONB element carries its own `v` shape marker** (`{"v":1,"provider":"jira","key":"ACM-1","url":"..."}`). It is set in exactly one place — `JsonShapeDocument.Create`/base `V` property — and never hand-written. Do not bypass the typed model. Retrofitting is impossible.
@@ -20,7 +20,11 @@ EF Core + PostgreSQL index over blob-stored content. Seven entities: `Initiative
   database, so the suite is always a first start and never sees this. Do not drop the pin, and add it to
   any new `UseNpgsql` call site or history will split.
 - **AGE session init is per physical connection**, via `NpgsqlDataSourceFactory` / `UsePhysicalConnectionInitializer`. Never initialise once at start-up — that prepares one pooled connection and leaves the rest failing under load (HLD 003 / LADR-04).
-- **Do not model graph objects in EF.** `memory_graph`, vertex label `Memory`, and edge labels are created by SQL in a non-transactional migration and are invisible to the model snapshot. `memory_link` stays until the HLD 003 cutover.
+- **Do not model graph objects in EF.** `memory_graph`, vertex label `Memory`, and edge label `LINKS` are created by SQL and are invisible to the model snapshot. Relationship access is `IMemoryGraph` / raw Cypher, never a `DbSet`.
+- **Never put a descriptive property on a vertex.** A vertex holds `memory_uuid` only (LADR-02). Adding a second property must fail `Vertex_CarriesIdentityOnly`.
+- **Never write a relationship to a table and the graph.** `memory_link` is gone; dual-write is a defect (LADR-03).
+- **Never delete graph edges from C#.** The one delete implementation is `BEFORE DELETE ON memory` (`memory_graph_cascade`). A second path is an NFR-01 defect.
+- **Never create an edge without read-before-write.** Uniqueness is `(source uuid, target uuid, relation)`; the same pair may hold different relations. Concurrent duplicate-create races are accepted (same tier as subject uniqueness).
 - **`Label` registry is advisory, not enforcing.** There is deliberately no FK from `memory.facets` to `label`. A facet absent from the registry must be accepted.
 
 ## System Context
@@ -33,14 +37,15 @@ erDiagram
     MEMORY_GROUP ||--o{ GROUP_DESCRIPTION : "append-only history"
     MEMORY_GROUP ||--o{ MEMORY : contains
     MEMORY ||--o{ MEMORY_VERSION : "append-only history"
-    MEMORY ||--o{ MEMORY_LINK : "links from/to"
+    MEMORY ||--o| GRAPH_VERTEX : "anchored by (identity only)"
+    GRAPH_VERTEX ||--o{ GRAPH_EDGE : "LINKS"
 ```
 
 ## Architecture Decisions
 
 **LADR-001: Store history as tables, not JSONB arrays.** Appending to a JSONB array is read-modify-write, so concurrent appends silently lose one. A table `INSERT` is atomic, and history *is* the audit trail — silently losing entries defeats the additive-only guarantee. Consequence: `MemoryVersion` and `GroupDescription` grow monotonically.
 
-**LADR-002: Keep `MemoryLink` as a table.** "What points at this memory?" is an index seek on `target_memory_id` as a table but a full containment scan as JSONB. Graph edges are the one genuinely relational structure here.
+**LADR-002 (superseded by HLD 003):** `MemoryLink` was a table so reverse lookup was an index seek. The HLD 003 cutover replaced it with AGE edges (`:LINKS` with `relation` + `reason`). Reverse lookup is Cypher one-hop keyed on `memory_uuid`. Uniqueness and cascade are application/trigger invariants (LADR-05), not a composite PK / FK.
 
 **LADR-003: `Memory`/`MemoryVersion` split along the subject/claim line.** Description (subject) is stable by definition and is what deduplication matches on, so it and `subject_slug` live on the stable `Memory` row. Statement (claim) is volatile, so it lives on the versioned row. Tags and facets are classification, not claims, and are therefore unversioned — placing them on `Memory` is what makes that true.
 
@@ -74,14 +79,16 @@ erDiagram
 - **Version bump ordering**: because the partial unique index only allows one current version, a bump must flip the old version's `is_current` to `false` *before* inserting the new current version. Inserting the new current while the old is still current violates the index (both current at insert time). **Wrap both statements in one transaction** — they are separate round-trips, so a failure between them leaves the memory with *zero* current versions, a state no constraint forbids and nothing detects. See `BumpVersionAsync` in the L1 tests.
 - **AGE LOAD + `search_path` are session properties.** `DISCARD ALL` on pool return would undo them, so the data source sets `NoResetOnClose`. This applies to **all** connections (one shared data source): session state is never reset on pool return, so a leaked session-scoped `SET` survives into the next borrower — the trigger's `SET LOCAL`-only rule above is load-bearing, not a style preference. The initialiser skips `LOAD` until `pg_extension` contains `age`, then migrate clears that pool (without opening a connection) so connections opened before `CREATE EXTENSION` are not reused unprepared, and asserts the PG major + AGE version pairing (NFR-04) on a fresh connection. Test/host migrate DI must register the same `NpgsqlDataSource` singleton — migrate now fails loudly if it is absent, because clearing a differently-keyed pool is a silent no-op. **Multi-instance rollout constraint (cutover):** `ClearPool` only heals the migrating process; other instances whose pools filled before `CREATE EXTENSION` keep unprepared connections until restart. Roll out graph reads only after all instances have restarted past the migration.
 - **AGE catalog writes must commit to become visible.** The AGE migration uses `suppressTransaction: true` because `create_graph` / `create_*label` inside the ambient migration transaction are invisible to other sessions. Every step is guarded by an `ag_catalog` existence check so a mid-batch failure (partial state, migration unrecorded) re-runs cleanly.
-- **Relationship uniqueness** is the composite `(source_memory_id, target_memory_id, relation)`. The same pair may hold several different relations; the same directed triple cannot. Direction is identity — A→B and B→A are distinct rows. Relationships are not group-bounded.
-- **Deleting a memory cascades inbound and outbound links** via FKs on both sides. Versionless memories delete without the history bypass; a memory that has versions still needs `SET LOCAL app.allow_history_delete`.
-- **Self-link is unprevented at persistence.** `source_memory_id = target_memory_id` persists. Application validators reject it (400). The split is current behaviour, characterised not tightened (HLD-003).
+- **Relationship uniqueness** is read-before-write on `(source uuid, target uuid, relation)` inside `IMemoryGraph.CreateAsync`. The same pair may hold several different relations; the same directed triple cannot. Direction is identity — A→B and B→A are distinct. Relationships are not group-bounded. Open vocabulary: relation is an edge property on `:LINKS`, not a per-type elabel. Concurrent duplicate creates can race (no unique constraint); sequential CreateLink still 409, SetMemories still skip.
+- **Deleting a memory strips incident edges in the same transaction** via `BEFORE DELETE ON memory` (`memory_graph_cascade`): MATCH vertex by `memory_uuid`, DELETE incident edges then the vertex, then the row proceeds. Fires for `Memories.Remove`, group cascade, and a future purge. Versionless memories delete without the history bypass; a memory that has versions still needs `SET LOCAL app.allow_history_delete`. A failure after the graph strip (e.g. append-only guard) rolls both back.
+- **Self-link is unprevented at persistence.** Same uuid as source and target persists as a loop. Application validators reject it (400). The split is current behaviour, characterised not tightened (HLD-003).
+- **Vertices are lazy.** MERGE on first edge; memories with no relationships have no vertex.
+- **Graph commands enlist in the ambient EF transaction** on the same connection. CreateLink opens an explicit transaction (there is no SaveChanges). SetMemories already has one.
 
 ## Test References
 
 - **L0** — `tests/SmoothAiProductContextMemory.Domain.UnitTest/` (`SlugTests`, `JsonShapeDocumentTests`, `EntityInvariantTests`); `tests/SmoothAiProductContextMemory.Infrastructure.UnitTest/` (`ModelShapeGuardTests`, `NpgsqlDataSourceFactoryTests`).
-- **L1** — `tests/SmoothAiProductContextMemory.Infrastructure.ComponentTest/Persistence/` against real PostgreSQL via `AspireFixture`, fresh migrated database per test (`PersistenceTestBase`). Relationship uniqueness/integrity contract: `LinkTests` (duplicate directed triple refused by `PK_memory_link`, same pair different relations, opposite directions, cascade inbound+outbound, self-link persists at store, cross-group). AGE pool-recycle and cross-session visibility: `AgeFoundationTests`. Optional NFR-02 one-hop baseline: `AgeOneHopBaselineTests` (`SMOOTH_AGE_BASELINE=1`).
+- **L1** — `tests/SmoothAiProductContextMemory.Infrastructure.ComponentTest/Persistence/` against real PostgreSQL via `AspireFixture`, fresh migrated database per test (`PersistenceTestBase`). Relationship uniqueness/integrity contract: `LinkTests` (duplicate directed triple refused by `CreateAsync`, same pair different relations, opposite directions, trigger cascade inbound+outbound, group-delete orphan=0, mid-delete rollback, vertex identity-only, self-link persists at store, cross-group). AGE pool-recycle and cross-session visibility: `AgeFoundationTests`. NFR-02 relational one-hop numbers live in `docs/hlds/003-graph-edges-on-age/nfrs/NFR-02-one-hop-baseline.md` (post-cutover comparison is WT-03).
 
 ## Quality Constraints
 
@@ -92,6 +99,7 @@ erDiagram
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-13 | Cutover: drop `memory_link`; relationships are `:LINKS` edges (`relation` + `reason`); vertices `memory_uuid` only; delete via `memory_graph_cascade`; model-shape guard **six** types (deliberate). | HLD-003 |
 | 2026-09-13 | Characterised relationship uniqueness/integrity as the relational store provides it (duplicate directed triple, direction, cascade, self-link persists, cross-group). No production change. | HLD-003 |
 | 2026-09-13 | AGE foundation review fixes: idempotent migration guards, runtime PG/AGE version-pairing assert after migrate, migrate fails loudly without registered `NpgsqlDataSource`, multi-instance rollout constraint documented. | HLD-003 |
 | 2026-09-13 | AGE foundation: extension-bearing image, per-connection session init, non-transactional graph/label migration. `memory_link` unchanged. | HLD-003 |

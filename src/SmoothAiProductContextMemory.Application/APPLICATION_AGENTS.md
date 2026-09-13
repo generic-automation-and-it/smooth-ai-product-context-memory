@@ -12,8 +12,8 @@ Vertical-slice use cases dispatched via the Mediator source generator — one fo
 - **Use `Mediator` (martinothamar), not `MediatR`.** Register handlers as `Scoped` (`MediatorOptions.ServiceLifetime = ServiceLifetime.Scoped`) so they can consume scoped collaborators such as `IApplicationDbContext`; the generator defaults to Singleton, which fails DI scope validation.
 - **FluentValidation runs fail-fast** in a Mediator pipeline behavior under `Common/Pipelines/`, before the handler.
 - **References Domain only** — never Infrastructure or Host.
-- **Persistence contract is `IApplicationDbContext`**, not the Infrastructure DbContext. Seven `DbSet`s only; never map `label_usage` as an entity.
-- **Anything that needs a provider-specific operator goes behind an abstraction in `Abstractions/`, not into a handler.** `IMemorySearch` (index-matching retrieval: `to_tsvector`, `@>`) and `IDbErrorMapper` (SQLSTATE classification) are implemented in Infrastructure. A handler that reaches for provider syntax ends up filtering in memory or matching on message substrings — both were real defects here.
+- **Persistence contract is `IApplicationDbContext`**, not the Infrastructure DbContext. Six `DbSet`s only; never map `label_usage` as an entity. Relationships go through `IMemoryGraph`, not a `DbSet`.
+- **Anything that needs a provider-specific operator goes behind an abstraction in `Abstractions/`, not into a handler.** `IMemorySearch` (index-matching retrieval: `to_tsvector`, `@>`), `IDbErrorMapper` (SQLSTATE classification), and `IMemoryGraph` (AGE Cypher) are implemented in Infrastructure. A handler that reaches for provider syntax ends up filtering in memory or matching on message substrings — both were real defects here.
 - **Markdown export is an Application slice, not an HTTP endpoint.** `Features/Export/` owns tree shape, frontmatter and banners; `IMarkdownExportSink` writes bytes. Contract: `Features/Export/EXPORT_AGENTS.md`. Do not add an import path.
 
 ## Slice shape (`Features/<Name>/<UseCase>.cs`)
@@ -34,6 +34,7 @@ Feature-level contract (uuid wire, dry-run, scope, D42): `Features/FEATURES_AGEN
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-13 | Relationships via `IMemoryGraph`; six `DbSet`s. CreateLink / SetMemories / Export no longer touch `memory_link`. | HLD-003 |
 | 2026-09-13 | Markdown export slice (`Features/Export/`) — generated-never-maintained projection of the store. | PR #18 |
 | 2026-09-11 | Added `IMemorySearch` and `IDbErrorMapper` abstractions so retrieval predicates and error classification stay provider-side. | PR #14 review |
 | 2026-09-10 | HTTP API slices landed. Mediator Scoped + FluentValidation pipeline + `IApplicationDbContext`. Feature contract in `Features/FEATURES_AGENTS.md`. | PR #14 |

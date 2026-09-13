@@ -28,6 +28,7 @@ public static class ExportStore
 
     public sealed class Handler(
         IApplicationDbContext db,
+        IMemoryGraph graph,
         IBlobStorage blobStorage,
         IMarkdownExportSink sink,
         ILogger<Handler> logger) : IRequestHandler<Request, Response>
@@ -47,11 +48,9 @@ public static class ExportStore
                 .Include(m => m.Versions)
                 .ToArrayAsync(cancellationToken);
 
-            MemoryLink[] links = await db.MemoryLinks
-                .AsNoTracking()
-                .ToArrayAsync(cancellationToken);
+            IReadOnlyList<MemoryRelationship> links = await graph.ListAllAsync(cancellationToken);
 
-            Dictionary<long, Memory> memoriesById = memories.ToDictionary(m => m.Id);
+            Dictionary<Guid, Memory> memoriesByUuid = memories.ToDictionary(m => m.Uuid);
             Dictionary<long, MemoryGroup> groupsById = groups.ToDictionary(g => g.Id);
 
             IReadOnlyDictionary<Guid, string> groupFolders = ExportPaths.AssignGroupFolders(
@@ -146,7 +145,7 @@ public static class ExportStore
                         memory.Tags.OrderBy(x => x, StringComparer.Ordinal).ToArray(),
                         currentBody!,
                         historical,
-                        CollectLinks(memory, memoriesById, groupsById, links));
+                        CollectLinks(memory, memoriesByUuid, groupsById, links));
 
                     await sink.WriteFileAsync(
                         ExportPaths.MemoryFile(folder, memoryFiles[memory.Uuid]),
@@ -265,15 +264,15 @@ public static class ExportStore
 
         private static IReadOnlyList<ExportLink> CollectLinks(
             Memory memory,
-            IReadOnlyDictionary<long, Memory> memoriesById,
+            IReadOnlyDictionary<Guid, Memory> memoriesByUuid,
             IReadOnlyDictionary<long, MemoryGroup> groupsById,
-            IReadOnlyList<MemoryLink> links)
+            IReadOnlyList<MemoryRelationship> links)
         {
             var result = new List<ExportLink>();
 
-            foreach (MemoryLink link in links.Where(l => l.SourceMemoryId == memory.Id))
+            foreach (MemoryRelationship link in links.Where(l => l.SourceUuid == memory.Uuid))
             {
-                if (!TryResolve(link.TargetMemoryId, memoriesById, groupsById, out Memory? other, out MemoryGroup? otherGroup))
+                if (!TryResolve(link.TargetUuid, memoriesByUuid, groupsById, out Memory? other, out MemoryGroup? otherGroup))
                 {
                     continue;
                 }
@@ -287,9 +286,9 @@ public static class ExportStore
                     otherGroup.Uuid));
             }
 
-            foreach (MemoryLink link in links.Where(l => l.TargetMemoryId == memory.Id))
+            foreach (MemoryRelationship link in links.Where(l => l.TargetUuid == memory.Uuid))
             {
-                if (!TryResolve(link.SourceMemoryId, memoriesById, groupsById, out Memory? other, out MemoryGroup? otherGroup))
+                if (!TryResolve(link.SourceUuid, memoriesByUuid, groupsById, out Memory? other, out MemoryGroup? otherGroup))
                 {
                     continue;
                 }
@@ -303,7 +302,6 @@ public static class ExportStore
                     otherGroup.Uuid));
             }
 
-            // Deterministic across re-seeded stores: never order on internal bigint ids.
             return result
                 .OrderBy(l => l.Direction, StringComparer.Ordinal)
                 .ThenBy(l => l.OtherUuid)
@@ -312,13 +310,13 @@ public static class ExportStore
         }
 
         private static bool TryResolve(
-            long memoryId,
-            IReadOnlyDictionary<long, Memory> memoriesById,
+            Guid memoryUuid,
+            IReadOnlyDictionary<Guid, Memory> memoriesByUuid,
             IReadOnlyDictionary<long, MemoryGroup> groupsById,
             out Memory other,
             out MemoryGroup otherGroup)
         {
-            if (memoriesById.TryGetValue(memoryId, out Memory? memory)
+            if (memoriesByUuid.TryGetValue(memoryUuid, out Memory? memory)
                 && groupsById.TryGetValue(memory.GroupId, out MemoryGroup? group))
             {
                 other = memory;

@@ -172,7 +172,7 @@ public sealed class QueryMemoriesHandlerTests(AspireFixture aspire) : HandlerTes
     }
 
     private SetMemories.Handler NewSet() =>
-        new(AppDb, Blob, ErrorMapper, Loggers.CreateLogger<SetMemories.Handler>());
+        new(AppDb, Graph, Blob, ErrorMapper, Loggers.CreateLogger<SetMemories.Handler>());
 
     private QueryMemories.Handler NewQuery() =>
         new(AppDb, Search, Loggers.CreateLogger<QueryMemories.Handler>());

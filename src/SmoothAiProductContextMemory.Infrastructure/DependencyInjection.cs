@@ -50,6 +50,7 @@ public static class DependencyInjection
         // indexes needs Npgsql operators, and constraint identity is a SQLSTATE. Application depends
         // on the abstractions only.
         services.AddScoped<IMemorySearch, NpgsqlMemorySearch>();
+        services.AddScoped<IMemoryGraph, NpgsqlMemoryGraph>();
         services.AddSingleton<IDbErrorMapper, NpgsqlDbErrorMapper>();
 
         return services;

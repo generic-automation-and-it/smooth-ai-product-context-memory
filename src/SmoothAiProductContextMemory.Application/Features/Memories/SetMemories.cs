@@ -124,7 +124,7 @@ public static class SetMemories
         long? MemoryId,
         MemoryVersion? CurrentVersion);
 
-    private sealed record PlannedLink(LinkWrite Write, long? SourceMemoryId, long? TargetMemoryId, bool Skip);
+    private sealed record PlannedLink(LinkWrite Write, bool Skip);
 
     private sealed record WritePlan(
         MemoryGroup Group,
@@ -134,6 +134,7 @@ public static class SetMemories
 
     public sealed class Handler(
         IApplicationDbContext db,
+        IMemoryGraph graph,
         IBlobStorage blobStorage,
         IDbErrorMapper errorMapper,
         ILogger<Handler> logger) : IRequestHandler<Request, Response>
@@ -239,24 +240,22 @@ public static class SetMemories
                 return [];
             }
 
-            Dictionary<Guid, long> batchIds = items
-                .Where(i => i.Uuid is not null && i.MemoryId is not null)
-                .ToDictionary(i => i.Uuid!.Value, i => i.MemoryId!.Value);
+            HashSet<Guid> batchUuids = items
+                .Where(i => i.Uuid is not null)
+                .Select(i => i.Uuid!.Value)
+                .ToHashSet();
 
             var planned = new List<PlannedLink>(links.Count);
             var seen = new HashSet<(Guid Source, Guid Target, string Relation)>();
 
             foreach (LinkWrite link in links)
             {
-                long source = await ResolveMemoryIdAsync(link.SourceUuid, batchIds, cancellationToken);
-                long target = await ResolveMemoryIdAsync(link.TargetUuid, batchIds, cancellationToken);
+                await EnsureMemoryExistsAsync(link.SourceUuid, batchUuids, cancellationToken);
+                await EnsureMemoryExistsAsync(link.TargetUuid, batchUuids, cancellationToken);
 
                 bool duplicateInBatch = !seen.Add((link.SourceUuid, link.TargetUuid, link.Relation));
-                bool duplicateInStore = !duplicateInBatch && await db.MemoryLinks.AnyAsync(
-                    l => l.SourceMemoryId == source
-                        && l.TargetMemoryId == target
-                        && l.Relation == link.Relation,
-                    cancellationToken);
+                bool duplicateInStore = !duplicateInBatch
+                    && await graph.ExistsAsync(link.SourceUuid, link.TargetUuid, link.Relation, cancellationToken);
 
                 bool skip = duplicateInBatch || duplicateInStore;
                 if (skip)
@@ -264,26 +263,27 @@ public static class SetMemories
                     logger.LogDebug("Planned link skip. Relation: {Relation} InBatch: {InBatch}", link.Relation, duplicateInBatch);
                 }
 
-                planned.Add(new PlannedLink(link, source, target, skip));
+                planned.Add(new PlannedLink(link, skip));
             }
 
             return planned;
         }
 
-        private async Task<long> ResolveMemoryIdAsync(
+        private async Task EnsureMemoryExistsAsync(
             Guid uuid,
-            Dictionary<Guid, long> batchIds,
+            HashSet<Guid> batchUuids,
             CancellationToken cancellationToken)
         {
-            if (batchIds.TryGetValue(uuid, out long id))
+            if (batchUuids.Contains(uuid))
             {
-                return id;
+                return;
             }
 
-            Memory memory = await db.Memories
-                .SingleOrDefaultAsync(m => m.Uuid == uuid, cancellationToken)
-                ?? throw new NotFoundException($"Memory '{uuid}' was not found.");
-            return memory.Id;
+            bool exists = await db.Memories.AnyAsync(m => m.Uuid == uuid, cancellationToken);
+            if (!exists)
+            {
+                throw new NotFoundException($"Memory '{uuid}' was not found.");
+            }
         }
 
         private async Task<IReadOnlyList<string>> PlanLabelsAsync(
@@ -350,23 +350,23 @@ public static class SetMemories
                         : await VersionExistingAsync(item, address, cancellationToken));
                 }
 
-                foreach (PlannedLink link in plan.Links.Where(l => !l.Skip))
-                {
-                    db.MemoryLinks.Add(new MemoryLink
-                    {
-                        SourceMemoryId = link.SourceMemoryId!.Value,
-                        TargetMemoryId = link.TargetMemoryId!.Value,
-                        Relation = link.Write.Relation,
-                        Reason = link.Write.Reason,
-                    });
-                }
-
                 foreach (string name in plan.LabelsToInsert)
                 {
                     db.Labels.Add(new Label { Name = name, Status = Label.LabelStatus.Draft });
                 }
 
                 await errorMapper.SaveOrMapAsync(() => db.SaveChangesAsync(cancellationToken));
+
+                foreach (PlannedLink link in plan.Links.Where(l => !l.Skip))
+                {
+                    await graph.CreateAsync(
+                        link.Write.SourceUuid,
+                        link.Write.TargetUuid,
+                        link.Write.Relation,
+                        link.Write.Reason,
+                        cancellationToken);
+                }
+
                 await transaction.CommitAsync(cancellationToken);
 
                 return new Response(

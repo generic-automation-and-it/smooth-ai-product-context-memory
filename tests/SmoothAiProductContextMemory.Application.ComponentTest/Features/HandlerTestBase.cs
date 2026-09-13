@@ -29,6 +29,8 @@ public abstract class HandlerTestBase(AspireFixture aspire) : IAsyncLifetime
     /// <summary>Real provider search so predicates are proven against PostgreSQL, not LINQ-to-objects.</summary>
     protected IMemorySearch Search { get; private set; } = default!;
 
+    protected IMemoryGraph Graph { get; private set; } = default!;
+
     protected ILoggerFactory Loggers { get; private set; } = default!;
 
     protected CancellationToken Ct => TestContext.Current.CancellationToken;
@@ -49,6 +51,7 @@ public abstract class HandlerTestBase(AspireFixture aspire) : IAsyncLifetime
 
         Db = new SmoothAiProductContextMemoryDbContext(options);
         Search = new NpgsqlMemorySearch(Db);
+        Graph = new NpgsqlMemoryGraph(Db);
         Loggers = LoggerFactory.Create(b => b.SetMinimumLevel(LogLevel.Debug));
 
         var blobOptions = Microsoft.Extensions.Options.Options.Create(new BlobStorageOptions

@@ -31,7 +31,7 @@ public static class CreateLink
 
     public sealed class Handler(
         IApplicationDbContext db,
-        IDbErrorMapper errorMapper,
+        IMemoryGraph graph,
         ILogger<Handler> logger) : IRequestHandler<Request, Response>
     {
         public async ValueTask<Response> Handle(Request request, CancellationToken cancellationToken)
@@ -43,25 +43,14 @@ public static class CreateLink
             Memory target = await db.Memories.SingleOrDefaultAsync(m => m.Uuid == request.TargetUuid, cancellationToken)
                 ?? throw new NotFoundException($"Memory '{request.TargetUuid}' was not found.");
 
-            bool exists = await db.MemoryLinks.AnyAsync(
-                l => l.SourceMemoryId == source.Id
-                    && l.TargetMemoryId == target.Id
-                    && l.Relation == request.Relation,
-                cancellationToken);
-            if (exists)
+            await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+            if (await graph.ExistsAsync(source.Uuid, target.Uuid, request.Relation, cancellationToken)
+                || !await graph.CreateAsync(source.Uuid, target.Uuid, request.Relation, request.Reason, cancellationToken))
             {
                 throw new ConflictException("Link already exists.");
             }
 
-            db.MemoryLinks.Add(new MemoryLink
-            {
-                SourceMemoryId = source.Id,
-                TargetMemoryId = target.Id,
-                Relation = request.Relation,
-                Reason = request.Reason,
-            });
-
-            await errorMapper.SaveOrMapAsync(() => db.SaveChangesAsync(cancellationToken));
+            await transaction.CommitAsync(cancellationToken);
 
             logger.LogInformation("Create link completed");
             return new Response(source.Uuid, target.Uuid, request.Relation);

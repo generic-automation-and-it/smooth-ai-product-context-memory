@@ -24,8 +24,9 @@ Keep it relational when **any** hold: it has independent state; it requires bidi
 it is append-only history; or a constraint genuinely relied upon depends on it.
 
 Applying the rule removed six of thirteen entities. Tags and facets became indexed arrays; sources and
-tickets became JSONB; repository became plain columns. Registries with their own lifecycle, graph
-edges needing reverse traversal, and append-only history stayed relational.
+tickets became JSONB; repository became plain columns. Registries with their own lifecycle and
+append-only history stayed relational. Graph edges also stayed relational at foundation, needing
+reverse traversal, until the HLD-003 cutover moved them to Apache AGE.
 
 Every JSONB object carries a **shape marker** as its first key. This is per-document rather than
 per-column because collections accumulate over time — elements are appended under whatever shape was
@@ -40,7 +41,8 @@ Retrofitting is impossible once unmarked documents exist.
 
 ## Consequences
 
-- Seven entities instead of thirteen; three foreign keys on the main path.
+- Six entities instead of thirteen; three foreign keys on the main path. Seven until the HLD-003
+  cutover (2026-09-13) moved graph edges to Apache AGE.
 - Common reads need no joins — a memory carries its own tags and facets, a group its tickets and repository.
 - Renaming a repository or initiative touches many rows, accepted because writes are rare.
 - **JSONB shape drift is the principal residual risk.** A table change gets a migration; a shape change inside a document gets nothing. The shape marker plus strict serialisation through one typed model is the mitigation.

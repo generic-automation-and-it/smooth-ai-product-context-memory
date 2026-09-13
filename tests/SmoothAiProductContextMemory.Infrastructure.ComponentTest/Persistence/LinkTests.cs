@@ -1,71 +1,47 @@
 using Microsoft.EntityFrameworkCore;
+using SmoothAiProductContextMemory.Application.Abstractions;
+using SmoothAiProductContextMemory.Domain;
 using SmoothAiProductContextMemory.Domain.Entities;
+using SmoothAiProductContextMemory.Infrastructure.Persistence;
 
 namespace SmoothAiProductContextMemory.Infrastructure.ComponentTest.Persistence;
 
 /// <summary>
-/// Pins the relationship uniqueness and integrity contract as the store provides it today.
-/// The contract survives a later storage change: a failure here is a broken invariant, not
-/// an obsolete test.
+/// Pins the relationship uniqueness and integrity contract as the graph store provides it.
+/// A failure here is a broken invariant, not an obsolete test.
 /// </summary>
 public sealed class LinkTests : PersistenceTestBase
 {
     public LinkTests(AspireFixture aspire) : base(aspire) { }
 
+    private IMemoryGraph Graph => new NpgsqlMemoryGraph(Db);
+
     [Fact]
-    public async Task Link_PersistsWithReason_AndReverseLookupByTargetIsIndexServed()
+    public async Task Link_PersistsWithReason_AndReverseLookupByTarget()
     {
-        var group = TestEntities.NewGroup();
-        Db.MemoryGroups.Add(group);
-        await Db.SaveChangesAsync(Ct);
+        var (source, target) = await SeedPairAsync();
 
-        var source = TestEntities.NewMemory(group.Id, "Source", "The source subject");
-        var target = TestEntities.NewMemory(group.Id, "Target", "The target subject");
-        Db.Memories.AddRange(source, target);
-        await Db.SaveChangesAsync(Ct);
+        (await Graph.CreateAsync(source.Uuid, target.Uuid, MemoryRelation.DependsOn, "The target must hold before the source can hold", Ct))
+            .ShouldBeTrue();
 
-        var link = new MemoryLink
-        {
-            SourceMemoryId = source.Id,
-            TargetMemoryId = target.Id,
-            Relation = MemoryLink.RelationValue.DependsOn,
-            Reason = "The target must hold before the source can hold",
-        };
-        Db.MemoryLinks.Add(link);
-        await Db.SaveChangesAsync(Ct);
-
-        // Forward: source -> outbound links.
-        var forward = await Db.MemoryLinks.AsNoTracking()
-            .Where(l => l.SourceMemoryId == source.Id)
-            .SingleAsync(Ct);
-        forward.Reason.ShouldBe("The target must hold before the source can hold");
-        forward.Relation.ShouldBe(MemoryLink.RelationValue.DependsOn);
-
-        // Reverse: what points at this memory — index-served on target_memory_id.
-        var reverse = await Db.MemoryLinks.AsNoTracking()
-            .Where(l => l.TargetMemoryId == target.Id)
-            .ToListAsync(Ct);
-        reverse.Single().SourceMemoryId.ShouldBe(source.Id);
+        IReadOnlyList<MemoryRelationship> reverse = await Graph.ListTouchingAsync(target.Uuid, Ct);
+        MemoryRelationship link = reverse.Single();
+        link.SourceUuid.ShouldBe(source.Uuid);
+        link.TargetUuid.ShouldBe(target.Uuid);
+        link.Relation.ShouldBe(MemoryRelation.DependsOn);
+        link.Reason.ShouldBe("The target must hold before the source can hold");
     }
 
     [Fact]
     public async Task SamePair_CanHoldMultipleRelations()
     {
-        var group = TestEntities.NewGroup();
-        Db.MemoryGroups.Add(group);
-        await Db.SaveChangesAsync(Ct);
+        var (a, b) = await SeedPairAsync();
 
-        var a = TestEntities.NewMemory(group.Id, "A", "Subject A");
-        var b = TestEntities.NewMemory(group.Id, "B", "Subject B");
-        Db.Memories.AddRange(a, b);
-        await Db.SaveChangesAsync(Ct);
+        (await Graph.CreateAsync(a.Uuid, b.Uuid, MemoryRelation.DependsOn, "reason 1", Ct)).ShouldBeTrue();
+        (await Graph.CreateAsync(a.Uuid, b.Uuid, MemoryRelation.RelatesTo, "reason 2", Ct)).ShouldBeTrue();
 
-        Db.MemoryLinks.AddRange(
-            new MemoryLink { SourceMemoryId = a.Id, TargetMemoryId = b.Id, Relation = MemoryLink.RelationValue.DependsOn, Reason = "reason 1" },
-            new MemoryLink { SourceMemoryId = a.Id, TargetMemoryId = b.Id, Relation = MemoryLink.RelationValue.RelatesTo, Reason = "reason 2" });
-        await Db.SaveChangesAsync(Ct);
-
-        (await Db.MemoryLinks.CountAsync(l => l.SourceMemoryId == a.Id && l.TargetMemoryId == b.Id, Ct)).ShouldBe(2);
+        IReadOnlyList<MemoryRelationship> stored = await Graph.ListTouchingAsync(a.Uuid, Ct);
+        stored.Count(l => l.SourceUuid == a.Uuid && l.TargetUuid == b.Uuid).ShouldBe(2);
     }
 
     [Fact]
@@ -73,39 +49,14 @@ public sealed class LinkTests : PersistenceTestBase
     {
         var (a, b) = await SeedPairAsync();
 
-        Db.MemoryLinks.Add(new MemoryLink
-        {
-            SourceMemoryId = a.Id,
-            TargetMemoryId = b.Id,
-            Relation = MemoryLink.RelationValue.DependsOn,
-            Reason = "first",
-        });
-        await Db.SaveChangesAsync(Ct);
-        Db.ChangeTracker.Clear();
+        (await Graph.CreateAsync(a.Uuid, b.Uuid, MemoryRelation.DependsOn, "first", Ct)).ShouldBeTrue();
+        (await Graph.CreateAsync(a.Uuid, b.Uuid, MemoryRelation.DependsOn, "second", Ct)).ShouldBeFalse();
 
-        Db.MemoryLinks.Add(new MemoryLink
-        {
-            SourceMemoryId = a.Id,
-            TargetMemoryId = b.Id,
-            Relation = MemoryLink.RelationValue.DependsOn,
-            Reason = "second",
-        });
-
-        // The exception-shape assertions below attribute the refusal to the uniqueness
-        // constraint as the relational store raises it today. After the graph cutover (HLD-003 LADR-03) the
-        // invariant moves into the application, so the *behaviour* (second triple refused,
-        // count stays 1) must hold while these three lines are edited to match the new
-        // failure shape — that edit is expected, not a sign the test is obsolete.
-        var ex = await Should.ThrowAsync<DbUpdateException>(() => Db.SaveChangesAsync(Ct));
-        PostgresException postgres = ex.InnerException.ShouldBeOfType<PostgresException>();
-        postgres.SqlState.ShouldBe(PostgresErrorCodes.UniqueViolation);
-        postgres.ConstraintName.ShouldBe("PK_memory_link");
-
-        (await Db.MemoryLinks.AsNoTracking()
-            .CountAsync(l => l.SourceMemoryId == a.Id
-                && l.TargetMemoryId == b.Id
-                && l.Relation == MemoryLink.RelationValue.DependsOn, Ct))
-            .ShouldBe(1);
+        IReadOnlyList<MemoryRelationship> stored = await Graph.ListTouchingAsync(a.Uuid, Ct);
+        stored.Count(l => l.SourceUuid == a.Uuid
+            && l.TargetUuid == b.Uuid
+            && l.Relation == MemoryRelation.DependsOn).ShouldBe(1);
+        stored.Single(l => l.Relation == MemoryRelation.DependsOn).Reason.ShouldBe("first");
     }
 
     [Fact]
@@ -113,29 +64,15 @@ public sealed class LinkTests : PersistenceTestBase
     {
         var (a, b) = await SeedPairAsync();
 
-        Db.MemoryLinks.AddRange(
-            new MemoryLink
-            {
-                SourceMemoryId = a.Id,
-                TargetMemoryId = b.Id,
-                Relation = MemoryLink.RelationValue.RelatesTo,
-                Reason = "a to b",
-            },
-            new MemoryLink
-            {
-                SourceMemoryId = b.Id,
-                TargetMemoryId = a.Id,
-                Relation = MemoryLink.RelationValue.RelatesTo,
-                Reason = "b to a",
-            });
-        await Db.SaveChangesAsync(Ct);
+        (await Graph.CreateAsync(a.Uuid, b.Uuid, MemoryRelation.RelatesTo, "a to b", Ct)).ShouldBeTrue();
+        (await Graph.CreateAsync(b.Uuid, a.Uuid, MemoryRelation.RelatesTo, "b to a", Ct)).ShouldBeTrue();
 
-        var stored = await Db.MemoryLinks.AsNoTracking().ToListAsync(Ct);
+        IReadOnlyList<MemoryRelationship> stored = await Graph.ListAllAsync(Ct);
         stored.Count.ShouldBe(2);
-        stored.ShouldContain(l => l.SourceMemoryId == a.Id && l.TargetMemoryId == b.Id
-            && l.Relation == MemoryLink.RelationValue.RelatesTo);
-        stored.ShouldContain(l => l.SourceMemoryId == b.Id && l.TargetMemoryId == a.Id
-            && l.Relation == MemoryLink.RelationValue.RelatesTo);
+        stored.ShouldContain(l => l.SourceUuid == a.Uuid && l.TargetUuid == b.Uuid
+            && l.Relation == MemoryRelation.RelatesTo);
+        stored.ShouldContain(l => l.SourceUuid == b.Uuid && l.TargetUuid == a.Uuid
+            && l.Relation == MemoryRelation.RelatesTo);
     }
 
     [Fact]
@@ -152,43 +89,125 @@ public sealed class LinkTests : PersistenceTestBase
         Db.Memories.AddRange(a, b, c, d);
         await Db.SaveChangesAsync(Ct);
 
-        long deletedId = a.Id;
-        long unrelatedSourceId = c.Id;
-        long unrelatedTargetId = d.Id;
+        Guid deletedUuid = a.Uuid;
+        Guid unrelatedSource = c.Uuid;
+        Guid unrelatedTarget = d.Uuid;
 
-        Db.MemoryLinks.AddRange(
-            new MemoryLink
-            {
-                SourceMemoryId = a.Id,
-                TargetMemoryId = b.Id,
-                Relation = MemoryLink.RelationValue.DependsOn,
-                Reason = "outbound from deleted",
-            },
-            new MemoryLink
-            {
-                SourceMemoryId = c.Id,
-                TargetMemoryId = a.Id,
-                Relation = MemoryLink.RelationValue.RelatesTo,
-                Reason = "inbound to deleted",
-            },
-            new MemoryLink
-            {
-                SourceMemoryId = c.Id,
-                TargetMemoryId = d.Id,
-                Relation = MemoryLink.RelationValue.Implements,
-                Reason = "unrelated pair",
-            });
-        await Db.SaveChangesAsync(Ct);
+        (await Graph.CreateAsync(a.Uuid, b.Uuid, MemoryRelation.DependsOn, "outbound from deleted", Ct)).ShouldBeTrue();
+        (await Graph.CreateAsync(c.Uuid, a.Uuid, MemoryRelation.RelatesTo, "inbound to deleted", Ct)).ShouldBeTrue();
+        (await Graph.CreateAsync(c.Uuid, d.Uuid, MemoryRelation.Implements, "unrelated pair", Ct)).ShouldBeTrue();
 
         Db.Memories.Remove(a);
         await Db.SaveChangesAsync(Ct);
 
-        (await Db.MemoryLinks.AsNoTracking()
-            .CountAsync(l => l.SourceMemoryId == deletedId || l.TargetMemoryId == deletedId, Ct))
-            .ShouldBe(0);
-        (await Db.MemoryLinks.AsNoTracking()
-            .CountAsync(l => l.SourceMemoryId == unrelatedSourceId && l.TargetMemoryId == unrelatedTargetId, Ct))
-            .ShouldBe(1);
+        (await Graph.ListTouchingAsync(deletedUuid, Ct)).ShouldBeEmpty();
+        IReadOnlyList<MemoryRelationship> unrelated = await Graph.ListTouchingAsync(unrelatedSource, Ct);
+        unrelated.Count(l => l.SourceUuid == unrelatedSource && l.TargetUuid == unrelatedTarget).ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task GroupDelete_RemovesEdgesForCascadedMemories()
+    {
+        var group = TestEntities.NewGroup();
+        var other = TestEntities.NewGroup();
+        Db.MemoryGroups.AddRange(group, other);
+        await Db.SaveChangesAsync(Ct);
+
+        var a = TestEntities.NewMemory(group.Id, "A", "Subject A");
+        var b = TestEntities.NewMemory(group.Id, "B", "Subject B");
+        var c = TestEntities.NewMemory(other.Id, "C", "Subject C");
+        Db.Memories.AddRange(a, b, c);
+        await Db.SaveChangesAsync(Ct);
+
+        Guid deletedA = a.Uuid;
+        Guid deletedB = b.Uuid;
+
+        (await Graph.CreateAsync(a.Uuid, b.Uuid, MemoryRelation.DependsOn, "inside group", Ct)).ShouldBeTrue();
+        (await Graph.CreateAsync(c.Uuid, a.Uuid, MemoryRelation.RelatesTo, "into group", Ct)).ShouldBeTrue();
+        (await Graph.CreateAsync(c.Uuid, c.Uuid, MemoryRelation.RelatesTo, "unrelated loop", Ct)).ShouldBeTrue();
+
+        await using var conn = await DataSource.OpenConnectionAsync(Ct);
+        await using var tx = await conn.BeginTransactionAsync(Ct);
+        await using (var set = new NpgsqlCommand("SET LOCAL app.allow_history_delete = 'true'", conn, tx))
+        {
+            await set.ExecuteNonQueryAsync(Ct);
+        }
+
+        await using (var del = new NpgsqlCommand("DELETE FROM memory_group WHERE id = @id", conn, tx))
+        {
+            del.Parameters.AddWithValue("id", group.Id);
+            await del.ExecuteNonQueryAsync(Ct);
+        }
+
+        await tx.CommitAsync(Ct);
+
+        (await Graph.ListTouchingAsync(deletedA, Ct)).ShouldBeEmpty();
+        (await Graph.ListTouchingAsync(deletedB, Ct)).ShouldBeEmpty();
+        (await Graph.ListTouchingAsync(c.Uuid, Ct)).Count.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task ForcedFailureBetweenEdgeRemovalAndMemoryDelete_LeavesBothPresent()
+    {
+        var group = TestEntities.NewGroup();
+        Db.MemoryGroups.Add(group);
+        await Db.SaveChangesAsync(Ct);
+
+        var a = TestEntities.NewMemory(group.Id, "A", "Subject A");
+        var b = TestEntities.NewMemory(group.Id, "B", "Subject B");
+        Db.Memories.AddRange(a, b);
+        await Db.SaveChangesAsync(Ct);
+        Db.MemoryVersions.Add(TestEntities.NewVersion(a.Id, 1, "Claim"));
+        await Db.SaveChangesAsync(Ct);
+
+        (await Graph.CreateAsync(a.Uuid, b.Uuid, MemoryRelation.DependsOn, "must survive rollback", Ct)).ShouldBeTrue();
+
+        await Should.ThrowAsync<DbUpdateException>(() =>
+        {
+            Db.Memories.Remove(a);
+            return Db.SaveChangesAsync(Ct);
+        });
+
+        (await Db.Memories.AsNoTracking().CountAsync(m => m.Uuid == a.Uuid, Ct)).ShouldBe(1);
+        IReadOnlyList<MemoryRelationship> remaining = await Graph.ListTouchingAsync(a.Uuid, Ct);
+        remaining.Count.ShouldBe(1);
+        remaining[0].Reason.ShouldBe("must survive rollback");
+    }
+
+    [Fact]
+    public async Task Vertex_CarriesIdentityOnly()
+    {
+        var (a, b) = await SeedPairAsync();
+        (await Graph.CreateAsync(a.Uuid, b.Uuid, MemoryRelation.RelatesTo, "why", Ct)).ShouldBeTrue();
+
+        await using var conn = await DataSource.OpenConnectionAsync(Ct);
+        await using var cmd = new NpgsqlCommand(
+            $"""
+            SELECT keys::text FROM ag_catalog.cypher('{AgeSession.GraphName}', $$
+                MATCH (v:{AgeSession.VertexLabel})
+                RETURN keys(v)
+            $$) AS (keys agtype);
+            """,
+            conn);
+        await using var reader = await cmd.ExecuteReaderAsync(Ct);
+        var keys = new List<string>();
+        while (await reader.ReadAsync(Ct))
+        {
+            keys.Add(reader.GetString(0));
+        }
+
+        keys.Count.ShouldBeGreaterThan(0);
+        foreach (string row in keys)
+        {
+            row.ShouldContain("memory_uuid");
+            row.ShouldNotContain("subject");
+            row.ShouldNotContain("description");
+            row.ShouldNotContain("kind");
+            row.ShouldNotContain("scope");
+            row.ShouldNotContain("claim");
+            row.ShouldNotContain("reason");
+            row.ShouldBe("[\"memory_uuid\"]");
+        }
     }
 
     [Fact]
@@ -202,18 +221,12 @@ public sealed class LinkTests : PersistenceTestBase
         Db.Memories.Add(memory);
         await Db.SaveChangesAsync(Ct);
 
-        Db.MemoryLinks.Add(new MemoryLink
-        {
-            SourceMemoryId = memory.Id,
-            TargetMemoryId = memory.Id,
-            Relation = MemoryLink.RelationValue.RelatesTo,
-            Reason = "store has no self-link prevention",
-        });
-        await Db.SaveChangesAsync(Ct);
+        (await Graph.CreateAsync(memory.Uuid, memory.Uuid, MemoryRelation.RelatesTo, "store has no self-link prevention", Ct))
+            .ShouldBeTrue();
 
-        MemoryLink stored = await Db.MemoryLinks.AsNoTracking().SingleAsync(Ct);
-        stored.SourceMemoryId.ShouldBe(memory.Id);
-        stored.TargetMemoryId.ShouldBe(memory.Id);
+        MemoryRelationship stored = (await Graph.ListTouchingAsync(memory.Uuid, Ct)).Single();
+        stored.SourceUuid.ShouldBe(memory.Uuid);
+        stored.TargetUuid.ShouldBe(memory.Uuid);
     }
 
     [Fact]
@@ -229,20 +242,26 @@ public sealed class LinkTests : PersistenceTestBase
         Db.Memories.AddRange(source, target);
         await Db.SaveChangesAsync(Ct);
 
-        Db.MemoryLinks.Add(new MemoryLink
-        {
-            SourceMemoryId = source.Id,
-            TargetMemoryId = target.Id,
-            Relation = MemoryLink.RelationValue.DependsOn,
-            Reason = "relationships are not group-bounded",
-        });
-        await Db.SaveChangesAsync(Ct);
+        (await Graph.CreateAsync(source.Uuid, target.Uuid, MemoryRelation.DependsOn, "relationships are not group-bounded", Ct))
+            .ShouldBeTrue();
 
-        MemoryLink stored = await Db.MemoryLinks.AsNoTracking().SingleAsync(Ct);
-        stored.SourceMemoryId.ShouldBe(source.Id);
-        stored.TargetMemoryId.ShouldBe(target.Id);
-        (await Db.Memories.AsNoTracking().SingleAsync(m => m.Id == source.Id, Ct)).GroupId
-            .ShouldNotBe((await Db.Memories.AsNoTracking().SingleAsync(m => m.Id == target.Id, Ct)).GroupId);
+        MemoryRelationship stored = (await Graph.ListAllAsync(Ct)).Single();
+        stored.SourceUuid.ShouldBe(source.Uuid);
+        stored.TargetUuid.ShouldBe(target.Uuid);
+        (await Db.Memories.AsNoTracking().SingleAsync(m => m.Uuid == source.Uuid, Ct)).GroupId
+            .ShouldNotBe((await Db.Memories.AsNoTracking().SingleAsync(m => m.Uuid == target.Uuid, Ct)).GroupId);
+    }
+
+    [Fact]
+    public async Task UnknownRelation_Persists()
+    {
+        var (a, b) = await SeedPairAsync();
+
+        (await Graph.CreateAsync(a.Uuid, b.Uuid, "derived_from", "open vocabulary", Ct)).ShouldBeTrue();
+
+        MemoryRelationship stored = (await Graph.ListAllAsync(Ct)).Single();
+        stored.Relation.ShouldBe("derived_from");
+        stored.Reason.ShouldBe("open vocabulary");
     }
 
     private async Task<(Memory A, Memory B)> SeedPairAsync()
