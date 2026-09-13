@@ -15,6 +15,9 @@ internal static class DistributedApplicationBuilderExtensions
     private const int DefaultSeqPort = 5341;
     private const string HostConnectionStringName = "SmoothAiProductContextMemory";
     private const string HostReadinessPath = "/health";
+    private const int DefaultHostPort = 5141;
+    private const string HostContainerName = "mimisbrunnr-host";
+    private const string DefaultHostImage = "ghcr.io/generic-automation-and-it/smooth-ai-product-context-memory:latest";
     // The Docker Desktop group is a compose *label*, so it carries the brand spelling with its
     // accent. Container and volume names cannot: Docker rejects them outright —
     // "Invalid container name (mímisbrunnr-…), only [a-zA-Z0-9][a-zA-Z0-9_.-] are allowed" — so the
@@ -22,10 +25,10 @@ internal static class DistributedApplicationBuilderExtensions
     // (`smooth-mímisbrunnr-testing` group, `mimisbrunnr-testcontainer-*` containers).
     private const string DockerDesktopGroupName = "smooth-mímisbrunnr";
     private const string PostgresContainerName = "mimisbrunnr-postgres";
-    private const string BlobContainerName = "mimisbrunnr-blob";
+    private const string BlobContainerName = "mimisbrunnr-blob-well";
     private const string SeqContainerName = "mimisbrunnr-seq";
     private const string PostgresDataVolume = "mimisbrunnr-postgres-data";
-    private const string BlobDataVolume = "mimisbrunnr-blob-data";
+    private const string BlobDataVolume = "mimisbrunnr-blob-well-data";
     private const string SeqDataVolume = "mimisbrunnr-seq-data";
     // S3 bucket names are DNS labels: lowercase ASCII, digits and hyphens only, so the brand is
     // transliterated here for the same reason container names are.
@@ -77,6 +80,12 @@ internal static class DistributedApplicationBuilderExtensions
                     : value;
             }
 
+            string? hostImage = builder.Configuration["HostConfiguration:Image"];
+            if (string.IsNullOrWhiteSpace(hostImage))
+            {
+                hostImage = DefaultHostImage;
+            }
+
             return new AppHostConfiguration(
                 PostgresPassword(),
                 builder.Configuration.GetValue("PostgresConfiguration:Port", DefaultPostgresPort),
@@ -85,6 +94,8 @@ internal static class DistributedApplicationBuilderExtensions
                 builder.Configuration.GetValue("BlobConfiguration:Port", DefaultBlobPort),
                 builder.Configuration.GetValue("BlobConfiguration:ConsolePort", DefaultBlobConsolePort),
                 builder.Configuration.GetValue("SeqConfiguration:Port", DefaultSeqPort),
+                builder.Configuration.GetValue("HostConfiguration:UseProject", false),
+                hostImage,
                 Path.GetFullPath(Path.Combine(builder.AppHostDirectory, "..", "..")));
         }
 
@@ -157,8 +168,14 @@ internal static class DistributedApplicationBuilderExtensions
             IResourceBuilder<IResourceWithConnectionString> seq,
             AppHostConfiguration configuration)
         {
+            if (!configuration.UseProject)
+            {
+                builder.AddHostContainer(postgres, blob, seq, configuration);
+                return;
+            }
+
             builder.AddProject<Projects.SmoothAiProductContextMemory_Host>("host")
-                .WithReference(postgres)
+                .WithReference(postgres, connectionName: "SmoothAiProductContextMemory")
                 .WithReference(seq)
                 .WithEnvironment("BlobStorage__Endpoint", blob.GetEndpoint("s3"))
                 .WithEnvironment("BlobStorage__AccessKey", configuration.BlobAccessKey)
@@ -169,6 +186,53 @@ internal static class DistributedApplicationBuilderExtensions
                 .WaitFor(blob)
                 .WaitFor(seq);
         }
+
+        private void AddHostContainer(
+            IResourceBuilder<PostgresDatabaseResource> postgres,
+            IResourceBuilder<ContainerResource> blob,
+            IResourceBuilder<IResourceWithConnectionString> seq,
+            AppHostConfiguration configuration)
+        {
+            (string image, string? tag) = SplitImageReference(configuration.HostImage);
+            IResourceBuilder<ContainerResource> host = tag is null
+                ? builder.AddContainer("host", image)
+                : builder.AddContainer("host", image, tag);
+
+            if (configuration.HostImage.StartsWith("ghcr.io/", StringComparison.OrdinalIgnoreCase))
+            {
+                host = host.WithImagePullPolicy(ImagePullPolicy.Always);
+            }
+
+            host
+                .WithHttpEndpoint(port: DefaultHostPort, targetPort: DefaultHostPort, name: "http")
+                .WithContainerName(HostContainerName)
+                .WithContainerRuntimeArgs(
+                    "--label", $"com.docker.compose.project={DockerDesktopGroupName}",
+                    "--label", $"com.docker.compose.service={HostContainerName}")
+                .WithReference(postgres, connectionName: HostConnectionStringName)
+                .WithReference(seq)
+                .WithEnvironment("BlobStorage__Endpoint", blob.GetEndpoint("s3"))
+                .WithEnvironment("BlobStorage__AccessKey", configuration.BlobAccessKey)
+                .WithEnvironment("BlobStorage__SecretKey", configuration.BlobSecretKey)
+                .WithEnvironment("BlobStorage__Bucket", BlobBucketName)
+                .WithHttpHealthCheck(HostReadinessPath)
+                .WithOtlpExporter()
+                .WaitFor(postgres)
+                .WaitFor(blob)
+                .WaitFor(seq);
+        }
+    }
+
+    private static (string Image, string? Tag) SplitImageReference(string reference)
+    {
+        int slash = reference.LastIndexOf('/');
+        int colon = reference.LastIndexOf(':');
+        if (colon > slash)
+        {
+            return (reference[..colon], reference[(colon + 1)..]);
+        }
+
+        return (reference, null);
     }
 
     private sealed record AppHostConfiguration(
@@ -179,5 +243,7 @@ internal static class DistributedApplicationBuilderExtensions
         int BlobPort,
         int BlobConsolePort,
         int SeqPort,
+        bool UseProject,
+        string HostImage,
         string RepoRoot);
 }

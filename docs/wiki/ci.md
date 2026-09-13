@@ -1,6 +1,7 @@
 # CI/CD
 
-The pipeline is a single PR gate that builds and tests code changes before they can merge to `main`.
+Two workflows: the PR gate (build + test) and a separate image publish to GHCR.
+The publish workflow does **not** run on pull requests.
 
 ## PR Gate
 
@@ -34,3 +35,13 @@ The pipeline is a single PR gate that builds and tests code changes before they 
 | `dotnet-ef` | `10.0.8` | `dotnet-ef` |
 
 `dotnet-ef` is pinned to the EF Core runtime version (`Directory.Packages.props`) so the migrations CLI never drifts from the `Microsoft.EntityFrameworkCore.*` packages. Bump both together.
+
+## Publish image
+
+- **Workflow:** `.github/workflows/publish-image.yml`
+- **Triggers:** `push` → `main` (`:latest` + short SHA), `v*` tags (semver), `workflow_dispatch` (supplied pre-release version, **never** `latest`). No `pull_request` trigger.
+- **Permissions:** `contents: read`, `packages: write`.
+- **Platforms:** `linux/amd64,linux/arm64`.
+- **Registry:** `ghcr.io/${{ github.repository }}`.
+- **Timeout:** 45 minutes. GHA cache scoped by workflow + ref.
+- **Local run / configuration contract:** [docker.md](./docker.md).

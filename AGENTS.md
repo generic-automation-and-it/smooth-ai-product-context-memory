@@ -53,7 +53,10 @@ Rules live under `.agents/rules/` as `*.instructions.md`, auto-loaded every sess
 ```bash
 dotnet build SmoothAiProductContextMemory.slnx                     # build
 dotnet test  SmoothAiProductContextMemory.slnx                     # run all tests
-dotnet run --project src/SmoothAiProductContextMemory.AppHost      # dev Aspire AppHost
+dotnet run --project src/SmoothAiProductContextMemory.AppHost      # Aspire: pull Host image + postgres/blob/seq (group smooth-mímisbrunnr)
+HostConfiguration__UseProject=true \
+  dotnet run --project src/SmoothAiProductContextMemory.AppHost    # same stack, compile Host from source
+docker build -t smooth-ai-product-context-memory:local .           # Host image (see docs/wiki/docker.md)
 dotnet run --project src/SmoothAiProductContextMemory.ChatHost     # ChatHost standalone (separate from API Host)
 dotnet run --project src/SmoothAiProductContextMemory.Host -- export [--output DIR] [--history] [--force]
                                                                    # generated Markdown dump of the store (never commit the output)
@@ -74,6 +77,7 @@ Shared fixtures in `tests/SmoothAiProductContextMemory.TestFramework/`; Aspire d
 ## CI/CD
 
 - **PR gate** — `.github/workflows/pr-gate.yml` (PR→main, push→main, dispatch): restore → build (Release) → Aspire-backed test with coverage via local action `.github/actions/aspire-test-with-coverage`, then publish + upload coverage. Full step list, ports, timings, local tools: `docs/wiki/ci.md`.
+- **Publish image** — `.github/workflows/publish-image.yml` builds and pushes the Host image to GHCR for `linux/amd64` and `linux/arm64`; it never runs on pull requests. A push to `main` publishes `:latest` and a short-SHA tag; a SemVer `v*` push publishes the full SemVer tag, its `major.minor` tag, and a short-SHA tag. Manual dispatch accepts only a SemVer-compatible version without a leading `v`, rejects `latest`, and publishes the supplied version plus a short-SHA tag—never `:latest`. Publishing is serialized per Git ref (pushes supersede earlier pushes; dispatches are retained), uses a ref-scoped GitHub Actions build cache, and supplies the commit SHA as the image revision. Run contract: `docs/wiki/docker.md`.
 - **AI PR review** — `.github/workflows/pipeline-code-review-report.yml` is a thin caller for the `smooth-ai-report-review` reusable workflow; posts an OpenCode review report on PRs (opened/synchronize/reopened/ready_for_review, `/ai-review` comment, dispatch). `.github/workflows/pipeline-ai-analyse.yml` runs after it, auto-fixes 🟡 Medium / 🔵 Low findings (bounded by `OPENCODE_ANALYSE_MAX_INCREMENTAL`). Both need org-level `OPENCODE_*` secrets/variables (provider OpenAI). Local-only consumer skill at `.agents/skills/ai-review`; report *generator* stays remote. To commit+push a branch so the pushed PR gets a **full** review, use `/git-commit-review-push` (`.agents/skills/git-commit-review-push`) — embeds `/ai-review` in the last commit.
 
 ## Git Constraints
@@ -89,3 +93,9 @@ Hosted on **GitHub** at `https://github.com/generic-automation-and-it/project`. 
 | Semantic memory | Embedded, labelled knowledge — primary store for retrieval by label or similarity |
 | Episodic memory | Timestamped record of when/where a context was captured |
 | Procedural memory | Persisted agent/user preferences and learned behaviors |
+
+## Changelog
+
+| Date | Change | Ref |
+|---|---|---|
+| 2026-09-13 | Documented publish-image tag derivation, manual-dispatch validation, concurrency, cache, and revision behavior. | `.github/workflows/publish-image.yml` |

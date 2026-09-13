@@ -15,11 +15,11 @@ ports/container names.
   `com.docker.compose.project` **label**, so it carries the brand spelling — `smooth-mímisbrunnr`.
   Container and volume names cannot: Docker rejects non-ASCII outright (`Invalid container name
   (mímisbrunnr-…), only [a-zA-Z0-9][a-zA-Z0-9_.-] are allowed`), so they are transliterated —
-  `mimisbrunnr-postgres`, `mimisbrunnr-blob`, `mimisbrunnr-seq`. The test fixture follows the same
-  split (`smooth-mímisbrunnr-testing` group, `mimisbrunnr-testcontainer-*` containers). Do not "fix" the
-  group label to ASCII, and do not add the accent to a container or volume name. The MinIO bucket
-  `smooth-mimisbrunnr-memory-well` is transliterated for the same reason — S3 bucket names are DNS
-  labels (lowercase ASCII, digits, hyphens).
+  `mimisbrunnr-postgres`, `mimisbrunnr-blob-well`, `mimisbrunnr-seq`, `mimisbrunnr-host`. The test fixture
+  follows the same split (`smooth-mímisbrunnr-testing` group, `mimisbrunnr-testcontainer-*` containers).
+  Do not "fix" the group label to ASCII, and do not add the accent to a container or volume name. The
+  MinIO bucket `smooth-mimisbrunnr-memory-well` is transliterated for the same reason — S3 bucket names
+  are DNS labels (lowercase ASCII, digits, hyphens).
 - **No collision with TestFramework.Aspire.** Container names are `mimisbrunnr-*` (no `testcontainer` segment);
   ports must not equal those of the test fixture (Postgres `15432`, Redis `16379`, WireMock `19091`,
   MinIO `9002` s3 / `19092` console).
@@ -29,9 +29,16 @@ ports/container names.
   add runtime-specific wiring to the AppHost. Container images are **registry-qualified and pinned**
   (`docker.io/apache/age:release_PG17_1.7.0`, `quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z`) because Podman refuses to resolve short names
   non-interactively unless the host's `registries.conf` happens to allow it.
-- **Project-references the Host as `Projects.SmoothAiProductContextMemory_Host`.** The Host stays
-  runnable as a plain `Program` (`WebApplicationFactory<Program>` integration tests must keep working
-  without an AppHost).
+- **AppHost is the orchestrator, not a published image.** Starting it pulls the Host image and starts
+  postgres/blob/seq. Do not containerise the AppHost. The Host stays runnable as a plain `Program`
+  (`WebApplicationFactory<Program>` integration tests must keep working without an AppHost).
+- **Default Host is the published GHCR image** (`HostConfiguration:Image`). Set
+  `HostConfiguration:UseProject=true` (or `HostConfiguration__UseProject=true`) to compile and run
+  `Projects.SmoothAiProductContextMemory_Host` from source instead. Do not delete `AddProject`.
+- **Host container is `mimisbrunnr-host`**, with the same `com.docker.compose.project=smooth-mímisbrunnr` /
+  `com.docker.compose.service` labels as postgres/blob/seq. It injects
+  `ConnectionStrings__SmoothAiProductContextMemory` (the key Infrastructure reads) plus the existing
+  `BlobStorage__*` env vars. GHCR references use `ImagePullPolicy.Always`.
 - **Connection-string keys must match what the Host consumes.** Aspire `.WithReference(db)` injects
   `ConnectionStrings:<resource>` automatically for Postgres and Seq — so the **resource name is the
   connection-string key**. The database resource is therefore named `SmoothAiProductContextMemory`
@@ -55,9 +62,10 @@ ports/container names.
 |---|---|---:|---|
 | PostgreSQL + AGE | `postgres` (`docker.io/apache/age:release_PG17_1.7.0`) | `5432` | `mimisbrunnr-postgres` |
 | Database | `SmoothAiProductContextMemory` (physical DB `app`) | (via `postgres`) | n/a |
-| MinIO (blob) | `blob` | `9000` (s3), `9001` (console) | `mimisbrunnr-blob` |
+| MinIO (blob) | `blob` | `9000` (s3), `9001` (console) | `mimisbrunnr-blob-well` |
 | Seq | `seq` (volume `mimisbrunnr-seq-data`) | `5341` | `mimisbrunnr-seq` |
-| API project | `host` | `5141` http / `7141` https (from `launchSettings`) | n/a (host process) |
+| API image (default) | `host` (`HostConfiguration:Image`) | `5141` | `mimisbrunnr-host` |
+| API project (opt-in) | `host` (`HostConfiguration:UseProject=true`) | `5141` http / `7141` https | n/a (host process) |
 
 Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgres` — see
 `tests/SmoothAiProductContextMemory.TestFramework/TEST_FRAMEWORK_AGENTS.md`.
@@ -80,7 +88,11 @@ Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgr
 - `Program.cs` is intentionally thin and functionally chains
   `builder.AddSmoothAiProductContextMemoryAppHostResources().Build().Run()`.
 - `DistributedApplicationBuilderExtensions` keeps orchestration split into focused extension methods
-  (`AddPostgresResource`, `AddBlobResource`, `AddSeqResource`, `AddHostProject`).
+  (`AddPostgresResource`, `AddBlobResource`, `AddSeqResource`, `AddHostProject` / `AddHostContainer`).
+- `HostConfiguration:Image` defaults to `ghcr.io/generic-automation-and-it/smooth-ai-product-context-memory:latest`.
+  The AppHost splits on the last colon after the last slash so Aspire `AddContainer(name, image, tag)`
+  gets a registry-qualified name. Digest references (`@sha256:`) are not supported. `UseProject=true`
+  ignores the image and runs source.
 - **Telemetry is consumed, not just offered.** Aspire injects `OTEL_EXPORTER_OTLP_ENDPOINT` into
   **project** resources automatically and the Host now reads it, so the dashboard's log, trace and
   metric panes are populated. Do not override that variable here unless intentionally diverting
@@ -109,6 +121,8 @@ Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgr
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-13 | Runtime blob container renamed `mimisbrunnr-blob` → `mimisbrunnr-blob-well` (volume `mimisbrunnr-blob-well-data`). Tests stay `mimisbrunnr-testcontainer-blob`. Old volume is orphaned. | release-image |
+| 2026-09-13 | Default AppHost run pulls the published Host image as `mimisbrunnr-host` in group `smooth-mímisbrunnr`; `UseProject=true` keeps source. AppHost itself is not published. | release-image |
 | 2026-09-13 | Dev MinIO bucket renamed `smooth-project-memory` → `smooth-mimisbrunnr-memory-well`. Safe now because the blob volume was reset by the container rename; a later rename would orphan stored objects. | PR #36 |
 | 2026-09-13 | Renamed the dev resources to the Mímisbrunnr brand: group label `smooth-mímisbrunnr` (accented — it is a label), containers and volumes `mimisbrunnr-*` (ASCII — Docker rejects non-ASCII names). The `smooth-project-memory-dev-*` names are gone. Existing containers and volumes are orphaned by the rename and must be removed once. | PR #36 |
 | 2026-09-13 | Seq keep-or-drop decided: **kept** for persistence beyond the dashboard's in-memory store, and given the data volume it never had. Fed by the Serilog Seq sink rather than OTLP ingestion — deviation recorded above. | PR #36 |
