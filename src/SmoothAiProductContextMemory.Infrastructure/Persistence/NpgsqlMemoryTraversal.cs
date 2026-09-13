@@ -27,6 +27,8 @@ public sealed class NpgsqlMemoryTraversal(SmoothAiProductContextMemoryDbContext 
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(query.MaxDepth, 1);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(query.MaxDepth, MemoryTraversalDefaults.MaxDepth);
+        ArgumentOutOfRangeException.ThrowIfLessThan(query.Limit, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(query.Limit, MemorySearchDefaults.MaxLimit);
 
         await using NpgsqlCommand command = await CreateCommandAsync(query, cancellationToken);
         await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
