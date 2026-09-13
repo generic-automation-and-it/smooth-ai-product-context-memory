@@ -111,11 +111,11 @@ dump_minio_diagnostics() {
   nc -zv 127.0.0.1 9002 || true
   echo
   if command -v docker >/dev/null 2>&1; then
-    echo "docker ps -a --filter name=mimisbrunnr-blob"
-    docker ps -a --filter name=mimisbrunnr-blob || true
+    echo "docker ps -a --filter name=mimisbrunnr-testcontainer-blob"
+    docker ps -a --filter name=mimisbrunnr-testcontainer-blob || true
     echo
-    echo "docker logs mimisbrunnr-blob (tail 80)"
-    docker logs --tail 80 mimisbrunnr-blob 2>&1 || true
+    echo "docker logs mimisbrunnr-testcontainer-blob (tail 80)"
+    docker logs --tail 80 mimisbrunnr-testcontainer-blob 2>&1 || true
   fi
   echo "==== end MinIO diagnostics ===="
 }

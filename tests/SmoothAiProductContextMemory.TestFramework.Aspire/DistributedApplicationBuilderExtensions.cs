@@ -5,11 +5,11 @@ namespace SmoothAiProductContextMemory.TestFramework.Aspire;
 
 internal static class DistributedApplicationBuilderExtensions
 {
-    private const string DockerDesktopGroupName = "Mímisbrunnr";
-    private const string PostgresContainerName = "mimisbrunnr-postgres";
-    private const string RedisContainerName = "mimisbrunnr-redis";
-    private const string WireMockContainerName = "mimisbrunnr-wiremock";
-    private const string BlobContainerName = "mimisbrunnr-blob";
+    private const string DockerDesktopGroupName = "Mímisbrunnr-Testing";
+    private const string PostgresContainerName = "mimisbrunnr-testcontainer-postgres";
+    private const string RedisContainerName = "mimisbrunnr-testcontainer-redis";
+    private const string WireMockContainerName = "mimisbrunnr-testcontainer-wiremock";
+    private const string BlobContainerName = "mimisbrunnr-testcontainer-blob";
     private const string BlobAccessKey = "minioadmin";
     private const int BlobPort = 9002;
     private const int BlobConsolePort = 19092;

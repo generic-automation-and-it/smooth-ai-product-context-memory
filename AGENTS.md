@@ -57,7 +57,7 @@ dotnet run --project src/SmoothAiProductContextMemory.Host -- export [--output D
                                                                    # generated Markdown dump of the store (never commit the output)
 ```
 
-Target a single test project (`dotnet test tests/<Project>`) or `ls tests/` to list. **Gotcha:** dev Aspire dashboard at `http://localhost:15278`; first browser visit needs the printed `/login?t=...` URL. After the AGE image pin, recreate persistent Postgres containers once (`smooth-project-memory-dev-postgres`, `mimisbrunnr-postgres`) — `ContainerLifetime.Persistent` keeps the previous image until the container is removed. Same Postgres major (17) as Aspire's old default, so the named data volume is compatible.
+Target a single test project (`dotnet test tests/<Project>`) or `ls tests/` to list. **Gotcha:** dev Aspire dashboard at `http://localhost:15278`; first browser visit needs the printed `/login?t=...` URL. After the AGE image pin, recreate persistent Postgres containers once (`smooth-project-memory-dev-postgres`, `mimisbrunnr-testcontainer-postgres`) — `ContainerLifetime.Persistent` keeps the previous image until the container is removed. Same Postgres major (17) as Aspire's old default, so the named data volume is compatible.
 
 ## Test Framework
 
