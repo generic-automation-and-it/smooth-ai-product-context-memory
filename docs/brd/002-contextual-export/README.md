@@ -335,6 +335,7 @@ Extends BRD-001 §10; its terms continue to apply.
 | Term | Meaning |
 |---|---|
 | **Slice** | Knowledge selected under the effective work criteria, retrieval policy and stated limits |
+| **Tag** | BRD-001's free-form Label — the terms are interchangeable in this document |
 | **Widening** | Following recorded relationships to include eligible supporting knowledge beyond the initial labels |
 | **Export** | The act of composing a slice and the portable document it produces |
 | **Composition** | Organising knowledge and reasoning, consolidating equivalent claims and presenting findings without changing the store |

@@ -174,7 +174,7 @@ sequenceDiagram
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
-| 2026-09-13 | ADR-0001/0002/0003 deleted; LADR-004/005 context retargeted to HLD 001/002. | HLD-001, HLD-002 |
+| 2026-09-13 | ADR-0001/0002/0003 deleted; LADR-004 context retargeted to HLD 002, LADR-005 to HLD 001. | HLD-001, HLD-002 |
 | 2026-09-13 | `POST /api/context/paths` added (`Features/Links/FindPaths`) — bounded provenance traversal returning hops with reasons plus the endpoint's cheap fields from one composed statement. Depth bound required on the wire; scope rule applied to the source *and* the reached endpoints. | HLD-003 |
 | 2026-09-13 | CreateLink / SetMemories / Export re-pointed at `IMemoryGraph`. Duplicate skip vs 409 unchanged. Persistence no longer has `MemoryLink`. | HLD-003 |
 | 2026-09-13 | Intra-batch duplicate link skip characterised (`Duplicate_link_in_same_batch_is_skipped_not_fatal`). Store-vs-app self-link split recorded as a known limitation. | HLD-003 |

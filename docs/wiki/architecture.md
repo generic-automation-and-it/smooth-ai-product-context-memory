@@ -87,6 +87,7 @@ on it (see [HLD 001](../hlds/001-context-memory-storage/)).
 
 Hard: one current version per memory (partial unique index), version chain (unique `(memory_id,
 version)`), logical identity (unique `uuid`), initiative always assigned (not-null FK). Soft (both to
-be enforced by the write path's read-before-write once the skill exists — see HLD 001): subject
-uniqueness across a group (exact-slug duplicates are already rejected by the unique
-`(group_id, subject_slug)` backstop index), ticket uniqueness across groups.
+be enforced by the write path's read-before-write once the skill exists — see
+[HLD 001](../hlds/001-context-memory-storage/)): subject uniqueness across a group (exact-slug
+duplicates are already rejected by the unique `(group_id, subject_slug)` backstop index), ticket
+uniqueness across groups.

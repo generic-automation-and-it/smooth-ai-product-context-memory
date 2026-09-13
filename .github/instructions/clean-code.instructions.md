@@ -56,8 +56,9 @@ Claude, so this copy keeps the policy session-visible.
   behaviour.** Both are valid — pick one per type, deliberately. The shape to avoid is the **mutable
   hybrid**: settable state *plus* rules about that state, so an invariant holds only while callers
   remember to go through the method. An immutable type carrying behaviour (value object, strongly typed
-  ID) is an object, not a hybrid. Context-memory persistence rows are anemic POCOs by HLD 001 — do
-  not "correct" them into constructor-enforced aggregates.
+  ID) is an object, not a hybrid. Context-memory persistence rows are anemic POCOs by HLD 001 (see
+  the Domain context's "HLD 001 exceptions") — do not "correct" them into constructor-enforced
+  aggregates.
 - **Law of Demeter — one dot.** Prefer `a.DoThing()` over `a.B.C.DoThing()`; reaching through a chain
   couples you to internals. Chained fluent builders and LINQ/array pipelines are not violations.
 - Avoid `null` in and out of your own APIs. Model absence explicitly (`T?`, `Result<T>`, optional

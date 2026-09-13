@@ -17,7 +17,7 @@ These are deliberate departures from the defaults above, sanctioned by
 they are the design, not drift.
 
 - **Serialization attribute exception.** `[JsonPropertyOrder]` on `JsonShapeDocument` is the sanctioned
-  one-place implementation of the `v` shape marker required by the ADR's JSONB document contract. It is
+  one-place implementation of the `v` shape marker required by HLD 001's JSONB document contract. It is
   the *only* serialization concern permitted in Domain; no other entity may carry serialization
   attributes.
 - **Anemic POCOs, not constructor-enforced invariants.** Context-memory entities are persistence rows by
