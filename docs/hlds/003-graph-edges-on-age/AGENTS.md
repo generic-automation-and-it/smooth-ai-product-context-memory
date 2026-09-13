@@ -1,6 +1,6 @@
 # AGENTS.md - Graph edges on Apache AGE
 
-AI Context: HLD for graph edges on Apache AGE. Updated: 2026-09-14
+AI Context: HLD for graph edges on Apache AGE. Updated: 2026-09-13
 
 ## TL;DR
 
@@ -39,6 +39,7 @@ See [./ladrs/](./ladrs/).
 - **Traversal returns identities, never content.** Answering what those memories say requires selecting the relational rows — one composed query, since SQL and Cypher share the session.
 - **The entity-count guard changes by one.** Removing the relationship entity is expected and is updated deliberately in the same change; it is not a test to weaken when it fails.
 - **WT-01 is additive.** The extension, empty `memory_graph`, vertex label `Memory`, and the five relation edge labels exist; `memory_link` is still the relationship store. Do not write or read edges yet.
+- **Do not revert the database image to `library/postgres`.** Both Aspire hosts must stay on `docker.io/apache/age:release_PG17_1.7.0`. A vanilla Postgres image fails `CREATE EXTENSION age` and the pool-recycle tests.
 
 ## Quality Constraints
 
@@ -58,5 +59,6 @@ operability and compatibility. Two shape how code is written rather than merely 
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-13 | WT-01 review: both Aspire hosts stay on `docker.io/apache/age:release_PG17_1.7.0`; do not revert to `library/postgres`. | HLD-003 WT-01 |
 | 2026-09-13 | WT-01 shipped: AGE image pin, per-connection init, empty graph + labels, relational one-hop baseline. `memory_link` untouched. | HLD-003 WT-01 |
 | 2026-09-14 | Created — edges-only graph adoption, five LADRs, four NFRs, C1 + ER + sequence diagrams. | Amends HLD 001 |

@@ -6,7 +6,7 @@ Shared xunit.v3 test fixtures and helpers reused across the L0/L1/L2 test projec
 
 ## Non-Negotiables
 
-- **Keep it generic and domain-agnostic.** No references to feature code or concrete domain types; fixtures are reusable scaffolding only.
+- **Keep it generic and domain-agnostic.** No references to feature code or concrete domain types; fixtures are reusable scaffolding only. The test Aspire host still pins `docker.io/apache/age:release_PG17_1.7.0` — that is orchestration, not domain.
 - **No `[Fact]`/`[Theory]` here.** `IsTestProject` is `false`; tests live in the `*.UnitTest` / `*.ComponentTest` / `*.IntegrationTest` projects that reference this one.
 
 ## Key Behaviors

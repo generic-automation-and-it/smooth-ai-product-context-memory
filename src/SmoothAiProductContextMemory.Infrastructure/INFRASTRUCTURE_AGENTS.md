@@ -2,7 +2,7 @@
 
 ## TL;DR
 
-Implements the contracts defined in Application — EF Core + PostgreSQL persistence (`Persistence/`), blob storage (`Storage/`), and the Markdown export disk sink (`Export/`).
+Implements the contracts defined in Application — EF Core + PostgreSQL persistence (`Persistence/`, Apache AGE session init on the pooled data source), blob storage (`Storage/`), and the Markdown export disk sink (`Export/`).
 
 ## Non-Negotiables
 

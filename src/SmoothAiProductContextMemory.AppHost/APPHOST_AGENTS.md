@@ -2,7 +2,7 @@
 
 ## TL;DR
 
-Aspire AppHost orchestrating local dev dependencies (PostgreSQL + MinIO blob storage + Seq), the
+Aspire AppHost orchestrating local dev dependencies (PostgreSQL+AGE + MinIO blob storage + Seq), the
 `Host` project, and the Aspire dashboard. Run this for the F5 dev experience; **not** used by tests —
 `tests/SmoothAiProductContextMemory.TestFramework.Aspire` owns test-fixture orchestration on different
 ports/container names.
@@ -18,7 +18,7 @@ ports/container names.
   Aspire means the same AppHost runs against Docker (the default) or Podman with no code or config
   change; set `DOTNET_ASPIRE_CONTAINER_RUNTIME=podman` to switch. Verified working under both. Do not
   add runtime-specific wiring to the AppHost. Container images are **registry-qualified and pinned**
-  (`quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z`) because Podman refuses to resolve short names
+  (`docker.io/apache/age:release_PG17_1.7.0`, `quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z`) because Podman refuses to resolve short names
   non-interactively unless the host's `registries.conf` happens to allow it.
 - **Project-references the Host as `Projects.SmoothAiProductContextMemory_Host`.** The Host stays
   runnable as a plain `Program` (`WebApplicationFactory<Program>` integration tests must keep working
@@ -40,7 +40,7 @@ ports/container names.
 
 | Resource | Name | Fixed local port | Container name |
 |---|---|---:|---|
-| PostgreSQL | `postgres` | `5432` | `smooth-project-memory-dev-postgres` |
+| PostgreSQL + AGE | `postgres` (`docker.io/apache/age:release_PG17_1.7.0`) | `5432` | `smooth-project-memory-dev-postgres` |
 | Database | `app` | (via `postgres`) | n/a |
 | MinIO (blob) | `blob` | `9000` (s3), `9001` (console) | `smooth-project-memory-dev-blob` |
 | Seq | `seq` | `5341` | `smooth-project-memory-dev-seq` |

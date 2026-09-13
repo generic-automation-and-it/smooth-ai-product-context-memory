@@ -64,12 +64,12 @@ erDiagram
     outlives the operation — the next unrelated caller to borrow that connection inherits a live
     permission to delete history. That silently defeats the guarantee the trigger exists to provide.
 - **Version bump ordering**: because the partial unique index only allows one current version, a bump must flip the old version's `is_current` to `false` *before* inserting the new current version. Inserting the new current while the old is still current violates the index (both current at insert time). **Wrap both statements in one transaction** — they are separate round-trips, so a failure between them leaves the memory with *zero* current versions, a state no constraint forbids and nothing detects. See `BumpVersionAsync` in the L1 tests.
-- **AGE LOAD + `search_path` are session properties.** `DISCARD ALL` on pool return would undo them, so the data source sets `NoResetOnClose`. The initialiser skips `LOAD` until `pg_extension` contains `age`, then migrate clears that pool so connections opened before `CREATE EXTENSION` are not reused unprepared.
+- **AGE LOAD + `search_path` are session properties.** `DISCARD ALL` on pool return would undo them, so the data source sets `NoResetOnClose`. The initialiser skips `LOAD` until `pg_extension` contains `age`, then migrate clears that pool (without opening a connection) so connections opened before `CREATE EXTENSION` are not reused unprepared. Test migrate DI must register the same `NpgsqlDataSource` singleton or `ClearPool` hits a passwordless EF connection string.
 - **AGE catalog writes must commit to become visible.** The AGE migration uses `suppressTransaction: true` because `create_graph` / `create_*label` inside the ambient migration transaction are invisible to other sessions.
 
 ## Test References
 
-- **L0** — `tests/SmoothAiProductContextMemory.Domain.UnitTest/` (`SlugTests`, `JsonShapeDocumentTests`, `EntityInvariantTests`); `tests/SmoothAiProductContextMemory.Infrastructure.UnitTest/ModelShapeGuardTests`.
+- **L0** — `tests/SmoothAiProductContextMemory.Domain.UnitTest/` (`SlugTests`, `JsonShapeDocumentTests`, `EntityInvariantTests`); `tests/SmoothAiProductContextMemory.Infrastructure.UnitTest/` (`ModelShapeGuardTests`, `NpgsqlDataSourceFactoryTests`).
 - **L1** — `tests/SmoothAiProductContextMemory.Infrastructure.ComponentTest/Persistence/` against real PostgreSQL via `AspireFixture`, fresh migrated database per test (`PersistenceTestBase`). AGE pool-recycle and cross-session visibility: `AgeFoundationTests`. Optional NFR-02 one-hop baseline: `AgeOneHopBaselineTests` (`SMOOTH_AGE_BASELINE=1`).
 
 ## Quality Constraints
