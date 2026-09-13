@@ -68,6 +68,11 @@ internal static class DistributedApplicationBuilderExtensions
                 Console.WriteLine("If the dashboard asks for login, use the /login?t=... URL that Aspire prints after startup.");
             }
 
+            Console.WriteLine("Dashboard dies with this process. mimisbrunnr-{postgres,blob-well,seq} keep running (ContainerLifetime.Persistent). mimisbrunnr-host may remain after a hard kill.");
+            Console.WriteLine("Stop (keep data): scripts/stop-dev-stack.sh");
+            Console.WriteLine("Reset (destroy volumes): scripts/reset-dev-stack.sh");
+            Console.WriteLine("Do not glob mimisbrunnr-* — that also matches mimisbrunnr-testcontainer-*.");
+
             return builder;
         }
 

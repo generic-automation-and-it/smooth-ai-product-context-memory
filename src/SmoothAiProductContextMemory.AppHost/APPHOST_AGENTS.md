@@ -60,6 +60,9 @@ ports/container names.
 - **No WireMock in dev AppHost.** The AppHost orchestrates real Postgres/MinIO/Seq only. There is no
   upstream HTTP API to stub in this service.
 - **Postgres and MinIO use persistent named volumes.** Dev data survives container restarts.
+- **`ContainerLifetime.Persistent` stays the default** on postgres/blob/seq. Captured memories and blobs must survive an AppHost exit. Do not change it to session lifetime to "fix" leftover containers — that is the supported teardown's job.
+- **Never glob `mimisbrunnr-*` for teardown.** That prefix also matches `mimisbrunnr-testcontainer-*` (TestFramework.Aspire). Stop and reset use an exact allowlist (`mimisbrunnr-postgres`, `mimisbrunnr-blob-well`, `mimisbrunnr-seq`, `mimisbrunnr-host`) plus the `com.docker.compose.project=smooth-mímisbrunnr` label (does not match `smooth-mímisbrunnr-testing`).
+- **Stop and reset are distinct binaries.** `scripts/stop-dev-stack.sh` removes the four allowlisted containers and leaves named volumes. `scripts/reset-dev-stack.sh` is the only volume-destroy path (`mimisbrunnr-postgres-data`, `mimisbrunnr-blob-well-data`, `mimisbrunnr-seq-data`). Do not add a `--volumes` flag to stop. There is no prompt on reset — choosing that command is the explicit ask.
 - **Postgres image is the AGE-bearing pin** `docker.io/apache/age:release_PG17_1.7.0` (Postgres 17 + AGE 1.7.0), not Aspire's `library/postgres:17.6`. Same major as the previous default, so the named volume is compatible. A major mismatch against `mimisbrunnr-postgres-data` refuses to start and looks like a broken image — drop that volume only if the major actually changed. Recreate `mimisbrunnr-postgres` once after the image pin so the persistent container is not still running the old image.
 - **Every dev container carries `com.docker.compose.project` / `com.docker.compose.service` labels**
   so Docker Desktop groups them under the `smooth-mímisbrunnr` project while keeping the explicit
@@ -128,7 +131,58 @@ Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgr
   healthy only once migrations have completed and PostgreSQL is reachable — not merely once the
   process starts.
 - Aspire dashboard URL is printed at startup via the `WriteDashboardStartupHint` extension; use Aspire's
-  printed `/login?t=...` URL for the first terminal-driven browser visit.
+  printed `/login?t=...` URL for the first terminal-driven browser visit. The same hint states that
+  postgres/blob/seq keep running after this process exits, that `mimisbrunnr-host` may remain after a
+  hard kill, and names the two teardown scripts. There is no reliable Aspire exit hook under `pkill`
+  (SIGKILL), so the asymmetry is surfaced at startup — the moment a developer still has a terminal.
+- **Teardown does not kill AppHost, DCP, or `dotnet`.** Exit the AppHost first, then run the script.
+  Scripts do not `pkill` DCP (other workspaces may share the machine). Missing `mimisbrunnr-host` is
+  success (`UseProject=true` has no Host container). Empty stack is exit 0.
+- **AGE-pin recreate is the same Persistent mechanism, different symptom** — see the image-pin
+  non-negotiable above. `stop-dev-stack.sh` is the supported way to remove the container so the next
+  AppHost start picks up a new image without dropping volumes. Do not invent a third verb.
+- Runtime for the scripts is `$DOTNET_ASPIRE_CONTAINER_RUNTIME` (default `docker`), the same env
+  Aspire uses. AppHost C# stays runtime-agnostic; do not add Docker/Podman wiring there.
+
+## Architecture Decisions
+
+### LADR-001 — Two named scripts, not one command plus a flag
+
+- **Date:** 2026-09-13 · **Status:** Accepted
+- **Context:** An ambiguous `--volumes` / `--force` on a shared teardown can drop the captured corpus.
+  That is a worse defect than leftover containers.
+- **Decision:** `scripts/stop-dev-stack.sh` (containers only) and `scripts/reset-dev-stack.sh`
+  (containers, then the three named volumes). Reset may call stop. No volume flag on stop. No prompt
+  on reset — the distinct command is the explicit ask.
+- **Consequences:** Two entry points to document. Historical orphan volumes from renames are out of
+  both scripts.
+
+### LADR-002 — Persistence survives AppHost exit; teardown is explicit
+
+- **Date:** 2026-09-13 · **Status:** Accepted
+- **Context:** Auto-stopping containers on Ctrl+C or process death would undo `ContainerLifetime.Persistent`.
+  A hard kill (`pkill`) never runs an exit hook.
+- **Decision:** No exit hook that stops containers. Hint at startup. Operator runs a script after exit.
+- **Consequences:** Leftover stack until the script runs. DCP is not killed by teardown.
+
+### LADR-003 — Allowlist plus project label, never a name glob
+
+- **Date:** 2026-09-13 · **Status:** Accepted
+- **Context:** `mimisbrunnr-*` matches `mimisbrunnr-testcontainer-*`. A careless glob kills the test fixtures.
+- **Decision:** Exact container and volume names copied from this AppHost. Refuse if
+  `com.docker.compose.project` is not `smooth-mímisbrunnr`.
+- **Consequences:** An unlabeled leftover occupying a allowlisted name fails loud (correct). Names must
+  stay in sync with the C# constants; a rename here is a rename in the scripts.
+
+### LADR-004 — Dashboard stays in-process
+
+- **Date:** 2026-09-13 · **Status:** Accepted
+- **Context:** The dashboard's in-process lifetime is what makes leftover containers visible. A
+  standalone `mcr.microsoft.com/dotnet/aspire-dashboard` exists. OTLP containerises cleanly; the
+  resource service (`:20290`) is hosted by AppHost. A misconfigured link degrades silently to
+  telemetry-only.
+- **Decision:** Do not containerise the dashboard. Cosmetic symmetry is not worth a quiet downgrade.
+- **Consequences:** Dashboard dies with AppHost. Seq remains the durable log (`mimisbrunnr-seq-data`).
 
 ## Test References
 
@@ -139,6 +193,7 @@ Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgr
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-13 | Documented Persistent leftover after AppHost exit. Startup hint names `scripts/stop-dev-stack.sh` (keep data) and `scripts/reset-dev-stack.sh` (destroy volumes). Allowlist, never a `mimisbrunnr-*` glob. | AppHost teardown |
 | 2026-09-13 | Default AppHost run compiles Host from the working tree; published-image path is opt-in (`UseProject=false`) and announced so a lagging GHCR tag cannot look like current source. | APPHOST_AGENTS.md |
 | 2026-09-13 | Runtime blob container renamed `mimisbrunnr-blob` → `mimisbrunnr-blob-well` (volume `mimisbrunnr-blob-well-data`). Tests stay `mimisbrunnr-testcontainer-blob`. Old volume is orphaned. | release-image |
 | 2026-09-13 | Default AppHost run pulls the published Host image as `mimisbrunnr-host` in group `smooth-mímisbrunnr`; `UseProject=true` keeps source. AppHost itself is not published. | release-image |
