@@ -1,0 +1,10 @@
+{
+  "$schema_note": "Error shape for traversing from an unknown source uuid. The server returns 404; the client surfaces it as a non-zero exit with the body on stderr, matching every other subcommand.",
+  "request": {
+    "sourceUuid": "00000000-0000-0000-0000-000000000000",
+    "maxDepth": 2
+  },
+  "http_status": 404,
+  "client_exit_code": 1,
+  "client_error_prefix": "HTTP 404"
+}
