@@ -12,11 +12,9 @@ public sealed class LabelUsageTests : PersistenceTestBase
 
     private async Task<List<LabelUsageRow>> ReadViewAsync()
     {
-        string connStr = Db.Database.GetConnectionString()!;
         var rows = new List<LabelUsageRow>();
 
-        await using var conn = new NpgsqlConnection(connStr);
-        await conn.OpenAsync(Ct);
+        await using var conn = await DataSource.OpenConnectionAsync(Ct);
         await using var cmd = new NpgsqlCommand("SELECT name, uses FROM label_usage", conn);
         await using var reader = await cmd.ExecuteReaderAsync(Ct);
         while (await reader.ReadAsync(Ct))

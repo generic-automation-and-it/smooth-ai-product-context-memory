@@ -2,7 +2,7 @@
 
 ## TL;DR
 
-Implements the contracts defined in Application — EF Core + PostgreSQL persistence (`Persistence/`), blob storage (`Storage/`), and the Markdown export disk sink (`Export/`).
+Implements the contracts defined in Application — EF Core + PostgreSQL persistence (`Persistence/`, Apache AGE session init on the pooled data source), blob storage (`Storage/`), and the Markdown export disk sink (`Export/`).
 
 ## Non-Negotiables
 
@@ -19,6 +19,7 @@ Implements the contracts defined in Application — EF Core + PostgreSQL persist
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-13 | Pooled `NpgsqlDataSource` with AGE physical-connection initialiser (`NoResetOnClose`). Graph objects created by SQL migration, not the EF model. | HLD-003 |
 | 2026-09-13 | `FileSystemMarkdownExportSink` implements `IMarkdownExportSink` — wipe-and-rewrite behind `.context-memory-export`. Policy stays in Application. | WT-4 |
 | 2026-09-09 | Persistence delivered. Entity POCOs live in `Domain/Entities/`; the empty `Persistence/{Entities,Repositories,Stores}/` skeleton folders were removed (unused). `Persistence/{Configurations,DesignTime,Extensions,Migrations}/` are populated. DbContext + migration + seed + triggers + `label_usage` view. See `Persistence/PERSISTENCE_AGENTS.md`. | [ADR-0002] |
 | 2026-05-30 | Created — empty persistence + clients skeleton (`Clients/`, `Extensions/`, `Persistence/{Configurations,Entities,Migrations,Repositories,Stores,Extensions,DesignTime}/`). | — |

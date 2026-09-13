@@ -42,6 +42,8 @@ See [./ladrs/](./ladrs/).
 - **Install ordering matters.** The extension must be created before other roles gain schema-creation rights, or its catalog schema can be pre-created under the wrong owner and installation refuses.
 - **Traversal returns identities, never content.** Answering what those memories say requires selecting the relational rows — one composed query, since SQL and Cypher share the session.
 - **The entity-count guard changes by one.** Removing the relationship entity is expected and is updated deliberately in the same change; it is not a test to weaken when it fails.
+- **The current foundation is additive.** The extension, empty `memory_graph`, vertex label `Memory`, and the five relation edge labels exist; `memory_link` is still the relationship store. Do not write or read edges yet.
+- **Do not revert the database image to `library/postgres`.** Both Aspire hosts must stay on `docker.io/apache/age:release_PG17_1.7.0`. A vanilla Postgres image fails `CREATE EXTENSION age` and the pool-recycle tests.
 
 ## Quality Constraints
 
@@ -53,13 +55,15 @@ operability and compatibility. Two shape how code is written rather than merely 
 
 ## Migration Plans
 
-- The relational relationship table is dropped in the same change that creates the graph; existing rows are carried over in that migration (LADR-03).
+- The relational relationship table is dropped in the same change that creates the graph; existing rows are carried over in that migration (LADR-03). **Not yet:** the foundation created the empty graph beside `memory_link`; the cutover is a later change.
 - Reversal is a corrective migration restoring the table — there is no fallback flag, by design.
-- The database image becomes an explicitly pinned extension-bearing image rather than the orchestration default, in both the development and test hosts.
+- The database image is `docker.io/apache/age:release_PG17_1.7.0` (Postgres 17 + AGE 1.7.0) in both the development and test hosts. Pairing: [nfrs/NFR-04-version-pairing.md](./nfrs/NFR-04-version-pairing.md).
 
 ## Changelog
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
-| 2026-09-13 | Created — edges-only graph adoption, five LADRs, four NFRs, C1 + ER + sequence diagrams. | Amends HLD 001 |
+| 2026-09-13 | Foundation review: both Aspire hosts stay on `docker.io/apache/age:release_PG17_1.7.0`; do not revert to `library/postgres`. | HLD-003 |
+| 2026-09-13 | AGE foundation shipped: image pin, per-connection init, empty graph + labels, relational one-hop baseline. `memory_link` untouched. | HLD-003 |
 | 2026-09-13 | Added the upstream BRD as cited business authority; BR-11 requires the connection's reason, not only the edge. | BRD 001 |
+| 2026-09-13 | Created — edges-only graph adoption, five LADRs, four NFRs, C1 + ER + sequence diagrams. | Amends HLD 001 |

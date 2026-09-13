@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Npgsql;
 using SmoothAiProductContextMemory.Application.Abstractions;
 using SmoothAiProductContextMemory.Application.Common.Persistence;
 using SmoothAiProductContextMemory.Infrastructure.Persistence;
@@ -14,6 +15,7 @@ namespace SmoothAiProductContextMemory.Application.ComponentTest.Features;
 public abstract class HandlerTestBase(AspireFixture aspire) : IAsyncLifetime
 {
     private SmoothAiProductContextMemoryTestDatabase? _database;
+    private NpgsqlDataSource? _dataSource;
 
     protected SmoothAiProductContextMemoryDbContext Db { get; private set; } = default!;
 
@@ -38,10 +40,11 @@ public abstract class HandlerTestBase(AspireFixture aspire) : IAsyncLifetime
             $"app-component-{Guid.NewGuid():N}",
             Ct);
 
-        await ApplyMigrationsAsync(_database.ConnectionString, Ct);
+        _dataSource = NpgsqlDataSourceFactory.Create(_database.ConnectionString);
+        await ApplyMigrationsAsync(_dataSource, Ct);
 
         var options = new DbContextOptionsBuilder<SmoothAiProductContextMemoryDbContext>()
-            .UseNpgsql(_database.ConnectionString)
+            .UseNpgsql(_dataSource)
             .Options;
 
         Db = new SmoothAiProductContextMemoryDbContext(options);
@@ -65,6 +68,11 @@ public abstract class HandlerTestBase(AspireFixture aspire) : IAsyncLifetime
             await Db.DisposeAsync();
         }
 
+        if (_dataSource is not null)
+        {
+            await _dataSource.DisposeAsync();
+        }
+
         Loggers?.Dispose();
 
         if (_database is not null)
@@ -73,11 +81,12 @@ public abstract class HandlerTestBase(AspireFixture aspire) : IAsyncLifetime
         }
     }
 
-    private static async Task ApplyMigrationsAsync(string connectionString, CancellationToken cancellationToken)
+    private static async Task ApplyMigrationsAsync(NpgsqlDataSource dataSource, CancellationToken cancellationToken)
     {
         var services = new ServiceCollection();
+        services.AddSingleton(dataSource);
         services.AddDbContext<SmoothAiProductContextMemoryDbContext>(options =>
-            options.UseNpgsql(connectionString));
+            options.UseNpgsql(dataSource));
 
         await using ServiceProvider provider = services.BuildServiceProvider();
         await provider.MigrateSmoothAiProductContextMemoryAsync(cancellationToken);

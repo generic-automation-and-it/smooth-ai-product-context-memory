@@ -29,6 +29,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="SmoothAiProductContextMemory.Infrastructure.UnitTest" />
     <InternalsVisibleTo Include="SmoothAiProductContextMemory.Infrastructure.ComponentTest" />
+    <InternalsVisibleTo Include="SmoothAiProductContextMemory.Application.ComponentTest" />
   </ItemGroup>
 
 </Project>

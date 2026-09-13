@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
+using Npgsql;
+using SmoothAiProductContextMemory.Infrastructure.Persistence;
 
 namespace SmoothAiProductContextMemory.Infrastructure.Persistence.DesignTime;
 
@@ -14,10 +16,14 @@ public sealed class SmoothAiProductContextMemoryDbContextFactory : IDesignTimeDb
     private const string FallbackConnectionString =
         "Host=localhost;Port=15432;Database=smoothaiproductcontextmemory;Username=postgres;Password=LocalMachineAccessNoInterestingDataTestDev#Passw0rd!FirewallNotExposed";
 
+    private static NpgsqlDataSource? _dataSource;
+
     public SmoothAiProductContextMemoryDbContext CreateDbContext(string[] args)
     {
+        _dataSource ??= NpgsqlDataSourceFactory.Create(
+            Environment.GetEnvironmentVariable(ConnectionStringEnvVar) ?? FallbackConnectionString);
         var options = new DbContextOptionsBuilder<SmoothAiProductContextMemoryDbContext>()
-            .UseNpgsql(Environment.GetEnvironmentVariable(ConnectionStringEnvVar) ?? FallbackConnectionString)
+            .UseNpgsql(_dataSource)
             .Options;
 
         return new SmoothAiProductContextMemoryDbContext(options);

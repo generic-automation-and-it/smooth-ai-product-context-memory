@@ -4,7 +4,9 @@
 
 The context-memory store is an **index over content**, not a content store. Document bodies live in
 blob storage (see [HLD 001](../hlds/001-context-memory-storage/)); PostgreSQL
-holds metadata, relationships, and everything filtered on. The authoritative persistence model is
+holds metadata, relationships, and everything filtered on. Apache AGE is installed in the same
+instance (`docker.io/apache/age:release_PG17_1.7.0` in both Aspire hosts) — empty `memory_graph`
+until [HLD 003](../hlds/003-graph-edges-on-age/) cutover. The authoritative persistence model is
 [HLD 001](../hlds/001-context-memory-storage/). The write-path pipeline and the
 agent-facing skill contract (the **sole interface** to the store) are specified in
 [HLD 002](../hlds/002-context-memory-write-pipeline/); the skill lives at

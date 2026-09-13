@@ -6,7 +6,7 @@ Guidance for AI coding agents in SmoothAiProductContextMemory.
 
 Persistent memory service for AI agents: stores summarized, labelled context (linked to issue/ticket numbers) for retrieval across long gaps. HTTP Docker API + an agent skill for get/set.
 
-**Tech stack:** .NET 10 · ASP.NET Core · Clean Architecture (Domain / Application / Infrastructure / Host) · EF Core + PostgreSQL · Mediator (source-gen CQRS) · xunit.v3
+**Tech stack:** .NET 10 · ASP.NET Core · Clean Architecture (Domain / Application / Infrastructure / Host) · EF Core + PostgreSQL with Apache AGE · Mediator (source-gen CQRS) · xunit.v3
 
 ## AI Context Files
 
@@ -18,9 +18,9 @@ Persistent memory service for AI agents: stores summarized, labelled context (li
 |---|---|---|
 | Domain | `src/SmoothAiProductContextMemory.Domain/` | Core entities, value objects — no external deps |
 | Application | `src/SmoothAiProductContextMemory.Application/` | Vertical-slice use cases via Mediator — `Features/<Name>/` (contract: `Features/FEATURES_AGENTS.md`), shared code in `Common/` + `Abstractions/` |
-| Infrastructure | `src/SmoothAiProductContextMemory.Infrastructure/` | EF Core + PostgreSQL (`Persistence/`), HTTP clients (`Clients/`), blob storage (`Storage/`) |
+| Infrastructure | `src/SmoothAiProductContextMemory.Infrastructure/` | EF Core + PostgreSQL+AGE (`Persistence/`), HTTP clients (`Clients/`), blob storage (`Storage/`) |
 | Host | `src/SmoothAiProductContextMemory.Host/` | ASP.NET Core Web API, Serilog, Scalar OpenAPI |
-| AppHost | `src/SmoothAiProductContextMemory.AppHost/` | Aspire dev orchestrator — Postgres + MinIO blob storage + Seq |
+| AppHost | `src/SmoothAiProductContextMemory.AppHost/` | Aspire dev orchestrator — Postgres+AGE (`docker.io/apache/age:release_PG17_1.7.0`) + MinIO blob storage + Seq |
 | ChatHost | `src/SmoothAiProductContextMemory.ChatHost/` | Standalone LLM microservice — owns Anthropic SDK; talks to Host via HTTP only (project not yet in tree) |
 | Docs | `docs/` | Wiki, HLDs, BRDs, ADR pointer stubs — visible (not hidden `.docs`) |
 
@@ -57,7 +57,7 @@ dotnet run --project src/SmoothAiProductContextMemory.Host -- export [--output D
                                                                    # generated Markdown dump of the store (never commit the output)
 ```
 
-Target a single test project (`dotnet test tests/<Project>`) or `ls tests/` to list. **Gotcha:** dev Aspire dashboard at `http://localhost:15278`; first browser visit needs the printed `/login?t=...` URL.
+Target a single test project (`dotnet test tests/<Project>`) or `ls tests/` to list. **Gotcha:** dev Aspire dashboard at `http://localhost:15278`; first browser visit needs the printed `/login?t=...` URL. After the AGE image pin, recreate persistent Postgres containers once (`smooth-project-memory-dev-postgres`, `project-test-postgres`) — `ContainerLifetime.Persistent` keeps the previous image until the container is removed. Same Postgres major (17) as Aspire's old default, so the named data volume is compatible.
 
 ## Test Framework
 
@@ -67,7 +67,7 @@ xunit.v3 · Shouldly · Bogus · Respawn. Three tiers (drives where a test belon
 - **L1** component — `Application.ComponentTest` (handlers vs real Postgres via Aspire); `Infrastructure.ComponentTest` (real isolated DB).
 - **L2** `*.IntegrationTest` — full stack, real PostgreSQL.
 
-Shared fixtures in `tests/SmoothAiProductContextMemory.TestFramework/`; Aspire dependency host (PostgreSQL + WireMock) in `tests/SmoothAiProductContextMemory.TestFramework.Aspire/`. See `docs/wiki/testing.md`.
+Shared fixtures in `tests/SmoothAiProductContextMemory.TestFramework/`; Aspire dependency host (PostgreSQL+AGE + Redis + WireMock + MinIO) in `tests/SmoothAiProductContextMemory.TestFramework.Aspire/`. Both orchestration hosts pin `docker.io/apache/age:release_PG17_1.7.0` — pairing in `docs/hlds/003-graph-edges-on-age/nfrs/NFR-04-version-pairing.md`. See `docs/wiki/testing.md`.
 
 ## CI/CD
 

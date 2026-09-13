@@ -16,6 +16,12 @@ internal static class DistributedApplicationBuilderExtensions
     private const string BlobImage = "quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z";
     private const string WireMockImage = "docker.io/wiremock/wiremock";
     private const string BlobSecretKey = "LocalMachineAccessNoInterestingDataTestDev#Passw0rd!FirewallNotExposed";
+    // Aspire 13.3.0 defaults to library/postgres:17.6. AGE's PG17 image keeps the same major.
+    // Pairing recorded in HLD 003 / NFR-04.
+    // Keep this pin identical to src/SmoothAiProductContextMemory.AppHost.
+    private const string PostgresImageRegistry = "docker.io";
+    private const string PostgresImage = "apache/age";
+    private const string PostgresImageTag = "release_PG17_1.7.0";
 
     internal static void AddSmoothAiProductContextMemoryTestDependencies(this IDistributedApplicationBuilder builder)
     {
@@ -50,6 +56,8 @@ internal static class DistributedApplicationBuilderExtensions
         IResourceBuilder<ParameterResource> postgresPassword)
     {
         var postgres = builder.AddPostgres("postgres", password: postgresPassword, port: 15432)
+            .WithImage(PostgresImage, PostgresImageTag)
+            .WithImageRegistry(PostgresImageRegistry)
             .WithContainerName("project-test-postgres")
             .WithContainerRuntimeArgs(
                 "--label", $"com.docker.compose.project={DockerDesktopGroupName}",
