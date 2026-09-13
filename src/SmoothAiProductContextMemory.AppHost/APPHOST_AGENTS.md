@@ -11,7 +11,14 @@ ports/container names.
 
 - **Dev-only.** Never referenced by test projects, never invoked from CI. CI uses `TestFramework.Aspire`
   via the integration tests.
-- **No collision with TestFramework.Aspire.** Container names start with `smooth-project-memory-dev-*`;
+- **Docker naming: accent in the group, ASCII in the artifacts.** The Docker Desktop group is the
+  `com.docker.compose.project` **label**, so it carries the brand spelling — `smooth-mímisbrunnr`.
+  Container and volume names cannot: Docker rejects non-ASCII outright (`Invalid container name
+  (mímisbrunnr-…), only [a-zA-Z0-9][a-zA-Z0-9_.-] are allowed`), so they are transliterated —
+  `mimisbrunnr-postgres`, `mimisbrunnr-blob`, `mimisbrunnr-seq`. The test fixture follows the same
+  split (`Mímisbrunnr-Testing` group, `mimisbrunnr-testcontainer-*` containers). Do not "fix" the
+  group label to ASCII, and do not add the accent to a container or volume name.
+- **No collision with TestFramework.Aspire.** Container names are `mimisbrunnr-*` (no `testcontainer` segment);
   ports must not equal those of the test fixture (Postgres `15432`, Redis `16379`, WireMock `19091`,
   MinIO `9002` s3 / `19092` console).
 - **Container runtime agnostic, and runtime selection is Aspire's job.** Registering containers through
@@ -35,19 +42,19 @@ ports/container names.
 - **No WireMock in dev AppHost.** The AppHost orchestrates real Postgres/MinIO/Seq only. There is no
   upstream HTTP API to stub in this service.
 - **Postgres and MinIO use persistent named volumes.** Dev data survives container restarts.
-- **Postgres image is the AGE-bearing pin** `docker.io/apache/age:release_PG17_1.7.0` (Postgres 17 + AGE 1.7.0), not Aspire's `library/postgres:17.6`. Same major as the previous default, so the named volume is compatible. A major mismatch against `smooth-project-memory-postgres-data` refuses to start and looks like a broken image — drop that volume only if the major actually changed. Recreate `smooth-project-memory-dev-postgres` once after the image pin so the persistent container is not still running the old image.
+- **Postgres image is the AGE-bearing pin** `docker.io/apache/age:release_PG17_1.7.0` (Postgres 17 + AGE 1.7.0), not Aspire's `library/postgres:17.6`. Same major as the previous default, so the named volume is compatible. A major mismatch against `mimisbrunnr-postgres-data` refuses to start and looks like a broken image — drop that volume only if the major actually changed. Recreate `mimisbrunnr-postgres` once after the image pin so the persistent container is not still running the old image.
 - **Every dev container carries `com.docker.compose.project` / `com.docker.compose.service` labels**
-  so Docker Desktop groups them under the `smooth-project-memory` project while keeping the explicit
-  `smooth-project-memory-dev-*` container names.
+  so Docker Desktop groups them under the `smooth-mímisbrunnr` project while keeping the explicit
+  `mimisbrunnr-*` container names.
 
 ## Resource Names
 
 | Resource | Name | Fixed local port | Container name |
 |---|---|---:|---|
-| PostgreSQL + AGE | `postgres` (`docker.io/apache/age:release_PG17_1.7.0`) | `5432` | `smooth-project-memory-dev-postgres` |
+| PostgreSQL + AGE | `postgres` (`docker.io/apache/age:release_PG17_1.7.0`) | `5432` | `mimisbrunnr-postgres` |
 | Database | `SmoothAiProductContextMemory` (physical DB `app`) | (via `postgres`) | n/a |
-| MinIO (blob) | `blob` | `9000` (s3), `9001` (console) | `smooth-project-memory-dev-blob` |
-| Seq | `seq` (volume `smooth-project-memory-seq-data`) | `5341` | `smooth-project-memory-dev-seq` |
+| MinIO (blob) | `blob` | `9000` (s3), `9001` (console) | `mimisbrunnr-blob` |
+| Seq | `seq` (volume `mimisbrunnr-seq-data`) | `5341` | `mimisbrunnr-seq` |
 | API project | `host` | `5141` http / `7141` https (from `launchSettings`) | n/a (host process) |
 
 Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgres` — see
@@ -81,7 +88,7 @@ Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgr
   makes it work. Seq is retained for one reason only: the dashboard's telemetry store is **in-memory,
   capacity-bounded and cleared when the AppHost stops**, so an intermittent failure investigated
   tomorrow is already gone. Seq survives restarts and queries far better. That argument only holds with
-  a **data volume** (`smooth-project-memory-seq-data`), which it now has — previously its persistence
+  a **data volume** (`mimisbrunnr-seq-data`), which it now has — previously its persistence
   claim was false beyond container removal, unlike Postgres and the object store.
   **Deviation to note:** Seq is fed by the Serilog Seq sink rather than by OTLP ingestion. Seq does
   accept OTLP directly and that would be the tidier wiring, but Serilog is the authoritative log
@@ -98,6 +105,7 @@ Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgr
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-13 | Renamed the dev resources to the Mímisbrunnr brand: group label `smooth-mímisbrunnr` (accented — it is a label), containers and volumes `mimisbrunnr-*` (ASCII — Docker rejects non-ASCII names). The `smooth-project-memory-dev-*` names are gone. Existing containers and volumes are orphaned by the rename and must be removed once. | WT-obs |
 | 2026-09-13 | Seq keep-or-drop decided: **kept** for persistence beyond the dashboard's in-memory store, and given the data volume it never had. Fed by the Serilog Seq sink rather than OTLP ingestion — deviation recorded above. | WT-obs |
 | 2026-09-13 | Named the database resource after the connection-string key the Host reads (`SmoothAiProductContextMemory`, physical DB still `app`) — as `app` it published `ConnectionStrings__app` and the Host died at DI resolve. Added `WithHttpHealthCheck("/health")`. Corrected the OpenTelemetry claim: telemetry now actually reaches the dashboard, and Seq is fed via `ConnectionStrings:seq` (there is no `SEQ_URI`). | WT-obs |
 | 2026-09-13 | Pin Postgres to `docker.io/apache/age:release_PG17_1.7.0` (same major as Aspire 13.3.0's `library/postgres:17.6`). Persistent container must be recreated once so it is not still the old image. | HLD-003 |

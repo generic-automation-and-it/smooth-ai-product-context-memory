@@ -13,7 +13,7 @@ Shared xunit.v3 test fixtures and helpers reused across the L0/L1/L2 test projec
 
 - **`AspireFixture`** owns L1/L2 container dependencies, provisioned by `tests/SmoothAiProductContextMemory.TestFramework.Aspire`. It resolves endpoints in three steps: (1) probe the fixed well-known ports of already-running persistent containers, (2) ask the container CLI for the published port of each `mimisbrunnr-testcontainer-*` container, (3) only then boot the Aspire `DistributedApplication` itself. The `DistributedApplication` is shared process-wide via `[CollectionDefinition("Aspire")]` and disposal is a deliberate no-op — containers are `ContainerLifetime.Persistent` and outlive the test run. Docker Desktop groups them under `Mímisbrunnr-Testing` (`com.docker.compose.project`); container names are `mimisbrunnr-testcontainer-{tech}` (ASCII — Docker names cannot carry the acute).
 - **Container runtime is Aspire's concern, not the fixture's.** Aspire selects Docker by default and honours `DOTNET_ASPIRE_CONTAINER_RUNTIME=podman` when Podman is preferred. The fixture only shells out for *port discovery*, probing `docker` first and `podman` second; both calls are timeout-bounded and read stdout asynchronously so a stalled CLI (for example Podman with a stopped machine) cannot hang the test run.
-- **Test dependency ports** (fixed, must never collide with the dev AppHost's `smooth-project-memory-dev-*` resources):
+- **Test dependency ports** (fixed, must never collide with the dev AppHost's `mimisbrunnr-*` resources):
 
   | Resource | Container | Port |
   |---|---|---:|
