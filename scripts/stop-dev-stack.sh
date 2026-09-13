@@ -32,6 +32,11 @@ if ! command -v "$RUNTIME" >/dev/null 2>&1; then
     exit 1
 fi
 
+if ! "$RUNTIME" info >/dev/null 2>&1; then
+    echo "FAIL: container runtime '$RUNTIME' not reachable (daemon stopped?)" >&2
+    exit 1
+fi
+
 remove_container() {
     local name="$1"
 

@@ -34,6 +34,11 @@ echo "WARNING: destroying named volumes (memories, blobs, Seq logs)"
 
 "$SCRIPT_DIR/stop-dev-stack.sh"
 
+if ! "$RUNTIME" info >/dev/null 2>&1; then
+    echo "FAIL: container runtime '$RUNTIME' not reachable (daemon stopped?)" >&2
+    exit 1
+fi
+
 remove_volume() {
     local name="$1"
 
