@@ -44,7 +44,7 @@ public abstract class HandlerTestBase(AspireFixture aspire) : IAsyncLifetime
         await ApplyMigrationsAsync(_dataSource, Ct);
 
         var options = new DbContextOptionsBuilder<SmoothAiProductContextMemoryDbContext>()
-            .UseNpgsql(_dataSource)
+            .UseNpgsql(_dataSource, npgsql => npgsql.UseSmoothAiProductContextMemoryHistory())
             .Options;
 
         Db = new SmoothAiProductContextMemoryDbContext(options);
@@ -58,7 +58,7 @@ public abstract class HandlerTestBase(AspireFixture aspire) : IAsyncLifetime
             SecretKey = AspireFixture.BlobSecretKey,
             Bucket = $"app-comp-{Guid.NewGuid():N}",
         });
-        Blob = new S3BlobStorage(blobOptions, Loggers.CreateLogger<S3BlobStorage>());
+        Blob = new S3BlobStorage(blobOptions, new TestHttpClientFactory(), Loggers.CreateLogger<S3BlobStorage>());
     }
 
     public async ValueTask DisposeAsync()
@@ -86,7 +86,7 @@ public abstract class HandlerTestBase(AspireFixture aspire) : IAsyncLifetime
         var services = new ServiceCollection();
         services.AddSingleton(dataSource);
         services.AddDbContext<SmoothAiProductContextMemoryDbContext>(options =>
-            options.UseNpgsql(dataSource));
+            options.UseNpgsql(dataSource, npgsql => npgsql.UseSmoothAiProductContextMemoryHistory()));
 
         await using ServiceProvider provider = services.BuildServiceProvider();
         await provider.MigrateSmoothAiProductContextMemoryAsync(cancellationToken);

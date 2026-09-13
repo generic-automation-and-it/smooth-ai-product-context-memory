@@ -3,7 +3,7 @@
 Reproducible **Host** image (`src/SmoothAiProductContextMemory.Host`). The
 **AppHost is not published** — it is the local Aspire orchestrator. Starting
 `dotnet run --project src/SmoothAiProductContextMemory.AppHost` pulls this
-image and starts postgres/blob/seq in the `smooth-mimisbrunnr` Docker Desktop group.
+image and starts postgres/blob/seq in the `smooth-mímisbrunnr` Docker Desktop group.
 
 `HostConfiguration:UseProject=true` compiles Host from source instead (SDK
 required).
@@ -35,17 +35,18 @@ mount a host directory and pass `--output`.
 
 ## Docker Desktop group
 
-Brand is **Mímisbrunnr**. Docker names are ASCII (`í` is illegal). Runtime
-artifacts use prefix `smooth-mimisbrunnr`. Tests stay `mimisbrunnr-testcontainer-*`.
-Image/product stays `smooth-ai-product-context-memory`.
+Brand is **Mímisbrunnr**. The Docker Desktop **group label** keeps the accent
+(`smooth-mímisbrunnr`). Container names are ASCII (`mimisbrunnr-*`) — Docker
+rejects `í`. Tests stay `mimisbrunnr-testcontainer-*`. Image/product stays
+`smooth-ai-product-context-memory`.
 
 Standalone `docker run` and the AppHost Host container both apply:
 
-- container name `smooth-mimisbrunnr-host`
-- label `com.docker.compose.project=smooth-mimisbrunnr`
-- label `com.docker.compose.service=smooth-mimisbrunnr-host`
+- container name `mimisbrunnr-host`
+- label `com.docker.compose.project=smooth-mímisbrunnr`
+- label `com.docker.compose.service=mimisbrunnr-host`
 
-Siblings: `smooth-mimisbrunnr-{postgres,blob,seq}`.
+Siblings: `mimisbrunnr-{postgres,blob,seq}`.
 
 ## Build locally
 
@@ -68,15 +69,15 @@ inside the container** (`host.docker.internal` on Docker Desktop).
 
 ```bash
 docker run --rm \
-  --name smooth-mimisbrunnr-host \
-  --label com.docker.compose.project=smooth-mimisbrunnr \
-  --label com.docker.compose.service=smooth-mimisbrunnr-host \
+  --name mimisbrunnr-host \
+  --label com.docker.compose.project=smooth-mímisbrunnr \
+  --label com.docker.compose.service=mimisbrunnr-host \
   -p 5141:5141 \
   -e ConnectionStrings__SmoothAiProductContextMemory='Host=host.docker.internal;Port=5432;Database=app;Username=postgres;Password=LocalMachineAccessNoInterestingDataDev#Passw0rd!FirewallNotExposed' \
   -e BlobStorage__Endpoint='http://host.docker.internal:9000' \
   -e BlobStorage__AccessKey='smooth-local' \
   -e BlobStorage__SecretKey='LocalMachineAccessNoInterestingDataDev#Passw0rd!FirewallNotExposed' \
-  -e BlobStorage__Bucket='smooth-project-memory' \
+  -e BlobStorage__Bucket='smooth-mimisbrunnr-memory-well' \
   smooth-ai-product-context-memory:local
 ```
 
@@ -87,15 +88,15 @@ Probe: `http://localhost:5141/openapi/v1.json` (there is no in-image healthcheck
 
 ```bash
 docker run --rm \
-  --name smooth-mimisbrunnr-host \
-  --label com.docker.compose.project=smooth-mimisbrunnr \
-  --label com.docker.compose.service=smooth-mimisbrunnr-host \
+  --name mimisbrunnr-host \
+  --label com.docker.compose.project=smooth-mímisbrunnr \
+  --label com.docker.compose.service=mimisbrunnr-host \
   -v "$(pwd)/.context/export:/export" \
   -e ConnectionStrings__SmoothAiProductContextMemory='Host=host.docker.internal;Port=5432;Database=app;Username=postgres;Password=LocalMachineAccessNoInterestingDataDev#Passw0rd!FirewallNotExposed' \
   -e BlobStorage__Endpoint='http://host.docker.internal:9000' \
   -e BlobStorage__AccessKey='smooth-local' \
   -e BlobStorage__SecretKey='LocalMachineAccessNoInterestingDataDev#Passw0rd!FirewallNotExposed' \
-  -e BlobStorage__Bucket='smooth-project-memory' \
+  -e BlobStorage__Bucket='smooth-mimisbrunnr-memory-well' \
   smooth-ai-product-context-memory:local \
   export --output /export
 ```
@@ -106,7 +107,7 @@ replace `ENTRYPOINT` with a baked `dotnet …` web command.
 ## AppHost consumption
 
 Default: AppHost **pulls** `ghcr.io/generic-automation-and-it/smooth-ai-product-context-memory:latest`
-and starts `smooth-mimisbrunnr-{host,postgres,blob,seq}`.
+and starts `mimisbrunnr-{host,postgres,blob,seq}` in group `smooth-mímisbrunnr`.
 
 ```bash
 dotnet run --project src/SmoothAiProductContextMemory.AppHost
@@ -158,7 +159,7 @@ Executed, not inferred:
 | `docker run … image export --help` | prints System.CommandLine help (args reach `Program`) |
 | API against AppHost postgres+blob | `GET /openapi/v1.json` → **200**, OpenAPI 3.1.1, 11 paths; listening `http://[::]:5141` |
 | `export --output /export` (empty store) | writes marker `.context-memory-export`; 0 files |
-| Docker Desktop labels | `com.docker.compose.project=smooth-mimisbrunnr`, `service=smooth-mimisbrunnr-host` (verified under previous `smooth-project-memory` names; rename is the same label mechanism) |
+| Docker Desktop labels | `com.docker.compose.project=smooth-mímisbrunnr`, `service=mimisbrunnr-host` (verified under previous names; rename is the same label mechanism) |
 | Multi-arch manifest | **not** verified locally — CI `build-push-action` platforms `linux/amd64,linux/arm64`; inspect GHCR after first publish |
 | Dispatch never `:latest` | encoded in workflow `enable=` on the `latest` tag; confirm on first `workflow_dispatch` |
 

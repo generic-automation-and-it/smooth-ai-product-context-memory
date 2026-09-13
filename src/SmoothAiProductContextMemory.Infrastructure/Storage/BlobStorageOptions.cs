@@ -6,6 +6,13 @@ public sealed class BlobStorageOptions
 {
     public const string SectionName = "BlobStorage";
 
+    /// <summary>
+    /// Named client the MinIO SDK is handed. Going through <c>IHttpClientFactory</c> is what puts
+    /// object-store calls under the Host's <c>ConfigureHttpClientDefaults</c> — standard resilience
+    /// and service discovery — instead of an SDK-owned handler nothing can configure.
+    /// </summary>
+    public const string HttpClientName = "blob-storage";
+
     public string Endpoint { get; set; } = string.Empty;
 
     public string AccessKey { get; set; } = string.Empty;

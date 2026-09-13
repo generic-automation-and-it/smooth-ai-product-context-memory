@@ -14,6 +14,12 @@ lives in Application; the S3-compatible implementation lives here in Infrastruct
   read, so behaviour is identical across storage backends regardless of server-side compression.
 - **No engine concepts leak.** The `IBlobStorage` interface (`Application/Abstractions/IBlobStorage.cs`)
   never exposes buckets, object keys or ETags — the backing store stays swappable.
+- **The MinIO client is handed an `IHttpClientFactory` client** (`BlobStorageOptions.HttpClientName`),
+  never one it builds itself. That is what puts object-store calls under the Host's
+  `ConfigureHttpClientDefaults` — standard resilience and service discovery — and under
+  `HttpClient` trace instrumentation, so a blob call attaches to the request's trace instead of
+  appearing as unrelated activity. The `Polly` meter reporting for blob calls is how you can tell
+  the handler is actually attached.
 - **Bucket created lazily** on first write (`EnsureBucketAsync`); reads treat a missing bucket as a
   missing object. No separate init container required.
 - **Options bound from configuration**, populated by Aspire in development (`BlobStorage:Endpoint`,

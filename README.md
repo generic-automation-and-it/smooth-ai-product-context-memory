@@ -125,7 +125,7 @@ Target a single test project directly when iterating, e.g. `dotnet test tests/Sm
 ### Run locally
 
 ```bash
-dotnet run --project src/SmoothAiProductContextMemory.AppHost   # Aspire: pull Host image + Postgres + MinIO + Seq (group smooth-mimisbrunnr)
+dotnet run --project src/SmoothAiProductContextMemory.AppHost   # Aspire: pull Host image + Postgres + MinIO + Seq (group smooth-mímisbrunnr)
 HostConfiguration__UseProject=true \
   dotnet run --project src/SmoothAiProductContextMemory.AppHost # same stack, compile Host from source
 dotnet run --project src/SmoothAiProductContextMemory.Host      # start the API on its own
