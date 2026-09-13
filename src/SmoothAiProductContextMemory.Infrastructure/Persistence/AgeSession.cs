@@ -10,6 +10,7 @@ internal static class AgeSession
 {
     internal const string GraphName = "memory_graph";
     internal const string VertexLabel = "Memory";
+    internal const string EdgeLabel = "LINKS";
     internal const string ExtensionVersion = "1.7.0";
     internal const int PostgresMajor = 17;
 

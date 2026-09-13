@@ -18,8 +18,6 @@ public interface IApplicationDbContext
 
     DbSet<MemoryVersion> MemoryVersions { get; }
 
-    DbSet<MemoryLink> MemoryLinks { get; }
-
     DatabaseFacade Database { get; }
 
     IQueryable<LabelUsageRow> QueryLabelUsage();

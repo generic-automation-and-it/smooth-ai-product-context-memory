@@ -12,7 +12,7 @@ One-way generated Markdown projection of the store (groups, memories, current ve
 - **Relationships live in file content.** `group_uuid` is written into every memory file. Directory placement is navigation, not proof. A prior trial encoded the parent only in the path; a moved file lost it silently.
 - **Forensic dump, not HTTP retrieval.** Export bypasses `MemoryScopeFilter` and does not use `IMemorySearch`. Programme rows are included and marked. LADR-003 stays HTTP-only.
 - **Never log memory content.** Information = lifecycle + counts. Debug = per-entity uuid. Warning = missing/non-text blob (uuid + version, not address or body).
-- **No schema change, no 8th entity, no API endpoint.**
+- **No schema change, no 7th entity, no API endpoint.** Relationships come from `IMemoryGraph`, not a `DbSet`.
 
 ## System Context
 
@@ -27,7 +27,8 @@ sequenceDiagram
     participant Sink as IMarkdownExportSink
 
     CLI->>Handler: Request(output, history, force)
-    Handler->>Db: all groups, memories, versions, links
+    Handler->>Db: all groups, memories, versions
+    Handler->>Graph: ListAllAsync (IMemoryGraph)
     Handler->>Sink: PrepareAsync (wipe + marker)
     loop each memory version needed
         Handler->>Blob: GetAsync (null = missing, continue)
@@ -108,4 +109,5 @@ Approved implementation plan (2026-09-13):
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-13 | Export reads relationships via `IMemoryGraph.ListAllAsync` after the HLD 003 cutover. | HLD-003 |
 | 2026-09-13 | Created — generated Markdown export contract. | PR #18 |

@@ -42,8 +42,9 @@ See [./ladrs/](./ladrs/).
 - **Install ordering matters.** The extension must be created before other roles gain schema-creation rights, or its catalog schema can be pre-created under the wrong owner and installation refuses.
 - **Traversal returns identities, never content.** Answering what those memories say requires selecting the relational rows — one composed query, since SQL and Cypher share the session.
 - **The entity-count guard changes by one.** Removing the relationship entity is expected and is updated deliberately in the same change; it is not a test to weaken when it fails.
-- **The current foundation is additive.** The extension, empty `memory_graph`, vertex label `Memory`, and the five relation edge labels exist; `memory_link` is still the relationship store. Do not write or read edges yet.
-- **The relational relationship contract is characterised** in `LinkTests` (HLD-003): a duplicate directed triple is refused, the same pair may hold several relations, direction is identity, deleting a memory removes inbound and outbound links, a self-link persists at the store, and links are not group-bounded. The cutover (LADR-03) must keep this behaviour.
+- **Relationships live only in the graph.** Vertex label `Memory` (`memory_uuid` only); one edge label `LINKS` with properties `relation` (open vocabulary) and `reason` (mandatory). The five foundation elabels were dropped at cutover. `memory_link` is gone.
+- **The delete path is the `trg_memory_graph_cascade` trigger, and nothing else.** Removing a memory row fires a BEFORE DELETE trigger that DETACH DELETEs its vertex in the same statement and transaction. `IMemoryGraph` deliberately exposes no delete method; a C# edge-removal step beside the trigger is a second delete path (Quality Constraints), not belt-and-braces.
+- **The relationship contract is characterised** in `LinkTests` (HLD-003): a duplicate directed triple is refused, the same pair may hold several relations, direction is identity, deleting a memory removes inbound and outbound edges, a self-link persists at the store, and links are not group-bounded.
 - **Setting the AGE search path changes `current_schema()`, and EF resolves the migrations-history table against it.** `search_path = ag_catalog, "$user", public` makes `current_schema()` return `ag_catalog`, so an unqualified `__EFMigrationsHistory` is looked for there, not found, and EF concludes the database has never been migrated — then re-applies the first migration and fails on objects that already exist. The first start of a fresh database succeeds because the extension is not installed yet when history is first read; every start afterwards fails. The history table is therefore schema-pinned (`MigrationsHistoryConvention`). Anything else that resolves an unqualified object name at runtime is exposed to the same shift and must qualify it.
 - **Do not revert the database image to `library/postgres`.** Both Aspire hosts must stay on `docker.io/apache/age:release_PG17_1.7.0`. A vanilla Postgres image fails `CREATE EXTENSION age` and the pool-recycle tests.
 
@@ -57,7 +58,7 @@ operability and compatibility. Two shape how code is written rather than merely 
 
 ## Migration Plans
 
-- The relational relationship table is dropped in the same change that creates the graph; existing rows are carried over in that migration (LADR-03). **Not yet:** the foundation created the empty graph beside `memory_link`; the cutover is a later change.
+- The relational relationship table is dropped; existing rows are carried over as `:LINKS` edges in the same migration (LADR-03).
 - Reversal is a corrective migration restoring the table — there is no fallback flag, by design.
 - The database image is `docker.io/apache/age:release_PG17_1.7.0` (Postgres 17 + AGE 1.7.0) in both the development and test hosts. Pairing: [nfrs/NFR-04-version-pairing.md](./nfrs/NFR-04-version-pairing.md).
 
@@ -65,6 +66,7 @@ operability and compatibility. Two shape how code is written rather than merely 
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-13 | Cutover: `memory_link` replaced by `:LINKS` edges; identity-only vertices; delete trigger; uniqueness read-before-write. Open relation vocabulary. | HLD-003 |
 | 2026-09-13 | Recorded that the AGE search path shifts `current_schema()` to `ag_catalog`, which broke EF's migrations-history lookup and made every restart after the first re-apply migrations. History table pinned to `public`. | HLD-003 |
 | 2026-09-13 | Characterised the relational uniqueness/integrity contract in `LinkTests` before cutover. No production change. | HLD-003 |
 | 2026-09-13 | Foundation review: both Aspire hosts stay on `docker.io/apache/age:release_PG17_1.7.0`; do not revert to `library/postgres`. | HLD-003 |

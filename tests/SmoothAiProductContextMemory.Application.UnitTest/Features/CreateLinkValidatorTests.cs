@@ -1,6 +1,6 @@
 using FluentValidation.TestHelper;
 using SmoothAiProductContextMemory.Application.Features.Links;
-using SmoothAiProductContextMemory.Domain.Entities;
+using SmoothAiProductContextMemory.Domain;
 
 namespace SmoothAiProductContextMemory.Application.UnitTest.Features;
 
@@ -13,7 +13,7 @@ public class CreateLinkValidatorTests
     {
         Guid id = Guid.NewGuid();
         var result = _validator.TestValidate(
-            new CreateLink.Request(id, id, MemoryLink.RelationValue.RelatesTo, "because"));
+            new CreateLink.Request(id, id, MemoryRelation.RelatesTo, "because"));
         result.ShouldHaveValidationErrorFor(x => x);
     }
 
@@ -24,7 +24,7 @@ public class CreateLinkValidatorTests
             new CreateLink.Request(
                 Guid.NewGuid(),
                 Guid.NewGuid(),
-                MemoryLink.RelationValue.DependsOn,
+                MemoryRelation.DependsOn,
                 "needed"));
         result.ShouldNotHaveAnyValidationErrors();
     }

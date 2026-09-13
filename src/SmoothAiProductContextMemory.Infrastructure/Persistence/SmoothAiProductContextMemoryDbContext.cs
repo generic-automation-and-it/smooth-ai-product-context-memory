@@ -6,9 +6,9 @@ using SmoothAiProductContextMemory.Infrastructure.Persistence.Configurations;
 namespace SmoothAiProductContextMemory.Infrastructure.Persistence;
 
 /// <summary>
-/// DbContext over the context-memory model. Deliberately exposes exactly the seven entity types —
+/// DbContext over the context-memory model. Deliberately exposes exactly the six entity types —
 /// the model-shape guard test asserts this set, reintroducing a table for tags/facets/sources/
-/// repositories/tickets fails the build rather than passing review unnoticed.
+/// repositories/tickets (or the dropped MemoryLink) fails the build rather than passing review unnoticed.
 /// </summary>
 public sealed class SmoothAiProductContextMemoryDbContext(DbContextOptions<SmoothAiProductContextMemoryDbContext> options)
     : DbContext(options), IApplicationDbContext
@@ -24,8 +24,6 @@ public sealed class SmoothAiProductContextMemoryDbContext(DbContextOptions<Smoot
     public DbSet<Memory> Memories => Set<Memory>();
 
     public DbSet<MemoryVersion> MemoryVersions => Set<MemoryVersion>();
-
-    public DbSet<MemoryLink> MemoryLinks => Set<MemoryLink>();
 
     public IQueryable<LabelUsageRow> QueryLabelUsage() =>
         Database.SqlQueryRaw<LabelUsageRow>("SELECT name AS \"Name\", uses AS \"Uses\" FROM label_usage");
