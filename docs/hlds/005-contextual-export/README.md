@@ -5,7 +5,7 @@
 | **Status** | In Discovery |
 | **Owner** | generik0 |
 | **Tracker** | Contextual export |
-| **Business authority** | [BRD-002 — Contextual knowledge export](../../brd/002-contextual-export/) (`BR-18` … `BR-34`) |
+| **Business authority** | [BRD-002 — Contextual knowledge export](../../brd/002-contextual-export/) (`BR-18` … `BR-36`) |
 | **Last updated** | 2026-09-13 |
 
 > Discovery / prototyping HLD. Delivers **intent + spec** — what we are building and why, the decisions
@@ -39,13 +39,15 @@ different set of rules.
 
 ## Vocabulary
 
-Three words that are easy to conflate and are kept distinct throughout this HLD:
+Four words that are easy to conflate, plus the pre-existing artefact they are most often confused
+with. All are kept distinct throughout this HLD:
 
 | Term | Meaning |
 |---|---|
 | **Anchor set** | The selection criteria: repository, initiative, ticket, tags — combinable |
 | **Bundle** | What the API returns: the selected memories with their bodies, the edges between them with their reasons, and a **manifest** stating what was selected, what was reached, and what was cut. Deterministic. No judgement |
 | **Dossier** | What the skill composes from a bundle: the ordered document plus its findings. Judgement. Not deterministic |
+| **Focus** | The work a dossier is about to feed — requirements, architecture, specification, implementation, review. A presentation lens over an unfocused bundle: changes order, weighting and depth, never membership. Optional; unfocused is the default (LADR-12) |
 | **Forensic dump** | The pre-existing whole-store `export` CLI projection. Not part of this design; see LADR-01 |
 
 ## Key Goals
@@ -70,13 +72,20 @@ Concatenation is the failure mode this design exists to avoid. A slice pasted to
 order, with the same conclusion printed three times and a reversed decision sitting beside its
 replacement, is *less* useful than the store — it reads as complete and is not.
 
-**Acceptance criteria / DoD** — satisfies `BR-21`, `BR-22`, `BR-23`, `BR-24`, `BR-25`, `BR-26`
+A document with no target reader optimises for nothing, so composition can be **focused** on the work
+the document is about to feed. A focus is a lens, not a filter: it re-weights and reorders one
+unfocused bundle and never changes what was selected (LADR-12).
+
+**Acceptance criteria / DoD** — satisfies `BR-21`, `BR-22`, `BR-23`, `BR-24`, `BR-25`, `BR-26`, `BR-35`, `BR-36`
 
 - A decision and the reasoning it rests on appear in a followable order.
 - A claim captured more than once appears once, with every origin still identifiable.
 - Superseded and no-longer-true material is marked as such, not mixed in and not dropped.
 - Every statement traces to the memory, version and capture time it came from.
-- The document is identifiable as a generated projection, and reads as evidence rather than instruction.
+- The document is identifiable as a generated projection, states the focus that produced it, and reads as evidence rather than instruction.
+- Any focus from the bounded set produces a document ordered and weighted for that work; requesting none produces the complete unfocused document.
+- Two focuses of one slice contain the same selected knowledge; whatever a focus does not surface is listed as omitted with reason `outside-focus`.
+- Gaps, contradictions and quality problems are present under every focus.
 
 ### 3. Findings as first-class output
 
@@ -97,6 +106,9 @@ reader can miss and a script cannot count.
 Composition is the most expensive operation in the product, and its cost scales with the slice rather
 than with a fact. "Everything about this repository" must be answerable *as a size* before it is
 answerable as a document.
+
+One selection can serve several documents: because focus is applied after selection (LADR-12),
+producing a requirements view and an implementation view of one slice pays for the traversal once.
 
 **Acceptance criteria / DoD** — satisfies `BR-32`, `BR-34`
 
@@ -138,8 +150,9 @@ cannot — and pretending otherwise would either forbid the judgement or make th
 
 ## Architecture Decisions (LADRs)
 
-LADRs 01–06 are strategic, 07–08 tactical, and **09–11 are blocked prerequisites** — decisions that
-cannot be taken until a named gap in the graph or the capture skill is closed. See [`./ladrs/`](./ladrs/).
+LADRs 01–06 are strategic, 07–08 tactical, **09–11 are blocked prerequisites** — decisions that cannot
+be taken until a named gap in the graph or the capture skill is closed — and 12 is strategic, appended
+because numbers are never reassigned. See [`./ladrs/`](./ladrs/).
 
 **Status legend.** `Draft → Prototype → Accepted` is the shared vocabulary. **Blocked** is used here for
 a decision whose options cannot be evaluated yet because an upstream gap makes one of them unbuildable.
@@ -159,6 +172,7 @@ without it. It is not a deferred decision — it is a decision with a missing in
 | [LADR-09](./ladrs/LADR-09-ticket-anchors-have-no-graph-representation.md) | Ticket anchors as graph vertices | **Blocked** |
 | [LADR-10](./ladrs/LADR-10-tag-anchors-have-no-graph-representation.md) | Tag anchors as graph vertices | **Blocked** |
 | [LADR-11](./ladrs/LADR-11-no-writer-derives-anchor-edges.md) | Capture-time derivation of anchor edges | **Blocked** |
+| [LADR-12](./ladrs/LADR-12-focus-is-a-composition-lens.md) | Focus is a composition lens over one unfocused bundle | Draft |
 
 ### What the blocked LADRs mean for scope
 
