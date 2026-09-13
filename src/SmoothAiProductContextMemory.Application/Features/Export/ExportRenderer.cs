@@ -337,5 +337,5 @@ public static class ExportRenderer
     private static StringBuilder AppendLineLf(this StringBuilder builder, string? value = null) =>
         value is null ? builder.Append('\n') : builder.Append(value).Append('\n');
 
-    private static string Finish(StringBuilder builder) => builder.ToString().TrimEnd('\n') + "\n";
+    private static string Finish(StringBuilder builder) => builder.ToString().TrimEnd('\n', '\r') + "\n";
 }
