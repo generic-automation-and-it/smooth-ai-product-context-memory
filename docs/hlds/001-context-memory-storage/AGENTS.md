@@ -1,16 +1,21 @@
 # AGENTS.md - Context memory storage
 
-AI Context: HLD for context memory storage. Updated: 2026-09-14
+AI Context: HLD for context memory storage. Updated: 2026-09-13
 
 ## TL;DR
 
 How context memory is stored: PostgreSQL as an index over content, bodies in content-addressed object
 storage. Intent and goals in [README.md](./README.md); decisions in [./ladrs/](./ladrs/); measurable
 quality bar in [./nfrs/](./nfrs/); containers and entity model in
-[./diagrams/c4-context.md](./diagrams/c4-context.md).
+[./diagrams/c4-context.md](./diagrams/c4-context.md). The business requirements this design answers
+— and the only place their justification belongs — are in
+[BRD 001](../../brd/001-context-memory/): principally BR-05 (cross-product recall), BR-08 (superseded
+knowledge stays readable), BR-09 (a correction to a record is distinguishable from a change in the
+world), BR-13 (nothing silently lost) and BR-17 (readable without this application).
 
 ## Non-Negotiables
 
+- **A change that weakens a cited `BR-NN` is a business decision, not a design one.** Storage decisions may trade against each other freely; trading away BR-09's two axes or BR-13's retention is out of this document's authority and belongs back at the BRD.
 - **Do not flatten the stable memory row into the versioned one.** It reads as unnecessary indirection until you try to attach an unversioned tag (LADR-03).
 - **Do not move tags or facets onto the versioned row.** Their placement *is* the unversioned-classification decision.
 - **Do not add a foreign key from facets to the label registry.** It is advisory by design; an FK makes it enforcing (LADR-07).
@@ -62,4 +67,5 @@ Targets and verification live in [./nfrs/](./nfrs/). Two shape how code is writt
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
-| 2026-09-14 | Created — converted from ADR-0001 and ADR-0002, which were one design in two documents. | ADR-0001, ADR-0002 |
+| 2026-09-13 | Created — converted from ADR-0001 and ADR-0002, which were one design in two documents. | ADR-0001, ADR-0002 |
+| 2026-09-13 | Added the upstream BRD as cited business authority and the rule that weakening a cited `BR-NN` escalates. | BRD 001 |
