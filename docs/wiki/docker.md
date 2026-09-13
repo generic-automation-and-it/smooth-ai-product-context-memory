@@ -46,7 +46,7 @@ Standalone `docker run` and the AppHost Host container both apply:
 - label `com.docker.compose.project=smooth-mímisbrunnr`
 - label `com.docker.compose.service=mimisbrunnr-host`
 
-Siblings: `mimisbrunnr-{postgres,blob,seq}`.
+Siblings: `mimisbrunnr-postgres`, `mimisbrunnr-blob-well`, `mimisbrunnr-seq`.
 
 ## Build locally
 
@@ -107,7 +107,7 @@ replace `ENTRYPOINT` with a baked `dotnet …` web command.
 ## AppHost consumption
 
 Default: AppHost **pulls** `ghcr.io/generic-automation-and-it/smooth-ai-product-context-memory:latest`
-and starts `mimisbrunnr-{host,postgres,blob,seq}` in group `smooth-mímisbrunnr`.
+and starts `mimisbrunnr-{host,postgres,blob-well,seq}` in group `smooth-mímisbrunnr`.
 
 ```bash
 dotnet run --project src/SmoothAiProductContextMemory.AppHost

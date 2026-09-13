@@ -25,10 +25,10 @@ internal static class DistributedApplicationBuilderExtensions
     // (`smooth-mímisbrunnr-testing` group, `mimisbrunnr-testcontainer-*` containers).
     private const string DockerDesktopGroupName = "smooth-mímisbrunnr";
     private const string PostgresContainerName = "mimisbrunnr-postgres";
-    private const string BlobContainerName = "mimisbrunnr-blob";
+    private const string BlobContainerName = "mimisbrunnr-blob-well";
     private const string SeqContainerName = "mimisbrunnr-seq";
     private const string PostgresDataVolume = "mimisbrunnr-postgres-data";
-    private const string BlobDataVolume = "mimisbrunnr-blob-data";
+    private const string BlobDataVolume = "mimisbrunnr-blob-well-data";
     private const string SeqDataVolume = "mimisbrunnr-seq-data";
     // S3 bucket names are DNS labels: lowercase ASCII, digits and hyphens only, so the brand is
     // transliterated here for the same reason container names are.

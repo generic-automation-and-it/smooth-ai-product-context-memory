@@ -15,7 +15,7 @@ ports/container names.
   `com.docker.compose.project` **label**, so it carries the brand spelling — `smooth-mímisbrunnr`.
   Container and volume names cannot: Docker rejects non-ASCII outright (`Invalid container name
   (mímisbrunnr-…), only [a-zA-Z0-9][a-zA-Z0-9_.-] are allowed`), so they are transliterated —
-  `mimisbrunnr-postgres`, `mimisbrunnr-blob`, `mimisbrunnr-seq`, `mimisbrunnr-host`. The test fixture
+  `mimisbrunnr-postgres`, `mimisbrunnr-blob-well`, `mimisbrunnr-seq`, `mimisbrunnr-host`. The test fixture
   follows the same split (`smooth-mímisbrunnr-testing` group, `mimisbrunnr-testcontainer-*` containers).
   Do not "fix" the group label to ASCII, and do not add the accent to a container or volume name. The
   MinIO bucket `smooth-mimisbrunnr-memory-well` is transliterated for the same reason — S3 bucket names
@@ -62,7 +62,7 @@ ports/container names.
 |---|---|---:|---|
 | PostgreSQL + AGE | `postgres` (`docker.io/apache/age:release_PG17_1.7.0`) | `5432` | `mimisbrunnr-postgres` |
 | Database | `SmoothAiProductContextMemory` (physical DB `app`) | (via `postgres`) | n/a |
-| MinIO (blob) | `blob` | `9000` (s3), `9001` (console) | `mimisbrunnr-blob` |
+| MinIO (blob) | `blob` | `9000` (s3), `9001` (console) | `mimisbrunnr-blob-well` |
 | Seq | `seq` (volume `mimisbrunnr-seq-data`) | `5341` | `mimisbrunnr-seq` |
 | API image (default) | `host` (`HostConfiguration:Image`) | `5141` | `mimisbrunnr-host` |
 | API project (opt-in) | `host` (`HostConfiguration:UseProject=true`) | `5141` http / `7141` https | n/a (host process) |
@@ -121,6 +121,7 @@ Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgr
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-13 | Runtime blob container renamed `mimisbrunnr-blob` → `mimisbrunnr-blob-well` (volume `mimisbrunnr-blob-well-data`). Tests stay `mimisbrunnr-testcontainer-blob`. Old volume is orphaned. | release-image |
 | 2026-09-13 | Default AppHost run pulls the published Host image as `mimisbrunnr-host` in group `smooth-mímisbrunnr`; `UseProject=true` keeps source. AppHost itself is not published. | release-image |
 | 2026-09-13 | Dev MinIO bucket renamed `smooth-project-memory` → `smooth-mimisbrunnr-memory-well`. Safe now because the blob volume was reset by the container rename; a later rename would orphan stored objects. | PR #36 |
 | 2026-09-13 | Renamed the dev resources to the Mímisbrunnr brand: group label `smooth-mímisbrunnr` (accented — it is a label), containers and volumes `mimisbrunnr-*` (ASCII — Docker rejects non-ASCII names). The `smooth-project-memory-dev-*` names are gone. Existing containers and volumes are orphaned by the rename and must be removed once. | PR #36 |
