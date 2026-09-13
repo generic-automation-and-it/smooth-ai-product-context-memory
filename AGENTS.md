@@ -30,6 +30,7 @@ Planned work tracked as worktasks under `.context/work-tasks/` (gitignored). Use
 
 | Skill | Path | Purpose |
 |---|---|---|
+| agile-github-breakdown | `.agents/skills/agile-github-breakdown/` | Braindump/Feature → GitHub Feature + Task graph (Project = initiative, Feature = epic, Task = story). |
 | context-memory | `.agents/skills/context-memory/` | Sole interface to the context-memory store; capture (`set`) and retrieval (`get`) of persistent context memories against the HTTP API. |
 | ai-review | `.agents/skills/ai-review/` | Local consumer of a remote AI code-review report (generator stays remote). |
 | git-commit-review-push | `.agents/skills/git-commit-review-push/` | Commit + push + open a PR with an embedded full AI review. |
