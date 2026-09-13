@@ -16,7 +16,7 @@ variable-depth paths, filterable by relation type and direction. The traversal a
 memories' descriptive fields come from **one** statement: `ag_catalog.cypher(...)` joined to `memory`
 / `memory_version` / `memory_group`, since SQL and Cypher share the session. Every traversal carries a
 required depth bound (1–5); nothing in the storage layer stops an unbounded walk, so the application
-does. Measured at depth 3 over 10,000 edges: 0.978 ms p95
+does. Measured at depth 3 over 10,000 edges: 1.057 ms p95
 ([NFR-02](../hlds/003-graph-edges-on-age/nfrs/NFR-02-traversal-measurements.md)).
 
 Whole-graph algorithms, centrality and recommendation are deliberately out of scope, as is mirroring

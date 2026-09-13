@@ -35,7 +35,7 @@ All three absolute targets are met with an order of magnitude to spare.
 
 **On the strict reading of NFR-02 this is a regression, and NFR-02 says a regression blocks the
 change.** The figure is recorded here rather than argued away. Three facts bear on how it should be
-adjudicated, and none of them are a reason to call 0.595 ms "not slower than" 0.429 ms:
+adjudicated, and none of them are a reason to call 0.616 ms "not slower than" 0.429 ms:
 
 1. **It is not the same question.** The baseline query was `WHERE target_memory_id = $1` — inbound edges only. `ListTouchingAsync` returns inbound *and* outbound edges, which is two anchored index lookups unioned rather than one. The comparison is unfavourable to AGE by construction, because the graph implementation answers a strictly larger question. A reverse-only Cypher equivalent was not measured separately; that would be a fairer comparison and a less honest one, since it is not the method the store exposes.
 2. **The residual is `cypher()` overhead, not access-path cost.** The plan (below) is index scans throughout — `ix_memory_vertex_uuid` for the anchor, AGE's own `LINKS_start_id_idx` / `LINKS_end_id_idx` for the hop, `Memory_pkey` for the far endpoint. What remains is the extension's own cost: parsing the Cypher, building `agtype` vertex and edge values, and rendering them to text for the driver. That cost is roughly constant, so the ratio narrows rather than widens as the store grows.
@@ -55,7 +55,7 @@ on the record rather than removed from it.
 
 The reasoning of record is the first point above: the criterion exists to stop us trading a working access
 pattern for an unused one, and that is not what happened. The one-hop pattern was not traded away — it was
-widened from reverse-only to bidirectional, and it remains fully indexed. The 166 µs is the extension's own
+widened from reverse-only to bidirectional, and it remains fully indexed. The 187 µs is the extension's own
 parse-and-materialise cost, which is constant, so the ratio narrows as the store grows.
 
 What would reopen this: a measured one-hop above 10 ms, a plan that stops being index-only, or a growth
@@ -222,7 +222,7 @@ shortfall:
 - **Edge storage is not sequentially scanned.** `LINKS` is reached only through `age_vle`, which is the criterion NFR-02 states.
 - **The cost is bounded by the depth limit, not by the table.** This is the shape LADR-07 exists for: the bound, not an index, is what stops it.
 
-It is the slowest of the three at 8.374 ms and still 12× inside its target. If it becomes the dominant
+It is the slowest of the three at 8.522 ms and still 12× inside its target. If it becomes the dominant
 access pattern, the thing to revisit is the endpoint enumeration, and the fix would be measured then —
 not guessed at now.
 

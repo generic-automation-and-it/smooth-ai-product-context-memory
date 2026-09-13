@@ -41,7 +41,7 @@ See [./ladrs/](./ladrs/).
 
 ## Requirements
 
-Bounded multi-hop traversal — the capability Goal 1 exists for. Approved plan, ahead of implementation.
+Bounded multi-hop traversal — the capability Goal 1 exists for. Delivered.
 
 ### Traversal contract — delivered
 
@@ -54,7 +54,7 @@ and the endpoint memory's cheap descriptive fields. Exposed as `POST /api/contex
 - **Filterable by relation type and direction.** A single relation goes into the variable-length edge's property map so the predicate is applied during expansion. Direction is `Outbound` / `Inbound` / `Either`.
 - **Descriptive fields come from the relational rows in the same statement.** The Cypher call is composed with `JOIN memory / memory_version / memory_group` in one SQL statement, never an application-side join — that single-session composition is LADR-01's stated justification, so forfeiting it forfeits the reason for choosing an in-database extension.
 - **The scope rule applies.** A traversal returning `description` / `statement` is a read path, so `MemoryScopeFilter.Plan` is pushed into the composed SQL exactly as `MemorySearchCriteria` does. Omitting it reopens the hole LADR-003 (HLD 001 API) was written to close.
-- Exposed as `POST /api/context/paths`; the context-memory skill is the only consumer.
+- Exposed as `POST /api/context/paths`; the context-memory skill has no subcommand for it.
 
 ### Access path
 
@@ -74,8 +74,8 @@ plans as `Function Scan on age_vle`.
 
 | Requirement | Evidence | Result |
 |---|---|---|
-| NFR-02 three shapes at 3,000 memories / 10,000 edges | [nfrs/NFR-02-traversal-measurements.md](./nfrs/NFR-02-traversal-measurements.md) | 0.978 / 0.595 / 8.374 ms p95 against 50 / 10 / 100 ms |
-| NFR-02 one-hop vs the pre-cutover baseline | same file, *The one-hop comparison* | 0.595 ms vs 0.429 ms — 1.4×, accepted with the reasoning recorded |
+| NFR-02 three shapes at 3,000 memories / 10,000 edges | [nfrs/NFR-02-traversal-measurements.md](./nfrs/NFR-02-traversal-measurements.md) | 1.057 / 0.616 / 8.522 ms p95 against 50 / 10 / 100 ms |
+| NFR-02 one-hop vs the pre-cutover baseline | same file, *The one-hop comparison* | 0.616 ms vs 0.429 ms — 1.4×, accepted with the reasoning recorded |
 | NFR-03 restore round-trip | [nfrs/NFR-03-restore-verification.md](./nfrs/NFR-03-restore-verification.md) | 201 rows / 200 vertices / **500 edges** matched; 1,797 paths traversed after restore |
 | NFR-04 pairing and pre-upgrade check | [nfrs/NFR-04-version-pairing.md](./nfrs/NFR-04-version-pairing.md) | minor round-trip passed; major classified; dev snapshot blocked |
 
@@ -131,7 +131,7 @@ operability and compatibility. Two shape how code is written rather than merely 
 | 2026-09-13 | Review fix: the one-hop baseline comparison is now asserted against the adjudicated 3× ceiling rather than only reported, so a widening regression fails the build instead of producing a green test. | NFR-02 |
 | 2026-09-13 | Bounded multi-hop traversal shipped: `IMemoryTraversal` + `NpgsqlMemoryTraversal` (composed Cypher-and-SQL statement), `Features/Links/FindPaths`, `POST /api/context/paths`. Depth bound `required` and capped at 5. Scope plan applied to the new read path. | HLD-003, LADR-07 |
 | 2026-09-13 | Every anchor lookup was sequentially scanning the vertex table — the inline property map compiles to `properties @>`, which no index served. Added `ix_memory_vertex_uuid` (btree), `ix_memory_vertex_properties` (GIN, for `MERGE`) and `ix_memory_links_relation`; rewrote `ExistsAsync` to the predicate form. | LADR-06 |
-| 2026-09-13 | One-hop rewritten from `OR` to two anchored matches unioned. Measured 6.075 → 0.595 ms p95; plan cost 506.81 → 35.71. The `OR` form passed the 10 ms target while scanning edge storage — the plan requirement is what caught it. | NFR-02 |
+| 2026-09-13 | One-hop rewritten from `OR` to two anchored matches unioned. Measured 6.075 → 0.616 ms p95; plan cost 506.81 → 35.71. The `OR` form passed the 10 ms target while scanning edge storage — the plan requirement is what caught it. | NFR-02 |
 | 2026-09-13 | NFR-02, NFR-03, NFR-04 Accepted against committed evidence; LADR-06 and LADR-07 added and Accepted; HLD status Accepted. One-hop at 1.4× the relational baseline adjudicated as accepted, with the reasoning and the reopening conditions on the record. | HLD-003 |
 | 2026-09-13 | LADRs 01–05 and NFR-01 Accepted — cutover + `LinkTests` + pool-recycle shipped. NFR-02/03/04 stay Draft until measured. | HLD-003 |
 | 2026-09-13 | Cutover: `memory_link` replaced by `:LINKS` edges; identity-only vertices; delete trigger; uniqueness read-before-write. Open relation vocabulary. | HLD-003 |

@@ -21,12 +21,12 @@ Accepted:
 - Capture the query plan for each shape and confirm the access path is an index or graph traversal, not a sequential scan of the edge storage.
 - Re-run the one-hop measurement against the pre-change implementation on the same data, so the comparison is a measurement rather than an assertion. Pre-cutover baseline: [NFR-02-one-hop-baseline.md](./NFR-02-one-hop-baseline.md) (p50 0.320 ms, p95 0.429 ms, bitmap index scan).
 
-**Measured post-cutover: [NFR-02-traversal-measurements.md](./NFR-02-traversal-measurements.md)** — all three absolute targets met (0.978 / 0.595 / 8.374 ms p95); one-hop is 1.4× the relational baseline, which is a regression on the literal reading and is recorded rather than adjudicated there.
+**Measured post-cutover: [NFR-02-traversal-measurements.md](./NFR-02-traversal-measurements.md)** — all three absolute targets met (1.057 / 0.616 / 8.522 ms p95); one-hop is 1.4× the relational baseline, which is a regression on the literal reading and is recorded rather than adjudicated there.
 
 ## Acceptance Criteria
 
 - All three targets met at the stated volume, with the p95 figures recorded in the HLD folder.
-- The one-hop comparison shows no regression; a regression blocks the change, because it would trade a working access pattern for an unused one. **Adjudicated 2026-09-13:** measured at 0.595 ms p95 against a 0.429 ms baseline — 1.4×, +166 µs. Accepted rather than treated as blocking, because the graph one-hop answers a *bidirectional* question the reverse-only baseline did not, the residual is constant `cypher()` overhead rather than access-path cost (the plan is index scans throughout), and the absolute figure sits 17× inside the target. The working access pattern was not traded away — it was widened. Full reasoning: [NFR-02-traversal-measurements.md](./NFR-02-traversal-measurements.md).
+- The one-hop comparison shows no regression; a regression blocks the change, because it would trade a working access pattern for an unused one. **Adjudicated 2026-09-13:** measured at 0.616 ms p95 against a 0.429 ms baseline — 1.4×, +187 µs. Accepted rather than treated as blocking, because the graph one-hop answers a *bidirectional* question the reverse-only baseline did not, the residual is constant `cypher()` overhead rather than access-path cost (the plan is index scans throughout), and the absolute figure sits 16× inside the target. The working access pattern was not traded away — it was widened. Full reasoning: [NFR-02-traversal-measurements.md](./NFR-02-traversal-measurements.md).
 - Plans confirm no sequential scan over edge storage at the target volume.
 - If a target is missed, the shortfall and its cause are recorded before any tuning, so the fix addresses a measured cause rather than a guess.
 

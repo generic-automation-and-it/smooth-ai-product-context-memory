@@ -118,13 +118,20 @@ docker run -d --name "$PROBE" \
     -e POSTGRES_USER="$PGUSER_VALUE" \
     "$TARGET_IMAGE" >/dev/null
 
+READY=0
 for _ in $(seq 1 60); do
     if docker exec -e PGPASSWORD="$PGPASSWORD_VALUE" "$PROBE" \
         pg_isready -U "$PGUSER_VALUE" >/dev/null 2>&1; then
+        READY=1
         break
     fi
     sleep 1
 done
+
+if [ "$READY" -ne 1 ]; then
+    echo "FAIL: probe '$PROBE' did not become ready within 60s" >&2
+    exit 1
+fi
 
 docker exec -e PGPASSWORD="$PGPASSWORD_VALUE" "$PROBE" \
     psql -U "$PGUSER_VALUE" -v ON_ERROR_STOP=1 -d postgres -tAc "CREATE DATABASE upgraded;" >/dev/null
