@@ -5,7 +5,7 @@ namespace SmoothAiProductContextMemory.TestFramework.Aspire;
 
 internal static class DistributedApplicationBuilderExtensions
 {
-    private const string DockerDesktopGroupName = "project";
+    private const string DockerDesktopGroupName = "Mímisbrunnr";
     private const string BlobContainerName = "project-test-blob";
     private const string BlobAccessKey = "minioadmin";
     private const int BlobPort = 9002;
