@@ -52,18 +52,33 @@ public partial class CutoverMemoryLinksToAge : Migration
                     JOIN memory t ON t.id = l.target_memory_id
                 LOOP
                     -- AGE requires cypher's third argument to be a prepared-statement parameter,
-                    -- so values are interpolated with %L (uuid/relation/reason cannot be expressions).
+                    -- so values are interpolated. Uuids are %L (charset-safe). relation/reason
+                    -- are Cypher-escaped then injected with %s — %L emits SQL E'...' / doubled
+                    -- quotes, which are not Cypher string syntax.
+                    IF position('$age_copy$' in rec.relation) > 0
+                       OR position('$q$' in rec.relation) > 0
+                       OR position('$cypher$' in rec.relation) > 0
+                       OR position('$age_copy$' in rec.reason) > 0
+                       OR position('$q$' in rec.reason) > 0
+                       OR position('$cypher$' in rec.reason) > 0 THEN
+                        RAISE EXCEPTION
+                            'memory_link copy refused: relation or reason contains a reserved dollar-tag (source %, relation %)',
+                            rec.source_uuid, rec.relation;
+                    END IF;
+
                     EXECUTE format(
                         $q$SELECT v FROM ag_catalog.cypher('memory_graph', $cypher$
                             MERGE (s:Memory {memory_uuid: %L})
                             MERGE (t:Memory {memory_uuid: %L})
-                            CREATE (s)-[:LINKS {relation: %L, reason: %L}]->(t)
+                            CREATE (s)-[:LINKS {relation: %s, reason: %s}]->(t)
                             RETURN 1
                         $cypher$) AS (v agtype)$q$,
                         rec.source_uuid::text,
                         rec.target_uuid::text,
-                        rec.relation,
-                        rec.reason);
+                        '''' || replace(replace(replace(replace(replace(rec.relation,
+                            E'\\', E'\\\\'), '''', E'\\'''), chr(10), E'\\n'), chr(13), E'\\r'), chr(9), E'\\t') || '''',
+                        '''' || replace(replace(replace(replace(replace(rec.reason,
+                            E'\\', E'\\\\'), '''', E'\\'''), chr(10), E'\\n'), chr(13), E'\\r'), chr(9), E'\\t') || '''');
                 END LOOP;
             END
             $age_copy$;
