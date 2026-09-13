@@ -7,7 +7,7 @@ Merged with ADR-0001, which described the other half of the same design.
 | This ADR's content | Now in |
 |---|---|
 | PostgreSQL as one engine for relational and document data | [LADR-01](./001-context-memory-storage/ladrs/LADR-01-postgresql-single-engine.md) |
-| Hybrid placement rule, seven entities, JSONB shape marker | [LADR-02](./001-context-memory-storage/ladrs/LADR-02-hybrid-placement-rule.md) |
+| Hybrid placement rule, six entities, JSONB shape marker | [LADR-02](./001-context-memory-storage/ladrs/LADR-02-hybrid-placement-rule.md) |
 | Stable entity / versioned child, three identity keys | [LADR-03](./001-context-memory-storage/ladrs/LADR-03-stable-entity-versioned-child.md) |
 | Versioning absorbs supersession; bump ordering | [LADR-04](./001-context-memory-storage/ladrs/LADR-04-versioning-absorbs-supersession.md) |
 | Bitemporal separation | [LADR-05](./001-context-memory-storage/ladrs/LADR-05-bitemporal-separation.md) |

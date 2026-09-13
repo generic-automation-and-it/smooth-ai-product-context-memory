@@ -57,7 +57,8 @@ operability and compatibility. Two shape how code is written rather than merely 
 
 ## Migration Plans
 
-- The relational relationship table is dropped; existing rows are carried over as `:LINKS` edges in the same migration (LADR-03). Reversal is a corrective migration restoring the table — there is no fallback flag, by design.
+- The relational relationship table is dropped; existing rows are carried over as `:LINKS` edges in the same migration (LADR-03).
+- Reversal is a corrective migration restoring the table — there is no fallback flag, by design.
 - The database image is `docker.io/apache/age:release_PG17_1.7.0` (Postgres 17 + AGE 1.7.0) in both the development and test hosts. Pairing: [nfrs/NFR-04-version-pairing.md](./nfrs/NFR-04-version-pairing.md).
 
 ## Changelog

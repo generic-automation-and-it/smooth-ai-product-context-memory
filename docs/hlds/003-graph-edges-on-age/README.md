@@ -14,8 +14,8 @@
 
 ## Intent
 
-Memory relationships are currently a relational table (`memory_link`) serving exactly one access
-pattern: a one-hop reverse lookup — *what points at this memory?* The stated ambition is larger.
+Memory relationships were a relational table (`memory_link`) at foundation, serving exactly one
+access pattern: a one-hop reverse lookup — *what points at this memory?* The stated ambition is larger.
 R10 (Context-memory V2 tracker) exists so the store can reconstruct **why** something is true: the chain from a measurement, to
 the finding it produced, to the decision it justified. That is a variable-depth path query, and SQL
 serves it poorly.
@@ -32,7 +32,8 @@ not a service.
 Today a caller can ask *what points at this memory*. After this change it can ask *what chain of
 reasoning connects these two memories*, bounded by depth and relation type, in one query. The
 relations already modelled — `depends_on`, `relates_to`, `contradicts`, `supersedes`, `implements` —
-become traversable rather than merely listable.
+become traversable rather than merely listable; the cutover collapsed those five elabels into the
+open-vocabulary `relation` property on `:LINKS`.
 
 The capability targeted is provenance reconstruction, not analytics. Bounded paths between known
 endpoints, not whole-graph algorithms.

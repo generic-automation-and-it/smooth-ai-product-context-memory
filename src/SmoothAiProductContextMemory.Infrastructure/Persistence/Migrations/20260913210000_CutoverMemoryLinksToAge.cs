@@ -168,8 +168,8 @@ public partial class CutoverMemoryLinksToAge : Migration
                 SELECT
                     trim(both '"' from s::text) AS source_uuid,
                     trim(both '"' from t::text) AS target_uuid,
-                    trim(both '"' from rel::text) AS relation,
-                    trim(both '"' from reason::text) AS reason
+                    rel::text::jsonb #>> '{}' AS relation,
+                    reason::text::jsonb #>> '{}' AS reason
                 FROM ag_catalog.cypher('memory_graph', $$
                     MATCH (s:Memory)-[e:LINKS]->(t:Memory)
                     RETURN s.memory_uuid, t.memory_uuid, e.relation, e.reason
