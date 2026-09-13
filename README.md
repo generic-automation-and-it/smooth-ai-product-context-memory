@@ -164,7 +164,7 @@ tests/
 
 | Topic | Location |
 |---|---|
-| **Business intent & requirements** | [`docs/brd/001-context-memory.md`](docs/brd/001-context-memory.md) |
+| **Business intent & requirements** | [`docs/brd/001-context-memory/`](docs/brd/001-context-memory/) |
 | AI agent context & coding rules | [`AGENTS.md`](AGENTS.md) · [`.agents/`](.agents/) |
 | Architecture & design | [`docs/wiki/architecture.md`](docs/wiki/architecture.md) |
 | AI tooling setup | [`docs/wiki/ai-tooling.md`](docs/wiki/ai-tooling.md) |

@@ -1,12 +1,12 @@
-# BRD-001: AI Context Memory
+# BRD-001: Cross-Product Linked Context Memory
 
 | | |
 |---|---|
 | **Document** | Business Requirements Document |
 | **Status** | Approved |
 | **Owner** | Product owner / practitioner |
-| **Last updated** | 2026-09-14 |
-| **Related** | [HLD 001 — Storage](../hlds/001-context-memory-storage/) · [HLD 002 — Write pipeline](../hlds/002-context-memory-write-pipeline/) · [HLD 003 — Graph edges](../hlds/003-graph-edges-on-age/) |
+| **Last updated** | 2026-09-13 |
+| **Related** | [HLD 001 — Storage](../../hlds/001-context-memory-storage/) · [HLD 002 — Write pipeline](../../hlds/002-context-memory-write-pipeline/) · [HLD 003 — Graph edges](../../hlds/003-graph-edges-on-age/) |
 
 > This document states **what the business needs and why**. It deliberately contains no technology
 > choices, no data structures and no implementation detail — those live in the HLDs.
@@ -21,8 +21,13 @@ the conversation that produced it. When the session ends, the conclusion may sur
 ticket, but the *reasoning* does not.
 
 This application gives one practitioner a **durable, private memory** for that reasoning: captured as
-a byproduct of normal work, linked to the tickets and repositories it came from, and retrievable months
-later.
+a byproduct of normal work, **tagged with metadata identifying the work it came from** — ticket,
+repository, initiative — **linked to the decisions it follows from or supersedes**, and retrievable
+months later.
+
+Those tags and links are the retrieval keys, which makes the store **one memory spanning every
+product** rather than a set of per-repository silos: reasoning captured while working on one product
+surfaces when the same question arises on another.
 
 The business case is **compounding leverage**. A practitioner whose assistant remembers prior
 decisions, and the reasoning behind them, spends less time re-establishing context and makes fewer
@@ -268,6 +273,9 @@ complete it is.
 | **Memory** | One durable fact, decision or piece of reasoning worth recalling later |
 | **Capture** | Recording knowledge arising from work |
 | **Recall** | Retrieving relevant knowledge when it is needed |
+| **Label** | A metadata tag associating a memory with the work it came from — ticket, repository, initiative or free-form |
+| **Link** | A held relationship between two memories, such as one superseding or following from another |
+| **Cross-product recall** | Retrieval that spans every product and repository in the store, not only the one in hand |
 | **Provenance** | Where a piece of knowledge came from and when |
 | **Superseded** | Knowledge replaced by a later position, retained for its reasoning |
 | **Stale** | Knowledge that was correct when recorded and is no longer true |
@@ -279,6 +287,6 @@ complete it is.
 
 | Document | Covers |
 |---|---|
-| [HLD 001 — Context memory storage](../hlds/001-context-memory-storage/) | How knowledge is stored and retrieved |
-| [HLD 002 — Context memory write pipeline](../hlds/002-context-memory-write-pipeline/) | How capture works and what judgement it applies |
-| [HLD 003 — Graph edges on Apache AGE](../hlds/003-graph-edges-on-age/) | How relationships between decisions are held |
+| [HLD 001 — Context memory storage](../../hlds/001-context-memory-storage/) | How knowledge is stored and retrieved |
+| [HLD 002 — Context memory write pipeline](../../hlds/002-context-memory-write-pipeline/) | How capture works and what judgement it applies |
+| [HLD 003 — Graph edges on Apache AGE](../../hlds/003-graph-edges-on-age/) | How relationships between decisions are held |
