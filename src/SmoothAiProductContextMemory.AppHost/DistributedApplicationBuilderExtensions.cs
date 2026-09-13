@@ -175,7 +175,7 @@ internal static class DistributedApplicationBuilderExtensions
             }
 
             builder.AddProject<Projects.SmoothAiProductContextMemory_Host>("host")
-                .WithReference(postgres, connectionName: "SmoothAiProductContextMemory")
+                .WithReference(postgres, connectionName: HostConnectionStringName)
                 .WithReference(seq)
                 .WithEnvironment("BlobStorage__Endpoint", blob.GetEndpoint("s3"))
                 .WithEnvironment("BlobStorage__AccessKey", configuration.BlobAccessKey)

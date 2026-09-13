@@ -42,8 +42,9 @@ ports/container names.
 - **Connection-string keys must match what the Host consumes.** Aspire `.WithReference(db)` injects
   `ConnectionStrings:<resource>` automatically for Postgres and Seq — so the **resource name is the
   connection-string key**. The database resource is therefore named `SmoothAiProductContextMemory`
-  (with `databaseName: "app"` keeping the physical database, and the persistent volume's data, as it
-  was). Naming it `app` published `ConnectionStrings__app`, which nothing consumed: the Host threw at
+  (with `databaseName: "app"` keeping the physical database name, so a retained volume's data stays
+  valid — the Mímisbrunnr volume rename still starts a fresh volume; see changelog). Naming it `app`
+  published `ConnectionStrings__app`, which nothing consumed: the Host threw at
   DI resolve and the `host` resource never started. Rename the resource and you rename the key.
   The blob container is **not** a connection-string resource: the Host receives `BlobStorage__Endpoint` (from the blob `s3` endpoint)
   plus `BlobStorage__AccessKey` / `BlobStorage__SecretKey` / `BlobStorage__Bucket` as plain environment
