@@ -38,10 +38,7 @@ public sealed class AppendOnlyTriggerTests : PersistenceTestBase
     public async Task MemoryVersion_SummaryStamp_Update_Raises()
     {
         var (_, _, v1) = await SeedHistoryAsync();
-        string connStr = Db.Database.GetConnectionString()!;
-
-        await using var conn = new NpgsqlConnection(connStr);
-        await conn.OpenAsync(Ct);
+        await using var conn = await DataSource.OpenConnectionAsync(Ct);
         await using var cmd = new NpgsqlCommand(
             """UPDATE memory_version SET summary_stamp = '{"v":1,"model":"x","promptVersion":"y"}'::jsonb WHERE id = @id""",
             conn);
@@ -55,10 +52,7 @@ public sealed class AppendOnlyTriggerTests : PersistenceTestBase
     public async Task MemoryVersion_Update_Raises()
     {
         var (_, memory, v1) = await SeedHistoryAsync();
-        string connStr = Db.Database.GetConnectionString()!;
-
-        await using var conn = new NpgsqlConnection(connStr);
-        await conn.OpenAsync(Ct);
+        await using var conn = await DataSource.OpenConnectionAsync(Ct);
         await using var cmd = new NpgsqlCommand(
             "UPDATE memory_version SET statement = 'changed' WHERE id = @id", conn);
         cmd.Parameters.AddWithValue("id", v1.Id);
@@ -71,10 +65,7 @@ public sealed class AppendOnlyTriggerTests : PersistenceTestBase
     public async Task MemoryVersion_Delete_Raises()
     {
         var (_, memory, v1) = await SeedHistoryAsync();
-        string connStr = Db.Database.GetConnectionString()!;
-
-        await using var conn = new NpgsqlConnection(connStr);
-        await conn.OpenAsync(Ct);
+        await using var conn = await DataSource.OpenConnectionAsync(Ct);
         await using var cmd = new NpgsqlCommand("DELETE FROM memory_version WHERE id = @id", conn);
         cmd.Parameters.AddWithValue("id", v1.Id);
 
@@ -86,10 +77,7 @@ public sealed class AppendOnlyTriggerTests : PersistenceTestBase
     public async Task GroupDescription_Update_Raises()
     {
         var (_, _, _) = await SeedHistoryAsync();
-        string connStr = Db.Database.GetConnectionString()!;
-
-        await using var conn = new NpgsqlConnection(connStr);
-        await conn.OpenAsync(Ct);
+        await using var conn = await DataSource.OpenConnectionAsync(Ct);
         await using var cmd = new NpgsqlCommand(
             "UPDATE group_description SET body = 'changed' WHERE version = 1", conn);
 
@@ -101,10 +89,7 @@ public sealed class AppendOnlyTriggerTests : PersistenceTestBase
     public async Task GroupDescription_Delete_Raises()
     {
         var (_, _, _) = await SeedHistoryAsync();
-        string connStr = Db.Database.GetConnectionString()!;
-
-        await using var conn = new NpgsqlConnection(connStr);
-        await conn.OpenAsync(Ct);
+        await using var conn = await DataSource.OpenConnectionAsync(Ct);
         await using var cmd = new NpgsqlCommand("DELETE FROM group_description WHERE version = 1", conn);
 
         var ex = await Should.ThrowAsync<PostgresException>(() => cmd.ExecuteNonQueryAsync(Ct));
@@ -115,10 +100,7 @@ public sealed class AppendOnlyTriggerTests : PersistenceTestBase
     public async Task CascadeDelete_WithBypass_AllowsHistoryDelete()
     {
         var (group, _, _) = await SeedHistoryAsync();
-        string connStr = Db.Database.GetConnectionString()!;
-
-        await using var conn = new NpgsqlConnection(connStr);
-        await conn.OpenAsync(Ct);
+        await using var conn = await DataSource.OpenConnectionAsync(Ct);
 
         // SET LOCAL, not SET: the bypass must auto-revert at COMMIT so it cannot outlive this
         // operation on a pooled connection and hand a later unrelated caller permission to delete

@@ -1,4 +1,5 @@
 using System.IO;
+using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Microsoft.Extensions.Configuration;
 
@@ -18,6 +19,11 @@ internal static class DistributedApplicationBuilderExtensions
     private const string SeqContainerName = "smooth-project-memory-dev-seq";
     private const string PostgresDataVolume = "smooth-project-memory-postgres-data";
     private const string BlobDataVolume = "smooth-project-memory-blob-data";
+    // Aspire 13.3.0 defaults to library/postgres:17.6. AGE's PG17 image keeps the same major so the
+    // persistent data volume stays compatible. Pairing recorded in HLD 003 / NFR-04.
+    private const string PostgresImageRegistry = "docker.io";
+    private const string PostgresImage = "apache/age";
+    private const string PostgresImageTag = "release_PG17_1.7.0";
 
     extension(IDistributedApplicationBuilder builder)
     {
@@ -78,6 +84,8 @@ internal static class DistributedApplicationBuilderExtensions
                 secret: true);
 
             var postgres = builder.AddPostgres("postgres", password: postgresPassword, port: configuration.PostgresPort)
+                .WithImage(PostgresImage, PostgresImageTag)
+                .WithImageRegistry(PostgresImageRegistry)
                 .WithContainerName(PostgresContainerName)
                 .WithDataVolume(PostgresDataVolume)
                 .WithContainerRuntimeArgs(
