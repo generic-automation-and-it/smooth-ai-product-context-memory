@@ -8,7 +8,7 @@ alwaysApply: true
 ---
 # SmoothAiProductContextMemory Overview
 
-Updated: 2026-05-09
+Updated: 2026-09-13
 
 ## Tech Stack
 
@@ -73,3 +73,4 @@ tests/
 | Date | Change |
 |:-----|:-------|
 | 2026-05-30 | Initial version. |
+| 2026-09-13 | Add SmoothAiProductContextMemory.AppHost.UnitTest to targeted test commands (PR 46). |

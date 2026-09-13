@@ -115,7 +115,8 @@ postgres/blob/seq in group `smooth-mímisbrunnr`. Startup prints
 dotnet run --project src/SmoothAiProductContextMemory.AppHost
 ```
 
-Published GHCR image (tag may lag the working tree; no SDK required for Host):
+Published GHCR image (tag may lag the working tree; no SDK required for Host).
+Startup prints `Host mode: published image <image>.`; the dashboard resource is `host-published-image`.
 
 ```bash
 HostConfiguration__UseProject=false \
