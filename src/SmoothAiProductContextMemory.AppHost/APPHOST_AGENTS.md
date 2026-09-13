@@ -9,8 +9,9 @@ ports/container names.
 
 ## Non-Negotiables
 
-- **Dev-only.** Never referenced by test projects, never invoked from CI. CI uses `TestFramework.Aspire`
-  via the integration tests.
+- **Dev orchestrator.** Never start this AppHost from tests or CI. L0 may reference
+  `HostLaunchMode` (`tests/SmoothAiProductContextMemory.AppHost.UnitTest`). Container orchestration
+  for tests stays in `TestFramework.Aspire`.
 - **Docker naming: accent in the group, ASCII in the artifacts.** The Docker Desktop group is the
   `com.docker.compose.project` **label**, so it carries the brand spelling — `smooth-mímisbrunnr`.
   Container and volume names cannot: Docker rejects non-ASCII outright (`Invalid container name
@@ -29,16 +30,24 @@ ports/container names.
   add runtime-specific wiring to the AppHost. Container images are **registry-qualified and pinned**
   (`docker.io/apache/age:release_PG17_1.7.0`, `quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z`) because Podman refuses to resolve short names
   non-interactively unless the host's `registries.conf` happens to allow it.
-- **AppHost is the orchestrator, not a published image.** Starting it pulls the Host image and starts
-  postgres/blob/seq. Do not containerise the AppHost. The Host stays runnable as a plain `Program`
-  (`WebApplicationFactory<Program>` integration tests must keep working without an AppHost).
-- **Default Host is the published GHCR image** (`HostConfiguration:Image`). Set
-  `HostConfiguration:UseProject=true` (or `HostConfiguration__UseProject=true`) to compile and run
-  `Projects.SmoothAiProductContextMemory_Host` from source instead. Do not delete `AddProject`.
-- **Host container is `mimisbrunnr-host`**, with the same `com.docker.compose.project=smooth-mímisbrunnr` /
-  `com.docker.compose.service` labels as postgres/blob/seq. It injects
-  `ConnectionStrings__SmoothAiProductContextMemory` (the key Infrastructure reads) plus the existing
-  `BlobStorage__*` env vars. GHCR references use `ImagePullPolicy.Always`.
+- **AppHost is the orchestrator, not a published image.** Starting it compiles Host from the working
+  tree and starts postgres/blob/seq. Do not containerise the AppHost. The Host stays runnable as a
+  plain `Program` (`WebApplicationFactory<Program>` integration tests must keep working without an
+  AppHost).
+- **Default Host is the working tree.** `HostConfiguration:UseProject` defaults to `true` and
+  `appsettings.json` matches. Image-pull is opt-in: `HostConfiguration:UseProject=false` (or
+  `HostConfiguration__UseProject=false`) plus `HostConfiguration:Image`. Do not delete `AddProject`
+  or `AddHostContainer`. A GHCR `:latest` tag may lag the working tree — never treat an image-mode
+  run as current source.
+- **Mode must be visible without reading config.** Startup prints `Host mode: working tree (source).`
+  or `Host mode: published image <ref>. Tag may lag the working tree.` Dashboard resource names
+  differ: `host-working-tree` vs `host-published-image`. Do not collapse both modes onto resource
+  name `host` — that is how a stale image looked healthy.
+- **Host container (image mode only) is `mimisbrunnr-host`**, with the same
+  `com.docker.compose.project=smooth-mímisbrunnr` / `com.docker.compose.service` labels as
+  postgres/blob/seq. It injects `ConnectionStrings__SmoothAiProductContextMemory` (the key
+  Infrastructure reads) plus the existing `BlobStorage__*` env vars. GHCR references use
+  `ImagePullPolicy.Always`.
 - **Connection-string keys must match what the Host consumes.** Aspire `.WithReference(db)` injects
   `ConnectionStrings:<resource>` automatically for Postgres and Seq — so the **resource name is the
   connection-string key**. The database resource is therefore named `SmoothAiProductContextMemory`
@@ -51,6 +60,9 @@ ports/container names.
 - **No WireMock in dev AppHost.** The AppHost orchestrates real Postgres/MinIO/Seq only. There is no
   upstream HTTP API to stub in this service.
 - **Postgres and MinIO use persistent named volumes.** Dev data survives container restarts.
+- **`ContainerLifetime.Persistent` stays the default** on postgres/blob/seq. Captured memories and blobs must survive an AppHost exit. Do not change it to session lifetime to "fix" leftover containers — that is the supported teardown's job.
+- **Never glob `mimisbrunnr-*` for teardown.** That prefix also matches `mimisbrunnr-testcontainer-*` (TestFramework.Aspire). Stop and reset use an exact allowlist (`mimisbrunnr-postgres`, `mimisbrunnr-blob-well`, `mimisbrunnr-seq`, `mimisbrunnr-host`) plus the `com.docker.compose.project=smooth-mímisbrunnr` label (does not match `smooth-mímisbrunnr-testing`).
+- **Stop and reset are distinct binaries.** `scripts/stop-dev-stack.sh` removes the four allowlisted containers and leaves named volumes. `scripts/reset-dev-stack.sh` is the only volume-destroy path (`mimisbrunnr-postgres-data`, `mimisbrunnr-blob-well-data`, `mimisbrunnr-seq-data`). Do not add a `--volumes` flag to stop. There is no prompt on reset — choosing that command is the explicit ask.
 - **Postgres image is the AGE-bearing pin** `docker.io/apache/age:release_PG17_1.7.0` (Postgres 17 + AGE 1.7.0), not Aspire's `library/postgres:17.6`. Same major as the previous default, so the named volume is compatible. A major mismatch against `mimisbrunnr-postgres-data` refuses to start and looks like a broken image — drop that volume only if the major actually changed. Recreate `mimisbrunnr-postgres` once after the image pin so the persistent container is not still running the old image.
 - **Every dev container carries `com.docker.compose.project` / `com.docker.compose.service` labels**
   so Docker Desktop groups them under the `smooth-mímisbrunnr` project while keeping the explicit
@@ -64,8 +76,8 @@ ports/container names.
 | Database | `SmoothAiProductContextMemory` (physical DB `app`) | (via `postgres`) | n/a |
 | MinIO (blob) | `blob` | `9000` (s3), `9001` (console) | `mimisbrunnr-blob-well` |
 | Seq | `seq` (volume `mimisbrunnr-seq-data`) | `5341` | `mimisbrunnr-seq` |
-| API image (default) | `host` (`HostConfiguration:Image`) | `5141` | `mimisbrunnr-host` |
-| API project (opt-in) | `host` (`HostConfiguration:UseProject=true`) | `5141` http / `7141` https | n/a (host process) |
+| API project (default) | `host-working-tree` | `5141` http / `7141` https | n/a (host process) |
+| API image (opt-in) | `host-published-image` (`HostConfiguration:UseProject=false`) | `5141` | `mimisbrunnr-host` |
 
 Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgres` — see
 `tests/SmoothAiProductContextMemory.TestFramework/TEST_FRAMEWORK_AGENTS.md`.
@@ -89,10 +101,13 @@ Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgr
   `builder.AddSmoothAiProductContextMemoryAppHostResources().Build().Run()`.
 - `DistributedApplicationBuilderExtensions` keeps orchestration split into focused extension methods
   (`AddPostgresResource`, `AddBlobResource`, `AddSeqResource`, `AddHostProject` / `AddHostContainer`).
-- `HostConfiguration:Image` defaults to `ghcr.io/generic-automation-and-it/smooth-ai-product-context-memory:latest`.
-  The AppHost splits on the last colon after the last slash so Aspire `AddContainer(name, image, tag)`
-  gets a registry-qualified name. Digest references (`@sha256:`) are not supported. `UseProject=true`
-  ignores the image and runs source.
+- `HostConfiguration:Image` defaults to `ghcr.io/generic-automation-and-it/smooth-ai-product-context-memory:latest`
+  and is ignored unless `UseProject=false`. The AppHost splits on the last colon after the last slash
+  so Aspire `AddContainer(name, image, tag)` gets a registry-qualified name. Digest references
+  (`@sha256:`) are not supported. Image mode exists so a machine without an SDK can still start the
+  stack; its tag is allowed to lag.
+- Host launch mode is resolved by `HostLaunchMode` (`DefaultUseProject = true`). A missing
+  `HostConfiguration:UseProject` key is working-tree mode, not image mode.
 - **Telemetry is consumed, not just offered.** Aspire injects `OTEL_EXPORTER_OTLP_ENDPOINT` into
   **project** resources automatically and the Host now reads it, so the dashboard's log, trace and
   metric panes are populated. Do not override that variable here unless intentionally diverting
@@ -112,15 +127,74 @@ Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgr
   collector. Revisit if a collector ever lands.
 - **Seq is fed over `ConnectionStrings:seq`**, which is what `.WithReference(seq)` publishes;
   `Aspire.Hosting.Seq` defines no `SEQ_URI` variable. The Host's Serilog Seq sink activates on that key.
-- **The `host` resource carries `WithHttpHealthCheck("/health")`**, so the dashboard shows it as healthy
-  only once migrations have completed and PostgreSQL is reachable — not merely once the process starts.
+- **Both Host resources carry `WithHttpHealthCheck("/health")`**, so the dashboard shows them as
+  healthy only once migrations have completed and PostgreSQL is reachable — not merely once the
+  process starts.
 - Aspire dashboard URL is printed at startup via the `WriteDashboardStartupHint` extension; use Aspire's
-  printed `/login?t=...` URL for the first terminal-driven browser visit.
+  printed `/login?t=...` URL for the first terminal-driven browser visit. The same hint states that
+  postgres/blob/seq keep running after this process exits, that `mimisbrunnr-host` may remain after a
+  hard kill, and names the two teardown scripts. There is no reliable Aspire exit hook under `pkill`
+  (SIGKILL), so the asymmetry is surfaced at startup — the moment a developer still has a terminal.
+- **Teardown does not kill AppHost, DCP, or `dotnet`.** Exit the AppHost first, then run the script.
+  Scripts do not `pkill` DCP (other workspaces may share the machine). Missing `mimisbrunnr-host` is
+  success (`UseProject=true` has no Host container). Empty stack is exit 0.
+- **AGE-pin recreate is the same Persistent mechanism, different symptom** — see the image-pin
+  non-negotiable above. `stop-dev-stack.sh` is the supported way to remove the container so the next
+  AppHost start picks up a new image without dropping volumes. Do not invent a third verb.
+- Runtime for the scripts is `$DOTNET_ASPIRE_CONTAINER_RUNTIME` (default `docker`), the same env
+  Aspire uses. AppHost C# stays runtime-agnostic; do not add Docker/Podman wiring there.
+
+## Architecture Decisions
+
+### LADR-001 — Two named scripts, not one command plus a flag
+
+- **Date:** 2026-09-13 · **Status:** Accepted
+- **Context:** An ambiguous `--volumes` / `--force` on a shared teardown can drop the captured corpus.
+  That is a worse defect than leftover containers.
+- **Decision:** `scripts/stop-dev-stack.sh` (containers only) and `scripts/reset-dev-stack.sh`
+  (containers, then the three named volumes). Reset may call stop. No volume flag on stop. No prompt
+  on reset — the distinct command is the explicit ask.
+- **Consequences:** Two entry points to document. Historical orphan volumes from renames are out of
+  both scripts.
+
+### LADR-002 — Persistence survives AppHost exit; teardown is explicit
+
+- **Date:** 2026-09-13 · **Status:** Accepted
+- **Context:** Auto-stopping containers on Ctrl+C or process death would undo `ContainerLifetime.Persistent`.
+  A hard kill (`pkill`) never runs an exit hook.
+- **Decision:** No exit hook that stops containers. Hint at startup. Operator runs a script after exit.
+- **Consequences:** Leftover stack until the script runs. DCP is not killed by teardown.
+
+### LADR-003 — Allowlist plus project label, never a name glob
+
+- **Date:** 2026-09-13 · **Status:** Accepted
+- **Context:** `mimisbrunnr-*` matches `mimisbrunnr-testcontainer-*`. A careless glob kills the test fixtures.
+- **Decision:** Exact container and volume names copied from this AppHost. Refuse if
+  `com.docker.compose.project` is not `smooth-mímisbrunnr`.
+- **Consequences:** An unlabeled leftover occupying a allowlisted name fails loud (correct). Names must
+  stay in sync with the C# constants; a rename here is a rename in the scripts.
+
+### LADR-004 — Dashboard stays in-process
+
+- **Date:** 2026-09-13 · **Status:** Accepted
+- **Context:** The dashboard's in-process lifetime is what makes leftover containers visible. A
+  standalone `mcr.microsoft.com/dotnet/aspire-dashboard` exists. OTLP containerises cleanly; the
+  resource service (`:20290`) is hosted by AppHost. A misconfigured link degrades silently to
+  telemetry-only.
+- **Decision:** Do not containerise the dashboard. Cosmetic symmetry is not worth a quiet downgrade.
+- **Consequences:** Dashboard dies with AppHost. Seq remains the durable log (`mimisbrunnr-seq-data`).
+
+## Test References
+
+- L0: `tests/SmoothAiProductContextMemory.AppHost.UnitTest/` — default resolves to working-tree mode;
+  explicit `true`/`false`; working-tree announcement does not say `published image`.
 
 ## Changelog
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-13 | Documented Persistent leftover after AppHost exit. Startup hint names `scripts/stop-dev-stack.sh` (keep data) and `scripts/reset-dev-stack.sh` (destroy volumes). Allowlist, never a `mimisbrunnr-*` glob. | AppHost teardown |
+| 2026-09-13 | Default AppHost run compiles Host from the working tree; published-image path is opt-in (`UseProject=false`) and announced so a lagging GHCR tag cannot look like current source. | APPHOST_AGENTS.md |
 | 2026-09-13 | Runtime blob container renamed `mimisbrunnr-blob` → `mimisbrunnr-blob-well` (volume `mimisbrunnr-blob-well-data`). Tests stay `mimisbrunnr-testcontainer-blob`. Old volume is orphaned. | release-image |
 | 2026-09-13 | Default AppHost run pulls the published Host image as `mimisbrunnr-host` in group `smooth-mímisbrunnr`; `UseProject=true` keeps source. AppHost itself is not published. | release-image |
 | 2026-09-13 | Dev MinIO bucket renamed `smooth-project-memory` → `smooth-mimisbrunnr-memory-well`. Safe now because the blob volume was reset by the container rename; a later rename would orphan stored objects. | PR #36 |

@@ -45,6 +45,7 @@ internal static class DistributedApplicationBuilderExtensions
         internal IDistributedApplicationBuilder AddSmoothAiProductContextMemoryAppHostResources()
         {
             AppHostConfiguration configuration = builder.GetAppHostConfiguration();
+            Console.WriteLine(HostLaunchMode.FormatAnnouncement(configuration.UseProject, configuration.HostImage));
             var postgres = builder.AddPostgresResource(configuration);
             var blob = builder.AddBlobResource(configuration);
             var seq = builder.AddSeqResource(configuration);
@@ -66,6 +67,11 @@ internal static class DistributedApplicationBuilderExtensions
                 Console.WriteLine($"Aspire dashboard UI: {dashboardUrl}");
                 Console.WriteLine("If the dashboard asks for login, use the /login?t=... URL that Aspire prints after startup.");
             }
+
+            Console.WriteLine("Dashboard dies with this process. mimisbrunnr-{postgres,blob-well,seq} keep running (ContainerLifetime.Persistent). mimisbrunnr-host may remain after a hard kill.");
+            Console.WriteLine("Stop (keep data): scripts/stop-dev-stack.sh");
+            Console.WriteLine("Reset (destroy volumes): scripts/reset-dev-stack.sh");
+            Console.WriteLine("Do not glob mimisbrunnr-* — that also matches mimisbrunnr-testcontainer-*.");
 
             return builder;
         }
@@ -94,7 +100,7 @@ internal static class DistributedApplicationBuilderExtensions
                 builder.Configuration.GetValue("BlobConfiguration:Port", DefaultBlobPort),
                 builder.Configuration.GetValue("BlobConfiguration:ConsolePort", DefaultBlobConsolePort),
                 builder.Configuration.GetValue("SeqConfiguration:Port", DefaultSeqPort),
-                builder.Configuration.GetValue("HostConfiguration:UseProject", false),
+                HostLaunchMode.ResolveUseProject(builder.Configuration),
                 hostImage,
                 Path.GetFullPath(Path.Combine(builder.AppHostDirectory, "..", "..")));
         }
@@ -174,7 +180,7 @@ internal static class DistributedApplicationBuilderExtensions
                 return;
             }
 
-            builder.AddProject<Projects.SmoothAiProductContextMemory_Host>("host")
+            builder.AddProject<Projects.SmoothAiProductContextMemory_Host>(HostLaunchMode.WorkingTreeResourceName)
                 .WithReference(postgres, connectionName: "SmoothAiProductContextMemory")
                 .WithReference(seq)
                 .WithEnvironment("BlobStorage__Endpoint", blob.GetEndpoint("s3"))
@@ -195,8 +201,8 @@ internal static class DistributedApplicationBuilderExtensions
         {
             (string image, string? tag) = SplitImageReference(configuration.HostImage);
             IResourceBuilder<ContainerResource> host = tag is null
-                ? builder.AddContainer("host", image)
-                : builder.AddContainer("host", image, tag);
+                ? builder.AddContainer(HostLaunchMode.PublishedImageResourceName, image)
+                : builder.AddContainer(HostLaunchMode.PublishedImageResourceName, image, tag);
 
             if (configuration.HostImage.StartsWith("ghcr.io/", StringComparison.OrdinalIgnoreCase))
             {

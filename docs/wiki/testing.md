@@ -108,6 +108,7 @@ dotnet test tests/SmoothAiProductContextMemory.Domain.UnitTest
 dotnet test tests/SmoothAiProductContextMemory.Application.UnitTest
 dotnet test tests/SmoothAiProductContextMemory.Infrastructure.UnitTest
 dotnet test tests/SmoothAiProductContextMemory.Host.UnitTest
+dotnet test tests/SmoothAiProductContextMemory.AppHost.UnitTest
 
 # L1 component tests
 dotnet test tests/SmoothAiProductContextMemory.Application.ComponentTest
