@@ -22,7 +22,7 @@ public sealed class NpgsqlMemoryGraph(SmoothAiProductContextMemoryDbContext db) 
         CancellationToken cancellationToken)
     {
         string cypher = $$"""
-            OPTIONAL MATCH (s:Memory {memory_uuid: {{Quote(sourceUuid)}}})-[e:LINKS {relation: {{Quote(relation)}}}]->(t:Memory {memory_uuid: {{Quote(targetUuid)}}})
+            OPTIONAL MATCH (s:{{AgeSession.VertexLabel}} {memory_uuid: {{Quote(sourceUuid)}}})-[e:{{AgeSession.EdgeLabel}} {relation: {{Quote(relation)}}}]->(t:{{AgeSession.VertexLabel}} {memory_uuid: {{Quote(targetUuid)}}})
             RETURN count(e)
             """;
         string? count = await ExecuteScalarAsync(cypher, cancellationToken);
@@ -42,9 +42,9 @@ public sealed class NpgsqlMemoryGraph(SmoothAiProductContextMemoryDbContext db) 
         }
 
         string cypher = $$"""
-            MERGE (s:Memory {memory_uuid: {{Quote(sourceUuid)}}})
-            MERGE (t:Memory {memory_uuid: {{Quote(targetUuid)}}})
-            CREATE (s)-[:LINKS {relation: {{Quote(relation)}}, reason: {{Quote(reason)}}}]->(t)
+            MERGE (s:{{AgeSession.VertexLabel}} {memory_uuid: {{Quote(sourceUuid)}}})
+            MERGE (t:{{AgeSession.VertexLabel}} {memory_uuid: {{Quote(targetUuid)}}})
+            CREATE (s)-[:{{AgeSession.EdgeLabel}} {relation: {{Quote(relation)}}, reason: {{Quote(reason)}}}]->(t)
             RETURN 1
             """;
         await ExecuteScalarAsync(cypher, cancellationToken);
@@ -53,8 +53,8 @@ public sealed class NpgsqlMemoryGraph(SmoothAiProductContextMemoryDbContext db) 
 
     public Task<IReadOnlyList<MemoryRelationship>> ListAllAsync(CancellationToken cancellationToken) =>
         ListAsync(
-            """
-            MATCH (s:Memory)-[e:LINKS]->(t:Memory)
+            $"""
+            MATCH (s:{AgeSession.VertexLabel})-[e:{AgeSession.EdgeLabel}]->(t:{AgeSession.VertexLabel})
             RETURN s.memory_uuid, t.memory_uuid, e.relation, e.reason
             """,
             cancellationToken);
@@ -62,7 +62,7 @@ public sealed class NpgsqlMemoryGraph(SmoothAiProductContextMemoryDbContext db) 
     public Task<IReadOnlyList<MemoryRelationship>> ListTouchingAsync(Guid uuid, CancellationToken cancellationToken) =>
         ListAsync(
             $"""
-            MATCH (s:Memory)-[e:LINKS]->(t:Memory)
+            MATCH (s:{AgeSession.VertexLabel})-[e:{AgeSession.EdgeLabel}]->(t:{AgeSession.VertexLabel})
             WHERE s.memory_uuid = {Quote(uuid)} OR t.memory_uuid = {Quote(uuid)}
             RETURN s.memory_uuid, t.memory_uuid, e.relation, e.reason
             """,

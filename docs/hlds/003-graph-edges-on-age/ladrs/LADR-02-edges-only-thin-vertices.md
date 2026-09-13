@@ -23,7 +23,7 @@ a session, that is one composed query rather than an application-side round trip
 
 The rule is testable in the strongest form: asserting that a vertex has no property beyond identity
 is a passing test today and a failing test the moment someone adds one. That converts a design
-principle into a build-breaking guarantee, in the same way the seven-entity model-shape guard already
+principle into a build-breaking guarantee, in the same way the six-entity model-shape guard already
 does for the relational side.
 
 ## Alternatives Considered
