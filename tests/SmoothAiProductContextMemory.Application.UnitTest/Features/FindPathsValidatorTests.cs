@@ -38,6 +38,13 @@ public class FindPathsValidatorTests
     }
 
     [Fact]
+    public void Rejects_an_empty_target_when_supplied()
+    {
+        var result = _validator.TestValidate(Request() with { TargetUuid = Guid.Empty });
+        result.ShouldHaveValidationErrorFor(x => x.TargetUuid);
+    }
+
+    [Fact]
     public void Rejects_unknown_direction()
     {
         var result = _validator.TestValidate(Request() with { Direction = "sideways" });
