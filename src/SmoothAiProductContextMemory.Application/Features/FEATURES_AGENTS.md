@@ -141,6 +141,8 @@ sequenceDiagram
 ## Test References
 
 - L0: `tests/SmoothAiProductContextMemory.Application.UnitTest/Features/` (validators, `MemoryScopeFilter` predicate **and** plan)
+- L0: `tests/SmoothAiProductContextMemory.Application.UnitTest/Features/Export/` (export paths, renderer, gitignore)
+- L1: `tests/SmoothAiProductContextMemory.Application.ComponentTest/Features/ExportStoreHandlerTests.cs` (seeded store vs real Postgres)
 - L0: `tests/SmoothAiProductContextMemory.Host.UnitTest/` (ProblemDetails mapping, 403, no-leak on unmapped)
 - L0: `tests/SmoothAiProductContextMemory.Infrastructure.UnitTest/NpgsqlDbErrorMapperTests` (SQLSTATE classification, no provider text in messages)
 - L1: `tests/SmoothAiProductContextMemory.Application.ComponentTest/Features/` (handlers vs real Postgres — ordered version bump, dry-run/write parity, skipped links, full text, facet/tag containment, `asOf`, current-only, limit)
@@ -155,6 +157,7 @@ sequenceDiagram
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-13 | Markdown export is an Application slice (`Features/Export/`), not an HTTP endpoint. Forensic dump bypasses `MemoryScopeFilter`. | WT-4 |
 | 2026-09-11 | Review fixes: dry run shares the write plan (LADR-002); retrieval pushed into PostgreSQL behind `IMemorySearch` with `asOf` + `limit` (LADR-005); scope rule as data and enforced on the blob proxy (LADR-003); errors classified by SQLSTATE (LADR-006); facet endpoint reads the view (LADR-007); stale links skipped (LADR-008); `PATCH /groups/{uuid}` and initiative registry added; preflight narrows by kind before the cap. | WT-2 review |
 | 2026-09-12 | /ai-review fixes: `GetMemoryVersions` scope-gated like the blob proxy (LADR-003 now covers versions too); `LabelsProposed` capped at 100; duplicate version-target in a batch is a `ConflictException` on both dry-run and write; letter/digit-free `Description` rejected as a 400 via `Slug.TrySubject`. | /ai-review PR #14 |
 | 2026-09-12 | /ai-analyse: 200-items-per-`set` write cap documented in Key Behaviors (shipped as a validator `400` in `SetMemories`); contract previously omitted the write cap while documenting the sibling read caps. | /ai-analyse |

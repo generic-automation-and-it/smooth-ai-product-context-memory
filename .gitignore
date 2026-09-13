@@ -405,6 +405,10 @@ MigrationBackup/
 # Local AI context / work tasks (not tracked in source control)
 .context/
 
+# Generated Markdown export of the context-memory store (WT-4). Disposable; never commit.
+/export/
+.context/export/
+
 # Ionide (cross platform F# VS Code tools) working folder
 **/.ionide/
 

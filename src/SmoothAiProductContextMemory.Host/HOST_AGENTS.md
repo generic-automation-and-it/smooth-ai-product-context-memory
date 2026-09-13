@@ -6,13 +6,14 @@ ASP.NET Core composition root (Minimal API). Wires the application together and 
 
 ## Non-Negotiables
 
-- **Keep business logic out of Host.** Endpoints translate HTTP to a Mediator request and back; they contain no domain or orchestration logic.
+- **Keep business logic out of Host.** Endpoints translate HTTP to a Mediator request and back; they contain no domain or orchestration logic. The `export` CLI is the same rule: parse argv, compose DI, dispatch `ExportStore` — no rendering.
 - **One endpoint per use case** under `Endpoints/`; cross-cutting composition (DI, middleware, observability, problem-details) lives in `Configuration/`.
 - **`Program` ends with `public partial class Program { }`** so integration tests can target it via `WebApplicationFactory<Program>`.
 - **References Application, Domain, and Infrastructure** — it is the only project that composes all layers.
 
 ## Key Behaviors
 
+- **CLI branch:** when the first argument is `export`, `Program.cs` does **not** build a `WebApplication`. It uses `Host.CreateApplicationBuilder` + `AddApplication` + `AddInfrastructure` and runs `ExportStore` once. No Kestrel, OpenAPI, or `DatabaseMigrationHostedService`. Missing schema fails the command; migrate is not a side effect of export.
 - **Local ports are `5141` (http) and `7141` (https).** The number is derived from the product name so it is stable and collision-unlikely against other local services: the ASCII bit string of `smooth-ai-product-context-memory` is 256 bits long and contains **141 set bits**, giving `5000 + 141`. Reproduce with `python3 -c "n='smooth-ai-product-context-memory'; print(5000 + ''.join(format(ord(c),'08b') for c in n).count('1'))"`. If the product is renamed, recompute rather than keeping the old number. The previous `5080`/`7080` pair collided with unrelated local containers.
 - Composition: Serilog, OpenAPI, Scalar at `/scalar/v1`, ProblemDetails, `AddApplication`/`AddInfrastructure`, then endpoint mapping. Un-routed `/` still 404.
 - Migrations run in `IHostedService`, not before `app.Run()`. Awaiting migrate on the startup path deadlocks `WebApplicationFactory` (L2). L2 must keep that hosted service (`RemoveHostedServices = false`) and inject the connection string **before** DbContext is constructed (deferred `IConfiguration` lookup).
@@ -25,6 +26,7 @@ ASP.NET Core composition root (Minimal API). Wires the application together and 
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-13 | `export` CLI branch before `WebApplication.CreateBuilder` — generated Markdown dump, no HTTP. | WT-4 |
 | 2026-09-11 | Error handler classifies via `IDbErrorMapper` instead of message text; `application/problem+json`; `403` for scope. Added `PATCH /groups/{uuid}`, `GET|POST /initiatives`, `?scope=` on the blob route. | WT-2 review |
 | 2026-09-12 | `GET .../versions` now takes `?scope=` (scope-gated like the blob route); `POST /memories` OR-merges a body-supplied `dryRun` so it is not silently treated as a real write. | /ai-review PR #14 |
 | 2026-09-10 | Composed Mediator API: OpenAPI/Scalar, ProblemDetails, ADR-0003 endpoints under `Endpoints/`. | WT-2 |

@@ -51,6 +51,8 @@ dotnet build SmoothAiProductContextMemory.slnx                     # build
 dotnet test  SmoothAiProductContextMemory.slnx                     # run all tests
 dotnet run --project src/SmoothAiProductContextMemory.AppHost      # dev Aspire AppHost
 dotnet run --project src/SmoothAiProductContextMemory.ChatHost     # ChatHost standalone (separate from API Host)
+dotnet run --project src/SmoothAiProductContextMemory.Host -- export [--output DIR] [--history] [--force]
+                                                                   # generated Markdown dump of the store (never commit the output)
 ```
 
 Target a single test project (`dotnet test tests/<Project>`) or `ls tests/` to list. **Gotcha:** dev Aspire dashboard at `http://localhost:15278`; first browser visit needs the printed `/login?t=...` URL.
