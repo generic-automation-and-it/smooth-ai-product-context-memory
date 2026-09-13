@@ -43,6 +43,7 @@ See [./ladrs/](./ladrs/).
 - **Traversal returns identities, never content.** Answering what those memories say requires selecting the relational rows — one composed query, since SQL and Cypher share the session.
 - **The entity-count guard changes by one.** Removing the relationship entity is expected and is updated deliberately in the same change; it is not a test to weaken when it fails.
 - **The current foundation is additive.** The extension, empty `memory_graph`, vertex label `Memory`, and the five relation edge labels exist; `memory_link` is still the relationship store. Do not write or read edges yet.
+- **The relational relationship contract is characterised** in `LinkTests` (HLD-003 WT-04): a duplicate directed triple is refused, the same pair may hold several relations, direction is identity, deleting a memory removes inbound and outbound links, a self-link persists at the store, and links are not group-bounded. WT-02 must keep this behaviour.
 - **Do not revert the database image to `library/postgres`.** Both Aspire hosts must stay on `docker.io/apache/age:release_PG17_1.7.0`. A vanilla Postgres image fails `CREATE EXTENSION age` and the pool-recycle tests.
 
 ## Quality Constraints
@@ -63,6 +64,7 @@ operability and compatibility. Two shape how code is written rather than merely 
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-13 | WT-04 characterised the relational uniqueness/integrity contract in `LinkTests` before cutover. No production change. | HLD-003 WT-04 |
 | 2026-09-13 | Foundation review: both Aspire hosts stay on `docker.io/apache/age:release_PG17_1.7.0`; do not revert to `library/postgres`. | HLD-003 |
 | 2026-09-13 | AGE foundation shipped: image pin, per-connection init, empty graph + labels, relational one-hop baseline. `memory_link` untouched. | HLD-003 |
 | 2026-09-13 | Added the upstream BRD as cited business authority; BR-11 requires the connection's reason, not only the edge. | BRD 001 |
