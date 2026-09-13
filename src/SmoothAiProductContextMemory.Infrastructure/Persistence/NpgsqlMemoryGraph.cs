@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
@@ -21,8 +20,14 @@ public sealed class NpgsqlMemoryGraph(SmoothAiProductContextMemoryDbContext db) 
         string relation,
         CancellationToken cancellationToken)
     {
-        string cypher = $$"""
-            OPTIONAL MATCH (s:{{AgeSession.VertexLabel}} {memory_uuid: {{Quote(sourceUuid)}}})-[e:{{AgeSession.EdgeLabel}} {relation: {{Quote(relation)}}}]->(t:{{AgeSession.VertexLabel}} {memory_uuid: {{Quote(targetUuid)}}})
+        // Property predicates, not an inline map: AGE compiles `{memory_uuid: x}` to `properties @> …`
+        // and `WHERE n.memory_uuid = x` to an extracted-property equality. Only the second is served
+        // by ix_memory_vertex_uuid (LADR-06). count() over an empty match still yields one row of 0.
+        string cypher = $"""
+            MATCH (s:{AgeSession.VertexLabel})-[e:{AgeSession.EdgeLabel}]->(t:{AgeSession.VertexLabel})
+            WHERE s.memory_uuid = {Quote(sourceUuid)}
+              AND t.memory_uuid = {Quote(targetUuid)}
+              AND e.relation = {Quote(relation)}
             RETURN count(e)
             """;
         string? count = await ExecuteScalarAsync(cypher, cancellationToken);
@@ -60,13 +65,30 @@ public sealed class NpgsqlMemoryGraph(SmoothAiProductContextMemoryDbContext db) 
             cancellationToken);
 
     public Task<IReadOnlyList<MemoryRelationship>> ListTouchingAsync(Guid uuid, CancellationToken cancellationToken) =>
-        ListAsync(
-            $"""
-            MATCH (s:{AgeSession.VertexLabel})-[e:{AgeSession.EdgeLabel}]->(t:{AgeSession.VertexLabel})
-            WHERE s.memory_uuid = {Quote(uuid)} OR t.memory_uuid = {Quote(uuid)}
-            RETURN s.memory_uuid, t.memory_uuid, e.relation, e.reason
-            """,
-            cancellationToken);
+        ListAsync(ListTouchingCypher(uuid), cancellationToken);
+
+    /// <summary>
+    /// The one-hop lookup — outbound and inbound edges of one memory — exposed so the NFR-02 benchmark
+    /// plans the statement the store runs rather than a hand-written copy of it.
+    /// </summary>
+    /// <remarks>
+    /// Two anchored matches unioned, not one match with <c>OR</c>. A disjunction across two different
+    /// vertex instances cannot be served by an index on either, so the OR form hash-joined the whole
+    /// edge table against both vertex scans: measured at 6.075 ms p95 over <c>Seq Scan on "LINKS"</c>,
+    /// against a 0.429 ms relational baseline. Each union branch anchors one endpoint, so each uses
+    /// <c>ix_memory_vertex_uuid</c> (LADR-06). <c>UNION</c> rather than <c>UNION ALL</c> because a
+    /// self-link satisfies both branches and must still be reported once.
+    /// </remarks>
+    internal static string ListTouchingCypher(Guid uuid) =>
+        $"""
+        MATCH (s:{AgeSession.VertexLabel})-[e:{AgeSession.EdgeLabel}]->(t:{AgeSession.VertexLabel})
+        WHERE s.memory_uuid = {Quote(uuid)}
+        RETURN s.memory_uuid, t.memory_uuid, e.relation, e.reason
+        UNION
+        MATCH (s:{AgeSession.VertexLabel})-[e:{AgeSession.EdgeLabel}]->(t:{AgeSession.VertexLabel})
+        WHERE t.memory_uuid = {Quote(uuid)}
+        RETURN s.memory_uuid, t.memory_uuid, e.relation, e.reason
+        """;
 
     private async Task<IReadOnlyList<MemoryRelationship>> ListAsync(string cypher, CancellationToken cancellationToken)
     {
@@ -95,7 +117,7 @@ public sealed class NpgsqlMemoryGraph(SmoothAiProductContextMemoryDbContext db) 
         return value is null or DBNull ? null : Convert.ToString(value);
     }
 
-    private async Task<NpgsqlCommand> CreateCommandAsync(
+    internal async Task<NpgsqlCommand> CreateCommandAsync(
         string cypher,
         string resultColumns,
         CancellationToken cancellationToken)
@@ -121,58 +143,9 @@ public sealed class NpgsqlMemoryGraph(SmoothAiProductContextMemoryDbContext db) 
 
     private static string Quote(Guid uuid) => Quote(uuid.ToString("D"));
 
-    private static string Quote(string value)
-    {
-        var builder = new StringBuilder(value.Length + 2);
-        builder.Append('\'');
-        foreach (char c in value)
-        {
-            switch (c)
-            {
-                case '\\':
-                    builder.Append("\\\\");
-                    break;
-                case '\'':
-                    builder.Append("\\'");
-                    break;
-                case '\n':
-                    builder.Append("\\n");
-                    break;
-                case '\r':
-                    builder.Append("\\r");
-                    break;
-                case '\t':
-                    builder.Append("\\t");
-                    break;
-                default:
-                    if (c < 0x20)
-                    {
-                        builder.Append("\\u");
-                        builder.Append(((int)c).ToString("x4", CultureInfo.InvariantCulture));
-                    }
-                    else
-                    {
-                        builder.Append(c);
-                    }
+    private static string Quote(string value) => CypherLiteral.Quote(value);
 
-                    break;
-            }
-        }
-
-        builder.Append('\'');
-        return builder.ToString();
-    }
-
-    private static string DollarWrap(string cypher)
-    {
-        string tag = "$q$";
-        while (cypher.Contains(tag, StringComparison.Ordinal))
-        {
-            tag = $"$q{Random.Shared.Next():x8}$";
-        }
-
-        return $"{tag}\n{cypher}\n{tag}";
-    }
+    private static string DollarWrap(string cypher) => CypherLiteral.DollarWrap(cypher);
 
     private static string ReadAgtypeString(NpgsqlDataReader reader, int ordinal)
     {

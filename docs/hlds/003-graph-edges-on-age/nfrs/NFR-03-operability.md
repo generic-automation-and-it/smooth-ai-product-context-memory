@@ -1,6 +1,6 @@
 # NFR-03: Operability
 
-**Status:** Draft
+**Status:** Accepted
 
 ## Requirement
 
@@ -15,7 +15,7 @@ operational shape:
 ## Verification
 
 - Count running containers before and after; any increase fails.
-- Back up a populated database, restore into an empty instance, and assert both a relational row count and an edge count match the source. An edge count of zero after restore is the specific failure this catches.
+- Back up a populated database, restore into an empty instance, and assert both a relational row count and an edge count match the source. An edge count of zero after restore is the specific failure this catches. **Verified: [NFR-03-restore-verification.md](./NFR-03-restore-verification.md)** — 201 rows / 200 vertices / 500 edges round-tripped, traversal intact ([`scripts/verify-graph-restore.sh`](../../../../scripts/verify-graph-restore.sh)).
 - Start from clean on a machine with no prior image, then immediately exercise one relationship write and one traversal. Any manual step between start and success fails.
 - Time the cold-start path and compare against the recorded baseline.
 

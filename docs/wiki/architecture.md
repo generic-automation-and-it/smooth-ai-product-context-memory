@@ -7,7 +7,21 @@ blob storage (see [HLD 001](../hlds/001-context-memory-storage/)); PostgreSQL
 holds metadata, relationships, and everything filtered on. Apache AGE is installed in the same
 instance (`docker.io/apache/age:release_PG17_1.7.0` in both Aspire hosts). Relationships are graph
 edges (`memory_graph`, vertex `Memory` identity-only, edge `:LINKS`) — see
-[HLD 003](../hlds/003-graph-edges-on-age/). The authoritative persistence model is
+[HLD 003](../hlds/003-graph-edges-on-age/).
+
+### Provenance traversal
+
+`POST /api/context/paths` answers *what chain of reasoning connects these two memories* — bounded
+variable-depth paths, filterable by relation type and direction. The traversal and the endpoint
+memories' descriptive fields come from **one** statement: `ag_catalog.cypher(...)` joined to `memory`
+/ `memory_version` / `memory_group`, since SQL and Cypher share the session. Every traversal carries a
+required depth bound (1–5); nothing in the storage layer stops an unbounded walk, so the application
+does. Measured at depth 3 over 10,000 edges: 1.042 ms p95
+([NFR-02](../hlds/003-graph-edges-on-age/nfrs/NFR-02-traversal-measurements.md)).
+
+Whole-graph algorithms, centrality and recommendation are deliberately out of scope, as is mirroring
+trackers, repositories or the agile hierarchy into the graph — those are trees with an authoritative
+upstream, and a copy would need syncing. The authoritative persistence model is
 [HLD 001](../hlds/001-context-memory-storage/). The write-path pipeline and the
 agent-facing skill contract (the **sole interface** to the store) are specified in
 [HLD 002](../hlds/002-context-memory-write-pipeline/); the skill lives at

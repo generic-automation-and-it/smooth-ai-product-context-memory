@@ -37,6 +37,36 @@ public static class MemoryScopeFilter
     }
 
     /// <summary>
+    /// Dimensions that must not be disclosed even as an intermediate hop on a traversal.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Plan"/>'s excluded list is empty for every explicit dimension, because there
+    /// <see cref="ScopeFilterPlan.RequiredDimension"/> does the narrowing and exclusion is redundant. A
+    /// traversal cannot use it that way: the required dimension narrows which *endpoints* come back and
+    /// says nothing about the memories a path crosses on the way, so driving the hop gate off the
+    /// excluded list stops filtering exactly when the caller narrows — declaring <c>product</c> would
+    /// disclose programme hops that declaring nothing hides, inverting the consent model
+    /// <c>GetMemoryBlob</c> enforces.
+    /// <para>
+    /// Programme is the dimension the rule exists to protect, so it is hidden unless the caller has
+    /// declared it or holds in-group context. Other dimensions stay traversable: a provenance chain
+    /// crossing scopes is normal, and narrowing a read must not silently truncate the chain that
+    /// justifies it.
+    /// </para>
+    /// </remarks>
+    public static IReadOnlyList<string> HiddenDimensions(string? requestedScope, bool hasGroupContext)
+    {
+        if (hasGroupContext)
+        {
+            return [];
+        }
+
+        return string.Equals(requestedScope, MemoryGroup.ScopeDimensionValue.Program, StringComparison.Ordinal)
+            ? []
+            : ProgramOnly;
+    }
+
+    /// <summary>
     /// Whether a group of the given scope dimension is visible under the plan. Kept as the readable
     /// statement of the rule and as the L0 assertion surface; derived from <see cref="Plan"/> so the
     /// two can never drift.

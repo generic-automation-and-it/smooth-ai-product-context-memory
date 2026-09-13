@@ -13,7 +13,7 @@ Vertical-slice use cases dispatched via the Mediator source generator — one fo
 - **FluentValidation runs fail-fast** in a Mediator pipeline behavior under `Common/Pipelines/`, before the handler.
 - **References Domain only** — never Infrastructure or Host.
 - **Persistence contract is `IApplicationDbContext`**, not the Infrastructure DbContext. Six `DbSet`s only; never map `label_usage` as an entity. Relationships go through `IMemoryGraph`, not a `DbSet`.
-- **Anything that needs a provider-specific operator goes behind an abstraction in `Abstractions/`, not into a handler.** `IMemorySearch` (index-matching retrieval: `to_tsvector`, `@>`), `IDbErrorMapper` (SQLSTATE classification), and `IMemoryGraph` (AGE Cypher) are implemented in Infrastructure. A handler that reaches for provider syntax ends up filtering in memory or matching on message substrings — both were real defects here.
+- **Anything that needs a provider-specific operator goes behind an abstraction in `Abstractions/`, not into a handler.** `IMemorySearch` (index-matching retrieval: `to_tsvector`, `@>`), `IDbErrorMapper` (SQLSTATE classification), `IMemoryGraph` (AGE Cypher) and `IMemoryTraversal` (bounded paths composed with the relational read in one statement) are implemented in Infrastructure. A handler that reaches for provider syntax ends up filtering in memory or matching on message substrings — both were real defects here.
 - **Markdown export is an Application slice, not an HTTP endpoint.** `Features/Export/` owns tree shape, frontmatter and banners; `IMarkdownExportSink` writes bytes. Contract: `Features/Export/EXPORT_AGENTS.md`. Do not add an import path.
 
 ## Slice shape (`Features/<Name>/<UseCase>.cs`)
@@ -34,6 +34,7 @@ Feature-level contract (uuid wire, dry-run, scope, D42): `Features/FEATURES_AGEN
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-13 | Added `IMemoryTraversal` — bounded multi-hop paths whose descriptive fields come from the relational rows in the *same* statement. `MemoryPathQuery.MaxDepth` is `required`: an unbounded traversal does not compile. | HLD-003 LADR-07 |
 | 2026-09-13 | Relationships via `IMemoryGraph`; six `DbSet`s. CreateLink / SetMemories / Export no longer touch `memory_link`. | HLD-003 |
 | 2026-09-13 | Markdown export slice (`Features/Export/`) — generated-never-maintained projection of the store. | PR #18 |
 | 2026-09-11 | Added `IMemorySearch` and `IDbErrorMapper` abstractions so retrieval predicates and error classification stay provider-side. | PR #14 review |

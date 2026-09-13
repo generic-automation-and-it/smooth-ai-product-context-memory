@@ -26,7 +26,7 @@ ASP.NET Core composition root (Minimal API). Wires the application together and 
 - Endpoints translate HTTP to Mediator only. **`ApiExceptionHandler` never inspects exception text** — it asks `IDbErrorMapper` (SQLSTATE, implemented in Infrastructure) and otherwise maps the Application exception type. Database-originated details are fixed strings, so no SQL, column name or value can leak.
 - **One error contract:** RFC 7807 written as `application/problem+json` for every failure. `400` validation, `403` scope (`ForbiddenException`), `404` `NotFoundException`, `409` `ConflictException`, `500` with the fixed detail `"An unexpected error occurred."`.
 - `GET .../blob` and `GET .../versions` take `?scope=` and `POST /query` takes `asOf`/`limit`; `PATCH /groups/{uuid}` and `GET|POST /initiatives` complete the registry surface. These read routes are proxies **and** scope boundaries — see `Features/FEATURES_AGENTS.md` LADR-003.
-- Scalar/OpenAPI document every `/api/context/*` route; the L2 test asserts each path literally. Bind localhost (`5141`/`7141`); do not listen `0.0.0.0` in dev.
+- Scalar/OpenAPI document every `/api/context/*` route; the L2 test asserts each path literally — `/api/context/paths` included, so a route added without updating `ExpectedRoutes` fails. Bind localhost (`5141`/`7141`); do not listen `0.0.0.0` in dev.
 - **Container image** listens `http://+:5141` (required inside Docker). Non-root (`$APP_UID`). `ENTRYPOINT` is the Host binary so `export` remains `docker run … image export …`. Config contract and AppHost image path: `docs/wiki/docker.md`. Do not bake web args into the entrypoint.
 
 ## Requirements

@@ -18,6 +18,17 @@ HTTP API the context-memory skill consumes — uuid-only wire, Mediator slices, 
 - **Do not add a LabelUsage entity** for the `label_usage` view — the six-type model-shape guard fails on purpose.
 - **`kind` is an open string**, not an enum or check constraint.
 - **Programme scope is never citable as product fact.** `MemoryScopeFilter.Plan` is the one source of truth and is expressed as *data* so the provider can push it into SQL. Default query omits `scope_dimension = program` unless the caller filters by that scope, a group uuid, or a ticket (in-group context). `self` is always returned with `scopeDimension`. The same plan gates the blob proxy and version history. Write path does not reject programme.
+- **Every traversal is bounded, and the bound is on the wire.** `POST /api/context/paths` requires `maxDepth`
+  (1–5); there is no server-side default, because a default is a bound the caller never considered. The store
+  layer refuses an out-of-range depth as well, so a direct caller cannot bypass the validator (HLD-003 LADR-07).
+- **The traversal endpoint is scope-gated at every vertex, not just the two ends.** Traversing *from* a
+  programme-scoped memory needs `scopeDimension`, as the blob proxy and version history do (403 otherwise).
+  The endpoints it *reaches* are narrowed by `Plan().RequiredDimension`; every intermediate hop it crosses
+  is gated by `MemoryScopeFilter.HiddenDimensions`, **not** by `Plan().ExcludedDimensions` (empty for every
+  explicit dimension, so it would stop filtering exactly when the caller narrows). Both are pushed into the
+  composed SQL — a path routed through a hidden memory is dropped,
+  because returning it would disclose that memory's uuid and its edges' reasons. A traversal returns
+  descriptive fields, so it is a read path and gets the read path's rule in full.
 - **Never log statement, summary, content, or blob address at Information.** Counts and lifecycle at `Information`, per-operation decisions at `Debug`.
 
 ## System Context
@@ -132,6 +143,11 @@ sequenceDiagram
 - Sources and tickets serialize only through `JsonShapeDocument` so `v` is never hand-written.
 - D42 summary stamp is jsonb `SummaryStampDocument` on `memory_version`; `append_only_guard` equality list includes `summary_stamp`.
 - Error contract is RFC 7807 on `application/problem+json` for every failure: `400` validation, `403` scope, `404` missing, `409` conflict, `500` with a fixed detail.
+- `POST /api/context/paths` reconstructs provenance: bounded variable-depth paths from `sourceUuid`, optionally to
+  `targetUuid`, filtered by `relation` and `direction` (`outbound` default / `inbound` / `either`), and narrowable
+  by the endpoint memory's `kind` and `status`. Each path returns its `depth`, its `hops` (source, target,
+  relation, **reason**) and the endpoint as a `CheapMemory`. Unknown `sourceUuid` is `404`; `maxDepth` outside
+  1–5 is `400`; `limit` shares the read cap of 200.
 
 ## Known Limitations
 
@@ -158,6 +174,7 @@ sequenceDiagram
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-13 | `POST /api/context/paths` added (`Features/Links/FindPaths`) — bounded provenance traversal returning hops with reasons plus the endpoint's cheap fields from one composed statement. Depth bound required on the wire; scope rule applied to the source *and* the reached endpoints. | HLD-003 |
 | 2026-09-13 | CreateLink / SetMemories / Export re-pointed at `IMemoryGraph`. Duplicate skip vs 409 unchanged. Persistence no longer has `MemoryLink`. | HLD-003 |
 | 2026-09-13 | Intra-batch duplicate link skip characterised (`Duplicate_link_in_same_batch_is_skipped_not_fatal`). Store-vs-app self-link split recorded as a known limitation. | HLD-003 |
 | 2026-09-13 | Markdown export is an Application slice (`Features/Export/`), not an HTTP endpoint. Forensic dump bypasses `MemoryScopeFilter`. | PR #18 |

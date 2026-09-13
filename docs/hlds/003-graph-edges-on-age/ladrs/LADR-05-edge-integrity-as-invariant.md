@@ -1,6 +1,6 @@
 # LADR-05: Edge integrity becomes an enforced application invariant
 
-**Status:** Draft
+**Status:** Accepted
 
 ## Context
 
@@ -52,10 +52,7 @@ second-strongest. That is a real cost, recorded here rather than discovered in p
 - Two guarantees move from structural to behavioural, raising the cost of a write-path bug. NFR-01 exists to bound that risk with verification.
 - The invariants are enforced in one place — the relationship write and memory delete paths — rather than scattered, keeping the surface small.
 - A direct database write that bypasses the application can now create an orphan or a duplicate, which the table made impossible. Operational access must treat relationships as application-owned.
-
-## Open
-
-- Whether an audit query that counts orphans is worth exposing as an operational check — decided during prototyping once the delete path has a test.
+- No separate orphan-audit query. `LinkTests` on every build is the check; delete is `trg_memory_graph_cascade` only.
 
 ## Related
 

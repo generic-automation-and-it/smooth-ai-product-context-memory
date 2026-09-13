@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using SmoothAiProductContextMemory.Application.Abstractions;
 using SmoothAiProductContextMemory.Domain;
 using SmoothAiProductContextMemory.Domain.Entities;
 
@@ -304,6 +305,7 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
         "/api/context/groups/{uuid}",
         "/api/context/groups/{uuid}/descriptions",
         "/api/context/links",
+        "/api/context/paths",
         "/api/context/labels",
         "/api/context/initiatives",
     ];
@@ -405,6 +407,129 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
             new { repo = "nope" },
             Ct);
         missing.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task Traversal_returns_the_chain_and_the_endpoint_fields()
+    {
+        Guid group = await ResolveGroup(MemoryGroup.ScopeDimensionValue.Product);
+        Guid measurement = await Capture(group, "Traversal measurement subject", "Latency was 42 ms");
+        Guid finding = await Capture(group, "Traversal finding subject", "Latency exceeds the target");
+        Guid decision = await Capture(group, "Traversal decision subject", "Adopt the cache");
+
+        await Link(measurement, finding, MemoryRelation.DependsOn, "the measurement produced the finding");
+        await Link(finding, decision, MemoryRelation.DependsOn, "the finding justified the decision");
+
+        using HttpResponseMessage response = await _http.PostAsJsonAsync(
+            "/api/context/paths",
+            new { sourceUuid = measurement, targetUuid = decision, maxDepth = 3 },
+            Ct);
+        string payload = await response.Content.ReadAsStringAsync(Ct);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, payload);
+
+        JsonElement path = JsonSerializer.Deserialize<JsonElement>(payload, Json)
+            .GetProperty("paths").EnumerateArray().Single();
+        path.GetProperty("depth").GetInt32().ShouldBe(2);
+
+        JsonElement[] hops = [.. path.GetProperty("hops").EnumerateArray()];
+        hops.Length.ShouldBe(2);
+        hops[0].GetProperty("sourceUuid").GetGuid().ShouldBe(measurement);
+        hops[0].GetProperty("reason").GetString().ShouldBe("the measurement produced the finding");
+        hops[1].GetProperty("targetUuid").GetGuid().ShouldBe(decision);
+        hops[1].GetProperty("relation").GetString().ShouldBe(MemoryRelation.DependsOn);
+
+        // Descriptive fields come from the relational rows, not from the graph.
+        path.GetProperty("endpoint").GetProperty("uuid").GetGuid().ShouldBe(decision);
+        path.GetProperty("endpoint").GetProperty("statement").GetString().ShouldBe("Adopt the cache");
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(MemoryTraversalDefaults.MaxDepth + 1)]
+    public async Task Traversal_without_a_usable_bound_returns_400(int maxDepth)
+    {
+        Guid group = await ResolveGroup(MemoryGroup.ScopeDimensionValue.Product);
+        Guid source = await Capture(group, $"Unbounded subject {maxDepth}", "Claim");
+
+        using HttpResponseMessage response = await _http.PostAsJsonAsync(
+            "/api/context/paths",
+            new { sourceUuid = source, maxDepth },
+            Ct);
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        response.Content.Headers.ContentType?.MediaType.ShouldBe("application/problem+json");
+    }
+
+    [Fact]
+    public async Task Traversal_from_a_programme_memory_requires_the_declared_scope()
+    {
+        Guid programme = await ResolveGroup(MemoryGroup.ScopeDimensionValue.Program);
+        Guid source = await Capture(programme, "Programme traversal subject", "Programme claim");
+
+        using HttpResponseMessage undeclared = await _http.PostAsJsonAsync(
+            "/api/context/paths",
+            new { sourceUuid = source, maxDepth = 2 },
+            Ct);
+        undeclared.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+
+        using HttpResponseMessage declared = await _http.PostAsJsonAsync(
+            "/api/context/paths",
+            new { sourceUuid = source, maxDepth = 2, scopeDimension = MemoryGroup.ScopeDimensionValue.Program },
+            Ct);
+        declared.StatusCode.ShouldBe(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task Traversal_declaring_product_does_not_disclose_programme_intermediates()
+    {
+        // Pins the handler's hop gate end to end: HiddenDimensions("product") hides programme hops,
+        // whereas a regression to Plan().ExcludedDimensions (empty for every explicit dimension)
+        // would disclose them while the store-level tests stay green.
+        Guid product = await ResolveGroup(MemoryGroup.ScopeDimensionValue.Product);
+        Guid programme = await ResolveGroup(MemoryGroup.ScopeDimensionValue.Program);
+        Guid source = await Capture(product, "Cross-scope source subject", "Product claim");
+        Guid hidden = await Capture(programme, "Programme intermediate subject", "Programme claim");
+        Guid endpoint = await Capture(product, "Cross-scope endpoint subject", "Product decision");
+
+        await Link(source, hidden, MemoryRelation.DependsOn, "programme rationale");
+        await Link(hidden, endpoint, MemoryRelation.DependsOn, "leads to the decision");
+
+        using HttpResponseMessage declared = await _http.PostAsJsonAsync(
+            "/api/context/paths",
+            new
+            {
+                sourceUuid = source,
+                targetUuid = endpoint,
+                maxDepth = 3,
+                scopeDimension = MemoryGroup.ScopeDimensionValue.Product,
+            },
+            Ct);
+        string payload = await declared.Content.ReadAsStringAsync(Ct);
+        declared.StatusCode.ShouldBe(HttpStatusCode.OK, payload);
+        payload.ShouldNotContain(hidden.ToString());
+        payload.ShouldNotContain("programme rationale");
+    }
+
+    [Fact]
+    public async Task Traversal_from_an_unknown_memory_returns_404()
+    {
+        using HttpResponseMessage response = await _http.PostAsJsonAsync(
+            "/api/context/paths",
+            new { sourceUuid = Guid.NewGuid(), maxDepth = 2 },
+            Ct);
+        response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+    }
+
+    private async Task<Guid> Capture(Guid groupUuid, string description, string statement) =>
+        (await SetMemory(groupUuid, description, statement, MemoryVersion.MemoryVersionStatus.Approved))
+            .GetProperty("items")[0].GetProperty("uuid").GetGuid();
+
+    private async Task Link(Guid source, Guid target, string relation, string reason)
+    {
+        using HttpResponseMessage response = await _http.PostAsJsonAsync(
+            "/api/context/links",
+            new { sourceUuid = source, targetUuid = target, relation, reason },
+            Ct);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, await response.Content.ReadAsStringAsync(Ct));
     }
 
     private async Task<Guid> ResolveGroup(string scope)

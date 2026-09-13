@@ -2,15 +2,20 @@
 
 | | |
 |---|---|
-| **Status** | In Discovery |
+| **Status** | Accepted |
 | **Owner** | generik0 |
 | **Tracker** | Context-memory V2 |
-| **Last updated** | 2026-09-14 |
+| **Last updated** | 2026-09-13 |
 
-> Discovery / prototyping HLD. This document delivers **intent + spec** — what we are
-> building and why, the decisions behind it, and the quality bar it must meet. It does
-> **not** contain an implementation plan; execution (phasing, sub-issues, sequencing) is
-> tracked in the issue/work tracker.
+> **Delivered and accepted.** All seven decisions and all four quality requirements are Accepted,
+> each against committed evidence: integrity and the relationship contract at the cutover, traversal
+> performance in [NFR-02-traversal-measurements.md](./nfrs/NFR-02-traversal-measurements.md), the
+> restore round-trip in [NFR-03-restore-verification.md](./nfrs/NFR-03-restore-verification.md), and
+> the version pairing plus pre-upgrade check in
+> [NFR-04-version-pairing.md](./nfrs/NFR-04-version-pairing.md).
+>
+> This document delivers **intent + spec** — what we built and why, the decisions behind it, and the
+> quality bar it had to meet. It does **not** contain an implementation plan.
 
 ## Intent
 
@@ -29,20 +34,22 @@ not a service.
 
 ### 1. Multi-hop traversal over memory relationships
 
-Today a caller can ask *what points at this memory*. The cutover collapsed the five foundation
-elabels into the open-vocabulary `relation` property on `:LINKS`; variable-depth traversal
-(*what chain of reasoning connects these two memories*) lands with the later NFR-02 change. The
-relations already modelled — `depends_on`, `relates_to`, `contradicts`, `supersedes`, `implements` —
-become traversable rather than merely listable once that lands.
+**Delivered.** A caller can ask *what points at this memory* and *what chain of reasoning connects
+these two memories*. The cutover collapsed the five foundation elabels into the open-vocabulary
+`relation` property on `:LINKS`; bounded variable-depth traversal followed, exposed as
+`POST /api/context/paths`. The relations modelled — `depends_on`, `relates_to`, `contradicts`,
+`supersedes`, `implements`, and anything else a caller records — are traversable, not merely
+listable.
 
 The capability targeted is provenance reconstruction, not analytics. Bounded paths between known
 endpoints, not whole-graph algorithms.
 
-**Acceptance criteria / DoD**
+**Acceptance criteria / DoD** — all met
 
 - A bounded variable-depth path query between two memory identities returns the intermediate hops and their relation types.
-- Traversal can be filtered by relation type and direction.
-- The existing one-hop reverse lookup remains available and returns the same results as before.
+- Traversal can be filtered by relation type and direction (outbound, inbound, either).
+- The existing one-hop reverse lookup remains available and returns the same results as before — pinned by a depth-1-inbound parity test against `ListTouchingAsync`.
+- Every traversal is bounded: the depth limit is a `required` property of the query type, so an unbounded path query does not compile (LADR-07).
 
 ### 2. Edges only — the graph never owns an entity
 
@@ -119,16 +126,18 @@ question tables answer badly, and is given nothing else.
 
 ## Architecture Decisions (LADRs)
 
-LADRs 01–03 are strategic (*what* and *why*); 04–05 are tactical (*how*). Each is a single
+LADRs 01–03 are strategic (*what* and *why*); 04–07 are tactical (*how*). Each is a single
 decision — a horizontal concern spanning this HLD. See [`./ladrs/`](./ladrs/).
 
 | LADR | Decision | Status |
 |------|----------|--------|
-| [LADR-01](./ladrs/LADR-01-adopt-age-for-relationships.md) | Adopt Apache AGE in the existing Postgres for relationship storage | Draft |
-| [LADR-02](./ladrs/LADR-02-edges-only-thin-vertices.md) | Vertices carry identity only; all properties stay relational | Draft |
-| [LADR-03](./ladrs/LADR-03-replace-not-dual-write.md) | Replace the relationship table outright; never dual-write | Draft |
-| [LADR-04](./ladrs/LADR-04-connection-session-initialisation.md) | Initialise the AGE session per physical connection | Draft |
-| [LADR-05](./ladrs/LADR-05-edge-integrity-as-invariant.md) | Edge integrity becomes an enforced application invariant | Draft |
+| [LADR-01](./ladrs/LADR-01-adopt-age-for-relationships.md) | Adopt Apache AGE in the existing Postgres for relationship storage | Accepted |
+| [LADR-02](./ladrs/LADR-02-edges-only-thin-vertices.md) | Vertices carry identity only; all properties stay relational | Accepted |
+| [LADR-03](./ladrs/LADR-03-replace-not-dual-write.md) | Replace the relationship table outright; never dual-write | Accepted |
+| [LADR-04](./ladrs/LADR-04-connection-session-initialisation.md) | Initialise the AGE session per physical connection | Accepted |
+| [LADR-05](./ladrs/LADR-05-edge-integrity-as-invariant.md) | Edge integrity becomes an enforced application invariant | Accepted |
+| [LADR-06](./ladrs/LADR-06-anchor-lookups-use-property-predicates.md) | Anchor lookups are property predicates over a btree; `MERGE` keeps the inline map over a GIN | Accepted |
+| [LADR-07](./ladrs/LADR-07-every-traversal-carries-its-bound.md) | The depth bound is a `required` property of the query type | Accepted |
 
 ## Non-Functional Requirements
 
@@ -137,7 +146,7 @@ target, a verification mechanism, and acceptance criteria. See [`./nfrs/`](./nfr
 
 | NFR | Attribute | Target (summary) | Status |
 |-----|-----------|------------------|--------|
-| [NFR-01](./nfrs/NFR-01-referential-integrity.md) | Integrity | Zero orphan edges; zero duplicate edges | Draft |
-| [NFR-02](./nfrs/NFR-02-traversal-performance.md) | Performance | Depth-3 bounded path p95 ≤ 50 ms at 10k edges | Draft — one-hop baseline recorded in [NFR-02-one-hop-baseline.md](./nfrs/NFR-02-one-hop-baseline.md) |
-| [NFR-03](./nfrs/NFR-03-operability.md) | Operability | No added container; one backup; one-command start | Draft |
-| [NFR-04](./nfrs/NFR-04-compatibility.md) | Compatibility | Extension must not pin us below a supported Postgres | Draft — pairing recorded in [NFR-04-version-pairing.md](./nfrs/NFR-04-version-pairing.md) |
+| [NFR-01](./nfrs/NFR-01-referential-integrity.md) | Integrity | Zero orphan edges; zero duplicate edges | Accepted |
+| [NFR-02](./nfrs/NFR-02-traversal-performance.md) | Performance | Depth-3 bounded path p95 ≤ 50 ms at 10k edges | Accepted — measured 1.042 / 0.621 / 14.053 ms p95 in [NFR-02-traversal-measurements.md](./nfrs/NFR-02-traversal-measurements.md); one-hop is 1.4× the [baseline](./nfrs/NFR-02-one-hop-baseline.md), adjudicated as accepted |
+| [NFR-03](./nfrs/NFR-03-operability.md) | Operability | No added container; one backup; one-command start | Accepted — restore round-trip in [NFR-03-restore-verification.md](./nfrs/NFR-03-restore-verification.md) |
+| [NFR-04](./nfrs/NFR-04-compatibility.md) | Compatibility | Extension must not pin us below a supported Postgres | Accepted — pairing and pre-upgrade check in [NFR-04-version-pairing.md](./nfrs/NFR-04-version-pairing.md) |

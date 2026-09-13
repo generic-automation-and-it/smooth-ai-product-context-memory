@@ -61,12 +61,13 @@ Targets and verification live in [./nfrs/](./nfrs/). Two shape how code is writt
 
 - Unreferenced objects accumulate in the object store; a garbage-collection sweep is deferred, not solved. Orphaning drops the database reference only — deleting the object can destroy content another version still references.
 - Candidate-recall improvements (trigram similarity, stemming) are deferred until measurement justifies them; the text search configuration performs no stemming today.
-- The generated Markdown projection (`dotnet run --project src/SmoothAiProductContextMemory.Host -- export`) pays down the inspectability debt content addressing introduces; any remaining NFR-04 acceptance item (byte-identical idempotency assertion) is tracked, not the projection itself.
+- The generated Markdown projection (`dotnet run --project src/SmoothAiProductContextMemory.Host -- export`) pays down the inspectability debt content addressing introduces. NFR-04 is Accepted: L1 `ExportStoreHandlerTests` pins byte-identical re-runs, inlined bodies, and missing-blob warn-and-continue.
 
 ## Changelog
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-13 | NFR-04 Accepted — export projection + byte-identical L1 assertions shipped. | NFR-04 |
 | 2026-09-13 | Guard is six entities: HLD 003 dropped `MemoryLink`. Relationships live in AGE, not a seventh table. | HLD-003 |
 | 2026-09-13 | Created — converted from ADR-0001 and ADR-0002, which were one design in two documents. | ADR-0001, ADR-0002 |
 | 2026-09-13 | Added the upstream BRD as cited business authority and the rule that weakening a cited `BR-NN` escalates. | BRD 001 |
