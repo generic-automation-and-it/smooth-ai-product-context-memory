@@ -110,6 +110,6 @@ public sealed class S3BlobStorageTests(AspireFixture aspire)
             Bucket = $"s3blob-{Guid.NewGuid():N}",
         });
 
-        return new S3BlobStorage(options, NullLogger<S3BlobStorage>.Instance);
+        return new S3BlobStorage(options, new TestHttpClientFactory(), NullLogger<S3BlobStorage>.Instance);
     }
 }

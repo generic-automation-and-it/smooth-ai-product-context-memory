@@ -39,7 +39,9 @@ public static class DependencyInjection
 
         services.AddDbContext<SmoothAiProductContextMemoryDbContext>((sp, options) =>
         {
-            options.UseNpgsql(sp.GetRequiredService<NpgsqlDataSource>());
+            options.UseNpgsql(
+                sp.GetRequiredService<NpgsqlDataSource>(),
+                npgsql => npgsql.UseSmoothAiProductContextMemoryHistory());
         });
         services.AddScoped<IApplicationDbContext>(sp =>
             sp.GetRequiredService<SmoothAiProductContextMemoryDbContext>());
@@ -62,6 +64,7 @@ public static class DependencyInjection
             .ValidateOnStart();
 
         services.AddSingleton<IValidateOptions<BlobStorageOptions>, BlobStorageOptionsValidator>();
+        services.AddHttpClient(BlobStorageOptions.HttpClientName);
         services.AddSingleton<IBlobStorage, S3BlobStorage>();
 
         return services;

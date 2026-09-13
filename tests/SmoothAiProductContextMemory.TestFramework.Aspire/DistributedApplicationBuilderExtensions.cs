@@ -5,7 +5,7 @@ namespace SmoothAiProductContextMemory.TestFramework.Aspire;
 
 internal static class DistributedApplicationBuilderExtensions
 {
-    private const string DockerDesktopGroupName = "Mímisbrunnr-Testing";
+    private const string DockerDesktopGroupName = "smooth-mímisbrunnr-testing";
     private const string PostgresContainerName = "mimisbrunnr-testcontainer-postgres";
     private const string RedisContainerName = "mimisbrunnr-testcontainer-redis";
     private const string WireMockContainerName = "mimisbrunnr-testcontainer-wiremock";

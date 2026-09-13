@@ -19,8 +19,14 @@ public sealed class S3BlobStorage : IBlobStorage, IAsyncDisposable
     private readonly string _bucket;
     private readonly ILogger<S3BlobStorage> _logger;
 
-    public S3BlobStorage(IOptions<BlobStorageOptions> options, ILogger<S3BlobStorage> logger)
+    public S3BlobStorage(
+        IOptions<BlobStorageOptions> options,
+        IHttpClientFactory httpClientFactory,
+        ILogger<S3BlobStorage> logger)
     {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(httpClientFactory);
+
         BlobStorageOptions opts = options.Value;
         Uri endpointUri = new(opts.Endpoint);
 
@@ -28,6 +34,9 @@ public sealed class S3BlobStorage : IBlobStorage, IAsyncDisposable
             .WithEndpoint(endpointUri.Host, endpointUri.Port)
             .WithCredentials(opts.AccessKey, opts.SecretKey)
             .WithSSL(endpointUri.Scheme == Uri.UriSchemeHttps)
+            .WithHttpClient(
+                httpClientFactory.CreateClient(BlobStorageOptions.HttpClientName),
+                disposeHttpClient: false)
             .Build();
         _bucket = opts.Bucket;
         _logger = logger;
