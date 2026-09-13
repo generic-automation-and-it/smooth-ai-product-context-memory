@@ -6,7 +6,7 @@
 | **Owner** | generik0 |
 | **Tracker** | Contextual export |
 | **Business authority** | [BRD-002 — Contextual knowledge export](../../brd/002-contextual-export/) (`BR-18` … `BR-36`) |
-| **Last updated** | 2026-09-13 |
+| **Last updated** | 2026-09-14 |
 
 > Discovery / prototyping HLD. Delivers **intent + spec** — what we are building and why, the decisions
 > behind it, and the quality bar it must meet. No implementation plan; execution is tracked in the
@@ -39,13 +39,14 @@ different set of rules.
 
 ## Vocabulary
 
-Four words that are easy to conflate, plus the pre-existing artefact they are most often confused
+Five words that are easy to conflate, plus the pre-existing artefact they are most often confused
 with. All are kept distinct throughout this HLD:
 
 | Term | Meaning |
 |---|---|
 | **Anchor set** | The selection criteria: repository, initiative, ticket, tags — combinable |
-| **Bundle** | What the API returns: the selected memories with their bodies, the edges between them with their reasons, and a **manifest** stating what was selected, what was reached, and what was cut. Deterministic. No judgement |
+| **Bundle** | What the API returns: the selected memories with their bodies, the edges between them with their reasons, and a **manifest** stating the effective selection, what was reached, and what was cut. Deterministic. No judgement |
+| **Preview** | The manifest served without bodies and without composition, so scope and cost can be judged before either is paid for. The first half of the operation, not a detached estimate (LADR-14) |
 | **Dossier** | What the skill composes from a bundle: the ordered document plus its findings. Judgement. Not deterministic |
 | **Focus** | The work a dossier is about to feed — requirements, architecture, specification, implementation, review. A presentation lens over an unfocused bundle: changes order, weighting and depth, never membership. Optional; unfocused is the default (LADR-12) |
 | **Forensic dump** | The pre-existing whole-store `export` CLI projection. Not part of this design; see LADR-01 |
@@ -61,7 +62,8 @@ is portable.
 
 **Acceptance criteria / DoD** — satisfies `BR-18`, `BR-19`, `BR-20`, `BR-33`
 
-- Any combination of repository, initiative, ticket and tags resolves to one bundle.
+- Any combination of repository, initiative, ticket and tags resolves to one bundle, under a **stated** combination rule reported with the result — values within a category are alternatives, categories are conjunctive. A request matching nothing reports no match and is never silently broadened.
+- Whether history is included is part of the request and part of the recorded effective selection, not a composition afterthought.
 - The bundle reports how far relationships were followed and what it stopped short of.
 - Repeating a request against an unchanged store produces a byte-identical bundle.
 - No memory hidden from ordinary retrieval appears in a bundle, including when reached by relationship rather than requested directly.
@@ -80,7 +82,9 @@ unfocused bundle and never changes what was selected (LADR-12).
 
 - A decision and the reasoning it rests on appear in a followable order.
 - A claim captured more than once appears once, with every origin still identifiable.
-- Superseded and no-longer-true material is marked as such, not mixed in and not dropped.
+- Current, proposed, superseded and no-longer-true material stay distinguishable, and unknown status is stated as unknown. Capture recency is never evidence that behaviour shipped.
+- Every definition, condition, threshold, permission and exception needed to apply a claim survives composition; wording is retained verbatim where paraphrase would change meaning.
+- Consolidation merges only where meaning, applicability and lifecycle match, and repeated captures of one source are not presented as independent corroboration.
 - Every statement traces to the memory, version and capture time it came from.
 - The document is identifiable as a generated projection, states the focus that produced it, and reads as evidence rather than instruction.
 - Any focus from the bounded set produces a document ordered and weighted for that work; requesting none produces the complete unfocused document.
@@ -93,11 +97,19 @@ The store's honesty about its limits is the whole reason to trust it. In a docum
 be structural — named sections with a bounded taxonomy — not remarks scattered through prose that a
 reader can miss and a script cannot count.
 
+A finding is only useful if it can be checked, so each carries its **basis** (what prompted it), its
+**scope** (the examined material, never the store or the product) and its **classification** as
+observation or analysis. `BR-27` supplies the basis for a gap — the stated task, an included claim
+needing interpretation, or an explicit practitioner expectation — which is what an earlier draft of this
+design left open and could not supply for itself (LADR-13).
+
 **Acceptance criteria / DoD** — satisfies `BR-27`, `BR-28`, `BR-29`, `BR-30`, `BR-31`
 
 - Gaps, contradictions and quality problems are separate, addressable sections.
-- Every finding names the memories it concerns, so it can be acted on without re-deriving it.
-- Contradictions resolvable by stated authority are resolved and the resolution shown; the rest are presented for decision.
+- Every finding names the memories it concerns and states its basis, so it can be acted on and rejected without re-deriving it.
+- Every gap is a specific question with one of `BR-27`'s three grounds. A general best-practice suggestion is offered as analysis, never as evidence of a product gap.
+- Findings distinguish "not found in this material" from "does not exist", and the export does not claim to have found every gap.
+- Contradictions are compared on applicability and lifecycle first: a scoped exception and a proposed-versus-shipped pair are not conflicts. Those a stated authority settles are resolved with the authority shown; the rest are presented for decision.
 - Everything selected is either in the document or listed as omitted with a reason.
 - Producing an export leaves the store byte-identical.
 
@@ -112,8 +124,9 @@ producing a requirements view and an implementation view of one slice pays for t
 
 **Acceptance criteria / DoD** — satisfies `BR-32`, `BR-34`
 
-- A request can return its manifest — counts, reach, estimated composition cost — without composing anything.
-- Every cap that would be hit is named in that manifest, before composition.
+- A preview returns the effective scope, volume, reach limits and estimated composition cost without composing anything and without hydrating a body. Estimates state their assumptions and uncertainty; monetary cost is shown when pricing is known and marked unavailable when it is not.
+- Every limit that would be hit is named in that preview, before composition. Scope beyond a supported limit is refused and reported, never silently truncated.
+- The practitioner can proceed, narrow or cancel, and composition is bound to the selection they approved (LADR-14).
 - The artefact declares its sensitivity and is written where nothing commits or synchronises it by default.
 
 ## Core Separation of Concerns
@@ -151,8 +164,9 @@ cannot — and pretending otherwise would either forbid the judgement or make th
 ## Architecture Decisions (LADRs)
 
 LADRs 01–06 are strategic, 07–08 tactical, **09–11 are blocked prerequisites** — decisions that cannot
-be taken until a named gap in the graph or the capture skill is closed — and 12 is strategic, appended
-because numbers are never reassigned. See [`./ladrs/`](./ladrs/).
+be taken until a named gap in the graph or the capture skill is closed — and 12–14 were appended after
+the original set (12 and 13 strategic, 14 tactical), because numbers are never reassigned. See
+[`./ladrs/`](./ladrs/).
 
 **Status legend.** `Draft → Prototype → Accepted` is the shared vocabulary. **Blocked** is used here for
 a decision whose options cannot be evaluated yet because an upstream gap makes one of them unbuildable.
@@ -173,6 +187,8 @@ without it. It is not a deferred decision — it is a decision with a missing in
 | [LADR-10](./ladrs/LADR-10-tag-anchors-have-no-graph-representation.md) | Tag anchors as graph vertices | **Blocked** |
 | [LADR-11](./ladrs/LADR-11-no-writer-derives-anchor-edges.md) | Capture-time derivation of anchor edges | **Blocked** |
 | [LADR-12](./ladrs/LADR-12-focus-is-a-composition-lens.md) | Focus is a composition lens over one unfocused bundle | Draft |
+| [LADR-13](./ladrs/LADR-13-findings-carry-a-basis-and-a-scope.md) | Every finding carries a stated basis and is scoped to the examined material | Draft |
+| [LADR-14](./ladrs/LADR-14-preview-and-composition-bind-to-one-selection.md) | Preview and composition bind to one recorded selection | Draft |
 
 ### What the blocked LADRs mean for scope
 
@@ -204,7 +220,8 @@ See [`./nfrs/`](./nfrs/).
 |-----|-----------|------------------|--------|
 | [NFR-01](./nfrs/NFR-01-confidentiality.md) | Confidentiality | Zero hidden-dimension memories in a bundle, at any depth; artefact declares sensitivity | Draft |
 | [NFR-02](./nfrs/NFR-02-reproducibility.md) | Reproducibility | Byte-identical bundle for one anchor set against an unchanged store | Draft |
-| [NFR-03](./nfrs/NFR-03-bounded-cost.md) | Bounded cost | Reach and size capped, caps named on the wire, manifest without composition | Draft |
+| [NFR-03](./nfrs/NFR-03-bounded-cost.md) | Bounded cost | Reach bounded and named on the wire; preview without composition; numeric limits derived from the reference workflows, not assumed | Draft |
 | [NFR-04](./nfrs/NFR-04-completeness.md) | Completeness | Selected count reconciles: present + omitted-with-reason, no silent loss | Draft |
 | [NFR-05](./nfrs/NFR-05-attribution.md) | Traceability | 100% of dossier claims carry memory uuid, version and capture time | Draft |
 | [NFR-06](./nfrs/NFR-06-read-only.md) | Integrity | Zero writes — row counts and version chains byte-identical after an export | Draft |
+| [NFR-07](./nfrs/NFR-07-fidelity.md) | Fidelity | Every condition, exception and lifecycle state needed to apply a claim survives composition | Draft |

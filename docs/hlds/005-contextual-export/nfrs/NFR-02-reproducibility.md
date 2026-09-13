@@ -4,8 +4,13 @@
 
 ## Requirement
 
-One anchor set, one widening bound, one unchanged store ⇒ a **byte-identical bundle**, across repeated
-calls and across process restarts.
+One **effective selection** — criteria, combination rule, widening bound, history policy and retrieval
+policy — against one unchanged store ⇒ a **byte-identical bundle**, across repeated calls and across
+process restarts.
+
+`BR-20` also requires the effective selection to be **recorded**, so the export can be repeated rather
+than merely being reproducible in principle. That record is what LADR-14 binds preview and composition
+to, and what makes the ordinary case of that decision a no-op.
 
 This binds the bundle only. The dossier is judgement (LADR-02) and is deliberately **not** required to be
 identical between runs; requiring it would either forbid the judgement or make the guarantee untrue.
@@ -17,6 +22,7 @@ which is the main reason focus is a lens and not a selection predicate.
 Concretely, the bundle must be free of every ordinary source of run-to-run variance:
 
 - No timestamp of its own generation anywhere in the payload. Stored times are data; a generation time is variance.
+  **This does not conflict with `BR-21`**, which requires the *document* to be identifiable as a dated snapshot. The date belongs to the dossier, where it is useful and where nothing is required to be byte-identical; putting it in the bundle would break this requirement for no gain. Anyone reading the two requirements as contradictory has conflated the two artefacts.
 - Deterministic ordering at every level — selected memories, edges, paths, manifest entries — using the stated tiebreak of business-time validity, then capture time, then memory identity.
 - Deterministic cut behaviour when a cap is reached: the cut is decided by the ordering, never by whatever the traversal reached first.
 - Deterministic collapse of the mechanically identical (LADR-05), including when one memory was reached by several anchor paths.
@@ -32,6 +38,7 @@ Concretely, the bundle must be free of every ordinary source of run-to-run varia
 ## Acceptance Criteria
 
 - Two bundles from one request against an unchanged store are byte-identical, including after a restart.
+- The effective selection is recorded in the bundle in a form sufficient to repeat it.
 - Reordering the anchors or the tags in a request changes nothing in the response.
 - Every ordering has a documented, tested tiebreak; no ordering falls back to database order.
 - A cap hit cuts at the same place in both runs and is reported identically.

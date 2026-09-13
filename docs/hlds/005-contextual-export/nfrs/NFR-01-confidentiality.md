@@ -4,8 +4,13 @@
 
 ## Requirement
 
-**Zero** memories hidden from ordinary retrieval appear in a bundle or a dossier, at **any** widening
+**Zero** memories hidden from ordinary retrieval appear anywhere in the export, at **any** widening
 depth, and regardless of whether they were requested directly or reached by relationship.
+
+"Anywhere" is enumerated deliberately, because `BR-33` lists the surfaces and every one of them is a
+separate place to leak: direct selection, relationship expansion, the **preview**, composed claims,
+**citations**, **findings**, and the **omission list**. The omission list is the least obvious and the
+most tempting — "omitted: hidden by scope, 3 items" discloses both existence and count.
 
 Specifically:
 
@@ -24,8 +29,9 @@ Specifically:
 
 ## Acceptance Criteria
 
-- A hidden memory reachable at any depth from any anchor appears in no bundle, in no dossier, and in no manifest.
-- No edge reason, path, count or omission entry reveals the existence of a hidden memory.
+- A hidden memory reachable at any depth from any anchor appears in no bundle, dossier, manifest, preview, citation, finding or omission entry.
+- No edge reason, path, count or omission entry reveals the existence of a hidden memory — including by counting it.
+- A visible memory's relationship to a hidden one is absent, so the hidden memory cannot be inferred from what its neighbour links to.
 - An export requested without declaring a hidden dimension returns the narrowed result and never signals that something was withheld.
 - Every produced artefact states its sensitivity in its first lines.
 - The default artefact location is ignored by version control, proven by test.

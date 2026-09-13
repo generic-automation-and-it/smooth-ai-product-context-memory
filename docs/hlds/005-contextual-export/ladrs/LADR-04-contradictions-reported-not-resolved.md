@@ -21,6 +21,14 @@ Reading a whole slice is the first moment anything looks at all of them together
 **Report** every contradiction found, with the evidence each side rests on, and **resolve only** those
 a stated authority settles — showing the authority and retaining the losing position.
 
+**Compare applicability and lifecycle before calling anything a conflict.** `BR-28` makes this a
+precondition, and it eliminates the two most common false positives: a **scoped exception** is not a
+contradiction of the general rule it qualifies, and a **proposed** change is not a contradiction of the
+**shipped** behaviour it proposes to alter. Both look like flat disagreements to a reader comparing
+sentences, and treating them as conflicts would fill the findings with noise while training the
+practitioner to skim them. A conflict requires claims that are incompatible **for the same
+circumstances**.
+
 An edge is evidence, not a precondition. A contradiction with a `contradicts` edge is reported *and*
 that edge is cited. A contradiction the composition notices between two unlinked current claims is
 reported identically, with its absence of an edge noted as itself a finding — the store held a conflict
@@ -39,6 +47,7 @@ and goes through the approved write path (LADR-06).
 - **Resolve automatically using recency** — rejected: newer is not truer. This is exactly the silent resolution `BR-10` forbids, and it would erase the losing reasoning, which is frequently the more valuable half (`BR-08`).
 - **Write the missing `contradicts` edge as a side effect of finding it** — rejected: turns a read into a write, bypasses the practitioner's judgement, and would let a composition error become stored fact (LADR-06).
 - **Suppress low-confidence contradiction findings** — rejected: the suppression threshold would be invisible, so the export would be silently incomplete about the one thing it is most important to be loud about.
+- **Report any two claims that read as incompatible, and let the practitioner sort out scope** — rejected by `BR-28`: scoped exceptions and proposed-versus-shipped pairs are common and legitimate, so this floods the findings with non-conflicts and devalues the real ones.
 
 ## Consequences
 
@@ -49,9 +58,11 @@ and goes through the approved write path (LADR-06).
 
 ## Open
 
-- **What counts as a "stated authority" mechanically?** Shipped-versus-specified maps onto scope, but the scope model's citation rules are recorded as absent from BRD-001. Until they exist, authority-based resolution is limited to what the composition can justify from scope and supersession alone. Resolved by the scope-and-citation work named in BRD-001's `AGENTS.md` gap list.
+- **What counts as a "stated authority" mechanically?** Shipped-versus-specified maps onto scope, but the scope model's citation rules are recorded as absent from BRD-001. Until they exist, authority-based resolution is limited to what the composition can justify from scope and supersession alone. Resolved by the scope-and-citation work named in BRD-001's `AGENTS.md` gap list. Note that this Open question is narrower than it was: `BR-28` now supplies the applicability-and-lifecycle precondition, so what remains unresolved is only the *ranking* between two same-scope claims.
 
 ## Related
 
 - **LADR-06** — why finding a contradiction does not write one.
+- **LADR-13** — a contradiction is a finding, so it carries a basis and a scope claim like any other.
 - **NFR-04** — findings are counted, so suppression would be visible.
+- **NFR-07** — lifecycle must survive composition, which is what makes the proposed-versus-shipped comparison possible at all.

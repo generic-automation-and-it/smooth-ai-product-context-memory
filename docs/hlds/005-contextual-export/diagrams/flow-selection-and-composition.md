@@ -20,15 +20,15 @@ flowchart TD
         F --> G["Bundle + manifest<br/>selected · reached · cut · caps hit"]
     end
 
-    G --> H{"Manifest only?"}
-    H -->|"yes — no bodies, no composition (NFR-03)"| Z["Return manifest<br/>cost visible before it is paid"]
+    G --> H{"Preview only?"}
+    H -->|"yes — no bodies, no composition (NFR-03)"| Z["Return preview<br/>effective selection · cost · limits<br/>practitioner proceeds, narrows or cancels"]
 
     subgraph judgement["Judgement — dossier skill, model, not reproducible"]
         H -->|"no"| I["Order: topological over supersedes · depends_on · implements<br/>stated tiebreak, cycles reported (LADR-07)"]
-        I --> J["Collapse restatements<br/>every origin retained (LADR-05)"]
-        J --> K["Mark superseded and stale<br/>cite memory · version · capture time (NFR-05)"]
-        K --> L["Derive findings<br/>bounded taxonomy (NFR-04)"]
-        L --> M["Reconcile:<br/>present + collapsed + omitted-with-reason == bundle count"]
+        I --> J["Consolidate equivalent claims<br/>meaning + applicability + lifecycle must match<br/>every origin retained, never counted as corroboration (LADR-05)"]
+        J --> K["Mark lifecycle: current · proposed · superseded · stale · unknown<br/>preserve conditions and exceptions (NFR-07)<br/>cite memory · version · capture time (NFR-05)"]
+        K --> L["Derive findings<br/>bounded taxonomy, each with basis + scope (LADR-13, NFR-04)"]
+        L --> M["Reconcile:<br/>present + consolidated + omitted-with-reason == bundle count"]
         M --> N["Dossier artefact<br/>sensitivity banner, gitignored path"]
     end
 
@@ -44,7 +44,8 @@ flowchart TD
 | Ordering rationale (LADR-07) | Deterministic rule, applied on the judgement side | The rule is mechanical and testable; what the document does with the ordered material is not |
 | Contradiction detection (LADR-04) | Judgement | Most contradictions carry no edge; no predicate finds them |
 | Cost estimate (NFR-03) | Deterministic | Must be answerable *without* paying the composition cost it estimates |
-| Findings (NFR-04) | Judgement | A gap is an absence relative to an expectation, which is not a query |
+| Findings (NFR-04) | Judgement | A gap is an unanswered question against the task, an included claim or a stated expectation (`BR-27`) — none of which is a predicate |
+| Fidelity (NFR-07) | Judgement | Whether a condition still bounds a claim after rewriting is a semantic property, not a count |
 
 ## Interim reach, and what it excludes
 
