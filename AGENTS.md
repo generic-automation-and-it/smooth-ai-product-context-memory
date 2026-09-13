@@ -8,6 +8,8 @@ Persistent memory service for AI agents: stores summarized, labelled context (li
 
 **Tech stack:** .NET 10 · ASP.NET Core · Clean Architecture (Domain / Application / Infrastructure / Host) · EF Core + PostgreSQL with Apache AGE · Mediator (source-gen CQRS) · xunit.v3
 
+**Observability:** Serilog is the single logging pipeline (console + Seq sinks) and forwards to the OpenTelemetry logging provider, which exports logs, traces and metrics over OTLP to the Aspire dashboard. Traces cover ASP.NET Core, `HttpClient` and Npgsql, so one request is one trace spanning both stores. Memory content never reaches a log, span attribute or metric tag (NFR-05).
+
 ## AI Context Files
 
 `AGENTS.md` and `*AGENTS.md` are first-class AI-coder context — read like `CLAUDE.md`, not optional reference. Layered domain → sub-domain → feature → technology; read every level that governs code you touch, nearest `*AGENTS.md` most authoritative. Keep `*AGENTS.md` synced with code; every PR updates at least one. Prefer local context over adding to this root file — avoid restating the same plan at multiple levels.
@@ -19,7 +21,7 @@ Persistent memory service for AI agents: stores summarized, labelled context (li
 | Domain | `src/SmoothAiProductContextMemory.Domain/` | Core entities, value objects — no external deps |
 | Application | `src/SmoothAiProductContextMemory.Application/` | Vertical-slice use cases via Mediator — `Features/<Name>/` (contract: `Features/FEATURES_AGENTS.md`), shared code in `Common/` + `Abstractions/` |
 | Infrastructure | `src/SmoothAiProductContextMemory.Infrastructure/` | EF Core + PostgreSQL+AGE (`Persistence/`), HTTP clients (`Clients/`), blob storage (`Storage/`) |
-| Host | `src/SmoothAiProductContextMemory.Host/` | ASP.NET Core Web API, Serilog, Scalar OpenAPI |
+| Host | `src/SmoothAiProductContextMemory.Host/` | ASP.NET Core Web API, Serilog → console/Seq + OpenTelemetry OTLP, `/health` + `/alive`, Scalar OpenAPI |
 | AppHost | `src/SmoothAiProductContextMemory.AppHost/` | Aspire dev orchestrator — Postgres+AGE (`docker.io/apache/age:release_PG17_1.7.0`) + MinIO blob storage + Seq |
 | ChatHost | `src/SmoothAiProductContextMemory.ChatHost/` | Standalone LLM microservice — owns Anthropic SDK; talks to Host via HTTP only (project not yet in tree) |
 | Docs | `docs/` | Wiki, HLDs, BRDs, ADR pointer stubs — visible (not hidden `.docs`) |

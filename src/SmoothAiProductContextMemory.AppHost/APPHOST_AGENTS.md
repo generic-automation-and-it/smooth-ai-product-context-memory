@@ -24,8 +24,12 @@ ports/container names.
   runnable as a plain `Program` (`WebApplicationFactory<Program>` integration tests must keep working
   without an AppHost).
 - **Connection-string keys must match what the Host consumes.** Aspire `.WithReference(db)` injects
-  `ConnectionStrings:<resource>` automatically for Postgres and Seq. The blob container is **not** a
-  connection-string resource: the Host receives `BlobStorage__Endpoint` (from the blob `s3` endpoint)
+  `ConnectionStrings:<resource>` automatically for Postgres and Seq — so the **resource name is the
+  connection-string key**. The database resource is therefore named `SmoothAiProductContextMemory`
+  (with `databaseName: "app"` keeping the physical database, and the persistent volume's data, as it
+  was). Naming it `app` published `ConnectionStrings__app`, which nothing consumed: the Host threw at
+  DI resolve and the `host` resource never started. Rename the resource and you rename the key.
+  The blob container is **not** a connection-string resource: the Host receives `BlobStorage__Endpoint` (from the blob `s3` endpoint)
   plus `BlobStorage__AccessKey` / `BlobStorage__SecretKey` / `BlobStorage__Bucket` as plain environment
   variables, bound by `BlobStorageOptions`.
 - **No WireMock in dev AppHost.** The AppHost orchestrates real Postgres/MinIO/Seq only. There is no
@@ -41,7 +45,7 @@ ports/container names.
 | Resource | Name | Fixed local port | Container name |
 |---|---|---:|---|
 | PostgreSQL + AGE | `postgres` (`docker.io/apache/age:release_PG17_1.7.0`) | `5432` | `smooth-project-memory-dev-postgres` |
-| Database | `app` | (via `postgres`) | n/a |
+| Database | `SmoothAiProductContextMemory` (physical DB `app`) | (via `postgres`) | n/a |
 | MinIO (blob) | `blob` | `9000` (s3), `9001` (console) | `smooth-project-memory-dev-blob` |
 | Seq | `seq` | `5341` | `smooth-project-memory-dev-seq` |
 | API project | `host` | `5141` http / `7141` https (from `launchSettings`) | n/a (host process) |
@@ -66,9 +70,16 @@ Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgr
   `builder.AddSmoothAiProductContextMemoryAppHostResources().Build().Run()`.
 - `DistributedApplicationBuilderExtensions` keeps orchestration split into focused extension methods
   (`AddPostgresResource`, `AddBlobResource`, `AddSeqResource`, `AddHostProject`).
-- OpenTelemetry uses the Aspire dashboard's built-in OTLP endpoint supplied to project resources by the
-  AppHost runtime. Do not override `OTEL_EXPORTER_OTLP_ENDPOINT` from AppHost unless intentionally
-  diverting telemetry away from the dashboard.
+- **Telemetry is consumed, not just offered.** Aspire injects `OTEL_EXPORTER_OTLP_ENDPOINT` into
+  **project** resources automatically and the Host now reads it, so the dashboard's log, trace and
+  metric panes are populated. Do not override that variable here unless intentionally diverting
+  telemetry away from the dashboard. A resource added with `AddContainer` — e.g. a published image
+  instead of the project — does **not** receive it automatically and needs an explicit
+  `.WithOtlpExporter()`.
+- **Seq is fed over `ConnectionStrings:seq`**, which is what `.WithReference(seq)` publishes;
+  `Aspire.Hosting.Seq` defines no `SEQ_URI` variable. The Host's Serilog Seq sink activates on that key.
+- **The `host` resource carries `WithHttpHealthCheck("/health")`**, so the dashboard shows it as healthy
+  only once migrations have completed and PostgreSQL is reachable — not merely once the process starts.
 - Aspire dashboard URL is printed at startup via the `WriteDashboardStartupHint` extension; use Aspire's
   printed `/login?t=...` URL for the first terminal-driven browser visit.
 
@@ -76,6 +87,7 @@ Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgr
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-13 | Named the database resource after the connection-string key the Host reads (`SmoothAiProductContextMemory`, physical DB still `app`) — as `app` it published `ConnectionStrings__app` and the Host died at DI resolve. Added `WithHttpHealthCheck("/health")`. Corrected the OpenTelemetry claim: telemetry now actually reaches the dashboard, and Seq is fed via `ConnectionStrings:seq` (there is no `SEQ_URI`). | WT-obs |
 | 2026-09-13 | Pin Postgres to `docker.io/apache/age:release_PG17_1.7.0` (same major as Aspire 13.3.0's `library/postgres:17.6`). Persistent container must be recreated once so it is not still the old image. | HLD-003 |
 | 2026-09-12 | Pin MinIO to last community release `quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z`. Upstream archived the repo and Docker Hub `minio/minio` is no longer publicly pullable (registry returns UNAUTHORIZED), so images must come from quay.io. | PR #17 |
 | 2026-09-01 | Aligned the blob ports across code, `appsettings.json` and this document (s3 `9000`, console `9001`; the leftover SeaweedFS `8333` is gone), made the console port configurable, registry-qualified the MinIO image for Podman, and corrected the false claim that the blob resource injects `ConnectionStrings:blob`. Docker/Podman startup verified end to end. | — |

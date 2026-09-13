@@ -29,10 +29,31 @@ Shared xunit.v3 test fixtures and helpers reused across the L0/L1/L2 test projec
 - **`XUnitLogger*`** bridges `ILogger` to xunit's `ITestOutputHelper`, with optional per-category minimum levels.
 - **`PriorityOrderer` + `[TestPriority]`** order test cases when sequencing matters; opt in with `[TestCaseOrderer(typeof(PriorityOrderer))]` on the test class.
 
+- **`TelemetryCapture` observes the real pipeline, not a parallel one.** Spans are captured with an
+  OpenTelemetry `BaseProcessor<Activity>` appended to the application's own tracer provider via
+  `ConfigureTestServices` → `ConfigureOpenTelemetryTracerProvider`. Processors run in registration
+  order, so a processor registered from test services runs **after** `ConfidentialityTraceProcessor`
+  and sees the post-scrub span an exporter would actually ship. A bare `ActivityListener` fires in
+  listener-registration order and can observe a *pre*-scrub span, which makes a clean pipeline look
+  like a leak. Metric tags come from a `MeterListener`, which has no such ordering concern.
+- **`CapturingLoggerProvider` sees everything** because the Host runs Serilog with
+  `writeToProviders: true`; one capture point covers both the Serilog sinks and the OTLP provider.
+  Register it through `WebAppFixture.ConfigureTestServices`, which runs after the application's own
+  registration and therefore survives the Host's `Logging.ClearProviders()`.
+- **Confidentiality assertions must prove they can fail.** Assert logs and spans are non-empty before
+  asserting a marker is absent — an absence assertion over an empty capture passes vacuously. The
+  content-address case is the load-bearing one: it fails when the scrubbing processor is disabled.
+- **`TestHttpClientFactory`** exists only for component tests that construct `S3BlobStorage` directly
+  instead of resolving it; production wiring goes through the real factory so the Host's
+  `ConfigureHttpClientDefaults` applies.
+- All three capture mechanisms are BCL-only or already-referenced packages — no in-memory exporter
+  package is needed.
+
 ## Changelog
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-13 | Added `Telemetry/TelemetryCapture` + `CapturedSpan`, `Logging/CapturingLoggerProvider`, `Fixtures/TestHttpClientFactory`, and a `ConfigureTestServices` hook on `WebAppFixture` so L2 can assert OTLP export, health and NFR-05 confidentiality. | WT-obs |
 | 2026-09-13 | Test Docker Desktop group is `Mímisbrunnr-Testing`; containers are `mimisbrunnr-testcontainer-{tech}`. Recreate persistent containers once so Aspire does not keep the old names/labels. | — |
 | 2026-09-13 | Test Postgres image pinned to `docker.io/apache/age:release_PG17_1.7.0`. Recreate `mimisbrunnr-testcontainer-postgres` once after the pin — `ContainerLifetime.Persistent` keeps the previous image until the container is removed. | HLD-003 |
 | 2026-09-12 | Test Aspire MinIO image pinned to `quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z` (same tag as the dev AppHost). CI wait now probes TCP `:9002` before `/minio/health/live` and dumps container logs on timeout. | PR #17 |
