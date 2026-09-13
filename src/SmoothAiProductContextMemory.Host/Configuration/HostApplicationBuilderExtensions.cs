@@ -10,7 +10,7 @@ namespace SmoothAiProductContextMemory.Host.Configuration;
 /// <summary>
 /// Aspire service defaults, deliberately inlined here rather than living in a shared
 /// <c>ServiceDefaults</c> project — the surface is too small to justify a library, and the sibling
-/// repository already tried the separate project and reversed it (LADR-OBS-02).
+/// repository already tried the separate project and reversed it. Recorded in <c>HOST_AGENTS.md</c>.
 /// </summary>
 internal static class HostApplicationBuilderExtensions
 {
@@ -37,7 +37,7 @@ internal static class HostApplicationBuilderExtensions
     private static void ConfigureOpenTelemetry<TBuilder>(this TBuilder builder)
         where TBuilder : IHostApplicationBuilder
     {
-        // Serilog owns console (LADR-OBS-01) and writeToProviders forwards to whatever MEL providers
+        // Serilog owns console and writeToProviders forwards to whatever MEL providers
         // remain. The default builder registers a console provider of its own, so leaving it in place
         // prints every record twice — the "duplicate records in one surface" failure this wiring is
         // meant to avoid. After clearing, OpenTelemetry is the only provider and the only extra

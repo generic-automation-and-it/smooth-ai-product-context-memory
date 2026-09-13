@@ -21,6 +21,7 @@ internal static class DistributedApplicationBuilderExtensions
     private const string SeqContainerName = "smooth-project-memory-dev-seq";
     private const string PostgresDataVolume = "smooth-project-memory-postgres-data";
     private const string BlobDataVolume = "smooth-project-memory-blob-data";
+    private const string SeqDataVolume = "smooth-project-memory-seq-data";
     // Aspire 13.3.0 defaults to library/postgres:17.6. AGE's PG17 image keeps the same major so the
     // persistent data volume stays compatible. Pairing recorded in HLD 003 / NFR-04.
     // Keep this pin identical to tests/SmoothAiProductContextMemory.TestFramework.Aspire.
@@ -127,8 +128,14 @@ internal static class DistributedApplicationBuilderExtensions
 
         private IResourceBuilder<IResourceWithConnectionString> AddSeqResource(AppHostConfiguration configuration)
         {
+            // Seq is retained for persistence: the Aspire dashboard's telemetry store is in-memory,
+            // capacity-bounded and cleared when the AppHost stops, so an intermittent failure looked at
+            // tomorrow is already gone. That argument only holds with a data volume — without one Seq's
+            // persistence claim was false beyond container removal, which is why one is attached here
+            // alongside the Postgres and blob volumes.
             return builder.AddSeq("seq", port: configuration.SeqPort)
                 .WithEnvironment("ACCEPT_EULA", "Y")
+                .WithDataVolume(SeqDataVolume)
                 .WithContainerName(SeqContainerName)
                 .WithContainerRuntimeArgs(
                     "--label", $"com.docker.compose.project={DockerDesktopGroupName}",

@@ -4,7 +4,8 @@ using Serilog;
 namespace SmoothAiProductContextMemory.Host.Configuration;
 
 /// <summary>
-/// Serilog is the single authoritative logging pipeline (LADR-OBS-01). <c>writeToProviders: true</c>
+/// Serilog is the single authoritative logging pipeline (recorded in <c>HOST_AGENTS.md</c>).
+/// <c>writeToProviders: true</c>
 /// forwards every record to the registered <c>ILoggerProvider</c>s as well, so the OpenTelemetry
 /// provider exports the same events over OTLP. Console and Seq are Serilog sinks; the dashboard is a
 /// provider. No destination is served twice.

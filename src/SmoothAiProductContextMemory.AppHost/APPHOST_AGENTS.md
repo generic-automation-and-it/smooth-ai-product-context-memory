@@ -47,7 +47,7 @@ ports/container names.
 | PostgreSQL + AGE | `postgres` (`docker.io/apache/age:release_PG17_1.7.0`) | `5432` | `smooth-project-memory-dev-postgres` |
 | Database | `SmoothAiProductContextMemory` (physical DB `app`) | (via `postgres`) | n/a |
 | MinIO (blob) | `blob` | `9000` (s3), `9001` (console) | `smooth-project-memory-dev-blob` |
-| Seq | `seq` | `5341` | `smooth-project-memory-dev-seq` |
+| Seq | `seq` (volume `smooth-project-memory-seq-data`) | `5341` | `smooth-project-memory-dev-seq` |
 | API project | `host` | `5141` http / `7141` https (from `launchSettings`) | n/a (host process) |
 
 Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgres` — see
@@ -76,6 +76,17 @@ Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgr
   telemetry away from the dashboard. A resource added with `AddContainer` — e.g. a published image
   instead of the project — does **not** receive it automatically and needs an explicit
   `.WithOtlpExporter()`.
+- **Seq is kept, deliberately — and the dashboard is the target, not Seq.** The Aspire dashboard is
+  itself an OTLP receiver and needs no help to show logs, traces and metrics; exporting OTel is what
+  makes it work. Seq is retained for one reason only: the dashboard's telemetry store is **in-memory,
+  capacity-bounded and cleared when the AppHost stops**, so an intermittent failure investigated
+  tomorrow is already gone. Seq survives restarts and queries far better. That argument only holds with
+  a **data volume** (`smooth-project-memory-seq-data`), which it now has — previously its persistence
+  claim was false beyond container removal, unlike Postgres and the object store.
+  **Deviation to note:** Seq is fed by the Serilog Seq sink rather than by OTLP ingestion. Seq does
+  accept OTLP directly and that would be the tidier wiring, but Serilog is the authoritative log
+  pipeline here, and routing logs to two OTLP endpoints (dashboard + Seq) needs a second exporter or a
+  collector. Revisit if a collector ever lands.
 - **Seq is fed over `ConnectionStrings:seq`**, which is what `.WithReference(seq)` publishes;
   `Aspire.Hosting.Seq` defines no `SEQ_URI` variable. The Host's Serilog Seq sink activates on that key.
 - **The `host` resource carries `WithHttpHealthCheck("/health")`**, so the dashboard shows it as healthy
@@ -87,6 +98,7 @@ Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgr
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-13 | Seq keep-or-drop decided: **kept** for persistence beyond the dashboard's in-memory store, and given the data volume it never had. Fed by the Serilog Seq sink rather than OTLP ingestion — deviation recorded above. | WT-obs |
 | 2026-09-13 | Named the database resource after the connection-string key the Host reads (`SmoothAiProductContextMemory`, physical DB still `app`) — as `app` it published `ConnectionStrings__app` and the Host died at DI resolve. Added `WithHttpHealthCheck("/health")`. Corrected the OpenTelemetry claim: telemetry now actually reaches the dashboard, and Seq is fed via `ConnectionStrings:seq` (there is no `SEQ_URI`). | WT-obs |
 | 2026-09-13 | Pin Postgres to `docker.io/apache/age:release_PG17_1.7.0` (same major as Aspire 13.3.0's `library/postgres:17.6`). Persistent container must be recreated once so it is not still the old image. | HLD-003 |
 | 2026-09-12 | Pin MinIO to last community release `quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z`. Upstream archived the repo and Docker Hub `minio/minio` is no longer publicly pullable (registry returns UNAUTHORIZED), so images must come from quay.io. | PR #17 |
