@@ -139,7 +139,8 @@ public sealed class NpgsqlMemorySearch(SmoothAiProductContextMemoryDbContext db)
     }
 
     /// <summary>
-    /// The memory set narrowed by facet and tag containment. Falls back to the plain set when neither
+    /// The memory set narrowed by the facet/tag array operator — overlap (<c>&amp;&amp;</c>, "any")
+    /// by default, containment (<c>@&gt;</c>, "all") opt-in. Falls back to the plain set when neither
     /// is requested, so the common query carries no extra subquery.
     /// </summary>
     private IQueryable<Memory> ClassifiedMemories(MemorySearchCriteria criteria)

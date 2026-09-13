@@ -120,7 +120,9 @@ flowchart LR
 
 - **Committed L0 harness (CI-gatable):** `.agents/skills/context-memory/tests/run_tests.py` — stdlib
   `unittest` (no external runner). Unit-tests the deterministic plumbing: `redact.py` (planted
-  credential never leaks; digest reports the rule name) and `atomicity.py` (bundle → split/skip).
+  credential never leaks; digest reports the rule name), `atomicity.py` (bundle → split/skip), and
+  `context_memory_client.py` (`paths` guard rails — maxDepth/sourceUuid required before any network
+  call — and `_render_path` summary rendering).
   Run: `python3 .agents/skills/context-memory/tests/run_tests.py`.
 - **On-demand LLM-eval fixtures (not CI-gated):**
   `.agents/skills/context-memory/tests/fixtures/scenarios.json` plus `score_fixtures.py`. Authored
