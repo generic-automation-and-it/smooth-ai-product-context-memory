@@ -8,7 +8,7 @@ alwaysApply: true
 ---
 # SmoothAiProductContextMemory Overview
 
-Updated: 2026-05-09
+Updated: 2026-09-13
 
 ## Tech Stack
 
@@ -35,6 +35,7 @@ dotnet test tests/SmoothAiProductContextMemory.Domain.UnitTest
 dotnet test tests/SmoothAiProductContextMemory.Application.UnitTest
 dotnet test tests/SmoothAiProductContextMemory.Infrastructure.UnitTest
 dotnet test tests/SmoothAiProductContextMemory.Host.UnitTest
+dotnet test tests/SmoothAiProductContextMemory.AppHost.UnitTest
 dotnet test tests/SmoothAiProductContextMemory.Application.ComponentTest
 dotnet test tests/SmoothAiProductContextMemory.Infrastructure.ComponentTest
 dotnet test tests/SmoothAiProductContextMemory.Host.IntegrationTest
@@ -72,3 +73,4 @@ tests/
 | Date | Change |
 |:-----|:-------|
 | 2026-05-30 | Initial version. |
+| 2026-09-13 | Add SmoothAiProductContextMemory.AppHost.UnitTest to targeted test commands (PR 46). |

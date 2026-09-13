@@ -54,9 +54,9 @@ Rules live under `.agents/rules/` as `*.instructions.md`, auto-loaded every sess
 ```bash
 dotnet build SmoothAiProductContextMemory.slnx                     # build
 dotnet test  SmoothAiProductContextMemory.slnx                     # run all tests
-dotnet run --project src/SmoothAiProductContextMemory.AppHost      # Aspire: pull Host image + postgres/blob/seq (group smooth-mímisbrunnr)
-HostConfiguration__UseProject=true \
-  dotnet run --project src/SmoothAiProductContextMemory.AppHost    # same stack, compile Host from source
+dotnet run --project src/SmoothAiProductContextMemory.AppHost      # Aspire: Host from working tree + postgres/blob/seq (group smooth-mímisbrunnr)
+HostConfiguration__UseProject=false \
+  dotnet run --project src/SmoothAiProductContextMemory.AppHost    # same stack, pull published Host image (tag may lag)
 docker build -t smooth-ai-product-context-memory:local .           # Host image (see docs/wiki/docker.md)
 dotnet run --project src/SmoothAiProductContextMemory.ChatHost     # ChatHost standalone (separate from API Host)
 dotnet run --project src/SmoothAiProductContextMemory.Host -- export [--output DIR] [--history] [--force]
@@ -108,5 +108,6 @@ Hosted on **GitHub** at `https://github.com/generic-automation-and-it/project`. 
 | Date | Change | Ref |
 |---|---|---|
 | 2026-09-13 | Documented AppHost Persistent leftover after exit and the two teardown scripts (`stop-dev-stack.sh` keep data, `reset-dev-stack.sh` destroy volumes). | `scripts/` |
+| 2026-09-13 | AppHost default is working-tree Host; `HostConfiguration__UseProject=false` pulls the published image (tag may lag). | `src/SmoothAiProductContextMemory.AppHost/` |
 | 2026-09-13 | Documented `scripts/` operational verification (NFR-03 restore round-trip, NFR-04 pre-upgrade check) and the `SMOOTH_AGE_BENCH`-gated NFR-02 benchmark command. | `scripts/` |
 | 2026-09-13 | Documented publish-image tag derivation, manual-dispatch validation, concurrency, cache, and revision behavior. | `.github/workflows/publish-image.yml` |
