@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using SmoothAiProductContextMemory.Application.Abstractions;
 using SmoothAiProductContextMemory.Domain;
 using SmoothAiProductContextMemory.Domain.Entities;
 
@@ -444,7 +445,7 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
 
     [Theory]
     [InlineData(0)]
-    [InlineData(99)]
+    [InlineData(MemoryTraversalDefaults.MaxDepth + 1)]
     public async Task Traversal_without_a_usable_bound_returns_400(int maxDepth)
     {
         Guid group = await ResolveGroup(MemoryGroup.ScopeDimensionValue.Product);
@@ -475,6 +476,37 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
             new { sourceUuid = source, maxDepth = 2, scopeDimension = MemoryGroup.ScopeDimensionValue.Program },
             Ct);
         declared.StatusCode.ShouldBe(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task Traversal_declaring_product_does_not_disclose_programme_intermediates()
+    {
+        // Pins the handler's hop gate end to end: HiddenDimensions("product") hides programme hops,
+        // whereas a regression to Plan().ExcludedDimensions (empty for every explicit dimension)
+        // would disclose them while the store-level tests stay green.
+        Guid product = await ResolveGroup(MemoryGroup.ScopeDimensionValue.Product);
+        Guid programme = await ResolveGroup(MemoryGroup.ScopeDimensionValue.Program);
+        Guid source = await Capture(product, "Cross-scope source subject", "Product claim");
+        Guid hidden = await Capture(programme, "Programme intermediate subject", "Programme claim");
+        Guid endpoint = await Capture(product, "Cross-scope endpoint subject", "Product decision");
+
+        await Link(source, hidden, MemoryRelation.DependsOn, "programme rationale");
+        await Link(hidden, endpoint, MemoryRelation.DependsOn, "leads to the decision");
+
+        using HttpResponseMessage declared = await _http.PostAsJsonAsync(
+            "/api/context/paths",
+            new
+            {
+                sourceUuid = source,
+                targetUuid = endpoint,
+                maxDepth = 3,
+                scopeDimension = MemoryGroup.ScopeDimensionValue.Product,
+            },
+            Ct);
+        string payload = await declared.Content.ReadAsStringAsync(Ct);
+        declared.StatusCode.ShouldBe(HttpStatusCode.OK, payload);
+        payload.ShouldNotContain(hidden.ToString());
+        payload.ShouldNotContain("programme rationale");
     }
 
     [Fact]
