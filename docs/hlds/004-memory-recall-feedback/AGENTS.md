@@ -58,3 +58,4 @@ Targets and verification live in [./nfrs/](./nfrs/). Two shape how code is writt
 | Date | Change | Ref |
 |:-----|:-------|:----|
 | 2026-09-14 | Created — discovery HLD for recall feedback. Placement deliberately left open. | Gap identified during pre-dogfooding review |
+| 2026-09-14 | Added business-authority back-reference to BRD 001, completing the three-place rule. | BRD 001 |

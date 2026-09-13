@@ -62,3 +62,4 @@ Known incompleteness as of 2026-09-13, deliberately left open rather than guesse
 | Date | Change | Ref |
 |:-----|:-------|:----|
 | 2026-09-13 | Created — BRD-002 for contextual knowledge export. Continues BRD-001's requirement space at `BR-18`; adds BO-6 … BO-10; closes BRD-001's recorded "BRD does not mention export at all" gap for the curated case. | HLD 005 |
+| 2026-09-13 | Added the three-place HLD-reference rule (owned: HLD 005; §11 rows for 003/004 are dependency pointers). | BRD-001 |
