@@ -34,6 +34,8 @@ echo "WARNING: destroying named volumes (memories, blobs, Seq logs)"
 
 "$SCRIPT_DIR/stop-dev-stack.sh"
 
+# Deliberate duplicate of the probe in stop-dev-stack.sh: only covers a daemon
+# death between that script's exit and this point. Do not simplify away.
 if ! "$RUNTIME" info >/dev/null 2>&1; then
     echo "FAIL: container runtime '$RUNTIME' not reachable (daemon stopped?)" >&2
     exit 1
