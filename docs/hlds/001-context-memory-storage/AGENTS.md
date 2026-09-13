@@ -19,7 +19,7 @@ world), BR-13 (nothing silently lost) and BR-17 (readable without this applicati
 - **Do not flatten the stable memory row into the versioned one.** It reads as unnecessary indirection until you try to attach an unversioned tag (LADR-03).
 - **Do not move tags or facets onto the versioned row.** Their placement *is* the unversioned-classification decision.
 - **Do not add a foreign key from facets to the label registry.** It is advisory by design; an FK makes it enforcing (LADR-07).
-- **Do not reintroduce tables for tags, facets, sources, repositories or tickets.** Six entities were removed deliberately; the guard test enforces exactly seven (LADR-02).
+- **Do not reintroduce tables for tags, facets, sources, repositories or tickets.** Six entities were removed deliberately; the HLD 003 cutover then dropped `MemoryLink`, so the guard test enforces exactly **six** (LADR-02, amended). Relationships live in AGE, not a seventh table.
 - **Do not move history into a JSONB array.** Appending to a JSONB array is read-modify-write, so concurrent appends silently lose one (LADR-02).
 - **`created_on` is not redundant beside `valid_from`.** Removing it makes correcting a record indistinguishable from the world changing (LADR-05).
 - **`kind` must not become an enum or a check constraint.** Open vocabulary is deliberate.
@@ -67,5 +67,6 @@ Targets and verification live in [./nfrs/](./nfrs/). Two shape how code is writt
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-13 | Guard is six entities: HLD 003 dropped `MemoryLink`. Relationships live in AGE, not a seventh table. | HLD-003 |
 | 2026-09-13 | Created — converted from ADR-0001 and ADR-0002, which were one design in two documents. | ADR-0001, ADR-0002 |
 | 2026-09-13 | Added the upstream BRD as cited business authority and the rule that weakening a cited `BR-NN` escalates. | BRD 001 |

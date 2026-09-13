@@ -1,5 +1,6 @@
 using FluentValidation.TestHelper;
 using SmoothAiProductContextMemory.Application.Features.Memories;
+using SmoothAiProductContextMemory.Domain;
 using SmoothAiProductContextMemory.Domain.Entities;
 
 namespace SmoothAiProductContextMemory.Application.UnitTest.Features;
@@ -66,7 +67,7 @@ public class SetMemoriesValidatorTests
                     null,
                     null)
             ],
-            [new SetMemories.LinkWrite(id, id, MemoryLink.RelationValue.RelatesTo, "loop")],
+            [new SetMemories.LinkWrite(id, id, MemoryRelation.RelatesTo, "loop")],
             null);
 
         var result = _validator.TestValidate(request);

@@ -33,6 +33,7 @@ they are the design, not drift.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-13 | `MemoryLink` entity removed; `MemoryRelation` holds the five well-known relation strings (open vocabulary, not a closed set). | HLD-003 |
 | 2026-09-13 | `.docs`→`docs` move and ADR-0002→HLD 001 authority retarget recorded; the exceptions sanction now links HLD 001. | — |
 | 2026-09-09 | Restored the "Enforce invariants at construction" default as the stated Domain default; the ADR-0002 exceptions section now explicitly carves out the context-memory persistence rows. | ADR-0002 |
 | 2026-09-09 | Seven-entity context-memory model + `Slug` value logic added; recorded the ADR-0002 serialization and anemic-POCO exceptions. | ADR-0002 |

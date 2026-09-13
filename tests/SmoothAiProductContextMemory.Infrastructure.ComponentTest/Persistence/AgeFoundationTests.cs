@@ -91,7 +91,7 @@ public sealed class AgeFoundationTests : PersistenceTestBase
             SELECT name::text
             FROM ag_catalog.ag_label
             WHERE graph = (SELECT graphid FROM ag_catalog.ag_graph WHERE name = '{AgeSession.GraphName}')
-              AND name = ANY(ARRAY['{AgeSession.VertexLabel}','depends_on','relates_to','contradicts','supersedes','implements']);
+              AND name = ANY(ARRAY['{AgeSession.VertexLabel}','{AgeSession.EdgeLabel}']);
             """,
             conn))
         await using (var reader = await labels.ExecuteReaderAsync(Ct))
@@ -102,13 +102,9 @@ public sealed class AgeFoundationTests : PersistenceTestBase
                 found.Add(reader.GetString(0));
             }
 
-            found.Count.ShouldBe(6);
+            found.Count.ShouldBe(2);
             found.ShouldContain(AgeSession.VertexLabel);
-            found.ShouldContain("depends_on");
-            found.ShouldContain("relates_to");
-            found.ShouldContain("contradicts");
-            found.ShouldContain("supersedes");
-            found.ShouldContain("implements");
+            found.ShouldContain(AgeSession.EdgeLabel);
         }
     }
 

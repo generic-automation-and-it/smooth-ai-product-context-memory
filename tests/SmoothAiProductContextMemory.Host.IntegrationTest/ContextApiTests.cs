@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using SmoothAiProductContextMemory.Domain;
 using SmoothAiProductContextMemory.Domain.Entities;
 
 namespace SmoothAiProductContextMemory.Host.IntegrationTest;
@@ -256,7 +257,7 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
 
         using HttpResponseMessage response = await _http.PostAsJsonAsync(
             "/api/context/links",
-            new { sourceUuid = uuid, targetUuid = uuid, relation = MemoryLink.RelationValue.RelatesTo, reason = "loop" },
+            new { sourceUuid = uuid, targetUuid = uuid, relation = MemoryRelation.RelatesTo, reason = "loop" },
             Ct);
         response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
         response.Content.Headers.ContentType?.MediaType.ShouldBe("application/problem+json");
@@ -271,7 +272,7 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
         Guid b = (await SetMemory(group, "B subject", "B", MemoryVersion.MemoryVersionStatus.Approved))
             .GetProperty("items")[0].GetProperty("uuid").GetGuid();
 
-        object body = new { sourceUuid = a, targetUuid = b, relation = MemoryLink.RelationValue.DependsOn, reason = "need" };
+        object body = new { sourceUuid = a, targetUuid = b, relation = MemoryRelation.DependsOn, reason = "need" };
         (await _http.PostAsJsonAsync("/api/context/links", body, Ct)).StatusCode.ShouldBe(HttpStatusCode.OK);
         using HttpResponseMessage dup = await _http.PostAsJsonAsync("/api/context/links", body, Ct);
         dup.StatusCode.ShouldBe(HttpStatusCode.Conflict);

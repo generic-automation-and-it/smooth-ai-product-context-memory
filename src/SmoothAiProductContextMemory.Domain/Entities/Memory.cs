@@ -35,8 +35,4 @@ public sealed class Memory
     public List<string> Facets { get; set; } = [];
 
     public ICollection<MemoryVersion> Versions { get; set; } = [];
-
-    public ICollection<MemoryLink> LinksFrom { get; set; } = [];
-
-    public ICollection<MemoryLink> LinksTo { get; set; } = [];
 }

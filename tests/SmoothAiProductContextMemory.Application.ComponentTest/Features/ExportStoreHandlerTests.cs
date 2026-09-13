@@ -78,6 +78,7 @@ public sealed class ExportStoreHandlerTests(AspireFixture aspire) : HandlerTestB
         memory.ShouldContain(BlobBody);
         memory.ShouldNotContain(BlobAddress);
         memory.ShouldContain("outgoing depends_on");
+        memory.ShouldContain("needs it");
         memory.ShouldContain($"group_uuid: `{ProductGroupUuid:D}`");
 
         File.Exists(Path.Combine(dir.Path, "groups", "empty-group", "_group.md")).ShouldBeTrue();
@@ -174,7 +175,7 @@ public sealed class ExportStoreHandlerTests(AspireFixture aspire) : HandlerTestB
     // The handler's multiple-current warning remains as defense-in-depth only.
 
     private ExportStore.Handler NewHandler(IBlobStorage blobs, ILogger<ExportStore.Handler>? logger = null) =>
-        new(AppDb, blobs, new FileSystemMarkdownExportSink(NullLogger<FileSystemMarkdownExportSink>.Instance),
+        new(AppDb, Graph, blobs, new FileSystemMarkdownExportSink(NullLogger<FileSystemMarkdownExportSink>.Instance),
             logger ?? NullLogger<ExportStore.Handler>.Instance);
 
     private async Task SeedAsync(string? blobAddress)
@@ -217,14 +218,7 @@ public sealed class ExportStoreHandlerTests(AspireFixture aspire) : HandlerTestB
         Db.MemoryVersions.Add(Version(selfMemory.Id, 1, "Preference claim", isCurrent: true, blobAddress: null));
         await Db.SaveChangesAsync(Ct);
 
-        Db.MemoryLinks.Add(new MemoryLink
-        {
-            SourceMemoryId = subject.Id,
-            TargetMemoryId = other.Id,
-            Relation = MemoryLink.RelationValue.DependsOn,
-            Reason = "needs it",
-        });
-        await Db.SaveChangesAsync(Ct);
+        (await Graph.CreateAsync(subject.Uuid, other.Uuid, MemoryRelation.DependsOn, "needs it", Ct)).ShouldBeTrue();
     }
 
     private static MemoryGroup Group(Guid uuid, string scope, string? scopeIdentifier = null) => new()

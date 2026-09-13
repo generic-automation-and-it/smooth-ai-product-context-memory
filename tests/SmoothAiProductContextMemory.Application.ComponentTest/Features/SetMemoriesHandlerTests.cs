@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Shouldly;
 using SmoothAiProductContextMemory.Application.Common.Exceptions;
 using SmoothAiProductContextMemory.Application.Features.Memories;
+using SmoothAiProductContextMemory.Domain;
 using SmoothAiProductContextMemory.Domain.Entities;
 
 namespace SmoothAiProductContextMemory.Application.ComponentTest.Features;
@@ -75,7 +76,7 @@ public sealed class SetMemoriesHandlerTests(AspireFixture aspire) : HandlerTestB
 
         SetMemories.Request bump = Write(group.Uuid, "A subject", "A2", a) with
         {
-            Links = [new SetMemories.LinkWrite(a, b, MemoryLink.RelationValue.DependsOn, "need")],
+            Links = [new SetMemories.LinkWrite(a, b, MemoryRelation.DependsOn, "need")],
             LabelsProposed = ["already-known", "brand-new"],
         };
 
@@ -92,7 +93,7 @@ public sealed class SetMemoriesHandlerTests(AspireFixture aspire) : HandlerTestB
         // Same request again: the link now exists, so both paths must agree it is skipped.
         SetMemories.Request repeat = Write(group.Uuid, "A subject", "A3", a) with
         {
-            Links = [new SetMemories.LinkWrite(a, b, MemoryLink.RelationValue.DependsOn, "need")],
+            Links = [new SetMemories.LinkWrite(a, b, MemoryRelation.DependsOn, "need")],
             LabelsProposed = ["already-known", "brand-new"],
         };
 
@@ -119,7 +120,7 @@ public sealed class SetMemoriesHandlerTests(AspireFixture aspire) : HandlerTestB
         Guid a = (await handler.Handle(Write(group.Uuid, "Link a", "A"), Ct)).Items[0].Uuid!.Value;
         Guid b = (await handler.Handle(Write(group.Uuid, "Link b", "B"), Ct)).Items[0].Uuid!.Value;
 
-        var link = new SetMemories.LinkWrite(a, b, MemoryLink.RelationValue.RelatesTo, "why");
+        var link = new SetMemories.LinkWrite(a, b, MemoryRelation.RelatesTo, "why");
         await handler.Handle(Write(group.Uuid, "Link a", "A2", a) with { Links = [link] }, Ct);
 
         SetMemories.Response second = await handler.Handle(
@@ -148,7 +149,7 @@ public sealed class SetMemoriesHandlerTests(AspireFixture aspire) : HandlerTestB
         Guid a = (await handler.Handle(Write(group.Uuid, "Batch a", "A"), Ct)).Items[0].Uuid!.Value;
         Guid b = (await handler.Handle(Write(group.Uuid, "Batch b", "B"), Ct)).Items[0].Uuid!.Value;
 
-        var link = new SetMemories.LinkWrite(a, b, MemoryLink.RelationValue.RelatesTo, "why");
+        var link = new SetMemories.LinkWrite(a, b, MemoryRelation.RelatesTo, "why");
         SetMemories.Response response = await handler.Handle(
             Write(group.Uuid, "Batch a", "A2", a) with { Links = [link, link] },
             Ct);
@@ -156,8 +157,7 @@ public sealed class SetMemoriesHandlerTests(AspireFixture aspire) : HandlerTestB
         response.Versioned.ShouldBe(1);
         response.Linked.ShouldBe(1);
         response.Skipped.ShouldBe(1);
-        (await Db.MemoryLinks.CountAsync(
-            l => l.Relation == MemoryLink.RelationValue.RelatesTo, Ct)).ShouldBe(1);
+        (await Graph.ListAllAsync(Ct)).Count(l => l.Relation == MemoryRelation.RelatesTo).ShouldBe(1);
     }
 
     [Fact]
@@ -222,7 +222,7 @@ public sealed class SetMemoriesHandlerTests(AspireFixture aspire) : HandlerTestB
     }
 
     private SetMemories.Handler NewHandler() =>
-        new(AppDb, Blob, ErrorMapper, Loggers.CreateLogger<SetMemories.Handler>());
+        new(AppDb, Graph, Blob, ErrorMapper, Loggers.CreateLogger<SetMemories.Handler>());
 
     private static SetMemories.Request Write(Guid groupUuid, string description, string statement, Guid? uuid = null) =>
         new(

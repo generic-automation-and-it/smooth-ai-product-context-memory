@@ -14,11 +14,10 @@ public class ModelShapeGuardTests
         typeof(GroupDescription),
         typeof(Memory),
         typeof(MemoryVersion),
-        typeof(MemoryLink),
     ];
 
     [Fact]
-    public void DbContext_exposes_exactly_the_seven_entity_types()
+    public void DbContext_exposes_exactly_the_six_entity_types()
     {
         var options = new DbContextOptionsBuilder<SmoothAiProductContextMemoryDbContext>()
             .UseNpgsql("Host=localhost;Database=throwaway;Username=x;Password=y")
@@ -36,6 +35,6 @@ public class ModelShapeGuardTests
 
         // Deliberately a literal set, not a count: reintroducing a table for tags, facets,
         // sources, repositories or tickets breaks the build rather than passing review unnoticed.
-        ExpectedEntityTypes.Length.ShouldBe(7);
+        ExpectedEntityTypes.Length.ShouldBe(6);
     }
 }

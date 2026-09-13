@@ -7,7 +7,7 @@
 Every guarantee in LADR-07 is provably in the tier it claims. Specifically:
 
 - **Tier 1** — a second current version for one memory is **rejected by the database**, not by the application. Version chain integrity and identity uniqueness likewise.
-- **Tier 2** — update or delete against either history table **raises**; the entity set is **exactly seven types**; tags and facets survive a version bump **unchanged, unduplicated, unversioned**; a facet absent from the registry is **accepted**.
+- **Tier 2** — update or delete against either history table **raises**; the entity set is **exactly six types**; tags and facets survive a version bump **unchanged, unduplicated, unversioned**; a facet absent from the registry is **accepted**.
 - **Tier 3** — subject and ticket uniqueness are documented as soft, and the exact-match backstop rejects an identical subject within one group.
 
 ## Verification
