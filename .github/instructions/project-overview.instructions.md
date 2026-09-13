@@ -35,6 +35,7 @@ dotnet test tests/SmoothAiProductContextMemory.Domain.UnitTest
 dotnet test tests/SmoothAiProductContextMemory.Application.UnitTest
 dotnet test tests/SmoothAiProductContextMemory.Infrastructure.UnitTest
 dotnet test tests/SmoothAiProductContextMemory.Host.UnitTest
+dotnet test tests/SmoothAiProductContextMemory.AppHost.UnitTest
 dotnet test tests/SmoothAiProductContextMemory.Application.ComponentTest
 dotnet test tests/SmoothAiProductContextMemory.Infrastructure.ComponentTest
 dotnet test tests/SmoothAiProductContextMemory.Host.IntegrationTest

@@ -35,14 +35,15 @@ Approved release-image plan (2026-09-13):
 
 1. Repo-root multi-stage Dockerfile: copy CPM props + `NuGet.Config` + Host graph csprojs, restore, copy sources, publish; runtime `aspnet:10.0-alpine`, non-root, OCI labels, `ENTRYPOINT` the Host binary.
 2. `.github/workflows/publish-image.yml` mirrors smooth-llm-imposter: GHCR, QEMU+Buildx, metadata tags, GHA cache per workflow+ref, `linux/amd64,linux/arm64`. No `pull_request` trigger. Dispatch never tags `latest`.
-3. AppHost default is the published Host image (`HostConfiguration:Image`). Container `mimisbrunnr-host` in Docker Desktop group `smooth-mímisbrunnr`. `UseProject=true` keeps `AddProject`. Inject `ConnectionStrings__SmoothAiProductContextMemory`. AppHost is not published. Published image path needs `.WithOtlpExporter()`.
+3. AppHost default compiles Host from the working tree (`HostConfiguration:UseProject=true`). Published image is opt-in (`UseProject=false`); container `mimisbrunnr-host` in Docker Desktop group `smooth-mímisbrunnr`. Keep `AddProject`. Inject `ConnectionStrings__SmoothAiProductContextMemory`. AppHost is not published. Published image path needs `.WithOtlpExporter()`.
 4. Run contract in `docs/wiki/docker.md`, verified by executing the documented build.
 
 ## Changelog
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
-| 2026-09-13 | Host Dockerfile + GHCR publish; image serves API and `export`; AppHost pulls Host as `mimisbrunnr-host` in group `smooth-mímisbrunnr`. | release-image |
+| 2026-09-13 | AppHost default is working-tree Host; published image remains opt-in. | APPHOST_AGENTS.md |
+| 2026-09-13 | Host Dockerfile + GHCR publish; image serves API and `export`; AppHost image mode still runs Host as `mimisbrunnr-host` in group `smooth-mímisbrunnr`. | release-image |
 | 2026-09-13 | Delivered the observability wiring: Serilog → console/Seq forwarding to the OpenTelemetry provider for OTLP logs/traces/metrics, real `Logging:Serilog` sections, `AddServiceDefaults`, `ConfidentialityTraceProcessor`, and `/health` + `/alive` gated on migration completion. Verified from a published artifact in Production — Serilog console, Seq ingestion and all three OTLP signals. | PR #36 |
 | 2026-09-13 | `export` CLI branch before `WebApplication.CreateBuilder` — generated Markdown dump, no HTTP. | PR #18 |
 | 2026-09-11 | Error handler classifies via `IDbErrorMapper` instead of message text; `application/problem+json`; `403` for scope. Added `PATCH /groups/{uuid}`, `GET|POST /initiatives`, `?scope=` on the blob route. | PR #14 review |

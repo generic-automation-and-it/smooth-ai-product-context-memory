@@ -185,10 +185,13 @@ run_test_project tests/SmoothAiProductContextMemory.Infrastructure.UnitTest/Smoo
 infra_unit_pid=$!
 run_test_project tests/SmoothAiProductContextMemory.Host.UnitTest/SmoothAiProductContextMemory.Host.UnitTest.csproj &
 host_unit_pid=$!
+run_test_project tests/SmoothAiProductContextMemory.AppHost.UnitTest/SmoothAiProductContextMemory.AppHost.UnitTest.csproj &
+apphost_unit_pid=$!
 wait "${domain_unit_pid}" || record_failure "Domain unit tests failed."
 wait "${app_unit_pid}"    || record_failure "Application unit tests failed."
 wait "${infra_unit_pid}"  || record_failure "Infrastructure unit tests failed."
 wait "${host_unit_pid}"   || record_failure "Host unit tests failed."
+wait "${apphost_unit_pid}" || record_failure "AppHost unit tests failed."
 ensure_aspire_alive
 
 dotnet tool run reportgenerator \
