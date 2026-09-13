@@ -136,7 +136,7 @@ sequenceDiagram
 ## Known Limitations
 
 - **A link between two memories that are both new in the same batch cannot be expressed.** `MemoryWrite.Uuid` means "version this existing memory", so a create has no caller-known identity until persist, and `LinkWrite` addresses memories by uuid. Link the two in a follow-up `POST /links`, or send one of them first. Adding a batch-local reference is a wire-contract change and belongs with WT-3.
-- **The store accepts a self-link; both write validators reject it.** Persistence has no source≠target check. Characterised at L1 (`SelfLink_PersistsAtStore`); not tightened here (HLD-003 WT-04).
+- **The store accepts a self-link; both write validators reject it.** Persistence has no source≠target check. Characterised at L1 (`SelfLink_PersistsAtStore`); not tightened here (HLD-003).
 - **`ix_memory_version_validity` (GIST over `tstzrange`) is unreachable from LINQ**, which cannot construct a range from two columns. The `asOf` predicate is scalar and always combined with a narrowing predicate. Index usage is not asserted by a test: at test data volumes the planner correctly prefers a sequential scan regardless, so such a test would prove nothing. Verify with `EXPLAIN` against a realistic dataset.
 
 ## Test References
@@ -158,7 +158,7 @@ sequenceDiagram
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
-| 2026-09-13 | Intra-batch duplicate link skip characterised (`Duplicate_link_in_same_batch_is_skipped_not_fatal`). Store-vs-app self-link split recorded as a known limitation. | HLD-003 WT-04 |
+| 2026-09-13 | Intra-batch duplicate link skip characterised (`Duplicate_link_in_same_batch_is_skipped_not_fatal`). Store-vs-app self-link split recorded as a known limitation. | HLD-003 |
 | 2026-09-13 | Markdown export is an Application slice (`Features/Export/`), not an HTTP endpoint. Forensic dump bypasses `MemoryScopeFilter`. | WT-4 |
 | 2026-09-11 | Review fixes: dry run shares the write plan (LADR-002); retrieval pushed into PostgreSQL behind `IMemorySearch` with `asOf` + `limit` (LADR-005); scope rule as data and enforced on the blob proxy (LADR-003); errors classified by SQLSTATE (LADR-006); facet endpoint reads the view (LADR-007); stale links skipped (LADR-008); `PATCH /groups/{uuid}` and initiative registry added; preflight narrows by kind before the cap. | WT-2 review |
 | 2026-09-12 | /ai-review fixes: `GetMemoryVersions` scope-gated like the blob proxy (LADR-003 now covers versions too); `LabelsProposed` capped at 100; duplicate version-target in a batch is a `ConflictException` on both dry-run and write; letter/digit-free `Description` rejected as a 400 via `Slug.TrySubject`. | /ai-review PR #14 |

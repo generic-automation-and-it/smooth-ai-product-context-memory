@@ -68,7 +68,7 @@ erDiagram
 - **AGE catalog writes must commit to become visible.** The AGE migration uses `suppressTransaction: true` because `create_graph` / `create_*label` inside the ambient migration transaction are invisible to other sessions. Every step is guarded by an `ag_catalog` existence check so a mid-batch failure (partial state, migration unrecorded) re-runs cleanly.
 - **Relationship uniqueness** is the composite `(source_memory_id, target_memory_id, relation)`. The same pair may hold several different relations; the same directed triple cannot. Direction is identity — A→B and B→A are distinct rows. Relationships are not group-bounded.
 - **Deleting a memory cascades inbound and outbound links** via FKs on both sides. Versionless memories delete without the history bypass; a memory that has versions still needs `SET LOCAL app.allow_history_delete`.
-- **Self-link is unprevented at persistence.** `source_memory_id = target_memory_id` persists. Application validators reject it (400). The split is current behaviour, characterised not tightened (HLD-003 WT-04).
+- **Self-link is unprevented at persistence.** `source_memory_id = target_memory_id` persists. Application validators reject it (400). The split is current behaviour, characterised not tightened (HLD-003).
 
 ## Test References
 
@@ -84,7 +84,7 @@ erDiagram
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
-| 2026-09-13 | Characterised relationship uniqueness/integrity as the relational store provides it (duplicate directed triple, direction, cascade, self-link persists, cross-group). No production change. | HLD-003 WT-04 |
+| 2026-09-13 | Characterised relationship uniqueness/integrity as the relational store provides it (duplicate directed triple, direction, cascade, self-link persists, cross-group). No production change. | HLD-003 |
 | 2026-09-13 | AGE foundation review fixes: idempotent migration guards, runtime PG/AGE version-pairing assert after migrate, migrate fails loudly without registered `NpgsqlDataSource`, multi-instance rollout constraint documented. | HLD-003 |
 | 2026-09-13 | AGE foundation: extension-bearing image, per-connection session init, non-transactional graph/label migration. `memory_link` unchanged. | HLD-003 |
 | 2026-09-13 | `.docs`→`docs` move and ADR-0002→HLD 001 authority retarget recorded; ADR-era citations now reference HLD 001 (blob storage → LADR-06, in-database enforcement → LADR-07). | — |

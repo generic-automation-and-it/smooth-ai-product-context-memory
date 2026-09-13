@@ -92,7 +92,7 @@ public sealed class LinkTests : PersistenceTestBase
         });
 
         // The exception-shape assertions below attribute the refusal to the uniqueness
-        // constraint as the relational store raises it today. After the WT-02 cutover the
+        // constraint as the relational store raises it today. After the graph cutover (HLD-003 LADR-03) the
         // invariant moves into the application, so the *behaviour* (second triple refused,
         // count stays 1) must hold while these three lines are edited to match the new
         // failure shape — that edit is expected, not a sign the test is obsolete.

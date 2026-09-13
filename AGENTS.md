@@ -24,7 +24,7 @@ Persistent memory service for AI agents: stores summarized, labelled context (li
 | ChatHost | `src/SmoothAiProductContextMemory.ChatHost/` | Standalone LLM microservice — owns Anthropic SDK; talks to Host via HTTP only (project not yet in tree) |
 | Docs | `docs/` | Wiki, HLDs, BRDs, ADR pointer stubs — visible (not hidden `.docs`) |
 
-Planned work tracked as worktasks under `.context/work-tasks/` (gitignored). Use `/create worktask`.
+Planned work tracked as worktasks under `.context/work-tasks/` (gitignored). Use `/create worktask`. **Never reference worktask IDs (e.g. `WT-04`) in delivered artefacts** — code, comments, `*AGENTS.md`, HLDs, changelogs. Worktasks are short-lived and gitignored; cite the durable authority instead (HLD, LADR, NFR, PR, issue).
 
 ## Skills
 
