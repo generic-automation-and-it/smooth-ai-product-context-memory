@@ -3,11 +3,11 @@
 ## Persistence
 
 The context-memory store is an **index over content**, not a content store. Document bodies live in
-blob storage (see [ADR-0001](../hlds/adr-0001-blob-storage-backend-and-addressing.md)); PostgreSQL
+blob storage (see [HLD 001 (storage)](../hlds/001-context-memory-storage/)); PostgreSQL
 holds metadata, relationships, and everything filtered on. The authoritative persistence model is
-[ADR-0002](../hlds/adr-0002-persistence-layer-architecture.md). The write-path pipeline and the
+[HLD 001 (storage)](../hlds/001-context-memory-storage/). The write-path pipeline and the
 agent-facing skill contract (the **sole interface** to the store) are specified in
-[ADR-0003](../hlds/adr-0003-context-memory-write-pipeline.md); the skill lives at
+[HLD 002 (write pipeline)](../hlds/002-context-memory-write-pipeline/); the skill lives at
 `.agents/skills/context-memory/`.
 
 ### Three-level hierarchy
@@ -15,7 +15,7 @@ agent-facing skill contract (the **sole interface** to the store) are specified 
 ```
 Initiative → MemoryGroup (tickets jsonb, repo columns) → Memory (logical) → MemoryVersion
                                                             ├── tags[] / facets[]  (unversioned)
-                                                            └── blob address       (ADR-0001)
+                                                            └── blob address       (HLD 001 (storage))
 ```
 
 Seven entities (`Initiative`, `Label`, `MemoryGroup`, `GroupDescription`, `Memory`,
@@ -61,7 +61,7 @@ findable without their bodies being indexed. Indexes:
 - **B-tree** over `kind`, `status`, `initiative_id`
 
 `repo` is not indexed yet — the retrieval query that would use it does not exist, so the index is
-deferred (see ADR-0002).
+deferred (see HLD 001 (storage)).
 
 `label.usage_count` is not a column — it is the derived `label_usage` view.
 
@@ -69,6 +69,6 @@ deferred (see ADR-0002).
 
 Hard: one current version per memory (partial unique index), version chain (unique `(memory_id,
 version)`), logical identity (unique `uuid`), initiative always assigned (not-null FK). Soft (both to
-be enforced by the write path's read-before-write once the skill exists — see ADR-0002): subject
+be enforced by the write path's read-before-write once the skill exists — see HLD 001 (storage)): subject
 uniqueness across a group (exact-slug duplicates are already rejected by the unique
 `(group_id, subject_slug)` backstop index), ticket uniqueness across groups.
