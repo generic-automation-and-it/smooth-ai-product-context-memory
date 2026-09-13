@@ -177,6 +177,40 @@ public partial class CutoverMemoryLinksToAge : Migration
             """
             LOAD 'age';
             SET search_path = ag_catalog, "$user", public;
+            DO $age_restore_guard$
+            DECLARE
+                conflict record;
+            BEGIN
+                SELECT d.source_uuid, d.target_uuid, d.relation
+                INTO conflict
+                FROM (
+                    SELECT DISTINCT
+                        trim(both '"' from s::text) AS source_uuid,
+                        trim(both '"' from t::text) AS target_uuid,
+                        rel::text::jsonb #>> '{}' AS relation,
+                        reason::text::jsonb #>> '{}' AS reason
+                    FROM ag_catalog.cypher('memory_graph', $cypher$
+                        MATCH (s:Memory)-[e:LINKS]->(t:Memory)
+                        RETURN s.memory_uuid, t.memory_uuid, e.relation, e.reason
+                    $cypher$) AS (s agtype, t agtype, rel agtype, reason agtype)
+                ) d
+                GROUP BY d.source_uuid, d.target_uuid, d.relation
+                HAVING count(*) > 1
+                LIMIT 1;
+
+                IF FOUND THEN
+                    RAISE EXCEPTION
+                        'memory_link restore refused: race-created same-triple edges with differing reasons need manual resolution (source %, target %, relation %)',
+                        conflict.source_uuid, conflict.target_uuid, conflict.relation;
+                END IF;
+            END
+            $age_restore_guard$;
+            """);
+
+        migrationBuilder.Sql(
+            """
+            LOAD 'age';
+            SET search_path = ag_catalog, "$user", public;
             INSERT INTO memory_link (source_memory_id, target_memory_id, relation, reason)
             SELECT s.id, t.id, r.relation, r.reason
             FROM (
