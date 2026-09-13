@@ -111,14 +111,10 @@ public sealed class NpgsqlMemoryGraph(SmoothAiProductContextMemoryDbContext db) 
             CommandText = resultColumns.Contains("s agtype", StringComparison.Ordinal)
                 ? $"""
                     SELECT s::text, t::text, r::text, reason::text
-                    FROM ag_catalog.cypher('{AgeSession.GraphName}', $$
-                    {cypher}
-                    $$) AS {resultColumns};
+                    FROM ag_catalog.cypher('{AgeSession.GraphName}', {DollarWrap(cypher)}) AS {resultColumns};
                     """
                 : $"""
-                    SELECT v::text FROM ag_catalog.cypher('{AgeSession.GraphName}', $$
-                    {cypher}
-                    $$) AS {resultColumns};
+                    SELECT v::text FROM ag_catalog.cypher('{AgeSession.GraphName}', {DollarWrap(cypher)}) AS {resultColumns};
                     """,
         };
     }
@@ -149,13 +145,33 @@ public sealed class NpgsqlMemoryGraph(SmoothAiProductContextMemoryDbContext db) 
                     builder.Append("\\t");
                     break;
                 default:
-                    builder.Append(c);
+                    if (c < 0x20)
+                    {
+                        builder.Append("\\u");
+                        builder.Append(((int)c).ToString("x4", CultureInfo.InvariantCulture));
+                    }
+                    else
+                    {
+                        builder.Append(c);
+                    }
+
                     break;
             }
         }
 
         builder.Append('\'');
         return builder.ToString();
+    }
+
+    private static string DollarWrap(string cypher)
+    {
+        string tag = "$q$";
+        while (cypher.Contains(tag, StringComparison.Ordinal))
+        {
+            tag = $"$q{Random.Shared.Next():x8}$";
+        }
+
+        return $"{tag}\n{cypher}\n{tag}";
     }
 
     private static string ReadAgtypeString(NpgsqlDataReader reader, int ordinal)
