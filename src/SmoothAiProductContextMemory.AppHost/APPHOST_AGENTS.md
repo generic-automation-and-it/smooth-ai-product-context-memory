@@ -9,8 +9,9 @@ ports/container names.
 
 ## Non-Negotiables
 
-- **Dev-only.** Never referenced by test projects, never invoked from CI. CI uses `TestFramework.Aspire`
-  via the integration tests.
+- **Dev orchestrator.** Never start this AppHost from tests or CI. L0 may reference
+  `HostLaunchMode` (`tests/SmoothAiProductContextMemory.AppHost.UnitTest`). Container orchestration
+  for tests stays in `TestFramework.Aspire`.
 - **Docker naming: accent in the group, ASCII in the artifacts.** The Docker Desktop group is the
   `com.docker.compose.project` **label**, so it carries the brand spelling — `smooth-mímisbrunnr`.
   Container and volume names cannot: Docker rejects non-ASCII outright (`Invalid container name
@@ -29,16 +30,24 @@ ports/container names.
   add runtime-specific wiring to the AppHost. Container images are **registry-qualified and pinned**
   (`docker.io/apache/age:release_PG17_1.7.0`, `quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z`) because Podman refuses to resolve short names
   non-interactively unless the host's `registries.conf` happens to allow it.
-- **AppHost is the orchestrator, not a published image.** Starting it pulls the Host image and starts
-  postgres/blob/seq. Do not containerise the AppHost. The Host stays runnable as a plain `Program`
-  (`WebApplicationFactory<Program>` integration tests must keep working without an AppHost).
-- **Default Host is the published GHCR image** (`HostConfiguration:Image`). Set
-  `HostConfiguration:UseProject=true` (or `HostConfiguration__UseProject=true`) to compile and run
-  `Projects.SmoothAiProductContextMemory_Host` from source instead. Do not delete `AddProject`.
-- **Host container is `mimisbrunnr-host`**, with the same `com.docker.compose.project=smooth-mímisbrunnr` /
-  `com.docker.compose.service` labels as postgres/blob/seq. It injects
-  `ConnectionStrings__SmoothAiProductContextMemory` (the key Infrastructure reads) plus the existing
-  `BlobStorage__*` env vars. GHCR references use `ImagePullPolicy.Always`.
+- **AppHost is the orchestrator, not a published image.** Starting it compiles Host from the working
+  tree and starts postgres/blob/seq. Do not containerise the AppHost. The Host stays runnable as a
+  plain `Program` (`WebApplicationFactory<Program>` integration tests must keep working without an
+  AppHost).
+- **Default Host is the working tree.** `HostConfiguration:UseProject` defaults to `true` and
+  `appsettings.json` matches. Image-pull is opt-in: `HostConfiguration:UseProject=false` (or
+  `HostConfiguration__UseProject=false`) plus `HostConfiguration:Image`. Do not delete `AddProject`
+  or `AddHostContainer`. A GHCR `:latest` tag may lag the working tree — never treat an image-mode
+  run as current source.
+- **Mode must be visible without reading config.** Startup prints `Host mode: working tree (source).`
+  or `Host mode: published image <ref>. Tag may lag the working tree.` Dashboard resource names
+  differ: `host-working-tree` vs `host-published-image`. Do not collapse both modes onto resource
+  name `host` — that is how a stale image looked healthy.
+- **Host container (image mode only) is `mimisbrunnr-host`**, with the same
+  `com.docker.compose.project=smooth-mímisbrunnr` / `com.docker.compose.service` labels as
+  postgres/blob/seq. It injects `ConnectionStrings__SmoothAiProductContextMemory` (the key
+  Infrastructure reads) plus the existing `BlobStorage__*` env vars. GHCR references use
+  `ImagePullPolicy.Always`.
 - **Connection-string keys must match what the Host consumes.** Aspire `.WithReference(db)` injects
   `ConnectionStrings:<resource>` automatically for Postgres and Seq — so the **resource name is the
   connection-string key**. The database resource is therefore named `SmoothAiProductContextMemory`
@@ -64,8 +73,8 @@ ports/container names.
 | Database | `SmoothAiProductContextMemory` (physical DB `app`) | (via `postgres`) | n/a |
 | MinIO (blob) | `blob` | `9000` (s3), `9001` (console) | `mimisbrunnr-blob-well` |
 | Seq | `seq` (volume `mimisbrunnr-seq-data`) | `5341` | `mimisbrunnr-seq` |
-| API image (default) | `host` (`HostConfiguration:Image`) | `5141` | `mimisbrunnr-host` |
-| API project (opt-in) | `host` (`HostConfiguration:UseProject=true`) | `5141` http / `7141` https | n/a (host process) |
+| API project (default) | `host-working-tree` | `5141` http / `7141` https | n/a (host process) |
+| API image (opt-in) | `host-published-image` (`HostConfiguration:UseProject=false`) | `5141` | `mimisbrunnr-host` |
 
 Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgres` — see
 `tests/SmoothAiProductContextMemory.TestFramework/TEST_FRAMEWORK_AGENTS.md`.
@@ -89,10 +98,13 @@ Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgr
   `builder.AddSmoothAiProductContextMemoryAppHostResources().Build().Run()`.
 - `DistributedApplicationBuilderExtensions` keeps orchestration split into focused extension methods
   (`AddPostgresResource`, `AddBlobResource`, `AddSeqResource`, `AddHostProject` / `AddHostContainer`).
-- `HostConfiguration:Image` defaults to `ghcr.io/generic-automation-and-it/smooth-ai-product-context-memory:latest`.
-  The AppHost splits on the last colon after the last slash so Aspire `AddContainer(name, image, tag)`
-  gets a registry-qualified name. Digest references (`@sha256:`) are not supported. `UseProject=true`
-  ignores the image and runs source.
+- `HostConfiguration:Image` defaults to `ghcr.io/generic-automation-and-it/smooth-ai-product-context-memory:latest`
+  and is ignored unless `UseProject=false`. The AppHost splits on the last colon after the last slash
+  so Aspire `AddContainer(name, image, tag)` gets a registry-qualified name. Digest references
+  (`@sha256:`) are not supported. Image mode exists so a machine without an SDK can still start the
+  stack; its tag is allowed to lag.
+- Host launch mode is resolved by `HostLaunchMode` (`DefaultUseProject = true`). A missing
+  `HostConfiguration:UseProject` key is working-tree mode, not image mode.
 - **Telemetry is consumed, not just offered.** Aspire injects `OTEL_EXPORTER_OTLP_ENDPOINT` into
   **project** resources automatically and the Host now reads it, so the dashboard's log, trace and
   metric panes are populated. Do not override that variable here unless intentionally diverting
@@ -112,15 +124,22 @@ Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgr
   collector. Revisit if a collector ever lands.
 - **Seq is fed over `ConnectionStrings:seq`**, which is what `.WithReference(seq)` publishes;
   `Aspire.Hosting.Seq` defines no `SEQ_URI` variable. The Host's Serilog Seq sink activates on that key.
-- **The `host` resource carries `WithHttpHealthCheck("/health")`**, so the dashboard shows it as healthy
-  only once migrations have completed and PostgreSQL is reachable — not merely once the process starts.
+- **Both Host resources carry `WithHttpHealthCheck("/health")`**, so the dashboard shows them as
+  healthy only once migrations have completed and PostgreSQL is reachable — not merely once the
+  process starts.
 - Aspire dashboard URL is printed at startup via the `WriteDashboardStartupHint` extension; use Aspire's
   printed `/login?t=...` URL for the first terminal-driven browser visit.
+
+## Test References
+
+- L0: `tests/SmoothAiProductContextMemory.AppHost.UnitTest/` — default resolves to working-tree mode;
+  explicit `true`/`false`; working-tree announcement does not say `published image`.
 
 ## Changelog
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-13 | Default AppHost run compiles Host from the working tree; published-image path is opt-in (`UseProject=false`) and announced so a lagging GHCR tag cannot look like current source. | APPHOST_AGENTS.md |
 | 2026-09-13 | Runtime blob container renamed `mimisbrunnr-blob` → `mimisbrunnr-blob-well` (volume `mimisbrunnr-blob-well-data`). Tests stay `mimisbrunnr-testcontainer-blob`. Old volume is orphaned. | release-image |
 | 2026-09-13 | Default AppHost run pulls the published Host image as `mimisbrunnr-host` in group `smooth-mímisbrunnr`; `UseProject=true` keeps source. AppHost itself is not published. | release-image |
 | 2026-09-13 | Dev MinIO bucket renamed `smooth-project-memory` → `smooth-mimisbrunnr-memory-well`. Safe now because the blob volume was reset by the container rename; a later rename would orphan stored objects. | PR #36 |
