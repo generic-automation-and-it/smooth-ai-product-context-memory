@@ -44,21 +44,13 @@ public static class CreateLink
                 ?? throw new NotFoundException($"Memory '{request.TargetUuid}' was not found.");
 
             await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-            try
+            if (await graph.ExistsAsync(source.Uuid, target.Uuid, request.Relation, cancellationToken)
+                || !await graph.CreateAsync(source.Uuid, target.Uuid, request.Relation, request.Reason, cancellationToken))
             {
-                if (await graph.ExistsAsync(source.Uuid, target.Uuid, request.Relation, cancellationToken)
-                    || !await graph.CreateAsync(source.Uuid, target.Uuid, request.Relation, request.Reason, cancellationToken))
-                {
-                    throw new ConflictException("Link already exists.");
-                }
+                throw new ConflictException("Link already exists.");
+            }
 
-                await transaction.CommitAsync(cancellationToken);
-            }
-            catch
-            {
-                await transaction.RollbackAsync(cancellationToken);
-                throw;
-            }
+            await transaction.CommitAsync(cancellationToken);
 
             logger.LogInformation("Create link completed");
             return new Response(source.Uuid, target.Uuid, request.Relation);
