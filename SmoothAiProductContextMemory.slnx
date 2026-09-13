@@ -16,6 +16,7 @@
     <Project Path="tests/SmoothAiProductContextMemory.Application.UnitTest/SmoothAiProductContextMemory.Application.UnitTest.csproj" />
     <Project Path="tests/SmoothAiProductContextMemory.Infrastructure.UnitTest/SmoothAiProductContextMemory.Infrastructure.UnitTest.csproj" />
     <Project Path="tests/SmoothAiProductContextMemory.Host.UnitTest/SmoothAiProductContextMemory.Host.UnitTest.csproj" />
+    <Project Path="tests/SmoothAiProductContextMemory.AppHost.UnitTest/SmoothAiProductContextMemory.AppHost.UnitTest.csproj" />
   </Folder>
   <Folder Name="/tests/L1/">
     <Project Path="tests/SmoothAiProductContextMemory.Application.ComponentTest/SmoothAiProductContextMemory.Application.ComponentTest.csproj" />

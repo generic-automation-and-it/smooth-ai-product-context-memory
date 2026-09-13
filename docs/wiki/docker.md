@@ -2,11 +2,12 @@
 
 Reproducible **Host** image (`src/SmoothAiProductContextMemory.Host`). The
 **AppHost is not published** — it is the local Aspire orchestrator. Starting
-`dotnet run --project src/SmoothAiProductContextMemory.AppHost` pulls this
-image and starts postgres/blob/seq in the `smooth-mímisbrunnr` Docker Desktop group.
+`dotnet run --project src/SmoothAiProductContextMemory.AppHost` compiles Host
+from the working tree and starts postgres/blob/seq in the `smooth-mímisbrunnr`
+Docker Desktop group.
 
-`HostConfiguration:UseProject=true` compiles Host from source instead (SDK
-required).
+`HostConfiguration:UseProject=false` pulls this image instead (no SDK required
+on the Host itself). The tag may lag the working tree.
 
 **Base pairing:** `mcr.microsoft.com/dotnet/sdk:10.0-alpine` (build) and
 `mcr.microsoft.com/dotnet/aspnet:10.0-alpine` (runtime). Bump both together.
@@ -106,24 +107,27 @@ replace `ENTRYPOINT` with a baked `dotnet …` web command.
 
 ## AppHost consumption
 
-Default: AppHost **pulls** `ghcr.io/generic-automation-and-it/smooth-ai-product-context-memory:latest`
-and starts `mimisbrunnr-{host,postgres,blob-well,seq}` in group `smooth-mímisbrunnr`.
+Default: AppHost **compiles Host from the working tree** and starts
+postgres/blob/seq in group `smooth-mímisbrunnr`. Startup prints
+`Host mode: working tree (source).`; the dashboard resource is `host-working-tree`.
 
 ```bash
 dotnet run --project src/SmoothAiProductContextMemory.AppHost
 ```
 
-Local image instead of GHCR:
+Published GHCR image (tag may lag the working tree; no SDK required for Host).
+Startup prints `Host mode: published image <image>.`; the dashboard resource is `host-published-image`.
 
 ```bash
-HostConfiguration__Image=smooth-ai-product-context-memory:local \
+HostConfiguration__UseProject=false \
   dotnet run --project src/SmoothAiProductContextMemory.AppHost
 ```
 
-Source Host (needs the SDK):
+Local image instead of GHCR:
 
 ```bash
-HostConfiguration__UseProject=true \
+HostConfiguration__UseProject=false \
+HostConfiguration__Image=smooth-ai-product-context-memory:local \
   dotnet run --project src/SmoothAiProductContextMemory.AppHost
 ```
 
