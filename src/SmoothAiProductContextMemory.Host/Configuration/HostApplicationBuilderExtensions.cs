@@ -37,6 +37,12 @@ internal static class HostApplicationBuilderExtensions
     private static void ConfigureOpenTelemetry<TBuilder>(this TBuilder builder)
         where TBuilder : IHostApplicationBuilder
     {
+        // Serilog owns console (LADR-OBS-01) and writeToProviders forwards to whatever MEL providers
+        // remain. The default builder registers a console provider of its own, so leaving it in place
+        // prints every record twice — the "duplicate records in one surface" failure this wiring is
+        // meant to avoid. After clearing, OpenTelemetry is the only provider and the only extra
+        // destination is OTLP.
+        builder.Logging.ClearProviders();
         builder.Logging.AddOpenTelemetry(logging =>
         {
             logging.IncludeFormattedMessage = true;
