@@ -29,11 +29,11 @@ not a service.
 
 ### 1. Multi-hop traversal over memory relationships
 
-Today a caller can ask *what points at this memory*. After this change it can ask *what chain of
-reasoning connects these two memories*, bounded by depth and relation type, in one query. The
+Today a caller can ask *what points at this memory*. The cutover collapsed the five foundation
+elabels into the open-vocabulary `relation` property on `:LINKS`; variable-depth traversal
+(*what chain of reasoning connects these two memories*) lands with the later NFR-02 change. The
 relations already modelled — `depends_on`, `relates_to`, `contradicts`, `supersedes`, `implements` —
-become traversable rather than merely listable; the cutover collapsed those five elabels into the
-open-vocabulary `relation` property on `:LINKS`.
+become traversable rather than merely listable once that lands.
 
 The capability targeted is provenance reconstruction, not analytics. Bounded paths between known
 endpoints, not whole-graph algorithms.
