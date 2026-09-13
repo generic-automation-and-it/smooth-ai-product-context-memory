@@ -18,6 +18,7 @@ internal static class DistributedApplicationBuilderExtensions
     private const string BlobSecretKey = "LocalMachineAccessNoInterestingDataTestDev#Passw0rd!FirewallNotExposed";
     // Aspire 13.3.0 defaults to library/postgres:17.6. AGE's PG17 image keeps the same major.
     // Pairing recorded in HLD 003 / NFR-04.
+    // Keep this pin identical to src/SmoothAiProductContextMemory.AppHost.
     private const string PostgresImageRegistry = "docker.io";
     private const string PostgresImage = "apache/age";
     private const string PostgresImageTag = "release_PG17_1.7.0";

@@ -10,6 +10,8 @@ internal static class AgeSession
 {
     internal const string GraphName = "memory_graph";
     internal const string VertexLabel = "Memory";
+    internal const string ExtensionVersion = "1.7.0";
+    internal const int PostgresMajor = 17;
 
     internal const string LoadLibrarySql = "LOAD 'age';";
     internal const string SearchPathSql = """SET search_path = ag_catalog, "$user", public;""";

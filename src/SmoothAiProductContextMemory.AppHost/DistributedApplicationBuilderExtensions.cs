@@ -21,6 +21,7 @@ internal static class DistributedApplicationBuilderExtensions
     private const string BlobDataVolume = "smooth-project-memory-blob-data";
     // Aspire 13.3.0 defaults to library/postgres:17.6. AGE's PG17 image keeps the same major so the
     // persistent data volume stays compatible. Pairing recorded in HLD 003 / NFR-04.
+    // Keep this pin identical to tests/SmoothAiProductContextMemory.TestFramework.Aspire.
     private const string PostgresImageRegistry = "docker.io";
     private const string PostgresImage = "apache/age";
     private const string PostgresImageTag = "release_PG17_1.7.0";

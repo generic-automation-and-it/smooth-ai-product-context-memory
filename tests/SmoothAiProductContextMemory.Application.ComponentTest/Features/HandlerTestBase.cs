@@ -84,6 +84,7 @@ public abstract class HandlerTestBase(AspireFixture aspire) : IAsyncLifetime
     private static async Task ApplyMigrationsAsync(NpgsqlDataSource dataSource, CancellationToken cancellationToken)
     {
         var services = new ServiceCollection();
+        services.AddSingleton(dataSource);
         services.AddDbContext<SmoothAiProductContextMemoryDbContext>(options =>
             options.UseNpgsql(dataSource));
 

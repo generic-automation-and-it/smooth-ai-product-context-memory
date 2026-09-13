@@ -65,11 +65,18 @@ public sealed class AgeFoundationTests : PersistenceTestBase
     {
         await using var conn = await DataSource.OpenConnectionAsync(Ct);
 
+        await using (var major = new NpgsqlCommand(
+            "SELECT current_setting('server_version_num')::int / 10000;",
+            conn))
+        {
+            Convert.ToInt32(await major.ExecuteScalarAsync(Ct)).ShouldBe(AgeSession.PostgresMajor);
+        }
+
         await using (var ext = new NpgsqlCommand(
             "SELECT extversion FROM pg_extension WHERE extname = 'age';",
             conn))
         {
-            (await ext.ExecuteScalarAsync(Ct)).ShouldNotBeNull();
+            (await ext.ExecuteScalarAsync(Ct)).ShouldBe(AgeSession.ExtensionVersion);
         }
 
         await using (var graphs = new NpgsqlCommand(
