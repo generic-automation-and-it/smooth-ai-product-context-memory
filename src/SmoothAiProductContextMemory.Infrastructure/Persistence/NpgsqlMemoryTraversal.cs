@@ -135,6 +135,31 @@ public sealed class NpgsqlMemoryTraversal(SmoothAiProductContextMemoryDbContext 
           AND (@status IS NULL OR v.status = @status)
           AND (@requiredScope IS NULL OR g.scope_dimension = @requiredScope)
           AND g.scope_dimension <> ALL(@excludedScopes)
+          -- Intermediate hops are gated too, not only the endpoint. A path from a product memory
+          -- through a programme one discloses that memory's identity and its edges' reasons, which is
+          -- descriptive content on a read path. Only the excluded list is a visibility rule;
+          -- @requiredScope is a selector for which endpoints to return, so narrowing to a dimension
+          -- must not forbid routing through freely-readable ones.
+          --
+          -- Text surgery on the node list is safe where it would not be on the edge list: a vertex
+          -- carries memory_uuid and nothing else (LADR-02), so no caller-supplied string can appear in
+          -- its rendering. Edges carry `reason` and are parsed by AgtypeArrayReader instead.
+          --
+          -- Shaped as a membership test against the hidden set rather than a join per path. Joining
+          -- `memory` inside the subquery made the planner hash all 3,000 rows for every candidate path
+          -- (it estimates 100 rows from jsonb_array_elements and cannot know a path holds four): the
+          -- composed shape measured 16.1 ms that way against 8.4 ms before the gate existed. The hidden
+          -- set is computed once and is a minority of the store.
+          AND (cardinality(@excludedScopes) = 0 OR NOT EXISTS (
+              SELECT 1
+              FROM jsonb_array_elements(replace(tr.nodes::text, '::vertex', '')::jsonb) AS hop_node
+              WHERE (hop_node -> 'properties' ->> 'memory_uuid')::uuid IN (
+                  SELECT hidden_memory.uuid
+                  FROM memory hidden_memory
+                  JOIN memory_group hidden_group ON hidden_group.id = hidden_memory.group_id
+                  WHERE hidden_group.scope_dimension = ANY(@excludedScopes)
+              )
+          ))
         LIMIT @limit;
         """;
 

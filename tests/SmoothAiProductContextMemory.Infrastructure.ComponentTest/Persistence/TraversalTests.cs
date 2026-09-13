@@ -183,6 +183,37 @@ public sealed class TraversalTests : PersistenceTestBase
     }
 
     [Fact]
+    public async Task ScopeRule_HidesPathsRoutedThroughAnExcludedIntermediate()
+    {
+        MemoryGroup product = await SeedGroupAsync();
+        MemoryGroup programme = await SeedGroupAsync(MemoryGroup.ScopeDimensionValue.Program);
+        Memory source = await SeedMemoryAsync(product.Id, "Source", "Source subject");
+        Memory hidden = await SeedMemoryAsync(programme.Id, "Programme", "Programme subject");
+        Memory endpoint = await SeedMemoryAsync(product.Id, "Endpoint", "Endpoint subject");
+
+        // Both endpoints are product-scoped; only the middle hop is programme-scoped.
+        (await Graph.CreateAsync(source.Uuid, hidden.Uuid, MemoryRelation.DependsOn, "programme rationale", Ct))
+            .ShouldBeTrue();
+        (await Graph.CreateAsync(hidden.Uuid, endpoint.Uuid, MemoryRelation.DependsOn, "leads to the decision", Ct))
+            .ShouldBeTrue();
+
+        IReadOnlyList<MemoryPath> open = await Traversal.FindPathsAsync(
+            new MemoryPathQuery
+            {
+                SourceUuid = source.Uuid,
+                MaxDepth = 3,
+                ExcludedScopeDimensions = [MemoryGroup.ScopeDimensionValue.Program],
+            },
+            Ct);
+
+        // Filtering only the endpoint would return this path and disclose the programme memory's
+        // identity and its edge reasons — descriptive content, on a read path, with no scope declared.
+        open.SelectMany(p => p.Hops)
+            .ShouldNotContain(h => h.SourceUuid == hidden.Uuid || h.TargetUuid == hidden.Uuid);
+        open.Select(p => p.Endpoint.Uuid).ShouldNotContain(endpoint.Uuid);
+    }
+
+    [Fact]
     public async Task CyclicGraph_TerminatesAtTheBound()
     {
         MemoryGroup group = await SeedGroupAsync();
@@ -198,6 +229,26 @@ public sealed class TraversalTests : PersistenceTestBase
 
         paths.ShouldNotBeEmpty();
         paths.ShouldAllBe(p => p.Depth <= 3);
+    }
+
+    [Fact]
+    public async Task SelfLink_TerminatesAtTheBound()
+    {
+        MemoryGroup group = await SeedGroupAsync();
+        Memory loop = await SeedMemoryAsync(group.Id, "Loop", "Self link subject");
+
+        // A one-vertex cycle is the tightest loop the store accepts, so it is the shape most likely to
+        // expose a bound that is applied to distinct vertices rather than to hops.
+        (await Graph.CreateAsync(loop.Uuid, loop.Uuid, MemoryRelation.RelatesTo, "store permits a self link", Ct))
+            .ShouldBeTrue();
+
+        IReadOnlyList<MemoryPath> paths = await Traversal.FindPathsAsync(
+            new MemoryPathQuery { SourceUuid = loop.Uuid, MaxDepth = 3 },
+            Ct);
+
+        paths.ShouldNotBeEmpty();
+        paths.ShouldAllBe(p => p.Depth >= 1 && p.Depth <= 3);
+        paths.SelectMany(p => p.Hops).ShouldAllBe(h => h.SourceUuid == loop.Uuid && h.TargetUuid == loop.Uuid);
     }
 
     [Theory]

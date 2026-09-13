@@ -19,9 +19,9 @@ pre-cutover relational baseline in [NFR-02-one-hop-baseline.md](./NFR-02-one-hop
 
 | Shape | p50 (ms) | p95 (ms) | Target | Verdict |
 |---|---|---|---|---|
-| Depth-3 bounded path between two known identities, filtered by relation type | 0.832 | **0.978** | p95 ≤ 50 ms | **met** (51× margin) |
-| One-hop reverse lookup | 0.526 | **0.595** | p95 ≤ 10 ms | **met** (17× margin) |
-| Composed traversal plus relational filter | 8.119 | **8.374** | p95 ≤ 100 ms | **met** (12× margin) |
+| Depth-3 bounded path between two known identities, filtered by relation type | 0.869 | **1.057** | p95 ≤ 50 ms | **met** (47× margin) |
+| One-hop reverse lookup | 0.549 | **0.616** | p95 ≤ 10 ms | **met** (16× margin) |
+| Composed traversal plus relational filter | 8.217 | **8.522** | p95 ≤ 100 ms | **met** (12× margin) |
 
 All three absolute targets are met with an order of magnitude to spare.
 
@@ -30,8 +30,8 @@ All three absolute targets are met with an order of magnitude to spare.
 | | p95 |
 |---|---|
 | Relational `memory_link`, reverse-only, bitmap index scan (pre-cutover baseline) | 0.429 ms |
-| AGE `:LINKS`, both directions, fully indexed (this run) | **0.595 ms** |
-| Delta | **+0.166 ms — 1.4×** |
+| AGE `:LINKS`, both directions, fully indexed (this run) | **0.616 ms** |
+| Delta | **+0.187 ms — 1.4×** |
 
 **On the strict reading of NFR-02 this is a regression, and NFR-02 says a regression blocks the
 change.** The figure is recorded here rather than argued away. Three facts bear on how it should be
@@ -39,7 +39,11 @@ adjudicated, and none of them are a reason to call 0.595 ms "not slower than" 0.
 
 1. **It is not the same question.** The baseline query was `WHERE target_memory_id = $1` — inbound edges only. `ListTouchingAsync` returns inbound *and* outbound edges, which is two anchored index lookups unioned rather than one. The comparison is unfavourable to AGE by construction, because the graph implementation answers a strictly larger question. A reverse-only Cypher equivalent was not measured separately; that would be a fairer comparison and a less honest one, since it is not the method the store exposes.
 2. **The residual is `cypher()` overhead, not access-path cost.** The plan (below) is index scans throughout — `ix_memory_vertex_uuid` for the anchor, AGE's own `LINKS_start_id_idx` / `LINKS_end_id_idx` for the hop, `Memory_pkey` for the far endpoint. What remains is the extension's own cost: parsing the Cypher, building `agtype` vertex and edge values, and rendering them to text for the driver. That cost is roughly constant, so the ratio narrows rather than widens as the store grows.
-3. **The absolute figure is 17× inside the target.** 0.166 ms of added latency on a lookup budgeted at 10 ms.
+3. **The absolute figure is 16× inside the target.** 0.187 ms of added latency on a lookup budgeted at 10 ms.
+
+The accepted multiple is now **asserted**, not merely recorded: the benchmark fails if the one-hop p95
+exceeds three times the baseline. NFR-02 accepted 1.4×; it did not accept any multiple, and an
+unasserted prediction that the ratio "narrows as the store grows" is a comment rather than a guard.
 
 ## Adjudication
 
@@ -62,9 +66,9 @@ NFR-02 requires the plan at all.
 
 | Shape | p95, first run | p95, after the fix |
 |---|---|---|
-| One-hop reverse lookup | **6.075 ms** (14.2× baseline) | **0.595 ms** (1.4× baseline) |
-| Depth-3 bounded path | 0.982 ms | 0.978 ms |
-| Composed traversal plus filter | 8.976 ms | 8.374 ms |
+| One-hop reverse lookup | **6.075 ms** (14.2× baseline) | **0.616 ms** (1.4× baseline) |
+| Depth-3 bounded path | 0.982 ms | 1.057 ms |
+| Composed traversal plus filter | 8.976 ms | 8.522 ms |
 
 **Cause.** `ListTouchingAsync` asked for both directions with a disjunction over two *different* vertex
 instances:
@@ -99,6 +103,31 @@ both branches and must still be reported once. Cost fell from 506.81 to 35.71 an
 reachable set instead of the planner enumerating the label table. Measured effect: 8.976 → 8.786 ms,
 inside run-to-run noise, and the plan gained an `Append` over `_ag_label_vertex`. It was reverted —
 a branch in the query builder that buys nothing measurable is not worth keeping.
+
+## Shortfall found in review, and its cause
+
+Code review found that the scope rule gated the path's **endpoint** but not its **intermediate hops**, so
+a path from a product-scoped memory through a programme-scoped one disclosed that memory's identity and
+its edges' reasons — descriptive content on a read path, which this HLD's own non-negotiables forbid. An
+L1 test reproduced the leak before the fix.
+
+Gating intermediates cost more than expected on the first attempt:
+
+| Composed shape | p95 |
+|---|---|
+| Before the gate existed (leaky) | 8.374 ms |
+| Gate written as a join per path | **16.106 ms** |
+| Gate written as a membership test against the hidden set | **8.522 ms** |
+
+**Cause.** Joining `memory` inside the `NOT EXISTS` made the planner hash all 3,000 rows for *every*
+candidate path: it estimates 100 rows from `jsonb_array_elements` and cannot know that a bounded path
+holds four. Reshaped as a membership test against the set of memories in excluded scopes — computed
+once, and a minority of the store — the correctness fix costs 0.15 ms instead of 7.7 ms.
+
+The node list is converted to JSON by plain text replacement, which would be unsafe on the *edge* list:
+a vertex carries `memory_uuid` and nothing else (LADR-02), so no caller-supplied string can appear in
+its rendering, whereas an edge carries `reason`. That asymmetry follows from the edges-only decision and
+is why the two lists are parsed by different means.
 
 ## Plans
 
@@ -184,6 +213,7 @@ not guessed at now.
 
 ## What was not measured
 
+- **Whether the intermediate-hop gate stays cheap as the excluded set grows.** The hidden set is a minority of the store today; if programme-scoped memories became the majority, the membership test needs re-measuring.
 - **A reverse-only AGE one-hop**, which would compare more favourably against the reverse-only baseline. Deliberately omitted: it is not the method the store exposes, so measuring it would flatter the comparison rather than inform it.
 - **Growth beyond 10,000 edges.** The target volume is roughly an order of magnitude past the expected first-year store, and the plans are index- and traversal-based, so the shapes should degrade with the log of the table rather than its size. That is a prediction from the plan, not a measurement.
 - **Concurrency.** The service is single-user and local-first; contention is not a modelled concern.

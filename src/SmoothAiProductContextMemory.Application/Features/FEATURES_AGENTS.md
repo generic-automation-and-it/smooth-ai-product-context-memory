@@ -21,10 +21,12 @@ HTTP API the context-memory skill consumes — uuid-only wire, Mediator slices, 
 - **Every traversal is bounded, and the bound is on the wire.** `POST /api/context/paths` requires `maxDepth`
   (1–5); there is no server-side default, because a default is a bound the caller never considered. The store
   layer refuses an out-of-range depth as well, so a direct caller cannot bypass the validator (HLD-003 LADR-07).
-- **The traversal endpoint is scope-gated on both sides.** Traversing *from* a programme-scoped memory needs
-  `scopeDimension`, as the blob proxy and version history do (403 otherwise); the endpoints it *reaches* are
-  filtered by the same `MemoryScopeFilter.Plan`, pushed into the composed SQL. A traversal returns descriptive
-  fields, so it is a read path and gets the read path's rule.
+- **The traversal endpoint is scope-gated at every vertex, not just the two ends.** Traversing *from* a
+  programme-scoped memory needs `scopeDimension`, as the blob proxy and version history do (403 otherwise).
+  The endpoints it *reaches* and every intermediate hop it crosses are filtered by the same
+  `MemoryScopeFilter.Plan`, pushed into the composed SQL — a path routed through a hidden memory is dropped,
+  because returning it would disclose that memory's uuid and its edges' reasons. A traversal returns
+  descriptive fields, so it is a read path and gets the read path's rule in full.
 - **Never log statement, summary, content, or blob address at Information.** Counts and lifecycle at `Information`, per-operation decisions at `Debug`.
 
 ## System Context
