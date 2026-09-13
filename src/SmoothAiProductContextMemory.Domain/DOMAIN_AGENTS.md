@@ -13,7 +13,7 @@ Pure domain model — entities, aggregate roots, and value objects. Zero externa
 ## ADR-0002 exceptions (context-memory model)
 
 These are deliberate departures from the defaults above, sanctioned by
-[ADR-0002](../../.docs/hlds/adr-0002-persistence-layer-architecture.md). **Do not "correct" them** —
+[HLD 001](../../docs/hlds/001-context-memory-storage/). **Do not "correct" them** —
 they are the design, not drift.
 
 - **Serialization attribute exception.** `[JsonPropertyOrder]` on `JsonShapeDocument` is the sanctioned
@@ -33,6 +33,7 @@ they are the design, not drift.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-13 | `.docs`→`docs` move and ADR-0002→HLD 001 authority retarget recorded; the exceptions sanction now links HLD 001. | — |
 | 2026-09-09 | Restored the "Enforce invariants at construction" default as the stated Domain default; the ADR-0002 exceptions section now explicitly carves out the context-memory persistence rows. | ADR-0002 |
 | 2026-09-09 | Seven-entity context-memory model + `Slug` value logic added; recorded the ADR-0002 serialization and anemic-POCO exceptions. | ADR-0002 |
 | 2026-05-30 | Created — empty Clean Architecture domain skeleton (`Entities/`, `ValueObjects/`). | — |

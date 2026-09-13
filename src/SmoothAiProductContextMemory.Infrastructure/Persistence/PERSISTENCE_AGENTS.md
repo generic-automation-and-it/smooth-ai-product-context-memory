@@ -2,7 +2,7 @@
 
 ## TL;DR
 
-EF Core + PostgreSQL index over blob-stored content. Seven entities: `Initiative`, `Label`, `MemoryGroup`, `GroupDescription`, `Memory`, `MemoryVersion`, `MemoryLink`. Authoritative model is `.docs/hlds/adr-0002-persistence-layer-architecture.md`; where this file and the code disagree with it, the ADR wins and should be reconciled.
+EF Core + PostgreSQL index over blob-stored content. Seven entities: `Initiative`, `Label`, `MemoryGroup`, `GroupDescription`, `Memory`, `MemoryVersion`, `MemoryLink`. Authoritative model is `docs/hlds/001-context-memory-storage/`; where this file and the code disagree with it, the HLD wins and should be reconciled.
 
 ## Non-Negotiables
 
@@ -15,7 +15,7 @@ EF Core + PostgreSQL index over blob-stored content. Seven entities: `Initiative
 
 ## System Context
 
-The store is an index over content, not a content store. Document bodies live in blob storage (ADR-0001); PostgreSQL holds metadata, relationships, and everything filtered on. Blob content is therefore not indexable — the AI-generated `content_summary` and keywords are the search surface.
+The store is an index over content, not a content store. Document bodies live in blob storage (HLD 001 / LADR-06); PostgreSQL holds metadata, relationships, and everything filtered on. Blob content is therefore not indexable — the AI-generated `content_summary` and keywords are the search surface.
 
 ```mermaid
 erDiagram
@@ -44,7 +44,7 @@ erDiagram
 - **`sources` sits on the version**, because provenance records where *this claim* came from. v1 and v2 legitimately carry different sources.
 - **`is_current` flag**: exactly one current version per memory, enforced by a partial unique index `WHERE "is_current"`. Version chain integrity is the unique `(memory_id, version)`.
 - **`MemoryGroup` is keyed by its own GUID**, not by its tickets — tickets accumulate over time. A group holds many tickets, an optional repo, the scope, and a mandatory initiative FK (defaulting to the seeded `to-be-decided` row, id 1).
-- **Two constraints are deliberately soft**: subject uniqueness (unique `(group_id, subject_slug)` is an exact-match backstop only) and ticket-to-group uniqueness (application-enforced read-before-write). Do not attempt to enforce either in-database — see ADR-0002.
+- **Two constraints are deliberately soft**: subject uniqueness (unique `(group_id, subject_slug)` is an exact-match backstop only) and ticket-to-group uniqueness (application-enforced read-before-write). Do not attempt to enforce either in-database — see HLD 001 / LADR-07.
 - **`label_usage` is a derived view**, not a column. A maintained counter drifts; a derived one cannot.
 - **Append-only guard (DB trigger `append_only_guard`)**:
   - The one permitted `memory_version` UPDATE is a **version-bump pointer transfer** (`is_current` flips with all content unchanged). Any content edit raises.
@@ -77,6 +77,7 @@ erDiagram
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-13 | `.docs`→`docs` move and ADR-0002→HLD 001 authority retarget recorded; ADR-era citations now reference HLD 001 (blob storage → LADR-06, in-database enforcement → LADR-07). | — |
 | 2026-09-11 | Documented that `ix_memory_version_validity` (GIST over `tstzrange`) is unreachable from LINQ; `NpgsqlMemorySearch` uses scalar validity comparisons and `@>` for facet/tag GIN matching. No schema change. | WT-2 review |
 | 2026-09-10 | Additive `memory_version.summary_stamp` jsonb (D42) + `append_only_guard` equality-list extension + btree on `memory_group.repo`. | WT-2, ADR-0003 |
 | 2026-09-09 | Created — entity map, subject/claim and system/business-time splits, constraint rationale, versioning, JSONB `v` contract. | ADR-0002 |

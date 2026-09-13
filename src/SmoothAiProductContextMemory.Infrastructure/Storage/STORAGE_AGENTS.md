@@ -35,7 +35,7 @@ Address layout is a sharded prefix to avoid one flat directory: `ab/cd/abcd...` 
 SeaweedFS was the initial selection but was rejected because its S3 gateway requires a JSON credentials
 file and an admin JWT to create buckets — impractical to automate inside an Aspire dev/test container.
 MinIO takes fixed environment credentials (`MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD`) and is the worktask's
-approved fallback. See the ADR under `.docs/adr/`.
+approved fallback. See [HLD 001 LADR-06](../../../docs/hlds/001-context-memory-storage/ladrs/LADR-06-content-addressed-blob-storage.md).
 
 ## How to swap backends
 
@@ -46,4 +46,5 @@ abstraction only, so the S3 implementation can be replaced without touching Appl
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-13 | `.docs`→`docs` move recorded — the HLD 001 LADR-06 reference path now resolves under the visible `docs/hlds/` tree. | — |
 | 2026-08-30 | Created — blob storage abstraction + MinIO S3 implementation, content addressing, gzip compression, lazy bucket creation. | — |

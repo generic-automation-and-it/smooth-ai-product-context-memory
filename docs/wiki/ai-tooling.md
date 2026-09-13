@@ -21,9 +21,9 @@ All three tools share a common context through the `.agents/` folder — rules, 
 - Codex was well-suited to PR workflow automation and repetitive generation tasks.
 - GitHub Copilot's web agent added value in PR review participation — visible in the PR conversation history.
 
-## Embedded AI Agent
+## ChatHost (planned)
 
-A Claude SDK-powered conversational agent is embedded directly in the API. It allows natural-language queries against the buildability data — for example: *"Which sets can brickfan35 build?"* — rather than requiring direct API calls. This was a deliberate side quest to explore agentic integration as a pattern for data-rich APIs.
+ChatHost is a standalone LLM microservice — it owns the Anthropic SDK and talks to the Host API via HTTP only, keeping conversational AI out of the data API. The project is not yet in tree (planned as `src/SmoothAiProductContextMemory.ChatHost/`); until it lands, agents work with the store through the context-memory skill against the HTTP API.
 
 ## Recommendations (for teams adopting this approach)
 

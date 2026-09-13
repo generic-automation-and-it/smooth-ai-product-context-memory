@@ -17,8 +17,8 @@ Shared fixtures live in `tests/SmoothAiProductContextMemory.TestFramework/`. Con
 `AspireFixture` provisions and shares test containers across all test assemblies in a process. It tries three strategies in order:
 
 1. **Reuse** — if another fixture in the same process already initialised, adopt the shared state
-2. **Fixed endpoints** — probe `127.0.0.1:15432` (Postgres), `127.0.0.1:19091` (WireMock) and `127.0.0.1:9002` (MinIO) — succeeds if containers are pre-warmed (CI or local `dotnet run --project tests/SmoothAiProductContextMemory.TestFramework.Aspire`)
-3. **Container port discovery** — query `docker`/`podman port` for the persistent named containers (`project-test-postgres`, `project-test-wiremock`, `project-test-blob`)
+2. **Fixed endpoints** — probe `127.0.0.1:15432` (Postgres), `127.0.0.1:16379` (Redis), `127.0.0.1:19091` (WireMock) and `127.0.0.1:9002` (MinIO) — succeeds if containers are pre-warmed (CI or local `dotnet run --project tests/SmoothAiProductContextMemory.TestFramework.Aspire`)
+3. **Container port discovery** — query `docker`/`podman port` for the persistent named containers (`project-test-postgres`, `project-test-redis`, `project-test-wiremock`, `project-test-blob`)
 4. **Start Aspire host** — provision fresh containers (takes ~30s on first run)
 
 Container lifetimes are `Persistent` — they survive test runs and are reused on subsequent runs.
@@ -63,6 +63,7 @@ await admin.ResetAsync(); // clear stubs between tests
 | Container | Local Port | Service |
 |---|---|---|
 | `project-test-postgres` | 15432 | PostgreSQL |
+| `project-test-redis` | 16379 | Redis |
 | `project-test-wiremock` | 19091 | WireMock HTTP admin + stubbed endpoints |
 | `project-test-blob` | 9002 (s3), 19092 (console) | MinIO S3-compatible object storage |
 

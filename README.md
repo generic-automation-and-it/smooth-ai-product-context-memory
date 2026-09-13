@@ -164,12 +164,13 @@ tests/
 
 | Topic | Location |
 |---|---|
+| **Business intent & requirements** | [`docs/brd/001-context-memory.md`](docs/brd/001-context-memory.md) |
 | AI agent context & coding rules | [`AGENTS.md`](AGENTS.md) · [`.agents/`](.agents/) |
-| Architecture & design | [`.docs/wiki/architecture.md`](.docs/wiki/architecture.md) |
-| AI tooling setup | [`.docs/wiki/ai-tooling.md`](.docs/wiki/ai-tooling.md) |
-| Testing strategy | [`.docs/wiki/testing.md`](.docs/wiki/testing.md) |
-| CI/CD pipeline | [`.docs/wiki/ci.md`](.docs/wiki/ci.md) |
-| Architecture decisions & NFRs | [`.docs/adr/`](.docs/adr/) · [`.docs/nfr/`](.docs/nfr/) |
+| Architecture & design | [`docs/wiki/architecture.md`](docs/wiki/architecture.md) |
+| AI tooling setup | [`docs/wiki/ai-tooling.md`](docs/wiki/ai-tooling.md) |
+| Testing strategy | [`docs/wiki/testing.md`](docs/wiki/testing.md) |
+| CI/CD pipeline | [`docs/wiki/ci.md`](docs/wiki/ci.md) |
+| Architecture decisions & NFRs | [`docs/hlds/`](docs/hlds/) |
 
 ---
 
