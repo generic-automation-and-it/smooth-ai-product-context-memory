@@ -13,12 +13,23 @@ internal static class DistributedApplicationBuilderExtensions
     // docker.io/minio/minio is no longer publicly pullable; quay.io hosts the last community releases.
     private const string BlobImage = "quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z";
     private const int DefaultSeqPort = 5341;
-    private const string DockerDesktopGroupName = "smooth-project-memory";
-    private const string PostgresContainerName = "smooth-project-memory-dev-postgres";
-    private const string BlobContainerName = "smooth-project-memory-dev-blob";
-    private const string SeqContainerName = "smooth-project-memory-dev-seq";
-    private const string PostgresDataVolume = "smooth-project-memory-postgres-data";
-    private const string BlobDataVolume = "smooth-project-memory-blob-data";
+    private const string HostConnectionStringName = "SmoothAiProductContextMemory";
+    private const string HostReadinessPath = "/health";
+    // The Docker Desktop group is a compose *label*, so it carries the brand spelling with its
+    // accent. Container and volume names cannot: Docker rejects them outright —
+    // "Invalid container name (mímisbrunnr-…), only [a-zA-Z0-9][a-zA-Z0-9_.-] are allowed" — so the
+    // artifacts are transliterated to ASCII. Same split the test fixture uses
+    // (`smooth-mímisbrunnr-testing` group, `mimisbrunnr-testcontainer-*` containers).
+    private const string DockerDesktopGroupName = "smooth-mímisbrunnr";
+    private const string PostgresContainerName = "mimisbrunnr-postgres";
+    private const string BlobContainerName = "mimisbrunnr-blob";
+    private const string SeqContainerName = "mimisbrunnr-seq";
+    private const string PostgresDataVolume = "mimisbrunnr-postgres-data";
+    private const string BlobDataVolume = "mimisbrunnr-blob-data";
+    private const string SeqDataVolume = "mimisbrunnr-seq-data";
+    // S3 bucket names are DNS labels: lowercase ASCII, digits and hyphens only, so the brand is
+    // transliterated here for the same reason container names are.
+    private const string BlobBucketName = "smooth-mimisbrunnr-memory-well";
     // Aspire 13.3.0 defaults to library/postgres:17.6. AGE's PG17 image keeps the same major so the
     // persistent data volume stays compatible. Pairing recorded in HLD 003 / NFR-04.
     // Keep this pin identical to tests/SmoothAiProductContextMemory.TestFramework.Aspire.
@@ -94,7 +105,11 @@ internal static class DistributedApplicationBuilderExtensions
                     "--label", $"com.docker.compose.service={PostgresContainerName}")
                 .WithLifetime(ContainerLifetime.Persistent);
 
-            return postgres.AddDatabase("app");
+            // The resource name is the connection-string key Aspire injects, and the Host reads
+            // `ConnectionStrings:SmoothAiProductContextMemory`. Naming the resource "app" published
+            // `ConnectionStrings__app`, which nothing consumed — the Host died on start-up. The
+            // physical database stays "app" so the persistent data volume keeps its dev data.
+            return postgres.AddDatabase(HostConnectionStringName, databaseName: "app");
         }
 
         private IResourceBuilder<ContainerResource> AddBlobResource(AppHostConfiguration configuration)
@@ -121,8 +136,14 @@ internal static class DistributedApplicationBuilderExtensions
 
         private IResourceBuilder<IResourceWithConnectionString> AddSeqResource(AppHostConfiguration configuration)
         {
+            // Seq is retained for persistence: the Aspire dashboard's telemetry store is in-memory,
+            // capacity-bounded and cleared when the AppHost stops, so an intermittent failure looked at
+            // tomorrow is already gone. That argument only holds with a data volume — without one Seq's
+            // persistence claim was false beyond container removal, which is why one is attached here
+            // alongside the Postgres and blob volumes.
             return builder.AddSeq("seq", port: configuration.SeqPort)
                 .WithEnvironment("ACCEPT_EULA", "Y")
+                .WithDataVolume(SeqDataVolume)
                 .WithContainerName(SeqContainerName)
                 .WithContainerRuntimeArgs(
                     "--label", $"com.docker.compose.project={DockerDesktopGroupName}",
@@ -142,7 +163,8 @@ internal static class DistributedApplicationBuilderExtensions
                 .WithEnvironment("BlobStorage__Endpoint", blob.GetEndpoint("s3"))
                 .WithEnvironment("BlobStorage__AccessKey", configuration.BlobAccessKey)
                 .WithEnvironment("BlobStorage__SecretKey", configuration.BlobSecretKey)
-                .WithEnvironment("BlobStorage__Bucket", "smooth-project-memory")
+                .WithEnvironment("BlobStorage__Bucket", BlobBucketName)
+                .WithHttpHealthCheck(HostReadinessPath)
                 .WaitFor(postgres)
                 .WaitFor(blob)
                 .WaitFor(seq);

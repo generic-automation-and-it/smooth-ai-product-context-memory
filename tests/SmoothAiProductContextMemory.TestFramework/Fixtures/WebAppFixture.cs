@@ -61,6 +61,8 @@ public abstract class WebAppFixture<TProgram> : IAsyncLifetime
                     {
                         services.RemoveAll<IHostedService>();
                     }
+
+                    ConfigureTestServices(services);
                 });
 
                 builder.ConfigureAppConfiguration((_, config) =>
@@ -76,6 +78,14 @@ public abstract class WebAppFixture<TProgram> : IAsyncLifetime
 
     /// <summary>Override to inject app-specific configuration (connection strings, WireMock URL, etc.).</summary>
     protected virtual Task EnrichConfigurationAsync(Dictionary<string, string?> overrides) => Task.CompletedTask;
+
+    /// <summary>
+    /// Override to register or replace services after the application's own registration — e.g. a
+    /// capturing <c>ILoggerProvider</c> for telemetry assertions.
+    /// </summary>
+    protected virtual void ConfigureTestServices(IServiceCollection services)
+    {
+    }
 
     /// <summary>Override to run post-boot setup (e.g. trigger a sync cycle before tests run).</summary>
     protected virtual Task PostInitializeAsync() => Task.CompletedTask;

@@ -44,6 +44,7 @@ See [./ladrs/](./ladrs/).
 - **The entity-count guard changes by one.** Removing the relationship entity is expected and is updated deliberately in the same change; it is not a test to weaken when it fails.
 - **The current foundation is additive.** The extension, empty `memory_graph`, vertex label `Memory`, and the five relation edge labels exist; `memory_link` is still the relationship store. Do not write or read edges yet.
 - **The relational relationship contract is characterised** in `LinkTests` (HLD-003): a duplicate directed triple is refused, the same pair may hold several relations, direction is identity, deleting a memory removes inbound and outbound links, a self-link persists at the store, and links are not group-bounded. The cutover (LADR-03) must keep this behaviour.
+- **Setting the AGE search path changes `current_schema()`, and EF resolves the migrations-history table against it.** `search_path = ag_catalog, "$user", public` makes `current_schema()` return `ag_catalog`, so an unqualified `__EFMigrationsHistory` is looked for there, not found, and EF concludes the database has never been migrated — then re-applies the first migration and fails on objects that already exist. The first start of a fresh database succeeds because the extension is not installed yet when history is first read; every start afterwards fails. The history table is therefore schema-pinned (`MigrationsHistoryConvention`). Anything else that resolves an unqualified object name at runtime is exposed to the same shift and must qualify it.
 - **Do not revert the database image to `library/postgres`.** Both Aspire hosts must stay on `docker.io/apache/age:release_PG17_1.7.0`. A vanilla Postgres image fails `CREATE EXTENSION age` and the pool-recycle tests.
 
 ## Quality Constraints
@@ -64,6 +65,7 @@ operability and compatibility. Two shape how code is written rather than merely 
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-13 | Recorded that the AGE search path shifts `current_schema()` to `ag_catalog`, which broke EF's migrations-history lookup and made every restart after the first re-apply migrations. History table pinned to `public`. | HLD-003 |
 | 2026-09-13 | Characterised the relational uniqueness/integrity contract in `LinkTests` before cutover. No production change. | HLD-003 |
 | 2026-09-13 | Foundation review: both Aspire hosts stay on `docker.io/apache/age:release_PG17_1.7.0`; do not revert to `library/postgres`. | HLD-003 |
 | 2026-09-13 | AGE foundation shipped: image pin, per-connection init, empty graph + labels, relational one-hop baseline. `memory_link` untouched. | HLD-003 |

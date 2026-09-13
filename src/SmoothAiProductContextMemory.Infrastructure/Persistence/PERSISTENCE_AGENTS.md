@@ -11,6 +11,14 @@ EF Core + PostgreSQL index over blob-stored content. Seven entities: `Initiative
 - **`MemoryVersion` and `GroupDescription` are append-only**, enforced by DB triggers. Never edit or delete a row in place — a correction is a new version with a higher version number.
 - **Every JSONB element carries its own `v` shape marker** (`{"v":1,"provider":"jira","key":"ACM-1","url":"..."}`). It is set in exactly one place — `JsonShapeDocument.Create`/base `V` property — and never hand-written. Do not bypass the typed model. Retrofitting is impossible.
 - **`kind` is open vocabulary.** It must not become a C# enum or a check constraint; new kinds emerge by design.
+- **The migrations-history table is schema-pinned** via `MigrationsHistoryConvention` at every site that
+  migrates. AGE session init sets `search_path = ag_catalog, "$user", public`, which makes
+  `current_schema()` return `ag_catalog`; EF resolves an unqualified `__EFMigrationsHistory` against the
+  current schema, so it looked in `ag_catalog`, concluded the database had never been migrated and
+  re-applied `InitialCreate`. The first start of a fresh database succeeded because AGE is not installed
+  yet when history is first read — **every start after that failed**. Every test tier recreates its
+  database, so the suite is always a first start and never sees this. Do not drop the pin, and add it to
+  any new `UseNpgsql` call site or history will split.
 - **AGE session init is per physical connection**, via `NpgsqlDataSourceFactory` / `UsePhysicalConnectionInitializer`. Never initialise once at start-up — that prepares one pooled connection and leaves the rest failing under load (HLD 003 / LADR-04).
 - **Do not model graph objects in EF.** `memory_graph`, vertex label `Memory`, and edge labels are created by SQL in a non-transactional migration and are invisible to the model snapshot. `memory_link` stays until the HLD 003 cutover.
 - **`Label` registry is advisory, not enforcing.** There is deliberately no FK from `memory.facets` to `label`. A facet absent from the registry must be accepted.

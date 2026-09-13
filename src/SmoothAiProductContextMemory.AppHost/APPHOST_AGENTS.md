@@ -11,7 +11,16 @@ ports/container names.
 
 - **Dev-only.** Never referenced by test projects, never invoked from CI. CI uses `TestFramework.Aspire`
   via the integration tests.
-- **No collision with TestFramework.Aspire.** Container names start with `smooth-project-memory-dev-*`;
+- **Docker naming: accent in the group, ASCII in the artifacts.** The Docker Desktop group is the
+  `com.docker.compose.project` **label**, so it carries the brand spelling — `smooth-mímisbrunnr`.
+  Container and volume names cannot: Docker rejects non-ASCII outright (`Invalid container name
+  (mímisbrunnr-…), only [a-zA-Z0-9][a-zA-Z0-9_.-] are allowed`), so they are transliterated —
+  `mimisbrunnr-postgres`, `mimisbrunnr-blob`, `mimisbrunnr-seq`. The test fixture follows the same
+  split (`smooth-mímisbrunnr-testing` group, `mimisbrunnr-testcontainer-*` containers). Do not "fix" the
+  group label to ASCII, and do not add the accent to a container or volume name. The MinIO bucket
+  `smooth-mimisbrunnr-memory-well` is transliterated for the same reason — S3 bucket names are DNS
+  labels (lowercase ASCII, digits, hyphens).
+- **No collision with TestFramework.Aspire.** Container names are `mimisbrunnr-*` (no `testcontainer` segment);
   ports must not equal those of the test fixture (Postgres `15432`, Redis `16379`, WireMock `19091`,
   MinIO `9002` s3 / `19092` console).
 - **Container runtime agnostic, and runtime selection is Aspire's job.** Registering containers through
@@ -24,26 +33,30 @@ ports/container names.
   runnable as a plain `Program` (`WebApplicationFactory<Program>` integration tests must keep working
   without an AppHost).
 - **Connection-string keys must match what the Host consumes.** Aspire `.WithReference(db)` injects
-  `ConnectionStrings:<resource>` automatically for Postgres and Seq. The blob container is **not** a
-  connection-string resource: the Host receives `BlobStorage__Endpoint` (from the blob `s3` endpoint)
+  `ConnectionStrings:<resource>` automatically for Postgres and Seq — so the **resource name is the
+  connection-string key**. The database resource is therefore named `SmoothAiProductContextMemory`
+  (with `databaseName: "app"` keeping the physical database, and the persistent volume's data, as it
+  was). Naming it `app` published `ConnectionStrings__app`, which nothing consumed: the Host threw at
+  DI resolve and the `host` resource never started. Rename the resource and you rename the key.
+  The blob container is **not** a connection-string resource: the Host receives `BlobStorage__Endpoint` (from the blob `s3` endpoint)
   plus `BlobStorage__AccessKey` / `BlobStorage__SecretKey` / `BlobStorage__Bucket` as plain environment
   variables, bound by `BlobStorageOptions`.
 - **No WireMock in dev AppHost.** The AppHost orchestrates real Postgres/MinIO/Seq only. There is no
   upstream HTTP API to stub in this service.
 - **Postgres and MinIO use persistent named volumes.** Dev data survives container restarts.
-- **Postgres image is the AGE-bearing pin** `docker.io/apache/age:release_PG17_1.7.0` (Postgres 17 + AGE 1.7.0), not Aspire's `library/postgres:17.6`. Same major as the previous default, so the named volume is compatible. A major mismatch against `smooth-project-memory-postgres-data` refuses to start and looks like a broken image — drop that volume only if the major actually changed. Recreate `smooth-project-memory-dev-postgres` once after the image pin so the persistent container is not still running the old image.
+- **Postgres image is the AGE-bearing pin** `docker.io/apache/age:release_PG17_1.7.0` (Postgres 17 + AGE 1.7.0), not Aspire's `library/postgres:17.6`. Same major as the previous default, so the named volume is compatible. A major mismatch against `mimisbrunnr-postgres-data` refuses to start and looks like a broken image — drop that volume only if the major actually changed. Recreate `mimisbrunnr-postgres` once after the image pin so the persistent container is not still running the old image.
 - **Every dev container carries `com.docker.compose.project` / `com.docker.compose.service` labels**
-  so Docker Desktop groups them under the `smooth-project-memory` project while keeping the explicit
-  `smooth-project-memory-dev-*` container names.
+  so Docker Desktop groups them under the `smooth-mímisbrunnr` project while keeping the explicit
+  `mimisbrunnr-*` container names.
 
 ## Resource Names
 
 | Resource | Name | Fixed local port | Container name |
 |---|---|---:|---|
-| PostgreSQL + AGE | `postgres` (`docker.io/apache/age:release_PG17_1.7.0`) | `5432` | `smooth-project-memory-dev-postgres` |
-| Database | `app` | (via `postgres`) | n/a |
-| MinIO (blob) | `blob` | `9000` (s3), `9001` (console) | `smooth-project-memory-dev-blob` |
-| Seq | `seq` | `5341` | `smooth-project-memory-dev-seq` |
+| PostgreSQL + AGE | `postgres` (`docker.io/apache/age:release_PG17_1.7.0`) | `5432` | `mimisbrunnr-postgres` |
+| Database | `SmoothAiProductContextMemory` (physical DB `app`) | (via `postgres`) | n/a |
+| MinIO (blob) | `blob` | `9000` (s3), `9001` (console) | `mimisbrunnr-blob` |
+| Seq | `seq` (volume `mimisbrunnr-seq-data`) | `5341` | `mimisbrunnr-seq` |
 | API project | `host` | `5141` http / `7141` https (from `launchSettings`) | n/a (host process) |
 
 Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgres` — see
@@ -61,14 +74,34 @@ Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgr
   above — a divergence here is invisible until something binds the wrong port.
 - MinIO credentials are committed in `appsettings.Development.json` (local dev only, firewall-isolated).
   Bucket creation is lazy: the storage adapter ensures the bucket exists on first write, so no separate
-  `mc`/init container is required.
+  `mc`/init container is required. The dev bucket is `smooth-mimisbrunnr-memory-well`; renaming it
+  orphans existing objects, because the database stores content addresses that are object keys
+  *within* a bucket — treat any future change as a data migration, not a rename.
 - `Program.cs` is intentionally thin and functionally chains
   `builder.AddSmoothAiProductContextMemoryAppHostResources().Build().Run()`.
 - `DistributedApplicationBuilderExtensions` keeps orchestration split into focused extension methods
   (`AddPostgresResource`, `AddBlobResource`, `AddSeqResource`, `AddHostProject`).
-- OpenTelemetry uses the Aspire dashboard's built-in OTLP endpoint supplied to project resources by the
-  AppHost runtime. Do not override `OTEL_EXPORTER_OTLP_ENDPOINT` from AppHost unless intentionally
-  diverting telemetry away from the dashboard.
+- **Telemetry is consumed, not just offered.** Aspire injects `OTEL_EXPORTER_OTLP_ENDPOINT` into
+  **project** resources automatically and the Host now reads it, so the dashboard's log, trace and
+  metric panes are populated. Do not override that variable here unless intentionally diverting
+  telemetry away from the dashboard. A resource added with `AddContainer` — e.g. a published image
+  instead of the project — does **not** receive it automatically and needs an explicit
+  `.WithOtlpExporter()`.
+- **Seq is kept, deliberately — and the dashboard is the target, not Seq.** The Aspire dashboard is
+  itself an OTLP receiver and needs no help to show logs, traces and metrics; exporting OTel is what
+  makes it work. Seq is retained for one reason only: the dashboard's telemetry store is **in-memory,
+  capacity-bounded and cleared when the AppHost stops**, so an intermittent failure investigated
+  tomorrow is already gone. Seq survives restarts and queries far better. That argument only holds with
+  a **data volume** (`mimisbrunnr-seq-data`), which it now has — previously its persistence
+  claim was false beyond container removal, unlike Postgres and the object store.
+  **Deviation to note:** Seq is fed by the Serilog Seq sink rather than by OTLP ingestion. Seq does
+  accept OTLP directly and that would be the tidier wiring, but Serilog is the authoritative log
+  pipeline here, and routing logs to two OTLP endpoints (dashboard + Seq) needs a second exporter or a
+  collector. Revisit if a collector ever lands.
+- **Seq is fed over `ConnectionStrings:seq`**, which is what `.WithReference(seq)` publishes;
+  `Aspire.Hosting.Seq` defines no `SEQ_URI` variable. The Host's Serilog Seq sink activates on that key.
+- **The `host` resource carries `WithHttpHealthCheck("/health")`**, so the dashboard shows it as healthy
+  only once migrations have completed and PostgreSQL is reachable — not merely once the process starts.
 - Aspire dashboard URL is printed at startup via the `WriteDashboardStartupHint` extension; use Aspire's
   printed `/login?t=...` URL for the first terminal-driven browser visit.
 
@@ -76,6 +109,10 @@ Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgr
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-13 | Dev MinIO bucket renamed `smooth-project-memory` → `smooth-mimisbrunnr-memory-well`. Safe now because the blob volume was reset by the container rename; a later rename would orphan stored objects. | PR #36 |
+| 2026-09-13 | Renamed the dev resources to the Mímisbrunnr brand: group label `smooth-mímisbrunnr` (accented — it is a label), containers and volumes `mimisbrunnr-*` (ASCII — Docker rejects non-ASCII names). The `smooth-project-memory-dev-*` names are gone. Existing containers and volumes are orphaned by the rename and must be removed once. | PR #36 |
+| 2026-09-13 | Seq keep-or-drop decided: **kept** for persistence beyond the dashboard's in-memory store, and given the data volume it never had. Fed by the Serilog Seq sink rather than OTLP ingestion — deviation recorded above. | PR #36 |
+| 2026-09-13 | Named the database resource after the connection-string key the Host reads (`SmoothAiProductContextMemory`, physical DB still `app`) — as `app` it published `ConnectionStrings__app` and the Host died at DI resolve. Added `WithHttpHealthCheck("/health")`. Corrected the OpenTelemetry claim: telemetry now actually reaches the dashboard, and Seq is fed via `ConnectionStrings:seq` (there is no `SEQ_URI`). | PR #36 |
 | 2026-09-13 | Pin Postgres to `docker.io/apache/age:release_PG17_1.7.0` (same major as Aspire 13.3.0's `library/postgres:17.6`). Persistent container must be recreated once so it is not still the old image. | HLD-003 |
 | 2026-09-12 | Pin MinIO to last community release `quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z`. Upstream archived the repo and Docker Hub `minio/minio` is no longer publicly pullable (registry returns UNAUTHORIZED), so images must come from quay.io. | PR #17 |
 | 2026-09-01 | Aligned the blob ports across code, `appsettings.json` and this document (s3 `9000`, console `9001`; the leftover SeaweedFS `8333` is gone), made the console port configurable, registry-qualified the MinIO image for Podman, and corrected the false claim that the blob resource injects `ConnectionStrings:blob`. Docker/Podman startup verified end to end. | — |
