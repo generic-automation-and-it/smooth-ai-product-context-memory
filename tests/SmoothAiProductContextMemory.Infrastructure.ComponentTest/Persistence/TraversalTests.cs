@@ -1,4 +1,5 @@
 using SmoothAiProductContextMemory.Application.Abstractions;
+using SmoothAiProductContextMemory.Application.Common.Retrieval;
 using SmoothAiProductContextMemory.Domain;
 using SmoothAiProductContextMemory.Domain.Entities;
 using SmoothAiProductContextMemory.Infrastructure.Persistence;
@@ -211,6 +212,38 @@ public sealed class TraversalTests : PersistenceTestBase
         open.SelectMany(p => p.Hops)
             .ShouldNotContain(h => h.SourceUuid == hidden.Uuid || h.TargetUuid == hidden.Uuid);
         open.Select(p => p.Endpoint.Uuid).ShouldNotContain(endpoint.Uuid);
+    }
+
+    [Fact]
+    public async Task DeclaringAScope_DoesNotWidenWhatAnIntermediateHopMayDisclose()
+    {
+        MemoryGroup product = await SeedGroupAsync();
+        MemoryGroup programme = await SeedGroupAsync(MemoryGroup.ScopeDimensionValue.Program);
+        Memory source = await SeedMemoryAsync(product.Id, "Source", "Source subject");
+        Memory hidden = await SeedMemoryAsync(programme.Id, "Programme", "Programme subject");
+        Memory endpoint = await SeedMemoryAsync(product.Id, "Endpoint", "Endpoint subject");
+
+        (await Graph.CreateAsync(source.Uuid, hidden.Uuid, MemoryRelation.DependsOn, "programme rationale", Ct))
+            .ShouldBeTrue();
+        (await Graph.CreateAsync(hidden.Uuid, endpoint.Uuid, MemoryRelation.DependsOn, "leads to the decision", Ct))
+            .ShouldBeTrue();
+
+        // Declaring 'product' must not disclose more than declaring nothing. The plan's excluded list is
+        // empty for every explicit dimension, so a gate driven straight off it stops filtering exactly
+        // when the caller narrows — the inverse of the consent model the blob proxy enforces.
+        IReadOnlyList<MemoryPath> declaredProduct = await Traversal.FindPathsAsync(
+            new MemoryPathQuery
+            {
+                SourceUuid = source.Uuid,
+                MaxDepth = 3,
+                RequiredScopeDimension = MemoryGroup.ScopeDimensionValue.Product,
+                ExcludedScopeDimensions =
+                    MemoryScopeFilter.HiddenDimensions(MemoryGroup.ScopeDimensionValue.Product, hasGroupContext: false),
+            },
+            Ct);
+
+        declaredProduct.SelectMany(p => p.Hops)
+            .ShouldNotContain(h => h.SourceUuid == hidden.Uuid || h.TargetUuid == hidden.Uuid);
     }
 
     [Fact]

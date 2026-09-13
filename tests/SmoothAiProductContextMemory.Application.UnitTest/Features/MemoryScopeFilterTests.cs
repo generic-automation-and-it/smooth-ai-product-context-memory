@@ -71,4 +71,59 @@ public class MemoryScopeFilterTests
         inGroup.RequiredDimension.ShouldBeNull();
         inGroup.ExcludedDimensions.ShouldBeEmpty();
     }
+
+    /// <summary>
+    /// Hop visibility is a separate question from endpoint narrowing, and conflating them inverts the
+    /// rule: <see cref="MemoryScopeFilter.Plan"/> returns an empty excluded list for every explicit
+    /// dimension, so a traversal gate driven off it filters nothing exactly when the caller narrows.
+    /// </summary>
+    [Fact]
+    public void HiddenDimensions_never_widen_when_the_caller_narrows()
+    {
+        // Declaring nothing hides programme.
+        MemoryScopeFilter.HiddenDimensions(null, hasGroupContext: false)
+            .ShouldBe([MemoryGroup.ScopeDimensionValue.Program]);
+
+        // Declaring another dimension must hide it too, unlike Plan's excluded list.
+        foreach (string declared in new[]
+                 {
+                     MemoryGroup.ScopeDimensionValue.Product,
+                     MemoryGroup.ScopeDimensionValue.Customer,
+                     MemoryGroup.ScopeDimensionValue.Self,
+                 })
+        {
+            MemoryScopeFilter.HiddenDimensions(declared, hasGroupContext: false)
+                .ShouldBe([MemoryGroup.ScopeDimensionValue.Program]);
+            MemoryScopeFilter.Plan(declared, hasGroupContext: false).ExcludedDimensions.ShouldBeEmpty();
+        }
+    }
+
+    [Fact]
+    public void HiddenDimensions_hides_nothing_once_programme_is_declared_or_in_group()
+    {
+        MemoryScopeFilter.HiddenDimensions(MemoryGroup.ScopeDimensionValue.Program, hasGroupContext: false)
+            .ShouldBeEmpty();
+        MemoryScopeFilter.HiddenDimensions(null, hasGroupContext: true).ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// The hop rule and the single-memory rule must agree about programme, or the traversal and the blob
+    /// proxy would disagree about the same memory.
+    /// </summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData(MemoryGroup.ScopeDimensionValue.Product)]
+    [InlineData(MemoryGroup.ScopeDimensionValue.Customer)]
+    [InlineData(MemoryGroup.ScopeDimensionValue.Self)]
+    [InlineData(MemoryGroup.ScopeDimensionValue.Program)]
+    public void HiddenDimensions_agrees_with_IncludeGroup_about_programme(string? declared)
+    {
+        bool programmeVisibleToHops = !MemoryScopeFilter
+            .HiddenDimensions(declared, hasGroupContext: false)
+            .Contains(MemoryGroup.ScopeDimensionValue.Program, StringComparer.Ordinal);
+        bool programmeVisibleToReads = MemoryScopeFilter.IncludeGroup(
+            MemoryGroup.ScopeDimensionValue.Program, declared, hasGroupContext: false);
+
+        programmeVisibleToHops.ShouldBe(programmeVisibleToReads);
+    }
 }

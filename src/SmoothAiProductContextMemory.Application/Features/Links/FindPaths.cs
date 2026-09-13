@@ -113,7 +113,12 @@ public static class FindPaths
                 Kind = string.IsNullOrWhiteSpace(request.Kind) ? null : request.Kind,
                 Status = string.IsNullOrWhiteSpace(request.Status) ? null : request.Status,
                 RequiredScopeDimension = scope.RequiredDimension,
-                ExcludedScopeDimensions = scope.ExcludedDimensions,
+                // Not scope.ExcludedDimensions: that list is empty for every explicit dimension,
+                // because there RequiredDimension does the narrowing. Endpoints are narrowed by
+                // RequiredScopeDimension; the hops a path crosses need their own visibility rule, or
+                // declaring a scope would disclose more than declaring none.
+                ExcludedScopeDimensions =
+                    MemoryScopeFilter.HiddenDimensions(request.ScopeDimension, hasGroupContext: false),
                 Limit = request.Limit,
             };
 

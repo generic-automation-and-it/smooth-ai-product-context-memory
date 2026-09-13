@@ -23,8 +23,10 @@ HTTP API the context-memory skill consumes — uuid-only wire, Mediator slices, 
   layer refuses an out-of-range depth as well, so a direct caller cannot bypass the validator (HLD-003 LADR-07).
 - **The traversal endpoint is scope-gated at every vertex, not just the two ends.** Traversing *from* a
   programme-scoped memory needs `scopeDimension`, as the blob proxy and version history do (403 otherwise).
-  The endpoints it *reaches* and every intermediate hop it crosses are filtered by the same
-  `MemoryScopeFilter.Plan`, pushed into the composed SQL — a path routed through a hidden memory is dropped,
+  The endpoints it *reaches* are narrowed by `Plan().RequiredDimension`; every intermediate hop it crosses
+  is gated by `MemoryScopeFilter.HiddenDimensions`, **not** by `Plan().ExcludedDimensions` (empty for every
+  explicit dimension, so it would stop filtering exactly when the caller narrows). Both are pushed into the
+  composed SQL — a path routed through a hidden memory is dropped,
   because returning it would disclose that memory's uuid and its edges' reasons. A traversal returns
   descriptive fields, so it is a read path and gets the read path's rule in full.
 - **Never log statement, summary, content, or blob address at Information.** Counts and lifecycle at `Information`, per-operation decisions at `Debug`.
