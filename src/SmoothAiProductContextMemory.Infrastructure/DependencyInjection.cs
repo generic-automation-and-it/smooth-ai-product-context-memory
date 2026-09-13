@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using SmoothAiProductContextMemory.Application.Abstractions;
 using SmoothAiProductContextMemory.Application.Common.Persistence;
+using SmoothAiProductContextMemory.Infrastructure.Export;
 using SmoothAiProductContextMemory.Infrastructure.Persistence;
 using SmoothAiProductContextMemory.Infrastructure.Storage;
 
@@ -15,6 +16,7 @@ public static class DependencyInjection
     {
         services.AddBlobStorage(configuration);
         services.AddPersistence(configuration);
+        services.AddScoped<IMarkdownExportSink, FileSystemMarkdownExportSink>();
         return services;
     }
 

@@ -19,7 +19,7 @@ Updated: 2026-05-09
   - `Infrastructure` implements external concerns (DB, clients, providers).
   - `Host` composes the app and maps HTTP endpoints.
 - Application code is vertical-slice by feature: `Features/<FeatureName>/`.
-- Do not create global `Commands/` or `Queries/` folders in Application.
+- Do not create global `Commands/`, `Queries/`, or `Services/` folders in Application.
 - Keep business rules out of `Host` and `Infrastructure`; place them in `Domain` or Application use-case orchestration where appropriate.
 - Register services through layer extension methods (Host calls `AddApplication()` and `AddInfrastructure()`).
 

@@ -39,10 +39,10 @@ Rules live under `.agents/rules/` as `*.instructions.md`, auto-loaded every sess
 
 | Category | Folder | Contents |
 |----------|--------|----------|
-| _(cross-cutting)_ | `.agents/rules/` | `ai-workflow-rules`, `code-review-standards` (hook-deferred), `project-overview`, `skill-secret-handling` |
+| _(cross-cutting)_ | `.agents/rules/` | `ai-workflow-rules`, `code-review-standards` (hook-deferred), `project-overview`, `skill-secret-handling`, `clean-code`, `solid-principles` |
 | git | `.agents/rules/git/` | `git-policy`, `pr-standards` |
 | meta | `.agents/rules/meta/` | `rules` (file convention), `knowledge-conventional-contexts-quality` (AGENTS.md quality) |
-| backend (`**/*.cs`) | `.agents/rules/backend/` | api-mediator-validation, architecture-slices, backend-logging, external-api-clients, migrations, wiremock-stubbing |
+| backend (`**/*.cs`) | `.agents/rules/backend/` | api-mediator-validation, architecture-slices, backend-logging-conventions, external-api-clients, migrations, readonly-collections, wiremock-stubbing |
 
 ## Build / Test
 
@@ -51,6 +51,8 @@ dotnet build SmoothAiProductContextMemory.slnx                     # build
 dotnet test  SmoothAiProductContextMemory.slnx                     # run all tests
 dotnet run --project src/SmoothAiProductContextMemory.AppHost      # dev Aspire AppHost
 dotnet run --project src/SmoothAiProductContextMemory.ChatHost     # ChatHost standalone (separate from API Host)
+dotnet run --project src/SmoothAiProductContextMemory.Host -- export [--output DIR] [--history] [--force]
+                                                                   # generated Markdown dump of the store (never commit the output)
 ```
 
 Target a single test project (`dotnet test tests/<Project>`) or `ls tests/` to list. **Gotcha:** dev Aspire dashboard at `http://localhost:15278`; first browser visit needs the printed `/login?t=...` URL.
