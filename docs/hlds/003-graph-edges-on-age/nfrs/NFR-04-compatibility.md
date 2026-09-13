@@ -1,6 +1,6 @@
 # NFR-04: Compatibility
 
-**Status:** Draft
+**Status:** Accepted
 
 ## Requirement
 

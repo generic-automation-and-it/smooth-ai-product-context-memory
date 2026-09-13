@@ -7,6 +7,12 @@ EF Core + PostgreSQL index over blob-stored content. **Six** entities: `Initiati
 ## Non-Negotiables
 
 - **Six entities, no more.** The seventh (`MemoryLink`) was dropped deliberately in the HLD 003 cutover — update the guard's literal list **and** `Length.ShouldBe(6)` together, never one. Tags, facets, sources, repositories and tickets stay denormalised. Reintroducing one fails `Infrastructure.UnitTest/ModelShapeGuardTests` by design.
+- **Graph anchor lookups are property predicates, never inline maps.** `MATCH (n:Memory) WHERE n.memory_uuid = x`
+  is served by `ix_memory_vertex_uuid`; `MATCH (n:Memory {memory_uuid: x})` compiles to `properties @>` and
+  sequentially scans the vertex table. `MERGE` cannot be rewritten and has `ix_memory_vertex_properties` (GIN)
+  instead. Both indexes are created by `20260914120000_AddGraphPropertyIndexes` and are invisible to the EF
+  model snapshot, like every other graph object. Writing the wrong form is not a compile error and not a test
+  failure — it is a plan regression, so check `EXPLAIN` (HLD-003 LADR-06).
 - **Domain entities carry no EF attributes** and reference nothing from `Microsoft.EntityFrameworkCore`; all mapping is fluent in `Persistence/Configurations/`.
 - **`MemoryVersion` and `GroupDescription` are append-only**, enforced by DB triggers. Never edit or delete a row in place — a correction is a new version with a higher version number.
 - **Every JSONB element carries its own `v` shape marker** (`{"v":1,"provider":"jira","key":"ACM-1","url":"..."}`). It is set in exactly one place — `JsonShapeDocument.Create`/base `V` property — and never hand-written. Do not bypass the typed model. Retrofitting is impossible.

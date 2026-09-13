@@ -7,6 +7,24 @@
 | L0 | Unit | `*.UnitTest` | None | Isolated logic, no I/O — pure in-process |
 | L1 | Component | `Application.ComponentTest`, `Infrastructure.ComponentTest` | PostgreSQL + MinIO | End-to-end within a layer; real DB and object storage via Aspire |
 | L2 | Integration | `Host.IntegrationTest` | PostgreSQL + MinIO | Full stack via `WebApplicationFactory` + Aspire containers |
+| — | Benchmark | `Infrastructure.ComponentTest` (env-gated) | PostgreSQL | `Nfr02BenchmarkTests` — seeds 3,000 memories / 10,000 edges, measures three traversal shapes and captures `EXPLAIN` for each. Skipped unless `SMOOTH_AGE_BENCH=1`, so the PR gate stays fast |
+| — | Operational | `scripts/` | Docker | Not tests. Backup/restore round-trip and Postgres pre-upgrade checks, run by hand against a container |
+
+### Benchmarks are evidence, not gates
+
+`Nfr02BenchmarkTests` produces figures committed to
+`docs/hlds/003-graph-edges-on-age/nfrs/NFR-02-traversal-measurements.md`. It asserts absolute p95 targets **and
+the query plan**, because at seed volume almost anything is fast: the first run of this benchmark passed its
+10 ms target while sequentially scanning the edge table. A benchmark that checks only wall clock would have
+shipped that.
+
+```bash
+SMOOTH_AGE_BENCH=1 dotnet test tests/SmoothAiProductContextMemory.Infrastructure.ComponentTest \
+    --filter Nfr02BenchmarkTests --logger "console;verbosity=detailed"
+```
+
+It measures through the shipped code path (`IMemoryTraversal`, `IMemoryGraph`) and `EXPLAIN`s the statement
+those methods build — a benchmark that plans a hand-written copy measures the copy.
 
 ## Test Infrastructure
 
