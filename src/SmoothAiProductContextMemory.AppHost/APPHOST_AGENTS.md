@@ -20,9 +20,15 @@ ports/container names.
   add runtime-specific wiring to the AppHost. Container images are **registry-qualified and pinned**
   (`docker.io/apache/age:release_PG17_1.7.0`, `quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z`) because Podman refuses to resolve short names
   non-interactively unless the host's `registries.conf` happens to allow it.
-- **Project-references the Host as `Projects.SmoothAiProductContextMemory_Host`.** The Host stays
-  runnable as a plain `Program` (`WebApplicationFactory<Program>` integration tests must keep working
-  without an AppHost).
+- **Project-references the Host as `Projects.SmoothAiProductContextMemory_Host` by default.** Set
+  `HostConfiguration:Image` (or `HostConfiguration__Image`) to run a published/local Host image
+  instead. Empty keeps the project path. Do not delete `AddProject`. The Host stays runnable as a
+  plain `Program` (`WebApplicationFactory<Program>` integration tests must keep working without an
+  AppHost).
+- **Image-path Host is a container**, named `smooth-project-memory-dev-host`, with the same
+  `com.docker.compose.project` / `com.docker.compose.service` labels as postgres/blob/seq. It injects
+  `ConnectionStrings__SmoothAiProductContextMemory` (the key Infrastructure reads) plus the existing
+  `BlobStorage__*` env vars. Source-path Host wiring is unchanged.
 - **Connection-string keys must match what the Host consumes.** Aspire `.WithReference(db)` injects
   `ConnectionStrings:<resource>` automatically for Postgres and Seq. The blob container is **not** a
   connection-string resource: the Host receives `BlobStorage__Endpoint` (from the blob `s3` endpoint)
@@ -45,6 +51,7 @@ ports/container names.
 | MinIO (blob) | `blob` | `9000` (s3), `9001` (console) | `smooth-project-memory-dev-blob` |
 | Seq | `seq` | `5341` | `smooth-project-memory-dev-seq` |
 | API project | `host` | `5141` http / `7141` https (from `launchSettings`) | n/a (host process) |
+| API image (opt-in) | `host` (`HostConfiguration:Image`) | `5141` | `smooth-project-memory-dev-host` |
 
 Test fixture (separate AppHost) uses `15432` / `project-test-postgres` — see
 `tests/SmoothAiProductContextMemory.TestFramework/TEST_FRAMEWORK_AGENTS.md`.
@@ -65,7 +72,10 @@ Test fixture (separate AppHost) uses `15432` / `project-test-postgres` — see
 - `Program.cs` is intentionally thin and functionally chains
   `builder.AddSmoothAiProductContextMemoryAppHostResources().Build().Run()`.
 - `DistributedApplicationBuilderExtensions` keeps orchestration split into focused extension methods
-  (`AddPostgresResource`, `AddBlobResource`, `AddSeqResource`, `AddHostProject`).
+  (`AddPostgresResource`, `AddBlobResource`, `AddSeqResource`, `AddHostProject` / `AddHostContainer`).
+- `HostConfiguration:Image` is an image:tag (or registry/name:tag). The AppHost splits on the last
+  colon after the last slash so Aspire `AddContainer(name, image, tag)` gets a registry-qualified
+  name. Digest references (`@sha256:`) are not supported.
 - OpenTelemetry uses the Aspire dashboard's built-in OTLP endpoint supplied to project resources by the
   AppHost runtime. Do not override `OTEL_EXPORTER_OTLP_ENDPOINT` from AppHost unless intentionally
   diverting telemetry away from the dashboard.
@@ -76,6 +86,7 @@ Test fixture (separate AppHost) uses `15432` / `project-test-postgres` — see
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-13 | Optional `HostConfiguration:Image` runs the published Host container in the `smooth-project-memory` Docker Desktop group. Source `AddProject` remains default. | release-image |
 | 2026-09-13 | Pin Postgres to `docker.io/apache/age:release_PG17_1.7.0` (same major as Aspire 13.3.0's `library/postgres:17.6`). Persistent container must be recreated once so it is not still the old image. | HLD-003 |
 | 2026-09-12 | Pin MinIO to last community release `quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z`. Upstream archived the repo and Docker Hub `minio/minio` is no longer publicly pullable (registry returns UNAUTHORIZED), so images must come from quay.io. | PR #17 |
 | 2026-09-01 | Aligned the blob ports across code, `appsettings.json` and this document (s3 `9000`, console `9001`; the leftover SeaweedFS `8333` is gone), made the console port configurable, registry-qualified the MinIO image for Podman, and corrected the false claim that the blob resource injects `ConnectionStrings:blob`. Docker/Podman startup verified end to end. | — |

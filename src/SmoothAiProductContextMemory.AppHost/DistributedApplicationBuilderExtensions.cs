@@ -17,6 +17,8 @@ internal static class DistributedApplicationBuilderExtensions
     private const string PostgresContainerName = "smooth-project-memory-dev-postgres";
     private const string BlobContainerName = "smooth-project-memory-dev-blob";
     private const string SeqContainerName = "smooth-project-memory-dev-seq";
+    private const string HostContainerName = "smooth-project-memory-dev-host";
+    private const int DefaultHostPort = 5141;
     private const string PostgresDataVolume = "smooth-project-memory-postgres-data";
     private const string BlobDataVolume = "smooth-project-memory-blob-data";
     // Aspire 13.3.0 defaults to library/postgres:17.6. AGE's PG17 image keeps the same major so the
@@ -74,6 +76,7 @@ internal static class DistributedApplicationBuilderExtensions
                 builder.Configuration.GetValue("BlobConfiguration:Port", DefaultBlobPort),
                 builder.Configuration.GetValue("BlobConfiguration:ConsolePort", DefaultBlobConsolePort),
                 builder.Configuration.GetValue("SeqConfiguration:Port", DefaultSeqPort),
+                builder.Configuration["HostConfiguration:Image"],
                 Path.GetFullPath(Path.Combine(builder.AppHostDirectory, "..", "..")));
         }
 
@@ -136,6 +139,12 @@ internal static class DistributedApplicationBuilderExtensions
             IResourceBuilder<IResourceWithConnectionString> seq,
             AppHostConfiguration configuration)
         {
+            if (!string.IsNullOrWhiteSpace(configuration.HostImage))
+            {
+                builder.AddHostContainer(postgres, blob, seq, configuration);
+                return;
+            }
+
             builder.AddProject<Projects.SmoothAiProductContextMemory_Host>("host")
                 .WithReference(postgres)
                 .WithReference(seq)
@@ -147,6 +156,46 @@ internal static class DistributedApplicationBuilderExtensions
                 .WaitFor(blob)
                 .WaitFor(seq);
         }
+
+        private void AddHostContainer(
+            IResourceBuilder<PostgresDatabaseResource> postgres,
+            IResourceBuilder<ContainerResource> blob,
+            IResourceBuilder<IResourceWithConnectionString> seq,
+            AppHostConfiguration configuration)
+        {
+            (string image, string? tag) = SplitImageReference(configuration.HostImage!);
+            IResourceBuilder<ContainerResource> host = tag is null
+                ? builder.AddContainer("host", image)
+                : builder.AddContainer("host", image, tag);
+
+            host
+                .WithHttpEndpoint(port: DefaultHostPort, targetPort: DefaultHostPort, name: "http")
+                .WithContainerName(HostContainerName)
+                .WithContainerRuntimeArgs(
+                    "--label", $"com.docker.compose.project={DockerDesktopGroupName}",
+                    "--label", $"com.docker.compose.service={HostContainerName}")
+                .WithReference(postgres, connectionName: "SmoothAiProductContextMemory")
+                .WithReference(seq)
+                .WithEnvironment("BlobStorage__Endpoint", blob.GetEndpoint("s3"))
+                .WithEnvironment("BlobStorage__AccessKey", configuration.BlobAccessKey)
+                .WithEnvironment("BlobStorage__SecretKey", configuration.BlobSecretKey)
+                .WithEnvironment("BlobStorage__Bucket", "smooth-project-memory")
+                .WaitFor(postgres)
+                .WaitFor(blob)
+                .WaitFor(seq);
+        }
+    }
+
+    private static (string Image, string? Tag) SplitImageReference(string reference)
+    {
+        int slash = reference.LastIndexOf('/');
+        int colon = reference.LastIndexOf(':');
+        if (colon > slash)
+        {
+            return (reference[..colon], reference[(colon + 1)..]);
+        }
+
+        return (reference, null);
     }
 
     private sealed record AppHostConfiguration(
@@ -157,5 +206,6 @@ internal static class DistributedApplicationBuilderExtensions
         int BlobPort,
         int BlobConsolePort,
         int SeqPort,
+        string? HostImage,
         string RepoRoot);
 }
