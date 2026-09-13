@@ -22,7 +22,7 @@ on:
 
 concurrency:
   group: publish-image-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'push' }}
 
 permissions:
   contents: read
