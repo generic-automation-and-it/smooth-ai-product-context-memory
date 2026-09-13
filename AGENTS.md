@@ -51,7 +51,10 @@ Rules live under `.agents/rules/` as `*.instructions.md`, auto-loaded every sess
 ```bash
 dotnet build SmoothAiProductContextMemory.slnx                     # build
 dotnet test  SmoothAiProductContextMemory.slnx                     # run all tests
-dotnet run --project src/SmoothAiProductContextMemory.AppHost      # dev Aspire AppHost
+dotnet run --project src/SmoothAiProductContextMemory.AppHost      # dev Aspire AppHost (source Host)
+HostConfiguration__Image=ghcr.io/generic-automation-and-it/smooth-ai-product-context-memory:latest \
+  dotnet run --project src/SmoothAiProductContextMemory.AppHost    # same stack, published Host image
+docker build -t smooth-ai-product-context-memory:local .           # Host image (see docs/wiki/docker.md)
 dotnet run --project src/SmoothAiProductContextMemory.ChatHost     # ChatHost standalone (separate from API Host)
 dotnet run --project src/SmoothAiProductContextMemory.Host -- export [--output DIR] [--history] [--force]
                                                                    # generated Markdown dump of the store (never commit the output)
@@ -72,6 +75,7 @@ Shared fixtures in `tests/SmoothAiProductContextMemory.TestFramework/`; Aspire d
 ## CI/CD
 
 - **PR gate** — `.github/workflows/pr-gate.yml` (PR→main, push→main, dispatch): restore → build (Release) → Aspire-backed test with coverage via local action `.github/actions/aspire-test-with-coverage`, then publish + upload coverage. Full step list, ports, timings, local tools: `docs/wiki/ci.md`.
+- **Publish image** — `.github/workflows/publish-image.yml` (push→main `:latest`, `v*` semver, dispatch pre-release never `:latest`). Multi-arch GHCR. Does not run on PRs. Run contract: `docs/wiki/docker.md`.
 - **AI PR review** — `.github/workflows/pipeline-code-review-report.yml` is a thin caller for the `smooth-ai-report-review` reusable workflow; posts an OpenCode review report on PRs (opened/synchronize/reopened/ready_for_review, `/ai-review` comment, dispatch). `.github/workflows/pipeline-ai-analyse.yml` runs after it, auto-fixes 🟡 Medium / 🔵 Low findings (bounded by `OPENCODE_ANALYSE_MAX_INCREMENTAL`). Both need org-level `OPENCODE_*` secrets/variables (provider OpenAI). Local-only consumer skill at `.agents/skills/ai-review`; report *generator* stays remote. To commit+push a branch so the pushed PR gets a **full** review, use `/git-commit-review-push` (`.agents/skills/git-commit-review-push`) — embeds `/ai-review` in the last commit.
 
 ## Git Constraints

@@ -127,6 +127,7 @@ Target a single test project directly when iterating, e.g. `dotnet test tests/Sm
 ```bash
 dotnet run --project src/SmoothAiProductContextMemory.AppHost   # Aspire: Postgres + MinIO + Seq + the API
 dotnet run --project src/SmoothAiProductContextMemory.Host      # start the API on its own
+docker build -t smooth-ai-product-context-memory:local .        # Host image; run contract in docs/wiki/docker.md
 ```
 
 Aspire uses Docker by default. To run the same AppHost on Podman, start the machine and set the runtime:
