@@ -51,16 +51,16 @@ Rules live under `.agents/rules/` as `*.instructions.md`, auto-loaded every sess
 ```bash
 dotnet build SmoothAiProductContextMemory.slnx                     # build
 dotnet test  SmoothAiProductContextMemory.slnx                     # run all tests
-dotnet run --project src/SmoothAiProductContextMemory.AppHost      # dev Aspire AppHost (source Host)
-HostConfiguration__Image=ghcr.io/generic-automation-and-it/smooth-ai-product-context-memory:latest \
-  dotnet run --project src/SmoothAiProductContextMemory.AppHost    # same stack, published Host image
+dotnet run --project src/SmoothAiProductContextMemory.AppHost      # Aspire: pull Host image + postgres/blob/seq (group mimisbrunnr)
+HostConfiguration__UseProject=true \
+  dotnet run --project src/SmoothAiProductContextMemory.AppHost    # same stack, compile Host from source
 docker build -t smooth-ai-product-context-memory:local .           # Host image (see docs/wiki/docker.md)
 dotnet run --project src/SmoothAiProductContextMemory.ChatHost     # ChatHost standalone (separate from API Host)
 dotnet run --project src/SmoothAiProductContextMemory.Host -- export [--output DIR] [--history] [--force]
                                                                    # generated Markdown dump of the store (never commit the output)
 ```
 
-Target a single test project (`dotnet test tests/<Project>`) or `ls tests/` to list. **Gotcha:** dev Aspire dashboard at `http://localhost:15278`; first browser visit needs the printed `/login?t=...` URL. After the AGE image pin, recreate persistent Postgres containers once (`smooth-project-memory-dev-postgres`, `project-test-postgres`) — `ContainerLifetime.Persistent` keeps the previous image until the container is removed. Same Postgres major (17) as Aspire's old default, so the named data volume is compatible.
+Target a single test project (`dotnet test tests/<Project>`) or `ls tests/` to list. **Gotcha:** dev Aspire dashboard at `http://localhost:15278`; first browser visit needs the printed `/login?t=...` URL. After the AGE image pin, recreate persistent Postgres containers once (`mimisbrunnr-postgres`, `project-test-postgres`) — `ContainerLifetime.Persistent` keeps the previous image until the container is removed. Same Postgres major (17) as Aspire's old default, so the named data volume is compatible. The 2026-09-13 rename from `smooth-project-memory-*` starts a new volume.
 
 ## Test Framework
 

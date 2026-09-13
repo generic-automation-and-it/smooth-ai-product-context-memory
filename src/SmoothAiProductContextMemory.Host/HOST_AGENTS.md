@@ -29,7 +29,7 @@ Approved release-image plan (2026-09-13):
 
 1. Repo-root multi-stage Dockerfile: copy CPM props + `NuGet.Config` + Host graph csprojs, restore, copy sources, publish; runtime `aspnet:10.0-alpine`, non-root, OCI labels, `ENTRYPOINT` the Host binary.
 2. `.github/workflows/publish-image.yml` mirrors smooth-llm-imposter: GHCR, QEMU+Buildx, metadata tags, GHA cache per workflow+ref, `linux/amd64,linux/arm64`. No `pull_request` trigger. Dispatch never tags `latest`.
-3. AppHost `HostConfiguration:Image` opt-in; default remains `AddProject`. Image path names `smooth-project-memory-dev-host` and applies Docker Desktop group labels. Inject `ConnectionStrings__SmoothAiProductContextMemory`.
+3. AppHost default is the published Host image (`HostConfiguration:Image`). Container `mimisbrunnr-host` in Docker Desktop group `mimisbrunnr`. `UseProject=true` keeps `AddProject`. Inject `ConnectionStrings__SmoothAiProductContextMemory`. AppHost is not published.
 4. Run contract in `docs/wiki/docker.md`, verified by executing the documented build.
 
 ## Changelog

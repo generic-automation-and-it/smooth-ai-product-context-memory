@@ -1,9 +1,12 @@
 # Host container image
 
-Reproducible Host image for machines without a .NET SDK. The AppHost stays the
-dev orchestrator and is **not** containerised. Default local run is still
-`dotnet run --project src/SmoothAiProductContextMemory.AppHost` (project
-reference). This image is an alternative.
+Reproducible **Host** image (`src/SmoothAiProductContextMemory.Host`). The
+**AppHost is not published** — it is the local Aspire orchestrator. Starting
+`dotnet run --project src/SmoothAiProductContextMemory.AppHost` pulls this
+image and starts postgres/blob/seq in the `mimisbrunnr` Docker Desktop group.
+
+`HostConfiguration:UseProject=true` compiles Host from source instead (SDK
+required).
 
 **Base pairing:** `mcr.microsoft.com/dotnet/sdk:10.0-alpine` (build) and
 `mcr.microsoft.com/dotnet/aspnet:10.0-alpine` (runtime). Bump both together.
@@ -32,14 +35,16 @@ mount a host directory and pass `--output`.
 
 ## Docker Desktop group
 
-Standalone `docker run` and the AppHost image path both apply:
+Brand is **Mímisbrunnr**. Docker names are ASCII (`í` is illegal), so the
+compose project and container prefix are `mimisbrunnr`.
 
-- container name `smooth-project-memory-dev-host`
-- label `com.docker.compose.project=smooth-project-memory`
-- label `com.docker.compose.service=smooth-project-memory-dev-host`
+Standalone `docker run` and the AppHost Host container both apply:
 
-so the API sits in the same Docker Desktop group as
-`smooth-project-memory-dev-{postgres,blob,seq}`.
+- container name `mimisbrunnr-host`
+- label `com.docker.compose.project=mimisbrunnr`
+- label `com.docker.compose.service=mimisbrunnr-host`
+
+Siblings: `mimisbrunnr-{postgres,blob,seq}`.
 
 ## Build locally
 
@@ -62,9 +67,9 @@ inside the container** (`host.docker.internal` on Docker Desktop).
 
 ```bash
 docker run --rm \
-  --name smooth-project-memory-dev-host \
-  --label com.docker.compose.project=smooth-project-memory \
-  --label com.docker.compose.service=smooth-project-memory-dev-host \
+  --name mimisbrunnr-host \
+  --label com.docker.compose.project=mimisbrunnr \
+  --label com.docker.compose.service=mimisbrunnr-host \
   -p 5141:5141 \
   -e ConnectionStrings__SmoothAiProductContextMemory='Host=host.docker.internal;Port=5432;Database=app;Username=postgres;Password=LocalMachineAccessNoInterestingDataDev#Passw0rd!FirewallNotExposed' \
   -e BlobStorage__Endpoint='http://host.docker.internal:9000' \
@@ -81,9 +86,9 @@ Probe: `http://localhost:5141/openapi/v1.json` (there is no in-image healthcheck
 
 ```bash
 docker run --rm \
-  --name smooth-project-memory-dev-host \
-  --label com.docker.compose.project=smooth-project-memory \
-  --label com.docker.compose.service=smooth-project-memory-dev-host \
+  --name mimisbrunnr-host \
+  --label com.docker.compose.project=mimisbrunnr \
+  --label com.docker.compose.service=mimisbrunnr-host \
   -v "$(pwd)/.context/export:/export" \
   -e ConnectionStrings__SmoothAiProductContextMemory='Host=host.docker.internal;Port=5432;Database=app;Username=postgres;Password=LocalMachineAccessNoInterestingDataDev#Passw0rd!FirewallNotExposed' \
   -e BlobStorage__Endpoint='http://host.docker.internal:9000' \
@@ -99,17 +104,26 @@ replace `ENTRYPOINT` with a baked `dotnet …` web command.
 
 ## AppHost consumption
 
-Source-based Host remains the default. To run the published (or local) image
-instead:
+Default: AppHost **pulls** `ghcr.io/generic-automation-and-it/smooth-ai-product-context-memory:latest`
+and starts `mimisbrunnr-{host,postgres,blob,seq}`.
+
+```bash
+dotnet run --project src/SmoothAiProductContextMemory.AppHost
+```
+
+Local image instead of GHCR:
 
 ```bash
 HostConfiguration__Image=smooth-ai-product-context-memory:local \
   dotnet run --project src/SmoothAiProductContextMemory.AppHost
 ```
 
-or set `HostConfiguration:Image` in AppHost user secrets. Empty / omitted keeps
-`AddProject`. Wiring (postgres + blob + seq, `BlobStorage__*`, `WaitFor`,
-Docker Desktop group labels) is shared.
+Source Host (needs the SDK):
+
+```bash
+HostConfiguration__UseProject=true \
+  dotnet run --project src/SmoothAiProductContextMemory.AppHost
+```
 
 The container path injects `ConnectionStrings__SmoothAiProductContextMemory`
 (the key `AddInfrastructure` reads). That override is container-only.
@@ -143,7 +157,7 @@ Executed, not inferred:
 | `docker run … image export --help` | prints System.CommandLine help (args reach `Program`) |
 | API against AppHost postgres+blob | `GET /openapi/v1.json` → **200**, OpenAPI 3.1.1, 11 paths; listening `http://[::]:5141` |
 | `export --output /export` (empty store) | writes marker `.context-memory-export`; 0 files |
-| Docker Desktop labels | `com.docker.compose.project=smooth-project-memory`, `service=smooth-project-memory-dev-host` |
+| Docker Desktop labels | `com.docker.compose.project=mimisbrunnr`, `service=mimisbrunnr-host` (verified under previous `smooth-project-memory` names; rename is the same label mechanism) |
 | Multi-arch manifest | **not** verified locally — CI `build-push-action` platforms `linux/amd64,linux/arm64`; inspect GHCR after first publish |
 | Dispatch never `:latest` | encoded in workflow `enable=` on the `latest` tag; confirm on first `workflow_dispatch` |
 

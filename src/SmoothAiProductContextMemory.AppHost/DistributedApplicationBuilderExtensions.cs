@@ -13,14 +13,17 @@ internal static class DistributedApplicationBuilderExtensions
     // docker.io/minio/minio is no longer publicly pullable; quay.io hosts the last community releases.
     private const string BlobImage = "quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z";
     private const int DefaultSeqPort = 5341;
-    private const string DockerDesktopGroupName = "smooth-project-memory";
-    private const string PostgresContainerName = "smooth-project-memory-dev-postgres";
-    private const string BlobContainerName = "smooth-project-memory-dev-blob";
-    private const string SeqContainerName = "smooth-project-memory-dev-seq";
-    private const string HostContainerName = "smooth-project-memory-dev-host";
+    // Docker names are ASCII. Product brand is Mímisbrunnr; the compose project and
+    // container prefix drop the acute (í is not a valid container-name character).
+    private const string DockerDesktopGroupName = "mimisbrunnr";
+    private const string PostgresContainerName = "mimisbrunnr-postgres";
+    private const string BlobContainerName = "mimisbrunnr-blob";
+    private const string SeqContainerName = "mimisbrunnr-seq";
+    private const string HostContainerName = "mimisbrunnr-host";
     private const int DefaultHostPort = 5141;
-    private const string PostgresDataVolume = "smooth-project-memory-postgres-data";
-    private const string BlobDataVolume = "smooth-project-memory-blob-data";
+    private const string PostgresDataVolume = "mimisbrunnr-postgres-data";
+    private const string BlobDataVolume = "mimisbrunnr-blob-data";
+    private const string DefaultHostImage = "ghcr.io/generic-automation-and-it/smooth-ai-product-context-memory:latest";
     // Aspire 13.3.0 defaults to library/postgres:17.6. AGE's PG17 image keeps the same major so the
     // persistent data volume stays compatible. Pairing recorded in HLD 003 / NFR-04.
     // Keep this pin identical to tests/SmoothAiProductContextMemory.TestFramework.Aspire.
@@ -68,6 +71,12 @@ internal static class DistributedApplicationBuilderExtensions
                     : value;
             }
 
+            string? hostImage = builder.Configuration["HostConfiguration:Image"];
+            if (string.IsNullOrWhiteSpace(hostImage))
+            {
+                hostImage = DefaultHostImage;
+            }
+
             return new AppHostConfiguration(
                 PostgresPassword(),
                 builder.Configuration.GetValue("PostgresConfiguration:Port", DefaultPostgresPort),
@@ -76,7 +85,8 @@ internal static class DistributedApplicationBuilderExtensions
                 builder.Configuration.GetValue("BlobConfiguration:Port", DefaultBlobPort),
                 builder.Configuration.GetValue("BlobConfiguration:ConsolePort", DefaultBlobConsolePort),
                 builder.Configuration.GetValue("SeqConfiguration:Port", DefaultSeqPort),
-                builder.Configuration["HostConfiguration:Image"],
+                builder.Configuration.GetValue("HostConfiguration:UseProject", false),
+                hostImage,
                 Path.GetFullPath(Path.Combine(builder.AppHostDirectory, "..", "..")));
         }
 
@@ -139,7 +149,7 @@ internal static class DistributedApplicationBuilderExtensions
             IResourceBuilder<IResourceWithConnectionString> seq,
             AppHostConfiguration configuration)
         {
-            if (!string.IsNullOrWhiteSpace(configuration.HostImage))
+            if (!configuration.UseProject)
             {
                 builder.AddHostContainer(postgres, blob, seq, configuration);
                 return;
@@ -163,10 +173,15 @@ internal static class DistributedApplicationBuilderExtensions
             IResourceBuilder<IResourceWithConnectionString> seq,
             AppHostConfiguration configuration)
         {
-            (string image, string? tag) = SplitImageReference(configuration.HostImage!);
+            (string image, string? tag) = SplitImageReference(configuration.HostImage);
             IResourceBuilder<ContainerResource> host = tag is null
                 ? builder.AddContainer("host", image)
                 : builder.AddContainer("host", image, tag);
+
+            if (configuration.HostImage.StartsWith("ghcr.io/", StringComparison.OrdinalIgnoreCase))
+            {
+                host = host.WithImagePullPolicy(ImagePullPolicy.Always);
+            }
 
             host
                 .WithHttpEndpoint(port: DefaultHostPort, targetPort: DefaultHostPort, name: "http")
@@ -206,6 +221,7 @@ internal static class DistributedApplicationBuilderExtensions
         int BlobPort,
         int BlobConsolePort,
         int SeqPort,
-        string? HostImage,
+        bool UseProject,
+        string HostImage,
         string RepoRoot);
 }
