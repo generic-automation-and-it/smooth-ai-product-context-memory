@@ -10,13 +10,14 @@ the receipt it renders. Intent and goals in [README.md](./README.md); decisions 
 [./diagrams/c4-context.md](./diagrams/c4-context.md). Storage is HLD 001. The business requirements
 this pipeline answers are in [BRD 001](../../brd/001-context-memory/): principally BR-01 (capture is a
 byproduct of work, ranked there as the single most important requirement), BR-02 (no mid-task
-interruption), BR-03 (sensitive material never stored), BR-10 (conflicts surfaced, not resolved),
+interruption), BR-03 (sensitive material never stored), BR-10 (rule-resolvable disagreements settled
+by stated authority; genuine conflicts surfaced, not resolved),
 BR-14 (every change reportable) and BR-15 (gaps visible).
 
 ## Non-Negotiables
 
 - **BR-01 outranks every other requirement this pipeline serves.** Any stage that introduces upkeep the practitioner must remember to perform fails the BRD outright, however well it satisfies the rest. Sequencing and batching decisions are made against that constraint first.
-- **This document owns the *when* of link derivation (LADR-05); the BRD's BR-11 does not name one.** That silence is why three prior trials produced zero links unnoticed — do not read the gap as licence to defer derivation to a later phase.
+- **This document owns the mechanics of link derivation (LADR-05); BR-11 fixes the *when* at the capture checkpoint.** BR-11 originally named no moment, which is why three prior trials produced zero links unnoticed — the checkpoint clause exists precisely to prevent deferring derivation to a later phase.
 - **Do not re-sequence the five stages.** Ordering is the design. Redaction after the body write is useless; deduplication after the write cannot change the write decision (LADR-01).
 - **Redaction runs before anything reaches storage.** Objects are immutable and content-addressed — after the write there is no remedy, only orphaning (LADR-02).
 - **Never log the matched span, the secret, or memory content** — not in diagnostics, not in the digest. Rule name and candidate only (LADR-03, NFR-01).
@@ -73,3 +74,4 @@ Targets and verification live in [./nfrs/](./nfrs/). Three shape how code is wri
 |:-----|:-------|:----|
 | 2026-09-13 | Created — converted from ADR-0003. | ADR-0003 |
 | 2026-09-13 | Added the upstream BRD as cited business authority, BR-01 primacy, and this HLD's ownership of link-derivation timing where BR-11 is silent. | BRD 001 |
+| 2026-09-13 | Synced with BRD second amendment: BR-10 now states authority ranking; BR-11 fixes link proposal at the capture checkpoint. | BRD 001 |
