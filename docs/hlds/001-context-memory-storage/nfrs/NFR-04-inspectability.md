@@ -1,6 +1,6 @@
 # NFR-04: Inspectability
 
-**Status:** Draft
+**Status:** Accepted
 
 ## Requirement
 

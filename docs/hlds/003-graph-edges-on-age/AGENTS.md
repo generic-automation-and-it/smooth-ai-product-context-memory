@@ -20,7 +20,7 @@ for.
 - **Never delete a memory without removing its edges in the same transaction.** No foreign key cascades into the graph; a two-statement delete outside one transaction can strand orphan edges (LADR-05).
 - **Never create a relationship without first checking it does not exist.** No unique constraint exists over edges; uniqueness is a read-before-write, and the same pair holding *different* relations remains valid (LADR-05).
 - **Never mirror trackers, repositories or agile hierarchy into the graph.** Those are trees with an authoritative upstream; a copy needs syncing and syncing is a separate product (README, Guiding Principle).
-- **LADRs are Draft.** Flag a deviation and raise it; do not silently override.
+- **LADRs are Accepted.** Flag a deviation and raise it; do not silently override.
 
 ## Architecture Decisions
 
@@ -66,6 +66,7 @@ operability and compatibility. Two shape how code is written rather than merely 
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-13 | LADRs 01–05 and NFR-01 Accepted — cutover + `LinkTests` + pool-recycle shipped. NFR-02/03/04 stay Draft until measured. | HLD-003 |
 | 2026-09-13 | Cutover: `memory_link` replaced by `:LINKS` edges; identity-only vertices; delete trigger; uniqueness read-before-write. Open relation vocabulary. | HLD-003 |
 | 2026-09-13 | Recorded that the AGE search path shifts `current_schema()` to `ag_catalog`, which broke EF's migrations-history lookup and made every restart after the first re-apply migrations. History table pinned to `public`. | HLD-003 |
 | 2026-09-13 | Characterised the relational uniqueness/integrity contract in `LinkTests` before cutover. No production change. | HLD-003 |

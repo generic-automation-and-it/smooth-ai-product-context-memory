@@ -1,6 +1,6 @@
 # LADR-03: Replace the relationship table outright; never dual-write
 
-**Status:** Draft
+**Status:** Accepted
 
 ## Context
 

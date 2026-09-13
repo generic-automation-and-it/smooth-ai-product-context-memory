@@ -1,6 +1,6 @@
 # LADR-01: Adopt Apache AGE in the existing Postgres for relationship storage
 
-**Status:** Draft
+**Status:** Accepted
 
 ## Context
 
@@ -43,10 +43,7 @@ It is not adopted as a general modelling tool, and no existing relational concer
 - The database image becomes a specific published image rather than the orchestrator's default, which couples upgrades to the extension's support matrix (see NFR-04).
 - Schema is no longer fully described by the ORM's migration model; graph objects are created by explicit statements and are invisible to the model snapshot.
 - The .NET driver situation is community-maintained rather than first-party, so relationship access is written against the database driver directly rather than through the ORM.
-
-## Open
-
-- Whether the published extension image or a derived image is used — resolved by NFR-03 verification during prototyping.
+- The published image `docker.io/apache/age:release_PG17_1.7.0` is the pairing — not a derived image (NFR-04).
 
 ## Related
 

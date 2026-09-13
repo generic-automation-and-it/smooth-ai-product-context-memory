@@ -1,6 +1,6 @@
 # NFR-01: Integrity
 
-**Status:** Draft
+**Status:** Accepted
 
 ## Requirement
 

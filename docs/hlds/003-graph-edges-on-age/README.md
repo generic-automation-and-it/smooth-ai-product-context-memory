@@ -124,11 +124,11 @@ decision — a horizontal concern spanning this HLD. See [`./ladrs/`](./ladrs/).
 
 | LADR | Decision | Status |
 |------|----------|--------|
-| [LADR-01](./ladrs/LADR-01-adopt-age-for-relationships.md) | Adopt Apache AGE in the existing Postgres for relationship storage | Draft |
-| [LADR-02](./ladrs/LADR-02-edges-only-thin-vertices.md) | Vertices carry identity only; all properties stay relational | Draft |
-| [LADR-03](./ladrs/LADR-03-replace-not-dual-write.md) | Replace the relationship table outright; never dual-write | Draft |
-| [LADR-04](./ladrs/LADR-04-connection-session-initialisation.md) | Initialise the AGE session per physical connection | Draft |
-| [LADR-05](./ladrs/LADR-05-edge-integrity-as-invariant.md) | Edge integrity becomes an enforced application invariant | Draft |
+| [LADR-01](./ladrs/LADR-01-adopt-age-for-relationships.md) | Adopt Apache AGE in the existing Postgres for relationship storage | Accepted |
+| [LADR-02](./ladrs/LADR-02-edges-only-thin-vertices.md) | Vertices carry identity only; all properties stay relational | Accepted |
+| [LADR-03](./ladrs/LADR-03-replace-not-dual-write.md) | Replace the relationship table outright; never dual-write | Accepted |
+| [LADR-04](./ladrs/LADR-04-connection-session-initialisation.md) | Initialise the AGE session per physical connection | Accepted |
+| [LADR-05](./ladrs/LADR-05-edge-integrity-as-invariant.md) | Edge integrity becomes an enforced application invariant | Accepted |
 
 ## Non-Functional Requirements
 
@@ -137,7 +137,7 @@ target, a verification mechanism, and acceptance criteria. See [`./nfrs/`](./nfr
 
 | NFR | Attribute | Target (summary) | Status |
 |-----|-----------|------------------|--------|
-| [NFR-01](./nfrs/NFR-01-referential-integrity.md) | Integrity | Zero orphan edges; zero duplicate edges | Draft |
+| [NFR-01](./nfrs/NFR-01-referential-integrity.md) | Integrity | Zero orphan edges; zero duplicate edges | Accepted |
 | [NFR-02](./nfrs/NFR-02-traversal-performance.md) | Performance | Depth-3 bounded path p95 ≤ 50 ms at 10k edges | Draft — one-hop baseline recorded in [NFR-02-one-hop-baseline.md](./nfrs/NFR-02-one-hop-baseline.md) |
 | [NFR-03](./nfrs/NFR-03-operability.md) | Operability | No added container; one backup; one-command start | Draft |
 | [NFR-04](./nfrs/NFR-04-compatibility.md) | Compatibility | Extension must not pin us below a supported Postgres | Draft — pairing recorded in [NFR-04-version-pairing.md](./nfrs/NFR-04-version-pairing.md) |

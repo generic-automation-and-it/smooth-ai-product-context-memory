@@ -1,6 +1,6 @@
 # LADR-02: Vertices carry identity only; all properties stay relational
 
-**Status:** Draft
+**Status:** Accepted
 
 ## Context
 

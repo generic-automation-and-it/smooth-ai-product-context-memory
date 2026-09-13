@@ -1,6 +1,6 @@
 # LADR-04: Initialise the AGE session per physical connection
 
-**Status:** Draft
+**Status:** Accepted
 
 ## Context
 
@@ -44,10 +44,7 @@ initialiser runs for every connection, not merely the first.
 - The data source acquires a required construction step; a code path that builds a connection without it will fail on first graph use, which the pool-recycling test is designed to catch.
 - Migrations gain a category of statement that must not be transaction-wrapped, which is unusual enough to warrant an explicit comment where it occurs.
 - Ordering matters at install time: the extension must be created before other roles are granted schema-creation rights, or its catalog schema can be pre-created under the wrong owner and the install refuses.
-
-## Open
-
-- Whether the initialiser is sufficient for tooling that opens its own connections outside the data source — resolved during prototyping by running the migration and the export path against a recycled pool.
+- Migration and export share the pooled data source; `AgeFoundationTests` pool-recycle covers every connection, not just the first.
 
 ## Related
 
