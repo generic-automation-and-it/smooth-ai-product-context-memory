@@ -55,10 +55,10 @@ public partial class CutoverMemoryLinksToAge : Migration
                     -- so values are interpolated. Uuids are %L (charset-safe). relation/reason
                     -- are Cypher-escaped then injected with %s — %L emits SQL E'...' / doubled
                     -- quotes, which are not Cypher string syntax.
-                    IF position('$age_copy$' in rec.relation) > 0
+                    IF position('$' || 'age_copy' || '$' in rec.relation) > 0
                        OR position('$q$' in rec.relation) > 0
                        OR position('$cypher$' in rec.relation) > 0
-                       OR position('$age_copy$' in rec.reason) > 0
+                       OR position('$' || 'age_copy' || '$' in rec.reason) > 0
                        OR position('$q$' in rec.reason) > 0
                        OR position('$cypher$' in rec.reason) > 0 THEN
                         RAISE EXCEPTION
