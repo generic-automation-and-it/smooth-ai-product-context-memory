@@ -13,7 +13,7 @@ The extension must not become the reason the database cannot be upgraded.
 
 ## Verification
 
-- Record the Postgres major version and extension version in the HLD folder at adoption, and update on every change to either.
+- Record the Postgres major version and extension version in the HLD folder at adoption, and update on every change to either. Current pairing: [NFR-04-version-pairing.md](./NFR-04-version-pairing.md).
 - A documented pre-upgrade check compares the intended Postgres major against the extension's supported set; this is a checklist item on the upgrade path, not a runtime assertion.
 - Restore a backup taken on the current minor into a newer minor, then run a traversal. Failure blocks the upgrade.
 

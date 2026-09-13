@@ -38,6 +38,7 @@ See [./ladrs/](./ladrs/).
 - **Install ordering matters.** The extension must be created before other roles gain schema-creation rights, or its catalog schema can be pre-created under the wrong owner and installation refuses.
 - **Traversal returns identities, never content.** Answering what those memories say requires selecting the relational rows — one composed query, since SQL and Cypher share the session.
 - **The entity-count guard changes by one.** Removing the relationship entity is expected and is updated deliberately in the same change; it is not a test to weaken when it fails.
+- **WT-01 is additive.** The extension, empty `memory_graph`, vertex label `Memory`, and the five relation edge labels exist; `memory_link` is still the relationship store. Do not write or read edges yet.
 
 ## Quality Constraints
 
@@ -49,12 +50,13 @@ operability and compatibility. Two shape how code is written rather than merely 
 
 ## Migration Plans
 
-- The relational relationship table is dropped in the same change that creates the graph; existing rows are carried over in that migration (LADR-03).
+- The relational relationship table is dropped in the same change that creates the graph; existing rows are carried over in that migration (LADR-03). **Not yet:** WT-01 created the empty graph beside `memory_link`.
 - Reversal is a corrective migration restoring the table — there is no fallback flag, by design.
-- The database image becomes an explicitly pinned extension-bearing image rather than the orchestration default, in both the development and test hosts.
+- The database image is `docker.io/apache/age:release_PG17_1.7.0` (Postgres 17 + AGE 1.7.0) in both the development and test hosts. Pairing: [nfrs/NFR-04-version-pairing.md](./nfrs/NFR-04-version-pairing.md).
 
 ## Changelog
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-13 | WT-01 shipped: AGE image pin, per-connection init, empty graph + labels, relational one-hop baseline. `memory_link` untouched. | HLD-003 WT-01 |
 | 2026-09-14 | Created — edges-only graph adoption, five LADRs, four NFRs, C1 + ER + sequence diagrams. | Amends HLD 001 |
