@@ -17,7 +17,7 @@ public sealed class LinkTests : PersistenceTestBase
     private IMemoryGraph Graph => new NpgsqlMemoryGraph(Db);
 
     [Fact]
-    public async Task Link_PersistsWithReason_AndReverseLookupByTargetIsIndexServed()
+    public async Task Link_PersistsWithReason_AndReverseLookupByTarget()
     {
         var (source, target) = await SeedPairAsync();
 
