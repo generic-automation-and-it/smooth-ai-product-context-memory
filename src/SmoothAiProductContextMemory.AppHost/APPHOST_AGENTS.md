@@ -170,7 +170,9 @@ Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgr
 - **Date:** 2026-09-13 · **Status:** Accepted
 - **Context:** `mimisbrunnr-*` matches `mimisbrunnr-testcontainer-*`. A careless glob kills the test fixtures.
 - **Decision:** Exact container and volume names copied from this AppHost. Refuse if
-  `com.docker.compose.project` is not `smooth-mímisbrunnr`.
+  `com.docker.compose.project` is not `smooth-mímisbrunnr` (containers only — Aspire-created
+  named volumes carry no compose label, so `remove_volume` protects them via the exact-name
+  allowlist instead).
 - **Consequences:** An unlabeled leftover occupying a allowlisted name fails loud (correct). Names must
   stay in sync with the C# constants; a rename here is a rename in the scripts.
 
@@ -193,6 +195,7 @@ Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgr
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-13 | Corrected LADR-003: the compose-label refusal is enforced by `remove_container` only — Aspire-created named volumes carry no compose label, so `remove_volume` protects them via the exact-name allowlist. | ai-analyse |
 | 2026-09-13 | Documented Persistent leftover after AppHost exit. Startup hint names `scripts/stop-dev-stack.sh` (keep data) and `scripts/reset-dev-stack.sh` (destroy volumes). Allowlist, never a `mimisbrunnr-*` glob. | AppHost teardown |
 | 2026-09-13 | Default AppHost run compiles Host from the working tree; published-image path is opt-in (`UseProject=false`) and announced so a lagging GHCR tag cannot look like current source. | APPHOST_AGENTS.md |
 | 2026-09-13 | Runtime blob container renamed `mimisbrunnr-blob` → `mimisbrunnr-blob-well` (volume `mimisbrunnr-blob-well-data`). Tests stay `mimisbrunnr-testcontainer-blob`. Old volume is orphaned. | release-image |
