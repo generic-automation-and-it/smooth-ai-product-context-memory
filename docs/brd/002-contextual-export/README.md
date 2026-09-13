@@ -13,7 +13,7 @@
 > choices, no data structures and no implementation detail — those live in the HLDs.
 >
 > It **extends BRD-001** rather than replacing it. Requirement numbering continues BRD-001's space
-> (`BR-18` onwards): one product, one requirement vocabulary. Every requirement below is either new,
+> (`BR-18` … `BR-36`): one product, one requirement vocabulary. Every requirement below is either new,
 > or an explicitly named extension of an existing `BR-NN`.
 
 ---
@@ -43,6 +43,12 @@ knows, the **contradictions** it holds without resolving them, and the **quality
 while reading itself. The store is at its most valuable when it is honest about its limits, and this
 is the first capability that can assess those limits across a whole slice of work rather than one
 answer at a time.
+
+One slice of knowledge feeds several different kinds of work, so the document can be **focused** on the
+work it is about to feed — gathering requirements, deciding architecture, writing a specification,
+implementing, or reviewing. A focus changes ordering, weighting and depth. It never changes what was selected, and it
+never hides a finding: a focused document that quietly omits is worse than an unfocused one, because
+its emphasis reads as the store's. The unfocused document remains the default.
 
 The business case is **transferable context**. Reasoning that today can only be recalled into an AI
 session becomes an artefact a human can read, a new agent can be handed, a pull request or design
@@ -112,6 +118,12 @@ applied to a whole slice rather than one answer.
 | **The AI assistant** | Composes the document and its findings; consumes an export when handed one as context. Never a decision-maker |
 | **A recipient of an exported document (human or agent)** | Reads reasoning they did not capture. **Has no access to the store** — they receive a document the practitioner chose to give them |
 
+**There is no single primary consumer, and that is deliberate.** The practitioner is always the
+*requester*; who reads the result varies by occasion — themselves months later, a colleague, an agent
+about to do the work. Naming one of them primary would optimise the document for that one and quietly
+degrade it for the others. The design instead names the **work** the document is about to feed
+(BR-35), which is knowable at request time in a way the reader's identity is not.
+
 The single-user decision in BRD-001 §4 is unchanged. An export is a **file the practitioner produces
 and controls**, not a shared surface: producing one grants nobody access to the store. This is
 deliberately the only sharing mechanism, because a file the practitioner reviews before sending is
@@ -127,6 +139,7 @@ BRD-001 exists without.
 - Selecting a slice of stored knowledge by repository, initiative, ticket and tags, in combination
 - Widening that selection along recorded relationships between memories, to a stated limit
 - Composing the selection into one ordered, readable, self-contained document
+- Focusing that document on the work it is about to feed — requirements, architecture, specification, implementation, review — while leaving the unfocused document as the default
 - Collapsing restatements of the same knowledge, retaining where each came from
 - Marking superseded and no-longer-true material as such, rather than mixing it with current material
 - Reporting gaps: what the slice should contain and does not
@@ -264,6 +277,30 @@ It is the store's most sensitive content in its most copyable form, in plain tex
 *Accepted when:* the artefact declares its sensitivity, and is produced somewhere that is not
 committed or synchronised by default.
 
+### Focus
+
+**BR-35 — An export must be focusable on what the reader is about to produce.**
+"For anyone" is not a target reader, and a document with no target reader is optimised for nothing —
+BR-06's problem returning at document scale. The same slice of knowledge serves different work
+differently: gathering requirements wants constraints, business rules and open questions; making an
+architectural decision wants what was decided and what was rejected; writing a specification wants
+what must observably be true; implementing wants concrete constraints, prior failures and known
+limitations; reviewing wants the problems first. The unfocused form remains the default, because a
+complete dump is itself a legitimate and frequent need.
+*Accepted when:* the practitioner can request a focus and receive a document ordered and weighted for
+the work named, the available focuses are a stated set, and requesting none yields the complete
+unfocused document.
+
+**BR-36 — A focus must not change what was selected, and must never suppress a finding.**
+The dangerous reading of BR-35 is a focus that quietly narrows selection. That produces the
+confidently incomplete document BR-19 and BR-30 exist to prevent, and it makes two focuses of one
+slice incomparable — a reader cannot tell whether a difference is the lens or the store. Findings are
+the honesty mechanism, so they survive every focus: a contradiction is *more* consequential to
+implementation than to requirements, not less.
+*Accepted when:* two focuses of one slice contain the same selected knowledge and differ only in
+ordering, weighting and depth; whatever a focus does not surface is listed as omitted with a reason;
+and gaps, contradictions and quality problems appear under every focus.
+
 ---
 
 ## 7. Success measures
@@ -275,6 +312,7 @@ committed or synchronised by default.
 | **Coverage confidence** | The practitioner can tell what an export did *not* cover, without inspecting the store |
 | **Defects found in bulk** | Contradictions and gaps are surfaced by exports rather than discovered by a decision going wrong |
 | **Findings acted on** | Reported gaps become captured knowledge; reported contradictions become decisions. A findings list nobody acts on means the findings are not specific enough |
+| **Focus earns its keep** | A focused export is used to produce the artefact it was focused for, without the practitioner falling back to the unfocused document. If they always fall back, the focuses are wrong or unnecessary |
 | **Trust in the document** | The practitioner hands an export to a colleague or an agent without first re-reading it against source. This is the real measure — the others are proxies |
 
 ---
@@ -310,6 +348,8 @@ committed or synchronised by default.
 | **Selection over-reaches** | An export of "everything about this repository" becomes the whole store, expensive and unreadable | Cost visible before composition (BR-32); reach is bounded and the bound is stated |
 | **Sensitive material leaves the machine** | A portable plaintext copy of the store's most sensitive reasoning | Hidden material excluded even when reached by relationship (BR-33); artefact declares sensitivity and is not committed by default (BR-34) |
 | **The export becomes a maintained document** | Someone edits one, and the edited copy competes with the store as the record | Projection with no path back in (§5 out of scope); regeneration is cheap enough that editing is never the easier option |
+| **A focus is mistaken for the whole** | The most likely misuse of BR-35: a focused document is read as everything the store knows, and its emphasis is read as the store's | Focus never narrows selection and never hides a finding (BR-36); the document states which focus produced it |
+| **Focuses proliferate** | Five becomes fifteen, each thinly different, and no two exports are comparable | The set is stated and bounded (BR-35); adding one requires naming the work it feeds and how it differs from the nearest existing focus |
 
 ---
 
@@ -324,6 +364,7 @@ Extends BRD-001 §10; every term there still applies.
 | **Widening** | Extending a slice along recorded relationships to include relevant knowledge that does not carry the requested labels |
 | **Export** | The act of assembling a slice, and the document it produces |
 | **Composition** | The judgement applied to a slice to make it a document: ordering, collapsing, marking supersession |
+| **Focus** | The work a document is about to feed — requirements, architecture, specification, implementation, review. Changes ordering, weighting and depth; never what was selected. Optional; unfocused is the default |
 | **Findings** | The report accompanying the document: gaps, contradictions, quality problems and omissions |
 | **Contradiction** | Two claims held as current that cannot both be true |
 | **Gap** | Knowledge a slice should reasonably contain and does not |
