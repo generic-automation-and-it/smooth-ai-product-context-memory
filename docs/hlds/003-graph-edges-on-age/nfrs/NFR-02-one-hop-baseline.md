@@ -14,7 +14,7 @@ Recorded at HLD-003 foundation, **before** `memory_link` is dropped. The post-cu
 | **p95** | 0.429 ms |
 | **NFR-02 one-hop target** | p95 ≤ 10 ms, and no slower than this baseline after cutover |
 | **Hardware** | local Docker AGE image `docker.io/apache/age:release_PG17_1.7.0` (Postgres 17), Apple Silicon |
-| **Re-run** | Relational one-hop harness removed at the AGE cutover (PR #38). Recorded numbers remain the baseline. **Post-cutover AGE re-run: 0.616 ms p95** — [NFR-02-traversal-measurements.md](./NFR-02-traversal-measurements.md). |
+| **Re-run** | Relational one-hop harness removed at the AGE cutover (PR #38). Recorded numbers remain the baseline. **Post-cutover AGE re-run: 0.621 ms p95** — [NFR-02-traversal-measurements.md](./NFR-02-traversal-measurements.md). |
 
 ## Plan
 

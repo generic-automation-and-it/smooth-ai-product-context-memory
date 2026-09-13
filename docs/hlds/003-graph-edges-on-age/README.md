@@ -147,6 +147,6 @@ target, a verification mechanism, and acceptance criteria. See [`./nfrs/`](./nfr
 | NFR | Attribute | Target (summary) | Status |
 |-----|-----------|------------------|--------|
 | [NFR-01](./nfrs/NFR-01-referential-integrity.md) | Integrity | Zero orphan edges; zero duplicate edges | Accepted |
-| [NFR-02](./nfrs/NFR-02-traversal-performance.md) | Performance | Depth-3 bounded path p95 ≤ 50 ms at 10k edges | Accepted — measured 1.057 / 0.616 / 8.522 ms p95 in [NFR-02-traversal-measurements.md](./nfrs/NFR-02-traversal-measurements.md); one-hop is 1.4× the [baseline](./nfrs/NFR-02-one-hop-baseline.md), adjudicated as accepted |
+| [NFR-02](./nfrs/NFR-02-traversal-performance.md) | Performance | Depth-3 bounded path p95 ≤ 50 ms at 10k edges | Accepted — measured 1.042 / 0.621 / 14.053 ms p95 in [NFR-02-traversal-measurements.md](./nfrs/NFR-02-traversal-measurements.md); one-hop is 1.4× the [baseline](./nfrs/NFR-02-one-hop-baseline.md), adjudicated as accepted |
 | [NFR-03](./nfrs/NFR-03-operability.md) | Operability | No added container; one backup; one-command start | Accepted — restore round-trip in [NFR-03-restore-verification.md](./nfrs/NFR-03-restore-verification.md) |
 | [NFR-04](./nfrs/NFR-04-compatibility.md) | Compatibility | Extension must not pin us below a supported Postgres | Accepted — pairing and pre-upgrade check in [NFR-04-version-pairing.md](./nfrs/NFR-04-version-pairing.md) |
