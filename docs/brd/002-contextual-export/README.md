@@ -320,6 +320,7 @@ Extends BRD-001 §10; every term there still applies.
 | Term | Meaning |
 |---|---|
 | **Slice** | The body of knowledge selected for one export, named by repository, initiative, ticket and tags |
+| **Tag** | BRD-001's free-form Label — the terms are interchangeable in this document |
 | **Widening** | Extending a slice along recorded relationships to include relevant knowledge that does not carry the requested labels |
 | **Export** | The act of assembling a slice, and the document it produces |
 | **Composition** | The judgement applied to a slice to make it a document: ordering, collapsing, marking supersession |

@@ -25,7 +25,7 @@ public sealed class MemoryVersion
     /// <summary>AI-generated TL;DR of the blob content. Distinct from <see cref="Statement"/>.</summary>
     public string ContentSummary { get; set; } = string.Empty;
 
-    /// <summary>Content address from blob storage; see ADR-0001.</summary>
+    /// <summary>Content address from blob storage; see HLD 001 (LADR-06).</summary>
     public string? BlobAddress { get; set; }
 
     /// <summary>Open vocabulary — not an enum.</summary>

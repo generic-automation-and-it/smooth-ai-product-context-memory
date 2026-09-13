@@ -24,7 +24,7 @@ Persistent memory service for AI agents: stores summarized, labelled context (li
 | Host | `src/SmoothAiProductContextMemory.Host/` | ASP.NET Core Web API, Serilog → console/Seq + OpenTelemetry OTLP, `/health` + `/alive`, Scalar OpenAPI |
 | AppHost | `src/SmoothAiProductContextMemory.AppHost/` | Aspire dev orchestrator — Postgres+AGE (`docker.io/apache/age:release_PG17_1.7.0`) + MinIO blob storage + Seq |
 | ChatHost | `src/SmoothAiProductContextMemory.ChatHost/` | Standalone LLM microservice — owns Anthropic SDK; talks to Host via HTTP only (project not yet in tree) |
-| Docs | `docs/` | Wiki, HLDs, BRDs, ADR pointer stubs — visible (not hidden `.docs`) |
+| Docs | `docs/` | Wiki, HLDs, BRDs — visible (not hidden `.docs`) |
 | Scripts | `scripts/` | Operational verification run against a container, not part of the test suite — graph restore round-trip (NFR-03), Postgres pre-upgrade check (NFR-04), and a sample-data seeder so both have something to verify |
 
 Planned work tracked as worktasks under `.context/work-tasks/` (gitignored). Use `/create worktask`. **Never reference worktask IDs (e.g. `WT-04`) in delivered artefacts** — code, comments, `*AGENTS.md`, HLDs, changelogs. Worktasks are short-lived and gitignored; cite the durable authority instead (HLD, LADR, NFR, PR, issue).
