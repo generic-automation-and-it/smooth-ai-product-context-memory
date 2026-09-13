@@ -28,7 +28,12 @@ public static class ExportPaths
             if (!used.Add(folder))
             {
                 folder = $"{slug}--{CollisionSuffix(group.Uuid)}";
-                used.Add(folder);
+                if (!used.Add(folder))
+                {
+                    // Full uuid is unique per input — guaranteed terminal fallback.
+                    folder = $"{slug}--{group.Uuid:N}";
+                    used.Add(folder);
+                }
             }
 
             assigned[group.Uuid] = folder;
@@ -50,7 +55,12 @@ public static class ExportPaths
             if (!used.Add(fileName))
             {
                 fileName = $"{MemoryFilePrefix}{memory.SubjectSlug}--{CollisionSuffix(memory.Uuid)}.md";
-                used.Add(fileName);
+                if (!used.Add(fileName))
+                {
+                    // Full uuid is unique per input — guaranteed terminal fallback.
+                    fileName = $"{MemoryFilePrefix}{memory.SubjectSlug}--{memory.Uuid:N}.md";
+                    used.Add(fileName);
+                }
             }
 
             assigned[memory.Uuid] = fileName;

@@ -101,9 +101,13 @@ public sealed class FileSystemMarkdownExportSink(ILogger<FileSystemMarkdownExpor
 
     private static bool IsUnderRoot(string candidate, string root)
     {
+        // Case-insensitive only where the filesystem is (Windows/macOS); Linux is case-sensitive.
+        StringComparison comparison = OperatingSystem.IsLinux()
+            ? StringComparison.Ordinal
+            : StringComparison.OrdinalIgnoreCase;
         string prefix = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
                        + Path.DirectorySeparatorChar;
-        return candidate.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
-               || string.Equals(candidate, root, StringComparison.OrdinalIgnoreCase);
+        return candidate.StartsWith(prefix, comparison)
+               || string.Equals(candidate, root, comparison);
     }
 }

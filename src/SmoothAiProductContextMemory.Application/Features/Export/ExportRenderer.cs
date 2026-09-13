@@ -10,16 +10,16 @@ public static class ExportRenderer
 {
     public static string RenderGroup(ExportGroupDocument group, bool includeHistory)
     {
-        var yaml = new List<(string Key, string Value)>
+        var yaml = new List<(string Key, string Value, bool Literal)>
         {
-            ("generated", "true"),
-            ("uuid", group.Uuid.ToString("D")),
-            ("scope", group.ScopeDimension),
-            ("scope_identifier", Scalar(group.ScopeIdentifier)),
-            ("initiative", group.InitiativeName),
-            ("initiative_status", group.InitiativeStatus),
-            ("repo", Scalar(group.Repo)),
-            ("repo_url", Scalar(group.RepoUrl)),
+            ("generated", "true", true),
+            ("uuid", group.Uuid.ToString("D"), true),
+            ("scope", group.ScopeDimension, false),
+            ("scope_identifier", group.ScopeIdentifier ?? "null", group.ScopeIdentifier is null),
+            ("initiative", group.InitiativeName, false),
+            ("initiative_status", group.InitiativeStatus, false),
+            ("repo", group.Repo ?? "null", group.Repo is null),
+            ("repo_url", group.RepoUrl ?? "null", group.RepoUrl is null),
         };
 
         var builder = new StringBuilder();
@@ -77,24 +77,24 @@ public static class ExportRenderer
     public static string RenderMemory(ExportMemoryDocument memory, bool includeHistory)
     {
         ExportVersionBody current = memory.Current;
-        var yaml = new List<(string Key, string Value)>
+        var yaml = new List<(string Key, string Value, bool Literal)>
         {
-            ("generated", "true"),
-            ("uuid", memory.Uuid.ToString("D")),
-            ("lineage_id", memory.LineageId.ToString("D")),
-            ("group_uuid", memory.GroupUuid.ToString("D")),
-            ("subject_slug", memory.SubjectSlug),
-            ("name", memory.Name),
-            ("kind", current.Kind),
-            ("status", current.Status),
-            ("confidence", current.Confidence.ToString(CultureInfo.InvariantCulture)),
-            ("scope", memory.ScopeDimension),
-            ("scope_identifier", Scalar(memory.ScopeIdentifier)),
-            ("version", current.Version.ToString(CultureInfo.InvariantCulture)),
-            ("is_current", current.IsCurrent ? "true" : "false"),
-            ("valid_from", FormatTimestamp(current.ValidFrom)),
-            ("valid_until", current.ValidUntil is null ? "null" : FormatTimestamp(current.ValidUntil.Value)),
-            ("created_on", FormatTimestamp(current.CreatedOn)),
+            ("generated", "true", true),
+            ("uuid", memory.Uuid.ToString("D"), true),
+            ("lineage_id", memory.LineageId.ToString("D"), true),
+            ("group_uuid", memory.GroupUuid.ToString("D"), true),
+            ("subject_slug", memory.SubjectSlug, false),
+            ("name", memory.Name, false),
+            ("kind", current.Kind, false),
+            ("status", current.Status, false),
+            ("confidence", current.Confidence.ToString(CultureInfo.InvariantCulture), true),
+            ("scope", memory.ScopeDimension, false),
+            ("scope_identifier", memory.ScopeIdentifier ?? "null", memory.ScopeIdentifier is null),
+            ("version", current.Version.ToString(CultureInfo.InvariantCulture), true),
+            ("is_current", current.IsCurrent ? "true" : "false", true),
+            ("valid_from", FormatTimestamp(current.ValidFrom), true),
+            ("valid_until", current.ValidUntil is null ? "null" : FormatTimestamp(current.ValidUntil.Value), true),
+            ("created_on", FormatTimestamp(current.CreatedOn), true),
         };
 
         var builder = new StringBuilder();
@@ -118,7 +118,7 @@ public static class ExportRenderer
         builder.AppendLine(memory.Description);
         builder.AppendLine();
 
-        WriteVersionBody(builder, current, heading: "## Claim");
+        WriteVersionBody(builder, current, heading: "## Claim", includeMetadataBlock: false);
 
         if (memory.Links.Count > 0)
         {
@@ -141,7 +141,7 @@ public static class ExportRenderer
         {
             foreach (ExportVersionBody historic in memory.HistoricalVersions)
             {
-                WriteVersionBody(builder, historic, heading: $"## Version {historic.Version}");
+                WriteVersionBody(builder, historic, heading: $"## Version {historic.Version}", includeMetadataBlock: true);
             }
         }
 
@@ -150,11 +150,11 @@ public static class ExportRenderer
 
     public static string FormatTimestamp(DateTimeOffset value) => value.ToString("O");
 
-    private static void WriteVersionBody(StringBuilder builder, ExportVersionBody version, string heading)
+    private static void WriteVersionBody(StringBuilder builder, ExportVersionBody version, string heading, bool includeMetadataBlock)
     {
         builder.AppendLine(heading);
         builder.AppendLine();
-        if (!heading.StartsWith("## Claim", StringComparison.Ordinal))
+        if (includeMetadataBlock)
         {
             builder.AppendLine($"kind: {version.Kind}");
             builder.AppendLine($"status: {version.Status}");
@@ -197,13 +197,13 @@ public static class ExportRenderer
 
     private static void WriteFrontMatter(
         StringBuilder builder,
-        IReadOnlyList<(string Key, string Value)> yaml,
+        IReadOnlyList<(string Key, string Value, bool Literal)> yaml,
         Action<StringBuilder> extra)
     {
         builder.AppendLine("---");
-        foreach ((string key, string value) in yaml)
+        foreach ((string key, string value, bool literal) in yaml)
         {
-            builder.Append(key).Append(": ").AppendLine(YamlScalar(value, alreadyLiteral: IsBareYaml(value)));
+            builder.Append(key).Append(": ").AppendLine(YamlScalar(value, alreadyLiteral: literal));
         }
 
         extra(builder);
@@ -258,11 +258,6 @@ public static class ExportRenderer
         }
     }
 
-    private static string Scalar(string? value) => value ?? "null";
-
-    private static bool IsBareYaml(string value) =>
-        value is "true" or "false" or "null" || LooksLikeUnquotedLiteral(value);
-
     private static string YamlScalar(string value, bool alreadyLiteral = false)
     {
         if (alreadyLiteral)
@@ -272,30 +267,34 @@ public static class ExportRenderer
 
         if (NeedsQuotes(value))
         {
-            return $"\"{value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal)}\"";
+            var quoted = new StringBuilder(value.Length + 2).Append('"');
+            foreach (char c in value)
+            {
+                switch (c)
+                {
+                    case '\\': quoted.Append("\\\\"); break;
+                    case '"': quoted.Append("\\\""); break;
+                    case '\n': quoted.Append("\\n"); break;
+                    case '\r': quoted.Append("\\r"); break;
+                    case '\t': quoted.Append("\\t"); break;
+                    default:
+                        if (char.IsControl(c))
+                        {
+                            quoted.Append("\\u").Append(((int)c).ToString("x4", CultureInfo.InvariantCulture));
+                        }
+                        else
+                        {
+                            quoted.Append(c);
+                        }
+
+                        break;
+                }
+            }
+
+            return quoted.Append('"').ToString();
         }
 
         return value;
-    }
-
-    private static bool LooksLikeUnquotedLiteral(string value)
-    {
-        if (value.Length == 0)
-        {
-            return false;
-        }
-
-        foreach (char c in value)
-        {
-            if (char.IsLetterOrDigit(c) || c is '-' or '_' or '.' or ':' or '+' or 'T' or 'Z')
-            {
-                continue;
-            }
-
-            return false;
-        }
-
-        return true;
     }
 
     private static bool NeedsQuotes(string value)
@@ -310,9 +309,16 @@ public static class ExportRenderer
             return true;
         }
 
+        // Numeric-looking strings would silently change YAML type (int/float) — force string.
+        if (double.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out _))
+        {
+            return true;
+        }
+
         foreach (char c in value)
         {
-            if (char.IsWhiteSpace(c) || c is ':' or '#' or '{' or '}' or '[' or ']' or ',' or '&' or '*' or '!' or '|' or '>' or '\'' or '"' or '%')
+            if (char.IsWhiteSpace(c) || char.IsControl(c)
+                || c is ':' or '#' or '{' or '}' or '[' or ']' or ',' or '&' or '*' or '!' or '|' or '>' or '\'' or '"' or '%')
             {
                 return true;
             }

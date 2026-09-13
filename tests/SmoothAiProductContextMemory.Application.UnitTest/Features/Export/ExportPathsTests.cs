@@ -69,6 +69,37 @@ public class ExportPathsTests
     }
 
     [Fact]
+    public void Memory_file_double_collision_falls_back_to_full_uuid()
+    {
+        // Second and Third share the same first-8 hex chars, so the short suffix collides too.
+        var third = Guid.Parse("22222222-2222-2222-2222-333333333333");
+        IReadOnlyDictionary<Guid, string> files = ExportPaths.AssignMemoryFiles(
+        [
+            new ExportPaths.MemoryInput(First, "dup"),
+            new ExportPaths.MemoryInput(Second, "dup"),
+            new ExportPaths.MemoryInput(third, "dup"),
+        ]);
+
+        files.Values.Distinct(StringComparer.Ordinal).Count().ShouldBe(3);
+        files[third].ShouldBe($"mem-dup--{third:N}.md");
+    }
+
+    [Fact]
+    public void Group_folder_double_collision_falls_back_to_full_uuid()
+    {
+        var third = Guid.Parse("22222222-2222-2222-2222-333333333333");
+        IReadOnlyDictionary<Guid, string> folders = ExportPaths.AssignGroupFolders(
+        [
+            new ExportPaths.GroupInput(First, "Same Name"),
+            new ExportPaths.GroupInput(Second, "Same Name"),
+            new ExportPaths.GroupInput(third, "Same Name"),
+        ]);
+
+        folders.Values.Distinct(StringComparer.Ordinal).Count().ShouldBe(3);
+        folders[third].ShouldBe($"same-name--{third:N}");
+    }
+
+    [Fact]
     public void Group_file_is_underscore_group()
     {
         ExportPaths.GroupFile("persistence-layer").ShouldBe("groups/persistence-layer/_group.md");

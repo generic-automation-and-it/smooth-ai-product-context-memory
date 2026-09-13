@@ -1,5 +1,6 @@
 using System.CommandLine;
 using Mediator;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using SmoothAiProductContextMemory.Application.Extensions;
@@ -41,6 +42,11 @@ internal static class ExportCommand
 
             HostApplicationBuilder builder = Microsoft.Extensions.Hosting.Host.CreateApplicationBuilder(
                 new HostApplicationBuilderSettings { Args = [] });
+
+            // The CLI host defaults to Production, where user secrets are skipped. Load them
+            // explicitly so the documented local config path (user secrets) works for export.
+            builder.Configuration.AddUserSecrets(typeof(Program).Assembly, optional: true);
+
             builder.Services.AddApplication();
             builder.Services.AddInfrastructure(builder.Configuration);
 
@@ -53,7 +59,7 @@ internal static class ExportCommand
                 cancellationToken);
 
             Console.WriteLine(
-                $"Export wrote {response.FilesWritten} files ({response.Groups} groups, {response.Memories} memories, {response.MissingBlobs} missing blobs).");
+                $"Export wrote {response.FilesWritten} files ({response.Groups} groups, {response.Memories} memories, {response.MissingBlobs} missing blobs, {response.NonTextBlobs} non-text blobs).");
         });
 
         ParseResult parsed = command.Parse(args);

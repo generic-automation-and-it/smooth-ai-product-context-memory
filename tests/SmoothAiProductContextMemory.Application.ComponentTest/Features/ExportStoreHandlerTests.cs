@@ -147,6 +147,32 @@ public sealed class ExportStoreHandlerTests(AspireFixture aspire) : HandlerTestB
         }
     }
 
+    [Fact]
+    public async Task Two_history_runs_are_byte_identical()
+    {
+        await SeedAsync(blobAddress: BlobAddress);
+        using TempExportDir dir = new();
+        var blobs = new DictionaryBlobStorage();
+        blobs.Add(BlobAddress, BlobBody);
+        ExportStore.Handler handler = NewHandler(blobs);
+
+        await handler.Handle(new ExportStore.Request(dir.Path, IncludeHistory: true), Ct);
+        Dictionary<string, byte[]> first = Snapshot(dir.Path);
+
+        await handler.Handle(new ExportStore.Request(dir.Path, IncludeHistory: true), Ct);
+        Dictionary<string, byte[]> second = Snapshot(dir.Path);
+
+        second.Keys.ShouldBe(first.Keys, ignoreOrder: true);
+        foreach (string key in first.Keys)
+        {
+            second[key].ShouldBe(first[key]);
+        }
+    }
+
+    // Note: duplicate current versions cannot be seeded — the partial unique index
+    // IX_memory_version_memory_id (where is_current) rejects them at the database level.
+    // The handler's multiple-current warning remains as defense-in-depth only.
+
     private ExportStore.Handler NewHandler(IBlobStorage blobs, ILogger<ExportStore.Handler>? logger = null) =>
         new(AppDb, blobs, new FileSystemMarkdownExportSink(NullLogger<FileSystemMarkdownExportSink>.Instance),
             logger ?? NullLogger<ExportStore.Handler>.Instance);

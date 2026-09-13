@@ -43,7 +43,7 @@ sequenceDiagram
 - **Date**: 2026-09-13
 - **Status**: Accepted
 - **Context**: The worktask allowed Infrastructure or a small console entry point. Clean Architecture forbids business rules in Infrastructure; a second console csproj is a second composition root.
-- **Decision**: `Features/Export/` owns tree shape, frontmatter, slugs, collision, sort, and banners. `IMarkdownExportSink` writes bytes. Host parses `export` before `WebApplication.CreateBuilder` and composes `Host.CreateApplicationBuilder` + `AddApplication` + `AddInfrastructure` — no Kestrel, no OpenAPI, no migrate-on-start. YAML is hand-rolled (no YamlDotNet).
+- **Decision**: `Features/Export/` owns tree shape, frontmatter, slugs, collision, sort, and banners. `IMarkdownExportSink` writes bytes. Host parses `export` before `WebApplication.CreateBuilder` and composes `Host.CreateApplicationBuilder` + `AddApplication` + `AddInfrastructure` (user secrets loaded explicitly — the CLI host defaults to Production) — no Kestrel, no OpenAPI, no migrate-on-start. YAML is hand-rolled (no YamlDotNet): free-text scalars are quoted with `\n`/`\r`/`\t`/control-char escapes, and numeric-looking strings are quoted to keep their YAML type `string`.
 - **Consequences**: L0/L1 live under Application tests. `System.CommandLine` is Host-only.
 
 ### LADR-102: Forensic dump bypasses MemoryScopeFilter
@@ -74,7 +74,7 @@ sequenceDiagram
 
 - **Run:** `dotnet run --project src/SmoothAiProductContextMemory.Host -- export [--output DIR] [--history] [--force]`. Needs the same `ConnectionStrings:SmoothAiProductContextMemory` and `BlobStorage:*` as the API (Aspire AppHost or user secrets). Missing schema fails the command — export does not migrate.
 - **Layout:** `groups/<group-slug>/_group.md` and `groups/<group-slug>/mem-<subject-slug>.md`.
-- **Group slug:** `Slug.Subject` of the current `GroupDescription.Name` (highest version). No/unslugable name → `group-<uuid>`. Slug clash (Uuid-sorted): first keeps the clean name; later get `--` + first 8 hex of `Uuid` (`N` format).
+- **Group slug:** `Slug.Subject` of the current `GroupDescription.Name` (highest version). No/unslugable name → `group-<uuid>`. Slug clash (Uuid-sorted): first keeps the clean name; later get `--` + first 8 hex of `Uuid` (`N` format); if that still clashes, full 32-hex `Uuid` (guaranteed unique).
 - **Memory file clash:** same suffix rule. In-group `subject_slug` is unique, so this is a backstop.
 - **Frontmatter** is a closed key list, fixed order, UTF-8 no BOM, LF scaffolding, exactly one trailing newline on the file. No `exported_at`. Timestamps use `DateTimeOffset` round-trip `"O"`.
 - **Both time axes:** `valid_from` / `valid_until` = business time; `created_on` = system time.

@@ -135,6 +135,27 @@ public class ExportRendererTests
     }
 
     [Fact]
+    public void Frontmatter_escapes_newlines_and_tabs_in_free_text()
+    {
+        ExportMemoryDocument memory = ProductMemory() with { Name = "Line1\nLine2\tTabbed \"quoted\"" };
+        string markdown = ExportRenderer.RenderMemory(memory, includeHistory: false);
+
+        markdown.ShouldContain("name: \"Line1\\nLine2\\tTabbed \\\"quoted\\\"\"");
+        int end = markdown.IndexOf("\n---\n", 4, StringComparison.Ordinal);
+        string frontmatter = markdown[..end];
+        frontmatter.Split('\n').ShouldAllBe(line => !line.StartsWith("Line2", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Frontmatter_quotes_numeric_looking_free_text()
+    {
+        ExportMemoryDocument memory = ProductMemory() with { Name = "2024" };
+        string markdown = ExportRenderer.RenderMemory(memory, includeHistory: false);
+
+        markdown.ShouldContain("name: \"2024\"");
+    }
+
+    [Fact]
     public void Group_render_includes_scope_initiative_and_tickets()
     {
         var group = new ExportGroupDocument(

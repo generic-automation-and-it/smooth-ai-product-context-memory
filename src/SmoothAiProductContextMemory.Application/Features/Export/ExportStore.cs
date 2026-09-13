@@ -36,20 +36,20 @@ public static class ExportStore
         {
             logger.LogInformation("Markdown export started");
 
-            List<MemoryGroup> groups = await db.MemoryGroups
+            MemoryGroup[] groups = await db.MemoryGroups
                 .AsNoTracking()
                 .Include(g => g.Initiative)
                 .Include(g => g.Descriptions)
-                .ToListAsync(cancellationToken);
+                .ToArrayAsync(cancellationToken);
 
-            List<Memory> memories = await db.Memories
+            Memory[] memories = await db.Memories
                 .AsNoTracking()
                 .Include(m => m.Versions)
-                .ToListAsync(cancellationToken);
+                .ToArrayAsync(cancellationToken);
 
-            List<MemoryLink> links = await db.MemoryLinks
+            MemoryLink[] links = await db.MemoryLinks
                 .AsNoTracking()
-                .ToListAsync(cancellationToken);
+                .ToArrayAsync(cancellationToken);
 
             Dictionary<long, Memory> memoriesById = memories.ToDictionary(m => m.Id);
             Dictionary<long, MemoryGroup> groupsById = groups.ToDictionary(g => g.Id);
@@ -76,18 +76,30 @@ public static class ExportStore
                     cancellationToken);
                 filesWritten++;
 
-                List<Memory> groupMemories = memories
+                Memory[] groupMemories = memories
                     .Where(m => m.GroupId == group.Id)
                     .OrderBy(m => m.SubjectSlug, StringComparer.Ordinal)
                     .ThenBy(m => m.Uuid)
-                    .ToList();
+                    .ToArray();
 
                 IReadOnlyDictionary<Guid, string> memoryFiles = ExportPaths.AssignMemoryFiles(
                     groupMemories.Select(m => new ExportPaths.MemoryInput(m.Uuid, m.SubjectSlug)));
 
                 foreach (Memory memory in groupMemories)
                 {
-                    MemoryVersion? current = memory.Versions.SingleOrDefault(v => v.IsCurrent);
+                    MemoryVersion[] currentRows = memory.Versions
+                        .Where(v => v.IsCurrent)
+                        .OrderByDescending(v => v.Version)
+                        .ToArray();
+                    if (currentRows.Length > 1)
+                    {
+                        logger.LogWarning(
+                            "Export found multiple current versions; using the highest. Memory: {MemoryUuid} CurrentCount: {CurrentCount}",
+                            memory.Uuid,
+                            currentRows.Length);
+                    }
+
+                    MemoryVersion? current = currentRows.FirstOrDefault();
                     if (current is null)
                     {
                         logger.LogWarning("Export skipped memory with no current version. Memory: {MemoryUuid}", memory.Uuid);
@@ -111,7 +123,7 @@ public static class ExportStore
                         missingBlobs += missing;
                         nonTextBlobs += nonText;
 
-                        if (version.IsCurrent)
+                        if (ReferenceEquals(version, current))
                         {
                             currentBody = body;
                         }
@@ -147,12 +159,12 @@ public static class ExportStore
 
             logger.LogInformation(
                 "Markdown export completed. Groups: {GroupCount} Memories: {MemoryCount} Files: {FileCount} MissingBlobs: {MissingBlobCount}",
-                groups.Count,
+                groups.Length,
                 memoriesWritten,
                 filesWritten,
                 missingBlobs);
 
-            return new Response(groups.Count, memoriesWritten, filesWritten, missingBlobs, nonTextBlobs);
+            return new Response(groups.Length, memoriesWritten, filesWritten, missingBlobs, nonTextBlobs);
         }
 
         private async Task<(ExportVersionBody Body, int Missing, int NonText)> ReadVersionAsync(
@@ -259,7 +271,7 @@ public static class ExportStore
         {
             var result = new List<ExportLink>();
 
-            foreach (MemoryLink link in links.Where(l => l.SourceMemoryId == memory.Id).OrderBy(l => l.TargetMemoryId))
+            foreach (MemoryLink link in links.Where(l => l.SourceMemoryId == memory.Id))
             {
                 if (!TryResolve(link.TargetMemoryId, memoriesById, groupsById, out Memory? other, out MemoryGroup? otherGroup))
                 {
@@ -275,7 +287,7 @@ public static class ExportStore
                     otherGroup.Uuid));
             }
 
-            foreach (MemoryLink link in links.Where(l => l.TargetMemoryId == memory.Id).OrderBy(l => l.SourceMemoryId))
+            foreach (MemoryLink link in links.Where(l => l.TargetMemoryId == memory.Id))
             {
                 if (!TryResolve(link.SourceMemoryId, memoriesById, groupsById, out Memory? other, out MemoryGroup? otherGroup))
                 {
@@ -291,7 +303,12 @@ public static class ExportStore
                     otherGroup.Uuid));
             }
 
-            return result;
+            // Deterministic across re-seeded stores: never order on internal bigint ids.
+            return result
+                .OrderBy(l => l.Direction, StringComparer.Ordinal)
+                .ThenBy(l => l.OtherUuid)
+                .ThenBy(l => l.Relation, StringComparer.Ordinal)
+                .ToArray();
         }
 
         private static bool TryResolve(
