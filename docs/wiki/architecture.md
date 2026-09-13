@@ -32,7 +32,7 @@ agent-facing skill contract (the **sole interface** to the store) are specified 
 ```
 Initiative → MemoryGroup (tickets jsonb, repo columns) → Memory (logical) → MemoryVersion
                                                             ├── tags[] / facets[]  (unversioned)
-                                                            └── blob address       (ADR-0001)
+                                                            └── blob address       (HLD 001)
 ```
 
 Six entities (`Initiative`, `Label`, `MemoryGroup`, `GroupDescription`, `Memory`,
@@ -87,6 +87,6 @@ on it (see [HLD 001](../hlds/001-context-memory-storage/)).
 
 Hard: one current version per memory (partial unique index), version chain (unique `(memory_id,
 version)`), logical identity (unique `uuid`), initiative always assigned (not-null FK). Soft (both to
-be enforced by the write path's read-before-write once the skill exists — see ADR-0002): subject
+be enforced by the write path's read-before-write once the skill exists — see HLD 001): subject
 uniqueness across a group (exact-slug duplicates are already rejected by the unique
 `(group_id, subject_slug)` backstop index), ticket uniqueness across groups.
