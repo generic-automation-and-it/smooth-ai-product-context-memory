@@ -91,6 +91,11 @@ public sealed class LinkTests : PersistenceTestBase
             Reason = "second",
         });
 
+        // The exception-shape assertions below attribute the refusal to the uniqueness
+        // constraint as the relational store raises it today. After the WT-02 cutover the
+        // invariant moves into the application, so the *behaviour* (second triple refused,
+        // count stays 1) must hold while these three lines are edited to match the new
+        // failure shape — that edit is expected, not a sign the test is obsolete.
         var ex = await Should.ThrowAsync<DbUpdateException>(() => Db.SaveChangesAsync(Ct));
         PostgresException postgres = ex.InnerException.ShouldBeOfType<PostgresException>();
         postgres.SqlState.ShouldBe(PostgresErrorCodes.UniqueViolation);

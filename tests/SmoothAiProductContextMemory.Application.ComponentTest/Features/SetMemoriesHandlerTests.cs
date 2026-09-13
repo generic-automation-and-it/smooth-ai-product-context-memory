@@ -134,7 +134,8 @@ public sealed class SetMemoriesHandlerTests(AspireFixture aspire) : HandlerTestB
 
     /// <summary>
     /// A duplicate inside one batch is skipped and counted, not fatal — distinct from a
-    /// standalone create, which refuses the same triple.
+    /// standalone create, which refuses the same triple. The <c>Skipped</c> counter is
+    /// shared with pre-existing/stale duplicates; the response does not distinguish the two.
     /// </summary>
     [Fact]
     public async Task Duplicate_link_in_same_batch_is_skipped_not_fatal()
