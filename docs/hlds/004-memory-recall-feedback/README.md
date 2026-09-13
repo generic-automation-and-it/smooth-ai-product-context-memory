@@ -16,10 +16,10 @@
 The store records what it was told and nothing about whether that was useful. There is no signal for
 which memories are recalled, which are never returned, or whether a retrieval found what it was for.
 
-This matters now because the system is entering daily use for **tuning**, and several decisions are
-explicitly deferred *until measurement justifies them* — stemming and trigram similarity for candidate
-recall, a separate keywords column, per-write cost. **Dogfooding is that measurement**, and without
-feedback it produces impressions rather than evidence.
+This matters now because the system is entering daily use for **tuning**, and stemming and trigram
+similarity for candidate recall are explicitly deferred *until measurement justifies them*
+(HLD-001 AGENTS.md; HLD-002 AGENTS.md). **Dogfooding is that measurement**, and without feedback it
+produces impressions rather than evidence.
 
 The asymmetry is the point: capture is instrumented by its digest, so we know exactly what went in.
 Retrieval reports nothing, so we know nothing about what comes out.
@@ -47,8 +47,8 @@ A retrieval returning nothing means either the store does not hold the answer, o
 recall failed to surface it. These demand opposite responses — capture more, or tune recall — and are
 currently indistinguishable.
 
-The design already treats an honest miss as a signal that feeds the question loop. That signal
-currently evaporates the moment it is rendered.
+An honest miss is a signal that should feed a question loop — proposed here; the current design
+does not yet define that loop. That signal currently evaporates the moment it is rendered.
 
 **Acceptance criteria / DoD**
 

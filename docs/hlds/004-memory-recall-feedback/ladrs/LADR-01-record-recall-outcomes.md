@@ -8,10 +8,10 @@ Capture is fully instrumented — every write returns a digest naming what was c
 linked and skipped. Retrieval reports nothing at all. The store therefore knows precisely what it was
 told and nothing about whether any of it was ever wanted.
 
-Several design decisions were deferred *until measurement justifies them*: stemming and trigram
-similarity for candidate recall, a separate keywords column, per-write cost. The system is entering
-daily use, which is the intended source of that measurement — but daily use without instrumentation
-produces recollection, not evidence.
+Stemming and trigram similarity for candidate recall were deferred *until measurement justifies
+them* (HLD-001 AGENTS.md:63; HLD-002 AGENTS.md:68). The system is entering daily use, which is the
+intended source of that measurement — but daily use without instrumentation produces recollection,
+not evidence.
 
 ## Decision
 
