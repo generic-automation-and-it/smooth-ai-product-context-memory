@@ -33,6 +33,18 @@ public sealed class Nfr02BenchmarkTests : PersistenceTestBase
     /// <summary>Pre-cutover relational one-hop p95, from nfrs/NFR-02-one-hop-baseline.md.</summary>
     private const double RelationalBaselineP95Ms = 0.429;
 
+    /// <summary>
+    /// The adjudicated ceiling on the one-hop regression, as a multiple of the relational baseline.
+    /// </summary>
+    /// <remarks>
+    /// NFR-02 accepted a measured 1.4× on the grounds that the graph one-hop answers a bidirectional
+    /// question the reverse-only baseline did not, and that the residual is constant <c>cypher()</c>
+    /// overhead which narrows as the store grows. "Narrows" is a prediction, and an unasserted
+    /// prediction is a comment. This is the executable form of the recorded reopening condition: the
+    /// delta widening rather than narrowing fails the build instead of being noticed later.
+    /// </remarks>
+    private const double OneHopAdjudicatedCeilingFactor = 3.0;
+
     private const double DepthThreeTargetMs = 50.0;
     private const double OneHopTargetMs = 10.0;
     private const double ComposedTargetMs = 100.0;
@@ -109,11 +121,18 @@ public sealed class Nfr02BenchmarkTests : PersistenceTestBase
 
         TestContext.Current.TestOutputHelper?.WriteLine(report.ToString());
 
-        // Absolute targets. The baseline comparison is reported above and adjudicated in the HLD, not
-        // asserted here — NFR-02 requires the shortfall and its cause to be recorded before tuning.
+        // Absolute targets.
         depthThreeResult.P95Ms.ShouldBeLessThan(DepthThreeTargetMs);
         oneHopResult.P95Ms.ShouldBeLessThan(OneHopTargetMs);
         composedResult.P95Ms.ShouldBeLessThan(ComposedTargetMs);
+
+        // The baseline comparison, as a guard rather than a narration. NFR-02 accepted 1.4×; it did
+        // not accept "any multiple". Without this, a regression to 5× still produces a green test and
+        // the acceptance quietly stops meaning what it said.
+        oneHopResult.P95Ms.ShouldBeLessThan(
+            RelationalBaselineP95Ms * OneHopAdjudicatedCeilingFactor,
+            "the one-hop regression widened past the multiple NFR-02 adjudicated; re-measure and re-adjudicate "
+            + "rather than raising this ceiling");
 
         // Access path, not just wall clock. NFR-02's criterion is edge storage, so no shape may
         // sequentially scan LINKS; path expansion must go through AGE's traversal function.
