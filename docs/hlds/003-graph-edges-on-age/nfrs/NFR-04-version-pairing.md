@@ -8,7 +8,7 @@ Recorded at HLD-003 foundation adoption. Update this file whenever either versio
 | **Postgres version** | 17 — 17.11 inside the AGE image (Aspire 13.3.0 default was `library/postgres:17.6`; same major, volume compatible) |
 | **AGE extension** | 1.7.0 |
 | **Supported AGE ceiling (upstream, at adoption)** | Postgres 11–18 for released tags; PG19 exists only as `dev_snapshot_PG19` |
-| **Hosts** | Dev AppHost (`mimisbrunnr-postgres`) and test Aspire (`project-test-postgres`) |
+| **Hosts** | Dev AppHost (`smooth-mimisbrunnr-postgres`) and test Aspire (`mimisbrunnr-testcontainer-postgres`) |
 
 ## Pre-upgrade check
 
@@ -22,7 +22,7 @@ Before any Postgres major upgrade:
 1. Confirm Apache AGE publishes a release tag for the target major (`release_PG<major>_*`, not `dev_snapshot_*`).
 2. If no release exists, **block the upgrade** — wait, or remove the extension. Do not silently defer.
 3. Recreate the persistent container after the image pin. `ContainerLifetime.Persistent` keeps the previous image until the container is removed.
-4. Named volume `mimisbrunnr-postgres-data` is compatible across this pin (same major). A later major bump requires an explicit volume reset; a mismatch refuses to start and looks like a broken image. The 2026-09-13 rename from `smooth-project-memory-postgres-data` is a new volume.
+4. Named volume `smooth-mimisbrunnr-postgres-data` is compatible across this pin (same major). A later major bump requires an explicit volume reset; a mismatch refuses to start and looks like a broken image. The 2026-09-13 rename from `smooth-project-memory-postgres-data` is a new volume.
 
 ## Restore
 

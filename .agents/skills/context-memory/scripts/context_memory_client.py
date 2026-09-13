@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Deterministic plumbing for the context-memory skill.
 
-Thin, dependency-free client over the WT-2 HTTP API. Every byte of judgement lives in SKILL.md; this
+Thin, dependency-free client over the store's HTTP API. Every byte of judgement lives in SKILL.md; this
 script only moves JSON. Reads the request body from a payload file or stdin, performs the HTTP call,
 and prints the response JSON on stdout. Nothing is ever logged that leaks memory content.
 """

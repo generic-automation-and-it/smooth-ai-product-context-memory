@@ -34,7 +34,7 @@ Feature-level contract (uuid wire, dry-run, scope, D42): `Features/FEATURES_AGEN
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
-| 2026-09-13 | Markdown export slice (`Features/Export/`) — generated-never-maintained projection of the store. | WT-4 |
-| 2026-09-11 | Added `IMemorySearch` and `IDbErrorMapper` abstractions so retrieval predicates and error classification stay provider-side. | WT-2 review |
-| 2026-09-10 | HTTP API slices landed. Mediator Scoped + FluentValidation pipeline + `IApplicationDbContext`. Feature contract in `Features/FEATURES_AGENTS.md`. | WT-2 |
+| 2026-09-13 | Markdown export slice (`Features/Export/`) — generated-never-maintained projection of the store. | PR #18 |
+| 2026-09-11 | Added `IMemorySearch` and `IDbErrorMapper` abstractions so retrieval predicates and error classification stay provider-side. | PR #14 review |
+| 2026-09-10 | HTTP API slices landed. Mediator Scoped + FluentValidation pipeline + `IApplicationDbContext`. Feature contract in `Features/FEATURES_AGENTS.md`. | PR #14 |
 | 2026-05-30 | Created — empty vertical-slice skeleton (`Features/`, `Common/{Clients,Exceptions,Models,Persistence,Pipelines}/`, `Extensions/`). | — |

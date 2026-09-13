@@ -43,7 +43,7 @@ derivation, redaction and atomicity checks the database cannot express as constr
 
 ## System Context
 
-The skill is a thin client over the HTTP API (WT-2), which is the only thing that touches PostgreSQL and
+The skill is a thin client over the HTTP API (PR #14), which is the only thing that touches PostgreSQL and
 blob storage. The skill owns the judgement; the API owns the mechanics. Both soft constraints (subject
 uniqueness, ticket-to-group uniqueness) and the write-time AI work (summary, keywords, semantic dedup,
 link derivation, redaction) live here — none can be expressed as a database constraint.
@@ -126,13 +126,13 @@ flowchart LR
   `.agents/skills/context-memory/tests/fixtures/scenarios.json` plus `score_fixtures.py`. Authored
   positive/negative scenarios for the semantic-dedup, atomicity, link and divergence stages, scored
   for recall AND precision against a countable expected-verdict set.
-- WT-3's test approach is specified in `docs/hlds/002-context-memory-write-pipeline/nfrs/NFR-02-deduplication-accuracy.md`. These
-  are not this repo's L0/L1/L2 tiers, which apply to the C# API (WT-2).
+- The skill's test approach is specified in `docs/hlds/002-context-memory-write-pipeline/nfrs/NFR-02-deduplication-accuracy.md`. These
+  are not this repo's L0/L1/L2 tiers, which apply to the C# API (PR #14).
 
 ## Requirements
 
-Approved (WT-3 Phase 4 gate, 2026-09-12) implementation plan for making this contract executable
-against the WT-2 API. No C# changes. The plan detail and decision set live in the gitignored working
+Approved (2026-09-12) implementation plan for making this contract executable
+against the HTTP API (PR #14). No C# changes. The plan detail and decision set live in the gitignored working
 spec `.context/work-tasks/wt-3-phase3-spec.md`. Key decisions: semantic dedup composed from
 `/query` recall (facets+kind, no free-text, `includeProposed:true`, `limit:200`) + LLM judgement,
 with `/preflight` as exact-match backstop + intra-batch + ticket-uniqueness only (amends HLD 002 (write pipeline)'s
@@ -144,7 +144,7 @@ as a static configurable setting; divergence fixture asserts non-collapse (V1 `d
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
-| 2026-09-10 | Created — contract for the sole interface to the context-memory store; fixed write pipeline; cross-group dedup, atomicity and secret-redaction ownership. | WT-1, HLD 002 (write pipeline) |
-| 2026-09-10 | Contract-coherence pass. Pipeline numbering pinned to five stages with **preflight as stage 1** (SKILL.md previously specified four, starting at redact). Approval gating resolved to *write-as-`proposed`* — SKILL.md previously said "do not write", which contradicted this file and the retrieval rule that excludes `proposed` records. Digest reclassified as a post-write receipt with `--dryrun` named as the only pre-write veto point (LADR-002 previously implied a veto round that `set`'s single transaction cannot provide). Intra-batch collision, source-date `valid_from`, and the summary model/prompt stamp added to SKILL.md, which the executing agent reads. | WT-1 review |
-| 2026-09-12 | `## Requirements` added — WT-3 Phase 4-approved implementation plan (skill executable against WT-2 API; no C#). Key decisions recorded (semantic dedup via `/query` recall + LLM judgement; digest `skipped` segregation; redaction rule-name digest; 20-cap static setting; divergence non-collapse). | WT-3 Phase 5 |
-| 2026-09-12 | **WT-3 implemented (no C#).** Added `scripts/context_memory_client.py` (14 subcommands, base-URL + health probe, `MAX_CANDIDATES`=20 cap, `--dryrun`), `scripts/redact.py` (stdin→stdout, rule-name digest, true-positive rules), `scripts/atomicity.py` (conservative bundle detector). SKILL.md gained `## Deterministic Components` (script mapping + two-call semantic-dedup composition) and `## Scope Prohibitions` (programme exclusion, no auto-403-`?scope=program` retry); digest `skipped` segregation added. HLD 002 (write pipeline) "Write preflight" API row amended to **judges nothing**. Test home: committed L0 harness `tests/run_tests.py` (12 tests) + on-demand fixtures `tests/fixtures/`. **Deferred:** the L0 harness is committed and CI-gatable but not wired into `pr-gate.yml` (approved plan's file set omitted a CI change). | WT-3 Phase 8 |
+| 2026-09-10 | Created — contract for the sole interface to the context-memory store; fixed write pipeline; cross-group dedup, atomicity and secret-redaction ownership. | HLD 002 (write pipeline) |
+| 2026-09-10 | Contract-coherence pass. Pipeline numbering pinned to five stages with **preflight as stage 1** (SKILL.md previously specified four, starting at redact). Approval gating resolved to *write-as-`proposed`* — SKILL.md previously said "do not write", which contradicted this file and the retrieval rule that excludes `proposed` records. Digest reclassified as a post-write receipt with `--dryrun` named as the only pre-write veto point (LADR-002 previously implied a veto round that `set`'s single transaction cannot provide). Intra-batch collision, source-date `valid_from`, and the summary model/prompt stamp added to SKILL.md, which the executing agent reads. | HLD 002 contract review |
+| 2026-09-12 | `## Requirements` added — approved implementation plan (skill executable against the HTTP API; no C#). Key decisions recorded (semantic dedup via `/query` recall + LLM judgement; digest `skipped` segregation; redaction rule-name digest; 20-cap static setting; divergence non-collapse). | PR #17 |
+| 2026-09-12 | **Skill implemented (no C#).** Added `scripts/context_memory_client.py` (14 subcommands, base-URL + health probe, `MAX_CANDIDATES`=20 cap, `--dryrun`), `scripts/redact.py` (stdin→stdout, rule-name digest, true-positive rules), `scripts/atomicity.py` (conservative bundle detector). SKILL.md gained `## Deterministic Components` (script mapping + two-call semantic-dedup composition) and `## Scope Prohibitions` (programme exclusion, no auto-403-`?scope=program` retry); digest `skipped` segregation added. HLD 002 (write pipeline) "Write preflight" API row amended to **judges nothing**. Test home: committed L0 harness `tests/run_tests.py` (12 tests) + on-demand fixtures `tests/fixtures/`. **Deferred:** the L0 harness is committed and CI-gatable but not wired into `pr-gate.yml` (approved plan's file set omitted a CI change). | PR #17 |

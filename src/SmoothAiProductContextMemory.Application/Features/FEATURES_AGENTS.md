@@ -83,7 +83,7 @@ sequenceDiagram
 
 - **Date**: 2026-09-10
 - **Status**: Accepted
-- **Context**: WT-2 AC mentioned cascade-delete `SET LOCAL`; ADR-0003 has no DELETE.
+- **Context**: The original API acceptance criteria (PR #14) mentioned cascade-delete `SET LOCAL`; ADR-0003 has no DELETE.
 - **Decision**: Do not add a delete endpoint or unused bypass helper. Persistence L1 already covers the trigger.
 - **Consequences**: A future purge endpoint must use `SET LOCAL` inside an explicit transaction, never plain `SET`. The append-only trigger is therefore **unreachable through the API** — no request can UPDATE or DELETE history — so its HTTP mapping is proven at L0 on the mapper, not by an L2 round trip.
 
@@ -135,7 +135,8 @@ sequenceDiagram
 
 ## Known Limitations
 
-- **A link between two memories that are both new in the same batch cannot be expressed.** `MemoryWrite.Uuid` means "version this existing memory", so a create has no caller-known identity until persist, and `LinkWrite` addresses memories by uuid. Link the two in a follow-up `POST /links`, or send one of them first. Adding a batch-local reference is a wire-contract change and belongs with WT-3.
+- **A link between two memories that are both new in the same batch cannot be expressed.** `MemoryWrite.Uuid` means "version this existing memory", so a create has no caller-known identity until persist, and `LinkWrite` addresses memories by uuid. Link the two in a follow-up `POST /links`, or send one of them first. Adding a batch-local reference is a wire-contract change and belongs with the write-pipeline work (HLD 002).
+- **The store accepts a self-link; both write validators reject it.** Persistence has no source≠target check. Characterised at L1 (`SelfLink_PersistsAtStore`); not tightened here (HLD-003).
 - **`ix_memory_version_validity` (GIST over `tstzrange`) is unreachable from LINQ**, which cannot construct a range from two columns. The `asOf` predicate is scalar and always combined with a narrowing predicate. Index usage is not asserted by a test: at test data volumes the planner correctly prefers a sequential scan regardless, so such a test would prove nothing. Verify with `EXPLAIN` against a realistic dataset.
 
 ## Test References
@@ -145,7 +146,7 @@ sequenceDiagram
 - L1: `tests/SmoothAiProductContextMemory.Application.ComponentTest/Features/ExportStoreHandlerTests.cs` (seeded store vs real Postgres)
 - L0: `tests/SmoothAiProductContextMemory.Host.UnitTest/` (ProblemDetails mapping, 403, no-leak on unmapped)
 - L0: `tests/SmoothAiProductContextMemory.Infrastructure.UnitTest/NpgsqlDbErrorMapperTests` (SQLSTATE classification, no provider text in messages)
-- L1: `tests/SmoothAiProductContextMemory.Application.ComponentTest/Features/` (handlers vs real Postgres — ordered version bump, dry-run/write parity, skipped links, full text, facet/tag containment, `asOf`, current-only, limit)
+- L1: `tests/SmoothAiProductContextMemory.Application.ComponentTest/Features/` (handlers vs real Postgres — ordered version bump, dry-run/write parity, skipped links including intra-batch duplicate, full text, facet/tag containment, `asOf`, current-only, limit)
 - L2: `tests/SmoothAiProductContextMemory.Host.IntegrationTest/` (HTTP round-trips, scope enforcement on query, blob **and** version history, dry run, subject-collision 409, group patch, initiatives, facet vocabulary, Scalar/OpenAPI)
 
 ## Quality Constraints
@@ -157,8 +158,9 @@ sequenceDiagram
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
-| 2026-09-13 | Markdown export is an Application slice (`Features/Export/`), not an HTTP endpoint. Forensic dump bypasses `MemoryScopeFilter`. | WT-4 |
-| 2026-09-11 | Review fixes: dry run shares the write plan (LADR-002); retrieval pushed into PostgreSQL behind `IMemorySearch` with `asOf` + `limit` (LADR-005); scope rule as data and enforced on the blob proxy (LADR-003); errors classified by SQLSTATE (LADR-006); facet endpoint reads the view (LADR-007); stale links skipped (LADR-008); `PATCH /groups/{uuid}` and initiative registry added; preflight narrows by kind before the cap. | WT-2 review |
+| 2026-09-13 | Intra-batch duplicate link skip characterised (`Duplicate_link_in_same_batch_is_skipped_not_fatal`). Store-vs-app self-link split recorded as a known limitation. | HLD-003 |
+| 2026-09-13 | Markdown export is an Application slice (`Features/Export/`), not an HTTP endpoint. Forensic dump bypasses `MemoryScopeFilter`. | PR #18 |
+| 2026-09-11 | Review fixes: dry run shares the write plan (LADR-002); retrieval pushed into PostgreSQL behind `IMemorySearch` with `asOf` + `limit` (LADR-005); scope rule as data and enforced on the blob proxy (LADR-003); errors classified by SQLSTATE (LADR-006); facet endpoint reads the view (LADR-007); stale links skipped (LADR-008); `PATCH /groups/{uuid}` and initiative registry added; preflight narrows by kind before the cap. | PR #14 review |
 | 2026-09-12 | /ai-review fixes: `GetMemoryVersions` scope-gated like the blob proxy (LADR-003 now covers versions too); `LabelsProposed` capped at 100; duplicate version-target in a batch is a `ConflictException` on both dry-run and write; letter/digit-free `Description` rejected as a 400 via `Slug.TrySubject`. | /ai-review PR #14 |
 | 2026-09-12 | /ai-analyse: 200-items-per-`set` write cap documented in Key Behaviors (shipped as a validator `400` in `SetMemories`); contract previously omitted the write cap while documenting the sibling read caps. | /ai-analyse |
-| 2026-09-10 | Created — ADR-0003 API surface, uuid wire, dry-run persist gate, scope filter, D42 stamp. | WT-2 |
+| 2026-09-10 | Created — ADR-0003 API surface, uuid wire, dry-run persist gate, scope filter, D42 stamp. | PR #14 |

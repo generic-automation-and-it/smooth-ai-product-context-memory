@@ -86,7 +86,7 @@ sequenceDiagram
 
 ## Requirements
 
-Approved WT-4 Phase 4 plan (2026-09-13):
+Approved implementation plan (2026-09-13):
 
 1. `IMarkdownExportSink` in Application; `FileSystemMarkdownExportSink` in Infrastructure.
 2. Pure `ExportPaths` + `ExportRenderer` (L0-tested).
@@ -108,4 +108,4 @@ Approved WT-4 Phase 4 plan (2026-09-13):
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
-| 2026-09-13 | Created — generated Markdown export contract (WT-4). | WT-4 |
+| 2026-09-13 | Created — generated Markdown export contract. | PR #18 |

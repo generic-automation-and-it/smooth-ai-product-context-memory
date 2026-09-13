@@ -13,16 +13,17 @@ internal static class DistributedApplicationBuilderExtensions
     // docker.io/minio/minio is no longer publicly pullable; quay.io hosts the last community releases.
     private const string BlobImage = "quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z";
     private const int DefaultSeqPort = 5341;
-    // Docker names are ASCII. Product brand is Mímisbrunnr; the compose project and
-    // container prefix drop the acute (í is not a valid container-name character).
-    private const string DockerDesktopGroupName = "mimisbrunnr";
-    private const string PostgresContainerName = "mimisbrunnr-postgres";
-    private const string BlobContainerName = "mimisbrunnr-blob";
-    private const string SeqContainerName = "mimisbrunnr-seq";
-    private const string HostContainerName = "mimisbrunnr-host";
+    // Docker names are ASCII. Brand is Mímisbrunnr; artifacts are smooth-mimisbrunnr-*
+    // (í is not a valid container-name character). Image/product stays
+    // smooth-ai-product-context-memory. Test fixtures use mimisbrunnr-testcontainer-*.
+    private const string DockerDesktopGroupName = "smooth-mimisbrunnr";
+    private const string PostgresContainerName = "smooth-mimisbrunnr-postgres";
+    private const string BlobContainerName = "smooth-mimisbrunnr-blob";
+    private const string SeqContainerName = "smooth-mimisbrunnr-seq";
+    private const string HostContainerName = "smooth-mimisbrunnr-host";
     private const int DefaultHostPort = 5141;
-    private const string PostgresDataVolume = "mimisbrunnr-postgres-data";
-    private const string BlobDataVolume = "mimisbrunnr-blob-data";
+    private const string PostgresDataVolume = "smooth-mimisbrunnr-postgres-data";
+    private const string BlobDataVolume = "smooth-mimisbrunnr-blob-data";
     private const string DefaultHostImage = "ghcr.io/generic-automation-and-it/smooth-ai-product-context-memory:latest";
     // Aspire 13.3.0 defaults to library/postgres:17.6. AGE's PG17 image keeps the same major so the
     // persistent data volume stays compatible. Pairing recorded in HLD 003 / NFR-04.

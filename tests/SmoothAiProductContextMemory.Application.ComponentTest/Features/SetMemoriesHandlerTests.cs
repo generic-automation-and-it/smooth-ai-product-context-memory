@@ -132,6 +132,34 @@ public sealed class SetMemoriesHandlerTests(AspireFixture aspire) : HandlerTestB
         (await Db.Memories.CountAsync(m => m.Description == "Link c", Ct)).ShouldBe(1);
     }
 
+    /// <summary>
+    /// A duplicate inside one batch is skipped and counted, not fatal — distinct from a
+    /// standalone create, which refuses the same triple. The <c>Skipped</c> counter is
+    /// shared with pre-existing/stale duplicates; the response does not distinguish the two.
+    /// </summary>
+    [Fact]
+    public async Task Duplicate_link_in_same_batch_is_skipped_not_fatal()
+    {
+        var group = TestEntities.NewGroup();
+        Db.MemoryGroups.Add(group);
+        await Db.SaveChangesAsync(Ct);
+
+        SetMemories.Handler handler = NewHandler();
+        Guid a = (await handler.Handle(Write(group.Uuid, "Batch a", "A"), Ct)).Items[0].Uuid!.Value;
+        Guid b = (await handler.Handle(Write(group.Uuid, "Batch b", "B"), Ct)).Items[0].Uuid!.Value;
+
+        var link = new SetMemories.LinkWrite(a, b, MemoryLink.RelationValue.RelatesTo, "why");
+        SetMemories.Response response = await handler.Handle(
+            Write(group.Uuid, "Batch a", "A2", a) with { Links = [link, link] },
+            Ct);
+
+        response.Versioned.ShouldBe(1);
+        response.Linked.ShouldBe(1);
+        response.Skipped.ShouldBe(1);
+        (await Db.MemoryLinks.CountAsync(
+            l => l.Relation == MemoryLink.RelationValue.RelatesTo, Ct)).ShouldBe(1);
+    }
+
     [Fact]
     public async Task Duplicate_subject_in_group_is_a_conflict_on_both_paths()
     {
