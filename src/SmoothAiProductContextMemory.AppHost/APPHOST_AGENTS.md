@@ -16,7 +16,7 @@ ports/container names.
   Container and volume names cannot: Docker rejects non-ASCII outright (`Invalid container name
   (mímisbrunnr-…), only [a-zA-Z0-9][a-zA-Z0-9_.-] are allowed`), so they are transliterated —
   `mimisbrunnr-postgres`, `mimisbrunnr-blob`, `mimisbrunnr-seq`. The test fixture follows the same
-  split (`Mímisbrunnr-Testing` group, `mimisbrunnr-testcontainer-*` containers). Do not "fix" the
+  split (`smooth-mímisbrunnr-testing` group, `mimisbrunnr-testcontainer-*` containers). Do not "fix" the
   group label to ASCII, and do not add the accent to a container or volume name. The MinIO bucket
   `smooth-mimisbrunnr-memory-well` is transliterated for the same reason — S3 bucket names are DNS
   labels (lowercase ASCII, digits, hyphens).

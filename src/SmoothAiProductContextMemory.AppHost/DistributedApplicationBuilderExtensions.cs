@@ -19,7 +19,7 @@ internal static class DistributedApplicationBuilderExtensions
     // accent. Container and volume names cannot: Docker rejects them outright —
     // "Invalid container name (mímisbrunnr-…), only [a-zA-Z0-9][a-zA-Z0-9_.-] are allowed" — so the
     // artifacts are transliterated to ASCII. Same split the test fixture uses
-    // (`Mímisbrunnr-Testing` group, `mimisbrunnr-testcontainer-*` containers).
+    // (`smooth-mímisbrunnr-testing` group, `mimisbrunnr-testcontainer-*` containers).
     private const string DockerDesktopGroupName = "smooth-mímisbrunnr";
     private const string PostgresContainerName = "mimisbrunnr-postgres";
     private const string BlobContainerName = "mimisbrunnr-blob";
