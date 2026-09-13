@@ -9,6 +9,8 @@ alwaysApply: true
 
 # Clean Code
 
+Updated: 2026-09-13
+
 Cross-cutting craftsmanship baseline distilled from Robert C. Martin's _Clean Code_. C# collection
 shape (array vs `List`) lives in [`backend/readonly-collections`](backend/readonly-collections.instructions.md).
 

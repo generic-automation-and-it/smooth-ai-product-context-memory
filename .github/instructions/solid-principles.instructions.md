@@ -9,6 +9,8 @@ alwaysApply: true
 
 # SOLID Principles
 
+Updated: 2026-09-13
+
 The principles need no restating. What follows is when one is a real diagnosis here, and when
 applying it makes the code worse.
 

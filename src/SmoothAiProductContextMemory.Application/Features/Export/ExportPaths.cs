@@ -32,7 +32,11 @@ public static class ExportPaths
                 {
                     // Full uuid is unique per input — guaranteed terminal fallback.
                     folder = $"{slug}--{group.Uuid:N}";
-                    used.Add(folder);
+                    if (!used.Add(folder))
+                    {
+                        throw new InvalidOperationException(
+                            $"Refusing to assign export folder '{folder}' twice for group UUID {group.Uuid:D}.");
+                    }
                 }
             }
 
@@ -59,7 +63,11 @@ public static class ExportPaths
                 {
                     // Full uuid is unique per input — guaranteed terminal fallback.
                     fileName = $"{MemoryFilePrefix}{memory.SubjectSlug}--{memory.Uuid:N}.md";
-                    used.Add(fileName);
+                    if (!used.Add(fileName))
+                    {
+                        throw new InvalidOperationException(
+                            $"Refusing to assign export file '{fileName}' twice for memory UUID {memory.Uuid:D}.");
+                    }
                 }
             }
 

@@ -28,46 +28,46 @@ public static class ExportRenderer
             w.Append("tickets:");
             if (group.Tickets.Count == 0)
             {
-                w.AppendLine(" []");
+                w.AppendLineLf(" []");
                 return;
             }
 
-            w.AppendLine();
+            w.AppendLineLf();
             foreach (ExportTicket ticket in group.Tickets)
             {
-                w.Append("  - provider: ").AppendLine(YamlScalar(ticket.Provider));
-                w.Append("    key: ").AppendLine(YamlScalar(ticket.Key));
-                w.Append("    url: ").AppendLine(YamlScalar(ticket.Url));
+                w.Append("  - provider: ").AppendLineLf(YamlScalar(ticket.Provider));
+                w.Append("    key: ").AppendLineLf(YamlScalar(ticket.Key));
+                w.Append("    url: ").AppendLineLf(YamlScalar(ticket.Url));
             }
         });
 
-        builder.AppendLine(ExportScopeMarks.GeneratedComment);
-        builder.AppendLine();
+        builder.AppendLineLf(ExportScopeMarks.GeneratedComment);
+        builder.AppendLineLf();
         WriteBanner(builder, group.ScopeDimension);
 
         string heading = group.CurrentDescription?.Name ?? $"group-{group.Uuid:D}";
-        builder.Append("# ").AppendLine(heading);
-        builder.AppendLine();
-        builder.AppendLine($"group_uuid: `{group.Uuid:D}`");
-        builder.AppendLine();
+        builder.Append("# ").AppendLineLf(heading);
+        builder.AppendLineLf();
+        builder.AppendLineLf($"group_uuid: `{group.Uuid:D}`");
+        builder.AppendLineLf();
 
         if (group.CurrentDescription is not null)
         {
-            builder.AppendLine(group.CurrentDescription.Body);
-            builder.AppendLine();
+            builder.AppendLineLf(group.CurrentDescription.Body);
+            builder.AppendLineLf();
         }
 
         if (includeHistory)
         {
             foreach (ExportGroupDescription historic in group.HistoricalDescriptions)
             {
-                builder.AppendLine($"## Description version {historic.Version}");
-                builder.AppendLine();
-                builder.AppendLine($"name: {historic.Name}");
-                builder.AppendLine($"created_on: {FormatTimestamp(historic.CreatedOn)}");
-                builder.AppendLine();
-                builder.AppendLine(historic.Body);
-                builder.AppendLine();
+                builder.AppendLineLf($"## Description version {historic.Version}");
+                builder.AppendLineLf();
+                builder.AppendLineLf($"name: {historic.Name}");
+                builder.AppendLineLf($"created_on: {FormatTimestamp(historic.CreatedOn)}");
+                builder.AppendLineLf();
+                builder.AppendLineLf(historic.Body);
+                builder.AppendLineLf();
             }
         }
 
@@ -105,25 +105,25 @@ public static class ExportRenderer
             WriteSources(w, current.Sources);
         });
 
-        builder.AppendLine(ExportScopeMarks.GeneratedComment);
-        builder.AppendLine();
+        builder.AppendLineLf(ExportScopeMarks.GeneratedComment);
+        builder.AppendLineLf();
         WriteBanner(builder, memory.ScopeDimension);
 
-        builder.Append("# ").AppendLine(memory.Name);
-        builder.AppendLine();
-        builder.AppendLine($"group_uuid: `{memory.GroupUuid:D}`");
-        builder.AppendLine();
-        builder.AppendLine("## Subject");
-        builder.AppendLine();
-        builder.AppendLine(memory.Description);
-        builder.AppendLine();
+        builder.Append("# ").AppendLineLf(memory.Name);
+        builder.AppendLineLf();
+        builder.AppendLineLf($"group_uuid: `{memory.GroupUuid:D}`");
+        builder.AppendLineLf();
+        builder.AppendLineLf("## Subject");
+        builder.AppendLineLf();
+        builder.AppendLineLf(memory.Description);
+        builder.AppendLineLf();
 
         WriteVersionBody(builder, current, heading: "## Claim", includeMetadataBlock: false);
 
         if (memory.Links.Count > 0)
         {
-            builder.AppendLine("## Links");
-            builder.AppendLine();
+            builder.AppendLineLf("## Links");
+            builder.AppendLineLf();
             foreach (ExportLink link in memory.Links)
             {
                 builder.Append("- ").Append(link.Direction)
@@ -131,10 +131,10 @@ public static class ExportRenderer
                     .Append(" `").Append(link.OtherUuid.ToString("D")).Append("` ")
                     .Append(link.OtherSubject)
                     .Append(" (group_uuid: `").Append(link.OtherGroupUuid.ToString("D")).Append("`) — ")
-                    .AppendLine(link.Reason);
+                    .AppendLineLf(link.Reason);
             }
 
-            builder.AppendLine();
+            builder.AppendLineLf();
         }
 
         if (includeHistory)
@@ -152,47 +152,47 @@ public static class ExportRenderer
 
     private static void WriteVersionBody(StringBuilder builder, ExportVersionBody version, string heading, bool includeMetadataBlock)
     {
-        builder.AppendLine(heading);
-        builder.AppendLine();
+        builder.AppendLineLf(heading);
+        builder.AppendLineLf();
         if (includeMetadataBlock)
         {
-            builder.AppendLine($"kind: {version.Kind}");
-            builder.AppendLine($"status: {version.Status}");
-            builder.AppendLine($"valid_from: {FormatTimestamp(version.ValidFrom)}");
-            builder.AppendLine($"valid_until: {(version.ValidUntil is null ? "null" : FormatTimestamp(version.ValidUntil.Value))}");
-            builder.AppendLine($"created_on: {FormatTimestamp(version.CreatedOn)}");
-            builder.AppendLine();
+            builder.AppendLineLf($"kind: {version.Kind}");
+            builder.AppendLineLf($"status: {version.Status}");
+            builder.AppendLineLf($"valid_from: {FormatTimestamp(version.ValidFrom)}");
+            builder.AppendLineLf($"valid_until: {(version.ValidUntil is null ? "null" : FormatTimestamp(version.ValidUntil.Value))}");
+            builder.AppendLineLf($"created_on: {FormatTimestamp(version.CreatedOn)}");
+            builder.AppendLineLf();
         }
 
-        builder.AppendLine(version.Statement);
-        builder.AppendLine();
+        builder.AppendLineLf(version.Statement);
+        builder.AppendLineLf();
         if (!string.IsNullOrWhiteSpace(version.ContentSummary))
         {
-            builder.AppendLine("### Summary");
-            builder.AppendLine();
-            builder.AppendLine(version.ContentSummary);
-            builder.AppendLine();
+            builder.AppendLineLf("### Summary");
+            builder.AppendLineLf();
+            builder.AppendLineLf(version.ContentSummary);
+            builder.AppendLineLf();
         }
 
-        builder.AppendLine("### Document");
-        builder.AppendLine();
+        builder.AppendLineLf("### Document");
+        builder.AppendLineLf();
         switch (version.BlobState)
         {
             case BlobRenderState.Inlined:
-                builder.AppendLine(version.BlobText ?? string.Empty);
+                builder.AppendLineLf(version.BlobText ?? string.Empty);
                 break;
             case BlobRenderState.Missing:
-                builder.AppendLine(ExportScopeMarks.MissingBlobNote);
+                builder.AppendLineLf(ExportScopeMarks.MissingBlobNote);
                 break;
             case BlobRenderState.NonText:
-                builder.AppendLine(ExportScopeMarks.NonTextBlobNote);
+                builder.AppendLineLf(ExportScopeMarks.NonTextBlobNote);
                 break;
             default:
-                builder.AppendLine(ExportScopeMarks.NoBlobNote);
+                builder.AppendLineLf(ExportScopeMarks.NoBlobNote);
                 break;
         }
 
-        builder.AppendLine();
+        builder.AppendLineLf();
     }
 
     private static void WriteFrontMatter(
@@ -200,15 +200,15 @@ public static class ExportRenderer
         IReadOnlyList<(string Key, string Value, bool Literal)> yaml,
         Action<StringBuilder> extra)
     {
-        builder.AppendLine("---");
+        builder.AppendLineLf("---");
         foreach ((string key, string value, bool literal) in yaml)
         {
-            builder.Append(key).Append(": ").AppendLine(YamlScalar(value, alreadyLiteral: literal));
+            builder.Append(key).Append(": ").AppendLineLf(YamlScalar(value, alreadyLiteral: literal));
         }
 
         extra(builder);
-        builder.AppendLine("---");
-        builder.AppendLine();
+        builder.AppendLineLf("---");
+        builder.AppendLineLf();
     }
 
     private static void WriteBanner(StringBuilder builder, string scopeDimension)
@@ -219,8 +219,8 @@ public static class ExportRenderer
             return;
         }
 
-        builder.AppendLine(banner);
-        builder.AppendLine();
+        builder.AppendLineLf(banner);
+        builder.AppendLineLf();
     }
 
     private static void WriteStringList(StringBuilder builder, string key, IReadOnlyList<string> values)
@@ -228,14 +228,14 @@ public static class ExportRenderer
         builder.Append(key).Append(':');
         if (values.Count == 0)
         {
-            builder.AppendLine(" []");
+            builder.AppendLineLf(" []");
             return;
         }
 
-        builder.AppendLine();
+        builder.AppendLineLf();
         foreach (string value in values)
         {
-            builder.Append("  - ").AppendLine(YamlScalar(value));
+            builder.Append("  - ").AppendLineLf(YamlScalar(value));
         }
     }
 
@@ -244,16 +244,16 @@ public static class ExportRenderer
         builder.Append("sources:");
         if (sources.Count == 0)
         {
-            builder.AppendLine(" []");
+            builder.AppendLineLf(" []");
             return;
         }
 
-        builder.AppendLine();
+        builder.AppendLineLf();
         foreach (ExportSource source in sources)
         {
-            builder.Append("  - kind: ").AppendLine(YamlScalar(source.Kind));
-            builder.Append("    reference: ").AppendLine(YamlScalar(source.Reference));
-            builder.Append("    captured_at: ").AppendLine(
+            builder.Append("  - kind: ").AppendLineLf(YamlScalar(source.Kind));
+            builder.Append("    reference: ").AppendLineLf(YamlScalar(source.Reference));
+            builder.Append("    captured_at: ").AppendLineLf(
                 source.CapturedAt is null ? "null" : YamlScalar(FormatTimestamp(source.CapturedAt.Value), alreadyLiteral: true));
         }
     }
@@ -334,9 +334,8 @@ public static class ExportRenderer
 
     private static bool IsBooleanOrNullAlias(string value) => BooleanOrNullAliases.Contains(value);
 
-    private static string Finish(StringBuilder builder)
-    {
-        string text = builder.ToString().Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
-        return text.TrimEnd('\n') + "\n";
-    }
+    private static StringBuilder AppendLineLf(this StringBuilder builder, string? value = null) =>
+        value is null ? builder.Append('\n') : builder.Append(value).Append('\n');
+
+    private static string Finish(StringBuilder builder) => builder.ToString().TrimEnd('\n') + "\n";
 }
