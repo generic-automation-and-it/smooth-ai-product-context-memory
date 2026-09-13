@@ -113,3 +113,4 @@ Hosted on **GitHub** at `https://github.com/generic-automation-and-it/project`. 
 | 2026-09-13 | Documented publish-image tag derivation, manual-dispatch validation, concurrency, cache, and revision behavior. | `.github/workflows/publish-image.yml` |
 | 2026-09-13 | Added BRD-002 (contextual knowledge export, `BR-18`–`BR-34`, extends BRD-001's requirement space) and HLD-005 (discovery). Ticket- and tag-anchored graph traversal recorded as three **Blocked** LADRs — no ticket or tag vertex exists and no writer derives such edges. | `docs/brd/002-contextual-export/`, `docs/hlds/005-contextual-export/` |
 | 2026-09-14 | Docs row in the repository layout now lists BRDs alongside HLDs. | `docs/` |
+| 2026-09-14 | BRD-002's requirement range extended to `BR-35`–`BR-36` (focus on the work the document feeds; a focus never changes selection or suppresses a finding); BRD-001 §11 row updated to match. | `docs/brd/002-contextual-export/` |

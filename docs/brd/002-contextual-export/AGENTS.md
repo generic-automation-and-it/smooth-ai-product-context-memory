@@ -1,6 +1,6 @@
 # AGENTS.md - Contextual knowledge export (BRD)
 
-AI Context: BRD for contextual knowledge export. Updated: 2026-09-13
+AI Context: BRD for contextual knowledge export. Updated: 2026-09-14
 
 ## TL;DR
 
@@ -46,10 +46,10 @@ design, with HLD 003 supplying relationships and HLD 004 supplying relevant find
 
 Design follow-up after review of the revised business requirements:
 
-- **HLD 005 still describes the earlier gap definition as unresolved.** Align its gap findings with BR-27's stated basis. Do not implement generic expectations as established product rules. The HLD's analysis taxonomy and BR-25 attribution language also need to distinguish findings from stored claims.
-- **HLD 005's collapse and lifecycle criteria need the fidelity cases in §7.** Preserve scope and proposed status, and do not count repeated copies of one source as independent corroboration. This BRD does not decide how those distinctions are stored.
-- **Combined selection semantics and history policy need explicit design treatment.** BR-18 requires visible combination behavior without choosing an unstated AND/OR rule. BR-24 retains selected history, BR-30 accounts for limits, and BR-33 still excludes hidden material.
-- **Preview consistency needs a design decision.** Define behavior when knowledge changes between preview and composition so the cost and scope reviewed by the practitioner remain meaningful (BR-20, BR-32).
+- **HLD 005's gap definition is aligned (closed 2026-09-14).** LADR-13 implements BR-27's three grounds and NFR-05 labels analysis with its basis — do not reintroduce a generic-expectations rule.
+- **HLD 005's consolidation and lifecycle criteria carry the fidelity cases (closed 2026-09-14).** LADR-05 requires equivalence of meaning, applicability and lifecycle, and repeated captures of one source are not corroboration. This BRD does not decide how those distinctions are stored.
+- **Combined selection semantics and history policy are designed (closed 2026-09-14).** LADR-03 states the combination rule (alternatives within a category, conjunctive across categories), keeps history a selection dimension priced by the preview, and never silently broadens a no-match.
+- **Preview consistency is decided (closed 2026-09-14).** LADR-14 binds preview and composition to one recorded selection — the scope the practitioner approved is the scope composed, or the difference is reported (BR-20, BR-32).
 - **Size and usability limits remain unmeasured.** Validate using the reference workflows before setting operational limits; do not assume a memory count guarantees a useful document or one-pass composition.
 - **BR-29's overlap with HLD 004 remains open.** A bulk-reading hypothesis about a weak summary and an observed recall signal are different evidence. Keep that distinction when connecting the mechanisms.
 - **Comparing exports over time is not required.** A dated snapshot and reproducible selection do not imply automatic refresh or document diffing.
@@ -64,3 +64,4 @@ Design follow-up after review of the revised business requirements:
 | 2026-09-13 | Created — BRD-002 for contextual knowledge export. Continues BRD-001's requirement space at `BR-18`; adds BO-6 … BO-10; closes BRD-001's recorded "BRD does not mention export at all" gap for the curated case. | HLD 005 |
 | 2026-09-13 | Added the three-place HLD-reference rule (owned: HLD 005; §11 rows for 003/004 are dependency pointers). | BRD-001 |
 | 2026-09-13 | Added BR-35 (focus on the work the document feeds) and BR-36 (a focus never changes selection and never suppresses a finding), plus §4's statement that there is deliberately no single primary consumer. Raised by review asking who the primary user is; the answer is that the work is knowable at request time and the reader is not. | BR-35, BR-36 |
+| 2026-09-14 | Migration Plans: HLD 005 alignment items — gap definition, consolidation and lifecycle criteria, combination semantics, preview consistency — marked closed; delivered by HLD 005's 2026-09-14 revision (LADR-13, LADR-14, revised LADR-03/LADR-05, NFR-05, NFR-07). | HLD 005 |
