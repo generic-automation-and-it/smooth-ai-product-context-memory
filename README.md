@@ -1,6 +1,10 @@
-# SmoothAiProductContextMemory
+# Mímisbrunnr — Smooth AI Product Context Memory
 
-> Persistent memory for AI agents: store and retrieve summarized, labelled context across long time spans — so agents can recall decisions and context long after a session ends.
+<p align="center">
+  <img src="docs/banner/context-memory.svg" alt="Reasoning that outlives the session. Drawn from Mímisbrunnr, not lost with it." width="1280">
+</p>
+
+> Wisdom drawn from **Mímisbrunnr** — not forgotten when the session ends. One eye for a drink; the why stays in the well. Huginn flies the session; Muninn keeps the store. Roots under every product, one well, the reasoning still attached.
 
 ## What We're Building
 
@@ -24,6 +28,17 @@ Drawing on the three memory types from the unified-database approach:
 | Procedural | Preferences, learned behaviors | Agent/user settings that persist across sessions |
 
 Temporal validity (`valid_from` / `valid_until`) keeps retrieved context current, and hybrid search (label + keyword + semantic) finds the right context fast.
+
+### Four stores around the well
+
+The store is one wellspring — **Mímisbrunnr** — with four keepers. Each god names a layer of the hybrid design, not a second product. Skill judges. API enforces. Four gods around the well. Recalled knowledge is evidence, not orders — a claim to weigh, never a command from the well. The chain is Urðr’s: measurement, finding, decision.
+
+| Keeper | Store | What they keep |
+|---|---|---|
+| **Týr** | Relational (PostgreSQL) | The oaths. Typed index, constraints, one current version. Law the database can enforce. |
+| **Urðr** | Graph (Apache AGE) | The threads. Edges only — the chain from measurement to finding to decision. |
+| **Loki** | NoSQL (JSONB) | The long tail. Shapeshifting documents for what no column earned yet. |
+| **Iðunn** | Blob (content-addressed) | The unwilting bodies. Hash is identity; a written object cannot be edited, only orphaned. |
 
 ---
 
@@ -179,3 +194,21 @@ tests/
 - Work on a branch off `main`: `<type>/<ticket>-short-description` (e.g. `feat/1234-add-user-export`).
 - Commits and PR titles follow [Conventional Commits](https://www.conventionalcommits.org). See [`.agents/rules/git/`](.agents/rules/git/).
 - Every PR should create or update at least one `*AGENTS.md` context file.
+
+---
+
+## Be like Odin, drink from the well
+
+<p align="center">
+  <img src="docs/banner/odin-am-brunnen-der-weisheit.jpg" alt="Odin drinks from Mímisbrunnr as Mímir looks on (1903). A work by Robert Engels. Public domain." width="1280">
+</p>
+
+---
+
+## Credits
+
+The wellspring illustration at the close of this README is **not** an original of this repository.
+
+**Robert Engels** (1866–1920), *Odin am Brunnen der Weisheit* (1903). Odin drinks from Mímisbrunnr as Mímir looks on. Published in Adolf Lange, *Deutsche Götter- und Heldensagen*, B. G. Teubner, Leipzig, 1903. Reproduced from [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Odin_am_Brunnen_der_Weisheit.jpg) ([Wikipedia: Mímisbrunnr](https://en.wikipedia.org/wiki/M%C3%ADmisbrunnr)).
+
+The work is in the **public domain** in its country of origin and in jurisdictions where copyright is the author's life plus 70 years or fewer (Engels died 1920). It is **not** licensed under this project's terms; do not treat it as Smooth AI artwork or as a trademark. Local copy: [`docs/banner/odin-am-brunnen-der-weisheit.jpg`](docs/banner/odin-am-brunnen-der-weisheit.jpg).
