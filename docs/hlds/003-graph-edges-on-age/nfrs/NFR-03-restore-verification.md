@@ -8,7 +8,7 @@ entirely successful until the first traversal after a restore.
 |---|---|
 | **Date** | 2026-09-13 |
 | **Script** | [`scripts/verify-graph-restore.sh`](../../../../scripts/verify-graph-restore.sh) |
-| **Fixture** | [`scripts/seed-graph-sample.sh`](../../../../scripts/seed-graph-sample.sh) — 200 memories, 200 vertices, 500 edges in the NFR-02 relation-type distribution |
+| **Fixture** | [`scripts/seed-graph-sample.sh`](../../../../scripts/seed-graph-sample.sh) — 200 seeded memories (201 memory rows in the output below: the cloned `app` template carried one pre-existing row, and only the seeded `sample-*` rows get vertices), 200 vertices, 500 edges in the NFR-02 relation-type distribution |
 | **Image** | `docker.io/apache/age:release_PG17_1.7.0` (Postgres 17.11, AGE 1.7.0) |
 | **Method** | `pg_dump -Fc` of the populated database, `pg_restore` into a **freshly created empty** database in the same instance, then counts and a traversal against the restored copy |
 | **Result** | **PASSED** |
