@@ -6,7 +6,10 @@ namespace SmoothAiProductContextMemory.TestFramework.Aspire;
 internal static class DistributedApplicationBuilderExtensions
 {
     private const string DockerDesktopGroupName = "Mímisbrunnr";
-    private const string BlobContainerName = "project-test-blob";
+    private const string PostgresContainerName = "mimisbrunnr-postgres";
+    private const string RedisContainerName = "mimisbrunnr-redis";
+    private const string WireMockContainerName = "mimisbrunnr-wiremock";
+    private const string BlobContainerName = "mimisbrunnr-blob";
     private const string BlobAccessKey = "minioadmin";
     private const int BlobPort = 9002;
     private const int BlobConsolePort = 19092;
@@ -58,10 +61,10 @@ internal static class DistributedApplicationBuilderExtensions
         var postgres = builder.AddPostgres("postgres", password: postgresPassword, port: 15432)
             .WithImage(PostgresImage, PostgresImageTag)
             .WithImageRegistry(PostgresImageRegistry)
-            .WithContainerName("project-test-postgres")
+            .WithContainerName(PostgresContainerName)
             .WithContainerRuntimeArgs(
                 "--label", $"com.docker.compose.project={DockerDesktopGroupName}",
-                "--label", "com.docker.compose.service=project-test-postgres")
+                "--label", $"com.docker.compose.service={PostgresContainerName}")
             .WithLifetime(ContainerLifetime.Persistent);
 
         postgres.AddDatabase("app-component");
@@ -74,10 +77,10 @@ internal static class DistributedApplicationBuilderExtensions
     private static void AddRedisDependency(this IDistributedApplicationBuilder builder)
     {
         builder.AddRedis("redis", port: 16379)
-            .WithContainerName("project-test-redis")
+            .WithContainerName(RedisContainerName)
             .WithContainerRuntimeArgs(
                 "--label", $"com.docker.compose.project={DockerDesktopGroupName}",
-                "--label", "com.docker.compose.service=project-test-redis")
+                "--label", $"com.docker.compose.service={RedisContainerName}")
             .WithLifetime(ContainerLifetime.Persistent);
     }
 
@@ -85,10 +88,10 @@ internal static class DistributedApplicationBuilderExtensions
     {
         builder.AddContainer("wiremock", WireMockImage)
             .WithHttpEndpoint(port: 19091, targetPort: 8080)
-            .WithContainerName("project-test-wiremock")
+            .WithContainerName(WireMockContainerName)
             .WithContainerRuntimeArgs(
                 "--label", $"com.docker.compose.project={DockerDesktopGroupName}",
-                "--label", "com.docker.compose.service=project-test-wiremock")
+                "--label", $"com.docker.compose.service={WireMockContainerName}")
             .WithLifetime(ContainerLifetime.Persistent);
     }
 }

@@ -46,7 +46,7 @@ ports/container names.
 | Seq | `seq` | `5341` | `smooth-project-memory-dev-seq` |
 | API project | `host` | `5141` http / `7141` https (from `launchSettings`) | n/a (host process) |
 
-Test fixture (separate AppHost) uses `15432` / `project-test-postgres` — see
+Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-postgres` — see
 `tests/SmoothAiProductContextMemory.TestFramework/TEST_FRAMEWORK_AGENTS.md`.
 
 ## Key Behaviors

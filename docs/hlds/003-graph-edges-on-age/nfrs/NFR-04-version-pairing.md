@@ -8,7 +8,7 @@ Recorded at HLD-003 foundation adoption. Update this file whenever either versio
 | **Postgres version** | 17 — 17.11 inside the AGE image (Aspire 13.3.0 default was `library/postgres:17.6`; same major, volume compatible) |
 | **AGE extension** | 1.7.0 |
 | **Supported AGE ceiling (upstream, at adoption)** | Postgres 11–18 for released tags; PG19 exists only as `dev_snapshot_PG19` |
-| **Hosts** | Dev AppHost (`smooth-project-memory-dev-postgres`) and test Aspire (`project-test-postgres`) |
+| **Hosts** | Dev AppHost (`smooth-project-memory-dev-postgres`) and test Aspire (`mimisbrunnr-postgres`) |
 
 ## Pre-upgrade check
 

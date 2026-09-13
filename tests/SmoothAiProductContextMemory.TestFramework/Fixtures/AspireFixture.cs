@@ -18,10 +18,10 @@ public sealed class AspireFixture : IAsyncLifetime
     private const string WireMockResourceName = "wiremock";
     private const string RedisResourceName = "redis";
     private const string BlobResourceName = "blob";
-    private const string PostgresContainerName = "project-test-postgres";
-    private const string RedisContainerName = "project-test-redis";
-    private const string WireMockContainerName = "project-test-wiremock";
-    private const string BlobContainerName = "project-test-blob";
+    private const string PostgresContainerName = "mimisbrunnr-postgres";
+    private const string RedisContainerName = "mimisbrunnr-redis";
+    private const string WireMockContainerName = "mimisbrunnr-wiremock";
+    private const string BlobContainerName = "mimisbrunnr-blob";
     private const string PostgresPassword = "LocalMachineAccessNoInterestingDataTestDev#Passw0rd!FirewallNotExposed";
     public const string BlobAccessKey = "minioadmin";
     public const string BlobSecretKey = "LocalMachineAccessNoInterestingDataTestDev#Passw0rd!FirewallNotExposed";
