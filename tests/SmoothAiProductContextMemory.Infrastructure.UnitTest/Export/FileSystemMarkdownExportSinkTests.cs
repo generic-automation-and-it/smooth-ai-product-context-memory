@@ -33,6 +33,31 @@ public class FileSystemMarkdownExportSinkTests
     }
 
     [Fact]
+    public async Task Prepare_refuses_filesystem_root()
+    {
+        string root = Path.GetPathRoot(Path.GetTempPath())
+                      ?? throw new InvalidOperationException("Could not resolve a filesystem root.");
+        var sink = new FileSystemMarkdownExportSink(NullLogger<FileSystemMarkdownExportSink>.Instance);
+
+        InvalidOperationException ex = await Should.ThrowAsync<InvalidOperationException>(
+            () => sink.PrepareAsync(root, force: true, TestContext.Current.CancellationToken));
+        ex.Message.ShouldContain("filesystem root");
+    }
+
+    [Fact]
+    public async Task Prepare_refuses_git_root()
+    {
+        using var dir = new TempDir();
+        Directory.CreateDirectory(Path.Combine(dir.Path, ".git"));
+        var sink = new FileSystemMarkdownExportSink(NullLogger<FileSystemMarkdownExportSink>.Instance);
+
+        InvalidOperationException ex = await Should.ThrowAsync<InvalidOperationException>(
+            () => sink.PrepareAsync(dir.Path, force: true, TestContext.Current.CancellationToken));
+        ex.Message.ShouldContain("git repository root");
+        Directory.Exists(Path.Combine(dir.Path, ".git")).ShouldBeTrue();
+    }
+
+    [Fact]
     public async Task WriteFile_rejects_path_escape()
     {
         using var dir = new TempDir();

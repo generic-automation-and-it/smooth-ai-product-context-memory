@@ -84,16 +84,17 @@ public sealed class FileSystemMarkdownExportSink(ILogger<FileSystemMarkdownExpor
 
     private static bool IsFilesystemRoot(string path)
     {
-        string full = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        string full = Path.GetFullPath(path);
         string? volumeRoot = Path.GetPathRoot(full);
-        if (string.IsNullOrEmpty(volumeRoot))
+        if (volumeRoot is null)
         {
             return false;
         }
 
-        string trimmedVolume = volumeRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        return string.Equals(full, trimmedVolume, StringComparison.OrdinalIgnoreCase)
-               || full is "/" or "\\";
+        return string.Equals(
+            full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+            volumeRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+            StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsGitRoot(string path) =>
