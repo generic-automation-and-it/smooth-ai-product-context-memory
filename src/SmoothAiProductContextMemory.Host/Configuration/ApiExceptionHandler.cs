@@ -47,13 +47,18 @@ internal sealed class ApiExceptionHandler(IDbErrorMapper errorMapper) : IExcepti
         // A request body that fails to deserialize is a caller mistake, not a server failure. An
         // unknown property — e.g. a misspelled `initiative` where the contract says
         // `initiativeName` — is rejected here as a 400, never absorbed and silently defaulted.
+        // BadHttpRequestException carries its own status (413 payload too large, 411 length
+        // required, …) — honor it rather than flattening every request defect to 400.
         if (effective is JsonException || effective is BadHttpRequestException)
         {
-            httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
+            int badRequestStatus = effective is BadHttpRequestException bad
+                ? bad.StatusCode
+                : StatusCodes.Status400BadRequest;
+            httpContext.Response.StatusCode = badRequestStatus;
             await httpContext.Response.WriteAsJsonAsync(
                 new ProblemDetails
                 {
-                    Status = StatusCodes.Status400BadRequest,
+                    Status = badRequestStatus,
                     Title = "Invalid request body",
                     Detail = "The request body could not be read: " + effective.Message,
                 },
