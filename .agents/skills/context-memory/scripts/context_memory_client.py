@@ -215,6 +215,62 @@ def cmd_create_link(args):
     return resp
 
 
+def cmd_paths(args):
+    """POST /api/context/paths. Traversal is bounded: maxDepth is required, never a server default.
+
+    Renders each returned path as a legible chain of relations onto the terminal endpoint's
+    descriptive fields, so the agent reads relationships rather than raw uuids. Raw hop uuids are
+    kept where no descriptive label exists (intermediate nodes); the terminal endpoint carries its
+    name/statement.
+    """
+    payload = read_payload(args.payload)
+    if not isinstance(payload, dict):
+        raise ClientError(0, "bad-input", "'paths' payload must be an object")
+    if "maxDepth" not in payload:
+        raise ClientError(
+            0,
+            "bad-input",
+            "'maxDepth' is required — the traversal bound is never left to a server default.",
+        )
+    resp = _request("POST", "/api/context/paths", payload)
+    _render_paths(resp)
+    return resp
+
+
+def _render_paths(resp):
+    paths = resp.get("paths", [])
+    if not paths:
+        print("No paths found.")
+        return
+
+    def label(node_uuid, endpoint):
+        if node_uuid and node_uuid == endpoint.get("uuid"):
+            return endpoint.get("name") or endpoint.get("statement") or node_uuid
+        return (str(node_uuid)[:8] + "…") if node_uuid else "?"
+
+    blocks = []
+    for index, path in enumerate(paths):
+        endpoint = path.get("endpoint", {})
+        hops = path.get("hops", [])
+        if hops:
+            chain = [label(hops[0].get("sourceUuid"), endpoint)]
+            for hop in hops:
+                chain.append(
+                    f"--[{hop.get('relation')}]--> {label(hop.get('targetUuid'), endpoint)}"
+                )
+        else:
+            chain = [label(endpoint.get("uuid"), endpoint)]
+
+        lines = [f"Path {index + 1} (depth={path.get('depth')}):"]
+        lines.append("  " + " ".join(chain))
+        for hop in hops:
+            if hop.get("reason"):
+                lines.append(f"    {hop.get('relation')}: {hop.get('reason')}")
+        blocks.append("\n".join(lines))
+
+    print("\n\n".join(blocks))
+
+
 def cmd_labels(args):
     resp = _request("GET", "/api/context/labels")
     print(json.dumps(resp, indent=2))
@@ -288,6 +344,10 @@ def main():
     p = sub.add_parser("create-link", help="POST /api/context/links")
     p.add_argument("--payload", help="JSON file; defaults to stdin")
     p.set_defaults(func=cmd_create_link)
+
+    p = sub.add_parser("paths", help="POST /api/context/paths (bounded traversal)")
+    p.add_argument("--payload", help="JSON file; defaults to stdin")
+    p.set_defaults(func=cmd_paths)
 
     p = sub.add_parser("labels", help="GET /api/context/labels")
     p.set_defaults(func=cmd_labels)

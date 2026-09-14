@@ -8,10 +8,13 @@ behaviour rather than re-deriving the rules (the anti-pattern run-trial.js fell 
 Run: python3 tests/run_tests.py
 """
 
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -110,6 +113,68 @@ class AtomicityTests(unittest.TestCase):
     def test_empty_input_is_simple(self):
         verdict = atomicity.classify("")
         self.assertEqual(verdict["verdict"], "simple")
+
+
+class PathsTests(unittest.TestCase):
+    """Server-independent assertions over the `paths` subcommand's deterministic parts.
+
+    The HTTP round-trip needs a live store, so it stays a manual check (per the worktask); what the
+    client guarantees without a server is the request guard and the legible rendering.
+    """
+
+    def setUp(self):
+        self.client = _load("context_memory_client")
+
+    def test_paths_requires_an_explicit_maxdepth(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as fh:
+            json.dump({"sourceUuid": "aaaaaaaa-1111-1111-1111-111111111111"}, fh)
+            path = fh.name
+        try:
+            import argparse
+
+            args = argparse.Namespace(payload=path)
+            with self.assertRaises(self.client.ClientError) as ctx:
+                self.client.cmd_paths(args)
+            self.assertIn("maxDepth", str(ctx.exception))
+        finally:
+            os.unlink(path)
+
+    def test_render_prefers_names_and_relations_over_uuids(self):
+        resp = {
+            "paths": [
+                {
+                    "depth": 2,
+                    "hops": [
+                        {
+                            "sourceUuid": "aaaaaaaa-1111-1111-1111-111111111111",
+                            "targetUuid": "bbbbbbbb-2222-2222-2222-222222222222",
+                            "relation": "depends_on",
+                            "reason": "the finding justified the decision",
+                        }
+                    ],
+                    "endpoint": {
+                        "uuid": "bbbbbbbb-2222-2222-2222-222222222222",
+                        "name": "Adopt the cache",
+                        "statement": "Adopt the cache",
+                    },
+                }
+            ]
+        }
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.client._render_paths(resp)
+
+        out = buf.getvalue()
+        self.assertIn("Adopt the cache", out)
+        self.assertIn("depends_on", out)
+        # The terminal endpoint is labelled by its name, not its bare uuid.
+        self.assertNotIn("bbbbbbbb-2222-2222-2222-222222222222", out)
+
+    def test_render_no_paths_is_honest(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.client._render_paths({"paths": []})
+        self.assertEqual(buf.getvalue().strip(), "No paths found.")
 
 
 if __name__ == "__main__":
