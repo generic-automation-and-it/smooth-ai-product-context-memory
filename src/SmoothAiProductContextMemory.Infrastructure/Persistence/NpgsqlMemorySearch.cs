@@ -155,7 +155,17 @@ public sealed class NpgsqlMemorySearch(SmoothAiProductContextMemoryDbContext db)
 
         // "any" matches rows carrying at least one requested value (array overlap, `&&`); "all" is
         // array containment (`@>`). Both are GIN-indexed, so neither introduces a sequential scan.
-        string matchOperator = criteria.FacetMatchMode == FacetMatchModeValue.All ? "@>" : "&&";
+        // An unknown mode throws rather than silently widening: the API validator guards the wire,
+        // but an in-process caller bypassing the handler must not get "any" by accident.
+        string matchOperator = criteria.FacetMatchMode switch
+        {
+            FacetMatchModeValue.Any => "&&",
+            FacetMatchModeValue.All => "@>",
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(criteria),
+                criteria.FacetMatchMode,
+                $"FacetMatchMode must be one of: {string.Join(", ", FacetMatchModeValue.Allowed)}."),
+        };
 
         if (criteria.Facets.Count > 0)
         {

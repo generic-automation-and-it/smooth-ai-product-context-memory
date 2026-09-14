@@ -138,22 +138,30 @@ class PathsClientTests(unittest.TestCase):
         self.assertEqual(client._render_path(path), data["expected_summary"])
 
     def test_missing_max_depth_is_rejected_before_any_network_call(self):
-        payload_path = self._write_temp({"sourceUuid": "aaaaaaaa-0000-0000-0000-000000000000"})
-        try:
-            with self.assertRaises(client.ClientError) as ctx:
-                client.cmd_paths(self._args(payload_path))
-            self.assertIn("maxDepth", str(ctx.exception))
-        finally:
-            os.unlink(payload_path)
+        for bad in ({"sourceUuid": "aaaaaaaa-0000-0000-0000-000000000000"},
+                    {"sourceUuid": "aaaaaaaa-0000-0000-0000-000000000000", "maxDepth": None},
+                    {"sourceUuid": "aaaaaaaa-0000-0000-0000-000000000000", "maxDepth": 0},
+                    {"sourceUuid": "aaaaaaaa-0000-0000-0000-000000000000", "maxDepth": "2"},
+                    {"sourceUuid": "aaaaaaaa-0000-0000-0000-000000000000", "maxDepth": True}):
+            with self.subTest(payload=bad):
+                payload_path = self._write_temp(bad)
+                try:
+                    with self.assertRaises(client.ClientError) as ctx:
+                        client.cmd_paths(self._args(payload_path))
+                    self.assertIn("maxDepth", str(ctx.exception))
+                finally:
+                    os.unlink(payload_path)
 
     def test_missing_source_uuid_is_rejected_before_any_network_call(self):
-        payload_path = self._write_temp({"maxDepth": 2})
-        try:
-            with self.assertRaises(client.ClientError) as ctx:
-                client.cmd_paths(self._args(payload_path))
-            self.assertIn("sourceUuid", str(ctx.exception))
-        finally:
-            os.unlink(payload_path)
+        for bad in ({"maxDepth": 2}, {"maxDepth": 2, "sourceUuid": None}, {"maxDepth": 2, "sourceUuid": "  "}):
+            with self.subTest(payload=bad):
+                payload_path = self._write_temp(bad)
+                try:
+                    with self.assertRaises(client.ClientError) as ctx:
+                        client.cmd_paths(self._args(payload_path))
+                    self.assertIn("sourceUuid", str(ctx.exception))
+                finally:
+                    os.unlink(payload_path)
 
     def test_unknown_source_uuid_error_shape_is_documented(self):
         data = json.loads((self.FIXTURES / "paths_error_unknown_source.json").read_text(encoding="utf-8"))

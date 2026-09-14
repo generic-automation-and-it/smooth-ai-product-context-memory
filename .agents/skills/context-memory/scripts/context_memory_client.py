@@ -249,14 +249,15 @@ def cmd_paths(args):
     payload = read_payload(args.payload)
     if not isinstance(payload, dict):
         raise ClientError(0, "bad-input", "'paths' payload must be an object")
-    if "maxDepth" not in payload:
+    if not isinstance(payload.get("maxDepth"), int) or isinstance(payload.get("maxDepth"), bool) or payload["maxDepth"] < 1:
         raise ClientError(
             0,
             "bad-input",
-            "'paths' requires 'maxDepth' — the traversal bound is never left to a server default.",
+            "'paths' requires 'maxDepth' as a positive integer — the traversal bound is never left to a server default.",
         )
-    if "sourceUuid" not in payload:
-        raise ClientError(0, "bad-input", "'paths' requires 'sourceUuid'")
+    source_uuid = payload.get("sourceUuid")
+    if not isinstance(source_uuid, str) or not source_uuid.strip():
+        raise ClientError(0, "bad-input", "'paths' requires 'sourceUuid' as a non-empty string")
 
     resp = _request("POST", "/api/context/paths", payload)
     for path in resp.get("paths", []):

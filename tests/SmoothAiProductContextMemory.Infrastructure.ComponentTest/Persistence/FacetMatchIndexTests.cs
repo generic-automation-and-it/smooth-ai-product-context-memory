@@ -50,8 +50,8 @@ public sealed class FacetMatchIndexTests : PersistenceTestBase
         rows.Select(r => r.Name).ShouldBe(["M1", "M2"], ignoreOrder: true);
 
         // The overlap predicate the "any" mode emits must be served by the facet GIN index, not a scan.
-        string plan = await ExplainAsync($"facets && ARRAY['storage','domain-model']");
-        plan.ShouldContain("ix_memory_facets");
+        string plan = await ExplainAsync("&&", ["storage", "domain-model"]);
+        plan.ShouldContain("IX_memory_facets");
         plan.ShouldNotContain("Seq Scan");
     }
 
@@ -70,25 +70,42 @@ public sealed class FacetMatchIndexTests : PersistenceTestBase
 
         await Db.SaveChangesAsync(Ct);
 
-        string plan = await ExplainAsync($"facets @> ARRAY['architecture','storage']");
-        plan.ShouldContain("ix_memory_facets");
+        string plan = await ExplainAsync("@>", ["architecture", "storage"]);
+        plan.ShouldContain("IX_memory_facets");
         plan.ShouldNotContain("Seq Scan");
     }
 
-    private async Task<string> ExplainAsync(string predicate)
+    /// <summary>
+    /// EXPLAIN of the same shape <see cref="NpgsqlMemorySearch"/> emits: the array is a bound
+    /// parameter, not a literal, so a parameterized-plan regression (operator/type mismatch dropping
+    /// the GIN path) is caught rather than hidden by a hand-written literal.
+    /// </summary>
+    private async Task<string> ExplainAsync(string matchOperator, string[] values)
     {
-        // enable_seqscan off forces the planner to prove the index path rather than default to a scan
-        // over a tiny fixture table, where a seq scan is honestly optimal but hides the regression.
-        string sql = $"SET enable_seqscan = off; EXPLAIN (FORMAT TEXT) SELECT * FROM memory WHERE {predicate}";
         await using var conn = await DataSource.OpenConnectionAsync(Ct);
-        await using var cmd = new NpgsqlCommand(sql, conn);
-        await using NpgsqlDataReader reader = await cmd.ExecuteReaderAsync(Ct);
-        var lines = new StringBuilder();
-        while (await reader.ReadAsync(Ct))
+        // SET LOCAL scopes the planner override to this transaction, so the pooled connection is
+        // clean on return. enable_seqscan off forces the planner to prove the index path rather than
+        // default to a scan over a tiny fixture table, where a seq scan is honestly optimal but
+        // hides the regression.
+        await using var tx = await conn.BeginTransactionAsync(Ct);
+        await using (var setCmd = new NpgsqlCommand("SET LOCAL enable_seqscan = off", conn, tx))
         {
-            lines.AppendLine(reader.GetString(0));
+            await setCmd.ExecuteNonQueryAsync(Ct);
         }
 
+        string sql = $"EXPLAIN (FORMAT TEXT) SELECT * FROM memory WHERE facets {matchOperator} $1";
+        await using var cmd = new NpgsqlCommand(sql, conn, tx);
+        cmd.Parameters.AddWithValue(values);
+        var lines = new StringBuilder();
+        await using (NpgsqlDataReader reader = await cmd.ExecuteReaderAsync(Ct))
+        {
+            while (await reader.ReadAsync(Ct))
+            {
+                lines.AppendLine(reader.GetString(0));
+            }
+        }
+
+        await tx.RollbackAsync(Ct);
         return lines.ToString();
     }
 }
