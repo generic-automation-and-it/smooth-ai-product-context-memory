@@ -12,7 +12,7 @@ Persistent memory service for AI agents: stores summarized, labelled context (li
 
 ## AI Context Files
 
-`AGENTS.md` and `*AGENTS.md` are first-class AI-coder context — read like `CLAUDE.md`, not optional reference. Layered domain → sub-domain → feature → technology; read every level that governs code you touch, nearest `*AGENTS.md` most authoritative. Keep `*AGENTS.md` synced with code; every PR updates at least one. Prefer local context over adding to this root file — avoid restating the same plan at multiple levels.
+`AGENTS.md` and `*AGENTS.md` are first-class AI-coder context — read like `CLAUDE.md`, not optional reference. Layered domain → sub-domain → feature → technology; read every level that governs code you touch, nearest `*AGENTS.md` most authoritative. Keep `*AGENTS.md` synced with code; every PR updates at least one. Prefer local context over adding to this root file — avoid restating the same plan at multiple levels. Changelog entries follow the same rule: record a change in the **nearest localized `*AGENTS.md`'s** changelog, not the root's — the root `## Changelog` is only for changes that are global to the solution or to this root file itself.
 
 ## Repository Layout
 
@@ -107,12 +107,6 @@ Hosted on **GitHub** at `https://github.com/generic-automation-and-it/project`. 
 
 | Date | Change | Ref |
 |---|---|---|
-| 2026-09-13 | `UpdateGroup` accepts additive idempotent cross-group-unique ticket merge; all endpoints reject unknown JSON fields as 400. | BUG-03 |
-| 2026-09-13 | Facet/tag query match is ANY by default (indexed overlap), containment (`all`) opt-in — fixes silent empty recall on multi-facet dedup batches; `FacetMatchMode` on `QueryMemories.Request`/`MemorySearchCriteria`. Added `paths` subcommand to the context-memory skill client (bounded traversal, `maxDepth` required). | BUG-02, BUG-04 |
-| 2026-09-13 | Documented AppHost Persistent leftover after exit and the two teardown scripts (`stop-dev-stack.sh` keep data, `reset-dev-stack.sh` destroy volumes). | `scripts/` |
-| 2026-09-13 | AppHost default is working-tree Host; `HostConfiguration__UseProject=false` pulls the published image (tag may lag). | `src/SmoothAiProductContextMemory.AppHost/` |
-| 2026-09-13 | Documented `scripts/` operational verification (NFR-03 restore round-trip, NFR-04 pre-upgrade check) and the `SMOOTH_AGE_BENCH`-gated NFR-02 benchmark command. | `scripts/` |
-| 2026-09-13 | Documented publish-image tag derivation, manual-dispatch validation, concurrency, cache, and revision behavior. | `.github/workflows/publish-image.yml` |
 | 2026-09-13 | Added BRD-002 (contextual knowledge export, `BR-18`–`BR-34`, extends BRD-001's requirement space) and HLD-005 (discovery). Ticket- and tag-anchored graph traversal recorded as three **Blocked** LADRs — no ticket or tag vertex exists and no writer derives such edges. | `docs/brd/002-contextual-export/`, `docs/hlds/005-contextual-export/` |
 | 2026-09-14 | Docs row in the repository layout now lists BRDs alongside HLDs. | `docs/` |
-| 2026-09-14 | BRD-002's requirement range extended to `BR-35`–`BR-36` (focus on the work the document feeds; a focus never changes selection or suppresses a finding); BRD-001 §11 row updated to match. | `docs/brd/002-contextual-export/` |
+| 2026-09-14 | Changelog scoping rule added to `## AI Context Files`: record changes in the nearest localized `*AGENTS.md`; root changelog is for solution-global or root-file changes only. Localized rows pruned from this table accordingly. | this file |
