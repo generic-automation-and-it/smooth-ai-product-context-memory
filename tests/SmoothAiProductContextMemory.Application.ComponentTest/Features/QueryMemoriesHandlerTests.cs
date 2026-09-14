@@ -70,7 +70,7 @@ public sealed class QueryMemoriesHandlerTests(AspireFixture aspire) : HandlerTes
     }
 
     [Fact]
-    public async Task Facets_and_tags_narrow_by_containment()
+    public async Task Facets_and_tags_match_any_requested_value()
     {
         var group = TestEntities.NewGroup();
         Db.MemoryGroups.Add(group);
@@ -86,14 +86,28 @@ public sealed class QueryMemoriesHandlerTests(AspireFixture aspire) : HandlerTes
 
         QueryMemories.Handler query = NewQuery();
 
-        (await query.Handle(Query() with { Facets = ["architecture", "storage"] }, Ct))
+        // A single requested facet matches the memory carrying it.
+        (await query.Handle(Query() with { Facets = ["architecture"] }, Ct))
+            .Items.Select(i => i.Description).ShouldBe(["Tagged fact"]);
+
+        // A multi-facet query is ANY — the union of rows carrying any requested facet, not only rows
+        // carrying all of them. This is the recall contract the semantic-dedup step depends on.
+        (await query.Handle(Query() with { Facets = ["architecture", "process"] }, Ct))
+            .Items.Select(i => i.Description).ShouldBe(["Other fact", "Tagged fact"]);
+
+        (await query.Handle(Query() with { Facets = ["architecture", "absent"] }, Ct))
             .Items.Select(i => i.Description).ShouldBe(["Tagged fact"]);
 
         (await query.Handle(Query() with { Tags = ["adr"] }, Ct))
             .Items.Select(i => i.Description).ShouldBe(["Tagged fact"]);
 
-        (await query.Handle(Query() with { Facets = ["architecture", "absent"] }, Ct))
-            .Items.ShouldBeEmpty();
+        // The same ANY rule holds for tags: disjoint tag sets union.
+        SetMemories.Request otherTagged = Approved(group.Uuid, "Tagged other");
+        otherTagged = otherTagged with { Items = [otherTagged.Items[0] with { Facets = [], Tags = ["decision"] }] };
+        await NewSet().Handle(otherTagged, Ct);
+
+        (await query.Handle(Query() with { Tags = ["adr", "decision"] }, Ct))
+            .Items.Select(i => i.Description).ShouldBe(["Tagged other", "Tagged fact"]);
     }
 
     [Fact]

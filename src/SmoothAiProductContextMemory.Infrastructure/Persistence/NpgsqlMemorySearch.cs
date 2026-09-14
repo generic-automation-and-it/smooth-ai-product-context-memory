@@ -20,7 +20,7 @@ namespace SmoothAiProductContextMemory.Infrastructure.Persistence;
 /// <list type="bullet">
 /// <item>
 /// Facet and tag matching goes through a small <c>FROM</c> fragment so the predicate is array
-/// containment (<c>@&gt;</c>), which the GIN indexes on those columns serve. LINQ's
+/// overlap (<c>&amp;&amp;</c>), which the GIN indexes on those columns serve. LINQ's
 /// <c>List.Contains</c> translates to <c>= ANY(column)</c>, which they do not. Column names are
 /// literals; every value is a parameter.
 /// </item>
@@ -139,8 +139,15 @@ public sealed class NpgsqlMemorySearch(SmoothAiProductContextMemoryDbContext db)
     }
 
     /// <summary>
-    /// The memory set narrowed by facet and tag containment. Falls back to the plain set when neither
+    /// The memory set narrowed by facet and tag overlap. Falls back to the plain set when neither
     /// is requested, so the common query carries no extra subquery.
+    /// <para>
+    /// Matching is overlap (<c>&amp;&amp;</c>), not containment (<c>@&gt;</c>): this is the recall path
+    /// (the only consumer of this filter), and a recall that passes a batch of facets must match a
+    /// memory carrying <em>any</em> of them. Containment returns nothing for any multi-facet batch
+    /// because no single memory carries every facet — an empty result that looks like an empty store
+    /// and silently defeats semantic dedup. <c>&amp;&amp;</c> is GIN-served, so the index still holds.
+    /// </para>
     /// </summary>
     private IQueryable<Memory> ClassifiedMemories(MemorySearchCriteria criteria)
     {
@@ -154,13 +161,13 @@ public sealed class NpgsqlMemorySearch(SmoothAiProductContextMemoryDbContext db)
 
         if (criteria.Facets.Count > 0)
         {
-            conditions.Add("facets @> {" + parameters.Count.ToString(CultureInfo.InvariantCulture) + "}");
+            conditions.Add("facets && {" + parameters.Count.ToString(CultureInfo.InvariantCulture) + "}");
             parameters.Add(criteria.Facets.ToArray());
         }
 
         if (criteria.Tags.Count > 0)
         {
-            conditions.Add("tags @> {" + parameters.Count.ToString(CultureInfo.InvariantCulture) + "}");
+            conditions.Add("tags && {" + parameters.Count.ToString(CultureInfo.InvariantCulture) + "}");
             parameters.Add(criteria.Tags.ToArray());
         }
 
