@@ -94,7 +94,7 @@ sequenceDiagram
 
 - **Date**: 2026-09-10
 - **Status**: Accepted
-- **Context**: The original API acceptance criteria (PR #14) mentioned cascade-delete `SET LOCAL`; ADR-0003 has no DELETE.
+- **Context**: The original API acceptance criteria (PR #14) mentioned cascade-delete `SET LOCAL`; HLD 002 has no DELETE.
 - **Decision**: Do not add a delete endpoint or unused bypass helper. Persistence L1 already covers the trigger.
 - **Consequences**: A future purge endpoint must use `SET LOCAL` inside an explicit transaction, never plain `SET`. The append-only trigger is therefore **unreachable through the API** — no request can UPDATE or DELETE history — so its HTTP mapping is proven at L0 on the mapper, not by an L2 round trip.
 
@@ -102,9 +102,9 @@ sequenceDiagram
 
 - **Date**: 2026-09-11
 - **Status**: Accepted
-- **Context**: Matching the indexes ADR-0002 defines needs provider-specific operators — `to_tsvector`/`plainto_tsquery` for full text, `@>` for facet and tag arrays. Those come from the Npgsql EF provider, which Application must not reference. Composing the query in Application therefore meant filtering in memory.
+- **Context**: Matching the indexes HLD 001 defines needs provider-specific operators — `to_tsvector`/`plainto_tsquery` for full text, `&&` (overlap, the default "any") / `@>` (containment, "all") for facet and tag arrays. Those come from the Npgsql EF provider, which Application must not reference. Composing the query in Application therefore meant filtering in memory.
 - **Decision**: Application owns `IMemorySearch` + `MemorySearchCriteria` (a fully resolved request, including the scope plan and the resolved group id). `NpgsqlMemorySearch` in Infrastructure translates it and projects straight to `CheapMemory`.
-- **Consequences**: The handler resolves identity and policy; the provider translates predicates. Facet/tag matching uses a small `FROM` fragment and the array **overlap** operator (`&&`) because `EF.Functions` exposes no array-containment helper and LINQ's `Contains` translates to `= ANY`, which the GIN indexes do not serve — column names are literals, values are parameters. Overlap is ANY (the recall contract): a multi-facet batch must match a memory carrying *any* requested facet, not all of them. `plainto_tsquery` must stay inside the expression tree; hoisting it to a local throws.
+- **Consequences**: The handler resolves identity and policy; the provider translates predicates. Facet/tag matching uses a small `FROM` fragment with a GIN-served array operator because `EF.Functions` exposes no array-containment/overlap helper and LINQ's `Contains` translates to `= ANY`, which the GIN indexes do not serve — column names are literals, values are parameters. The `any`/`all` mode is chosen by `MemorySearchCriteria.FacetMatchMode`; `all` (containment `@>`) is the deliberate narrowing form, `any` (overlap `&&`) the default so recall unifies a batch's facets. `plainto_tsquery` must stay inside the expression tree; hoisting it to a local throws.
 
 ### LADR-006: Database errors are classified by SQLSTATE
 
@@ -162,19 +162,21 @@ sequenceDiagram
 - L1: `tests/SmoothAiProductContextMemory.Application.ComponentTest/Features/ExportStoreHandlerTests.cs` (seeded store vs real Postgres)
 - L0: `tests/SmoothAiProductContextMemory.Host.UnitTest/` (ProblemDetails mapping, 403, no-leak on unmapped)
 - L0: `tests/SmoothAiProductContextMemory.Infrastructure.UnitTest/NpgsqlDbErrorMapperTests` (SQLSTATE classification, no provider text in messages)
-- L1: `tests/SmoothAiProductContextMemory.Application.ComponentTest/Features/` (handlers vs real Postgres — ordered version bump, dry-run/write parity, skipped links including intra-batch duplicate, full text, facet/tag overlap, `asOf`, current-only, limit)
+- L1: `tests/SmoothAiProductContextMemory.Application.ComponentTest/Features/` (handlers vs real Postgres — ordered version bump, dry-run/write parity, skipped links including intra-batch duplicate, full text, facet/tag any-match and all-containment, `asOf`, current-only, limit); `tests/SmoothAiProductContextMemory.Infrastructure.ComponentTest/Persistence/FacetMatchIndexTests` (both array modes served by the GIN index, no seq scan)
 - L2: `tests/SmoothAiProductContextMemory.Host.IntegrationTest/` (HTTP round-trips, scope enforcement on query, blob **and** version history, dry run, subject-collision 409, group patch, initiatives, facet vocabulary, Scalar/OpenAPI)
 
 ## Quality Constraints
 
-- Target query (current, approved, facet, repo, ticket, in-scope, validity) is one SQL statement. `memory_group.repo` has a btree; facets/tags have GIN and are matched with `&&` (overlap, ANY); full text matches the two `to_tsvector('simple', … || ' ' || …)` GIN expressions verbatim — changing either concatenation silently drops the index.
+- Target query (current, approved, facet, repo, ticket, in-scope, validity) is one SQL statement. `memory_group.repo` has a btree; facets/tags have GIN and are matched with `&&` (overlap, default "any") or `@>` (containment, "all" via `FacetMatchMode`); full text matches the two `to_tsvector('simple', … || ' ' || …)` GIN expressions verbatim — changing either concatenation silently drops the index.
 - Bind locally; no auth. Do not return raw blob URLs.
 
 ## Changelog
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
-| 2026-09-13 | Bugfix batch: recall facet/tag filter is overlap (`&&`, ANY) not containment (`@>`); `UpdateGroup` accepts `tickets` as an additive, idempotent, cross-group-unique merge; all endpoints reject unknown JSON body fields as a 400 (breaking — a stray field no longer silently defaults). | BUG-02/03 |
+| 2026-09-13 | `UpdateGroup` accepts `tickets` as an additive, idempotent, cross-group-unique merge; all endpoints reject unknown JSON body fields as a 400 (breaking — a stray field no longer silently defaults). | BUG-03 |
+| 2026-09-13 | Facet/tag match mode made explicit: default `any` (indexed overlap `&&`) so recall unifies a batch's facets; `all` (containment `@>`) opt-in via `QueryMemories.Request.FacetMatchMode` / `MemorySearchCriteria.FacetMatchMode`. GIN serves both (verified, no seq scan). | BUG-02 |
+| 2026-09-13 | ADR-0001/0002/0003 deleted; LADR-004 context retargeted to HLD 002, LADR-005 to HLD 001. | HLD-001, HLD-002 |
 | 2026-09-13 | `POST /api/context/paths` added (`Features/Links/FindPaths`) — bounded provenance traversal returning hops with reasons plus the endpoint's cheap fields from one composed statement. Depth bound required on the wire; scope rule applied to the source *and* the reached endpoints. | HLD-003 |
 | 2026-09-13 | CreateLink / SetMemories / Export re-pointed at `IMemoryGraph`. Duplicate skip vs 409 unchanged. Persistence no longer has `MemoryLink`. | HLD-003 |
 | 2026-09-13 | Intra-batch duplicate link skip characterised (`Duplicate_link_in_same_batch_is_skipped_not_fatal`). Store-vs-app self-link split recorded as a known limitation. | HLD-003 |

@@ -8,15 +8,13 @@ behaviour rather than re-deriving the rules (the anti-pattern run-trial.js fell 
 Run: python3 tests/run_tests.py
 """
 
-import contextlib
 import importlib.util
-import io
 import json
 import os
-import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 HERE = Path(__file__).resolve().parent
 SCRIPTS = HERE.parent / "scripts"
@@ -31,6 +29,7 @@ def _load(name):
 
 redact = _load("redact")
 atomicity = _load("atomicity")
+client = _load("context_memory_client")
 
 
 def _scrub_item(content):
@@ -115,66 +114,67 @@ class AtomicityTests(unittest.TestCase):
         self.assertEqual(verdict["verdict"], "simple")
 
 
-class PathsTests(unittest.TestCase):
-    """Server-independent assertions over the `paths` subcommand's deterministic parts.
+class PathsClientTests(unittest.TestCase):
+    FIXTURES = HERE / "fixtures"
 
-    The HTTP round-trip needs a live store, so it stays a manual check (per the worktask); what the
-    client guarantees without a server is the request guard and the legible rendering.
-    """
+    def _args(self, payload_path):
+        return SimpleNamespace(payload=str(payload_path))
 
-    def setUp(self):
-        self.client = _load("context_memory_client")
+    def test_plain_and_filtered_request_shapes_carry_required_fields(self):
+        for name in ("paths_plain.json", "paths_filtered.json"):
+            with self.subTest(name=name):
+                request = json.loads((self.FIXTURES / name).read_text(encoding="utf-8"))["request"]
+                self.assertIn("sourceUuid", request)
+                self.assertIn("maxDepth", request)
 
-    def test_paths_requires_an_explicit_maxdepth(self):
-        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as fh:
-            json.dump({"sourceUuid": "aaaaaaaa-1111-1111-1111-111111111111"}, fh)
-            path = fh.name
-        try:
-            import argparse
+    def test_filtered_request_reaches_all_filters(self):
+        request = json.loads((self.FIXTURES / "paths_filtered.json").read_text(encoding="utf-8"))["request"]
+        for field in ("sourceUuid", "maxDepth", "targetUuid", "relation", "direction", "kind", "status", "scopeDimension", "limit"):
+            self.assertIn(field, request)
 
-            args = argparse.Namespace(payload=path)
-            with self.assertRaises(self.client.ClientError) as ctx:
-                self.client.cmd_paths(args)
-            self.assertIn("maxDepth", str(ctx.exception))
-        finally:
-            os.unlink(path)
+    def test_render_path_matches_expected_summary(self):
+        data = json.loads((self.FIXTURES / "paths_plain.json").read_text(encoding="utf-8"))
+        path = data["response"]["paths"][0]
+        self.assertEqual(client._render_path(path), data["expected_summary"])
 
-    def test_render_prefers_names_and_relations_over_uuids(self):
-        resp = {
-            "paths": [
-                {
-                    "depth": 2,
-                    "hops": [
-                        {
-                            "sourceUuid": "aaaaaaaa-1111-1111-1111-111111111111",
-                            "targetUuid": "bbbbbbbb-2222-2222-2222-222222222222",
-                            "relation": "depends_on",
-                            "reason": "the finding justified the decision",
-                        }
-                    ],
-                    "endpoint": {
-                        "uuid": "bbbbbbbb-2222-2222-2222-222222222222",
-                        "name": "Adopt the cache",
-                        "statement": "Adopt the cache",
-                    },
-                }
-            ]
-        }
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            self.client._render_paths(resp)
+    def test_missing_max_depth_is_rejected_before_any_network_call(self):
+        for bad in ({"sourceUuid": "aaaaaaaa-0000-0000-0000-000000000000"},
+                    {"sourceUuid": "aaaaaaaa-0000-0000-0000-000000000000", "maxDepth": None},
+                    {"sourceUuid": "aaaaaaaa-0000-0000-0000-000000000000", "maxDepth": 0},
+                    {"sourceUuid": "aaaaaaaa-0000-0000-0000-000000000000", "maxDepth": "2"},
+                    {"sourceUuid": "aaaaaaaa-0000-0000-0000-000000000000", "maxDepth": True}):
+            with self.subTest(payload=bad):
+                payload_path = self._write_temp(bad)
+                try:
+                    with self.assertRaises(client.ClientError) as ctx:
+                        client.cmd_paths(self._args(payload_path))
+                    self.assertIn("maxDepth", str(ctx.exception))
+                finally:
+                    os.unlink(payload_path)
 
-        out = buf.getvalue()
-        self.assertIn("Adopt the cache", out)
-        self.assertIn("depends_on", out)
-        # The terminal endpoint is labelled by its name, not its bare uuid.
-        self.assertNotIn("bbbbbbbb-2222-2222-2222-222222222222", out)
+    def test_missing_source_uuid_is_rejected_before_any_network_call(self):
+        for bad in ({"maxDepth": 2}, {"maxDepth": 2, "sourceUuid": None}, {"maxDepth": 2, "sourceUuid": "  "}):
+            with self.subTest(payload=bad):
+                payload_path = self._write_temp(bad)
+                try:
+                    with self.assertRaises(client.ClientError) as ctx:
+                        client.cmd_paths(self._args(payload_path))
+                    self.assertIn("sourceUuid", str(ctx.exception))
+                finally:
+                    os.unlink(payload_path)
 
-    def test_render_no_paths_is_honest(self):
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            self.client._render_paths({"paths": []})
-        self.assertEqual(buf.getvalue().strip(), "No paths found.")
+    def test_unknown_source_uuid_error_shape_is_documented(self):
+        data = json.loads((self.FIXTURES / "paths_error_unknown_source.json").read_text(encoding="utf-8"))
+        self.assertEqual(data["http_status"], 404)
+        self.assertEqual(data["client_exit_code"], 1)
+        self.assertTrue(data["client_error_prefix"].startswith("HTTP 404"))
+
+    @staticmethod
+    def _write_temp(obj):
+        handle = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8")
+        with handle:
+            json.dump(obj, handle)
+        return handle.name
 
 
 if __name__ == "__main__":

@@ -19,10 +19,10 @@ namespace SmoothAiProductContextMemory.Infrastructure.Persistence;
 /// </para>
 /// <list type="bullet">
 /// <item>
-/// Facet and tag matching goes through a small <c>FROM</c> fragment so the predicate is array
-/// overlap (<c>&amp;&amp;</c>), which the GIN indexes on those columns serve. LINQ's
-/// <c>List.Contains</c> translates to <c>= ANY(column)</c>, which they do not. Column names are
-/// literals; every value is a parameter.
+/// Facet and tag matching goes through a small <c>FROM</c> fragment so the predicate uses a GIN-
+/// served array operator — <c>&amp;&amp;</c> (overlap, the default "any" mode) or <c>@&gt;</c>
+/// (containment, "all"). Both are indexed; LINQ's <c>List.Contains</c> translates to
+/// <c>= ANY(column)</c>, which they are not. Column names are literals; every value is a parameter.
 /// </item>
 /// <item>
 /// The as-of predicate is scalar rather than range containment: <c>ix_memory_version_validity</c> is
@@ -139,15 +139,9 @@ public sealed class NpgsqlMemorySearch(SmoothAiProductContextMemoryDbContext db)
     }
 
     /// <summary>
-    /// The memory set narrowed by facet and tag overlap. Falls back to the plain set when neither
+    /// The memory set narrowed by the facet/tag array operator — overlap (<c>&amp;&amp;</c>, "any")
+    /// by default, containment (<c>@&gt;</c>, "all") opt-in. Falls back to the plain set when neither
     /// is requested, so the common query carries no extra subquery.
-    /// <para>
-    /// Matching is overlap (<c>&amp;&amp;</c>), not containment (<c>@&gt;</c>): this is the recall path
-    /// (the only consumer of this filter), and a recall that passes a batch of facets must match a
-    /// memory carrying <em>any</em> of them. Containment returns nothing for any multi-facet batch
-    /// because no single memory carries every facet — an empty result that looks like an empty store
-    /// and silently defeats semantic dedup. <c>&amp;&amp;</c> is GIN-served, so the index still holds.
-    /// </para>
     /// </summary>
     private IQueryable<Memory> ClassifiedMemories(MemorySearchCriteria criteria)
     {
@@ -159,15 +153,29 @@ public sealed class NpgsqlMemorySearch(SmoothAiProductContextMemoryDbContext db)
         var conditions = new List<string>();
         var parameters = new List<object>();
 
+        // "any" matches rows carrying at least one requested value (array overlap, `&&`); "all" is
+        // array containment (`@>`). Both are GIN-indexed, so neither introduces a sequential scan.
+        // An unknown mode throws rather than silently widening: the API validator guards the wire,
+        // but an in-process caller bypassing the handler must not get "any" by accident.
+        string matchOperator = criteria.FacetMatchMode switch
+        {
+            FacetMatchModeValue.Any => "&&",
+            FacetMatchModeValue.All => "@>",
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(criteria),
+                criteria.FacetMatchMode,
+                $"FacetMatchMode must be one of: {string.Join(", ", FacetMatchModeValue.Allowed)}."),
+        };
+
         if (criteria.Facets.Count > 0)
         {
-            conditions.Add("facets && {" + parameters.Count.ToString(CultureInfo.InvariantCulture) + "}");
+            conditions.Add("facets " + matchOperator + " {" + parameters.Count.ToString(CultureInfo.InvariantCulture) + "}");
             parameters.Add(criteria.Facets.ToArray());
         }
 
         if (criteria.Tags.Count > 0)
         {
-            conditions.Add("tags && {" + parameters.Count.ToString(CultureInfo.InvariantCulture) + "}");
+            conditions.Add("tags " + matchOperator + " {" + parameters.Count.ToString(CultureInfo.InvariantCulture) + "}");
             parameters.Add(criteria.Tags.ToArray());
         }
 

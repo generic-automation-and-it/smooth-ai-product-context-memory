@@ -24,7 +24,7 @@ Persistent memory service for AI agents: stores summarized, labelled context (li
 | Host | `src/SmoothAiProductContextMemory.Host/` | ASP.NET Core Web API, Serilog → console/Seq + OpenTelemetry OTLP, `/health` + `/alive`, Scalar OpenAPI |
 | AppHost | `src/SmoothAiProductContextMemory.AppHost/` | Aspire dev orchestrator — Postgres+AGE (`docker.io/apache/age:release_PG17_1.7.0`) + MinIO blob storage + Seq |
 | ChatHost | `src/SmoothAiProductContextMemory.ChatHost/` | Standalone LLM microservice — owns Anthropic SDK; talks to Host via HTTP only (project not yet in tree) |
-| Docs | `docs/` | Wiki, HLDs, BRDs, ADR pointer stubs — visible (not hidden `.docs`) |
+| Docs | `docs/` | Wiki, HLDs, BRDs — visible (not hidden `.docs`) |
 | Scripts | `scripts/` | Operational verification run against a container, not part of the test suite — graph restore round-trip (NFR-03), Postgres pre-upgrade check (NFR-04), a sample-data seeder so both have something to verify, and AppHost teardown (`stop-dev-stack.sh` keep data / `reset-dev-stack.sh` destroy volumes) |
 
 Planned work tracked as worktasks under `.context/work-tasks/` (gitignored). Use `/create worktask`. **Never reference worktask IDs (e.g. `WT-04`) in delivered artefacts** — code, comments, `*AGENTS.md`, HLDs, changelogs. Worktasks are short-lived and gitignored; cite the durable authority instead (HLD, LADR, NFR, PR, issue).
@@ -107,7 +107,12 @@ Hosted on **GitHub** at `https://github.com/generic-automation-and-it/project`. 
 
 | Date | Change | Ref |
 |---|---|---|
-| 2026-09-13 | Bugfix batch: recall facet/tag filter is overlap (ANY) not containment; `UpdateGroup` accepts additive idempotent cross-group-unique ticket merge; all endpoints reject unknown JSON fields as 400; client `paths` subcommand added. | BUG-02/03/04 |
+| 2026-09-13 | `UpdateGroup` accepts additive idempotent cross-group-unique ticket merge; all endpoints reject unknown JSON fields as 400. | BUG-03 |
+| 2026-09-13 | Facet/tag query match is ANY by default (indexed overlap), containment (`all`) opt-in — fixes silent empty recall on multi-facet dedup batches; `FacetMatchMode` on `QueryMemories.Request`/`MemorySearchCriteria`. Added `paths` subcommand to the context-memory skill client (bounded traversal, `maxDepth` required). | BUG-02, BUG-04 |
+| 2026-09-13 | Documented AppHost Persistent leftover after exit and the two teardown scripts (`stop-dev-stack.sh` keep data, `reset-dev-stack.sh` destroy volumes). | `scripts/` |
 | 2026-09-13 | AppHost default is working-tree Host; `HostConfiguration__UseProject=false` pulls the published image (tag may lag). | `src/SmoothAiProductContextMemory.AppHost/` |
 | 2026-09-13 | Documented `scripts/` operational verification (NFR-03 restore round-trip, NFR-04 pre-upgrade check) and the `SMOOTH_AGE_BENCH`-gated NFR-02 benchmark command. | `scripts/` |
 | 2026-09-13 | Documented publish-image tag derivation, manual-dispatch validation, concurrency, cache, and revision behavior. | `.github/workflows/publish-image.yml` |
+| 2026-09-13 | Added BRD-002 (contextual knowledge export, `BR-18`–`BR-34`, extends BRD-001's requirement space) and HLD-005 (discovery). Ticket- and tag-anchored graph traversal recorded as three **Blocked** LADRs — no ticket or tag vertex exists and no writer derives such edges. | `docs/brd/002-contextual-export/`, `docs/hlds/005-contextual-export/` |
+| 2026-09-14 | Docs row in the repository layout now lists BRDs alongside HLDs. | `docs/` |
+| 2026-09-14 | BRD-002's requirement range extended to `BR-35`–`BR-36` (focus on the work the document feeds; a focus never changes selection or suppresses a finding); BRD-001 §11 row updated to match. | `docs/brd/002-contextual-export/` |

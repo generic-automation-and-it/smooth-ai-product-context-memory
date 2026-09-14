@@ -70,7 +70,35 @@ public sealed class QueryMemoriesHandlerTests(AspireFixture aspire) : HandlerTes
     }
 
     [Fact]
-    public async Task Facets_and_tags_match_any_requested_value()
+    public async Task Facets_and_tags_match_any_by_default()
+    {
+        var group = TestEntities.NewGroup();
+        Db.MemoryGroups.Add(group);
+        await Db.SaveChangesAsync(Ct);
+
+        SetMemories.Request storage = Approved(group.Uuid, "Storage fact");
+        storage = storage with { Items = [storage.Items[0] with { Facets = ["storage"], Tags = ["adr"] }] };
+        await NewSet().Handle(storage, Ct);
+
+        SetMemories.Request domain = Approved(group.Uuid, "Domain fact");
+        domain = domain with { Items = [domain.Items[0] with { Facets = ["domain-model"], Tags = [] }] };
+        await NewSet().Handle(domain, Ct);
+
+        QueryMemories.Handler query = NewQuery();
+
+        // Recall is the union: a row carrying any of the batch's facets must come back.
+        (await query.Handle(Query() with { Facets = ["storage", "domain-model"] }, Ct))
+            .Items.Select(i => i.Description).ShouldBe(["Storage fact", "Domain fact"], ignoreOrder: true);
+
+        (await query.Handle(Query() with { Tags = ["adr"] }, Ct))
+            .Items.Select(i => i.Description).ShouldBe(["Storage fact"]);
+
+        (await query.Handle(Query() with { Facets = ["absent", "also-absent"] }, Ct))
+            .Items.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Facets_and_tags_narrow_by_containment_in_all_mode()
     {
         var group = TestEntities.NewGroup();
         Db.MemoryGroups.Add(group);
@@ -86,28 +114,12 @@ public sealed class QueryMemoriesHandlerTests(AspireFixture aspire) : HandlerTes
 
         QueryMemories.Handler query = NewQuery();
 
-        // A single requested facet matches the memory carrying it.
-        (await query.Handle(Query() with { Facets = ["architecture"] }, Ct))
+        // "all" keeps the airtight narrowing form: only rows carrying every requested facet.
+        (await query.Handle(Query() with { Facets = ["architecture", "storage"], FacetMatchMode = FacetMatchModeValue.All }, Ct))
             .Items.Select(i => i.Description).ShouldBe(["Tagged fact"]);
 
-        // A multi-facet query is ANY — the union of rows carrying any requested facet, not only rows
-        // carrying all of them. This is the recall contract the semantic-dedup step depends on.
-        (await query.Handle(Query() with { Facets = ["architecture", "process"] }, Ct))
-            .Items.Select(i => i.Description).ShouldBe(["Other fact", "Tagged fact"]);
-
-        (await query.Handle(Query() with { Facets = ["architecture", "absent"] }, Ct))
-            .Items.Select(i => i.Description).ShouldBe(["Tagged fact"]);
-
-        (await query.Handle(Query() with { Tags = ["adr"] }, Ct))
-            .Items.Select(i => i.Description).ShouldBe(["Tagged fact"]);
-
-        // The same ANY rule holds for tags: disjoint tag sets union.
-        SetMemories.Request otherTagged = Approved(group.Uuid, "Tagged other");
-        otherTagged = otherTagged with { Items = [otherTagged.Items[0] with { Facets = [], Tags = ["decision"] }] };
-        await NewSet().Handle(otherTagged, Ct);
-
-        (await query.Handle(Query() with { Tags = ["adr", "decision"] }, Ct))
-            .Items.Select(i => i.Description).ShouldBe(["Tagged other", "Tagged fact"]);
+        (await query.Handle(Query() with { Facets = ["architecture", "absent"], FacetMatchMode = FacetMatchModeValue.All }, Ct))
+            .Items.ShouldBeEmpty();
     }
 
     [Fact]

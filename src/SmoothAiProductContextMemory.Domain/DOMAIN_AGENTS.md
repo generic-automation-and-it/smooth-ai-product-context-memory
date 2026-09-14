@@ -8,16 +8,16 @@ Pure domain model — entities, aggregate roots, and value objects. Zero externa
 
 - **No outward dependencies.** Domain references no other project and no infrastructure packages (EF Core, ASP.NET, HTTP, serialization). It is the innermost Clean Architecture layer — everything depends on it, it depends on nothing.
 - **No I/O or framework concerns.** No persistence, network, logging, or DI registration here — those belong in Infrastructure/Host.
-- **Enforce invariants at construction.** Default for domain types. Guard required state in constructors/factory methods so an entity cannot exist in an invalid state. Value objects are immutable and compared by value. (Context-memory persistence rows are exempt — see the ADR-0002 exceptions below.)
+- **Enforce invariants at construction.** Default for domain types. Guard required state in constructors/factory methods so an entity cannot exist in an invalid state. Value objects are immutable and compared by value. (Context-memory persistence rows are exempt — see the HLD 001 exceptions below.)
 
-## ADR-0002 exceptions (context-memory model)
+## HLD 001 exceptions (context-memory model)
 
 These are deliberate departures from the defaults above, sanctioned by
 [HLD 001](../../docs/hlds/001-context-memory-storage/). **Do not "correct" them** —
 they are the design, not drift.
 
 - **Serialization attribute exception.** `[JsonPropertyOrder]` on `JsonShapeDocument` is the sanctioned
-  one-place implementation of the `v` shape marker required by the ADR's JSONB document contract. It is
+  one-place implementation of the `v` shape marker required by HLD 001's JSONB document contract. It is
   the *only* serialization concern permitted in Domain; no other entity may carry serialization
   attributes.
 - **Anemic POCOs, not constructor-enforced invariants.** Context-memory entities are persistence rows by
@@ -33,6 +33,7 @@ they are the design, not drift.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-13 | ADR-0001/0002/0003 deleted; exceptions section retargeted to HLD 001. | HLD-001 |
 | 2026-09-13 | `MemoryLink` entity removed; `MemoryRelation` holds the five well-known relation strings (open vocabulary, not a closed set). | HLD-003 |
 | 2026-09-13 | `.docs`→`docs` move and ADR-0002→HLD 001 authority retarget recorded; the exceptions sanction now links HLD 001. | — |
 | 2026-09-09 | Restored the "Enforce invariants at construction" default as the stated Domain default; the ADR-0002 exceptions section now explicitly carves out the context-memory persistence rows. | ADR-0002 |

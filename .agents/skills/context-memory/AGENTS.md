@@ -125,8 +125,9 @@ flowchart LR
 
 - **Committed L0 harness (CI-gatable):** `.agents/skills/context-memory/tests/run_tests.py` — stdlib
   `unittest` (no external runner). Unit-tests the deterministic plumbing: `redact.py` (planted
-  credential never leaks; digest reports the rule name), `atomicity.py` (bundle → split/skip), and the
-  `paths` client subcommand (maxDepth guard + legible names/relations rendering).
+  credential never leaks; digest reports the rule name), `atomicity.py` (bundle → split/skip), and
+  `context_memory_client.py` (`paths` guard rails — maxDepth/sourceUuid required before any network
+  call — and `_render_path` summary rendering).
   Run: `python3 .agents/skills/context-memory/tests/run_tests.py`.
 - **On-demand LLM-eval fixtures (not CI-gated):**
   `.agents/skills/context-memory/tests/fixtures/scenarios.json` plus `score_fixtures.py`. Authored
@@ -150,7 +151,8 @@ as a static configurable setting; divergence fixture asserts non-collapse (V1 `d
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
-| 2026-09-13 | `paths` client subcommand added (15th) — bounded traversal, always sends `maxDepth`, renders paths as legible names/relations; SKILL.md gained Query-vs-Traverse guidance; `query` facets/tags documented as ANY (union). The API now rejects unknown request fields, so a misspelled payload field is a 400, not a silent default. | BUG-04/02/03 |
+| 2026-09-13 | The API rejects unknown request fields as a 400, so a misspelled payload field never silently defaults; `update-group` accepts `tickets` as an additive, idempotent, cross-group-unique merge. | BUG-03 |
+| 2026-09-13 | `/query` recall: facet/tag match is ANY by default (rows carrying any requested facet), containment (`all`) opt-in — matches the recall union the dedup step needs. `paths` subcommand added (bounded multi-hop traversal, `maxDepth` required, scope enforced); SKILL.md gained `## Traversal` guidance on when to traverse vs query. | BUG-02, BUG-04 |
 | 2026-09-10 | Created — contract for the sole interface to the context-memory store; fixed write pipeline; cross-group dedup, atomicity and secret-redaction ownership. | HLD 002 (write pipeline) |
 | 2026-09-10 | Contract-coherence pass. Pipeline numbering pinned to five stages with **preflight as stage 1** (SKILL.md previously specified four, starting at redact). Approval gating resolved to *write-as-`proposed`* — SKILL.md previously said "do not write", which contradicted this file and the retrieval rule that excludes `proposed` records. Digest reclassified as a post-write receipt with `--dryrun` named as the only pre-write veto point (LADR-002 previously implied a veto round that `set`'s single transaction cannot provide). Intra-batch collision, source-date `valid_from`, and the summary model/prompt stamp added to SKILL.md, which the executing agent reads. | HLD 002 contract review |
 | 2026-09-12 | `## Requirements` added — approved implementation plan (skill executable against the HTTP API; no C#). Key decisions recorded (semantic dedup via `/query` recall + LLM judgement; digest `skipped` segregation; redaction rule-name digest; 20-cap static setting; divergence non-collapse). | PR #17 |
