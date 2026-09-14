@@ -54,14 +54,22 @@ internal sealed class ApiExceptionHandler(IDbErrorMapper errorMapper) : IExcepti
             int badRequestStatus = effective is BadHttpRequestException bad
                 ? bad.StatusCode
                 : StatusCodes.Status400BadRequest;
+            JsonException? json = FindJsonFailure(effective);
+            var problem = new ProblemDetails
+            {
+                Status = badRequestStatus,
+                Title = "Invalid request body",
+                Detail = "The request body could not be read: " + (json?.Message ?? effective.Message),
+            };
+
+            if (json is { Path.Length: > 0 } located)
+            {
+                problem.Extensions["path"] = located.Path;
+            }
+
             httpContext.Response.StatusCode = badRequestStatus;
             await httpContext.Response.WriteAsJsonAsync(
-                new ProblemDetails
-                {
-                    Status = badRequestStatus,
-                    Title = "Invalid request body",
-                    Detail = "The request body could not be read: " + effective.Message,
-                },
+                problem,
                 options: null,
                 contentType: ProblemContentType,
                 cancellationToken);
@@ -88,5 +96,22 @@ internal sealed class ApiExceptionHandler(IDbErrorMapper errorMapper) : IExcepti
             contentType: ProblemContentType,
             cancellationToken);
         return true;
+    }
+
+    // BadHttpRequestException's own message names no property ("Failed to read parameter ... as
+    // JSON"), so a caller cannot tell which field was rejected. The inner JsonException names the
+    // offending member, and carries the JSON path structurally — reported as a problem extension
+    // rather than spliced into the detail, so nothing here reads exception text.
+    private static JsonException? FindJsonFailure(Exception exception)
+    {
+        for (Exception? current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is JsonException json)
+            {
+                return json;
+            }
+        }
+
+        return null;
     }
 }

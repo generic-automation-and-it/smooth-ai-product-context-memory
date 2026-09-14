@@ -294,6 +294,51 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
         }
     }
 
+    /// <summary>
+    /// A rejected body has to name the field that was rejected. The wrapper exception says only
+    /// "Failed to read parameter", which leaves the caller guessing; the inner JsonException carries
+    /// the member and its JSON path, and that is what makes the 400 actionable.
+    /// </summary>
+    [Fact]
+    public async Task Unknown_body_property_returns_400_naming_the_property()
+    {
+        using HttpResponseMessage response = await _http.PostAsJsonAsync(
+            "/api/context/preflight",
+            new { candidates = new[] { new { description = "Subject", statement = "Not a preflight field" } } },
+            Ct);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        response.Content.Headers.ContentType!.MediaType.ShouldBe("application/problem+json");
+        JsonElement body = await response.Content.ReadFromJsonAsync<JsonElement>(Json, Ct);
+        body.GetProperty("title").GetString().ShouldBe("Invalid request body");
+        body.GetProperty("detail").GetString()!.ShouldContain("statement");
+        // The path is a problem extension, not prose spliced into the detail: it says which element
+        // of the batch carried the rejected member, and a caller can read it without parsing English.
+        body.GetProperty("path").GetString().ShouldBe("$.candidates[0].statement");
+    }
+
+    /// <summary>
+    /// Every optional member of a request contract must be optional in the schema too. A caller that
+    /// trusts an over-declared <c>required</c> list sends fields the endpoint does not accept, and
+    /// <c>JsonUnmappedMemberHandling.Disallow</c> then rejects the whole body.
+    /// </summary>
+    [Fact]
+    public async Task Openapi_marks_only_genuinely_required_preflight_members_as_required()
+    {
+        using HttpResponseMessage openapi = await _http.GetAsync("/openapi/v1.json", Ct);
+        openapi.StatusCode.ShouldBe(HttpStatusCode.OK);
+        JsonElement doc = await openapi.Content.ReadFromJsonAsync<JsonElement>(Json, Ct);
+
+        JsonElement candidate = doc.GetProperty("components").GetProperty("schemas").GetProperty("Candidate");
+        string[] required = candidate.TryGetProperty("required", out JsonElement req)
+            ? [.. req.EnumerateArray().Select(e => e.GetString()!)]
+            : [];
+        required.ShouldBe(["description"]);
+
+        string[] properties = [.. candidate.GetProperty("properties").EnumerateObject().Select(m => m.Name)];
+        properties.ShouldContain("groupUuid");
+    }
+
     private static readonly string[] ExpectedRoutes =
     [
         "/api/context/preflight",

@@ -8,6 +8,7 @@ HTTP API the mimisbrunnr-context-memory skill consumes — uuid-only wire, Media
 
 - **Wire identity is `uuid`, never the surrogate `bigint`.** Handlers resolve FKs internally.
 - **No LLM in Application/Host.** Preflight is exact-match recall (`subject_slug`, ticket hits, intra-batch slug collisions). Skill decides new / version / skip and typed links.
+- **Preflight scopes tickets by group, subjects by nothing.** A candidate's optional `GroupUuid` exists only so a ticket owned by *that* group is not reported as a conflict — the check is about *another* group's ownership. Subject matching stays deliberately cross-group and ignores it. Omitting `GroupUuid` reports every owner, because a caller that names no group has not said which ownership is its own.
 - **Never expose or let the caller set `is_current`.** `SetMemories` owns the flag in one transaction: flip old current off, then insert the new current. A failure between those statements strands zero currents — a state no constraint forbids.
 - **Dry run and write share one plan, not just one handler.** Every verdict is reached in `BuildPlanAsync`, which mutates nothing; only the persist step branches. A shortcut dry-run path stops predicting the write, and this endpoint is the caller's only pre-write veto point.
 - **Dry-run skips blob and `SaveChanges`.** Do not begin-then-rollback: blob writes sit outside Postgres and would orphan objects. `blobAddress` and (for planned creates) `uuid` are null on dry run.
@@ -174,6 +175,7 @@ sequenceDiagram
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-14 | `Preflight.Candidate` takes an optional `GroupUuid` and suppresses a ticket owned by *that* group; without it every candidate of a real batch was reported as its own conflict. Optional candidate members now carry defaults so OpenAPI stops declaring them `required`. Both group writers reject a null ticket `Url` through a shared `TicketInputValidator` — a ticket legal to create a group with must be legal to merge into one. | e2e-dogfood |
 | 2026-09-14 | Agent-facing skill renamed `context-memory` → `mimisbrunnr-context-memory`. | skill rename |
 | 2026-09-13 | `UpdateGroup` accepts `tickets` as an additive, idempotent, cross-group-unique merge; all endpoints reject unknown JSON body fields as a 400 (breaking — a stray field no longer silently defaults). | BUG-03 |
 | 2026-09-13 | Facet/tag match mode made explicit: default `any` (indexed overlap `&&`) so recall unifies a batch's facets; `all` (containment `@>`) opt-in via `QueryMemories.Request.FacetMatchMode` / `MemorySearchCriteria.FacetMatchMode`. GIN serves both (verified, no seq scan). | BUG-02 |

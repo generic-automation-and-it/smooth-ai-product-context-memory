@@ -17,7 +17,7 @@ placed after the write has nothing left to prevent.
 **Specify** all five together as one pipeline with a **fixed, canonical order**, executed in that order
 and never re-sequenced.
 
-1. **Preflight** — one *batched* cross-group read-before-write serving deduplication recall, link derivation and ticket uniqueness. Array in, array out. Writes nothing, judges nothing.
+1. **Preflight** — one *batched* cross-group read-before-write serving deduplication recall, link derivation and ticket uniqueness. Array in, array out. Writes nothing, judges nothing. Ticket uniqueness is the one concern that needs the caller's target group: "already owned by **another** group" is undecidable without it, so a candidate declares the group it is bound for and self-ownership is not a conflict. Subject recall stays group-blind.
 2. **Redact** — scrub detected secrets before anything reaches storage.
 3. **Dedupe and derive links** — the semantic subject decision and typed-link derivation, both from the preflight's single traversal.
 4. **Atomicity check** — confirm one memory is one fact; split bundles, route the remainder to skipped.
