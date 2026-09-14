@@ -33,7 +33,7 @@ internal static class JsonbConverter
         => new(
             (a, b) => TicketsEqual(a, b),
             v => v.Aggregate(0, (hash, t) => HashCode.Combine(hash, t.Provider, t.Key, t.Url)),
-            v => v.ToList());
+            v => v.Select(t => new TicketDocument { V = t.V, Provider = t.Provider, Key = t.Key, Url = t.Url }).ToList());
 
     private static bool TicketsEqual(List<TicketDocument>? a, List<TicketDocument>? b)
         => ReferenceEquals(a, b)
