@@ -7,8 +7,8 @@ verdict. Reason clauses and noun-phrase coordination are not such signals. It is
 core of the atomicity stage; the final decision to split vs skip, and the routing of the
 unprocessable remainder, stays in SKILL.md (LADR-002).
 
-Conservative on purpose: a candidate is only flagged BUNDLED on strong signals, so it never
-over-splits a genuinely single fact.
+Conservative on purpose: a candidate is only flagged BUNDLED on strong signals, so it over-splits
+a genuinely single fact only in the accepted cases noted below.
 """
 
 import argparse
@@ -28,7 +28,7 @@ import sys
 #
 # Two tiers, because the markers are not equally strong. A semicolon or whereas/however
 # cannot join anything but two finite clauses, so one occurrence already means two claims;
-# "but"/"while" usually do too (temporal "while" and "not X but Y" are accepted misses);
+# "but"/"while" usually do too (temporal "while" and "not X but Y" are accepted over-splits);
 # an additive adverb can sit inside a single clause, so it takes two.
 _CONTRASTIVE = [
     r"\b(?:but|however|whereas|while)\b",
@@ -63,7 +63,7 @@ _COMPILED_SPLIT = [re.compile(p, re.IGNORECASE) for p in _SPLIT]
 # fired — ", and ... also ... but" is three independent claim junctions.
 TALLY_THRESHOLD = 1
 DISCOURSE_THRESHOLD = 2
-CONTRASTIVE_WEIGHT = 2
+CONTRASTIVE_WEIGHT = DISCOURSE_THRESHOLD
 
 
 def _count_matches(patterns, text):

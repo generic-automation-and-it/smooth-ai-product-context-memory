@@ -42,7 +42,7 @@ Approved release-image plan (2026-09-13):
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
-| 2026-09-14 | `Invalid request body` reports the innermost `JsonException` as the detail and its `Path` as a `path` problem extension, not the `BadHttpRequestException` wrapper. The wrapper names no field, so a rejected batch gave the caller nothing to fix — proven by an e2e run lost to one unmapped member. | e2e-dogfood |
+| 2026-09-14 | `Invalid request body` reports the first `JsonException` in the exception chain as the detail and its `Path` as a `path` problem extension, not the `BadHttpRequestException` wrapper. The wrapper names no field, so a rejected batch gave the caller nothing to fix — proven by an e2e run lost to one unmapped member. | e2e-dogfood |
 | 2026-09-13 | All endpoints reject unknown JSON body fields as `400` (`JsonUnmappedMemberHandling.Disallow`); `ApiExceptionHandler` maps deserialization failures (`JsonException`/`BadHttpRequestException`) to `400` `Invalid request body`. | BUG-03 |
 | 2026-09-13 | AppHost default is working-tree Host; published image remains opt-in. | APPHOST_AGENTS.md |
 | 2026-09-13 | Host Dockerfile + GHCR publish; image serves API and `export`; AppHost image mode still runs Host as `mimisbrunnr-host` in group `smooth-mímisbrunnr`. | release-image |
