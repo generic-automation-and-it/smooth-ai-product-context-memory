@@ -105,6 +105,7 @@ erDiagram
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-13 | `NpgsqlMemorySearch` facet/tag matching changed from containment (`@>`) to overlap (`&&`, ANY) for the recall path. No schema change — same GIN indexes serve both. | BUG-02 |
 | 2026-09-13 | Cutover: drop `memory_link`; relationships are `:LINKS` edges (`relation` + `reason`); vertices `memory_uuid` only; delete via `memory_graph_cascade`; model-shape guard **six** types (deliberate). | HLD-003 |
 | 2026-09-13 | Characterised relationship uniqueness/integrity as the relational store provides it (duplicate directed triple, direction, cascade, self-link persists, cross-group). No production change. | HLD-003 |
 | 2026-09-13 | AGE foundation review fixes: idempotent migration guards, runtime PG/AGE version-pairing assert after migrate, migrate fails loudly without registered `NpgsqlDataSource`, multi-instance rollout constraint documented. | HLD-003 |

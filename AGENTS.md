@@ -107,7 +107,7 @@ Hosted on **GitHub** at `https://github.com/generic-automation-and-it/project`. 
 
 | Date | Change | Ref |
 |---|---|---|
-| 2026-09-13 | Documented AppHost Persistent leftover after exit and the two teardown scripts (`stop-dev-stack.sh` keep data, `reset-dev-stack.sh` destroy volumes). | `scripts/` |
+| 2026-09-13 | Bugfix batch: recall facet/tag filter is overlap (ANY) not containment; `UpdateGroup` accepts additive idempotent cross-group-unique ticket merge; all endpoints reject unknown JSON fields as 400; client `paths` subcommand added. | BUG-02/03/04 |
 | 2026-09-13 | AppHost default is working-tree Host; `HostConfiguration__UseProject=false` pulls the published image (tag may lag). | `src/SmoothAiProductContextMemory.AppHost/` |
 | 2026-09-13 | Documented `scripts/` operational verification (NFR-03 restore round-trip, NFR-04 pre-upgrade check) and the `SMOOTH_AGE_BENCH`-gated NFR-02 benchmark command. | `scripts/` |
 | 2026-09-13 | Documented publish-image tag derivation, manual-dispatch validation, concurrency, cache, and revision behavior. | `.github/workflows/publish-image.yml` |
