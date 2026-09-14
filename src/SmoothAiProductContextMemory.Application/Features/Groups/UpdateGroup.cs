@@ -132,7 +132,8 @@ public static class UpdateGroup
                 foreach (TicketInput ticket in request.Tickets)
                 {
                     bool alreadyPresent = group.Tickets.Any(t =>
-                        t.Provider == ticket.Provider && t.Key == ticket.Key);
+                        t.Provider == ticket.Provider && t.Key == ticket.Key)
+                        || additions.Any(a => a.Provider == ticket.Provider && a.Key == ticket.Key);
                     if (alreadyPresent)
                     {
                         // Idempotent: re-attaching a ticket already on this group is a no-op.
