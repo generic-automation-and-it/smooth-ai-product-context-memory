@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using SmoothAiProductContextMemory.Application.Common.Models;
 using SmoothAiProductContextMemory.Application.Features.Groups;
@@ -26,6 +27,10 @@ public sealed class UpdateGroupHandlerTests(AspireFixture aspire) : HandlerTestB
             Ct);
 
         response.Tickets.Select(t => t.Key).ShouldBe(["ACM-1", "ACM-2"]);
+
+        // Assert the persisted row, not the tracked instance: a merge invisible to EF change
+        // detection returns a correct-looking response while writing nothing.
+        (await ReloadTickets(uuid)).ShouldBe(["ACM-1", "ACM-2"]);
     }
 
     [Fact]
@@ -45,6 +50,26 @@ public sealed class UpdateGroupHandlerTests(AspireFixture aspire) : HandlerTestB
 
         first.Tickets.Count.ShouldBe(1);
         second.Tickets.Count.ShouldBe(1);
+        (await ReloadTickets(group.Uuid)).ShouldBe(["ACM-1"]);
+    }
+
+    [Fact]
+    public async Task The_same_ticket_twice_in_one_request_merges_once()
+    {
+        MemoryGroup group = TestEntities.NewGroup();
+        Db.MemoryGroups.Add(group);
+        await Db.SaveChangesAsync(Ct);
+
+        UpdateGroup.Response response = await NewHandler().Handle(
+            new UpdateGroup.Request(group.Uuid, null, null, null, null, null,
+                [
+                    new TicketInput("jira", "ACM-7", "https://example.com/ACM-7"),
+                    new TicketInput("jira", "ACM-7", "https://example.com/ACM-7"),
+                ]),
+            Ct);
+
+        response.Tickets.Select(t => t.Key).ShouldBe(["ACM-7"]);
+        (await ReloadTickets(group.Uuid)).ShouldBe(["ACM-7"]);
     }
 
     [Fact]
@@ -62,6 +87,14 @@ public sealed class UpdateGroupHandlerTests(AspireFixture aspire) : HandlerTestB
         var ex = await Should.ThrowAsync<FluentValidation.ValidationException>(
             async () => await NewHandler().Handle(request, Ct));
         ex.Message.ShouldContain("ACM-9");
+    }
+
+    private async Task<string[]> ReloadTickets(Guid uuid)
+    {
+        Db.ChangeTracker.Clear();
+        MemoryGroup reloaded = await Db.MemoryGroups.AsNoTracking()
+            .SingleAsync(g => g.Uuid == uuid, Ct);
+        return [.. reloaded.Tickets.Select(t => t.Key)];
     }
 
     private UpdateGroup.Handler NewHandler() =>

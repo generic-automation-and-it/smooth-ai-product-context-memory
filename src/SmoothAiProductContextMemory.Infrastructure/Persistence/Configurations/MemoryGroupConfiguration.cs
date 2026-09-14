@@ -24,10 +24,13 @@ public sealed class MemoryGroupConfiguration : IEntityTypeConfiguration<MemoryGr
 
         builder.Property(g => g.RepoUrl).HasColumnName("repo_url").HasMaxLength(500);
 
+        // The value comparer is load-bearing, not optional: without it EF snapshots the converted
+        // list by reference, so an in-place mutation (UpdateGroup's ticket merge) is invisible to
+        // DetectChanges and SaveChanges writes no UPDATE.
         builder.Property(g => g.Tickets)
             .HasColumnName("tickets")
             .HasColumnType("jsonb")
-            .HasConversion(JsonbConverter.ForTickets());
+            .HasConversion(JsonbConverter.ForTickets(), JsonbConverter.TicketsComparer());
 
         builder.Property(g => g.CreatedOn).HasColumnName("created_on").HasColumnType("timestamptz").HasDefaultValueSql("now()");
 
