@@ -54,7 +54,7 @@ and the endpoint memory's cheap descriptive fields. Exposed as `POST /api/contex
 - **Filterable by relation type and direction.** A single relation goes into the variable-length edge's property map so the predicate is applied during expansion. Direction is `Outbound` / `Inbound` / `Either`.
 - **Descriptive fields come from the relational rows in the same statement.** The Cypher call is composed with `JOIN memory / memory_version / memory_group` in one SQL statement, never an application-side join — that single-session composition is LADR-01's stated justification, so forfeiting it forfeits the reason for choosing an in-database extension.
 - **The scope rule applies.** A traversal returning `description` / `statement` is a read path, so `MemoryScopeFilter.Plan` is pushed into the composed SQL exactly as `MemorySearchCriteria` does. Omitting it reopens the hole LADR-003 (HLD 001 API) was written to close.
-- Exposed as `POST /api/context/paths`; the context-memory skill has no subcommand for it.
+- Exposed as `POST /api/context/paths`; the mimisbrunnr-context-memory skill exposes it as the `paths` subcommand (bounded traversal, `maxDepth` required).
 
 ### Access path
 
@@ -125,6 +125,8 @@ operability and compatibility. Two shape how code is written rather than merely 
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-14 | Review fix: the access note claimed the skill has no subcommand for path traversal — the `paths` subcommand has existed since 2026-09-13 (bounded traversal, `maxDepth` required). | HLD-003 |
+| 2026-09-14 | Agent-facing skill renamed `context-memory` → `mimisbrunnr-context-memory`. | skill rename |
 | 2026-09-13 | Review fix: the evidence summaries quoted the superseded pre-gate run; every document now quotes the Results-table run (1.042 / 0.621 / 14.053 ms p95, one-hop delta +0.192 ms), and the historical tables are marked as such. | NFR-02 |
 | 2026-09-13 | Review fix: the hop gate read `Plan().ExcludedDimensions`, which is empty for every explicit dimension, so declaring `product` disclosed programme intermediates that declaring nothing hid — the inverse of the blob proxy's consent model. Hop visibility now comes from `MemoryScopeFilter.HiddenDimensions`. | HLD-003 |
 | 2026-09-13 | Corrected the recorded gate cost: the benchmark had left the excluded list empty and tripped the short-circuit, so the reported 0.15 ms was a gate that never ran. Gating hops costs ~5.7 ms (8.4 → 14.1 ms); the membership rewrite bought nothing and was reverted. | NFR-02 |

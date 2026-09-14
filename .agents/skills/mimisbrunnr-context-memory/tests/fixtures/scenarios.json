@@ -1,5 +1,5 @@
 {
-  "$schema_note": "On-demand LLM-eval fixtures for the context-memory semantic/atomicity stages. Each scenario carries a candidate, a fixed recall set, and an independently-authored EXPECTED verdict. Scored for recall AND precision against the expected set, never derived from the rules (the anti-pattern run-trial.js fell into). Not CI-gated; run on demand via score_fixtures.py.",
+  "$schema_note": "On-demand LLM-eval fixtures for the mimisbrunnr-context-memory semantic/atomicity stages. Each scenario carries a candidate, a fixed recall set, and an independently-authored EXPECTED verdict. Scored for recall AND precision against the expected set, never derived from the rules (the anti-pattern run-trial.js fell into). Not CI-gated; run on demand via score_fixtures.py.",
   "scenarios": [
     {
       "id": "s1-redact-planted-credential",

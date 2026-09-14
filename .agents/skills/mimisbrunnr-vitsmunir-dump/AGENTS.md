@@ -1,4 +1,4 @@
-# ai-brain-dump — AGENTS.md
+# mimisbrunnr-vitsmunir-dump — AGENTS.md
 
 ## TL;DR
 
@@ -19,3 +19,4 @@ Pure-prompt behavioral skill (no scripts): a listen-first capture session whose 
 |:-----|:-------|:----|
 | 2026-06-12 | Initial version. | |
 | 2026-09-13 | Added `--all` (enables `--oktoask` `--thinking` `--oktoreaddocs` `--oktowebsearch`). | |
+| 2026-09-14 | Renamed `ai-brain-dump` → `mimisbrunnr-vitsmunir-dump`. Vitsmunir is Old Norse for intelligence, wits, and the power of comprehension — this is the AI Brain / Intelligence Dump. | |

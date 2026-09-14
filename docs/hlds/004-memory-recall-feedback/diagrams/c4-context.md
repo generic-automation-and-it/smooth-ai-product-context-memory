@@ -22,7 +22,7 @@ C4Context
         System(fb, "Recall feedback", "Identity, outcome and time. No content. Disposable.")
     }
 
-    System_Ext(agent, "AI harness", "Runs the context-memory skill; issues retrievals on the practitioner's behalf.")
+    System_Ext(agent, "AI harness", "Runs the mimisbrunnr-context-memory skill; issues retrievals on the practitioner's behalf.")
 
     Rel(dev, agent, "Works through")
     Rel(agent, api, "Retrieves", "HTTP")

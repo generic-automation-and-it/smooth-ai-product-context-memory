@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""L0 committed harness for the context-memory skill plumbing.
+"""L0 committed harness for the mimisbrunnr-context-memory skill plumbing.
 
 Standard-library unittest only — no external test runner dependency. Exercises the deterministic
 artefacts (redact.py, atomicity.py) over explicit positive and negative fixtures, asserting real

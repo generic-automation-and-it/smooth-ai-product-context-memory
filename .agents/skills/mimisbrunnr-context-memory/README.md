@@ -1,8 +1,8 @@
-# context-memory — Intent & Token-Usage Review
+# mimisbrunnr-context-memory — Intent & Token-Usage Review
 
 > Companion notes to [`SKILL.md`](./SKILL.md). Explains what this skill is for and — because
 > **R13 makes every write an LLM call** — where it genuinely costs tokens and where it saves
-> them. Mirrors the honesty of `ai-brain-dump/README.md`: the savings are real but not where
+> them. Mirrors the honesty of `mimisbrunnr-vitsmunir-dump/README.md`: the savings are real but not where
 > you might expect.
 
 ## Intent review

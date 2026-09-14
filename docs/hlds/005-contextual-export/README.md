@@ -182,7 +182,7 @@ without it. It is not a deferred decision — it is a decision with a missing in
 | [LADR-05](./ladrs/LADR-05-collapse-with-provenance.md) | Restatements collapse with every origin retained | Draft |
 | [LADR-06](./ladrs/LADR-06-findings-are-output-not-writes.md) | Findings are output; recording one is a normal capture | Draft |
 | [LADR-07](./ladrs/LADR-07-deterministic-provenance-ordering.md) | Ordering is a deterministic topological sort over provenance relations | Draft |
-| [LADR-08](./ladrs/LADR-08-read-only-dossier-skill.md) | A read-only dossier skill; `context-memory` narrows to sole *writer* | Draft |
+| [LADR-08](./ladrs/LADR-08-read-only-dossier-skill.md) | A read-only dossier skill; `mimisbrunnr-context-memory` narrows to sole *writer* | Draft |
 | [LADR-09](./ladrs/LADR-09-ticket-anchors-have-no-graph-representation.md) | Ticket anchors as graph vertices | **Blocked** |
 | [LADR-10](./ladrs/LADR-10-tag-anchors-have-no-graph-representation.md) | Tag anchors as graph vertices | **Blocked** |
 | [LADR-11](./ladrs/LADR-11-no-writer-derives-anchor-edges.md) | Capture-time derivation of anchor edges | **Blocked** |

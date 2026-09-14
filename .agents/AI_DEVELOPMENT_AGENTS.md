@@ -30,13 +30,13 @@ This is a unified AI development experience folder that centralizes skills, prom
 | `.agents/skills/` | Executable skills (multi-file workflows) — flat dirs, category-prefixed folder names |
 | `.agents/skills/agile-github-breakdown/` | Turn a braindump or existing Feature into GitHub Feature + Task issues |
 | `.agents/skills/agile-github-task-from-diff/` | Create a GitHub Task (sub-issue) from the current git diff vs main |
-| `.agents/skills/ai-brain-dump/` | Listen-first capture session; synthesize on request |
+| `.agents/skills/mimisbrunnr-vitsmunir-dump/` | AI Brain / Intelligence Dump — listen-first capture; synthesize on request. Vitsmunir is Old Norse for intelligence, wits, and the power of comprehension. |
 | `.agents/skills/ai-review/` | Local consumer of a remote AI code-review report |
 | `.agents/skills/ai-terse/` | Reformat this turn's reply into terse, high-density output with a TL;DR |
 | `.agents/skills/ai-template-sync/` | UPSERT the smooth-devex-template agentic scaffold into an existing repo |
 | `.agents/skills/context-load-context/` | Load or create functional `*AGENTS.md` context files |
 | `.agents/skills/context-load-agents-context/` | Load ancestor AGENTS.md context for a target file |
-| `.agents/skills/context-memory/` | Skill to store/retrieve persistent context memories (sole interface to the context-memory store) |
+| `.agents/skills/mimisbrunnr-context-memory/` | Skill to store/retrieve persistent context memories (sole interface to the context-memory store) |
 | `.agents/skills/create-hld/` | Author a design-only High-Level Design under `docs/hlds/NNN-<slug>/` |
 | `.agents/skills/git-commit/` | Commit with conventional format |
 | `.agents/skills/git-commit-push/` | Commit and push to remote |
@@ -140,6 +140,7 @@ ls -la | grep -E '(\.claude|\.codex|\.cursor)'
 
 | Date | Change | Reason |
 | :---- | :---- | :---- |
+| 2026-09-14 | This-repo skills renamed: `ai-brain-dump` → `mimisbrunnr-vitsmunir-dump`; `context-memory` → `mimisbrunnr-context-memory`. Upstream skills unchanged. | |
 | 2026-09-13 | Synced `agile-github-breakdown` skill + `--all` on `ai-brain-dump` from smooth-devex-template #61. | template #61 |
 | 2026-07-23 | Changed Codex `approval_policy` from `unless-allow-listed` to `never` to resolve configuration load error. | #54 |
 | 2026-05-30 | Initial version. | |

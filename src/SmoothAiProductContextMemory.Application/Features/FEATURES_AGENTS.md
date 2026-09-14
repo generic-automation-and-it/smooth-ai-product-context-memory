@@ -2,7 +2,7 @@
 
 ## TL;DR
 
-HTTP API the context-memory skill consumes — uuid-only wire, Mediator slices, lookup/mechanics only; skill owns judgement. Retrieval runs in PostgreSQL; the dry run runs the real plan.
+HTTP API the mimisbrunnr-context-memory skill consumes — uuid-only wire, Mediator slices, lookup/mechanics only; skill owns judgement. Retrieval runs in PostgreSQL; the dry run runs the real plan.
 
 ## Non-Negotiables
 
@@ -174,6 +174,7 @@ sequenceDiagram
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-14 | Agent-facing skill renamed `context-memory` → `mimisbrunnr-context-memory`. | skill rename |
 | 2026-09-13 | `UpdateGroup` accepts `tickets` as an additive, idempotent, cross-group-unique merge; all endpoints reject unknown JSON body fields as a 400 (breaking — a stray field no longer silently defaults). | BUG-03 |
 | 2026-09-13 | Facet/tag match mode made explicit: default `any` (indexed overlap `&&`) so recall unifies a batch's facets; `all` (containment `@>`) opt-in via `QueryMemories.Request.FacetMatchMode` / `MemorySearchCriteria.FacetMatchMode`. GIN serves both (verified, no seq scan). | BUG-02 |
 | 2026-09-13 | ADR-0001/0002/0003 deleted; LADR-004 context retargeted to HLD 002, LADR-005 to HLD 001. | HLD-001, HLD-002 |

@@ -1,13 +1,17 @@
 ---
-name: ai-brain-dump
-description: Start and run a listen-first braindump session for tickets, issues, ADRs, worktasks, PR descriptions, requirements, designs, or implementation plans. Use when the user says they want to braindump, think out loud, capture rough requirements, or provide context incrementally before asking the agent to synthesize, update a ticket, create docs, or perform implementation work.
+name: mimisbrunnr-vitsmunir-dump
+description: >-
+  Vitsmunir is the Old Norse word for "intelligence," "wits," and "the power of comprehension." This is an AI Brain / Intelligence Dump.
+  Start and run a listen-first braindump session for tickets, issues, ADRs, worktasks, PR descriptions, requirements, designs, or implementation plans.
+  Use when the user says they want to braindump, think out loud, capture rough requirements, or provide context incrementally before asking the agent to synthesize, update a ticket, create docs, or perform implementation work.
+  Also triggers on /mimisbrunnr-vitsmunir-dump and /ai-brain-dump.
 models:
   claude: opus      # high-complexity; multi-turn synthesis and deep requirement reasoning
   copilot: auto
   codex: gpt-5.5
 ---
 
-# Brain Dump
+# Vitsmunir Dump
 
 ## Modes & Switches
 

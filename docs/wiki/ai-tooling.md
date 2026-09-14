@@ -23,7 +23,7 @@ All three tools share a common context through the `.agents/` folder — rules, 
 
 ## ChatHost (planned)
 
-ChatHost is a standalone LLM microservice — it owns the Anthropic SDK and talks to the Host API via HTTP only, keeping conversational AI out of the data API. The project is not yet in tree (planned as `src/SmoothAiProductContextMemory.ChatHost/`); until it lands, agents work with the store through the context-memory skill against the HTTP API.
+ChatHost is a standalone LLM microservice — it owns the Anthropic SDK and talks to the Host API via HTTP only, keeping conversational AI out of the data API. The project is not yet in tree (planned as `src/SmoothAiProductContextMemory.ChatHost/`); until it lands, agents work with the store through the mimisbrunnr-context-memory skill against the HTTP API.
 
 ## Recommendations (for teams adopting this approach)
 

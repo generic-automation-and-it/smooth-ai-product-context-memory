@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fingerprint secret-redaction detector for the context-memory skill.
+"""Fingerprint secret-redaction detector for the mimisbrunnr-context-memory skill.
 
 Reads a batch of candidate content strings on stdin (JSON array), scrubs the recognised secret spans,
 and emits the redacted batch plus a findings list on stdout. The findings report rule NAMES only
