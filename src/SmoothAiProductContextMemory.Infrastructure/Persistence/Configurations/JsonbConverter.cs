@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using SmoothAiProductContextMemory.Domain.Entities;
 
@@ -21,6 +22,26 @@ internal static class JsonbConverter
         => new(
             value => JsonSerializer.Serialize(value, Options),
             value => JsonSerializer.Deserialize<List<TicketDocument>>(value, Options) ?? new List<TicketDocument>());
+
+    /// <summary>
+    /// Snapshot-by-copy comparer for the tickets list. EF's default for a converted reference type
+    /// is reference equality with the same instance as snapshot, which makes in-place mutation
+    /// (the additive ticket merge) invisible to change detection. <see cref="TicketDocument"/> is a
+    /// mutable class without value equality, so elements are compared field-by-field.
+    /// </summary>
+    public static ValueComparer<List<TicketDocument>> TicketsComparer()
+        => new(
+            (a, b) => TicketsEqual(a, b),
+            v => v.Aggregate(0, (hash, t) => HashCode.Combine(hash, t.Provider, t.Key, t.Url)),
+            v => v.Select(t => new TicketDocument { V = t.V, Provider = t.Provider, Key = t.Key, Url = t.Url }).ToList());
+
+    private static bool TicketsEqual(List<TicketDocument>? a, List<TicketDocument>? b)
+        => ReferenceEquals(a, b)
+            || (a is not null && b is not null && a.Count == b.Count
+                && a.Zip(b).All(pair =>
+                    pair.First.Provider == pair.Second.Provider
+                    && pair.First.Key == pair.Second.Key
+                    && pair.First.Url == pair.Second.Url));
 
     public static ValueConverter<List<SourceDocument>, string> ForSources()
         => new(
