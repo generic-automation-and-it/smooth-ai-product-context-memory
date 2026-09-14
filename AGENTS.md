@@ -34,7 +34,8 @@ Planned work tracked as worktasks under `.context/work-tasks/` (gitignored). Use
 | Skill | Path | Purpose |
 |---|---|---|
 | agile-github-breakdown | `.agents/skills/agile-github-breakdown/` | Braindump/Feature → GitHub Feature + Task graph (Project = initiative, Feature = epic, Task = story). |
-| context-memory | `.agents/skills/context-memory/` | Sole interface to the context-memory store; capture (`set`) and retrieval (`get`) of persistent context memories against the HTTP API. |
+| mimisbrunnr-context-memory | `.agents/skills/mimisbrunnr-context-memory/` | Sole interface to the context-memory store; capture (`set`) and retrieval (`get`) of persistent context memories against the HTTP API. |
+| mimisbrunnr-vitsmunir-dump | `.agents/skills/mimisbrunnr-vitsmunir-dump/` | Listen-first braindump session for tickets, ADRs, worktasks, requirements or designs; synthesizes only when asked. |
 | ai-review | `.agents/skills/ai-review/` | Local consumer of a remote AI code-review report (generator stays remote). |
 | git-commit-review-push | `.agents/skills/git-commit-review-push/` | Commit + push + open a PR with an embedded full AI review. |
 
@@ -112,3 +113,5 @@ Hosted on **GitHub** at `https://github.com/generic-automation-and-it/project`. 
 | 2026-09-13 | Documented publish-image tag derivation, manual-dispatch validation, concurrency, cache, and revision behavior. | `.github/workflows/publish-image.yml` |
 | 2026-09-14 | Docs row in the repository layout now lists BRDs alongside HLDs. | `docs/` |
 | 2026-09-14 | Changelog scoping rule added to `## AI Context Files`: record changes in the nearest localized `*AGENTS.md`; root changelog is for solution-global or root-file changes only. Localized rows pruned from this table accordingly. | this file |
+| 2026-09-14 | Skills table corrected after the owned-skill rename to the `mimisbrunnr-` prefix: `context-memory` → `mimisbrunnr-context-memory`, and the previously unlisted `mimisbrunnr-vitsmunir-dump` added. | PR #55 |
+| 2026-09-14 | Microsoft package baseline 10.0.7/10.0.8 -> 10.0.11 (EF Core, Extensions, AspNetCore.OpenApi, Mvc.Testing, EF InMemory); Aspire 13.3.0 -> 13.5.3 (AppHost-localized row in APPHOST_AGENTS.md). | this PR |

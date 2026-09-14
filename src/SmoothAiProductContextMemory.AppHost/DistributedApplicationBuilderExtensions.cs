@@ -35,7 +35,7 @@ internal static class DistributedApplicationBuilderExtensions
     // S3 bucket names are DNS labels: lowercase ASCII, digits and hyphens only, so the brand is
     // transliterated here for the same reason container names are.
     private const string BlobBucketName = "smooth-mimisbrunnr-memory-well";
-    // Aspire 13.3.0 defaults to library/postgres:17.6. AGE's PG17 image keeps the same major so the
+    // Aspire 13.5.3 defaults to library/postgres:17.7. AGE's PG17 image keeps the same major so the
     // persistent data volume stays compatible. Pairing recorded in HLD 003 / NFR-04.
     // Keep this pin identical to tests/SmoothAiProductContextMemory.TestFramework.Aspire.
     private const string PostgresImageRegistry = "docker.io";
