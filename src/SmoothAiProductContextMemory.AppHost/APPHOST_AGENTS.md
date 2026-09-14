@@ -131,7 +131,8 @@ Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgr
   process starts.
 - Aspire dashboard URL is printed at startup via the `WriteDashboardStartupHint` extension; use Aspire's
   printed `/login?t=...` URL for the first terminal-driven browser visit. The same hint states that
-  postgres/blob/seq keep running after this process exits, that `mimisbrunnr-host` may remain after a
+  `tyr-postgres` (`mimisbrunnr-postgres`), `idunn-blob` (`mimisbrunnr-blob-well`), and `saga-seq`
+  (`mimisbrunnr-seq`) keep running after this process exits, that `mimisbrunnr-host` may remain after a
   hard kill, and names the two teardown scripts. There is no reliable Aspire exit hook under `pkill`
   (SIGKILL), so the asymmetry is surfaced at startup — the moment a developer still has a terminal.
 - **Teardown does not kill AppHost, DCP, or `dotnet`.** Exit the AppHost first, then run the script.
@@ -192,6 +193,7 @@ Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgr
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-14 | Startup hint now pairs each persistent resource name with its docker-visible container name, and the Key Behaviors paraphrase matches. Working-tree Host reference uses the `HostConnectionStringName` constant instead of a literal; the database-resource local and parameters are renamed `postgres` → `database` (the server resource stays `tyr-postgres`). | ai-analyse |
 | 2026-09-14 | Dashboard title is `Mímisbrunnr`; resources are `tyr-postgres`, `mimers-head`, `idunn-blob`, and `saga-seq`. Explicit connection names preserve the Host's existing database and Seq configuration. The physical database stays `app`, avoiding a migration of the persistent dev corpus. | AppHost naming |
 | 2026-09-14 | Upgraded Aspire AppHost SDK and hosting packages to 13.5.3. AGE remains explicitly pinned to PostgreSQL 17, compatible with Aspire's `library/postgres:17.7` default. | Aspire 13.5.3 |
 | 2026-09-13 | Documented Persistent leftover after AppHost exit. Startup hint names `scripts/stop-dev-stack.sh` (keep data) and `scripts/reset-dev-stack.sh` (destroy volumes). Allowlist, never a `mimisbrunnr-*` glob. | AppHost teardown |

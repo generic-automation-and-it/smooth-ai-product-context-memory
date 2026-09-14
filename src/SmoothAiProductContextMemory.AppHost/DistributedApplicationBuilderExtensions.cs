@@ -48,11 +48,11 @@ internal static class DistributedApplicationBuilderExtensions
         {
             AppHostConfiguration configuration = builder.GetAppHostConfiguration();
             Console.WriteLine(HostLaunchMode.FormatAnnouncement(configuration.UseProject, configuration.HostImage));
-            var postgres = builder.AddPostgresResource(configuration);
+            var database = builder.AddPostgresResource(configuration);
             var blob = builder.AddBlobResource(configuration);
             var seq = builder.AddSeqResource(configuration);
 
-            builder.AddHostProject(postgres, blob, seq, configuration);
+            builder.AddHostProject(database, blob, seq, configuration);
 
             return builder;
         }
@@ -70,7 +70,7 @@ internal static class DistributedApplicationBuilderExtensions
                 Console.WriteLine("If the dashboard asks for login, use the /login?t=... URL that Aspire prints after startup.");
             }
 
-            Console.WriteLine("Dashboard dies with this process. tyr-postgres, idunn-blob, and saga-seq keep running (ContainerLifetime.Persistent). mimisbrunnr-host may remain after a hard kill.");
+            Console.WriteLine("Dashboard dies with this process. tyr-postgres (mimisbrunnr-postgres), idunn-blob (mimisbrunnr-blob-well), and saga-seq (mimisbrunnr-seq) keep running (ContainerLifetime.Persistent). mimisbrunnr-host may remain after a hard kill.");
             Console.WriteLine("Stop (keep data): scripts/stop-dev-stack.sh");
             Console.WriteLine("Reset (destroy volumes): scripts/reset-dev-stack.sh");
             Console.WriteLine("Do not glob mimisbrunnr-* — that also matches mimisbrunnr-testcontainer-*.");
@@ -169,32 +169,32 @@ internal static class DistributedApplicationBuilderExtensions
         }
 
         private void AddHostProject(
-            IResourceBuilder<PostgresDatabaseResource> postgres,
+            IResourceBuilder<PostgresDatabaseResource> database,
             IResourceBuilder<ContainerResource> blob,
             IResourceBuilder<IResourceWithConnectionString> seq,
             AppHostConfiguration configuration)
         {
             if (!configuration.UseProject)
             {
-                builder.AddHostContainer(postgres, blob, seq, configuration);
+                builder.AddHostContainer(database, blob, seq, configuration);
                 return;
             }
 
             builder.AddProject<Projects.SmoothAiProductContextMemory_Host>(HostLaunchMode.WorkingTreeResourceName)
-                .WithReference(postgres, connectionName: "SmoothAiProductContextMemory")
+                .WithReference(database, connectionName: HostConnectionStringName)
                 .WithReference(seq, connectionName: SeqConnectionStringName)
                 .WithEnvironment("BlobStorage__Endpoint", blob.GetEndpoint("s3"))
                 .WithEnvironment("BlobStorage__AccessKey", configuration.BlobAccessKey)
                 .WithEnvironment("BlobStorage__SecretKey", configuration.BlobSecretKey)
                 .WithEnvironment("BlobStorage__Bucket", BlobBucketName)
                 .WithHttpHealthCheck(HostReadinessPath)
-                .WaitFor(postgres)
+                .WaitFor(database)
                 .WaitFor(blob)
                 .WaitFor(seq);
         }
 
         private void AddHostContainer(
-            IResourceBuilder<PostgresDatabaseResource> postgres,
+            IResourceBuilder<PostgresDatabaseResource> database,
             IResourceBuilder<ContainerResource> blob,
             IResourceBuilder<IResourceWithConnectionString> seq,
             AppHostConfiguration configuration)
@@ -215,7 +215,7 @@ internal static class DistributedApplicationBuilderExtensions
                 .WithContainerRuntimeArgs(
                     "--label", $"com.docker.compose.project={DockerDesktopGroupName}",
                     "--label", $"com.docker.compose.service={HostContainerName}")
-                .WithReference(postgres, connectionName: HostConnectionStringName)
+                .WithReference(database, connectionName: HostConnectionStringName)
                 .WithReference(seq, connectionName: SeqConnectionStringName)
                 .WithEnvironment("BlobStorage__Endpoint", blob.GetEndpoint("s3"))
                 .WithEnvironment("BlobStorage__AccessKey", configuration.BlobAccessKey)
@@ -223,7 +223,7 @@ internal static class DistributedApplicationBuilderExtensions
                 .WithEnvironment("BlobStorage__Bucket", BlobBucketName)
                 .WithHttpHealthCheck(HostReadinessPath)
                 .WithOtlpExporter()
-                .WaitFor(postgres)
+                .WaitFor(database)
                 .WaitFor(blob)
                 .WaitFor(seq);
         }
