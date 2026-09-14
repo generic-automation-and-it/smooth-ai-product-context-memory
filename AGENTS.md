@@ -114,4 +114,4 @@ Hosted on **GitHub** at `https://github.com/generic-automation-and-it/project`. 
 | 2026-09-14 | Docs row in the repository layout now lists BRDs alongside HLDs. | `docs/` |
 | 2026-09-14 | Changelog scoping rule added to `## AI Context Files`: record changes in the nearest localized `*AGENTS.md`; root changelog is for solution-global or root-file changes only. Localized rows pruned from this table accordingly. | this file |
 | 2026-09-14 | Skills table corrected after the owned-skill rename to the `mimisbrunnr-` prefix: `context-memory` → `mimisbrunnr-context-memory`, and the previously unlisted `mimisbrunnr-vitsmunir-dump` added. | PR #55 |
-| 2026-09-14 | Microsoft package baseline 10.0.7/10.0.8 -> 10.0.11 (EF Core, Extensions, AspNetCore.OpenApi, Mvc.Testing, EF InMemory); Aspire 13.3.0 -> 13.5.3 (AppHost-localized row in APPHOST_AGENTS.md). | this PR |
+| 2026-09-14 | Microsoft package baseline 10.0.7/10.0.8 → 10.0.11 (EF Core, Extensions, AspNetCore.OpenApi, Mvc.Testing, EF InMemory); Aspire 13.3.0 → 13.5.3 (AppHost-localized row in APPHOST_AGENTS.md). | PR #57 |

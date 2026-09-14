@@ -32,7 +32,7 @@ The publish workflow does **not** run on pull requests.
 | Tool | Version | Command |
 |---|---|---|
 | `dotnet-reportgenerator-globaltool` | `5.4.4` | `reportgenerator` |
-| `dotnet-ef` | `10.0.8` | `dotnet-ef` |
+| `dotnet-ef` | `10.0.11` | `dotnet-ef` |
 
 `dotnet-ef` is pinned to the EF Core runtime version (`Directory.Packages.props`) so the migrations CLI never drifts from the `Microsoft.EntityFrameworkCore.*` packages. Bump both together.
 
