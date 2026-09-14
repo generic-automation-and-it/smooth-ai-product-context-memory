@@ -50,11 +50,34 @@ public sealed class ObservabilityTests(ObservabilityWebAppFixture fixture) : ICl
         await SetMemory(group, $"Trace subject {Guid.NewGuid():N}", "Trace claim", content: "trace-body");
 
         CapturedSpan server = FindLastServerSpan("/api/context/memories");
-        IReadOnlyList<CapturedSpan> trace = fixture.Telemetry.SpansForTrace(server.TraceId);
+        IReadOnlyList<CapturedSpan> trace = await WaitForTraceAsync(
+            server.TraceId,
+            spans => spans.Any(span => span.Source == NpgsqlSourceName)
+                && spans.Any(span => span.Source == HttpClientSourceName));
 
         trace.ShouldContain(span => span.Source == NpgsqlSourceName);
         trace.ShouldContain(span => span.Source == HttpClientSourceName);
         trace.Select(span => span.TraceId).Distinct().Count().ShouldBe(1);
+    }
+
+    /// <summary>
+    /// Spans are captured at <c>Activity.OnEnd</c>, and the object-store client's HTTP activity can end
+    /// a beat after the server has already returned the response (client/content disposal). A single
+    /// snapshot taken immediately after the POST therefore races the capture; polling briefly removes
+    /// the flake without weakening the assertion — the final Should* calls still decide.
+    /// </summary>
+    private async Task<IReadOnlyList<CapturedSpan>> WaitForTraceAsync(
+        string traceId,
+        Func<IReadOnlyList<CapturedSpan>, bool> complete)
+    {
+        IReadOnlyList<CapturedSpan> trace = fixture.Telemetry.SpansForTrace(traceId);
+        for (int attempt = 0; attempt < 50 && !complete(trace); attempt++)
+        {
+            await Task.Delay(100, Ct);
+            trace = fixture.Telemetry.SpansForTrace(traceId);
+        }
+
+        return trace;
     }
 
     [Fact]
