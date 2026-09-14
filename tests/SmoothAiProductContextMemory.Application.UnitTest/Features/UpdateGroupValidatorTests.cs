@@ -1,4 +1,5 @@
 using FluentValidation.TestHelper;
+using SmoothAiProductContextMemory.Application.Common.Models;
 using SmoothAiProductContextMemory.Application.Features.Groups;
 using SmoothAiProductContextMemory.Domain.Entities;
 
@@ -36,6 +37,38 @@ public class UpdateGroupValidatorTests
             null,
             MemoryGroup.ScopeDimensionValue.Program,
             "atlas");
+
+        _validator.TestValidate(request).ShouldNotHaveAnyValidationErrors();
+    }
+
+    [Fact]
+    public void Rejects_a_ticket_without_a_provider_or_key()
+    {
+        UpdateGroup.Request request = new(
+            Guid.NewGuid(),
+            null,
+            null,
+            null,
+            null,
+            null,
+            [new TicketInput("", "", "https://example.com/ACM-1")]);
+
+        var result = _validator.TestValidate(request);
+        result.ShouldHaveValidationErrorFor("Tickets[0].Provider");
+        result.ShouldHaveValidationErrorFor("Tickets[0].Key");
+    }
+
+    [Fact]
+    public void Accepts_wellformed_tickets()
+    {
+        UpdateGroup.Request request = new(
+            Guid.NewGuid(),
+            null,
+            null,
+            null,
+            null,
+            null,
+            [new TicketInput("jira", "ACM-1", "https://example.com/ACM-1")]);
 
         _validator.TestValidate(request).ShouldNotHaveAnyValidationErrors();
     }

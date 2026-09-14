@@ -175,6 +175,7 @@ sequenceDiagram
 | Date | Change | Ref |
 |:-----|:-------|:----|
 | 2026-09-14 | Agent-facing skill renamed `context-memory` → `mimisbrunnr-context-memory`. | skill rename |
+| 2026-09-13 | `UpdateGroup` accepts `tickets` as an additive, idempotent, cross-group-unique merge; all endpoints reject unknown JSON body fields as a 400 (breaking — a stray field no longer silently defaults). | BUG-03 |
 | 2026-09-13 | Facet/tag match mode made explicit: default `any` (indexed overlap `&&`) so recall unifies a batch's facets; `all` (containment `@>`) opt-in via `QueryMemories.Request.FacetMatchMode` / `MemorySearchCriteria.FacetMatchMode`. GIN serves both (verified, no seq scan). | BUG-02 |
 | 2026-09-13 | ADR-0001/0002/0003 deleted; LADR-004 context retargeted to HLD 002, LADR-005 to HLD 001. | HLD-001, HLD-002 |
 | 2026-09-13 | `POST /api/context/paths` added (`Features/Links/FindPaths`) — bounded provenance traversal returning hops with reasons plus the endpoint's cheap fields from one composed statement. Depth bound required on the wire; scope rule applied to the source *and* the reached endpoints. | HLD-003 |

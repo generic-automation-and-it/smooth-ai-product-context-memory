@@ -410,6 +410,32 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
     }
 
     [Fact]
+    public async Task Resolve_rejects_an_unknown_field_instead_of_defaulting()
+    {
+        // A misspelled `initiative` used to be absorbed silently and the group created with the
+        // default `to-be-decided` — reported as success. The unknown field must now be a 400.
+        using HttpResponseMessage response = await _http.PostAsJsonAsync(
+            "/api/context/groups/resolve",
+            new { initiative = "atlas", scopeDimension = MemoryGroup.ScopeDimensionValue.Product },
+            Ct);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
+    public async Task Group_patch_rejects_an_unknown_field()
+    {
+        Guid group = await ResolveGroup(MemoryGroup.ScopeDimensionValue.Product);
+
+        using HttpResponseMessage response = await _http.PatchAsJsonAsync(
+            $"/api/context/groups/{group}",
+            new { repoUrlx = "https://example.com" },
+            Ct);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
     public async Task Traversal_returns_the_chain_and_the_endpoint_fields()
     {
         Guid group = await ResolveGroup(MemoryGroup.ScopeDimensionValue.Product);

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using FluentValidation;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
@@ -42,6 +43,30 @@ internal sealed class ApiExceptionHandler(IDbErrorMapper errorMapper) : IExcepti
         }
 
         Exception effective = errorMapper.TryMap(exception, out Exception mapped) ? mapped : exception;
+
+        // A request body that fails to deserialize is a caller mistake, not a server failure. An
+        // unknown property — e.g. a misspelled `initiative` where the contract says
+        // `initiativeName` — is rejected here as a 400, never absorbed and silently defaulted.
+        // BadHttpRequestException carries its own status (413 payload too large, 411 length
+        // required, …) — honor it rather than flattening every request defect to 400.
+        if (effective is JsonException || effective is BadHttpRequestException)
+        {
+            int badRequestStatus = effective is BadHttpRequestException bad
+                ? bad.StatusCode
+                : StatusCodes.Status400BadRequest;
+            httpContext.Response.StatusCode = badRequestStatus;
+            await httpContext.Response.WriteAsJsonAsync(
+                new ProblemDetails
+                {
+                    Status = badRequestStatus,
+                    Title = "Invalid request body",
+                    Detail = "The request body could not be read: " + effective.Message,
+                },
+                options: null,
+                contentType: ProblemContentType,
+                cancellationToken);
+            return true;
+        }
 
         (int status, string title, string detail) = effective switch
         {
