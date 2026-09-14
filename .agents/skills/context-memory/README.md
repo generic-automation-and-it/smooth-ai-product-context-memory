@@ -36,7 +36,7 @@ default. Get the cost model wrong and the skill becomes more expensive than the 
 
 - **Every `set` costs an LLM call per fact for summary + keywords.** This is the big one. A batch of
   N facts costs ~N LLM judgement calls. There is no way around it — the body is in blob storage, not
-  indexable (ADR-0002), so the summary is the search surface. This is the price of the design, not a bug.
+  indexable (HLD 001), so the summary is the search surface. This is the price of the design, not a bug.
 - **Semantic dedup and link derivation are LLM judgements** on the pre-write round. Narrowed by
   facet/kind to a bounded top-N first, so the judgement is over candidates, not the whole store.
 - **`--dryrun` costs the same as a real write** (same pipeline, no persistence). It is the inspection
