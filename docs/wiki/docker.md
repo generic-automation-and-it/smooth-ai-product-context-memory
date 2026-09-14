@@ -134,6 +134,36 @@ HostConfiguration__Image=smooth-ai-product-context-memory:local \
 The container path injects `ConnectionStrings__SmoothAiProductContextMemory`
 (the key `AddInfrastructure` reads). That override is container-only.
 
+## Stop and reset the AppHost stack
+
+`ContainerLifetime.Persistent` on postgres/blob/seq is deliberate: captured
+memories and blobs survive an AppHost exit. The dashboard is in-process and
+dies with the process, so leftover containers have no UI. That is not a leak.
+
+Exit the AppHost first. Then pick **one** of these — they are distinct
+binaries, not one command plus a flag:
+
+```bash
+scripts/stop-dev-stack.sh    # remove mimisbrunnr-{postgres,blob-well,seq,host}; keep named volumes
+scripts/reset-dev-stack.sh   # same, then destroy mimisbrunnr-{postgres,blob-well,seq}-data
+```
+
+`reset-dev-stack.sh` has no prompt. Choosing it **is** the explicit ask — it
+deletes the captured corpus.
+
+Do **not** glob `mimisbrunnr-*`. That prefix also matches
+`mimisbrunnr-testcontainer-*` (TestFramework.Aspire). The scripts use an exact
+allowlist plus label `com.docker.compose.project=smooth-mímisbrunnr`. Missing
+`mimisbrunnr-host` is success (`UseProject=true` has no Host container). Empty
+stack is exit 0.
+
+Runtime is `$DOTNET_ASPIRE_CONTAINER_RUNTIME` (default `docker`). Scripts do
+not kill AppHost, DCP, or `dotnet`.
+
+AGE-pin recreate (Persistent keeps the previous image until the container is
+removed) is the same mechanism — `stop-dev-stack.sh` is the supported remove
+for the dev container; see `APPHOST_AGENTS.md`.
+
 ## Publish workflow
 
 `.github/workflows/publish-image.yml` — not on pull requests.

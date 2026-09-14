@@ -24,8 +24,8 @@ Persistent memory service for AI agents: stores summarized, labelled context (li
 | Host | `src/SmoothAiProductContextMemory.Host/` | ASP.NET Core Web API, Serilog → console/Seq + OpenTelemetry OTLP, `/health` + `/alive`, Scalar OpenAPI |
 | AppHost | `src/SmoothAiProductContextMemory.AppHost/` | Aspire dev orchestrator — Postgres+AGE (`docker.io/apache/age:release_PG17_1.7.0`) + MinIO blob storage + Seq |
 | ChatHost | `src/SmoothAiProductContextMemory.ChatHost/` | Standalone LLM microservice — owns Anthropic SDK; talks to Host via HTTP only (project not yet in tree) |
-| Docs | `docs/` | Wiki, HLDs, BRDs, ADR pointer stubs — visible (not hidden `.docs`) |
-| Scripts | `scripts/` | Operational verification run against a container, not part of the test suite — graph restore round-trip (NFR-03), Postgres pre-upgrade check (NFR-04), and a sample-data seeder so both have something to verify |
+| Docs | `docs/` | Wiki, HLDs, BRDs — visible (not hidden `.docs`) |
+| Scripts | `scripts/` | Operational verification run against a container, not part of the test suite — graph restore round-trip (NFR-03), Postgres pre-upgrade check (NFR-04), a sample-data seeder so both have something to verify, and AppHost teardown (`stop-dev-stack.sh` keep data / `reset-dev-stack.sh` destroy volumes) |
 
 Planned work tracked as worktasks under `.context/work-tasks/` (gitignored). Use `/create worktask`. **Never reference worktask IDs (e.g. `WT-04`) in delivered artefacts** — code, comments, `*AGENTS.md`, HLDs, changelogs. Worktasks are short-lived and gitignored; cite the durable authority instead (HLD, LADR, NFR, PR, issue).
 
@@ -67,9 +67,11 @@ SMOOTH_AGE_BENCH=1 dotnet test tests/SmoothAiProductContextMemory.Infrastructure
 scripts/seed-graph-sample.sh nfr03_sample                          # populate a scratch database with memories + edges
 scripts/verify-graph-restore.sh mimisbrunnr-postgres nfr03_sample  # NFR-03 backup/restore round trip incl. edge count
 scripts/verify-graph-preupgrade.sh <target-image>                  # NFR-04 pre-upgrade check — run before any Postgres bump
+scripts/stop-dev-stack.sh                                          # AppHost teardown: remove mimisbrunnr-{postgres,blob-well,seq,host}, keep volumes
+scripts/reset-dev-stack.sh                                         # same, then destroy named volumes (captured corpus gone)
 ```
 
-Target a single test project (`dotnet test tests/<Project>`) or `ls tests/` to list. **Gotcha:** dev Aspire dashboard at `http://localhost:15278`; first browser visit needs the printed `/login?t=...` URL. After the AGE image pin, recreate persistent Postgres containers once (`mimisbrunnr-postgres`, `mimisbrunnr-testcontainer-postgres`) — `ContainerLifetime.Persistent` keeps the previous image until the container is removed. Same Postgres major (17) as Aspire's old default, so the named data volume is compatible.
+Target a single test project (`dotnet test tests/<Project>`) or `ls tests/` to list. **Gotcha:** dev Aspire dashboard at `http://localhost:15278`; first browser visit needs the printed `/login?t=...` URL. **AppHost exit does not stop the stack.** `mimisbrunnr-{postgres,blob-well,seq}` use `ContainerLifetime.Persistent` so captured memories and blobs survive a restart — that is load-bearing, not a leak. `mimisbrunnr-host` is session-lifetime but can remain after a hard kill (`pkill` leaves DCP). Dashboard is in-process and dies with AppHost. Supported teardown: `scripts/stop-dev-stack.sh` (keep data) vs `scripts/reset-dev-stack.sh` (destroy volumes). Do not glob `mimisbrunnr-*` — that also matches `mimisbrunnr-testcontainer-*`. After the AGE image pin, recreate persistent Postgres containers once (`mimisbrunnr-postgres`, `mimisbrunnr-testcontainer-postgres`) — same Persistent mechanism; `stop-dev-stack.sh` is the supported remove for the dev container (see `APPHOST_AGENTS.md`). Same Postgres major (17) as Aspire's old default, so the named data volume is compatible.
 
 ## Test Framework
 
@@ -106,6 +108,10 @@ Hosted on **GitHub** at `https://github.com/generic-automation-and-it/project`. 
 | Date | Change | Ref |
 |---|---|---|
 | 2026-09-13 | Facet/tag query match is ANY by default (indexed overlap), containment (`all`) opt-in — fixes silent empty recall on multi-facet dedup batches; `FacetMatchMode` on `QueryMemories.Request`/`MemorySearchCriteria`. Added `paths` subcommand to the context-memory skill client (bounded traversal, `maxDepth` required). | BUG-02, BUG-04 |
+| 2026-09-13 | Documented AppHost Persistent leftover after exit and the two teardown scripts (`stop-dev-stack.sh` keep data, `reset-dev-stack.sh` destroy volumes). | `scripts/` |
 | 2026-09-13 | AppHost default is working-tree Host; `HostConfiguration__UseProject=false` pulls the published image (tag may lag). | `src/SmoothAiProductContextMemory.AppHost/` |
 | 2026-09-13 | Documented `scripts/` operational verification (NFR-03 restore round-trip, NFR-04 pre-upgrade check) and the `SMOOTH_AGE_BENCH`-gated NFR-02 benchmark command. | `scripts/` |
 | 2026-09-13 | Documented publish-image tag derivation, manual-dispatch validation, concurrency, cache, and revision behavior. | `.github/workflows/publish-image.yml` |
+| 2026-09-13 | Added BRD-002 (contextual knowledge export, `BR-18`–`BR-34`, extends BRD-001's requirement space) and HLD-005 (discovery). Ticket- and tag-anchored graph traversal recorded as three **Blocked** LADRs — no ticket or tag vertex exists and no writer derives such edges. | `docs/brd/002-contextual-export/`, `docs/hlds/005-contextual-export/` |
+| 2026-09-14 | Docs row in the repository layout now lists BRDs alongside HLDs. | `docs/` |
+| 2026-09-14 | BRD-002's requirement range extended to `BR-35`–`BR-36` (focus on the work the document feeds; a focus never changes selection or suppresses a finding); BRD-001 §11 row updated to match. | `docs/brd/002-contextual-export/` |

@@ -68,6 +68,11 @@ internal static class DistributedApplicationBuilderExtensions
                 Console.WriteLine("If the dashboard asks for login, use the /login?t=... URL that Aspire prints after startup.");
             }
 
+            Console.WriteLine("Dashboard dies with this process. mimisbrunnr-{postgres,blob-well,seq} keep running (ContainerLifetime.Persistent). mimisbrunnr-host may remain after a hard kill.");
+            Console.WriteLine("Stop (keep data): scripts/stop-dev-stack.sh");
+            Console.WriteLine("Reset (destroy volumes): scripts/reset-dev-stack.sh");
+            Console.WriteLine("Do not glob mimisbrunnr-* — that also matches mimisbrunnr-testcontainer-*.");
+
             return builder;
         }
 
@@ -130,7 +135,7 @@ internal static class DistributedApplicationBuilderExtensions
             // first-party Aspire integration exists. Fixed env-var credentials make bucket creation
             // and .NET client auth fully deterministic. SeaweedFS was rejected: its S3 gateway needs
             // a JSON credentials file and an admin JWT to create buckets, which is impractical to
-            // automate inside an Aspire container (see ADR).
+            // automate inside an Aspire container (see HLD 001 LADR-06).
             // The image is registry-qualified so Podman never has to resolve a short name.
             return builder.AddContainer("blob", BlobImage)
                 .WithArgs("server", "/data", "--console-address", ":9001")

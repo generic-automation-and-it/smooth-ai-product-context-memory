@@ -7,7 +7,8 @@ AI Context: HLD for memory recall feedback. Updated: 2026-09-14
 Records whether retrieval is working — which memories are returned, which never are, and when a
 retrieval finds nothing. Intent in [README.md](./README.md); decisions in [./ladrs/](./ladrs/);
 quality bar in [./nfrs/](./nfrs/); context and recall path in
-[./diagrams/c4-context.md](./diagrams/c4-context.md).
+[./diagrams/c4-context.md](./diagrams/c4-context.md). Business authority is
+[BRD 001](../../brd/001-context-memory/).
 
 **This HLD is In Discovery.** The central decision — where feedback lives — is deliberately open
 (LADR-02). Do not resolve it by implementation default.
@@ -57,3 +58,4 @@ Targets and verification live in [./nfrs/](./nfrs/). Two shape how code is writt
 | Date | Change | Ref |
 |:-----|:-------|:----|
 | 2026-09-14 | Created — discovery HLD for recall feedback. Placement deliberately left open. | Gap identified during pre-dogfooding review |
+| 2026-09-14 | Added business-authority back-reference to BRD 001, completing the three-place rule. | BRD 001 |

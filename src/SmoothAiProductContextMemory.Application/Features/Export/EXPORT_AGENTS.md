@@ -6,7 +6,7 @@ One-way generated Markdown projection of the store (groups, memories, current ve
 
 ## Non-Negotiables
 
-- **Generated, never maintained.** Output is a projection. Hand-editing it is a defect. There is no import path and there must not be one — ADR-0002 chose database-as-truth; import would reverse that by the back door.
+- **Generated, never maintained.** Output is a projection. Hand-editing it is a defect. There is no import path and there must not be one — HLD 001 chose database-as-truth; import would reverse that by the back door.
 - **Current-only by default.** `--history` adds version chains as extra sections in the same file. History is not the default — it duplicates content and would swamp the tree.
 - **Blob bodies are inlined.** Never print a content hash as if it were the document. A missing blob warns and continues; a non-text blob is noted and omitted.
 - **Relationships live in file content.** `group_uuid` is written into every memory file. Directory placement is navigation, not proof. A prior trial encoded the parent only in the path; a moved file lost it silently.
@@ -16,7 +16,7 @@ One-way generated Markdown projection of the store (groups, memories, current ve
 
 ## System Context
 
-ADR-0002 made PostgreSQL the source of truth and recorded the cost: the store is opaque without tooling. ADR-0001 made blobs content-addressed, so a directory of SHA-256 hashes is no more readable than a table. This command is that tooling.
+HLD 001 made PostgreSQL the source of truth and recorded the cost: the store is opaque without tooling. HLD 001 also made blobs content-addressed, so a directory of SHA-256 hashes is no more readable than a table. This command is that tooling.
 
 ```mermaid
 sequenceDiagram
@@ -69,7 +69,7 @@ sequenceDiagram
 - **Status**: Accepted
 - **Context**: A trial's hand-written index became a maintenance obligation and drifted immediately.
 - **Decision**: One-way projection. Every file carries a GENERATED marker. Output directories are gitignored. No import, no Obsidian wiki-links, no graph view.
-- **Consequences**: Adding import later is a defect against ADR-0002.
+- **Consequences**: Adding import later is a defect against HLD 001.
 
 ## Key Behaviors
 
@@ -109,5 +109,6 @@ Approved implementation plan (2026-09-13):
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-13 | ADR-0001/0002 deleted; authority citations retargeted to HLD 001. | HLD-001 |
 | 2026-09-13 | Export reads relationships via `IMemoryGraph.ListAllAsync` after the HLD 003 cutover. | HLD-003 |
 | 2026-09-13 | Created — generated Markdown export contract. | PR #18 |
