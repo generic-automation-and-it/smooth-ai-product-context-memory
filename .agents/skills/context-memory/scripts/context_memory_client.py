@@ -239,6 +239,43 @@ def cmd_upsert_initiative(args):
     return resp
 
 
+def cmd_paths(args):
+    """POST /api/context/paths. Bounded multi-hop traversal from a source memory.
+
+    maxDepth is required — the bound is never left to a server default. Each returned path is
+    enriched with a rendered `summary` line (endpoint name + relation chain) so the agent reads the
+    path without joining UUIDs itself; the full hop/endpoint data is preserved beneath it.
+    """
+    payload = read_payload(args.payload)
+    if not isinstance(payload, dict):
+        raise ClientError(0, "bad-input", "'paths' payload must be an object")
+    if not isinstance(payload.get("maxDepth"), int) or isinstance(payload.get("maxDepth"), bool) or payload["maxDepth"] < 1:
+        raise ClientError(
+            0,
+            "bad-input",
+            "'paths' requires 'maxDepth' as a positive integer — the traversal bound is never left to a server default.",
+        )
+    source_uuid = payload.get("sourceUuid")
+    if not isinstance(source_uuid, str) or not source_uuid.strip():
+        raise ClientError(0, "bad-input", "'paths' requires 'sourceUuid' as a non-empty string")
+
+    resp = _request("POST", "/api/context/paths", payload)
+    for path in resp.get("paths", []):
+        path["summary"] = _render_path(path)
+    print(json.dumps(resp, indent=2))
+    return resp
+
+
+def _render_path(path):
+    hops = path.get("hops", []) or []
+    endpoint = path.get("endpoint") or {}
+    endpoint_label = endpoint.get("name") or endpoint.get("uuid") or "?"
+    chain = " ".join(
+        f"{hop.get('sourceUuid')}--[{hop.get('relation')}]--> " for hop in hops
+    )
+    return f"depth={path.get('depth')}: {chain}{endpoint_label} ({endpoint.get('uuid', '?')})"
+
+
 def main():
     parser = argparse.ArgumentParser(prog="context_memory_client")
     parser.add_argument("--base-url", help="override " + ENV_BASE_URL)
@@ -303,6 +340,10 @@ def main():
     p = sub.add_parser("upsert-initiative", help="POST /api/context/initiatives")
     p.add_argument("--payload", help="JSON file; defaults to stdin")
     p.set_defaults(func=cmd_upsert_initiative)
+
+    p = sub.add_parser("paths", help="POST /api/context/paths (bounded multi-hop traversal)")
+    p.add_argument("--payload", help="JSON file; defaults to stdin")
+    p.set_defaults(func=cmd_paths)
 
     args = parser.parse_args()
 

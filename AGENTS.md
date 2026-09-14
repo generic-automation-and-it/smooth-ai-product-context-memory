@@ -107,6 +107,7 @@ Hosted on **GitHub** at `https://github.com/generic-automation-and-it/project`. 
 
 | Date | Change | Ref |
 |---|---|---|
+| 2026-09-13 | Facet/tag query match is ANY by default (indexed overlap), containment (`all`) opt-in — fixes silent empty recall on multi-facet dedup batches; `FacetMatchMode` on `QueryMemories.Request`/`MemorySearchCriteria`. Added `paths` subcommand to the context-memory skill client (bounded traversal, `maxDepth` required). | BUG-02, BUG-04 |
 | 2026-09-13 | Documented AppHost Persistent leftover after exit and the two teardown scripts (`stop-dev-stack.sh` keep data, `reset-dev-stack.sh` destroy volumes). | `scripts/` |
 | 2026-09-13 | AppHost default is working-tree Host; `HostConfiguration__UseProject=false` pulls the published image (tag may lag). | `src/SmoothAiProductContextMemory.AppHost/` |
 | 2026-09-13 | Documented `scripts/` operational verification (NFR-03 restore round-trip, NFR-04 pre-upgrade check) and the `SMOOTH_AGE_BENCH`-gated NFR-02 benchmark command. | `scripts/` |

@@ -1,0 +1,17 @@
+{
+  "$schema_note": "Request shape for a traversal narrowed by relation, direction and endpoint. All filter fields reachable; maxDepth still present.",
+  "request": {
+    "sourceUuid": "aaaaaaaa-0000-0000-0000-000000000000",
+    "maxDepth": 3,
+    "targetUuid": "cccccccc-0000-0000-0000-000000000000",
+    "relation": "depends_on",
+    "direction": "either",
+    "kind": "decision",
+    "status": "approved",
+    "scopeDimension": "product",
+    "limit": 50
+  },
+  "response": {
+    "paths": []
+  }
+}

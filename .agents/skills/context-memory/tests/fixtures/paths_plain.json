@@ -1,0 +1,20 @@
+{
+  "$schema_note": "Request shape for a plain bounded traversal. maxDepth is always present — the bound is never left to a server default.",
+  "request": {
+    "sourceUuid": "aaaaaaaa-0000-0000-0000-000000000000",
+    "maxDepth": 2
+  },
+  "response": {
+    "paths": [
+      {
+        "depth": 2,
+        "hops": [
+          { "sourceUuid": "aaaaaaaa-0000-0000-0000-000000000000", "targetUuid": "bbbbbbbb-0000-0000-0000-000000000000", "relation": "depends_on", "reason": "A depends on B" },
+          { "sourceUuid": "bbbbbbbb-0000-0000-0000-000000000000", "targetUuid": "cccccccc-0000-0000-0000-000000000000", "relation": "relates_to", "reason": "B relates to C" }
+        ],
+        "endpoint": { "uuid": "cccccccc-0000-0000-0000-000000000000", "name": "Storage engine" }
+      }
+    ]
+  },
+  "expected_summary": "depth=2: aaaaaaaa-0000-0000-0000-000000000000--[depends_on]-->  bbbbbbbb-0000-0000-0000-000000000000--[relates_to]--> Storage engine (cccccccc-0000-0000-0000-000000000000)"
+}

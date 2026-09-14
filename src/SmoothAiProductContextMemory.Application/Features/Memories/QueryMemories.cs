@@ -35,7 +35,8 @@ public static class QueryMemories
         bool IncludeProposed = false,
         bool CurrentOnly = true,
         DateTimeOffset? AsOf = null,
-        int Limit = MemorySearchDefaults.Limit) : IRequest<Response>;
+        int Limit = MemorySearchDefaults.Limit,
+        string FacetMatchMode = FacetMatchModeValue.Any) : IRequest<Response>;
 
     public sealed record Response(IReadOnlyList<CheapMemory> Items);
 
@@ -47,6 +48,9 @@ public static class QueryMemories
             RuleFor(x => x.Status).MaximumLength(32);
             RuleFor(x => x.ScopeDimension).MaximumLength(32);
             RuleFor(x => x.Limit).InclusiveBetween(1, MemorySearchDefaults.MaxLimit);
+            RuleFor(x => x.FacetMatchMode)
+                .Must(mode => FacetMatchModeValue.Allowed.Contains(mode, StringComparer.Ordinal))
+                .WithMessage($"FacetMatchMode must be one of: {string.Join(", ", FacetMatchModeValue.Allowed)}.");
             RuleFor(x => x.TicketKey)
                 .NotEmpty()
                 .When(x => !string.IsNullOrWhiteSpace(x.TicketProvider))
@@ -106,6 +110,7 @@ public static class QueryMemories
                 AsOf = request.AsOf,
                 CurrentOnly = request.CurrentOnly,
                 Limit = request.Limit,
+                FacetMatchMode = request.FacetMatchMode,
             };
 
             logger.LogDebug(
