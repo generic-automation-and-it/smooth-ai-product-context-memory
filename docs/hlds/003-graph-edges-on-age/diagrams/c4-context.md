@@ -22,7 +22,7 @@ C4Context
         SystemDb(blob, "Object store", "Document bodies, content-addressed and immutable.")
     }
 
-    System_Ext(agent, "AI harness", "Runs the context-memory skill. Sole agent-facing interface.")
+    System_Ext(agent, "AI harness", "Runs the mimisbrunnr-context-memory skill. Sole agent-facing interface.")
     System_Ext(tracker, "Issue trackers", "Jira, Linear, GitHub. Referenced by identity only, never copied.")
 
     Rel(dev, agent, "Works through")

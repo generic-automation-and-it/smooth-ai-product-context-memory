@@ -1,5 +1,5 @@
 ---
-name: context-memory
+name: mimisbrunnr-context-memory
 description: Get and set persistent context-memory records — the sole interface to the SmoothAiProductContextMemory store. Use when you need to record a durable fact, decision, preference, or constraint for later retrieval across sessions, or when you need to recall what was previously captured about a subject, ticket, repository, or scope. Captures byproduct facts during work and writes them at an explicit end-of-task checkpoint.
 models:
   claude: opus       # high-complexity; write path performs semantic dedup, link derivation, atomicity, summary/keyword generation
@@ -48,7 +48,7 @@ During work, accumulate candidate facts silently.
 
 ### 1. Initialize (Resolve Group)
 
-When the user starts a context-memory session, resolve the target group from what the caller provides
+When the user starts a mimisbrunnr-context-memory session, resolve the target group from what the caller provides
 — ticket, repository, initiative, or scope — or create it if it does not exist.
 
 - If the caller supplies a ticket, look up the group that owns it. **A ticket belongs to at most one
@@ -139,7 +139,7 @@ stale, not an alternative reading.
 
 ## Deterministic Components
 
-The judgement below runs through three thin scripts under `.agents/skills/context-memory/scripts/`.
+The judgement below runs through three thin scripts under `.agents/skills/mimisbrunnr-context-memory/scripts/`.
 They carry no secrets, never read/write the store themselves, and move JSON over the store's HTTP API. The
 agent assembles payloads and interprets results; the scripts do not decide. Root the base URL via
 `CONTEXT_MEMORY_BASE_URL` (fallback `http://localhost:5141`); always `probe` first for an honest

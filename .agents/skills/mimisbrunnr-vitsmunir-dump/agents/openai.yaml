@@ -1,0 +1,5 @@
+interface:
+  display_name: "Vitsmunir Dump"
+  short_description: "AI Brain / Intelligence Dump — listen-first capture. Vitsmunir is Old Norse for intelligence, wits, and the power of comprehension."
+  default_prompt: "Start a vitsmunir dump (AI brain / intelligence dump) for a ticket or idea. Listen and take notes until I ask you to synthesize or update an artifact."
+  model: gpt-5.5

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deterministic plumbing for the context-memory skill.
+"""Deterministic plumbing for the mimisbrunnr-context-memory skill.
 
 Thin, dependency-free client over the store's HTTP API. Every byte of judgement lives in SKILL.md; this
 script only moves JSON. Reads the request body from a payload file or stdin, performs the HTTP call,
@@ -84,9 +84,9 @@ def _probe(base):
 def cmd_probe(args):
     base = args.base_url or base_url()
     if _probe(base):
-        print(f"context-memory API reachable at {base}")
+        print(f"mimisbrunnr-context-memory API reachable at {base}")
         return
-    print(f"context-memory API unreachable at {base}", file=sys.stderr)
+    print(f"mimisbrunnr-context-memory API unreachable at {base}", file=sys.stderr)
     sys.exit(2)
 
 

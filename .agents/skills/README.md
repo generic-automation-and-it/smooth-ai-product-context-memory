@@ -10,13 +10,13 @@ Skills live **flat**, one directory per skill directly under `.agents/skills/`. 
 |-------|---------|-------|
 | **agile-github-breakdown** | Turn a braindump or existing Feature into GitHub Feature + Task issues | `/agile-github-breakdown` |
 | **agile-github-task-from-diff** | Create a GitHub Task (sub-issue) from the current git diff vs main | `/agile-github-task-from-diff` |
-| **ai-brain-dump** | Listen-first capture session; synthesize on request | `/ai-brain-dump [--oktoask] [--thinking] [--oktoreaddocs] [--oktowebsearch] [--all]` |
+| **mimisbrunnr-vitsmunir-dump** | AI Brain / Intelligence Dump — listen-first capture; synthesize on request. Vitsmunir is Old Norse for intelligence, wits, and the power of comprehension. | `/mimisbrunnr-vitsmunir-dump [--oktoask] [--thinking] [--oktoreaddocs] [--oktowebsearch] [--all]` |
 | **ai-review** | Analyze and execute AI PR review feedback (fix/skip) | `/ai-review <pr> [1=fix 2=skip …]` |
 | **ai-terse** | Reformat this turn's reply into terse, high-density output with a TL;DR | `/ai-terse` |
 | **ai-template-sync** | UPSERT smooth-devex-template scaffold into an existing repo | `/ai-template-sync` |
 | **context-load-agents-context** | Load ancestor AGENTS.md context for a file | `/context-load-agents-context` |
 | **context-load-context** | Load domain context before implementation | `/context-load-context auth` |
-| **context-memory** | Get/set persistent context-memory records; sole interface to the store | `/context-memory [--dryrun] [--approve]` |
+| **mimisbrunnr-context-memory** | Get/set persistent context-memory records; sole interface to the store | `/mimisbrunnr-context-memory [--dryrun] [--approve]` |
 | **create-hld** | Author a design-only High-Level Design under `docs/hlds/NNN-<slug>/` | `/create-hld <kebab-slug>` |
 | **git-commit** | Commit with conventional format | `/git-commit [--autonomous]` |
 | **git-commit-push** | Commit and push to remote | `/git-commit-push [--autonomous]` |
@@ -25,10 +25,10 @@ Skills live **flat**, one directory per skill directly under `.agents/skills/`. 
 | **git-sync** | Sync with main (optionally auto-resolve conflicts) | `/git-sync` |
 | **manage-rule-system** | Create/update rule files in `.agents/rules/` | `/manage-rule-system` |
 
-### ai-brain-dump switches
+### mimisbrunnr-vitsmunir-dump switches
 
 Default (no switch) is pure silent listen-first — no questions, no tools — until you ask it to synthesize.
-Opt-in switches relax that, at different token costs (see `ai-brain-dump/README.md` for the full breakdown):
+Opt-in switches relax that, at different token costs (see `mimisbrunnr-vitsmunir-dump/README.md` for the full breakdown):
 
 | Switch | Effect | Cost |
 |--------|--------|------|
@@ -42,10 +42,10 @@ Opt-in switches relax that, at different token costs (see `ai-brain-dump/README.
 The tool switches (`--oktoreaddocs`, `--oktowebsearch`) re-enable the file/web payload bloat the
 listen-first default avoids — use deliberately.
 
-### context-memory switches
+### mimisbrunnr-context-memory switches
 
 Default (no switch) accumulates candidate facts silently during work and writes them in one transaction at
-an explicit end-of-task `set`. See `context-memory/README.md` for the cost model — **every write is an LLM
+an explicit end-of-task `set`. See `mimisbrunnr-context-memory/README.md` for the cost model — **every write is an LLM
 call** (R13), so the switches trade inspection against irreversibility, not against speed:
 
 | Switch | Effect | Cost |
@@ -93,10 +93,10 @@ Skills are classified by complexity tier. Each SKILL.md carries a `models` front
 | **agile-github-task-from-diff** | medium | Diff classification + issue authoring |
 | **manage-rule-system** | medium | Cross-tool frontmatter authoring |
 | **ai-terse** | low | Single-turn reply reformatting; no tools or deep reasoning |
-| **ai-brain-dump** | high | Multi-turn synthesis + deep requirement reasoning |
+| **mimisbrunnr-vitsmunir-dump** | high | Multi-turn synthesis + deep requirement reasoning |
 | **ai-template-sync** | high | Interactive multi-turn Q&A + conditional file sync across tools |
 | **create-hld** | high | Multi-turn clarification gates + architectural judgment (LADRs, NFRs, diagrams) |
-| **context-memory** | high | Write path performs semantic cross-group dedup, link derivation, atomicity splitting and summary/keyword generation — judgement the database cannot express as constraints |
+| **mimisbrunnr-context-memory** | high | Write path performs semantic cross-group dedup, link derivation, atomicity splitting and summary/keyword generation — judgement the database cannot express as constraints |
 
 ### Sub-skill invocation model guidance
 
@@ -112,8 +112,9 @@ Skills are flat under `.agents/skills/`; the category lives in the folder-name p
 | Prefix | Skills |
 |--------|--------|
 | `agile-` | `agile-github-breakdown`, `agile-github-task-from-diff` |
-| `ai-` | `ai-brain-dump`, `ai-review`, `ai-terse`, `ai-template-sync` |
-| `context-` | `context-load-agents-context`, `context-load-context`, `context-memory` |
+| `ai-` | `ai-review`, `ai-terse`, `ai-template-sync` |
+| `context-` | `context-load-agents-context`, `context-load-context` |
+| `mimisbrunnr-` | `mimisbrunnr-vitsmunir-dump`, `mimisbrunnr-context-memory` |
 | `git-` | `git-commit`, `git-commit-push`, `git-commit-push-pr`, `git-commit-review-push`, `git-sync` |
 | _(none)_ | `create-hld`, `manage-rule-system` |
 

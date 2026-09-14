@@ -1,4 +1,4 @@
-# context-memory — AGENTS.md
+# mimisbrunnr-context-memory — AGENTS.md
 
 ## TL;DR
 
@@ -50,7 +50,7 @@ link derivation, redaction) live here — none can be expressed as a database co
 
 ```mermaid
 flowchart LR
-    A[Agent / Human] -->|capture candidates| B[context-memory skill]
+    A[Agent / Human] -->|capture candidates| B[mimisbrunnr-context-memory skill]
     B -->|"set (preflight + one transaction)"| C[HTTP API]
     C --> D[(PostgreSQL)]
     C --> E[(MinIO blob)]
@@ -118,14 +118,14 @@ flowchart LR
 
 ## Test References
 
-- **Committed L0 harness (CI-gatable):** `.agents/skills/context-memory/tests/run_tests.py` — stdlib
-  `unittest` (no external runner). Unit-tests the deterministic plumbing: `redact.py` (planted
-  credential never leaks; digest reports the rule name), `atomicity.py` (bundle → split/skip), and
-  `context_memory_client.py` (`paths` guard rails — maxDepth/sourceUuid required before any network
-  call — and `_render_path` summary rendering).
-  Run: `python3 .agents/skills/context-memory/tests/run_tests.py`.
+- **Committed L0 harness (CI-gatable):** `.agents/skills/mimisbrunnr-context-memory/tests/run_tests.py` — stdlib
+   `unittest` (no external runner). Unit-tests the deterministic plumbing: `redact.py` (planted
+   credential never leaks; digest reports the rule name), `atomicity.py` (bundle → split/skip), and
+   `context_memory_client.py` (`paths` guard rails — maxDepth/sourceUuid required before any network
+   call — and `_render_path` summary rendering).
+   Run: `python3 .agents/skills/mimisbrunnr-context-memory/tests/run_tests.py`.
 - **On-demand LLM-eval fixtures (not CI-gated):**
-  `.agents/skills/context-memory/tests/fixtures/scenarios.json` plus `score_fixtures.py`. Authored
+  `.agents/skills/mimisbrunnr-context-memory/tests/fixtures/scenarios.json` plus `score_fixtures.py`. Authored
   positive/negative scenarios for the semantic-dedup, atomicity, link and divergence stages, scored
   for recall AND precision against a countable expected-verdict set.
 - The skill's test approach is specified in `docs/hlds/002-context-memory-write-pipeline/nfrs/NFR-02-deduplication-accuracy.md`. These
@@ -146,6 +146,7 @@ as a static configurable setting; divergence fixture asserts non-collapse (V1 `d
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-14 | Brand-prefixed to `mimisbrunnr-context-memory`. | |
 | 2026-09-13 | `/query` recall: facet/tag match is ANY by default (rows carrying any requested facet), containment (`all`) opt-in — matches the recall union the dedup step needs. `paths` subcommand added (bounded multi-hop traversal, `maxDepth` required, scope enforced); SKILL.md gained `## Traversal` guidance on when to traverse vs query. | BUG-02, BUG-04 |
 | 2026-09-10 | Created — contract for the sole interface to the context-memory store; fixed write pipeline; cross-group dedup, atomicity and secret-redaction ownership. | HLD 002 (write pipeline) |
 | 2026-09-10 | Contract-coherence pass. Pipeline numbering pinned to five stages with **preflight as stage 1** (SKILL.md previously specified four, starting at redact). Approval gating resolved to *write-as-`proposed`* — SKILL.md previously said "do not write", which contradicted this file and the retrieval rule that excludes `proposed` records. Digest reclassified as a post-write receipt with `--dryrun` named as the only pre-write veto point (LADR-002 previously implied a veto round that `set`'s single transaction cannot provide). Intra-batch collision, source-date `valid_from`, and the summary model/prompt stamp added to SKILL.md, which the executing agent reads. | HLD 002 contract review |

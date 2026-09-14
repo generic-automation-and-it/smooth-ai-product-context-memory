@@ -6,7 +6,7 @@ description: >
     dependency graph, soft technology suggestions, and GitHub writes gated behind a
     dry-run preview. Trigger keywords: "create stories", "break this epic down",
     "produce stories for", "turn this braindump into a feature", "agile github breakdown".
-    Also triggers on /agile-github-breakdown. Complements ai-brain-dump (run after its
+    Also triggers on /agile-github-breakdown. Complements mimisbrunnr-vitsmunir-dump (run after its
     synthesize step) and shares GitHub Project / sub-issue / gh conventions with
     agile-github-task-from-diff — but that skill sources an untyped subtask from a git
     diff; this one sources Feature + Task issues from contextual knowledge (braindumps,
@@ -194,7 +194,7 @@ guessing that the write succeeded.
   requirement into English.
 - `scripts/create_github_breakdown.py` owns `gh` argv (`shell=False`). The agent authors
   titles/bodies; the script creates Feature/Task, project-adds, sub-issue-links, and `blocked_by`.
-- Composes with `ai-brain-dump`: that skill's Listen/Synthesize phases can feed this skill's Step 1
+- Composes with `mimisbrunnr-vitsmunir-dump`: that skill's Listen/Synthesize phases can feed this skill's Step 1
   input directly — this skill does not re-implement listen-first capture.
 - Composes with `agile-github-task-from-diff`: that skill later creates **untyped** subtasks under a
   Task from a git diff. Do not collapse the two — same GitHub Task type is not used for both.
