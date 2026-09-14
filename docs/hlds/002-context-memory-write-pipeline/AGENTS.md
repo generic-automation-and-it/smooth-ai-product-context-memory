@@ -1,6 +1,6 @@
 # AGENTS.md - Context memory write pipeline
 
-AI Context: HLD for the context-memory write pipeline. Updated: 2026-09-13
+AI Context: HLD for the context-memory write pipeline. Updated: 2026-09-14
 
 ## TL;DR
 

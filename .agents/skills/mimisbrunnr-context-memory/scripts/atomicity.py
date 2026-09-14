@@ -26,9 +26,10 @@ import sys
 # detector then called simple: a signal that never discriminates cannot support a verdict.
 # "and" counts only after a comma, the cheapest deterministic proxy for clause coordination.
 #
-# Two tiers, because the markers are not equally strong. A contrastive junction and a semicolon
-# cannot join anything but two finite clauses, so one occurrence already means two claims; an
-# additive adverb can sit inside a single clause, so it takes two to reach the same conclusion.
+# Two tiers, because the markers are not equally strong. A semicolon or whereas/however
+# cannot join anything but two finite clauses, so one occurrence already means two claims;
+# "but"/"while" usually do too (temporal "while" and "not X but Y" are accepted misses);
+# an additive adverb can sit inside a single clause, so it takes two.
 _CONTRASTIVE = [
     r"\b(?:but|however|whereas|while)\b",
     r";",
