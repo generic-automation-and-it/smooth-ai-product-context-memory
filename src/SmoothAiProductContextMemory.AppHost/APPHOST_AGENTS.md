@@ -31,7 +31,7 @@ ports/container names.
   (`docker.io/apache/age:release_PG17_1.7.0`, `quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z`) because Podman refuses to resolve short names
   non-interactively unless the host's `registries.conf` happens to allow it.
 - **AppHost is the orchestrator, not a published image.** Starting it compiles Host from the working
-  tree and starts postgres/blob/seq. Do not containerise the AppHost. The Host stays runnable as a
+  tree and starts Týr/Iðunn/Saga. Do not containerise the AppHost. The Host stays runnable as a
   plain `Program` (`WebApplicationFactory<Program>` integration tests must keep working without an
   AppHost).
 - **Default Host is the working tree.** `HostConfiguration:UseProject` defaults to `true` and
@@ -48,12 +48,11 @@ ports/container names.
   postgres/blob/seq. It injects `ConnectionStrings__SmoothAiProductContextMemory` (the key
   Infrastructure reads) plus the existing `BlobStorage__*` env vars. GHCR references use
   `ImagePullPolicy.Always`.
-- **Connection-string keys must match what the Host consumes.** Aspire `.WithReference(db)` injects
-  `ConnectionStrings:<resource>` automatically for Postgres and Seq — so the **resource name is the
-  connection-string key**. The database resource is therefore named `SmoothAiProductContextMemory`
-  (with `databaseName: "app"` keeping the physical database, and the persistent volume's data, as it
-  was). Naming it `app` published `ConnectionStrings__app`, which nothing consumed: the Host threw at
-  DI resolve and the `host` resource never started. Rename the resource and you rename the key.
+- **Connection-string keys must match what the Host consumes.** The dashboard names are independent
+  from connection-string keys: `.WithReference(db, connectionName: "SmoothAiProductContextMemory")`
+  and `.WithReference(seq, connectionName: "seq")` retain the Host's established configuration while
+  the resources are named `mimers-head` and `saga-seq`. Do not omit either `connectionName`: the Host
+  would otherwise receive a key derived from the resource name and fail during startup or lose Seq logs.
   The blob container is **not** a connection-string resource: the Host receives `BlobStorage__Endpoint` (from the blob `s3` endpoint)
   plus `BlobStorage__AccessKey` / `BlobStorage__SecretKey` / `BlobStorage__Bucket` as plain environment
   variables, bound by `BlobStorageOptions`.
@@ -72,10 +71,10 @@ ports/container names.
 
 | Resource | Name | Fixed local port | Container name |
 |---|---|---:|---|
-| PostgreSQL + AGE | `postgres` (`docker.io/apache/age:release_PG17_1.7.0`) | `5432` | `mimisbrunnr-postgres` |
-| Database | `SmoothAiProductContextMemory` (physical DB `app`) | (via `postgres`) | n/a |
-| MinIO (blob) | `blob` | `9000` (s3), `9001` (console) | `mimisbrunnr-blob-well` |
-| Seq | `seq` (volume `mimisbrunnr-seq-data`) | `5341` | `mimisbrunnr-seq` |
+| PostgreSQL + AGE | `tyr-postgres` (`docker.io/apache/age:release_PG17_1.7.0`) | `5432` | `mimisbrunnr-postgres` |
+| Database | `mimers-head` (physical DB `app`) | (via `tyr-postgres`) | n/a |
+| MinIO (blob) | `idunn-blob` | `9000` (s3), `9001` (console) | `mimisbrunnr-blob-well` |
+| Seq | `saga-seq` (volume `mimisbrunnr-seq-data`) | `5341` | `mimisbrunnr-seq` |
 | API project (default) | `host-working-tree` | `5141` http / `7141` https | n/a (host process) |
 | API image (opt-in) | `host-published-image` (`HostConfiguration:UseProject=false`) | `5141` | `mimisbrunnr-host` |
 
@@ -125,8 +124,8 @@ Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgr
   accept OTLP directly and that would be the tidier wiring, but Serilog is the authoritative log
   pipeline here, and routing logs to two OTLP endpoints (dashboard + Seq) needs a second exporter or a
   collector. Revisit if a collector ever lands.
-- **Seq is fed over `ConnectionStrings:seq`**, which is what `.WithReference(seq)` publishes;
-  `Aspire.Hosting.Seq` defines no `SEQ_URI` variable. The Host's Serilog Seq sink activates on that key.
+- **Seq is fed over `ConnectionStrings:seq`**, which `.WithReference(seq, connectionName: "seq")`
+  publishes; `Aspire.Hosting.Seq` defines no `SEQ_URI` variable. The Host's Serilog Seq sink activates on that key.
 - **Both Host resources carry `WithHttpHealthCheck("/health")`**, so the dashboard shows them as
   healthy only once migrations have completed and PostgreSQL is reachable — not merely once the
   process starts.
@@ -193,6 +192,7 @@ Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgr
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-14 | Dashboard title is `Mímisbrunnr`; resources are `tyr-postgres`, `mimers-head`, `idunn-blob`, and `saga-seq`. Explicit connection names preserve the Host's existing database and Seq configuration. The physical database stays `app`, avoiding a migration of the persistent dev corpus. | AppHost naming |
 | 2026-09-13 | Documented Persistent leftover after AppHost exit. Startup hint names `scripts/stop-dev-stack.sh` (keep data) and `scripts/reset-dev-stack.sh` (destroy volumes). Allowlist, never a `mimisbrunnr-*` glob. | AppHost teardown |
 | 2026-09-13 | Default AppHost run compiles Host from the working tree; published-image path is opt-in (`UseProject=false`) and announced so a lagging GHCR tag cannot look like current source. | APPHOST_AGENTS.md |
 | 2026-09-13 | Runtime blob container renamed `mimisbrunnr-blob` → `mimisbrunnr-blob-well` (volume `mimisbrunnr-blob-well-data`). Tests stay `mimisbrunnr-testcontainer-blob`. Old volume is orphaned. | release-image |
