@@ -12,7 +12,7 @@ Persistent memory service for AI agents: stores summarized, labelled context (li
 
 ## AI Context Files
 
-`AGENTS.md` and `*AGENTS.md` are first-class AI-coder context — read like `CLAUDE.md`, not optional reference. Layered domain → sub-domain → feature → technology; read every level that governs code you touch, nearest `*AGENTS.md` most authoritative. Keep `*AGENTS.md` synced with code; every PR updates at least one. Prefer local context over adding to this root file — avoid restating the same plan at multiple levels. Changelog entries follow the same rule: record a change in the **nearest localized `*AGENTS.md`'s** changelog, not the root's — the root `## Changelog` is only for changes that are global to the solution or to this root file itself.
+`AGENTS.md` and `*AGENTS.md` are first-class AI-coder context — read like `CLAUDE.md`, not optional reference. Layered domain → sub-domain → feature → technology; read every level that governs code you touch, nearest `*AGENTS.md` most authoritative. Keep `*AGENTS.md` synced with code; every PR updates at least one. Prefer local context over adding to this root file — avoid restating the same plan at multiple levels. Changelog entries follow the same rule: record a change in the **nearest localized `*AGENTS.md`'s** changelog, not the root's — the root `## Changelog` is only for changes that are global to the solution or to this root file itself; when no localized `*AGENTS.md` exists for the touched area, the root changelog is that change's home.
 
 ## Repository Layout
 
