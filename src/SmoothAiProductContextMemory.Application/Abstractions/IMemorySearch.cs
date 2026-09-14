@@ -6,7 +6,7 @@ namespace SmoothAiProductContextMemory.Application.Abstractions;
 /// Server-side hybrid retrieval over the cheap fields. Every predicate in
 /// <see cref="MemorySearchCriteria"/> must be executed by the database — the implementation lives in
 /// Infrastructure because matching the full-text and array indexes requires provider-specific
-/// operators (<c>to_tsvector</c>, <c>@&gt;</c>) that Application must not reference.
+/// operators (<c>to_tsvector</c>, <c>&amp;&amp;</c>/<c>@&gt;</c>) that Application must not reference.
 /// </summary>
 public interface IMemorySearch
 {
