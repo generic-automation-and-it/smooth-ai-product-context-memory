@@ -12,13 +12,15 @@ using SmoothAiProductContextMemory.Domain.Entities;
 namespace SmoothAiProductContextMemory.Application.Features.Groups;
 
 /// <summary>
-/// Sets repository, initiative or scope on an existing group.
+/// Sets repository, initiative, scope, or tickets on an existing group.
 /// </summary>
 /// <remarks>
 /// Resolve-or-create only ever sets these on creation, so without this a group's repo or scope could
 /// never be corrected — the group row itself is mutable state (only version history is append-only).
-/// Null means "leave unchanged"; the group's tickets are not edited here because they accumulate
-/// through resolve.
+/// Null means "leave unchanged". Tickets take an additive merge: an epic gains stories across months,
+/// and a supplied ticket is appended unless it is already present (idempotent) or already owned by a
+/// different group (rejected, same uniqueness rule as creation). Ticket removal is intentionally out
+/// of scope here — make it an explicit, separate operation if it is ever needed.
 /// </remarks>
 public static class UpdateGroup
 {
@@ -28,7 +30,8 @@ public static class UpdateGroup
         string? RepoUrl,
         string? InitiativeName,
         string? ScopeDimension,
-        string? ScopeIdentifier) : IRequest<Response>;
+        string? ScopeIdentifier,
+        IReadOnlyList<TicketInput>? Tickets = null) : IRequest<Response>;
 
     public sealed record Response(
         Guid Uuid,
@@ -53,6 +56,11 @@ public static class UpdateGroup
             RuleFor(x => x.Repo).MaximumLength(200);
             RuleFor(x => x.InitiativeName).MaximumLength(200);
             RuleFor(x => x.ScopeIdentifier).MaximumLength(200);
+            RuleForEach(x => x.Tickets).ChildRules(ticket =>
+            {
+                ticket.RuleFor(t => t.Provider).NotEmpty();
+                ticket.RuleFor(t => t.Key).NotEmpty();
+            });
         }
     }
 
@@ -116,6 +124,40 @@ public static class UpdateGroup
                 initiative = await db.Initiatives
                     .SingleOrDefaultAsync(i => i.Id == group.InitiativeId, cancellationToken)
                     ?? throw new NotFoundException($"Initiative '{group.InitiativeId}' was not found.");
+            }
+
+            if (request.Tickets is { Count: > 0 })
+            {
+                List<TicketInput> additions = [];
+                foreach (TicketInput ticket in request.Tickets)
+                {
+                    bool alreadyPresent = group.Tickets.Any(t =>
+                        t.Provider == ticket.Provider && t.Key == ticket.Key);
+                    if (alreadyPresent)
+                    {
+                        // Idempotent: re-attaching a ticket already on this group is a no-op.
+                        continue;
+                    }
+
+                    MemoryGroup? owner = await TicketLookup.FindGroupByTicketAsync(
+                        db, ticket.Provider, ticket.Key, cancellationToken);
+                    if (owner is not null && owner.Uuid != group.Uuid)
+                    {
+                        throw new ValidationException(
+                        [
+                            new ValidationFailure(
+                                nameof(Request.Tickets),
+                                $"Ticket '{ticket.Provider}/{ticket.Key}' already belongs to group '{owner.Uuid}'.")
+                        ]);
+                    }
+
+                    additions.Add(ticket);
+                }
+
+                foreach (TicketInput ticket in additions)
+                {
+                    group.Tickets.Add(TicketDocument.Create(ticket.Provider, ticket.Key, ticket.Url));
+                }
             }
 
             await errorMapper.SaveOrMapAsync(() => db.SaveChangesAsync(cancellationToken));

@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Scalar.AspNetCore;
 using SmoothAiProductContextMemory.Application.Extensions;
 using SmoothAiProductContextMemory.Host.Cli;
@@ -19,6 +20,12 @@ builder.AddServiceDefaults();
 
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<ApiExceptionHandler>();
+
+// Unknown JSON properties are a caller mistake, not data to ignore. A misspelled field (e.g.
+// `initiative` where the contract says `initiativeName`) was absorbed silently and the request
+// proceeded with a default, so rejection must be explicit and consistent across every endpoint.
+builder.Services.ConfigureHttpJsonOptions(options =>
+    options.SerializerOptions.UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow);
 builder.Services.AddOpenApi();
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
