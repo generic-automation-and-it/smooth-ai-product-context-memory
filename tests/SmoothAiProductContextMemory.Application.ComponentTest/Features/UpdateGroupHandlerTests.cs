@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using SmoothAiProductContextMemory.Application.Common.Models;
 using SmoothAiProductContextMemory.Application.Features.Groups;
 using SmoothAiProductContextMemory.Domain.Entities;
+using SmoothAiProductContextMemory.Infrastructure.Persistence;
 
 namespace SmoothAiProductContextMemory.Application.ComponentTest.Features;
 
@@ -97,6 +98,27 @@ public sealed class UpdateGroupHandlerTests(AspireFixture aspire) : HandlerTestB
         return [.. reloaded.Tickets.Select(t => t.Key)];
     }
 
+    [Fact]
+    public async Task Ownership_failure_rolls_back_other_requested_changes()
+    {
+        MemoryGroup owner = TestEntities.NewGroup(tickets: [TicketDocument.Create("jira", "APP-1", "")]);
+        MemoryGroup group = TestEntities.NewGroup();
+        Db.MemoryGroups.AddRange(owner, group);
+        await Db.SaveChangesAsync(Ct);
+        string? originalRepo = group.Repo;
+        Db.ChangeTracker.Clear();
+
+        await Should.ThrowAsync<FluentValidation.ValidationException>(async () => await NewHandler().Handle(
+            new UpdateGroup.Request(group.Uuid, "changed", null, null, null, null,
+                [new TicketInput("jira", "APP-2", ""), new TicketInput("jira", "APP-1", "")]), Ct));
+
+        Db.Database.CurrentTransaction.ShouldBeNull();
+        Db.ChangeTracker.Clear();
+        MemoryGroup persisted = await Db.MemoryGroups.AsNoTracking().SingleAsync(g => g.Uuid == group.Uuid, Ct);
+        persisted.Repo.ShouldBe(originalRepo);
+        persisted.Tickets.ShouldBeEmpty();
+    }
+
     private UpdateGroup.Handler NewHandler() =>
-        new(AppDb, ErrorMapper, Loggers.CreateLogger<UpdateGroup.Handler>());
+        new(AppDb, ErrorMapper, new NpgsqlTicketGraph(Db), Loggers.CreateLogger<UpdateGroup.Handler>());
 }

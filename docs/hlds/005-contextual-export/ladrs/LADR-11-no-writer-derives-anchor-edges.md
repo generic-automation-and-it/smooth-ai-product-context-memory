@@ -1,21 +1,19 @@
 # LADR-11: Capture-time derivation of anchor edges
 
-**Status:** Blocked
+**Status:** Ticket design Accepted, owner-approved and decision-resolved on 2026-09-14; implemented
+and release gates passed on 2026-09-15. Tag half remains **Blocked**.
 
-> **Blocked by** — nothing in the system would write a ticket or tag edge even if the vertices existed.
-> The capture skill derives relationships from cross-group subject matching between memories, and
-> proposes them at the checkpoint. It has no step that inspects tickets or tags for relationships, no
-> vocabulary for such an edge, and no way to propose one. The API persists what the skill decided, so it
-> is not a candidate either.
->
-> **Unblocking trigger** — LADR-09 or LADR-10 clearing first. A writer for edges whose vertices do not
-> exist cannot be specified. Owner: the write-pipeline design (HLD-002), which owns link derivation.
+> **Ticket resolution:** [HLD-002 LADR-08](../../002-context-memory-write-pipeline/ladrs/LADR-08-practitioner-declared-ticket-hierarchy.md)
+> selects practitioner-declared hierarchy only, using the representation accepted by
+> [HLD-003 LADR-08](../../003-graph-edges-on-age/ladrs/LADR-08-captured-ticket-hierarchy.md).
+> **Remaining tag blocker:** LADR-10's tag identity/synonym decision must clear, then HLD-002 must
+> decide its writer. Ticket approval does not provide a tag writer or authorize derivation.
 
 ## Context
 
-LADR-09 and LADR-10 are blocked on *representation* — whether the graph may hold a ticket or tag vertex.
-This LADR is the writer-side half of the same gap, and it is the half that is easy to overlook: adding a
-vertex label is a migration, and it would produce an empty subgraph.
+LADR-09 and LADR-10 originally blocked on *representation*. LADR-09 is now resolved for declared
+ticket hierarchy; LADR-10 remains blocked for tags. This LADR is the writer-side half of that gap:
+adding an identity label alone would still produce no hierarchy edges.
 
 The existing derivation is memory-to-memory and subject-driven. It locates existing subjects, decides
 version-bump versus new-memory versus skip, and derives links from that comparison. Every relation it
@@ -32,29 +30,45 @@ an authoritative source rather than captured at all.
 
 ## Decision
 
-**Not taken.** Blocked on LADR-09 and LADR-10, and on the derive-versus-project question above.
+**Tickets: practitioner-declared only**, as accepted by HLD-002 LADR-08. The skill carries an explicit
+declaration into capture; it does not derive parentage from shared group membership, subject matching,
+ticket spelling or tracker reads. Set/reparent/remove requires expected parent, exact provider/key,
+and the declaration metadata defined by HLD-003 LADR-08. Receipt and pre-write inspection distinguish
+the declared operation from derived memory links. No proposed-memory surrogate or memory `LINKS`
+projection is permitted.
 
-The options, recorded so the first implementation does not invent one:
+The API owns mechanical one-parent/cycle/precondition validation and atomic current-state mutation.
+Group-ticket triggers/backfill create identities only, never parent declarations. JSONB membership
+remains authoritative; a relational join associates memories without fanout. Captured coverage may
+be thin or stale and is disclosed as such, not expanded by inference.
 
-- **Extend capture-time link derivation** to propose ticket and tag edges alongside memory links. Fits the existing checkpoint and proposal model; creates a second copy of externally owned facts.
-- **A separate reconciliation pass**, run deliberately, that reads tracker and vocabulary state and proposes edges in bulk. Keeps capture cheap; is a scheduled upkeep task, which `BR-01` treats as a failure signal.
-- **Project at read time** from an authoritative source, storing nothing. No drift by construction; needs network access, which `BR-16` forbids depending on, so it would degrade rather than fail.
-- **Practitioner-declared only** — no derivation at all; the practitioner states a ticket or tag relationship when it matters. Cheapest and most accurate; coverage will be thin, and thin coverage in a widening path produces the under-selection this HLD is trying to avoid.
+**Tags: no decision taken.** No tag edges are derived, proposed or written. Clearing ticket
+representation does not clear tag identity, synonym semantics or the tag writer decision.
 
-**Interim behaviour, which ships:** no anchor edges are derived, proposed or written. Widening uses the
-memory-to-memory edges capture already produces (LADR-03). Where the composition notices a relationship
-that plainly should have been recorded, it is reported as a finding — which routes the gap back into the
-normal capture path rather than around it (LADR-06).
+**Implementation:** `ticket-parent` sends PUT `/api/context/tickets/parent` through `ITicketGraph`.
+Strict expected-parent comparison occurs before identical-state no-op detection; replaying an old
+null expectation after set conflicts, and no replay token exists. Local dry-run validates only shape,
+not ownership/cycles/preconditions. Read-only findings may describe missing relationships only with an evidence basis and
+scope qualification; they never invoke the writer. The evidence-only `near-miss-tag` interim is
+defined in LADR-10, not permission to build the full dossier or broaden selection.
+
+## Alternatives Considered
+
+- Automatic ticket-edge derivation is rejected: subject similarity and association do not prove
+  parentage. Tracker reconciliation adds upkeep; live projection adds a network dependency.
+- Practitioner declaration is selected for ticket hierarchy only. No alternative for tag edges
+  can be selected until LADR-10 and the HLD-002 writer decision resolve.
 
 ## Consequences
 
-- No migration adds a vertex label that would sit empty, and no writer is built for a schema that may not be approved.
-- The findings become the evidence base for choosing among the four options — which relationships were actually missed, and how often.
-- **Anchor-level widening stays unavailable for as long as this is blocked**, regardless of what LADR-09 and LADR-10 decide, because representation without a writer changes nothing.
-- The derive-versus-project question is now recorded rather than being rediscovered during implementation.
+- Ticket representation and writer are implemented and accepted against the final HLD-003 evidence.
+- Tag-level widening remains blocked. Evidence-only findings can inform a future vocabulary decision
+  but neither establish synonyms nor authorize additional searches or writes.
+- The evidence-only near-miss helper is executable; full dossier implementation remains outside
+  this ticket-only approval. HLD-003's performance gate passed, with no relaxed threshold.
 
 ## Related
 
-- **LADR-09** and **LADR-10** — the representation half; both must clear before this can be specified.
-- **LADR-06** — why a noticed missing relationship becomes a finding rather than a write.
-- **HLD-002** — owns link derivation and therefore owns this decision when it unblocks.
+- **LADR-09**: ticket representation resolved; **LADR-10**: tag representation remains blocked.
+- **LADR-06**: a noticed missing relationship becomes a finding, not a write.
+- **HLD-002 LADR-08**: accepted ticket writer authority; existing LADR-05 still owns memory-link derivation.

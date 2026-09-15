@@ -48,4 +48,4 @@ C4Context
 - **Any arrow back into the store.** An export is a read (NFR-06); the composing skill has no write capability at all (LADR-08).
 - **The forensic dump.** A separate whole-store projection with opposite rules; see LADR-01.
 - **The capture skill.** It remains the sole *writer* and plays no part in an export (LADR-08).
-- **Any network dependency beyond the local API.** The store is local and offline-capable; ticket-tracker relationships are out of reach for that reason (LADR-09).
+- **Any network dependency beyond the local API.** Captured ticket hierarchy is implemented and accepted without tracker synchronization. Undeclared upstream hierarchy is not followed and freshness is unverified (LADR-09); tag synonyms remain blocked (LADR-10). The full dossier flow shown here remains a discovery design.

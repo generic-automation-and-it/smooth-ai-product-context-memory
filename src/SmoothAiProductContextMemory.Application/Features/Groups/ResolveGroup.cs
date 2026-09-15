@@ -55,28 +55,43 @@ public static class ResolveGroup
     public sealed class Handler(
         IApplicationDbContext db,
         IDbErrorMapper errorMapper,
+        ITicketGraph ticketGraph,
         ILogger<Handler> logger) : IRequestHandler<Request, Response>
     {
         public async ValueTask<Response> Handle(Request request, CancellationToken cancellationToken)
         {
             logger.LogInformation("Group resolve started");
 
+            await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+            await ticketGraph.LockAsync(cancellationToken);
+
+            MemoryGroup? existing = null;
             if (request.Tickets is { Count: > 0 })
             {
                 foreach (TicketInput ticket in request.Tickets)
                 {
-                    MemoryGroup? existing = await TicketLookup.FindGroupByTicketAsync(
+                    MemoryGroup? owner = await TicketLookup.FindGroupByTicketAsync(
                         db, ticket.Provider, ticket.Key, cancellationToken);
-                    if (existing is not null)
+                    if (owner is not null)
                     {
-                        Initiative? existingInitiative = await db.Initiatives
-                            .AsNoTracking()
-                            .SingleOrDefaultAsync(i => i.Id == existing.InitiativeId, cancellationToken);
+                        if (existing is not null && existing.Id != owner.Id)
+                        {
+                            throw new ConflictException("Supplied tickets do not resolve to a single group.");
+                        }
 
-                        logger.LogInformation("Group resolve completed. Created: {Created}", false);
-                        return ToResponse(existing, existingInitiative?.Name ?? "to-be-decided", created: false);
+                        existing = owner;
                     }
                 }
+            }
+
+            if (existing is not null)
+            {
+                Initiative? existingInitiative = await db.Initiatives
+                    .AsNoTracking()
+                    .SingleOrDefaultAsync(i => i.Id == existing.InitiativeId, cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+                logger.LogInformation("Group resolve completed. Created: {Created}", false);
+                return ToResponse(existing, existingInitiative?.Name ?? "to-be-decided", created: false);
             }
 
             string initiativeName = string.IsNullOrWhiteSpace(request.InitiativeName)
@@ -118,6 +133,7 @@ public static class ResolveGroup
             }
 
             await errorMapper.SaveOrMapAsync(() => db.SaveChangesAsync(cancellationToken));
+            await transaction.CommitAsync(cancellationToken);
 
             logger.LogInformation("Group resolve completed. Created: {Created}", true);
             return ToResponse(group, initiative.Name, created: true);
@@ -133,4 +149,5 @@ public static class ResolveGroup
                 initiativeName,
                 [.. group.Tickets.Select(t => new TicketInput(t.Provider, t.Key, t.Url))]);
     }
+
 }

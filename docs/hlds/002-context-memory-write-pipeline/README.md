@@ -2,10 +2,10 @@
 
 | | |
 |---|---|
-| **Status** | Accepted — implemented |
+| **Status** | Accepted; memory pipeline and ticket declaration transport implemented, release gates passed |
 | **Owner** | generik0 |
 | **Tracker** | Context-memory MVP |
-| **Last updated** | 2026-09-14 |
+| **Last updated** | 2026-09-15 |
 
 > Converted from ADR-0003. This HLD delivers **intent + spec** — the contract the agent-facing skill
 > executes and the judgement it owns. Execution is tracked in the issue/work tracker.
@@ -107,7 +107,11 @@ for the other.
 
 ## Architecture Decisions (LADRs)
 
-LADRs 01–05 are strategic; 06–07 are tactical. See [`./ladrs/`](./ladrs/).
+LADRs 01–05 are strategic; 06–07 are tactical. LADR-08's owner-approved ticket writer is implemented
+without re-sequencing memory capture or deriving hierarchy. Its local dry-run is shape-only;
+expected-parent checks precede no-op detection, not operation replay. HLD-003's ticket performance
+gate passed against [final evidence](../003-graph-edges-on-age/nfrs/NFR-02-ticket-traversal-measurements.md).
+See [`./ladrs/`](./ladrs/).
 
 | LADR | Decision | Status |
 |------|----------|--------|
@@ -118,6 +122,7 @@ LADRs 01–05 are strategic; 06–07 are tactical. See [`./ladrs/`](./ladrs/).
 | [LADR-05](./ladrs/LADR-05-link-derivation-batched.md) | Link derivation batched into the pre-write round | Accepted |
 | [LADR-06](./ladrs/LADR-06-gate-status-not-persistence.md) | Approval gates status, not persistence | Accepted |
 | [LADR-07](./ladrs/LADR-07-digest-is-a-receipt.md) | The digest is a receipt; dry-run is the veto | Accepted |
+| [LADR-08](./ladrs/LADR-08-practitioner-declared-ticket-hierarchy.md) | Ticket hierarchy is practitioner-declared, with explicit expected-parent mutation | Accepted; implemented and verified |
 
 ## Non-Functional Requirements
 

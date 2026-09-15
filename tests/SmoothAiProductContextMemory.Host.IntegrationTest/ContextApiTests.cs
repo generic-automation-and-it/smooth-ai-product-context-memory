@@ -351,6 +351,8 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
         "/api/context/groups/{uuid}/descriptions",
         "/api/context/links",
         "/api/context/paths",
+        "/api/context/tickets/parent",
+        "/api/context/tickets/paths",
         "/api/context/labels",
         "/api/context/initiatives",
     ];

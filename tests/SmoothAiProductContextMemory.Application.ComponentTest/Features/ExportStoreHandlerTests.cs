@@ -229,7 +229,7 @@ public sealed class ExportStoreHandlerTests(AspireFixture aspire) : HandlerTestB
         InitiativeId = TestEntities.DefaultInitiativeId,
         Repo = "kingstown",
         RepoUrl = "https://example.invalid/repo",
-        Tickets = [TicketDocument.Create("jira", "ACM-1", "https://example.invalid/ACM-1")],
+        Tickets = [TicketDocument.Create("jira", $"ACM-{uuid:N}", $"https://example.invalid/ACM-{uuid:N}")],
         CreatedOn = CreatedOn,
     };
 

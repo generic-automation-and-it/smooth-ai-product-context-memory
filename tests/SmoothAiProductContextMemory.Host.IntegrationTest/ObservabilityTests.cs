@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -47,17 +48,45 @@ public sealed class ObservabilityTests(ObservabilityWebAppFixture fixture) : ICl
     {
         Guid group = await ResolveGroup();
 
-        await SetMemory(group, $"Trace subject {Guid.NewGuid():N}", "Trace claim", content: "trace-body");
+        string traceId = ActivityTraceId.CreateRandom().ToString();
+        string parentSpanId = ActivitySpanId.CreateRandom().ToString();
+        await SetMemory(
+            group,
+            $"Trace subject {Guid.NewGuid():N}",
+            "Trace claim",
+            content: "trace-body",
+            traceparent: $"00-{traceId}-{parentSpanId}-01");
 
-        CapturedSpan server = FindLastServerSpan("/api/context/memories");
         IReadOnlyList<CapturedSpan> trace = await WaitForTraceAsync(
-            server.TraceId,
-            spans => spans.Any(span => span.Source == NpgsqlSourceName)
+            traceId,
+            spans => spans.Any(IsMemoryServerSpan)
+                && spans.Any(span => span.Source == NpgsqlSourceName)
                 && spans.Any(span => span.Source == HttpClientSourceName));
+        CapturedSpan server = trace.Where(IsMemoryServerSpan).ShouldHaveSingleItem();
+        server.TraceId.ShouldBe(traceId);
+        server.ParentSpanId.ShouldBe(parentSpanId);
 
+        string decoyTraceId = ActivityTraceId.CreateRandom().ToString();
+        string decoyParentSpanId = ActivitySpanId.CreateRandom().ToString();
+        decoyTraceId.ShouldNotBe(traceId);
+        await SetMemory(
+            group,
+            $"Decoy subject {Guid.NewGuid():N}",
+            "Decoy claim",
+            content: null,
+            traceparent: $"00-{decoyTraceId}-{decoyParentSpanId}-01");
+        IReadOnlyList<CapturedSpan> decoyTrace = await WaitForTraceAsync(
+            decoyTraceId,
+            spans => spans.Any(IsMemoryServerSpan));
+        CapturedSpan decoyServer = decoyTrace.Where(IsMemoryServerSpan).ShouldHaveSingleItem();
+        decoyServer.TraceId.ShouldBe(decoyTraceId);
+        decoyServer.ParentSpanId.ShouldBe(decoyParentSpanId);
+
+        trace = fixture.Telemetry.SpansForTrace(traceId);
+        trace.Where(IsMemoryServerSpan).ShouldHaveSingleItem().SpanId.ShouldBe(server.SpanId);
         trace.ShouldContain(span => span.Source == NpgsqlSourceName);
         trace.ShouldContain(span => span.Source == HttpClientSourceName);
-        trace.Select(span => span.TraceId).Distinct().Count().ShouldBe(1);
+        trace.ShouldAllBe(span => span.TraceId == traceId);
     }
 
     /// <summary>
@@ -177,13 +206,10 @@ public sealed class ObservabilityTests(ObservabilityWebAppFixture fixture) : ICl
         offenders.ShouldBeEmpty($"Memory content leaked into telemetry: {string.Join(" | ", offenders)}");
     }
 
-    private CapturedSpan FindLastServerSpan(string route) =>
-        fixture.Telemetry.Spans
-            .Where(span => span.Tags.TryGetValue("http.route", out string? value) && value == route)
-            .LastOrDefault()
-        ?? throw new InvalidOperationException(
-            $"No server span captured for route '{route}'. Captured sources: "
-            + string.Join(", ", fixture.Telemetry.Spans.Select(span => span.Source).Distinct()));
+    private static bool IsMemoryServerSpan(CapturedSpan span) =>
+        span.Source == "Microsoft.AspNetCore"
+        && span.Tags.TryGetValue("http.route", out string? route)
+        && route == "/api/context/memories";
 
     private async Task<Guid> ResolveGroup()
     {
@@ -196,12 +222,23 @@ public sealed class ObservabilityTests(ObservabilityWebAppFixture fixture) : ICl
         return json.GetProperty("uuid").GetGuid();
     }
 
-    private async Task<JsonElement> SetMemory(Guid group, string description, string statement, string? content)
+    private async Task<JsonElement> SetMemory(
+        Guid group,
+        string description,
+        string statement,
+        string? content,
+        string? traceparent = null)
     {
-        using HttpResponseMessage response = await _http.PostAsJsonAsync(
-            "/api/context/memories",
-            SetBody(group, description, statement, content),
-            Ct);
+        using HttpRequestMessage request = new(HttpMethod.Post, "/api/context/memories")
+        {
+            Content = JsonContent.Create(SetBody(group, description, statement, content)),
+        };
+        if (traceparent is not null)
+        {
+            request.Headers.Add("traceparent", traceparent);
+        }
+
+        using HttpResponseMessage response = await _http.SendAsync(request, Ct);
         string payload = await response.Content.ReadAsStringAsync(Ct);
         response.StatusCode.ShouldBe(HttpStatusCode.OK, payload);
         return JsonSerializer.Deserialize<JsonElement>(payload, Json);
