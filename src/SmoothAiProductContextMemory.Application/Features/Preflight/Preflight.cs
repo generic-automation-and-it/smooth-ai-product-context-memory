@@ -15,7 +15,10 @@ namespace SmoothAiProductContextMemory.Application.Features.Preflight;
 /// </summary>
 /// <remarks>
 /// Subject lookup is deliberately not scoped to a group: the same subject asserted in another group
-/// is exactly what the caller needs to see.
+/// is exactly what the caller needs to see. Ticket uniqueness is the opposite — a ticket already
+/// owned by the group the caller is writing into is not a conflict, so a candidate declaring its
+/// target <see cref="Candidate.GroupUuid"/> gets self-ownership filtered out. Omitting it reports
+/// every owner, because a caller that names no group has not said which ownership is its own.
 /// </remarks>
 public static class Preflight
 {
@@ -23,9 +26,10 @@ public static class Preflight
 
     public sealed record Candidate(
         string Description,
-        string? Kind,
-        IReadOnlyList<string>? Facets,
-        TicketInput? Ticket);
+        string? Kind = null,
+        IReadOnlyList<string>? Facets = null,
+        TicketInput? Ticket = null,
+        Guid? GroupUuid = null);
 
     public sealed record Match(
         Guid Uuid,
@@ -131,7 +135,7 @@ public static class Preflight
                 {
                     MemoryGroup? owner = await TicketLookup.FindGroupByTicketAsync(
                         db, ticket.Provider, ticket.Key, cancellationToken);
-                    if (owner is not null)
+                    if (owner is not null && owner.Uuid != candidate.GroupUuid)
                     {
                         ticketConflict = new TicketConflict(ticket.Provider, ticket.Key, owner.Uuid);
                     }

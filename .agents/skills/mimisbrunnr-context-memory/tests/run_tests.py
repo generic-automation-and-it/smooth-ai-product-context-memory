@@ -13,6 +13,7 @@ import copy
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -36,6 +37,18 @@ redact = _load("redact")
 atomicity = _load("atomicity")
 client = _load("context_memory_client")
 near_miss = _load("near_miss_tags")
+
+
+def _run_atomicity(batch):
+    """Drive atomicity.py end to end, so the description/statement split is covered, not just classify()."""
+    completed = subprocess.run(
+        [sys.executable, str(SCRIPTS / "atomicity.py")],
+        input=json.dumps(batch),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return json.loads(completed.stdout)
 
 
 def _scrub_item(content):
@@ -118,6 +131,60 @@ class AtomicityTests(unittest.TestCase):
     def test_empty_input_is_simple(self):
         verdict = atomicity.classify("")
         self.assertEqual(verdict["verdict"], "simple")
+
+    def test_reason_clause_is_one_fact(self):
+        # A fact plus the reason it holds is one fact. Scoring "because" as a claim junction made
+        # this a false positive on a real braindump batch.
+        verdict = atomicity.classify(
+            "PostgreSQL is selected because typed indexed relations and JSONB support server-side "
+            "querying of rich evolving metadata."
+        )
+        self.assertEqual(verdict["verdict"], "simple")
+        self.assertEqual(verdict["signals"], [])
+
+    def test_coordinated_pair_is_one_fact(self):
+        verdict = atomicity.classify(
+            "The memory service is a local HTTP Docker API consumed manually through an AI harness "
+            "skill for both capture and retrieval."
+        )
+        self.assertEqual(verdict["verdict"], "simple")
+
+    def test_semicolon_between_clauses_is_bundled(self):
+        verdict = atomicity.classify(
+            "One memory represents one atomic fact; retrieval returns arrays of statements."
+        )
+        self.assertEqual(verdict["verdict"], "bundled")
+
+    def test_single_contrastive_junction_is_bundled(self):
+        verdict = atomicity.classify(
+            "Groups provide stable episodic umbrellas while append-only versions preserve changed "
+            "child-memory claims."
+        )
+        self.assertEqual(verdict["verdict"], "bundled")
+
+    def test_noun_phrase_list_alone_is_not_bundled(self):
+        verdict = atomicity.classify("The store keeps facets, tags, and scope dimensions.")
+        self.assertEqual(verdict["verdict"], "simple")
+
+    def test_signal_set_discriminates_between_verdicts(self):
+        # The regression this guards: every candidate of a real batch carried the same signal, so
+        # the signal list said nothing about the verdict.
+        simple = atomicity.classify("Capture derives a content summary so retrieval stays compact.")
+        bundled = atomicity.classify("Facets filter dependably while free tags stay expressive.")
+        self.assertEqual(simple["signals"], [])
+        self.assertIn("discourse", bundled["signals"])
+
+    def test_verdict_scores_the_statement_not_the_description(self):
+        # A description is a subject label; coordination inside it ("labels and tags") is not a
+        # second claim and must not push the candidate to bundled.
+        batch = [{"description": "Controlled labels and free tags", "statement": "Facets filter."}]
+        result = _run_atomicity(batch)
+        self.assertEqual(result["results"][0]["verdict"], "simple")
+
+    def test_description_is_scored_when_no_statement_is_supplied(self):
+        batch = [{"description": "Facets filter dependably while free tags stay expressive."}]
+        result = _run_atomicity(batch)
+        self.assertEqual(result["results"][0]["verdict"], "bundled")
 
 
 class PathsClientTests(unittest.TestCase):
