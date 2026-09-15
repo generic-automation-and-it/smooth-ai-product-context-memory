@@ -17,9 +17,11 @@ L2 Host tests exercise real stores; telemetry capture also observes requests fro
 ## Test References
 
 - L2: `ObservabilityTests.cs`, especially `One_request_yields_one_trace_spanning_both_stores`.
+- L2: `TicketApiTests.cs` (parent round-trip, scope-consent hiding) and `TicketTraversalCorruptionApiTests.cs` (persisted-corruption 500 vs hidden-corruption indistinguishability).
 
 ## Changelog
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
 | 2026-09-15 | Bound cross-store telemetry assertions to incoming sampled trace context and added a captured same-route decoy regression. | `ObservabilityTests.cs` |
+| 2026-09-15 | Test References extended with the ticket graph's L2 API tests. | `TicketApiTests.cs`; `TicketTraversalCorruptionApiTests.cs` |

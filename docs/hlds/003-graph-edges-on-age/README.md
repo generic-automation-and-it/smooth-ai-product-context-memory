@@ -179,6 +179,6 @@ target, a verification mechanism, and acceptance criteria. See [`./nfrs/`](./nfr
 | NFR | Attribute | Target (summary) | Status |
 |-----|-----------|------------------|--------|
 | [NFR-01](./nfrs/NFR-01-referential-integrity.md) | Integrity | Zero orphan edges; zero duplicate edges | Accepted |
-| [NFR-02](./nfrs/NFR-02-traversal-performance.md) | Performance | Existing memory budgets unchanged; composed ticket p95 <= 100 ms | Accepted; [final ticket and memory rerun](./nfrs/NFR-02-ticket-traversal-measurements.md), worst ticket p95 59.092 ms |
+| [NFR-02](./nfrs/NFR-02-traversal-performance.md) | Performance | Existing memory budgets unchanged; composed ticket p95 <= 100 ms | Accepted; [final ticket and memory rerun](./nfrs/NFR-02-ticket-traversal-measurements.md), worst ticket p95 34.797 ms (final revalidation; historical run's worst 59.092 ms) |
 | [NFR-03](./nfrs/NFR-03-operability.md) | Operability | No added container; one backup; one-command start | Accepted — restore round-trip in [NFR-03-restore-verification.md](./nfrs/NFR-03-restore-verification.md) |
 | [NFR-04](./nfrs/NFR-04-compatibility.md) | Compatibility | Extension must not pin us below a supported Postgres | Accepted — pairing and pre-upgrade check in [NFR-04-version-pairing.md](./nfrs/NFR-04-version-pairing.md) |

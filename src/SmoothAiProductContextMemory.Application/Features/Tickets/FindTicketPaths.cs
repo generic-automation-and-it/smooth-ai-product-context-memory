@@ -30,6 +30,10 @@ public static class FindTicketPaths
                 .WithMessage("Direction must be outbound, inbound, or either.");
             RuleFor(x => x.ScopeDimension).MaximumLength(32);
             RuleFor(x => x.Kind).MaximumLength(64);
+            RuleFor(x => x.ScopeDimension).Must(value => value is null || !value.Contains('\0'))
+                .WithMessage("ScopeDimension must not contain a null character.");
+            RuleFor(x => x.Kind).Must(value => value is null || !value.Contains('\0'))
+                .WithMessage("Kind must not contain a null character.");
             RuleFor(x => x.PathLimit).InclusiveBetween(1, MemorySearchDefaults.MaxLimit);
             RuleFor(x => x.MemoryLimit).InclusiveBetween(1, MemorySearchDefaults.MaxLimit);
         }
