@@ -9,6 +9,7 @@ and prints the response JSON on stdout. Nothing is ever logged that leaks memory
 import argparse
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.request
@@ -276,11 +277,21 @@ def _render_path(path):
     return f"depth={path.get('depth')}: {chain}{endpoint_label} ({endpoint.get('uuid', '?')})"
 
 
+def _ticket_text(value, field, limit):
+    try:
+        valid = (isinstance(value, str) and bool(value.strip()) and "\0" not in value
+                 and len(value.encode("utf-16-le")) // 2 <= limit)
+    except UnicodeEncodeError:
+        valid = False
+    if not valid:
+        raise ClientError(0, "bad-input", f"'{field}' requires non-empty Unicode text, no NUL, at most {limit} UTF-16 code units")
+
+
 def _ticket_identity(value, field):
-    if (not isinstance(value, dict) or set(value) != {"provider", "key"}
-            or any(not isinstance(value[k], str) or not value[k].strip()
-                   for k in ("provider", "key"))):
+    if not isinstance(value, dict) or set(value) != {"provider", "key"}:
         raise ClientError(0, "bad-input", f"'{field}' requires exact non-empty provider/key strings")
+    for key in ("provider", "key"):
+        _ticket_text(value[key], f"{field}.{key}", 512)
 
 
 def cmd_ticket_parent(args):
@@ -297,17 +308,21 @@ def cmd_ticket_parent(args):
             if payload[field] == payload["child"]:
                 raise ClientError(0, "bad-input", "A child cannot be its own parent")
     for field in ("reason", "source"):
-        if not isinstance(payload[field], str) or not payload[field].strip():
-            raise ClientError(0, "bad-input", f"'{field}' must be a non-empty string")
+        _ticket_text(payload[field], field, 4000)
     if payload.get("observedAt") is not None:
-        from datetime import datetime
+        from datetime import datetime, timezone
 
         try:
-            observed = datetime.fromisoformat(payload["observedAt"].replace("Z", "+00:00"))
-            if observed.tzinfo is None:
+            value = payload["observedAt"]
+            if not isinstance(value, str) or not re.fullmatch(
+                r"[0-9]{4}-[0-9]{2}-[0-9]{2}T(?:[01][0-9]|2[0-3]):[0-5][0-9]"
+                r"(?::[0-5][0-9](?:\.[0-9]{1,16})?)?(?:Z|[+-](?:(?:0[0-9]|1[0-3]):[0-5][0-9]|14:00))",
+                value,
+            ):
                 raise ValueError()
-        except (AttributeError, TypeError, ValueError):
-            raise ClientError(0, "bad-input", "'observedAt' must be an ISO timestamp with timezone") from None
+            datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
+        except (TypeError, ValueError, OverflowError):
+            raise ClientError(0, "bad-input", "'observedAt' must be a wire-compatible ISO timestamp with timezone") from None
     operation = ("remove" if payload["parent"] is None else
                  "set" if payload["expectedParent"] is None else "reparent")
     if args.dryrun:
@@ -336,9 +351,9 @@ def cmd_ticket_paths(args):
         payload.setdefault(field, 50)
         if type(payload[field]) is not int or not 1 <= payload[field] <= MAX_QUERY_LIMIT:
             raise ClientError(0, "bad-input", f"'{field}' must be an integer in 1..{MAX_QUERY_LIMIT}")
-    for field in ("scopeDimension", "kind"):
-        if payload.get(field) is not None and (not isinstance(payload[field], str) or not payload[field].strip()):
-            raise ClientError(0, "bad-input", f"'{field}' must be a non-empty string or null")
+    for field, limit in (("scopeDimension", 32), ("kind", 64)):
+        if payload.get(field) is not None:
+            _ticket_text(payload[field], field, limit)
     resp = _request("POST", "/api/context/tickets/paths", payload)
     print(json.dumps(resp, indent=2))
     return resp

@@ -71,6 +71,10 @@ than Draft — a Draft may be revised by this work, a Blocked may not be resolve
 - **The near-miss helper is executable, not a dossier implementation.** `near_miss_tags.py` validates
   supplied approved UUID/version evidence and exact supporting quotes, observes failed exact tag
   predicates, and labels caller/skill relevance as analysis. Selection and disclosure stay unchanged.
+  Its current schema preserves `originalQuery` with API `facetMatchMode` (default `any`), not separate
+  `criteria`/`tagsMatchMode`. Each record's `status` and approved `scopeDimension`/`scopeIdentifier`
+  survive into findings; `proposedEvidence` is explicit. Examined-set names and query scope do not
+  replace applicability, and examination approval does not promote proposed knowledge.
   Its offline bounded tests establish plumbing, not authorization truth or semantic judgement quality.
 - **`relates_to` and unknown relations connect without ordering.** Including them in the topological sort manufactures cycles constantly, because reciprocal `relates_to` edges are normal (LADR-07).
 - **A provenance cycle is a finding, not a rendering problem.** It means capture recorded that A rests on B and B on A. Break at a stated point, report it, and still produce the document.
@@ -109,6 +113,7 @@ Targets and verification live in [./nfrs/](./nfrs/). Three shape how code is wri
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-15 | Aligned LADR-10 with the current near-miss helper schema: unchanged originalQuery/facetMatchMode, per-record lifecycle/applicability and explicit proposed evidence. Selection/disclosure and blocked tag decisions unchanged; no new verification recorded. | LADR-10 |
 | 2026-09-15 | Finalized ticket representation/writer and evidence-only helper acceptance using final HLD-003 verification. Performance and full-suite gates passed; full dossier remains In Discovery and tag identity/synonym decisions remain blocked. | LADRs 09-11; HLD-003 final NFR-02 evidence |
 | 2026-09-14 | Synced ticket decisions to ITicketGraph/API/migration implementation and selected capped path association; release/performance gate remains open. Recorded executable offline evidence-only near-miss helper, bounded validation and unchanged selection/disclosure. Tag decisions remain blocked and full dossier stays In Discovery. | LADRs 09-11; NFR-04; HLD-003 NFR-02 |
 | 2026-09-14 | Ticket LADR-09 and ticket half of LADR-11 decision-resolved by HLD-003/HLD-002 LADR-08, implementation pending. Tag identity/synonyms and tag writer stay blocked. LADR-10 interim and NFR-04 now require evidence-only `near-miss-tag` skill findings with UUID/version, basis, scope and classification, without search broadening. No full dossier implementation approved. | LADRs 09-11; NFR-04 |

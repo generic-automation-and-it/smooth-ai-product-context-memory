@@ -70,10 +70,16 @@ the full dossier implementation.
 
 The executable [near_miss_tags.py](../../../../.agents/skills/mimisbrunnr-context-memory/scripts/near_miss_tags.py)
 is an offline stdin/stdout validator and reporter, not a semantic detector. Its strict input contains
-approved scope UUID/version references, criteria, examined records, caller/skill relevance analysis
+approved UUID/version references with per-record `scopeDimension`/`scopeIdentifier`, the unchanged
+`originalQuery` using API field `facetMatchMode` (`any` when absent), examined records carrying
+`status` and their matching approved scope, caller/skill relevance analysis
 with an exact quote from the referenced statement, selected references and disclosure. A finding
 requires both relevant analysis and a failed exact `any`/`all` tag predicate. The mismatch is an
-observation; relevance remains analysis. It preserves selection/disclosure, sorts by UUID/version,
+observation; relevance remains analysis. Findings retain each record's status and scope and explicitly
+flag `proposedEvidence`; permission to examine proposed evidence does not make it approved knowledge.
+The examined-set name and query scope never replace record applicability. The helper uses this current
+schema, not separate `criteria`/`tagsMatchMode` fields. It preserves `originalQuery`, selection and
+disclosure, sorts by UUID/version,
 and rejects over 1 MiB, 200 records/analyses/references or 200 tags per list without partial output.
 These are helper safety limits, not dossier-wide caps. Tests cover deterministic plumbing and no
 extra I/O; they do not prove authorization truth, semantic relevance quality or full dossier readiness.

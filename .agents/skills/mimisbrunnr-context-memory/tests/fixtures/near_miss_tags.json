@@ -3,12 +3,13 @@
     "scope": {
       "name": "Caller-approved product database evidence",
       "authorization": "explicitly-supplied",
-      "records": [{"uuid": "aaaaaaaa-0000-4000-8000-000000000001", "version": 1}]
+      "records": [{"uuid": "aaaaaaaa-0000-4000-8000-000000000001", "version": 1,
+                   "scopeDimension": "product", "scopeIdentifier": null}]
     },
-    "criteria": {"tags": ["postgres"], "tagsMatchMode": "any", "nonTagFilters": {"scopeDimension": "product"}},
+    "originalQuery": {"tags": ["postgres"], "facetMatchMode": "any", "scopeDimension": "product"},
     "records": [{
       "uuid": "aaaaaaaa-0000-4000-8000-000000000001", "version": 1,
-      "tags": ["database"], "scope": "Caller-approved product database evidence",
+      "tags": ["database"], "status": "approved", "scopeDimension": "product", "scopeIdentifier": null,
       "statement": "The product database uses PostgreSQL."
     }],
     "analyses": [{

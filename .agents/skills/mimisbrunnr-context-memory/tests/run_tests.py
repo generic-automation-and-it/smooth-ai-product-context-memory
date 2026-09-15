@@ -200,11 +200,11 @@ class TicketClientTests(unittest.TestCase):
         self.assertEqual(json.loads(output.getvalue()), result)
         return result, request
 
-    def assert_rejected(self, command, payload):
+    def assert_rejected(self, command, payload, dryrun=False):
         with patch.object(client, "read_payload", return_value=payload), \
                 patch.object(client, "_request") as request:
             with self.assertRaises(client.ClientError):
-                command(SimpleNamespace(payload=None, dryrun=False))
+                command(SimpleNamespace(payload=None, dryrun=dryrun))
             request.assert_not_called()
 
     def test_parent_set_reparent_remove_exact_transport_and_receipt(self):
@@ -259,6 +259,81 @@ class TicketClientTests(unittest.TestCase):
                 self.assertEqual(result, response)
                 request.assert_called_once_with("POST", "/api/context/tickets/paths",
                                                 payload | {"direction": "outbound", "pathLimit": 50, "memoryLimit": 50})
+
+    def test_identity_limits_and_nul_guards_apply_to_both_commands_and_dryrun(self):
+        for field in ("child", "parent", "expectedParent", "anchor"):
+            for key in ("provider", "key"):
+                for value in ("x" * 513, "\U0001f600" * 257, "x\0", "\ud800", "\udfff"):
+                    command = client.cmd_ticket_paths if field == "anchor" else client.cmd_ticket_parent
+                    payload = ({"anchor": self.PARENT, "maxDepth": 1} if field == "anchor"
+                               else self.parent_payload())
+                    payload[field] = self.PARENT | {key: value}
+                    for dryrun in ((False,) if field == "anchor" else (False, True)):
+                        with self.subTest(field=field, key=key, value=repr(value[:12]), dryrun=dryrun):
+                            self.assert_rejected(command, payload, dryrun=dryrun)
+
+    def test_provenance_string_guards_apply_to_write_and_dryrun(self):
+        for field in ("reason", "source"):
+            for value in ("x" * 4001, "\U0001f600" * 2001, "x\0", "\ud800", None, True, " "):
+                for dryrun in (False, True):
+                    with self.subTest(field=field, value=repr(value)[:40], dryrun=dryrun):
+                        self.assert_rejected(client.cmd_ticket_parent,
+                                             self.parent_payload() | {field: value}, dryrun=dryrun)
+
+    def test_utf16_boundary_strings_are_preserved_without_normalization(self):
+        for identity, provenance in ((" x" + "y" * 510, "r" * 4000),
+                                     ("\U0001f600" * 256, "\U0001f600" * 2000)):
+            payload = self.parent_payload() | {
+                "child": {"provider": identity, "key": identity},
+                "parent": {"provider": identity, "key": "parent"},
+                "expectedParent": {"provider": identity, "key": "old"},
+                "reason": provenance, "source": provenance,
+            }
+            for dryrun in (False, True):
+                result, request = self.invoke(client.cmd_ticket_parent, payload, {"changed": True}, dryrun)
+                if dryrun:
+                    self.assertEqual(result["request"], payload)
+                    request.assert_not_called()
+                else:
+                    request.assert_called_once_with("PUT", "/api/context/tickets/parent", payload)
+            query = {"anchor": payload["child"], "maxDepth": 1}
+            _, request = self.invoke(client.cmd_ticket_paths, query, {})
+            self.assertEqual(request.call_args.args[2]["anchor"], payload["child"])
+
+    def test_ticket_path_filter_string_limits(self):
+        for field, limit in (("scopeDimension", 32), ("kind", 64)):
+            for value in ("x" * (limit + 1), "\U0001f600" * (limit // 2 + 1), "x\0", "\ud800"):
+                self.assert_rejected(client.cmd_ticket_paths,
+                                     {"anchor": self.PARENT, "maxDepth": 1, field: value})
+            for value in ("x" * limit, "\U0001f600" * (limit // 2), None):
+                _, request = self.invoke(client.cmd_ticket_paths,
+                                         {"anchor": self.PARENT, "maxDepth": 1, field: value}, {})
+                self.assertEqual(request.call_args.args[2][field], value)
+
+    def test_observed_at_wire_shape_and_calendar_guards(self):
+        invalid = ("2026-09-14X12:00:00+00:00", "2026-09-14 12:00:00Z",
+                   "2026-09-14t12:00:00z", "20260914T120000Z", "2026-W38-1T12:00:00Z",
+                   "2026-09-14T12:00:00+0000", "2026-09-14T12:00:00+00:00:30",
+                   "2026-09-14T12:00:00+14:01", "2026-09-14T12:00:00-15:00",
+                   "2026-09-14T12:00:00+01:60", "2026-09-14T12:00:00,5Z",
+                   "2026-09-14T12:00:00.Z", "2026-09-14T12:00:00.12345678901234567Z",
+                   "2026-02-29T12:00:00Z", "2026-09-14T24:00:00Z", "2026-09-14T12:00:60Z",
+                   "0001-01-01T00:00:00+00:01", "9999-12-31T23:59:59-00:01",
+                   "2026-09-14T12:00:00", True, 123, [])
+        for value in invalid:
+            for dryrun in (False, True):
+                with self.subTest(value=value, dryrun=dryrun):
+                    self.assert_rejected(client.cmd_ticket_parent,
+                                         self.parent_payload() | {"observedAt": value}, dryrun=dryrun)
+        for value in (None, "2026-09-14T12:00Z", "2026-09-14T12:00:00Z",
+                      "2024-02-29T12:00:00.1234567+14:00", "2026-09-14T12:00:00-14:00",
+                      "2026-09-14T12:00:00.1234567890123456+00:00",
+                      "0001-01-01T00:00:00Z", "9999-12-31T23:59:59.9999999Z"):
+            for dryrun in (False, True):
+                payload = self.parent_payload() | {"observedAt": value}
+                result, request = self.invoke(client.cmd_ticket_parent, payload, {}, dryrun)
+                actual = result["request"] if dryrun else request.call_args.args[2]
+                self.assertEqual(actual, payload)
 
     def test_ticket_paths_explicit_filters_and_boundaries(self):
         for direction in ("outbound", "inbound", "either"):
@@ -350,7 +425,8 @@ class NearMissTagsTests(unittest.TestCase):
                 for finding in report["findings"]:
                     self.assertEqual(finding["category"], "near-miss-tag")
                     self.assertEqual(finding["scope"], payload["scope"]["name"])
-                    self.assertEqual(finding["memory"], payload["scope"]["records"][0])
+                    self.assertEqual(finding["memory"], payload["scope"]["records"][0] | {"status": "approved"})
+                    self.assertFalse(finding["proposedEvidence"])
                     self.assertEqual(finding["classification"], "analysis")
                     self.assertEqual(finding["observation"]["classification"], "observation")
                     self.assertFalse(finding["observation"]["exactTagMatch"])
@@ -358,14 +434,97 @@ class NearMissTagsTests(unittest.TestCase):
 
     def test_all_containment_and_exact_case_not_synonyms(self):
         payload = self.evidence
-        payload["criteria"]["tags"] = ["postgres", "database"]
+        payload["originalQuery"]["tags"] = ["postgres", "database"]
         self.assertEqual(near_miss.build_report(payload)["findings"], [])
-        payload["criteria"]["tagsMatchMode"] = "all"
+        payload["originalQuery"]["facetMatchMode"] = "all"
         self.assertEqual(len(near_miss.build_report(payload)["findings"]), 1)
         payload["records"][0]["tags"] = ["postgres", "database"]
         self.assertEqual(near_miss.build_report(payload)["findings"], [])
         payload["records"][0]["tags"] = ["Postgres", "database"]
         self.assertEqual(len(near_miss.build_report(payload)["findings"]), 1)
+
+    def test_original_api_query_is_the_only_tag_predicate_source(self):
+        query = {"query": "PostgreSQL", "tags": ["postgres", "database"], "facets": ["storage"],
+                 "kind": "decision", "status": "approved", "scopeDimension": "product",
+                 "groupUuid": None, "ticketProvider": None, "ticketKey": None, "repo": "example",
+                 "initiativeName": "example", "includeProposed": False, "currentOnly": True,
+                 "asOf": None, "limit": 10}
+        for mode, count in ((None, 0), ("any", 0), ("all", 1)):
+            payload = copy.deepcopy(self.evidence)
+            payload["originalQuery"] = query.copy()
+            if mode is not None:
+                payload["originalQuery"]["facetMatchMode"] = mode
+            original = copy.deepcopy(payload)
+            report = near_miss.build_report(payload)
+            self.assertEqual(payload, original)
+            self.assertEqual(report["originalQuery"], original["originalQuery"])
+            self.assertEqual(len(report["findings"]), count)
+            if count:
+                self.assertEqual(report["findings"][0]["observation"]["facetMatchMode"], mode)
+        for mode in (None, "ALL", True, 1, [], {}):
+            payload = copy.deepcopy(self.evidence)
+            payload["originalQuery"]["facetMatchMode"] = mode
+            with self.subTest(mode=mode), self.assertRaises(ValueError):
+                near_miss.build_report(payload)
+        for field, value in (("tagsMatchMode", "all"), ("nonTagFilters", {"facetMatchMode": "all"}),
+                             ("selectedTags", ["database"]), ("facetMatchMod", "all")):
+            for location in ("originalQuery", "input"):
+                payload = copy.deepcopy(self.evidence)
+                (payload if location == "input" else payload[location])[field] = value
+                with self.subTest(field=field, location=location), self.assertRaises(ValueError):
+                    near_miss.build_report(payload)
+        payload = copy.deepcopy(self.evidence)
+        payload["criteria"] = payload.pop("originalQuery")
+        with self.assertRaises(ValueError):
+            near_miss.build_report(payload)
+
+    def test_mixed_scope_and_status_evidence_is_retained_not_promoted_or_dropped(self):
+        payload = self.evidence
+        payload["scope"]["name"] = "Explicitly supplied mixed-scope evidence"
+        payload["records"] = []
+        payload["analyses"] = []
+        payload["scope"]["records"] = []
+        for version, (dimension, identifier, status) in enumerate((
+            ("product", None, "approved"), ("customer", "customer-a", "proposed"),
+            ("program", "initiative-a", "proposed"), ("self", "practitioner", "approved"),
+        ), 1):
+            ref = {"uuid": "aaaaaaaa-0000-4000-8000-000000000001", "version": version}
+            scoped = ref | {"scopeDimension": dimension, "scopeIdentifier": identifier}
+            payload["scope"]["records"].append(scoped)
+            payload["records"].append(scoped | {"status": status, "tags": ["database"],
+                                                   "statement": "Uses PostgreSQL."})
+            payload["analyses"].append(ref | {"relevant": True, "basis": {
+                "classification": "analysis", "author": "caller", "quote": "Uses PostgreSQL.",
+                "explanation": "Database evidence relevant only within its stated applicability and lifecycle."}})
+        original = copy.deepcopy(payload)
+        report = near_miss.build_report(payload)
+        self.assertEqual(payload, original)
+        self.assertEqual(len(report["findings"]), 4)
+        self.assertEqual(report["selected"], [])
+        for record, finding in zip(payload["records"], report["findings"]):
+            self.assertEqual(finding["memory"], {k: record[k] for k in
+                             ("uuid", "version", "status", "scopeDimension", "scopeIdentifier")})
+            self.assertEqual(finding["proposedEvidence"], record["status"] == "proposed")
+        self.assertIn("not canon", report["qualification"])
+        self.assertIn("not the examined-set name or query scope", report["qualification"])
+
+    def test_record_scope_must_match_approved_reference_not_query_or_set_name(self):
+        for dimension, identifier in (("program", "initiative"), ("customer", "customer-a"),
+                                      ("product", "other-product")):
+            payload = copy.deepcopy(self.evidence)
+            payload["records"][0].update(scopeDimension=dimension, scopeIdentifier=identifier)
+            payload["originalQuery"]["scopeDimension"] = dimension
+            payload["scope"]["name"] = f"Approved {dimension} {identifier}"
+            with self.subTest(dimension=dimension), self.assertRaises(ValueError):
+                near_miss.build_report(payload)
+        for field in ("records", "analyses", "selected"):
+            payload = copy.deepcopy(self.evidence)
+            if field == "selected":
+                payload[field] = [{"uuid": payload["records"][0]["uuid"], "version": 2}]
+            else:
+                payload[field][0]["version"] = 2
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                near_miss.build_report(payload)
 
     def test_empty_evidence_is_not_absence_proof(self):
         payload = self.evidence | {"records": [], "analyses": []}
@@ -381,7 +540,7 @@ class NearMissTagsTests(unittest.TestCase):
             payload["scope"]["records"].append(payload["scope"]["records"][0] | {"version": version})
             payload["records"].append(payload["records"][0] | {"version": version})
             payload["analyses"].append(payload["analyses"][0] | {"version": version})
-        payload["selected"] = copy.deepcopy(payload["scope"]["records"])
+        payload["selected"] = [{"uuid": r["uuid"], "version": r["version"]} for r in payload["records"]]
         report = near_miss.build_report(payload)
         self.assertEqual([f["memory"]["version"] for f in report["findings"]], [1, 2, 3])
         payload["analyses"].reverse()
@@ -401,15 +560,22 @@ class NearMissTagsTests(unittest.TestCase):
             (("analyses", 0, "version"), 2),
             (("records", 0, "uuid"), "not-a-uuid"),
             (("records", 0, "uuid"), "00000000-0000-0000-0000-000000000000"),
-            (("records", 0, "scope"), "hidden-program"),
+            (("records", 0, "scopeDimension"), "hidden-program"),
+            (("records", 0, "status"), "settled"),
+            (("records", 0, "status"), None),
+            (("records", 0, "scopeIdentifier"), []),
+            (("records", 0, "scopeIdentifier"), " "),
+            (("scope", "records", 0, "scopeDimension"), "program"),
+            (("scope", "records", 0, "scopeIdentifier"), 3),
+            (("scope", "records", 0, "scopeIdentifier"), "x" * 201),
             (("records", 0, "version"), True),
             (("records", 0, "version"), 0),
             (("records", 0, "tags"), "database"),
             (("records", 0, "tags"), ["database"] * 201),
             (("scope", "records"), []),
             (("scope", "authorization"), "inferred"),
-            (("criteria", "tags"), []),
-            (("criteria", "tagsMatchMode"), "synonyms"),
+            (("originalQuery", "tags"), []),
+            (("originalQuery", "facetMatchMode"), "synonyms"),
             (("records",), self.evidence["records"] * 201),
             (("analyses",), self.evidence["analyses"] * 201),
             (("records", 0, "statement"), "x" * 8001),
@@ -426,10 +592,15 @@ class NearMissTagsTests(unittest.TestCase):
                     near_miss.build_report(payload)
         with self.assertRaises(ValueError):
             near_miss.build_report(self.evidence | {"globalVocabulary": ["telemetry"]})
-        for field in ("records", "analyses", "selected", "disclosure", "scope", "criteria"):
+        for field in ("records", "analyses", "selected", "disclosure", "scope", "originalQuery"):
             payload = copy.deepcopy(self.evidence)
             del payload[field]
             with self.assertRaises(ValueError):
+                near_miss.build_report(payload)
+        for field in ("status", "scopeDimension", "scopeIdentifier"):
+            payload = copy.deepcopy(self.evidence)
+            del payload["records"][0][field]
+            with self.subTest(missing=field), self.assertRaises(ValueError):
                 near_miss.build_report(payload)
 
     def test_no_network_file_access_or_writes_and_executable_output(self):
@@ -446,7 +617,15 @@ class NearMissTagsTests(unittest.TestCase):
         self.assertEqual(json.loads(output.getvalue()), near_miss.build_report(self.evidence))
 
     def test_cli_rejects_oversize_or_malformed_input_without_partial_report(self):
-        for raw in (b"x" * (near_miss.MAX_BYTES + 1), b"{bad-json", b"[]", b"null"):
+        invalid_evidence = []
+        for field, value in (("status", "unknown"), ("scopeIdentifier", "not-approved")):
+            payload = copy.deepcopy(self.evidence)
+            payload["records"][0][field] = value
+            invalid_evidence.append(json.dumps(payload).encode("utf-8"))
+        payload = copy.deepcopy(self.evidence)
+        payload["originalQuery"]["tagsMatchMode"] = "all"
+        invalid_evidence.append(json.dumps(payload).encode("utf-8"))
+        for raw in [b"x" * (near_miss.MAX_BYTES + 1), b"{bad-json", b"[]", b"null", *invalid_evidence]:
             with patch.object(sys, "stdin", SimpleNamespace(buffer=io.BytesIO(raw))), \
                     redirect_stdout(io.StringIO()) as output, redirect_stderr(io.StringIO()) as error:
                 self.assertEqual(near_miss.main(), 1)

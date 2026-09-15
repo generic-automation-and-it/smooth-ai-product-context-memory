@@ -46,7 +46,9 @@ derivation, redaction and atomicity checks the database cannot express as constr
   approval is not hierarchy authorization; read-only findings never invoke the writer.
 - **Near-miss tags use only supplied, approved examined evidence.** No extra query, synonym heuristic,
   registry scan, hidden/global vocabulary, automatic broadening or write. UUID/version allowlist and
-  grounded caller/skill analysis are mandatory; matching tags or no relevance evidence produce no finding.
+  exact scope dimension/identifier binding plus grounded caller/skill analysis are mandatory. Original
+  API query `tags`/`facetMatchMode` are the only predicate source; matching tags or no relevance evidence
+  produce no finding. Evidence approval is not canon: preserve lifecycle status and flag proposed records.
 
 ## System Context
 
@@ -134,6 +136,12 @@ flowchart LR
   scope consent. Render the whole response, including disclosure, on empty/capped results. Never retry
   errors with broader scope or a changed expected parent. API owns ownership/cycles and atomic mutation;
   hierarchy is current state, not history, and separate from the memory-set transaction.
+- **Ticket shape guards match deterministic wire limits.** Identity strings max 512 and reason/source
+  max 4000 UTF-16 code units, including surrogate pairs for non-BMP characters; NUL/invalid Unicode fail.
+  No trimming/truncation. Shared checks apply to write/dry-run and traversal anchors; traversal filter
+  strings are capped at 32/64 units. `observedAt` requires extended ISO with uppercase T/Z or colon offset,
+  optional seconds and 1..16 fractional digits, offset at most 14:00, valid calendar and UTC years 1..9999.
+  Preserve the original timestamp string; local parsing must not round/truncate what goes on the wire.
 - **Expected parent precedes no-op, not replay.** The server checks the expectation before comparing
   parent/reason/source/observedAt. An identical state with expected current parent returns
   `changed: false`; replaying an old null expectation after initial set conflicts. No replay token
@@ -141,10 +149,15 @@ flowchart LR
 - **Coverage stays qualified:** undeclared upstream hierarchy was not followed; freshness is unverified.
   Ticket paths are not memory provenance paths. No hidden IDs/counts or inferred missing parents.
 - **`near_miss_tags.py` is offline stdin/stdout validation, not semantic detection.** The strict payload
-  carries scope approval references, exact criteria, UUID/version/tags/statements, caller/skill analysis
-  with an exact supporting quote, selected references and disclosure. References must resolve within
-  approved examined records. It separates observed failed exact tag predicates from analysis relevance,
-  preserves selection/disclosure, sorts findings by UUID/version, and qualifies absence/caps/non-tag
+  carries scope-bound approval references, frozen `originalQuery`, UUID/version/tags/statements/status/
+  actual scope, caller/skill analysis with an exact supporting quote, selected references and disclosure.
+  Query `facetMatchMode` alone controls tags (omission means ANY; explicit null/unknown mode fails).
+  Legacy `criteria`, independent tag modes and unknown query fields fail; non-tag API fields are preserved,
+  not evaluated. References must resolve within approved examined records and match approved actual scope.
+  Customer/program scope requires an identifier. Mixed-scope evidence requires its own explicit approval,
+  not consent inferred from query or set name. Findings retain actual scope/status and flag proposed
+  evidence without dropping or promoting it. It separates observed failed exact predicates from relevance,
+  preserves original query/selection/disclosure, sorts by UUID/version, and qualifies absence/caps/non-tag
   exclusion. Rejects input above 1 MiB, 200 records/analyses/references or 200 tags per list without
   partial output. These are local safety limits, not HLD-005 dossier caps; authorization truth and
   semantic quality remain skill-owned. Full dossier and tag identity/synonyms remain unimplemented here.
@@ -159,10 +172,14 @@ flowchart LR
    disclosure, and `near_miss_tags.py` schema/scope/basis/bounds/output/no-I/O guarantees.
    Run: `python3 -B .agents/skills/mimisbrunnr-context-memory/tests/run_tests.py`.
 - **Deterministic near-miss fixtures:** `tests/fixtures/near_miss_tags.json` exercises grounded mismatch,
-  exact match, ANY overlap, irrelevant evidence, unsupported plausible synonym and empty tags. Harness
-  additionally checks empty evidence, ALL containment, case-sensitive predicates, invalid UUID/version/
-  scope/basis, executable stdin/stdout, rejection without partial output, preserved selection/disclosure,
-  stable finding order and zero network/file access. These tests validate plumbing, not LLM judgement.
+  exact match, ANY overlap, irrelevant evidence, unsupported plausible synonym and empty tags. Its evidence
+  contains the original API query, scope-bound approval entry, and explicit approved lifecycle status.
+  Harness additionally checks default ANY/explicit ALL against API-shaped queries, duplicate mode rejection,
+  mixed-status/scope findings, scope-binding failures, empty evidence, case-sensitive predicates, invalid
+  UUID/version/scope/basis, executable stdin/stdout, rejection without partial output, preserved query/
+  selection/disclosure, stable order and zero network/file access. Ticket tests include UTF-16 boundaries,
+  NUL/Unicode rejection and timestamp wire/calendar/offset guards in transport and dry-run. These tests
+  validate plumbing, not LLM judgement or live API behavior.
 - **On-demand LLM-eval fixtures (not CI-gated):**
   `.agents/skills/mimisbrunnr-context-memory/tests/fixtures/scenarios.json` plus `score_fixtures.py`. Authored
   positive/negative scenarios for the semantic-dedup, atomicity, link and divergence stages, scored
@@ -185,6 +202,7 @@ as a static configurable setting; divergence fixture asserts non-collapse (V1 `d
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-15 | Replaced unmerged near-miss criteria schema with frozen original API query (`tags` + sole `facetMatchMode`, default ANY); bound approved UUID/version evidence to actual scope and retained status/scope with explicit proposed flag. Added shared ticket UTF-16 length/NUL/Unicode guards and wire-compatible timestamp validation without normalization. Updated fixtures/docs; Python harness 42 passing tests including positive/negative offline regressions. No retrieval, compatibility shim or C# changes. | HLD-005 LADR-10/13, NFR-04; HLD-002 LADR-08 |
 | 2026-09-14 | Synced documentation to strict expected-parent-before-no-op behavior, no operation replay token, selected capped path endpoint/anchor memory association and trigger-backed exact ownership. No scripts changed by this sync; ticket performance gate remains open and targeted tests do not imply release acceptance. | HLD-002 LADR-08; HLD-003 LADR-08 |
 | 2026-09-14 | Added exact-identity `ticket-parent` PUT with explicit nullable parent/expectedParent, source metadata and no-network local dry-run; bounded `ticket-paths` POST preserves the complete response/disclosure. Documented declaration-only checkpoint/approval rules, conflict handling, scope consent and partial/stale hierarchy coverage. Added offline bounded `near_miss_tags.py`, strict approved-evidence schema, grounded analysis/observed mismatch separation, unchanged selection/disclosure, positive/negative fixtures and transport/output/no-I/O tests. Python harness: 34 passing tests; live API integration and LLM relevance quality not measured. HLD docs owned by parallel work left untouched. | HLD-002 LADR-08; HLD-003 LADR-08; HLD-005 LADR-10, NFR-04 |
 | 2026-09-14 | Brand-prefixed to `mimisbrunnr-context-memory`. | |

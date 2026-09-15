@@ -46,43 +46,60 @@ def _tags(value):
         raise ValueError("tags: duplicates are not permitted")
 
 
+def _record_scope(value):
+    dimension, identifier = value["scopeDimension"], value["scopeIdentifier"]
+    if dimension not in ("product", "customer", "program", "self"):
+        raise ValueError("scopeDimension: requires product, customer, program or self")
+    if identifier is not None:
+        _text(identifier, "scopeIdentifier", 200)
+    if dimension in ("customer", "program") and identifier is None:
+        raise ValueError("scopeIdentifier: required for customer/program evidence")
+    return dimension, identifier
+
+
 def build_report(payload):
     """Validate declared authorization and supplied analysis without discovering any evidence."""
     if len(json.dumps(payload, allow_nan=False).encode("utf-8")) > MAX_BYTES:
         raise ValueError("input exceeds the byte cap; narrow the approved evidence explicitly")
-    _object(payload, "scope criteria records analyses selected disclosure", "input")
+    _object(payload, "scope originalQuery records analyses selected disclosure", "input")
     scope = payload["scope"]
     _object(scope, "name authorization records", "scope")
     _text(scope["name"], "scope.name")
     if scope["authorization"] not in ("explicitly-supplied", "already-authorized"):
         raise ValueError("scope.authorization: explicit supplied/authorized evidence required")
     _list(scope["records"], "scope.records")
-    approved = set()
+    approved = {}
     for ref in scope["records"]:
-        _object(ref, "uuid version", "scope reference")
+        _object(ref, "uuid version scopeDimension scopeIdentifier", "scope reference")
         key = _reference(ref)
         if key in approved:
             raise ValueError("scope.records: duplicate reference")
-        approved.add(key)
+        approved[key] = _record_scope(ref)
 
-    criteria = payload["criteria"]
-    _object(criteria, "tags tagsMatchMode nonTagFilters", "criteria")
-    _tags(criteria["tags"])
-    if not criteria["tags"] or criteria["tagsMatchMode"] not in ("any", "all"):
-        raise ValueError("criteria: non-empty exact tags and any/all match mode required")
-    if not isinstance(criteria["nonTagFilters"], dict) or not isinstance(payload["disclosure"], dict):
-        raise ValueError("nonTagFilters and disclosure must be objects")
+    query = payload["originalQuery"]
+    query_fields = set("query facets tags kind status scopeDimension groupUuid ticketProvider ticketKey "
+                       "repo initiativeName includeProposed currentOnly asOf limit facetMatchMode".split())
+    if not isinstance(query, dict) or "tags" not in query or query.keys() - query_fields:
+        raise ValueError("originalQuery: requires the original API query with tags and supported fields")
+    _tags(query["tags"])
+    match_mode = query.get("facetMatchMode", "any")
+    if not query["tags"] or match_mode not in ("any", "all"):
+        raise ValueError("originalQuery: non-empty exact tags and any/all facetMatchMode required")
+    if not isinstance(payload["disclosure"], dict):
+        raise ValueError("disclosure must be an object")
 
     _list(payload["records"], "records")
     records = {}
     for record in payload["records"]:
-        _object(record, "uuid version tags scope statement", "record")
+        _object(record, "uuid version tags status scopeDimension scopeIdentifier statement", "record")
         key = _reference(record)
-        if key not in approved or record["scope"] != scope["name"]:
+        if key not in approved or _record_scope(record) != approved[key]:
             raise ValueError("record outside the declared approved scope")
         if key in records:
             raise ValueError("records: duplicate reference")
         _tags(record["tags"])
+        if record["status"] not in ("approved", "proposed"):
+            raise ValueError("record.status: requires approved or proposed")
         _text(record["statement"], "record.statement")
         records[key] = record
 
@@ -115,28 +132,32 @@ def build_report(payload):
         record = records[key]
         if basis["quote"] not in record["statement"]:
             raise ValueError("basis.quote must occur exactly in the referenced record statement")
-        requested = set(criteria["tags"])
+        requested = set(query["tags"])
         actual = set(record["tags"])
-        matches = bool(requested & actual) if criteria["tagsMatchMode"] == "any" else requested <= actual
+        matches = bool(requested & actual) if match_mode == "any" else requested <= actual
         if analysis["relevant"] and not matches:
             findings.append({
                 "category": "near-miss-tag",
                 "classification": "analysis",
                 "scope": scope["name"],
-                "memory": {"uuid": key[0], "version": key[1]},
-                "observation": {"classification": "observation", "requestedTags": criteria["tags"],
-                                "tagsMatchMode": criteria["tagsMatchMode"], "actualTags": record["tags"],
+                "memory": {field: record[field] for field in
+                           ("uuid", "version", "status", "scopeDimension", "scopeIdentifier")},
+                "proposedEvidence": record["status"] == "proposed",
+                "observation": {"classification": "observation", "requestedTags": query["tags"],
+                                "facetMatchMode": match_mode, "actualTags": record["tags"],
                                 "exactTagMatch": False},
                 "basis": basis,
             })
 
     return {
         "scope": scope,
-        "criteria": criteria,
+        "originalQuery": query,
         "selected": payload["selected"],
         "disclosure": payload["disclosure"],
         "findings": sorted(findings, key=lambda f: (f["memory"]["uuid"], f["memory"]["version"])),
         "qualification": "Findings concern only supplied, approved examined evidence; none detected is not store-wide absence. "
+                         "Evidence approval permits examination, not canon: proposed evidence remains proposed. "
+                         "Record applicability is its declared scope, not the examined-set name or query scope. "
                          "Exact tag mismatch is observed; relevance is caller/skill analysis, not established synonymy. "
                          "Tag relationships were not followed. Selection is unchanged. Caps and non-tag filters may "
                          "exclude records independently; absence does not prove tag-caused exclusion or unseen missing records.",

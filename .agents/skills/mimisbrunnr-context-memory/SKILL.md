@@ -269,10 +269,17 @@ and [HLD-003 LADR-08](../../../docs/hlds/003-graph-edges-on-age/ladrs/LADR-08-ca
 ```
 
 - Preserve provider/key strings exactly: no normalization, aliases or URL-derived identity.
+  Each identity string is limited to 512 UTF-16 code units; `reason`/`source` to 4000, matching .NET
+  string lengths (a non-BMP character counts as two). Empty/whitespace-only strings, NUL and invalid
+  Unicode are rejected before transport and in dry-run; values are never trimmed or truncated.
   `parent` and `expectedParent` must both be present, including explicit `null`. Set expects absence;
   reparent names the expected current parent; remove sets `parent: null` and names the expected parent.
   Supply `reason`/`source` each time. `observedAt` is optional source observation time; never supply
   server-owned `recordedAt` or claim either timestamp proves upstream freshness.
+  Non-null `observedAt` must use `YYYY-MM-DDTHH:mm[:ss[.fraction]]` followed by uppercase `Z` or
+  `+/-HH:mm`. Fractions require seconds and contain 1..16 digits; offsets cannot exceed 14:00.
+  Calendar/time and UTC year range 1..9999 are checked locally. The exact supplied string is sent,
+  not normalized through Python's lower-precision datetime representation.
 - `ticket-parent --dryrun` validates the same shape and prints the intended operation/request with
   **zero network calls or writes**. It cannot validate ownership, cycles or current expected parent.
   Use this local inspection for hierarchy in a skill-wide dry-run; never send the PUT in that mode.
@@ -304,6 +311,8 @@ and [HLD-003 LADR-08](../../../docs/hlds/003-graph-edges-on-age/ladrs/LADR-08-ca
   Direction is `outbound` (parent to children, default), `inbound` (toward parents), or `either`.
   Optional `scopeDimension` and `kind` narrow the read; path/memory limits default to 50 each,
   valid **1..200**. The client sends these defaults explicitly and never chunks or retries.
+  Anchor identity uses the same 512-unit/NUL/Unicode guards as `ticket-parent`; optional non-null
+  scope/kind strings are non-empty, NUL-free and capped at 32/64 UTF-16 units respectively.
 - A ticket is not scope consent. Only the caller's explicit dimension declaration authorizes that
   read. Never auto-retry 403 with `program`. Server resolves every ticket's live owner, drops hidden
   paths whole and narrows returned memories. Shared group membership establishes no hierarchy.
@@ -324,30 +333,36 @@ Authority: [HLD-005 LADR-10](../../../docs/hlds/005-contextual-export/ladrs/LADR
 and [NFR-04](../../../docs/hlds/005-contextual-export/nfrs/NFR-04-completeness.md). This is narrow,
 read-only reporting, **not** the full dossier feature, tag identity, synonym support or a tag graph.
 
-1. Freeze the original exact tag criteria (`any` overlap by default, `all` only if explicit), non-tag
-   filters, selected UUID/versions and all disclosure/cap metadata. A no-match remains a no-match.
+1. Freeze the original API query as `originalQuery`, selected UUID/versions and all disclosure/cap
+   metadata. `originalQuery.tags` is the sole requested tag list; `originalQuery.facetMatchMode`
+   controls tags as well as facets, exactly as `/query` does (`any` when omitted, `all` only if explicit).
+   No independent `tagsMatchMode`, `selectedTags`, reconstructed `criteria` or `nonTagFilters` object.
+   A no-match remains a no-match.
 2. Use only evidence explicitly supplied by the caller or already authorized and examined for the
-   task. Fix an approval manifest of UUID/version pairs and an examined-scope name **before** analysis.
+   task. Fix an approval manifest of UUID/version pairs with their actual `scopeDimension` and
+   `scopeIdentifier`, plus an examined-set name, **before** analysis.
    Do not grant authorization by inserting a discovered record into that manifest. An API ticket/group
    shortcut, a plausible synonym, or a finding is not consent to hidden material.
 3. The caller/skill judges semantic relevance against those criteria and supplied claims, including
    applicability. For each judgement, supply a concrete explanation and an exact supporting quote
    from that UUID/version's examined statement. `relevant: true` is analysis, not a synonym fact.
    Tag difference alone, word overlap, edit distance and a global vocabulary are not relevance grounds.
-4. Run the offline helper with this strict input schema. Every listed field is required; unknown
-   structural fields fail. `analyses: []` or `records: []` is valid and produces no findings.
+4. Run the offline helper with this strict input schema. Every listed structural field is required;
+   API query fields other than `tags` are optional, and unknown fields fail. `analyses: []` or
+   `records: []` is valid and produces no findings.
 
 ```json
 {
   "scope": {
     "name": "Caller-supplied product database evidence",
     "authorization": "explicitly-supplied",
-    "records": [{"uuid": "aaaaaaaa-0000-4000-8000-000000000001", "version": 1}]
+    "records": [{"uuid": "aaaaaaaa-0000-4000-8000-000000000001", "version": 1,
+                 "scopeDimension": "product", "scopeIdentifier": null}]
   },
-  "criteria": {"tags": ["postgres"], "tagsMatchMode": "any", "nonTagFilters": {"scopeDimension": "product"}},
+  "originalQuery": {"tags": ["postgres"], "facetMatchMode": "any", "scopeDimension": "product"},
   "records": [{
     "uuid": "aaaaaaaa-0000-4000-8000-000000000001", "version": 1,
-    "scope": "Caller-supplied product database evidence", "tags": ["database"],
+    "status": "approved", "scopeDimension": "product", "scopeIdentifier": null, "tags": ["database"],
     "statement": "The product database uses PostgreSQL."
   }],
   "analyses": [{
@@ -364,17 +379,27 @@ read-only reporting, **not** the full dossier feature, tag identity, synonym sup
 ```
 
 `authorization` is `explicitly-supplied` or `already-authorized`; `author` is `caller` or `skill`.
-`scope.records` is the approved allowlist, not a query. Record `scope` names that same examined scope;
-retain actual selection filters separately in `criteria.nonTagFilters`. References require canonical
-non-zero UUIDs and positive integer versions. Supporting statements are caller-supplied examined text,
-not fetched by the helper. Authorization truth and semantic quality remain the skill's responsibility:
-the helper validates consistency, not credentials or reasoning correctness.
+`scope.records` is the approved allowlist, not a query. Each examined record must match its approved
+UUID/version **and exact scope dimension/identifier**. Dimensions are `product`, `customer`, `program`,
+or `self`; identifiers are null or non-empty text up to 200 characters, and required for customer/program.
+The examined-set name is a label, never a substitute for actual applicability or permission. Query scope
+does not authorize evidence or override record scope: separately approved mixed-scope evidence can be
+reported, but only in its own applicability. Never add private material merely because its fields validate.
 
-5. Render each `near-miss-tag` with UUID/version, scope, **observed exact mismatch** and separately
+Record `status` is required (`approved` or `proposed`). Evidence approval permits examination, not canon.
+Findings preserve status and actual scope in `memory`, with `proposedEvidence: true` for proposed records;
+do not drop them, promote them or present them as settled product facts. References require canonical
+non-zero UUIDs and positive integer versions. Statements are supplied examined text, never fetched.
+Authorization truth, original-query fidelity, and semantic applicability remain the skill's responsibility:
+the helper validates consistency, not credentials or reasoning correctness. Non-tag API query fields
+are preserved as supplied context, not re-executed or used to prove why a record was excluded.
+
+5. Render each `near-miss-tag` with UUID/version, status/proposed flag, actual scope, examined-set name,
+   **observed exact mismatch** and separately
    labelled **analysis basis**. The helper emits a finding only for `relevant: true` plus failed exact
    tag predicate. Matching tags or absent relevance evidence produce no mismatch finding. It checks
    quotes occur in the referenced supplied statement and rejects unapproved/unexamined references.
-6. Preserve `selected` and `disclosure` unchanged. The helper limits input to 1 MiB, 200 records,
+6. Preserve `originalQuery`, `selected` and `disclosure` unchanged. The helper limits input to 1 MiB, 200 records,
    200 analyses/references per list, and 200 tags per list; it rejects over-cap input without partial
    output. These are local report safety bounds, **not** dossier-wide caps. Narrow approved evidence
    explicitly if needed; never silently truncate. Output qualifies even an empty findings list by
