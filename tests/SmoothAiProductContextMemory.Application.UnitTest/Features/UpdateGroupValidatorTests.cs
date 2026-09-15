@@ -58,6 +58,35 @@ public class UpdateGroupValidatorTests
         result.ShouldHaveValidationErrorFor("Tickets[0].Key");
     }
 
+    /// <summary>
+    /// <c>Url</c> is non-nullable in the contract, but an omitted JSON member binds to null through
+    /// the record constructor. That null reaches jsonb and the export renderer dereferences it, so it
+    /// is rejected here rather than persisted. An empty url is legitimate; a missing one is not.
+    /// </summary>
+    [Fact]
+    public void Rejects_a_ticket_with_a_null_url()
+    {
+        UpdateGroup.Request request = new(
+            Guid.NewGuid(),
+            null,
+            null,
+            null,
+            null,
+            null,
+            [new TicketInput("jira", "ACM-1", null!)]);
+
+        _validator.TestValidate(request).ShouldHaveValidationErrorFor("Tickets[0].Url");
+    }
+
+    [Fact]
+    public void Accepts_a_ticket_with_an_empty_url()
+    {
+        UpdateGroup.Request request = new(
+            Guid.NewGuid(), null, null, null, null, null, [new TicketInput("local", "wt-1", "")]);
+
+        _validator.TestValidate(request).ShouldNotHaveAnyValidationErrors();
+    }
+
     [Fact]
     public void Accepts_wellformed_tickets()
     {

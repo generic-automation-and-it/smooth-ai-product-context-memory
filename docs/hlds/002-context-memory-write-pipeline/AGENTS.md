@@ -1,6 +1,6 @@
 # AGENTS.md - Context memory write pipeline
 
-AI Context: HLD for the context-memory write pipeline. Updated: 2026-09-13
+AI Context: HLD for the context-memory write pipeline. Updated: 2026-09-14
 
 ## TL;DR
 
@@ -45,7 +45,7 @@ See [./ladrs/](./ladrs/).
 ## Key Behaviors
 
 - **The preflight is batched, array in and array out.** A per-record pass misses intra-batch collisions — two candidates in one batch sharing a subject, neither yet written, so neither visible to the other.
-- **One traversal serves three concerns** — deduplication recall, link derivation and ticket uniqueness all need the same cross-group subject lookup.
+- **One traversal serves three concerns** — deduplication recall, link derivation and ticket uniqueness all need the same cross-group subject lookup. Only ticket uniqueness is group-relative: the candidate carries its target group so the group being written into is not reported as its own conflict.
 - **The skill never sequences the version bump.** The API owns the flip-then-insert ordering and its transaction; splitting it across round-trips can strand a memory with zero current versions.
 - **Skipped has distinct causes.** An atomicity split never reaches the API; a duplicate link is skipped at the API. Reporting one aggregate hides a split remainder behind an unrelated zero.
 - **A duplicate link inside a write is skipped and counted, never fatal** — a stale derived link must not discard the capture it arrived with.
@@ -72,6 +72,7 @@ Targets and verification live in [./nfrs/](./nfrs/). Three shape how code is wri
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-14 | Stage 1's ticket-uniqueness check recorded as group-relative — a candidate declares its target group, and self-ownership is not a conflict. Previously undecidable, so every candidate of a real batch was flagged. | e2e-dogfood |
 | 2026-09-13 | Created — converted from ADR-0003. | ADR-0003 |
 | 2026-09-13 | Added the upstream BRD as cited business authority, BR-01 primacy, and this HLD's ownership of link-derivation timing where BR-11 is silent. | BRD 001 |
 | 2026-09-13 | Synced with BRD second amendment: BR-10 now states authority ranking; BR-11 fixes link proposal at the capture checkpoint. | BRD 001 |

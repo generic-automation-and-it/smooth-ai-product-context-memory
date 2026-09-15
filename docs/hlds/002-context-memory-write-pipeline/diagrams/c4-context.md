@@ -56,7 +56,7 @@ sequenceDiagram
 
     rect rgb(245, 245, 245)
         Note over S,DB: Stage 1 — Preflight (batched, judges nothing, writes nothing)
-        S->>A: Candidate batch (subjects, kinds, facets, ticket refs)
+        S->>A: Candidate batch (subjects, kinds, facets, ticket refs, target group)
         A->>DB: One cross-group traversal
         DB-->>A: Exact-match candidates, ticket conflicts, intra-batch collisions
         A-->>S: Array out — facts only, no decisions

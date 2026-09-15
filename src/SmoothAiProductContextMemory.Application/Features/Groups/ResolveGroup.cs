@@ -35,11 +35,7 @@ public static class ResolveGroup
     {
         public Validator()
         {
-            RuleForEach(x => x.Tickets).ChildRules(ticket =>
-            {
-                ticket.RuleFor(t => t.Provider).NotEmpty();
-                ticket.RuleFor(t => t.Key).NotEmpty();
-            });
+            RuleForEach(x => x.Tickets).SetValidator(new TicketInputValidator());
 
             RuleFor(x => x.ScopeDimension)
                 .Must(d => d is null

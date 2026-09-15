@@ -89,7 +89,9 @@ pipeline below, and it performs the cross-group read-before-write. Submit the wh
    subject, new claim) rather than a duplicate insert.
 2. **Link derivation** — propose typed links (`depends_on`, `relates_to`, `contradicts`, `supersedes`,
    `implements`) to mentally-related existing memories, each with a mandatory `reason`.
-3. **Ticket uniqueness** — confirm no candidate's ticket is already owned by another group.
+3. **Ticket uniqueness** — confirm no candidate's ticket is already owned by another group. Send the
+   target group as `groupUuid` on each candidate: without it the endpoint cannot tell *another*
+   group's ownership from your own and reports the group you are writing into as a conflict.
 4. **Intra-batch collision** — detect two candidates *in this same batch* sharing a subject. Neither is
    written yet, so no cross-group lookup against the store will find them; only the batched preflight
    can. Resolve them into one memory (or one memory plus a version) before writing, never two.
@@ -154,11 +156,78 @@ NOT-AVAILABLE, never a silent miss.
 The **semantic dedup** decision is a two-call composition, never a single preflight:
 
 1. **Recall** — `context_memory_client.py query` with `{"facets": [...], "kind": ..., "includeProposed": true, "currentOnly": true, "limit": 200}`. Do **not** pass the candidate description as free-text: `/query` free-text is AND-of-all-lexemes with no stemming, so a natural-language candidate defeats recall. Observe the **cheap fields** (`description`, `statement`, `content_summary`, `kind`, `status`, scope) in the result rows.
-   - **Facet/tag match is ANY by default** — a query returns rows carrying *any* of the requested facets, so a batch's facet set unifies disjoint rows (the recall union rather than an empty set). Containment (only rows carrying *every* requested facet) is opt-in via `"facetsMatchMode": "all"`; do not use it for recall, it is the deliberate-narrowing form.
+   - **Facet/tag match is ANY by default** — a query returns rows carrying *any* of the requested facets, so a batch's facet set unifies disjoint rows (the recall union rather than an empty set). Containment (only rows carrying *every* requested facet) is opt-in via `"facetMatchMode": "all"`; do not use it for recall, it is the deliberate-narrowing form.
 2. **Judge** — compare each recalled row's cheap fields to the candidate and decide, per pair, `version_bump` (send the matched row's `uuid` in `set`) / `new_memory` / `skip`. This LLM judgement is where the semantic equivalence (e.g. *"we store in Postgres"* vs *"PostgreSQL is the storage engine"*) is resolved.
 3. `/preflight` contributes only the **exact-match backstop**, **intra-batch collisions**, and **ticket-uniqueness conflicts**. It judges nothing. Candidate recall for the semantic step comes from `/query`, not `/preflight`.
 
 The **20-candidate cap** is a static configurable setting (`MAX_CANDIDATES` in `context_memory_client.py`), changeable without touching pipeline logic. A batch over the cap is refused with "split into multiple checkpoints", never silently truncated.
+
+## Request Bodies (wire contract)
+
+Every endpoint rejects an **unknown property** with `400 Invalid request body` — a misspelled or
+borrowed field fails JSON binding before the handler, so nothing partial is written. The field lists
+below are therefore exhaustive, not indicative. The live schema is at
+`GET {base}/openapi/v1.json`; treat it as the tiebreak, but note it over-declares `required` on some
+optional members.
+
+**The three pipeline payloads are three different shapes. Do not carry fields between them.** A
+`statement` belongs to `set`, never to `preflight`; a ticket belongs to a **group**, never to a
+memory.
+
+### `preflight` — stage 1
+
+```json
+{"candidates": [
+  {"description": "Storage engine decision",
+   "kind": "architecture",
+   "facets": ["storage"],
+   "ticket": {"provider": "local", "key": "e2e-braindump-capture", "url": ""},
+   "groupUuid": "5153f72b-a965-42ce-94ef-69d5eaea05ce"}
+]}
+```
+
+Only `description` is required. `ticket` is **singular** — not `tickets`. `groupUuid` is the group
+this candidate is bound for, and only suppresses self-ownership in the ticket check (see stage 1
+above); subject matching is deliberately cross-group and ignores it. There is no `statement` here:
+preflight is exact-match recall over the subject, so a claim body would change nothing.
+
+### `set` — stage 5
+
+```json
+{"groupUuid": "5153f72b-…", "items": [
+  {"uuid": null, "name": "Storage engine", "description": "Storage engine decision",
+   "statement": "PostgreSQL is the storage engine.", "contentSummary": "…",
+   "kind": "architecture", "facets": ["storage"], "tags": [], "status": "approved",
+   "confidence": 80, "content": "…", "sources": [], "validFrom": "2026-09-14T00:00:00Z",
+   "validUntil": null, "summaryModel": "…", "summaryPromptVersion": "…"}
+], "links": [], "labelsProposed": []}
+```
+
+`uuid` non-null is the version-bump target. `groupUuid` sits on the **request**, never on an item.
+`--dryrun` appends `?dryRun=true`.
+
+### `query` — recall
+
+```json
+{"query": null, "facets": [], "tags": [], "kind": null, "status": null, "scopeDimension": null,
+ "groupUuid": null, "ticketProvider": null, "ticketKey": null, "repo": null,
+ "initiativeName": null, "includeProposed": true, "currentOnly": true, "asOf": null,
+ "limit": 200, "facetMatchMode": "any"}
+```
+
+`facetMatchMode` — **singular `facet`**. `"facetsMatchMode"` is rejected as an unknown property.
+
+### Group and link bodies
+
+| Subcommand | Body |
+|---|---|
+| `resolve-group` | `{tickets: [{provider, key, url}], repo, repoUrl, initiativeName, scopeDimension, scopeIdentifier, name, body}` — all optional; **`url` may be `""` but never omitted** |
+| `update-group` | `{groupUuid, repo, repoUrl, initiativeName, scopeDimension, scopeIdentifier, tickets}` — ticket merge is additive |
+| `append-description` | `{groupUuid, name, body}` |
+| `create-link` | `{sourceUuid, targetUuid, relation, reason}` |
+| `paths` | `{sourceUuid, maxDepth, targetUuid, relation, direction, kind, status, scopeDimension, limit}` — `sourceUuid` and `maxDepth` required |
+| `propose-label` | `{name}` |
+| `upsert-initiative` | `{name, description, status}` |
 
 ## Scope Prohibitions (retrieval, hard)
 

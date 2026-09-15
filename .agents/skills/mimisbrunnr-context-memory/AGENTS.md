@@ -92,6 +92,7 @@ flowchart LR
 
 ## Key Behaviors
 
+- **The bundle detector scores claims, not prose.** `atomicity.py` reads the **statement**; a description is a subject label and coordination inside it is not a second claim. A reason clause (`because`, `so that`) and a noun-phrase `and` are one fact, so neither counts as a junction — scoring them made the signal fire on 12/12 candidates of a real batch, including every candidate the detector then called simple. A contrastive junction or a semicolon cannot join anything but two finite clauses, so one is decisive; additive adverbs take two.
 - **Atomicity checked three times.** Restated at accumulation (Listen), at the pre-write round, and as
   the `skipped` count in the digest. The check is: one memory = one atomic fact. Bundles split; the
   unprocessable remainder goes to `skipped`.
@@ -151,6 +152,7 @@ as a static configurable setting; divergence fixture asserts non-collapse (V1 `d
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-14 | SKILL.md gained `## Request Bodies` — the wire contract per subcommand, previously documented nowhere and guessable only from `/openapi/v1.json`. Corrected `facetsMatchMode` → `facetMatchMode` (the documented spelling was rejected as an unknown property). `atomicity.py` scores the statement, not description+statement, and no longer counts reason clauses or noun-phrase `and` as claim junctions. | e2e-dogfood |
 | 2026-09-14 | Brand-prefixed to `mimisbrunnr-context-memory`. | |
 | 2026-09-13 | The API rejects unknown request fields as a 400, so a misspelled payload field never silently defaults; `update-group` accepts `tickets` as an additive, idempotent, cross-group-unique merge. | BUG-03 |
 | 2026-09-13 | `/query` recall: facet/tag match is ANY by default (rows carrying any requested facet), containment (`all`) opt-in — matches the recall union the dedup step needs. `paths` subcommand added (bounded multi-hop traversal, `maxDepth` required, scope enforced); SKILL.md gained `## Traversal` guidance on when to traverse vs query. | BUG-02, BUG-04 |
