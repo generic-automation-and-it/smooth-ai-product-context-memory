@@ -7,7 +7,8 @@ The publish workflow does **not** run on pull requests.
 
 - **Workflow:** `.github/workflows/pr-gate.yml`
 - **Triggers:** `pull_request` → `main` (including PR branch updates), `push` → `main`, and manual `workflow_dispatch`.
-- **Paths filter:** the `push` and `pull_request` triggers fire only when `Directory.Packages.props`, `src/**`, `tests/**`, `.github/actions/**` or `.github/workflows/pr-gate.yml` change — docs-only PRs skip the gate; `workflow_dispatch` always runs.
+- **Paths filter:** source/tests, scripts, Dockerfiles, solution/build/package inputs, local actions, and PR/publish workflows trigger checks. Docs-only PRs skip the gate; dispatch and reusable workflow calls run explicitly.
+- **Policy checks:** release event/version/promotion tests and engine-free controller preflight/lifecycle tests run with the build. PRs also build both container architectures on native runners without publication.
 
 ### Steps
 
@@ -40,8 +41,14 @@ The publish workflow does **not** run on pull requests.
 
 - **Workflow:** `.github/workflows/publish-image.yml`
 - **Triggers:** `push` → `main` (`:latest` + short SHA), `v*` tags (semver), `workflow_dispatch` (supplied pre-release version, **never** `latest`). No `pull_request` trigger.
-- **Permissions:** `contents: read`, `packages: write`.
+- **Permissions:** default `contents: read`; package writes only in image build/promotion jobs; contents writes only for release-tag reservation and GitHub Release metadata.
 - **Platforms:** `linux/amd64,linux/arm64`.
-- **Registry:** `ghcr.io/${{ github.repository }}`.
-- **Timeout:** 45 minutes. GHA cache scoped by workflow + ref.
+- **Registries:** `ghcr.io/${{ github.repository }}` (API) and the same name suffixed `-apphost` (controller).
+- **Gates:** reuse PR build/tests for the same commit, publish immutable candidates, then smoke their exact digests on native amd64/arm64 runners. Controller embeds the API multi-platform digest. Native runner availability must be confirmed for this repository.
+- **Identity:** strict SemVer/OCI validation; no build metadata, blank versions, or numeric leading zeros. Candidates include full SHA, run ID, and attempt. Dispatch never publishes latest or major.minor; prereleases never update stable aliases.
+- **Promotion:** one repository-wide concurrency group with `queue: max` (up to 100 pending runs). Fresh source refs prevent stale latest/major.minor promotion. Existing version images must match tested digests; conflicting rebuilds require a new version. API and controller alias writes are sequential, not transactional; retain candidate digests to diagnose partial promotion.
+- **Releases:** validate existing Git tag target before alias mutation; dispatch reserves a missing version tag at the tested commit. Release creation uses that verified tag and updates an existing draft to published. Protect release tags against external retargeting/deletion.
+- **Credentials:** smoke uses a temporary dedicated Docker config usable inside Linux controller, not runner/platform credential helpers. Config is deleted after smoke; evidence excludes raw controller logs and login tokens.
+- **Timeouts/cache:** build jobs 45 minutes; smoke 20 minutes per native architecture. Caches are separated by image/ref and by architecture for PR builds.
+- **Validation caveat:** older actionlint builds reject `concurrency.queue`; current GitHub Actions documentation supports it. Validate other workflow diagnostics normally, not by deleting the queue policy.
 - **Local run / configuration contract:** [docker.md](./docker.md).

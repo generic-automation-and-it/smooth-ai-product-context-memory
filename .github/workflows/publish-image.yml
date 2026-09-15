@@ -14,89 +14,62 @@ on:
         type: string
 
 concurrency:
-  group: publish-images-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'push' }}
+  # Keep tag reservation, alias promotion and release metadata in one lock.
+  group: publish-images-promotion
+  cancel-in-progress: false
+  queue: max
 
 permissions:
   contents: read
-  packages: write
 
 env:
   REGISTRY: ghcr.io
   API_IMAGE: ghcr.io/${{ github.repository }}
   APPHOST_IMAGE: ghcr.io/${{ github.repository }}-apphost
+  INPUT_VERSION: ${{ inputs.version }}
 
 jobs:
   prepare:
     name: Validate release identity
     runs-on: ubuntu-latest
     outputs:
-      aliases: ${{ steps.release.outputs.aliases }}
       candidate: ${{ steps.release.outputs.candidate }}
       create_release: ${{ steps.release.outputs.create_release }}
       prerelease: ${{ steps.release.outputs.prerelease }}
       release_tag: ${{ steps.release.outputs.release_tag }}
       release_version: ${{ steps.release.outputs.release_version }}
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
       - name: Derive candidates and aliases
         id: release
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          REF: ${{ github.ref }}
-          INPUT_VERSION: ${{ inputs.version }}
-          REVISION: ${{ github.sha }}
-          RUN_ATTEMPT: ${{ github.run_attempt }}
-        run: |
-          set -euo pipefail
-          short_sha="${REVISION:0:7}"
-          candidate="candidate-${short_sha}-${RUN_ATTEMPT}"
-          create_release=false
-          prerelease=false
-          release_tag=""
-          release_version=""
+        run: python3 scripts/release_policy.py prepare >> "$GITHUB_OUTPUT"
 
-          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
-            release_version="$INPUT_VERSION"
-          elif [[ "$REF" == refs/tags/v* ]]; then
-            release_version="${REF#refs/tags/v}"
-          fi
-
-          if [[ -n "$release_version" ]]; then
-            if [[ ! "$release_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
-              echo "::error::version '$release_version' must be SemVer without build metadata or a leading v."
-              exit 1
-            fi
-
-            create_release=true
-            release_tag="v$release_version"
-            aliases="[\"$release_version\",\"sha-$short_sha\"]"
-            if [[ "$release_version" == *-* ]]; then
-              prerelease=true
-            else
-              major_minor="${release_version%.*}"
-              aliases="[\"$release_version\",\"$major_minor\",\"sha-$short_sha\"]"
-            fi
-          else
-            aliases="[\"latest\",\"sha-$short_sha\"]"
-          fi
-
-          echo "aliases=$aliases" >> "$GITHUB_OUTPUT"
-          echo "candidate=$candidate" >> "$GITHUB_OUTPUT"
-          echo "create_release=$create_release" >> "$GITHUB_OUTPUT"
-          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
-          echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
-          echo "release_version=${release_version:-main-$short_sha}" >> "$GITHUB_OUTPUT"
+  validate:
+    name: Build and test this commit
+    needs: prepare
+    uses: ./.github/workflows/pr-gate.yml
+    with:
+      skip-container-build: true
 
   build-api:
     name: Build immutable API candidate
-    needs: prepare
+    needs: [prepare, validate]
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
     outputs:
       digest: ${{ steps.build.outputs.digest }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
@@ -125,8 +98,8 @@ jobs:
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
           build-args: |
             REVISION=${{ github.sha }}
-          cache-from: type=gha,scope=publish-api-${{ github.ref_name }}
-          cache-to: type=gha,mode=max,scope=publish-api-${{ github.ref_name }}
+          cache-from: type=gha,scope=publish-api-${{ github.ref }}
+          cache-to: type=gha,mode=max,scope=publish-api-${{ github.ref }}
 
   build-apphost:
     name: Build immutable AppHost candidate
@@ -135,11 +108,16 @@ jobs:
       - build-api
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
     outputs:
       digest: ${{ steps.build.outputs.digest }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
@@ -166,24 +144,38 @@ jobs:
           labels: |
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ needs.prepare.outputs.release_version }}
           build-args: |
             API_IMAGE=${{ env.API_IMAGE }}@${{ needs.build-api.outputs.digest }}
             RELEASE_VERSION=${{ needs.prepare.outputs.release_version }}
             REVISION=${{ github.sha }}
-          cache-from: type=gha,scope=publish-apphost-${{ github.ref_name }}
-          cache-to: type=gha,mode=max,scope=publish-apphost-${{ github.ref_name }}
+          cache-from: type=gha,scope=publish-apphost-${{ github.ref }}
+          cache-to: type=gha,mode=max,scope=publish-apphost-${{ github.ref }}
 
   smoke:
-    name: Smoke exact AppHost candidate
+    name: Smoke exact candidates (${{ matrix.arch }})
     needs:
       - prepare
       - build-api
       - build-apphost
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -192,10 +184,40 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Verify native candidate identity
+        env:
+          ARCH: ${{ matrix.arch }}
+          API_DIGEST: ${{ needs.build-api.outputs.digest }}
+          APPHOST_DIGEST: ${{ needs.build-apphost.outputs.digest }}
+        run: |
+          set -euo pipefail
+          case "$ARCH:$(uname -m)" in
+            amd64:x86_64|arm64:aarch64) ;;
+            *) exit 1 ;;
+          esac
+          for image in "${API_IMAGE}@${API_DIGEST}" "${APPHOST_IMAGE}@${APPHOST_DIGEST}"; do
+            docker pull --platform "linux/$ARCH" "$image"
+            test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$image")" = "linux/$ARCH"
+            test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$image")" = "$GITHUB_SHA"
+          done
+          docker image inspect "${APPHOST_IMAGE}@${APPHOST_DIGEST}" |
+            jq -e --arg api "HostConfiguration__Image=${API_IMAGE}@${API_DIGEST}" '.[0].Config.Env | index($api) != null'
+
       - name: Run lifecycle and data smoke test
         env:
-          INSTALLATION_ID: ci-${{ github.run_id }}-${{ github.run_attempt }}
-        run: scripts/smoke-apphost-container.sh "${APPHOST_IMAGE}@${{ needs.build-apphost.outputs.digest }}"
+          INSTALLATION_ID: ci-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.arch }}
+          APPHOST_DIGEST: ${{ needs.build-apphost.outputs.digest }}
+          ENGINE_CONFIG_DIRECTORY: ${{ runner.temp }}/controller-docker
+          DOCKER_CONFIG: ${{ runner.temp }}/controller-docker
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p "$DOCKER_CONFIG"
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          scripts/smoke-apphost-container.sh "${APPHOST_IMAGE}@${APPHOST_DIGEST}"
+
+      - name: Remove controller registry credentials
+        if: always()
+        run: rm -rf "${{ runner.temp }}/controller-docker"
 
       - name: Record candidate evidence
         if: always()
@@ -214,25 +236,73 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: apphost-container-smoke-${{ github.run_id }}-${{ github.run_attempt }}
+          name: apphost-container-smoke-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.arch }}
           path: container-smoke-evidence.txt
           if-no-files-found: warn
 
+  release-tag:
+    name: Validate or reserve release tag at tested commit
+    if: needs.prepare.outputs.create_release == 'true'
+    needs: [prepare, smoke]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Authenticate read-only Git queries
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh auth setup-git
+
+      - name: Validate existing tag target
+        id: target
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/release_policy.py check-tag >> "$GITHUB_OUTPUT"
+
+      - name: Reserve missing dispatch tag
+        if: steps.target.outputs.tag_exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+        run: |
+          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+            -f "ref=refs/tags/$RELEASE_TAG" -f "sha=$GITHUB_SHA"
+
+      - name: Recheck reserved tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/release_policy.py verify-tag
+
   promote:
     name: Promote tested digests
+    if: ${{ !cancelled() && needs.smoke.result == 'success' && (needs.release-tag.result == 'success' || needs.release-tag.result == 'skipped') }}
     needs:
       - prepare
       - build-api
       - build-apphost
       - smoke
+      - release-tag
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
-      contents: write
+      contents: read
       packages: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Authenticate read-only Git queries
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh auth setup-git
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
@@ -246,18 +316,40 @@ jobs:
 
       - name: Promote API and AppHost aliases
         env:
-          ALIASES: ${{ needs.prepare.outputs.aliases }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           API_DIGEST: ${{ needs.build-api.outputs.digest }}
           APPHOST_DIGEST: ${{ needs.build-apphost.outputs.digest }}
         run: |
           set -euo pipefail
+          # Re-read source refs inside the promotion lock before any registry mutation.
+          policy="$(python3 scripts/release_policy.py aliases)"
+          aliases="${policy#aliases=}"
           while IFS= read -r alias; do
             docker buildx imagetools create --tag "${API_IMAGE}:${alias}" "${API_IMAGE}@${API_DIGEST}"
-          done < <(jq -r '.[]' <<< "$ALIASES")
+          done < <(jq -r '.[]' <<< "$aliases")
 
           while IFS= read -r alias; do
             docker buildx imagetools create --tag "${APPHOST_IMAGE}:${alias}" "${APPHOST_IMAGE}@${APPHOST_DIGEST}"
-          done < <(jq -r '.[]' <<< "$ALIASES")
+          done < <(jq -r '.[]' <<< "$aliases")
+
+  release:
+    name: Publish GitHub Release metadata
+    if: needs.prepare.outputs.create_release == 'true'
+    needs: [prepare, build-api, build-apphost, promote]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Authenticate read-only Git queries
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh auth setup-git
 
       - name: Create or update GitHub Release
         if: needs.prepare.outputs.create_release == 'true'
@@ -269,6 +361,7 @@ jobs:
           APPHOST_DIGEST: ${{ needs.build-apphost.outputs.digest }}
         run: |
           set -euo pipefail
+          python3 scripts/release_policy.py verify-tag
           cat > release-notes.md <<EOF
           ## Container images
 
@@ -280,13 +373,9 @@ jobs:
           The controller requires administrative access to a Docker-compatible engine socket. See [Docker and Podman installation, persistence, backup, upgrade, and recovery](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_SHA}/docs/wiki/docker.md).
           EOF
 
-          prerelease_flag=()
-          if [[ "$PRERELEASE" == "true" ]]; then
-            prerelease_flag+=(--prerelease)
-          fi
-
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release edit "$RELEASE_TAG" --title "$RELEASE_TAG" --notes-file release-notes.md "${prerelease_flag[@]}"
+          releases="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100")"
+          if jq -se --arg tag "$RELEASE_TAG" 'any(.[][]; .tag_name == $tag)' <<< "$releases" >/dev/null; then
+            gh release edit "$RELEASE_TAG" --title "$RELEASE_TAG" --notes-file release-notes.md --prerelease="$PRERELEASE" --draft=false --latest=false
           else
-            gh release create "$RELEASE_TAG" --target "$GITHUB_SHA" --title "$RELEASE_TAG" --notes-file release-notes.md "${prerelease_flag[@]}"
+            gh release create "$RELEASE_TAG" --verify-tag --title "$RELEASE_TAG" --notes-file release-notes.md --prerelease="$PRERELEASE" --latest=false
           fi
