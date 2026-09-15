@@ -34,8 +34,11 @@ bundle item count == claims present in the dossier
 **Implemented interim:** `near_miss_tags.py` validates explicit approved UUID/version scope references,
 exact supporting quotes and bounded payloads. It emits analysis findings only for caller/skill-relevant
 records failing the exact tag predicate, preserves selected references/disclosure and sorts findings.
-The skill harness's reported 34 passing tests include fixtures, stdin/stdout execution, bounds and
-no-extra-I/O checks. This does not evaluate LLM relevance judgement or prove the full dossier NFR;
+The skill harness includes fixtures, stdin/stdout execution, bounds and no-extra-I/O checks.
+The [dated review revalidation](../../003-graph-edges-on-age/nfrs/NFR-02-ticket-traversal-measurements.md#2026-09-15-review-revalidation)
+records the post-schema-fix harness run; the earlier 34-test checkpoint is historical. Run
+`python3 .agents/skills/mimisbrunnr-context-memory/tests/run_tests.py` for the current harness,
+whose count also includes unrelated skill tests. This does not evaluate LLM relevance judgement or prove the full dossier NFR;
 the tests below for full composition remain required, not claimed passed.
 
 - **Skill-level test** — compose a dossier from a fixture bundle; parse the produced document and assert the reconciliation closes exactly. This is the load-bearing test of the whole design: it is the one that catches a composition that quietly dropped material.

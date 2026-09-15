@@ -113,6 +113,7 @@ Targets and verification live in [./nfrs/](./nfrs/). Three shape how code is wri
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-15 | Replaced NFR-04's stale near-miss harness count with a dated evidence reference and the current verification command; full dossier verification remains unclaimed. | PR #63 review finding 2 |
 | 2026-09-15 | Aligned LADR-10 with the current near-miss helper schema: unchanged originalQuery/facetMatchMode, per-record lifecycle/applicability and explicit proposed evidence. Selection/disclosure and blocked tag decisions unchanged; no new verification recorded. | LADR-10 |
 | 2026-09-15 | Finalized ticket representation/writer and evidence-only helper acceptance using final HLD-003 verification. Performance and full-suite gates passed; full dossier remains In Discovery and tag identity/synonym decisions remain blocked. | LADRs 09-11; HLD-003 final NFR-02 evidence |
 | 2026-09-14 | Synced ticket decisions to ITicketGraph/API/migration implementation and selected capped path association; release/performance gate remains open. Recorded executable offline evidence-only near-miss helper, bounded validation and unchanged selection/disclosure. Tag decisions remain blocked and full dossier stays In Discovery. | LADRs 09-11; NFR-04; HLD-003 NFR-02 |
