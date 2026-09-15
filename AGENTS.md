@@ -25,7 +25,7 @@ Persistent memory service for AI agents: stores summarized, labelled context (li
 | AppHost | `src/SmoothAiProductContextMemory.AppHost/` | Aspire dev orchestrator — Postgres+AGE (`docker.io/apache/age:release_PG17_1.7.0`) + MinIO blob storage + Seq |
 | ChatHost | `src/SmoothAiProductContextMemory.ChatHost/` | Standalone LLM microservice — owns Anthropic SDK; talks to Host via HTTP only (project not yet in tree) |
 | Docs | `docs/` | Wiki, HLDs, BRDs — visible (not hidden `.docs`) |
-| Scripts | `scripts/` | Operational verification run against a container, not part of the test suite — graph restore round-trip (NFR-03), Postgres pre-upgrade check (NFR-04), a sample-data seeder so both have something to verify, and AppHost teardown (`stop-dev-stack.sh` keep data / `reset-dev-stack.sh` destroy volumes) |
+| Scripts | `scripts/` | Operational verification run against a container, not part of the test suite — graph restore round-trip (NFR-03), Postgres pre-upgrade check (NFR-04), ticket-ownership preflight before the ticket-graph migration (`check-ticket-ownership.sh`), a sample-data seeder, and AppHost teardown (`stop-dev-stack.sh` keep data / `reset-dev-stack.sh` destroy volumes). Local contract: [scripts/AGENTS.md](scripts/AGENTS.md). |
 
 Planned work tracked as worktasks under `.context/work-tasks/` (gitignored). Use `/create worktask`. **Never reference worktask IDs (e.g. `WT-04`) in delivered artefacts** — code, comments, `*AGENTS.md`, HLDs, changelogs. Worktasks are short-lived and gitignored; cite the durable authority instead (HLD, LADR, NFR, PR, issue).
 
@@ -116,3 +116,4 @@ Hosted on **GitHub** at `https://github.com/generic-automation-and-it/project`. 
 | 2026-09-14 | Skills table corrected after the owned-skill rename to the `mimisbrunnr-` prefix: `context-memory` → `mimisbrunnr-context-memory`, and the previously unlisted `mimisbrunnr-vitsmunir-dump` added. | PR #55 |
 | 2026-09-14 | Microsoft package baseline 10.0.7/10.0.8 -> 10.0.11 (EF Core, Extensions, AspNetCore.OpenApi, Mvc.Testing, EF InMemory); Aspire 13.3.0 -> 13.5.3 (AppHost-localized row in APPHOST_AGENTS.md). | this PR |
 | 2026-09-15 | Added localized Host integration-test context for exact-request telemetry assertions and ticket graph L2 coverage. | [INTEGRATION_TEST_AGENTS.md](tests/SmoothAiProductContextMemory.Host.IntegrationTest/INTEGRATION_TEST_AGENTS.md), PR #63 |
+| 2026-09-15 | Added localized operational-scripts context and surfaced ticket-ownership preflight in the repository layout. | [scripts/AGENTS.md](scripts/AGENTS.md), [ticket migration runbook](docs/hlds/003-graph-edges-on-age/ticket-migration-runbook.md), PR #63 |
