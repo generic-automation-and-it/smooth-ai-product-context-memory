@@ -2,10 +2,9 @@
 
 ## TL;DR
 
-Aspire AppHost orchestrating local dev dependencies (PostgreSQL+AGE + MinIO blob storage + Seq), the
-`Host` project, and the Aspire dashboard. Run this for the F5 dev experience; **not** used by tests —
-`tests/SmoothAiProductContextMemory.TestFramework.Aspire` owns test-fixture orchestration on different
-ports/container names.
+Aspire AppHost orchestrating PostgreSQL+AGE, MinIO, Seq, the API Host, and the Aspire dashboard. Source
+mode is the F5 development experience; release mode is packaged as a privileged controller image and
+must remain isolated from the test fixture and development installation.
 
 ## Non-Negotiables
 
@@ -30,10 +29,18 @@ ports/container names.
   add runtime-specific wiring to the AppHost. Container images are **registry-qualified and pinned**
   (`docker.io/apache/age:release_PG17_1.7.0`, `quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z`) because Podman refuses to resolve short names
   non-interactively unless the host's `registries.conf` happens to allow it.
-- **AppHost is the orchestrator, not a published image.** Starting it compiles Host from the working
-  tree and starts Týr/Iðunn/Saga. Do not containerise the AppHost. The Host stays runnable as a
-  plain `Program` (`WebApplicationFactory<Program>` integration tests must keep working without an
-  AppHost).
+- **Source mode remains the development default.** Starting it compiles Host from the working tree and
+  starts Týr/Iðunn/Saga. The separate release profile may package this same live AppHost, DCP, and
+  dashboard into a controller image; it must force API image mode and must not depend on source paths,
+  restore, or a host SDK. The Host stays runnable as a plain `Program`
+  (`WebApplicationFactory<Program>` integration tests must keep working without an AppHost).
+- **Release and development installations never share identity.** Release names, labels, volumes,
+  state, and teardown are installation-scoped and distinct from `mimisbrunnr-*` development resources
+  and `mimisbrunnr-testcontainer-*` fixtures. A foreign collision fails before mutation.
+- **Engine access is an administrative boundary.** The release controller reaches Docker or Podman
+  through a configured socket or authenticated endpoint. Never open an unauthenticated engine API,
+  describe a read-only socket bind as read-only access, or imply that the controller is sandboxed from
+  the engine user.
 - **Default Host is the working tree.** `HostConfiguration:UseProject` defaults to `true` and
   `appsettings.json` matches. Image-pull is opt-in: `HostConfiguration:UseProject=false` (or
   `HostConfiguration__UseProject=false`) plus `HostConfiguration:Image`. Do not delete `AddProject`
@@ -184,6 +191,19 @@ Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgr
 - **Decision:** Do not containerise the dashboard. Cosmetic symmetry is not worth a quiet downgrade.
 - **Consequences:** Dashboard dies with AppHost. Seq remains the durable log (`mimisbrunnr-seq-data`).
 
+### LADR-005 — Package the live AppHost as a separate release controller
+
+- **Date:** 2026-09-15 · **Status:** Accepted
+- **Context:** Users require a Docker/Podman-only installation in which one pulled controller image
+  starts and controls the API and dependencies. Generated Compose output does not retain live Aspire
+  resource control, and changing the existing API image would break its standalone API/export contract.
+- **Decision:** Publish a second multi-platform image containing the AppHost, DCP, dashboard, .NET
+  runtime, and required engine client. Release mode forces a digest-pinned API container and uses an
+  installation-scoped identity. The existing API image and source-mode development flow remain intact.
+- **Consequences:** This is custom packaging outside Aspire's standard deployment path. Engine access
+  is privileged, runtime networking and recovery require end-to-end proof, and public aliases must not
+  be promoted until the exact API/controller candidates pass smoke tests.
+
 ## Test References
 
 - L0: `tests/SmoothAiProductContextMemory.AppHost.UnitTest/` — default resolves to working-tree mode;
@@ -193,6 +213,7 @@ Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgr
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-15 | Accepted a separate containerized live-AppHost release controller while preserving source-mode development, the standalone API image, and isolated test orchestration. | LADR-005 |
 | 2026-09-14 | Startup hint now pairs each persistent resource name with its docker-visible container name, and the Key Behaviors paraphrase matches. Working-tree Host reference uses the `HostConnectionStringName` constant instead of a literal; the database-resource local and parameters are renamed `postgres` → `database` (the server resource stays `tyr-postgres`). | ai-analyse |
 | 2026-09-14 | Dashboard title is `Mímisbrunnr`; resources are `tyr-postgres`, `mimers-head`, `idunn-blob`, and `saga-seq`. Explicit connection names preserve the Host's existing database and Seq configuration. The physical database stays `app`, avoiding a migration of the persistent dev corpus. | AppHost naming |
 | 2026-09-14 | Upgraded Aspire AppHost SDK and hosting packages to 13.5.3. AGE remains explicitly pinned to PostgreSQL 17, compatible with Aspire's `library/postgres:17.7` default. | Aspire 13.5.3 |
