@@ -160,6 +160,11 @@ operability and compatibility. Two shape how code is written rather than merely 
 
 ## Migration Plans
 
+- Before the first ticket-graph upgrade, stop all writers and run `scripts/check-ticket-ownership.sh`.
+  The [ticket migration runbook](./ticket-migration-runbook.md) covers read-only duplicate/shape
+  detection and guarded, operator-approved legacy cleanup. Never infer a keeper or weaken the
+  migration's duplicate guard. A failed/partial migration needs separate state inspection.
+
 - The relational relationship table is dropped; existing rows are carried over as `:LINKS` edges in the same migration (LADR-03).
 - Reversal of the historical memory cutover is a corrective migration restoring the table; no fallback flag. Ticket-only Down instead warns of declaration loss and preserves memory `LINKS` and relational metadata (LADR-08).
 - The database image is `docker.io/apache/age:release_PG17_1.7.0` (Postgres 17 + AGE 1.7.0) in both the development and test hosts. Pairing: [nfrs/NFR-04-version-pairing.md](./nfrs/NFR-04-version-pairing.md).
@@ -168,6 +173,7 @@ operability and compatibility. Two shape how code is written rather than merely 
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-15 | Added read-only legacy ticket ownership preflight and guarded operator-only pre-migration remediation; duplicate migration guard unchanged. | PR #63 review finding 3; [runbook](./ticket-migration-runbook.md) |
 | 2026-09-15 | Corrected NFR-02's evidence attribution: original pre-merge checkpoint is historical; dated post-review revalidation supplies the later measured results. | PR #63 review finding 1 |
 | 2026-09-15 | Final full-suite repeat verified: 429 passed, 4 gated skips, zero failures via `dotnet test SmoothAiProductContextMemory.slnx --no-build -m:1`. Prior benchmark-fixture connection timeout remains recorded in NFR-02; original pre-merge evidence unchanged. | NFR-02-ticket-traversal-measurements.md |
 | 2026-09-15 | Appended post-review benchmark revalidation and failed-attempt history without replacing original tables. Documented CASE eligibility, OFFSET 0 frontier joins and post-cap edge-ID hydration; same-snapshot live ownership retained. | LADR-08; NFR-02-ticket-traversal-measurements.md |
