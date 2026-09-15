@@ -130,6 +130,47 @@ public class AppHostConfigurationTests
         exception.Message.ShouldContain("HostAddress");
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("0.0.0.0")]
+    [InlineData("::")]
+    [InlineData("host.docker.internal")]
+    public void Release_requires_explicit_non_wildcard_bind_ip(string? value)
+    {
+        var values = ReleaseValues();
+        values["EngineConfiguration:BindAddress"] = value;
+        Should.Throw<InvalidOperationException>(() => AppHostConfiguration.Create(BuildConfiguration(values)))
+            .Message.ShouldContain("BindAddress");
+    }
+
+    [Theory]
+    [InlineData("127.0.0.1")]
+    [InlineData("172.17.0.1")]
+    public void Release_preserves_explicit_bind_ip(string value)
+    {
+        var values = ReleaseValues();
+        values["EngineConfiguration:BindAddress"] = value;
+        AppHostConfiguration.Create(BuildConfiguration(values)).EngineBindAddress.ShouldBe(value);
+    }
+
+    [Fact]
+    public void Unknown_mode_does_not_silently_select_development()
+    {
+        var values = ReleaseValues();
+        values["AppHostConfiguration:Mode"] = "Releaze";
+        Should.Throw<InvalidOperationException>(() => AppHostConfiguration.Create(BuildConfiguration(values)));
+    }
+
+    [Fact]
+    public void Release_rejects_duplicate_workload_ports()
+    {
+        var values = ReleaseValues();
+        values["HostConfiguration:Port"] = "5432";
+        Should.Throw<InvalidOperationException>(() => AppHostConfiguration.Create(BuildConfiguration(values)))
+            .Message.ShouldContain("distinct");
+    }
+
     private static Dictionary<string, string?> ReleaseValues() => new()
     {
         ["AppHostConfiguration:Mode"] = "Release",
@@ -138,6 +179,7 @@ public class AppHostConfigurationTests
         ["PostgresConfiguration:Password"] = "postgres-secret",
         ["BlobConfiguration:AccessKey"] = "blob-access",
         ["BlobConfiguration:SecretKey"] = "blob-secret",
+        ["EngineConfiguration:BindAddress"] = "172.17.0.1",
     };
 
     private static IConfiguration BuildConfiguration(Dictionary<string, string?> values) =>

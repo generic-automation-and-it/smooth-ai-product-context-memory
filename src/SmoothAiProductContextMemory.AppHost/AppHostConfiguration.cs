@@ -26,6 +26,7 @@ internal sealed partial record AppHostConfiguration(
     string EngineKind,
     string EngineHostAddress)
 {
+    internal string EngineBindAddress { get; init; } = "127.0.0.1";
     internal const string OwnershipLabel = "io.smooth-mimisbrunnr.installation";
     internal const string ManagedLabel = "io.smooth-mimisbrunnr.managed";
     private const string DefaultHostImage = "ghcr.io/generic-automation-and-it/smooth-ai-product-context-memory:latest";
@@ -73,8 +74,14 @@ internal sealed partial record AppHostConfiguration(
         }
 
         string engineHostAddress = GetEngineHostAddress(configuration, engineKind);
+        string bindAddress = configuration["EngineConfiguration:BindAddress"] ?? (isRelease ? "" : "127.0.0.1");
+        if (!System.Net.IPAddress.TryParse(bindAddress, out var address) ||
+            (isRelease && (address.Equals(System.Net.IPAddress.Any) || address.Equals(System.Net.IPAddress.IPv6Any))))
+        {
+            throw new InvalidOperationException("Release mode requires EngineConfiguration:BindAddress to be an explicit engine interface IP reachable from the controller. Wildcard binds are not allowed.");
+        }
 
-        return new AppHostConfiguration(
+        var result = new AppHostConfiguration(
             mode,
             installationId,
             GetValue(configuration, "PostgresConfiguration:Password", isRelease, DevelopmentPassword),
@@ -89,7 +96,17 @@ internal sealed partial record AppHostConfiguration(
             hostImage,
             configuration["ReleaseConfiguration:Version"] ?? "development",
             engineKind,
-            engineHostAddress);
+            engineHostAddress)
+        {
+            EngineBindAddress = bindAddress,
+        };
+
+        if (isRelease && new[] { result.PostgresPort, result.BlobPort, result.BlobConsolePort, result.SeqPort, result.HostPort }.Distinct().Count() != 5)
+        {
+            throw new InvalidOperationException("Release workload ports must be distinct.");
+        }
+
+        return result;
     }
 
     private string ResourceName(string resource) => IsRelease
@@ -103,9 +120,14 @@ internal sealed partial record AppHostConfiguration(
     private static AppHostMode ResolveMode(IConfiguration configuration)
     {
         string? value = configuration["AppHostConfiguration:Mode"];
+        if (value is null || string.Equals(value, "Development", StringComparison.OrdinalIgnoreCase))
+        {
+            return AppHostMode.Development;
+        }
+
         return string.Equals(value, "Release", StringComparison.OrdinalIgnoreCase)
             ? AppHostMode.Release
-            : AppHostMode.Development;
+            : throw new InvalidOperationException("AppHostConfiguration:Mode must be Development or Release.");
     }
 
     private static string GetValue(
@@ -130,8 +152,13 @@ internal sealed partial record AppHostConfiguration(
 
     private static int GetPort(IConfiguration configuration, string key, int defaultValue)
     {
-        int value = configuration.GetValue(key, defaultValue);
-        if (value is < 1 or > 65535)
+        string? configuredValue = configuration[key];
+        if (configuredValue is null)
+        {
+            return defaultValue;
+        }
+
+        if (!int.TryParse(configuredValue, out int value) || value is < 1 or > 65535)
         {
             throw new InvalidOperationException($"{key} must be between 1 and 65535.");
         }
@@ -144,7 +171,7 @@ internal sealed partial record AppHostConfiguration(
         string value = configuration["EngineConfiguration:HostAddress"]
             ?? (engineKind == "podman" ? "host.containers.internal" : "host.docker.internal");
 
-        if (string.IsNullOrWhiteSpace(value) || value.Contains("://", StringComparison.Ordinal))
+        if (Uri.CheckHostName(value) == UriHostNameType.Unknown)
         {
             throw new InvalidOperationException("EngineConfiguration:HostAddress must be a host name or IP address without a URI scheme.");
         }

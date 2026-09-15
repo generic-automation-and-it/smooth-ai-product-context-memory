@@ -5,16 +5,13 @@ ownership_label="io.smooth-mimisbrunnr.installation"
 managed_label="io.smooth-mimisbrunnr.managed"
 installation_id="${InstallationConfiguration__Id:-default}"
 command_name="${1:-run}"
+stop_timeout="${ControllerConfiguration__StopTimeoutSeconds:-30}"
+PATH="/app:$PATH"
+export PATH
 
 fail() {
   echo "mimisbrunnr-controller: $*" >&2
   exit 1
-}
-
-require_value() {
-  variable_name="$1"
-  value="$(printenv "$variable_name" 2>/dev/null || true)"
-  [ -n "$value" ] || fail "required configuration '$variable_name' is missing"
 }
 
 validate_installation_id() {
@@ -29,10 +26,10 @@ validate_installation_id() {
 
 container_names() {
   printf '%s\n' \
+    "mimisbrunnr-${installation_id}-host" \
     "mimisbrunnr-${installation_id}-postgres" \
     "mimisbrunnr-${installation_id}-blob-well" \
-    "mimisbrunnr-${installation_id}-seq" \
-    "mimisbrunnr-${installation_id}-host"
+    "mimisbrunnr-${installation_id}-seq"
 }
 
 volume_names() {
@@ -42,42 +39,77 @@ volume_names() {
     "mimisbrunnr-${installation_id}-seq-data"
 }
 
-container_label() {
-  docker inspect --format "{{ index .Config.Labels \"$1\" }}" "$2" 2>/dev/null || true
-}
-
-volume_label() {
-  docker volume inspect --format "{{ index .Labels \"$1\" }}" "$2" 2>/dev/null || true
-}
-
-verify_container_ownership() {
-  container_name="$1"
-  docker container inspect "$container_name" >/dev/null 2>&1 || return 1
-
-  owner="$(container_label "$ownership_label" "$container_name")"
-  managed="$(container_label "$managed_label" "$container_name")"
-  [ "$owner" = "$installation_id" ] && [ "$managed" = "true" ] ||
-    fail "container '$container_name' exists but is not owned by installation '$installation_id'"
-}
-
-ensure_volume() {
-  volume_name="$1"
-  if docker volume inspect "$volume_name" >/dev/null 2>&1; then
-    owner="$(volume_label "$ownership_label" "$volume_name")"
-    managed="$(volume_label "$managed_label" "$volume_name")"
-    [ "$owner" = "$installation_id" ] && [ "$managed" = "true" ] ||
-      fail "volume '$volume_name' exists but is not owned by installation '$installation_id'"
-    return
-  fi
-
-  docker volume create \
-    --label "$ownership_label=$installation_id" \
-    --label "$managed_label=true" \
-    "$volume_name" >/dev/null
-}
-
 check_engine() {
-  docker version >/dev/null 2>&1 || fail "container engine is unreachable through DOCKER_HOST='${DOCKER_HOST:-unset}'"
+  case "${DOCKER_HOST:-unix:///var/run/docker.sock}" in
+    unix://*) ;;
+    tcp://*) [ "${DOCKER_TLS_VERIFY:-}" = 1 ] || fail "TCP engine access requires DOCKER_TLS_VERIFY=1 and mutual TLS credentials" ;;
+    *) fail "engine transport must be a Unix socket or mutually authenticated TLS" ;;
+  esac
+  docker version >/dev/null 2>&1 || fail "container engine is unreachable; check DOCKER_HOST, socket permissions, and TLS configuration"
+}
+
+verify_controller_identity() {
+  controller_name="mimisbrunnr-${installation_id}-controller"
+  controller_hostname="$(printenv HOSTNAME || true)"
+  case "$controller_hostname" in
+    ""|*[!0-9a-f]*) fail "retain the engine-generated controller hostname (container ID)" ;;
+  esac
+  [ "${#controller_hostname}" -ge 12 ] || fail "controller hostname must be its container ID (at least 12 characters)"
+  controller_identity="$(docker container inspect --format '{{.Id}} {{.State.Running}}' "$controller_name")" ||
+    fail "start this command in a container named '$controller_name'; remove a stopped controller explicitly before replacement"
+  case "$controller_identity" in
+    "$controller_hostname"*" true") ;;
+    *) fail "this process does not own canonical controller '$controller_name'; do not run a second controller or override its hostname" ;;
+  esac
+}
+
+preflight_resources() {
+  existing_containers="$(docker container ls --all --format '{{.Names}}')" || fail "cannot list containers"
+  existing_volumes="$(docker volume ls --format '{{.Name}}')" || fail "cannot list volumes"
+  owned_containers=""
+  owned_volumes=""
+  missing_volumes=""
+
+  for container_name in $(container_names); do
+    case "
+$existing_containers
+" in
+      *"
+$container_name
+"*)
+        identity="$(docker container inspect --format "{{.Id}} {{ index .Config.Labels \"$ownership_label\" }} {{ index .Config.Labels \"$managed_label\" }}" "$container_name")" ||
+          fail "cannot inspect container '$container_name'"
+        container_id="${identity%% *}"
+        [ "$identity" = "$container_id $installation_id true" ] ||
+          fail "container '$container_name' exists but is not owned by installation '$installation_id'"
+        owned_containers="${owned_containers}${container_id} ${container_name}
+"
+        ;;
+    esac
+  done
+
+  for volume_name in $(volume_names); do
+    case "
+$existing_volumes
+" in
+      *"
+$volume_name
+"*)
+        verify_volume_ownership "$volume_name"
+        owned_volumes="${owned_volumes}${volume_name}
+"
+        ;;
+      *) missing_volumes="${missing_volumes}${volume_name}
+" ;;
+    esac
+  done
+}
+
+verify_volume_ownership() {
+  identity="$(docker volume inspect --format "{{ index .Labels \"$ownership_label\" }} {{ index .Labels \"$managed_label\" }}" "$1")" ||
+    fail "cannot inspect volume '$1'"
+  [ "$identity" = "$installation_id true" ] ||
+    fail "volume '$1' exists but is not owned by installation '$installation_id'"
 }
 
 configure_engine() {
@@ -104,73 +136,71 @@ configure_engine() {
 }
 
 stop_owned_containers() {
-  container_names | while IFS= read -r container_name; do
-    if verify_container_ownership "$container_name"; then
-      docker rm --force "$container_name" >/dev/null
-      echo "Removed owned container $container_name"
-    fi
+  printf '%s' "$owned_containers" | while read -r container_id container_name; do
+    docker stop --time "$stop_timeout" "$container_id" >/dev/null || exit 1
+    docker rm "$container_id" >/dev/null || exit 1
+    echo "Removed owned container $container_name"
   done
 }
 
 reset_owned_volumes() {
-  volume_names | while IFS= read -r volume_name; do
-    docker volume inspect "$volume_name" >/dev/null 2>&1 || continue
-    owner="$(volume_label "$ownership_label" "$volume_name")"
-    managed="$(volume_label "$managed_label" "$volume_name")"
-    [ "$owner" = "$installation_id" ] && [ "$managed" = "true" ] ||
-      fail "volume '$volume_name' exists but is not owned by installation '$installation_id'"
+  printf '%s' "$owned_volumes" | while IFS= read -r volume_name; do
+    verify_volume_ownership "$volume_name"
     docker volume rm "$volume_name" >/dev/null
     echo "Removed owned volume $volume_name"
   done
 }
 
 run_controller() {
-  require_value PostgresConfiguration__Password
-  require_value BlobConfiguration__AccessKey
-  require_value BlobConfiguration__SecretKey
-  require_value HostConfiguration__Image
-
-  case "$HostConfiguration__Image" in
-    *@sha256:????????????????????????????????????????????????????????????????) ;;
-    *) fail "HostConfiguration__Image must be pinned by sha256 digest" ;;
-  esac
-
-  configure_engine
-  check_engine
-
-  container_names | while IFS= read -r container_name; do
-    verify_container_ownership "$container_name" || true
-  done
-  stop_owned_containers
-  volume_names | while IFS= read -r volume_name; do
-    ensure_volume "$volume_name"
-  done
-
   export AppHostConfiguration__Mode=Release
   export HostConfiguration__UseProject=false
+  export DOTNET_ENVIRONMENT=Production
+  export ASPNETCORE_ENVIRONMENT=Production
   export InstallationConfiguration__Id="$installation_id"
   export DCP_WORKLOAD_ID="mimisbrunnr-${installation_id}"
   export ASPIRE_DASHBOARD_FRONTEND_AUTH_MODE=BrowserToken
   export DCP_INSTANCE_ID_PREFIX="mimisbrunnr-${installation_id}"
 
-  echo "Starting Mímisbrunnr controller version ${ReleaseConfiguration__Version:-development}; installation=$installation_id; engine=$engine_kind; api=$HostConfiguration__Image"
+  SmoothAiProductContextMemory.AppHost --validate-configuration || fail "release configuration validation failed; no workloads changed"
+  check_engine
+  verify_controller_identity
+  preflight_resources
+  stop_owned_containers
+  printf '%s' "$missing_volumes" | while IFS= read -r volume_name; do
+    docker volume create \
+      --label "$ownership_label=$installation_id" \
+      --label "$managed_label=true" \
+      "$volume_name" >/dev/null
+    verify_volume_ownership "$volume_name"
+  done
+
+  echo "Starting Mimisbrunnr controller version ${ReleaseConfiguration__Version:-development}; installation=$installation_id; engine=$engine_kind"
 
   shutdown_requested=false
   apphost_pid=""
   handle_shutdown() {
+    [ "$shutdown_requested" = false ] || return 0
     shutdown_requested=true
     [ -z "$apphost_pid" ] || kill -TERM "$apphost_pid" 2>/dev/null || true
   }
   trap handle_shutdown INT TERM
 
-  /app/SmoothAiProductContextMemory.AppHost &
+  SmoothAiProductContextMemory.AppHost &
   apphost_pid=$!
+  if [ "$shutdown_requested" = true ]; then
+    kill -TERM "$apphost_pid" 2>/dev/null || true
+  fi
   set +e
-  wait "$apphost_pid"
-  apphost_status=$?
+  while :; do
+    wait "$apphost_pid"
+    apphost_status=$?
+    kill -0 "$apphost_pid" 2>/dev/null || break
+  done
   set -e
 
   if [ "$shutdown_requested" = true ]; then
+    verify_controller_identity
+    preflight_resources
     stop_owned_containers
   fi
 
@@ -178,17 +208,32 @@ run_controller() {
 }
 
 validate_installation_id
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+case "$stop_timeout" in
+  ""|*[!0-9]*|?????*) fail "ControllerConfiguration__StopTimeoutSeconds must be between 1 and 3600" ;;
+esac
+[ "$stop_timeout" -ge 1 ] && [ "$stop_timeout" -le 3600 ] ||
+  fail "ControllerConfiguration__StopTimeoutSeconds must be between 1 and 3600"
 
 case "$command_name" in
   run)
+    configure_engine
     run_controller
     ;;
   stop)
+    configure_engine
     check_engine
+    verify_controller_identity
+    preflight_resources
     stop_owned_containers
     ;;
   reset)
+    configure_engine
     check_engine
+    verify_controller_identity
+    preflight_resources
     stop_owned_containers
     reset_owned_volumes
     ;;

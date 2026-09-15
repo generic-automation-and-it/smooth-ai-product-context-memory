@@ -220,7 +220,11 @@ internal static class DistributedApplicationBuilderExtensions
                 return resource;
             }
 
-            resource.WithEndpoint(endpointName, endpoint => endpoint.IsProxied = false, createIfNotExists: false);
+            resource.WithEndpoint(endpointName, endpoint =>
+            {
+                endpoint.IsProxied = false;
+                endpoint.TargetHost = configuration.EngineBindAddress;
+            }, createIfNotExists: false);
             return resource.OnResourceEndpointsAllocated((model, _, _) =>
             {
                 EndpointAnnotation endpoint = model.Annotations
