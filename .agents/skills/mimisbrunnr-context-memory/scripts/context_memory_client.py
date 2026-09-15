@@ -276,6 +276,74 @@ def _render_path(path):
     return f"depth={path.get('depth')}: {chain}{endpoint_label} ({endpoint.get('uuid', '?')})"
 
 
+def _ticket_identity(value, field):
+    if (not isinstance(value, dict) or set(value) != {"provider", "key"}
+            or any(not isinstance(value[k], str) or not value[k].strip()
+                   for k in ("provider", "key"))):
+        raise ClientError(0, "bad-input", f"'{field}' requires exact non-empty provider/key strings")
+
+
+def cmd_ticket_parent(args):
+    """PUT an explicit declaration, or inspect locally without any network call."""
+    payload = read_payload(args.payload)
+    required = {"child", "parent", "expectedParent", "reason", "source"}
+    if (not isinstance(payload, dict) or not required <= payload.keys()
+            or payload.keys() - required - {"observedAt"}):
+        raise ClientError(0, "bad-input", "'ticket-parent' requires child, parent, expectedParent, reason, source")
+    _ticket_identity(payload["child"], "child")
+    for field in ("parent", "expectedParent"):
+        if payload[field] is not None:
+            _ticket_identity(payload[field], field)
+            if payload[field] == payload["child"]:
+                raise ClientError(0, "bad-input", "A child cannot be its own parent")
+    for field in ("reason", "source"):
+        if not isinstance(payload[field], str) or not payload[field].strip():
+            raise ClientError(0, "bad-input", f"'{field}' must be a non-empty string")
+    if payload.get("observedAt") is not None:
+        from datetime import datetime
+
+        try:
+            observed = datetime.fromisoformat(payload["observedAt"].replace("Z", "+00:00"))
+            if observed.tzinfo is None:
+                raise ValueError()
+        except (AttributeError, TypeError, ValueError):
+            raise ClientError(0, "bad-input", "'observedAt' must be an ISO timestamp with timezone") from None
+    operation = ("remove" if payload["parent"] is None else
+                 "set" if payload["expectedParent"] is None else "reparent")
+    if args.dryrun:
+        resp = {"dryRun": True, "operation": operation, "request": payload,
+                "validation": "Local shape only; ownership, cycles and expected parent are unverified."}
+    else:
+        resp = _request("PUT", "/api/context/tickets/parent", payload)
+    print(json.dumps(resp, indent=2))
+    return resp
+
+
+def cmd_ticket_paths(args):
+    """Separate ticket traversal; preserve the entire response, including disclosure."""
+    payload = read_payload(args.payload)
+    allowed = {"anchor", "maxDepth", "direction", "scopeDimension", "kind", "pathLimit", "memoryLimit"}
+    if not isinstance(payload, dict) or payload.keys() - allowed:
+        raise ClientError(0, "bad-input", "'ticket-paths' requires an object with supported fields")
+    _ticket_identity(payload.get("anchor"), "anchor")
+    depth = payload.get("maxDepth")
+    if type(depth) is not int or not 1 <= depth <= 5:
+        raise ClientError(0, "bad-input", "'ticket-paths' requires 'maxDepth' as an integer in 1..5")
+    payload.setdefault("direction", "outbound")
+    if payload["direction"] not in ("outbound", "inbound", "either"):
+        raise ClientError(0, "bad-input", "'direction' must be outbound, inbound or either")
+    for field in ("pathLimit", "memoryLimit"):
+        payload.setdefault(field, 50)
+        if type(payload[field]) is not int or not 1 <= payload[field] <= MAX_QUERY_LIMIT:
+            raise ClientError(0, "bad-input", f"'{field}' must be an integer in 1..{MAX_QUERY_LIMIT}")
+    for field in ("scopeDimension", "kind"):
+        if payload.get(field) is not None and (not isinstance(payload[field], str) or not payload[field].strip()):
+            raise ClientError(0, "bad-input", f"'{field}' must be a non-empty string or null")
+    resp = _request("POST", "/api/context/tickets/paths", payload)
+    print(json.dumps(resp, indent=2))
+    return resp
+
+
 def main():
     parser = argparse.ArgumentParser(prog="context_memory_client")
     parser.add_argument("--base-url", help="override " + ENV_BASE_URL)
@@ -344,6 +412,15 @@ def main():
     p = sub.add_parser("paths", help="POST /api/context/paths (bounded multi-hop traversal)")
     p.add_argument("--payload", help="JSON file; defaults to stdin")
     p.set_defaults(func=cmd_paths)
+
+    p = sub.add_parser("ticket-parent", help="PUT /api/context/tickets/parent (declared hierarchy only)")
+    p.add_argument("--payload", help="JSON file; defaults to stdin")
+    p.add_argument("--dryrun", action="store_true", help="local inspection only; no request or write")
+    p.set_defaults(func=cmd_ticket_parent)
+
+    p = sub.add_parser("ticket-paths", help="POST /api/context/tickets/paths (required depth 1..5)")
+    p.add_argument("--payload", help="JSON file; defaults to stdin")
+    p.set_defaults(func=cmd_ticket_paths)
 
     args = parser.parse_args()
 

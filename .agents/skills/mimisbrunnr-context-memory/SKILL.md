@@ -139,17 +139,19 @@ stale, not an alternative reading.
 
 ## Deterministic Components
 
-The judgement below runs through three thin scripts under `.agents/skills/mimisbrunnr-context-memory/scripts/`.
-They carry no secrets, never read/write the store themselves, and move JSON over the store's HTTP API. The
-agent assembles payloads and interprets results; the scripts do not decide. Root the base URL via
+The judgement below uses thin scripts under `.agents/skills/mimisbrunnr-context-memory/scripts/`.
+They carry no secrets and never access database or blob storage directly. Only the client moves JSON
+over the HTTP API; the other scripts are offline. The agent assembles payloads and interprets results;
+the scripts do not decide semantic relevance. Root the base URL via
 `CONTEXT_MEMORY_BASE_URL` (fallback `http://localhost:5141`); always `probe` first for an honest
 NOT-AVAILABLE, never a silent miss.
 
 | Script | Invocation | Pipeline stage | What it does (and does NOT do) |
 |---|---|---|---|
-| `context_memory_client.py` | `python3 .../context_memory_client.py <subcommand>` | 1 (preflight), 3 (dedup/links), 5 (write) | Base-URL resolution + health probe, all HTTP calls, JSON assembly from a payload file or stdin, over-cap batch refusal at the **20-candidate cap** (preflight and set both refuse; indices are request-relative, so batches are never silently chunked). Subcommands: `probe`, `preflight`, `set` (with `--dryrun`), `query`, `get-versions`, `get-blob`, `resolve-group`, `update-group`, `append-description`, `create-link`, `paths`, `labels`, `propose-label`, `initiatives`, `upsert-initiative`. |
+| `context_memory_client.py` | `python3 .../context_memory_client.py <subcommand>` | 1 (preflight), 3 (dedup/links), 5 (write) | Base-URL resolution + health probe, all HTTP calls, JSON assembly from a payload file or stdin, over-cap batch refusal at the **20-candidate cap** (preflight and set both refuse; indices are request-relative, so batches are never silently chunked). Subcommands: `probe`, `preflight`, `set` (with `--dryrun`), `query`, `get-versions`, `get-blob`, `resolve-group`, `update-group`, `append-description`, `create-link`, `paths`, `ticket-parent` (with local `--dryrun`), `ticket-paths`, `labels`, `propose-label`, `initiatives`, `upsert-initiative`. |
 | `redact.py` | `echo '<json array of content strings>' \| python3 .../redact.py` | 2 (redact) | Fingerprint secret detection, stdin→stdout. Emits redacted content plus `{candidate_index, rule_name, hit_count}` findings. **Reports rule names only** — never the matched span, never the content. Redact-and-flag (LADR-003); never rejects. |
 | `atomicity.py` | `echo '<json array of {description,statement}>' \| python3 .../atomicity.py` | 4 (atomicity) | Conservative bundle detector, stdin→stdout. Flags `simple` / `bundled` per candidate. It is a detector only — the split-vs-skip decision and the routing of the unprocessable remainder stay here, in the agent's judgement (LADR-002). |
+| `near_miss_tags.py` | `python3 .../near_miss_tags.py < approved-evidence.json` | Read-only reporting | Bounded stdin JSON validation, exact tag comparison, scoped `near-miss-tag` output. No network, file output, vocabulary lookup or semantic heuristic. See Evidence-only Near Misses below. |
 
 The **semantic dedup** decision is a two-call composition, never a single preflight:
 
@@ -240,6 +242,152 @@ dedup and filter surface, traversal (`paths`) is for following actual written ed
 - Output is rendered per-path with a **`summary`** line (relation chain ending in the endpoint's
   name) so the connection is readable without joining UUIDs; the full hop data (UUIDs, relations,
   reasons) is preserved beneath it.
+
+## Declared Ticket Hierarchy
+
+Authority: [HLD-002 LADR-08](../../../docs/hlds/002-context-memory-write-pipeline/ladrs/LADR-08-practitioner-declared-ticket-hierarchy.md)
+and [HLD-003 LADR-08](../../../docs/hlds/003-graph-edges-on-age/ladrs/LADR-08-captured-ticket-hierarchy.md).
+
+- Accumulate **explicit practitioner declarations only**, then carry them into the authorized
+  end-of-task `set` checkpoint. No parent inference from spelling, shared groups, memory claims/links,
+  or tracker polling. Ambiguous intent requires clarification, not a proposed hierarchy write.
+- `--approve` remains the human-confirmed memory-status gate; it does not grant hierarchy permission.
+  Hierarchy has no proposed status. A declaration authorizes only its stated set/reparent/remove;
+  it does not authorize future replacements or retries with a changed expected parent.
+- Run `context_memory_client.py ticket-parent --payload declaration.json` only at that checkpoint.
+  It sends `PUT /api/context/tickets/parent` with this shape:
+
+```json
+{
+  "child": {"provider": "github", "key": "42"},
+  "parent": {"provider": "github", "key": "10"},
+  "expectedParent": null,
+  "reason": "Practitioner explicitly assigned this task to this feature.",
+  "source": "Practitioner declaration at the capture checkpoint",
+  "observedAt": "2026-09-14T12:00:00Z"
+}
+```
+
+- Preserve provider/key strings exactly: no normalization, aliases or URL-derived identity.
+  `parent` and `expectedParent` must both be present, including explicit `null`. Set expects absence;
+  reparent names the expected current parent; remove sets `parent: null` and names the expected parent.
+  Supply `reason`/`source` each time. `observedAt` is optional source observation time; never supply
+  server-owned `recordedAt` or claim either timestamp proves upstream freshness.
+- `ticket-parent --dryrun` validates the same shape and prints the intended operation/request with
+  **zero network calls or writes**. It cannot validate ownership, cycles or current expected parent.
+  Use this local inspection for hierarchy in a skill-wide dry-run; never send the PUT in that mode.
+- Render the operation and complete server receipt. Report conflicts/failures separately, never as
+  success; do not silently retry with a different expectation. Reparent replaces and remove deletes
+  current state, not history. A separate hierarchy request is not atomic with memory `set`; report
+  partial outcomes honestly. Never substitute memory `LINKS` for ticket declarations.
+- The server checks `expectedParent` **before** identical-state no-op detection. Supplying the
+  expected current parent and identical parent/reason/source/observedAt returns `changed: false`
+  without changing `recordedAt`. Replaying an initial set with its old `expectedParent: null` after
+  success conflicts, even if the desired parent already matches. No operation replay token exists;
+  an uncertain outcome is not permission to rewrite the expectation or claim a retry succeeded.
+
+## Ticket Traversal (`ticket-paths`)
+
+`context_memory_client.py ticket-paths` sends `POST /api/context/tickets/paths`:
+
+```json
+{
+  "anchor": {"provider": "github", "key": "10"},
+  "maxDepth": 2,
+  "direction": "outbound",
+  "pathLimit": 50,
+  "memoryLimit": 50
+}
+```
+
+- `maxDepth` is required, integer **1..5**, bounding ticket hops, not memory provenance hops.
+  Direction is `outbound` (parent to children, default), `inbound` (toward parents), or `either`.
+  Optional `scopeDimension` and `kind` narrow the read; path/memory limits default to 50 each,
+  valid **1..200**. The client sends these defaults explicitly and never chunks or retries.
+- A ticket is not scope consent. Only the caller's explicit dimension declaration authorizes that
+  read. Never auto-retry 403 with `program`. Server resolves every ticket's live owner, drops hidden
+  paths whole and narrows returned memories. Shared group membership establishes no hierarchy.
+- Render **the entire response, including `disclosure`, on normal, empty and capped results**.
+  Preserve ordered hops, reason/source/observedAt/recordedAt, items, declared limits and every cap flag;
+  never render only `paths` or only `items`. Current non-proposed memories come from selected capped
+  path endpoint groups plus the anchor's group, even without an edge, subject to scope and memory cap.
+  Paths dropped by the path cap add no memories. Do not claim dossier history or complete tracker coverage.
+- Always state: **undeclared upstream hierarchy was not followed; upstream freshness is unverified**.
+  Missing/unavailable endpoint means captured ticket traversal unavailable, not no hierarchy. Preserve
+  server errors without fallback to memory paths, upstream lookup, scope broadening or invented parents.
+  Local rootlessness never proves the upstream ticket is a root. Disclosures are generic, never hidden
+  identities/counts or reconstructed hidden branches.
+
+## Evidence-only Near Misses
+
+Authority: [HLD-005 LADR-10](../../../docs/hlds/005-contextual-export/ladrs/LADR-10-tag-anchors-have-no-graph-representation.md)
+and [NFR-04](../../../docs/hlds/005-contextual-export/nfrs/NFR-04-completeness.md). This is narrow,
+read-only reporting, **not** the full dossier feature, tag identity, synonym support or a tag graph.
+
+1. Freeze the original exact tag criteria (`any` overlap by default, `all` only if explicit), non-tag
+   filters, selected UUID/versions and all disclosure/cap metadata. A no-match remains a no-match.
+2. Use only evidence explicitly supplied by the caller or already authorized and examined for the
+   task. Fix an approval manifest of UUID/version pairs and an examined-scope name **before** analysis.
+   Do not grant authorization by inserting a discovered record into that manifest. An API ticket/group
+   shortcut, a plausible synonym, or a finding is not consent to hidden material.
+3. The caller/skill judges semantic relevance against those criteria and supplied claims, including
+   applicability. For each judgement, supply a concrete explanation and an exact supporting quote
+   from that UUID/version's examined statement. `relevant: true` is analysis, not a synonym fact.
+   Tag difference alone, word overlap, edit distance and a global vocabulary are not relevance grounds.
+4. Run the offline helper with this strict input schema. Every listed field is required; unknown
+   structural fields fail. `analyses: []` or `records: []` is valid and produces no findings.
+
+```json
+{
+  "scope": {
+    "name": "Caller-supplied product database evidence",
+    "authorization": "explicitly-supplied",
+    "records": [{"uuid": "aaaaaaaa-0000-4000-8000-000000000001", "version": 1}]
+  },
+  "criteria": {"tags": ["postgres"], "tagsMatchMode": "any", "nonTagFilters": {"scopeDimension": "product"}},
+  "records": [{
+    "uuid": "aaaaaaaa-0000-4000-8000-000000000001", "version": 1,
+    "scope": "Caller-supplied product database evidence", "tags": ["database"],
+    "statement": "The product database uses PostgreSQL."
+  }],
+  "analyses": [{
+    "uuid": "aaaaaaaa-0000-4000-8000-000000000001", "version": 1, "relevant": true,
+    "basis": {
+      "classification": "analysis", "author": "skill",
+      "explanation": "The supplied claim directly concerns PostgreSQL in the requested product scope.",
+      "quote": "The product database uses PostgreSQL."
+    }
+  }],
+  "selected": [],
+  "disclosure": {"pathLimitReached": false, "memoryLimitReached": false}
+}
+```
+
+`authorization` is `explicitly-supplied` or `already-authorized`; `author` is `caller` or `skill`.
+`scope.records` is the approved allowlist, not a query. Record `scope` names that same examined scope;
+retain actual selection filters separately in `criteria.nonTagFilters`. References require canonical
+non-zero UUIDs and positive integer versions. Supporting statements are caller-supplied examined text,
+not fetched by the helper. Authorization truth and semantic quality remain the skill's responsibility:
+the helper validates consistency, not credentials or reasoning correctness.
+
+5. Render each `near-miss-tag` with UUID/version, scope, **observed exact mismatch** and separately
+   labelled **analysis basis**. The helper emits a finding only for `relevant: true` plus failed exact
+   tag predicate. Matching tags or absent relevance evidence produce no mismatch finding. It checks
+   quotes occur in the referenced supplied statement and rejects unapproved/unexamined references.
+6. Preserve `selected` and `disclosure` unchanged. The helper limits input to 1 MiB, 200 records,
+   200 analyses/references per list, and 200 tags per list; it rejects over-cap input without partial
+   output. These are local report safety bounds, **not** dossier-wide caps. Narrow approved evidence
+   explicitly if needed; never silently truncate. Output qualifies even an empty findings list by
+   examined scope and states tag relationships were not followed.
+
+**No additional query, synonym search, candidate recall, registry scan, relaxed filter, blob fetch,
+extra traversal or automatic broadening to find near misses. No hidden/global vocabulary.** No tag
+registration, graph mutation, memory recapture or writer invocation from this workflow. Evidence may
+support likely relevance, but neither a no-match nor an empty report proves store-wide absence. Caps,
+scope and other non-tag filters can exclude independently; exact tag mismatch does not establish
+that tags alone caused omission, that a synonym exists, or that any unseen record was excluded.
+Findings never add evidence records to the selected set. Further retrieval or correction requires a
+separate caller-authorized task; hierarchy still requires an explicit declaration at its checkpoint.
 
 ## Finalization Output
 

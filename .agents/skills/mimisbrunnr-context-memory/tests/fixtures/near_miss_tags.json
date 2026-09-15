@@ -1,0 +1,36 @@
+{
+  "evidence": {
+    "scope": {
+      "name": "Caller-approved product database evidence",
+      "authorization": "explicitly-supplied",
+      "records": [{"uuid": "aaaaaaaa-0000-4000-8000-000000000001", "version": 1}]
+    },
+    "criteria": {"tags": ["postgres"], "tagsMatchMode": "any", "nonTagFilters": {"scopeDimension": "product"}},
+    "records": [{
+      "uuid": "aaaaaaaa-0000-4000-8000-000000000001", "version": 1,
+      "tags": ["database"], "scope": "Caller-approved product database evidence",
+      "statement": "The product database uses PostgreSQL."
+    }],
+    "analyses": [{
+      "uuid": "aaaaaaaa-0000-4000-8000-000000000001", "version": 1, "relevant": true,
+      "basis": {
+        "classification": "analysis", "author": "skill",
+        "explanation": "The supplied claim directly concerns PostgreSQL in the requested product scope.",
+        "quote": "The product database uses PostgreSQL."
+      }
+    }],
+    "selected": [],
+    "disclosure": {
+      "pathLimitReached": true, "memoryLimitReached": true,
+      "qualification": "Only visible results are represented."
+    }
+  },
+  "cases": [
+    {"name": "grounded mismatch", "tags": ["database"], "relevant": true, "findings": 1},
+    {"name": "exact match", "tags": ["postgres"], "relevant": true, "findings": 0},
+    {"name": "any overlap is a match", "tags": ["postgres", "database"], "relevant": true, "findings": 0},
+    {"name": "unrelated tag is insufficient", "tags": ["billing"], "relevant": false, "findings": 0},
+    {"name": "plausible synonym without judgement", "tags": ["PostgreSQL"], "relevant": null, "findings": 0},
+    {"name": "empty tags with grounded relevance", "tags": [], "relevant": true, "findings": 1}
+  ]
+}

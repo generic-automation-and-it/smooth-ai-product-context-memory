@@ -9,12 +9,17 @@ Run: python3 tests/run_tests.py
 """
 
 import importlib.util
+import copy
+import io
 import json
 import os
+import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout, redirect_stderr
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
 SCRIPTS = HERE.parent / "scripts"
@@ -30,6 +35,7 @@ def _load(name):
 redact = _load("redact")
 atomicity = _load("atomicity")
 client = _load("context_memory_client")
+near_miss = _load("near_miss_tags")
 
 
 def _scrub_item(content):
@@ -175,6 +181,277 @@ class PathsClientTests(unittest.TestCase):
         with handle:
             json.dump(obj, handle)
         return handle.name
+
+
+class TicketClientTests(unittest.TestCase):
+    CHILD = {"provider": "GitHub ", "key": " 42"}
+    PARENT = {"provider": "github", "key": "10"}
+
+    def parent_payload(self):
+        return {"child": self.CHILD, "parent": self.PARENT, "expectedParent": None,
+                "reason": "Practitioner declared this parent.", "source": "Checkpoint declaration",
+                "observedAt": "2026-09-14T12:00:00Z"}
+
+    def invoke(self, command, payload, response=None, dryrun=False):
+        output = io.StringIO()
+        with patch.object(client, "read_payload", return_value=copy.deepcopy(payload)), \
+                patch.object(client, "_request", return_value=response) as request, redirect_stdout(output):
+            result = command(SimpleNamespace(payload=None, dryrun=dryrun))
+        self.assertEqual(json.loads(output.getvalue()), result)
+        return result, request
+
+    def assert_rejected(self, command, payload):
+        with patch.object(client, "read_payload", return_value=payload), \
+                patch.object(client, "_request") as request:
+            with self.assertRaises(client.ClientError):
+                command(SimpleNamespace(payload=None, dryrun=False))
+            request.assert_not_called()
+
+    def test_parent_set_reparent_remove_exact_transport_and_receipt(self):
+        for parent, expected in ((self.PARENT, None), (self.PARENT, {"provider": "jira", "key": "OLD-1"}),
+                                 (None, self.PARENT)):
+            payload = self.parent_payload() | {"parent": parent, "expectedParent": expected}
+            response = {"changed": True, "declaration": payload, "extra": "preserved"}
+            result, request = self.invoke(client.cmd_ticket_parent, payload, response)
+            request.assert_called_once_with("PUT", "/api/context/tickets/parent", payload)
+            self.assertEqual(result, response)
+
+    def test_parent_dryrun_has_no_network_and_same_validated_payload(self):
+        for parent, expected, operation in ((self.PARENT, None, "set"),
+                                            (self.PARENT, self.PARENT, "reparent"),
+                                            (None, self.PARENT, "remove")):
+            payload = self.parent_payload() | {"parent": parent, "expectedParent": expected}
+            result, request = self.invoke(client.cmd_ticket_parent, payload, dryrun=True)
+            request.assert_not_called()
+            self.assertEqual(result["request"], payload)
+            self.assertEqual(result["operation"], operation)
+            self.assertIn("unverified", result["validation"])
+
+    def test_parent_guards_before_transport(self):
+        valid = self.parent_payload()
+        invalid = [[], None, valid | {"recordedAt": "server-owned"}]
+        invalid += [{k: v for k, v in valid.items() if k != missing}
+                    for missing in ("child", "parent", "expectedParent", "reason", "source")]
+        invalid += [valid | {field: value} for field, value in (
+            ("child", None), ("parent", {}), ("expectedParent", "unknown"),
+            ("parent", self.CHILD), ("reason", " "), ("source", 3),
+            ("observedAt", "yesterday"), ("observedAt", True),
+            ("observedAt", "2026-09-14T12:00:00"),
+            ("child", {"provider": "github", "key": "42", "url": "ignored?"}),
+        )]
+        for payload in invalid:
+            with self.subTest(payload=payload):
+                self.assert_rejected(client.cmd_ticket_parent, payload)
+
+    def test_ticket_paths_preserves_full_empty_and_capped_disclosure(self):
+        for paths in ([], [{"depth": 1, "hops": [{"parent": self.PARENT, "child": self.CHILD,
+                       "reason": "Declared", "source": "User", "observedAt": None,
+                       "recordedAt": "2026-09-14T12:00:00Z"}]}]):
+            for capped in (False, True):
+                payload = {"anchor": self.PARENT, "maxDepth": 2}
+                response = {"paths": paths, "items": [{"uuid": "anchor-memory", "version": 1}],
+                            "disclosure": {"maxDepth": 2, "pathLimit": 50, "memoryLimit": 50,
+                                           "depthLimitReached": capped, "pathLimitReached": capped,
+                                           "memoryLimitReached": capped,
+                                           "hierarchyCoverage": "Undeclared upstream hierarchy was not followed; upstream freshness is unverified."},
+                            "futureDisclosure": {"preserve": True}}
+                result, request = self.invoke(client.cmd_ticket_paths, payload, response)
+                self.assertEqual(result, response)
+                request.assert_called_once_with("POST", "/api/context/tickets/paths",
+                                                payload | {"direction": "outbound", "pathLimit": 50, "memoryLimit": 50})
+
+    def test_ticket_paths_explicit_filters_and_boundaries(self):
+        for direction in ("outbound", "inbound", "either"):
+            for depth in (1, 5):
+                payload = {"anchor": self.CHILD, "maxDepth": depth, "direction": direction,
+                           "scopeDimension": "program", "kind": "decision", "pathLimit": 1, "memoryLimit": 200}
+                _, request = self.invoke(client.cmd_ticket_paths, payload, {})
+                request.assert_called_once_with("POST", "/api/context/tickets/paths", payload)
+
+    def test_ticket_paths_guards_before_transport(self):
+        valid = {"anchor": self.PARENT, "maxDepth": 2}
+        invalid = [[], None, {"anchor": self.PARENT}, {"maxDepth": 2}, valid | {"scope": "program"}]
+        invalid += [valid | {"maxDepth": value} for value in (None, 0, -1, 6, True, "2", 2.0)]
+        invalid += [valid | {"anchor": value} for value in (None, {}, "github:10", {"provider": " ", "key": "10"})]
+        invalid += [valid | {field: value} for field in ("pathLimit", "memoryLimit")
+                    for value in (0, -1, 201, True, "50", None)]
+        invalid += [valid | {"direction": value} for value in (None, "both", True, [])]
+        invalid += [valid | {field: value} for field in ("scopeDimension", "kind") for value in (" ", [], 3)]
+        for payload in invalid:
+            with self.subTest(payload=payload):
+                self.assert_rejected(client.cmd_ticket_paths, payload)
+
+    def test_errors_propagate_without_retry_or_scope_change(self):
+        for command, payload in ((client.cmd_ticket_paths, {"anchor": self.PARENT, "maxDepth": 2}),
+                                 (client.cmd_ticket_parent, self.parent_payload())):
+            for status in (403, 404, 409, 503):
+                with patch.object(client, "read_payload", return_value=copy.deepcopy(payload)), \
+                        patch.object(client, "_request", side_effect=client.ClientError(status, "error", "generic")) as request:
+                    with self.assertRaises(client.ClientError) as error:
+                        command(SimpleNamespace(payload=None, dryrun=False))
+                    self.assertEqual(error.exception.status, status)
+                    request.assert_called_once()
+
+    def test_cli_routes_stdin_commands(self):
+        for command, payload, method, endpoint in (
+            ("ticket-parent", self.parent_payload(), "PUT", "/api/context/tickets/parent"),
+            ("ticket-paths", {"anchor": self.PARENT, "maxDepth": 1}, "POST", "/api/context/tickets/paths"),
+        ):
+            with patch.object(sys, "argv", ["client", command]), \
+                    patch.object(sys, "stdin", io.StringIO(json.dumps(payload))), \
+                    patch.object(client, "_request", return_value={"disclosure": "kept"}) as request, \
+                    redirect_stdout(io.StringIO()) as output:
+                client.main()
+            self.assertEqual(request.call_args.args[:2], (method, endpoint))
+            self.assertEqual(json.loads(output.getvalue()), {"disclosure": "kept"})
+
+    def test_http_wire_methods_json_and_response(self):
+        for command, payload, method, endpoint in (
+            (client.cmd_ticket_parent, self.parent_payload(), "PUT", "/api/context/tickets/parent"),
+            (client.cmd_ticket_paths, {"anchor": self.PARENT, "maxDepth": 1,
+                                      "direction": "outbound", "pathLimit": 50, "memoryLimit": 50},
+             "POST", "/api/context/tickets/paths"),
+        ):
+            with patch.object(client, "read_payload", return_value=copy.deepcopy(payload)), \
+                    patch.object(client, "base_url", return_value="http://example.invalid"), \
+                    patch.object(client.urllib.request, "urlopen") as transport, \
+                    redirect_stdout(io.StringIO()) as output:
+                transport.return_value.__enter__.return_value.read.return_value = b'{"disclosure":{"kept":true}}'
+                command(SimpleNamespace(payload=None, dryrun=False))
+            request = transport.call_args.args[0]
+            self.assertEqual(request.full_url, "http://example.invalid" + endpoint)
+            self.assertEqual(request.method, method)
+            self.assertEqual(json.loads(request.data), payload)
+            self.assertEqual(request.get_header("Content-type"), "application/json")
+            self.assertEqual(json.loads(output.getvalue()), {"disclosure": {"kept": True}})
+
+
+class NearMissTagsTests(unittest.TestCase):
+    def setUp(self):
+        fixture = json.loads((HERE / "fixtures" / "near_miss_tags.json").read_text(encoding="utf-8"))
+        self.evidence = fixture["evidence"]
+        self.cases = fixture["cases"]
+
+    def test_positive_and_negative_fixtures(self):
+        for case in self.cases:
+            with self.subTest(case=case["name"]):
+                payload = copy.deepcopy(self.evidence)
+                payload["records"][0]["tags"] = case["tags"]
+                if case["relevant"] is None:
+                    payload["analyses"] = []
+                else:
+                    payload["analyses"][0]["relevant"] = case["relevant"]
+                original = copy.deepcopy(payload)
+                report = near_miss.build_report(payload)
+                self.assertEqual(payload, original)
+                self.assertEqual(len(report["findings"]), case["findings"])
+                self.assertEqual(report["selected"], payload["selected"])
+                self.assertEqual(report["disclosure"], payload["disclosure"])
+                for finding in report["findings"]:
+                    self.assertEqual(finding["category"], "near-miss-tag")
+                    self.assertEqual(finding["scope"], payload["scope"]["name"])
+                    self.assertEqual(finding["memory"], payload["scope"]["records"][0])
+                    self.assertEqual(finding["classification"], "analysis")
+                    self.assertEqual(finding["observation"]["classification"], "observation")
+                    self.assertFalse(finding["observation"]["exactTagMatch"])
+                    self.assertEqual(finding["basis"], payload["analyses"][0]["basis"])
+
+    def test_all_containment_and_exact_case_not_synonyms(self):
+        payload = self.evidence
+        payload["criteria"]["tags"] = ["postgres", "database"]
+        self.assertEqual(near_miss.build_report(payload)["findings"], [])
+        payload["criteria"]["tagsMatchMode"] = "all"
+        self.assertEqual(len(near_miss.build_report(payload)["findings"]), 1)
+        payload["records"][0]["tags"] = ["postgres", "database"]
+        self.assertEqual(near_miss.build_report(payload)["findings"], [])
+        payload["records"][0]["tags"] = ["Postgres", "database"]
+        self.assertEqual(len(near_miss.build_report(payload)["findings"]), 1)
+
+    def test_empty_evidence_is_not_absence_proof(self):
+        payload = self.evidence | {"records": [], "analyses": []}
+        payload["scope"]["records"] = []
+        report = near_miss.build_report(payload)
+        self.assertEqual(report["findings"], [])
+        for text in ("supplied, approved examined evidence", "not store-wide absence", "non-tag filters", "Tag relationships were not followed"):
+            self.assertIn(text, report["qualification"])
+
+    def test_findings_order_is_deterministic_and_selected_membership_unchanged(self):
+        payload = self.evidence
+        for version in (3, 2):
+            payload["scope"]["records"].append(payload["scope"]["records"][0] | {"version": version})
+            payload["records"].append(payload["records"][0] | {"version": version})
+            payload["analyses"].append(payload["analyses"][0] | {"version": version})
+        payload["selected"] = copy.deepcopy(payload["scope"]["records"])
+        report = near_miss.build_report(payload)
+        self.assertEqual([f["memory"]["version"] for f in report["findings"]], [1, 2, 3])
+        payload["analyses"].reverse()
+        payload["records"].reverse()
+        self.assertEqual(near_miss.build_report(payload), report)
+        self.assertEqual(report["selected"], payload["selected"])
+
+    def test_invalid_basis_identity_scope_and_bounds_rejected(self):
+        changes = [
+            (("analyses", 0, "basis", "classification"), "observation"),
+            (("analyses", 0, "basis", "author"), "heuristic"),
+            (("analyses", 0, "basis", "explanation"), " "),
+            (("analyses", 0, "basis", "quote"), "Guessed unseen claim"),
+            (("analyses", 0, "basis", "quote"), ""),
+            (("analyses", 0, "relevant"), "true"),
+            (("analyses", 0, "uuid"), "aaaaaaaa-0000-4000-8000-000000000002"),
+            (("analyses", 0, "version"), 2),
+            (("records", 0, "uuid"), "not-a-uuid"),
+            (("records", 0, "uuid"), "00000000-0000-0000-0000-000000000000"),
+            (("records", 0, "scope"), "hidden-program"),
+            (("records", 0, "version"), True),
+            (("records", 0, "version"), 0),
+            (("records", 0, "tags"), "database"),
+            (("records", 0, "tags"), ["database"] * 201),
+            (("scope", "records"), []),
+            (("scope", "authorization"), "inferred"),
+            (("criteria", "tags"), []),
+            (("criteria", "tagsMatchMode"), "synonyms"),
+            (("records",), self.evidence["records"] * 201),
+            (("analyses",), self.evidence["analyses"] * 201),
+            (("records", 0, "statement"), "x" * 8001),
+            (("selected",), [{"uuid": "aaaaaaaa-0000-4000-8000-000000000002", "version": 1}]),
+        ]
+        for path, value in changes:
+            with self.subTest(path=path, value=str(value)[:80]):
+                payload = copy.deepcopy(self.evidence)
+                target = payload
+                for key in path[:-1]:
+                    target = target[key]
+                target[path[-1]] = value
+                with self.assertRaises(ValueError):
+                    near_miss.build_report(payload)
+        with self.assertRaises(ValueError):
+            near_miss.build_report(self.evidence | {"globalVocabulary": ["telemetry"]})
+        for field in ("records", "analyses", "selected", "disclosure", "scope", "criteria"):
+            payload = copy.deepcopy(self.evidence)
+            del payload[field]
+            with self.assertRaises(ValueError):
+                near_miss.build_report(payload)
+
+    def test_no_network_file_access_or_writes_and_executable_output(self):
+        raw = json.dumps(self.evidence).encode("utf-8")
+        with patch("builtins.open", side_effect=AssertionError("file access")) as files, \
+                patch("os.open", side_effect=AssertionError("file access")) as os_files, \
+                patch("socket.socket", side_effect=AssertionError("network")) as sockets, \
+                patch.object(client, "_request", side_effect=AssertionError("store access")) as requests, \
+                patch.object(sys, "stdin", SimpleNamespace(buffer=io.BytesIO(raw))), \
+                redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(near_miss.main(), 0)
+        for mock in (files, os_files, sockets, requests):
+            mock.assert_not_called()
+        self.assertEqual(json.loads(output.getvalue()), near_miss.build_report(self.evidence))
+
+    def test_cli_rejects_oversize_or_malformed_input_without_partial_report(self):
+        for raw in (b"x" * (near_miss.MAX_BYTES + 1), b"{bad-json", b"[]", b"null"):
+            with patch.object(sys, "stdin", SimpleNamespace(buffer=io.BytesIO(raw))), \
+                    redirect_stdout(io.StringIO()) as output, redirect_stderr(io.StringIO()) as error:
+                self.assertEqual(near_miss.main(), 1)
+            self.assertEqual(output.getvalue(), "")
+            self.assertIn("Invalid near-miss evidence", error.getvalue())
 
 
 if __name__ == "__main__":
