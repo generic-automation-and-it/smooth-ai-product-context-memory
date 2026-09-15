@@ -168,6 +168,7 @@ operability and compatibility. Two shape how code is written rather than merely 
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-15 | Corrected NFR-02's evidence attribution: original pre-merge checkpoint is historical; dated post-review revalidation supplies the later measured results. | PR #63 review finding 1 |
 | 2026-09-15 | Final full-suite repeat verified: 429 passed, 4 gated skips, zero failures via `dotnet test SmoothAiProductContextMemory.slnx --no-build -m:1`. Prior benchmark-fixture connection timeout remains recorded in NFR-02; original pre-merge evidence unchanged. | NFR-02-ticket-traversal-measurements.md |
 | 2026-09-15 | Appended post-review benchmark revalidation and failed-attempt history without replacing original tables. Documented CASE eligibility, OFFSET 0 frontier joins and post-cap edge-ID hydration; same-snapshot live ownership retained. | LADR-08; NFR-02-ticket-traversal-measurements.md |
 | 2026-09-15 | Aligned review-fix contracts: explicit EF ReadCommitted, savepoint recovery, atomic reparent/cardinality, stale-snapshot rejection, migration NOWAIT quiesce/retry, typed memberships and scope-safe sanitized stored-JSON failures. Historical benchmark evidence unchanged; no new verification recorded. | LADR-08 |

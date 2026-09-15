@@ -45,12 +45,16 @@ anchor, recursive SQL over indexed AGE adjacency, live ownership, hidden-hop gat
 memory selection. It exercises hub fanouts 100/500/1000 at requested depths 2/3/5, with 20 warm-ups and 100 measured
 iterations, captures p50/p95 and EXPLAIN, and asserts <= 100 ms. The fixture remains **three actual
 edges deep**: requesting depth 5 verifies the supported maximum bound on that fixture, not five-deep
-performance. All nine ticket measurements and the original memory benchmark case passed; worst
-ticket p95 is 59.092 ms. No threshold was relaxed.
+performance. The historical pre-merge run passed all nine ticket measurements and the original
+memory benchmark case, with worst ticket p95 59.092 ms. The 2026-09-15 post-review revalidation
+also passed all shapes, with worst ticket p95 34.797 ms. No threshold was relaxed.
 
-Full tables, actual plan excerpts, dataset sizes, noise caveats and the final 396-pass solution /
-4-pass explicit benchmark / 34-pass Python checkpoint are in
+Full tables, actual plan excerpts, dataset sizes and noise caveats are in
 [NFR-02-ticket-traversal-measurements.md](./NFR-02-ticket-traversal-measurements.md).
+Its original 396-pass solution / 4-pass explicit benchmark / 34-pass Python checkpoint is historical;
+the dated review revalidation records 429 solution passes, four gated skips, four explicit benchmark
+passes and 42 Python passes. Later post-sync functional runs are separate checkpoints, not replacements
+for the dated benchmark measurements.
 The export fixture now uses unique tickets per group and the full-suite rerun passed. Former
 quadratic joins and targeted-only verification are historical corrections, not current open gates.
 
