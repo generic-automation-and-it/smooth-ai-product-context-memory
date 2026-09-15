@@ -35,14 +35,15 @@ ASP.NET Core composition root (Minimal API). Wires the application together and 
 Approved release-image plan (2026-09-13):
 
 1. Repo-root multi-stage Dockerfile: copy CPM props + `NuGet.Config` + Host graph csprojs, restore, copy sources, publish; runtime `aspnet:10.0-alpine`, non-root, OCI labels, `ENTRYPOINT` the Host binary.
-2. `.github/workflows/publish-image.yml` mirrors smooth-llm-imposter: GHCR, QEMU+Buildx, metadata tags, GHA cache per workflow+ref, `linux/amd64,linux/arm64`. No `pull_request` trigger. Dispatch never tags `latest`.
-3. AppHost default compiles Host from the working tree (`HostConfiguration:UseProject=true`). Published image is opt-in (`UseProject=false`); container `mimisbrunnr-host` in Docker Desktop group `smooth-mímisbrunnr`. Keep `AddProject`. Inject `ConnectionStrings__SmoothAiProductContextMemory`. AppHost is not published. Published image path needs `.WithOtlpExporter()`.
+2. `.github/workflows/publish-image.yml` builds and pushes the API image and the `-apphost` release-controller image to GHCR for `linux/amd64` and `linux/arm64`; it never runs on pull requests. Publishing is serialized in one repository-wide `queue: max` concurrency group; candidates pass same-commit PR tests and native-architecture smoke before aliases are promoted. Prerelease `v*` tags never update stable aliases; see `docs/wiki/ci.md` for the full contract.
+3. AppHost default compiles Host from the working tree (`HostConfiguration:UseProject=true`). Published image is opt-in (`UseProject=false`); container `mimisbrunnr-host` in Docker Desktop group `smooth-mímisbrunnr`. Keep `AddProject`. Inject `ConnectionStrings__SmoothAiProductContextMemory`. The development AppHost is not published; the release controller ships as the separate `-apphost` image (APPHOST_AGENTS.md LADR-005). Published image path needs `.WithOtlpExporter()`.
 4. Run contract in `docs/wiki/docker.md`, verified by executing the documented build.
 
 ## Changelog
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-15 | Publish-model summary synced with the coordinated release pipeline: two images (API + `-apphost` controller) promoted inside one repository-wide `queue: max` group, prereleases never update stable aliases, and the release controller ships as the `-apphost` image. | ai-analyse |
 | 2026-09-14 | Added ticket parent and bounded ticket path route mappings, explicit-null removal wire guard, and HTTP validation/scope/hierarchy plus OpenAPI route coverage. | HLD-003 LADR-08 |
 | 2026-09-14 | `Invalid request body` reports the first `JsonException` in the exception chain as the detail and its `Path` as a `path` problem extension, not the `BadHttpRequestException` wrapper. The wrapper names no field, so a rejected batch gave the caller nothing to fix — proven by an e2e run lost to one unmapped member. | e2e-dogfood |
 | 2026-09-13 | All endpoints reject unknown JSON body fields as `400` (`JsonUnmappedMemberHandling.Disallow`); `ApiExceptionHandler` maps deserialization failures (`JsonException`/`BadHttpRequestException`) to `400` `Invalid request body`. | BUG-03 |

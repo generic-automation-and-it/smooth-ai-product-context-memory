@@ -1,10 +1,64 @@
-# Host container image
+# Container Images
 
 Reproducible **Host** image (`src/SmoothAiProductContextMemory.Host`). The
-**AppHost is not published** — it is the local Aspire orchestrator. Starting
+**AppHost has a separate release-controller Dockerfile and delivery pipeline**; its full platform acceptance is still pending. Development startup with
 `dotnet run --project src/SmoothAiProductContextMemory.AppHost` compiles Host
 from the working tree and starts postgres/blob/seq in the `smooth-mímisbrunnr`
 Docker Desktop group.
+
+## Release Controller
+
+The additional image is `ghcr.io/generic-automation-and-it/smooth-ai-product-context-memory-apphost`.
+It packages live Aspire 13.5.3 AppHost, DCP, dashboard, .NET runtime, and Docker client. It starts sibling containers through the external engine, not Docker-in-Docker. No host .NET installation or source checkout is required for a published controller image.
+
+**Security:** engine socket access grants administrative control with the engine user's privileges, potentially host root. A read-only socket mount does not make API calls read-only. Never expose an unauthenticated engine API. API and Seq are not internet-ready authenticated services; use private interfaces and a protected network.
+
+### Docker Desktop Example
+
+Supply `PostgresConfiguration__Password`, `BlobConfiguration__AccessKey`, and `BlobConfiguration__SecretKey` in a private `controller.env` file. Never commit it. Keep credentials stable across restarts and upgrades. Replace `VERSION` with an actually published version; this documentation does not imply an image has already been released.
+
+```bash
+docker run -d --name mimisbrunnr-default-controller \
+  --stop-timeout 180 \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v mimisbrunnr-default-controller-state:/var/lib/mimisbrunnr \
+  --env-file controller.env \
+  -e EngineConfiguration__BindAddress=127.0.0.1 \
+  -p 127.0.0.1:15278:15278 \
+  -p 127.0.0.1:19075:19075 \
+  ghcr.io/generic-automation-and-it/smooth-ai-product-context-memory-apphost:VERSION
+```
+
+Dashboard: `http://localhost:15278`, using the login URL printed by the controller. API: `http://localhost:5141`. The controller starts PostgreSQL 5432, MinIO 9000/9001, and Seq 5341. Those workload ports bind to the explicitly supplied address, not via `-p` on the controller. Change conflicting ports through `HostConfiguration__Port`, `PostgresConfiguration__Port`, `BlobConfiguration__Port`, `BlobConfiguration__ConsolePort`, and `SeqConfiguration__Port`.
+
+Use `InstallationConfiguration__Id` for another installation and name its controller `mimisbrunnr-<id>-controller`. Preserve the engine-generated hostname. Container-name uniqueness prevents a second controller taking over a live installation; maintenance commands must run in a replacement canonical container, never via `docker exec` on the live controller.
+
+### Linux, Podman, and TCP
+
+Linux Docker bridge deployments need an explicit engine-side bind IP reachable from containers, such as the bridge gateway, plus `--add-host host.docker.internal:host-gateway` on the controller. Docker Desktop host bindings and VM bridge bindings are different: do not copy a VM gateway into a Desktop host `-p` binding. Wildcard workload binds are rejected. If publishing OTLP on another port, set `ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL` to the same port inside the controller so injected telemetry addresses match.
+
+Podman uses its Docker-compatible API through a mounted socket; set `EngineConfiguration__Kind=podman`, with `EngineConfiguration__HostAddress=host.containers.internal` unless the environment needs another reachable address. Rootless Linux commonly exposes `$XDG_RUNTIME_DIR/podman/podman.sock`; Podman Machine requires VM-aware socket forwarding/mounts. SELinux may need an explicit label exception for the socket. These paths require validation for the actual platform, not just a hostname substitution.
+
+For secured TCP, supply `DOCKER_HOST=tcp://ENGINE:PORT`, `DOCKER_TLS_VERIFY=1`, and mounted client/CA certificates under `DOCKER_CERT_PATH`. The engine must require mutual TLS. Engine transport and workload/dashboard reachability are independent; remote engines need explicit routing for both.
+
+Do not mount macOS `~/.docker` blindly: `credsStore: desktop` requires a helper absent from the Linux image. Public images can pull without that mount. For private GHCR packages, supply a dedicated Linux-compatible Docker config containing registry authentication, mounted read-only at `/root/.docker`. The smoke script accepts that directory through `ENGINE_CONFIG_DIRECTORY`; it no longer mounts host credentials implicitly.
+
+### Stop, Recovery, and Upgrade
+
+```bash
+docker stop --timeout 180 mimisbrunnr-default-controller
+docker rm mimisbrunnr-default-controller
+```
+
+Graceful stop removes owned workloads and preserves data volumes. Restart the same version with the same installation ID, secrets, and state volume. After forced termination, the next startup checks ownership of all resources, then replaces owned workloads; foreign resources are never adopted. Controller state and dependency data volumes are distinct.
+
+After removing the stopped controller, `stop` and `reset` can run as commands of a replacement container with the same canonical name, socket, and installation ID. `stop` preserves all data. **`reset` permanently removes the installation's three dependency data volumes.** It does not remove the separately mounted controller-state volume. Never use dev teardown scripts against a release installation.
+
+Back up PostgreSQL/AGE and blob storage together before upgrading. Start the new controller version with the same volumes and credentials; it uses its embedded API digest. Do not change PostgreSQL major as part of this operation. Rolling back an image does not roll back schema or data: restore a compatible cross-store backup if migrations prevent downgrade. See the graph NFR-03 restore and NFR-04 version-pairing documents.
+
+### Verification Status
+
+Docker Desktop 4.90.0 / Engine 29.7.2, Linux ARM64 image: API/blob/graph round-trip, graceful restart, forced recovery, scoped reset, foreign-resource rejection, and dashboard HTTP reachability passed locally. The API was an existing registry digest; this was not a historical cross-version upgrade test. Rootless Podman, Podman Machine, secured TCP, native Linux amd64/arm64 runtime, dashboard resource commands, and all telemetry panes remain unverified. The CD workflow gates promotion on native Linux smoke, but has not been executed from this workspace. Do not advertise full platform acceptance until those checks complete.
 
 `HostConfiguration:UseProject=false` pulls this image instead (no SDK required
 on the Host itself). The tag may lag the working tree.
@@ -171,11 +225,15 @@ for the dev container; see `APPHOST_AGENTS.md`.
 | Trigger | Tags |
 |---|---|
 | push to `main` | `latest`, short SHA |
-| `v*` git tag | semver `{{version}}` and `{{major}}.{{minor}}`, short SHA |
+| stable `v*` git tag | full version and major.minor (unless a newer patch reserves that lane), short SHA |
+| prerelease `v*` git tag | full prerelease version and short SHA; no stable alias |
 | `workflow_dispatch` | the supplied pre-release version (e.g. `1.0.0-rc.1`), short SHA — **never** `latest` |
 
 Multi-arch: `linux/amd64,linux/arm64`. Confirm both in the GHCR manifest list
 after the first publish (`docker buildx imagetools inspect ghcr.io/generic-automation-and-it/smooth-ai-product-context-memory:latest`).
+
+Both API and controller candidates pass same-commit tests and native-architecture smoke before aliases are promoted. The controller embeds the API's multi-platform digest. Version aliases cannot replace an existing different digest; use a new version for a rebuilt release. Promotion is serialized, and release tags must point at the tested commit. GitHub Releases link exact digests and these installation instructions. Package visibility must be configured/verified separately; private packages require registry authentication.
+
 An amd64-only push fails on Apple silicon with a manifest error that reads like
 a configuration problem.
 

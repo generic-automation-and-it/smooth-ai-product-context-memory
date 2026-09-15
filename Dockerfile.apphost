@@ -1,0 +1,84 @@
+# syntax=docker/dockerfile:1
+
+ARG ASPIRE_VERSION=13.5.3
+ARG DOCKER_CLI_VERSION=29.7.2
+
+FROM docker:${DOCKER_CLI_VERSION}-cli AS docker-cli
+
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+ARG ASPIRE_VERSION
+ARG TARGETARCH
+WORKDIR /build
+
+COPY SmoothAiProductContextMemory.slnx Directory.Build.props Directory.Packages.props NuGet.Config ./
+COPY src/SmoothAiProductContextMemory.Domain/SmoothAiProductContextMemory.Domain.csproj src/SmoothAiProductContextMemory.Domain/
+COPY src/SmoothAiProductContextMemory.Application/SmoothAiProductContextMemory.Application.csproj src/SmoothAiProductContextMemory.Application/
+COPY src/SmoothAiProductContextMemory.Infrastructure/SmoothAiProductContextMemory.Infrastructure.csproj src/SmoothAiProductContextMemory.Infrastructure/
+COPY src/SmoothAiProductContextMemory.Host/SmoothAiProductContextMemory.Host.csproj src/SmoothAiProductContextMemory.Host/
+COPY src/SmoothAiProductContextMemory.AppHost/SmoothAiProductContextMemory.AppHost.csproj src/SmoothAiProductContextMemory.AppHost/
+COPY src/ src/
+
+RUN --mount=type=cache,target=/root/.nuget/packages \
+    case "$TARGETARCH" in \
+      amd64) runtime_rid=linux-x64 ;; \
+      arm64) runtime_rid=linux-arm64 ;; \
+      *) echo "Unsupported target architecture: $TARGETARCH" >&2; exit 1 ;; \
+    esac && \
+    dotnet restore src/SmoothAiProductContextMemory.AppHost/SmoothAiProductContextMemory.AppHost.csproj -r "$runtime_rid" && \
+    dotnet publish src/SmoothAiProductContextMemory.AppHost/SmoothAiProductContextMemory.AppHost.csproj \
+      -c Release \
+      -r "$runtime_rid" \
+      --self-contained false \
+      --no-restore \
+      -p:IsPublishable=true \
+      -p:DcpDir=/app/aspire/dcp \
+      -p:AspireDashboardDir=/app/aspire/dashboard \
+      -o /publish && \
+    mkdir -p /aspire/dcp /aspire/dashboard && \
+    cp -a "/root/.nuget/packages/aspire.hosting.orchestration.${runtime_rid}/${ASPIRE_VERSION}/tools/." /aspire/dcp/ && \
+    cp -a "/root/.nuget/packages/aspire.dashboard.sdk.${runtime_rid}/${ASPIRE_VERSION}/tools/." /aspire/dashboard/
+
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
+WORKDIR /app
+
+COPY --from=build /publish ./
+COPY --from=build /aspire /app/aspire
+COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
+COPY scripts/apphost-container-entrypoint.sh /usr/local/bin/mimisbrunnr-orchestrator
+
+ARG API_IMAGE=ghcr.io/generic-automation-and-it/smooth-ai-product-context-memory@sha256:0000000000000000000000000000000000000000000000000000000000000000
+ARG RELEASE_VERSION=development
+ARG REVISION=unknown
+
+LABEL org.opencontainers.image.source="https://github.com/generic-automation-and-it/smooth-ai-product-context-memory" \
+      org.opencontainers.image.revision="${REVISION}" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.title="SmoothAiProductContextMemory Aspire controller" \
+      org.opencontainers.image.description="Live Aspire AppHost controller for the Mímisbrunnr container stack."
+
+ENV AppHostConfiguration__Mode=Release \
+    HostConfiguration__UseProject=false \
+    HostConfiguration__Image=${API_IMAGE} \
+    ReleaseConfiguration__Version=${RELEASE_VERSION} \
+    EngineConfiguration__Kind=docker \
+    ASPNETCORE_URLS=http://0.0.0.0:15278 \
+    ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL=http://0.0.0.0:19075 \
+    ASPIRE_RESOURCE_SERVICE_ENDPOINT_URL=http://127.0.0.1:20290 \
+    ASPIRE_ALLOW_UNSECURED_TRANSPORT=true \
+    ASPIRE_ENABLE_CONTAINER_TUNNEL=false \
+    ASPIRE__STORE__PATH=/var/lib/mimisbrunnr/aspire \
+    DcpPublisher__RandomizePorts=false \
+    DcpPublisher__WaitForResourceCleanup=true \
+    DcpPublisher__ContainerRuntimeInitializationTimeout=00:00:30 \
+    DOTNET_ASPIRE_CONTAINER_RUNTIME=docker \
+    DOCKER_HOST=unix:///var/run/docker.sock
+
+EXPOSE 15278 19075 20290
+VOLUME ["/var/lib/mimisbrunnr"]
+
+RUN chmod 0755 /usr/local/bin/mimisbrunnr-orchestrator \
+    /app/aspire/dcp/dcp \
+    /app/aspire/dcp/dcptun_c \
+    /app/aspire/dashboard/Aspire.Dashboard
+
+ENTRYPOINT ["/usr/local/bin/mimisbrunnr-orchestrator"]

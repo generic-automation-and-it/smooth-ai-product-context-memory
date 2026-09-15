@@ -6,20 +6,44 @@ on:
       - main
     paths:
       - Directory.Packages.props
+      - Dockerfile
+      - Dockerfile.apphost
+      - .dockerignore
+      - Directory.Build.props
+      - NuGet.Config
+      - '*.slnx'
       - src/**
       - tests/**
+      - scripts/**
       - .github/actions/**
       - .github/workflows/pr-gate.yml
+      - .github/workflows/publish-image.yml
   pull_request:
     branches:
       - main
     paths:
       - Directory.Packages.props
+      - Dockerfile
+      - Dockerfile.apphost
+      - .dockerignore
+      - Directory.Build.props
+      - NuGet.Config
+      - '*.slnx'
       - src/**
       - tests/**
+      - scripts/**
       - .github/actions/**
       - .github/workflows/pr-gate.yml
+      - .github/workflows/publish-image.yml
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      skip-container-build:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
 
 jobs:
   build-and-test:
@@ -35,6 +59,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Test release policy
+        run: python3 -B -m unittest discover -s scripts -p 'test_release_policy.py' -v
 
       - name: Install .NET SDK
         uses: actions/setup-dotnet@v4
@@ -46,6 +75,9 @@ jobs:
 
       - name: Build
         run: dotnet build --configuration "$BUILD_CONFIGURATION" --no-restore
+
+      - name: Test controller preflight and lifecycle
+        run: python3 scripts/test-apphost-entrypoint.py
 
       - name: Aspire test with coverage
         uses: ./.github/actions/aspire-test-with-coverage
@@ -68,3 +100,54 @@ jobs:
           name: coverage-report
           path: artifacts/coverage/
           if-no-files-found: warn
+
+  container-build:
+    name: Build release container candidates (${{ matrix.arch }})
+    if: ${{ !inputs.skip-container-build }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/${{ matrix.arch }}
+          push: false
+          build-args: |
+            REVISION=${{ github.sha }}
+          cache-from: type=gha,scope=pr-api-${{ github.ref }}-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=pr-api-${{ github.ref }}-${{ matrix.arch }}
+
+      - name: Build AppHost controller image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.apphost
+          platforms: linux/${{ matrix.arch }}
+          push: false
+          build-args: |
+            API_IMAGE=ghcr.io/${{ github.repository }}@sha256:0000000000000000000000000000000000000000000000000000000000000000
+            RELEASE_VERSION=pr-${{ github.event.pull_request.number || github.run_number }}
+            REVISION=${{ github.sha }}
+          cache-from: type=gha,scope=pr-apphost-${{ github.ref }}-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=pr-apphost-${{ github.ref }}-${{ matrix.arch }}

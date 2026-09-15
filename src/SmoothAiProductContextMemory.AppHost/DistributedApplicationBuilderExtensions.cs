@@ -1,43 +1,19 @@
-using System.IO;
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
-using Microsoft.Extensions.Configuration;
 
 namespace SmoothAiProductContextMemory.AppHost;
 
 internal static class DistributedApplicationBuilderExtensions
 {
-    private const int DefaultPostgresPort = 5432;
-    private const int DefaultBlobPort = 9000;
-    private const int DefaultBlobConsolePort = 9001;
-    // docker.io/minio/minio is no longer publicly pullable; quay.io hosts the last community releases.
     private const string BlobImage = "quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z";
-    private const int DefaultSeqPort = 5341;
+    private const string SeqImageRegistry = "docker.io";
+    private const string SeqImage = "datalust/seq";
+    private const string SeqImageTag = "2025.2";
     private const string DatabaseResourceName = "mimers-head";
     private const string HostConnectionStringName = "SmoothAiProductContextMemory";
     private const string SeqConnectionStringName = "seq";
     private const string HostReadinessPath = "/health";
-    private const int DefaultHostPort = 5141;
-    private const string HostContainerName = "mimisbrunnr-host";
-    private const string DefaultHostImage = "ghcr.io/generic-automation-and-it/smooth-ai-product-context-memory:latest";
-    // The Docker Desktop group is a compose *label*, so it carries the brand spelling with its
-    // accent. Container and volume names cannot: Docker rejects them outright —
-    // "Invalid container name (mímisbrunnr-…), only [a-zA-Z0-9][a-zA-Z0-9_.-] are allowed" — so the
-    // artifacts are transliterated to ASCII. Same split the test fixture uses
-    // (`smooth-mímisbrunnr-testing` group, `mimisbrunnr-testcontainer-*` containers).
-    private const string DockerDesktopGroupName = "smooth-mímisbrunnr";
-    private const string PostgresContainerName = "mimisbrunnr-postgres";
-    private const string BlobContainerName = "mimisbrunnr-blob-well";
-    private const string SeqContainerName = "mimisbrunnr-seq";
-    private const string PostgresDataVolume = "mimisbrunnr-postgres-data";
-    private const string BlobDataVolume = "mimisbrunnr-blob-well-data";
-    private const string SeqDataVolume = "mimisbrunnr-seq-data";
-    // S3 bucket names are DNS labels: lowercase ASCII, digits and hyphens only, so the brand is
-    // transliterated here for the same reason container names are.
     private const string BlobBucketName = "smooth-mimisbrunnr-memory-well";
-    // Aspire 13.5.3 defaults to library/postgres:17.7. AGE's PG17 image keeps the same major so the
-    // persistent data volume stays compatible. Pairing recorded in HLD 003 / NFR-04.
-    // Keep this pin identical to tests/SmoothAiProductContextMemory.TestFramework.Aspire.
     private const string PostgresImageRegistry = "docker.io";
     private const string PostgresImage = "apache/age";
     private const string PostgresImageTag = "release_PG17_1.7.0";
@@ -46,8 +22,9 @@ internal static class DistributedApplicationBuilderExtensions
     {
         internal IDistributedApplicationBuilder AddSmoothAiProductContextMemoryAppHostResources()
         {
-            AppHostConfiguration configuration = builder.GetAppHostConfiguration();
+            AppHostConfiguration configuration = AppHostConfiguration.Create(builder.Configuration);
             Console.WriteLine(HostLaunchMode.FormatAnnouncement(configuration.UseProject, configuration.HostImage));
+            Console.WriteLine($"AppHost mode: {configuration.Mode}. Installation: {configuration.InstallationId}. Engine: {configuration.EngineKind}. Controller version: {configuration.ReleaseVersion}.");
             var database = builder.AddPostgresResource(configuration);
             var blob = builder.AddBlobResource(configuration);
             var seq = builder.AddSeqResource(configuration);
@@ -59,6 +36,7 @@ internal static class DistributedApplicationBuilderExtensions
 
         internal IDistributedApplicationBuilder WriteDashboardStartupHint()
         {
+            AppHostConfiguration configuration = AppHostConfiguration.Create(builder.Configuration);
             string? dashboardUrls = builder.Configuration["ASPNETCORE_URLS"];
             string? dashboardUrl = dashboardUrls?
                 .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
@@ -70,41 +48,20 @@ internal static class DistributedApplicationBuilderExtensions
                 Console.WriteLine("If the dashboard asks for login, use the /login?t=... URL that Aspire prints after startup.");
             }
 
-            Console.WriteLine("Dashboard dies with this process. tyr-postgres (mimisbrunnr-postgres), idunn-blob (mimisbrunnr-blob-well), and saga-seq (mimisbrunnr-seq) keep running (ContainerLifetime.Persistent). mimisbrunnr-host may remain after a hard kill.");
-            Console.WriteLine("Stop (keep data): scripts/stop-dev-stack.sh");
-            Console.WriteLine("Reset (destroy volumes): scripts/reset-dev-stack.sh");
-            Console.WriteLine("Do not glob mimisbrunnr-* — that also matches mimisbrunnr-testcontainer-*.");
+            if (configuration.IsRelease)
+            {
+                Console.WriteLine($"Release resources are scoped to installation '{configuration.InstallationId}'. Stop the controller gracefully to remove workloads while preserving named data volumes.");
+                Console.WriteLine("After forced termination, use the controller image's stop or reset command. Reset is destructive and ownership-checked.");
+            }
+            else
+            {
+                Console.WriteLine("Dashboard dies with this process. tyr-postgres (mimisbrunnr-postgres), idunn-blob (mimisbrunnr-blob-well), and saga-seq (mimisbrunnr-seq) keep running (ContainerLifetime.Persistent). mimisbrunnr-host may remain after a hard kill.");
+                Console.WriteLine("Stop (keep data): scripts/stop-dev-stack.sh");
+                Console.WriteLine("Reset (destroy volumes): scripts/reset-dev-stack.sh");
+                Console.WriteLine("Do not glob mimisbrunnr-* — that also matches mimisbrunnr-testcontainer-*.");
+            }
 
             return builder;
-        }
-
-        private AppHostConfiguration GetAppHostConfiguration()
-        {
-            string PostgresPassword()
-            {
-                string value = builder.Configuration["PostgresConfiguration:Password"] ?? string.Empty;
-                return string.IsNullOrWhiteSpace(value)
-                    ? "LocalMachineAccessNoInterestingDataDev#Passw0rd!FirewallNotExposed"
-                    : value;
-            }
-
-            string? hostImage = builder.Configuration["HostConfiguration:Image"];
-            if (string.IsNullOrWhiteSpace(hostImage))
-            {
-                hostImage = DefaultHostImage;
-            }
-
-            return new AppHostConfiguration(
-                PostgresPassword(),
-                builder.Configuration.GetValue("PostgresConfiguration:Port", DefaultPostgresPort),
-                builder.Configuration["BlobConfiguration:AccessKey"] ?? "smooth-local",
-                builder.Configuration["BlobConfiguration:SecretKey"] ?? "LocalMachineAccessNoInterestingDataDev#Passw0rd!FirewallNotExposed",
-                builder.Configuration.GetValue("BlobConfiguration:Port", DefaultBlobPort),
-                builder.Configuration.GetValue("BlobConfiguration:ConsolePort", DefaultBlobConsolePort),
-                builder.Configuration.GetValue("SeqConfiguration:Port", DefaultSeqPort),
-                HostLaunchMode.ResolveUseProject(builder.Configuration),
-                hostImage,
-                Path.GetFullPath(Path.Combine(builder.AppHostDirectory, "..", "..")));
         }
 
         private IResourceBuilder<PostgresDatabaseResource> AddPostgresResource(AppHostConfiguration configuration)
@@ -117,12 +74,20 @@ internal static class DistributedApplicationBuilderExtensions
             var postgres = builder.AddPostgres("tyr-postgres", password: postgresPassword, port: configuration.PostgresPort)
                 .WithImage(PostgresImage, PostgresImageTag)
                 .WithImageRegistry(PostgresImageRegistry)
-                .WithContainerName(PostgresContainerName)
-                .WithDataVolume(PostgresDataVolume)
+                .WithContainerName(configuration.PostgresContainerName)
+                .WithDataVolume(configuration.PostgresDataVolume)
                 .WithContainerRuntimeArgs(
-                    "--label", $"com.docker.compose.project={DockerDesktopGroupName}",
-                    "--label", $"com.docker.compose.service={PostgresContainerName}")
-                .WithLifetime(ContainerLifetime.Persistent);
+                    "--label", $"com.docker.compose.project={configuration.DockerDesktopGroupName}",
+                    "--label", $"com.docker.compose.service={configuration.PostgresContainerName}",
+                    "--label", $"{AppHostConfiguration.OwnershipLabel}={configuration.InstallationId}",
+                    "--label", $"{AppHostConfiguration.ManagedLabel}=true");
+
+            postgres = builder.ConfigureReleaseEndpoint(postgres, "tcp", configuration);
+
+            if (!configuration.IsRelease)
+            {
+                postgres = postgres.WithLifetime(ContainerLifetime.Persistent);
+            }
 
             // The dashboard name follows Mímir's severed head. Keep the physical database as "app":
             // changing it on an existing persistent cluster requires an explicit data migration.
@@ -137,18 +102,24 @@ internal static class DistributedApplicationBuilderExtensions
             // a JSON credentials file and an admin JWT to create buckets, which is impractical to
             // automate inside an Aspire container (see HLD 001 LADR-06).
             // The image is registry-qualified so Podman never has to resolve a short name.
-            return builder.AddContainer("idunn-blob", BlobImage)
+            var blob = builder.AddContainer("idunn-blob", BlobImage)
                 .WithArgs("server", "/data", "--console-address", ":9001")
                 .WithHttpEndpoint(port: configuration.BlobPort, targetPort: 9000, name: "s3")
                 .WithHttpEndpoint(port: configuration.BlobConsolePort, targetPort: 9001, name: "console")
                 .WithEnvironment("MINIO_ROOT_USER", configuration.BlobAccessKey)
                 .WithEnvironment("MINIO_ROOT_PASSWORD", configuration.BlobSecretKey)
-                .WithVolume(BlobDataVolume, "/data")
-                .WithContainerName(BlobContainerName)
+                .WithVolume(configuration.BlobDataVolume, "/data")
+                .WithContainerName(configuration.BlobContainerName)
                 .WithContainerRuntimeArgs(
-                    "--label", $"com.docker.compose.project={DockerDesktopGroupName}",
-                    "--label", $"com.docker.compose.service={BlobContainerName}")
-                .WithLifetime(ContainerLifetime.Persistent);
+                    "--label", $"com.docker.compose.project={configuration.DockerDesktopGroupName}",
+                    "--label", $"com.docker.compose.service={configuration.BlobContainerName}",
+                    "--label", $"{AppHostConfiguration.OwnershipLabel}={configuration.InstallationId}",
+                    "--label", $"{AppHostConfiguration.ManagedLabel}=true")
+                .WithLifetime(configuration.IsRelease ? ContainerLifetime.Session : ContainerLifetime.Persistent);
+
+            blob = builder.ConfigureReleaseEndpoint(blob, "s3", configuration);
+            blob = builder.ConfigureReleaseEndpoint(blob, "console", configuration);
+            return blob;
         }
 
         private IResourceBuilder<IResourceWithConnectionString> AddSeqResource(AppHostConfiguration configuration)
@@ -158,14 +129,20 @@ internal static class DistributedApplicationBuilderExtensions
             // tomorrow is already gone. That argument only holds with a data volume — without one Seq's
             // persistence claim was false beyond container removal, which is why one is attached here
             // alongside the Postgres and blob volumes.
-            return builder.AddSeq("saga-seq", port: configuration.SeqPort)
+            var seq = builder.AddSeq("saga-seq", port: configuration.SeqPort)
+                .WithImage(SeqImage, SeqImageTag)
+                .WithImageRegistry(SeqImageRegistry)
                 .WithEnvironment("ACCEPT_EULA", "Y")
-                .WithDataVolume(SeqDataVolume)
-                .WithContainerName(SeqContainerName)
+                .WithDataVolume(configuration.SeqDataVolume)
+                .WithContainerName(configuration.SeqContainerName)
                 .WithContainerRuntimeArgs(
-                    "--label", $"com.docker.compose.project={DockerDesktopGroupName}",
-                    "--label", $"com.docker.compose.service={SeqContainerName}")
-                .WithLifetime(ContainerLifetime.Persistent);
+                    "--label", $"com.docker.compose.project={configuration.DockerDesktopGroupName}",
+                    "--label", $"com.docker.compose.service={configuration.SeqContainerName}",
+                    "--label", $"{AppHostConfiguration.OwnershipLabel}={configuration.InstallationId}",
+                    "--label", $"{AppHostConfiguration.ManagedLabel}=true")
+                .WithLifetime(configuration.IsRelease ? ContainerLifetime.Session : ContainerLifetime.Persistent);
+
+            return builder.ConfigureReleaseEndpoint(seq, "http", configuration);
         }
 
         private void AddHostProject(
@@ -199,10 +176,10 @@ internal static class DistributedApplicationBuilderExtensions
             IResourceBuilder<IResourceWithConnectionString> seq,
             AppHostConfiguration configuration)
         {
-            (string image, string? tag) = SplitImageReference(configuration.HostImage);
-            IResourceBuilder<ContainerResource> host = tag is null
-                ? builder.AddContainer(HostLaunchMode.PublishedImageResourceName, image)
-                : builder.AddContainer(HostLaunchMode.PublishedImageResourceName, image, tag);
+            ContainerImageReference imageReference = ContainerImageReference.Parse(configuration.HostImage);
+            IResourceBuilder<ContainerResource> host = imageReference.Tag is null
+                ? builder.AddContainer(HostLaunchMode.PublishedImageResourceName, imageReference.Image)
+                : builder.AddContainer(HostLaunchMode.PublishedImageResourceName, imageReference.Image, imageReference.Tag);
 
             if (configuration.HostImage.StartsWith("ghcr.io/", StringComparison.OrdinalIgnoreCase))
             {
@@ -210,11 +187,13 @@ internal static class DistributedApplicationBuilderExtensions
             }
 
             host
-                .WithHttpEndpoint(port: DefaultHostPort, targetPort: DefaultHostPort, name: "http")
-                .WithContainerName(HostContainerName)
+                .WithHttpEndpoint(port: configuration.HostPort, targetPort: 5141, name: "http")
+                .WithContainerName(configuration.HostContainerName)
                 .WithContainerRuntimeArgs(
-                    "--label", $"com.docker.compose.project={DockerDesktopGroupName}",
-                    "--label", $"com.docker.compose.service={HostContainerName}")
+                    "--label", $"com.docker.compose.project={configuration.DockerDesktopGroupName}",
+                    "--label", $"com.docker.compose.service={configuration.HostContainerName}",
+                    "--label", $"{AppHostConfiguration.OwnershipLabel}={configuration.InstallationId}",
+                    "--label", $"{AppHostConfiguration.ManagedLabel}=true")
                 .WithReference(database, connectionName: HostConnectionStringName)
                 .WithReference(seq, connectionName: SeqConnectionStringName)
                 .WithEnvironment("BlobStorage__Endpoint", blob.GetEndpoint("s3"))
@@ -226,30 +205,45 @@ internal static class DistributedApplicationBuilderExtensions
                 .WaitFor(database)
                 .WaitFor(blob)
                 .WaitFor(seq);
-        }
-    }
 
-    private static (string Image, string? Tag) SplitImageReference(string reference)
-    {
-        int slash = reference.LastIndexOf('/');
-        int colon = reference.LastIndexOf(':');
-        if (colon > slash)
+            builder.ConfigureReleaseEndpoint(host, "http", configuration);
+        }
+
+        private IResourceBuilder<T> ConfigureReleaseEndpoint<T>(
+            IResourceBuilder<T> resource,
+            string endpointName,
+            AppHostConfiguration configuration)
+            where T : IResourceWithEndpoints
         {
-            return (reference[..colon], reference[(colon + 1)..]);
-        }
+            if (!configuration.IsRelease)
+            {
+                return resource;
+            }
 
-        return (reference, null);
+            resource.WithEndpoint(endpointName, endpoint =>
+            {
+                endpoint.IsProxied = false;
+                endpoint.TargetHost = configuration.EngineBindAddress;
+            }, createIfNotExists: false);
+            return resource.OnResourceEndpointsAllocated((model, _, _) =>
+            {
+                EndpointAnnotation endpoint = model.Annotations
+                    .OfType<EndpointAnnotation>()
+                    .Single(endpoint => endpoint.Name == endpointName);
+                AllocatedEndpoint allocated = endpoint.AllocatedEndpoint
+                    ?? throw new InvalidOperationException($"Endpoint '{endpointName}' was not allocated for '{model.Name}'.");
+
+                endpoint.AllocatedEndpoint = new AllocatedEndpoint(
+                    endpoint,
+                    configuration.EngineHostAddress,
+                    allocated.Port,
+                    allocated.BindingMode,
+                    allocated.TargetPortExpression,
+                    allocated.NetworkID);
+
+                return Task.CompletedTask;
+            });
+        }
     }
 
-    private sealed record AppHostConfiguration(
-        string PostgresPassword,
-        int PostgresPort,
-        string BlobAccessKey,
-        string BlobSecretKey,
-        int BlobPort,
-        int BlobConsolePort,
-        int SeqPort,
-        bool UseProject,
-        string HostImage,
-        string RepoRoot);
 }
