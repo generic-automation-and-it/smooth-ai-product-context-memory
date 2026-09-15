@@ -6,6 +6,7 @@ using SmoothAiProductContextMemory.Application.Features.Labels;
 using SmoothAiProductContextMemory.Application.Features.Links;
 using SmoothAiProductContextMemory.Application.Features.Memories;
 using SmoothAiProductContextMemory.Application.Features.Preflight;
+using SmoothAiProductContextMemory.Application.Features.Tickets;
 
 namespace SmoothAiProductContextMemory.Host.Endpoints;
 
@@ -72,6 +73,12 @@ internal static class ContextEndpoints
         // maxDepth is on the body, not defaulted server-side: a bound the caller never stated is a
         // bound the caller never considered, and nothing in the graph store stops an unbounded walk.
         group.MapPost("/paths", (FindPaths.Request body, IMediator mediator, CancellationToken ct) =>
+            mediator.Send(body, ct));
+
+        group.MapPut("/tickets/parent", (SetTicketParent.Request body, IMediator mediator, CancellationToken ct) =>
+            mediator.Send(body, ct));
+
+        group.MapPost("/tickets/paths", (FindTicketPaths.Request body, IMediator mediator, CancellationToken ct) =>
             mediator.Send(body, ct));
 
         group.MapGet("/labels", (IMediator mediator, CancellationToken ct) =>

@@ -63,11 +63,15 @@ public static class UpdateGroup
     public sealed class Handler(
         IApplicationDbContext db,
         IDbErrorMapper errorMapper,
+        ITicketGraph ticketGraph,
         ILogger<Handler> logger) : IRequestHandler<Request, Response>
     {
         public async ValueTask<Response> Handle(Request request, CancellationToken cancellationToken)
         {
             logger.LogInformation("Update group started");
+
+            await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+            await ticketGraph.LockAsync(cancellationToken);
 
             MemoryGroup group = await db.MemoryGroups
                 .SingleOrDefaultAsync(g => g.Uuid == request.GroupUuid, cancellationToken)
@@ -127,15 +131,6 @@ public static class UpdateGroup
                 List<TicketInput> additions = [];
                 foreach (TicketInput ticket in request.Tickets)
                 {
-                    bool alreadyPresent = group.Tickets.Any(t =>
-                        t.Provider == ticket.Provider && t.Key == ticket.Key)
-                        || additions.Any(a => a.Provider == ticket.Provider && a.Key == ticket.Key);
-                    if (alreadyPresent)
-                    {
-                        // Idempotent: re-attaching a ticket already on this group is a no-op.
-                        continue;
-                    }
-
                     MemoryGroup? owner = await TicketLookup.FindGroupByTicketAsync(
                         db, ticket.Provider, ticket.Key, cancellationToken);
                     if (owner is not null && owner.Uuid != group.Uuid)
@@ -148,6 +143,15 @@ public static class UpdateGroup
                         ]);
                     }
 
+                    bool alreadyPresent = group.Tickets.Any(t =>
+                        t.Provider == ticket.Provider && t.Key == ticket.Key)
+                        || additions.Any(a => a.Provider == ticket.Provider && a.Key == ticket.Key);
+                    if (alreadyPresent)
+                    {
+                        // Idempotent: re-attaching a ticket already on this group is a no-op.
+                        continue;
+                    }
+
                     additions.Add(ticket);
                 }
 
@@ -158,6 +162,7 @@ public static class UpdateGroup
             }
 
             await errorMapper.SaveOrMapAsync(() => db.SaveChangesAsync(cancellationToken));
+            await transaction.CommitAsync(cancellationToken);
 
             logger.LogInformation("Update group completed");
             return new Response(

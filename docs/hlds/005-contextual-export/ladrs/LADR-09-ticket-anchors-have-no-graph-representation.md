@@ -1,16 +1,12 @@
 # LADR-09: Ticket anchors as graph vertices
 
-**Status:** Blocked
+**Status:** Accepted for captured ticket hierarchy; decision resolved by owner approval on 2026-09-14.
+Implementation and release gates accepted on 2026-09-15 against
+[final evidence](../../003-graph-edges-on-age/nfrs/NFR-02-ticket-traversal-measurements.md).
 
-> **Blocked by** — a ticket has no representation in the graph. The graph declares exactly one vertex
-> label, `Memory`, and HLD-003 LADR-02 constrains a vertex to a label plus the memory's stable identity,
-> with no descriptive property permitted. Tickets are documents on a memory group in the relational
-> store. There is nothing to traverse from and nothing to traverse to.
->
-> **Unblocking trigger** — a decision on whether the graph may hold a non-`Memory` vertex label, taken
-> against HLD-003 LADR-02 rather than around it. Owner: HLD-003. The trigger is the first export whose
-> findings show that ticket-to-ticket relationships were the missing information, not a hypothetical
-> need.
+> **Resolution authority:** [HLD-003 LADR-08](../../003-graph-edges-on-age/ladrs/LADR-08-captured-ticket-hierarchy.md)
+> explicitly supersedes HLD-003 LADR-02 in writing before any ticket migration. The previous
+> memory-only representation block is resolved for tickets only, not arbitrary anchor graphs.
 
 ## Context
 
@@ -24,38 +20,61 @@ issue tracker issued them, and completely absent from the store's graph. A slice
 therefore cannot widen to "and everything about the tickets this one depends on", even though that is
 frequently the shape of the question.
 
-The block is not an oversight. HLD-003 LADR-02 rejected descriptive properties on vertices because
+The original block was not an oversight. HLD-003 LADR-02 rejected descriptive properties on vertices because
 every polyglot failure it surveyed failed the same way: one fact in two stores, drifting, with no
 arbiter. A ticket vertex is that argument's hardest case — ticket identity is owned by an external
 tracker, mirrored into a group's documents, and would then exist a third time in the graph.
 
 ## Decision
 
-**Not taken.** The options cannot be evaluated until the thin-vertex rule is either upheld or amended,
-and that decision belongs to HLD-003.
+**Adopt the ticket-only contract in HLD-003 LADR-08.** `Ticket` carries exact `provider`/`key` only;
+`TICKET_PARENT` is a practitioner-declared parent -> child edge with reason/source, optional
+`observedAt` and mandatory `recordedAt`. One parent, no cycles, explicit expected-parent
+set/reparent/remove, current state rather than history. The writer is decided in
+[HLD-002 LADR-08](../../002-context-memory-write-pipeline/ladrs/LADR-08-practitioner-declared-ticket-hierarchy.md).
 
-The options, recorded so the first implementation does not invent one:
+Membership stays group JSONB. Triggers maintain identities on group-ticket changes/backfill and
+group deletion; group-ticket and hierarchy mutations share one transaction-scoped advisory lock.
+Memories join relationally through live ownership, never through membership fanout or projected
+memory `LINKS`. Existing exact provider/key ownership is preserved.
 
-- **A ticket vertex label** carrying tracker and key as identity, edged to the memories in its group and to other tickets. Directly contradicts the thin-vertex rule unless "identity" is read to include an external key.
-- **Ticket relationships as relational rows**, joined rather than traversed. Keeps the graph pure and gives up variable-depth ticket chains.
-- **Ticket relationships derived from the tracker at export time**, never stored. Accurate and fresh, but requires network access, which `BR-16` forbids depending on.
-- **Ticket relationships projected onto memory edges** — if ticket A blocks ticket B, edge every A-memory to every B-memory. Rejected on sight in this list: it manufactures edges nobody recorded and would corrupt both ordering (LADR-07) and contradiction detection (LADR-04).
+Ticket traversal is separate from memory provenance traversal: required `maxDepth` 1..5,
+deterministic capped paths and distinct current non-proposed memories, including the anchor's.
+Every ticket must resolve to exactly one live owner. `HiddenDimensions` gates every hop, dropping
+the whole path rather than shortening it; endpoint `Plan()` narrowing applies to returned memories.
+A ticket does not grant hidden-scope consent. Neither historical dossier selection nor general
+blocker/dependency traversal is implied by this parent/child contract.
 
-**Interim behaviour, which ships:** a ticket anchor resolves relationally to its group's memories, and
-widening proceeds from those memories over recorded memory-to-memory edges. The manifest states that
-ticket-level relationships were not followed, so the export's completeness claim is qualified rather than
-overstated (`BR-19`, `BR-30`).
+`ITicketGraph` now backs PUT `/api/context/tickets/parent` and POST `/api/context/tickets/paths`.
+The read combines a Cypher anchor with recursive SQL over indexed AGE adjacency and live memberships,
+not variable-length Cypher. Memory association uses selected capped path endpoint groups plus anchor,
+not every admitted ticket. Always report **undeclared upstream hierarchy was not followed; freshness
+is unverified**, plus visible-only cap flags without hidden IDs/counts. This is captured hierarchy,
+not a synchronized tracker or a completeness claim. Release acceptance rests on final tests and
+benchmarks, not API presence alone.
+
+## Alternatives Considered
+
+- Relational hierarchy would give up graph traversal; live tracker projection introduces a network
+  dependency and unowned freshness obligations.
+- Ticket-to-Memory edges are rejected: JSONB already owns association, and relational joins avoid
+  membership fanout. Projecting hierarchy onto memory `LINKS` invents provenance and stays forbidden.
+- General ticket relationships such as blockers, splits and supersession remain outside this
+  decision. Their motivating examples above are not approval of additional edge types.
 
 ## Consequences
 
-- `BR-18` and `BR-19` are satisfied as written; the limitation is one the requirements do not currently demand be lifted.
-- **A slice anchored on a ticket under-selects whenever the answer lives in a related ticket.** This is the most likely source of a "the export missed the obvious thing" complaint, and it will be reported honestly rather than silently.
-- Nothing is built that would have to be unbuilt when the block clears.
-- The manifest gains a permanent "not followed" entry, which is accurate and also a standing reminder that this LADR is open.
+- Ticket representation and traversal are implemented; full dossier composition remains unimplemented.
+- Captured hierarchy remains partial and potentially stale. Group deletion removes its vertices and
+  incident hierarchy transactionally; memory deletion does not. Ticket-only Down warns of lost
+  declarations while preserving memory `LINKS` and relational metadata (HLD-003 LADR-08).
+- Existing HLD-003 NFR-02 memory budgets remain; composed ticket p95 <= 100 ms still gates release.
+  The hub-active benchmark exercises the actual command; its gate passed without widening the budget.
+- Tag identity and synonyms remain blocked under LADR-10.
 
 ## Related
 
-- **LADR-03** — the interim behaviour this leaves in place.
-- **LADR-10** — the same block, for tags.
-- **LADR-11** — even with the vertices, nothing would write the edges.
-- **HLD-003 LADR-02** — the rule that constrains every option here.
+- **LADR-03**: relational selection and memory widening remain separate from ticket traversal.
+- **LADR-10**: tag identity and synonyms remain blocked.
+- **LADR-11**: ticket writer resolved by HLD-002 LADR-08; tag writer still blocked.
+- **HLD-003 LADR-08**: current authority; supersedes the historical LADR-02 restriction.

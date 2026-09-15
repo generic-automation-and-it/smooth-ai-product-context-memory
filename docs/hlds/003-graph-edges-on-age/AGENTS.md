@@ -1,6 +1,6 @@
 # AGENTS.md - Graph edges on Apache AGE
 
-AI Context: HLD for graph edges on Apache AGE. Updated: 2026-09-13
+AI Context: HLD for graph edges on Apache AGE. Updated: 2026-09-15
 
 ## TL;DR
 
@@ -15,12 +15,12 @@ for.
 ## Non-Negotiables
 
 - **An edge without a recorded reason does not satisfy BR-11.** The BRD's case for relationships is the chain "a measurement produced a finding, which justified a decision" — an untyped, unexplained edge preserves adjacency and loses the chain.
-- **Never put a descriptive property on a vertex.** A vertex holds the memory's identity and nothing else. Subject, claim, scope, kind, validity and tags stay relational (LADR-02). A vertex with a second descriptive attribute is the failure this design exists to avoid.
+- **Never put a descriptive property on a vertex.** `Memory` carries only `memory_uuid`; `Ticket` carries only exact `provider`/`key`. Subject, claim, scope, kind, validity, tags and group membership stay relational (LADR-08, superseding LADR-02).
 - **Never write a relationship to both a table and the graph.** There is one representation, not two with a reconciler (LADR-03).
 - **Never delete a memory without removing its edges in the same transaction.** No foreign key cascades into the graph; a two-statement delete outside one transaction can strand orphan edges (LADR-05).
 - **Never create a relationship without first checking it does not exist.** No unique constraint exists over edges; uniqueness is a read-before-write, and the same pair holding *different* relations remains valid (LADR-05).
-- **Never mirror trackers, repositories or agile hierarchy into the graph.** Those are trees with an authoritative upstream; a copy needs syncing and syncing is a separate product (README, Guiding Principle).
-- **All seven LADRs and all four NFRs are Accepted.** Implementations rely on them. Flag a deviation and raise it; do not silently override.
+- **Never synchronize a tracker or infer hierarchy.** LADR-08 permits only practitioner-declared parent/child ticket edges, not an authoritative upstream mirror, tag graph, or memory-link projection.
+- **LADR-02 was superseded in writing before the ticket migration.** LADRs 01 and 03-08 are Accepted and implemented. Ticket release gates passed on 2026-09-15 against [final evidence](./nfrs/NFR-02-ticket-traversal-measurements.md), not the historical memory-only measurements; all budgets remain unchanged.
 - **Never write an anchor lookup as an inline property map.** `MATCH (n:Memory {memory_uuid: x})` compiles to `properties @> …` and sequentially scans the vertex table; `MATCH (n:Memory) WHERE n.memory_uuid = x` compiles to an extracted-property equality that `ix_memory_vertex_uuid` serves. `MERGE` is the sole exception and has its own GIN index (LADR-06).
 - **Never traverse without a bound.** `MemoryPathQuery.MaxDepth` is `required` and capped at 5. Do not add a defaulted overload; a default is a bound the caller never considered (LADR-07).
 - **Never return descriptive fields from a read path without the scope plan — and a path's intermediate hops are part of that read.** The endpoint is narrowed by `Plan().RequiredDimension`; every vertex the path crosses is gated by `MemoryScopeFilter.HiddenDimensions`. **Do not drive the hop gate off `Plan().ExcludedDimensions`** — that list is empty for every explicit dimension, so the gate would stop filtering exactly when the caller narrows, and declaring `product` would disclose programme hops that declaring nothing hides. Both the endpoint-only gap and this inversion were found in review and are pinned by tests.
@@ -32,12 +32,13 @@ See [./ladrs/](./ladrs/).
 | LADR | Decision | Why it matters |
 |------|----------|----------------|
 | [LADR-01](./ladrs/LADR-01-adopt-age-for-relationships.md) | AGE as an extension in the existing instance | One transaction spans relational and graph work. A separate graph server cannot join that transaction, which is why one was rejected |
-| [LADR-02](./ladrs/LADR-02-edges-only-thin-vertices.md) | Vertices carry identity only | Prevents two copies of one truth. Code that reads a memory property from a vertex is wrong by construction |
+| [LADR-02](./ladrs/LADR-02-edges-only-thin-vertices.md) | Superseded by LADR-08; historical text preserved | Identity-only survives; memory-only vertex restriction does not |
 | [LADR-03](./ladrs/LADR-03-replace-not-dual-write.md) | Replace the table; never dual-write | Any transitional dual-write path is a defect, not caution |
 | [LADR-04](./ladrs/LADR-04-connection-session-initialisation.md) | Initialise AGE per physical connection | Start-up-only initialisation prepares one pooled connection and leaves the rest failing intermittently |
 | [LADR-05](./ladrs/LADR-05-edge-integrity-as-invariant.md) | Edge integrity is an application invariant | Two guarantees the database used to provide are now the code's job |
 | [LADR-06](./ladrs/LADR-06-anchor-lookups-use-property-predicates.md) | Anchor lookups are property predicates, not inline maps | The two Cypher forms compile to different predicates and need different indexes; the inline form was sequentially scanning the vertex table |
 | [LADR-07](./ladrs/LADR-07-every-traversal-carries-its-bound.md) | Every traversal carries its bound | `MaxDepth` is `required`, so an unbounded path does not compile |
+| [LADR-08](./ladrs/LADR-08-captured-ticket-hierarchy.md) | Accepted; implemented, release gates passed | JSONB ownership, live hop gating and separate bounded traversal; actual benchmark evidence retained |
 
 ## Requirements
 
@@ -55,6 +56,46 @@ and the endpoint memory's cheap descriptive fields. Exposed as `POST /api/contex
 - **Descriptive fields come from the relational rows in the same statement.** The Cypher call is composed with `JOIN memory / memory_version / memory_group` in one SQL statement, never an application-side join — that single-session composition is LADR-01's stated justification, so forfeiting it forfeits the reason for choosing an in-database extension.
 - **The scope rule applies.** A traversal returning `description` / `statement` is a read path, so `MemoryScopeFilter.Plan` is pushed into the composed SQL exactly as `MemorySearchCriteria` does. Omitting it reopens the hole LADR-003 (HLD 001 API) was written to close.
 - Exposed as `POST /api/context/paths`; the mimisbrunnr-context-memory skill exposes it as the `paths` subcommand (bounded traversal, `maxDepth` required).
+
+### Ticket traversal contract - implemented and accepted
+
+[LADR-08](./ladrs/LADR-08-captured-ticket-hierarchy.md) governs a separate ticket query with required
+`maxDepth` 1..5, deterministic capped paths and distinct current non-proposed memories, anchor
+included. Every ticket resolves live to exactly one JSONB owner; `HiddenDimensions` gates every hop,
+dropping the whole path, while `Plan()` narrows returned memories. A ticket supplies no scope consent.
+Membership joins stay relational. Shared transaction-scoped advisory locking serializes group-ticket
+and hierarchy mutation; triggers maintain/backfill identities and clean up group deletion. Memory
+deletion never removes hierarchy. Generic upstream-coverage/freshness disclosures and visible-only
+cap flags must not leak hidden IDs or counts. Ticket p95 <= 100 ms passed without threshold relaxation.
+
+`ITicketGraph` / `NpgsqlTicketGraph` backs PUT `/api/context/tickets/parent` and POST
+`/api/context/tickets/paths`. The read composes a Cypher anchor with recursive SQL over AGE's indexed
+`TICKET_PARENT` adjacency, not variable-length Cypher. Live JSONB owner eligibility gates each frontier;
+only selected capped path endpoint groups plus the anchor supply distinct current memories. Limits
+default to 50 each, bounded 1..200; depth has no default. Mutation checks `ExpectedParent` before a
+current-state no-op: replaying an old null expectation after a successful set conflicts, with no
+operation replay token. `20260914180000_AddTicketGraph` owns identities, triggers and HASH indexes
+on provider/key plus GIN on properties; Memory's btree strategy does not apply to unrestricted ticket keys.
+Identity properties are parsed once in a materialized CTE; exact owner joins use ordinal `C`
+collation, avoiding the original quadratic join shape. Requested depth 5 evidence uses a three-deep
+hierarchy; never describe it as a five-deep benchmark.
+
+Stricter JSON guards made the filtered owner aggregate estimate collapse and reversed expansion.
+Keep the aggregate unfiltered, with `CASE` nulling ineligible IDs; NULL cannot join the anchor or next
+frontier. `OFFSET 0` anchors adjacency and keeps owner joins per recursive level, not per vertex.
+Hydrate hop metadata only after the path cap via `ix_ticket_parent_id` on `TICKET_PARENT(id)`;
+that btree is not the adjacency index. Live owner/group IDs are statement-local: no persisted cache,
+and ownership, visibility, selection and hydration share one SQL snapshot.
+
+Review-fix guardrails in LADR-08: ticket locking supports explicit EF `ReadCommitted` only, rejecting
+stale-snapshot isolation before SQL. Mutation owns its transaction or uses a private savepoint with
+uncancelled rollback/release; reparent is one Cypher command with exactly one result and exactly one
+vertex per supplied identity. Migration advisory-before-table locking uses `NOWAIT`; `55P03` means
+quiesce writers and retry, not wait into a deadlock. Owner reads accept string identities only and
+treat non-array membership containers as absent. Selected stored JSON corruption yields sanitized
+500; hidden-only corruption must leave the response unchanged. The dated revalidation below records
+the post-fix benchmark pass separately from historical acceptance; the final full-suite repeat passed
+with 429 tests, 4 gated benchmark skips and zero failures.
 
 ### Access path
 
@@ -74,6 +115,8 @@ plans as `Function Scan on age_vle`.
 
 | Requirement | Evidence | Result |
 |---|---|---|
+| Original pre-merge ticket and memory acceptance | [NFR-02-ticket-traversal-measurements.md](./nfrs/NFR-02-ticket-traversal-measurements.md) | Historical: 4 benchmark cases passed; full solution 396 passed + 4 gated skips; Python 34 passed; original tables retained |
+| 2026-09-15 post-review revalidation | [Dated results and three-loop checks](./nfrs/NFR-02-ticket-traversal-measurements.md#2026-09-15-review-revalidation) | 4 explicit benchmarks passed; worst ticket p95 34.797 ms; prior failures retained. Final full-suite repeat: 429 passed, 4 gated skips, zero failures; Python 42, Host 52 in each of three runs |
 | NFR-02 three shapes at 3,000 memories / 10,000 edges | [nfrs/NFR-02-traversal-measurements.md](./nfrs/NFR-02-traversal-measurements.md) | 1.042 / 0.621 / 14.053 ms p95 against 50 / 10 / 100 ms |
 | NFR-02 one-hop vs the pre-cutover baseline | same file, *The one-hop comparison* | 0.621 ms vs 0.429 ms — 1.4×, accepted with the reasoning recorded |
 | NFR-03 restore round-trip | [nfrs/NFR-03-restore-verification.md](./nfrs/NFR-03-restore-verification.md) | 201 rows / 200 vertices / **500 edges** matched; 1,797 paths traversed after restore |
@@ -98,11 +141,11 @@ verify.
 - **`nodes()` / `relationships()` come back with `::vertex` / `::edge` annotations that no JSON parser accepts.** `AgtypeArrayReader` strips them by scanning and skipping string literals, not by text replacement — `reason` is caller-supplied free text and may legitimately contain `}::edge`, which an L1 theory pins.
 - **Hop orientation comes from the edge, not from the walk.** An `Either`-direction traversal crosses edges backwards, so a hop's source and target are resolved from `start_id` / `end_id`, never from the order `nodes(p)` returned. Direction is part of a relationship's identity.
 - **The intermediate-hop gate roughly doubles the composed shape, 8.4 → 14.1 ms, and that is the price of not leaking.** Two SQL formulations measured the same, so the simpler join is kept. The `cardinality(...) = 0` short-circuit is load-bearing for correctness measurement as well as speed: an earlier benchmark left the excluded list empty, tripped the short-circuit, and reported a gate cost of 0.15 ms for a gate that never ran. A benchmark whose query is not the query the API issues measures nothing.
-- **The node list is safe to convert with text replacement; the edge list is not.** A vertex carries `memory_uuid` only (LADR-02), so no caller-supplied string reaches its rendering and `replace(…, '::vertex', '')` cannot corrupt it. An edge carries `reason`, so it goes through `AgtypeArrayReader`'s scanner instead. The asymmetry is a consequence of edges-only, not an inconsistency.
+- **Only the Memory node list is safe to convert with text replacement.** `Memory` carries `memory_uuid` only (LADR-08). Ticket provider/key strings and edge reason/source strings are caller-supplied; never extend the Memory-only replacement shortcut to them. Use string-aware parsing such as `AgtypeArrayReader` instead.
 - **The open-ended traversal scans the vertex table, deliberately.** Asking for everything reachable has no second endpoint to index against; the depth bound is what limits it, not an index (LADR-07). Edge storage is still reached only through `age_vle`, which is what NFR-02's criterion names.
 - **The entity-count guard changes by one.** Removing the relationship entity is expected and is updated deliberately in the same change; it is not a test to weaken when it fails.
-- **Relationships live only in the graph.** Vertex label `Memory` (`memory_uuid` only); one edge label `LINKS` with properties `relation` (open vocabulary) and `reason` (mandatory). The five foundation elabels were dropped at cutover. `memory_link` is gone.
-- **The delete path is the `trg_memory_graph_cascade` trigger, and nothing else.** Removing a memory row fires a BEFORE DELETE trigger that DETACH DELETEs its vertex in the same statement and transaction. `IMemoryGraph` deliberately exposes no delete method; a C# edge-removal step beside the trigger is a second delete path (Quality Constraints), not belt-and-braces.
+- **Memory relationships live only in the graph.** Labels are `Memory` (`memory_uuid` only) and `LINKS` (`relation`, open vocabulary; `reason`, mandatory). The five foundation elabels were dropped at cutover. `memory_link` is gone. LADR-08's implemented extension adds only `Ticket` and `TICKET_PARENT`; no membership fanout.
+- **Memory cleanup is the `trg_memory_graph_cascade` trigger, and nothing else.** Removing a memory row deletes its Memory vertex and incident `LINKS` in the same transaction, never ticket hierarchy. `IMemoryGraph` exposes no delete method; LADR-08 requires separate trigger-owned group-ticket cleanup, not a second memory cleanup path.
 - **The relationship contract is characterised** in `LinkTests` (HLD-003): a duplicate directed triple is refused, the same pair may hold several relations, direction is identity, deleting a memory removes inbound and outbound edges, a self-link persists at the store, and links are not group-bounded.
 - **Setting the AGE search path changes `current_schema()`, and EF resolves the migrations-history table against it.** `search_path = ag_catalog, "$user", public` makes `current_schema()` return `ag_catalog`, so an unqualified `__EFMigrationsHistory` is looked for there, not found, and EF concludes the database has never been migrated — then re-applies the first migration and fails on objects that already exist. The first start of a fresh database succeeds because the extension is not installed yet when history is first read; every start afterwards fails. The history table is therefore schema-pinned (`MigrationsHistoryConvention`). Anything else that resolves an unqualified object name at runtime is exposed to the same shift and must qualify it.
 - **Do not revert the database image to `library/postgres`.** Both Aspire hosts must stay on `docker.io/apache/age:release_PG17_1.7.0`. A vanilla Postgres image fails `CREATE EXTENSION age` and the pool-recycle tests.
@@ -112,19 +155,32 @@ verify.
 Measurable targets and their verification live in [./nfrs/](./nfrs/) — integrity, performance,
 operability and compatibility. Two shape how code is written rather than merely how it is measured:
 
-- The delete path must have exactly **one** implementation. The orphan invariant is only as strong as its least careful caller, so a second delete path is a defect.
+- Owning-row cleanup has exactly **one** implementation per row type: memory cleanup and group-ticket cleanup. Explicit hierarchy remove/reparent is not a second memory cleanup path.
 - Relationship access is written against the database driver directly. The ORM does not model graph objects, so they are absent from its migration model and its snapshot does not describe them.
 
 ## Migration Plans
 
+- Before the first ticket-graph upgrade, stop all writers and run `scripts/check-ticket-ownership.sh`.
+  The [ticket migration runbook](./ticket-migration-runbook.md) covers read-only duplicate/shape
+  detection and guarded, operator-approved legacy cleanup. Never infer a keeper or weaken the
+  migration's duplicate guard. A failed/partial migration needs separate state inspection.
+
 - The relational relationship table is dropped; existing rows are carried over as `:LINKS` edges in the same migration (LADR-03).
-- Reversal is a corrective migration restoring the table — there is no fallback flag, by design.
+- Reversal of the historical memory cutover is a corrective migration restoring the table; no fallback flag. Ticket-only Down instead warns of declaration loss and preserves memory `LINKS` and relational metadata (LADR-08).
 - The database image is `docker.io/apache/age:release_PG17_1.7.0` (Postgres 17 + AGE 1.7.0) in both the development and test hosts. Pairing: [nfrs/NFR-04-version-pairing.md](./nfrs/NFR-04-version-pairing.md).
 
 ## Changelog
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-15 | Added read-only legacy ticket ownership preflight and guarded operator-only pre-migration remediation; duplicate migration guard unchanged. | PR #63 review finding 3; [runbook](./ticket-migration-runbook.md) |
+| 2026-09-15 | Corrected NFR-02's evidence attribution: original pre-merge checkpoint is historical; dated post-review revalidation supplies the later measured results. | PR #63 review finding 1 |
+| 2026-09-15 | Final full-suite repeat verified: 429 passed, 4 gated skips, zero failures via `dotnet test SmoothAiProductContextMemory.slnx --no-build -m:1`. Prior benchmark-fixture connection timeout remains recorded in NFR-02; original pre-merge evidence unchanged. | NFR-02-ticket-traversal-measurements.md |
+| 2026-09-15 | Appended post-review benchmark revalidation and failed-attempt history without replacing original tables. Documented CASE eligibility, OFFSET 0 frontier joins and post-cap edge-ID hydration; same-snapshot live ownership retained. | LADR-08; NFR-02-ticket-traversal-measurements.md |
+| 2026-09-15 | Aligned review-fix contracts: explicit EF ReadCommitted, savepoint recovery, atomic reparent/cardinality, stale-snapshot rejection, migration NOWAIT quiesce/retry, typed memberships and scope-safe sanitized stored-JSON failures. Historical benchmark evidence unchanged; no new verification recorded. | LADR-08 |
+| 2026-09-15 | Closed ticket release/performance gates against final TRX and full-suite evidence. Added concise nine-shape ticket tables, original memory rerun, actual plan/index paths, parse-once ordinal ownership-join correction and honest three-deep/maxDepth-5 limitation. No threshold widened; pre-migration supersession and destructive ticket-only Down warning retained. | LADR-08; NFR-02-ticket-traversal-measurements.md |
+| 2026-09-14 | Synced to working-tree ITicketGraph, parent/path endpoints, identity migration/triggers, provider/key HASH plus properties GIN, recursive SQL over indexed AGE adjacency with Cypher anchor, selected-path memory association and strict expected-parent-before-no-op semantics. Targeted checks do not establish release acceptance; NFR-02 performance gate remains open without threshold relaxation. | LADR-08; NFR-02 |
+| 2026-09-14 | Owner-approved LADR-08 supersedes LADR-02 in writing before any ticket migration. Recorded exact Ticket identities, declared current-state hierarchy, JSONB association/trigger lifecycle, serialized mutation, live scope-safe bounded traversal and warned reversal. Existing memory budgets preserved; ticket benchmark and all implementation pending. | LADR-08, NFR-02 |
 | 2026-09-14 | Review fix: the access note claimed the skill has no subcommand for path traversal — the `paths` subcommand has existed since 2026-09-13 (bounded traversal, `maxDepth` required). | HLD-003 |
 | 2026-09-14 | Agent-facing skill renamed `context-memory` → `mimisbrunnr-context-memory`. | skill rename |
 | 2026-09-13 | Review fix: the evidence summaries quoted the superseded pre-gate run; every document now quotes the Results-table run (1.042 / 0.621 / 14.053 ms p95, one-hop delta +0.192 ms), and the historical tables are marked as such. | NFR-02 |

@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using SmoothAiProductContextMemory.Application.Common.Exceptions;
 using SmoothAiProductContextMemory.Domain.Entities;
 
 namespace SmoothAiProductContextMemory.Application.Common.Persistence;
@@ -11,7 +12,7 @@ public static class TicketLookup
         string key,
         CancellationToken cancellationToken)
     {
-        return await db.MemoryGroups
+        MemoryGroup[] owners = await db.MemoryGroups
             .FromSqlInterpolated(
                 $"""
                 SELECT * FROM memory_group g
@@ -21,6 +22,13 @@ public static class TicketLookup
                 )
                 """)
             .AsNoTracking()
-            .FirstOrDefaultAsync(cancellationToken);
+            .Take(2)
+            .ToArrayAsync(cancellationToken);
+        if (owners.Length > 1)
+        {
+            throw new ConflictException("Ticket ownership is ambiguous.");
+        }
+
+        return owners.SingleOrDefault();
     }
 }
