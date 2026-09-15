@@ -52,6 +52,7 @@ public static class DependencyInjection
         services.AddScoped<IMemorySearch, NpgsqlMemorySearch>();
         services.AddScoped<IMemoryGraph, NpgsqlMemoryGraph>();
         services.AddScoped<IMemoryTraversal, NpgsqlMemoryTraversal>();
+        services.AddScoped<ITicketGraph, NpgsqlTicketGraph>();
         services.AddSingleton<IDbErrorMapper, NpgsqlDbErrorMapper>();
 
         return services;
