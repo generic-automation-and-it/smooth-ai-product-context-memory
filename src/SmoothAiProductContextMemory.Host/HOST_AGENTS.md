@@ -26,6 +26,7 @@ ASP.NET Core composition root (Minimal API). Wires the application together and 
 - Endpoints translate HTTP to Mediator only. **`ApiExceptionHandler` never inspects exception text** — it asks `IDbErrorMapper` (SQLSTATE, implemented in Infrastructure) and otherwise maps the Application exception type. Database-originated details are fixed strings, so no SQL, column name or value can leak.
 - **One error contract:** RFC 7807 written as `application/problem+json` for every failure. `400` validation, `403` scope (`ForbiddenException`), `404` `NotFoundException`, `409` `ConflictException`, `500` with the fixed detail `"An unexpected error occurred."`. A request body that fails to deserialize — including an unknown property (a misspelled field is a caller mistake) — is also `400` `Invalid request body`, never absorbed and silently defaulted (`JsonUnmappedMemberHandling.Disallow`).
 - `GET .../blob` and `GET .../versions` take `?scope=` and `POST /query` takes `asOf`/`limit`; `PATCH /groups/{uuid}` and `GET|POST /initiatives` complete the registry surface. These read routes are proxies **and** scope boundaries — see `Features/FEATURES_AGENTS.md` LADR-003.
+- Ticket routes are separate: `PUT /api/context/tickets/parent` dispatches `SetTicketParent` and returns `changed`; `parent` must be present (explicit null removes), while null/absent `expectedParent` expects absence. `POST /api/context/tickets/paths` dispatches `FindTicketPaths` and returns `TicketTraversalResult`; omitted `maxDepth` stays zero and fails validation. Ticket identity grants no group-scope consent; the provider drops hidden anchors and whole hidden paths without a revealing 403/404 lookup in Host/Application.
 - Scalar/OpenAPI document every `/api/context/*` route; the L2 test asserts each path literally — `/api/context/paths` included, so a route added without updating `ExpectedRoutes` fails. Bind localhost (`5141`/`7141`); do not listen `0.0.0.0` in dev.
 - **Container image** listens `http://+:5141` (required inside Docker). Non-root (`$APP_UID`). `ENTRYPOINT` is the Host binary so `export` remains `docker run … image export …`. Config contract and AppHost image path: `docs/wiki/docker.md`. Do not bake web args into the entrypoint.
 
@@ -42,6 +43,7 @@ Approved release-image plan (2026-09-13):
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-14 | Added ticket parent and bounded ticket path route mappings, explicit-null removal wire guard, and HTTP validation/scope/hierarchy plus OpenAPI route coverage. | HLD-003 LADR-08 |
 | 2026-09-13 | All endpoints reject unknown JSON body fields as `400` (`JsonUnmappedMemberHandling.Disallow`); `ApiExceptionHandler` maps deserialization failures (`JsonException`/`BadHttpRequestException`) to `400` `Invalid request body`. | BUG-03 |
 | 2026-09-13 | AppHost default is working-tree Host; published image remains opt-in. | APPHOST_AGENTS.md |
 | 2026-09-13 | Host Dockerfile + GHCR publish; image serves API and `export`; AppHost image mode still runs Host as `mimisbrunnr-host` in group `smooth-mímisbrunnr`. | release-image |

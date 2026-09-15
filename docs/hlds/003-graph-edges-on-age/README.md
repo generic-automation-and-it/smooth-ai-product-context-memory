@@ -5,14 +5,17 @@
 | **Status** | Accepted |
 | **Owner** | generik0 |
 | **Tracker** | Context-memory V2 |
-| **Last updated** | 2026-09-13 |
+| **Last updated** | 2026-09-15 |
 
-> **Delivered and accepted.** All seven decisions and all four quality requirements are Accepted,
+> **Memory graph delivered and accepted.** The original decisions and four quality requirements were accepted
 > each against committed evidence: integrity and the relationship contract at the cutover, traversal
 > performance in [NFR-02-traversal-measurements.md](./nfrs/NFR-02-traversal-measurements.md), the
 > restore round-trip in [NFR-03-restore-verification.md](./nfrs/NFR-03-restore-verification.md), and
 > the version pairing plus pre-upgrade check in
 > [NFR-04-version-pairing.md](./nfrs/NFR-04-version-pairing.md).
+> **Ticket implementation accepted; release gates passed.** Owner-approved [LADR-08](./ladrs/LADR-08-captured-ticket-hierarchy.md)
+> superseded LADR-02 in writing before migration. [Final evidence](./nfrs/NFR-02-ticket-traversal-measurements.md)
+> records all ticket shapes below unchanged p95 <= 100 ms, the memory regression rerun and full-suite pass.
 >
 > This document delivers **intent + spec** — what we built and why, the decisions behind it, and the
 > quality bar it had to meet. It does **not** contain an implementation plan.
@@ -53,13 +56,14 @@ endpoints, not whole-graph algorithms.
 
 ### 2. Edges only — the graph never owns an entity
 
-Vertices exist solely to give edges something to attach to. A vertex carries the memory's stable
-identity and nothing else — no subject, no claim, no scope, no validity. Every property that
-describes a memory stays in its relational row.
+Vertices exist solely to give edges something to attach to. `Memory` carries only `memory_uuid`;
+LADR-08's implemented `Ticket` carries exact `provider` and `key` only. No subject,
+claim, scope or validity is copied. Ticket membership remains group JSONB; all descriptive fields
+remain relational.
 
-This is the rule that keeps the design honest. The moment a vertex carries a property that also
-exists in a table, there are two copies of one truth and a dual-write problem, which is the failure
-mode that discredits most polyglot designs.
+This keeps descriptive facts in one authoritative location. Identity anchoring is the deliberate
+exception: Ticket identity follows JSONB membership transactionally, while scope and ownership are
+resolved live. Copying descriptive fields would reintroduce the drift this design rejects.
 
 **Acceptance criteria / DoD**
 
@@ -96,6 +100,33 @@ must not make a developer's first run harder.
 - One backup captures relational and graph data together.
 - Local start-up remains a single command with no additional manual setup.
 
+### 5. Captured ticket hierarchy without a tracker mirror
+
+**Implemented and accepted.** [LADR-08](./ladrs/LADR-08-captured-ticket-hierarchy.md) permits
+practitioner-declared parent -> child `TICKET_PARENT` edges, separate from memory `LINKS`.
+
+`ITicketGraph` backs PUT `/api/context/tickets/parent` and POST `/api/context/tickets/paths`.
+The migration owns Ticket identities and group triggers. Separate provider/key HASH indexes and a
+properties GIN serve identity operations; traversal combines a Cypher anchor with recursive SQL
+over indexed AGE adjacency, not variable-length Cypher. Only selected capped path endpoints plus
+the anchor contribute group memories. NFR-02's gate passed with actual provider plans and measurements;
+requested depth 5 was tested on a three-deep hierarchy, not a five-deep fixture.
+
+**Acceptance criteria / DoD**
+
+- Exact provider/key identities, at most one parent and no cycles; explicit set/reparent/remove with
+  expected parent, reason/source, optional observation time and recorded time. Current state, not history.
+- JSONB membership remains authoritative; triggers maintain/backfill identities and clean up deleted
+  groups under the same transaction-scoped advisory lock as hierarchy writes. Memory deletion leaves
+  hierarchy intact; no membership fanout or memory-link projection.
+- Separate traversal requires `maxDepth` 1..5, deterministic capped paths and distinct current
+  non-proposed memories including the anchor's. Every ticket has exactly one live owner; hop visibility
+  uses `HiddenDimensions`, drops whole paths, and never treats a ticket as consent. Endpoint `Plan()`
+  narrowing still applies.
+- Generic undeclared-upstream/freshness disclosures and visible cap flags reveal no hidden IDs or
+  counts. Existing memory NFR-02 budgets stay intact; hub-active actual composed ticket traversal
+  requires p95 <= 100 ms. Ticket-only Down warns of declaration loss, preserving `LINKS` and JSONB.
+
 ## Core Separation of Concerns
 
 > AGE holds relationships. Relational tables hold entities. Neither takes the other's job.
@@ -114,8 +145,8 @@ question tables answer badly, and is given nothing else.
 > If it needs a join, it is a table. If it needs a path, it is an edge.
 
 - The graph is an **index over relationships**, never a second home for data.
-- A vertex without a corresponding relational row is a defect, not a valid state.
-- We will deliberately **not** mirror the agile hierarchy, ticket trees or repository structure into the graph. Those are trees with an authoritative upstream; a copy would need syncing, and syncing is a product.
+- A Memory vertex without its relational row, or a Ticket without exactly one live JSONB-owning group, is a defect.
+- We will deliberately **not** synchronize an authoritative tracker or mirror repository structure. LADR-08 allows only captured practitioner-declared ticket hierarchy, with unverified upstream freshness and incomplete coverage disclosed. No tag graph is approved.
 - We will deliberately **not** adopt a separate graph server. The extension model is the reason this is affordable.
 
 ---
@@ -126,18 +157,19 @@ question tables answer badly, and is given nothing else.
 
 ## Architecture Decisions (LADRs)
 
-LADRs 01–03 are strategic (*what* and *why*); 04–07 are tactical (*how*). Each is a single
+LADRs 01–03 are strategic (*what* and *why*); 04–07 are tactical (*how*); 08 replaces 02 for the ticket extension. Each is a single
 decision — a horizontal concern spanning this HLD. See [`./ladrs/`](./ladrs/).
 
 | LADR | Decision | Status |
 |------|----------|--------|
 | [LADR-01](./ladrs/LADR-01-adopt-age-for-relationships.md) | Adopt Apache AGE in the existing Postgres for relationship storage | Accepted |
-| [LADR-02](./ladrs/LADR-02-edges-only-thin-vertices.md) | Vertices carry identity only; all properties stay relational | Accepted |
+| [LADR-02](./ladrs/LADR-02-edges-only-thin-vertices.md) | Historical memory-only rule; identity-only retained by successor | Superseded by LADR-08 |
 | [LADR-03](./ladrs/LADR-03-replace-not-dual-write.md) | Replace the relationship table outright; never dual-write | Accepted |
 | [LADR-04](./ladrs/LADR-04-connection-session-initialisation.md) | Initialise the AGE session per physical connection | Accepted |
 | [LADR-05](./ladrs/LADR-05-edge-integrity-as-invariant.md) | Edge integrity becomes an enforced application invariant | Accepted |
 | [LADR-06](./ladrs/LADR-06-anchor-lookups-use-property-predicates.md) | Anchor lookups are property predicates over a btree; `MERGE` keeps the inline map over a GIN | Accepted |
 | [LADR-07](./ladrs/LADR-07-every-traversal-carries-its-bound.md) | The depth bound is a `required` property of the query type | Accepted |
+| [LADR-08](./ladrs/LADR-08-captured-ticket-hierarchy.md) | Identity-only tickets and practitioner-declared current-state hierarchy | Accepted; implemented, release gates passed |
 
 ## Non-Functional Requirements
 
@@ -147,6 +179,6 @@ target, a verification mechanism, and acceptance criteria. See [`./nfrs/`](./nfr
 | NFR | Attribute | Target (summary) | Status |
 |-----|-----------|------------------|--------|
 | [NFR-01](./nfrs/NFR-01-referential-integrity.md) | Integrity | Zero orphan edges; zero duplicate edges | Accepted |
-| [NFR-02](./nfrs/NFR-02-traversal-performance.md) | Performance | Depth-3 bounded path p95 ≤ 50 ms at 10k edges | Accepted — measured 1.042 / 0.621 / 14.053 ms p95 in [NFR-02-traversal-measurements.md](./nfrs/NFR-02-traversal-measurements.md); one-hop is 1.4× the [baseline](./nfrs/NFR-02-one-hop-baseline.md), adjudicated as accepted |
+| [NFR-02](./nfrs/NFR-02-traversal-performance.md) | Performance | Existing memory budgets unchanged; composed ticket p95 <= 100 ms | Accepted; [final ticket and memory rerun](./nfrs/NFR-02-ticket-traversal-measurements.md), worst ticket p95 59.092 ms |
 | [NFR-03](./nfrs/NFR-03-operability.md) | Operability | No added container; one backup; one-command start | Accepted — restore round-trip in [NFR-03-restore-verification.md](./nfrs/NFR-03-restore-verification.md) |
 | [NFR-04](./nfrs/NFR-04-compatibility.md) | Compatibility | Extension must not pin us below a supported Postgres | Accepted — pairing and pre-upgrade check in [NFR-04-version-pairing.md](./nfrs/NFR-04-version-pairing.md) |

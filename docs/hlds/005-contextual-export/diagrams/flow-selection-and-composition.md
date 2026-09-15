@@ -47,23 +47,28 @@ flowchart TD
 | Findings (NFR-04) | Judgement | A gap is an unanswered question against the task, an included claim or a stated expectation (`BR-27`) — none of which is a predicate |
 | Fidelity (NFR-07) | Judgement | Whether a condition still bounds a claim after rewriting is a semantic property, not a count |
 
-## Interim reach, and what it excludes
+## Implemented and accepted ticket reach
 
-The widening step travels **memory to memory only**. Anchors are resolved relationally and then left
-behind — a ticket anchor cannot follow that ticket's blockers, and a tag anchor cannot follow that tag's
-synonyms, because neither has a vertex and nothing writes such edges.
+Delivered widening travels **memory to memory**. LADR-09 now resolves separate captured ticket
+hierarchy under HLD-003 LADR-08; HLD-002 LADR-08 resolves its practitioner-declared writer.
+Ticket implementation and release gates are accepted against final HLD-003 evidence.
+Tag synonyms stay blocked; generic ticket blockers are not approved.
 
 ```mermaid
 flowchart LR
     T["Ticket anchor"] -.->|"resolved relationally"| M1["Memory"]
-    G["Tag anchor"] -.->|"array containment"| M1
+    G["Tag anchor"] -.->|"exact array matching"| M1
     M1 -->|"depends_on"| M2["Memory"]
     M2 -->|"supersedes"| M3["Memory"]
-    T ==>|"BLOCKED — no ticket vertex<br/>LADR-09"| T2["Related ticket"]
+    T ==>|"IMPLEMENTED AND ACCEPTED<br/>declared parent -> child, LADR-09"| T2["Child ticket"]
+    T2 -.->|"live JSONB owner join<br/>not a membership edge"| M4["Current non-proposed memories"]
     G ==>|"BLOCKED — no tag identity<br/>LADR-10"| G2["Synonym tag"]
-    M1 -.->|"BLOCKED — no writer<br/>LADR-11"| T
 ```
 
-Solid arrows work today. The heavy arrows are the blocked prerequisites, and the manifest states that
-they were not followed — so an export's completeness claim is qualified rather than overstated
-(`BR-19`, `BR-30`).
+Arrows distinguish memory links, implemented and accepted ticket hierarchy, and blocked tags.
+The separate ticket read requires depth 1..5 and exactly one live owner per ticket, gates every hop
+with `HiddenDimensions`, drops whole hidden paths, and narrows returned memories through `Plan()`.
+The read uses a Cypher anchor plus recursive SQL over indexed AGE adjacency; only selected capped
+path endpoint groups and anchor contribute memories. Ticket identity grants no consent. Generic undeclared-upstream and
+unverified-freshness disclosure plus visible-only cap flags qualify completeness without exposing
+hidden IDs/counts (`BR-19`, `BR-30`). This diagram does not claim the full dossier is implemented.

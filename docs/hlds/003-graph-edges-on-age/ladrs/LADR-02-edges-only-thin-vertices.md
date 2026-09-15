@@ -1,6 +1,13 @@
 # LADR-02: Vertices carry identity only; all properties stay relational
 
-**Status:** Accepted
+**Status:** Superseded by [LADR-08](./LADR-08-captured-ticket-hierarchy.md) on 2026-09-14.
+
+**Supersession recorded before any ticket-graph migration.** The owner approved identity-only
+`Ticket` vertices and practitioner-declared hierarchy in LADR-08; implementation and release gates
+are now accepted against the 2026-09-15 evidence linked from LADR-08. The
+memory identity-only rule survives, but the restriction to memory vertices and the blanket ban on
+captured ticket hierarchy no longer govern. The original text below is preserved as historical
+rationale, not a competing current rule.
 
 ## Context
 

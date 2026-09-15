@@ -26,8 +26,10 @@ and Cypher execute against the same session, so a relationship write and the rel
 it commit or roll back together. No additional service is deployed and the container count is
 unchanged; only the database image differs.
 
-Scope is deliberately narrow. AGE is introduced to answer path questions about memory relationships.
-It is not adopted as a general modelling tool, and no existing relational concern moves to it.
+Scope is deliberately narrow. AGE was introduced for memory relationship paths. The owner-approved,
+implemented [LADR-08](./LADR-08-captured-ticket-hierarchy.md) adds captured ticket hierarchy
+only; no existing relational concern moves to the graph and it is not a general modelling tool.
+Ticket release gates passed against the final NFR-02 evidence linked from LADR-08.
 
 ## Alternatives Considered
 
@@ -47,5 +49,5 @@ It is not adopted as a general modelling tool, and no existing relational concer
 
 ## Related
 
-- **LADR-02** — constrains what may be stored on the graph side.
+- **LADR-08**: current graph storage boundary, superseding the historical LADR-02 memory-only restriction.
 - **LADR-05** — handles the integrity guarantees this decision forfeits.

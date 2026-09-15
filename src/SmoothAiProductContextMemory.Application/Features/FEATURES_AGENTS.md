@@ -2,11 +2,13 @@
 
 ## TL;DR
 
-HTTP API the mimisbrunnr-context-memory skill consumes — uuid-only wire, Mediator slices, lookup/mechanics only; skill owns judgement. Retrieval runs in PostgreSQL; the dry run runs the real plan.
+HTTP API the mimisbrunnr-context-memory skill consumes: memory/group UUIDs, exact ticket provider/key,
+Mediator slices and lookup/mechanics only; skill owns judgement. Retrieval runs in PostgreSQL.
+Memory-set dry-run runs the real plan; ticket-parent local dry-run validates shape only.
 
 ## Non-Negotiables
 
-- **Wire identity is `uuid`, never the surrogate `bigint`.** Handlers resolve FKs internally.
+- **Memory/group wire identity is `uuid`, never the surrogate `bigint`.** Handlers resolve FKs internally. Ticket hierarchy uses exact external `provider`/`key`, not a new ticket UUID (HLD-003 LADR-08).
 - **No LLM in Application/Host.** Preflight is exact-match recall (`subject_slug`, ticket hits, intra-batch slug collisions). Skill decides new / version / skip and typed links.
 - **Never expose or let the caller set `is_current`.** `SetMemories` owns the flag in one transaction: flip old current off, then insert the new current. A failure between those statements strands zero currents — a state no constraint forbids.
 - **Dry run and write share one plan, not just one handler.** Every verdict is reached in `BuildPlanAsync`, which mutates nothing; only the persist step branches. A shortcut dry-run path stops predicting the write, and this endpoint is the caller's only pre-write veto point.
@@ -29,6 +31,19 @@ HTTP API the mimisbrunnr-context-memory skill consumes — uuid-only wire, Media
   composed SQL — a path routed through a hidden memory is dropped,
   because returning it would disclose that memory's uuid and its edges' reasons. A traversal returns
   descriptive fields, so it is a read path and gets the read path's rule in full.
+- **Ticket traversal is separate and grants no consent from ticket identity.** `Tickets/FindTicketPaths`
+  dispatches `TicketTraversalQuery` under HLD-003 LADR-08; the provider must resolve every ticket live to exactly one JSONB-owning group;
+  `HiddenDimensions` gates anchor and all hops, dropping hidden paths whole, never shortening them.
+  Apply endpoint `Plan()` narrowing to returned memories without the relational ticket lookup's
+  in-group consent shortcut. Required `maxDepth` 1..5 at wire/store; deterministic capped paths and
+  distinct current non-proposed memories from selected capped path endpoint groups plus the anchor's.
+  Dropped-by-cap paths contribute no memories. No membership fanout or `LINKS`
+  projection. Generic upstream-unfollowed/freshness-unverified disclosure and visible cap flags
+  reveal no hidden IDs/counts. This is neither dossier history selection nor full dossier delivery.
+- **Ticket hierarchy capture is practitioner-declared only.** HLD-002 LADR-08 requires explicit
+  expected-parent set/reparent/remove, not subject-based inference. One-parent/cycle validation and
+  group-ticket changes share one transaction-scoped advisory lock (HLD-003 LADR-08); stale expectation
+  conflicts rather than overwrites. Existing exact ownership and additive ticket association remain.
 - **Never log statement, summary, content, or blob address at Information.** Counts and lifecycle at `Information`, per-operation decisions at `Debug`.
 
 ## System Context
@@ -139,7 +154,15 @@ sequenceDiagram
 - API persists `status` as given — no re-gate by kind.
 - **Subject uniqueness is checked before the write, not only by the index.** A create whose `subject_slug` already exists in the group is a `409` telling the caller to send a version bump — on the dry run too. Two items in one batch sharing a subject is the same `409`.
 - Resolve-or-create matches by ticket (200 existing group) or creates (`local:<guid>` when untracked). Initiative is a **name** (entity has no uuid); default `to-be-decided`. Optional repo/scope apply on **create only** — use `PATCH /groups/{uuid}` afterwards.
-- Ticket uniqueness is soft: resolve returns the owning group. Exact `(group_id, subject_slug)` unique index is the only in-DB subject backstop.
+- Resolve/update acquire `ITicketGraph.LockAsync` inside an explicit EF transaction before group or ticket-owner reads. Resolve inspects every supplied ticket and rejects multiple owners or different owning groups; returning an existing group never merges unowned tickets. Update checks ownership even for already-attached tickets, then preserves additive/idempotent merge.
+- `PUT /api/context/tickets/parent` requires explicit `parent` (null removes); null/absent `expectedParent` expects absence. It returns `changed`. `POST /api/context/tickets/paths` returns `TicketTraversalResult` with required numeric `maxDepth` 1..5, outbound/inbound/either direction, scope/kind narrowing, and independent path/memory caps defaulting to 50 (1..200). Identity strings are exact, nonempty, max 512; declaration reason/source are nonempty, max 4000; embedded null characters and self-parenting are rejected. Hidden-anchor handling stays provider-side and returns an empty result, not a revealing preliminary lookup.
+- Ticket ownership uses exact provider/key application checks and a shared-lock trigger guard against
+  cross-group conflicts; it is no longer solely a soft application check. The `(group_id, subject_slug)`
+  unique index remains the only in-DB subject backstop.
+- `SetTicketParent` checks `ExpectedParent` before identical current-state no-op. Matching expected
+  current parent and identical parent/reason/source/observedAt returns `changed: false`; replaying the
+  original null expectation after a successful set returns conflict. No operation replay token exists.
+  The API returns only `changed`; skill inspection is local shape validation, not server dry-run.
 - Sources and tickets serialize only through `JsonShapeDocument` so `v` is never hand-written.
 - D42 summary stamp is jsonb `SummaryStampDocument` on `memory_version`; `append_only_guard` equality list includes `summary_stamp`.
 - Error contract is RFC 7807 on `application/problem+json` for every failure: `400` validation, `403` scope, `404` missing, `409` conflict, `500` with a fixed detail.
@@ -156,6 +179,11 @@ sequenceDiagram
 - **`ix_memory_version_validity` (GIST over `tstzrange`) is unreachable from LINQ**, which cannot construct a range from two columns. The `asOf` predicate is scalar and always combined with a narrowing predicate. Index usage is not asserted by a test: at test data volumes the planner correctly prefers a sequential scan regardless, so such a test would prove nothing. Verify with `EXPLAIN` against a realistic dataset.
 
 ## Test References
+
+- Ticket release gates passed on 2026-09-15: full solution and explicit benchmarks, with unchanged
+  p95 <= 100 ms. [Final evidence](../../../docs/hlds/003-graph-edges-on-age/nfrs/NFR-02-ticket-traversal-measurements.md)
+  records exact counts and fixture limits. The export fixture now gives its five groups distinct
+  ticket identities; ownership enforcement was not weakened to make tests pass.
 
 - L0: `tests/SmoothAiProductContextMemory.Application.UnitTest/Features/` (validators, `MemoryScopeFilter` predicate **and** plan)
 - L0: `tests/SmoothAiProductContextMemory.Application.UnitTest/Features/Export/` (export paths, renderer, gitignore)
@@ -174,6 +202,10 @@ sequenceDiagram
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-15 | Closed ticket release gates using full-suite and explicit benchmark evidence. Export fixture identity reuse corrected rather than weakening ownership; strict expected-parent/no-replay, scope and selected-path association contracts unchanged. | HLD-003 final NFR-02 evidence |
+| 2026-09-14 | Synced ticket documentation to strict expected-parent-before-no-op semantics, no replay token, trigger-backed exact ownership and memory association from selected capped path endpoints plus anchor. Distinguished local shape-only inspection from memory-set dry-run and kept ticket release/performance gate open. | HLD-003 LADR-08; NFR-02 |
+| 2026-09-14 | Added `Tickets/SetTicketParent` and `FindTicketPaths`: exact identities capped at 512, mandatory reason/source capped at 4000, self-parent rejection, explicit-null parent removal, required depth 1..5, independent caps 1..200 (default 50), no ticket scope consent. Resolve/update now lock inside explicit EF transactions before ownership/group reads; inspect every supplied ticket, reject ambiguous ownership, preserve re-resolve no-merge and additive update. Provider lifecycle/traversal remain separately owned. | HLD-003 LADR-08 |
+| 2026-09-14 | Recorded pending ticket-only wire/scope contract and declared writer, distinct from existing relational ticket lookup consent and memory provenance traversal. No implementation, migration, full dossier or tag-graph change. | HLD-003 LADR-08; HLD-002 LADR-08 |
 | 2026-09-14 | Agent-facing skill renamed `context-memory` → `mimisbrunnr-context-memory`. | skill rename |
 | 2026-09-13 | `UpdateGroup` accepts `tickets` as an additive, idempotent, cross-group-unique merge; all endpoints reject unknown JSON body fields as a 400 (breaking — a stray field no longer silently defaults). | BUG-03 |
 | 2026-09-13 | Facet/tag match mode made explicit: default `any` (indexed overlap `&&`) so recall unifies a batch's facets; `all` (containment `@>`) opt-in via `QueryMemories.Request.FacetMatchMode` / `MemorySearchCriteria.FacetMatchMode`. GIN serves both (verified, no seq scan). | BUG-02 |

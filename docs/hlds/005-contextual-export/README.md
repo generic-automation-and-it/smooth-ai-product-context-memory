@@ -6,7 +6,7 @@
 | **Owner** | generik0 |
 | **Tracker** | Contextual export |
 | **Business authority** | [BRD-002 — Contextual knowledge export](../../brd/002-contextual-export/) (`BR-18` … `BR-36`) |
-| **Last updated** | 2026-09-14 |
+| **Last updated** | 2026-09-15 |
 
 > Discovery / prototyping HLD. Delivers **intent + spec** — what we are building and why, the decisions
 > behind it, and the quality bar it must meet. No implementation plan; execution is tracked in the
@@ -163,8 +163,8 @@ cannot — and pretending otherwise would either forbid the judgement or make th
 
 ## Architecture Decisions (LADRs)
 
-LADRs 01–06 are strategic, 07–08 tactical, **09–11 are blocked prerequisites** — decisions that cannot
-be taken until a named gap in the graph or the capture skill is closed — and 12–14 were appended after
+LADRs 01–06 are strategic, 07–08 tactical, **09–11 track anchor prerequisites**: tickets are now
+implemented and accepted against final verification; tags remain blocked. LADRs 12–14 were appended after
 the original set (12 and 13 strategic, 14 tactical), because numbers are never reassigned. See
 [`./ladrs/`](./ladrs/).
 
@@ -183,34 +183,40 @@ without it. It is not a deferred decision — it is a decision with a missing in
 | [LADR-06](./ladrs/LADR-06-findings-are-output-not-writes.md) | Findings are output; recording one is a normal capture | Draft |
 | [LADR-07](./ladrs/LADR-07-deterministic-provenance-ordering.md) | Ordering is a deterministic topological sort over provenance relations | Draft |
 | [LADR-08](./ladrs/LADR-08-read-only-dossier-skill.md) | A read-only dossier skill; `mimisbrunnr-context-memory` narrows to sole *writer* | Draft |
-| [LADR-09](./ladrs/LADR-09-ticket-anchors-have-no-graph-representation.md) | Ticket anchors as graph vertices | **Blocked** |
+| [LADR-09](./ladrs/LADR-09-ticket-anchors-have-no-graph-representation.md) | Captured ticket hierarchy under HLD-003 LADR-08 | Accepted; implemented, release gates passed |
 | [LADR-10](./ladrs/LADR-10-tag-anchors-have-no-graph-representation.md) | Tag anchors as graph vertices | **Blocked** |
-| [LADR-11](./ladrs/LADR-11-no-writer-derives-anchor-edges.md) | Capture-time derivation of anchor edges | **Blocked** |
+| [LADR-11](./ladrs/LADR-11-no-writer-derives-anchor-edges.md) | Practitioner-declared ticket hierarchy under HLD-002 LADR-08; tag writer unresolved | Ticket half implemented and accepted; tag half **Blocked** |
 | [LADR-12](./ladrs/LADR-12-focus-is-a-composition-lens.md) | Focus is a composition lens over one unfocused bundle | Draft |
 | [LADR-13](./ladrs/LADR-13-findings-carry-a-basis-and-a-scope.md) | Every finding carries a stated basis and is scoped to the examined material | Draft |
 | [LADR-14](./ladrs/LADR-14-preview-and-composition-bind-to-one-selection.md) | Preview and composition bind to one recorded selection | Draft |
 
-### What the blocked LADRs mean for scope
+### Resolved tickets, blocked tags
 
-The graph holds exactly one vertex label — `Memory` — carrying identity and nothing else (HLD-003
-LADR-02). Tickets live as documents on a memory group; tags and facets live as arrays on a memory.
-**Neither is a vertex, so neither can be traversed from.**
+[HLD-003 LADR-08](../003-graph-edges-on-age/ladrs/LADR-08-captured-ticket-hierarchy.md) supersedes
+LADR-02 in writing before any ticket migration. Exact provider/key-only `Ticket` identities and
+practitioner-declared parent -> child `TICKET_PARENT` are implemented under the accepted design. Group
+association stays JSONB; memories join relationally, without membership fanout or projected `LINKS`.
+[HLD-002 LADR-08](../002-context-memory-write-pipeline/ladrs/LADR-08-practitioner-declared-ticket-hierarchy.md)
+resolves the writer: explicit expected-parent set/reparent/remove, not automatic derivation or a
+synchronized tracker mirror. This is current-state hierarchy, not history or general ticket blockers.
 
-The consequence is precise and worth stating plainly rather than discovering during implementation:
-**widening works from memories, never from anchors.** A ticket or tag anchor is resolved relationally to
-a set of memories, and the graph then widens *from those memories*. What cannot be expressed at all is
-a relationship *between anchors* — ticket blocks ticket, tag narrows tag, initiative contains ticket —
-so a slice cannot follow "this ticket's blockers" or "this tag's parent topic". Those are LADR-09 and
-LADR-10, and both are blocked on a schema decision that HLD-003's thin-vertex rule deliberately
-constrains.
+The separate ticket traversal requires `maxDepth` 1..5, deterministic capped paths and distinct
+current non-proposed memories including the anchor's. Every ticket resolves to exactly one live
+owner; `HiddenDimensions` gates every hop, drops hidden paths whole, and grants no consent merely
+from ticket identity. Endpoint `Plan()` narrowing still applies. Generic disclosures say undeclared
+upstream hierarchy was not followed and freshness is unverified; visible cap flags reveal no hidden
+IDs or counts. `ITicketGraph` backs separate parent PUT and ticket-path POST endpoints. Traversal
+composes a Cypher anchor with recursive SQL over indexed AGE adjacency, with memories from selected
+capped path endpoints plus anchor. **Performance gate PASSED:** [final evidence](../003-graph-edges-on-age/nfrs/NFR-02-ticket-traversal-measurements.md)
+records the accepted implementation at unchanged memory budgets and ticket p95 <= 100 ms. The
+depth-5 request was benchmarked on a three-deep hierarchy; no five-deep performance claim is made.
 
-LADR-11 is the writer-side half: even if those vertices existed, nothing derives edges for them.
-Capture derives memory-to-memory links from subject matching, and there is no path — automatic or
-proposed — that would produce a ticket or tag edge.
-
-**The design ships without all three.** Relational anchor resolution plus memory-to-memory widening
-satisfies `BR-18` and `BR-19` as written. The blocked LADRs are what a *later* increment needs, and
-naming them here stops the first implementation from quietly inventing an answer.
+**Tag identity/synonyms and the tag writer remain blocked.** LADR-10 permits only evidence-backed
+`near-miss-tag` skill reporting from already-authorized examined material, with supporting UUID/version,
+basis, scope and observation/analysis classification. No extra search, broadened selection, guessed
+excluded record or write. Executable `near_miss_tags.py` validates approved examined references,
+exact tag mismatch and grounded caller/skill analysis without I/O beyond stdin/stdout. NFR-04 fixes
+the taxonomy; this helper does not implement or approve the full dossier, which remains In Discovery.
 
 ## Non-Functional Requirements
 

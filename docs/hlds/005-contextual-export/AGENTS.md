@@ -1,6 +1,6 @@
 # AGENTS.md - Contextual knowledge export
 
-AI Context: HLD for contextual knowledge export. Updated: 2026-09-14
+AI Context: HLD for contextual knowledge export. Updated: 2026-09-15
 
 ## TL;DR
 
@@ -10,8 +10,11 @@ graph — as one composed document plus a findings report. Intent in [README.md]
 [./diagrams/flow-selection-and-composition.md](./diagrams/flow-selection-and-composition.md). Business
 authority is [BRD-002](../../brd/002-contextual-export/).
 
-**This HLD is In Discovery, and three LADRs are Blocked** (09, 10, 11). The blocked set is not a backlog —
-it is the reason anchor-level widening is absent. Do not implement around it.
+**This HLD remains In Discovery.** LADR-09 and LADR-11's ticket half are decision-resolved by
+owner-approved HLD-003 LADR-08 and HLD-002 LADR-08, with implementation and release gates accepted
+against [final evidence](../003-graph-edges-on-age/nfrs/NFR-02-ticket-traversal-measurements.md). LADR-10 and
+LADR-11's tag half remain Blocked. Evidence-only near-miss reporting does not approve a tag graph
+or the full dossier implementation.
 
 ## Non-Negotiables
 
@@ -31,11 +34,13 @@ it is the reason anchor-level widening is absent. Do not implement around it.
 - **Never present repeated captures as corroboration.** `BR-23` is explicit: several captures of one source are not independent evidence. An earlier version of LADR-05 said the opposite — do not restore it.
 - **Never compress away a condition to fit a budget.** Narrow what is included and report the omission; a claim shorn of its exception is a false claim, not a shorter one (NFR-07).
 - **Never let composition silently re-select.** The scope the practitioner approved in the preview is the scope composed, or the difference is reported (LADR-14).
-- **Do not invent an answer for LADR-09 / 10 / 11.** Specifically: do not add a non-`Memory` vertex label, and do not project ticket or tag relationships onto memory edges. The second is the tempting one and it corrupts both ordering and contradiction detection.
+- **Use the ticket-only upstream decisions; do not generalize them.** HLD-003 LADR-08 supersedes LADR-02 for exact `Ticket` identities and declared `TICKET_PARENT` only. Group membership remains JSONB, memories join relationally, and no ticket/tag relationship is projected onto memory `LINKS`. Tag identity/synonyms remain blocked.
+- **Ticket identity supplies no scope consent.** Separate ticket traversal requires `maxDepth` 1..5 and exactly one live owner for every ticket. Gate all owners with `HiddenDimensions`, drop hidden paths whole, then apply endpoint `Plan()` narrowing. Return capped deterministic paths and distinct current non-proposed memories including the anchor's; disclose only visible cap flags and generic upstream coverage/freshness limits (LADR-09).
 
 ## Architecture Decisions
 
-See [./ladrs/](./ladrs/). LADRs 01–08 and 12–14 Draft; 09–11 **Blocked**.
+See [./ladrs/](./ladrs/). LADRs 01–08 and 12–14 Draft; 09 Accepted and implemented;
+10 Blocked with a verified evidence-only interim; 11 ticket half Accepted and implemented, tag half Blocked.
 
 | LADR | Decision | Why it matters |
 |------|----------|----------------|
@@ -47,9 +52,9 @@ See [./ladrs/](./ladrs/). LADRs 01–08 and 12–14 Draft; 09–11 **Blocked**.
 | [LADR-06](./ladrs/LADR-06-findings-are-output-not-writes.md) | Findings are output | A side-effect write has no checkpoint and no judgement |
 | [LADR-07](./ladrs/LADR-07-deterministic-provenance-ordering.md) | Deterministic topological ordering | Ordering is the one part of composition that can be specified and tested |
 | [LADR-08](./ladrs/LADR-08-read-only-dossier-skill.md) | Read-only dossier skill; capture skill is sole *writer* | Makes read-only structural rather than behavioural |
-| [LADR-09](./ladrs/LADR-09-ticket-anchors-have-no-graph-representation.md) | Ticket vertices — **Blocked** | No ticket vertex exists; ticket-to-ticket relationships are unreachable |
+| [LADR-09](./ladrs/LADR-09-ticket-anchors-have-no-graph-representation.md) | Ticket hierarchy implemented and accepted | HLD-003 LADR-08 owns identity-only tickets, live ownership and separate scope-safe traversal |
 | [LADR-10](./ladrs/LADR-10-tag-anchors-have-no-graph-representation.md) | Tag vertices — **Blocked** | Tags are open strings with no identity; synonyms are invisible |
-| [LADR-11](./ladrs/LADR-11-no-writer-derives-anchor-edges.md) | Anchor-edge derivation — **Blocked** | Even with vertices, nothing would write the edges |
+| [LADR-11](./ladrs/LADR-11-no-writer-derives-anchor-edges.md) | Ticket writer resolved; tag writer **Blocked** | HLD-002 LADR-08 permits practitioner declarations only, not inference or tracker synchronization |
 | [LADR-12](./ladrs/LADR-12-focus-is-a-composition-lens.md) | Focus is a lens over one unfocused bundle | Filtering by focus breaks completeness, reproducibility and comparability at once |
 | [LADR-13](./ladrs/LADR-13-findings-carry-a-basis-and-a-scope.md) | Findings carry a basis and a scope | An inference that reads as a discovery is the most persuasive and least checkable thing a composition emits |
 | [LADR-14](./ladrs/LADR-14-preview-and-composition-bind-to-one-selection.md) | Preview and composition bind to one selection | Re-selecting at composition time is the implementation default and makes the consent step decorative |
@@ -61,8 +66,12 @@ than Draft — a Draft may be revised by this work, a Blocked may not be resolve
 
 ## Key Behaviors
 
-- **Widening travels memory to memory only.** Anchors are resolved relationally and then left behind. A ticket anchor cannot reach that ticket's blockers; a tag anchor cannot reach that tag's synonyms. The manifest must say so on every export — an unstated reach is indistinguishable from completeness.
-- **A tag slice under-selects when the vocabulary drifted.** Tags are an open vocabulary typed over months, so this is the more frequent of the two under-selection failures. Reporting the near-miss tag as a finding is the interim answer and costs nothing (LADR-10).
+- **Ticket traversal exists separately from memory provenance.** `ITicketGraph` backs POST `/api/context/tickets/paths`; a Cypher anchor composes with recursive SQL over indexed AGE adjacency and live owners. Selected capped path endpoints plus anchor supply memories, not every admitted ticket. No blocker/dependency graph or dossier history mode is implied. Always disclose undeclared upstream hierarchy unfollowed and freshness unverified. The performance gate passed; tags still have no synonym traversal.
+- **Near-miss reporting needs evidence, not broader search.** `near-miss-tag` uses only already-authorized examined material and cites UUID/version, basis, scope and observation/analysis classification. No extra query, guessed excluded record, hidden ID/count or write; no evidence means no finding (LADR-10, NFR-04).
+- **The near-miss helper is executable, not a dossier implementation.** `near_miss_tags.py` validates
+  supplied approved UUID/version evidence and exact supporting quotes, observes failed exact tag
+  predicates, and labels caller/skill relevance as analysis. Selection and disclosure stay unchanged.
+  Its offline bounded tests establish plumbing, not authorization truth or semantic judgement quality.
 - **`relates_to` and unknown relations connect without ordering.** Including them in the topological sort manufactures cycles constantly, because reciprocal `relates_to` edges are normal (LADR-07).
 - **A provenance cycle is a finding, not a rendering problem.** It means capture recorded that A rests on B and B on A. Break at a stated point, report it, and still produce the document.
 - **The bounded sets are decided before first use, not discovered.** Omission reasons and finding categories both. Adding a category later changes the meaning of every earlier export — the same reasoning HLD-004 applies to its retrieval-shape classification.
@@ -90,16 +99,19 @@ Targets and verification live in [./nfrs/](./nfrs/). Three shape how code is wri
 ## Migration Plans
 
 - **`mimisbrunnr-context-memory` documentation must be amended in the same change** that introduces the dossier skill: its stated invariant narrows from sole *interface* to sole **writer** (LADR-08). Unamended, the two skills' documentation contradicts each other — the exact defect this design reports on elsewhere.
-- **LADR-09 and LADR-10 both depend on a decision owned by HLD-003** (whether a non-`Memory` vertex label is permissible against its thin-vertex rule). Neither can be resolved here. LADR-11 depends on both, and on HLD-002, which owns link derivation.
+- **Ticket prerequisites were resolved in their owning HLDs before migration.** HLD-003 LADR-08 superseded LADR-02; HLD-002 LADR-08 owns the accepted declared-only writer. Final evidence verifies ticket migration/API and the deterministic near-miss helper. LADR-10 and the tag half of LADR-11 still require tag identity/synonym and writer decisions; full dossier implementation is not implied by this acceptance.
 - **LADR-06's Open question belongs to HLD-004.** Whether an export counts as a recall event — and whether "findings already dismissed" is recorded anywhere — must be settled with recall feedback, not ahead of it.
 - **The five focuses are unvalidated** (LADR-12 Open). They were named from how the practitioner works, not derived. Whether `specification` survives beside `architecture`, and whether `review` is a focus at all, is answerable only by use. Do not add a sixth before the five have been used, and do not build a focus-registry abstraction for five enum values.
 - **Gap detection now has a defined basis and this design has been aligned to it.** `BR-27` supplies three grounds (task, included claim, explicit expectation); LADR-13 implements them. The earlier "no expectation model" position is **resolved, not open** — do not reintroduce it, and do not build a generic-expectations rule engine, which `BR-27` explicitly excludes.
-- **The finding taxonomy renames before first use.** `orphan` → `no-links-in-slice`, and `duplicate-not-collapsed` → `equivalence-uncertain`. NFR-04 fixes the set before the first export, so these must land ahead of it.
+- **The finding taxonomy changes before first use.** `orphan` becomes `no-links-in-slice`, `duplicate-not-collapsed` becomes `equivalence-uncertain`, and evidence-only `near-miss-tag` is added. NFR-04 fixes the set before the first export.
 
 ## Changelog
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-15 | Finalized ticket representation/writer and evidence-only helper acceptance using final HLD-003 verification. Performance and full-suite gates passed; full dossier remains In Discovery and tag identity/synonym decisions remain blocked. | LADRs 09-11; HLD-003 final NFR-02 evidence |
+| 2026-09-14 | Synced ticket decisions to ITicketGraph/API/migration implementation and selected capped path association; release/performance gate remains open. Recorded executable offline evidence-only near-miss helper, bounded validation and unchanged selection/disclosure. Tag decisions remain blocked and full dossier stays In Discovery. | LADRs 09-11; NFR-04; HLD-003 NFR-02 |
+| 2026-09-14 | Ticket LADR-09 and ticket half of LADR-11 decision-resolved by HLD-003/HLD-002 LADR-08, implementation pending. Tag identity/synonyms and tag writer stay blocked. LADR-10 interim and NFR-04 now require evidence-only `near-miss-tag` skill findings with UUID/version, basis, scope and classification, without search broadening. No full dossier implementation approved. | LADRs 09-11; NFR-04 |
 | 2026-09-13 | Created — discovery HLD for contextual knowledge export. Selection/composition boundary set at the judgement line; ticket and tag anchor traversal recorded as three Blocked LADRs rather than designed around. | BRD-002 |
 | 2026-09-13 | LADR-12 added — focus (requirements / architecture / specification / implementation / review) is a presentation lens over one unfocused bundle, never a selection filter. NFR-02 records that focus does not enter reproducibility; NFR-04 gains the `outside-focus` omission reason and a per-focus reconciliation test; NFR-05 requires the document to state its focus. | BR-35, BR-36 |
 | 2026-09-14 | Capture-skill identity updated to `mimisbrunnr-context-memory` (LADR-08, migration plan). | skill rename |
