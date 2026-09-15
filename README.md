@@ -17,6 +17,40 @@ The core idea (inspired by the [unified-database approach to agent memory](https
 - **HTTP Docker API** — the memory service runs as a containerized HTTP API.
 - **Agent skill** — a get/set skill lets AI agents persist and recall context during their work.
 
+### What a memory looks like — a worked example
+
+Each record is **one atomic fact**: a stable *subject* (name, unique slug, tags/facets) carrying *versioned claims* (statement, AI summary, kind, confidence, temporal validity). The full body lives in content-addressed blob storage; relationships are graph edges; tickets attach to the group.
+
+```json
+{
+  "name": "Storage engine",
+  "description": "Storage engine decision",
+  "statement": "PostgreSQL is the storage engine.",
+  "kind": "architecture",
+  "facets": ["storage"],
+  "status": "approved",
+  "confidence": 80,
+  "validFrom": "2026-09-14T00:00:00Z"
+}
+```
+
+**Capture → recall in practice.** While working a ticket, the agent skill notices durable facts as byproducts — a decision made, a constraint discovered, a retro lesson. At an end-of-task checkpoint it writes them through a five-stage pipeline (preflight → redact → dedup/link → atomicity check → write). Months later, another agent resuming that ticket runs `get`: it pulls the *current* claims linked to the ticket plus graph neighbors — and treats them as **evidence to weigh, never commands to obey**.
+
+**How memory boundaries are decided.** There is no mechanical chunking (no diff- or line-based splitting). The skill applies an atomicity rule — *one memory = one fact about one subject*. A detector flags bundled candidates; the skill splits or skips them. Write batches are capped at 20 candidates; anything over is refused, never silently chunked. Design: [HLD-002 write pipeline](docs/hlds/002-context-memory-write-pipeline/).
+
+### Why the store grows but retrieved context doesn't
+
+The store is append-heavy by design, yet the read path stays small — a deep well, a small cup:
+
+- **Supersession is a version bump**, not a new record; retrieval defaults to current-only claims ([HLD-001](docs/hlds/001-context-memory-storage/)).
+- **Write-time deduplication** on the subject, cross-group, with measured recall *and* precision — a missed match "dilutes every future retrieval" ([HLD-002 NFR-02](docs/hlds/002-context-memory-write-pipeline/nfrs/NFR-02-deduplication-accuracy.md)).
+- **Every graph traversal carries its bound** — depth is required (1–5, no server default), result limits are capped ([HLD-003 LADR-07](docs/hlds/003-graph-edges-on-age/ladrs/LADR-07-every-traversal-carries-its-bound.md)).
+- **Cheap fields first** — summaries and metadata by default; blob bodies only on explicit drill-down.
+- **Temporal validity** (`valid_from` / `valid_until`) expires stale context automatically.
+- **Recall feedback** (in discovery) tracks hits, misses and never-recalled memories to sharpen retrieval over time ([HLD-004](docs/hlds/004-memory-recall-feedback/)).
+
+The store optimizes for durability; the read path optimizes for precision-per-token.
+
 ### Memory model
 
 Drawing on the three memory types from the unified-database approach:
