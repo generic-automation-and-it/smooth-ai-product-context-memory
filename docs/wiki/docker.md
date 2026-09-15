@@ -233,6 +233,7 @@ Multi-arch: `linux/amd64,linux/arm64`. Confirm both in the GHCR manifest list
 after the first publish (`docker buildx imagetools inspect ghcr.io/generic-automation-and-it/smooth-ai-product-context-memory:latest`).
 
 Both API and controller candidates pass same-commit tests and native-architecture smoke before aliases are promoted. The controller embeds the API's multi-platform digest. Version aliases cannot replace an existing different digest; use a new version for a rebuilt release. Promotion is serialized, and release tags must point at the tested commit. GitHub Releases link exact digests and these installation instructions. Package visibility must be configured/verified separately; private packages require registry authentication.
+
 An amd64-only push fails on Apple silicon with a manifest error that reads like
 a configuration problem.
 

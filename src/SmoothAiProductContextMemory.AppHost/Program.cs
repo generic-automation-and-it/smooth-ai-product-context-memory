@@ -26,7 +26,7 @@ if (args is ["--validate-configuration"])
     }
     catch (Exception exception) when (exception is InvalidOperationException or FormatException)
     {
-        Console.Error.WriteLine("Invalid AppHost configuration. Check mode, image digest, credentials, engine addresses, and ports.");
+        Console.Error.WriteLine($"Invalid AppHost configuration: {exception.Message}");
         Environment.ExitCode = 1;
         return;
     }

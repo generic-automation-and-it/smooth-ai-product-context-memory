@@ -26,6 +26,7 @@ Each record is **one atomic fact**: a stable *subject* (name, unique slug, tags/
   "name": "Storage engine",
   "description": "Storage engine decision",
   "statement": "PostgreSQL is the storage engine.",
+  "contentSummary": "Short AI summary of the statement",
   "kind": "architecture",
   "facets": ["storage"],
   "status": "approved",
