@@ -35,8 +35,8 @@ public sealed class AddTicketGraph : Migration
 
         migrationBuilder.Sql(
             """
-            LOCK TABLE public.memory_group IN SHARE ROW EXCLUSIVE MODE;
             SELECT pg_advisory_xact_lock(734921, 1);
+            LOCK TABLE public.memory_group IN SHARE ROW EXCLUSIVE MODE NOWAIT;
 
             CREATE INDEX IF NOT EXISTS ix_ticket_vertex_provider ON memory_graph."Ticket"
                 USING hash (
@@ -45,6 +45,7 @@ public sealed class AddTicketGraph : Migration
                 USING hash (
                     ag_catalog.agtype_access_operator(VARIADIC ARRAY[properties, '"key"'::ag_catalog.agtype]));
             CREATE INDEX IF NOT EXISTS ix_ticket_vertex_properties ON memory_graph."Ticket" USING gin (properties);
+            CREATE INDEX IF NOT EXISTS ix_ticket_parent_id ON memory_graph."TICKET_PARENT" (id);
 
             CREATE OR REPLACE FUNCTION public.ticket_graph_cypher(query text) RETURNS void AS $fn$
             DECLARE tag text := '$ticket$';
@@ -136,8 +137,8 @@ public sealed class AddTicketGraph : Migration
             DECLARE graph_oid oid;
             BEGIN
                 RAISE WARNING 'Captured ticket hierarchy declarations will be lost; reapplying restores identities only';
-                LOCK TABLE public.memory_group IN SHARE ROW EXCLUSIVE MODE;
                 PERFORM pg_advisory_xact_lock(734921, 1);
+                LOCK TABLE public.memory_group IN SHARE ROW EXCLUSIVE MODE NOWAIT;
                 DROP TRIGGER IF EXISTS trg_ticket_graph_membership ON public.memory_group;
                 DROP TRIGGER IF EXISTS trg_ticket_graph_lock ON public.memory_group;
                 DROP FUNCTION IF EXISTS public.ticket_graph_membership();

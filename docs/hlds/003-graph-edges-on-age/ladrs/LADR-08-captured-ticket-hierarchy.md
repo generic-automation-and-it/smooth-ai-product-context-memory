@@ -31,6 +31,9 @@ does not offer. HLD-005 LADR-09 needs a ticket-specific answer, not permission f
 - Resolve each ticket's owner live from JSONB, requiring exactly one group. Never cache ownership
   or scope on a vertex. Memories join through that group relationally in the composed SQL/Cypher
   read; there are no Ticket-to-Memory membership edges, group vertices, or membership fanout.
+  Mutation owner checks and traversal accept only JSON string `provider`/`key` members with exact
+  ordinal equality; non-array containers supply no memberships, and numeric/null/missing identity
+  fields are not coerced into strings. This is fail-closed reading, not stored-data repair.
 - Group-ticket mutations, their triggers, group-delete cleanup and hierarchy mutations share one
   transaction-scoped advisory lock. Ownership checks and hierarchy validation occur under that
   same lock before mutation, preventing ownership/hierarchy races. Existing exact ownership and
@@ -44,10 +47,21 @@ does not offer. HLD-005 LADR-09 needs a ticket-specific answer, not permission f
 - A child has at most one parent; self-parenting and cycles are rejected, including under concurrent
   writes. Forest integrity checks cover the actual hierarchy, not a visibility-filtered view or the
   retrieval depth limit. Failures must not disclose hidden identities or graph structure.
+- Locking requires an explicit EF-managed `ReadCommitted` transaction. `ChangeParentAsync` creates
+  its own if none exists; otherwise it uses the private `ticket_graph_parent_change` savepoint on a
+  serial, non-reentrant DbContext/connection. Failure rolls back/releases that savepoint with
+  `CancellationToken.None`, preserving prior outer work when the connection remains usable; success
+  releases it without committing the caller's transaction. `TransactionScope` and unenlisted raw
+  transactions are unsupported. Other isolation levels are rejected before lock SQL: an advisory
+  lock cannot refresh a stale `RepeatableRead` snapshot, which could admit a second parent.
 - Set, reparent and remove are explicit operations with an expected-parent precondition. Set
   requires expected absence; reparent and remove name the expected current parent by exact identity.
   A stale expectation conflicts without changing state. Reparent replaces the old edge atomically;
   removal deletes the declaration. Replacing a declaration requires its reason/source anew.
+  Before destructive work, child, supplied parent and expected parent must each resolve to exactly
+  one owner and exactly one graph vertex. Missing/duplicate vertices conflict rather than being
+  repaired. Reparent `DELETE`/`CREATE` runs in one Cypher command; each non-no-op mutation must return
+  exactly one row or roll back.
 - `ExpectedParent` is checked **before** the identical-state no-op. A request naming the current
   expected parent and identical parent/reason/source/observedAt returns `changed: false`, preserving
   `recordedAt`. Replaying the initial set with its old null expectation conflicts after the set
@@ -82,6 +96,10 @@ does not offer. HLD-005 LADR-09 needs a ticket-specific answer, not permission f
 - Gate every owner against `MemoryScopeFilter.HiddenDimensions`, not `Plan().ExcludedDimensions`.
   If any hop is hidden, **drop the whole path, never shorten it**. Gate before returning ticket
   identities, reasons, sources, timestamps, memory fields or cap metadata.
+  Malformed stored data in selected traversal JSON is a server failure, not invalid request JSON:
+  replace `JsonException` with a fixed exception without an inner exception, yielding sanitized
+  HTTP 500 ProblemDetails without persisted values or parser details. Hidden-only malformed
+  metadata is gated out before deserialization and must not change the response or cap flags.
 - Apply endpoint `Plan()` narrowing to returned memories, including anchor-associated memories.
   A ticket identifier is **not consent** to a hidden dimension; only explicit scope consent can
   authorize it. Relational ticket lookup's existing in-group shortcut must not grant traversal
@@ -98,6 +116,12 @@ does not offer. HLD-005 LADR-09 needs a ticket-specific answer, not permission f
 - Group deletion removes its Ticket vertices and all incident `TICKET_PARENT` edges in the same
   transaction as relational deletion and existing memory cascade. Trigger failure rolls back both
   graph and relational changes. Retain one trigger-owned cleanup path per owning row type.
+- Migration Up/Down acquires advisory lock `(734921, 1)` before
+  `LOCK TABLE public.memory_group IN SHARE ROW EXCLUSIVE MODE NOWAIT`. Handlers lock advisory before
+  DML, but raw group DML holds a table lock before its statement trigger acquires advisory. `NOWAIT`
+  prevents that inversion from forming a migration deadlock: table contention fails with SQLSTATE
+  `55P03` rather than waiting into `40P01`. Quiesce writers and retry; no automatic live-migration
+  retry or broader raw-SQL concurrency contract is promised.
 - The ticket-graph migration's Down warns that captured hierarchy declarations will be
   lost, then removes ticket-specific triggers/indexes/labels and declarations only. It preserves memory
   `LINKS`, Memory vertices, relational ticket JSONB and all other relational metadata. Reapplying
@@ -121,18 +145,29 @@ separate HASH expression indexes on provider and key, plus GIN on properties for
 a composite btree over unrestricted provider/key strings: existing JSONB keys must not fail btree
 entry-size limits. LADR-06's Memory btree prescription is Memory-specific; its property-predicate
 rule still applies to Ticket lookups. Ticket endpoint validation bounds each identity component to 512 characters.
+The migration also adds `ix_ticket_parent_id`, a btree on `TICKET_PARENT(id)` for post-cap declaration
+hydration only; start/end adjacency indexes still serve recursive expansion.
 
 Traversal composes a **Cypher anchor lookup with recursive SQL over indexed AGE adjacency** in one
 statement; it does not use variable-length Cypher expansion. Materialized identities parse properties
-once; exact membership joins use ordinal `C` collation. Live distinct JSONB memberships yield
-only exactly-one, visible owners before expansion. SQL orders paths by depth, provider/key sequence
+once; exact membership joins use ordinal `C` collation. The owner aggregate stays unfiltered, using
+`CASE` to expose an ID only for exactly-one, visible owners; NULL IDs cannot join the anchor or next
+frontier. This avoids the estimate collapse caused by stricter JSON guards plus filtered aggregation.
+`OFFSET 0` anchors adjacency probes and keeps owner joins per recursive level, not per vertex.
+SQL orders paths by depth, provider/key sequence
 under `C` collation, then edge IDs; selected endpoint groups plus anchor are unioned before the
 current-memory join and UUID/version memory cap. One extra visible hop supplies depth disclosure.
+The walk carries edge IDs and the live endpoint group ID; ordered hop JSON is hydrated only from
+selected paths after the cap. These are statement-local values, not a persisted ownership cache:
+ownership, visibility, selection and hydration use the same SQL statement snapshot.
 Cycle checks separately use unbounded recursive SQL over AGE adjacency, independent of read scope.
 
-Release acceptance is recorded against the [final evidence](../nfrs/NFR-02-ticket-traversal-measurements.md):
-the full suite, explicit benchmark cases, build and deterministic skill tests passed. Requested depth 5
-was measured on a three-deep hierarchy, not a five-deep chain. The following remain regression obligations:
+Original release acceptance remains in the [historical evidence](../nfrs/NFR-02-ticket-traversal-measurements.md).
+The [dated review revalidation](../nfrs/NFR-02-ticket-traversal-measurements.md#2026-09-15-review-revalidation)
+records four post-fix benchmark passes, earlier loop-3 failures and focused checks separately. The
+final full-suite repeat passed with 429 tests, 4 gated benchmark skips and zero failures; the prior
+benchmark-fixture connection timeout remains recorded. Requested depth 5 was measured on a three-deep
+hierarchy, not a five-deep chain. The following remain regression obligations:
 
 - Exact identity and property-shape checks; zero/one/multiple-owner cases; empty-group backfill;
   no inferred edges; no membership fanout or change to existing ticket ownership semantics.
@@ -163,5 +198,6 @@ was measured on a three-deep hierarchy, not a five-deep chain. The following rem
   current-state replacement deliberately does not preserve declaration history.
 - Approval resolves the ticket representation decision in HLD-005, not the full dossier design or
   tag identity/synonym decisions. Migration, API, skill transport and benchmark code now exist;
-  final full-suite and explicit benchmark evidence close the release gates, not merely the earlier
-  targeted checks. This records acceptance, not publication of a release.
+  original full-suite and explicit benchmark evidence recorded release acceptance, not merely targeted
+  checks. Post-review benchmark revalidation and the completed final full-suite repeat are recorded separately.
+  Neither record is publication of a release.

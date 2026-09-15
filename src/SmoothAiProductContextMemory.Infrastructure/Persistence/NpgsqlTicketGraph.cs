@@ -9,16 +9,26 @@ namespace SmoothAiProductContextMemory.Infrastructure.Persistence;
 
 public sealed partial class NpgsqlTicketGraph(SmoothAiProductContextMemoryDbContext db) : ITicketGraph
 {
+    private const string MutationSavepoint = "ticket_graph_parent_change";
+
     public async Task LockAsync(CancellationToken cancellationToken)
     {
-        if (db.Database.CurrentTransaction is null)
-        {
-            throw new InvalidOperationException("Ticket graph locking requires an explicit transaction.");
-        }
-
+        MutationRequireTransaction();
         await using NpgsqlCommand command = await MutationCommandAsync(
             "SELECT pg_advisory_xact_lock(734921, 1);", cancellationToken);
         await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private IDbContextTransaction MutationRequireTransaction()
+    {
+        IDbContextTransaction transaction = db.Database.CurrentTransaction
+            ?? throw new InvalidOperationException("Ticket graph locking requires an explicit EF transaction.");
+        if (transaction.GetDbTransaction().IsolationLevel != System.Data.IsolationLevel.ReadCommitted)
+        {
+            throw new InvalidOperationException("Ticket graph mutation requires ReadCommitted isolation.");
+        }
+
+        return transaction;
     }
 
     public async Task<bool> ChangeParentAsync(TicketParentChange change, CancellationToken cancellationToken)
@@ -36,58 +46,78 @@ public sealed partial class NpgsqlTicketGraph(SmoothAiProductContextMemoryDbCont
         }
 
         await using IDbContextTransaction? transaction = db.Database.CurrentTransaction is null
-            ? await db.Database.BeginTransactionAsync(cancellationToken)
+            ? await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.ReadCommitted, cancellationToken)
             : null;
-        await LockAsync(cancellationToken);
-        await MutationRequireOwnerAsync(change.Child, cancellationToken);
-        if (change.Parent is not null) await MutationRequireOwnerAsync(change.Parent, cancellationToken);
-        if (change.ExpectedParent is not null) await MutationRequireOwnerAsync(change.ExpectedParent, cancellationToken);
-
-        TicketHierarchyHop? current = await MutationCurrentAsync(change.Child, cancellationToken);
-        if (current?.Parent != change.ExpectedParent)
+        IDbContextTransaction activeTransaction = MutationRequireTransaction();
+        if (transaction is null) await activeTransaction.CreateSavepointAsync(MutationSavepoint, cancellationToken);
+        try
         {
-            throw MutationConflict();
-        }
+            await LockAsync(cancellationToken);
+            await MutationRequireOwnerAsync(change.Child, cancellationToken);
+            if (change.Parent is not null) await MutationRequireOwnerAsync(change.Parent, cancellationToken);
+            if (change.ExpectedParent is not null) await MutationRequireOwnerAsync(change.ExpectedParent, cancellationToken);
 
-        bool identical = current is null
-            ? change.Parent is null
-            : current.Parent == change.Parent && current.Reason == change.Reason && current.Source == change.Source
-                && current.ObservedAt == change.ObservedAt;
-        if (identical)
-        {
+            TicketHierarchyHop? current = await MutationCurrentAsync(change.Child, cancellationToken);
+            if (current?.Parent != change.ExpectedParent)
+            {
+                throw MutationConflict();
+            }
+
+            bool identical = current is null
+                ? change.Parent is null
+                : current.Parent == change.Parent && current.Reason == change.Reason && current.Source == change.Source
+                    && current.ObservedAt == change.ObservedAt;
+            if (!identical)
+            {
+                if (change.Parent is not null
+                    && (change.Parent == change.Child || await MutationWouldCycleAsync(change.Child, change.Parent, cancellationToken)))
+                {
+                    throw MutationConflict();
+                }
+
+                string cypher;
+                if (change.Parent is null)
+                {
+                    cypher = $"""
+                        MATCH (c:Ticket)<-[e:TICKET_PARENT]-(:Ticket)
+                        WHERE {MutationPredicate("c", change.Child)}
+                        DELETE e RETURN 1
+                        """;
+                }
+                else
+                {
+                    string observed = change.ObservedAt is null ? string.Empty
+                        : $", observedAt: {CypherLiteral.Quote(change.ObservedAt.Value.ToString("O", CultureInfo.InvariantCulture))}";
+                    string oldParent = current is null ? string.Empty : "<-[old:TICKET_PARENT]-(:Ticket)";
+                    string delete = current is null ? string.Empty : "DELETE old WITH p, c";
+                    cypher = $$"""
+                        MATCH (p:Ticket), (c:Ticket){{oldParent}}
+                        WHERE {{MutationPredicate("p", change.Parent)}} AND {{MutationPredicate("c", change.Child)}}
+                        {{delete}}
+                        CREATE (p)-[:TICKET_PARENT {reason: {{CypherLiteral.Quote(change.Reason)}},
+                            source: {{CypherLiteral.Quote(change.Source)}},
+                            recordedAt: {{CypherLiteral.Quote(DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture))}}{{observed}}}]->(c)
+                        RETURN 1
+                        """;
+                }
+
+                await MutationExecuteAsync(cypher, cancellationToken);
+            }
+
             if (transaction is not null) await transaction.CommitAsync(cancellationToken);
-            return false;
+            else await activeTransaction.ReleaseSavepointAsync(MutationSavepoint, cancellationToken);
+            return !identical;
         }
-
-        if (change.Parent is not null
-            && (change.Parent == change.Child || await MutationWouldCycleAsync(change.Child, change.Parent, cancellationToken)))
+        catch
         {
-            throw MutationConflict();
-        }
+            if (transaction is null)
+            {
+                await activeTransaction.RollbackToSavepointAsync(MutationSavepoint, CancellationToken.None);
+                await activeTransaction.ReleaseSavepointAsync(MutationSavepoint, CancellationToken.None);
+            }
 
-        string cypher = $"""
-            MATCH (c:Ticket)<-[e:TICKET_PARENT]-(:Ticket)
-            WHERE {MutationPredicate("c", change.Child)}
-            DELETE e RETURN 1
-            """;
-        await MutationExecuteAsync(cypher, cancellationToken);
-        if (change.Parent is not null)
-        {
-            string observed = change.ObservedAt is null ? string.Empty
-                : $", observedAt: {CypherLiteral.Quote(change.ObservedAt.Value.ToString("O", CultureInfo.InvariantCulture))}";
-            cypher = $$"""
-                MATCH (p:Ticket), (c:Ticket)
-                WHERE {{MutationPredicate("p", change.Parent)}} AND {{MutationPredicate("c", change.Child)}}
-                CREATE (p)-[:TICKET_PARENT {reason: {{CypherLiteral.Quote(change.Reason)}},
-                    source: {{CypherLiteral.Quote(change.Source)}},
-                    recordedAt: {{CypherLiteral.Quote(DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture))}}{{observed}}}]->(c)
-                RETURN 1
-                """;
-            await MutationExecuteAsync(cypher, cancellationToken);
+            throw;
         }
-
-        if (transaction is not null) await transaction.CommitAsync(cancellationToken);
-        return true;
     }
 
     private static void MutationValidateIdentity(TicketIdentity identity)
@@ -107,14 +137,22 @@ public sealed partial class NpgsqlTicketGraph(SmoothAiProductContextMemoryDbCont
         await using NpgsqlCommand command = await MutationCommandAsync(
             """
             SELECT count(*) FROM public.memory_group g
-            WHERE EXISTS (SELECT 1 FROM jsonb_array_elements(g.tickets) t
-                WHERE t->>'provider' = @provider AND t->>'key' = @key);
+            WHERE EXISTS (SELECT 1 FROM jsonb_array_elements(
+                CASE WHEN jsonb_typeof(g.tickets) = 'array' THEN g.tickets ELSE '[]'::jsonb END) t
+                WHERE jsonb_typeof(t->'provider') = 'string' AND jsonb_typeof(t->'key') = 'string'
+                    AND t->>'provider' COLLATE "C" = @provider AND t->>'key' COLLATE "C" = @key);
             """, cancellationToken);
         command.Parameters.AddWithValue("provider", identity.Provider);
         command.Parameters.AddWithValue("key", identity.Key);
         long count = Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
         if (count == 0) throw new NotFoundException("Ticket ownership could not be resolved.");
         if (count != 1) throw MutationConflict();
+
+        string cypher = $"MATCH (t:Ticket) WHERE {MutationPredicate("t", identity)} RETURN id(t)";
+        await using NpgsqlCommand vertices = await MutationCommandAsync(
+            $"SELECT count(*) FROM ag_catalog.cypher('memory_graph', {CypherLiteral.DollarWrap(cypher)}) AS (id ag_catalog.agtype);",
+            cancellationToken);
+        if ((long)(await vertices.ExecuteScalarAsync(cancellationToken))! != 1) throw MutationConflict();
     }
 
     private async Task<TicketHierarchyHop?> MutationCurrentAsync(TicketIdentity child, CancellationToken cancellationToken)
@@ -168,7 +206,8 @@ public sealed partial class NpgsqlTicketGraph(SmoothAiProductContextMemoryDbCont
         await using NpgsqlCommand command = await MutationCommandAsync(
             $"SELECT v::text FROM ag_catalog.cypher('memory_graph', {CypherLiteral.DollarWrap(cypher)}) AS (v ag_catalog.agtype);",
             cancellationToken);
-        await command.ExecuteNonQueryAsync(cancellationToken);
+        await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken) || await reader.ReadAsync(cancellationToken)) throw MutationConflict();
     }
 
     private async Task<NpgsqlCommand> MutationCommandAsync(string sql, CancellationToken cancellationToken)

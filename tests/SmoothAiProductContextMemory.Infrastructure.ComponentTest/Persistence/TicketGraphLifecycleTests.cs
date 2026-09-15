@@ -169,6 +169,26 @@ public sealed class TicketGraphLifecycleTests(AspireFixture aspire) : Persistenc
         (await CountAsync("TICKET_PARENT")).ShouldBe(1);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task MultirowMembershipRemovalOrDelete_CleansAllVerticesAndEdges(bool delete)
+    {
+        await AddGroupAsync("parent");
+        await AddGroupAsync("middle");
+        await AddGroupAsync("child");
+        await DeclareAsync("middle", "parent");
+        await DeclareAsync("child", "middle");
+
+        await Db.Database.ExecuteSqlRawAsync(delete
+            ? "DELETE FROM public.memory_group"
+            : "UPDATE public.memory_group SET tickets = '[]'::jsonb", Ct);
+
+        (await CountAsync("Ticket")).ShouldBe(0);
+        (await CountAsync("TICKET_PARENT")).ShouldBe(0);
+        (await Db.MemoryGroups.AsNoTracking().CountAsync(Ct)).ShouldBe(delete ? 0 : 3);
+    }
+
     [Fact]
     public async Task GroupDeleteFailure_RollsBackRelationalAndBothGraphs()
     {
@@ -193,6 +213,80 @@ public sealed class TicketGraphLifecycleTests(AspireFixture aspire) : Persistenc
         (await memoryGraph.ListAllAsync(Ct)).Count.ShouldBe(1);
         (await Db.MemoryGroups.AsNoTracking().CountAsync(Ct)).ShouldBe(1);
         (await Db.Memories.AsNoTracking().CountAsync(Ct)).ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Down_WaitsForHandlerLockWithoutBlockingItsGroupWrite()
+    {
+        await AddGroupAsync("parent", "child");
+        await DeclareAsync("child", "parent");
+        await using var migrating = new SmoothAiProductContextMemoryDbContext(
+            new DbContextOptionsBuilder<SmoothAiProductContextMemoryDbContext>()
+                .UseNpgsql(DataSource, options => options.UseSmoothAiProductContextMemoryHistory()).Options);
+        await migrating.Database.OpenConnectionAsync(Ct);
+        int migrationPid = ((NpgsqlConnection)migrating.Database.GetDbConnection()).ProcessID;
+        await using var transaction = await Db.Database.BeginTransactionAsync(Ct);
+        await Graph.LockAsync(Ct);
+        Task migration = migrating.GetService<IMigrator>().MigrateAsync(PreviousMigration, Ct);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(Ct);
+        timeout.CancelAfter(TimeSpan.FromSeconds(15));
+        while (true)
+        {
+            await using NpgsqlCommand blocked = DataSource.CreateCommand(
+                "SELECT cardinality(pg_blocking_pids(@pid)) > 0");
+            blocked.Parameters.AddWithValue("pid", migrationPid);
+            if ((bool)(await blocked.ExecuteScalarAsync(timeout.Token))!) break;
+            await Task.Delay(20, timeout.Token);
+        }
+
+        try
+        {
+            await Db.Database.ExecuteSqlRawAsync("UPDATE public.memory_group SET tickets = tickets", Ct);
+            await transaction.CommitAsync(Ct);
+            await migration;
+        }
+        finally
+        {
+            await transaction.DisposeAsync();
+            try { await migration; }
+            catch (Exception error) when (error.GetBaseException() is PostgresException) { }
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Migration_TableLockContentionFailsFastAndCanRetry(bool upgrade)
+    {
+        await AddGroupAsync("parent", "child");
+        await DeclareAsync("child", "parent");
+        if (upgrade) await Db.GetService<IMigrator>().MigrateAsync(PreviousMigration, Ct);
+        await using (var rawWriter = await DataSource.OpenConnectionAsync(Ct))
+        await using (var transaction = await rawWriter.BeginTransactionAsync(Ct))
+        {
+            await using var command = new NpgsqlCommand(
+                "LOCK TABLE public.memory_group IN ROW EXCLUSIVE MODE", rawWriter, transaction);
+            await command.ExecuteNonQueryAsync(Ct);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(Ct);
+            timeout.CancelAfter(TimeSpan.FromSeconds(10));
+            Exception error = await Should.ThrowAsync<Exception>(() => Db.GetService<IMigrator>()
+                .MigrateAsync(upgrade ? null : PreviousMigration, timeout.Token));
+            error.GetBaseException().ShouldBeOfType<PostgresException>().SqlState.ShouldBe(PostgresErrorCodes.LockNotAvailable);
+            await transaction.RollbackAsync(Ct);
+        }
+
+        if (!upgrade)
+        {
+            (await CountAsync("Ticket")).ShouldBe(2);
+            (await CountAsync("TICKET_PARENT")).ShouldBe(1);
+        }
+
+        await Db.GetService<IMigrator>().MigrateAsync(upgrade ? null : PreviousMigration, Ct);
+        if (upgrade)
+        {
+            (await CountAsync("Ticket")).ShouldBe(2);
+            (await CountAsync("TICKET_PARENT")).ShouldBe(0);
+        }
     }
 
     [Fact]

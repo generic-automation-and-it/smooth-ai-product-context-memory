@@ -124,6 +124,168 @@ public sealed class TicketGraphMutationTests(AspireFixture aspire) : Persistence
         (await EdgePropertiesAsync()).ShouldBe(before);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AmbientReplacementFailure_RestoresDeclarationAndLeavesOuterCommittable(bool cancel)
+    {
+        await SeedAsync("child", "parent", "other");
+        await Graph.ChangeParentAsync(Change("child", "parent"), Ct);
+        string original = await EdgePropertiesAsync();
+        await Db.Database.ExecuteSqlRawAsync(
+            """
+            CREATE FUNCTION public.block_ticket_replacement() RETURNS boolean AS $$
+            BEGIN
+                PERFORM pg_advisory_xact_lock(734921, 2);
+                RETURN false;
+            END;
+            $$ LANGUAGE plpgsql;
+            ALTER TABLE memory_graph."TICKET_PARENT" ADD CONSTRAINT fail_replacement
+                CHECK (public.block_ticket_replacement()) NOT VALID;
+            """, Ct);
+        await using var blocker = await DataSource.OpenConnectionAsync(Ct);
+        await using var blockingTransaction = await blocker.BeginTransactionAsync(Ct);
+        await using (var block = new NpgsqlCommand("SELECT pg_advisory_xact_lock(734921, 2)", blocker, blockingTransaction))
+        {
+            await block.ExecuteNonQueryAsync(Ct);
+        }
+
+        await using var transaction = await Db.Database.BeginTransactionAsync(Ct);
+        await Db.Database.ExecuteSqlRawAsync("UPDATE public.memory_group SET repo = 'outer-work'", Ct);
+        int pid = ((NpgsqlConnection)Db.Database.GetDbConnection()).ProcessID;
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(Ct);
+        Task<bool> replacement = Graph.ChangeParentAsync(Change("child", "other", "parent"), cancellation.Token);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(Ct);
+        timeout.CancelAfter(TimeSpan.FromSeconds(15));
+        try
+        {
+            while (true)
+            {
+                await using NpgsqlCommand blocked = DataSource.CreateCommand("SELECT @blocker = ANY(pg_blocking_pids(@pid))");
+                blocked.Parameters.AddWithValue("blocker", blocker.ProcessID);
+                blocked.Parameters.AddWithValue("pid", pid);
+                if ((bool)(await blocked.ExecuteScalarAsync(timeout.Token))!) break;
+                await Task.Delay(20, timeout.Token);
+            }
+
+            if (cancel)
+            {
+                await cancellation.CancelAsync();
+                await Should.ThrowAsync<OperationCanceledException>(() => replacement);
+            }
+            else
+            {
+                await blockingTransaction.CommitAsync(Ct);
+                PostgresException error = await Should.ThrowAsync<PostgresException>(() => replacement);
+                error.SqlState.ShouldBe(PostgresErrorCodes.CheckViolation);
+            }
+
+            await Db.Database.ExecuteSqlRawAsync("ALTER TABLE memory_graph.\"TICKET_PARENT\" DROP CONSTRAINT fail_replacement", Ct);
+            (await Graph.ChangeParentAsync(Change("child", "parent", "parent"), Ct)).ShouldBeFalse();
+            await transaction.CommitAsync(Ct);
+        }
+        finally
+        {
+            await cancellation.CancelAsync();
+            try { await replacement; }
+            catch (OperationCanceledException) { }
+            catch (PostgresException) { }
+        }
+
+        (await EdgePropertiesAsync()).ShouldBe(original);
+        (await Db.MemoryGroups.AsNoTracking().SingleAsync(Ct)).Repo.ShouldBe("outer-work");
+    }
+
+    [Theory]
+    [InlineData("child", false)]
+    [InlineData("other", false)]
+    [InlineData("parent", false)]
+    [InlineData("child", true)]
+    [InlineData("other", true)]
+    [InlineData("parent", true)]
+    public async Task MissingOrDuplicateOwnedVertex_RejectsBeforeChangingDeclaration(string key, bool duplicate)
+    {
+        await SeedAsync("child", "parent", "other");
+        await Graph.ChangeParentAsync(Change("child", "parent"), Ct);
+        string original = await EdgePropertiesAsync();
+        string sql = duplicate
+            ? "INSERT INTO memory_graph.\"Ticket\" (properties) SELECT properties FROM memory_graph.\"Ticket\" WHERE properties::text::jsonb->>'key' = @key"
+            : "DELETE FROM memory_graph.\"Ticket\" WHERE properties::text::jsonb->>'key' = @key";
+        await using (NpgsqlCommand corrupt = DataSource.CreateCommand(sql))
+        {
+            corrupt.Parameters.AddWithValue("key", key);
+            await corrupt.ExecuteNonQueryAsync(Ct);
+        }
+
+        await using var transaction = await Db.Database.BeginTransactionAsync(Ct);
+        await Should.ThrowAsync<ConflictException>(() => Graph.ChangeParentAsync(Change("child", "other", "parent"), Ct));
+        await transaction.CommitAsync(Ct);
+        (await EdgePropertiesAsync()).ShouldBe(original);
+        (await CountEdgesAsync()).ShouldBe(1);
+    }
+
+    [Theory]
+    [InlineData("[{\"provider\":123,\"key\":\"parent\"}]", "123", "parent")]
+    [InlineData("[{\"provider\":\"jira\",\"key\":123}]", "jira", "123")]
+    [InlineData("[{\"provider\":true,\"key\":\"parent\"}]", "true", "parent")]
+    [InlineData("[{\"provider\":\"jira\",\"key\":null}]", "jira", "parent")]
+    [InlineData("[null,123,\"parent\",{}]", "jira", "parent")]
+    [InlineData("null", "jira", "parent")]
+    [InlineData("123", "jira", "parent")]
+    [InlineData("{}", "jira", "parent")]
+    public async Task CorruptMembership_DoesNotBecomeStringIdentity(string json, string provider, string key)
+    {
+        await SeedAsync("child");
+        var identity = new TicketIdentity(provider, key);
+        var owner = TestEntities.NewGroup(tickets: [TicketDocument.Create(provider, key, "")]);
+        Db.MemoryGroups.Add(owner);
+        await Db.SaveChangesAsync(Ct);
+        await Db.Database.ExecuteSqlRawAsync("ALTER TABLE public.memory_group DISABLE TRIGGER trg_ticket_graph_membership", Ct);
+        try
+        {
+            await Db.Database.ExecuteSqlInterpolatedAsync($"UPDATE public.memory_group SET tickets = {json}::jsonb WHERE id = {owner.Id}", Ct);
+        }
+        finally
+        {
+            await Db.Database.ExecuteSqlRawAsync("ALTER TABLE public.memory_group ENABLE TRIGGER trg_ticket_graph_membership", Ct);
+        }
+
+        await using var transaction = await Db.Database.BeginTransactionAsync(Ct);
+        await Should.ThrowAsync<NotFoundException>(() => Graph.ChangeParentAsync(Change("child", "parent") with { Parent = identity }, Ct));
+        (await Graph.ChangeParentAsync(Change("child", null), Ct)).ShouldBeFalse();
+        await transaction.CommitAsync(Ct);
+        (await CountEdgesAsync()).ShouldBe(0);
+    }
+
+    [Theory]
+    [InlineData(System.Data.IsolationLevel.RepeatableRead)]
+    [InlineData(System.Data.IsolationLevel.Serializable)]
+    [InlineData(System.Data.IsolationLevel.ReadUncommitted)]
+    public async Task Lock_RejectsUnsupportedIsolationBeforeSql(System.Data.IsolationLevel isolation)
+    {
+        await using var transaction = await Db.Database.BeginTransactionAsync(isolation, Ct);
+        using var cancelled = new CancellationTokenSource();
+        await cancelled.CancelAsync();
+        await Should.ThrowAsync<InvalidOperationException>(() => Graph.LockAsync(cancelled.Token));
+        await Db.MemoryGroups.AsNoTracking().CountAsync(Ct);
+        await transaction.CommitAsync(Ct);
+    }
+
+    [Fact]
+    public async Task RepeatableRead_StaleSnapshotCannotAddASecondParent()
+    {
+        await SeedAsync("child", "parent", "other");
+        await using var otherDb = NewContext();
+        await using var transaction = await Db.Database.BeginTransactionAsync(System.Data.IsolationLevel.RepeatableRead, Ct);
+        await Db.MemoryGroups.AsNoTracking().CountAsync(Ct);
+        await new NpgsqlTicketGraph(otherDb).ChangeParentAsync(Change("child", "parent"), Ct);
+
+        await Should.ThrowAsync<InvalidOperationException>(() => Graph.ChangeParentAsync(Change("child", "other"), Ct));
+        await transaction.CommitAsync(Ct);
+
+        (await CountEdgesAsync()).ShouldBe(1);
+    }
+
     [Fact]
     public async Task CompetingParents_Serialize_OnlyOneWins()
     {

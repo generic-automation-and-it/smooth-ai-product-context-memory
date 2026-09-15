@@ -200,6 +200,112 @@ public sealed class TicketTraversalTests(AspireFixture aspire) : PersistenceTest
         }
     }
 
+    [Theory]
+    [InlineData("provider")]
+    [InlineData("key")]
+    [InlineData("null")]
+    [InlineData("123")]
+    [InlineData("{}")]
+    public async Task InvalidMembershipIdentity_FailsClosedForAnchorAndIntermediate(string component)
+    {
+        MemoryGroup root = await GroupAsync("product", Id("root"));
+        var identity = new TicketIdentity("123", "123");
+        MemoryGroup middle = await GroupAsync("product", identity);
+        MemoryGroup leaf = await GroupAsync("product", Id("leaf"));
+        await MemoryAsync(root);
+        await MemoryAsync(middle);
+        await MemoryAsync(leaf);
+        TicketTraversalQuery query = Query("root", 3) with { PathLimit = 1, MemoryLimit = 1 };
+        TicketTraversalResult before = await Graph.TraverseAsync(query, Ct);
+        await Graph.ChangeParentAsync(new(identity, Id("root"), null, "Declared parent", "practitioner"), Ct);
+        await Graph.ChangeParentAsync(new(Id("leaf"), identity, null, "Declared parent", "practitioner"), Ct);
+        (await Graph.TraverseAsync(Query("root", 3), Ct)).Paths.Count.ShouldBe(2);
+
+        // Preserve the graph while corrupting only the live JSONB membership's value type.
+        await Db.Database.ExecuteSqlRawAsync("ALTER TABLE public.memory_group DISABLE TRIGGER trg_ticket_graph_membership", Ct);
+        try
+        {
+            if (component is "provider" or "key")
+            {
+                await Db.Database.ExecuteSqlInterpolatedAsync($"""
+                    UPDATE public.memory_group SET tickets = jsonb_set(tickets, ARRAY['0', {component}], '123'::jsonb)
+                    WHERE id = {middle.Id}
+                    """, Ct);
+            }
+            else
+            {
+                await Db.Database.ExecuteSqlInterpolatedAsync($"""
+                    UPDATE public.memory_group SET tickets = {component}::jsonb WHERE id = {middle.Id}
+                    """, Ct);
+            }
+        }
+        finally
+        {
+            await Db.Database.ExecuteSqlRawAsync("ALTER TABLE public.memory_group ENABLE TRIGGER trg_ticket_graph_membership", Ct);
+        }
+
+        JsonSerializer.Serialize(await Graph.TraverseAsync(query, Ct)).ShouldBe(JsonSerializer.Serialize(before));
+        TicketTraversalResult anchor = await Graph.TraverseAsync(query with { Anchor = identity }, Ct);
+        anchor.Paths.ShouldBeEmpty();
+        anchor.Items.ShouldBeEmpty();
+        anchor.Disclosure.ShouldBe(new TicketTraversalDisclosure(3, 1, 1, false, false, false));
+    }
+
+    [Fact]
+    public async Task UnrelatedHiddenGroupWithNonArrayMembership_DoesNotAffectVisibleResponse()
+    {
+        MemoryGroup root = await GroupAsync("product", Id("root"));
+        MemoryGroup child = await GroupAsync("product", Id("child"));
+        MemoryGroup hidden = await GroupAsync("program", Id("hidden"));
+        await MemoryAsync(root);
+        await MemoryAsync(child);
+        await ParentAsync("root", "child");
+        TicketTraversalQuery query = Query("root", 1, "product");
+        string before = JsonSerializer.Serialize(await Graph.TraverseAsync(query, Ct));
+        await Db.Database.ExecuteSqlRawAsync("ALTER TABLE public.memory_group DISABLE TRIGGER trg_ticket_graph_membership", Ct);
+        try
+        {
+            await Db.Database.ExecuteSqlInterpolatedAsync($"""
+                UPDATE public.memory_group SET tickets = 'null'::jsonb WHERE id = {hidden.Id}
+                """, Ct);
+        }
+        finally
+        {
+            await Db.Database.ExecuteSqlRawAsync("ALTER TABLE public.memory_group ENABLE TRIGGER trg_ticket_graph_membership", Ct);
+        }
+
+        JsonSerializer.Serialize(await Graph.TraverseAsync(query, Ct)).ShouldBe(before);
+    }
+
+    [Fact]
+    public async Task CorruptDeclaration_ThrowsSafeServerError_UnlessItsWholePathIsHidden()
+    {
+        MemoryGroup root = await GroupAsync("product", Id("root"));
+        MemoryGroup middle = await GroupAsync("product", Id("middle"));
+        MemoryGroup leaf = await GroupAsync("product", Id("leaf"));
+        await MemoryAsync(root);
+        await MemoryAsync(middle);
+        await MemoryAsync(leaf);
+        TicketTraversalQuery query = Query("root", 3, "product");
+        TicketTraversalResult before = await Graph.TraverseAsync(query, Ct);
+        await ParentAsync("root", "middle");
+        await ParentAsync("middle", "leaf");
+        (await Graph.TraverseAsync(query, Ct)).Paths.Count.ShouldBe(2);
+        await Db.Database.ExecuteSqlRawAsync("""
+            UPDATE memory_graph."TICKET_PARENT"
+            SET properties = jsonb_set(properties::text::jsonb, ARRAY['recordedAt'], '"corrupt-stored-marker"'::jsonb)::text::ag_catalog.agtype
+            """, Ct);
+
+        InvalidOperationException error = await Should.ThrowAsync<InvalidOperationException>(() => Graph.TraverseAsync(query, Ct));
+        error.Message.ShouldBe("Stored ticket traversal data could not be read.");
+        error.InnerException.ShouldBeNull();
+        error.ToString().ShouldNotContain("corrupt-stored-marker");
+
+        middle.ScopeDimension = "program";
+        await Db.SaveChangesAsync(Ct);
+        JsonSerializer.Serialize(await Graph.TraverseAsync(query, Ct)).ShouldBe(JsonSerializer.Serialize(before));
+    }
+
     [Fact]
     public async Task Caps_AreDeterministic_DepthFlagRequiresExtraVisibleHop_AndMemoriesUseSelectedPaths()
     {

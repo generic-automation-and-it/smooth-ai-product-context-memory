@@ -70,7 +70,7 @@ cap flags must not leak hidden IDs or counts. Ticket p95 <= 100 ms passed withou
 
 `ITicketGraph` / `NpgsqlTicketGraph` backs PUT `/api/context/tickets/parent` and POST
 `/api/context/tickets/paths`. The read composes a Cypher anchor with recursive SQL over AGE's indexed
-`TICKET_PARENT` adjacency, not variable-length Cypher. Live JSONB owners are filtered before expansion;
+`TICKET_PARENT` adjacency, not variable-length Cypher. Live JSONB owner eligibility gates each frontier;
 only selected capped path endpoint groups plus the anchor supply distinct current memories. Limits
 default to 50 each, bounded 1..200; depth has no default. Mutation checks `ExpectedParent` before a
 current-state no-op: replaying an old null expectation after a successful set conflicts, with no
@@ -79,6 +79,23 @@ on provider/key plus GIN on properties; Memory's btree strategy does not apply t
 Identity properties are parsed once in a materialized CTE; exact owner joins use ordinal `C`
 collation, avoiding the original quadratic join shape. Requested depth 5 evidence uses a three-deep
 hierarchy; never describe it as a five-deep benchmark.
+
+Stricter JSON guards made the filtered owner aggregate estimate collapse and reversed expansion.
+Keep the aggregate unfiltered, with `CASE` nulling ineligible IDs; NULL cannot join the anchor or next
+frontier. `OFFSET 0` anchors adjacency and keeps owner joins per recursive level, not per vertex.
+Hydrate hop metadata only after the path cap via `ix_ticket_parent_id` on `TICKET_PARENT(id)`;
+that btree is not the adjacency index. Live owner/group IDs are statement-local: no persisted cache,
+and ownership, visibility, selection and hydration share one SQL snapshot.
+
+Review-fix guardrails in LADR-08: ticket locking supports explicit EF `ReadCommitted` only, rejecting
+stale-snapshot isolation before SQL. Mutation owns its transaction or uses a private savepoint with
+uncancelled rollback/release; reparent is one Cypher command with exactly one result and exactly one
+vertex per supplied identity. Migration advisory-before-table locking uses `NOWAIT`; `55P03` means
+quiesce writers and retry, not wait into a deadlock. Owner reads accept string identities only and
+treat non-array membership containers as absent. Selected stored JSON corruption yields sanitized
+500; hidden-only corruption must leave the response unchanged. The dated revalidation below records
+the post-fix benchmark pass separately from historical acceptance; the final full-suite repeat passed
+with 429 tests, 4 gated benchmark skips and zero failures.
 
 ### Access path
 
@@ -98,7 +115,8 @@ plans as `Function Scan on age_vle`.
 
 | Requirement | Evidence | Result |
 |---|---|---|
-| Final ticket and original memory benchmark rerun | [NFR-02-ticket-traversal-measurements.md](./nfrs/NFR-02-ticket-traversal-measurements.md) | 4 benchmark cases passed; full solution 396 passed + 4 gated skips; Python 34 passed; exact timings and plans in evidence |
+| Original pre-merge ticket and memory acceptance | [NFR-02-ticket-traversal-measurements.md](./nfrs/NFR-02-ticket-traversal-measurements.md) | Historical: 4 benchmark cases passed; full solution 396 passed + 4 gated skips; Python 34 passed; original tables retained |
+| 2026-09-15 post-review revalidation | [Dated results and three-loop checks](./nfrs/NFR-02-ticket-traversal-measurements.md#2026-09-15-review-revalidation) | 4 explicit benchmarks passed; worst ticket p95 34.797 ms; prior failures retained. Final full-suite repeat: 429 passed, 4 gated skips, zero failures; Python 42, Host 52 in each of three runs |
 | NFR-02 three shapes at 3,000 memories / 10,000 edges | [nfrs/NFR-02-traversal-measurements.md](./nfrs/NFR-02-traversal-measurements.md) | 1.042 / 0.621 / 14.053 ms p95 against 50 / 10 / 100 ms |
 | NFR-02 one-hop vs the pre-cutover baseline | same file, *The one-hop comparison* | 0.621 ms vs 0.429 ms — 1.4×, accepted with the reasoning recorded |
 | NFR-03 restore round-trip | [nfrs/NFR-03-restore-verification.md](./nfrs/NFR-03-restore-verification.md) | 201 rows / 200 vertices / **500 edges** matched; 1,797 paths traversed after restore |
@@ -150,6 +168,9 @@ operability and compatibility. Two shape how code is written rather than merely 
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-15 | Final full-suite repeat verified: 429 passed, 4 gated skips, zero failures via `dotnet test SmoothAiProductContextMemory.slnx --no-build -m:1`. Prior benchmark-fixture connection timeout remains recorded in NFR-02; original pre-merge evidence unchanged. | NFR-02-ticket-traversal-measurements.md |
+| 2026-09-15 | Appended post-review benchmark revalidation and failed-attempt history without replacing original tables. Documented CASE eligibility, OFFSET 0 frontier joins and post-cap edge-ID hydration; same-snapshot live ownership retained. | LADR-08; NFR-02-ticket-traversal-measurements.md |
+| 2026-09-15 | Aligned review-fix contracts: explicit EF ReadCommitted, savepoint recovery, atomic reparent/cardinality, stale-snapshot rejection, migration NOWAIT quiesce/retry, typed memberships and scope-safe sanitized stored-JSON failures. Historical benchmark evidence unchanged; no new verification recorded. | LADR-08 |
 | 2026-09-15 | Closed ticket release/performance gates against final TRX and full-suite evidence. Added concise nine-shape ticket tables, original memory rerun, actual plan/index paths, parse-once ordinal ownership-join correction and honest three-deep/maxDepth-5 limitation. No threshold widened; pre-migration supersession and destructive ticket-only Down warning retained. | LADR-08; NFR-02-ticket-traversal-measurements.md |
 | 2026-09-14 | Synced to working-tree ITicketGraph, parent/path endpoints, identity migration/triggers, provider/key HASH plus properties GIN, recursive SQL over indexed AGE adjacency with Cypher anchor, selected-path memory association and strict expected-parent-before-no-op semantics. Targeted checks do not establish release acceptance; NFR-02 performance gate remains open without threshold relaxation. | LADR-08; NFR-02 |
 | 2026-09-14 | Owner-approved LADR-08 supersedes LADR-02 in writing before any ticket migration. Recorded exact Ticket identities, declared current-state hierarchy, JSONB association/trigger lifecycle, serialized mutation, live scope-safe bounded traversal and warned reversal. Existing memory budgets preserved; ticket benchmark and all implementation pending. | LADR-08, NFR-02 |

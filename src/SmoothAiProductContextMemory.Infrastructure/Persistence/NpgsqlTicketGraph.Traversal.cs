@@ -15,11 +15,19 @@ public sealed partial class NpgsqlTicketGraph
         await using NpgsqlCommand command = await CreateTraversalCommandAsync(query, cancellationToken);
         await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
         await reader.ReadAsync(cancellationToken);
-        return new TicketTraversalResult(
-            JsonSerializer.Deserialize<TicketHierarchyPath[]>(reader.GetString(0), TraversalJson)!,
-            JsonSerializer.Deserialize<CheapMemory[]>(reader.GetString(1), TraversalJson)!,
-            new TicketTraversalDisclosure(query.MaxDepth, query.PathLimit, query.MemoryLimit,
-                reader.GetBoolean(2), reader.GetBoolean(3), reader.GetBoolean(4)));
+        try
+        {
+            return new TicketTraversalResult(
+                JsonSerializer.Deserialize<TicketHierarchyPath[]>(reader.GetString(0), TraversalJson)!,
+                JsonSerializer.Deserialize<CheapMemory[]>(reader.GetString(1), TraversalJson)!,
+                new TicketTraversalDisclosure(query.MaxDepth, query.PathLimit, query.MemoryLimit,
+                    reader.GetBoolean(2), reader.GetBoolean(3), reader.GetBoolean(4)));
+        }
+        catch (JsonException)
+        {
+            // Stored corruption is not invalid request JSON; omit persisted details from the exception chain.
+            throw new InvalidOperationException("Stored ticket traversal data could not be read.");
+        }
     }
 
     // The benchmark EXPLAINs this exact command, including live ownership and hidden-hop gates.
@@ -35,8 +43,8 @@ public sealed partial class NpgsqlTicketGraph
         ArgumentOutOfRangeException.ThrowIfGreaterThan(query.MemoryLimit, 200);
         if (!Enum.IsDefined(query.Direction)) throw new ArgumentOutOfRangeException(nameof(query));
 
-        string outward = "SELECT e.id, e.end_id AS next_id, e.properties::text::jsonb AS properties, true AS outbound FROM memory_graph.\"TICKET_PARENT\" e WHERE e.start_id = w.id";
-        string inward = "SELECT e.id, e.start_id AS next_id, e.properties::text::jsonb AS properties, false AS outbound FROM memory_graph.\"TICKET_PARENT\" e WHERE e.end_id = w.id";
+        string outward = "SELECT e.id, e.end_id AS next_id FROM memory_graph.\"TICKET_PARENT\" e WHERE e.start_id = w.id";
+        string inward = "SELECT e.id, e.start_id AS next_id FROM memory_graph.\"TICKET_PARENT\" e WHERE e.end_id = w.id";
         string expansion = query.Direction switch
         {
             TraversalDirection.Inbound => inward,
@@ -49,38 +57,42 @@ public sealed partial class NpgsqlTicketGraph
         // unique and visible BEFORE expansion: a hidden intermediate kills that entire route. Neither
         // caps nor depth disclosure can therefore count a hidden branch. Property objects are JSON;
         // unlike rendered vertices they need no unsafe annotation replacement on caller strings.
+        // Null ineligible owner IDs without filtering the aggregate's cardinality estimate;
+        // OFFSET 0 anchors adjacency and keeps the owner join outside the per-vertex expansion.
         NpgsqlCommand command = await MutationCommandAsync($"""
             WITH RECURSIVE memberships AS MATERIALIZED (
                 SELECT DISTINCT g.id, g.scope_dimension, ticket->>'provider' AS provider, ticket->>'key' AS key
-                FROM public.memory_group g CROSS JOIN LATERAL jsonb_array_elements(g.tickets) ticket
+                FROM public.memory_group g CROSS JOIN LATERAL jsonb_array_elements(
+                    CASE WHEN jsonb_typeof(g.tickets) = 'array' THEN g.tickets ELSE '[]'::jsonb END) ticket
+                -- Text extraction must not turn a corrupt numeric identity into a string identity.
+                WHERE jsonb_typeof(ticket->'provider') = 'string' AND jsonb_typeof(ticket->'key') = 'string'
             ), identities AS MATERIALIZED (
                 SELECT id, properties::text::jsonb AS identity FROM memory_graph."Ticket"
             ), owners AS MATERIALIZED (
-                SELECT t.id, t.identity,
+                SELECT CASE WHEN count(*) = 1 AND bool_and(g.scope_dimension <> ALL(@hidden))
+                            THEN t.id END AS id, t.identity,
                        min(g.id) AS group_id, min(g.scope_dimension) AS scope_dimension
                 FROM identities t
                 JOIN memberships g ON g.provider COLLATE "C" = t.identity->>'provider'
                                   AND g.key COLLATE "C" = t.identity->>'key'
                 GROUP BY t.id, t.identity
-                HAVING count(*) = 1 AND bool_and(g.scope_dimension <> ALL(@hidden))
             ), anchor AS (
                 SELECT o.* FROM ag_catalog.cypher('memory_graph', {CypherLiteral.DollarWrap(anchorCypher)})
                     AS a(id ag_catalog.agtype)
                 JOIN owners o ON o.id = a.id::text::ag_catalog.graphid
-            ), walk(id, depth, vertices, edges, sort_key, identity, hops) AS (
+            ), walk(id, depth, vertices, edges, sort_key, group_id) AS (
                 SELECT id, 0, ARRAY[id], ARRAY[]::ag_catalog.graphid[],
-                       ARRAY[identity->>'provider', identity->>'key'], identity, '[]'::jsonb FROM anchor
+                       ARRAY[identity->>'provider', identity->>'key'], group_id FROM anchor
                 UNION ALL
-                SELECT o.id, w.depth + 1, w.vertices || o.id, w.edges || e.id,
-                       w.sort_key || ARRAY[o.identity->>'provider', o.identity->>'key'], o.identity,
-                       w.hops || jsonb_build_object(
-                           'parent', CASE WHEN e.outbound THEN w.identity ELSE o.identity END,
-                           'child', CASE WHEN e.outbound THEN o.identity ELSE w.identity END,
-                           'reason', e.properties->>'reason', 'source', e.properties->>'source',
-                           'observedAt', e.properties->>'observedAt', 'recordedAt', e.properties->>'recordedAt')
-                FROM walk w CROSS JOIN LATERAL ({expansion}) e
+                SELECT e.next_id, e.depth + 1, e.vertices || e.next_id, e.edges || e.id,
+                       e.sort_key || ARRAY[o.identity->>'provider', o.identity->>'key'], o.group_id
+                FROM (
+                    SELECT e.id, e.next_id, w.depth, w.vertices, w.edges, w.sort_key
+                    FROM walk w CROSS JOIN LATERAL ({expansion} OFFSET 0) e
+                    WHERE w.depth < @depth + 1 AND NOT e.next_id = ANY(w.vertices)
+                    OFFSET 0
+                ) e
                 JOIN owners o ON o.id = e.next_id
-                WHERE w.depth < @depth + 1 AND NOT o.id = ANY(w.vertices)
             ), admitted AS MATERIALIZED (
                 SELECT * FROM walk WHERE depth BETWEEN 1 AND @depth
             ), selected AS MATERIALIZED (
@@ -88,7 +100,7 @@ public sealed partial class NpgsqlTicketGraph
             ), groups AS (
                 SELECT group_id FROM anchor
                 UNION
-                SELECT o.group_id FROM selected s JOIN owners o ON o.id = s.id
+                SELECT group_id FROM selected
             ), memories AS MATERIALIZED (
                 SELECT m.uuid, g.uuid AS group_uuid, m.name, m.description, v.statement, v.content_summary,
                        v.kind, m.facets, m.tags, v.status, v.confidence, g.scope_dimension, g.scope_identifier,
@@ -103,7 +115,20 @@ public sealed partial class NpgsqlTicketGraph
             ), memory_selection AS (
                 SELECT * FROM memories ORDER BY uuid, version LIMIT @memories
             )
-            SELECT COALESCE((SELECT jsonb_agg(jsonb_build_object('depth', s.depth, 'hops', s.hops)
+            SELECT COALESCE((SELECT jsonb_agg(jsonb_build_object('depth', s.depth, 'hops', (
+                       SELECT jsonb_agg(jsonb_build_object(
+                           'parent', p.properties::text::jsonb, 'child', c.properties::text::jsonb,
+                           'reason', e.properties::text::jsonb->>'reason',
+                           'source', e.properties::text::jsonb->>'source',
+                           'observedAt', e.properties::text::jsonb->>'observedAt',
+                           'recordedAt', e.properties::text::jsonb->>'recordedAt') ORDER BY h.ordinal)
+                       FROM unnest(s.edges) WITH ORDINALITY h(id, ordinal)
+                       CROSS JOIN LATERAL (
+                           SELECT * FROM memory_graph."TICKET_PARENT" edge WHERE edge.id = h.id OFFSET 0
+                       ) e
+                       JOIN memory_graph."Ticket" p ON p.id = e.start_id
+                       JOIN memory_graph."Ticket" c ON c.id = e.end_id
+                   ))
                        ORDER BY s.depth, s.sort_key COLLATE "C", s.edges) FROM selected s), '[]'::jsonb)::text,
                    COALESCE((SELECT jsonb_agg(jsonb_build_object(
                        'uuid', uuid, 'groupUuid', group_uuid, 'name', name, 'description', description,

@@ -104,9 +104,22 @@ is the current design authority, superseding HLD-003 LADR-02 before any ticket m
   `ix_ticket_vertex_key`), plus properties GIN for MERGE. Do not substitute a composite btree over
   unrestricted existing JSONB keys: long strings can exceed btree entry-size limits. Exact identity
   is preserved; the ticket endpoints separately validate 512-character component limits.
+  `ix_ticket_parent_id` is a btree on `TICKET_PARENT(id)` for post-cap hop hydration, not expansion;
+  AGE start/end indexes remain the adjacency access path.
 - Group-ticket mutation, trigger cleanup and explicit hierarchy set/reparent/remove share one
   transaction-scoped advisory lock, including ownership and expected-parent validation. One parent,
   no cycles, mandatory reason/source/recordedAt and optional observedAt; current state, not history.
+- Ticket locking requires explicit EF `ReadCommitted`; other isolation levels are rejected before
+  SQL because advisory locking cannot refresh a stale snapshot. `ChangeParentAsync` owns a transaction
+  or uses private `ticket_graph_parent_change` on a serial, non-reentrant context; failure rolls back
+  and releases the savepoint with `CancellationToken.None`, preserving prior outer work if the
+  connection remains usable. `TransactionScope` and unenlisted raw transactions are unsupported.
+  Reparent DELETE/CREATE is one Cypher command with exactly one result; every supplied identity must
+  have exactly one owner and one vertex before destructive work. Reject corruption, never repair it.
+- Migration Up/Down takes advisory `(734921, 1)` before `memory_group` SHARE ROW EXCLUSIVE `NOWAIT`.
+  Raw group DML takes its table lock before the advisory-lock trigger; waiting for that table while
+  holding advisory would deadlock. Table contention fails `55P03`: quiesce writers and retry, with
+  no automatic live-migration retry guarantee.
 - `ExpectedParent` is validated before identical-state no-op. Matching current parent and unchanged
   parent/reason/source/observedAt returns false without changing `recordedAt`; replaying an initial
   null expectation after successful set conflicts. There is no operation replay token.
@@ -120,18 +133,31 @@ is the current design authority, superseding HLD-003 LADR-02 before any ticket m
   `HiddenDimensions` gates every hop, dropping whole paths; endpoint `Plan()` narrows memories.
   Ticket identity grants no scope consent. Required depth 1..5, deterministic caps, distinct current
   non-proposed memories including the anchor, generic upstream/freshness disclosure, no hidden IDs/counts.
+- Keep the owner aggregate unfiltered: `CASE` returns NULL for ineligible IDs, which cannot join the
+  anchor or next frontier. Stricter JSON guards plus `HAVING` collapsed owner estimates and reversed
+  expansion. `OFFSET 0` anchors adjacency and keeps owner joins per recursive level rather than per
+  vertex. Walk IDs/sort keys/live group IDs first; hydrate ordered hop JSON only after the path cap.
+  All ownership, scope, selection and hydration share one SQL snapshot; no persisted ownership cache.
+- Mutation owner checks and traversal require JSON string provider/key fields with ordinal equality;
+  invalid non-array containers supply no memberships, and numeric/null/missing fields are not coerced.
+  Selected traversal JSON deserialization failures become a fixed exception without the original
+  `JsonException` chain, yielding sanitized HTTP 500 rather than request-body 400. Hidden-only malformed
+  metadata is gated out before deserialization and must not affect responses or cap flags.
 - Ticket-only Down warns of declaration loss and preserves memory `LINKS`, Memory vertices and all
   relational metadata. Existing NFR-02 budgets stay; composed ticket p95 <= 100 ms requires a hub-active
   actual-traversal benchmark, not reused memory evidence. All ticket fanouts and requested depths
-  2/3/5 passed, alongside the original memory benchmark and full solution. Requested depth 5 used a
+  2/3/5 passed, alongside the original memory benchmark. Requested depth 5 used a
   three-deep hierarchy. [Final evidence](../../../docs/hlds/003-graph-edges-on-age/nfrs/NFR-02-ticket-traversal-measurements.md)
-  records acceptance without threshold relaxation.
+  preserves original acceptance and dated post-review revalidation without threshold relaxation;
+  the final full-suite repeat after query fixes passed with 429 tests, 4 gated benchmark skips and zero failures.
 
 ## Test References
 
 - Ticket coverage: `TicketGraphLifecycleTests`, `TicketGraphMutationTests`, `TicketTraversalTests`;
   actual-command benchmark `TicketTraversalBenchmarkTests` is gated by `SMOOTH_AGE_BENCH=1`.
-  Final suite and explicit benchmark results are recorded in HLD-003 NFR-02; acceptance is not inferred from gated skips.
+  Historical suites, focused checks and explicit post-fix benchmarks are recorded separately in
+  HLD-003 NFR-02; the final suite repeat passed 429 tests with 4 gated skips and zero failures.
+  Benchmark acceptance comes from the four explicit passes, not gated skips.
 
 - **L0** — `tests/SmoothAiProductContextMemory.Domain.UnitTest/` (`SlugTests`, `JsonShapeDocumentTests`, `EntityInvariantTests`); `tests/SmoothAiProductContextMemory.Infrastructure.UnitTest/` (`ModelShapeGuardTests`, `NpgsqlDataSourceFactoryTests`).
 - **L1** — `tests/SmoothAiProductContextMemory.Infrastructure.ComponentTest/Persistence/` against real PostgreSQL via `AspireFixture`, fresh migrated database per test (`PersistenceTestBase`). Relationship uniqueness/integrity contract: `LinkTests` (duplicate directed triple refused by `CreateAsync`, same pair different relations, opposite directions, trigger cascade inbound+outbound, group-delete orphan=0, mid-delete rollback, vertex identity-only, self-link persists at store, cross-group). AGE pool-recycle and cross-session visibility: `AgeFoundationTests`. NFR-02 relational one-hop numbers live in `docs/hlds/003-graph-edges-on-age/nfrs/NFR-02-one-hop-baseline.md`; the post-cutover AGE measurements and the baseline comparison are in `docs/hlds/003-graph-edges-on-age/nfrs/NFR-02-traversal-measurements.md`. Bounded traversal: `TraversalTests`. Benchmark: `Nfr02BenchmarkTests` (env-gated `SMOOTH_AGE_BENCH=1`).
@@ -145,6 +171,11 @@ is the current design authority, superseding HLD-003 LADR-02 before any ticket m
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-15 | Final full-suite repeat verified after query fixes: 429 passed, 4 gated skips, zero failures. NFR-02 retains the prior benchmark-fixture connection timeout and successful `--no-build` repeat; original pre-merge evidence unchanged. | HLD-003 NFR-02 |
+| 2026-09-15 | Synced CASE-based owner eligibility, OFFSET 0 frontier joins and ix_ticket_parent_id post-cap hydration to measured provider SQL. No persisted owner cache or snapshot split. Dated NFR-02 records four post-fix benchmark passes and earlier failures. | HLD-003 LADR-08; NFR-02 |
+| 2026-09-15 | Promoted transaction/cardinality and NOWAIT constraints into ticket guardrails; documented invalid-container-as-absent membership reads and sanitized stored-JSON 500 versus hidden-only corruption with no response impact. Historical evidence retained; no new verification recorded. | HLD-003 LADR-08 |
+| 2026-09-15 | Ticket mutations support only explicit EF-managed ReadCommitted transactions, or create their own ReadCommitted transaction; LockAsync rejects other isolation levels before SQL. System.Transactions TransactionScope and unenlisted raw transactions are not supported. Ambient operations use the private `ticket_graph_parent_change` savepoint on a serial, non-reentrant DbContext/connection; failures roll back/release it with CancellationToken.None, preserving prior outer work when the connection remains usable. Reparent DELETE/CREATE is one Cypher command and requires exactly one result. Ownership accepts only exact string provider/key JSONB memberships and exactly one graph vertex per supplied identity before destructive work; corrupt identities are rejected, not repaired. | HLD-003 LADR-08 |
+| 2026-09-15 | Ticket migration Up/Down acquires advisory lock `(734921, 1)` before `memory_group` SHARE ROW EXCLUSIVE NOWAIT. Handlers acquire advisory before DML; raw group DML obtains its table lock before the statement trigger acquires advisory. NOWAIT prevents this ordering difference from forming a migration deadlock: table contention fails with SQLSTATE 55P03, with no custom identity-bearing error. Quiesce writers and retry; no automatic live-migration retry or broader raw-SQL concurrency API is promised. Regressions cover reproduced stale RepeatableRead second-parent commit and migration 40P01, replacement CREATE cancellation/SQL failure with outer commit, missing/duplicate anchors, malformed memberships, NOWAIT retry and multirow cleanup. | HLD-003 LADR-08 |
 | 2026-09-15 | Finalized ticket acceptance after the full suite and all four explicit benchmark cases passed. Recorded parse-once identities and ordinal owner joins, actual indexed adjacency plans and three-deep/maxDepth-5 fixture limit. Ticket-only Down still warns of declaration loss while preserving memory graph and relational metadata. | HLD-003 final NFR-02 evidence |
 | 2026-09-14 | Synced implemented ticket migration/trigger ownership, provider/key HASH plus properties GIN, strict expected-parent-before-no-op mutation and recursive SQL over indexed AGE adjacency composed with a Cypher anchor. Memory association follows selected capped paths plus anchor. Performance gate remains open; no threshold relaxation or release-accepted claim. | HLD-003 LADR-08; NFR-02 |
 | 2026-09-14 | Recorded accepted, implementation-pending ticket graph boundary: exact identity-only vertices, JSONB association, shared advisory locking, trigger lifecycle, live scope-safe composed traversal and warned ticket-only Down. Scoped existing Memory-only parser/model/cleanup rules without changing code or migrations. | HLD-003 LADR-08 |
