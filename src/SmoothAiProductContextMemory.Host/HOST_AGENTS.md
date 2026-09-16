@@ -29,6 +29,7 @@ ASP.NET Core composition root (Minimal API). Wires the application together and 
 - Ticket routes are separate: `PUT /api/context/tickets/parent` dispatches `SetTicketParent` and returns `changed`; `parent` must be present (explicit null removes), while null/absent `expectedParent` expects absence. `POST /api/context/tickets/paths` dispatches `FindTicketPaths` and returns `TicketTraversalResult`; omitted `maxDepth` stays zero and fails validation. Ticket identity grants no group-scope consent; the provider drops hidden anchors and whole hidden paths without a revealing 403/404 lookup in Host/Application.
 - Scalar/OpenAPI document every `/api/context/*` route; the L2 test asserts each path literally — `/api/context/paths` included, so a route added without updating `ExpectedRoutes` fails. Bind localhost (`5141`/`7141`); do not listen `0.0.0.0` in dev.
 - **Container image** listens `http://+:5141` (required inside Docker). Non-root (`$APP_UID`). `ENTRYPOINT` is the Host binary so `export` remains `docker run … image export …`. Config contract and AppHost image path: `docs/wiki/docker.md`. Do not bake web args into the entrypoint.
+- **Docker restore cache must include packages.** The API Dockerfile keeps NuGet packages in the build-stage restore layer, not a BuildKit cache mount. Exported GHA layer caches do not include cache-mount contents; a cached restore followed by source-invalidated `publish --no-restore` otherwise fails with NETSDK1064 on a fresh runner. Packages remain outside the final runtime image.
 
 ## Requirements
 
@@ -43,6 +44,7 @@ Approved release-image plan (2026-09-13):
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-16 | Persisted API NuGet packages alongside restore metadata in Docker build layers so fresh runners can publish after importing GHA layer cache. | PR #65, Actions run 35014970369 |
 | 2026-09-14 | Added ticket parent and bounded ticket path route mappings, explicit-null removal wire guard, and HTTP validation/scope/hierarchy plus OpenAPI route coverage. | HLD-003 LADR-08 |
 | 2026-09-14 | `Invalid request body` reports the first `JsonException` in the exception chain as the detail and its `Path` as a `path` problem extension, not the `BadHttpRequestException` wrapper. The wrapper names no field, so a rejected batch gave the caller nothing to fix — proven by an e2e run lost to one unmapped member. | e2e-dogfood |
 | 2026-09-13 | All endpoints reject unknown JSON body fields as `400` (`JsonUnmappedMemberHandling.Disallow`); `ApiExceptionHandler` maps deserialization failures (`JsonException`/`BadHttpRequestException`) to `400` `Invalid request body`. | BUG-03 |
