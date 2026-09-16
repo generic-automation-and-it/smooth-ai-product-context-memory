@@ -145,6 +145,24 @@ public class AppHostConfigurationTests
     }
 
     [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("host.docker.internal")]
+    [InlineData("0.0.0.0")]
+    public void Development_does_not_validate_unused_bind_address(string? value)
+    {
+        var values = new Dictionary<string, string?>
+        {
+            ["EngineConfiguration:BindAddress"] = value,
+        };
+
+        var result = AppHostConfiguration.Create(BuildConfiguration(values));
+
+        result.Mode.ShouldBe(AppHostMode.Development);
+        result.EngineBindAddress.ShouldBe(value ?? "127.0.0.1");
+    }
+
+    [Theory]
     [InlineData("127.0.0.1")]
     [InlineData("172.17.0.1")]
     public void Release_preserves_explicit_bind_ip(string value)

@@ -213,6 +213,7 @@ Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgr
 
 ## Release Controller Contract
 
+- Bind-address validation applies only in release mode; development ignores this unused endpoint override.
 - Canonical name for every `run`, `stop`, and `reset` container is `mimisbrunnr-<id>-controller`; retain engine-generated hostname. Remove a stopped controller explicitly before replacing it. Do not invoke maintenance through `docker exec` on a live controller.
 - Preflight uses `--validate-configuration` without starting Aspire. All existing containers and volumes must pass ownership checks before mutation. Inspection errors fail closed.
 - Workload shutdown is graceful and API-first for entrypoint cleanup; allow 180 seconds for controller stop. Aspire performs its own session cleanup before fallback cleanup. Forced termination can leave workloads; next start reconciles them without dropping volumes.
@@ -224,6 +225,7 @@ Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgr
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-16 | Limited bind-address validation to release mode and added development-mode regression cases. | PR #65 review |
 | 2026-09-16 | Added the configurable image-mode API port to the port contract. | PR #65 review |
 | 2026-09-15 | Hardened release preflight, canonical controller ownership, graceful signal handling, explicit bind/advertised addresses, and registry credential isolation; added regression tests and documented remaining runtime verification gaps. | LADR-005 |
 | 2026-09-15 | Accepted a separate containerized live-AppHost release controller while preserving source-mode development, the standalone API image, and isolated test orchestration. | LADR-005 |

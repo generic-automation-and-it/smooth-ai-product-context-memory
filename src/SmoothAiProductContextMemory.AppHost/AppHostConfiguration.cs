@@ -75,8 +75,8 @@ internal sealed partial record AppHostConfiguration(
 
         string engineHostAddress = GetEngineHostAddress(configuration, engineKind);
         string bindAddress = configuration["EngineConfiguration:BindAddress"] ?? (isRelease ? "" : "127.0.0.1");
-        if (!System.Net.IPAddress.TryParse(bindAddress, out var address) ||
-            (isRelease && (address.Equals(System.Net.IPAddress.Any) || address.Equals(System.Net.IPAddress.IPv6Any))))
+        if (isRelease && (!System.Net.IPAddress.TryParse(bindAddress, out var address) ||
+            address.Equals(System.Net.IPAddress.Any) || address.Equals(System.Net.IPAddress.IPv6Any)))
         {
             throw new InvalidOperationException("Release mode requires EngineConfiguration:BindAddress to be an explicit engine interface IP reachable from the controller. Wildcard binds are not allowed.");
         }
