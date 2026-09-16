@@ -20,6 +20,7 @@ Operational checks support operator decisions; a preflight must never repair the
 
 ## Test References
 
+- Release policy: `python3 scripts/test_release_policy.py`; negative event/ref matrix, fail-closed identity, and stale-main alias tests. Runs in the PR gate's "Test release policy" step.
 - Operational harness: `python3 scripts/tests/test_ticket_ownership.py`; mocked Docker transport checks require no daemon.
 - Real PostgreSQL checks: `python3 scripts/tests/test_ticket_ownership.py --postgres`; disposable pinned AGE container, synthetic pre-migration table only, no published ports or corpus access. Not part of the .NET suite.
 - 2026-09-15 verification: 14 tests passed (transport, read-only enforcement, exact/malformed ownership, runbook rollback/commit/stale-input guards and partial-graph refusal); Dockerized ShellCheck (`koalaman/shellcheck:v0.11.0`, read-only mount, network disabled) and Bash syntax checks passed. This does not establish whole-migration or application-suite acceptance.
@@ -28,5 +29,6 @@ Operational checks support operator decisions; a preflight must never repair the
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-16 | Added the release-policy harness to Test References. | PR #65 review |
 | 2026-09-16 | Restricted release policy to main pushes and added negative event/ref tests; removed tag/manual publication paths. | PR #65 |
 | 2026-09-15 | Added read-only exact ticket ownership preflight, malformed-data blockers, isolated operational tests and operator-only remediation runbook. Migration fail-closed duplicate guard unchanged. | PR #63 finding 3; HLD-003 LADR-08 |
