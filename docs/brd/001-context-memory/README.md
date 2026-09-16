@@ -6,7 +6,7 @@
 | **Status** | Approved |
 | **Owner** | Product owner / practitioner |
 | **Last updated** | 2026-09-13 |
-| **Related** | [HLD 001 — Storage](../../hlds/001-context-memory-storage/) · [HLD 002 — Write pipeline](../../hlds/002-context-memory-write-pipeline/) · [HLD 003 — Graph edges](../../hlds/003-graph-edges-on-age/) · [HLD 004 — Recall feedback](../../hlds/004-memory-recall-feedback/) |
+| **Related** | [HLD 001 — Storage](../../hlds/001-context-memory-storage/) · [HLD 002 — Write pipeline](../../hlds/002-context-memory-write-pipeline/) · [HLD 003 — Graph edges](../../hlds/003-graph-edges-on-age/) · [HLD 004 — Recall feedback](../../hlds/004-memory-recall-feedback/) · [HLD 006 — Corpus snapshot and restore](../../hlds/006-corpus-snapshot-and-restore/) |
 | **Extended by** | [BRD 002 — Contextual knowledge export](../002-contextual-export/) — continues this requirement space at `BR-18` |
 
 > This document states **what the business needs and why**. It deliberately contains no technology
@@ -213,6 +213,15 @@ practitioner's machine.
 An asset readable only through the application that wrote it is a dependency, not an asset.
 *Accepted when:* the store's contents can be read in a human-readable form.
 
+**BR-37 — The store must survive the loss of the machine that holds it.**
+The store is a compounding personal asset (§1); an asset that dies with one disk is a liability
+deferred. Protection must not become recurring upkeep (BR-01) and must not leave the
+practitioner's control (BR-16). *(Numbered BR-37 because BRD-002 continues this requirement
+space at BR-18–36.)*
+*Accepted when:* the practitioner can produce a complete, verifiable copy of the store on
+demand, confirm its completeness without rebuilding from it, and rebuild a fully functional
+store from it; how recently a copy was made is visible without asking.
+
 ---
 
 ## 7. Success measures
@@ -259,6 +268,7 @@ An asset readable only through the application that wrote it is a dependency, no
 | **Recalled knowledge is followed as instruction** | An incorrect item propagates into future work | Presentation as evidence, not directive (BR-12) |
 | **Value accrues slowly** | Thin and unconvincing early, when habits form | Accept deliberately: capture cost is near zero, so an early store costs little to maintain |
 | **Knowledge is unreadable without the application** | The asset becomes a dependency | Human-readable export (BR-17) |
+| **The store dies with its machine** | The compounding asset is lost outright; the longer it compounds, the worse the loss | On-demand verifiable copy and rebuild, with copy recency visible (BR-37) |
 
 ---
 
@@ -287,4 +297,5 @@ An asset readable only through the application that wrote it is a dependency, no
 | [HLD 002 — Context memory write pipeline](../../hlds/002-context-memory-write-pipeline/) | How capture works and what judgement it applies |
 | [HLD 003 — Graph edges on Apache AGE](../../hlds/003-graph-edges-on-age/) | How relationships between decisions are held |
 | [HLD 004 — Memory recall feedback](../../hlds/004-memory-recall-feedback/) | Whether retrieval is working — what is recalled, what never is |
+| [HLD 006 — Corpus snapshot and restore](../../hlds/006-corpus-snapshot-and-restore/) | Durability of the store as an asset — verified backup and restore across both stores |
 | [BRD 002 — Contextual knowledge export](../002-contextual-export/) | Extends this document (`BR-18` … `BR-36`): exporting a slice of the store as one focused, composed document with its gaps and contradictions. Owns [HLD 005](../../hlds/005-contextual-export/) |

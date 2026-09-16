@@ -53,7 +53,7 @@ on them by design:
 - **The automation gradient is unstated.** "Automate what is reversible; ask about what is not" generates BR-10, BR-13, BR-14 and the agentic-action exclusion. The BRD lists those consequences without the rule that produces them.
 - **Four requirements have no validating evidence** — divergence, bitemporality, typed links, and provenance-with-confidence were never exercised by the fixtures used so far. §7 assumes they work.
 - **BR-17 is stated as settled and is not.** Content-addressed bodies are not human-navigable, so readability depends on a reconstruction step across two stores; the BRD does not mention export at all. *Partly answered on 2026-09-13 by [BRD-002](../002-contextual-export/) `BR-21` for the curated case; the whole-store readability half remains unstated here.*
-- **Losing the store is not a risk.** BR-16 covers control of a personal asset; nothing covers its durability across two stores under monotonic growth.
+- **Losing the store is a stated risk — closed 2026-09-16 by BR-37.** On-demand verifiable copy and rebuild, recency visible; design answered by [HLD 006](../../hlds/006-corpus-snapshot-and-restore/) (In Discovery). BR-37 sits in BRD-001's Ownership section but is numbered after BRD-002's BR-18–36 because the two documents share one requirement space — do not renumber it to fit the section.
 
 Closed on 2026-09-13 (second amendment): findability risk row in §9; BR-10 rewritten to state
 authority ranking with genuine conflicts surfaced; BR-11 acceptance names the proposing actor and
@@ -68,3 +68,5 @@ multi-tracker in BR-04.
 | 2026-09-13 | Second amendment applied to the BRD: BR-10 authority ranking, BR-11 checkpoint clause, findability risk, preferences in scope, multi-tracker tickets, terseness pass on §1/§2/§7. Five of eleven gaps closed; gap list pruned to the six remaining. | — |
 | 2026-09-13 | BRD-002 recorded as extending this requirement space and owning HLD 005; three-place rule clarified for sibling-BRD-owned HLDs; BR-17 export gap marked partly answered. | BRD-002 |
 | 2026-09-13 | HLD 004 added to the `Related` row and §11 — the three-place rule had been missed when it landed. | HLD 004 |
+| 2026-09-16 | HLD 006 (corpus snapshot and restore, In Discovery) added to the `Related` row and §11; the "losing the store is not a risk" gap marked as design-side answered, BRD-side still unstated. | HLD 006 |
+| 2026-09-16 | Third amendment: BR-37 appended (store survives loss of its machine — on-demand verifiable copy, rebuild, recency visible) with a matching §9 risk row; durability gap closed. Numbered BR-37 to respect BRD-002's BR-18–36 continuation. | BR-37; HLD 006 |
