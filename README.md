@@ -8,7 +8,7 @@
 
 ## What We're Building
 
-AI language models are stateless — sessions are ephemeral and lost in time, deleted or submerged by chaos. This project is building the connective tissue to brings cohesion to the lifecycle. Context is no longer lost, instead, it gets refined to the latest, most relevant versions while still keeping track of the history and previous thought process, from both humans and agents. This project builds **persistent AI memory** so coding agents can recall relevant context over long periods, even after their working memory is gone, the sessions are impossible to find or the human in the loop no longer remembers why something got to be the way it got to be.
+AI language models are stateless — sessions are ephemeral and lost in time, deleted or submerged by chaos. This project is building the connective tissue to bring cohesion to the lifecycle. Context is no longer lost, instead, it gets refined to the latest, most relevant versions while still keeping track of the history and previous thought process, from both humans and agents. This project builds **persistent AI memory** so coding agents can recall relevant context over long periods, even after their working memory is gone, the sessions are impossible to find or the human in the loop no longer remembers why something got to be the way it got to be.
 
 The core idea (inspired by the [unified-database approach to agent memory](https://www.tigerdata.com/learn/building-ai-agents-with-persistent-memory-a-unified-database-approach)):
 
