@@ -34,8 +34,12 @@ RUN --mount=type=cache,target=/root/.nuget/packages \
       -p:AspireDashboardDir=/app/aspire/dashboard \
       -o /publish && \
     mkdir -p /aspire/dcp /aspire/dashboard && \
-    cp -a "/root/.nuget/packages/aspire.hosting.orchestration.${runtime_rid}/${aspire_version}/tools/." /aspire/dcp/ && \
-    cp -a "/root/.nuget/packages/aspire.dashboard.sdk.${runtime_rid}/${aspire_version}/tools/." /aspire/dashboard/
+    orchestration_dir="/root/.nuget/packages/aspire.hosting.orchestration.${runtime_rid}/${aspire_version}/tools" && \
+    [ -d "$orchestration_dir" ] || { echo "Aspire asset packages for ${aspire_version} not restored; check Aspire version alignment in Directory.Packages.props" >&2; exit 1; } && \
+    cp -a "${orchestration_dir}/." /aspire/dcp/ && \
+    dashboard_dir="/root/.nuget/packages/aspire.dashboard.sdk.${runtime_rid}/${aspire_version}/tools" && \
+    [ -d "$dashboard_dir" ] || { echo "Aspire asset packages for ${aspire_version} not restored; check Aspire version alignment in Directory.Packages.props" >&2; exit 1; } && \
+    cp -a "${dashboard_dir}/." /aspire/dashboard/
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
