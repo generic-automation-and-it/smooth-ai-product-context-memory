@@ -96,7 +96,7 @@ Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgr
   `POSTGRESCONFIGURATION__PASSWORD` environment variable in automated environments.
 - Every host port is configuration-driven with a code default: `PostgresConfiguration:Port` (5432),
   `BlobConfiguration:Port` (9000), `BlobConfiguration:ConsolePort` (9001), `SeqConfiguration:Port`
-  (5341). `appsettings.json` must keep these values in sync with the code defaults and with the table
+  (5341), `HostConfiguration:Port` (5141, image mode). `appsettings.json` must keep these values in sync with the code defaults and with the table
   above — a divergence here is invisible until something binds the wrong port.
 - MinIO credentials are committed in `appsettings.Development.json` (local dev only, firewall-isolated).
   Bucket creation is lazy: the storage adapter ensures the bucket exists on first write, so no separate
@@ -224,6 +224,7 @@ Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgr
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-16 | Added the configurable image-mode API port to the port contract. | PR #65 review |
 | 2026-09-15 | Hardened release preflight, canonical controller ownership, graceful signal handling, explicit bind/advertised addresses, and registry credential isolation; added regression tests and documented remaining runtime verification gaps. | LADR-005 |
 | 2026-09-15 | Accepted a separate containerized live-AppHost release controller while preserving source-mode development, the standalone API image, and isolated test orchestration. | LADR-005 |
 | 2026-09-14 | Startup hint now pairs each persistent resource name with its docker-visible container name, and the Key Behaviors paraphrase matches. Working-tree Host reference uses the `HostConnectionStringName` constant instead of a literal; the database-resource local and parameters are renamed `postgres` → `database` (the server resource stays `tyr-postgres`). | ai-analyse |
