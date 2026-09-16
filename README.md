@@ -8,12 +8,12 @@
 
 ## What We're Building
 
-AI language models are stateless — they forget everything between sessions. This project builds **persistent AI memory** so coding agents can recall relevant context over long periods, even after their working memory is gone.
+AI language models are stateless — sessions are ephemeral and lost in time, deleted or submerged by chaos. This project is building the connective tissue to bring cohesion to the lifecycle. Context is no longer lost, instead, it gets refined to the latest, most relevant versions while still keeping track of the history and previous thought process, from both humans and agents. The connective tissue is layered tagging: what a session leaves behind is broken into atomic facts, each anchored by initiative, scope, repository, ticket, subject, tags and facets — and the anchors that matter for reachability are edges, so memories link to each other and tickets link into a hierarchy. A session is therefore not a transcript to be found again but a referenced graph to be walked. This project builds **persistent AI memory** so coding agents can recall relevant context over long periods, even after their working memory is gone, the sessions are impossible to find or the human in the loop no longer remembers why something got to be the way it got to be.
 
 The core idea (inspired by the [unified-database approach to agent memory](https://www.tigerdata.com/learn/building-ai-agents-with-persistent-memory-a-unified-database-approach)):
 
 - **Summarized contexts with labels** — distilled knowledge captured from sessions, tagged with labels such as issue/ticket numbers so related context can be linked and retrieved.
-- **Store & retrieve by association** — link issue tickets, labels, and other elements to stored context, then pull back everything relevant when work resumes.
+- **Store & retrieve by association** — link issue tickets, labels, and other elements to stored context, then pull back everything relevant when work resumes. Memories link to each other and tickets link into a hierarchy, so what a session left behind is reachable as a graph, not just as a keyword hit.
 - **HTTP Docker API** — the memory service runs as a containerized HTTP API.
 - **Agent skill** — a get/set skill lets AI agents persist and recall context during their work.
 
@@ -38,6 +38,29 @@ Each record is **one atomic fact**: a stable *subject* (name, unique slug, tags/
 **Capture → recall in practice.** While working a ticket, the agent skill notices durable facts as byproducts — a decision made, a constraint discovered, a retro lesson. At an end-of-task checkpoint it writes them through a five-stage pipeline (preflight → redact → dedup/link → atomicity check → write). Months later, another agent resuming that ticket runs `get`: it pulls the *current* claims linked to the ticket plus graph neighbors — and treats them as **evidence to weigh, never commands to obey**.
 
 **How memory boundaries are decided.** There is no mechanical chunking (no diff- or line-based splitting). The skill applies an atomicity rule — *one memory = one fact about one subject*. A detector flags bundled candidates; the skill splits or skips them. Write batches are capped at 20 candidates; anything over is refused, never silently chunked. Design: [HLD-002 write pipeline](docs/hlds/002-context-memory-write-pipeline/).
+
+### A session lands as a graph, not a transcript
+
+A captured session is not filed away as one blob you have to find again. It decomposes into atomic memories, and each one is anchored at several levels of classification — that layering is what makes the store traversable, not merely searchable:
+
+| Level | What it anchors |
+|---|---|
+| **Initiative** | The work stream a group belongs to — a registry entity with its own lifecycle (active/archived) |
+| **Scope** | `product` / `customer` / `program` / `self` plus an optional identifier; inherited by every memory in the group and enforced at retrieval |
+| **Repository** | At most one per group, optional |
+| **Tickets** | Many per group, identity only (`provider` + `key`); a group accumulates them as an epic gains stories |
+| **Subject** | The stable thing one memory is about — what deduplication matches on |
+| **Tags / facets** | Free text + AI keywords, and a controlled vocabulary with an advisory (non-enforcing) registry; unversioned, because classification is not a claim |
+| **Claim labels** | `kind`, `status`, `confidence`, validity window — versioned with the claim |
+
+Two of those levels are real edges in the graph store (Apache AGE):
+
+- **Memory ↔ Memory** — `LINKS` edges carrying a relation name: `depends_on`, `relates_to`, `contradicts`, `supersedes`, `implements`. Open vocabulary, not a closed set.
+- **Ticket ↔ Ticket** — practitioner-declared current-state parent/child hierarchy, so a traversal can compose a ticket path (epic → story) with the memory links hanging off it ([LADR-08](docs/hlds/003-graph-edges-on-age/ladrs/LADR-08-captured-ticket-hierarchy.md)).
+
+The other levels stay relational predicates on purpose — *if it needs a join, it is a table; if it needs a path, it is an edge*. Filtering by facet, scope, ticket, repository or validity window is a multi-predicate problem indexes solve and traversal does not; measured access here is about four parts filter to one part traverse, so the graph is additive over the authoritative relational core rather than a second home for the data ([HLD-003](docs/hlds/003-graph-edges-on-age/)). Deliberately absent: a tag graph, and any mirror of an upstream tracker's structure.
+
+So recall is not "locate the old session". It is: land on an anchor — a ticket, a facet, a subject — then walk bounded edges out to what that fact depends on, contradicts, or has already superseded. The session that produced the memories is provenance (episodic), never the unit you retrieve.
 
 ### Why the store grows but retrieved context doesn't
 
