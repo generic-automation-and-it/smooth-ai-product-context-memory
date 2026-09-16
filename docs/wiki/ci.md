@@ -13,18 +13,20 @@ The publish workflow does **not** run on pull requests.
 ### Steps
 
 1. **Checkout** — `actions/checkout@v4`.
-2. **Install .NET SDK** — `actions/setup-dotnet@v4` (version from the `DOTNET_VERSION` env, currently `10.0.x`).
-3. **Restore** — `dotnet restore SmoothAiProductContextMemory.slnx`.
-4. **Build** — `dotnet build --no-restore --configuration Release`.
-5. **Aspire test with coverage** — local action `.github/actions/aspire-test-with-coverage`:
+2. **Test release policy** - `python3 -B -m unittest discover -s scripts -p 'test_release_policy.py' -v`; fails closed before installing the SDK.
+3. **Install .NET SDK** — `actions/setup-dotnet@v4` (version from the `DOTNET_VERSION` env, currently `10.0.x`).
+4. **Restore** — `dotnet restore SmoothAiProductContextMemory.slnx`.
+5. **Build** — `dotnet build --no-restore --configuration Release`.
+6. **Test controller preflight and lifecycle** - `python3 scripts/test-apphost-entrypoint.py`; engine-free tests against the built AppHost output.
+7. **Aspire test with coverage** — local action `.github/actions/aspire-test-with-coverage`:
     - Starts `tests/SmoothAiProductContextMemory.TestFramework.Aspire`, keeps its PID inside the action script, and waits for PostgreSQL (`127.0.0.1:15432`, image `docker.io/apache/age:release_PG17_1.7.0`), Redis (`127.0.0.1:16379`), WireMock (`http://127.0.0.1:19091/__admin/health`), MinIO TCP (`127.0.0.1:9002`), then MinIO HTTP (`http://127.0.0.1:9002/minio/health/live`). On MinIO timeout the action dumps `docker logs mimisbrunnr-testcontainer-blob`. MinIO image is pinned to `quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z`.
    - Restores .NET tools (`dotnet tool restore`) after the dependency pre-warm, matching the proven CI timing before tests start.
    - Prepares `artifacts/testresults/` and `artifacts/coverage/`.
     - Runs test projects in order: Host integration → Application/Infrastructure component → Domain/Application/Infrastructure/Host/AppHost unit tests.
    - Generates coverage reports with `dotnet tool run reportgenerator`.
    - Stops the Aspire host from the action script's teardown trap once tests and coverage have finished or failed.
-6. **Publish coverage summary** (`if: always()`) — appends `artifacts/coverage/SummaryGithub.md` to the GitHub step summary.
-7. **Upload coverage artifacts** — uploads `artifacts/coverage/` as `coverage-report` only for main pushes (including failed main runs). PR and manual CI skip upload.
+8. **Publish coverage summary** (`if: always()`) — appends `artifacts/coverage/SummaryGithub.md` to the GitHub step summary.
+9. **Upload coverage artifacts** — uploads `artifacts/coverage/` as `coverage-report` only for main pushes (including failed main runs). PR and manual CI skip upload.
 
 ## .NET local tools
 
