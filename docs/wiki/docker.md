@@ -15,7 +15,7 @@ It packages live Aspire 13.5.3 AppHost, DCP, dashboard, .NET runtime, and Docker
 
 ### Docker Desktop Example
 
-Supply `PostgresConfiguration__Password`, `BlobConfiguration__AccessKey`, and `BlobConfiguration__SecretKey` in a private `controller.env` file. Never commit it. Keep credentials stable across restarts and upgrades. Replace `VERSION` with an actually published version; this documentation does not imply an image has already been released.
+Supply `PostgresConfiguration__Password`, `BlobConfiguration__AccessKey`, and `BlobConfiguration__SecretKey` in a private `controller.env` file. Never commit it. Keep credentials stable across restarts and upgrades. Replace `VERSION` with an actually published `sha-<short-sha>` tag or `latest`; this documentation does not imply an image has already been released. Pin the controller digest for immutable deployment identity.
 
 ```bash
 docker run -d --name mimisbrunnr-default-controller \
@@ -220,19 +220,17 @@ for the dev container; see `APPHOST_AGENTS.md`.
 
 ## Publish workflow
 
-`.github/workflows/publish-image.yml` — not on pull requests.
+`.github/workflows/publish-image.yml` runs only on main pushes after merge. Branch protection should prohibit direct pushes to main. PR CI still runs tests and builds both images without pushing images or uploading build-record/coverage artifacts.
 
 | Trigger | Tags |
 |---|---|
 | push to `main` | `latest`, short SHA |
-| stable `v*` git tag | full version and major.minor (unless a newer patch reserves that lane), short SHA |
-| prerelease `v*` git tag | full prerelease version and short SHA; no stable alias |
-| `workflow_dispatch` | the supplied pre-release version (e.g. `1.0.0-rc.1`), short SHA — **never** `latest` |
+| PR, tag push, manual CI | no publication |
 
 Multi-arch: `linux/amd64,linux/arm64`. Confirm both in the GHCR manifest list
 after the first publish (`docker buildx imagetools inspect ghcr.io/generic-automation-and-it/smooth-ai-product-context-memory:latest`).
 
-Both API and controller candidates pass same-commit tests and native-architecture smoke before aliases are promoted. The controller embeds the API's multi-platform digest. Version aliases cannot replace an existing different digest; use a new version for a rebuilt release. Promotion is serialized, and release tags must point at the tested commit. GitHub Releases link exact digests and these installation instructions. Package visibility must be configured/verified separately; private packages require registry authentication.
+Both API and controller candidates pass same-commit tests and native-architecture smoke before aliases are promoted. The controller embeds the API's multi-platform digest. Promotion is serialized; stale main runs cannot overwrite `latest`. No Git tags or GitHub Release records are created by this main-only pipeline. Package visibility must be configured/verified separately; private packages require registry authentication.
 
 An amd64-only push fails on Apple silicon with a manifest error that reads like
 a configuration problem.
@@ -253,6 +251,6 @@ Executed, not inferred:
 | `export --output /export` (empty store) | writes marker `.context-memory-export`; 0 files |
 | Docker Desktop labels | `com.docker.compose.project=smooth-mímisbrunnr`, `service=mimisbrunnr-host` (verified under previous names; rename is the same label mechanism) |
 | Multi-arch manifest | **not** verified locally — CI `build-push-action` platforms `linux/amd64,linux/arm64`; inspect GHCR after first publish |
-| Dispatch never `:latest` | encoded in workflow `enable=` on the `latest` tag; confirm on first `workflow_dispatch` |
+| Publication trigger (current policy) | main pushes only; PRs and manual CI build/test without uploading artifacts |
 
 Alpine runtime logs `Cannot load library libgssapi_krb5.so.2` from Npgsql GSSAPI probe. Harmless; do not add kerberos packages to silence it.

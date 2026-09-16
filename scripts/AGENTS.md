@@ -13,6 +13,7 @@ Operational checks support operator decisions; a preflight must never repair the
 
 ## Key Behaviors
 
+- `release_policy.py` permits publication only for `push` on `refs/heads/main`. PRs, tag pushes, releases, and manual dispatch fail closed. Candidates include source SHA/run/attempt; stale main builds cannot promote `latest`. No version-tag or GitHub Release creation path remains.
 - A clean snapshot is not a reservation: writers must remain stopped from the final precheck through migration. Host startup applies migrations, so checking after startup is too late.
 - Same-group repeated memberships are not cross-group ownership conflicts. Malformed containers or identity types block preflight even though some live reads treat them as absent; silently skipping them would claim migration readiness without establishing it.
 - The checker needs only `public.memory_group`, not AGE or the ticket migration. The [ticket migration runbook](../docs/hlds/003-graph-edges-on-age/ticket-migration-runbook.md) targets legacy data before graph backfill; it refuses installed/partially installed ticket graph objects.
@@ -27,4 +28,5 @@ Operational checks support operator decisions; a preflight must never repair the
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-16 | Restricted release policy to main pushes and added negative event/ref tests; removed tag/manual publication paths. | PR #65 |
 | 2026-09-15 | Added read-only exact ticket ownership preflight, malformed-data blockers, isolated operational tests and operator-only remediation runbook. Migration fail-closed duplicate guard unchanged. | PR #63 finding 3; HLD-003 LADR-08 |

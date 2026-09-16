@@ -36,7 +36,7 @@ ASP.NET Core composition root (Minimal API). Wires the application together and 
 Approved release-image plan (2026-09-13):
 
 1. Repo-root multi-stage Dockerfile: copy CPM props + `NuGet.Config` + Host graph csprojs, restore, copy sources, publish; runtime `aspnet:10.0-alpine`, non-root, OCI labels, `ENTRYPOINT` the Host binary.
-2. `.github/workflows/publish-image.yml` builds and pushes the API image and the `-apphost` release-controller image to GHCR for `linux/amd64` and `linux/arm64`; it never runs on pull requests. Publishing is serialized in one repository-wide `queue: max` concurrency group; candidates pass same-commit PR tests and native-architecture smoke before aliases are promoted. Prerelease `v*` tags never update stable aliases; see `docs/wiki/ci.md` for the full contract.
+2. `.github/workflows/publish-image.yml` publishes API and `-apphost` images only on main pushes after merge. PR CI builds/tests without uploading artifacts. One repository-wide `queue: max` group serializes same-commit tests, candidates, native smoke, and latest/SHA promotion. No tag/manual publication or GitHub Release creation; see `docs/wiki/ci.md`.
 3. AppHost default compiles Host from the working tree (`HostConfiguration:UseProject=true`). Published image is opt-in (`UseProject=false`); container `mimisbrunnr-host` in Docker Desktop group `smooth-mímisbrunnr`. Keep `AddProject`. Inject `ConnectionStrings__SmoothAiProductContextMemory`. The development AppHost is not published; the release controller ships as the separate `-apphost` image (APPHOST_AGENTS.md LADR-005). Published image path needs `.WithOtlpExporter()`.
 4. Run contract in `docs/wiki/docker.md`, verified by executing the documented build.
 
@@ -44,6 +44,7 @@ Approved release-image plan (2026-09-13):
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-16 | Updated publication contract to main-only; PR builds/tests do not upload artifacts. | PR #65 |
 | 2026-09-16 | Persisted API NuGet packages alongside restore metadata in Docker build layers so fresh runners can publish after importing GHA layer cache. | PR #65, Actions run 35014970369 |
 | 2026-09-15 | Publish-model summary synced with the coordinated release pipeline: two images (API + `-apphost` controller) promoted inside one repository-wide `queue: max` group, prereleases never update stable aliases, and the release controller ships as the `-apphost` image. | ai-analyse |
 | 2026-09-14 | Added ticket parent and bounded ticket path route mappings, explicit-null removal wire guard, and HTTP validation/scope/hierarchy plus OpenAPI route coverage. | HLD-003 LADR-08 |

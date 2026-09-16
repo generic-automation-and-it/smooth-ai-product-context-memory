@@ -4,17 +4,9 @@ on:
   push:
     branches:
       - main
-    tags:
-      - "v*"
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Release version without a leading "v". Build metadata (+suffix) is not accepted because it is not OCI-tag compatible.'
-        required: true
-        type: string
 
 concurrency:
-  # Keep tag reservation, alias promotion and release metadata in one lock.
+  # Keep candidate validation and alias promotion in one lock.
   group: publish-images-promotion
   cancel-in-progress: false
   queue: max
@@ -26,17 +18,14 @@ env:
   REGISTRY: ghcr.io
   API_IMAGE: ghcr.io/${{ github.repository }}
   APPHOST_IMAGE: ghcr.io/${{ github.repository }}-apphost
-  INPUT_VERSION: ${{ inputs.version }}
 
 jobs:
   prepare:
     name: Validate release identity
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     outputs:
       candidate: ${{ steps.release.outputs.candidate }}
-      create_release: ${{ steps.release.outputs.create_release }}
-      prerelease: ${{ steps.release.outputs.prerelease }}
-      release_tag: ${{ steps.release.outputs.release_tag }}
       release_version: ${{ steps.release.outputs.release_version }}
     steps:
       - name: Checkout
@@ -240,54 +229,13 @@ jobs:
           path: container-smoke-evidence.txt
           if-no-files-found: warn
 
-  release-tag:
-    name: Validate or reserve release tag at tested commit
-    if: needs.prepare.outputs.create_release == 'true'
-    needs: [prepare, smoke]
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      - name: Authenticate read-only Git queries
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh auth setup-git
-
-      - name: Validate existing tag target
-        id: target
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python3 scripts/release_policy.py check-tag >> "$GITHUB_OUTPUT"
-
-      - name: Reserve missing dispatch tag
-        if: steps.target.outputs.tag_exists == 'false'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
-        run: |
-          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
-            -f "ref=refs/tags/$RELEASE_TAG" -f "sha=$GITHUB_SHA"
-
-      - name: Recheck reserved tag
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python3 scripts/release_policy.py verify-tag
-
   promote:
     name: Promote tested digests
-    if: ${{ !cancelled() && needs.smoke.result == 'success' && (needs.release-tag.result == 'success' || needs.release-tag.result == 'skipped') }}
     needs:
       - prepare
       - build-api
       - build-apphost
       - smoke
-      - release-tag
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -331,51 +279,3 @@ jobs:
           while IFS= read -r alias; do
             docker buildx imagetools create --tag "${APPHOST_IMAGE}:${alias}" "${APPHOST_IMAGE}@${APPHOST_DIGEST}"
           done < <(jq -r '.[]' <<< "$aliases")
-
-  release:
-    name: Publish GitHub Release metadata
-    if: needs.prepare.outputs.create_release == 'true'
-    needs: [prepare, build-api, build-apphost, promote]
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      - name: Authenticate read-only Git queries
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh auth setup-git
-
-      - name: Create or update GitHub Release
-        if: needs.prepare.outputs.create_release == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
-          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
-          API_DIGEST: ${{ needs.build-api.outputs.digest }}
-          APPHOST_DIGEST: ${{ needs.build-apphost.outputs.digest }}
-        run: |
-          set -euo pipefail
-          python3 scripts/release_policy.py verify-tag
-          cat > release-notes.md <<EOF
-          ## Container images
-
-          - API: \`${API_IMAGE}@${API_DIGEST}\`
-          - Aspire controller: \`${APPHOST_IMAGE}@${APPHOST_DIGEST}\`
-
-          Platforms: \`linux/amd64\`, \`linux/arm64\`.
-
-          The controller requires administrative access to a Docker-compatible engine socket. See [Docker and Podman installation, persistence, backup, upgrade, and recovery](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_SHA}/docs/wiki/docker.md).
-          EOF
-
-          releases="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100")"
-          if jq -se --arg tag "$RELEASE_TAG" 'any(.[][]; .tag_name == $tag)' <<< "$releases" >/dev/null; then
-            gh release edit "$RELEASE_TAG" --title "$RELEASE_TAG" --notes-file release-notes.md --prerelease="$PRERELEASE" --draft=false --latest=false
-          else
-            gh release create "$RELEASE_TAG" --verify-tag --title "$RELEASE_TAG" --notes-file release-notes.md --prerelease="$PRERELEASE" --latest=false
-          fi

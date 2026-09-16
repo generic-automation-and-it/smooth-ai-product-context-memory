@@ -86,8 +86,8 @@ Shared fixtures in `tests/SmoothAiProductContextMemory.TestFramework/`; Aspire d
 
 ## CI/CD
 
-- **PR gate** — `.github/workflows/pr-gate.yml` (PR→main, push→main, dispatch): restore → build (Release) → Aspire-backed test with coverage via local action `.github/actions/aspire-test-with-coverage`, then publish + upload coverage. Full step list, ports, timings, local tools: `docs/wiki/ci.md`.
-- **Publish image** — `.github/workflows/publish-image.yml` builds and pushes the API image and the `-apphost` release-controller image to GHCR for `linux/amd64` and `linux/arm64`; it never runs on pull requests. Publishing is serialized in one repository-wide `queue: max` concurrency group; candidates pass same-commit PR tests and native-architecture smoke before aliases are promoted. Prerelease `v*` tags never update stable aliases; see `docs/wiki/ci.md` for the full contract.
+- **PR gate** — `.github/workflows/pr-gate.yml` (PR→main, push→main, dispatch): restore → build (Release) → Aspire-backed tests and coverage summary, plus native container builds. PR/manual CI uploads no build-record or coverage artifacts; main pushes may upload them. Full contract: `docs/wiki/ci.md`.
+- **Publish image** — `.github/workflows/publish-image.yml` publishes API and `-apphost` controller images only on main pushes after merge, not PRs, tag pushes, or manual dispatch. One repository-wide `queue: max` group serializes same-commit tests, multi-platform candidates, native smoke, and `latest`/SHA promotion. No GitHub Release/tag creation path. Require PR-only main updates through branch protection; see `docs/wiki/ci.md`.
 - **AI PR review** — `.github/workflows/pipeline-code-review-report.yml` is a thin caller for the `smooth-ai-report-review` reusable workflow; posts an OpenCode review report on PRs (opened/synchronize/reopened/ready_for_review, `/ai-review` comment, dispatch). `.github/workflows/pipeline-ai-analyse.yml` runs after it, auto-fixes 🟡 Medium / 🔵 Low findings (bounded by `OPENCODE_ANALYSE_MAX_INCREMENTAL`). Both need org-level `OPENCODE_*` secrets/variables (provider OpenAI). Local-only consumer skill at `.agents/skills/ai-review`; report *generator* stays remote. To commit+push a branch so the pushed PR gets a **full** review, use `/git-commit-review-push` (`.agents/skills/git-commit-review-push`) — embeds `/ai-review` in the last commit.
 
 ## Git Constraints
@@ -108,6 +108,7 @@ Hosted on **GitHub** at `https://github.com/generic-automation-and-it/project`. 
 
 | Date | Change | Ref |
 |---|---|---|
+| 2026-09-16 | CI/CD summary now states main-only image publication and no PR/manual build-record or coverage artifact uploads. | PR #65 |
 | 2026-09-13 | Added BRD-002 (contextual knowledge export, `BR-18`–`BR-34`, extends BRD-001's requirement space) and HLD-005 (discovery). Ticket- and tag-anchored graph traversal recorded as three **Blocked** LADRs — no ticket or tag vertex exists and no writer derives such edges. | `docs/brd/002-contextual-export/`, `docs/hlds/005-contextual-export/` |
 | 2026-09-13 | Documented `scripts/` operational verification (NFR-03 restore round-trip, NFR-04 pre-upgrade check) and the `SMOOTH_AGE_BENCH`-gated NFR-02 benchmark command. | `scripts/` |
 | 2026-09-13 | Documented publish-image tag derivation, manual-dispatch validation, concurrency, cache, and revision behavior. | `.github/workflows/publish-image.yml` |
