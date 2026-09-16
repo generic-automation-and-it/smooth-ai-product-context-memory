@@ -47,7 +47,7 @@ The store is append-heavy by design, yet the read path stays small — a deep we
 - **Write-time deduplication** on the subject, cross-group, with measured recall *and* precision — a missed match "dilutes every future retrieval" ([HLD-002 NFR-02](docs/hlds/002-context-memory-write-pipeline/nfrs/NFR-02-deduplication-accuracy.md)).
 - **Every graph traversal carries its bound** — depth is required (1–5, no server default), result limits are capped ([HLD-003 LADR-07](docs/hlds/003-graph-edges-on-age/ladrs/LADR-07-every-traversal-carries-its-bound.md)).
 - **Cheap fields first** — summaries and metadata by default; blob bodies only on explicit drill-down.
-- **Temporal validity** (`valid_from` / `valid_until`) expires stale context automatically.
+- **Temporal validity** (`valid_from` / `valid_until`) filters claims outside their validity window when callers supply `asOf`; default queries do not apply this filter.
 - **Recall feedback** (in discovery) tracks hits, misses and never-recalled memories to sharpen retrieval over time ([HLD-004](docs/hlds/004-memory-recall-feedback/)).
 
 The store optimizes for durability; the read path optimizes for precision-per-token.
