@@ -31,7 +31,12 @@ lives in Application; the S3-compatible implementation lives here in Infrastruct
 - `Store(content, contentType?) -> address` — writes and returns the content address.
 - `Get(address) -> BlobContent?` — returns content (decompressed) + content type, or `null` when absent.
 - `Exists(address) -> bool`
-- `Delete(address)`
+
+**Deliberately no delete on the abstraction.** Content addresses are shared by identical bytes, so no
+application code can prove an object is unreferenced across all versions; deletion awaits a separately
+approved garbage-collection design informed by HLD-006 orphan accounting (which reports, never
+deletes). The concrete `S3BlobStorage.DeleteAsync` exists solely for isolated test cleanup, and the L0
+guard `BlobStorageCapabilityGuardTests` pins the interface surface to the three members above.
 
 Address layout is a sharded prefix to avoid one flat directory: `ab/cd/abcd...` (64 lowercase hex).
 
@@ -52,5 +57,6 @@ abstraction only, so the S3 implementation can be replaced without touching Appl
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-16 | Deletion removed from `IBlobStorage`: normal application code structurally cannot delete objects; concrete adapter keeps a documented test-only delete. Guarded by `BlobStorageCapabilityGuardTests`. | HLD-001 AGENTS.md migration plans |
 | 2026-09-13 | `.docs`→`docs` move recorded — the HLD 001 LADR-06 reference path now resolves under the visible `docs/hlds/` tree. | — |
 | 2026-08-30 | Created — blob storage abstraction + MinIO S3 implementation, content addressing, gzip compression, lazy bucket creation. | — |

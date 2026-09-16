@@ -59,14 +59,16 @@ Targets and verification live in [./nfrs/](./nfrs/). Two shape how code is writt
 
 ## Migration Plans
 
-- Unreferenced objects accumulate in the object store; a garbage-collection sweep is deferred, not solved. Orphaning drops the database reference only — deleting the object can destroy content another version still references.
-- Candidate-recall improvements (trigram similarity, stemming) are deferred until measurement justifies them; the text search configuration performs no stemming today.
+- Unreferenced objects accumulate in the object store; a garbage-collection sweep is deferred, not solved. Orphaning drops the database reference only — deleting the object can destroy content another version still references. The application abstraction (`IBlobStorage`) therefore carries **no delete capability** (guarded by `BlobStorageCapabilityGuardTests`); the concrete adapter's delete exists for isolated test cleanup only. HLD-006 reports orphan/dangling counts but never deletes or repairs. **Reopening condition for a GC design:** HLD-006 orphan accounting demonstrates material growth, and the design proves an address has zero references across *all* versions before deletion.
+- Candidate recall is stemmed: the text-search configuration is `english` on both the GIN index expressions and the query side, selected on measured evidence ([NFR-02 recall-tuning measurements](./nfrs/NFR-02-recall-tuning-measurements.md) — recall 0.44 → 0.78 at 0.88 precision). Trigram similarity (`pg_trgm`) was measured and **rejected** (no recall gain over stemming; extension + threshold-sensitive semantics); its reopening threshold is recorded in the same evidence document. Index and query configuration must change together or the index silently stops serving.
 - The generated Markdown projection (`dotnet run --project src/SmoothAiProductContextMemory.Host -- export`) pays down the inspectability debt content addressing introduces. NFR-04 is Accepted: L1 `ExportStoreHandlerTests` pins byte-identical re-runs, inlined bodies, and missing-blob warn-and-continue.
 
 ## Changelog
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-16 | Recall deferral closed by measurement: FTS configuration `simple` → `english` (recall 0.44 → 0.78, precision 0.88); `pg_trgm` measured and rejected with a recorded reopening threshold. | [NFR-02 recall-tuning measurements](./nfrs/NFR-02-recall-tuning-measurements.md) |
+| 2026-09-16 | Orphan-management ambiguity closed structurally: `IBlobStorage` no longer exposes deletion; test-only delete stays on the concrete adapter; GC remains deferred behind the recorded reopening condition. HLD-006 reports orphans, never deletes. | `BlobStorageCapabilityGuardTests` |
 | 2026-09-13 | NFR-04 Accepted — export projection + byte-identical L1 assertions shipped. | NFR-04 |
 | 2026-09-13 | Guard is six entities: HLD 003 dropped `MemoryLink`. Relationships live in AGE, not a seventh table. | HLD-003 |
 | 2026-09-13 | Created — converted from ADR-0001 and ADR-0002, which were one design in two documents. | ADR-0001, ADR-0002 |

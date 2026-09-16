@@ -316,8 +316,6 @@ public sealed class ExportStoreHandlerTests(AspireFixture aspire) : HandlerTestB
 
         public Task<bool> ExistsAsync(string address, CancellationToken cancellationToken = default) =>
             Task.FromResult(_blobs.ContainsKey(address));
-
-        public Task DeleteAsync(string address, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 
     private sealed class CollectingLogger<T> : ILogger<T>
