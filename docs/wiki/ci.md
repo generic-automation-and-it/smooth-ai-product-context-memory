@@ -50,6 +50,7 @@ The publish workflow does **not** run on pull requests.
 - **Identity:** candidates include full SHA, run ID, and attempt. Controller version is `main-<short-sha>`; successful promotion adds `latest` and `sha-<short-sha>` to both images. No SemVer release/tag mechanism is configured.
 - **Promotion:** one repository-wide concurrency group with `queue: max` (up to 100 pending runs). Fresh main ref prevents stale `latest` promotion. API and controller alias writes are sequential, not transactional; retain candidate digests to diagnose partial promotion. Use digests when immutable deployment identity is required.
 - **Credentials:** smoke uses a temporary dedicated Docker config usable inside Linux controller, not runner/platform credential helpers. Config is deleted after smoke; evidence excludes raw controller logs and login tokens.
+- **Alias validation:** promotion requires a nonempty JSON array of valid image tags before either registry is mutated; malformed policy output fails the job rather than producing a successful no-op.
 - **Timeouts/cache:** build jobs 45 minutes; smoke 20 minutes per native architecture. Caches are separated by image/ref and by architecture for PR builds.
 - **Validation caveat:** older actionlint builds reject `concurrency.queue`; current GitHub Actions documentation supports it. Validate other workflow diagnostics normally, not by deleting the queue policy.
 - **Local run / configuration contract:** [docker.md](./docker.md).

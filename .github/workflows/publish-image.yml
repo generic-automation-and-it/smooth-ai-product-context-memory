@@ -272,10 +272,11 @@ jobs:
           # Re-read source refs inside the promotion lock before any registry mutation.
           policy="$(python3 scripts/release_policy.py aliases)"
           aliases="${policy#aliases=}"
+          alias_lines="$(jq -er 'if type == "array" and length > 0 and all(.[]; type == "string" and test("^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$")) then .[] else error("invalid or empty promotion aliases") end' <<< "$aliases")"
           while IFS= read -r alias; do
             docker buildx imagetools create --tag "${API_IMAGE}:${alias}" "${API_IMAGE}@${API_DIGEST}"
-          done < <(jq -r '.[]' <<< "$aliases")
+          done <<< "$alias_lines"
 
           while IFS= read -r alias; do
             docker buildx imagetools create --tag "${APPHOST_IMAGE}:${alias}" "${APPHOST_IMAGE}@${APPHOST_DIGEST}"
-          done < <(jq -r '.[]' <<< "$aliases")
+          done <<< "$alias_lines"
