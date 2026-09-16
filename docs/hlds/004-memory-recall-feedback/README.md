@@ -5,7 +5,7 @@
 | **Status** | In Discovery |
 | **Owner** | generik0 |
 | **Tracker** | Context-memory tuning |
-| **Last updated** | 2026-09-14 |
+| **Last updated** | 2026-09-16 |
 
 > Discovery / prototyping HLD. Delivers **intent + spec** — what we are building and why, the decisions
 > behind it, and the quality bar it must meet. No implementation plan; execution is tracked in the
@@ -16,10 +16,10 @@
 The store records what it was told and nothing about whether that was useful. There is no signal for
 which memories are recalled, which are never returned, or whether a retrieval found what it was for.
 
-This matters now because the system is entering daily use for **tuning**, and stemming and trigram
-similarity for candidate recall are explicitly deferred *until measurement justifies them*
-(HLD-001 AGENTS.md; HLD-002 AGENTS.md). **Dogfooding is that measurement**, and without feedback it
-produces impressions rather than evidence.
+This matters now because the system is entering daily use for **tuning**. Stemming was adopted and
+trigram rejected on measured evidence (HLD-001 NFR-02 recall-tuning measurements); the recorded
+reopening threshold for trigram waits on exactly this feedback data. **Dogfooding is that
+measurement**, and without feedback it produces impressions rather than evidence.
 
 The asymmetry is the point: capture is instrumented by its digest, so we know exactly what went in.
 Retrieval reports nothing, so we know nothing about what comes out.

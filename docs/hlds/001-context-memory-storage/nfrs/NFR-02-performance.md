@@ -2,6 +2,10 @@
 
 **Status:** Accepted
 
+Related: [NFR-02-recall-tuning-measurements.md](NFR-02-recall-tuning-measurements.md) records the
+measured evidence behind the stemmed-recall decision; this document pins the access-path
+performance target only.
+
 ## Requirement
 
 The compound retrieval query — currently-valid memories filtered by facets, tags, ticket, repository,
