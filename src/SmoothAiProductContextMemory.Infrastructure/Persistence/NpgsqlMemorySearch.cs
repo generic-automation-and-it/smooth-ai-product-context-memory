@@ -11,7 +11,7 @@ namespace SmoothAiProductContextMemory.Infrastructure.Persistence;
 /// </summary>
 /// <remarks>
 /// Lives in Infrastructure because the index-matching operators are provider-specific: the full-text
-/// predicates must reproduce the exact <c>to_tsvector('simple', … || ' ' || …)</c> expressions the GIN
+/// predicates must reproduce the exact <c>to_tsvector('english', … || ' ' || …)</c> expressions the GIN
 /// indexes were built over. Projecting straight to <see cref="CheapMemory"/> also keeps blob addresses
 /// and the rest of the version chain out of the result set.
 /// <para>
@@ -34,7 +34,14 @@ namespace SmoothAiProductContextMemory.Infrastructure.Persistence;
 /// </remarks>
 public sealed class NpgsqlMemorySearch(SmoothAiProductContextMemoryDbContext db) : IMemorySearch
 {
-    private const string TextSearchConfig = "simple";
+    /// <summary>
+    /// Must match the configuration named in the FTS index expressions (StemFullTextIndexes migration)
+    /// exactly — changing one side silently drops the index. <c>english</c> was selected on measured
+    /// evidence (recall 0.44 → 0.78 on inflection queries at 0.88 precision; see HLD-001 NFR-02
+    /// recall-tuning measurements). Stemming widens candidate recall only; semantic equivalence
+    /// judgement stays in the capture skill.
+    /// </summary>
+    private const string TextSearchConfig = "english";
 
     public async Task<IReadOnlyList<CheapMemory>> SearchAsync(
         MemorySearchCriteria criteria,
