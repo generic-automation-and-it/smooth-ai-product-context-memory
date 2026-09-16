@@ -14,13 +14,11 @@ COPY src/SmoothAiProductContextMemory.Application/SmoothAiProductContextMemory.A
 COPY src/SmoothAiProductContextMemory.Infrastructure/SmoothAiProductContextMemory.Infrastructure.csproj src/SmoothAiProductContextMemory.Infrastructure/
 COPY src/SmoothAiProductContextMemory.Host/SmoothAiProductContextMemory.Host.csproj src/SmoothAiProductContextMemory.Host/
 
-RUN --mount=type=cache,target=/root/.nuget/packages \
-    dotnet restore src/SmoothAiProductContextMemory.Host/SmoothAiProductContextMemory.Host.csproj
+RUN dotnet restore src/SmoothAiProductContextMemory.Host/SmoothAiProductContextMemory.Host.csproj
 
 COPY src/ src/
 
-RUN --mount=type=cache,target=/root/.nuget/packages \
-    dotnet publish src/SmoothAiProductContextMemory.Host/SmoothAiProductContextMemory.Host.csproj \
+RUN dotnet publish src/SmoothAiProductContextMemory.Host/SmoothAiProductContextMemory.Host.csproj \
       -c Release -o /app --no-restore
 
 # ── Runtime stage ─────────────────────────────────────────────────────────

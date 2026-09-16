@@ -13,12 +13,14 @@ Operational checks support operator decisions; a preflight must never repair the
 
 ## Key Behaviors
 
+- `release_policy.py` permits publication only for `push` on `refs/heads/main`. PRs, tag pushes, releases, and manual dispatch fail closed. Candidates include source SHA/run/attempt; stale main builds cannot promote `latest`. No version-tag or GitHub Release creation path remains.
 - A clean snapshot is not a reservation: writers must remain stopped from the final precheck through migration. Host startup applies migrations, so checking after startup is too late.
 - Same-group repeated memberships are not cross-group ownership conflicts. Malformed containers or identity types block preflight even though some live reads treat them as absent; silently skipping them would claim migration readiness without establishing it.
 - The checker needs only `public.memory_group`, not AGE or the ticket migration. The [ticket migration runbook](../docs/hlds/003-graph-edges-on-age/ticket-migration-runbook.md) targets legacy data before graph backfill; it refuses installed/partially installed ticket graph objects.
 
 ## Test References
 
+- Release policy: `python3 scripts/test_release_policy.py`; negative event/ref matrix, fail-closed identity, and stale-main alias tests. Runs in the PR gate's "Test release policy" step.
 - Operational harness: `python3 scripts/tests/test_ticket_ownership.py`; mocked Docker transport checks require no daemon.
 - Real PostgreSQL checks: `python3 scripts/tests/test_ticket_ownership.py --postgres`; disposable pinned AGE container, synthetic pre-migration table only, no published ports or corpus access. Not part of the .NET suite.
 - 2026-09-15 verification: 14 tests passed (transport, read-only enforcement, exact/malformed ownership, runbook rollback/commit/stale-input guards and partial-graph refusal); Dockerized ShellCheck (`koalaman/shellcheck:v0.11.0`, read-only mount, network disabled) and Bash syntax checks passed. This does not establish whole-migration or application-suite acceptance.
@@ -27,4 +29,6 @@ Operational checks support operator decisions; a preflight must never repair the
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-16 | Added the release-policy harness to Test References. | PR #65 review |
+| 2026-09-16 | Restricted release policy to main pushes and added negative event/ref tests; removed tag/manual publication paths. | PR #65 |
 | 2026-09-15 | Added read-only exact ticket ownership preflight, malformed-data blockers, isolated operational tests and operator-only remediation runbook. Migration fail-closed duplicate guard unchanged. | PR #63 finding 3; HLD-003 LADR-08 |

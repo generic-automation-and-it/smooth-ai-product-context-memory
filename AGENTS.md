@@ -86,8 +86,8 @@ Shared fixtures in `tests/SmoothAiProductContextMemory.TestFramework/`; Aspire d
 
 ## CI/CD
 
-- **PR gate** — `.github/workflows/pr-gate.yml` (PR→main, push→main, dispatch): restore → build (Release) → Aspire-backed test with coverage via local action `.github/actions/aspire-test-with-coverage`, then publish + upload coverage. Full step list, ports, timings, local tools: `docs/wiki/ci.md`.
-- **Publish image** — `.github/workflows/publish-image.yml` builds and pushes the Host image to GHCR for `linux/amd64` and `linux/arm64`; it never runs on pull requests. A push to `main` publishes `:latest` and a short-SHA tag; a SemVer `v*` push publishes the full SemVer tag, its `major.minor` tag, and a short-SHA tag. Manual dispatch accepts only a SemVer-compatible version without a leading `v`, rejects `latest`, and publishes the supplied version plus a short-SHA tag—never `:latest`. Publishing is serialized per Git ref (pushes supersede earlier pushes; dispatches are retained), uses a ref-scoped GitHub Actions build cache, and supplies the commit SHA as the image revision. Run contract: `docs/wiki/docker.md`.
+- **PR gate** — `.github/workflows/pr-gate.yml` (PR→main, push→main, dispatch): restore → build (Release) → Aspire-backed tests and coverage summary, plus native container builds. PR/manual CI uploads no build-record or coverage artifacts; main pushes may upload them. Full contract: `docs/wiki/ci.md`.
+- **Publish image** — `.github/workflows/publish-image.yml` publishes API and `-apphost` controller images only on main pushes after merge, not PRs, tag pushes, or manual dispatch. One repository-wide `queue: max` group serializes same-commit tests, multi-platform candidates, native smoke, and `latest`/SHA promotion. No GitHub Release/tag creation path. Require PR-only main updates through branch protection; see `docs/wiki/ci.md`.
 - **AI PR review** — `.github/workflows/pipeline-code-review-report.yml` is a thin caller for the `smooth-ai-report-review` reusable workflow; posts an OpenCode review report on PRs (opened/synchronize/reopened/ready_for_review, `/ai-review` comment, dispatch). `.github/workflows/pipeline-ai-analyse.yml` runs after it, auto-fixes 🟡 Medium / 🔵 Low findings (bounded by `OPENCODE_ANALYSE_MAX_INCREMENTAL`). Both need org-level `OPENCODE_*` secrets/variables (provider OpenAI). Local-only consumer skill at `.agents/skills/ai-review`; report *generator* stays remote. To commit+push a branch so the pushed PR gets a **full** review, use `/git-commit-review-push` (`.agents/skills/git-commit-review-push`) — embeds `/ai-review` in the last commit.
 
 ## Git Constraints
@@ -108,6 +108,8 @@ Hosted on **GitHub** at `https://github.com/generic-automation-and-it/project`. 
 
 | Date | Change | Ref |
 |---|---|---|
+| 2026-09-16 | Corrected README temporal-validity wording: retrieval filters validity windows only when `asOf` is supplied. | PR #65 review |
+| 2026-09-16 | CI/CD summary now states main-only image publication and no PR/manual build-record or coverage artifact uploads. | PR #65 |
 | 2026-09-13 | Added BRD-002 (contextual knowledge export, `BR-18`–`BR-34`, extends BRD-001's requirement space) and HLD-005 (discovery). Ticket- and tag-anchored graph traversal recorded as three **Blocked** LADRs — no ticket or tag vertex exists and no writer derives such edges. | `docs/brd/002-contextual-export/`, `docs/hlds/005-contextual-export/` |
 | 2026-09-13 | Documented `scripts/` operational verification (NFR-03 restore round-trip, NFR-04 pre-upgrade check) and the `SMOOTH_AGE_BENCH`-gated NFR-02 benchmark command. | `scripts/` |
 | 2026-09-13 | Documented publish-image tag derivation, manual-dispatch validation, concurrency, cache, and revision behavior. | `.github/workflows/publish-image.yml` |
@@ -117,3 +119,5 @@ Hosted on **GitHub** at `https://github.com/generic-automation-and-it/project`. 
 | 2026-09-14 | Microsoft package baseline 10.0.7/10.0.8 -> 10.0.11 (EF Core, Extensions, AspNetCore.OpenApi, Mvc.Testing, EF InMemory); Aspire 13.3.0 -> 13.5.3 (AppHost-localized row in APPHOST_AGENTS.md). | this PR |
 | 2026-09-15 | Added localized Host integration-test context for exact-request telemetry assertions and ticket graph L2 coverage. | [INTEGRATION_TEST_AGENTS.md](tests/SmoothAiProductContextMemory.Host.IntegrationTest/INTEGRATION_TEST_AGENTS.md), PR #63 |
 | 2026-09-15 | Added localized operational-scripts context and surfaced ticket-ownership preflight in the repository layout. | [scripts/AGENTS.md](scripts/AGENTS.md), [ticket migration runbook](docs/hlds/003-graph-edges-on-age/ticket-migration-runbook.md), PR #63 |
+| 2026-09-15 | README gained a worked memory example, memory-boundary (atomicity, no mechanical chunking) explanation, and a "store grows but retrieved context doesn't" section — placed above the memory model for novice readers. | `README.md` |
+| 2026-09-15 | Publish-image CI/CD bullet rewritten for the coordinated release model: two images (API + `-apphost` controller), one repository-wide `queue: max` promotion group, prereleases never update stable aliases. | this PR |

@@ -1,59 +1,64 @@
-name: Publish image
-
-# Builds the Host container image from the repo Dockerfile and pushes it to the
-# GitHub Container Registry (GHCR). Runs on every push to main (tagged :latest),
-# on version tags v* (semver tags), and on manual dispatch. A manual dispatch
-# never produces the :latest tag — it publishes the user-supplied pre-release
-# version (e.g. 1.0.0-rc.1) so pre-release versions can be cut from any branch.
-# This workflow does not run on pull requests.
+name: Publish images
 
 on:
   push:
     branches:
       - main
-    tags:
-      - "v*"
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Pre-release version tag (e.g. 1.0.0-rc.1). Must be a semver-compatible identifier without the leading "v".'
-        required: true
-        type: string
 
 concurrency:
-  group: publish-image-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'push' }}
+  # Keep candidate validation and alias promotion in one lock.
+  group: publish-images-promotion
+  cancel-in-progress: false
+  queue: max
 
 permissions:
   contents: read
-  packages: write
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  API_IMAGE: ghcr.io/${{ github.repository }}
+  APPHOST_IMAGE: ghcr.io/${{ github.repository }}-apphost
 
 jobs:
-  publish:
-    name: Build & push container image
+  prepare:
+    name: Validate release identity
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    outputs:
+      candidate: ${{ steps.release.outputs.candidate }}
+      release_version: ${{ steps.release.outputs.release_version }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
-      - name: Validate dispatch version
-        if: github.event_name == 'workflow_dispatch'
-        env:
-          VERSION: ${{ inputs.version }}
-        run: |
-          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
-            echo "::error::version '$VERSION' is not a valid semver identifier (without leading 'v')."
-            exit 1
-          fi
-          if [[ "$VERSION" == "latest" ]]; then
-            echo "::error::version 'latest' is not allowed — manual dispatch never publishes :latest."
-            exit 1
-          fi
+      - name: Derive candidates and aliases
+        id: release
+        run: python3 scripts/release_policy.py prepare >> "$GITHUB_OUTPUT"
+
+  validate:
+    name: Build and test this commit
+    needs: prepare
+    uses: ./.github/workflows/pr-gate.yml
+    with:
+      skip-container-build: true
+
+  build-api:
+    name: Build immutable API candidate
+    needs: [prepare, validate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
@@ -68,32 +73,210 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Derive image metadata (tags + labels)
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          # latest=auto would also tag :latest on non-prerelease v* tag pushes;
-          # only push to main may produce :latest (explicit raw rule below).
-          flavor: |
-            latest=false
-          tags: |
-            type=raw,value=latest,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-            type=raw,value=${{ inputs.version }},enable=${{ github.event_name == 'workflow_dispatch' }}
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha,format=short
-
-      - name: Build & push
+      - name: Build and push API candidate
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ env.API_IMAGE }}:${{ needs.prepare.outputs.candidate }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
           build-args: |
             REVISION=${{ github.sha }}
-          cache-from: type=gha,scope=${{ github.workflow }}-${{ github.ref_name }}
-          cache-to: type=gha,mode=max,scope=${{ github.workflow }}-${{ github.ref_name }}
+          cache-from: type=gha,scope=publish-api-${{ github.ref }}
+          cache-to: type=gha,mode=max,scope=publish-api-${{ github.ref }}
+
+  build-apphost:
+    name: Build immutable AppHost candidate
+    needs:
+      - prepare
+      - build-api
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push AppHost candidate
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.apphost
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ env.APPHOST_IMAGE }}:${{ needs.prepare.outputs.candidate }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ needs.prepare.outputs.release_version }}
+          build-args: |
+            API_IMAGE=${{ env.API_IMAGE }}@${{ needs.build-api.outputs.digest }}
+            RELEASE_VERSION=${{ needs.prepare.outputs.release_version }}
+            REVISION=${{ github.sha }}
+          cache-from: type=gha,scope=publish-apphost-${{ github.ref }}
+          cache-to: type=gha,mode=max,scope=publish-apphost-${{ github.ref }}
+
+  smoke:
+    name: Smoke exact candidates (${{ matrix.arch }})
+    needs:
+      - prepare
+      - build-api
+      - build-apphost
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify native candidate identity
+        env:
+          ARCH: ${{ matrix.arch }}
+          API_DIGEST: ${{ needs.build-api.outputs.digest }}
+          APPHOST_DIGEST: ${{ needs.build-apphost.outputs.digest }}
+        run: |
+          set -euo pipefail
+          case "$ARCH:$(uname -m)" in
+            amd64:x86_64|arm64:aarch64) ;;
+            *) exit 1 ;;
+          esac
+          for image in "${API_IMAGE}@${API_DIGEST}" "${APPHOST_IMAGE}@${APPHOST_DIGEST}"; do
+            docker pull --platform "linux/$ARCH" "$image"
+            test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$image")" = "linux/$ARCH"
+            test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$image")" = "$GITHUB_SHA"
+          done
+          docker image inspect "${APPHOST_IMAGE}@${APPHOST_DIGEST}" |
+            jq -e --arg api "HostConfiguration__Image=${API_IMAGE}@${API_DIGEST}" '.[0].Config.Env | index($api) != null'
+
+      - name: Run lifecycle and data smoke test
+        env:
+          INSTALLATION_ID: ci-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.arch }}
+          APPHOST_DIGEST: ${{ needs.build-apphost.outputs.digest }}
+          ENGINE_CONFIG_DIRECTORY: ${{ runner.temp }}/controller-docker
+          DOCKER_CONFIG: ${{ runner.temp }}/controller-docker
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p "$DOCKER_CONFIG"
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          scripts/smoke-apphost-container.sh "${APPHOST_IMAGE}@${APPHOST_DIGEST}"
+
+      - name: Remove controller registry credentials
+        if: always()
+        run: rm -rf "${{ runner.temp }}/controller-docker"
+
+      - name: Record candidate evidence
+        if: always()
+        env:
+          API_DIGEST: ${{ needs.build-api.outputs.digest }}
+          APPHOST_DIGEST: ${{ needs.build-apphost.outputs.digest }}
+        run: |
+          {
+            echo "API candidate: ${API_IMAGE}@${API_DIGEST}"
+            echo "AppHost candidate: ${APPHOST_IMAGE}@${APPHOST_DIGEST}"
+            docker version --format 'Docker client {{.Client.Version}} / server {{.Server.Version}}'
+            uname -a
+          } > container-smoke-evidence.txt
+
+      - name: Upload smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apphost-container-smoke-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.arch }}
+          path: container-smoke-evidence.txt
+          if-no-files-found: warn
+
+  promote:
+    name: Promote tested digests
+    needs:
+      - prepare
+      - build-api
+      - build-apphost
+      - smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Authenticate read-only Git queries
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh auth setup-git
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Promote API and AppHost aliases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          API_DIGEST: ${{ needs.build-api.outputs.digest }}
+          APPHOST_DIGEST: ${{ needs.build-apphost.outputs.digest }}
+        run: |
+          set -euo pipefail
+          # Re-read source refs inside the promotion lock before any registry mutation.
+          policy="$(python3 scripts/release_policy.py aliases)"
+          aliases="${policy#aliases=}"
+          alias_lines="$(jq -er 'if type == "array" and length > 0 and all(.[]; type == "string" and test("^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$")) then .[] else error("invalid or empty promotion aliases") end' <<< "$aliases")"
+          while IFS= read -r alias; do
+            docker buildx imagetools create --tag "${API_IMAGE}:${alias}" "${API_IMAGE}@${API_DIGEST}"
+          done <<< "$alias_lines"
+
+          while IFS= read -r alias; do
+            docker buildx imagetools create --tag "${APPHOST_IMAGE}:${alias}" "${APPHOST_IMAGE}@${APPHOST_DIGEST}"
+          done <<< "$alias_lines"

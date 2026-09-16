@@ -17,6 +17,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Aspire.Hosting.PostgreSQL" />
     <PackageReference Include="Aspire.Hosting.Seq" />
     <!-- MessagePack pinned transitively (via Aspire) to the patched 2.5.301+ line — fixes NU1902/NU1903 audit advisories on CI. -->
