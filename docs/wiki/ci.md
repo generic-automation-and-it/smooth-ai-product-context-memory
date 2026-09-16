@@ -15,7 +15,7 @@ The publish workflow does **not** run on pull requests.
 1. **Checkout** — `actions/checkout@v4`.
 2. **Test release policy** - `python3 -B -m unittest discover -s scripts -p 'test_release_policy.py' -v`; fails closed before installing the SDK.
 3. **Install .NET SDK** — `actions/setup-dotnet@v4` (version from the `DOTNET_VERSION` env, currently `10.0.x`).
-4. **Restore** — `dotnet restore SmoothAiProductContextMemory.slnx`.
+4. **Restore** — `dotnet restore`.
 5. **Build** — `dotnet build --no-restore --configuration Release`.
 6. **Test controller preflight and lifecycle** - `python3 scripts/test-apphost-entrypoint.py`; engine-free tests against the built AppHost output.
 7. **Aspire test with coverage** — local action `.github/actions/aspire-test-with-coverage`:

@@ -47,7 +47,7 @@ def promotion_aliases(release, revision, refs):
 
 def main():
     release = identity(os.environ)
-    command = sys.argv[1]
+    command = sys.argv[1] if len(sys.argv) > 1 else ""
     if command == "prepare":
         values = release
     elif command == "aliases":

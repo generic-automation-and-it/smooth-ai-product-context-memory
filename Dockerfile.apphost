@@ -1,12 +1,10 @@
 # syntax=docker/dockerfile:1
 
-ARG ASPIRE_VERSION=13.5.3
 ARG DOCKER_CLI_VERSION=29.7.2
 
 FROM docker:${DOCKER_CLI_VERSION}-cli AS docker-cli
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
-ARG ASPIRE_VERSION
 ARG TARGETARCH
 WORKDIR /build
 
@@ -19,6 +17,7 @@ COPY src/SmoothAiProductContextMemory.AppHost/SmoothAiProductContextMemory.AppHo
 COPY src/ src/
 
 RUN --mount=type=cache,target=/root/.nuget/packages \
+    aspire_version="$(grep -oP 'Include="Aspire.Hosting.PostgreSQL" Version="\K[^"]+' Directory.Packages.props)" && \
     case "$TARGETARCH" in \
       amd64) runtime_rid=linux-x64 ;; \
       arm64) runtime_rid=linux-arm64 ;; \
@@ -35,8 +34,8 @@ RUN --mount=type=cache,target=/root/.nuget/packages \
       -p:AspireDashboardDir=/app/aspire/dashboard \
       -o /publish && \
     mkdir -p /aspire/dcp /aspire/dashboard && \
-    cp -a "/root/.nuget/packages/aspire.hosting.orchestration.${runtime_rid}/${ASPIRE_VERSION}/tools/." /aspire/dcp/ && \
-    cp -a "/root/.nuget/packages/aspire.dashboard.sdk.${runtime_rid}/${ASPIRE_VERSION}/tools/." /aspire/dashboard/
+    cp -a "/root/.nuget/packages/aspire.hosting.orchestration.${runtime_rid}/${aspire_version}/tools/." /aspire/dcp/ && \
+    cp -a "/root/.nuget/packages/aspire.dashboard.sdk.${runtime_rid}/${aspire_version}/tools/." /aspire/dashboard/
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
