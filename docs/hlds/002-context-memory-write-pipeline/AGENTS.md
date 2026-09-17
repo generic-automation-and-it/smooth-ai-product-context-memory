@@ -1,6 +1,6 @@
 # AGENTS.md - Context memory write pipeline
 
-AI Context: HLD for the context-memory write pipeline. Updated: 2026-09-16
+AI Context: HLD for the context-memory write pipeline. Updated: 2026-09-17
 
 ## TL;DR
 
@@ -47,7 +47,7 @@ See [./ladrs/](./ladrs/).
 ## Key Behaviors
 
 - **The preflight is batched, array in and array out.** A per-record pass misses intra-batch collisions — two candidates in one batch sharing a subject, neither yet written, so neither visible to the other.
-- **One traversal serves three concerns** — deduplication recall, link derivation and ticket uniqueness all need the same cross-group subject lookup. Only ticket uniqueness is group-relative: the candidate carries its target group so the group being written into is not reported as its own conflict.
+- **Stages 1 and 3 are distinct bounded reads, not one traversal.** The stage-1 preflight supplies the batched exact subject/ticket backstops and intra-batch collisions; stage 3 supplies the bounded semantic recall that deduplication judgement and link derivation use. Only ticket uniqueness is group-relative: the candidate carries its target group so the group being written into is not reported as its own conflict.
 - **The skill never sequences the version bump.** The API owns the flip-then-insert ordering and its transaction; splitting it across round-trips can strand a memory with zero current versions.
 - **Skipped has distinct causes.** An atomicity split never reaches the API; a duplicate link is skipped at the API. Reporting one aggregate hides a split remainder behind an unrelated zero.
 - **A duplicate link inside a write is skipped and counted, never fatal** — a stale derived link must not discard the capture it arrived with.
@@ -93,6 +93,7 @@ Targets and verification live in [./nfrs/](./nfrs/). Three shape how code is wri
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-17 | Key Behaviors corrected: the stage-1 preflight and stage-3 semantic recall are distinct bounded reads; removed the stale "one traversal serves three concerns" claim that contradicted LADR-01 and the c4-context sequence diagram. | LADR-01; c4-context diagram |
 | 2026-09-17 | Working-tree AppHost verification confirmed dry-run/write identity and link-count parity for two caller-identified creates plus one new-to-new edge; read-token traversal returned the edge. | NFR-05 evidence |
 | 2026-09-17 | Approved closure contracts: additive `createUuid`, proposed divergence with loop/pair guards, bounded opt-in deep search, delegated read/write execution, and API-enforced read/write capabilities. | HLD-002 delta closure |
 | 2026-09-16 | Stemming/trigram deferral resolved by HLD-001's measurement: candidate recall now uses the `english` FTS configuration; trigram rejected with a reopening threshold. Skill-owned semantic judgement unchanged. | HLD-001 NFR-02 recall-tuning measurements |

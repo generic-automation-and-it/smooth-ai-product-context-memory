@@ -106,12 +106,7 @@ def main():
     for line in sys.stdin:
         if not line.strip():
             continue
-        message = json.loads(line)
-        try:
-            response = handle(message)
-        except Exception as error:
-            response = {"jsonrpc": "2.0", "id": message.get("id"),
-                        "error": {"code": -32000, "message": str(error)}}
+        response = memory_read_mcp.respond(line, handle)
         if response is not None:
             print(json.dumps(response, separators=(",", ":")), flush=True)
     return 0

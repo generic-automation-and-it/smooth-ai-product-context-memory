@@ -108,19 +108,28 @@ def handle(message):
     return {"jsonrpc": "2.0", "id": request_id, "result": result}
 
 
+def respond(line, handler):
+    try:
+        message = json.loads(line)
+    except ValueError as error:
+        return {"jsonrpc": "2.0", "id": None,
+                "error": {"code": -32700, "message": f"Parse error: {error}"}}
+    if not isinstance(message, dict):
+        return {"jsonrpc": "2.0", "id": None,
+                "error": {"code": -32600, "message": "Invalid Request: message must be an object"}}
+    try:
+        return handler(message)
+    except Exception as error:
+        return {"jsonrpc": "2.0", "id": message.get("id"),
+                "error": {"code": -32000, "message": str(error)}}
+
+
 def main():
     os.environ.pop(client.ENV_WRITE_TOKEN, None)
     for line in sys.stdin:
         if not line.strip():
             continue
-        try:
-            response = handle(json.loads(line))
-        except Exception as error:
-            response = {
-                "jsonrpc": "2.0",
-                "id": json.loads(line).get("id"),
-                "error": {"code": -32000, "message": str(error)},
-            }
+        response = respond(line, handle)
         if response is not None:
             print(json.dumps(response, separators=(",", ":")), flush=True)
     return 0

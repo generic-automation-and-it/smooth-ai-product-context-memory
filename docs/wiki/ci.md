@@ -14,7 +14,7 @@ The publish workflow does **not** run on pull requests.
 
 1. **Checkout** — `actions/checkout@v4`.
 2. **Test release policy** - `python3 -B -m unittest discover -s scripts -p 'test_release_policy.py' -v`; fails closed before installing the SDK.
-3. **Test context-memory skill** - `python3 -B .agents/skills/mimisbrunnr-context-memory/tests/run_tests.py`; deterministic plumbing, agent grants, deep-search bounds and divergence composition only.
+3. **Test context-memory skill** - two scripts in one step: `python3 -B .agents/skills/mimisbrunnr-context-memory/tests/run_tests.py` (deterministic plumbing, agent grants, deep-search bounds, divergence composition) and `python3 -B .agents/skills/mimisbrunnr-context-memory/tests/measure_cost.py` (reproducible structural cost evidence; never emits memory content).
 4. **Install .NET SDK** — `actions/setup-dotnet@v4` (version from the `DOTNET_VERSION` env, currently `10.0.x`).
 5. **Restore** — `dotnet restore`.
 6. **Build** — `dotnet build --no-restore --configuration Release`.
