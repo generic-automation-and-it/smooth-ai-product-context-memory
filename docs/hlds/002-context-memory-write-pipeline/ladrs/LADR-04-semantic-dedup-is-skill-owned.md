@@ -43,7 +43,7 @@ negative pairs, not asserted as "deduplication held".
 
 - Deduplication quality is a property of the skill, not a guarantee of the schema — the single largest correctness risk in the system, and named as such.
 - Cross-group matching costs one traversal, shared with link derivation and ticket uniqueness.
-- Text search performs no stemming today, so recall is weaker than ideal; improvement is deferred until measurement justifies it.
+- Text search stems (`english` configuration) since HLD-001's recall-tuning measurement; this widens candidate recall only — the equivalence decision stays here, in the skill.
 - Testing must be adversarial, including negative controls, or it measures nothing.
 
 ## Related

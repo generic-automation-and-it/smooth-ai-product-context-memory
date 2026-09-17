@@ -1,6 +1,6 @@
 # AGENTS.md - Context memory write pipeline
 
-AI Context: HLD for the context-memory write pipeline. Updated: 2026-09-15
+AI Context: HLD for the context-memory write pipeline. Updated: 2026-09-16
 
 ## TL;DR
 
@@ -69,13 +69,14 @@ Targets and verification live in [./nfrs/](./nfrs/). Three shape how code is wri
 
 - Divergence handling is deferred. It needs no new table — a divergence kind plus contradiction links — and requires an adversarial fixture built from documented design reversals with their reversal metadata stripped, since a coherent corpus contains no live conflicts.
 - Deeper search is deferred behind a switch.
-- Candidate recall currently performs no stemming; trigram similarity is deferred until measurement justifies it.
+- Candidate recall is stemmed since the storage side moved its text-search configuration to `english` on measured evidence; trigram similarity was measured and rejected (see [HLD-001 NFR-02 recall-tuning measurements](../001-context-memory-storage/nfrs/NFR-02-recall-tuning-measurements.md)). Semantic equivalence judgement stays skill-owned regardless.
 - Any column added to a history table must extend the append-only trigger's equality list **in the same migration**, or it becomes silently mutable through an otherwise legal version-bump update.
 
 ## Changelog
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-16 | Stemming/trigram deferral resolved by HLD-001's measurement: candidate recall now uses the `english` FTS configuration; trigram rejected with a reopening threshold. Skill-owned semantic judgement unchanged. | HLD-001 NFR-02 recall-tuning measurements |
 | 2026-09-15 | Finalized declared ticket writer acceptance against the passing solution, explicit benchmarks and Python harness. Corrected obsolete untested-scope claim; strict expected-parent/no-replay and local shape-only inspection remain unchanged. Full dossier and tag graph remain outside scope. | LADR-08; HLD-003 final NFR-02 evidence |
 | 2026-09-14 | Synced declared hierarchy contract to API/store and skill implementation: separate PUT, strict expected-parent check before no-op, no replay token, changed receipt and no-network shape-only dry-run. Full dossier remains separate; ticket performance gate stays open, not release-accepted. | LADR-08; HLD-003 NFR-02 |
 | 2026-09-14 | Owner-approved LADR-08 records explicit ticket hierarchy capture, expected-parent mutation and receipts; no automatic derivation, group-membership projection or tracker synchronization. Ticket half of HLD-005 LADR-11 resolved; tag half blocked. Documentation only, implementation pending. | LADR-08; HLD-003 LADR-08 |

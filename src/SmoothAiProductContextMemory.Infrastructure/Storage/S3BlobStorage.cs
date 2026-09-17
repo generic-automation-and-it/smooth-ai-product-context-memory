@@ -108,6 +108,12 @@ public sealed class S3BlobStorage : IBlobStorage, IAsyncDisposable
     public async Task<bool> ExistsAsync(string address, CancellationToken cancellationToken = default)
         => await ObjectExistsAsync(ToObjectKey(address), cancellationToken);
 
+    /// <summary>
+    /// Deletes the object at the given address. Deliberately absent from <see cref="IBlobStorage"/>:
+    /// content addresses are shared by identical bytes, so production code cannot prove an object is
+    /// unreferenced. This exists only for isolated test cleanup against a dedicated bucket; a
+    /// production deletion path requires a separately approved garbage-collection design.
+    /// </summary>
     public async Task DeleteAsync(string address, CancellationToken cancellationToken = default)
     {
         RemoveObjectArgs args = new RemoveObjectArgs()

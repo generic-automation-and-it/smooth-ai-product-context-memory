@@ -15,7 +15,7 @@ Memory-set dry-run runs the real plan; ticket-parent local dry-run validates sha
 - **Dry run and write share one plan, not just one handler.** Every verdict is reached in `BuildPlanAsync`, which mutates nothing; only the persist step branches. A shortcut dry-run path stops predicting the write, and this endpoint is the caller's only pre-write veto point.
 - **Dry-run skips blob and `SaveChanges`.** Do not begin-then-rollback: blob writes sit outside Postgres and would orphan objects. `blobAddress` and (for planned creates) `uuid` are null on dry run.
 - **Blobs are stored before the transaction opens**, never inside it. They are content-addressed and immutable, so the write is idempotent on retry and the transaction never stays open across object-storage round trips.
-- **Never `DeleteAsync` on the write path.** Content-addressed blobs are shared; "orphan" means drop the DB reference only.
+- **No blob deletion from application code, ever.** Content-addressed blobs are shared; "orphan" means drop the DB reference only. `IBlobStorage` structurally has no delete member (guarded by `BlobStorageCapabilityGuardTests`); a deletion path requires a separately approved GC design.
 - **No predicate is evaluated in the handler.** Retrieval goes through `IMemorySearch`; filtering materialised rows defeats the full-text/array/validity indexes and drags whole version chains over the wire.
 - **Never classify a database error by message text.** `IDbErrorMapper` matches SQLSTATE. Substring matching mis-fires on any message containing a word like "unique", and provider text must never reach the caller.
 - **Do not add a LabelUsage entity** for the `label_usage` view — the six-type model-shape guard fails on purpose.
@@ -196,13 +196,14 @@ sequenceDiagram
 
 ## Quality Constraints
 
-- Target query (current, approved, facet, repo, ticket, in-scope, validity) is one SQL statement. `memory_group.repo` has a btree; facets/tags have GIN and are matched with `&&` (overlap, default "any") or `@>` (containment, "all" via `FacetMatchMode`); full text matches the two `to_tsvector('simple', … || ' ' || …)` GIN expressions verbatim — changing either concatenation silently drops the index.
+- Target query (current, approved, facet, repo, ticket, in-scope, validity) is one SQL statement. `memory_group.repo` has a btree; facets/tags have GIN and are matched with `&&` (overlap, default "any") or `@>` (containment, "all" via `FacetMatchMode`); full text matches the two `to_tsvector('english', … || ' ' || …)` GIN expressions verbatim — changing either concatenation or the configuration on one side only silently drops the index (config selected by HLD-001's recall-tuning measurement).
 - Bind locally; no auth. Do not return raw blob URLs.
 
 ## Changelog
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-16 | FTS configuration `simple` → `english` (query side and index side together, `StemFullTextIndexes` migration) per HLD-001's recall-tuning measurement; blob-deletion rule strengthened from convention to structural (`IBlobStorage` has no delete member). | HLD-001 NFR-02 recall-tuning measurements |
 | 2026-09-15 | Closed ticket release gates using full-suite and explicit benchmark evidence. Export fixture identity reuse corrected rather than weakening ownership; strict expected-parent/no-replay, scope and selected-path association contracts unchanged. | HLD-003 final NFR-02 evidence |
 | 2026-09-14 | Synced ticket documentation to strict expected-parent-before-no-op semantics, no replay token, trigger-backed exact ownership and memory association from selected capped path endpoints plus anchor. Distinguished local shape-only inspection from memory-set dry-run and kept ticket release/performance gate open. | HLD-003 LADR-08; NFR-02 |
 | 2026-09-14 | Added `Tickets/SetTicketParent` and `FindTicketPaths`: exact identities capped at 512, mandatory reason/source capped at 4000, self-parent rejection, explicit-null parent removal, required depth 1..5, independent caps 1..200 (default 50), no ticket scope consent. Resolve/update now lock inside explicit EF transactions before ownership/group reads; inspect every supplied ticket, reject ambiguous ownership, preserve re-resolve no-merge and additive update. Provider lifecycle/traversal remain separately owned. | HLD-003 LADR-08 |

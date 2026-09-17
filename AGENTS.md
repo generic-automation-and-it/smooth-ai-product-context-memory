@@ -65,6 +65,8 @@ dotnet run --project src/SmoothAiProductContextMemory.Host -- export [--output D
 
 SMOOTH_AGE_BENCH=1 dotnet test tests/SmoothAiProductContextMemory.Infrastructure.ComponentTest \
     --filter Nfr02BenchmarkTests                                   # NFR-02 traversal benchmark (skipped without the env var)
+SMOOTH_FTS_BENCH=1 dotnet test tests/SmoothAiProductContextMemory.Infrastructure.ComponentTest \
+    --filter RecallTuningEvidenceTests                             # recall-tuning evidence harness (skipped without the env var)
 scripts/seed-graph-sample.sh nfr03_sample                          # populate a scratch database with memories + edges
 scripts/verify-graph-restore.sh mimisbrunnr-postgres nfr03_sample  # NFR-03 backup/restore round trip incl. edge count
 scripts/verify-graph-preupgrade.sh <target-image>                  # NFR-04 pre-upgrade check — run before any Postgres bump
@@ -123,3 +125,4 @@ Hosted on **GitHub** at `https://github.com/generic-automation-and-it/project`. 
 | 2026-09-15 | Publish-image CI/CD bullet rewritten for the coordinated release model: two images (API + `-apphost` controller), one repository-wide `queue: max` promotion group, prereleases never update stable aliases. | this PR |
 | 2026-09-16 | README opening pitch now names layered tagging as the connective tissue (anchors + edges, session as referenced graph); plus "A session lands as a graph, not a transcript" — the classification levels (initiative, scope, repo, ticket, subject, tags/facets, claim labels), which two are AGE edges (memory `LINKS`, ticket hierarchy), and the deliberate absence of a tag graph. | `README.md`, PR #68 |
 | 2026-09-16 | Added HLD-006 (corpus snapshot and restore, In Discovery) — durability of the store as one asset: a self-verifying archive over both stores plus a verified restore path. Authorized by BRD-001's third amendment (`BR-37`), which closed the durability gap in that BRD's requirement space. | `docs/hlds/006-corpus-snapshot-and-restore/`, `docs/brd/001-context-memory/` |
+| 2026-09-16 | Documented the `SMOOTH_FTS_BENCH`-gated recall-tuning evidence harness in the Build/Test catalogue beside its `SMOOTH_AGE_BENCH` sibling. | HLD-001 NFR-02 recall-tuning measurements |
