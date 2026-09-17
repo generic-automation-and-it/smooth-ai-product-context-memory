@@ -28,15 +28,15 @@ the pipeline table in `SKILL.md` is the canonical numbering.
 
 ## Where the tokens actually go
 
-The dominant cost is **R13**: every write is an LLM call to generate `content_summary` and keywords
-(from the blob content), plus the semantic dedup and link-derivation judgements. Retrieval is cheap by
-default. Get the cost model wrong and the skill becomes more expensive than the problem it solves.
+R13 requires logical summary and keyword judgement for every fact, but that does not imply one provider
+invocation per fact. Harnesses may batch several logical judgements into one invocation. Cost evidence
+therefore records provider/agent invocations, logical judgements, candidates inspected, HTTP/blob I/O,
+and exposed token counts separately.
 
 ### Where it genuinely costs
 
-- **Every `set` costs an LLM call per fact for summary + keywords.** This is the big one. A batch of
-  N facts costs ~N LLM judgement calls. There is no way around it — the body is in blob storage, not
-  indexable (HLD 001), so the summary is the search surface. This is the price of the design, not a bug.
+- **Every `set` performs summary and keyword judgement per fact.** Provider invocation count depends
+  on harness batching and cannot be inferred from fact count.
 - **Semantic dedup and link derivation are LLM judgements** on the pre-write round. Narrowed by
   facet/kind to a bounded top-N first, so the judgement is over candidates, not the whole store.
 - **`--dryrun` costs the same as a real write** (same pipeline, no persistence). It is the inspection
@@ -44,10 +44,8 @@ default. Get the cost model wrong and the skill becomes more expensive than the 
 
 ### Where it saves
 
-- **Retrieval is cheap by default** — `get` returns the cheap fields as an array and drills into the
-  blob only on demand. The consuming model judges relevance from compact metadata instead of pulling
-  full bodies. This is the context-economy payoff (§6.8 of the design): the main session holds
-  conclusions, never raw material.
+- **Retrieval is bounded by default.** `memory-read` consumes candidate rows in isolated context and
+  returns cited conclusions plus omission disclosure; blobs remain drill-down only.
 - **It replaces ossified prompt re-explanation.** The cost that recurs every session is re-explaining
   context to a stateless model. A retrieved memory carries the reasoning forward without re-derivation.
   This is the amortized saving — paid at write, recovered across many reads.
@@ -59,6 +57,9 @@ default. Get the cost model wrong and the skill becomes more expensive than the 
   records. Each avoided duplicate is an LLM call and a retrieval-confusion avoided downstream.
 
 ### Where it does *not* save — the caveat
+
+- **Aggregate token spend may rise.** Read and write agents each establish context. Gain is main-context
+  longevity and enforced read capability, not guaranteed lower total tokens.
 
 - **A wrong dedup decision is expensive and silent.** If the skill misses a semantic match, it writes a
   near-duplicate. If it falsely matches, it version-bumps a different subject and rewrites canon. Both
@@ -75,7 +76,7 @@ default. Get the cost model wrong and the skill becomes more expensive than the 
 | _(none)_ | **Baseline** | Silent capture; write only at checkpoint; no approval override. |
 | `--dryrun` | **Same as a real write** | Full pipeline, no persistence. Costs the LLM judgements but writes nothing. The **only** pre-write inspection point — a plain `set`'s digest arrives after the transaction has committed. |
 | `--approve` | **No extra cost, narrower gate** | Writes `rule`/`nfr`/`decision` as `approved` rather than `proposed`. Saves a human round-trip at the cost of canon becoming citable without review — the "ask about what is not reversible" rule. Without it the fact is still stored, just not yet citable. |
-| `--deepsearch` | **V1 — not implemented** | Would widen candidate recall past the facet/kind-narrowed top-N. More LLM judgement per candidate; no extra irreversibility. |
+| `--deepsearch` | **Bounded opt-in** | Adds four keyword passes of 25 and five depth-one traversals of 20, capped at 400 unique UUID/version candidates. Reports saturation and possible omissions. |
 
 **Bottom line:** writes are expensive by design (R13) and cheap by default for reads. The skill's value
 is not that it is cheap — it is that it is the *only* way to make real, long-lived memory, and it makes

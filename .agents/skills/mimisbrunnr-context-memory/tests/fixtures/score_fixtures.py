@@ -28,7 +28,7 @@ def load_fixtures():
 # Expected-side fields compared by equality against the model verdict object when declared.
 # "reason" is authored explanation text, not a criterion; "reason_must_be_nonempty" and
 # "must_not_contain" carry their own assertion semantics below.
-AUX_EQUALITY_FIELDS = ("target_uuid", "link_uuid", "relation", "count", "diverged", "not_product_fact")
+AUX_EQUALITY_FIELDS = ("target_uuid", "link_uuid", "relation", "count", "diverged", "not_product_fact", "authority")
 
 
 def scenario_matches(expected, got):
@@ -92,7 +92,7 @@ def main():
             continue
         expected = fixture["expected"]["verdict"]
         got_verdict = got.get("verdict") if isinstance(got, dict) else got
-        if expected in ("new_memory", "leave_both") and got_verdict in ("version_bump", "merge"):
+        if expected in ("new_memory", "genuine_conflict") and got_verdict in ("version_bump", "merge"):
             over_merge += 1
     precision = 1.0 - (over_merge / len(dedup_scenarios)) if dedup_scenarios else 1.0
 

@@ -166,11 +166,15 @@ is the current design authority, superseding HLD-003 LADR-02 before any ticket m
 
 - **Audit**: append-only history is the audit trail; never update history in place.
 - **Logging**: never log memory content. `Information` for lifecycle, `Debug` for per-operation detail.
+- Memory `LINKS` creation takes transaction advisory lock `(734921, 2)` before duplicate check/create,
+  serializing the AGE uniqueness backstop that AGE cannot express as a relational unique constraint.
 
 ## Changelog
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-17 | Serialized memory-edge duplicate check/create with a transaction advisory lock; batch digest now uses actual graph create outcomes. | HLD-002 LADR-05 |
+| 2026-09-17 | Cheap query, memory traversal and ticket traversal projections now include version sources and created-on for attributed delegated reads; AGE transaction behavior unchanged. | HLD-002 NFR-04 |
 | 2026-09-15 | Final full-suite repeat verified after query fixes: 429 passed, 4 gated skips, zero failures. NFR-02 retains the prior benchmark-fixture connection timeout and successful `--no-build` repeat; original pre-merge evidence unchanged. | HLD-003 NFR-02 |
 | 2026-09-15 | Synced CASE-based owner eligibility, OFFSET 0 frontier joins and ix_ticket_parent_id post-cap hydration to measured provider SQL. No persisted owner cache or snapshot split. Dated NFR-02 records four post-fix benchmark passes and earlier failures. | HLD-003 LADR-08; NFR-02 |
 | 2026-09-15 | Promoted transaction/cardinality and NOWAIT constraints into ticket guardrails; documented invalid-container-as-absent membership reads and sanitized stored-JSON 500 versus hidden-only corruption with no response impact. Historical evidence retained; no new verification recorded. | HLD-003 LADR-08 |

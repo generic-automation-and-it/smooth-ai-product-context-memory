@@ -13,7 +13,7 @@ Memory-set dry-run runs the real plan; ticket-parent local dry-run validates sha
 - **Preflight scopes tickets by group, subjects by nothing.** A candidate's optional `GroupUuid` exists only so a ticket owned by *that* group is not reported as a conflict — the check is about *another* group's ownership. Subject matching stays deliberately cross-group and ignores it. Omitting `GroupUuid` reports every owner, because a caller that names no group has not said which ownership is its own.
 - **Never expose or let the caller set `is_current`.** `SetMemories` owns the flag in one transaction: flip old current off, then insert the new current. A failure between those statements strands zero currents — a state no constraint forbids.
 - **Dry run and write share one plan, not just one handler.** Every verdict is reached in `BuildPlanAsync`, which mutates nothing; only the persist step branches. A shortcut dry-run path stops predicting the write, and this endpoint is the caller's only pre-write veto point.
-- **Dry-run skips blob and `SaveChanges`.** Do not begin-then-rollback: blob writes sit outside Postgres and would orphan objects. `blobAddress` and (for planned creates) `uuid` are null on dry run.
+- **Dry-run skips blob and `SaveChanges`.** Do not begin-then-rollback: blob writes sit outside Postgres and would orphan objects. `blobAddress` is null. A caller-selected `createUuid` is returned unchanged; a legacy create still has null `uuid`.
 - **Blobs are stored before the transaction opens**, never inside it. They are content-addressed and immutable, so the write is idempotent on retry and the transaction never stays open across object-storage round trips.
 - **No blob deletion from application code, ever.** Content-addressed blobs are shared; "orphan" means drop the DB reference only. `IBlobStorage` structurally has no delete member (guarded by `BlobStorageCapabilityGuardTests`); a deletion path requires a separately approved GC design.
 - **No predicate is evaluated in the handler.** Retrieval goes through `IMemorySearch`; filtering materialised rows defeats the full-text/array/validity indexes and drags whole version chains over the wire.
@@ -66,12 +66,12 @@ sequenceDiagram
     Handler-->>Skill: candidates (writes nothing)
     Skill->>Host: POST /api/context/memories
     Host->>Handler: SetMemories
-    Handler->>Db: BuildPlanAsync (read-only)
+    Handler->>Db: Resolve create identities and BuildPlanAsync (read-only)
     alt dryRun
-        Handler-->>Skill: predicted digest, no blobAddress, no new uuid
+        Handler-->>Skill: predicted digest, no blobAddress, stable caller create uuid
     else write
         Handler->>Blob: StoreAsync (before tx)
-        Handler->>Db: tx flip is_current then insert
+        Handler->>Db: tx flip is_current, insert memories, then AGE links
         Handler-->>Skill: digest with uuid + blobAddress
     end
     Skill->>Host: POST /api/context/query
@@ -96,7 +96,7 @@ sequenceDiagram
 - **Status**: Accepted
 - **Context**: The blob store is outside the Postgres transaction, so a dry run cannot be a rollback. The first implementation of that rule went further than needed and gave the dry run its own shorter path, which then failed to predict duplicate links, already-registered labels and subject collisions.
 - **Decision**: `BuildPlanAsync` resolves every write against stored state and mutates nothing. `Predict` reports the plan's counts; `PersistAsync` executes the same plan. Both paths throw on the same conflicts.
-- **Consequences**: One extra read pass on the write path, in exchange for a veto point that means something. `ItemResult.Uuid` is nullable because a planned create has no identity until persist.
+- **Consequences**: One extra read pass on the write path, in exchange for a veto point that means something. `ItemResult.Uuid` remains nullable for legacy planned creates; caller-selected create identities are stable.
 
 ### LADR-003: Scope rule as data, applied on every read path
 
@@ -144,14 +144,14 @@ sequenceDiagram
 - **Status**: Accepted
 - **Context**: Links arrive derived, alongside the memories they describe. Failing the whole `set` on a link that already exists discarded a whole checkpoint's capture over a duplicate edge.
 - **Decision**: In `SetMemories`, an already-present link (in the store or repeated in the batch) is counted in the digest's `skipped` and not written. The standalone `POST /links` still returns `409`, because there the link *is* the request.
-- **Consequences**: `skipped` in the digest means "links skipped"; `diverged` stays 0 (V2). A self-link is still a `400` from the validator on both paths.
+- **Consequences**: `skipped` in the digest means "links skipped"; `diverged` counts newly created open-kind divergence memories. A self-link is still a `400` from the validator on both paths.
 
 ## Key Behaviors
 
 - Retrieval defaults to **current-only** and **excludes `proposed`**. History is `GET .../versions`. Empty query is `200 []`. `limit` defaults to 50 and is capped at 200 — an uncapped read floods the caller's context.
 - A `set` request accepts at most 200 items; larger batches are a `400` — the write-side sibling of the read `limit` cap.
 - `asOf` narrows to claims valid at a business-time instant. Absent means no temporal narrowing.
-- API digest is a persist receipt: `created` / `versioned` / `linked` / `skipped` / `labelsProposed`; `diverged` is always 0 here. Skill composes the human digest.
+- API digest is a persist receipt: `created` / `versioned` / `linked` / `diverged` / `skipped` / `labelsProposed`; `diverged` is a mechanical count of newly created divergence-kind records. Skill composes the human digest.
 - API persists `status` as given — no re-gate by kind.
 - **Subject uniqueness is checked before the write, not only by the index.** A create whose `subject_slug` already exists in the group is a `409` telling the caller to send a version bump — on the dry run too. Two items in one batch sharing a subject is the same `409`.
 - Resolve-or-create matches by ticket (200 existing group) or creates (`local:<guid>` when untracked). Initiative is a **name** (entity has no uuid); default `to-be-decided`. Optional repo/scope apply on **create only** — use `PATCH /groups/{uuid}` afterwards.
@@ -175,7 +175,10 @@ sequenceDiagram
 
 ## Known Limitations
 
-- **A link between two memories that are both new in the same batch cannot be expressed.** `MemoryWrite.Uuid` means "version this existing memory", so a create has no caller-known identity until persist, and `LinkWrite` addresses memories by uuid. Link the two in a follow-up `POST /links`, or send one of them first. Adding a batch-local reference is a wire-contract change and belongs with the write-pipeline work (HLD 002).
+- **`MemoryWrite.CreateUuid` is the additive create identity;**
+  `MemoryWrite.Uuid` remains a version target. Planning resolves both before links, enabling
+  new→existing, existing→new and new→new links in the same transaction. Legacy creates may omit
+  `CreateUuid`; linked creates and dry-run/write identity parity require it.
 - **The store accepts a self-link; both write validators reject it.** Persistence has no source≠target check. Characterised at L1 (`SelfLink_PersistsAtStore`); not tightened here (HLD-003).
 - **`ix_memory_version_validity` (GIST over `tstzrange`) is unreachable from LINQ**, which cannot construct a range from two columns. The `asOf` predicate is scalar and always combined with a narrowing predicate. Index usage is not asserted by a test: at test data volumes the planner correctly prefers a sequential scan regardless, so such a test would prove nothing. Verify with `EXPLAIN` against a realistic dataset.
 
@@ -203,6 +206,8 @@ sequenceDiagram
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-17 | Delivered caller-selected create UUIDs, same-batch new-memory links, divergence counting, provenance on cheap reads, resolved dry-run identities, and graph-failure rollback coverage. | HLD-002 LADR-05/LADR-07, NFR-03/NFR-04 |
+| 2026-09-17 | Approved additive create identity and same-transaction new-memory link contract; implementation and L0/L1/L2 evidence follow in this delivery. | HLD-002 LADR-05/LADR-07 |
 | 2026-09-16 | FTS configuration `simple` → `english` (query side and index side together, `StemFullTextIndexes` migration) per HLD-001's recall-tuning measurement; blob-deletion rule strengthened from convention to structural (`IBlobStorage` has no delete member). | HLD-001 NFR-02 recall-tuning measurements |
 | 2026-09-15 | Closed ticket release gates using full-suite and explicit benchmark evidence. Export fixture identity reuse corrected rather than weakening ownership; strict expected-parent/no-replay, scope and selected-path association contracts unchanged. | HLD-003 final NFR-02 evidence |
 | 2026-09-14 | Synced ticket documentation to strict expected-parent-before-no-op semantics, no replay token, trigger-backed exact ownership and memory association from selected capped path endpoints plus anchor. Distinguished local shape-only inspection from memory-set dry-run and kept ticket release/performance gate open. | HLD-003 LADR-08; NFR-02 |

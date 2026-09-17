@@ -205,4 +205,56 @@ public class SetMemoriesValidatorTests
 
         _validator.TestValidate(request).ShouldHaveValidationErrorFor("Items[0].Description");
     }
+
+    [Fact]
+    public void Rejects_version_and_create_identity_together()
+    {
+        SetMemories.Request request = ValidRequest();
+        request = request with
+        {
+            Items = [request.Items[0] with { Uuid = Guid.NewGuid(), CreateUuid = Guid.NewGuid() }],
+        };
+
+        _validator.TestValidate(request).ShouldHaveValidationErrorFor("Items[0]");
+    }
+
+    [Fact]
+    public void Rejects_empty_create_identity_and_overlong_link_reason()
+    {
+        SetMemories.Request request = ValidRequest();
+        request = request with
+        {
+            Items = [request.Items[0] with { CreateUuid = Guid.Empty }],
+            Links = [new(Guid.NewGuid(), Guid.NewGuid(), MemoryRelation.RelatesTo, new string('x', 4001))],
+        };
+
+        var result = _validator.TestValidate(request);
+        result.ShouldHaveValidationErrorFor("Items[0].CreateUuid");
+        result.ShouldHaveValidationErrorFor("Links[0].Reason");
+    }
+
+    private static SetMemories.Request ValidRequest() =>
+        new(
+            Guid.NewGuid(),
+            [
+                new SetMemories.MemoryWrite(
+                    null,
+                    "Name",
+                    "Subject",
+                    "Claim",
+                    "Summary",
+                    MemoryVersion.KindValue.Decision,
+                    null,
+                    null,
+                    MemoryVersion.MemoryVersionStatus.Approved,
+                    80,
+                    null,
+                    null,
+                    DateTimeOffset.UtcNow,
+                    null,
+                    null,
+                    null)
+            ],
+            null,
+            null);
 }

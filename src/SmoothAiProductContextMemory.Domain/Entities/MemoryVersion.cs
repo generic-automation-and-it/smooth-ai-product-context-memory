@@ -65,5 +65,6 @@ public sealed class MemoryVersion
         public const string Plan = "plan";
         public const string Backlog = "backlog";
         public const string Preference = "preference";
+        public const string Divergence = "divergence";
     }
 }

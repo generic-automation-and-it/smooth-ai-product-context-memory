@@ -79,5 +79,7 @@ public sealed class ServiceDefaultsTests : IAsyncDisposable
                 builder.UseSetting("BlobStorage:AccessKey", "placeholder");
                 builder.UseSetting("BlobStorage:SecretKey", "placeholder");
                 builder.UseSetting("BlobStorage:Bucket", "placeholder");
+                builder.UseSetting("ApiAccess:ReadToken", "unit-test-read-token");
+                builder.UseSetting("ApiAccess:WriteToken", "unit-test-write-token");
             });
 }

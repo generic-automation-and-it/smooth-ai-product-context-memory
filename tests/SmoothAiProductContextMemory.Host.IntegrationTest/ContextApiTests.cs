@@ -11,6 +11,7 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private readonly HttpClient _http = fixture.HttpClient;
+    private readonly HostWebAppFixture _fixture = fixture;
     private CancellationToken Ct => TestContext.Current.CancellationToken;
 
     [Fact]
@@ -23,6 +24,71 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
         JsonElement body = await response.Content.ReadFromJsonAsync<JsonElement>(Json, Ct);
         body.GetProperty("items").GetArrayLength().ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Read_token_can_read_but_cannot_mutate()
+    {
+        using HttpClient read = _fixture.CreateClient();
+        read.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", HostWebAppFixture.ReadToken);
+
+        (await read.PostAsJsonAsync("/api/context/query", new { limit = 1 }, Ct))
+            .StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await read.PostAsJsonAsync("/api/context/preflight", new { candidates = Array.Empty<object>() }, Ct))
+            .StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        (await read.PostAsJsonAsync("/api/context/memories", new { }, Ct))
+            .StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        (await read.PostAsJsonAsync("/api/context/groups/resolve", new { }, Ct))
+            .StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        (await read.PatchAsJsonAsync($"/api/context/groups/{Guid.NewGuid()}", new { }, Ct))
+            .StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        (await read.PostAsJsonAsync($"/api/context/groups/{Guid.NewGuid()}/descriptions", new { }, Ct))
+            .StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        (await read.PostAsJsonAsync("/api/context/links", new { }, Ct))
+            .StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        (await read.PutAsJsonAsync("/api/context/tickets/parent", new { }, Ct))
+            .StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        (await read.PostAsJsonAsync("/api/context/labels", new { }, Ct))
+            .StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        (await read.PostAsJsonAsync("/api/context/initiatives", new { }, Ct))
+            .StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+    }
+
+    [Fact]
+    public async Task Context_routes_reject_missing_token_while_openapi_stays_public()
+    {
+        using HttpClient anonymous = _fixture.CreateClient();
+
+        foreach ((HttpMethod method, string path) in new[]
+        {
+            (HttpMethod.Post, "/api/context/preflight"),
+            (HttpMethod.Post, "/api/context/memories"),
+            (HttpMethod.Post, "/api/context/query"),
+            (HttpMethod.Get, $"/api/context/memories/{Guid.NewGuid()}/versions"),
+            (HttpMethod.Get, $"/api/context/memories/{Guid.NewGuid()}/versions/1/blob"),
+            (HttpMethod.Post, "/api/context/groups/resolve"),
+            (HttpMethod.Patch, $"/api/context/groups/{Guid.NewGuid()}"),
+            (HttpMethod.Post, $"/api/context/groups/{Guid.NewGuid()}/descriptions"),
+            (HttpMethod.Post, "/api/context/links"),
+            (HttpMethod.Post, "/api/context/paths"),
+            (HttpMethod.Put, "/api/context/tickets/parent"),
+            (HttpMethod.Post, "/api/context/tickets/paths"),
+            (HttpMethod.Get, "/api/context/labels"),
+            (HttpMethod.Post, "/api/context/labels"),
+            (HttpMethod.Get, "/api/context/initiatives"),
+            (HttpMethod.Post, "/api/context/initiatives"),
+        })
+        {
+            using var request = new HttpRequestMessage(method, path);
+            if (method is not null && method != HttpMethod.Get)
+            {
+                request.Content = JsonContent.Create(new { });
+            }
+            using HttpResponseMessage response = await anonymous.SendAsync(request, Ct);
+            response.StatusCode.ShouldBe(HttpStatusCode.Forbidden, $"{method} {path}");
+        }
+        (await anonymous.GetAsync("/openapi/v1.json", Ct)).StatusCode.ShouldBe(HttpStatusCode.OK);
     }
 
     [Fact]
@@ -132,6 +198,81 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
         using HttpResponseMessage query = await _http.PostAsJsonAsync("/api/context/query", new { query = "Dry subject" }, Ct);
         JsonElement items = (await query.Content.ReadFromJsonAsync<JsonElement>(Json, Ct)).GetProperty("items");
         items.GetArrayLength().ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Set_creates_and_links_new_memories_with_stable_dry_run_identities()
+    {
+        Guid group = await ResolveGroup(MemoryGroup.ScopeDimensionValue.Product);
+        Guid first = Guid.NewGuid();
+        Guid second = Guid.NewGuid();
+        object body = new
+        {
+            groupUuid = group,
+            items = new[]
+            {
+                SetItem("Linked create A", "A", first),
+                SetItem("Linked create B", "B", second),
+            },
+            links = new[]
+            {
+                new { sourceUuid = first, targetUuid = second, relation = MemoryRelation.Contradicts, reason = "conflicting evidence" },
+            },
+            labelsProposed = Array.Empty<string>(),
+        };
+
+        JsonElement dry = await PostJson("/api/context/memories?dryRun=true", body);
+        dry.GetProperty("items")[0].GetProperty("uuid").GetGuid().ShouldBe(first);
+        dry.GetProperty("linked").GetInt32().ShouldBe(1);
+
+        JsonElement written = await PostJson("/api/context/memories", body);
+        written.GetProperty("items")[1].GetProperty("uuid").GetGuid().ShouldBe(second);
+        written.GetProperty("linked").GetInt32().ShouldBe(1);
+
+        using HttpResponseMessage paths = await _http.PostAsJsonAsync(
+            "/api/context/paths",
+            new { sourceUuid = first, targetUuid = second, maxDepth = 1 },
+            Ct);
+        paths.StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await paths.Content.ReadFromJsonAsync<JsonElement>(Json, Ct))
+            .GetProperty("paths").GetArrayLength().ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Set_rejects_create_and_version_identity_together()
+    {
+        Guid group = await ResolveGroup(MemoryGroup.ScopeDimensionValue.Product);
+        object body = new
+        {
+            groupUuid = group,
+            items = new[]
+            {
+                new
+                {
+                    uuid = Guid.NewGuid(),
+                    createUuid = Guid.NewGuid(),
+                    name = "Invalid identity",
+                    description = "Invalid identity combination",
+                    statement = "Cannot be create and version.",
+                    contentSummary = "Invalid",
+                    kind = MemoryVersion.KindValue.Decision,
+                    facets = Array.Empty<string>(),
+                    tags = Array.Empty<string>(),
+                    status = MemoryVersion.MemoryVersionStatus.Approved,
+                    confidence = (short)80,
+                    content = (string?)null,
+                    sources = Array.Empty<object>(),
+                    validFrom = DateTimeOffset.UtcNow,
+                    validUntil = (DateTimeOffset?)null,
+                    summaryModel = "test-model",
+                    summaryPromptVersion = "1",
+                },
+            },
+        };
+
+        using HttpResponseMessage response = await _http.PostAsJsonAsync("/api/context/memories", body, Ct);
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        (await response.Content.ReadAsStringAsync(Ct)).ShouldContain("CreateUuid");
     }
 
     /// <summary>
@@ -292,6 +433,8 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
         {
             doc.ShouldContain(route);
         }
+        doc.ShouldContain("bearer");
+        doc.ShouldContain("Requires write capability");
     }
 
     /// <summary>
@@ -329,7 +472,10 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
         openapi.StatusCode.ShouldBe(HttpStatusCode.OK);
         JsonElement doc = await openapi.Content.ReadFromJsonAsync<JsonElement>(Json, Ct);
 
-        JsonElement candidate = doc.GetProperty("components").GetProperty("schemas").GetProperty("Candidate");
+        JsonElement schemas = doc.GetProperty("components").GetProperty("schemas");
+        JsonElement candidate = schemas.EnumerateObject()
+            .Single(schema => schema.Name.EndsWith("Preflight.Candidate", StringComparison.Ordinal))
+            .Value;
         string[] required = candidate.TryGetProperty("required", out JsonElement req)
             ? [.. req.EnumerateArray().Select(e => e.GetString()!)]
             : [];
@@ -337,6 +483,13 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
 
         string[] properties = [.. candidate.GetProperty("properties").EnumerateObject().Select(m => m.Name)];
         properties.ShouldContain("groupUuid");
+
+        JsonElement memoryWrite = schemas.EnumerateObject()
+            .Single(schema => schema.Name.EndsWith("SetMemories.MemoryWrite", StringComparison.Ordinal))
+            .Value;
+        string[] memoryProperties = [.. memoryWrite.GetProperty("properties").EnumerateObject().Select(m => m.Name)];
+        memoryProperties.ShouldContain("uuid");
+        memoryProperties.ShouldContain("createUuid");
     }
 
     private static readonly string[] ExpectedRoutes =
@@ -674,4 +827,33 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
         links = (object?)null,
         labelsProposed = (object?)null,
     };
+
+    private static object SetItem(string description, string statement, Guid createUuid) => new
+    {
+        uuid = (Guid?)null,
+        createUuid,
+        name = "Name",
+        description,
+        statement,
+        contentSummary = "Summary",
+        kind = MemoryVersion.KindValue.Decision,
+        facets = new[] { "architecture" },
+        tags = Array.Empty<string>(),
+        status = MemoryVersion.MemoryVersionStatus.Approved,
+        confidence = (short)80,
+        content = (string?)null,
+        sources = Array.Empty<object>(),
+        validFrom = DateTimeOffset.UtcNow.AddDays(-1),
+        validUntil = (DateTimeOffset?)null,
+        summaryModel = "test-model",
+        summaryPromptVersion = "1",
+    };
+
+    private async Task<JsonElement> PostJson(string route, object body)
+    {
+        using HttpResponseMessage response = await _http.PostAsJsonAsync(route, body, Ct);
+        string payload = await response.Content.ReadAsStringAsync(Ct);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, payload);
+        return JsonSerializer.Deserialize<JsonElement>(payload, Json);
+    }
 }

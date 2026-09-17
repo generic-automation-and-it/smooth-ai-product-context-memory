@@ -183,10 +183,12 @@ Target a single test project directly when iterating, e.g. `dotnet test tests/Sm
 ### Run locally
 
 ```bash
-dotnet run --project src/SmoothAiProductContextMemory.AppHost   # Aspire: Host from working tree + Postgres + MinIO + Seq (group smooth-mímisbrunnr)
+dotnet run --project src/SmoothAiProductContextMemory.AppHost   # Aspire stack; set secret api-read-token/api-write-token parameters first (docs/wiki/docker.md)
 HostConfiguration__UseProject=false \
   dotnet run --project src/SmoothAiProductContextMemory.AppHost # same stack, pull published Host image (tag may lag)
-dotnet run --project src/SmoothAiProductContextMemory.Host      # start the API on its own
+ApiAccess__ReadToken='<random-read-token>' \
+ApiAccess__WriteToken='<different-random-write-token>' \
+  dotnet run --project src/SmoothAiProductContextMemory.Host    # start API on its own
 docker build -t smooth-ai-product-context-memory:local .        # Host image; run contract in docs/wiki/docker.md
 ```
 

@@ -67,8 +67,25 @@ Targets and verification live in [./nfrs/](./nfrs/). Three shape how code is wri
 
 ## Migration Plans
 
-- Divergence handling is deferred. It needs no new table — a divergence kind plus contradiction links — and requires an adversarial fixture built from documented design reversals with their reversal metadata stripped, since a coherent corpus contains no live conflicts.
-- Deeper search is deferred behind a switch.
+- Transactional links to new memories use an additive caller-selected `createUuid`. Existing `uuid`
+  keeps its sole meaning (version target); both fields together are invalid. The skill assigns every
+  create identity before dry-run and reuses the unchanged payload for write, so links and receipts have
+  stable identities without a prepare/commit protocol. Legacy creates may still omit `createUuid`.
+- Genuine conflicts use the existing model: a proposed open-kind `divergence` memory plus two
+  `contradicts` links. The skill owns the semantic decision; the API counts newly created divergence
+  items mechanically. Generated divergence is excluded from conflict evidence and deduplicated by the
+  unordered pair of exact claim references. Rule-resolvable disagreement applies only BR-10's stated
+  authority: verified shipped behaviour over specification, and agreed vocabulary over alternatives.
+- `--deepsearch` is opt-in: baseline recall remains capped at 200, then at most four keyword FTS passes
+  of 25 and five depth-one traversals of 20, with 400 unique UUID/version candidates overall. Stable
+  first-seen ordering and saturation/cap disclosure are mandatory.
+- Deep search skips graph traversal when recall authority came only from group/ticket context and no
+  explicit scope was supplied; current path API cannot preserve that context, so skipping with
+  disclosure is safer than broadening.
+- Read and write execution are delegated. Main-thread orchestration receives cited conclusions and
+  receipts, never raw result arrays. Read-only capability is enforced by separate API read/write
+  credentials and a read-only client surface; agent prose/frontmatter is defence in depth, not the
+  security boundary.
 - Candidate recall is stemmed since the storage side moved its text-search configuration to `english` on measured evidence; trigram similarity was measured and rejected (see [HLD-001 NFR-02 recall-tuning measurements](../001-context-memory-storage/nfrs/NFR-02-recall-tuning-measurements.md)). Semantic equivalence judgement stays skill-owned regardless.
 - Any column added to a history table must extend the append-only trigger's equality list **in the same migration**, or it becomes silently mutable through an otherwise legal version-bump update.
 
@@ -76,6 +93,8 @@ Targets and verification live in [./nfrs/](./nfrs/). Three shape how code is wri
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-17 | Working-tree AppHost verification confirmed dry-run/write identity and link-count parity for two caller-identified creates plus one new-to-new edge; read-token traversal returned the edge. | NFR-05 evidence |
+| 2026-09-17 | Approved closure contracts: additive `createUuid`, proposed divergence with loop/pair guards, bounded opt-in deep search, delegated read/write execution, and API-enforced read/write capabilities. | HLD-002 delta closure |
 | 2026-09-16 | Stemming/trigram deferral resolved by HLD-001's measurement: candidate recall now uses the `english` FTS configuration; trigram rejected with a reopening threshold. Skill-owned semantic judgement unchanged. | HLD-001 NFR-02 recall-tuning measurements |
 | 2026-09-15 | Finalized declared ticket writer acceptance against the passing solution, explicit benchmarks and Python harness. Corrected obsolete untested-scope claim; strict expected-parent/no-replay and local shape-only inspection remain unchanged. Full dossier and tag graph remain outside scope. | LADR-08; HLD-003 final NFR-02 evidence |
 | 2026-09-14 | Synced declared hierarchy contract to API/store and skill implementation: separate PUT, strict expected-parent check before no-op, no replay token, changed receipt and no-network shape-only dry-run. Full dossier remains separate; ticket performance gate stays open, not release-accepted. | LADR-08; HLD-003 NFR-02 |

@@ -26,6 +26,8 @@ state_directory="$(mktemp -d "${TMPDIR:-/tmp}/mimisbrunnr-controller-smoke.XXXXX
 postgres_password="$(openssl rand -hex 24)"
 blob_access_key="$(openssl rand -hex 12)"
 blob_secret_key="$(openssl rand -hex 24)"
+api_read_token="$(openssl rand -hex 24)"
+api_write_token="$(openssl rand -hex 24)"
 
 if [ -z "$engine_host_address" ]; then
   if [ "$engine_kind" = "podman" ]; then
@@ -91,7 +93,9 @@ controller_args=(
     -e "BlobConfiguration__SecretKey=$blob_secret_key" \
     -e "BlobConfiguration__Port=$blob_port" \
     -e "BlobConfiguration__ConsolePort=$blob_console_port" \
-    -e "SeqConfiguration__Port=$seq_port"
+    -e "SeqConfiguration__Port=$seq_port" \
+    -e "Parameters__api-read-token=$api_read_token" \
+    -e "Parameters__api-write-token=$api_write_token"
 )
 
 if [ -d "$engine_config_directory" ]; then
@@ -210,31 +214,37 @@ assert_volumes_absent() {
 
 capture_fixture() {
   group_uuid="$(curl --fail --silent \
+    -H "Authorization: Bearer $api_write_token" \
     -H 'Content-Type: application/json' \
     -d '{"scopeDimension":"product","tickets":[]}' \
     "http://$engine_bind_address:$api_port/api/context/groups/resolve" | jq -r '.uuid')"
 
   first_uuid="$(curl --fail --silent \
+    -H "Authorization: Bearer $api_write_token" \
     -H 'Content-Type: application/json' \
     -d '{"groupUuid":"'"$group_uuid"'","items":[{"name":"Controller smoke source","description":"Controller smoke source","statement":"Containerized AppHost starts the stack","contentSummary":"Synthetic smoke content","kind":"decision","facets":["architecture"],"tags":["controller-smoke"],"status":"approved","confidence":90,"content":"controller-smoke-blob","sources":[],"validFrom":"2026-09-15T00:00:00Z"}]}' \
     "http://$engine_bind_address:$api_port/api/context/memories" | jq -r '.items[0].uuid')"
 
   second_uuid="$(curl --fail --silent \
+    -H "Authorization: Bearer $api_write_token" \
     -H 'Content-Type: application/json' \
     -d '{"groupUuid":"'"$group_uuid"'","items":[{"name":"Controller smoke target","description":"Controller smoke target","statement":"Graph data crosses the controller boundary","contentSummary":"Synthetic smoke content","kind":"decision","facets":["architecture"],"tags":["controller-smoke"],"status":"approved","confidence":90,"sources":[],"validFrom":"2026-09-15T00:00:00Z"}]}' \
     "http://$engine_bind_address:$api_port/api/context/memories" | jq -r '.items[0].uuid')"
 
   curl --fail --silent \
+    -H "Authorization: Bearer $api_write_token" \
     -H 'Content-Type: application/json' \
     -d '{"sourceUuid":"'"$first_uuid"'","targetUuid":"'"$second_uuid"'","relation":"depends-on","reason":"controller smoke graph"}' \
     "http://$engine_bind_address:$api_port/api/context/links" >/dev/null
 }
 
 assert_fixture() {
-  blob="$(curl --fail --silent "http://$engine_bind_address:$api_port/api/context/memories/$first_uuid/versions/1/blob")"
+  blob="$(curl --fail --silent -H "Authorization: Bearer $api_read_token" \
+    "http://$engine_bind_address:$api_port/api/context/memories/$first_uuid/versions/1/blob")"
   [ "$blob" = "controller-smoke-blob" ]
 
   path_count="$(curl --fail --silent \
+    -H "Authorization: Bearer $api_read_token" \
     -H 'Content-Type: application/json' \
     -d '{"sourceUuid":"'"$first_uuid"'","targetUuid":"'"$second_uuid"'","maxDepth":2}' \
     "http://$engine_bind_address:$api_port/api/context/paths" | jq '.paths | length')"

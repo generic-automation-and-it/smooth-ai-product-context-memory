@@ -9,6 +9,15 @@ derivation, redaction and atomicity checks the database cannot express as constr
 
 ## Non-Negotiables
 
+- **Main thread never consumes raw store rows.** Retrieval and pre-write recall run in delegated
+  read/write contexts. Read execution receives only the read API credential and read-only client;
+  write execution receives discrete facts, never a transcript. API credentials enforce capability;
+  prompt text alone is not a security boundary.
+- **Project agent registrations live in `.agents/agents/`.** Skill-local files hold detailed contracts;
+  project registrations make workers discoverable and point at them. Read worker has no generic
+  shell/write-client access; its MCP server strips `CONTEXT_MEMORY_WRITE_TOKEN` and exposes only reads.
+  Write worker also has no shell/file tools; typed write MCP methods bound its mutation surface.
+
 - **Never write mid-work.** Accumulate candidates silently during work; write only at the explicit
   end-of-task checkpoint (`set`). This is the manual-trigger design (D29), not a per-fact flush.
 - **Don't "optimize" the SKILL.md by deduplicating the restatements.** The atomicity discipline and the
@@ -68,6 +77,13 @@ flowchart LR
 
 ## Architecture Decisions
 
+- **LADR-005** (2026-09, accepted): Separate read and write execution contexts. *Context:* baseline
+  recall may return 200 rows and consume the task's working context; broad shell grants cannot prove a
+  read worker cannot mutate. *Decision:* delegate raw recall, expose a read-only client, and enforce
+  read/write credentials at the API. Lookup and grounding return bounded cited conclusions plus
+  matched-but-not-surfaced disclosure. *Consequence:* aggregate token spend may rise, but main-context
+  longevity improves and the read boundary is structural when runtimes keep the write credential absent.
+
 - **LADR-001** (2026-09, accepted): Version-bump ordering is pinned by the persistence layer, not the
   skill. *Context:* `memory_version` is append-only with a partial unique index over `is_current` and a
   `BEFORE UPDATE OR DELETE` trigger permitting exactly one legal UPDATE (the `is_current` pointer
@@ -79,7 +95,8 @@ flowchart LR
 - **LADR-002** (2026-09, accepted): Link derivation is batched with deduplication in the pre-write
   round (D47). *Context:* three trials produced zero typed links, so `MemoryLink` would stay empty
   forever and R10 decorative. *Decision:* both link derivation and cross-group dedup need the same
-  cross-group subject lookup, so one traversal serves both, and it must also detect **intra-batch**
+  bounded semantic recall, while preflight separately supplies exact subject/ticket facts and
+  detects **intra-batch**
   collisions (two candidates in the same batch sharing a subject — neither is written yet, so a
   per-record preflight misses it). Derived links are reported in the digest, never derived silently, and
   are inspectable before anything lands via `--dryrun`. *Consequence:* the preflight must be
@@ -171,7 +188,7 @@ flowchart LR
    `context_memory_client.py` (`paths` guard rails — maxDepth/sourceUuid required before any network
    call — and `_render_path` summary rendering), ticket HTTP transport/guards/dry-run/lossless
    disclosure, and `near_miss_tags.py` schema/scope/basis/bounds/output/no-I/O guarantees.
-   Run: `python3 -B .agents/skills/mimisbrunnr-context-memory/tests/run_tests.py`.
+   Run: `python3 -B .agents/skills/mimisbrunnr-context-memory/tests/run_tests.py`. The PR gate runs it.
 - **Deterministic near-miss fixtures:** `tests/fixtures/near_miss_tags.json` exercises grounded mismatch,
   exact match, ANY overlap, irrelevant evidence, unsupported plausible synonym and empty tags. Its evidence
   contains the original API query, scope-bound approval entry, and explicit approved lifecycle status.
@@ -192,17 +209,20 @@ flowchart LR
 
 Approved (2026-09-12) implementation plan for making this contract executable
 against the HTTP API (PR #14). No C# changes. The plan detail and decision set live in the gitignored working
-spec `.context/work-tasks/wt-3-phase3-spec.md`. Key decisions: semantic dedup composed from
+ specification. Key decisions: semantic dedup composed from
 `/query` recall (facets+kind, no free-text, `includeProposed:true`, `limit:200`) + LLM judgement,
 with `/preflight` as exact-match backstop + intra-batch + ticket-uniqueness only (amends HLD 002 (write pipeline)'s
 "Write preflight" API row); digest renders `skipped(atomicity)` separately from `skipped(duplicate-link)`;
 redaction detector is a stdin→stdout fingerprint script reporting rule names only; 20-candidate cap
-as a static configurable setting; divergence fixture asserts non-collapse (V1 `diverged:0` preserved).
+ as a static configurable setting. Divergence creates a proposed record plus transactional
+ contradiction links and reports a real count.
 
 ## Changelog
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-17 | Delivered memory-read/memory-write contracts, read-only client, bounded deepsearch, divergence composition/loop guard, createUuid payloads, cost evidence and deterministic PR gate. | HLD-002 closure |
+| 2026-09-17 | Approved delegated read/write execution, API-backed capability separation, bounded deep search, transactional create UUIDs and proposed divergence contract. | HLD-002 delta closure |
 | 2026-09-16 | SKILL.md recall rationale updated for stemmed full-text recall: `/query` free-text is now AND-of-all-lexemes under the `english` configuration - stemming forgives inflections, not sentence structure, so natural-language free-text still defeats recall. | HLD-001 storage delta |
 | 2026-09-15 | Replaced unmerged near-miss criteria schema with frozen original API query (`tags` + sole `facetMatchMode`, default ANY); bound approved UUID/version evidence to actual scope and retained status/scope with explicit proposed flag. Added shared ticket UTF-16 length/NUL/Unicode guards and wire-compatible timestamp validation without normalization. Updated fixtures/docs; Python harness 42 passing tests including positive/negative offline regressions. No retrieval, compatibility shim or C# changes. | HLD-005 LADR-10/13, NFR-04; HLD-002 LADR-08 |
 | 2026-09-14 | Synced documentation to strict expected-parent-before-no-op behavior, no operation replay token, selected capped path endpoint/anchor memory association and trigger-backed exact ownership. No scripts changed by this sync; ticket performance gate remains open and targeted tests do not imply release acceptance. | HLD-002 LADR-08; HLD-003 LADR-08 |
@@ -214,4 +234,4 @@ as a static configurable setting; divergence fixture asserts non-collapse (V1 `d
 | 2026-09-10 | Created — contract for the sole interface to the context-memory store; fixed write pipeline; cross-group dedup, atomicity and secret-redaction ownership. | HLD 002 (write pipeline) |
 | 2026-09-10 | Contract-coherence pass. Pipeline numbering pinned to five stages with **preflight as stage 1** (SKILL.md previously specified four, starting at redact). Approval gating resolved to *write-as-`proposed`* — SKILL.md previously said "do not write", which contradicted this file and the retrieval rule that excludes `proposed` records. Digest reclassified as a post-write receipt with `--dryrun` named as the only pre-write veto point (LADR-002 previously implied a veto round that `set`'s single transaction cannot provide). Intra-batch collision, source-date `valid_from`, and the summary model/prompt stamp added to SKILL.md, which the executing agent reads. | HLD 002 contract review |
 | 2026-09-12 | `## Requirements` added — approved implementation plan (skill executable against the HTTP API; no C#). Key decisions recorded (semantic dedup via `/query` recall + LLM judgement; digest `skipped` segregation; redaction rule-name digest; 20-cap static setting; divergence non-collapse). | PR #17 |
-| 2026-09-12 | **Skill implemented (no C#).** Added `scripts/context_memory_client.py` (14 subcommands, base-URL + health probe, `MAX_CANDIDATES`=20 cap, `--dryrun`), `scripts/redact.py` (stdin→stdout, rule-name digest, true-positive rules), `scripts/atomicity.py` (conservative bundle detector). SKILL.md gained `## Deterministic Components` (script mapping + two-call semantic-dedup composition) and `## Scope Prohibitions` (programme exclusion, no auto-403-`?scope=program` retry); digest `skipped` segregation added. HLD 002 (write pipeline) "Write preflight" API row amended to **judges nothing**. Test home: committed L0 harness `tests/run_tests.py` (12 tests) + on-demand fixtures `tests/fixtures/`. **Deferred:** the L0 harness is committed and CI-gatable but not wired into `pr-gate.yml` (approved plan's file set omitted a CI change). | PR #17 |
+| 2026-09-12 | **Skill implemented (no C#).** Added `scripts/context_memory_client.py` (14 subcommands, base-URL + health probe, `MAX_CANDIDATES`=20 cap, `--dryrun`), `scripts/redact.py` (stdin→stdout, rule-name digest, true-positive rules), `scripts/atomicity.py` (conservative bundle detector). SKILL.md gained deterministic component and scope contracts; digest skip segregation added. Test home: committed L0 harness plus on-demand fixtures. CI wiring landed during HLD-002 closure on 2026-09-17. | PR #17 |

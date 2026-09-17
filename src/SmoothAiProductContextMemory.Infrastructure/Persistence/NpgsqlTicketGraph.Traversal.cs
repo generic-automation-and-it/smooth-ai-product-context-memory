@@ -104,7 +104,7 @@ public sealed partial class NpgsqlTicketGraph
             ), memories AS MATERIALIZED (
                 SELECT m.uuid, g.uuid AS group_uuid, m.name, m.description, v.statement, v.content_summary,
                        v.kind, m.facets, m.tags, v.status, v.confidence, g.scope_dimension, g.scope_identifier,
-                       v.valid_from, v.valid_until, v.version, v.is_current
+                        v.valid_from, v.valid_until, v.version, v.is_current, v.sources, v.created_on
                 FROM groups selected_group
                 JOIN public.memory_group g ON g.id = selected_group.group_id
                 JOIN public.memory m ON m.group_id = g.id
@@ -136,7 +136,8 @@ public sealed partial class NpgsqlTicketGraph
                        'facets', facets, 'tags', tags, 'status', status, 'confidence', confidence,
                        'scopeDimension', scope_dimension, 'scopeIdentifier', scope_identifier,
                        'validFrom', valid_from, 'validUntil', valid_until, 'version', version,
-                       'isCurrent', is_current) ORDER BY uuid, version) FROM memory_selection), '[]'::jsonb)::text,
+                        'isCurrent', is_current, 'sources', sources, 'createdOn', created_on)
+                        ORDER BY uuid, version) FROM memory_selection), '[]'::jsonb)::text,
                    EXISTS (SELECT 1 FROM walk WHERE depth > @depth),
                    (SELECT count(*) > @paths FROM admitted),
                    (SELECT count(*) > @memories FROM memories);

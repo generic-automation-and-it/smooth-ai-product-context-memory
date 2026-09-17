@@ -90,6 +90,11 @@ Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgr
 
 ## Key Behaviors
 
+- Context API read/write tokens are secret AppHost parameters injected into both source and image Host
+  resources as `ApiAccess__ReadToken` and `ApiAccess__WriteToken`. They are never committed or printed.
+  Release configuration requires explicit values; development uses Aspire secret parameters so the
+  read and write agents can receive distinct runtime capabilities.
+
 - Postgres password is intentionally **not** committed in `appsettings.json`. Supply
   `PostgresConfiguration:Password` via AppHost User Secrets (`dotnet user-secrets set
   "PostgresConfiguration:Password" "..." --project src/SmoothAiProductContextMemory.AppHost`) or the
@@ -225,6 +230,8 @@ Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgr
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-17 | Added secret Aspire parameters for distinct API read/write tokens and injects them into project and image Host modes. | HLD-002 NFR-04 |
+| 2026-09-17 | Approved secret parameter injection for separate context API read/write capabilities. | HLD-002 NFR-04 |
 | 2026-09-16 | Limited bind-address validation to release mode and added development-mode regression cases. | PR #65 review |
 | 2026-09-16 | Added the configurable image-mode API port to the port contract. | PR #65 review |
 | 2026-09-15 | Hardened release preflight, canonical controller ownership, graceful signal handling, explicit bind/advertised addresses, and registry credential isolation; added regression tests and documented remaining runtime verification gaps. | LADR-005 |
