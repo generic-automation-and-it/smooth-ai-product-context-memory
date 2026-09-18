@@ -22,6 +22,7 @@ tools:
   - mcp__mimisbrunnr-write__upsert_initiative
   - mcp__mimisbrunnr-write__redact
   - mcp__mimisbrunnr-write__atomicity
+  - mcp__mimisbrunnr-write__authority
   - mcp__mimisbrunnr-write__divergence
 ---
 
@@ -50,6 +51,11 @@ a divergence record as conflict evidence. Before composition, query current prop
 records with sources and pass them as `existingDivergences`; existing unordered exact-claim pair means
 no new divergence. Also probe deterministic divergence UUID by exact identity before write; bounded
 kind recall alone is insufficient after 200 open conflicts.
+
+For a rule-resolvable disagreement, use `authority.py`. If candidate wins, one version bump makes it
+current and retains existing loser in history. If existing wins, two ordered version writes first record
+candidate loser, then restore existing winner as current; API accepts ordered repeated targets in one
+transaction. Report authority and losing-position retention in digest.
 
 Return only bounded clarification needs followed by digest: created, versioned, linked, diverged,
 skipped(atomicity), skipped(duplicate-link), labels-proposed, authority applied, and statuses. Raw recall

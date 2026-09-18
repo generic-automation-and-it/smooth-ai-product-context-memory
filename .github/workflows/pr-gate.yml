@@ -18,6 +18,8 @@ on:
       - .agents/skills/mimisbrunnr-context-memory/**
       - .agents/agents/memory-read.md
       - .agents/agents/memory-write.md
+      - .github/agents/memory-read.agent.md
+      - .github/agents/memory-write.agent.md
       - .mcp.json
       - .github/actions/**
       - .github/workflows/pr-gate.yml
@@ -39,6 +41,8 @@ on:
       - .agents/skills/mimisbrunnr-context-memory/**
       - .agents/agents/memory-read.md
       - .agents/agents/memory-write.md
+      - .github/agents/memory-read.agent.md
+      - .github/agents/memory-write.agent.md
       - .mcp.json
       - .github/actions/**
       - .github/workflows/pr-gate.yml

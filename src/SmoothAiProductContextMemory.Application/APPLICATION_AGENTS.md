@@ -36,6 +36,7 @@ Feature-level contract (uuid wire, dry-run, scope, D42): `Features/FEATURES_AGEN
 | Date | Change | Ref |
 |:-----|:-------|:----|
 | 2026-09-17 | SetMemories now resolves caller-selected create UUIDs before graph planning, allowing transactional links to new memories; cheap reads include source provenance and capture time. | HLD-002 LADR-05, NFR-04 |
+| 2026-09-17 | SetMemories accepts ordered repeated version targets, retaining authority-losing claims as history while leaving selected winner current in one transaction. | HLD-002 LADR-01/LADR-04 |
 | 2026-09-15 | Finalized ticket slice acceptance against the clean full-suite run and explicit performance evidence; no contract, threshold or scope relaxation. | HLD-003 LADR-08; final NFR-02 evidence |
 | 2026-09-14 | Synced working-tree ITicketGraph lock/mutation/traversal abstraction and ticket slices; group handlers share the hierarchy transaction lock. Design acceptance remains distinct from implementation release acceptance while NFR-02 is open. | HLD-003 LADR-08 |
 | 2026-09-14 | Distinguished accepted ticket hierarchy/traversal from delivered memory graph abstractions. Exact identity and JSONB association stay; no EF entity, memory-link projection or ticket-derived scope consent. Documentation only, implementation pending. | HLD-003 LADR-08; HLD-002 LADR-08 |

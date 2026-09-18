@@ -8,6 +8,8 @@ precision/recall over the fixed recall set.
 
 This is NOT CI-gated. Run on demand after a model has produced its verdicts:
 
+    python3 tests/fixtures/score_fixtures.py --emit-model-input > model_input.json
+    # Give only model_input.json to the model, then score its output:
     python3 tests/fixtures/score_fixtures.py --model-verdicts model_output.json
 """
 
@@ -52,13 +54,22 @@ def scenario_matches(expected, got):
 
 def main():
     parser = argparse.ArgumentParser(prog="score_fixtures")
-    parser.add_argument("--model-verdicts", required=True, help="JSON array of the model's verdicts, in scenario order")
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--model-verdicts", help="JSON array of the model's verdicts, in scenario order")
+    mode.add_argument("--emit-model-input", action="store_true",
+                      help="print scenarios without expected verdicts for a blinded model run")
     args = parser.parse_args()
+
+    fixtures = load_fixtures()
+    if args.emit_model_input:
+        blinded = [{key: value for key, value in fixture.items() if key != "expected"}
+                   for fixture in fixtures]
+        print(json.dumps({"scenarios": blinded}, indent=2))
+        return
 
     with open(args.model_verdicts, "r", encoding="utf-8") as fh:
         model = json.load(fh)
 
-    fixtures = load_fixtures()
     if len(model) != len(fixtures):
         print(f"score: expected {len(fixtures)} verdicts, got {len(model)}", file=sys.stderr)
         sys.exit(1)

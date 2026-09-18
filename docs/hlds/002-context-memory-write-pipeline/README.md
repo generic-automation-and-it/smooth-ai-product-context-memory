@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Accepted; pipeline, transactional batch links, divergence composition, delegated recall and deterministic gates implemented; NFR-05 provider telemetry remains open |
+| **Status** | Accepted; all LADR decisions implemented and verified; NFR-03 live all-outcomes evidence and NFR-05 provider telemetry remain open |
 | **Owner** | generik0 |
 | **Tracker** | Context-memory MVP |
 | **Last updated** | 2026-09-17 |
@@ -80,6 +80,9 @@ with a count. A human can audit what happened without reading the store.
 - A pre-write inspection mode runs the identical pipeline and renders the identical digest while persisting nothing.
 - Genuine conflict creates a proposed divergence record with two `contradicts` links;
   authority-resolvable disagreement does not.
+- Rule-resolvable disagreement keeps the losing position in version history and leaves the
+  authority-selected winner current; same-subject genuine conflict keeps both claims current under
+  separate identities.
 
 ### 5. Bulky recall stays outside the working session
 
@@ -126,13 +129,13 @@ See [`./ladrs/`](./ladrs/).
 
 | LADR | Decision | Status |
 |------|----------|--------|
-| [LADR-01](./ladrs/LADR-01-five-stage-pipeline.md) | Five stages in a fixed order, specified together | Accepted |
-| [LADR-02](./ladrs/LADR-02-redaction-precedes-blob-write.md) | Redaction precedes the body write | Accepted |
-| [LADR-03](./ladrs/LADR-03-redact-and-flag.md) | Redact and flag, never reject | Accepted |
-| [LADR-04](./ladrs/LADR-04-semantic-dedup-is-skill-owned.md) | Semantic deduplication belongs to the skill | Accepted |
-| [LADR-05](./ladrs/LADR-05-link-derivation-batched.md) | Link derivation batched into the pre-write round | Accepted |
-| [LADR-06](./ladrs/LADR-06-gate-status-not-persistence.md) | Approval gates status, not persistence | Accepted |
-| [LADR-07](./ladrs/LADR-07-digest-is-a-receipt.md) | The digest is a receipt; dry-run is the veto | Accepted |
+| [LADR-01](./ladrs/LADR-01-five-stage-pipeline.md) | Five stages in a fixed order, specified together | Accepted; implemented and verified |
+| [LADR-02](./ladrs/LADR-02-redaction-precedes-blob-write.md) | Redaction precedes the body write | Accepted; implemented and verified |
+| [LADR-03](./ladrs/LADR-03-redact-and-flag.md) | Redact and flag, never reject | Accepted; implemented and verified |
+| [LADR-04](./ladrs/LADR-04-semantic-dedup-is-skill-owned.md) | Semantic deduplication belongs to the skill | Accepted; implemented and verified |
+| [LADR-05](./ladrs/LADR-05-link-derivation-batched.md) | Link derivation batched into the pre-write round | Accepted; implemented and verified |
+| [LADR-06](./ladrs/LADR-06-gate-status-not-persistence.md) | Approval gates status, not persistence | Accepted; implemented and verified |
+| [LADR-07](./ladrs/LADR-07-digest-is-a-receipt.md) | The digest is a receipt; dry-run is the veto | Accepted; implemented and verified |
 | [LADR-08](./ladrs/LADR-08-practitioner-declared-ticket-hierarchy.md) | Ticket hierarchy is practitioner-declared, with explicit expected-parent mutation | Accepted; implemented and verified |
 
 ## Non-Functional Requirements

@@ -1,6 +1,6 @@
 # LADR-05: Link derivation batched into the pre-write round
 
-**Status:** Accepted
+**Status:** Accepted; implemented and verified 2026-09-17
 
 ## Context
 

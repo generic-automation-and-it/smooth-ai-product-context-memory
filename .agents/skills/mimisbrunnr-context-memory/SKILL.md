@@ -170,7 +170,8 @@ NOT-AVAILABLE, never a silent miss.
 | `redact.py` | `echo '<json array of content strings>' \| python3 .../redact.py` | 2 (redact) | Fingerprint secret detection, stdin→stdout. Emits redacted content plus `{candidate_index, rule_name, hit_count}` findings. **Reports rule names only** — never the matched span, never the content. Redact-and-flag (LADR-003); never rejects. |
 | `atomicity.py` | `echo '<json array of {description,statement}>' \| python3 .../atomicity.py` | 4 (atomicity) | Conservative bundle detector, stdin→stdout. Flags `simple` / `bundled` per candidate. It is a detector only — the split-vs-skip decision and the routing of the unprocessable remainder stay here, in the agent's judgement (LADR-002). |
 | `deepsearch.py` | `python3 .../deepsearch.py` | 3 (opt-in recall) | Baseline 200 plus bounded keyword/traversal passes, stable UUID/version dedupe, 400 aggregate cap and saturation disclosure. |
-| `divergence.py` | `python3 .../divergence.py` | 3 (conflict composition) | Converts an explicit genuine-conflict judgement into ordinary proposed-memory and contradiction-link writes; rejects cross-scope and recursive evidence and deduplicates exact claim pairs. |
+| `authority.py` | `python3 .../authority.py` | 3 (authority resolution) | Converts a stated-authority judgement into one or two ordered version writes. Existing-winner cases record the losing candidate as history, then restore the winner as current in the same transaction. |
+| `divergence.py` | `python3 .../divergence.py` | 3 (conflict composition) | Converts an explicit same-subject genuine-conflict judgement into a separately identified claim, proposed divergence memory and two contradiction links; rejects cross-scope and recursive evidence and deduplicates exact claim pairs. |
 | `near_miss_tags.py` | `python3 .../near_miss_tags.py < approved-evidence.json` | Read-only reporting | Bounded stdin JSON validation, exact tag comparison, scoped `near-miss-tag` output. No network, file output, vocabulary lookup or semantic heuristic. See Evidence-only Near Misses below. |
 
 The **semantic dedup** decision is a two-call composition, never a single preflight:
@@ -179,6 +180,14 @@ The **semantic dedup** decision is a two-call composition, never a single prefli
    - **Facet/tag match is ANY by default** — a query returns rows carrying *any* of the requested facets, so a batch's facet set unifies disjoint rows (the recall union rather than an empty set). Containment (only rows carrying *every* requested facet) is opt-in via `"facetMatchMode": "all"`; do not use it for recall, it is the deliberate-narrowing form.
 2. **Judge** — compare each recalled row's cheap fields to the candidate and decide, per pair, `version_bump` (send the matched row's `uuid` in `set`) / `new_memory` / `skip`. This LLM judgement is where the semantic equivalence (e.g. *"we store in Postgres"* vs *"PostgreSQL is the storage engine"*) is resolved.
 3. `/preflight` contributes only the **exact-match backstop**, **intra-batch collisions**, and **ticket-uniqueness conflicts**. It judges nothing. Candidate recall for the semantic step comes from `/query`, not `/preflight`.
+
+For a rule-resolvable disagreement, invoke `authority.py` with the selected authority and winner. A
+candidate winner is one version bump; the prior claim remains history. An existing winner is encoded as
+two ordered version writes in one `set`: record the losing candidate, then restore the existing winner
+as current. This retains both positions without falsely exposing the loser as current. For genuine
+conflict, invoke `divergence.py` only after explicitly judging same subject/scope/applicability/business
+time and no stated winner. It gives the alternative claim a deterministic non-colliding storage subject;
+the original claim text and provenance remain unchanged and `contradicts` links preserve reachability.
 
 The **20-candidate cap** is a static configurable setting (`MAX_CANDIDATES` in `context_memory_client.py`), changeable without touching pipeline logic. A batch over the cap is refused with "split into multiple checkpoints", never silently truncated.
 

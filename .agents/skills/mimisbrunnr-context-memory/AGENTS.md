@@ -13,8 +13,11 @@ derivation, redaction and atomicity checks the database cannot express as constr
   read/write contexts. Read execution receives only the read API credential and read-only client;
   write execution receives discrete facts, never a transcript. API credentials enforce capability;
   prompt text alone is not a security boundary.
-- **Project agent registrations live in `.agents/agents/`.** Skill-local files hold detailed contracts;
-  project registrations make workers discoverable and point at them. Read worker has no generic
+- **Project agent registrations live in `.agents/agents/` for Claude-compatible runtimes and
+  `.github/agents/` for Copilot.** Skill-local files hold detailed contracts; project registrations
+  make workers discoverable and point at them. Codex has no equivalent repository custom-agent
+  registration; Codex is not structurally supported for this delegation until its runtime gains one.
+  Read worker has no generic
   shell/write-client access; its MCP server strips `CONTEXT_MEMORY_WRITE_TOKEN` and exposes only reads.
   Write worker also has no shell/file tools; typed write MCP methods bound its mutation surface.
 
@@ -126,6 +129,10 @@ flowchart LR
   re-capture only. Word-overlap heuristics misfire on short subjects (proven in trial 3). Candidate
   recall is narrowed by facet/kind, then the LLM judges a bounded top-N; the match drives version-bump
   vs new-memory vs skip.
+- **Authority resolution retains both positions.** Candidate winner is one version bump. Existing
+  winner is two ordered version writes in one transactional set: candidate loser first, existing winner
+  second. Genuine conflict remains two current claim identities plus a proposed divergence record;
+  helper-generated alternative description avoids same-group subject uniqueness collision.
 - **Recall facets/tags match ANY (union), not containment.** A multi-facet batch must return every
   memory carrying any requested facet; containment would return nothing for any batch no single memory
   fully covers — an empty result that looks like an empty store and defeats dedup. Traversal
@@ -202,7 +209,9 @@ flowchart LR
 - **On-demand LLM-eval fixtures (not CI-gated):**
   `.agents/skills/mimisbrunnr-context-memory/tests/fixtures/scenarios.json` plus `score_fixtures.py`. Authored
   positive/negative scenarios for the semantic-dedup, atomicity, link and divergence stages, scored
-  for recall AND precision against a countable expected-verdict set.
+  for recall AND precision against a countable expected-verdict set. Give the model only
+  `score_fixtures.py --emit-model-input` output; the source fixture contains expected answers and is
+  scorer-only. A run where the model reads `scenarios.json` is circular and invalid evidence.
 - The skill's test approach is specified in `docs/hlds/002-context-memory-write-pipeline/nfrs/NFR-02-deduplication-accuracy.md`. These
   are not this repo's L0/L1/L2 tiers, which apply to the C# API (PR #14).
 
@@ -225,6 +234,7 @@ redaction detector is a stdin→stdout fingerprint script reporting rule names o
 | 2026-09-17 | Test References corrected: the PR-gate skill step runs both `run_tests.py` and `measure_cost.py`, not `run_tests.py` alone. | `.github/workflows/pr-gate.yml` |
 | 2026-09-17 | Both stdio MCP servers answer malformed JSON with a JSON-RPC parse error (-32700) and non-object messages with Invalid Request (-32600) instead of crashing the worker; parsing is shared through `memory_read_mcp.respond`. | code review |
 | 2026-09-17 | Delivered memory-read/memory-write contracts, read-only client, bounded deepsearch, divergence composition/loop guard, createUuid payloads, cost evidence and deterministic PR gate. | HLD-002 closure |
+| 2026-09-17 | Added executable authority resolution, exact-subject divergence storage, and Copilot custom-agent registrations; Codex custom-agent limitation documented. | BR-10 closure |
 | 2026-09-17 | Approved delegated read/write execution, API-backed capability separation, bounded deep search, transactional create UUIDs and proposed divergence contract. | HLD-002 delta closure |
 | 2026-09-16 | SKILL.md recall rationale updated for stemmed full-text recall: `/query` free-text is now AND-of-all-lexemes under the `english` configuration - stemming forgives inflections, not sentence structure, so natural-language free-text still defeats recall. | HLD-001 storage delta |
 | 2026-09-15 | Replaced unmerged near-miss criteria schema with frozen original API query (`tags` + sole `facetMatchMode`, default ANY); bound approved UUID/version evidence to actual scope and retained status/scope with explicit proposed flag. Added shared ticket UTF-16 length/NUL/Unicode guards and wire-compatible timestamp validation without normalization. Updated fixtures/docs; Python harness 42 passing tests including positive/negative offline regressions. No retrieval, compatibility shim or C# changes. | HLD-005 LADR-10/13, NFR-04; HLD-002 LADR-08 |

@@ -5,6 +5,7 @@ import json
 import sys
 
 import atomicity
+import authority
 import context_memory_client as client
 import deepsearch
 import divergence
@@ -15,7 +16,7 @@ SERVER_NAME = "mimisbrunnr-write"
 READ_TOOLS = {tool[0] for tool in memory_read_mcp.TOOLS}
 WRITE_TOOLS = ("preflight", "set", "resolve_group", "update_group", "append_description",
                "create_link", "ticket_parent", "propose_label", "upsert_initiative",
-               "redact", "atomicity", "divergence")
+               "redact", "atomicity", "authority", "divergence")
 
 
 def _schema(properties, required=None):
@@ -77,6 +78,8 @@ def call_tool(name, arguments):
                             for item in arguments["items"]]}
     if name == "divergence":
         return divergence.compose(payload)
+    if name == "authority":
+        return authority.compose(payload)
     raise ValueError(f"Unknown write tool '{name}'")
 
 

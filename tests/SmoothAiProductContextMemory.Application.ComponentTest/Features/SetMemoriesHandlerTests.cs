@@ -177,9 +177,8 @@ public sealed class SetMemoriesHandlerTests(AspireFixture aspire) : HandlerTestB
             await handler.Handle(Write(group.Uuid, "Taken subject", "Other claim"), Ct));
     }
 
-    /// <summary>A batch versioning the same uuid twice must fail on both paths, not pass dry run then 500.</summary>
     [Fact]
-    public async Task Duplicate_version_target_is_a_conflict_on_both_paths()
+    public async Task Ordered_versions_of_same_target_retain_loser_and_restore_winner()
     {
         var group = TestEntities.NewGroup();
         Db.MemoryGroups.Add(group);
@@ -188,19 +187,28 @@ public sealed class SetMemoriesHandlerTests(AspireFixture aspire) : HandlerTestB
         SetMemories.Handler handler = NewHandler();
         Guid uuid = (await handler.Handle(Write(group.Uuid, "Subject", "Claim 1"), Ct)).Items[0].Uuid!.Value;
 
-        SetMemories.Request batch = Write(group.Uuid, "Subject", "Claim 2", uuid) with
+        SetMemories.Request batch = Write(group.Uuid, "Subject", "Losing claim", uuid) with
         {
             Items =
             [
-                Write(group.Uuid, "Subject", "Claim 2", uuid).Items[0],
-                Write(group.Uuid, "Subject", "Claim 3", uuid).Items[0],
+                Write(group.Uuid, "Subject", "Losing claim", uuid).Items[0],
+                Write(group.Uuid, "Subject", "Claim 1", uuid).Items[0],
             ],
         };
 
-        await Should.ThrowAsync<ConflictException>(async () =>
-            await handler.Handle(batch with { DryRun = true }, Ct));
-        await Should.ThrowAsync<ConflictException>(async () =>
-            await handler.Handle(batch, Ct));
+        SetMemories.Response dry = await handler.Handle(batch with { DryRun = true }, Ct);
+        dry.Versioned.ShouldBe(2);
+
+        SetMemories.Response written = await handler.Handle(batch, Ct);
+        written.Versioned.ShouldBe(2);
+
+        long memoryId = await Db.Memories.Where(m => m.Uuid == uuid).Select(m => m.Id).SingleAsync(Ct);
+        List<MemoryVersion> versions = await Db.MemoryVersions.AsNoTracking()
+            .Where(v => v.MemoryId == memoryId)
+            .OrderBy(v => v.Version)
+            .ToListAsync(Ct);
+        versions.Select(v => v.Statement).ShouldBe(["Claim 1", "Losing claim", "Claim 1"]);
+        versions.Single(v => v.IsCurrent).Version.ShouldBe(3);
     }
 
     [Fact]
@@ -310,15 +318,15 @@ public sealed class SetMemoriesHandlerTests(AspireFixture aspire) : HandlerTestB
         Db.MemoryGroups.Add(group);
         await Db.SaveChangesAsync(Ct);
 
-        Guid existing = (await NewHandler().Handle(Write(group.Uuid, "Existing claim", "Claim A"), Ct))
+        Guid existing = (await NewHandler().Handle(Write(group.Uuid, "Storage engine", "Use PostgreSQL"), Ct))
             .Items[0].Uuid!.Value;
         Guid candidate = Guid.NewGuid();
         Guid divergence = Guid.NewGuid();
-        SetMemories.Request request = Write(group.Uuid, "Conflicting claim", "Claim B") with
+        SetMemories.Request request = Write(group.Uuid, $"Unresolved alternative to {existing} ({candidate})", "Use SQLite") with
         {
             Items =
             [
-                Write(group.Uuid, "Conflicting claim", "Claim B").Items[0] with { CreateUuid = candidate },
+                Write(group.Uuid, $"Unresolved alternative to {existing} ({candidate})", "Use SQLite").Items[0] with { CreateUuid = candidate },
                 Write(group.Uuid, "Open conflict", "Sources disagree").Items[0] with
                 {
                     CreateUuid = divergence,

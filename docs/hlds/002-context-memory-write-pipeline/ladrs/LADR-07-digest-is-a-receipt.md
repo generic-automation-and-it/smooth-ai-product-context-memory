@@ -1,6 +1,6 @@
 # LADR-07: The digest is a receipt; dry-run is the veto
 
-**Status:** Accepted
+**Status:** Accepted; implemented and verified 2026-09-17
 
 ## Context
 

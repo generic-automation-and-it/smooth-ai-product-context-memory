@@ -1,0 +1,55 @@
+[
+  {
+    "verdict": "scrub",
+    "reason": "Candidate description contains AWS access-key-shaped credential material."
+  },
+  {
+    "verdict": "version_bump",
+    "reason": "Candidate restates same PostgreSQL storage decision.",
+    "target_uuid": "m-001"
+  },
+  {
+    "verdict": "split",
+    "reason": "Candidate bundles PostgreSQL selection, JSONB need, and GIN index choice into separate facts.",
+    "count": 3
+  },
+  {
+    "verdict": "version_bump",
+    "reason": "Candidate restates same atomic-memory fact despite cross-group recall.",
+    "target_uuid": "m-002"
+  },
+  {
+    "verdict": "link",
+    "reason": "Candidate is directly related to existing local-first service positioning.",
+    "relation": "relates_to",
+    "link_uuid": "m-003"
+  },
+  {
+    "verdict": "set_scope_program",
+    "reason": "Statement explicitly describes programme-level knowledge rather than shipped product behavior.",
+    "not_product_fact": true
+  },
+  {
+    "verdict": "genuine_conflict",
+    "reason": "SQLite decision contradicts existing PostgreSQL decision, with no reversal authority or supersession metadata.",
+    "diverged": 1,
+    "relation": "contradicts",
+    "count": 2
+  },
+  {
+    "verdict": "new_memory",
+    "reason": "Search-index placement is distinct from general storage-engine selection."
+  },
+  {
+    "verdict": "authority_resolved",
+    "reason": "Executable test evidence for transactional link writes outranks conflicting specification text.",
+    "authority": "shipped_behavior",
+    "diverged": 0
+  },
+  {
+    "verdict": "authority_resolved",
+    "reason": "Approved glossary vocabulary outranks proposed replacement terminology.",
+    "authority": "agreed_vocabulary",
+    "diverged": 0
+  }
+]

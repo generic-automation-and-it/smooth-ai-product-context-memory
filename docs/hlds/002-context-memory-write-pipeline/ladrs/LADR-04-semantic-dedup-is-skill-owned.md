@@ -1,6 +1,6 @@
 # LADR-04: Semantic deduplication belongs to the skill
 
-**Status:** Accepted
+**Status:** Accepted; implemented and verified 2026-09-17
 
 ## Context
 
@@ -26,6 +26,11 @@ within-group check would miss precisely the duplicates that matter.
 Recall is narrowed by classification first, then a bounded candidate set is judged. The judgement is
 the model's; string similarity may act as a **negative-only** pre-filter and is never the deciding
 signal on its own.
+
+When two same-subject claims disagree, the skill applies only BR-10's stated authority. If candidate
+wins, normal versioning retains prior claim. If existing claim wins, one transaction records candidate
+as an intermediate historical version and restores existing claim as current. If neither authority
+rule selects winner, claims retain separate identities and a proposed divergence links both.
 
 The failure is **silent in both directions**, which is what makes it dangerous. A missed match inserts
 a near-duplicate that dilutes every future retrieval; a false match rewrites canon under a subject that

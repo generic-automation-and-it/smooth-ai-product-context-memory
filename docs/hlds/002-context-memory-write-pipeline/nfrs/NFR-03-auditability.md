@@ -22,9 +22,9 @@ which is the only thing that makes dry-run predictive.
 `diverged` is the count of newly created `kind: divergence` records. Existing conflict pairs and
 generated-divergence loop prevention do not increment it.
 
-Current API and deterministic tests cover each mechanical outcome and divergence composition, but one
-live delegated batch combining every outcome plus both skill-level skip categories has not been
-recorded. That missing all-outcomes run is the acceptance blocker.
+Current API and deterministic tests cover each mechanical outcome, ordered authority resolution and
+divergence composition. One live delegated batch combining every outcome plus both skill-level skip
+categories has not been recorded. That missing all-outcomes run is the acceptance blocker.
 
 ## Acceptance Criteria
 

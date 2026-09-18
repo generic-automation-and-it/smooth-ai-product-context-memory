@@ -27,6 +27,9 @@ The fixture drives the **model judgement**, not a string heuristic. A test that 
 then observes it holding measures nothing — a prior trial did exactly this and reported a result that
 did not transfer.
 
+The model must receive the blinded output of `score_fixtures.py --emit-model-input`, never the source
+fixture containing `expected`. Expected verdicts are scorer-only; exposing them invalidates the run.
+
 ## Acceptance Criteria
 
 - Both recall and precision reported per run; neither alone is a pass.
@@ -37,3 +40,9 @@ did not transfer.
 ## Applies To
 
 Goal 2; LADR-04. The largest correctness risk in the system.
+
+## Evidence
+
+[2026-09-17 blinded semantic evaluation](./NFR-02-semantic-evidence-2026-09-17.md) scored 1.0000 recall
+and 1.0000 precision across ten authored scenarios, including genuine conflict, two authority controls
+and a related-but-distinct negative control. Deterministic plumbing remains CI-gated separately.

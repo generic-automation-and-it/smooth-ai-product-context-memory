@@ -1,6 +1,6 @@
 # LADR-06: Approval gates status, not persistence
 
-**Status:** Accepted
+**Status:** Accepted; implemented and verified 2026-09-17
 
 ## Context
 

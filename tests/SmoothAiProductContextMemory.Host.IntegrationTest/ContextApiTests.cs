@@ -275,6 +275,49 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
         (await response.Content.ReadAsStringAsync(Ct)).ShouldContain("CreateUuid");
     }
 
+    [Fact]
+    public async Task Set_orders_repeated_version_targets_in_one_transaction()
+    {
+        Guid group = await ResolveGroup(MemoryGroup.ScopeDimensionValue.Product);
+        Guid uuid = await Capture(group, "Authority subject", "Existing winner");
+        JsonElement losing = JsonSerializer.SerializeToElement(SetBody(
+                group,
+                "Authority subject",
+                "Losing candidate",
+                MemoryVersion.MemoryVersionStatus.Approved,
+                uuid), Json)
+            .GetProperty("items")[0];
+        JsonElement winner = JsonSerializer.SerializeToElement(SetBody(
+                group,
+                "Authority subject",
+                "Existing winner",
+                MemoryVersion.MemoryVersionStatus.Approved,
+                uuid), Json)
+            .GetProperty("items")[0];
+        object body = new
+        {
+            groupUuid = group,
+            items = new object[]
+            {
+                losing,
+                winner,
+            },
+            links = Array.Empty<object>(),
+            labelsProposed = Array.Empty<string>(),
+        };
+
+        using HttpResponseMessage response = await _http.PostAsJsonAsync("/api/context/memories", body, Ct);
+        string payload = await response.Content.ReadAsStringAsync(Ct);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, payload);
+
+        using HttpResponseMessage history = await _http.GetAsync($"/api/context/memories/{uuid}/versions", Ct);
+        JsonElement versions = (await history.Content.ReadFromJsonAsync<JsonElement>(Json, Ct)).GetProperty("items");
+        versions.GetArrayLength().ShouldBe(3);
+        versions[1].GetProperty("statement").GetString().ShouldBe("Losing candidate");
+        versions[2].GetProperty("statement").GetString().ShouldBe("Existing winner");
+        versions[2].GetProperty("isCurrent").GetBoolean().ShouldBeTrue();
+    }
+
     /// <summary>
     /// A body-supplied dryRun is a dry run too — it must not be silently overwritten by the absent
     /// query default and turned into a real write.

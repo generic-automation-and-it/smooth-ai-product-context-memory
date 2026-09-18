@@ -60,6 +60,8 @@ def compose(payload):
         raise ValueError("candidate.write is required")
     if candidate_write.get("kind") == "divergence" or existing.get("kind") == "divergence":
         raise ValueError("divergence records cannot become conflict evidence")
+    if payload.get("sameSubject") is not True:
+        raise ValueError("genuine conflict requires an explicit same-subject judgement")
     if candidate.get("scopeDimension") != existing.get("scopeDimension") \
             or candidate.get("scopeIdentifier") != existing.get("scopeIdentifier"):
         raise ValueError("claims from different applicability scopes are not a genuine conflict")
@@ -73,13 +75,15 @@ def compose(payload):
     known.update(existing_pairs(payload.get("existingDivergences", [])))
     records = payload.get("existingDivergences", [])
     if key in known or key in existing_pairs(records) or existing_record_uuid(records, key):
-        return {"items": [candidate_write], "links": [], "diverged": 0, "pair": key}
+        return {"items": [], "links": [], "diverged": 0, "pair": key}
 
     record_uuid = divergence_uuid(key)
     reason = payload.get("reason")
     if not isinstance(reason, str) or not reason.strip():
         raise ValueError("a non-empty conflict reason is required")
     now = candidate_write.get("validFrom")
+    candidate_write = dict(candidate_write)
+    candidate_write["description"] = f"Unresolved alternative to {existing_uuid} ({candidate_uuid})"
     divergence = {
         "uuid": None,
         "createUuid": record_uuid,

@@ -22,6 +22,7 @@ tools:
   - mcp__mimisbrunnr-write__upsert_initiative
   - mcp__mimisbrunnr-write__redact
   - mcp__mimisbrunnr-write__atomicity
+  - mcp__mimisbrunnr-write__authority
   - mcp__mimisbrunnr-write__divergence
 model: opus
 ---

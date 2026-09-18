@@ -35,13 +35,13 @@ See [./ladrs/](./ladrs/).
 
 | LADR | Decision | Why it matters |
 |------|----------|----------------|
-| [LADR-01](./ladrs/LADR-01-five-stage-pipeline.md) | Five stages, fixed order, specified together | The stage numbers are canonical; decisions and stages are two different lists and do not map one-to-one |
-| [LADR-02](./ladrs/LADR-02-redaction-precedes-blob-write.md) | Redaction precedes the body write | The only point at which prevention is still possible |
-| [LADR-03](./ladrs/LADR-03-redact-and-flag.md) | Redact and flag, never reject | Rejecting discards knowledge for an incidental problem |
-| [LADR-04](./ladrs/LADR-04-semantic-dedup-is-skill-owned.md) | Semantic matching is the skill's | The database offers exact-match only; this is the top correctness risk |
-| [LADR-05](./ladrs/LADR-05-link-derivation-batched.md) | Link derivation batched with deduplication | Without a named stage, relationships are never created at all |
-| [LADR-06](./ladrs/LADR-06-gate-status-not-persistence.md) | Gate status, not persistence | Recording is reversible; becoming canon is not |
-| [LADR-07](./ladrs/LADR-07-digest-is-a-receipt.md) | Digest is a receipt; dry-run is the veto | The transaction has committed before a digest can describe it |
+| [LADR-01](./ladrs/LADR-01-five-stage-pipeline.md) | Accepted; implemented and verified | The stage numbers are canonical; decisions and stages are two different lists and do not map one-to-one |
+| [LADR-02](./ladrs/LADR-02-redaction-precedes-blob-write.md) | Accepted; implemented and verified | The only point at which prevention is still possible |
+| [LADR-03](./ladrs/LADR-03-redact-and-flag.md) | Accepted; implemented and verified | Rejecting discards knowledge for an incidental problem |
+| [LADR-04](./ladrs/LADR-04-semantic-dedup-is-skill-owned.md) | Accepted; implemented and verified | The database offers exact-match only; this is the top correctness risk |
+| [LADR-05](./ladrs/LADR-05-link-derivation-batched.md) | Accepted; implemented and verified | Without a named stage, relationships are never created at all |
+| [LADR-06](./ladrs/LADR-06-gate-status-not-persistence.md) | Accepted; implemented and verified | Recording is reversible; becoming canon is not |
+| [LADR-07](./ladrs/LADR-07-digest-is-a-receipt.md) | Accepted; implemented and verified | The transaction has committed before a digest can describe it |
 | [LADR-08](./ladrs/LADR-08-practitioner-declared-ticket-hierarchy.md) | Accepted; declared ticket writer implemented and verified | Resolves HLD-005 LADR-11's ticket writer; strict expected-parent semantics, no inference or tracker synchronization |
 
 ## Key Behaviors
@@ -76,6 +76,10 @@ Targets and verification live in [./nfrs/](./nfrs/). Three shape how code is wri
   items mechanically. Generated divergence is excluded from conflict evidence and deduplicated by the
   unordered pair of exact claim references. Rule-resolvable disagreement applies only BR-10's stated
   authority: verified shipped behaviour over specification, and agreed vocabulary over alternatives.
+  Candidate-winner resolution is one version bump. Existing-winner resolution is two ordered version
+  writes in one request: candidate loser becomes history, then existing winner becomes current again.
+  Same-subject genuine conflict gives the candidate a deterministic non-colliding storage subject so
+  both claims remain current and reachable; claim text and provenance are not rewritten.
 - `--deepsearch` is opt-in: baseline recall remains capped at 200, then at most four keyword FTS passes
   of 25 and five depth-one traversals of 20, with 400 unique UUID/version candidates overall. Stable
   first-seen ordering and saturation/cap disclosure are mandatory.
@@ -95,6 +99,7 @@ Targets and verification live in [./nfrs/](./nfrs/). Three shape how code is wri
 |:-----|:-------|:----|
 | 2026-09-17 | Key Behaviors corrected: the stage-1 preflight and stage-3 semantic recall are distinct bounded reads; removed the stale "one traversal serves three concerns" claim that contradicted LADR-01 and the c4-context sequence diagram. | LADR-01; c4-context diagram |
 | 2026-09-17 | Working-tree AppHost verification confirmed dry-run/write identity and link-count parity for two caller-identified creates plus one new-to-new edge; read-token traversal returned the edge. | NFR-05 evidence |
+| 2026-09-17 | Verified ordered same-target version writes for authority-resolved conflicts and deterministic same-subject divergence composition; LADR-01, LADR-04, LADR-05 and LADR-07 now distinguish implementation acceptance from remaining NFR evidence. | BR-10 closure |
 | 2026-09-17 | Approved closure contracts: additive `createUuid`, proposed divergence with loop/pair guards, bounded opt-in deep search, delegated read/write execution, and API-enforced read/write capabilities. | HLD-002 delta closure |
 | 2026-09-16 | Stemming/trigram deferral resolved by HLD-001's measurement: candidate recall now uses the `english` FTS configuration; trigram rejected with a reopening threshold. Skill-owned semantic judgement unchanged. | HLD-001 NFR-02 recall-tuning measurements |
 | 2026-09-15 | Finalized declared ticket writer acceptance against the passing solution, explicit benchmarks and Python harness. Corrected obsolete untested-scope claim; strict expected-parent/no-replay and local shape-only inspection remain unchanged. Full dossier and tag graph remain outside scope. | LADR-08; HLD-003 final NFR-02 evidence |

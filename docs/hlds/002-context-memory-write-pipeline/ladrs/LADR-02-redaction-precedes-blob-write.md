@@ -1,6 +1,6 @@
 # LADR-02: Redaction precedes the body write
 
-**Status:** Accepted
+**Status:** Accepted; implemented and verified 2026-09-17
 
 ## Context
 

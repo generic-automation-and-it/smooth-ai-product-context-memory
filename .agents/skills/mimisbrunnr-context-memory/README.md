@@ -26,6 +26,10 @@ and a retrieval (`get`) path that returns cheap fields by default and touches th
 Phase 3 above **is** pipeline stage 1 — the phases and the stages overlap rather than nest, which is why
 the pipeline table in `SKILL.md` is the canonical numbering.
 
+Rule-resolvable disagreement uses ordered versions: if existing claim remains authoritative, incoming
+loser is recorded as history before existing winner is restored as current in same transactional set.
+Genuine conflict keeps both claims current under separate identities and adds proposed divergence record.
+
 ## Where the tokens actually go
 
 R13 requires logical summary and keyword judgement for every fact, but that does not imply one provider

@@ -40,6 +40,7 @@ client = _load("context_memory_client")
 near_miss = _load("near_miss_tags")
 deepsearch = _load("deepsearch")
 divergence = _load("divergence")
+authority = _load("authority")
 read_mcp = _load("memory_read_mcp")
 write_mcp = _load("memory_write_mcp")
 
@@ -384,9 +385,10 @@ class DivergenceTests(unittest.TestCase):
         return {
             "candidate": {"scopeDimension": "product", "scopeIdentifier": None, "write": candidate},
             "existing": {"uuid": "22222222-2222-4222-8222-222222222222", "version": 3,
-                         "kind": "decision", "scopeDimension": "product", "scopeIdentifier": None,
-                         "confidence": 70},
+                          "kind": "decision", "scopeDimension": "product", "scopeIdentifier": None,
+                          "confidence": 70},
             "reason": "No stated authority selects either claim.",
+            "sameSubject": True,
             "existingPairs": [],
         }
 
@@ -395,6 +397,9 @@ class DivergenceTests(unittest.TestCase):
         self.assertEqual(result["diverged"], 1)
         self.assertEqual(result["items"][1]["kind"], "divergence")
         self.assertEqual(result["items"][1]["status"], "proposed")
+        self.assertEqual(result["items"][0]["description"],
+                         "Unresolved alternative to 22222222-2222-4222-8222-222222222222 "
+                         "(11111111-1111-4111-8111-111111111111)")
         self.assertEqual(len(result["links"]), 2)
         self.assertTrue(all(link["relation"] == "contradicts" for link in result["links"]))
 
@@ -402,7 +407,9 @@ class DivergenceTests(unittest.TestCase):
         first = divergence.compose(self.payload())
         duplicate = self.payload()
         duplicate["existingPairs"] = [first["pair"]]
-        self.assertEqual(divergence.compose(duplicate)["diverged"], 0)
+        duplicate_result = divergence.compose(duplicate)
+        self.assertEqual(duplicate_result["diverged"], 0)
+        self.assertEqual(duplicate_result["items"], [])
         loop = self.payload()
         loop["existing"]["kind"] = "divergence"
         with self.assertRaises(ValueError):
@@ -424,6 +431,65 @@ class DivergenceTests(unittest.TestCase):
         payload["existing"]["scopeDimension"] = "program"
         with self.assertRaises(ValueError):
             divergence.compose(payload)
+
+
+class AuthorityTests(unittest.TestCase):
+    def payload(self, winner):
+        return {
+            "authority": "shipped_behavior",
+            "winner": winner,
+            "candidateWrite": {"createUuid": "11111111-1111-4111-8111-111111111111",
+                               "statement": "Losing claim" if winner == "existing" else "Candidate"},
+            "existing": {"uuid": "22222222-2222-4222-8222-222222222222",
+                         "write": {"statement": "Existing winner"}},
+        }
+
+    def test_candidate_winner_is_one_version_and_existing_history_is_retained(self):
+        result = authority.compose(self.payload("candidate"))
+        self.assertEqual(len(result["items"]), 1)
+        self.assertEqual(result["items"][0]["uuid"], "22222222-2222-4222-8222-222222222222")
+        self.assertNotIn("createUuid", result["items"][0])
+        self.assertTrue(result["losingPositionRetained"])
+
+    def test_existing_winner_records_loser_then_restores_winner(self):
+        result = authority.compose(self.payload("existing"))
+        self.assertEqual([item["statement"] for item in result["items"]],
+                         ["Losing claim", "Existing winner"])
+        self.assertTrue(all(item["uuid"] == "22222222-2222-4222-8222-222222222222"
+                            for item in result["items"]))
+
+    def test_unknown_authority_is_rejected(self):
+        payload = self.payload("candidate")
+        payload["authority"] = "confidence"
+        with self.assertRaises(ValueError):
+            authority.compose(payload)
+
+
+class SemanticFixtureTests(unittest.TestCase):
+    def test_blinded_model_input_excludes_expected_verdicts(self):
+        completed = subprocess.run(
+            [sys.executable, str(HERE / "fixtures" / "score_fixtures.py"), "--emit-model-input"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0)
+        payload = json.loads(completed.stdout)
+        self.assertTrue(payload["scenarios"])
+        self.assertTrue(all("expected" not in scenario for scenario in payload["scenarios"]))
+
+    def test_committed_blinded_semantic_evidence_scores_cleanly(self):
+        completed = subprocess.run(
+            [sys.executable, str(HERE / "fixtures" / "score_fixtures.py"),
+             "--model-verdicts", str(HERE / "fixtures" / "model-verdicts-2026-09-17.json")],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        score = json.loads(completed.stdout)
+        self.assertEqual(score["recall"], 1.0)
+        self.assertEqual(score["precision"], 1.0)
 
 
 class AgentContractTests(unittest.TestCase):
@@ -510,6 +576,13 @@ class AgentContractTests(unittest.TestCase):
                     if line.strip().startswith("- mcp__mimisbrunnr-write__")}
         exposed = {f"mcp__mimisbrunnr-write__{tool['name']}" for tool in write_mcp.tool_definitions()}
         self.assertEqual(declared, exposed)
+
+        copilot_agents = HERE.parents[3] / ".github" / "agents"
+        copilot_read = (copilot_agents / "memory-read.agent.md").read_text(encoding="utf-8")
+        copilot_write = (copilot_agents / "memory-write.agent.md").read_text(encoding="utf-8")
+        self.assertIn("mimisbrunnr-read/query", copilot_read)
+        self.assertNotIn("execute", copilot_read.split("---", 2)[1])
+        self.assertIn("mimisbrunnr-write/*", copilot_write)
 
 
 class TicketClientTests(unittest.TestCase):

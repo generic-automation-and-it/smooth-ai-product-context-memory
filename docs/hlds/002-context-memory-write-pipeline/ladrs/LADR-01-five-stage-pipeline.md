@@ -1,6 +1,6 @@
 # LADR-01: Five stages in a fixed order, specified together
 
-**Status:** Accepted
+**Status:** Accepted; implemented and verified 2026-09-17
 
 ## Context
 
@@ -28,6 +28,10 @@ and never re-sequenced.
    one-hop graph passes; it does not change authority or scope.
 4. **Atomicity check** — confirm one memory is one fact; split bundles, route the remainder to skipped.
 5. **Write** — one transactional call owned by the API.
+
+Rule-resolvable disagreement may produce two ordered version writes for one UUID in that call: first
+retain the losing candidate as history, then restore the authority-selected existing claim as current.
+This is still one stage and one transaction, not a second write pipeline.
 
 The **decisions and the stages are two different lists** and do not map one-to-one. Exact deduplication
 spans stages 1 and 3; semantic recall and link derivation live in stage 3; ticket uniqueness lives
