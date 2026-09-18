@@ -28,10 +28,10 @@ public sealed class SetMemoriesHandlerTests(AspireFixture aspire) : HandlerTestB
         second.Created.ShouldBe(0);
 
         long memoryId = await Db.Memories.Where(m => m.Uuid == uuid).Select(m => m.Id).SingleAsync(Ct);
-        List<MemoryVersion> versions = await Db.MemoryVersions.AsNoTracking()
+        MemoryVersion[] versions = await Db.MemoryVersions.AsNoTracking()
             .Where(v => v.MemoryId == memoryId)
             .OrderBy(v => v.Version)
-            .ToListAsync(Ct);
+            .ToArrayAsync(Ct);
 
         versions.Count.ShouldBe(2);
         versions.Count(v => v.IsCurrent).ShouldBe(1);
