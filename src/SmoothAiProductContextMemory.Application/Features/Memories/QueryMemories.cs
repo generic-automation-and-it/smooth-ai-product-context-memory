@@ -65,11 +65,16 @@ public static class QueryMemories
     public sealed class Handler(
         IApplicationDbContext db,
         IMemorySearch search,
+        IRecallFeedback feedback,
         ILogger<Handler> logger) : IRequestHandler<Request, Response>
     {
         public async ValueTask<Response> Handle(Request request, CancellationToken cancellationToken)
         {
             logger.LogInformation("Query memories started");
+
+            string shape = RecallShapeClassifier.Classify(request);
+            Guid retrievalId = Guid.NewGuid();
+            DateTimeOffset occurredOn = DateTimeOffset.UtcNow;
 
             bool hasTicket = !string.IsNullOrWhiteSpace(request.TicketProvider)
                 && !string.IsNullOrWhiteSpace(request.TicketKey);
@@ -84,6 +89,7 @@ public static class QueryMemories
                 {
                     // A miss is a signal the caller acts on, not an error.
                     logger.LogInformation("Query memories completed. Count: {Count}", 0);
+                    Emit([new RecallFeedbackRecord(retrievalId, null, shape, occurredOn)]);
                     return new Response([]);
                 }
 
@@ -124,7 +130,39 @@ public static class QueryMemories
             IReadOnlyList<CheapMemory> items = await search.SearchAsync(criteria, cancellationToken);
 
             logger.LogInformation("Query memories completed. Count: {Count}", items.Count);
+
+            // Feedback is emitted after the response is fully materialised and is guarded so a
+            // feedback failure can never fail the retrieval; it cannot change the result set,
+            // ordering, limit or ranking. Off the critical path.
+            if (items.Count == 0)
+            {
+                Emit([new RecallFeedbackRecord(retrievalId, null, shape, occurredOn)]);
+            }
+            else
+            {
+                RecallFeedbackRecord[] records = new RecallFeedbackRecord[items.Count];
+                for (int i = 0; i < items.Count; i++)
+                {
+                    records[i] = new RecallFeedbackRecord(retrievalId, items[i].Uuid, shape, occurredOn);
+                }
+
+                Emit(records);
+            }
+
             return new Response(items);
+        }
+
+        private void Emit(RecallFeedbackRecord[] records)
+        {
+            try
+            {
+                feedback.Record(records);
+            }
+            catch (Exception ex)
+            {
+                // No record payload in the log — content must never reach a log line.
+                logger.LogDebug(ex, "Recall feedback write failed; retrieval unaffected.");
+            }
         }
     }
 }

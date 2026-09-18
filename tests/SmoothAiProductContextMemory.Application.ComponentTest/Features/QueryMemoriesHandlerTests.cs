@@ -201,7 +201,14 @@ public sealed class QueryMemoriesHandlerTests(AspireFixture aspire) : HandlerTes
         new(AppDb, Graph, Blob, ErrorMapper, Loggers.CreateLogger<SetMemories.Handler>());
 
     private QueryMemories.Handler NewQuery() =>
-        new(AppDb, Search, Loggers.CreateLogger<QueryMemories.Handler>());
+        new(AppDb, Search, new NoopRecallFeedback(), Loggers.CreateLogger<QueryMemories.Handler>());
+
+    private sealed class NoopRecallFeedback : IRecallFeedback
+    {
+        public void Record(RecallFeedbackRecord[] records)
+        {
+        }
+    }
 
     private static QueryMemories.Request Query() =>
         new(null, null, null, null, null, null, null, null, null, null, null);

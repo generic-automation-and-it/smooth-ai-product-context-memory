@@ -6,6 +6,7 @@ using SmoothAiProductContextMemory.Application.Features.Labels;
 using SmoothAiProductContextMemory.Application.Features.Links;
 using SmoothAiProductContextMemory.Application.Features.Memories;
 using SmoothAiProductContextMemory.Application.Features.Preflight;
+using SmoothAiProductContextMemory.Application.Features.RecallFeedback;
 using SmoothAiProductContextMemory.Application.Features.Tickets;
 using SmoothAiProductContextMemory.Host.Configuration;
 
@@ -110,6 +111,29 @@ internal static class ContextEndpoints
 
         group.MapPost("/initiatives", (UpsertInitiative.Request body, IMediator mediator, CancellationToken ct) =>
             mediator.Send(body, ct))
+            .RequireCapability(ApiCapability.Write);
+
+        // Practitioner tuning surface (HLD-004 NFR-03). Consumed occasionally by a human; not the
+        // retrieval path, and never pulls raw feedback into retrieval. identity/count/time only.
+        group.MapGet("/recall-feedback/never-recalled", (
+            IMediator mediator,
+            CancellationToken ct,
+            [FromQuery] DateTimeOffset asOf,
+            [FromQuery] int? limit = null) =>
+            mediator.Send(new GetNeverRecalledMemories.Request(asOf, limit), ct))
+            .RequireCapability(ApiCapability.Read);
+
+        group.MapGet("/recall-feedback/miss-rate", (
+            IMediator mediator,
+            CancellationToken ct,
+            [FromQuery] DateTimeOffset from,
+            [FromQuery] DateTimeOffset to) =>
+            mediator.Send(new GetMissRate.Request(from, to), ct))
+            .RequireCapability(ApiCapability.Read);
+
+        // Resettable baseline (LADR-04): feedback is disposable, so this is legitimate, not destructive.
+        group.MapPost("/recall-feedback/reset", (IMediator mediator, CancellationToken ct) =>
+            mediator.Send(new ResetRecallFeedback.Request(), ct))
             .RequireCapability(ApiCapability.Write);
     }
 }
