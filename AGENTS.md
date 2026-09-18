@@ -110,8 +110,7 @@ Hosted on **GitHub** at `https://github.com/generic-automation-and-it/project`. 
 
 | Date | Change | Ref |
 |---|---|---|
-| 2026-09-17 | Documented required runtime read/write API capabilities in the direct Host command; HLD-002 skill now delegates raw recall and supports transactional new-memory links. | HLD-002 closure |
-| 2026-09-17 | Completed HLD-002 conflict mechanics: ordered authority resolution, same-subject divergence storage, blinded semantic evidence, and Copilot read/write agent registrations. | HLD-002 LADR-01/LADR-04 |
+| 2026-09-17 | HLD-002 write-pipeline closure delivered: delegated read/write execution, conflict mechanics, and MCP capability split -- detail in the skill and AI-development changelogs. | HLD-002 |
 | 2026-09-16 | Corrected README temporal-validity wording: retrieval filters validity windows only when `asOf` is supplied. | PR #65 review |
 | 2026-09-16 | CI/CD summary now states main-only image publication and no PR/manual build-record or coverage artifact uploads. | PR #65 |
 | 2026-09-13 | Added BRD-002 (contextual knowledge export, `BR-18`–`BR-34`, extends BRD-001's requirement space) and HLD-005 (discovery). Ticket- and tag-anchored graph traversal recorded as three **Blocked** LADRs — no ticket or tag vertex exists and no writer derives such edges. | `docs/brd/002-contextual-export/`, `docs/hlds/005-contextual-export/` |

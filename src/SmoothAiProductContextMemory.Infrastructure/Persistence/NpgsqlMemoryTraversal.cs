@@ -22,6 +22,8 @@ namespace SmoothAiProductContextMemory.Infrastructure.Persistence;
 /// </remarks>
 public sealed class NpgsqlMemoryTraversal(SmoothAiProductContextMemoryDbContext db) : IMemoryTraversal
 {
+    private static readonly JsonSerializerOptions TraversalJson = new(JsonSerializerDefaults.Web);
+
     public async Task<IReadOnlyList<MemoryPath>> FindPathsAsync(
         MemoryPathQuery query,
         CancellationToken cancellationToken)
@@ -206,7 +208,7 @@ public sealed class NpgsqlMemoryTraversal(SmoothAiProductContextMemoryDbContext 
             reader.GetBoolean(18),
             JsonSerializer.Deserialize<List<SourceDocument>>(
                 reader.GetString(19),
-                new JsonSerializerOptions(JsonSerializerDefaults.Web)) ?? [],
+                TraversalJson) ?? [],
             reader.GetFieldValue<DateTimeOffset>(20));
 
     private static string Quote(Guid uuid) => Quote(uuid.ToString("D"));

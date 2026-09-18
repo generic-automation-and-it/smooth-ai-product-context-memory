@@ -51,11 +51,12 @@ def execute(payload, request=client._request):
     keywords = payload.get("keywords", [])
     if not isinstance(keywords, list):
         raise ValueError("keywords must be an array")
+    if not all(isinstance(word, str) for word in keywords):
+        raise ValueError("keywords must be an array of strings")
     keywords = sorted({word.strip() for word in keywords if isinstance(word, str) and word.strip()})
     if any(len(word.split()) > 3 for word in keywords):
         raise ValueError("each keyword query may contain at most three lexemes")
 
-    omitted_keywords = max(0, len(keywords) - MAX_KEYWORDS)
     for keyword in keywords[:MAX_KEYWORDS]:
         query = dict(baseline)
         query.update(query=keyword, facets=[], tags=[], kind=None, limit=KEYWORD_LIMIT)
@@ -71,7 +72,6 @@ def execute(payload, request=client._request):
     eligible_anchors = [row.get("uuid") for row in baseline_rows if row.get("uuid")]
     traversal_skipped_for_context = has_context_selector and not scope
     anchors = [] if traversal_skipped_for_context else eligible_anchors[:MAX_TRAVERSALS]
-    omitted_anchors = max(0, len(eligible_anchors) - len(anchors))
     for anchor in anchors:
         if len(merged) >= AGGREGATE_LIMIT:
             break
@@ -88,6 +88,11 @@ def execute(payload, request=client._request):
         added = _add(rows, merged, seen, AGGREGATE_LIMIT)
         passes.append(_disclosure("traversal", anchor, TRAVERSAL_LIMIT, rows, added))
 
+    keywords_executed = sum(1 for item in passes if item["kind"] == "keyword")
+    keywords_omitted = len(keywords) - keywords_executed
+    anchors_executed = sum(1 for item in passes if item["kind"] == "traversal")
+    anchors_omitted = len(eligible_anchors) - anchors_executed
+
     return {
         "items": merged,
         "disclosure": {
@@ -96,15 +101,15 @@ def execute(payload, request=client._request):
             "aggregateLimit": AGGREGATE_LIMIT,
             "aggregateLimitReached": len(merged) >= AGGREGATE_LIMIT,
             "keywordsRequested": len(keywords),
-            "keywordsExecuted": min(len(keywords), MAX_KEYWORDS),
-            "keywordsOmittedByCap": omitted_keywords,
+            "keywordsExecuted": keywords_executed,
+            "keywordsOmittedByCap": keywords_omitted,
             "anchorsEligible": len([row for row in baseline_rows if row.get("uuid")]),
-            "anchorsExecuted": len(anchors),
-            "anchorsOmittedByCap": omitted_anchors,
+            "anchorsExecuted": anchors_executed,
+            "anchorsOmittedByCap": anchors_omitted,
             "traversalSkippedForContextSelector": traversal_skipped_for_context,
             "passes": passes,
             "possiblyOmitted": len(merged) >= AGGREGATE_LIMIT
-                or omitted_keywords > 0 or omitted_anchors > 0 or traversal_skipped_for_context
+                or keywords_omitted > 0 or anchors_omitted > 0 or traversal_skipped_for_context
                 or any(item["limitReached"] for item in passes),
         },
     }

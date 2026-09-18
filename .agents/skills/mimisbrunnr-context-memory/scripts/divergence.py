@@ -119,7 +119,7 @@ def compose(payload):
 def main():
     try:
         result = compose(json.load(sys.stdin))
-    except ValueError as error:
+    except (ValueError, TypeError) as error:
         print(f"Invalid divergence judgement: {error}", file=sys.stderr)
         return 1
     print(json.dumps(result, indent=2))
