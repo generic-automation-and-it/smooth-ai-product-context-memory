@@ -1,6 +1,7 @@
 # CI/CD
 
-Two workflows: the PR gate (build + test) and a separate image publish to GHCR.
+Three workflow families: the PR gate (build + test), the AI PR review gate plus its
+auto-fix sibling, and a separate image publish to GHCR.
 The publish workflow does **not** run on pull requests.
 
 ## PR Gate
@@ -39,6 +40,88 @@ The publish workflow does **not** run on pull requests.
 | `dotnet-ef` | `10.0.8` | `dotnet-ef` |
 
 `dotnet-ef` is pinned to the EF Core runtime version (`Directory.Packages.props`) so the migrations CLI never drifts from the `Microsoft.EntityFrameworkCore.*` packages. Bump both together.
+
+## AI PR review
+
+- **Workflows:** `.github/workflows/pipeline-code-review-report.yml` (the gate) and
+  `.github/workflows/pipeline-ai-analyse.yml` (auto-fix, triggered by the gate's `workflow_run`).
+- **Triggers:** `pull_request` (opened/synchronize/reopened/ready_for_review), an `/ai-review` comment from an
+  OWNER/MEMBER/COLLABORATOR, and `workflow_dispatch`.
+- **Packaging:** local job, **not** a reusable-workflow call. The job checks out
+  `generic-automation-and-it/smooth-ai-report-review` at a pinned SHA into `.review-tools/` and invokes that repo's
+  `.agents/skills/ai-review-report/scripts/run-review.sh`. Bump the pinned `ref:` deliberately; a SHA predating that
+  entrypoint fails the gate with "No such file or directory".
+- **Why local-job:** the review provider is a private vLLM gateway that requires a client certificate and a private
+  CA. opencode's provider SDKs use Node/Bun `fetch`, which supports neither, so the job must first start a loopback
+  terminator. A reusable-workflow caller cannot inject a step into the callee's job, and a separate job would get a
+  separate runner — so the steps have to live here.
+
+### Provider wiring
+
+| Piece | Value |
+|---|---|
+| Terminator | `.github/scripts/vllm-tls-proxy.py`, plain HTTP on `127.0.0.1:8888`, mTLS out to the gateway in the profile |
+| opencode config | `.github/opencode.json`, selected via the `OPENCODE_REVIEW_REPORT_CONFIG` variable |
+| Retarget | `provider.anthropic.options.baseURL` = `http://127.0.0.1:8888/v1` as a **literal** |
+| Provider selector | `OPENCODE_REVIEW_REPORT_PROVIDER=ANTHROPIC` |
+
+Two upstream behaviours make that work and must not be "corrected":
+
+- The gate's `prepare-opencode-config.sh` injects `baseURL` only for `gemini`, `github-copilot` and `openai`. The
+  `anthropic` block is deliberately never injected, so a literal written here survives into the resolved config.
+- `resolve-provider.sh` requires every `OPENCODE_REVIEW_REPORT_MODEL_*` value to start with `claude` when the
+  provider is `ANTHROPIC`. The gateway serves Anthropic-named aliases, so that gate is satisfied. Selecting
+  `OPENCODE-GO-ANTHROPIC` instead fails: its family check rejects both `claude*` and `deepseek*`, which is
+  everything this gateway serves.
+
+The `/v1` suffix on the baseURL is required — the SDK appends only `/messages`, and the gateway answers `404` on a
+bare `/messages`. `small_model` is pinned to the one declared model so opencode's title/summary heuristic cannot
+select an id the gateway lacks.
+
+The config wires `anthropic` (the review provider), `go-openai` and `go-anthropic` (**keep these — auto-fix runs on
+a Go provider and reads this same config**), plus `openai` and `openrouter`. Two measured caveats about what this
+file does and does not control:
+
+- **The `models` block does not restrict model choice.** opencode merges its own catalogue over it, so with a single
+  `claude-opus-5` entry declared, `opencode models` still resolves 15 `anthropic/*` ids — including ones this gateway
+  `404`s. Only the `OPENCODE_REVIEW_REPORT_MODEL_*` variables decide what actually runs.
+- **Deleting a provider block does not remove the provider.** `github-copilot` still appears in `opencode models`
+  after its block is deleted, because opencode discovers it independently. What deletion removes is our credential
+  and baseURL wiring — so pointing `OPENCODE_REVIEW_REPORT_PROVIDER` at a deleted provider passes
+  `resolve-provider.sh` (which never reads this file) and then fails at request time with an auth error rather than a
+  clear configuration error.
+
+### Required configuration
+
+| Kind | Name | Value |
+|---|---|---|
+| Secret | `OPENCODE_VLLM_PROFILE_B64` | `base64` of the vllm-proxy `profile.json` (single line) |
+| Secret | `OPENCODE_ANTHROPIC_API_KEY` | any non-empty placeholder — the terminator supplies the real credential |
+| Variable | `OPENCODE_REVIEW_REPORT_PROVIDER` | `ANTHROPIC` |
+| Variable | `OPENCODE_REVIEW_REPORT_CONFIG` | `.github/opencode.json` |
+| Variable | `OPENCODE_REVIEW_REPORT_MODEL_PRIMARY` / `_SECONDARY` / `_ORCHESTRATOR` | a `claude-*` alias the gateway serves |
+| Variable | `OPENCODE_REVIEW_REPORT_MAX_PARALLEL` | `2` — one vLLM instance backs every chunk; the upstream default of 7 pushes chunks past their budget |
+| Variable | `OPENCODE_ANALYSE_PROVIDER` + `OPENCODE_ANALYSE_MODEL` | **both** required to keep auto-fix off the vLLM gateway (see below) |
+
+`OPENCODE_ANALYSE_MODEL` falls back to `OPENCODE_REVIEW_REPORT_MODEL_PRIMARY`. With the review tiers on a `claude-*`
+alias and `OPENCODE_ANALYSE_PROVIDER` unset, the analyse scope aborts with *"OPENCODE_ANALYSE_MODEL is set but
+OPENCODE_ANALYSE_PROVIDER is unset"*. Set both, or auto-fix stops running. Note also that the analyse job does
+**not** start the terminator, so its fallback chain — which still resolves to the review provider — points at a
+socket that does not exist in that job; only its primary target is live.
+
+### Security properties
+
+The gateway's client certificate, private key, private-CA PEM and API key all live inside the
+`OPENCODE_VLLM_PROFILE_B64` secret. The bootstrap step base64-decodes it, masks the inner API key with
+`::add-mask::`, starts the terminator with `env -u` so the secret is not readable through `/proc/<pid>/environ`, and
+deletes the profile and PEM cache as soon as the listener binds — the terminator holds its `SSLContext` in memory by
+then. What remains for the life of the job is an unauthenticated loopback listener: anything executing in that job,
+including code the review agent runs from the PR under review, can spend gateway quota. That is inherent to running
+the gate on a GitHub-hosted runner, not a defect in the step.
+
+Fork pull requests receive no secrets. Repository Actions settings are what keep fork PRs from reaching this job;
+the bootstrap step's empty-secret check fails loudly rather than letting the gate proceed toward a socket that will
+never answer.
 
 ## Publish image
 
