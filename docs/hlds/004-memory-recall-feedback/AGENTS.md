@@ -10,8 +10,10 @@ quality bar in [./nfrs/](./nfrs/); context and recall path in
 [./diagrams/c4-context.md](./diagrams/c4-context.md). Business authority is
 [BRD 001](../../brd/001-context-memory/).
 
-**This HLD is In Discovery.** The central decision — where feedback lives — is deliberately open
-(LADR-02). Do not resolve it by implementation default.
+**This HLD is In Discovery**, but its central decision is no longer open: feedback lives in **append-only
+records** (LADR-02), resolved on measured evidence and not by default. Do not reopen it without new
+measurements — the [evidence](./nfrs/NFR-02-placement-evidence-2026-09-18.md) records what would have to
+change first.
 
 ## Non-Negotiables
 
@@ -20,16 +22,18 @@ quality bar in [./nfrs/](./nfrs/); context and recall path in
 - **Never let feedback influence ranking.** A store that surfaces what it has surfaced before is self-reinforcing, and that failure is slow and hard to detect.
 - **Never version feedback or bring it under the append-only guarantee.** It is classification, not a claim — the same reasoning that keeps tags and facets off the versioned row (LADR-04).
 - **Record misses, not just hits.** Hits alone document what already works and hide everything that does not.
-- **Do not choose the placement by default.** LADR-02 is open on purpose; a counter column is the easiest to write and the most likely to be wrong.
+- **Never reintroduce the counter column.** It was measured and eliminated: a second reader of the same memory blocks on the first, every read rewrites the row, it cannot answer recency, and — decisively — it has nowhere to record a miss (LADR-02).
+- **Every record carries a per-retrieval identifier.** Fifty rows from one retrieval are otherwise indistinguishable from fifty retrievals, and the miss-rate question becomes unanswerable (LADR-02 record shape).
+- **"Recently captured" comes from `min(memory_version.created_on)`.** The stable memory row carries no timestamp, so the exclusion cannot be a predicate on the thing being measured.
 
 ## Architecture Decisions
 
-See [./ladrs/](./ladrs/). All Draft.
+See [./ladrs/](./ladrs/). LADR-02 Accepted; the rest Draft.
 
 | LADR | Decision | Why it matters |
 |------|----------|----------------|
 | [LADR-01](./ladrs/LADR-01-record-recall-outcomes.md) | Record recall outcomes, including misses | The miss is the actionable half and the one usually omitted |
-| [LADR-02](./ladrs/LADR-02-feedback-placement.md) | Placement deliberately open | A counter column turns every read into a write and discards recency |
+| [LADR-02](./ladrs/LADR-02-feedback-placement.md) | Feedback lives in append-only records | A counter column turns every read into a write, discards recency, and cannot hold a miss at all |
 | [LADR-03](./ladrs/LADR-03-identity-not-content.md) | Identity and outcome only | Prevents a less-guarded second copy of sensitive material |
 | [LADR-04](./ladrs/LADR-04-unversioned-and-disposable.md) | Unversioned and disposable | Keeps feedback out of history, backup and the version chain |
 
@@ -45,13 +49,14 @@ See [./ladrs/](./ladrs/). All Draft.
 
 Targets and verification live in [./nfrs/](./nfrs/). Two shape how code is written:
 
-- **The concurrency test decides the placement.** Concurrent retrievals returning the *same* memory must show no contention — which a counter column fails under repeat recall of a popular memory and appends do not.
+- **The concurrency test decided the placement**, and latency did not: all three candidates measured within ~1.2 ms p95 of each other, while the counter column blocked a second reader of the same memory outright (`55P03`). A wall-clock comparison alone would have chosen wrongly.
 - **The confidentiality test must include the miss path.** That is the case someone will later want to diagnose, and therefore the one most likely to be tempted into recording the query.
 
 ## Migration Plans
 
-- If the telemetry-derived placement is chosen (LADR-02, option C), this design becomes dependent on an observability retention policy owned elsewhere. Record that coupling explicitly rather than discovering it when retention changes.
-- Feedback retention is a bound, not a policy. If long-term trend analysis is ever wanted, that is a different design — old recall data describes a store and a recall implementation that no longer exist.
+- The telemetry-derived placement (LADR-02, option C) was rejected rather than chosen, so this design takes on no dependency on an observability retention policy owned elsewhere. Reviving C would reintroduce that coupling, and would buy a latency saving the measurements could not detect.
+- Feedback retention is a bound, not a policy: **30 days or 2,000,000 records, whichever comes first** (182 bytes/record measured, ~8.9 KiB per 50-memory retrieval). If long-term trend analysis is ever wanted, that is a different design — old recall data describes a store and a recall implementation that no longer exist.
+- The feedback table sits outside the six entity types the DbContext exposes and `ModelShapeGuardTests` asserts. Whether it becomes an EF entity is a deliberate decision for the write path, not something to settle by adding a `DbSet` and following the compiler.
 
 ## Changelog
 
@@ -60,3 +65,4 @@ Targets and verification live in [./nfrs/](./nfrs/). Two shape how code is writt
 | 2026-09-14 | Created — discovery HLD for recall feedback. Placement deliberately left open. | Gap identified during pre-dogfooding review |
 | 2026-09-14 | Added business-authority back-reference to BRD 001, completing the three-place rule. | BRD 001 |
 | 2026-09-16 | README Intent reworded: the stemming/trigram deferral is closed — stemming adopted and trigram rejected on HLD-001's measured evidence; trigram's reopening threshold now waits on this HLD's feedback data. | HLD-001 NFR-02 recall-tuning measurements |
+| 2026-09-18 | LADR-02 resolved on measured evidence: feedback lives in append-only records. The counter column is eliminated (serialises a second reader of the same memory, rewrites the row on every read, answers no recency, and cannot record a miss at all); the telemetry-derived option is rejected for an undetectable latency saving bought with an external retention dependency. Record shape, retention bound and the per-retrieval identifier requirement recorded; non-negotiables and migration notes updated accordingly. LADR-01/03/04 and all three NFRs stay Draft — the placement was settled, not the implementation. | [NFR-02 placement evidence](./nfrs/NFR-02-placement-evidence-2026-09-18.md), `FeedbackPlacementEvidenceTests` |
