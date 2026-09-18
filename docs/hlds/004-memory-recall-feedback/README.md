@@ -94,12 +94,13 @@ side channel around a constraint the rest of the design honours.
 
 ## Architecture Decisions (LADRs)
 
-All Draft — this is discovery. LADRs 01–03 are strategic; 04 is tactical. See [`./ladrs/`](./ladrs/).
+LADRs 01–03 are strategic; 04 is tactical. See [`./ladrs/`](./ladrs/). LADR-02 is resolved on measured
+evidence; the rest remain Draft pending implementation.
 
 | LADR | Decision | Status |
 |------|----------|--------|
 | [LADR-01](./ladrs/LADR-01-record-recall-outcomes.md) | Record recall outcomes, including misses | Draft |
-| [LADR-02](./ladrs/LADR-02-feedback-placement.md) | Where feedback lives — the open question | Draft |
+| [LADR-02](./ladrs/LADR-02-feedback-placement.md) | Feedback lives in append-only records | Accepted |
 | [LADR-03](./ladrs/LADR-03-identity-not-content.md) | Feedback carries identity and outcome only | Draft |
 | [LADR-04](./ladrs/LADR-04-unversioned-and-disposable.md) | Feedback is unversioned and disposable | Draft |
 
@@ -110,5 +111,8 @@ See [`./nfrs/`](./nfrs/).
 | NFR | Attribute | Target (summary) | Status |
 |-----|-----------|------------------|--------|
 | [NFR-01](./nfrs/NFR-01-confidentiality.md) | Confidentiality | No content, no query text, in any feedback record | Draft |
-| [NFR-02](./nfrs/NFR-02-read-path-cost.md) | Performance | Retrieval latency unchanged; no contention on hot rows | Draft |
+| [NFR-02](./nfrs/NFR-02-read-path-cost.md) | Performance | Retrieval latency unchanged; no contention on hot rows | Draft — [placement measured](./nfrs/NFR-02-placement-evidence-2026-09-18.md) |
 | [NFR-03](./nfrs/NFR-03-actionability.md) | Actionability | Answers the three tuning questions or it is not worth building | Draft |
+
+NFR-02 stays Draft deliberately: the measured evidence settled which placement to build, not that the
+shipped write path meets the target. All three are verified against the implementation, not the prototype.

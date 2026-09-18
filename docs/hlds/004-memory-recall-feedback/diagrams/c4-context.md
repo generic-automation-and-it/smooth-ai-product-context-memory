@@ -1,7 +1,11 @@
 # Diagrams — Memory recall feedback
 
-Two diagrams. An entity-relationship diagram is deliberately omitted: where feedback is stored is the
-open question (LADR-02), and an ER diagram would presuppose the answer.
+Two diagrams. An entity-relationship diagram is still omitted, now for a different reason: the placement
+question is settled — feedback lives in append-only records, and LADR-02 records the field shape — but no
+table exists yet. An ER diagram drawn ahead of the shipped one would be a second, divergent source for it.
+
+The recall path below is unchanged by that decision: feedback was always emitted off the critical path, and
+the chosen placement is where the outcome lands, not a new step.
 
 ---
 
