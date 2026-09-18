@@ -150,6 +150,7 @@ sequenceDiagram
 
 - Retrieval defaults to **current-only** and **excludes `proposed`**. History is `GET .../versions`. Empty query is `200 []`. `limit` defaults to 50 and is capped at 200 — an uncapped read floods the caller's context.
 - A `set` request accepts at most 200 items; larger batches are a `400` — the write-side sibling of the read `limit` cap.
+- A `set` request accepts at most 400 links, and each link reason is capped at 4000 characters; larger values are a `400` on dry-run and write.
 - `asOf` narrows to claims valid at a business-time instant. Absent means no temporal narrowing.
 - API digest is a persist receipt: `created` / `versioned` / `linked` / `diverged` / `skipped` / `labelsProposed`; `diverged` is a mechanical count of newly created divergence-kind records. Skill composes the human digest.
 - API persists `status` as given — no re-gate by kind.
