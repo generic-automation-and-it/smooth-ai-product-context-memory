@@ -8,8 +8,8 @@ Model received only blinded fixture output from:
 python3 -B .agents/skills/mimisbrunnr-context-memory/tests/fixtures/score_fixtures.py --emit-model-input
 ```
 
-It did not read `scenarios.json`, which contains scorer-only expected verdicts and author notes. The
-blinded emitter strips both fields. One same-session normalization added the required
+It did not read `scenarios.json`, which contains scorer-only identifiers, expected verdicts and author
+notes. The blinded emitter strips all three fields. One same-session normalization added the required
 `not_product_fact` output field without revisiting scenarios. Final verdicts are committed as
 `model-verdicts-2026-09-17.json`.
 

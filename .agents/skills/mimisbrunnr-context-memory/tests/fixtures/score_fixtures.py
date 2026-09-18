@@ -62,7 +62,8 @@ def main():
 
     fixtures = load_fixtures()
     if args.emit_model_input:
-        blinded = [{key: value for key, value in fixture.items() if key not in ("expected", "note")}
+        blinded = [{key: value for key, value in fixture.items()
+                    if key not in ("id", "expected", "note")}
                    for fixture in fixtures]
         print(json.dumps({"scenarios": blinded}, indent=2))
         return

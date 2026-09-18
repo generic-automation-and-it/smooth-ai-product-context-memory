@@ -476,7 +476,7 @@ class SemanticFixtureTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 0)
         payload = json.loads(completed.stdout)
         self.assertTrue(payload["scenarios"])
-        self.assertTrue(all("expected" not in scenario and "note" not in scenario
+        self.assertTrue(all("id" not in scenario and "expected" not in scenario and "note" not in scenario
                             for scenario in payload["scenarios"]))
 
     def test_committed_blinded_semantic_evidence_scores_cleanly(self):
