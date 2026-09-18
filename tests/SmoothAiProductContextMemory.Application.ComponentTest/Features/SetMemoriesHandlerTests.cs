@@ -28,10 +28,10 @@ public sealed class SetMemoriesHandlerTests(AspireFixture aspire) : HandlerTestB
         second.Created.ShouldBe(0);
 
         long memoryId = await Db.Memories.Where(m => m.Uuid == uuid).Select(m => m.Id).SingleAsync(Ct);
-        MemoryVersion[] versions = await Db.MemoryVersions.AsNoTracking()
+        List<MemoryVersion> versions = await Db.MemoryVersions.AsNoTracking()
             .Where(v => v.MemoryId == memoryId)
             .OrderBy(v => v.Version)
-            .ToArrayAsync(Ct);
+            .ToListAsync(Ct);
 
         versions.Count.ShouldBe(2);
         versions.Count(v => v.IsCurrent).ShouldBe(1);
@@ -203,10 +203,10 @@ public sealed class SetMemoriesHandlerTests(AspireFixture aspire) : HandlerTestB
         written.Versioned.ShouldBe(2);
 
         long memoryId = await Db.Memories.Where(m => m.Uuid == uuid).Select(m => m.Id).SingleAsync(Ct);
-        List<MemoryVersion> versions = await Db.MemoryVersions.AsNoTracking()
+        MemoryVersion[] versions = await Db.MemoryVersions.AsNoTracking()
             .Where(v => v.MemoryId == memoryId)
             .OrderBy(v => v.Version)
-            .ToListAsync(Ct);
+            .ToArrayAsync(Ct);
         versions.Select(v => v.Statement).ShouldBe(["Claim 1", "Losing claim", "Claim 1"]);
         versions.Single(v => v.IsCurrent).Version.ShouldBe(3);
     }
