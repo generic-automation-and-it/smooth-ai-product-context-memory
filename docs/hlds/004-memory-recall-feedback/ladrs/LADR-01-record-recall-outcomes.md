@@ -1,6 +1,6 @@
 # LADR-01: Record recall outcomes, including misses
 
-**Status:** Draft
+**Status:** Accepted — 2026-09-18
 
 ## Context
 
@@ -41,7 +41,12 @@ or feed anything back into retrieval.
 
 ## Open
 
-- Whether a "miss" is recorded for every empty result or only where the caller signals the answer was expected. The first is simpler and noisier; the second is more useful and requires the caller to say something it currently does not. **Resolve during prototyping against real usage.**
+- ~~Whether a "miss" is recorded for every empty result or only where the caller signals the answer was
+  expected.~~ **Resolved — 2026-09-18: a miss is recorded for every empty result.** The caller does not
+  currently signal expectation, so the second option would add a contract the handler cannot honour and
+  would silently drop the miss signal in the common case. The noise of recording every empty result is
+  bounded and classifiable, and NFR-03's miss-rate question is well-defined over all empty retrievals.
+  The emission point is `QueryMemories.Handler`, after the response is materialised, off the critical path.
 
 ## Related
 

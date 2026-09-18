@@ -1,6 +1,6 @@
 # LADR-03: Feedback carries identity and outcome only
 
-**Status:** Draft
+**Status:** Accepted — 2026-09-18
 
 ## Context
 
@@ -39,7 +39,12 @@ careful with, which would be a poor trade for diagnostic convenience.
 
 ## Open
 
-- The set of retrieval-shape categories. Must be small, bounded, and defined before the first record is written.
+- ~~The set of retrieval-shape categories. Must be small, bounded, and defined before the first record is
+  written.~~ **Resolved — 2026-09-18: closed to five shapes, schema-constrained.** `free_text`,
+  `facet_only`, `ticket_scoped`, `group_scoped`, `unfiltered` (`RetrievalShape` in
+  `Application/Abstractions/IRecallFeedback.cs`). Enforced by the `ck_recall_feedback_shape` CHECK
+  constraint on `recall_feedback`, so an out-of-set value is rejected by the schema (NFR-01), not by
+  convention. Classification is produced by `RecallShapeClassifier` from the raw retrieval request.
 
 ## Related
 

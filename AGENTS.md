@@ -36,6 +36,7 @@ Planned work tracked as worktasks under `.context/work-tasks/` (gitignored). Use
 | agile-github-breakdown | `.agents/skills/agile-github-breakdown/` | Braindump/Feature → GitHub Feature + Task graph (Project = initiative, Feature = epic, Task = story). |
 | mimisbrunnr-context-memory | `.agents/skills/mimisbrunnr-context-memory/` | Sole interface to the context-memory store; capture (`set`) and retrieval (`get`) of persistent context memories against the HTTP API. |
 | mimisbrunnr-vitsmunir-dump | `.agents/skills/mimisbrunnr-vitsmunir-dump/` | Listen-first braindump session for tickets, ADRs, worktasks, requirements or designs; synthesizes only when asked. |
+| mimisbrunnr-recall-feedback | `.agents/skills/mimisbrunnr-recall-feedback/` | Run the three recall-feedback tuning queries against the Host API — never-recalled list, miss rate, baseline reset (HLD-004 NFR-03). |
 | ai-review | `.agents/skills/ai-review/` | Local consumer of a remote AI code-review report (generator stays remote). |
 | git-commit-review-push | `.agents/skills/git-commit-review-push/` | Commit + push + open a PR with an embedded full AI review. |
 
@@ -130,3 +131,4 @@ Hosted on **GitHub** at `https://github.com/generic-automation-and-it/project`. 
 | 2026-09-16 | Added HLD-006 (corpus snapshot and restore, In Discovery) — durability of the store as one asset: a self-verifying archive over both stores plus a verified restore path. Authorized by BRD-001's third amendment (`BR-37`), which closed the durability gap in that BRD's requirement space. | `docs/hlds/006-corpus-snapshot-and-restore/`, `docs/brd/001-context-memory/` |
 | 2026-09-16 | Documented the `SMOOTH_FTS_BENCH`-gated recall-tuning evidence harness in the Build/Test catalogue beside its `SMOOTH_AGE_BENCH` sibling. | HLD-001 NFR-02 recall-tuning measurements |
 | 2026-09-18 | Documented the `SMOOTH_FEEDBACK_BENCH`-gated feedback-placement evidence harness in the Build/Test catalogue, beside its two `*_BENCH` siblings. | HLD-004 LADR-02 placement evidence |
+| 2026-09-18 | Added the `mimisbrunnr-recall-feedback` skill (never-recalled / miss-rate / reset against the Host API) to the Skills table. | HLD-004 NFR-03 |

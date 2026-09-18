@@ -27,6 +27,7 @@ EF Core + PostgreSQL index over blob-stored content. **Six** entities: `Initiati
   any new `UseNpgsql` call site or history will split.
 - **AGE session init is per physical connection**, via `NpgsqlDataSourceFactory` / `UsePhysicalConnectionInitializer`. Never initialise once at start-up — that prepares one pooled connection and leaves the rest failing under load (HLD 003 / LADR-04).
 - **Do not model graph objects in EF.** `memory_graph`, `Memory` and `LINKS` are SQL-created and invisible to the model snapshot. HLD-003 LADR-08's `Ticket`/`TICKET_PARENT` follows the same boundary through `ITicketGraph` / `NpgsqlTicketGraph`, never a `DbSet`.
+- **`recall_feedback` is not an EF entity either** (HLD-004 LADR-02). It is SQL-created by the `AddRecallFeedbackTable` migration, invisible to the model snapshot, outside the six entities `ModelShapeGuardTests` asserts, accessed only through `IRecallFeedback`/`IRecallFeedbackQuery` → `NpgsqlRecallFeedback`/`NpgsqlRecallFeedbackQuery`. It carries **no** `append_only_guard` trigger (it is not under the append-only guarantee) and is excluded from backup and restore.
 - **Never put a descriptive property on a vertex.** `Memory` holds only `memory_uuid`; `Vertex_CarriesIdentityOnly` remains a Memory-specific guard. `Ticket` holds only exact `provider`/`key`; no scope, owner, URL or copied metadata. HLD-003 LADR-08 superseded LADR-02 in writing before the ticket migration.
 - **Never write a relationship to a table and the graph.** `memory_link` is gone; dual-write is a defect (LADR-03).
 - **Owning-row cleanup is trigger-owned.** Memory cleanup is `BEFORE DELETE ON memory` (`memory_graph_cascade`), never a second C# path. Group-ticket cleanup uses `trg_ticket_graph_membership`. Explicit hierarchy remove/reparent is a separate operation, not permission to duplicate cascade cleanup.
@@ -173,6 +174,7 @@ is the current design authority, superseding HLD-003 LADR-02 before any ticket m
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-18 | `recall_feedback` table added — SQL-created, outside the six EF entities, no `append_only_guard` trigger, excluded from backup/restore, accessed via `IRecallFeedback`/`IRecallFeedbackQuery`. | HLD-004 LADR-02/03/04 |
 | 2026-09-17 | Serialized memory-edge duplicate check/create with a transaction advisory lock; batch digest now uses actual graph create outcomes. | HLD-002 LADR-05 |
 | 2026-09-17 | Cheap query, memory traversal and ticket traversal projections now include version sources and created-on for attributed delegated reads; AGE transaction behavior unchanged. | HLD-002 NFR-04 |
 | 2026-09-15 | Final full-suite repeat verified after query fixes: 429 passed, 4 gated skips, zero failures. NFR-02 retains the prior benchmark-fixture connection timeout and successful `--no-build` repeat; original pre-merge evidence unchanged. | HLD-003 NFR-02 |
