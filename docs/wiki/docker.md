@@ -11,11 +11,16 @@ Docker Desktop group.
 The additional image is `ghcr.io/generic-automation-and-it/smooth-ai-product-context-memory-apphost`.
 It packages live Aspire 13.5.3 AppHost, DCP, dashboard, .NET runtime, and Docker client. It starts sibling containers through the external engine, not Docker-in-Docker. No host .NET installation or source checkout is required for a published controller image.
 
-**Security:** engine socket access grants administrative control with the engine user's privileges, potentially host root. A read-only socket mount does not make API calls read-only. Never expose an unauthenticated engine API. API and Seq are not internet-ready authenticated services; use private interfaces and a protected network.
+**Security:** engine socket access grants administrative control with the engine user's privileges, potentially host root. A read-only socket mount does not make API calls read-only. Never expose an unauthenticated engine API. Context API Bearer tokens separate read and write capabilities but are not multi-user authorization; keep API and Seq on private interfaces and a protected network.
 
 ### Docker Desktop Example
 
-Supply `PostgresConfiguration__Password`, `BlobConfiguration__AccessKey`, and `BlobConfiguration__SecretKey` in a private `controller.env` file. Never commit it. Keep credentials stable across restarts and upgrades. Replace `VERSION` with an actually published `sha-<short-sha>` tag or `latest`; this documentation does not imply an image has already been released. Pin the controller digest for immutable deployment identity.
+Supply `PostgresConfiguration__Password`, `BlobConfiguration__AccessKey`,
+`BlobConfiguration__SecretKey`, `Parameters__api-read-token`, and
+`Parameters__api-write-token` in a private `controller.env` file. Read and write tokens must be
+distinct. Never commit it. Keep credentials stable across restarts and upgrades. Replace `VERSION`
+with an actually published `sha-<short-sha>` tag or `latest`; this documentation does not imply an
+image has already been released. Pin the controller digest for immutable deployment identity.
 
 ```bash
 docker run -d --name mimisbrunnr-default-controller \
@@ -80,11 +85,18 @@ build args, never baked into layers.
 | `BlobStorage__AccessKey` | Object-store access key. |
 | `BlobStorage__SecretKey` | Object-store secret key. |
 | `BlobStorage__Bucket` | Bucket name. Created lazily on first write. |
+| `ApiAccess__ReadToken` | Bearer token accepted by read-only context routes. Must differ from write token. |
+| `ApiAccess__WriteToken` | Bearer token accepted by all context routes. |
+
+Owned skill client intentionally accepts loopback API origins only. Non-loopback deployments need a
+separately reviewed trusted-origin configuration; agent-controlled arbitrary HTTPS origins are rejected
+to prevent Bearer-token exfiltration.
 
 Optional: `ASPNETCORE_URLS` (image default `http://+:5141`), Seq via
 `ConnectionStrings__seq` when the AppHost injects it.
 
-`export` needs the same variables. It does **not** migrate; missing schema fails
+Web API startup requires both `ApiAccess` tokens. `export` needs the storage variables but does not use
+HTTP capability tokens. It does **not** migrate; missing schema fails
 the command. Default output `.context/export` is not writable in the image —
 mount a host directory and pass `--output`.
 
@@ -133,6 +145,8 @@ docker run --rm \
   -e BlobStorage__AccessKey='smooth-local' \
   -e BlobStorage__SecretKey='LocalMachineAccessNoInterestingDataDev#Passw0rd!FirewallNotExposed' \
   -e BlobStorage__Bucket='smooth-mimisbrunnr-memory-well' \
+  -e ApiAccess__ReadToken='replace-with-a-random-read-token' \
+  -e ApiAccess__WriteToken='replace-with-a-different-random-write-token' \
   smooth-ai-product-context-memory:local
 ```
 
@@ -186,7 +200,9 @@ HostConfiguration__Image=smooth-ai-product-context-memory:local \
 ```
 
 The container path injects `ConnectionStrings__SmoothAiProductContextMemory`
-(the key `AddInfrastructure` reads). That override is container-only.
+(the key `AddInfrastructure` reads), plus `ApiAccess__ReadToken` and
+`ApiAccess__WriteToken` from secret Aspire parameters. That override is container-only. For source
+mode, set `Parameters:api-read-token` and `Parameters:api-write-token` with AppHost user secrets.
 
 ## Stop and reset the AppHost stack
 

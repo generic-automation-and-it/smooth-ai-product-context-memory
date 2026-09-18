@@ -7,26 +7,27 @@ The publish workflow does **not** run on pull requests.
 
 - **Workflow:** `.github/workflows/pr-gate.yml`
 - **Triggers:** `pull_request` → `main` (including PR branch updates), `push` → `main`, and manual `workflow_dispatch`.
-- **Paths filter:** source/tests, scripts, Dockerfiles, solution/build/package inputs, local actions, and PR/publish workflows trigger checks. Docs-only PRs skip the gate; dispatch and reusable workflow calls run explicitly.
+- **Paths filter:** source/tests, scripts, the owned context-memory skill and its two project-agent registrations, the `.mcp.json` MCP server config, Dockerfiles, solution/build/package inputs, local actions, and PR/publish workflows trigger checks. Docs-only PRs skip the gate; dispatch and reusable workflow calls run explicitly.
 - **Policy checks:** main-only release event/promotion tests and engine-free controller preflight/lifecycle tests run with the build. PRs also build both container architectures on native runners without publication. PR/manual CI keeps logs, summaries, and caches, but uploads neither Docker build records nor coverage artifacts. Images are build-only; full packaged-controller smoke runs in the main publication pipeline.
 
 ### Steps
 
 1. **Checkout** — `actions/checkout@v4`.
 2. **Test release policy** - `python3 -B -m unittest discover -s scripts -p 'test_release_policy.py' -v`; fails closed before installing the SDK.
-3. **Install .NET SDK** — `actions/setup-dotnet@v4` (version from the `DOTNET_VERSION` env, currently `10.0.x`).
-4. **Restore** — `dotnet restore`.
-5. **Build** — `dotnet build --no-restore --configuration Release`.
-6. **Test controller preflight and lifecycle** - `python3 scripts/test-apphost-entrypoint.py`; engine-free tests against the built AppHost output.
-7. **Aspire test with coverage** — local action `.github/actions/aspire-test-with-coverage`:
+3. **Test context-memory skill** - two scripts in one step: `python3 -B .agents/skills/mimisbrunnr-context-memory/tests/run_tests.py` (deterministic plumbing, agent grants, deep-search bounds, divergence composition) and `python3 -B .agents/skills/mimisbrunnr-context-memory/tests/measure_cost.py` (reproducible structural cost evidence; never emits memory content).
+4. **Install .NET SDK** — `actions/setup-dotnet@v4` (version from the `DOTNET_VERSION` env, currently `10.0.x`).
+5. **Restore** — `dotnet restore`.
+6. **Build** — `dotnet build --no-restore --configuration Release`.
+7. **Test controller preflight and lifecycle** - `python3 scripts/test-apphost-entrypoint.py`; engine-free tests against the built AppHost output.
+8. **Aspire test with coverage** — local action `.github/actions/aspire-test-with-coverage`:
     - Starts `tests/SmoothAiProductContextMemory.TestFramework.Aspire`, keeps its PID inside the action script, and waits for PostgreSQL (`127.0.0.1:15432`, image `docker.io/apache/age:release_PG17_1.7.0`), Redis (`127.0.0.1:16379`), WireMock (`http://127.0.0.1:19091/__admin/health`), MinIO TCP (`127.0.0.1:9002`), then MinIO HTTP (`http://127.0.0.1:9002/minio/health/live`). On MinIO timeout the action dumps `docker logs mimisbrunnr-testcontainer-blob`. MinIO image is pinned to `quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z`.
    - Restores .NET tools (`dotnet tool restore`) after the dependency pre-warm, matching the proven CI timing before tests start.
    - Prepares `artifacts/testresults/` and `artifacts/coverage/`.
     - Runs test projects in order: Host integration → Application/Infrastructure component → Domain/Application/Infrastructure/Host/AppHost unit tests.
    - Generates coverage reports with `dotnet tool run reportgenerator`.
    - Stops the Aspire host from the action script's teardown trap once tests and coverage have finished or failed.
-8. **Publish coverage summary** (`if: always()`) — appends `artifacts/coverage/SummaryGithub.md` to the GitHub step summary.
-9. **Upload coverage artifacts** — uploads `artifacts/coverage/` as `coverage-report` only for main pushes (including failed main runs). PR and manual CI skip upload.
+9. **Publish coverage summary** (`if: always()`) — appends `artifacts/coverage/SummaryGithub.md` to the GitHub step summary.
+10. **Upload coverage artifacts** — uploads `artifacts/coverage/` as `coverage-report` only for main pushes (including failed main runs). PR and manual CI skip upload.
 
 ## .NET local tools
 

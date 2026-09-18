@@ -28,10 +28,18 @@ ASP.NET Core composition root (Minimal API). Wires the application together and 
 - `GET .../blob` and `GET .../versions` take `?scope=` and `POST /query` takes `asOf`/`limit`; `PATCH /groups/{uuid}` and `GET|POST /initiatives` complete the registry surface. These read routes are proxies **and** scope boundaries — see `Features/FEATURES_AGENTS.md` LADR-003.
 - Ticket routes are separate: `PUT /api/context/tickets/parent` dispatches `SetTicketParent` and returns `changed`; `parent` must be present (explicit null removes), while null/absent `expectedParent` expects absence. `POST /api/context/tickets/paths` dispatches `FindTicketPaths` and returns `TicketTraversalResult`; omitted `maxDepth` stays zero and fails validation. Ticket identity grants no group-scope consent; the provider drops hidden anchors and whole hidden paths without a revealing 403/404 lookup in Host/Application.
 - Scalar/OpenAPI document every `/api/context/*` route; the L2 test asserts each path literally — `/api/context/paths` included, so a route added without updating `ExpectedRoutes` fails. Bind localhost (`5141`/`7141`); do not listen `0.0.0.0` in dev.
+- OpenAPI schema reference IDs use full nested CLR type names. Feature slices all define `Request` and
+  `Response`; short-name IDs collide and silently document the wrong body. This is compatibility-significant.
 - **Container image** listens `http://+:5141` (required inside Docker). Non-root (`$APP_UID`). `ENTRYPOINT` is the Host binary so `export` remains `docker run … image export …`. Config contract and AppHost image path: `docs/wiki/docker.md`. Do not bake web args into the entrypoint.
 - **Docker restore cache must include packages.** The API Dockerfile keeps NuGet packages in the build-stage restore layer, not a BuildKit cache mount. Exported GHA layer caches do not include cache-mount contents; a cached restore followed by source-invalidated `publish --no-restore` otherwise fails with NETSDK1064 on a fresh runner. Packages remain outside the final runtime image.
 
 ## Requirements
+
+Approved context API capability boundary (2026-09-17): every `/api/context/*` route requires a
+Bearer token. Read credentials can invoke only query/history/blob/path/ticket-path/label-list/
+initiative-list operations; write credentials can invoke both planes. Health, OpenAPI and Scalar stay
+public. Tokens come only from runtime configuration, compare in constant time, and never enter logs,
+traces, committed settings or OpenAPI examples.
 
 Approved release-image plan (2026-09-13):
 
@@ -44,6 +52,9 @@ Approved release-image plan (2026-09-13):
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-17 | OpenAPI schema IDs now use full nested CLR names, preventing vertical slices' repeated `Request`/`Response` names from colliding and exposing the wrong contract. | HLD-002 wire compatibility |
+| 2026-09-17 | Context routes now require distinct runtime read/write Bearer capabilities; public health/OpenAPI/Scalar remain unchanged. | HLD-002 NFR-04 |
+| 2026-09-17 | Approved API-enforced read/write capability boundary for delegated context-memory agents. | HLD-002 NFR-04 |
 | 2026-09-16 | Updated publication contract to main-only; PR builds/tests do not upload artifacts. | PR #65 |
 | 2026-09-16 | Persisted API NuGet packages alongside restore metadata in Docker build layers so fresh runners can publish after importing GHA layer cache. | PR #65, Actions run 35014970369 |
 | 2026-09-15 | Publish-model summary synced with the coordinated release pipeline: two images (API + `-apphost` controller) promoted inside one repository-wide `queue: max` group, prereleases never update stable aliases, and the release controller ships as the `-apphost` image. | ai-analyse |

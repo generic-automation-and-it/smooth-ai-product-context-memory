@@ -15,6 +15,12 @@ on:
       - src/**
       - tests/**
       - scripts/**
+      - .agents/skills/mimisbrunnr-context-memory/**
+      - .agents/agents/memory-read.md
+      - .agents/agents/memory-write.md
+      - .github/agents/memory-read.agent.md
+      - .github/agents/memory-write.agent.md
+      - .mcp.json
       - .github/actions/**
       - .github/workflows/pr-gate.yml
       - .github/workflows/publish-image.yml
@@ -32,6 +38,12 @@ on:
       - src/**
       - tests/**
       - scripts/**
+      - .agents/skills/mimisbrunnr-context-memory/**
+      - .agents/agents/memory-read.md
+      - .agents/agents/memory-write.md
+      - .github/agents/memory-read.agent.md
+      - .github/agents/memory-write.agent.md
+      - .mcp.json
       - .github/actions/**
       - .github/workflows/pr-gate.yml
       - .github/workflows/publish-image.yml
@@ -64,6 +76,11 @@ jobs:
 
       - name: Test release policy
         run: python3 -B -m unittest discover -s scripts -p 'test_release_policy.py' -v
+
+      - name: Test context-memory skill
+        run: |
+          python3 -B .agents/skills/mimisbrunnr-context-memory/tests/run_tests.py
+          python3 -B .agents/skills/mimisbrunnr-context-memory/tests/measure_cost.py
 
       - name: Install .NET SDK
         uses: actions/setup-dotnet@v4

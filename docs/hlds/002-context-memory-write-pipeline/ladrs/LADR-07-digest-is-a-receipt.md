@@ -1,6 +1,6 @@
 # LADR-07: The digest is a receipt; dry-run is the veto
 
-**Status:** Accepted
+**Status:** Accepted; implemented and verified 2026-09-17
 
 ## Context
 
@@ -26,6 +26,10 @@ Dry-run executes the **identical pipeline** and renders the **identical digest**
 nothing. It must share one code path with the real write: every verdict — subject collision, missing
 version target, unknown link endpoint, already-present link — is reached before the persist step
 branches. A dry-run on a separate path stops predicting the real one, which is the only thing it is for.
+
+The write agent assigns `createUuid` before dry-run and reuses the same payload for write. Thus item
+identities, resolved links and divergence counts are stable between both runs when store state has not
+changed. Legacy clients that omit create identities retain null dry-run UUIDs.
 
 The skipped count **distinguishes its causes**. A candidate held back for bundling never reaches the
 API, while a duplicate link is skipped at the API — collapsing them into one number hides a split

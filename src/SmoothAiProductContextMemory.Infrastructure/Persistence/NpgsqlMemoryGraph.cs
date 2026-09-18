@@ -41,6 +41,28 @@ public sealed class NpgsqlMemoryGraph(SmoothAiProductContextMemoryDbContext db) 
         string reason,
         CancellationToken cancellationToken)
     {
+        if (db.Database.CurrentTransaction is null)
+        {
+            await using IDbContextTransaction transaction =
+                await db.Database.BeginTransactionAsync(cancellationToken);
+            bool created = await CreateWithinTransactionAsync(
+                sourceUuid, targetUuid, relation, reason, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return created;
+        }
+
+        return await CreateWithinTransactionAsync(
+            sourceUuid, targetUuid, relation, reason, cancellationToken);
+    }
+
+    private async Task<bool> CreateWithinTransactionAsync(
+        Guid sourceUuid,
+        Guid targetUuid,
+        string relation,
+        string reason,
+        CancellationToken cancellationToken)
+    {
+        await AcquireLinkWriteLockAsync(cancellationToken);
         if (await ExistsAsync(sourceUuid, targetUuid, relation, cancellationToken))
         {
             return false;
@@ -54,6 +76,24 @@ public sealed class NpgsqlMemoryGraph(SmoothAiProductContextMemoryDbContext db) 
             """;
         await ExecuteScalarAsync(cypher, cancellationToken);
         return true;
+    }
+
+    private async Task AcquireLinkWriteLockAsync(CancellationToken cancellationToken)
+    {
+        await using NpgsqlCommand command = await CreateRelationalCommandAsync(
+            "SELECT pg_advisory_xact_lock(734921, 2);",
+            cancellationToken);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private async Task<NpgsqlCommand> CreateRelationalCommandAsync(
+        string sql,
+        CancellationToken cancellationToken)
+    {
+        await db.Database.OpenConnectionAsync(cancellationToken);
+        var connection = (NpgsqlConnection)db.Database.GetDbConnection();
+        var transaction = db.Database.CurrentTransaction?.GetDbTransaction() as NpgsqlTransaction;
+        return new NpgsqlCommand(sql, connection, transaction);
     }
 
     public Task<IReadOnlyList<MemoryRelationship>> ListAllAsync(CancellationToken cancellationToken) =>

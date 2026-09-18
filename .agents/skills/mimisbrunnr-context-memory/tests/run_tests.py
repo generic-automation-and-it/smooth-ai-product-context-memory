@@ -24,6 +24,7 @@ from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
 SCRIPTS = HERE.parent / "scripts"
+sys.path.insert(0, str(SCRIPTS))
 
 
 def _load(name):
@@ -37,6 +38,11 @@ redact = _load("redact")
 atomicity = _load("atomicity")
 client = _load("context_memory_client")
 near_miss = _load("near_miss_tags")
+deepsearch = _load("deepsearch")
+divergence = _load("divergence")
+authority = _load("authority")
+read_mcp = _load("memory_read_mcp")
+write_mcp = _load("memory_write_mcp")
 
 
 def _run_atomicity(batch):
@@ -250,6 +256,342 @@ class PathsClientTests(unittest.TestCase):
         return handle.name
 
 
+class WritePayloadTests(unittest.TestCase):
+    def test_set_preserves_create_uuid_payload(self):
+        create_uuid = "11111111-1111-4111-8111-111111111111"
+        payload = {"items": [{"uuid": None, "createUuid": create_uuid}], "links": []}
+        with patch.object(client, "read_payload", return_value=copy.deepcopy(payload)), \
+                patch.object(client, "_request", return_value={"created": 1}) as request, \
+                redirect_stdout(io.StringIO()):
+            client.cmd_set(SimpleNamespace(payload=None, dryrun=True))
+        self.assertEqual(request.call_args.args[2]["items"][0]["createUuid"], create_uuid)
+        self.assertEqual(request.call_args.kwargs["query"], {"dryRun": "true"})
+
+    def test_write_mcp_enforces_checkpoint_cap_before_transport(self):
+        payload = {"items": [{}] * (client.MAX_CANDIDATES + 1)}
+        with patch.object(write_mcp.client, "_request") as request, \
+                self.assertRaises(write_mcp.client.ClientError):
+            write_mcp.call_tool("set", {"payload": payload})
+        request.assert_not_called()
+
+    def test_missing_capability_fails_before_transport(self):
+        with patch.dict(os.environ, {}, clear=True), \
+                patch.object(client, "_open") as transport:
+            with self.assertRaises(client.ClientError) as error:
+                client._request("POST", "/api/context/query", {})
+        self.assertIn(client.ENV_READ_TOKEN, str(error.exception))
+        transport.assert_not_called()
+
+    def test_read_and_write_routes_select_distinct_credentials(self):
+        with patch.dict(os.environ, {client.ENV_READ_TOKEN: "read-only",
+                                    client.ENV_WRITE_TOKEN: "write-only"}), \
+                patch.object(client, "_open") as transport:
+            transport.return_value.__enter__.return_value.read.return_value = b'{}'
+            client._request("POST", "/api/context/query", {})
+            read_request = transport.call_args.args[0]
+            client._request("POST", "/api/context/memories", {"items": []})
+            write_request = transport.call_args.args[0]
+            client._request("POST", "/api/context/preflight", {"candidates": []})
+            preflight_request = transport.call_args.args[0]
+        self.assertEqual(read_request.get_header("Authorization"), "Bearer read-only")
+        self.assertEqual(write_request.get_header("Authorization"), "Bearer write-only")
+        self.assertEqual(preflight_request.get_header("Authorization"), "Bearer write-only")
+
+    def test_base_url_rejects_remote_plain_http_and_embedded_credentials(self):
+        for value in ("http://example.com", "https://example.com", "https://user:pass@example.com", "https://example.com/path"):
+            with self.subTest(value=value), patch.dict(os.environ, {client.ENV_BASE_URL: value}):
+                with self.assertRaises(client.ClientError):
+                    client.base_url()
+
+    def test_redirects_are_refused(self):
+        handler = client._NoRedirect()
+        request = client.urllib.request.Request(
+            "https://memory.example/api/context/query",
+            headers={"Authorization": "Bearer secret"})
+        with self.assertRaises(client.ClientError):
+            handler.redirect_request(request, None, 302, "Found", {}, "https://evil.example/")
+
+
+class DeepSearchTests(unittest.TestCase):
+    def test_default_client_query_has_no_deepsearch_pass(self):
+        with patch.object(client, "read_payload", return_value={}), \
+                patch.object(client, "_request", return_value={"items": []}) as request, \
+                redirect_stdout(io.StringIO()):
+            client.cmd_query(SimpleNamespace(payload=None))
+        request.assert_called_once_with("POST", "/api/context/query", {"limit": 200})
+
+    def test_deepsearch_is_bounded_deduplicated_and_disclosed(self):
+        baseline_rows = [self.row(index) for index in range(200)]
+        calls = []
+
+        def request(method, path, payload):
+            calls.append((method, path, payload))
+            if path.endswith("query") and payload.get("query") is None:
+                return {"items": baseline_rows}
+            if path.endswith("query"):
+                return {"items": [baseline_rows[0], self.row(200 + len(calls))]}
+            return {"paths": [{"endpoint": self.row(300 + len(calls))}]}
+
+        result = deepsearch.execute(
+            {"baseline": {"facets": ["storage"], "kind": "decision"},
+             "keywords": ["zeta", "alpha", "beta", "gamma", "delta"]},
+            request=request)
+
+        query_calls = [call for call in calls if call[1].endswith("query")]
+        path_calls = [call for call in calls if call[1].endswith("paths")]
+        self.assertEqual(len(query_calls), 5)
+        self.assertEqual([call[2]["query"] for call in query_calls[1:]],
+                         ["alpha", "beta", "delta", "gamma"])
+        self.assertEqual(len(path_calls), 5)
+        self.assertTrue(all(call[2]["maxDepth"] == 1 and call[2]["limit"] == 20
+                            for call in path_calls))
+        self.assertLessEqual(len(result["items"]), deepsearch.AGGREGATE_LIMIT)
+        self.assertTrue(result["disclosure"]["possiblyOmitted"])
+        self.assertEqual(result["disclosure"]["keywordsOmittedByCap"], 1)
+        self.assertGreater(result["disclosure"]["anchorsOmittedByCap"], 0)
+        keys = [(item["uuid"], item["version"]) for item in result["items"]]
+        self.assertEqual(len(keys), len(set(keys)))
+
+    def test_deepsearch_rejects_sentence_queries(self):
+        with self.assertRaises(ValueError):
+            deepsearch.execute(
+                {"baseline": {}, "keywords": ["this is a whole sentence"]},
+                request=lambda *_: {"items": []})
+
+    def test_group_context_does_not_broaden_into_unscoped_traversal(self):
+        calls = []
+        result = deepsearch.execute(
+            {"baseline": {"groupUuid": "11111111-1111-4111-8111-111111111111"}, "keywords": []},
+            request=lambda method, path, payload: calls.append((method, path, payload))
+                or ({"items": [self.row(1)]} if path.endswith("query") else {"paths": []}))
+        self.assertFalse(any(path.endswith("paths") for _, path, _ in calls))
+        self.assertTrue(result["disclosure"]["traversalSkippedForContextSelector"])
+        self.assertTrue(result["disclosure"]["possiblyOmitted"])
+
+    @staticmethod
+    def row(index):
+        return {"uuid": f"00000000-0000-4000-8000-{index:012d}", "version": 1}
+
+
+class DivergenceTests(unittest.TestCase):
+    def payload(self):
+        candidate = {
+            "createUuid": "11111111-1111-4111-8111-111111111111",
+            "kind": "decision", "scopeDimension": "product", "scopeIdentifier": None,
+            "facets": ["storage"], "tags": [], "confidence": 80,
+            "validFrom": "2026-09-17T00:00:00Z", "summaryModel": "model",
+            "summaryPromptVersion": "v1",
+        }
+        return {
+            "candidate": {"scopeDimension": "product", "scopeIdentifier": None, "write": candidate},
+            "existing": {"uuid": "22222222-2222-4222-8222-222222222222", "version": 3,
+                          "kind": "decision", "scopeDimension": "product", "scopeIdentifier": None,
+                          "confidence": 70},
+            "reason": "No stated authority selects either claim.",
+            "sameSubject": True,
+            "existingPairs": [],
+        }
+
+    def test_genuine_conflict_composes_proposed_record_and_two_links(self):
+        result = divergence.compose(self.payload())
+        self.assertEqual(result["diverged"], 1)
+        self.assertEqual(result["items"][1]["kind"], "divergence")
+        self.assertEqual(result["items"][1]["status"], "proposed")
+        self.assertEqual(result["items"][0]["description"],
+                         "Unresolved alternative to 22222222-2222-4222-8222-222222222222 "
+                         "(11111111-1111-4111-8111-111111111111)")
+        self.assertEqual(len(result["links"]), 2)
+        self.assertTrue(all(link["relation"] == "contradicts" for link in result["links"]))
+
+    def test_existing_pair_and_divergence_evidence_do_not_recurse(self):
+        first = divergence.compose(self.payload())
+        duplicate = self.payload()
+        duplicate["existingPairs"] = [first["pair"]]
+        duplicate_result = divergence.compose(duplicate)
+        self.assertEqual(duplicate_result["diverged"], 0)
+        self.assertEqual(duplicate_result["items"], [])
+        loop = self.payload()
+        loop["existing"]["kind"] = "divergence"
+        with self.assertRaises(ValueError):
+            divergence.compose(loop)
+
+        persisted = self.payload()
+        persisted["existingDivergences"] = [{
+            "uuid": divergence.divergence_uuid(first["pair"]),
+            "kind": "divergence", "status": "proposed",
+            "sources": [
+                {"kind": "memory", "reference": "22222222-2222-4222-8222-222222222222:v3"},
+                {"kind": "memory", "reference": "11111111-1111-4111-8111-111111111111:v1"},
+            ],
+        }]
+        self.assertEqual(divergence.compose(persisted)["diverged"], 0)
+
+    def test_scope_mismatch_is_not_a_conflict(self):
+        payload = self.payload()
+        payload["existing"]["scopeDimension"] = "program"
+        with self.assertRaises(ValueError):
+            divergence.compose(payload)
+
+
+class AuthorityTests(unittest.TestCase):
+    def payload(self, winner):
+        return {
+            "authority": "shipped_behavior",
+            "winner": winner,
+            "candidateWrite": {"createUuid": "11111111-1111-4111-8111-111111111111",
+                               "statement": "Losing claim" if winner == "existing" else "Candidate"},
+            "existing": {"uuid": "22222222-2222-4222-8222-222222222222",
+                         "write": {"statement": "Existing winner"}},
+        }
+
+    def test_candidate_winner_is_one_version_and_existing_history_is_retained(self):
+        result = authority.compose(self.payload("candidate"))
+        self.assertEqual(len(result["items"]), 1)
+        self.assertEqual(result["items"][0]["uuid"], "22222222-2222-4222-8222-222222222222")
+        self.assertNotIn("createUuid", result["items"][0])
+        self.assertTrue(result["losingPositionRetained"])
+
+    def test_existing_winner_records_loser_then_restores_winner(self):
+        result = authority.compose(self.payload("existing"))
+        self.assertEqual([item["statement"] for item in result["items"]],
+                         ["Losing claim", "Existing winner"])
+        self.assertTrue(all(item["uuid"] == "22222222-2222-4222-8222-222222222222"
+                            for item in result["items"]))
+
+    def test_unknown_authority_is_rejected(self):
+        payload = self.payload("candidate")
+        payload["authority"] = "confidence"
+        with self.assertRaises(ValueError):
+            authority.compose(payload)
+
+
+class SemanticFixtureTests(unittest.TestCase):
+    def test_blinded_model_input_excludes_expected_verdicts(self):
+        completed = subprocess.run(
+            [sys.executable, str(HERE / "fixtures" / "score_fixtures.py"), "--emit-model-input"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0)
+        payload = json.loads(completed.stdout)
+        self.assertTrue(payload["scenarios"])
+        self.assertTrue(all("id" not in scenario and "expected" not in scenario and "note" not in scenario
+                            for scenario in payload["scenarios"]))
+
+    def test_committed_blinded_semantic_evidence_scores_cleanly(self):
+        completed = subprocess.run(
+            [sys.executable, str(HERE / "fixtures" / "score_fixtures.py"),
+             "--model-verdicts", str(HERE / "fixtures" / "model-verdicts-2026-09-17.json")],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        score = json.loads(completed.stdout)
+        self.assertEqual(score["recall"], 1.0)
+        self.assertEqual(score["precision"], 1.0)
+
+
+class AgentContractTests(unittest.TestCase):
+    AGENTS = HERE.parent / "agents"
+    MUTATIONS = ("set", "create-link", "resolve-group", "update-group", "append-description",
+                 "propose-label", "upsert-initiative", "ticket-parent")
+
+    def test_read_agent_grants_only_read_client(self):
+        text = (self.AGENTS / "memory-read.md").read_text(encoding="utf-8")
+        grant = text.split("---", 2)[1]
+        self.assertIn("mcp__mimisbrunnr-read__query", grant)
+        self.assertNotIn("Bash", grant)
+        self.assertNotIn("context_memory_client.py:*", grant)
+        for mutation in self.MUTATIONS:
+            self.assertNotIn(mutation, grant)
+
+        registration = (HERE.parents[2] / "agents" / "memory-read.md").read_text(encoding="utf-8")
+        self.assertIn("mcp__mimisbrunnr-read__query", registration)
+        self.assertNotIn("Bash", registration.split("---", 2)[1])
+        self.assertIn("CONTEXT_MEMORY_WRITE_TOKEN", registration)
+
+    def test_read_client_refuses_environment_with_write_credential(self):
+        completed = subprocess.run(
+            [sys.executable, str(SCRIPTS / "context_memory_read_client.py"), "probe"],
+            env={**os.environ, client.ENV_READ_TOKEN: "read", client.ENV_WRITE_TOKEN: "write"},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn(client.ENV_WRITE_TOKEN, completed.stderr)
+
+    def test_read_mcp_lists_no_mutation_tools(self):
+        names = {tool["name"] for tool in read_mcp.tool_definitions()}
+        self.assertEqual(names, {"probe", "query", "deepsearch", "get_versions", "get_blob",
+                                 "paths", "ticket_paths", "labels", "initiatives"})
+        for mutation in self.MUTATIONS:
+            self.assertNotIn(mutation.replace("-", "_"), names)
+
+    def test_read_mcp_removes_write_credential_at_startup(self):
+        observed = []
+        original_handle = read_mcp.handle
+
+        def inspect_environment(message):
+            observed.append(client.ENV_WRITE_TOKEN not in os.environ)
+            return original_handle(message)
+
+        request = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}) + "\n"
+        with patch.dict(os.environ, {client.ENV_READ_TOKEN: "read", client.ENV_WRITE_TOKEN: "write"}), \
+                patch.object(sys, "stdin", io.StringIO(request)), \
+                patch.object(read_mcp, "handle", side_effect=inspect_environment), \
+                redirect_stdout(io.StringIO()) as stdout:
+            self.assertEqual(read_mcp.main(), 0)
+
+        self.assertEqual(observed, [True])
+        response = json.loads(stdout.getvalue())
+        self.assertEqual(response["id"], 1)
+        self.assertEqual(len(response["result"]["tools"]), 9)
+
+    def test_read_mcp_configuration_exists(self):
+        config = json.loads((HERE.parents[3] / ".mcp.json").read_text(encoding="utf-8"))
+        command = config["mcpServers"]["mimisbrunnr-read"]
+        self.assertEqual(command["command"], "python3")
+        self.assertEqual(command["args"], [
+            ".agents/skills/mimisbrunnr-context-memory/scripts/memory_read_mcp.py"
+        ])
+
+    def test_read_mcp_lifecycle_initialize_ping_and_list(self):
+        initialized = read_mcp.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize"})
+        pinged = read_mcp.handle({"jsonrpc": "2.0", "id": 2, "method": "ping"})
+        listed = read_mcp.handle({"jsonrpc": "2.0", "id": 3, "method": "tools/list"})
+        self.assertEqual(initialized["result"]["serverInfo"]["name"], "mimisbrunnr-read")
+        self.assertEqual(pinged["result"], {})
+        self.assertEqual(len(listed["result"]["tools"]), 9)
+
+    def test_agents_and_orchestration_contract_exist(self):
+        read = (self.AGENTS / "memory-read.md").read_text(encoding="utf-8")
+        write = (self.AGENTS / "memory-write.md").read_text(encoding="utf-8")
+        skill = (HERE.parent / "SKILL.md").read_text(encoding="utf-8")
+        for marker in ("lookup", "grounding", "ALSO IN STORE"):
+            self.assertIn(marker, read)
+        for stage in ("Preflight", "Redact", "Dedupe / derive links", "Atomicity check", "Write"):
+            self.assertIn(stage, write)
+        self.assertIn("Where Each Step Runs", skill)
+        self.assertIn("Never call the store client", skill)
+        registration = (HERE.parents[2] / "agents" / "memory-write.md").read_text(encoding="utf-8")
+        self.assertIn("mcp__mimisbrunnr-write__set", registration)
+        self.assertNotIn("Bash", registration.split("---", 2)[1])
+        declared = {line.strip()[2:] for line in registration.split("---", 2)[1].splitlines()
+                    if line.strip().startswith("- mcp__mimisbrunnr-write__")}
+        exposed = {f"mcp__mimisbrunnr-write__{tool['name']}" for tool in write_mcp.tool_definitions()}
+        self.assertEqual(declared, exposed)
+
+        copilot_agents = HERE.parents[3] / ".github" / "agents"
+        copilot_read = (copilot_agents / "memory-read.agent.md").read_text(encoding="utf-8")
+        copilot_write = (copilot_agents / "memory-write.agent.md").read_text(encoding="utf-8")
+        self.assertIn("mimisbrunnr-read/query", copilot_read)
+        self.assertNotIn("execute", copilot_read.split("---", 2)[1])
+        self.assertIn("mimisbrunnr-write/*", copilot_write)
+
+
 class TicketClientTests(unittest.TestCase):
     CHILD = {"provider": "GitHub ", "key": " 42"}
     PARENT = {"provider": "github", "key": "10"}
@@ -455,8 +797,10 @@ class TicketClientTests(unittest.TestCase):
              "POST", "/api/context/tickets/paths"),
         ):
             with patch.object(client, "read_payload", return_value=copy.deepcopy(payload)), \
-                    patch.object(client, "base_url", return_value="http://example.invalid"), \
-                    patch.object(client.urllib.request, "urlopen") as transport, \
+                patch.object(client, "base_url", return_value="http://example.invalid"), \
+                     patch.dict(os.environ, {client.ENV_READ_TOKEN: "read-token",
+                                             client.ENV_WRITE_TOKEN: "write-token"}), \
+                     patch.object(client, "_open") as transport, \
                     redirect_stdout(io.StringIO()) as output:
                 transport.return_value.__enter__.return_value.read.return_value = b'{"disclosure":{"kept":true}}'
                 command(SimpleNamespace(payload=None, dryrun=False))
@@ -465,6 +809,8 @@ class TicketClientTests(unittest.TestCase):
             self.assertEqual(request.method, method)
             self.assertEqual(json.loads(request.data), payload)
             self.assertEqual(request.get_header("Content-type"), "application/json")
+            expected_token = "write-token" if method == "PUT" else "read-token"
+            self.assertEqual(request.get_header("Authorization"), f"Bearer {expected_token}")
             self.assertEqual(json.loads(output.getvalue()), {"disclosure": {"kept": True}})
 
 

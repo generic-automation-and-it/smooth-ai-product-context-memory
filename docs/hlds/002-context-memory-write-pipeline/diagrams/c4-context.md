@@ -17,7 +17,9 @@ C4Context
     Person(dev, "Developer", "Captures durable facts at an end-of-task checkpoint.")
 
     System_Boundary(harness, "AI harness") {
-        System(skill, "Context-memory skill", "Owns judgement: redaction, semantic matching, link derivation, atomicity. Sole agent-facing interface.")
+        System(skill, "Context-memory orchestrator", "Owns interaction; receives only cited conclusions and receipts.")
+        System(readAgent, "Read agent", "Read credential only; bounded lookup and grounding.")
+        System(writeAgent, "Write agent", "Owns redaction, semantic matching, divergence, link derivation and atomicity.")
     }
 
     System_Boundary(cm, "Context Memory") {
@@ -26,7 +28,10 @@ C4Context
     }
 
     Rel(dev, skill, "Captures and recalls")
-    Rel(skill, api, "Preflight, set, query, drill-down", "HTTP")
+    Rel(skill, readAgent, "Delegates retrieval")
+    Rel(skill, writeAgent, "Delegates discrete facts")
+    Rel(readAgent, api, "Query and drill-down", "HTTP + read token")
+    Rel(writeAgent, api, "Preflight and set", "HTTP + write token")
     Rel(api, store, "One transaction per write")
 
     UpdateLayoutConfig($c4ShapeInRow="2", $c4BoundaryInRow="2")
@@ -47,61 +52,64 @@ carries the design.
 sequenceDiagram
     autonumber
     participant H as Human
-    participant S as Skill (judgement)
+    participant S as Main skill (orchestration)
+    participant W as Write agent (judgement)
     participant A as API (mechanics)
     participant DB as PostgreSQL
     participant B as Object store
 
     H->>S: Checkpoint — capture what was learned
+    S->>W: Discrete facts + mode (never raw transcript)
 
     rect rgb(245, 245, 245)
-        Note over S,DB: Stage 1 — Preflight (batched, judges nothing, writes nothing)
-        S->>A: Candidate batch (subjects, kinds, facets, ticket refs, target group)
-        A->>DB: One cross-group traversal
+        Note over W,DB: Stage 1 — Preflight (batched, judges nothing, writes nothing)
+        W->>A: Candidate batch (subjects, kinds, facets, ticket refs, target group)
+        A->>DB: Batched exact subject/ticket checks
         DB-->>A: Exact-match candidates, ticket conflicts, intra-batch collisions
-        A-->>S: Array out — facts only, no decisions
+        A-->>W: Array out — facts only, no decisions
     end
 
     rect rgb(245, 245, 245)
-        Note over S: Stage 2 — Redact (before anything reaches storage)
-        S->>S: Fingerprint detection; scrub spans
-        Note right of S: Content addressing makes a stored object<br/>immutable and its address stable. After the<br/>write there is no remedy, only orphaning.
+        Note over W: Stage 2 — Redact (before anything reaches storage)
+        W->>W: Fingerprint detection; scrub spans
     end
 
     rect rgb(245, 245, 245)
-        Note over S,DB: Stage 3 — Dedupe and derive links (same traversal)
-        S->>A: Recall by facet and kind
+        Note over W,DB: Stage 3 — Dedupe, divergence and derive links
+        W->>A: Baseline recall; optional bounded deep-search passes
         A->>DB: Bounded candidate set
         DB-->>A: Cheap fields only
-        A-->>S: Candidates
-        S->>S: Judge per pair — version / new / skip; derive links with reasons
+        A-->>W: Candidates
+        W->>W: Judge per pair — version / new / divergence / skip; derive links with reasons
     end
 
     rect rgb(245, 245, 245)
-        Note over S: Stage 4 — Atomicity check
-        S->>S: One memory = one fact. Split bundles; route remainder to skipped
+        Note over W: Stage 4 — Atomicity check
+        W->>W: One memory = one fact. Split bundles; route remainder to skipped
     end
 
     rect rgb(245, 245, 245)
-        Note over S,B: Stage 5 — Write (one transaction, API-owned)
-        S->>A: Resolved writes + derived links
+        Note over W,B: Stage 5 — Write (one transaction, API-owned)
+        W->>A: Writes with create UUIDs + resolved links
         A->>B: Store bodies, content-addressed
         B-->>A: Addresses
         A->>DB: BEGIN
         A->>DB: Flip old is_current false, then insert new current
         A->>DB: Insert links
         A->>DB: COMMIT
-        A-->>S: Digest
+        A-->>W: Digest
     end
 
-    S-->>H: Receipt — created / versioned / linked / diverged / skipped(atomicity) / skipped(duplicate-link) / labels-proposed
-    Note over H,S: Dry-run executes stages 1–5 identically<br/>and renders this same digest, persisting nothing.<br/>That is the pre-write veto — the digest is not.
+    W-->>S: Bounded clarification needs + digest only
+    S-->>H: Receipt — created / versioned / linked / diverged / skipped / labels-proposed
 ```
 
 **Read this for three properties the ordering encodes:**
 
 1. **Redaction sits at stage 2 because stage 5 is irreversible.** Once a body is stored it is immutable and its address is a function of its content; prevention is the only clean remedy.
-2. **Stages 1 and 3 share one traversal.** Deduplication recall, link derivation and ticket uniqueness all need the same cross-group subject lookup, so the expensive read happens once.
+2. **Stages 1 and 3 have distinct bounded reads.** Stage 1 supplies exact subject/ticket backstops and
+   intra-batch collisions. Stage 3 supplies semantic candidates for deduplication and link derivation;
+   optional deep search only expands this stage.
 3. **Stage 5 is one transaction, owned by the API.** The version flip must precede the insert or the partial unique index rejects it — and both must share a transaction, because a failure between them leaves the memory with *zero* current versions, which no constraint forbids and nothing detects.
 
 Note also what stage 1 does **not** do: it returns facts, never decisions. The judgement is entirely

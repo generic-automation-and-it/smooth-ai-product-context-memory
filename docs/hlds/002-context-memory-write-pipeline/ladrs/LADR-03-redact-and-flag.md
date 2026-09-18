@@ -1,6 +1,6 @@
 # LADR-03: Redact and flag, never reject
 
-**Status:** Accepted
+**Status:** Accepted; implemented and verified 2026-09-17
 
 ## Context
 

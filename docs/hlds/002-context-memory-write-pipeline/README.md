@@ -2,10 +2,10 @@
 
 | | |
 |---|---|
-| **Status** | Accepted; memory pipeline and ticket declaration transport implemented, release gates passed |
+| **Status** | Accepted; all LADR decisions implemented and verified; NFR-03 live all-outcomes evidence and NFR-05 provider telemetry remain open |
 | **Owner** | generik0 |
 | **Tracker** | Context-memory MVP |
-| **Last updated** | 2026-09-15 |
+| **Last updated** | 2026-09-17 |
 
 > Converted from ADR-0003. This HLD delivers **intent + spec** — the contract the agent-facing skill
 > executes and the judgement it owns. Execution is tracked in the issue/work tracker.
@@ -65,6 +65,8 @@ noticing — which is itself the evidence that this needs an owner rather than g
 - Link derivation is a named stage with a fixed position, not a side effect.
 - Derived links appear in the digest; none is created silently.
 - Every link carries a reason, structurally enforced by the schema.
+- Links involving batch-created memories use caller-selected create UUIDs and commit with those memories.
+- A graph failure rolls back relational memory/version changes and graph edges in that request.
 
 ### 4. Nothing mutates silently
 
@@ -76,6 +78,18 @@ with a count. A human can audit what happened without reading the store.
 - Every write path renders a digest; a silent mutation is a defect.
 - The skipped count distinguishes its causes rather than collapsing them.
 - A pre-write inspection mode runs the identical pipeline and renders the identical digest while persisting nothing.
+- Genuine conflict creates a proposed divergence record with two `contradicts` links;
+  authority-resolvable disagreement does not.
+- Rule-resolvable disagreement keeps the losing position in version history and leaves the
+  authority-selected winner current; same-subject genuine conflict keeps both claims current under
+  separate identities.
+
+### 5. Bulky recall stays outside the working session
+
+Default recall remains bounded and unchanged. `--deepsearch` is explicit and bounded; both default and
+deep paths run in delegated read/write contexts. The working session receives cited conclusions,
+omission disclosure and receipts rather than raw candidate arrays. Separate API credentials enforce
+the read-only worker boundary.
 
 ## Core Separation of Concerns
 
@@ -115,13 +129,13 @@ See [`./ladrs/`](./ladrs/).
 
 | LADR | Decision | Status |
 |------|----------|--------|
-| [LADR-01](./ladrs/LADR-01-five-stage-pipeline.md) | Five stages in a fixed order, specified together | Accepted |
-| [LADR-02](./ladrs/LADR-02-redaction-precedes-blob-write.md) | Redaction precedes the body write | Accepted |
-| [LADR-03](./ladrs/LADR-03-redact-and-flag.md) | Redact and flag, never reject | Accepted |
-| [LADR-04](./ladrs/LADR-04-semantic-dedup-is-skill-owned.md) | Semantic deduplication belongs to the skill | Accepted |
-| [LADR-05](./ladrs/LADR-05-link-derivation-batched.md) | Link derivation batched into the pre-write round | Accepted |
-| [LADR-06](./ladrs/LADR-06-gate-status-not-persistence.md) | Approval gates status, not persistence | Accepted |
-| [LADR-07](./ladrs/LADR-07-digest-is-a-receipt.md) | The digest is a receipt; dry-run is the veto | Accepted |
+| [LADR-01](./ladrs/LADR-01-five-stage-pipeline.md) | Five stages in a fixed order, specified together | Accepted; implemented and verified |
+| [LADR-02](./ladrs/LADR-02-redaction-precedes-blob-write.md) | Redaction precedes the body write | Accepted; implemented and verified |
+| [LADR-03](./ladrs/LADR-03-redact-and-flag.md) | Redact and flag, never reject | Accepted; implemented and verified |
+| [LADR-04](./ladrs/LADR-04-semantic-dedup-is-skill-owned.md) | Semantic deduplication belongs to the skill | Accepted; implemented and verified |
+| [LADR-05](./ladrs/LADR-05-link-derivation-batched.md) | Link derivation batched into the pre-write round | Accepted; implemented and verified |
+| [LADR-06](./ladrs/LADR-06-gate-status-not-persistence.md) | Approval gates status, not persistence | Accepted; implemented and verified |
+| [LADR-07](./ladrs/LADR-07-digest-is-a-receipt.md) | The digest is a receipt; dry-run is the veto | Accepted; implemented and verified |
 | [LADR-08](./ladrs/LADR-08-practitioner-declared-ticket-hierarchy.md) | Ticket hierarchy is practitioner-declared, with explicit expected-parent mutation | Accepted; implemented and verified |
 
 ## Non-Functional Requirements
@@ -132,6 +146,6 @@ See [`./nfrs/`](./nfrs/).
 |-----|-----------|------------------|--------|
 | [NFR-01](./nfrs/NFR-01-secret-containment.md) | Security | No detected secret reaches storage; content never logged | Accepted |
 | [NFR-02](./nfrs/NFR-02-deduplication-accuracy.md) | Correctness | Measured recall *and* precision against authored pairs | Accepted |
-| [NFR-03](./nfrs/NFR-03-auditability.md) | Auditability | Every mutation appears in a digest | Accepted |
+| [NFR-03](./nfrs/NFR-03-auditability.md) | Auditability | Mechanical outcomes covered; one live delegated all-outcomes receipt remains | Draft |
 | [NFR-04](./nfrs/NFR-04-poisoning-resistance.md) | Security | Retrieved memories render as quoted data, never instructions | Accepted |
-| [NFR-05](./nfrs/NFR-05-cost.md) | Cost | Per-write model cost stated and bounded; expensive paths opt-in | Draft |
+| [NFR-05](./nfrs/NFR-05-cost.md) | Cost | Logical/API/blob bounds measured; provider token telemetry and live delegated run remain open | Draft |

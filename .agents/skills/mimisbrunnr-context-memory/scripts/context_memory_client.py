@@ -13,9 +13,12 @@ import re
 import sys
 import urllib.error
 import urllib.request
+from urllib.parse import urlparse
 
 DEFAULT_BASE_URL = "http://localhost:5141"
 ENV_BASE_URL = "CONTEXT_MEMORY_BASE_URL"
+ENV_READ_TOKEN = "CONTEXT_MEMORY_READ_TOKEN"
+ENV_WRITE_TOKEN = "CONTEXT_MEMORY_WRITE_TOKEN"
 
 # Static, configurable candidate cap (decision 6). Change this constant to widen or narrow the
 # preflight batch without touching pipeline logic. Mirrors Preflight.MaxCandidates.
@@ -38,7 +41,25 @@ class ClientError(RuntimeError):
 
 
 def base_url():
-    return os.environ.get(ENV_BASE_URL, DEFAULT_BASE_URL).rstrip("/")
+    value = os.environ.get(ENV_BASE_URL, DEFAULT_BASE_URL).rstrip("/")
+    parsed = urlparse(value)
+    if parsed.scheme not in ("http", "https") or parsed.username or parsed.password \
+            or parsed.path not in ("", "/") or parsed.query or parsed.fragment:
+        raise ClientError(0, "bad-base-url", "Context-memory base URL must be an HTTP(S) origin")
+    if parsed.hostname not in ("localhost", "127.0.0.1", "::1"):
+        raise ClientError(0, "bad-base-url", "Context-memory API origin must be loopback")
+    return value
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise ClientError(code, "redirect-refused", "Credential-bearing requests do not follow redirects")
+
+
+def _open(request):
+    return urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect).open(
+        request,
+        timeout=HTTP_TIMEOUT)
 
 
 def _request(method, path, payload=None, query=None):
@@ -49,14 +70,28 @@ def _request(method, path, payload=None, query=None):
         url += "?" + urlencode(query)
 
     body = None
-    headers = {"Accept": "application/json"}
+    write_routes = {
+        ("POST", "/api/context/preflight"),
+        ("POST", "/api/context/memories"),
+        ("POST", "/api/context/groups/resolve"),
+        ("POST", "/api/context/links"),
+        ("PUT", "/api/context/tickets/parent"),
+        ("POST", "/api/context/labels"),
+        ("POST", "/api/context/initiatives"),
+    }
+    is_write = (method, path) in write_routes or method == "PATCH" or "/descriptions" in path
+    token_name = ENV_WRITE_TOKEN if is_write else ENV_READ_TOKEN
+    token = os.environ.get(token_name)
+    if not token:
+        raise ClientError(0, "missing-credential", f"{token_name} is required")
+    headers = {"Accept": "application/json", "Authorization": f"Bearer {token}"}
     if payload is not None:
         body = json.dumps(payload).encode("utf-8")
         headers["Content-Type"] = "application/json"
 
     req = urllib.request.Request(url, data=body, headers=headers, method=method)
     try:
-        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
+        with _open(req) as resp:
             raw = resp.read().decode("utf-8")
             return json.loads(raw) if raw else None
     except urllib.error.HTTPError as e:
@@ -136,19 +171,25 @@ def cmd_preflight(args):
 def cmd_set(args):
     """POST /api/context/memories. --dryrun appends ?dryRun=true."""
     payload = read_payload(args.payload)
+    validate_set_payload(payload)
+    query = {"dryRun": "true"} if args.dryrun else None
+    resp = _request("POST", "/api/context/memories", payload, query=query)
+    print(json.dumps(resp, indent=2))
+    return resp
+
+
+def validate_set_payload(payload):
     if not isinstance(payload, dict):
         raise ClientError(0, "bad-input", "'set' payload must be an object with 'items'")
-    if len(payload.get("items", [])) > MAX_CANDIDATES:
+    if not isinstance(payload.get("items"), list):
+        raise ClientError(0, "bad-input", "'items' must be a list")
+    if len(payload["items"]) > MAX_CANDIDATES:
         raise ClientError(
             0,
             "bad-input",
             f"Batch has {len(payload['items'])} items; cap is {MAX_CANDIDATES}. "
             "Split into multiple checkpoints.",
         )
-    query = {"dryRun": "true"} if args.dryrun else None
-    resp = _request("POST", "/api/context/memories", payload, query=query)
-    print(json.dumps(resp, indent=2))
-    return resp
 
 
 def cmd_query(args):
@@ -180,9 +221,12 @@ def cmd_get_blob(args):
     url = base_url() + f"/api/context/memories/{args.uuid}/versions/{args.version}/blob"
     if args.scope:
         url += "?" + urlencode({"scope": args.scope})
-    req = urllib.request.Request(url, method="GET")
+    token = os.environ.get(ENV_READ_TOKEN)
+    if not token:
+        raise ClientError(0, "missing-credential", f"{ENV_READ_TOKEN} is required")
+    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"}, method="GET")
     try:
-        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
+        with _open(req) as resp:
             print(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         raise ClientError(e.code, e.reason, e.read().decode("utf-8", errors="replace")) from e

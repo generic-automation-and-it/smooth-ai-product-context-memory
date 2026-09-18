@@ -1,6 +1,6 @@
 # LADR-01: Five stages in a fixed order, specified together
 
-**Status:** Accepted
+**Status:** Accepted; implemented and verified 2026-09-17
 
 ## Context
 
@@ -17,14 +17,25 @@ placed after the write has nothing left to prevent.
 **Specify** all five together as one pipeline with a **fixed, canonical order**, executed in that order
 and never re-sequenced.
 
-1. **Preflight** — one *batched* cross-group read-before-write serving deduplication recall, link derivation and ticket uniqueness. Array in, array out. Writes nothing, judges nothing. Ticket uniqueness is the one concern that needs the caller's target group: "already owned by **another** group" is undecidable without it, so a candidate declares the group it is bound for and self-ownership is not a conflict. Subject recall stays group-blind.
+1. **Preflight** — one *batched* exact cross-group read-before-write serving subject and ticket
+   backstops plus intra-batch collision detection. Array in, array out. Writes nothing, judges nothing.
+   Ticket uniqueness is the one concern that needs the caller's target group: "already owned by
+   **another** group" is undecidable without it, so a candidate declares the group it is bound for and
+   self-ownership is not a conflict. Subject recall stays group-blind.
 2. **Redact** — scrub detected secrets before anything reaches storage.
-3. **Dedupe and derive links** — the semantic subject decision and typed-link derivation, both from the preflight's single traversal.
+3. **Dedupe and derive links** — semantic subject judgement and typed-link derivation use bounded
+   `/query` recall in addition to preflight facts. Optional deep search adds bounded keyword and
+   one-hop graph passes; it does not change authority or scope.
 4. **Atomicity check** — confirm one memory is one fact; split bundles, route the remainder to skipped.
 5. **Write** — one transactional call owned by the API.
 
-The **decisions and the stages are two different lists** and do not map one-to-one. Deduplication
-spans stages 1 and 3; link derivation likewise; ticket uniqueness lives entirely in stage 1. Conflating
+Rule-resolvable disagreement may produce two ordered version writes for one UUID in that call: first
+retain the losing candidate as history, then restore the authority-selected existing claim as current.
+This is still one stage and one transaction, not a second write pipeline.
+
+The **decisions and the stages are two different lists** and do not map one-to-one. Exact deduplication
+spans stages 1 and 3; semantic recall and link derivation live in stage 3; ticket uniqueness lives
+entirely in stage 1. Conflating
 the lists is the easiest way to misread the design, so the stage numbering is declared canonical and
 any document numbering them differently is stale rather than an alternative reading.
 
@@ -35,13 +46,14 @@ in one batch sharing a subject, neither yet written, so neither is visible to th
 
 - **Specify each concern independently** — rejected: ordering would emerge by accident, and three of the five are only correct in one position.
 - **Per-record preflight** — rejected: misses intra-batch collisions entirely.
-- **Three separate lookups for dedup, links and ticket uniqueness** — rejected: all three need the same cross-group subject traversal, so one read serves all three at no extra cost.
+- **Unbounded or per-candidate semantic recall** — rejected: cost multiplies with batch size and raw
+  rows flood the working session. Stage 3 recall is batched, bounded and delegated.
 - **Let the skill sequence the write** — rejected: the version flip and insert must share one transaction, which only the API can guarantee.
 
 ## Consequences
 
 - Ordering is a stated property, so a re-sequencing is visibly a change rather than a refactor.
-- One traversal serves three concerns; the expensive part of the pipeline runs once.
+- Exact checks are one batched preflight; semantic recall is a separate bounded read owned by stage 3.
 - The pipeline is a unit — a change to one stage's position must justify itself against the others.
 - Stage numbering must be maintained consistently across the contract documents, or the canonical claim becomes false.
 

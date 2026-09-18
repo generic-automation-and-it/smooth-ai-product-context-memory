@@ -6,6 +6,7 @@ using Npgsql;
 using NpgsqlTypes;
 using SmoothAiProductContextMemory.Application.Abstractions;
 using SmoothAiProductContextMemory.Application.Common.Models;
+using SmoothAiProductContextMemory.Domain.Entities;
 
 namespace SmoothAiProductContextMemory.Infrastructure.Persistence;
 
@@ -21,6 +22,8 @@ namespace SmoothAiProductContextMemory.Infrastructure.Persistence;
 /// </remarks>
 public sealed class NpgsqlMemoryTraversal(SmoothAiProductContextMemoryDbContext db) : IMemoryTraversal
 {
+    private static readonly JsonSerializerOptions TraversalJson = new(JsonSerializerDefaults.Web);
+
     public async Task<IReadOnlyList<MemoryPath>> FindPathsAsync(
         MemoryPathQuery query,
         CancellationToken cancellationToken)
@@ -127,7 +130,9 @@ public sealed class NpgsqlMemoryTraversal(SmoothAiProductContextMemoryDbContext 
                v.valid_from,
                v.valid_until,
                v.version,
-               v.is_current
+               v.is_current,
+               v.sources::text,
+               v.created_on
         FROM ag_catalog.cypher('{AgeSession.GraphName}', {DollarWrap(cypher)})
                  AS tr(nodes ag_catalog.agtype, hops ag_catalog.agtype, endpoint ag_catalog.agtype)
         JOIN memory m ON m.uuid = trim(both '"' from tr.endpoint::text)::uuid
@@ -200,7 +205,11 @@ public sealed class NpgsqlMemoryTraversal(SmoothAiProductContextMemoryDbContext 
             reader.GetFieldValue<DateTimeOffset>(15),
             reader.IsDBNull(16) ? null : reader.GetFieldValue<DateTimeOffset>(16),
             reader.GetInt32(17),
-            reader.GetBoolean(18));
+            reader.GetBoolean(18),
+            JsonSerializer.Deserialize<List<SourceDocument>>(
+                reader.GetString(19),
+                TraversalJson) ?? [],
+            reader.GetFieldValue<DateTimeOffset>(20));
 
     private static string Quote(Guid uuid) => Quote(uuid.ToString("D"));
 

@@ -8,6 +8,8 @@ Operational checks support operator decisions; a preflight must never repair the
 
 - Ticket ownership preflight is read-only, including against the default dev database. Never weaken the migration's duplicate guard or choose a keeper automatically.
 - Exact provider/key and group UUID reports are sensitive operational output, not application logging. Never send them to telemetry, CI artifacts, or commits; credentials stay inside the container.
+- API smoke credentials are generated per run, passed through environment variables, used only in
+  Authorization headers, and never printed or committed.
 - Verification uses a newly created isolated fixture, never the default corpus or a schema cloned from it. Cleanup may remove only resources created by that test invocation.
 - Do not turn the manual remediation runbook into an automated destructive cleanup script. Membership ownership is an operator decision; preserving memories does not preserve ticket-based discoverability.
 
@@ -29,6 +31,7 @@ Operational checks support operator decisions; a preflight must never repair the
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-17 | Release smoke now generates separate read/write API tokens and exercises routes with least-capability credentials. | HLD-002 NFR-04 |
 | 2026-09-16 | Added the release-policy harness to Test References. | PR #65 review |
 | 2026-09-16 | Restricted release policy to main pushes and added negative event/ref tests; removed tag/manual publication paths. | PR #65 |
 | 2026-09-15 | Added read-only exact ticket ownership preflight, malformed-data blockers, isolated operational tests and operator-only remediation runbook. Migration fail-closed duplicate guard unchanged. | PR #63 finding 3; HLD-003 LADR-08 |

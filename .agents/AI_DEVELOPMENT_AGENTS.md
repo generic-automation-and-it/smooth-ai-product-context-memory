@@ -24,6 +24,8 @@ This is a unified AI development experience folder that centralizes skills, prom
 | `.agents/` | Root folder for all AI development tooling |
 | `.agents/prompts/` | Reusable prompt templates (code review, architecture analysis) |
 | `.agents/roles/` | Multi-agent role instructions (PO, Architect, QA, Backend/Frontend Engineer, Heimdall Reviewer) |
+| `.agents/agents/` | Claude/compatible project subagent registrations; context-memory read/write workers delegate to skill-local contracts and expose typed MCP tools instead of Bash |
+| `.github/agents/` | Copilot local/VS Code custom-agent registrations for the same context-memory workers and MCP capability split; cloud agent cannot reach loopback store |
 | `.agents/rules/` | Enforced AI development rules (workflow rules, coding standards) |
 | `.agents/settings.json` | Claude Code config — tool permissions, compile/test commands, hook registrations; every script in `.agents/hooks/` MUST be registered here or it silently never fires (#32) |
 | `.agents/config.toml` | OpenAI Codex config (read via the `.codex` symlink) — the Codex counterpart of `settings.json`. Mirrors what Codex's TOML schema supports: `approval_policy`/`sandbox_mode` (Codex has no per-command ACLs or hooks), root-doc fallback, web search |
@@ -140,6 +142,7 @@ ls -la | grep -E '(\.claude|\.codex|\.cursor)'
 
 | Date | Change | Reason |
 | :---- | :---- | :---- |
+| 2026-09-17 | Registered context-memory read/write workers; read worker uses a read-only MCP surface with no Bash or mutation methods. | HLD-002 capability split |
 | 2026-09-14 | This-repo skills renamed: `ai-brain-dump` → `mimisbrunnr-vitsmunir-dump`; `context-memory` → `mimisbrunnr-context-memory`. Upstream skills unchanged. | |
 | 2026-09-13 | Synced `agile-github-breakdown` skill + `--all` on `ai-brain-dump` from smooth-devex-template #61. | template #61 |
 | 2026-07-23 | Changed Codex `approval_policy` from `unless-allow-listed` to `never` to resolve configuration load error. | #54 |

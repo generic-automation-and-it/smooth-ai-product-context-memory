@@ -18,9 +18,9 @@ future instruction**. The store is local, but local is not the same as trusted.
 - Assert a default retrieval excludes proposed records, and that any surfaced proposed record is flagged.
 - Assert programme-scoped content is absent from an open query, and that requesting it by identifier requires naming the scope explicitly rather than being granted silently.
 
-The scope case has **never been tested at any layer** across three simulation trials — a self-authored
-corpus never produced a customer or programme scope. It is the least-exercised rule in the design and
-the one most likely to be quietly wrong.
+Scope is pinned at unit, component and HTTP layers, including programme query exclusion, explicit
+blob/version reads and hidden traversal hops. Delegated reads additionally carry lifecycle and scope
+caveats inline and receive a read credential rejected by mutation routes.
 
 ## Acceptance Criteria
 

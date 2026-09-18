@@ -1,6 +1,6 @@
 # LADR-04: Semantic deduplication belongs to the skill
 
-**Status:** Accepted
+**Status:** Accepted; implemented and verified 2026-09-17
 
 ## Context
 
@@ -27,6 +27,11 @@ Recall is narrowed by classification first, then a bounded candidate set is judg
 the model's; string similarity may act as a **negative-only** pre-filter and is never the deciding
 signal on its own.
 
+When two same-subject claims disagree, the skill applies only BR-10's stated authority. If candidate
+wins, normal versioning retains prior claim. If existing claim wins, one transaction records candidate
+as an intermediate historical version and restores existing claim as current. If neither authority
+rule selects winner, claims retain separate identities and a proposed divergence links both.
+
 The failure is **silent in both directions**, which is what makes it dangerous. A missed match inserts
 a near-duplicate that dilutes every future retrieval; a false match rewrites canon under a subject that
 never changed. Accuracy is therefore measured as **recall and precision** against authored positive and
@@ -42,7 +47,8 @@ negative pairs, not asserted as "deduplication held".
 ## Consequences
 
 - Deduplication quality is a property of the skill, not a guarantee of the schema — the single largest correctness risk in the system, and named as such.
-- Cross-group matching costs one traversal, shared with link derivation and ticket uniqueness.
+- Cross-group semantic matching and link derivation share one bounded candidate set. Exact subject and
+  ticket backstops remain the separate batched preflight.
 - Text search stems (`english` configuration) since HLD-001's recall-tuning measurement; this widens candidate recall only — the equivalence decision stays here, in the skill.
 - Testing must be adversarial, including negative controls, or it measures nothing.
 

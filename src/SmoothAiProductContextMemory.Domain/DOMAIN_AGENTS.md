@@ -33,6 +33,7 @@ they are the design, not drift.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-17 | Added `divergence` to well-known open kind values; no schema or closed-enum constraint introduced. | HLD-002 BR-10 closure |
 | 2026-09-13 | ADR-0001/0002/0003 deleted; exceptions section retargeted to HLD 001. | HLD-001 |
 | 2026-09-13 | `MemoryLink` entity removed; `MemoryRelation` holds the five well-known relation strings (open vocabulary, not a closed set). | HLD-003 |
 | 2026-09-13 | `.docs`→`docs` move and ADR-0002→HLD 001 authority retarget recorded; the exceptions sanction now links HLD 001. | — |

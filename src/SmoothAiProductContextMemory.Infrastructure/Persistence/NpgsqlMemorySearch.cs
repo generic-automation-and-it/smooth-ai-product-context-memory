@@ -141,7 +141,9 @@ public sealed class NpgsqlMemorySearch(SmoothAiProductContextMemoryDbContext db)
                 x.version.ValidFrom,
                 x.version.ValidUntil,
                 x.version.Version,
-                x.version.IsCurrent))
+                x.version.IsCurrent,
+                x.version.Sources,
+                x.version.CreatedOn))
             .ToListAsync(cancellationToken);
     }
 

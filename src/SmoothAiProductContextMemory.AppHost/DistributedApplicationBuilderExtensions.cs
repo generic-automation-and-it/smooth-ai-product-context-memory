@@ -28,8 +28,10 @@ internal static class DistributedApplicationBuilderExtensions
             var database = builder.AddPostgresResource(configuration);
             var blob = builder.AddBlobResource(configuration);
             var seq = builder.AddSeqResource(configuration);
+            var apiReadToken = builder.AddParameter("api-read-token", secret: true);
+            var apiWriteToken = builder.AddParameter("api-write-token", secret: true);
 
-            builder.AddHostProject(database, blob, seq, configuration);
+            builder.AddHostProject(database, blob, seq, apiReadToken, apiWriteToken, configuration);
 
             return builder;
         }
@@ -149,11 +151,13 @@ internal static class DistributedApplicationBuilderExtensions
             IResourceBuilder<PostgresDatabaseResource> database,
             IResourceBuilder<ContainerResource> blob,
             IResourceBuilder<IResourceWithConnectionString> seq,
+            IResourceBuilder<ParameterResource> apiReadToken,
+            IResourceBuilder<ParameterResource> apiWriteToken,
             AppHostConfiguration configuration)
         {
             if (!configuration.UseProject)
             {
-                builder.AddHostContainer(database, blob, seq, configuration);
+                builder.AddHostContainer(database, blob, seq, apiReadToken, apiWriteToken, configuration);
                 return;
             }
 
@@ -164,6 +168,8 @@ internal static class DistributedApplicationBuilderExtensions
                 .WithEnvironment("BlobStorage__AccessKey", configuration.BlobAccessKey)
                 .WithEnvironment("BlobStorage__SecretKey", configuration.BlobSecretKey)
                 .WithEnvironment("BlobStorage__Bucket", BlobBucketName)
+                .WithEnvironment("ApiAccess__ReadToken", apiReadToken)
+                .WithEnvironment("ApiAccess__WriteToken", apiWriteToken)
                 .WithHttpHealthCheck(HostReadinessPath)
                 .WaitFor(database)
                 .WaitFor(blob)
@@ -174,6 +180,8 @@ internal static class DistributedApplicationBuilderExtensions
             IResourceBuilder<PostgresDatabaseResource> database,
             IResourceBuilder<ContainerResource> blob,
             IResourceBuilder<IResourceWithConnectionString> seq,
+            IResourceBuilder<ParameterResource> apiReadToken,
+            IResourceBuilder<ParameterResource> apiWriteToken,
             AppHostConfiguration configuration)
         {
             ContainerImageReference imageReference = ContainerImageReference.Parse(configuration.HostImage);
@@ -200,6 +208,8 @@ internal static class DistributedApplicationBuilderExtensions
                 .WithEnvironment("BlobStorage__AccessKey", configuration.BlobAccessKey)
                 .WithEnvironment("BlobStorage__SecretKey", configuration.BlobSecretKey)
                 .WithEnvironment("BlobStorage__Bucket", BlobBucketName)
+                .WithEnvironment("ApiAccess__ReadToken", apiReadToken)
+                .WithEnvironment("ApiAccess__WriteToken", apiWriteToken)
                 .WithHttpHealthCheck(HostReadinessPath)
                 .WithOtlpExporter()
                 .WaitFor(database)

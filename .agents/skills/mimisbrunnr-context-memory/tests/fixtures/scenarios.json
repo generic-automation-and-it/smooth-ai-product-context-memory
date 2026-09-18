@@ -60,8 +60,8 @@
       "recall_set": [
         { "uuid": "m-004", "group_uuid": "g-01", "description": "Storage engine is PostgreSQL", "statement": "We use PostgreSQL for storage.", "kind": "storage", "content_summary": "PostgreSQL stores our data." }
       ],
-      "expected": { "verdict": "leave_both", "diverged": 0, "reason": "conflicting claim; no silent winner, record as separate memory" },
-      "note": "V2 divergence lands later; V1 must not collapse or pick a winner."
+      "expected": { "verdict": "genuine_conflict", "diverged": 1, "reason": "same-scope conflicting claims; no stated authority selects a winner" },
+      "note": "Design reversal metadata is intentionally absent; create one proposed divergence and two contradiction links."
     },
     {
       "id": "s8-near-miss-negative",
@@ -73,6 +73,26 @@
       ],
       "expected": { "verdict": "new_memory", "reason": "different claim: index storage vs chosen storage engine; must NOT dedup" },
       "note": "Negative control — near-miss must not collapse into a version bump."
+    },
+    {
+      "id": "s9-authority-shipped-behaviour",
+      "stage": "divergence",
+      "candidate_description": "The API contract says links are written later.",
+      "candidate_statement": "The accepted specification permits a follow-up link call.",
+      "recall_set": [
+        { "uuid": "m-005", "group_uuid": "g-01", "description": "Transactional link behavior", "statement": "The shipped API commits links with memories.", "kind": "behavior", "content_summary": "Executable evidence confirms one transaction.", "sources": [{"kind": "test", "reference": "SetMemoriesHandlerTests"}] }
+      ],
+      "expected": { "verdict": "authority_resolved", "diverged": 0, "authority": "shipped_behavior", "reason": "verified shipped behavior outranks specification for current behavior" }
+    },
+    {
+      "id": "s10-authority-agreed-vocabulary",
+      "stage": "divergence",
+      "candidate_description": "A stored fact should be called a note.",
+      "candidate_statement": "Use note as the canonical term.",
+      "recall_set": [
+        { "uuid": "m-006", "group_uuid": "g-01", "description": "Context memory glossary", "statement": "The agreed term is Context.", "kind": "glossary", "content_summary": "Context is the approved vocabulary." }
+      ],
+      "expected": { "verdict": "authority_resolved", "diverged": 0, "authority": "agreed_vocabulary", "reason": "agreed vocabulary outranks incidental terminology" }
     }
   ]
 }

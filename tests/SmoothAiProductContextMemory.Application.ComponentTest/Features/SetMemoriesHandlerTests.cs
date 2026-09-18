@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Shouldly;
+using SmoothAiProductContextMemory.Application.Abstractions;
 using SmoothAiProductContextMemory.Application.Common.Exceptions;
 using SmoothAiProductContextMemory.Application.Features.Memories;
 using SmoothAiProductContextMemory.Domain;
@@ -176,9 +177,8 @@ public sealed class SetMemoriesHandlerTests(AspireFixture aspire) : HandlerTestB
             await handler.Handle(Write(group.Uuid, "Taken subject", "Other claim"), Ct));
     }
 
-    /// <summary>A batch versioning the same uuid twice must fail on both paths, not pass dry run then 500.</summary>
     [Fact]
-    public async Task Duplicate_version_target_is_a_conflict_on_both_paths()
+    public async Task Ordered_versions_of_same_target_retain_loser_and_restore_winner()
     {
         var group = TestEntities.NewGroup();
         Db.MemoryGroups.Add(group);
@@ -187,19 +187,28 @@ public sealed class SetMemoriesHandlerTests(AspireFixture aspire) : HandlerTestB
         SetMemories.Handler handler = NewHandler();
         Guid uuid = (await handler.Handle(Write(group.Uuid, "Subject", "Claim 1"), Ct)).Items[0].Uuid!.Value;
 
-        SetMemories.Request batch = Write(group.Uuid, "Subject", "Claim 2", uuid) with
+        SetMemories.Request batch = Write(group.Uuid, "Subject", "Losing claim", uuid) with
         {
             Items =
             [
-                Write(group.Uuid, "Subject", "Claim 2", uuid).Items[0],
-                Write(group.Uuid, "Subject", "Claim 3", uuid).Items[0],
+                Write(group.Uuid, "Subject", "Losing claim", uuid).Items[0],
+                Write(group.Uuid, "Subject", "Claim 1", uuid).Items[0],
             ],
         };
 
-        await Should.ThrowAsync<ConflictException>(async () =>
-            await handler.Handle(batch with { DryRun = true }, Ct));
-        await Should.ThrowAsync<ConflictException>(async () =>
-            await handler.Handle(batch, Ct));
+        SetMemories.Response dry = await handler.Handle(batch with { DryRun = true }, Ct);
+        dry.Versioned.ShouldBe(2);
+
+        SetMemories.Response written = await handler.Handle(batch, Ct);
+        written.Versioned.ShouldBe(2);
+
+        long memoryId = await Db.Memories.Where(m => m.Uuid == uuid).Select(m => m.Id).SingleAsync(Ct);
+        MemoryVersion[] versions = await Db.MemoryVersions.AsNoTracking()
+            .Where(v => v.MemoryId == memoryId)
+            .OrderBy(v => v.Version)
+            .ToArrayAsync(Ct);
+        versions.Select(v => v.Statement).ShouldBe(["Claim 1", "Losing claim", "Claim 1"]);
+        versions.Single(v => v.IsCurrent).Version.ShouldBe(3);
     }
 
     [Fact]
@@ -219,6 +228,157 @@ public sealed class SetMemoriesHandlerTests(AspireFixture aspire) : HandlerTestB
         version.Sources.Count.ShouldBe(1);
         version.Sources[0].V.ShouldBe(JsonShapeDocument.CurrentShapeVersion);
         version.Sources[0].Kind.ShouldBe("jira");
+    }
+
+    [Fact]
+    public async Task New_memory_links_use_caller_identities_and_match_dry_run()
+    {
+        var group = TestEntities.NewGroup();
+        Db.MemoryGroups.Add(group);
+        await Db.SaveChangesAsync(Ct);
+
+        Guid existing = (await NewHandler().Handle(Write(group.Uuid, "Existing endpoint", "Existing"), Ct))
+            .Items[0].Uuid!.Value;
+        Guid first = Guid.NewGuid();
+        Guid second = Guid.NewGuid();
+        SetMemories.Request request = Write(group.Uuid, "New endpoint A", "A") with
+        {
+            Items =
+            [
+                Write(group.Uuid, "New endpoint A", "A").Items[0] with { CreateUuid = first },
+                Write(group.Uuid, "New endpoint B", "B").Items[0] with { CreateUuid = second },
+            ],
+            Links =
+            [
+                new(first, existing, MemoryRelation.DependsOn, "new to existing"),
+                new(existing, second, MemoryRelation.RelatesTo, "existing to new"),
+                new(first, second, MemoryRelation.Implements, "new to new"),
+                new(first, second, MemoryRelation.Implements, "duplicate"),
+            ],
+        };
+
+        SetMemories.Response dry = await NewHandler().Handle(request with { DryRun = true }, Ct);
+        dry.Items.Select(i => i.Uuid).ShouldBe([first, second]);
+        dry.Linked.ShouldBe(3);
+        dry.Skipped.ShouldBe(1);
+
+        SetMemories.Response written = await NewHandler().Handle(request, Ct);
+        written.Items.Select(i => i.Uuid).ShouldBe([first, second]);
+        written.Linked.ShouldBe(dry.Linked);
+        written.Skipped.ShouldBe(dry.Skipped);
+
+        IReadOnlyList<SmoothAiProductContextMemory.Application.Abstractions.MemoryRelationship> links =
+            await Graph.ListAllAsync(Ct);
+        links.ShouldContain(l => l.SourceUuid == first && l.TargetUuid == existing);
+        links.ShouldContain(l => l.SourceUuid == existing && l.TargetUuid == second);
+        links.ShouldContain(l => l.SourceUuid == first && l.TargetUuid == second);
+    }
+
+    [Fact]
+    public async Task Graph_failure_rolls_back_memories_versions_and_edges()
+    {
+        var group = TestEntities.NewGroup();
+        Db.MemoryGroups.Add(group);
+        await Db.SaveChangesAsync(Ct);
+
+        Guid first = Guid.NewGuid();
+        Guid second = Guid.NewGuid();
+        var failingGraph = new FailAfterFirstCreateGraph(Graph);
+        var handler = new SetMemories.Handler(
+            AppDb,
+            failingGraph,
+            Blob,
+            ErrorMapper,
+            Loggers.CreateLogger<SetMemories.Handler>());
+        SetMemories.Request request = Write(group.Uuid, "Rollback A", "A") with
+        {
+            Items =
+            [
+                Write(group.Uuid, "Rollback A", "A").Items[0] with { CreateUuid = first },
+                Write(group.Uuid, "Rollback B", "B").Items[0] with { CreateUuid = second },
+            ],
+            Links =
+            [
+                new(first, second, MemoryRelation.DependsOn, "first edge"),
+                new(second, first, MemoryRelation.RelatesTo, "forced failure"),
+            ],
+        };
+
+        await Should.ThrowAsync<InvalidOperationException>(async () => await handler.Handle(request, Ct));
+        Db.ChangeTracker.Clear();
+
+        (await Db.Memories.AnyAsync(m => m.Uuid == first || m.Uuid == second, Ct)).ShouldBeFalse();
+        (await Graph.ListAllAsync(Ct)).ShouldNotContain(l => l.SourceUuid == first || l.TargetUuid == first);
+    }
+
+    [Fact]
+    public async Task Divergence_kind_is_counted_only_when_created()
+    {
+        var group = TestEntities.NewGroup();
+        Db.MemoryGroups.Add(group);
+        await Db.SaveChangesAsync(Ct);
+
+        Guid existing = (await NewHandler().Handle(Write(group.Uuid, "Storage engine", "Use PostgreSQL"), Ct))
+            .Items[0].Uuid!.Value;
+        Guid candidate = Guid.NewGuid();
+        Guid divergence = Guid.NewGuid();
+        SetMemories.Request request = Write(group.Uuid, $"Unresolved alternative to {existing} ({candidate})", "Use SQLite") with
+        {
+            Items =
+            [
+                Write(group.Uuid, $"Unresolved alternative to {existing} ({candidate})", "Use SQLite").Items[0] with { CreateUuid = candidate },
+                Write(group.Uuid, "Open conflict", "Sources disagree").Items[0] with
+                {
+                    CreateUuid = divergence,
+                    Kind = MemoryVersion.KindValue.Divergence,
+                    Status = MemoryVersion.MemoryVersionStatus.Proposed,
+                },
+            ],
+            Links =
+            [
+                new(divergence, existing, MemoryRelation.Contradicts, "first side"),
+                new(divergence, candidate, MemoryRelation.Contradicts, "second side"),
+            ],
+        };
+
+        SetMemories.Response dry = await NewHandler().Handle(request with { DryRun = true }, Ct);
+        dry.Diverged.ShouldBe(1);
+        dry.Linked.ShouldBe(2);
+
+        SetMemories.Response written = await NewHandler().Handle(request, Ct);
+        written.Diverged.ShouldBe(1);
+        written.Linked.ShouldBe(2);
+        (await Graph.ListAllAsync(Ct)).Count(l => l.SourceUuid == divergence
+            && l.Relation == MemoryRelation.Contradicts).ShouldBe(2);
+    }
+
+    private sealed class FailAfterFirstCreateGraph(IMemoryGraph inner) : IMemoryGraph
+    {
+        private int _creates;
+
+        public Task<bool> ExistsAsync(Guid sourceUuid, Guid targetUuid, string relation, CancellationToken cancellationToken) =>
+            inner.ExistsAsync(sourceUuid, targetUuid, relation, cancellationToken);
+
+        public async Task<bool> CreateAsync(
+            Guid sourceUuid,
+            Guid targetUuid,
+            string relation,
+            string reason,
+            CancellationToken cancellationToken)
+        {
+            if (++_creates == 2)
+            {
+                throw new InvalidOperationException("Injected graph failure.");
+            }
+
+            return await inner.CreateAsync(sourceUuid, targetUuid, relation, reason, cancellationToken);
+        }
+
+        public Task<IReadOnlyList<MemoryRelationship>> ListAllAsync(CancellationToken cancellationToken) =>
+            inner.ListAllAsync(cancellationToken);
+
+        public Task<IReadOnlyList<MemoryRelationship>> ListTouchingAsync(Guid uuid, CancellationToken cancellationToken) =>
+            inner.ListTouchingAsync(uuid, cancellationToken);
     }
 
     private SetMemories.Handler NewHandler() =>

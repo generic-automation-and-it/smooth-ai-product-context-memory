@@ -1,6 +1,6 @@
 # LADR-05: Link derivation batched into the pre-write round
 
-**Status:** Accepted
+**Status:** Accepted; implemented and verified 2026-09-17
 
 ## Context
 
@@ -10,12 +10,12 @@ them.** No stage of any earlier specification owned their derivation.
 Three simulation trials produced **zero links**, and in none of them did anyone notice. That is the
 evidence: a capability with no owning stage is not merely unimplemented, it is invisible.
 
-Derivation needs the same cross-group subject lookup that deduplication already performs.
+Derivation consumes the same bounded semantic candidate set that deduplication already inspects.
 
 ## Decision
 
-**Place** link derivation in the pre-write round, **batched with deduplication**, sharing its single
-traversal.
+**Place** link derivation in the pre-write round, **batched with deduplication**, sharing its bounded
+candidate recall.
 
 Both questions — *is this the same subject as something we hold* and *what does this relate to* — are
 answered from the same recalled candidate set. One read serves both.
@@ -28,6 +28,11 @@ Links are written **in the same transaction as the memories they relate**. A dup
 write is skipped and counted, never fatal — a stale derived link must not discard the capture it
 arrived with.
 
+New memories may carry an optional caller-selected `createUuid`. Existing `uuid` remains exclusively a
+version target; both together are invalid. Link endpoints continue using UUIDs and may name any
+`createUuid` in the request. Planning resolves every identity before persistence, so new→existing,
+existing→new and new→new links share the memory transaction. Legacy unlinked creates may omit it.
+
 ## Alternatives Considered
 
 - **A separate background pass** — rejected: defers the value and needs its own trigger, which is another thing to forget.
@@ -38,7 +43,7 @@ arrived with.
 ## Consequences
 
 - The relationship model gains a creator, so it stops being decorative.
-- Derivation costs nothing extra in reads, sharing deduplication's traversal.
+- Derivation costs no additional recall pass beyond deduplication's candidate set.
 - Links are created without individual confirmation; pre-write inspection is the dry-run over the whole batch (LADR-07).
 - A wrong link is additive and cheap to remove — unlike a wrong version bump, which rewrites canon.
 

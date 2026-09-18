@@ -40,7 +40,8 @@ public static class SetMemories
         DateTimeOffset ValidFrom,
         DateTimeOffset? ValidUntil,
         string? SummaryModel,
-        string? SummaryPromptVersion);
+        string? SummaryPromptVersion,
+        Guid? CreateUuid = null);
 
     public sealed record LinkWrite(Guid SourceUuid, Guid TargetUuid, string Relation, string Reason);
 
@@ -51,7 +52,10 @@ public static class SetMemories
         IReadOnlyList<string>? LabelsProposed,
         bool DryRun = false) : IRequest<Response>;
 
-    /// <summary><see cref="Uuid"/> is null for a planned create on a dry run — the identity is minted at persist time.</summary>
+    /// <summary>
+    /// <see cref="Uuid"/> is stable on dry-run when the caller supplied <c>createUuid</c>; legacy
+    /// creates keep a null dry-run identity and mint it only during persistence.
+    /// </summary>
     public sealed record ItemResult(Guid? Uuid, string? BlobAddress, bool Versioned);
 
     public sealed record Response(
@@ -86,17 +90,29 @@ public static class SetMemories
                         or MemoryVersion.MemoryVersionStatus.Approved)
                     .WithMessage("Status must be proposed or approved.");
                 item.RuleFor(i => i.Confidence).InclusiveBetween((short)0, (short)100);
+                item.RuleFor(i => i.Uuid)
+                    .NotEqual(Guid.Empty)
+                    .When(i => i.Uuid is not null);
+                item.RuleFor(i => i.CreateUuid)
+                    .NotEqual(Guid.Empty)
+                    .When(i => i.CreateUuid is not null);
+                item.RuleFor(i => i)
+                    .Must(i => i.Uuid is null || i.CreateUuid is null)
+                    .WithMessage("Uuid and CreateUuid cannot both be supplied.");
                 item.RuleFor(i => i.ValidUntil)
                     .GreaterThan(i => i.ValidFrom)
                     .When(i => i.ValidUntil is not null)
                     .WithMessage("ValidUntil must be after ValidFrom.");
             });
+            RuleFor(x => x.Links)
+                .Must(links => links is null || links.Count <= 400)
+                .WithMessage("At most 400 links may be written per request.");
             RuleForEach(x => x.Links).ChildRules(link =>
             {
                 link.RuleFor(l => l.SourceUuid).NotEmpty();
                 link.RuleFor(l => l.TargetUuid).NotEmpty();
                 link.RuleFor(l => l.Relation).NotEmpty().MaximumLength(32);
-                link.RuleFor(l => l.Reason).NotEmpty();
+                link.RuleFor(l => l.Reason).NotEmpty().MaximumLength(4000);
                 link.RuleFor(l => l)
                     .Must(l => l.SourceUuid != l.TargetUuid)
                     .WithMessage("A link cannot target itself.");
@@ -122,7 +138,8 @@ public static class SetMemories
         string SubjectSlug,
         Guid? Uuid,
         long? MemoryId,
-        MemoryVersion? CurrentVersion);
+        MemoryVersion? CurrentVersion,
+        int? NextVersion);
 
     private sealed record PlannedLink(LinkWrite Write, bool Skip);
 
@@ -157,10 +174,11 @@ public static class SetMemories
                 : await PersistAsync(plan, cancellationToken);
 
             logger.LogInformation(
-                "Set memories completed. Created: {Created} Versioned: {Versioned} Linked: {Linked} Skipped: {Skipped} DryRun: {DryRun}",
+                "Set memories completed. Created: {Created} Versioned: {Versioned} Linked: {Linked} Diverged: {Diverged} Skipped: {Skipped} DryRun: {DryRun}",
                 response.Created,
                 response.Versioned,
                 response.Linked,
+                response.Diverged,
                 response.Skipped,
                 request.DryRun);
 
@@ -178,7 +196,8 @@ public static class SetMemories
         {
             var items = new List<PlannedItem>(request.Items.Count);
             var plannedSlugs = new HashSet<string>(StringComparer.Ordinal);
-            var plannedVersionTargets = new HashSet<Guid>();
+            var plannedVersionTargets = new Dictionary<Guid, (Memory Memory, MemoryVersion Current, int NextVersion)>();
+            var plannedCreateUuids = new HashSet<Guid>();
 
             for (int index = 0; index < request.Items.Count; index++)
             {
@@ -187,22 +206,31 @@ public static class SetMemories
 
                 if (item.Uuid is { } target)
                 {
-                    if (!plannedVersionTargets.Add(target))
+                    if (!plannedVersionTargets.TryGetValue(target, out var versionTarget))
                     {
-                        throw new ConflictException(
-                            $"Memory '{target}' is versioned twice in this batch. Merge the items or send them separately.");
+                        Memory memory = await db.Memories
+                            .SingleOrDefaultAsync(m => m.Uuid == target, cancellationToken)
+                            ?? throw new NotFoundException($"Memory '{target}' was not found.");
+
+                        MemoryVersion current = await db.MemoryVersions
+                            .SingleOrDefaultAsync(v => v.MemoryId == memory.Id && v.IsCurrent, cancellationToken)
+                            ?? throw new ConflictException($"Memory '{target}' has no current version.");
+                        versionTarget = (memory, current, current.Version + 1);
                     }
 
-                    Memory memory = await db.Memories
-                        .SingleOrDefaultAsync(m => m.Uuid == target, cancellationToken)
-                        ?? throw new NotFoundException($"Memory '{target}' was not found.");
-
-                    MemoryVersion current = await db.MemoryVersions
-                        .SingleOrDefaultAsync(v => v.MemoryId == memory.Id && v.IsCurrent, cancellationToken)
-                        ?? throw new ConflictException($"Memory '{target}' has no current version.");
-
-                    logger.LogDebug("Planned version bump. Index: {Index} NextVersion: {Version}", index, current.Version + 1);
-                    items.Add(new PlannedItem(ItemMode.Version, item, slug, target, memory.Id, current));
+                    logger.LogDebug("Planned version bump. Index: {Index} NextVersion: {Version}", index, versionTarget.NextVersion);
+                    items.Add(new PlannedItem(
+                        ItemMode.Version,
+                        item,
+                        slug,
+                        target,
+                        versionTarget.Memory.Id,
+                        versionTarget.Current,
+                        versionTarget.NextVersion));
+                    plannedVersionTargets[target] = (
+                        versionTarget.Memory,
+                        versionTarget.Current,
+                        versionTarget.NextVersion + 1);
                     continue;
                 }
 
@@ -210,6 +238,23 @@ public static class SetMemories
                 {
                     throw new ConflictException(
                         $"Two items in this batch share subject '{slug}'. Merge them or send one as a version bump.");
+                }
+
+                if (item.CreateUuid is { } createUuid)
+                {
+                    if (!plannedCreateUuids.Add(createUuid))
+                    {
+                        throw new ConflictException(
+                            $"CreateUuid '{createUuid}' is used twice in this batch.");
+                    }
+
+                    bool identityTaken = await db.Memories
+                        .AnyAsync(m => m.Uuid == createUuid, cancellationToken);
+                    if (identityTaken)
+                    {
+                        throw new ConflictException(
+                            $"CreateUuid '{createUuid}' already belongs to an existing memory.");
+                    }
                 }
 
                 bool subjectTaken = await db.Memories
@@ -221,7 +266,7 @@ public static class SetMemories
                 }
 
                 logger.LogDebug("Planned create. Index: {Index}", index);
-                items.Add(new PlannedItem(ItemMode.Create, item, slug, null, null, null));
+                items.Add(new PlannedItem(ItemMode.Create, item, slug, item.CreateUuid, null, null, null));
             }
 
             IReadOnlyList<PlannedLink> links = await PlanLinksAsync(request.Links, items, cancellationToken);
@@ -308,13 +353,13 @@ public static class SetMemories
             return toInsert;
         }
 
-        /// <summary>The dry-run verdict — the plan's own counts, with no identity and no blob.</summary>
+        /// <summary>The dry-run verdict — plan counts and resolved identities, with no blob.</summary>
         private static Response Predict(WritePlan plan) =>
             new(
                 plan.Items.Count(i => i.Mode == ItemMode.Create),
                 plan.Items.Count(i => i.Mode == ItemMode.Version),
                 plan.Links.Count(l => !l.Skip),
-                0,
+                plan.Items.Count(i => i.Mode == ItemMode.Create && i.Write.Kind == MemoryVersion.KindValue.Divergence),
                 plan.Links.Count(l => l.Skip),
                 plan.LabelsToInsert.Count,
                 [.. plan.Items.Select(i => new ItemResult(i.Uuid, null, i.Mode == ItemMode.Version))]);
@@ -339,6 +384,7 @@ public static class SetMemories
             try
             {
                 var results = new List<ItemResult>(plan.Items.Count);
+                var currentVersions = new Dictionary<Guid, MemoryVersion>();
 
                 for (int index = 0; index < plan.Items.Count; index++)
                 {
@@ -347,7 +393,7 @@ public static class SetMemories
 
                     results.Add(item.Mode == ItemMode.Create
                         ? CreateNew(plan.Group, item, address)
-                        : await VersionExistingAsync(item, address, cancellationToken));
+                        : await VersionExistingAsync(item, address, currentVersions, cancellationToken));
                 }
 
                 foreach (string name in plan.LabelsToInsert)
@@ -357,14 +403,18 @@ public static class SetMemories
 
                 await errorMapper.SaveOrMapAsync(() => db.SaveChangesAsync(cancellationToken));
 
+                int linked = 0;
+                int skipped = plan.Links.Count(l => l.Skip);
                 foreach (PlannedLink link in plan.Links.Where(l => !l.Skip))
                 {
-                    await graph.CreateAsync(
+                    bool created = await graph.CreateAsync(
                         link.Write.SourceUuid,
                         link.Write.TargetUuid,
                         link.Write.Relation,
                         link.Write.Reason,
                         cancellationToken);
+                    linked += created ? 1 : 0;
+                    skipped += created ? 0 : 1;
                 }
 
                 await transaction.CommitAsync(cancellationToken);
@@ -372,9 +422,9 @@ public static class SetMemories
                 return new Response(
                     plan.Items.Count(i => i.Mode == ItemMode.Create),
                     plan.Items.Count(i => i.Mode == ItemMode.Version),
-                    plan.Links.Count(l => !l.Skip),
-                    0,
-                    plan.Links.Count(l => l.Skip),
+                    linked,
+                    plan.Items.Count(i => i.Mode == ItemMode.Create && i.Write.Kind == MemoryVersion.KindValue.Divergence),
+                    skipped,
                     plan.LabelsToInsert.Count,
                     results);
             }
@@ -387,7 +437,7 @@ public static class SetMemories
 
         private ItemResult CreateNew(MemoryGroup group, PlannedItem item, string? blobAddress)
         {
-            Guid uuid = Guid.NewGuid();
+            Guid uuid = item.Uuid ?? Guid.NewGuid();
             var memory = new Memory
             {
                 Uuid = uuid,
@@ -414,9 +464,11 @@ public static class SetMemories
         private async Task<ItemResult> VersionExistingAsync(
             PlannedItem item,
             string? blobAddress,
+            Dictionary<Guid, MemoryVersion> currentVersions,
             CancellationToken cancellationToken)
         {
-            MemoryVersion current = item.CurrentVersion!;
+            Guid uuid = item.Uuid!.Value;
+            MemoryVersion current = currentVersions.GetValueOrDefault(uuid) ?? item.CurrentVersion!;
 
             // Ordered, not merely atomic: the partial unique index forbids two currents, so the flip
             // must reach the database before the new current is inserted. Nothing forbids zero
@@ -424,9 +476,10 @@ public static class SetMemories
             current.IsCurrent = false;
             await errorMapper.SaveOrMapAsync(() => db.SaveChangesAsync(cancellationToken));
 
-            MemoryVersion next = BuildVersion(current.Version + 1, isCurrent: true, item.Write, blobAddress);
+            MemoryVersion next = BuildVersion(item.NextVersion!.Value, isCurrent: true, item.Write, blobAddress);
             next.MemoryId = item.MemoryId!.Value;
             db.MemoryVersions.Add(next);
+            currentVersions[uuid] = next;
 
             return new ItemResult(item.Uuid, blobAddress, true);
         }

@@ -27,6 +27,9 @@ public abstract class WebAppFixture<TProgram> : IAsyncLifetime
 
     public IServiceProvider Services { get; private set; } = default!;
 
+    public HttpClient CreateClient() => _factory?.CreateClient()
+        ?? throw new InvalidOperationException("The web application fixture has not been initialized.");
+
     protected AspireFixture Aspire => _aspire;
 
     protected virtual string DatabaseName => $"host-integration-{Guid.NewGuid():N}";

@@ -39,6 +39,15 @@ public sealed class ObservabilityWebAppFixture : WebAppFixture<HostApp::Program>
         overrides["BlobStorage:AccessKey"] = AspireFixture.BlobAccessKey;
         overrides["BlobStorage:SecretKey"] = AspireFixture.BlobSecretKey;
         overrides["BlobStorage:Bucket"] = _bucket;
+        overrides["ApiAccess:ReadToken"] = HostWebAppFixture.ReadToken;
+        overrides["ApiAccess:WriteToken"] = HostWebAppFixture.WriteToken;
+        return Task.CompletedTask;
+    }
+
+    protected override Task PostInitializeAsync()
+    {
+        HttpClient.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", HostWebAppFixture.WriteToken);
         return Task.CompletedTask;
     }
 

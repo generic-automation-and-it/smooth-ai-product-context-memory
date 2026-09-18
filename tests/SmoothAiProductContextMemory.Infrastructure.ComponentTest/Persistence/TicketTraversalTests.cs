@@ -16,7 +16,9 @@ public sealed class TicketTraversalTests(AspireFixture aspire) : PersistenceTest
     {
         MemoryGroup epic = await GroupAsync("product", Id("epic"));
         MemoryGroup shared = await GroupAsync("product", Id("story"), Id("task"));
-        Memory anchor = await MemoryAsync(epic);
+        Memory anchor = await MemoryAsync(epic, sources: [SourceDocument.Create("jira", "EPIC-1")]);
+        MemoryVersion anchorVersion = await Db.MemoryVersions.AsNoTracking()
+            .SingleAsync(v => v.MemoryId == anchor.Id, Ct);
         Memory current = await MemoryAsync(shared);
         Db.MemoryVersions.Add(TestEntities.NewVersion(current.Id, 2, "Old claim", isCurrent: false));
         Memory proposed = await MemoryAsync(shared, status: "proposed");
@@ -34,6 +36,8 @@ public sealed class TicketTraversalTests(AspireFixture aspire) : PersistenceTest
         result.Items.ShouldAllBe(m => m.IsCurrent && m.Version == 1 && m.Status != "proposed");
         result.Items.ShouldNotContain(m => m.Uuid == proposed.Uuid || m.Uuid == versionless.Uuid);
         result.Items.Single(m => m.Uuid == current.Uuid).Statement.ShouldBe("Current claim");
+        result.Items.Single(m => m.Uuid == anchor.Uuid).Sources.Single().Reference.ShouldBe("EPIC-1");
+        result.Items.Single(m => m.Uuid == anchor.Uuid).CreatedOn.ShouldBe(anchorVersion.CreatedOn);
         result.Disclosure.ShouldBe(new TicketTraversalDisclosure(3, 50, 50, false, false, false));
         result.Disclosure.HierarchyCoverage.ShouldContain("Undeclared upstream hierarchy was not followed");
         result.Disclosure.HierarchyCoverage.ShouldContain("freshness and completeness are unverified");
@@ -406,12 +410,16 @@ public sealed class TicketTraversalTests(AspireFixture aspire) : PersistenceTest
         return group;
     }
 
-    private async Task<Memory> MemoryAsync(MemoryGroup group, string kind = "decision", string status = "approved")
+    private async Task<Memory> MemoryAsync(
+        MemoryGroup group,
+        string kind = "decision",
+        string status = "approved",
+        List<SourceDocument>? sources = null)
     {
         Memory memory = TestEntities.NewMemory(group.Id, "Test memory", $"Subject {Guid.NewGuid():N}");
         Db.Memories.Add(memory);
         await Db.SaveChangesAsync(Ct);
-        MemoryVersion version = TestEntities.NewVersion(memory.Id, 1, "Current claim", kind: kind);
+        MemoryVersion version = TestEntities.NewVersion(memory.Id, 1, "Current claim", kind: kind, sources: sources);
         version.Status = status;
         Db.MemoryVersions.Add(version);
         await Db.SaveChangesAsync(Ct);

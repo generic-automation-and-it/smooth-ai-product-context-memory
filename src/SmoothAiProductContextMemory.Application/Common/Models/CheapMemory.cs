@@ -1,3 +1,5 @@
+using SmoothAiProductContextMemory.Domain.Entities;
+
 namespace SmoothAiProductContextMemory.Application.Common.Models;
 
 public sealed record CheapMemory(
@@ -17,4 +19,6 @@ public sealed record CheapMemory(
     DateTimeOffset ValidFrom,
     DateTimeOffset? ValidUntil,
     int Version,
-    bool IsCurrent);
+    bool IsCurrent,
+    IReadOnlyList<SourceDocument> Sources,
+    DateTimeOffset CreatedOn);
