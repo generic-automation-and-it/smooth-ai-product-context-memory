@@ -7,7 +7,7 @@ The publish workflow does **not** run on pull requests.
 
 - **Workflow:** `.github/workflows/pr-gate.yml`
 - **Triggers:** `pull_request` → `main` (including PR branch updates), `push` → `main`, and manual `workflow_dispatch`.
-- **Paths filter:** source/tests, scripts, the owned context-memory skill and its two project-agent registrations, Dockerfiles, solution/build/package inputs, local actions, and PR/publish workflows trigger checks. Docs-only PRs skip the gate; dispatch and reusable workflow calls run explicitly.
+- **Paths filter:** source/tests, scripts, the owned context-memory skill and its two project-agent registrations, the `.mcp.json` MCP server config, Dockerfiles, solution/build/package inputs, local actions, and PR/publish workflows trigger checks. Docs-only PRs skip the gate; dispatch and reusable workflow calls run explicitly.
 - **Policy checks:** main-only release event/promotion tests and engine-free controller preflight/lifecycle tests run with the build. PRs also build both container architectures on native runners without publication. PR/manual CI keeps logs, summaries, and caches, but uploads neither Docker build records nor coverage artifacts. Images are build-only; full packaged-controller smoke runs in the main publication pipeline.
 
 ### Steps
