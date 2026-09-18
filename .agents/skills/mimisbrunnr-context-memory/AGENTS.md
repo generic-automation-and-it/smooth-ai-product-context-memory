@@ -190,11 +190,13 @@ flowchart LR
 ## Test References
 
 - **Committed L0 harness (CI-gatable):** `.agents/skills/mimisbrunnr-context-memory/tests/run_tests.py` — stdlib
-   `unittest` (no external runner). Unit-tests the deterministic plumbing: `redact.py` (planted
-   credential never leaks; digest reports the rule name), `atomicity.py` (bundle → split/skip), and
-   `context_memory_client.py` (`paths` guard rails — maxDepth/sourceUuid required before any network
-   call — and `_render_path` summary rendering), ticket HTTP transport/guards/dry-run/lossless
-   disclosure, and `near_miss_tags.py` schema/scope/basis/bounds/output/no-I/O guarantees.
+   `unittest` (no external runner). Unit-tests `redact.py` secret containment; `atomicity.py` bundle
+   detection; `context_memory_client.py` path, credential, loopback and redirect guards; `deepsearch.py`
+   caps, deduplication and omission disclosure; `divergence.py` composition, pair idempotency and
+   recursion rejection; `authority.py` ordered version composition; read-client/MCP fail-closed
+   capability boundaries; project/Copilot agent registrations; ticket transport/guards/dry-run/lossless
+   disclosure; blinded semantic-fixture emission/scoring; and `near_miss_tags.py` schema/scope/basis/
+   bounds/output/no-I/O guarantees.
    Run: `python3 -B .agents/skills/mimisbrunnr-context-memory/tests/run_tests.py`. The PR gate runs it and
    `tests/measure_cost.py` (reproducible structural cost evidence) in the same step.
 - **Deterministic near-miss fixtures:** `tests/fixtures/near_miss_tags.json` exercises grounded mismatch,
