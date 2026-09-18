@@ -531,16 +531,22 @@ class AgentContractTests(unittest.TestCase):
             self.assertNotIn(mutation.replace("-", "_"), names)
 
     def test_read_mcp_removes_write_credential_at_startup(self):
-        completed = subprocess.run(
-            [sys.executable, str(SCRIPTS / "memory_read_mcp.py")],
-            input=json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}) + "\n",
-            env={**os.environ, client.ENV_READ_TOKEN: "read", client.ENV_WRITE_TOKEN: "write"},
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        self.assertEqual(completed.returncode, 0)
-        response = json.loads(completed.stdout)
+        observed = []
+        original_handle = read_mcp.handle
+
+        def inspect_environment(message):
+            observed.append(client.ENV_WRITE_TOKEN not in os.environ)
+            return original_handle(message)
+
+        request = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}) + "\n"
+        with patch.dict(os.environ, {client.ENV_READ_TOKEN: "read", client.ENV_WRITE_TOKEN: "write"}), \
+                patch.object(sys, "stdin", io.StringIO(request)), \
+                patch.object(read_mcp, "handle", side_effect=inspect_environment), \
+                redirect_stdout(io.StringIO()) as stdout:
+            self.assertEqual(read_mcp.main(), 0)
+
+        self.assertEqual(observed, [True])
+        response = json.loads(stdout.getvalue())
         self.assertEqual(response["id"], 1)
         self.assertEqual(len(response["result"]["tools"]), 9)
 
