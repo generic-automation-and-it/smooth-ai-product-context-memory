@@ -27,8 +27,19 @@ telemetry-derived baseline, since option C performs no store write at all.
 3,000 memories, 50 of them captured "now" and the rest 30 days earlier so the capture-age exclusion has
 something to exclude, plus one deliberately singular memory every concurrent worker retrieves. Two query
 shapes: a broad one returning the full 50-row limit (the real write amplification of one retrieval) and a
-hot one returning exactly one memory (the contention shape). Latency is p50/p95 over 100 iterations after
-20 warmups. Plans are captured with `SET LOCAL enable_seqscan = off`.
+hot one returning exactly one memory (the contention shape).
+
+Latency is p50/p95 over 100 iterations after 20 warmups, repeated over **three rounds with the placement
+order rotated** and the feedback table truncated and both tables vacuumed between rounds. Both parts are
+load-bearing. A single round cannot say whether a sub-millisecond gap between two placements is a property
+or scheduler noise, so each placement's own p95 spread across rounds is reported beside the gap. And in a
+fixed order the placement measured last runs against a larger feedback table and a `memory` table dirtied
+by the one before it — an earlier fixed-order pass of this harness made B look ~0.4 ms p95 slower than A
+for exactly that reason, and the rotation reverses the sign.
+
+Plans are captured with `SET LOCAL enable_seqscan = off` so a predicate no index can serve stays visible
+at fixture volume. They are recorded as evidence of relative cost, **not asserted on**: under that setting
+an assertion about scan nodes would only restate the setting.
 
 Latency was not expected to settle this, and did not — see below. The decisive measurements are
 deterministic: `ctid` movement on the recalled row, and a second writer for the same memory under
@@ -38,22 +49,23 @@ deterministic: `ctid` movement on the recalled row, and a second writer for the 
 
 ### Latency does not discriminate
 
-| Placement | p50 (ms) | p95 (ms) | p95 delta vs C (ms) |
-|---|---|---|---|
-| C — telemetry-derived (no store writes) | 6.113 | 7.021 | 0.000 |
-| A — counter on the memory row | 7.148 | 7.851 | 0.830 |
-| B — append-only records | 7.426 | 8.236 | 1.214 |
+| Placement | p50 (ms) | p95 (ms) | p95 delta vs C (ms) | p95 across rounds (ms) | run-to-run spread (ms) |
+|---|---|---|---|---|---|
+| C — telemetry-derived (no store writes) | 5.727 | 6.464 | 0.000 | 6.395–7.309 | 0.913 |
+| A — counter on the memory row | 7.151 | 8.030 | 1.566 | 7.392–8.068 | 0.677 |
+| B — append-only records | 6.512 | 7.233 | 0.769 | 6.925–8.094 | 1.169 |
 
-A 50-memory retrieval costs ~1 ms p95 to record either way, against a ~7 ms retrieval. The spread between
-A and B is smaller than the spread between repeat runs of the same option, so **wall clock alone cannot
-choose between them** — which is why LADR-02 nominated the concurrency case instead. Throughput under 16
-concurrent workers hitting the same memory (604 ops/s for A, 666 ops/s for B) points the same way as the
-probes below but is likewise not decisive on its own.
+Recording a 50-memory retrieval costs under 1.6 ms p95 either way, against a ~6.5 ms retrieval. **The A↔B
+gap is 0.797 ms, against a run-to-run p95 spread of 1.169 ms for B alone** — the gap is inside the noise
+of a single placement, so wall clock cannot choose between them, which is why LADR-02 nominated the
+concurrency case instead. Throughput under 16 concurrent workers hitting the same memory (610 ops/s for A,
+672 ops/s for B) points the same way as the probes below but is likewise not decisive on its own.
 
 ### Serialisation — the discriminator NFR-02 named
 
 A first writer holds an uncommitted feedback write for one memory; a second connection attempts the same
-write with `lock_timeout = 250ms`.
+write with `lock_timeout = 250ms`. Only `55P03` counts as serialisation — any other SQL state would mean
+the probe broke rather than that the placement queued.
 
 | Placement | Second writer | SQL state |
 |---|---|---|
@@ -69,8 +81,8 @@ This is the failure NFR-02 exists to prevent, and it is a property of the placem
 
 | Placement | ctid before | ctid after | row rewritten | n_dead_tup delta |
 |---|---|---|---|---|
-| B — append-only records | `(83,51)` | `(83,51)` | no | 57 |
-| A — counter on the memory row | `(83,51)` | `(83,201)` | **yes** | 59 |
+| B — append-only records | `(80,69)` | `(80,69)` | no | 65 |
+| A — counter on the memory row | `(80,69)` | `(80,201)` | **yes** | 59 |
 
 `ctid` is the decisive column. `n_dead_tup` is reported but not relied on: statistics flush per backend, so
 a pooled connection from an earlier phase lands dead tuples inside a later window — which is exactly what
@@ -79,9 +91,17 @@ hottest table, and the vacuum load that follows is carried by the read path.
 
 ### Read-path isolation
 
-- Results are byte-identical, in the same order, with feedback written and without.
-- An injected feedback failure (`42P01 relation "recall_feedback_absent" does not exist`) leaves the
-  retrieval returning its results unchanged.
+- Every field of every returned row is identical, in the same order, with feedback written and without —
+  compared field by field rather than by identity, because identical identities would not catch a changed
+  projection.
+- A retrieval and a failing feedback write inside **one unit of work**: the injected failure
+  (`42P01 relation "recall_feedback_absent" does not exist`) is absorbed at the write and the unit still
+  returns all 50 rows, every field identical. Attempting the two independently would prove nothing,
+  because nothing could propagate between them.
+
+This is the prototype boundary. The shipped fire-and-forget writer, the retrieval handler it hangs off, and
+the results-identical-with-feedback-on-and-off criterion against that handler are verified with the write
+path, not here.
 
 ### Actionability — the three tuning questions, against option B
 
@@ -94,13 +114,18 @@ hottest table, and the vacuum load that follows is carried by the read path.
 
 ### Growth
 
-182 bytes per record including indexes; one 50-memory retrieval writes ~8.9 KiB.
+193 bytes per record including indexes; one 50-memory retrieval writes ~9.4 KiB. The unbounded columns are
+what makes the record cap load-bearing rather than decorative.
 
-| Retrievals/day | 30-day retained | 90-day retained |
-|---|---|---|
-| 200 | 52 MiB | 156 MiB |
-| 2,000 | 521 MiB | 1,562 MiB |
-| 20,000 | 5,208 MiB | 15,623 MiB |
+| Retrievals/day | records in 30 days | 30-day unbounded | 90-day unbounded | bounded by | retained under the bound |
+|---|---|---|---|---|---|
+| 200 | 300,000 | 55 MiB | 166 MiB | 30 days | 55 MiB |
+| 2,000 | 3,000,000 | 554 MiB | 1,661 MiB | record cap | 369 MiB |
+| 20,000 | 30,000,000 | 5,535 MiB | 16,605 MiB | record cap | 369 MiB |
+
+The bound stated in LADR-02 — 30 days or 2,000,000 records, whichever is reached first — therefore holds
+the set under ~370 MiB at any volume. Projecting it from an *observed* retrieval rate rather than these
+scenarios belongs with the NFR verification of the shipped path.
 
 ### Trigger audit
 
@@ -120,9 +145,10 @@ its own.
 - **A cannot record a miss at all.** LADR-02 does not name this, and it is the stronger argument: a counter
   lives on a memory row, and a retrieval that returned nothing has no memory row to count against. LADR-01
   requires both halves, so A cannot implement the decision it would serve.
-- **C remains viable but pays for a latency advantage that is not measurable** (~1 ms p95 on a ~7 ms
-  retrieval) with a dependency on an observability retention policy owned elsewhere, and with
-  never-recalled becoming a comparison performed outside the store. Rejected on that trade, not on cost.
+- **C remains viable but pays for a latency advantage that is not measurable** (0.769 ms p95 against B, on
+  a ~6.5 ms retrieval, inside B's own 1.169 ms run-to-run spread) with a dependency on an observability
+  retention policy owned elsewhere, and with never-recalled becoming a comparison performed outside the
+  store. Rejected on that trade, not on cost.
 
 ## Findings that change the record shape
 
@@ -132,10 +158,15 @@ its own.
    carries no content, so this stays inside LADR-03.
 2. **"Recently captured" is not a column on the thing being measured.** The stable `memory` row carries no
    timestamp; capture age has to come from `min(memory_version.created_on)`. As a correlated subquery it
-   dominates the never-recalled plan (25,414 of 25,485 total cost), so NFR-03's never-recalled list should
-   express it as a join rather than a subquery when that query is implemented.
+   dominates the never-recalled plan — the filtered scan of `memory` carrying that subplan costs 25,397.75
+   of the statement's 25,468.85 — so NFR-03's never-recalled list should express it as a join rather than a
+   subquery when that query is implemented.
 3. **The classification column must be schema-constrained.** The prototype `CHECK` rejects an out-of-set
-   value, satisfying NFR-01's "constrained, not conventional" criterion. A convention would not.
+   value with `23514`, satisfying NFR-01's "constrained, not conventional" criterion. A convention would
+   not.
+4. **Measurement order was itself a confound.** The fixed-order pass of this harness reported B slower than
+   A; rotating the order and resetting between rounds reversed the sign. Any later latency comparison in
+   this design must rotate, or it measures accumulation rather than placement.
 
 ## Reopening threshold
 
