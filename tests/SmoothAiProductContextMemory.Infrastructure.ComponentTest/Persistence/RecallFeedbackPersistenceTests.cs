@@ -149,7 +149,7 @@ public sealed class RecallFeedbackPersistenceTests(AspireFixture aspire) : Persi
     {
         await using NpgsqlConnection connection = await DataSource.OpenConnectionAsync(Ct);
         await using var command = new NpgsqlCommand(
-            "SELECT retrieval_id, memory_uuid, shape FROM public.recall_feedback ORDER BY retrieval_id",
+            "SELECT retrieval_id, memory_uuid, shape FROM public.recall_feedback ORDER BY retrieval_id, memory_uuid",
             connection);
 
         var rows = new List<(Guid, Guid?, string)>();

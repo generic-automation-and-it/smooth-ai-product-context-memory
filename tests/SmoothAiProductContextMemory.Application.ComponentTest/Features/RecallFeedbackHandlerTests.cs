@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Shouldly;
 using SmoothAiProductContextMemory.Application.Abstractions;
+using SmoothAiProductContextMemory.Application.Common.Models;
 using SmoothAiProductContextMemory.Application.Features.Memories;
 using SmoothAiProductContextMemory.Domain.Entities;
 
@@ -73,7 +74,14 @@ public sealed class RecallFeedbackHandlerTests(AspireFixture aspire) : HandlerTe
         QueryMemories.Response withFeedback = await NewQuery(new SpyRecallFeedback()).Handle(Query(), Ct);
         QueryMemories.Response withoutFeedback = await NewQuery(new NoopRecallFeedback()).Handle(Query(), Ct);
 
-        withFeedback.Items.Select(i => i.Uuid).ShouldBe(withoutFeedback.Items.Select(i => i.Uuid));
+        // CheapMemory's record equality uses reference equality for its list fields, so compare a
+        // deep projection (scalar fields + list contents) to prove the result is byte-identical.
+        withFeedback.Items.Select(Key).ShouldBe(withoutFeedback.Items.Select(Key));
+
+        static (Guid Uuid, string Description, string Statement, int Version, string Kind, short Confidence,
+            string ScopeDimension, string Facets, string Tags) Key(CheapMemory x) =>
+            (x.Uuid, x.Description, x.Statement, x.Version, x.Kind, x.Confidence, x.ScopeDimension,
+                string.Join(',', x.Facets), string.Join(',', x.Tags));
     }
 
     private QueryMemories.Handler NewQuery(IRecallFeedback feedback) =>
