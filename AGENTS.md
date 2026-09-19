@@ -29,18 +29,6 @@ Persistent memory service for AI agents: stores summarized, labelled context (li
 
 Planned work tracked as worktasks under `.context/work-tasks/` (gitignored). Use `/create worktask`. **Never reference worktask IDs (e.g. `WT-04`) in delivered artefacts** — code, comments, `*AGENTS.md`, HLDs, changelogs. Worktasks are short-lived and gitignored; cite the durable authority instead (HLD, LADR, NFR, PR, issue).
 
-## Skills
-
-| Skill | Path | Purpose |
-|---|---|---|
-| agile-github-breakdown | `.agents/skills/agile-github-breakdown/` | Braindump/Feature → GitHub Feature + Task graph (Project = initiative, Feature = epic, Task = story). |
-| mimisbrunnr-context-memory | `.agents/skills/mimisbrunnr-context-memory/` | Sole interface to the context-memory store; capture (`set`) and retrieval (`get`) of persistent context memories against the HTTP API. |
-| mimisbrunnr-vitsmunir-dump | `.agents/skills/mimisbrunnr-vitsmunir-dump/` | Listen-first braindump session for tickets, ADRs, worktasks, requirements or designs; synthesizes only when asked. |
-| mimisbrunnr-recall-feedback | `.agents/skills/mimisbrunnr-recall-feedback/` | Run the three recall-feedback tuning queries against the Host API — never-recalled list, miss rate, baseline reset (HLD-004 NFR-03). |
-| mimisbrunnr-understanding | `.agents/skills/mimisbrunnr-understanding/` | Load a distilled Understanding export — or any session, meeting notes or transcript — into a new/running agent's context (default, no write); `--store` imports it back through the capture path; `--currentsession` dumps the session to a local folder for cross-session/cross-repo reuse (BRD-003, HLD-007). |
-| ai-review | `.agents/skills/ai-review/` | Local consumer of a remote AI code-review report (generator stays remote). |
-| git-commit-review-push | `.agents/skills/git-commit-review-push/` | Commit + push + open a PR with an embedded full AI review. |
-
 ## Rules
 
 Rules live under `.agents/rules/` as `*.instructions.md`, auto-loaded every session by Claude Code / Cursor / Copilot / Codex (symlinks in `.agents/AI_DEVELOPMENT_AGENTS.md`). Scoping is **per-file** frontmatter: `paths` (Claude), `globs`+`alwaysApply` (Cursor), `applyTo` (Copilot). Category subfolders are organizational only — they don't change loading. One exception: prompt-scoped rules may be deferred for Claude and re-injected on demand by a `UserPromptSubmit` hook (e.g. `code-review-standards`). See `.agents/rules/meta/rules.instructions.md`.
@@ -115,6 +103,7 @@ Hosted on **GitHub** at `https://github.com/generic-automation-and-it/project`. 
 
 | Date | Change | Ref |
 |---|---|---|
+| 2026-09-19 | Removed the root `## Skills` table — it duplicated `.agents/skills/` and only filled context; skills remain discoverable by directory and self-describing in their own `*AGENTS.md`. Glossary terms kept. | context hygiene |
 | 2026-09-19 | Added BRD-003 (understanding, `BR-38`–`BR-45`) and HLD-007 (design, 8 LADRs / 3 NFRs), the `mimisbrunnr-understanding` skill (breadth-controlled load / `--store` import / `--currentsession` session dump) with a CI-gated 28-test harness, and the **Understanding** glossary term as an open kind value. An Understanding is a memory of `kind = understanding`, cross-repo by default scope and no repo anchor, stored in the existing models — memory keeps its name. | BRD-003, HLD-007 |
 | 2026-09-17 | HLD-002 write-pipeline closure delivered: delegated read/write execution, conflict mechanics, and MCP capability split -- detail in the skill and AI-development changelogs. | HLD-002 |
 | 2026-09-16 | Corrected README temporal-validity wording: retrieval filters validity windows only when `asOf` is supplied. | PR #65 review |
