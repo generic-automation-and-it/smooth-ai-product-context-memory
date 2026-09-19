@@ -37,7 +37,9 @@ ASP.NET Core composition root (Minimal API). Wires the application together and 
 
 Approved context API capability boundary (2026-09-17): every `/api/context/*` route requires a
 Bearer token. Read credentials can invoke only query/history/blob/path/ticket-path/label-list/
-initiative-list operations; write credentials can invoke both planes. Health, OpenAPI and Scalar stay
+initiative-list/recall-feedback/never-recalled/recall-feedback/miss-rate operations (the two recall-feedback
+read surfaces were added 2026-09-19 with HLD-004; `reset` needs write); write credentials can invoke
+both planes. Health, OpenAPI and Scalar stay
 public. Tokens come only from runtime configuration, compare in constant time, and never enter logs,
 traces, committed settings or OpenAPI examples.
 
@@ -52,6 +54,7 @@ Approved release-image plan (2026-09-13):
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-19 | Read-capability enumeration extended with the two recall-feedback read surfaces (`never-recalled`, `miss-rate`); `reset` needs write. | HLD-004, PR #79 |
 | 2026-09-17 | OpenAPI schema IDs now use full nested CLR names, preventing vertical slices' repeated `Request`/`Response` names from colliding and exposing the wrong contract. | HLD-002 wire compatibility |
 | 2026-09-17 | Context routes now require distinct runtime read/write Bearer capabilities; public health/OpenAPI/Scalar remain unchanged. | HLD-002 NFR-04 |
 | 2026-09-17 | Approved API-enforced read/write capability boundary for delegated context-memory agents. | HLD-002 NFR-04 |
