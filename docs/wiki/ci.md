@@ -122,10 +122,11 @@ where it is not set. The fallbacks are duplicated per workflow rather than share
 
 Do not "align" the analyse fallbacks onto the gate's. The mechanism is not the one you might assume: the analyse job
 never sets `OPENCODE_REVIEW_REPORT_CONFIG`, so `prepare-opencode-config.sh` falls back to **upstream's** committed
-`assets/opencode.json` rather than this repo's `.github/opencode.json`. That asset ships no `baseURL` on the
-`anthropic` provider, so pointing auto-fix at `ANTHROPIC` sends the placeholder `OPENCODE_ANTHROPIC_API_KEY` to the
-public `api.anthropic.com` and fails on **auth**, not on a dead loopback socket. The gate's
-`http://127.0.0.1:8888/v1` literal is never in play there at all.
+`assets/opencode.json` rather than this repo's `.github/opencode.json`. That asset pins the **public**
+`https://api.anthropic.com` as the `anthropic` provider's `baseURL` (verified at pin `4bdfea4`), so pointing
+auto-fix at `ANTHROPIC` sends the placeholder `OPENCODE_ANTHROPIC_API_KEY` to the real Anthropic API and fails on
+**auth**, not on a dead loopback socket. The gate's `http://127.0.0.1:8888/v1` literal is never in play there at
+all — it exists only in this repo's config, which that job does not load.
 
 Two couplings make a partial edit silent rather than loud:
 

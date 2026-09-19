@@ -246,10 +246,10 @@ jobs:
       # ANTHROPIC/claude-* ones and must NOT be "aligned" onto them. This job sets
       # no OPENCODE_REVIEW_REPORT_CONFIG, so prepare-opencode-config.sh loads
       # UPSTREAM's assets/opencode.json, not this repo's .github/opencode.json —
-      # the loopback baseURL literal is not in play here at all. That asset ships
-      # no baseURL on `anthropic`, so resolving to ANTHROPIC would send the
-      # placeholder OPENCODE_ANTHROPIC_API_KEY to the public api.anthropic.com and
-      # fail on auth. See docs/wiki/ci.md, "Fallback literals when the Variables
+      # the loopback baseURL literal is not in play here at all. That asset pins
+      # the public https://api.anthropic.com as anthropic's baseURL, so resolving
+      # to ANTHROPIC would send the placeholder OPENCODE_ANTHROPIC_API_KEY to the
+      # real Anthropic API and fail on auth. See docs/wiki/ci.md, "Fallback literals when the Variables
       # are unset".
       OPENCODE_REVIEW_REPORT_PROVIDER: ${{ vars.OPENCODE_REVIEW_REPORT_PROVIDER || 'OPENAI' }}
       OPENCODE_REVIEW_REPORT_MODEL_PRIMARY: ${{ vars.OPENCODE_REVIEW_REPORT_MODEL_PRIMARY || 'gpt-5.5' }}
