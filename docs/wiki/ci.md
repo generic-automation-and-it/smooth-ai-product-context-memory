@@ -56,14 +56,46 @@ The publish workflow does **not** run on pull requests.
   terminator. A reusable-workflow caller cannot inject a step into the callee's job, and a separate job would get a
   separate runner — so the steps have to live here.
 
-### Provider wiring
+### Which provider actually runs
+
+**The vLLM/`ANTHROPIC` wiring described below is configured but not currently selected.** Verified from run
+[35444596583](https://github.com/generic-automation-and-it/smooth-ai-product-context-memory/actions/runs/35444596583)
+(2026-09-19, commit `5302954`):
+
+```
+🔀 OpenCode provider: OPENCODE-GO-OPENAI (provider-id: go-openai)
+OPENCODE_REVIEW_REPORT_GATEWAY_URL: https://opencode.ai/zen/go/v1
+Start vLLM mTLS terminator -> skipped
+```
+
+So `OPENCODE_REVIEW_REPORT_PROVIDER` is set to `OPENCODE-GO-OPENAI`, the terminator step is skipped on every run,
+and the private gateway is not in the request path. Read the rest of this section as **the alternative
+configuration**, kept because it is selectable by flipping that one Variable — not as a description of today's runs.
+
+Check which is live by reading the `🔀 OpenCode provider:` line in any gate run's log. Actions Variables are not
+readable through the repo's integration token (`gh api .../actions/variables` → 403), so the log is the available
+source of truth.
+
+The gate's unset-Variable fallbacks follow this live provider: `OPENCODE-GO-OPENAI` with `glm-5.2` on all three
+tiers, so an unconfigured consumer lands where a configured one already is. The live Variables at the run above were
+`glm-5.2` / `grok-4.6` / `muse-spark-1.3-contributor`; the fallback pins only `glm-5.2`, the live primary.
+
+Why that model is safe in the case the fallback actually describes: an unconfigured consumer has
+`OPENCODE_REVIEW_REPORT_CONFIG` unset too, so `prepare-opencode-config.sh` loads **upstream's** committed
+`assets/opencode.json` — `.github/opencode.json` is not in play on that path. `glm-5.2` is declared under
+`go-openai` in **both** configs (upstream's verified at pin `4bdfea4`), so it resolves whether or not the config
+Variable is set. The binding constraint is in any case `_rp_model_family_ok`, not either `models` block — see
+[the models caveat above](#provider-wiring-the-anthropicvllm-alternative) — but a fallback model that no loaded
+config declares would still be a trap for the next reader.
+
+### Provider wiring (the ANTHROPIC/vLLM alternative)
 
 | Piece | Value |
 |---|---|
 | Terminator | `.github/scripts/vllm-tls-proxy.py`, plain HTTP on `127.0.0.1:8888`, mTLS out to the gateway in the profile |
 | opencode config | `.github/opencode.json`, selected via the `OPENCODE_REVIEW_REPORT_CONFIG` variable |
 | Retarget | `provider.anthropic.options.baseURL` = `http://127.0.0.1:8888/v1` as a **literal** |
-| Provider selector | `OPENCODE_REVIEW_REPORT_PROVIDER=ANTHROPIC` |
+| Provider selector | `OPENCODE_REVIEW_REPORT_PROVIDER=ANTHROPIC` — **not the current value**, see above |
 
 Two upstream behaviours make that work and must not be "corrected":
 
@@ -97,7 +129,7 @@ file does and does not control:
 |---|---|---|
 | Secret | `OPENCODE_VLLM_PROFILE_B64` | `base64` of the vllm-proxy `profile.json` (single line) |
 | Secret | `OPENCODE_ANTHROPIC_API_KEY` | any non-empty placeholder — the terminator supplies the real credential |
-| Variable | `OPENCODE_REVIEW_REPORT_PROVIDER` | `ANTHROPIC` |
+| Variable | `OPENCODE_REVIEW_REPORT_PROVIDER` | `ANTHROPIC` **for this wiring only**; currently `OPENCODE-GO-OPENAI`, which needs none of the rows in this table |
 | Variable | `OPENCODE_REVIEW_REPORT_CONFIG` | `.github/opencode.json` |
 | Variable | `OPENCODE_REVIEW_REPORT_MODEL_PRIMARY` / `_SECONDARY` / `_ORCHESTRATOR` | a `claude-*` alias the gateway serves |
 | Variable | `OPENCODE_REVIEW_REPORT_MAX_PARALLEL` | `2` — one vLLM instance backs every chunk; the upstream default of 7 pushes chunks past their budget |
@@ -105,9 +137,119 @@ file does and does not control:
 
 `OPENCODE_ANALYSE_MODEL` falls back to `OPENCODE_REVIEW_REPORT_MODEL_PRIMARY`. With the review tiers on a `claude-*`
 alias and `OPENCODE_ANALYSE_PROVIDER` unset, the analyse scope aborts with *"OPENCODE_ANALYSE_MODEL is set but
-OPENCODE_ANALYSE_PROVIDER is unset"*. Set both, or auto-fix stops running. Note also that the analyse job does
-**not** start the terminator, so its fallback chain — which still resolves to the review provider — points at a
-socket that does not exist in that job; only its primary target is live.
+OPENCODE_ANALYSE_PROVIDER is unset"*. Set both, or auto-fix stops running. Note also that the analyse job neither starts the terminator nor sets
+`OPENCODE_REVIEW_REPORT_CONFIG`, so its fallback chain — which still resolves to the review provider — reaches the
+**public** `api.anthropic.com` carrying the placeholder key and fails on auth; only its primary target is live.
+
+### Fallback literals when the Variables are unset
+
+Every **Variable** row in the table above has a hardcoded fallback in the workflow YAML for the run where it is not
+set. The two `Secret` rows do not, and must not — a secret with a committed default is the shape
+[`skill-secret-handling`](../../.agents/rules/skill-secret-handling.instructions.md) forbids; the gate forwards
+both bare and fails loudly when they are empty. The fallbacks are duplicated per workflow rather than shared, and the two workflows
+**deliberately disagree**:
+
+| Workflow | Provider fallback | Model fallbacks | Why |
+|---|---|---|---|
+| `pipeline-code-review-report.yml` | `OPENCODE-GO-OPENAI`, provider-id `go-openai` | `glm-5.2` on all three tiers | Matches the provider the gate actually resolves; needs no terminator and no URL Variable |
+| `pipeline-ai-analyse.yml` | `OPENAI` | `gpt-5.5` / `gpt-5.4` / `gpt-5.4-mini` | Auto-fix must stay **off** the review credential — this job starts no terminator and loads a different opencode config |
+
+Do not "align" the analyse fallbacks onto the gate's. The mechanism is not the one you might assume: the analyse job
+never sets `OPENCODE_REVIEW_REPORT_CONFIG`, so `prepare-opencode-config.sh` falls back to **upstream's** committed
+`assets/opencode.json` rather than this repo's `.github/opencode.json`. That asset pins the **public**
+`https://api.anthropic.com` as the `anthropic` provider's `baseURL` (verified at pin `4bdfea4`), so pointing
+auto-fix at `ANTHROPIC` sends the placeholder `OPENCODE_ANTHROPIC_API_KEY` to the real Anthropic API and fails on
+**auth**, not on a dead loopback socket. The gate's `http://127.0.0.1:8888/v1` literal is never in play there at
+all — it exists only in this repo's config, which that job does not load.
+
+Two couplings make a partial edit silent rather than loud:
+
+- **Provider and models move together.** `resolve-provider.sh` applies a per-provider family check — under
+  `OPENCODE-GO-OPENAI` it rejects `claude*`, `gemini*` and `minimax*`/`qwen*`; under `ANTHROPIC` it rejects anything
+  that is not `claude*`. Changing the provider fallback without the three model fallbacks
+  aborts at preflight, far from the line that was missed.
+- **The provider-id chain has a bare final literal.** In the gate, `OPENCODE_REVIEW_REPORT_PROVIDER_ID` is a long
+  `||` ladder whose last line is an unguarded provider id. Repointing that literal silently changes the id for any
+  provider that had no explicit row of its own — `GEMINI` now carries one for exactly that reason.
+
+Re-grep after any such change and expect no stray hits:
+
+```bash
+grep -rn "|| 'GEMINI'\|'gemini-\|:-GEMINI}" --include='*.yml' --include='*.sh' \
+  --exclude-dir=.review-tools --exclude-dir=.smooth-ai-review-tools .
+```
+
+The excludes matter: a leftover tooling checkout contains upstream's own `:-GEMINI}` default and would report a hit
+that is not yours.
+
+### Provider base URLs are not symmetric
+
+`resolve-provider.sh` splits providers into two shapes, and only one of them works from a key alone:
+
+| Shape | Providers | What is needed |
+|---|---|---|
+| Fixed base | `ANTHROPIC`, `OPENCODE-GO-OPENAI`, `OPENCODE-GO-ANTHROPIC`, `OPEN_ROUTER` | the API key Secret only |
+| Variable base | `GEMINI`, `COPILOT`, `OPENAI` | the key **and** an `OPENCODE_REVIEW_REPORT_<P>_URL` Variable |
+
+**Read that table against the pin, not against upstream `main`.** It lists what `_rp_provider_fields` accepts at
+the SHA the gate checks out (`4bdfea4`). Upstream `main` has since added `OPENCODE-GO-RESPONSES`, which this pin
+rejects as an unknown provider — and which has no row in the gate's provider-id ladder, so bumping the pin without
+adding one would silently map it to `anthropic`. The two workflows do not even agree on the ref: the gate pins a
+SHA, while `pipeline-ai-analyse.yml` tracks `main` (overridable via `SMOOTH_AI_REVIEW_TOOLS_REF`). Re-read the
+function at whichever ref you are changing.
+
+There is no fallback URL for the variable-base three — `_rp_resolve` hard-fails on an empty value. That is why the
+gate's unset-Variable fallback is `OPENCODE-GO-OPENAI` (fixed base) and not a variable-base provider: the old
+`GEMINI` fallback made an unconfigured run die on `OPENCODE_REVIEW_REPORT_GEMINI_URL`, naming a provider nobody had
+selected.
+
+Do not add a hardcoded fourth base URL to make a variable-base provider work out of the box. The `OPENAI` slot
+exists as the relay point for a proxy; a literal `https://api.openai.com/v1` would send a proxy key to OpenAI.
+
+### What the gate reads from the PR description
+
+`lib/extract-review-notes.sh` pulls exactly two **top-level** headings out of the PR body and feeds them to the
+review prompt: `^## AI Review Notes` and `^## Skip Areas`. Each section walk stops at the next `^## `.
+
+The Skip Areas bullets are the channel that tells the next round which findings are intentional. A
+`**Known Issues:**` line nested inside `## AI Review Notes` is not a heading at all, so it never reaches the prompt
+and every skip is re-raised. `.github/pull_request_template.md` therefore ships the two as siblings, and
+`ai-review` writes skips into the Skip Areas section rather than the summary table it also appends.
+
+#### A lone HTML comment truncates everything below it
+
+`_clean()` in that lib strips comments with `sed '/^<!--/,/-->$/d'`. A sed range whose start and end
+match on the **same line** does not close there — sed looks for the end pattern from the *next* line on. A
+self-closing one-line comment therefore opens a range that never closes, and everything from it to the end of the
+body is deleted.
+
+This is not hypothetical here: Conductor appends `<!-- conductor-workspace-link -->` to PR descriptions it creates.
+Verified on PR #83 — the `### AI Review Response` block placed below that marker reached the prompt as zero lines,
+while the same block moved above it extracted fine.
+
+Consequence, and the rule: **keep `## Skip Areas / Known Issues` above any one-line HTML comment in the body.** It
+currently sits above the Conductor marker by ordering luck, not design. Placed below — which `ai-review`'s own
+"append at the end" fallback would do — every skip bullet would be silently truncated, reproducing the LADR-083
+failure this section exists to prevent. The round-trip check below catches it; run it after any body edit.
+
+```bash
+printf 'keep A\n<!-- marker -->\nkeep B\n' | sed '/^<!--/,/-->$/d'   # prints only "keep A"
+```
+
+Verify a PR body by round-trip rather than by eye. First fetch the lib — `.review-tools/` is created by the gate's checkout step and does **not** exist in a
+clone, so pin-matched fetch is the only way to run it locally:
+
+```bash
+gh api "repos/generic-automation-and-it/smooth-ai-report-review/contents/\
+.agents/skills/ai-review-report/scripts/lib/extract-review-notes.sh?ref=4bdfea4f361218d88745dfcbad0b00a108a129f2" \
+  --jq .content | base64 -d > /tmp/extract-review-notes.sh
+```
+
+Then round-trip the body through it — both sections must appear in the output:
+
+```bash
+gh pr view <n> --json body --jq .body | bash /tmp/extract-review-notes.sh
+```
 
 ### Security properties
 
