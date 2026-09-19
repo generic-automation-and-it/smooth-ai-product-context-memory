@@ -300,7 +300,19 @@ jobs:
       # and the empty-secret check below fails loudly rather than letting the
       # gate proceed toward a socket that will never answer.
       - name: Start vLLM mTLS terminator
-        if: (vars.OPENCODE_REVIEW_REPORT_PROVIDER || 'ANTHROPIC') == 'ANTHROPIC'
+        # Mirrors the OPENCODE_REVIEW_REPORT_PROVIDER selector below, which honours
+        # `model_preset` ahead of the Variable. Guarding on the Variable alone let a
+        # dispatch with an Anthropic preset select the gateway while this step was
+        # skipped, leaving the run pointed at a terminator that never started. The
+        # second clause covers the no-preset paths: `pull_request` populates no
+        # inputs context (empty string) and the dispatch default is
+        # '(repository default)', and neither matches a preset row in the ladder.
+        if: >-
+          inputs.model_preset == 'Anthropic Claude Opus 4.8' ||
+          inputs.model_preset == 'Anthropic Claude Sonnet 4.6' ||
+          inputs.model_preset == 'Anthropic Claude Haiku 4.5' ||
+          ((inputs.model_preset == '' || inputs.model_preset == '(repository default)') &&
+          (vars.OPENCODE_REVIEW_REPORT_PROVIDER || 'ANTHROPIC') == 'ANTHROPIC')
         env:
           VLLM_PROFILE_B64: ${{ secrets.OPENCODE_VLLM_PROFILE_B64 }}
         run: |
