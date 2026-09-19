@@ -368,9 +368,13 @@ jobs:
           # passes it as REVIEWER_INPUT so run-review.sh reads it from the env
           # without any inputs.* / steps.*.outputs dependency).
           REVIEWER_INPUT: ${{ inputs.pr_number }}
-          # Provider selector, default GEMINI. See the reusable-workflow caller
-          # for the full preset → provider/model mapping. The variables below
-          # mirror that mapping; extend them together.
+          # Provider selector. The bare fallback below — reached only when no
+          # preset matched and the Variable is unset — is ANTHROPIC, and the
+          # three model tiers fall back to claude-opus-5 to match it; the family
+          # check in resolve-provider.sh ties the two together. See the
+          # reusable-workflow caller for the full preset → provider/model
+          # mapping. The variables below mirror that mapping; extend them
+          # together.
           OPENCODE_REVIEW_REPORT_PROVIDER: ${{
             (inputs.model_preset == 'Anthropic Claude Opus 4.8' && 'ANTHROPIC') ||
             (inputs.model_preset == 'Anthropic Claude Sonnet 4.6' && 'ANTHROPIC') ||
