@@ -9,12 +9,13 @@ Use this skill when a practitioner wants to seed an agent with prior knowledge, 
 already written somewhere into the store so it compounds. It is the **load/transfer** counterpart to
 `mimisbrunnr-context-memory` (the sole writer of clean facts).
 
-## Two acts — never conflate
+## Three operations — never conflated
 
-| Act | Default | Writes to store? | Through capture path? |
+| Operation | Default | Writes to store? | Through capture path? |
 |---|---|---|---|
-| **Load** | yes | no | n/a |
-| **Import** | no | yes, only with `--store` | yes |
+| **Load** | context-injection | no | n/a |
+| **Import** (`--store`) | opt-in | yes, only with `--store` | yes |
+| **Dump** (`--currentsession`) | export to local folder | no | n/a |
 
 ## Load (default)
 

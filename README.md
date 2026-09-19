@@ -98,7 +98,9 @@ transferable skill a future agent can act on as if it had learned it firsthand.
 
 An Understanding is stored as a **memory of `kind = understanding`** — the same models, the same
 `is_current` version semantics, the same defaults. Its group carries the default scope and omits the
-repo anchor, so unlike a scoped memory fact it is **not tied to one repo** and can cross repos
+repo anchor, so unlike a scoped memory fact it is **not tied to one repo**. Because a repository is a
+retrieval filter, an un-anchored understanding surfaces under an un-scoped query or the `--all` breadth
+path, not under a single-repo query — it is a distilled learning, not a fact of any one repo
 ([BRD-003](docs/brd/003-understanding-transfer/)). No nullable scope, no new column.
 
 The `mimisbrunnr-understanding` skill makes it portable:

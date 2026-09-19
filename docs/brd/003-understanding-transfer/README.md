@@ -141,9 +141,12 @@ and omits the repository anchor.
 **BR-41 — An Understanding must cross repos and scopes.**
 A distilled learning outlives the repo that produced it, so it is not tied to one repository.
 
-*Accepted when:* an Understanding's group carries the default scope values and no repository anchor, so
-it is recallable across repos without weakening the model (no nullable scope, no new column). A scoped
-memory fact remains scoped; only an Understanding is cross-repo.
+*Accepted when:* an Understanding's group carries the default scope values and no repository anchor, so it
+is **not a fact of any one repo**. Because a repository is a retrieval filter, an un-anchored understanding
+is recalled by an un-scoped query or the breadth `--all` path, and is deliberately **not** returned when a
+caller queries one specific repository. That boundary is stated rather than implied — an Understanding is a
+distilled learning, not a scoped fact of a particular repo. A scoped memory fact remains scoped; only an
+Understanding is cross-repo.
 
 ### Loading
 
