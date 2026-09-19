@@ -111,8 +111,10 @@ OPENCODE_ANALYSE_PROVIDER is unset"*. Set both, or auto-fix stops running. Note 
 
 ### Fallback literals when the Variables are unset
 
-Every row in the table above is a Variable, and every one has a hardcoded fallback in the workflow YAML for the run
-where it is not set. The fallbacks are duplicated per workflow rather than shared, and the two workflows
+Every **Variable** row in the table above has a hardcoded fallback in the workflow YAML for the run where it is not
+set. The two `Secret` rows do not, and must not — a secret with a committed default is the shape
+[`skill-secret-handling`](../../.agents/rules/skill-secret-handling.instructions.md) forbids; the gate forwards
+both bare and fails loudly when they are empty. The fallbacks are duplicated per workflow rather than shared, and the two workflows
 **deliberately disagree**:
 
 | Workflow | Provider fallback | Model fallbacks | Why |
