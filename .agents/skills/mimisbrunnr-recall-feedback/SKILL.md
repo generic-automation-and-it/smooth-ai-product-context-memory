@@ -15,12 +15,18 @@ leave the store.
 
 Base URL: `CONTEXT_MEMORY_BASE_URL`, fallback `http://localhost:5141`. Loopback origins only.
 
+API access requires runtime credentials: `CONTEXT_MEMORY_READ_TOKEN` for the two read queries and
+`CONTEXT_MEMORY_WRITE_TOKEN` for reset (write includes read). The **values** are runtime-only — never
+written to a file, prompt or commit. Each request carries the token as a `Bearer` Authorization header.
+A missing or wrong token returns `403`.
+
 ## Queries
 
 ### 1. Which memories have never been recalled?
 
 ```bash
-curl -s "$BASE/api/context/recall-feedback/never-recalled?asOf=2026-09-18&limit=500"
+curl -s -H "Authorization: Bearer $CONTEXT_MEMORY_READ_TOKEN" \
+  "$BASE/api/context/recall-feedback/never-recalled?asOf=2026-09-18&limit=500"
 ```
 
 `asOf` is required (ISO 8601). The list already excludes memories captured within the recency grace
@@ -30,7 +36,8 @@ not pollute the signal.
 ### 2. How often does retrieval return nothing?
 
 ```bash
-curl -s "$BASE/api/context/recall-feedback/miss-rate?from=2026-09-11&to=2026-09-18"
+curl -s -H "Authorization: Bearer $CONTEXT_MEMORY_READ_TOKEN" \
+  "$BASE/api/context/recall-feedback/miss-rate?from=2026-09-11&to=2026-09-18"
 ```
 
 Returns `{ "retrievals": N, "misses": M, "missRate": 0.0 }`. Count a window before and after a tuning
@@ -39,7 +46,8 @@ change to show whether a change moved it — this is the before/after comparison
 ### 3. Reset the baseline
 
 ```bash
-curl -s -X POST "$BASE/api/context/recall-feedback/reset"
+curl -s -X POST -H "Authorization: Bearer $CONTEXT_MEMORY_WRITE_TOKEN" \
+  "$BASE/api/context/recall-feedback/reset"
 ```
 
 Legitimate, not destructive: feedback is disposable (LADR-04), and a tuning experiment must be able to
