@@ -173,6 +173,9 @@ class LoadTests(unittest.TestCase):
             _, out2, _ = run(["load", store, "--format", "store", "--max-chars", "50"])
             self.assertIn("`--max-chars` does not apply", out2)
 
+            _, out3, _ = run(["load", foreign, "--all"])
+            self.assertIn("`--all` does not apply", out3)
+
     def test_missing_input_is_an_error_not_an_empty_render(self):
         rc, _, err = run(["load", "/nonexistent/path.md"])
         self.assertEqual(rc, 2)

@@ -49,3 +49,15 @@ omitting the repo anchor**, not from weakening scope to nullable.
 - `kind = understanding` is retrievable by label/similarity like any other kind.
 - Cross-repo reach is achieved without a schema change or nullable scope.
 - The only code change is the new constant plus whatever renders/validates the kind.
+
+## A boundary worth naming
+
+`Repo` is a **query filter**, not just an anchor: `NpgsqlMemorySearch` applies
+`WHERE group.repo = <requested>` when a repo is supplied, so a memory with `Repo = null` is **not
+recalled under a repository-scoped query** — it is recalled only by an un-scoped query or by the
+breadth `--all` path. So "an Understanding crosses repos by omitting the repo anchor" is specifically
+true for **un-scoped recall**, and an Understanding is deliberately **not** returned when a caller
+queries one specific repo. That is the intended behaviour — a cross-repo learning is not a fact of any
+one repo — but an implementer must not assume a `Repo = null` understanding will surface under a
+repo-filtered `query`. If a repo-scoped query should also surface it, that is a separate retrieval
+decision, not a storage one.

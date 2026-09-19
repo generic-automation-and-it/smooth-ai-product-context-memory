@@ -210,6 +210,10 @@ def cmd_load(args: argparse.Namespace) -> int:
             lines.append("")
             lines.append("- `--asof` does not apply to foreign material, which carries no validity "
                          "window; it was not used and nothing was filtered out.")
+        if args.all_kinds:
+            lines.append("")
+            lines.append("- `--all` does not apply to foreign material, which is not a store export; "
+                         "it was not used.")
     lines += ["", DATA_NOTICE]
     print("\n".join(lines))
     return 0
