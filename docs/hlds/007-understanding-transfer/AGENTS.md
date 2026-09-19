@@ -75,7 +75,7 @@ See [./ladrs/](./ladrs/). All Draft.
 ## Test References
 
 - **Skill L0 (CI-gated):** `.agents/skills/mimisbrunnr-understanding/tests/run_tests.py` — stdlib
-  `unittest`, 28 tests. A default load creates no files (NFR-01); store-export five-part rendering keeps
+  `unittest`, 29 tests. A default load creates no files (NFR-01); store-export five-part rendering keeps
   uuid/version attribution; `proposed` and `program` scope are flagged, never promoted (NFR-03); `--asof`
   filters the validity window and states the omission; foreign material is cited as data with truncation
   disclosed; import is refused without `--store` and emits nothing (NFR-02); the `--store` payload carries
@@ -105,5 +105,6 @@ See [./ladrs/](./ladrs/). All Draft.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-19 | Self-review (iter 4): fixed the import path collapsing a scoped memory fact into an understanding. Import of a store export now takes only `kind = understanding` records (LADR-01). | self-review |
 | 2026-09-19 | Rebuilt for the one-model model: Understanding is a **kind** of memory in the existing store, cross-repo by default scope and no repo anchor (no nullable scope), reusing `is_current` version semantics. Added load breadth (`--all` vs understanding-only, LADR-08). Retracted the earlier `Memory`→`Understanding` code rename (memory is the correct name) — LADR-05 and NFR-04 removed. Retracted the "understanding rather than memory" vocabulary requirement in favour of "memory is the correct name". | LADR-01, LADR-04, LADR-08; BRD-003 |
 | 2026-09-19 | Created — discovery HLD for understanding. | BRD-003 |

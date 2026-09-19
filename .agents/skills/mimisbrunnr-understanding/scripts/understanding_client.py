@@ -276,13 +276,18 @@ def cmd_import(args: argparse.Namespace) -> int:
     body = read_input(src)
 
     records = parse_store_export(body)
+    skipped_kind = 0
     if records is not None:
-        # Carry all five parts plus lifecycle and provenance, so the capture path can preserve what
-        # the export recorded. Dropping them here would silently flatten an Understanding to two
-        # fields and lose the origin it was exported with (BR-43, NFR-03).
+        # Import is understanding-only: a store export may mix a scoped memory fact with an
+        # understanding, and stamping the scoped memory as `kind = understanding` would collapse a
+        # category — the exact defect the one-model design exists to avoid (LADR-01). So only
+        # `kind = understanding` records become candidates, and the skip is stated below.
         candidates = []
         for record in records:
             parts = five_parts(record)
+            if parts["kind"] != KIND_UNDERSTANDING:
+                skipped_kind += 1
+                continue
             if not parts["knowledge"]:
                 continue
             candidates.append({
@@ -327,6 +332,9 @@ def cmd_import(args: argparse.Namespace) -> int:
     print()
     print(f"Candidates: {len(candidates)}; "
           f"flagged as possibly bundled: {sum(1 for c in candidates if c['bundledCandidate'])}.")
+    if skipped_kind:
+        print(f"Skipped {skipped_kind} record(s) that were not understanding-kind; import is "
+              "understanding-only (LADR-01).")
     print("The capture path applies preflight, redaction, deduplication, link derivation and the "
           "atomicity check. Conflicts and proposed status are surfaced there, never auto-resolved.")
     if not tickets and not tags and not args.repository and not args.scope:

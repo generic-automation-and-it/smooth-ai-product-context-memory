@@ -66,12 +66,16 @@ DB and wire are unchanged.
   (EXPORT_AGENTS LADR-103): a generated projection must not be written over a maintained tree.
 - **An inapplicable flag is reported, never silently ignored** — `--asof` on foreign material,
   `--max-chars` on a store export.
+- **Import of a store export is understanding-only.** A mixed export may carry a scoped memory fact next to
+  an understanding; only `kind = understanding` records become candidates, and the skipped scoped records are
+  reported. Stamping a scoped memory as an understanding would collapse a category — the exact defect the
+  one-model design exists to avoid (LADR-01).
 - **The dump derives its folder name** from `--session-name`, else the content's first heading, else a
   timestamp — and always prints the name so another session can discover it.
 
 ## Test References
 
-- **Committed L0 harness (CI-gated):** `tests/run_tests.py` — stdlib `unittest`, 28 tests, no external
+- **Committed L0 harness (CI-gated):** `tests/run_tests.py` — stdlib `unittest`, 29 tests, no external
   runner. A default load creates no files (NFR-01); store-export five-part rendering keeps uuid/version
   attribution; `proposed`/`program` scope flagged, never promoted (NFR-03); `--asof` filters the validity
   window and states the omission; foreign material cited as data with truncation disclosed; import refused
@@ -85,6 +89,7 @@ DB and wire are unchanged.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-19 | Self-review (iter 4): import of a store export is now understanding-only. It used to stamp every record `kind = understanding`, so a scoped memory fact in a mixed export was collapsed into an understanding (LADR-01 defect). Non-understanding records are now skipped and the skip is reported. Harness 28 -> 29 tests. | self-review |
 | 2026-09-19 | Self-review fixes: hard-wrapped prose no longer becomes one candidate per physical line (it was handing the capture path mid-sentence fragments); a store-export import now carries all five parts plus lifecycle/provenance instead of only statement+description; `dump` refuses the filesystem root and a repository root; inapplicable flags are reported. Harness 19 -> 26 tests. | self-review |
 | 2026-09-19 | Implemented: `load` (auto/store/foreign, `--asof`, truncation disclosure, attribution, proposed/scope flagging), `import --store` (candidate decomposition, bundle flagging, selector binding, no-selector notice, zero writes), `dump --currentsession` (`--from`, derived discoverable folder name, marker, idempotent). 19-test harness added to the PR gate. | BRD-003; HLD-007 |
 | 2026-09-19 | Created — load/import/session-dump skill for Understanding transfer. Load is context-only by default; `--store` imports via the capture path; `--currentsession` dumps to a local folder. | BRD-003; HLD-007 |

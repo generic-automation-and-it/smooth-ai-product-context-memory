@@ -243,6 +243,18 @@ class ImportTests(unittest.TestCase):
             self.assertEqual(payload["sourceKind"], "store-export")
             self.assertEqual(len(payload["candidates"]), 2)
 
+    def test_store_export_import_is_understanding_only(self):
+        """Regression: import used to stamp every store-export record as `kind = understanding`, so a
+        scoped memory fact in a mixed export was collapsed into an understanding (LADR-01)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "mixed.json", json.dumps(MIXED_EXPORT))
+            _, out, _ = run(["import", src, "--store"])
+            payload = json.loads(out[out.index("{"):out.rindex("}") + 1])
+            # Only the understanding-kind record is a candidate; the architecture one is skipped.
+            self.assertEqual(len(payload["candidates"]), 1)
+            self.assertEqual(payload["candidates"][0]["statement"], "The graph is a path")
+            self.assertIn("Skipped 1 record(s) that were not understanding-kind", out)
+
     def test_wrapped_prose_is_not_split_mid_sentence(self):
         """Regression: hard-wrapped prose used to become one candidate per physical line, handing
         the capture path mid-sentence fragments."""
