@@ -36,6 +36,15 @@
 - [ ] Related ADRs/NFRs updated in `docs/` (if applicable)
 - [ ] `*AGENTS.md` context files updated to reflect changes
 
+## Skip Areas / Known Issues
+
+<!-- MUST stay a top-level `## ` section and MUST keep the words "Skip Areas" in
+     the heading. The review gate greps `^## Skip Areas` to learn which findings
+     are intentional; demoted to `###` or nested under another heading it is
+     invisible and every skip is silently re-raised next round. -->
+
+-
+
 ## AI Review Notes
 
 
@@ -46,11 +55,6 @@
 -
 
 **Context:**
-
-
--
-
-**Known Issues:**
 
 
 -

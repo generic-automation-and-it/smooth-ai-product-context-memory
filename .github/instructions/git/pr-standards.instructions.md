@@ -32,7 +32,9 @@ Pattern: `<type>/<ticket-or-slug>-<description>` (lowercase, hyphens). Branch `<
 2. **Use `gh pr create`** — this is a GitHub repository; use the `gh` CLI
 3. **PR template**: use `.github/pull_request_template.md` if present, otherwise write a clear description with bullet points
 4. **Fill sections**: Description (bullet points), Type of Change, Testing notes
-5. **AI Review Notes** (mandatory): Focus areas, context, known issues, skip areas
+5. **AI Review Notes** (mandatory): focus areas and context
+6. **Skip Areas / Known Issues** (mandatory when anything is knowingly skipped): a separate
+   top-level section, not a bullet inside AI Review Notes — the gate parses it
 
 ## PR Update Requirements
 
@@ -43,7 +45,14 @@ Pattern: `<type>/<ticket-or-slug>-<description>` (lowercase, hyphens). Branch `<
 
 ## AI Review Notes Example
 
+Two **sibling top-level** sections. `Skip Areas / Known Issues` is not a sub-heading of
+`AI Review Notes` — see [Skip Areas is a parsed section](#skip-areas-is-a-parsed-section).
+
 ```markdown
+## Skip Areas / Known Issues
+
+- `src/Api/PaymentEndpoint.cs:88` duplicate validation — intentional for backward compatibility
+
 ## AI Review Notes
 
 **Focus Areas:**
@@ -53,10 +62,32 @@ Pattern: `<type>/<ticket-or-slug>-<description>` (lowercase, hyphens). Branch `<
 **Context:**
 - Hotfix for production issue
 - TODO on line 45 addressed in follow-up #4567
-
-**Known Issues:**
-- Gemini may flag duplicate validation - intentional for backward compatibility
 ```
+
+## Skip Areas is a parsed section
+
+The review gate does not read the PR description as prose. `extract-review-notes.sh`
+greps two **top-level** headings — `^## AI Review Notes` and `^## Skip Areas` — and
+terminates each section walk at the next `^## `. A `**Known Issues:**` bold line nested
+inside `## AI Review Notes` is therefore not a heading at all and never reaches the
+review prompt, so every finding marked `skip` is re-raised on the next round.
+
+Rules that follow from that:
+
+- Keep the literal words `Skip Areas` in a `## `-level heading. Demoting it to `###`
+  or folding it under another section makes it invisible.
+- Anchor each bullet with `<file>:<line>` plus the reason, so the next round can match
+  it against a finding.
+- Verify by round-trip, never by eye — both sections must appear in the output:
+
+  ```bash
+  gh pr view <n> --json body --jq .body \
+    | bash .review-tools/.agents/skills/ai-review-report/scripts/lib/extract-review-notes.sh
+  ```
+
+  The same check runs against `.github/pull_request_template.md` whenever that file is
+  edited. More generally: when you change a file a script reads, run that script against
+  the changed file before calling it done.
 
 ## Changelog
 
@@ -66,3 +97,4 @@ Pattern: `<type>/<ticket-or-slug>-<description>` (lowercase, hyphens). Branch `<
 |:-----|:-------|
 | 2026-05-30 | Initial version. |
 | 2026-05-30 | Align branch-name types with Conventional Commits (`feat`/`fix`/… valid; `feature`/`bugfix`/… invalid). |
+| 2026-09-19 | Example split into sibling `## Skip Areas / Known Issues` + `## AI Review Notes` sections, and the parser contract behind that split documented. The nested `**Known Issues:**` shape it replaced was invisible to `extract-review-notes.sh`. |
