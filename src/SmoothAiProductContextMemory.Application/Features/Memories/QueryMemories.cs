@@ -131,9 +131,9 @@ public static class QueryMemories
 
             logger.LogInformation("Query memories completed. Count: {Count}", items.Count);
 
-            // Feedback is emitted after the response is fully materialised and is guarded so a
-            // feedback failure can never fail the retrieval; it cannot change the result set,
-            // ordering, limit or ranking. Off the critical path.
+            // Feedback is emitted after the response is fully materialised, on a fresh connection
+            // outside the retrieval's unit of work, and is guarded so a feedback failure can never
+            // fail the retrieval; it cannot change the result set, ordering, limit or ranking.
             if (items.Count == 0)
             {
                 Emit([new RecallFeedbackRecord(retrievalId, null, shape, occurredOn)]);
@@ -161,7 +161,7 @@ public static class QueryMemories
             catch (Exception ex)
             {
                 // No record payload in the log — content must never reach a log line.
-                logger.LogDebug(ex, "Recall feedback write failed; retrieval unaffected.");
+                logger.LogWarning(ex, "Recall feedback write failed; retrieval unaffected.");
             }
         }
     }

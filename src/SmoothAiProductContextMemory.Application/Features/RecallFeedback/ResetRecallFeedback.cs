@@ -1,3 +1,4 @@
+using FluentValidation;
 using Mediator;
 using SmoothAiProductContextMemory.Application.Abstractions;
 
@@ -12,6 +13,8 @@ public static class ResetRecallFeedback
     public sealed record Request : IRequest<Response>;
 
     public sealed record Response(int RecordsDeleted);
+
+    public sealed class Validator : AbstractValidator<Request>;
 
     public sealed class Handler(IRecallFeedbackQuery query) : IRequestHandler<Request, Response>
     {

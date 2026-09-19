@@ -28,7 +28,7 @@ public sealed class NpgsqlRecallFeedback(NpgsqlDataSource dataSource, ILogger<Np
         catch (Exception ex)
         {
             // No record payload, shape, uuid or query in the log — content must never reach a log line.
-            logger.LogDebug(ex, "Recall feedback write failed; retrieval unaffected.");
+            logger.LogWarning(ex, "Recall feedback write failed; retrieval unaffected.");
         }
     }
 
