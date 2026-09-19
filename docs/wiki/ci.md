@@ -78,8 +78,15 @@ source of truth.
 
 The gate's unset-Variable fallbacks follow this live provider: `OPENCODE-GO-OPENAI` with `glm-5.2` on all three
 tiers, so an unconfigured consumer lands where a configured one already is. The live Variables at the run above were
-`glm-5.2` / `grok-4.6` / `muse-spark-1.3-contributor`; the fallback pins only `glm-5.2`, which is both the live
-primary and a model `.github/opencode.json` declares.
+`glm-5.2` / `grok-4.6` / `muse-spark-1.3-contributor`; the fallback pins only `glm-5.2`, the live primary.
+
+Why that model is safe in the case the fallback actually describes: an unconfigured consumer has
+`OPENCODE_REVIEW_REPORT_CONFIG` unset too, so `prepare-opencode-config.sh` loads **upstream's** committed
+`assets/opencode.json` — `.github/opencode.json` is not in play on that path. `glm-5.2` is declared under
+`go-openai` in **both** configs (upstream's verified at pin `4bdfea4`), so it resolves whether or not the config
+Variable is set. The binding constraint is in any case `_rp_model_family_ok`, not either `models` block — see
+[the models caveat above](#provider-wiring-the-anthropicvllm-alternative) — but a fallback model that no loaded
+config declares would still be a trap for the next reader.
 
 ### Provider wiring (the ANTHROPIC/vLLM alternative)
 
