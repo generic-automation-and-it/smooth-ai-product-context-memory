@@ -105,9 +105,9 @@ file does and does not control:
 
 `OPENCODE_ANALYSE_MODEL` falls back to `OPENCODE_REVIEW_REPORT_MODEL_PRIMARY`. With the review tiers on a `claude-*`
 alias and `OPENCODE_ANALYSE_PROVIDER` unset, the analyse scope aborts with *"OPENCODE_ANALYSE_MODEL is set but
-OPENCODE_ANALYSE_PROVIDER is unset"*. Set both, or auto-fix stops running. Note also that the analyse job does
-**not** start the terminator, so its fallback chain — which still resolves to the review provider — points at a
-socket that does not exist in that job; only its primary target is live.
+OPENCODE_ANALYSE_PROVIDER is unset"*. Set both, or auto-fix stops running. Note also that the analyse job neither starts the terminator nor sets
+`OPENCODE_REVIEW_REPORT_CONFIG`, so its fallback chain — which still resolves to the review provider — reaches the
+**public** `api.anthropic.com` carrying the placeholder key and fails on auth; only its primary target is live.
 
 ### Fallback literals when the Variables are unset
 
@@ -118,10 +118,14 @@ where it is not set. The fallbacks are duplicated per workflow rather than share
 | Workflow | Provider fallback | Model fallbacks | Why |
 |---|---|---|---|
 | `pipeline-code-review-report.yml` | `ANTHROPIC`, provider-id `anthropic` | `claude-opus-5` on all three tiers | Matches the configured standard, and this job is the one that starts the terminator |
-| `pipeline-ai-analyse.yml` | `OPENAI` | `gpt-5.5` / `gpt-5.4` / `gpt-5.4-mini` | Auto-fix must stay **off** the vLLM gateway — this job never starts the terminator |
+| `pipeline-ai-analyse.yml` | `OPENAI` | `gpt-5.5` / `gpt-5.4` / `gpt-5.4-mini` | Auto-fix must stay **off** the review credential — this job starts no terminator and loads a different opencode config |
 
-Do not "align" the analyse fallbacks onto the gate's. Pointing auto-fix at `ANTHROPIC` routes it through
-`.github/opencode.json`'s literal `http://127.0.0.1:8888/v1`, which in that job is a socket nobody is listening on.
+Do not "align" the analyse fallbacks onto the gate's. The mechanism is not the one you might assume: the analyse job
+never sets `OPENCODE_REVIEW_REPORT_CONFIG`, so `prepare-opencode-config.sh` falls back to **upstream's** committed
+`assets/opencode.json` rather than this repo's `.github/opencode.json`. That asset ships no `baseURL` on the
+`anthropic` provider, so pointing auto-fix at `ANTHROPIC` sends the placeholder `OPENCODE_ANTHROPIC_API_KEY` to the
+public `api.anthropic.com` and fails on **auth**, not on a dead loopback socket. The gate's
+`http://127.0.0.1:8888/v1` literal is never in play there at all.
 
 Two couplings make a partial edit silent rather than loud:
 
@@ -135,8 +139,12 @@ Two couplings make a partial edit silent rather than loud:
 Re-grep after any such change and expect no stray hits:
 
 ```bash
-grep -rn "|| 'GEMINI'\|'gemini-\|:-GEMINI}" --include='*.yml' --include='*.sh' .
+grep -rn "|| 'GEMINI'\|'gemini-\|:-GEMINI}" --include='*.yml' --include='*.sh' \
+  --exclude-dir=.review-tools --exclude-dir=.smooth-ai-review-tools .
 ```
+
+The excludes matter: a leftover tooling checkout contains upstream's own `:-GEMINI}` default and would report a hit
+that is not yours.
 
 ### Provider base URLs are not symmetric
 
@@ -144,8 +152,15 @@ grep -rn "|| 'GEMINI'\|'gemini-\|:-GEMINI}" --include='*.yml' --include='*.sh' .
 
 | Shape | Providers | What is needed |
 |---|---|---|
-| Fixed base | `ANTHROPIC`, `OPENCODE-GO-OPENAI`, `OPENCODE-GO-ANTHROPIC`, `OPENCODE-GO-RESPONSES`, `OPEN_ROUTER` | the API key Secret only |
+| Fixed base | `ANTHROPIC`, `OPENCODE-GO-OPENAI`, `OPENCODE-GO-ANTHROPIC`, `OPEN_ROUTER` | the API key Secret only |
 | Variable base | `GEMINI`, `COPILOT`, `OPENAI` | the key **and** an `OPENCODE_REVIEW_REPORT_<P>_URL` Variable |
+
+**Read that table against the pin, not against upstream `main`.** It lists what `_rp_provider_fields` accepts at
+the SHA the gate checks out (`4bdfea4`). Upstream `main` has since added `OPENCODE-GO-RESPONSES`, which this pin
+rejects as an unknown provider — and which has no row in the gate's provider-id ladder, so bumping the pin without
+adding one would silently map it to `anthropic`. The two workflows do not even agree on the ref: the gate pins a
+SHA, while `pipeline-ai-analyse.yml` tracks `main` (overridable via `SMOOTH_AI_REVIEW_TOOLS_REF`). Re-read the
+function at whichever ref you are changing.
 
 There is no fallback URL for the variable-base three — `_rp_resolve` hard-fails on an empty value. That is why the
 gate's unset-Variable fallback is `ANTHROPIC` (fixed base) and not a variable-base provider: the old `GEMINI`
@@ -164,11 +179,19 @@ The Skip Areas bullets are the channel that tells the next round which findings 
 and every skip is re-raised. `.github/pull_request_template.md` therefore ships the two as siblings, and
 `ai-review` writes skips into the Skip Areas section rather than the summary table it also appends.
 
-Verify a PR body by round-trip rather than by eye — both sections must appear:
+Verify a PR body by round-trip rather than by eye. First fetch the lib — `.review-tools/` is created by the gate's checkout step and does **not** exist in a
+clone, so pin-matched fetch is the only way to run it locally:
 
 ```bash
-gh pr view <n> --json body --jq .body \
-  | bash .review-tools/.agents/skills/ai-review-report/scripts/lib/extract-review-notes.sh
+gh api "repos/generic-automation-and-it/smooth-ai-report-review/contents/\
+.agents/skills/ai-review-report/scripts/lib/extract-review-notes.sh?ref=4bdfea4f361218d88745dfcbad0b00a108a129f2" \
+  --jq .content | base64 -d > /tmp/extract-review-notes.sh
+```
+
+Then round-trip the body through it — both sections must appear in the output:
+
+```bash
+gh pr view <n> --json body --jq .body | bash /tmp/extract-review-notes.sh
 ```
 
 ### Security properties

@@ -42,3 +42,4 @@ The companion `.github/workflows/pipeline-ai-analyse.yml` runs after `PR Code Re
 | 2026-07-05 | Documented the companion self-fix workflow that consumes low/medium review findings and posts an auto-fix summary. | |
 | 2026-07-25 | Synced to upstream `/ai-review` updates: non-Copilot skip-bullet propagation/verification and mandatory critical/high marker-commit behavior. | #78 |
 | 2026-07-25 | Synced to upstream: require `/ai-review` in every fix commit message body when Critical/High findings exist; empty commit remains as re-verification safety net. | #84 |
+| 2026-09-19 | The PR template finally provides the section this skill writes into. `Skip Areas / Known Issues` was nested inside `## AI Review Notes`, where `extract-review-notes.sh` cannot see it — so the skip bullets this doc calls load-bearing reached no prompt and every skipped finding was re-raised. Now a sibling top-level section, verified by round-trip. | #82, PR #83 |

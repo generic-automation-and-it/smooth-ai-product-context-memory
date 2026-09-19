@@ -78,15 +78,18 @@ Rules that follow from that:
   or folding it under another section makes it invisible.
 - Anchor each bullet with `<file>:<line>` plus the reason, so the next round can match
   it against a finding.
-- Verify by round-trip, never by eye — both sections must appear in the output:
+- Verify by round-trip, never by eye. The lib lives in the gate's runner-only
+  `.review-tools/` checkout, so fetch it at the pinned SHA first:
 
   ```bash
-  gh pr view <n> --json body --jq .body \
-    | bash .review-tools/.agents/skills/ai-review-report/scripts/lib/extract-review-notes.sh
+  gh api "repos/generic-automation-and-it/smooth-ai-report-review/contents/\
+  .agents/skills/ai-review-report/scripts/lib/extract-review-notes.sh?ref=4bdfea4f361218d88745dfcbad0b00a108a129f2" \
+    --jq .content | base64 -d > /tmp/extract-review-notes.sh
+  gh pr view <n> --json body --jq .body | bash /tmp/extract-review-notes.sh
   ```
 
-  The same check runs against `.github/pull_request_template.md` whenever that file is
-  edited. More generally: when you change a file a script reads, run that script against
+  Both sections must appear. The same check runs against
+  `.github/pull_request_template.md` whenever that file is edited. More generally: when you change a file a script reads, run that script against
   the changed file before calling it done.
 
 ## Changelog
