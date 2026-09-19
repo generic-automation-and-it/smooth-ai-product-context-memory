@@ -109,6 +109,68 @@ OPENCODE_ANALYSE_PROVIDER is unset"*. Set both, or auto-fix stops running. Note 
 **not** start the terminator, so its fallback chain — which still resolves to the review provider — points at a
 socket that does not exist in that job; only its primary target is live.
 
+### Fallback literals when the Variables are unset
+
+Every row in the table above is a Variable, and every one has a hardcoded fallback in the workflow YAML for the run
+where it is not set. The fallbacks are duplicated per workflow rather than shared, and the two workflows
+**deliberately disagree**:
+
+| Workflow | Provider fallback | Model fallbacks | Why |
+|---|---|---|---|
+| `pipeline-code-review-report.yml` | `ANTHROPIC`, provider-id `anthropic` | `claude-opus-5` on all three tiers | Matches the configured standard, and this job is the one that starts the terminator |
+| `pipeline-ai-analyse.yml` | `OPENAI` | `gpt-5.5` / `gpt-5.4` / `gpt-5.4-mini` | Auto-fix must stay **off** the vLLM gateway — this job never starts the terminator |
+
+Do not "align" the analyse fallbacks onto the gate's. Pointing auto-fix at `ANTHROPIC` routes it through
+`.github/opencode.json`'s literal `http://127.0.0.1:8888/v1`, which in that job is a socket nobody is listening on.
+
+Two couplings make a partial edit silent rather than loud:
+
+- **Provider and models move together.** `resolve-provider.sh` rejects any `OPENCODE_REVIEW_REPORT_MODEL_*` that is
+  not `claude*` once the provider is `ANTHROPIC`. Changing the provider fallback without the three model fallbacks
+  aborts at preflight, far from the line that was missed.
+- **The provider-id chain has a bare final literal.** In the gate, `OPENCODE_REVIEW_REPORT_PROVIDER_ID` is a long
+  `||` ladder whose last line is an unguarded provider id. Repointing that literal silently changes the id for any
+  provider that had no explicit row of its own — `GEMINI` now carries one for exactly that reason.
+
+Re-grep after any such change and expect no stray hits:
+
+```bash
+grep -rn "|| 'GEMINI'\|'gemini-\|:-GEMINI}" --include='*.yml' --include='*.sh' .
+```
+
+### Provider base URLs are not symmetric
+
+`resolve-provider.sh` splits providers into two shapes, and only one of them works from a key alone:
+
+| Shape | Providers | What is needed |
+|---|---|---|
+| Fixed base | `ANTHROPIC`, `OPENCODE-GO-OPENAI`, `OPENCODE-GO-ANTHROPIC`, `OPENCODE-GO-RESPONSES`, `OPEN_ROUTER` | the API key Secret only |
+| Variable base | `GEMINI`, `COPILOT`, `OPENAI` | the key **and** an `OPENCODE_REVIEW_REPORT_<P>_URL` Variable |
+
+There is no fallback URL for the variable-base three — `_rp_resolve` hard-fails on an empty value. That is why the
+gate's unset-Variable fallback is `ANTHROPIC` (fixed base) and not a variable-base provider: the old `GEMINI`
+fallback made an unconfigured run die on `OPENCODE_REVIEW_REPORT_GEMINI_URL`, naming a provider nobody had selected.
+
+Do not add a hardcoded fourth base URL to make a variable-base provider work out of the box. The `OPENAI` slot
+exists as the relay point for a proxy; a literal `https://api.openai.com/v1` would send a proxy key to OpenAI.
+
+### What the gate reads from the PR description
+
+`lib/extract-review-notes.sh` pulls exactly two **top-level** headings out of the PR body and feeds them to the
+review prompt: `^## AI Review Notes` and `^## Skip Areas`. Each section walk stops at the next `^## `.
+
+The Skip Areas bullets are the channel that tells the next round which findings are intentional. A
+`**Known Issues:**` line nested inside `## AI Review Notes` is not a heading at all, so it never reaches the prompt
+and every skip is re-raised. `.github/pull_request_template.md` therefore ships the two as siblings, and
+`ai-review` writes skips into the Skip Areas section rather than the summary table it also appends.
+
+Verify a PR body by round-trip rather than by eye — both sections must appear:
+
+```bash
+gh pr view <n> --json body --jq .body \
+  | bash .review-tools/.agents/skills/ai-review-report/scripts/lib/extract-review-notes.sh
+```
+
 ### Security properties
 
 The gateway's client certificate, private key, private-CA PEM and API key all live inside the
