@@ -441,3 +441,7 @@ FodyWeavers.xsd
 **/.DS_Store
 # Added by code-review-graph
 .code-review-graph/
+
+# Review-gate tooling checkouts (created on CI runners, never committed)
+.review-tools/
+.smooth-ai-review-tools/

@@ -41,7 +41,11 @@
 <!-- MUST stay a top-level `## ` section and MUST keep the words "Skip Areas" in
      the heading. The review gate greps `^## Skip Areas` to learn which findings
      are intentional; demoted to `###` or nested under another heading it is
-     invisible and every skip is silently re-raised next round. -->
+     invisible and every skip is silently re-raised next round.
+
+     Nothing to skip? Delete this whole section, heading included. Leaving the
+     bare "-" below emits an empty Skip Areas block into the review prompt, and
+     ai-review is explicitly told not to fabricate one. -->
 
 -
 
