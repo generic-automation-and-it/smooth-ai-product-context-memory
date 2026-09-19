@@ -407,7 +407,9 @@ MigrationBackup/
 
 # Generated Markdown export of the context-memory store (WT-4). Disposable; never commit.
 /export/
-.context/export/
+.context/mimisbrunnr-memories/
+.context/understandings/
+.context/mimisbrunnr-understandings/
 
 # Ionide (cross platform F# VS Code tools) working folder
 **/.ionide/

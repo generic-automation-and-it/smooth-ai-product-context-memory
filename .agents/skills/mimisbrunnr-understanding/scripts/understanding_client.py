@@ -13,7 +13,7 @@ Three operations, two of which write nothing:
       dedup/link -> atomicity -> write.
 
   dump --currentsession [--from FILE|-] [--out DIR] [--session-name NAME]
-      Write the current session's understanding to .context/understandings/<folder>/. An export,
+      Write the current session's understanding to .context/mimisbrunnr-understandings/<folder>/. An export,
       not a store write. The folder name is reported on stdout so another session or repository can
       discover it by name.
 
@@ -400,7 +400,7 @@ def cmd_dump(args: argparse.Namespace) -> int:
     if args.out:
         folder = Path(args.out)
     else:
-        folder = Path(".context/understandings") / folder_name
+        folder = Path(".context/mimisbrunnr-understandings") / folder_name
 
     refusal = refuse_unsafe_target(folder)
     if refusal is not None:

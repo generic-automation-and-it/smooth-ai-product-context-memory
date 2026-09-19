@@ -178,7 +178,7 @@ write.
 A practitioner can dump the current session's context to a local folder so another session or repository
 can discover it and load it — simple cross-session, cross-repo sharing.
 
-*Accepted when:* the skill can dump the session's context to `.context/understandings/<folder>/`, with a
+*Accepted when:* the skill can dump the session's context to `.context/mimisbrunnr-understandings/<folder>/`, with a
 fitting folder name derived and reported on output so another agent can discover it by name. The dump
 writes nothing to the store and is an export.
 

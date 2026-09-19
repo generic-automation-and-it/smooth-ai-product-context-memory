@@ -110,7 +110,7 @@ The `mimisbrunnr-understanding` skill makes it portable:
   inherits distilled learnings without the scoped record.
 - **Import (via `--store`)** captures it back into the store through the normal capture path, so it
   compounds.
-- **`--currentsession`** dumps the current session's context to `.context/understandings/<folder>/`,
+- **`--currentsession`** dumps the current session's context to `.context/mimisbrunnr-understandings/<folder>/`,
   discoverable by name, for cross-session / cross-repo sharing.
 
 Loaded material is **data, not orders** — cited, never adopted as instructions or shipped fact

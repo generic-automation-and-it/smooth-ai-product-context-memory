@@ -61,7 +61,7 @@ sequenceDiagram
 - **Status**: Accepted
 - **Context**: Merging into an existing tree leaves ghost files after a store delete, so two runs of the same store would not be byte-identical.
 - **Decision**: Write marker `.context-memory-export`. Wipe when the directory is empty or contains the marker. Refuse an unmarked non-empty directory unless `--force`. Refuse `/` and a directory that is a git root.
-- **Consequences**: Default output `.context/export/` (gitignored). Tests use `--force` or a fresh temp dir.
+- **Consequences**: Default output `.context/mimisbrunnr-memories/` (gitignored). Tests use `--force` or a fresh temp dir.
 
 ### LADR-104: Generated, never maintained
 
@@ -74,7 +74,7 @@ sequenceDiagram
 ## Key Behaviors
 
 - **Run:** `dotnet run --project src/SmoothAiProductContextMemory.Host -- export [--output DIR] [--history] [--force]`. Needs the same `ConnectionStrings:SmoothAiProductContextMemory` and `BlobStorage:*` as the API (Aspire AppHost or user secrets). Missing schema fails the command — export does not migrate.
-- **Layout:** `groups/<group-slug>/_group.md` and `groups/<group-slug>/mem-<subject-slug>.md`.
+- **Layout:** `groups/<group-slug>/_group.md` and `groups/<group-slug>/mem-<subject-slug>.v<currentVersion>.md`.
 - **Group slug:** `Slug.Subject` of the current `GroupDescription.Name` (highest version). No/unslugable name → `group-<uuid>`. Slug clash (Uuid-sorted): first keeps the clean name; later get `--` + first 8 hex of `Uuid` (`N` format); if that still clashes, full 32-hex `Uuid` (guaranteed unique).
 - **Memory file clash:** same suffix rule. In-group `subject_slug` is unique, so this is a backstop.
 - **Frontmatter** is a closed key list, fixed order, UTF-8 no BOM, LF scaffolding, exactly one trailing newline on the file. No `exported_at`. Timestamps use `DateTimeOffset` round-trip `"O"`.
@@ -93,7 +93,7 @@ Approved implementation plan (2026-09-13):
 2. Pure `ExportPaths` + `ExportRenderer` (L0-tested).
 3. `ExportStore` Mediator slice: `Request(OutputDirectory, IncludeHistory, Force)`.
 4. Host CLI: `dotnet run --project src/SmoothAiProductContextMemory.Host -- export [--output DIR] [--history] [--force]`.
-5. Gitignore `export/` and `.context/export/`. Root `AGENTS.md` command list updated.
+5. Gitignore `export/` and `.context/mimisbrunnr-memories/`. Root `AGENTS.md` command list updated.
 
 ## Test References
 
@@ -109,6 +109,7 @@ Approved implementation plan (2026-09-13):
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-19 | Memory files carry the DB current version in the filename (`mem-<slug>.v<N>.md`), so on-disk reflects store versioning; default output dir `.context/export` -> `.context/mimisbrunnr-memories`. | export versioning |
 | 2026-09-19 | Scoped the "no import path" guardrail to this forensic dump and noted the understanding load/import capability as a deliberate exception owned by HLD 007 (opt-in `--store` through the capture skill). | HLD-007; BRD-003 |
 | 2026-09-13 | ADR-0001/0002 deleted; authority citations retargeted to HLD 001. | HLD-001 |
 | 2026-09-13 | Export reads relationships via `IMemoryGraph.ListAllAsync` after the HLD 003 cutover. | HLD-003 |

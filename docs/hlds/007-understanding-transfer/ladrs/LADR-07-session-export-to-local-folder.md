@@ -21,7 +21,7 @@ folder by that name and load it.
 ## Decision
 
 Add a `--currentsession` dump to the understanding skill. It writes the current session's context (its
-Understandings, decisions and key learnings) to `.context/understandings/<folder>/`, where `<folder>`
+Understandings, decisions and key learnings) to `.context/mimisbrunnr-understandings/<folder>/`, where `<folder>`
 is a fitting name derived from the session, chosen on output so another agent can discover it by name.
 The dump:
 

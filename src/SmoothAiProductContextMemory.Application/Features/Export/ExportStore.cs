@@ -81,8 +81,12 @@ public static class ExportStore
                     .ThenBy(m => m.Uuid)
                     .ToArray();
 
+                IReadOnlyDictionary<Guid, int> currentVersions = groupMemories.ToDictionary(
+                    m => m.Uuid,
+                    m => m.Versions.Where(v => v.IsCurrent).Max(v => (int?)v.Version) ?? 0);
+
                 IReadOnlyDictionary<Guid, string> memoryFiles = ExportPaths.AssignMemoryFiles(
-                    groupMemories.Select(m => new ExportPaths.MemoryInput(m.Uuid, m.SubjectSlug)));
+                    groupMemories.Select(m => new ExportPaths.MemoryInput(m.Uuid, m.SubjectSlug, currentVersions[m.Uuid])));
 
                 foreach (Memory memory in groupMemories)
                 {

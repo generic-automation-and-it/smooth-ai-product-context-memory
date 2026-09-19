@@ -14,7 +14,7 @@ public static class ExportPaths
 
     public sealed record GroupInput(Guid Uuid, string? CurrentDescriptionName);
 
-    public sealed record MemoryInput(Guid Uuid, string SubjectSlug);
+    public sealed record MemoryInput(Guid Uuid, string SubjectSlug, int CurrentVersion);
 
     public static IReadOnlyDictionary<Guid, string> AssignGroupFolders(IEnumerable<GroupInput> groups)
     {
@@ -55,14 +55,16 @@ public static class ExportPaths
                      .OrderBy(m => m.SubjectSlug, StringComparer.Ordinal)
                      .ThenBy(m => m.Uuid))
         {
-            string fileName = $"{MemoryFilePrefix}{memory.SubjectSlug}.md";
+            // The filename carries the DB version (is_current), so the on-disk file reflects the
+            // store's versioning: mem-<slug>.v<currentVersion>.md
+            string fileName = $"{MemoryFilePrefix}{memory.SubjectSlug}.v{memory.CurrentVersion}.md";
             if (!used.Add(fileName))
             {
-                fileName = $"{MemoryFilePrefix}{memory.SubjectSlug}--{CollisionSuffix(memory.Uuid)}.md";
+                fileName = $"{MemoryFilePrefix}{memory.SubjectSlug}.v{memory.CurrentVersion}--{CollisionSuffix(memory.Uuid)}.md";
                 if (!used.Add(fileName))
                 {
                     // Full uuid is unique per input — guaranteed terminal fallback.
-                    fileName = $"{MemoryFilePrefix}{memory.SubjectSlug}--{memory.Uuid:N}.md";
+                    fileName = $"{MemoryFilePrefix}{memory.SubjectSlug}.v{memory.CurrentVersion}--{memory.Uuid:N}.md";
                     if (!used.Add(fileName))
                     {
                         throw new InvalidOperationException(

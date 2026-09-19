@@ -372,7 +372,7 @@ class DumpTests(unittest.TestCase):
                 os.chdir(cwd)
             self.assertEqual(rc, 0)
             self.assertIn("ticket-78-recall-feedback", out)
-            written = Path(tmp) / ".context/understandings/ticket-78-recall-feedback/_session.md"
+            written = Path(tmp) / ".context/mimisbrunnr-understandings/ticket-78-recall-feedback/_session.md"
             self.assertTrue(written.exists())
             self.assertIn("We measured the miss rate.", written.read_text(encoding="utf-8"))
 

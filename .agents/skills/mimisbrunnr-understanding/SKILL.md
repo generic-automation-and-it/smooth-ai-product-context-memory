@@ -57,11 +57,11 @@ python3 -B .agents/skills/mimisbrunnr-understanding/scripts/understanding_client
 
 ```bash
 python3 -B .agents/skills/mimisbrunnr-understanding/scripts/understanding_client.py \
-  dump --currentsession [--out .context/understandings/<session-folder>]
+  dump --currentsession [--out .context/mimisbrunnr-understandings/<session-folder>]
 ```
 
 - `dump --currentsession` writes the current session's understanding (its Understandings, decisions
-  and key learnings) to `.context/understandings/<session-folder>/` as Markdown.
+  and key learnings) to `.context/mimisbrunnr-understandings/<session-folder>/` as Markdown.
 - **The folder name is chosen on output** so another agent can discover it — if `--out` is omitted,
   the skill picks a fitting name derived from the session and reports it. Another session or
   repository (even a different repo) can then load that folder.

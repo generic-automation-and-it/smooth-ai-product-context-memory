@@ -81,11 +81,11 @@ Capturing loaded material back into the store so it compounds is an explicit `--
 ### 4. The current session dumps to a portable folder
 
 A practitioner shares this session's context with another session or repository simply, via
-`.context/understandings/<folder>/`. This is an export and changes nothing in the store.
+`.context/mimisbrunnr-understandings/<folder>/`. This is an export and changes nothing in the store.
 
 **DoD** — satisfies `BR-45`
 
-- `--currentsession` writes the session's context to `.context/understandings/<session-folder>/`, with a
+- `--currentsession` writes the session's context to `.context/mimisbrunnr-understandings/<session-folder>/`, with a
   fitting folder name reported on output so another agent can discover it by name.
 - The dump is an export; it writes nothing to the store (NFR-01).
 - Another session or repository can load the dumped folder, regardless of whether it is the originating repo.

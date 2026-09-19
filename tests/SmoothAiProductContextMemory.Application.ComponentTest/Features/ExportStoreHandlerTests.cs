@@ -68,7 +68,7 @@ public sealed class ExportStoreHandlerTests(AspireFixture aspire) : HandlerTestB
         selfGroup.ShouldContain("scope: self");
         selfGroup.ShouldContain(ExportScopeMarks.SelfBanner);
 
-        string memoryPath = Path.Combine(dir.Path, "groups", "product-group", "mem-postgresql-is-the-storage-engine.md");
+        string memoryPath = Path.Combine(dir.Path, "groups", "product-group", "mem-postgresql-is-the-storage-engine.v2.md");
         string memory = File.ReadAllText(memoryPath);
         memory.ShouldContain($"group_uuid: `{ProductGroupUuid:D}`");
         memory.ShouldContain($"valid_from: {ExportRenderer.FormatTimestamp(ValidFrom)}");
@@ -99,7 +99,7 @@ public sealed class ExportStoreHandlerTests(AspireFixture aspire) : HandlerTestB
 
         await NewHandler(blobs).Handle(new ExportStore.Request(dir.Path, IncludeHistory: true), Ct);
 
-        string memory = File.ReadAllText(Path.Combine(dir.Path, "groups", "product-group", "mem-postgresql-is-the-storage-engine.md"));
+        string memory = File.ReadAllText(Path.Combine(dir.Path, "groups", "product-group", "mem-postgresql-is-the-storage-engine.v2.md"));
         memory.ShouldContain(CurrentClaim);
         memory.ShouldContain(Superseded);
         memory.ShouldContain("## Version 1");
@@ -119,7 +119,7 @@ public sealed class ExportStoreHandlerTests(AspireFixture aspire) : HandlerTestB
         logger.Warnings.ShouldContain(w => w.Contains(ProductMemoryUuid.ToString("D"), StringComparison.Ordinal));
         logger.Warnings.ShouldAllBe(w => !w.Contains(BlobBody, StringComparison.Ordinal));
 
-        string memory = File.ReadAllText(Path.Combine(dir.Path, "groups", "product-group", "mem-postgresql-is-the-storage-engine.md"));
+        string memory = File.ReadAllText(Path.Combine(dir.Path, "groups", "product-group", "mem-postgresql-is-the-storage-engine.v2.md"));
         memory.ShouldContain(ExportScopeMarks.MissingBlobNote);
         memory.ShouldNotContain(BlobAddress);
         memory.ShouldContain(CurrentClaim);

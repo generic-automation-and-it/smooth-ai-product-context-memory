@@ -22,7 +22,7 @@ python3 .../understanding_client.py import <input> --store \
   [--tickets A,1] [--tags tag] [--repository repo] [--scope product:x]
 
 # Dump the current session's context to a discoverable local folder (export, no write)
-python3 .../understanding_client.py dump --currentsession [--out .context/understandings/<folder>]
+python3 .../understanding_client.py dump --currentsession [--out .context/mimisbrunnr-understandings/<folder>]
 ```
 
 ## Design
@@ -32,7 +32,7 @@ python3 .../understanding_client.py dump --currentsession [--out .context/unders
 - **Import is opt-in and funnels through the capture path.** `--store` hands material to the existing
   capture path — atomicity, redaction, dedup/link — never a direct write (HLD-007 LADR-03).
 - **The session dump is an export.** `--currentsession` writes to
-  `.context/understandings/<session-folder>/`, with a fitting folder name reported on output so another
+  `.context/mimisbrunnr-understandings/<session-folder>/`, with a fitting folder name reported on output so another
   agent can discover it (HLD-007 LADR-07). It changes nothing in the store.
 
 Business authority: [BRD-003](../../../docs/brd/003-understanding-transfer/). Design:
