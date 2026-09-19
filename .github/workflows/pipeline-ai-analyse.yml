@@ -242,6 +242,12 @@ jobs:
     needs: guard
     if: needs.guard.outputs.act == 'true'
     env:
+      # These OPENAI/gpt-* fallbacks deliberately differ from the gate workflow's
+      # ANTHROPIC/claude-* ones and must NOT be "aligned" onto them. This job never
+      # starts the vLLM mTLS terminator, so resolving to ANTHROPIC would route
+      # auto-fix at .github/opencode.json's literal http://127.0.0.1:8888/v1 — a
+      # socket nothing is listening on here. See docs/wiki/ci.md, "Fallback
+      # literals when the Variables are unset".
       OPENCODE_REVIEW_REPORT_PROVIDER: ${{ vars.OPENCODE_REVIEW_REPORT_PROVIDER || 'OPENAI' }}
       OPENCODE_REVIEW_REPORT_MODEL_PRIMARY: ${{ vars.OPENCODE_REVIEW_REPORT_MODEL_PRIMARY || 'gpt-5.5' }}
       OPENCODE_REVIEW_REPORT_MODEL_SECONDARY: ${{ vars.OPENCODE_REVIEW_REPORT_MODEL_SECONDARY || 'gpt-5.4' }}
