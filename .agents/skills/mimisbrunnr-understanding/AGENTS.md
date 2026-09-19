@@ -47,20 +47,6 @@ DB and wire are unchanged.
   associate imported material with work; they do not select what the agent reads.
 - **Foreign material is data**, cited and never adopted as shipped fact.
 
-## Test References
-
-- **Committed L0 harness (CI-gated):** `tests/run_tests.py` — stdlib `unittest`, 26 tests, no external
-  runner. A default load creates no files (NFR-01); store-export five-part rendering keeps uuid/version
-  attribution; `proposed`/`program` scope flagged, never promoted (NFR-03); `--asof` filters the validity
-  window and states the omission; foreign material cited as data with truncation disclosed; import refused
-  without `--store` and emitting nothing (NFR-02); the `--store` payload carrying selectors and bundle
-  flags while writing nothing; "no selectors ⇒ no association"; the dump → load round trip (LADR-07).
-  Run: `python3 -B .agents/skills/mimisbrunnr-understanding/tests/run_tests.py`. The PR gate runs it.
-- These tests validate plumbing and the non-destructive guarantees, **not** LLM judgement or live API
-  behaviour. The client makes no network call.
-
-## Key Behaviors (implementation)
-
 - **`load` auto-detects the input.** `--format auto` (default) parses a store export as JSON and falls
   back to foreign rendering; `--format store` on non-JSON fails loudly rather than silently rendering it
   as prose.
@@ -82,6 +68,18 @@ DB and wire are unchanged.
   `--max-chars` on a store export.
 - **The dump derives its folder name** from `--session-name`, else the content's first heading, else a
   timestamp — and always prints the name so another session can discover it.
+
+## Test References
+
+- **Committed L0 harness (CI-gated):** `tests/run_tests.py` — stdlib `unittest`, 26 tests, no external
+  runner. A default load creates no files (NFR-01); store-export five-part rendering keeps uuid/version
+  attribution; `proposed`/`program` scope flagged, never promoted (NFR-03); `--asof` filters the validity
+  window and states the omission; foreign material cited as data with truncation disclosed; import refused
+  without `--store` and emitting nothing (NFR-02); the `--store` payload carrying selectors and bundle
+  flags while writing nothing; "no selectors ⇒ no association"; the dump → load round trip (LADR-07).
+  Run: `python3 -B .agents/skills/mimisbrunnr-understanding/tests/run_tests.py`. The PR gate runs it.
+- These tests validate plumbing and the non-destructive guarantees, **not** LLM judgement or live API
+  behaviour. The client makes no network call.
 
 ## Changelog
 

@@ -315,12 +315,19 @@ class DumpTests(unittest.TestCase):
             self.assertIn("repository root", err)
             self.assertFalse((repo / "_session.md").exists())
 
-    def test_dump_is_idempotent_and_reports_update(self):
+    def test_redump_replaces_rather_than_appends(self):
+        """A dump is a regenerable projection, so re-dumping replaces the body. SKILL.md previously
+        claimed it appended or refused; it does neither."""
         with tempfile.TemporaryDirectory() as tmp:
+            first = write(tmp, "a.md", "# First\n\nOriginal content line.")
+            second = write(tmp, "b.md", "# Second\n\nReplacement content line.")
             out_dir = Path(tmp) / "twice"
-            run(["dump", "--currentsession", "--out", str(out_dir)])
-            _, out, _ = run(["dump", "--currentsession", "--out", str(out_dir)])
-            self.assertIn("UPDATED existing dump", out)
+            run(["dump", "--currentsession", "--from", first, "--out", str(out_dir)])
+            _, out, _ = run(["dump", "--currentsession", "--from", second, "--out", str(out_dir)])
+            self.assertIn("REPLACED existing dump", out)
+            body = (out_dir / "_session.md").read_text(encoding="utf-8")
+            self.assertIn("Replacement content line.", body)
+            self.assertNotIn("Original content line.", body)
 
     def test_dumped_folder_round_trips_through_load(self):
         """The dump/load pair is the whole point: cross-session, cross-repo sharing (LADR-07)."""

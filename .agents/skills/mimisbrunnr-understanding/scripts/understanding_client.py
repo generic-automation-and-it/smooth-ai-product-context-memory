@@ -402,7 +402,7 @@ def cmd_dump(args: argparse.Namespace) -> int:
     (folder / "_session.md").write_text("\n".join(body), encoding="utf-8")
 
     if existed:
-        print(f"UPDATED existing dump: {folder}")
+        print(f"REPLACED existing dump: {folder} (a dump is regenerated, never appended to)")
     print(f"SESSION DUMP WRITTEN: {folder}")
     print(f"Discover this folder by name: {folder.name}")
     print("This is an export. The store was not changed.")

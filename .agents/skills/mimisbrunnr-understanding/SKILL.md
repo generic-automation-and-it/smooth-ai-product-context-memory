@@ -62,8 +62,11 @@ python3 -B .agents/skills/mimisbrunnr-understanding/scripts/understanding_client
   repository (even a different repo) can then load that folder.
 - **This is an export, not a write.** It changes nothing in the store.
 - The dump is written to the gitignored `.context/` tree, so it is not committed.
-- `--out` may point at a `.context/understandings/` folder already created by a prior dump; passing an
-  existing folder adds to it or is refused if it conflicts.
+- **Re-dumping replaces `_session.md`; it does not append.** The dump is a regenerable projection, so
+  regenerating is meant to be cheaper than editing — the same reason the forensic export is generated and
+  never maintained. Do not hand-edit a dump and expect the edit to survive the next dump.
+- `--out` may point at an existing dump folder. A dump refuses the filesystem root and a repository
+  root, so a generated projection is never written over a tree somebody maintains.
 
 ## Proposing an Understanding
 
