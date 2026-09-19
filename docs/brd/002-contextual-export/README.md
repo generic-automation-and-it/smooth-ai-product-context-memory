@@ -124,7 +124,7 @@ and a shared team corpus are out of scope. The practitioner reviews the file bef
 | Excluded | Reason |
 |---|---|
 | Writing the final spec or making new product decisions | The export grounds subsequent work; unresolved choices remain with the practitioner |
-| Importing an edited export into the store | The file is a projection. New decisions arising from its use follow normal capture. *(A separate, opt-in understanding import — including the current-session dump under BR-46 — is a distinct capability owned by [BRD 003](../003-understanding-transfer/); it does not reopen this row for the contextual document.)* |
+| Importing an edited export into the store | The file is a projection. New decisions arising from its use follow normal capture. *(A separate, opt-in understanding import — including the current-session dump under BR-45 — is a distinct capability owned by [BRD 003](../003-understanding-transfer/); it does not reopen this row for the contextual document.)* |
 | Replacing the whole-store readable dump | BR-17's whole-store readability and this curated document serve different needs |
 | Automatically resolving genuine conflicts or correcting stored knowledge | Reporting is a read; changes require the existing capture path and appropriate judgement |
 | A complete audit of the store | Findings are limited to material examined during the export |
@@ -387,14 +387,14 @@ Extends BRD-001 §10; its terms continue to apply.
 | **Contradiction** | Incompatible claims applying to the same circumstances; a genuine conflict remains when no stated authority settles them |
 | **Gap** | An unanswered question within the examined material, needed for the task, an included claim or an explicit practitioner expectation |
 | **Whole-store dump** | The existing readable projection of stored records, serving BR-17 independently of contextual composition |
-| **Session export** | A projection of the current session's context written to a local folder for cross-session, cross-repo reuse (BRD-003 BR-46) |
+| **Session export** | A projection of the current session's context written to a local folder for cross-session, cross-repo reuse (BRD-003 BR-45) |
 
 ## 11. Related documents
 
 | Document | Covers |
 |---|---|
 | [BRD 001 — Cross-product linked context memory](../001-context-memory/) | Capture, recall, trust and ownership (BR-01 … BR-17) |
-| [BRD 003 — Understanding transfer and loading](../003-understanding-transfer/) | Extends this document (`BR-38` … `BR-46`): the Understanding kind, the non-destructive load, the opt-in import and the current-session export for cross-session reuse. Owns [HLD 007](../../hlds/007-understanding-transfer/) |
+| [BRD 003 — Understanding transfer and loading](../003-understanding-transfer/) | Extends this document (`BR-38` … `BR-45`): the Understanding kind, the non-destructive load, the opt-in import and the current-session export for cross-session reuse. Owns [HLD 007](../../hlds/007-understanding-transfer/) |
 | [HLD 005 — Contextual knowledge export](../../hlds/005-contextual-export/) | Selection, assembly, composition and findings |
 | [HLD 003 — Graph edges](../../hlds/003-graph-edges-on-age/) | Recorded relationships and traversal supporting BR-19 |
 | [HLD 004 — Memory recall feedback](../../hlds/004-memory-recall-feedback/) | Findability evidence relevant to BR-29 |

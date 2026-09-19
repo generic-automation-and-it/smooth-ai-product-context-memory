@@ -4,7 +4,7 @@
 
 ## Context
 
-BRD-003 BR-46 wants the understanding capability to share context across sessions and across
+BRD-003 BR-45 wants the understanding capability to share context across sessions and across
 repositories by writing the current session's context to a local folder. This is a **session export**:
 a projection of what this session holds, written so another session or repo can discover and load it.
 
@@ -52,4 +52,4 @@ the originating repo is the same.
 
 - **LADR-02** — the load side that consumes a dumped folder.
 - **NFR-01** — a session dump is an export and writes nothing to the store.
-- **BRD-003 BR-46**, **BRD-002** (§10 glossary "Session export").
+- **BRD-003 BR-45**, **BRD-002** (§10 glossary "Session export").
