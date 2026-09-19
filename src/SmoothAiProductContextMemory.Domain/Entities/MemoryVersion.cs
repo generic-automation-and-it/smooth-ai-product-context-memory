@@ -66,5 +66,12 @@ public sealed class MemoryVersion
         public const string Backlog = "backlog";
         public const string Preference = "preference";
         public const string Divergence = "divergence";
+
+        /// <summary>
+        /// A distilled unit of hard-won knowledge — the transferable skill that remains after the
+        /// experience is discarded. Carries trigger/knowledge/why/boundaries/provenance on the
+        /// existing fields; see HLD 007 (understanding transfer) LADR-04 for the mapping.
+        /// </summary>
+        public const string Understanding = "understanding";
     }
 }

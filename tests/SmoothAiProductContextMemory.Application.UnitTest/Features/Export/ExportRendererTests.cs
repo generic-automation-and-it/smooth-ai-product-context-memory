@@ -6,6 +6,7 @@ namespace SmoothAiProductContextMemory.Application.UnitTest.Features.Export;
 public class ExportRendererTests
 {
     private static readonly DateTimeOffset ValidFrom = new(2024, 1, 15, 10, 30, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset ValidUntil = new(2024, 6, 1, 0, 0, 0, TimeSpan.Zero);
     private static readonly DateTimeOffset CreatedOn = new(2024, 2, 1, 8, 0, 0, TimeSpan.Zero);
     private static readonly Guid MemoryUuid = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
     private static readonly Guid LineageId = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
@@ -200,6 +201,47 @@ public class ExportRendererTests
         markdown.ShouldContain($"group_uuid: `{OtherGroupUuid:D}`");
         markdown.ShouldContain("needs it");
     }
+
+    [Fact]
+    public void Understanding_kind_renders_with_all_five_parts()
+    {
+        string markdown = ExportRenderer.RenderMemory(UnderstandingMemory(), includeHistory: false);
+
+        markdown.ShouldContain($"kind: {MemoryVersion.KindValue.Understanding}");
+        markdown.ShouldContain("Containers are green but a new endpoint 404s");
+        markdown.ShouldContain("verify by calling a newly added endpoint");
+        markdown.ShouldContain("Green health checks proved liveness, not freshness");
+        markdown.ShouldContain($"valid_until: {ExportRenderer.FormatTimestamp(ValidUntil)}");
+        markdown.ShouldContain("dogfood-run-3");
+    }
+
+    private static ExportMemoryDocument UnderstandingMemory() => new(
+        MemoryUuid,
+        LineageId,
+        GroupUuid,
+        "stale-image-trap",
+        "Stale-image trap",
+        "Containers are green but a new endpoint 404s",
+        MemoryGroup.ScopeDimensionValue.Product,
+        null,
+        ["delivery"],
+        ["containers"],
+        new ExportVersionBody(
+            1,
+            true,
+            MemoryVersion.KindValue.Understanding,
+            MemoryVersion.MemoryVersionStatus.Approved,
+            90,
+            ValidFrom,
+            ValidUntil,
+            CreatedOn,
+            "A healthy container may run a stale build; verify by calling a newly added endpoint.",
+            "Green health checks proved liveness, not freshness.",
+            [new ExportSource("session", "dogfood-run-3", ValidFrom)],
+            BlobRenderState.None,
+            null),
+        [],
+        []);
 
     private static ExportMemoryDocument ProductMemory() => new(
         MemoryUuid,

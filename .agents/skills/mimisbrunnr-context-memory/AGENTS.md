@@ -2,10 +2,13 @@
 
 ## TL;DR
 
-The sole interface to the context-memory store and the sole authority on the write path. Runs a fixed
+The sole authority on the write path. Runs a fixed
 five-stage pipeline (**preflight → redact → dedupe/derive-links → atomicity → write**), the last stage
 being a single server-side transactional `set`; the skill performs the semantic deduplication, link
-derivation, redaction and atomicity checks the database cannot express as constraints.
+derivation, redaction and atomicity checks the database cannot express as constraints. The read/load
+sibling (`mimisbrunnr-understanding`) injects material into agent context and — only under `--store` —
+hands imported material to this skill's capture path; it is a reader + conditional importer, never a
+second writer.
 
 ## Non-Negotiables
 
@@ -233,6 +236,7 @@ redaction detector is a stdin→stdout fingerprint script reporting rule names o
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-19 | Narrowed "sole interface" to "sole authority on the write path" and noted the read/load sibling (`mimisbrunnr-understanding`) as a reader + conditional importer that hands `--store` material to this capture path. | HLD-007 LADR-03; BRD-003 |
 | 2026-09-17 | Test References corrected: the PR-gate skill step runs both `run_tests.py` and `measure_cost.py`, not `run_tests.py` alone. | `.github/workflows/pr-gate.yml` |
 | 2026-09-17 | Both stdio MCP servers answer malformed JSON with a JSON-RPC parse error (-32700) and non-object messages with Invalid Request (-32600) instead of crashing the worker; parsing is shared through `memory_read_mcp.respond`. | code review |
 | 2026-09-17 | Delivered memory-read/memory-write contracts, read-only client, bounded deepsearch, divergence composition/loop guard, createUuid payloads, cost evidence and deterministic PR gate. | HLD-002 closure |

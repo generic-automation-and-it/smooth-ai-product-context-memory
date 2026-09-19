@@ -16,7 +16,7 @@ Business authority for a portable grounding document that preserves product mean
 - **The artefact is the only sharing mechanism, and that is a decision.** §4 states why: a file the practitioner reviews before sending is governed by their judgement; a shared query surface would need the access-control model BRD-001 exists without. Do not propose sharing, tenancy or multi-user access as a gap.
 - **Never soften BR-30, BR-33 or BR-36.** Silent omission, leaked hidden material, and a focus that narrows selection are the three failures that make an export actively dangerous rather than merely incomplete. All three are absolute; none has a "best effort" reading.
 - **Never treat a focus as a filter.** BR-35 is emphasis; BR-36 forbids it changing what was selected or hiding a finding. A focus implemented as a selection predicate looks like the obvious reading and destroys comparability between two focuses of one slice.
-- **Do not treat §5 out-of-scope rows as a backlog.** Each was rejected on stated grounds — most importantly the import path, which would reverse the projection direction the whole design rests on.
+- **Do not treat §5 out-of-scope rows as a backlog.** Each was rejected on stated grounds — most importantly the import path, which would reverse the projection direction the whole design rests on. *(Exception: the understanding load/import and current-session dump are a separate capability owned by [BRD 003](../003-understanding-transfer/), so they do not reopen this row for the contextual document; the dossier itself stays one-way.)*
 
 ## System Context
 
@@ -60,6 +60,7 @@ Design follow-up after review of the revised business requirements:
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-19 | Scoped the no-import stance to the contextual document and cross-referenced BRD 003 (understanding load/import + current-session export, BR-38…BR-46) in §5 out-of-scope, §10 glossary and §11 Related. The dossier stays one-way. | BRD-003 |
 | 2026-09-13 | Refined the PM grounding workflow, fidelity and lifecycle acceptance criteria, bounded gap findings, snapshot meaning and size preview; preserved BR-18 … BR-34 and single-user scope. Recorded downstream design alignment separately from business requirements. | BRD-002 §§4, 6–8 |
 | 2026-09-13 | Created — BRD-002 for contextual knowledge export. Continues BRD-001's requirement space at `BR-18`; adds BO-6 … BO-10; closes BRD-001's recorded "BRD does not mention export at all" gap for the curated case. | HLD 005 |
 | 2026-09-13 | Added the three-place HLD-reference rule (owned: HLD 005; §11 rows for 003/004 are dependency pointers). | BRD-001 |

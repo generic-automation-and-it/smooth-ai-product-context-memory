@@ -37,7 +37,9 @@ public sealed class RecallFeedbackPersistenceTests(AspireFixture aspire) : Persi
         List<(Guid RetrievalId, Guid? MemoryUuid, string Shape)> rows = await ReadRowsAsync();
         rows.Count.ShouldBe(2);
         rows.ShouldAllBe(r => r.RetrievalId == retrievalId);
-        rows.Select(r => r.MemoryUuid).ShouldBe([first, second]);
+        // Rows are read ORDER BY retrieval_id, memory_uuid, and the two uuids are random — so the
+        // returned order is a coin flip and is not what this test is asserting.
+        rows.Select(r => r.MemoryUuid).ShouldBe([first, second], ignoreOrder: true);
     }
 
     [Fact]
