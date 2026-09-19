@@ -75,7 +75,7 @@ DB and wire are unchanged.
 
 ## Test References
 
-- **Committed L0 harness (CI-gated):** `tests/run_tests.py` — stdlib `unittest`, 29 tests, no external
+- **Committed L0 harness (CI-gated):** `tests/run_tests.py` — stdlib `unittest`, 30 tests, no external
   runner. A default load creates no files (NFR-01); store-export five-part rendering keeps uuid/version
   attribution; `proposed`/`program` scope flagged, never promoted (NFR-03); `--asof` filters the validity
   window and states the omission; foreign material cited as data with truncation disclosed; import refused

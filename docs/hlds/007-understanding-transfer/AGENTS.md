@@ -75,7 +75,7 @@ See [./ladrs/](./ladrs/). All Draft.
 ## Test References
 
 - **Skill L0 (CI-gated):** `.agents/skills/mimisbrunnr-understanding/tests/run_tests.py` — stdlib
-  `unittest`, 29 tests. A default load creates no files (NFR-01); store-export five-part rendering keeps
+  `unittest`, 30 tests. A default load creates no files (NFR-01); store-export five-part rendering keeps
   uuid/version attribution; `proposed` and `program` scope are flagged, never promoted (NFR-03); `--asof`
   filters the validity window and states the omission; foreign material is cited as data with truncation
   disclosed; import is refused without `--store` and emits nothing (NFR-02); the `--store` payload carries
