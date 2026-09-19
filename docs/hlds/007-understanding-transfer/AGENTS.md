@@ -90,7 +90,7 @@ See [./ladrs/](./ladrs/). All Draft.
 ## Test References
 
 - **Skill L0 (CI-gated):** `.agents/skills/mimisbrunnr-understanding/tests/run_tests.py` — stdlib
-  `unittest`, 19 tests. A default load creates no files (NFR-01); store-export five-part rendering keeps
+  `unittest`, 26 tests. A default load creates no files (NFR-01); store-export five-part rendering keeps
   uuid/version attribution; `proposed` and `program` scope are flagged, never promoted (NFR-03); `--asof`
   filters the validity window and states the omission; foreign material is cited as data with truncation
   disclosed; import is refused without `--store` and emits nothing (NFR-02); the `--store` payload carries
@@ -123,6 +123,7 @@ See [./ladrs/](./ladrs/). All Draft.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-19 | Self-review pass on the skill: fixed candidate decomposition splitting hard-wrapped prose per physical line (mid-sentence fragments reached the capture path), and a store-export import dropping three of the five parts plus lifecycle/provenance — both were fidelity defects against `BR-43`/NFR-03. Added a dump path guard matching the forensic export's root/repo-root refusal. Harness 19 -> 26 tests. | self-review |
 | 2026-09-19 | **Implemented.** `understanding` added to `KindValue`; skill delivers `load` (context-only), `import --store` (capture-path payload with `--tickets`/`--tags`/`--repository`/`--scope` binding and bundle flagging) and `dump --currentsession`; 19-test skill harness wired into the PR gate; L0 export test locks the five-part mapping. Verified: 515 tests pass across L0/L1/L2, 0 failures. Discovery finding recorded: `kind` is open vocabulary (no allowed-set validation, kind-generic renderer and query), so write/query/export needed **one constant** rather than the four separate code items planned. | LADR-01, LADR-04 |
 | 2026-09-19 | Bounded the `Memory`→`Understanding` rename to type names and made it a **separate change**. Discovery found serialization is convention-based (`JsonSerializerDefaults.Web`, zero `JsonPropertyName` attributes, `JsonbConverter` on the same convention), so a property name is both the JSON field and the stored jsonb key — a property rename is an API and data break the compiler cannot see. NFR-04 gained an OpenAPI-diff and jsonb round-trip check; a `[JsonPropertyName]` shim on every renamed member was considered and rejected. | LADR-05; NFR-04 |
 | 2026-09-19 | Created — discovery HLD for understanding transfer and loading. Defines Understanding as a `kind`, the default load (context-only) and opt-in import (`--store`) split, the five-part shape mapping onto existing fields, the code-only rename, and foreign-input-as-data handling. Amends the no-import stance for this capability only. | BRD-003 (BR-38…BR-45) |

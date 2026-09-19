@@ -49,7 +49,7 @@ DB and wire are unchanged.
 
 ## Test References
 
-- **Committed L0 harness (CI-gated):** `tests/run_tests.py` — stdlib `unittest`, 19 tests, no external
+- **Committed L0 harness (CI-gated):** `tests/run_tests.py` — stdlib `unittest`, 26 tests, no external
   runner. A default load creates no files (NFR-01); store-export five-part rendering keeps uuid/version
   attribution; `proposed`/`program` scope flagged, never promoted (NFR-03); `--asof` filters the validity
   window and states the omission; foreign material cited as data with truncation disclosed; import refused
@@ -67,6 +67,19 @@ DB and wire are unchanged.
 - **Bundle flagging proposes, it does not decide.** A contrastive junction or semicolon is decisive; two
   additive adverbs are needed otherwise. Candidates are flagged `bundledCandidate` for the capture path's
   atomicity stage — this client never splits or discards a fact itself, and never chunks by size.
+- **A blank-line block is the candidate unit, and prose is unwrapped.** Hard-wrapped lines are rejoined
+  into one candidate; only list items are split per item, with continuation lines attaching to the item
+  above. Splitting per physical line was a real defect — it handed the capture path mid-sentence
+  fragments. This client deliberately does **not** split a block into sentences either: where one fact
+  ends is the atomicity stage's call, so a multi-claim block is flagged for it instead.
+- **A store-export import carries all five parts plus lifecycle and provenance** (`contentSummary`,
+  `validFrom`/`validUntil`, `status`, `scope`, `sources`, `originUuid`/`originVersion`). Keeping only
+  statement+description silently flattened an Understanding and lost its origin. Foreign material gets
+  none of those keys rather than fabricated ones (NFR-03).
+- **A dump refuses the filesystem root and a repository root**, matching the forensic export's reason
+  (EXPORT_AGENTS LADR-103): a generated projection must not be written over a maintained tree.
+- **An inapplicable flag is reported, never silently ignored** — `--asof` on foreign material,
+  `--max-chars` on a store export.
 - **The dump derives its folder name** from `--session-name`, else the content's first heading, else a
   timestamp — and always prints the name so another session can discover it.
 
@@ -74,5 +87,6 @@ DB and wire are unchanged.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-19 | Self-review fixes: hard-wrapped prose no longer becomes one candidate per physical line (it was handing the capture path mid-sentence fragments); a store-export import now carries all five parts plus lifecycle/provenance instead of only statement+description; `dump` refuses the filesystem root and a repository root; inapplicable flags are reported. Harness 19 -> 26 tests. | self-review |
 | 2026-09-19 | Implemented: `load` (auto/store/foreign, `--asof`, truncation disclosure, attribution, proposed/scope flagging), `import --store` (candidate decomposition, bundle flagging, selector binding, no-selector notice, zero writes), `dump --currentsession` (`--from`, derived discoverable folder name, marker, idempotent). 19-test harness added to the PR gate. | BRD-003; HLD-007 |
 | 2026-09-19 | Created — load/import/session-dump skill for Understanding transfer. Load is context-only by default; `--store` imports via the capture path; `--currentsession` dumps to a local folder. | BRD-003; HLD-007 |

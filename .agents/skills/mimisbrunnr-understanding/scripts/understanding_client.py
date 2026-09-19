@@ -189,8 +189,14 @@ def cmd_load(args: argparse.Namespace) -> int:
     lines = ["# Loaded material — cited grounding context", ""]
     if records is not None:
         lines += render_store(records, src, args.asof)
+        if args.max_chars != DEFAULT_MAX_CHARS:
+            lines.append("- `--max-chars` does not apply to a store export; it was not used.")
     else:
         lines += render_foreign(body, src, args.max_chars)
+        if args.asof is not None:
+            lines.append("")
+            lines.append("- `--asof` does not apply to foreign material, which carries no validity "
+                         "window; it was not used and nothing was filtered out.")
     lines += ["", DATA_NOTICE]
     print("\n".join(lines))
     return 0
@@ -199,24 +205,46 @@ def cmd_load(args: argparse.Namespace) -> int:
 # -------------------------------------------------------------------------- import
 
 
+_LIST_ITEM = re.compile(r"^(?:[-*+]|\d+[.)])\s+")
+
+
 def split_candidates(body: str) -> list[str]:
-    """Split foreign prose into candidate atomic facts. Deliberately conservative: this proposes
-    candidates for the capture skill's atomicity stage, it does not decide atomicity itself and
-    never chunks mechanically by size."""
+    """Propose candidate facts from foreign prose for the capture skill's atomicity stage.
+
+    A blank-line-separated block is the unit. Within a block, a list item is its own candidate,
+    but plain prose is **unwrapped** — hard-wrapped lines are rejoined into one candidate rather
+    than becoming one candidate per physical line, which would hand the capture path mid-sentence
+    fragments. This client does not split a block into sentences either: deciding where one fact
+    ends is the atomicity stage's job, and a multi-claim block is flagged for it instead.
+    """
     candidates: list[str] = []
     for block in re.split(r"\n\s*\n", body):
-        block = block.strip()
-        if not block:
+        lines = [
+            line.strip()
+            for line in block.splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ]
+        if not lines:
             continue
-        for line in block.splitlines():
-            line = line.strip()
-            line = re.sub(r"^(?:[-*+]|\d+[.)])\s+", "", line)
-            if not line or line.startswith("#"):
-                continue
-            if len(line) < 12:
-                continue
-            candidates.append(line)
-    return candidates
+
+        if any(_LIST_ITEM.match(line) for line in lines):
+            # A list: each item is its own candidate. Continuation lines attach to the item above.
+            current: list[str] = []
+            for line in lines:
+                if _LIST_ITEM.match(line):
+                    if current:
+                        candidates.append(" ".join(current))
+                    current = [_LIST_ITEM.sub("", line)]
+                elif current:
+                    current.append(line)
+                else:
+                    current = [line]
+            if current:
+                candidates.append(" ".join(current))
+        else:
+            candidates.append(" ".join(lines))
+
+    return [c for c in (c.strip() for c in candidates) if len(c) >= 12]
 
 
 def cmd_import(args: argparse.Namespace) -> int:
@@ -232,12 +260,29 @@ def cmd_import(args: argparse.Namespace) -> int:
 
     records = parse_store_export(body)
     if records is not None:
-        candidates = [
-            {"statement": five_parts(r)["knowledge"], "description": five_parts(r)["trigger"]}
-            for r in records
-            if five_parts(r)["knowledge"]
-        ]
+        # Carry all five parts plus lifecycle and provenance, so the capture path can preserve what
+        # the export recorded. Dropping them here would silently flatten an Understanding to two
+        # fields and lose the origin it was exported with (BR-43, NFR-03).
+        candidates = []
+        for record in records:
+            parts = five_parts(record)
+            if not parts["knowledge"]:
+                continue
+            candidates.append({
+                "statement": parts["knowledge"],
+                "description": parts["trigger"],
+                "contentSummary": parts["why"],
+                "validFrom": parts["validFrom"] or None,
+                "validUntil": parts["boundaries"] or None,
+                "status": parts["status"] or None,
+                "scope": parts["scope"] or None,
+                "sources": parts["sources"],
+                "originUuid": parts["uuid"] or None,
+                "originVersion": parts["version"],
+            })
     else:
+        # Foreign material carries no provenance of its own beyond the file it came from, and none
+        # is invented here (NFR-03).
         candidates = [{"statement": s, "description": None} for s in split_candidates(body)]
 
     for candidate in candidates:
@@ -282,6 +327,22 @@ def split_list(value: str | None) -> list[str]:
 # ---------------------------------------------------------------------------- dump
 
 
+def refuse_unsafe_target(folder: Path) -> str | None:
+    """Return a refusal reason, or None when the folder is a safe dump target.
+
+    The forensic export refuses the filesystem root and a repository root for the same reason
+    (HLD 001 / EXPORT_AGENTS LADR-103): a generated projection must not be written over a tree
+    somebody maintains. This dump does not wipe, so the bar is lower — but writing `_session.md`
+    into a repo root is still never what was meant.
+    """
+    resolved = folder.resolve()
+    if resolved.parent == resolved:
+        return "refusing to dump to the filesystem root"
+    if (resolved / ".git").exists():
+        return f"refusing to dump into a repository root ({resolved})"
+    return None
+
+
 def derive_folder_name(content: str, explicit: str | None) -> str:
     if explicit:
         return slugify(explicit)
@@ -315,6 +376,11 @@ def cmd_dump(args: argparse.Namespace) -> int:
         folder = Path(args.out)
     else:
         folder = Path(".context/understandings") / folder_name
+
+    refusal = refuse_unsafe_target(folder)
+    if refusal is not None:
+        print(f"REFUSED: {refusal}. Nothing was written.", file=sys.stderr)
+        return 1
 
     folder.mkdir(parents=True, exist_ok=True)
     marker = folder / DUMP_MARKER
