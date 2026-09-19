@@ -1,6 +1,6 @@
 # LADR-04: Feedback is unversioned and disposable
 
-**Status:** Draft
+**Status:** Accepted — 2026-09-18
 
 ## Context
 

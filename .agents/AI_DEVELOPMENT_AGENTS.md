@@ -39,6 +39,7 @@ This is a unified AI development experience folder that centralizes skills, prom
 | `.agents/skills/context-load-context/` | Load or create functional `*AGENTS.md` context files |
 | `.agents/skills/context-load-agents-context/` | Load ancestor AGENTS.md context for a target file |
 | `.agents/skills/mimisbrunnr-context-memory/` | Skill to store/retrieve persistent context memories (sole interface to the context-memory store) |
+| `.agents/skills/mimisbrunnr-recall-feedback/` | Run the three HLD-004 NFR-03 recall-feedback tuning queries against the Host API |
 | `.agents/skills/create-hld/` | Author a design-only High-Level Design under `docs/hlds/NNN-<slug>/` |
 | `.agents/skills/git-commit/` | Commit with conventional format |
 | `.agents/skills/git-commit-push/` | Commit and push to remote |
@@ -142,6 +143,7 @@ ls -la | grep -E '(\.claude|\.codex|\.cursor)'
 
 | Date | Change | Reason |
 | :---- | :---- | :---- |
+| 2026-09-19 | Added `mimisbrunnr-recall-feedback` to the skills inventory. | HLD-004 NFR-03 |
 | 2026-09-17 | Registered context-memory read/write workers; read worker uses a read-only MCP surface with no Bash or mutation methods. | HLD-002 capability split |
 | 2026-09-14 | This-repo skills renamed: `ai-brain-dump` → `mimisbrunnr-vitsmunir-dump`; `context-memory` → `mimisbrunnr-context-memory`. Upstream skills unchanged. | |
 | 2026-09-13 | Synced `agile-github-breakdown` skill + `--all` on `ai-brain-dump` from smooth-devex-template #61. | template #61 |

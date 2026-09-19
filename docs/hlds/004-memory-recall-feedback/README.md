@@ -2,14 +2,14 @@
 
 | | |
 |---|---|
-| **Status** | In Discovery |
+| **Status** | Implemented (record + query mechanism); NFR evidence pending |
 | **Owner** | generik0 |
 | **Tracker** | Context-memory tuning |
-| **Last updated** | 2026-09-16 |
+| **Last updated** | 2026-09-18 |
 
-> Discovery / prototyping HLD. Delivers **intent + spec** — what we are building and why, the decisions
-> behind it, and the quality bar it must meet. No implementation plan; execution is tracked in the
-> issue/work tracker.
+> Delivers **intent + spec** — what we are building and why, the decisions behind it, and the quality bar
+> it must meet. The record-and-query mechanism (workstreams 02/03) is implemented; the NFR evidence is
+> workstream-04 scope.
 
 ## Intent
 
@@ -94,15 +94,15 @@ side channel around a constraint the rest of the design honours.
 
 ## Architecture Decisions (LADRs)
 
-LADRs 01–03 are strategic; 04 is tactical. See [`./ladrs/`](./ladrs/). LADR-02 is resolved on measured
-evidence; the rest remain Draft pending implementation.
+LADRs 01–03 are strategic; 04 is tactical. See [`./ladrs/`](./ladrs/). LADR-01..04 are Accepted; the
+three NFRs remain Draft pending workstream-04 evidence.
 
 | LADR | Decision | Status |
 |------|----------|--------|
-| [LADR-01](./ladrs/LADR-01-record-recall-outcomes.md) | Record recall outcomes, including misses | Draft |
+| [LADR-01](./ladrs/LADR-01-record-recall-outcomes.md) | Record recall outcomes, including misses | Accepted |
 | [LADR-02](./ladrs/LADR-02-feedback-placement.md) | Feedback lives in append-only records | Accepted |
-| [LADR-03](./ladrs/LADR-03-identity-not-content.md) | Feedback carries identity and outcome only | Draft |
-| [LADR-04](./ladrs/LADR-04-unversioned-and-disposable.md) | Feedback is unversioned and disposable | Draft |
+| [LADR-03](./ladrs/LADR-03-identity-not-content.md) | Feedback carries identity and outcome only | Accepted |
+| [LADR-04](./ladrs/LADR-04-unversioned-and-disposable.md) | Feedback is unversioned and disposable | Accepted |
 
 ## Non-Functional Requirements
 
