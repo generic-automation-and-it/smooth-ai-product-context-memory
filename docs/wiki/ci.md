@@ -206,6 +206,26 @@ The Skip Areas bullets are the channel that tells the next round which findings 
 and every skip is re-raised. `.github/pull_request_template.md` therefore ships the two as siblings, and
 `ai-review` writes skips into the Skip Areas section rather than the summary table it also appends.
 
+#### A lone HTML comment truncates everything below it
+
+`_clean()` in that lib strips comments with `sed '/^<!--/,/-->$/d'`. A sed range whose start and end
+match on the **same line** does not close there — sed looks for the end pattern from the *next* line on. A
+self-closing one-line comment therefore opens a range that never closes, and everything from it to the end of the
+body is deleted.
+
+This is not hypothetical here: Conductor appends `<!-- conductor-workspace-link -->` to PR descriptions it creates.
+Verified on PR #83 — the `### AI Review Response` block placed below that marker reached the prompt as zero lines,
+while the same block moved above it extracted fine.
+
+Consequence, and the rule: **keep `## Skip Areas / Known Issues` above any one-line HTML comment in the body.** It
+currently sits above the Conductor marker by ordering luck, not design. Placed below — which `ai-review`'s own
+"append at the end" fallback would do — every skip bullet would be silently truncated, reproducing the LADR-083
+failure this section exists to prevent. The round-trip check below catches it; run it after any body edit.
+
+```bash
+printf 'keep A\n<!-- marker -->\nkeep B\n' | sed '/^<!--/,/-->$/d'   # prints only "keep A"
+```
+
 Verify a PR body by round-trip rather than by eye. First fetch the lib — `.review-tools/` is created by the gate's checkout step and does **not** exist in a
 clone, so pin-matched fetch is the only way to run it locally:
 

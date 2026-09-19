@@ -78,6 +78,11 @@ Rules that follow from that:
   or folding it under another section makes it invisible.
 - Anchor each bullet with `<file>:<line>` plus the reason, so the next round can match
   it against a finding.
+- Keep the section **above any one-line HTML comment** in the body. The extractor strips
+  comments with a sed range that never closes on a self-closing comment, so it deletes
+  from there to the end of the body. Conductor appends
+  `<!-- conductor-workspace-link -->` to PR descriptions it creates — anything below it
+  is invisible to the review prompt.
 - Verify by round-trip, never by eye. The lib lives in the gate's runner-only
   `.review-tools/` checkout, so fetch it at the pinned SHA first:
 
