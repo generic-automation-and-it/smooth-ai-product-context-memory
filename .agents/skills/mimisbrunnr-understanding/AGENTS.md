@@ -20,8 +20,9 @@ load/transfer counterpart to `mimisbrunnr-context-memory` (the sole writer of cl
 - **Never add a column for the Understanding shape.** Five parts map onto existing fields
   (knowledge→statement, why→contentSummary, trigger→description, boundaries→validUntil/scope,
   provenance→sources/validFrom/createdOn).
-- **Never rename a DB table, HTTP route or MCP tool.** The `Memory`→`Understanding` change is C#
-  identifiers only.
+- **Never rename the product vocabulary or the DB/wire.** **Memory is the correct name** and stays the
+  scoped store of record; an Understanding is a `kind` of it, not a replacement term. There is no
+  `Memory`→`Understanding` rename and no DB table, HTTP route or MCP tool name change.
 - **Never fabricate provenance** for foreign material.
 - **Propose, don't write an Understanding without agreement** (BR-39).
 
@@ -89,6 +90,7 @@ DB and wire are unchanged.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-19 | Self-review (iter 5/6): pinned the `--all` with `--asof` combination so the two omission reasons are counted separately, and corrected the leftover rename non-negotiable to state memory keeps its name. Harness 29 -> 30 tests. | self-review |
 | 2026-09-19 | Self-review (iter 4): import of a store export is now understanding-only. It used to stamp every record `kind = understanding`, so a scoped memory fact in a mixed export was collapsed into an understanding (LADR-01 defect). Non-understanding records are now skipped and the skip is reported. Harness 28 -> 29 tests. | self-review |
 | 2026-09-19 | Self-review fixes: hard-wrapped prose no longer becomes one candidate per physical line (it was handing the capture path mid-sentence fragments); a store-export import now carries all five parts plus lifecycle/provenance instead of only statement+description; `dump` refuses the filesystem root and a repository root; inapplicable flags are reported. Harness 19 -> 26 tests. | self-review |
 | 2026-09-19 | Implemented: `load` (auto/store/foreign, `--asof`, truncation disclosure, attribution, proposed/scope flagging), `import --store` (candidate decomposition, bundle flagging, selector binding, no-selector notice, zero writes), `dump --currentsession` (`--from`, derived discoverable folder name, marker, idempotent). 19-test harness added to the PR gate. | BRD-003; HLD-007 |
