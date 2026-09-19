@@ -286,6 +286,7 @@ store from it; how recently a copy was made is visible without asking.
 | **Superseded** | Knowledge replaced by a later position, retained for its reasoning |
 | **Stale** | Knowledge that was correct when recorded and is no longer true |
 | **Checkpoint** | The natural pause at which capture occurs |
+| **Understanding** | A distilled, self-contained unit of hard-won knowledge — the transferable skill that remains after the experience is discarded. Stored as a memory of `kind = understanding` (BRD-003) |
 
 ---
 
@@ -299,3 +300,4 @@ store from it; how recently a copy was made is visible without asking.
 | [HLD 004 — Memory recall feedback](../../hlds/004-memory-recall-feedback/) | Whether retrieval is working — what is recalled, what never is |
 | [HLD 006 — Corpus snapshot and restore](../../hlds/006-corpus-snapshot-and-restore/) | Durability of the store as an asset — verified backup and restore across both stores |
 | [BRD 002 — Contextual knowledge export](../002-contextual-export/) | Extends this document (`BR-18` … `BR-36`): exporting a slice of the store as one focused, composed document with its gaps and contradictions. Owns [HLD 005](../../hlds/005-contextual-export/) |
+| [BRD 003 — Understanding transfer and loading](../003-understanding-transfer/) | Extends this document (`BR-38` … `BR-46`): the Understanding kind, non-destructive load, opt-in import and current-session export. Owns [HLD 007](../../hlds/007-understanding-transfer/) |

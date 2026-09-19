@@ -148,7 +148,7 @@ cannot — and pretending otherwise would either forbid the judgement or make th
 
 > Regenerating an export must always be easier than editing one.
 
-- **One-way, no import.** The store is the record; a dossier is a view of it at a moment. An import path would make an edited copy authoritative and reverse the direction HLD 001 chose — the same reasoning that keeps the forensic dump one-way.
+- **One-way, no import.** The store is the record; a dossier is a view of it at a moment. An import path would make an edited copy authoritative and reverse the direction HLD 001 chose — the same reasoning that keeps the forensic dump one-way. *(The understanding load/import capability is a deliberate, scoped exception owned by HLD 007 with an opt-in `--store` path through the capture skill; it does not apply to this dossier.)*
 - **A read that changes nothing.** Findings are output. Recording one as knowledge is a capture, and captures go through the approved write path with the practitioner's judgement — never as a side effect of reading (`BR-31`).
 - **Honest before complete.** Where the design must choose, it reports the limit rather than papering over it. A confidently incomplete document is the failure mode; a loudly incomplete one is a working feature.
 - **We will deliberately not** schedule or continuously regenerate exports. An export answers a question at a moment; a standing regeneration is upkeep, and upkeep is what `BR-01` forbids.

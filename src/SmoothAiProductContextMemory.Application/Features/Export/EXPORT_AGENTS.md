@@ -6,7 +6,7 @@ One-way generated Markdown projection of the store (groups, memories, current ve
 
 ## Non-Negotiables
 
-- **Generated, never maintained.** Output is a projection. Hand-editing it is a defect. There is no import path and there must not be one — HLD 001 chose database-as-truth; import would reverse that by the back door.
+- **Generated, never maintained.** Output is a projection. Hand-editing it is a defect. There is no import path and there must not be one — HLD 001 chose database-as-truth; import would reverse that by the back door. *(The one, deliberate exception for this dump is the understanding load/import capability, which lives in HLD 007 with an opt-in `--store` path through the capture skill; it does not reopen an import path for this forensic dump.)*
 - **Current-only by default.** `--history` adds version chains as extra sections in the same file. History is not the default — it duplicates content and would swamp the tree.
 - **Blob bodies are inlined.** Never print a content hash as if it were the document. A missing blob warns and continues; a non-text blob is noted and omitted.
 - **Relationships live in file content.** `group_uuid` is written into every memory file. Directory placement is navigation, not proof. A prior trial encoded the parent only in the path; a moved file lost it silently.
@@ -109,6 +109,7 @@ Approved implementation plan (2026-09-13):
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-19 | Scoped the "no import path" guardrail to this forensic dump and noted the understanding load/import capability as a deliberate exception owned by HLD 007 (opt-in `--store` through the capture skill). | HLD-007; BRD-003 |
 | 2026-09-13 | ADR-0001/0002 deleted; authority citations retargeted to HLD 001. | HLD-001 |
 | 2026-09-13 | Export reads relationships via `IMemoryGraph.ListAllAsync` after the HLD 003 cutover. | HLD-003 |
 | 2026-09-13 | Created — generated Markdown export contract. | PR #18 |
