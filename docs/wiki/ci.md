@@ -76,9 +76,10 @@ Check which is live by reading the `🔀 OpenCode provider:` line in any gate ru
 readable through the repo's integration token (`gh api .../actions/variables` → 403), so the log is the available
 source of truth.
 
-> **Unresolved:** the gate's unset-Variable fallbacks still resolve to `ANTHROPIC`/`claude-opus-5`. They are
-> unreachable while the Variable is set, so nothing misroutes today — but whether an unconfigured consumer should
-> land on `ANTHROPIC` or on the `OPENCODE-GO-OPENAI` that actually runs is an open decision, not a settled one.
+The gate's unset-Variable fallbacks follow this live provider: `OPENCODE-GO-OPENAI` with `glm-5.2` on all three
+tiers, so an unconfigured consumer lands where a configured one already is. The live Variables at the run above were
+`glm-5.2` / `grok-4.6` / `muse-spark-1.3-contributor`; the fallback pins only `glm-5.2`, which is both the live
+primary and a model `.github/opencode.json` declares.
 
 ### Provider wiring (the ANTHROPIC/vLLM alternative)
 
@@ -121,7 +122,7 @@ file does and does not control:
 |---|---|---|
 | Secret | `OPENCODE_VLLM_PROFILE_B64` | `base64` of the vllm-proxy `profile.json` (single line) |
 | Secret | `OPENCODE_ANTHROPIC_API_KEY` | any non-empty placeholder — the terminator supplies the real credential |
-| Variable | `OPENCODE_REVIEW_REPORT_PROVIDER` | `ANTHROPIC` **for this wiring**; currently set to `OPENCODE-GO-OPENAI` |
+| Variable | `OPENCODE_REVIEW_REPORT_PROVIDER` | `ANTHROPIC` **for this wiring only**; currently `OPENCODE-GO-OPENAI`, which needs none of the rows in this table |
 | Variable | `OPENCODE_REVIEW_REPORT_CONFIG` | `.github/opencode.json` |
 | Variable | `OPENCODE_REVIEW_REPORT_MODEL_PRIMARY` / `_SECONDARY` / `_ORCHESTRATOR` | a `claude-*` alias the gateway serves |
 | Variable | `OPENCODE_REVIEW_REPORT_MAX_PARALLEL` | `2` — one vLLM instance backs every chunk; the upstream default of 7 pushes chunks past their budget |
@@ -143,7 +144,7 @@ both bare and fails loudly when they are empty. The fallbacks are duplicated per
 
 | Workflow | Provider fallback | Model fallbacks | Why |
 |---|---|---|---|
-| `pipeline-code-review-report.yml` | `ANTHROPIC`, provider-id `anthropic` | `claude-opus-5` on all three tiers | Matches the configured standard, and this job is the one that starts the terminator |
+| `pipeline-code-review-report.yml` | `OPENCODE-GO-OPENAI`, provider-id `go-openai` | `glm-5.2` on all three tiers | Matches the provider the gate actually resolves; needs no terminator and no URL Variable |
 | `pipeline-ai-analyse.yml` | `OPENAI` | `gpt-5.5` / `gpt-5.4` / `gpt-5.4-mini` | Auto-fix must stay **off** the review credential — this job starts no terminator and loads a different opencode config |
 
 Do not "align" the analyse fallbacks onto the gate's. The mechanism is not the one you might assume: the analyse job
@@ -156,8 +157,9 @@ all — it exists only in this repo's config, which that job does not load.
 
 Two couplings make a partial edit silent rather than loud:
 
-- **Provider and models move together.** `resolve-provider.sh` rejects any `OPENCODE_REVIEW_REPORT_MODEL_*` that is
-  not `claude*` once the provider is `ANTHROPIC`. Changing the provider fallback without the three model fallbacks
+- **Provider and models move together.** `resolve-provider.sh` applies a per-provider family check — under
+  `OPENCODE-GO-OPENAI` it rejects `claude*`, `gemini*` and `minimax*`/`qwen*`; under `ANTHROPIC` it rejects anything
+  that is not `claude*`. Changing the provider fallback without the three model fallbacks
   aborts at preflight, far from the line that was missed.
 - **The provider-id chain has a bare final literal.** In the gate, `OPENCODE_REVIEW_REPORT_PROVIDER_ID` is a long
   `||` ladder whose last line is an unguarded provider id. Repointing that literal silently changes the id for any
@@ -190,8 +192,9 @@ SHA, while `pipeline-ai-analyse.yml` tracks `main` (overridable via `SMOOTH_AI_R
 function at whichever ref you are changing.
 
 There is no fallback URL for the variable-base three — `_rp_resolve` hard-fails on an empty value. That is why the
-gate's unset-Variable fallback is `ANTHROPIC` (fixed base) and not a variable-base provider: the old `GEMINI`
-fallback made an unconfigured run die on `OPENCODE_REVIEW_REPORT_GEMINI_URL`, naming a provider nobody had selected.
+gate's unset-Variable fallback is `OPENCODE-GO-OPENAI` (fixed base) and not a variable-base provider: the old
+`GEMINI` fallback made an unconfigured run die on `OPENCODE_REVIEW_REPORT_GEMINI_URL`, naming a provider nobody had
+selected.
 
 Do not add a hardcoded fourth base URL to make a variable-base provider work out of the box. The `OPENAI` slot
 exists as the relay point for a proxy; a literal `https://api.openai.com/v1` would send a proxy key to OpenAI.

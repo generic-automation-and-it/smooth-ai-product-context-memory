@@ -243,7 +243,9 @@ jobs:
     if: needs.guard.outputs.act == 'true'
     env:
       # These OPENAI/gpt-* fallbacks deliberately differ from the gate workflow's
-      # ANTHROPIC/claude-* ones and must NOT be "aligned" onto them. This job sets
+      # OPENCODE-GO-OPENAI/glm-* ones and must NOT be "aligned" onto them. The
+      # point is that auto-fix resolves independently of the review scope, not
+      # which provider the review scope happens to use. This job sets
       # no OPENCODE_REVIEW_REPORT_CONFIG, so prepare-opencode-config.sh loads
       # UPSTREAM's assets/opencode.json, not this repo's .github/opencode.json —
       # the loopback baseURL literal is not in play here at all. That asset pins
