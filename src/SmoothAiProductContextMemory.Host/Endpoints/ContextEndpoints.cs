@@ -120,7 +120,7 @@ internal static class ContextEndpoints
             CancellationToken ct,
             [FromQuery] DateTimeOffset asOf,
             [FromQuery] int? limit = null) =>
-            mediator.Send(new GetNeverRecalledMemories.Request(asOf, limit), ct))
+            mediator.Send(new GetNeverRecalledMemories.Request(asOf, limit ?? 500), ct))
             .RequireCapability(ApiCapability.Read);
 
         group.MapGet("/recall-feedback/miss-rate", (
