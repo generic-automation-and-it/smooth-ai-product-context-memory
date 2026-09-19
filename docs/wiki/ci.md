@@ -56,14 +56,38 @@ The publish workflow does **not** run on pull requests.
   terminator. A reusable-workflow caller cannot inject a step into the callee's job, and a separate job would get a
   separate runner — so the steps have to live here.
 
-### Provider wiring
+### Which provider actually runs
+
+**The vLLM/`ANTHROPIC` wiring described below is configured but not currently selected.** Verified from run
+[35444596583](https://github.com/generic-automation-and-it/smooth-ai-product-context-memory/actions/runs/35444596583)
+(2026-09-19, commit `5302954`):
+
+```
+🔀 OpenCode provider: OPENCODE-GO-OPENAI (provider-id: go-openai)
+OPENCODE_REVIEW_REPORT_GATEWAY_URL: https://opencode.ai/zen/go/v1
+Start vLLM mTLS terminator -> skipped
+```
+
+So `OPENCODE_REVIEW_REPORT_PROVIDER` is set to `OPENCODE-GO-OPENAI`, the terminator step is skipped on every run,
+and the private gateway is not in the request path. Read the rest of this section as **the alternative
+configuration**, kept because it is selectable by flipping that one Variable — not as a description of today's runs.
+
+Check which is live by reading the `🔀 OpenCode provider:` line in any gate run's log. Actions Variables are not
+readable through the repo's integration token (`gh api .../actions/variables` → 403), so the log is the available
+source of truth.
+
+> **Unresolved:** the gate's unset-Variable fallbacks still resolve to `ANTHROPIC`/`claude-opus-5`. They are
+> unreachable while the Variable is set, so nothing misroutes today — but whether an unconfigured consumer should
+> land on `ANTHROPIC` or on the `OPENCODE-GO-OPENAI` that actually runs is an open decision, not a settled one.
+
+### Provider wiring (the ANTHROPIC/vLLM alternative)
 
 | Piece | Value |
 |---|---|
 | Terminator | `.github/scripts/vllm-tls-proxy.py`, plain HTTP on `127.0.0.1:8888`, mTLS out to the gateway in the profile |
 | opencode config | `.github/opencode.json`, selected via the `OPENCODE_REVIEW_REPORT_CONFIG` variable |
 | Retarget | `provider.anthropic.options.baseURL` = `http://127.0.0.1:8888/v1` as a **literal** |
-| Provider selector | `OPENCODE_REVIEW_REPORT_PROVIDER=ANTHROPIC` |
+| Provider selector | `OPENCODE_REVIEW_REPORT_PROVIDER=ANTHROPIC` — **not the current value**, see above |
 
 Two upstream behaviours make that work and must not be "corrected":
 
@@ -97,7 +121,7 @@ file does and does not control:
 |---|---|---|
 | Secret | `OPENCODE_VLLM_PROFILE_B64` | `base64` of the vllm-proxy `profile.json` (single line) |
 | Secret | `OPENCODE_ANTHROPIC_API_KEY` | any non-empty placeholder — the terminator supplies the real credential |
-| Variable | `OPENCODE_REVIEW_REPORT_PROVIDER` | `ANTHROPIC` |
+| Variable | `OPENCODE_REVIEW_REPORT_PROVIDER` | `ANTHROPIC` **for this wiring**; currently set to `OPENCODE-GO-OPENAI` |
 | Variable | `OPENCODE_REVIEW_REPORT_CONFIG` | `.github/opencode.json` |
 | Variable | `OPENCODE_REVIEW_REPORT_MODEL_PRIMARY` / `_SECONDARY` / `_ORCHESTRATOR` | a `claude-*` alias the gateway serves |
 | Variable | `OPENCODE_REVIEW_REPORT_MAX_PARALLEL` | `2` — one vLLM instance backs every chunk; the upstream default of 7 pushes chunks past their budget |
