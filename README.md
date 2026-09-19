@@ -258,6 +258,11 @@ tests/
 - Commits and PR titles follow [Conventional Commits](https://www.conventionalcommits.org). See [`.agents/rules/git/`](.agents/rules/git/).
 - Every PR should create or update at least one `*AGENTS.md` context file.
 
+Start with [CONTRIBUTING.md](CONTRIBUTING.md) — setup, the review gate, and the two things that
+trip people up. By taking part you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+Found a vulnerability? Do not open an issue — follow the [Security Policy](SECURITY.md).
+
 ---
 
 ## Be like Odin, drink from the well

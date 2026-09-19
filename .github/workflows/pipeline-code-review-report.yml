@@ -300,7 +300,19 @@ jobs:
       # and the empty-secret check below fails loudly rather than letting the
       # gate proceed toward a socket that will never answer.
       - name: Start vLLM mTLS terminator
-        if: (vars.OPENCODE_REVIEW_REPORT_PROVIDER || 'GEMINI') == 'ANTHROPIC'
+        # Mirrors the OPENCODE_REVIEW_REPORT_PROVIDER selector below, which honours
+        # `model_preset` ahead of the Variable. Guarding on the Variable alone let a
+        # dispatch with an Anthropic preset select the gateway while this step was
+        # skipped, leaving the run pointed at a terminator that never started. The
+        # second clause covers the no-preset paths: `pull_request` populates no
+        # inputs context (empty string) and the dispatch default is
+        # '(repository default)', and neither matches a preset row in the ladder.
+        if: >-
+          inputs.model_preset == 'Anthropic Claude Opus 4.8' ||
+          inputs.model_preset == 'Anthropic Claude Sonnet 4.6' ||
+          inputs.model_preset == 'Anthropic Claude Haiku 4.5' ||
+          ((inputs.model_preset == '' || inputs.model_preset == '(repository default)') &&
+          (vars.OPENCODE_REVIEW_REPORT_PROVIDER || 'OPENCODE-GO-OPENAI') == 'ANTHROPIC')
         env:
           VLLM_PROFILE_B64: ${{ secrets.OPENCODE_VLLM_PROFILE_B64 }}
         run: |
@@ -356,9 +368,13 @@ jobs:
           # passes it as REVIEWER_INPUT so run-review.sh reads it from the env
           # without any inputs.* / steps.*.outputs dependency).
           REVIEWER_INPUT: ${{ inputs.pr_number }}
-          # Provider selector, default GEMINI. See the reusable-workflow caller
-          # for the full preset → provider/model mapping. The variables below
-          # mirror that mapping; extend them together.
+          # Provider selector. The bare fallback below — reached only when no
+          # preset matched and the Variable is unset — is OPENCODE-GO-OPENAI,
+          # and the three model tiers fall back to glm-5.2 to match it; the
+          # family check in resolve-provider.sh ties the two together. See the
+          # reusable-workflow caller for the full preset → provider/model
+          # mapping. The variables below mirror that mapping; extend them
+          # together.
           OPENCODE_REVIEW_REPORT_PROVIDER: ${{
             (inputs.model_preset == 'Anthropic Claude Opus 4.8' && 'ANTHROPIC') ||
             (inputs.model_preset == 'Anthropic Claude Sonnet 4.6' && 'ANTHROPIC') ||
@@ -367,7 +383,7 @@ jobs:
             ((inputs.model_preset == 'OpenCode DeepSeek V4 Pro' || inputs.model_preset == 'OpenCode DeepSeek V4 Flash' || inputs.model_preset == 'OpenCode GLM-5.2' || inputs.model_preset == 'OpenCode GLM-5.1' || inputs.model_preset == 'OpenCode Grok 4.5' || inputs.model_preset == 'OpenCode Hy3' || inputs.model_preset == 'OpenCode Kimi K3' || inputs.model_preset == 'OpenCode Kimi K2.7 Code' || inputs.model_preset == 'OpenCode Kimi K2.6' || inputs.model_preset == 'OpenCode MiMo V2.5' || inputs.model_preset == 'OpenCode MiMo V2.5 Pro') && 'OPENCODE-GO-OPENAI') ||
             ((inputs.model_preset == 'OpenCode MiniMax M3' || inputs.model_preset == 'OpenCode MiniMax M2.7' || inputs.model_preset == 'OpenCode MiniMax M2.5' || inputs.model_preset == 'OpenCode Qwen3.8 Max' || inputs.model_preset == 'OpenCode Qwen3.7 Max' || inputs.model_preset == 'OpenCode Qwen3.7 Plus' || inputs.model_preset == 'OpenCode Qwen3.6 Plus') && 'OPENCODE-GO-ANTHROPIC') ||
             ((inputs.model_preset == 'OpenRouter DeepSeek V4 Pro' || inputs.model_preset == 'OpenRouter Qwen3.7 Plus' || inputs.model_preset == 'OpenRouter GLM-5.1' || inputs.model_preset == 'OpenRouter MiniMax M3') && 'OPEN_ROUTER') ||
-            vars.OPENCODE_REVIEW_REPORT_PROVIDER || 'GEMINI' }}
+            vars.OPENCODE_REVIEW_REPORT_PROVIDER || 'OPENCODE-GO-OPENAI' }}
           OPENCODE_REVIEW_REPORT_PROVIDER_ID: ${{
             ((inputs.model_preset == 'Anthropic Claude Opus 4.8' || inputs.model_preset == 'Anthropic Claude Sonnet 4.6' || inputs.model_preset == 'Anthropic Claude Haiku 4.5') && 'anthropic') ||
             (inputs.model_preset == 'OpenAI GPT-5.5' && 'openai') ||
@@ -380,7 +396,8 @@ jobs:
             (vars.OPENCODE_REVIEW_REPORT_PROVIDER == 'OPENCODE-GO-OPENAI' && 'go-openai') ||
             (vars.OPENCODE_REVIEW_REPORT_PROVIDER == 'OPENCODE-GO-ANTHROPIC' && 'go-anthropic') ||
             (vars.OPENCODE_REVIEW_REPORT_PROVIDER == 'OPEN_ROUTER' && 'openrouter') ||
-            'gemini' }}
+            (vars.OPENCODE_REVIEW_REPORT_PROVIDER == 'GEMINI' && 'gemini') ||
+            'go-openai' }}
           # API keys — Secrets only. URLs — Variables only.
           OPENCODE_GEMINI_API_KEY: ${{ secrets.OPENCODE_GEMINI_API_KEY }}
           OPENCODE_REVIEW_REPORT_GEMINI_URL: ${{ vars.OPENCODE_REVIEW_REPORT_GEMINI_URL }}
@@ -421,15 +438,20 @@ jobs:
             (inputs.model_preset == 'OpenRouter Qwen3.7 Plus' && 'qwen/qwen3.7-plus') ||
             (inputs.model_preset == 'OpenRouter GLM-5.1' && 'z-ai/glm-5.1') ||
             (inputs.model_preset == 'OpenRouter MiniMax M3' && 'minimax/minimax-m3') ||
-            inputs.model || vars.OPENCODE_REVIEW_REPORT_MODEL_PRIMARY || 'gemini-3.1-pro-preview' }}
+            inputs.model || vars.OPENCODE_REVIEW_REPORT_MODEL_PRIMARY || 'glm-5.2' }}
           # Mirror the 24-row mapping for SECONDARY and ORCHESTRATOR
           # (the canonical workflow pins the same model across all three
-          # tiers per preset). Without this, every non-Gemini
-          # `workflow_dispatch` would set SECONDARY=gemini-2.5-pro and
-          # ORCHESTRATOR=gemini-3-flash-preview, which would fail the
-          # provider-model-family check in `lib/resolve-provider.sh:62-90`
-          # with "ANTHROPIC selected but OPENCODE_REVIEW_REPORT_MODEL_SECONDARY='gemini-2.5-pro'
-          # is not a Claude model". PR #86 review 4820469544 #1.
+          # tiers per preset). Without this, a `workflow_dispatch` that picks a
+          # preset from one family would leave SECONDARY and ORCHESTRATOR on the
+          # bare fallback from another, which fails the provider-model-family
+          # check in `lib/resolve-provider.sh:62-90` with e.g. "ANTHROPIC
+          # selected but OPENCODE_REVIEW_REPORT_MODEL_SECONDARY='gpt-5.5' is not
+          # a Claude model". PR #86 review 4820469544 #1.
+          #
+          # The three bare fallbacks below are `glm-5.2` because the
+          # unset-Variable provider is OPENCODE-GO-OPENAI — that provider's
+          # family check rejects claude*, gemini* and minimax*/qwen*, so provider
+          # and models move in one commit or not at all.
           OPENCODE_REVIEW_REPORT_MODEL_SECONDARY: >-
             ${{
             (inputs.model_preset == 'Anthropic Claude Opus 4.8' && 'claude-opus-4-8') ||
@@ -458,7 +480,7 @@ jobs:
             (inputs.model_preset == 'OpenRouter Qwen3.7 Plus' && 'qwen/qwen3.7-plus') ||
             (inputs.model_preset == 'OpenRouter GLM-5.1' && 'z-ai/glm-5.1') ||
             (inputs.model_preset == 'OpenRouter MiniMax M3' && 'minimax/minimax-m3') ||
-            vars.OPENCODE_REVIEW_REPORT_MODEL_SECONDARY || 'gemini-2.5-pro' }}
+            vars.OPENCODE_REVIEW_REPORT_MODEL_SECONDARY || 'glm-5.2' }}
           OPENCODE_REVIEW_REPORT_MODEL_ORCHESTRATOR: >-
             ${{
             (inputs.model_preset == 'Anthropic Claude Opus 4.8' && 'claude-opus-4-8') ||
@@ -487,7 +509,7 @@ jobs:
             (inputs.model_preset == 'OpenRouter Qwen3.7 Plus' && 'qwen/qwen3.7-plus') ||
             (inputs.model_preset == 'OpenRouter GLM-5.1' && 'z-ai/glm-5.1') ||
             (inputs.model_preset == 'OpenRouter MiniMax M3' && 'minimax/minimax-m3') ||
-            vars.OPENCODE_REVIEW_REPORT_MODEL_ORCHESTRATOR || 'gemini-3-flash-preview' }}
+            vars.OPENCODE_REVIEW_REPORT_MODEL_ORCHESTRATOR || 'glm-5.2' }}
           OPENCODE_REVIEW_REPORT_CONFIG: ${{ vars.OPENCODE_REVIEW_REPORT_CONFIG || '' }}
           OPENCODE_CLI_VERSION: ${{ vars.OPENCODE_CLI_VERSION || '' }}
           OPENCODE_REVIEW_REPORT_MAX_FILE_COUNT: ${{ inputs.file_limit || vars.OPENCODE_REVIEW_REPORT_MAX_FILE_COUNT || '100' }}
