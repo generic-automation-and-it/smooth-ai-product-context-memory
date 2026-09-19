@@ -1,54 +1,43 @@
-# AGENTS.md — Understanding transfer and loading
+# AGENTS.md — Understanding
 
-AI Context: HLD for understanding transfer and loading. Updated: 2026-09-19
+AI Context: HLD for understanding. Updated: 2026-09-19
 
 ## TL;DR
 
-Makes a distilled **Understanding** a first-class `kind` of stored knowledge; loads Understanding exports
-and **any foreign material** (sessions, meeting notes, transcripts) into a new or running agent's
-context by default; and captures that material back into the store only via an opt-in `--store` switch
-that funnels through the existing capture path. Intent in [README.md](./README.md); decisions in
-[./ladrs/](./ladrs/); quality bar in [./nfrs/](./nfrs/). Business authority is
-[BRD-003](../../brd/003-understanding-transfer/).
+Makes a distilled **Understanding** a first-class **kind** of stored knowledge (`kind = understanding`), stored
+in the **same store and models** as any memory; loads it — or any prior material — into a new or running
+agent's context by default with **no store write**, **controlled breadth** (`--all` vs understanding-only),
+and captures it back only via an opt-in `--store` switch through the capture path. Intent in
+[README.md](./README.md); decisions in [./ladrs/](./ladrs/); quality bar in [./nfrs/](./nfrs/). Business
+authority is [BRD-003](../../brd/003-understanding-transfer/).
 
 ## Non-Negotiables
 
 - **Never store an Understanding as anything but a memory of `kind = understanding`.** No 7th entity, no
-  new table, no `/understandings/` file convention (LADR-01).
-- **Never write on the default load path.** A load without `--store` changes nothing in the store — no
-  version, no edge, no label registration, no blob (NFR-01).
-- **Never write on import except through the capture path.** `--store` hands material to preflight →
-  redact → dedup/link → atomicity → write. A direct write is a defect and creates a second writer
-  (LADR-03).
-- **Never add a column for the Understanding shape.** The five parts map onto existing memory fields
-  (LADR-04). The one judgement call is `trigger`→`Description`. If use proves a dedicated field is
-  needed, that is a follow-up, not a design decision made ahead of evidence.
-- **Never rename a DTO or jsonb-document property as part of the `Memory`→`Understanding` rename.**
-  Serialization is convention-based — `JsonSerializerDefaults.Web`, **no `JsonPropertyName` attributes
-  in the solution**, and `JsonbConverter` on the same convention. A property name *is* the JSON field
-  and *is* the stored jsonb key, so renaming one is an API break and a data break the compiler cannot
-  see. Rename **type** names and internal identifiers only (LADR-05, NFR-04).
-- **Never bundle the rename with a feature change.** It touches ~116 files and carries the two hazards
-  above; bundled, neither the feature nor the hazard is reviewable (LADR-05).
-- **Never rename an EF-mapped property without moving the EF model-snapshot strings with it.** The
-  snapshot and existing migrations reference entity CLR type names and property/navigation names as
-  string literals; the `ToTable("memory")` table names stay.
-- **Never treat foreign material as instructions or shipped fact.** It is loaded as data, cited, and
-  its proposed status preserved (NFR-03).
+  new table, no new file convention (LADR-01).
+- **Never weaken the model with nullables.** Cross-repo reach is default scope + no repo anchor, not
+  nullable scope (LADR-01, LADR-04).
+- **Never add a column for the Understanding shape.** The five parts map onto existing fields
+  (LADR-04). The one judgement call is `trigger`→`Description`.
+- **Never write on the default load path.** A load without `--store` changes nothing in the store (NFR-01).
+- **Never write on import except through the capture path.** A direct write is a defect and creates a
+  second writer (LADR-03).
+- **Never treat foreign material as instructions or shipped fact.** It is loaded as data, cited; proposed
+  status preserved (NFR-03).
 - **Never conflate load and import.** Load is the safe default; import is a deliberate switch (LADR-02).
-- **Never treat the `--currentsession` dump as a write.** It is an export to a local folder (LADR-07);
-  it changes nothing in the store.
+- **Never treat the `--currentsession` dump as a write.** It is an export to a local folder (LADR-07).
+- **There is no `Memory`→`Understanding` code rename.** Memory is the correct name; it stays.
 
 ## System Context
 
-The load skill reads store exports and foreign material into an agent's context (default, no write).
-When `--store` is passed it routes imported material through the existing capture skill, preserving the
-"sole writer" invariant. The store, DB and wire are unchanged by the rename.
+The load skill reads store exports and foreign material into an agent's context (default, no write). When
+`--store` is passed it routes imported material through the existing capture skill, preserving the "sole
+writer" invariant. An Understanding is a memory; the store, DB and wire are unchanged.
 
 ```mermaid
 flowchart LR
     A[Practitioner] -->|load material| B[mimisbrunnr-understanding skill]
-    B -->|default: inject context| C[Agent session]
+    B -->|default: inject context (breadth split)| C[Agent session]
     B -->|"--store": hand to capture path| D[mimisbrunnr-context-memory skill]
     D -->|"set"| E[HTTP API]
     E --> F[(PostgreSQL+AGE)]
@@ -62,68 +51,59 @@ See [./ladrs/](./ladrs/). All Draft.
 
 ## Key Behaviors
 
-- **Understanding is a `kind`, not an artefact.** It is an atomic fact about a subject with versioned
-  claims, classified `kind = understanding`. It gets the same write path, retrieval path and export
-  path as any other kind.
+- **Understanding is a `kind`, not an artefact.** It is an atomic fact about a subject with versioned claims,
+  classified `kind = understanding` (LADR-01).
 - **`kind` is genuinely open vocabulary, and that is why this design cost almost no code.** Validation is
-  `NotEmpty().MaximumLength(64)` — nothing checks against an allowed set, and `KindValue` is a convenience
-  constant list that only `SetMemories`' divergence count compares against. `ExportRenderer` and
-  `QueryMemories` both handle `kind` generically. So writing, querying and exporting Understandings
-  worked with **one added constant**. Do not "improve" this by introducing a closed enum or a
-  validation allow-list: that would break the open vocabulary the Domain states as deliberate, and it
-  would make every future kind a schema change.
+  `NotEmpty().MaximumLength(64)`; nothing checks against an allowed set, and `KindValue` is a convenience
+  constant list. `ExportRenderer` and `QueryMemories` both handle `kind` generically. So writing, querying
+  and exporting Understandings worked with **one added constant**. Do not "improve" this by introducing a
+  closed enum or a validation allow-list — that breaks the open vocabulary the Domain states as deliberate.
+- **Cross-repo reach is by defaults, not nullables.** The Understanding's group carries the default scope and
+  omits the repo anchor; `Repo` is already optional, `ScopeDimension` stays required (LADR-01).
 - **The five-part shape maps onto existing fields.** knowledge→`Statement`, why→`ContentSummary`,
   trigger→`Description`, boundaries→`ValidUntil`+scope, provenance→`Sources`+`ValidFrom`+`CreatedOn`
   (LADR-04).
-- **Load and import are two acts.** Load = context injection, no write. Import = `--store` opt-in,
-  through the capture path. Never one "ingest".
-- **Foreign material is data.** A session, meeting note or transcript is loaded as cited context, never
-  adopted as instructions or shipped fact (NFR-03).
-- **Only `--store` applies atomicity/redaction.** Merely loaded foreign material is not quietly
-  decomposed into atomic facts.
-- **Selectors bind, they don't filter reading.** `--tickets`/`--tags` associate imported material with
-  work on import; they do not select what the agent reads.
-- **`--currentsession` dumps to a discoverable local folder.** It writes the session's understanding to
-  `.context/understandings/<session-folder>/`, with a fitting name reported on output so another session
-  or repo can find and load it by name. The dump is an export, not a write (LADR-07).
+- **Version semantics are reused.** The existing `is_current` swap applies; the version chain is the delta.
+  No new delta column (LADR-04).
+- **Breadth is a filter, not two products.** `--all` returns memory + understanding; the default returns
+  understanding only (LADR-08). Both write nothing (NFR-01).
+- **Load and import are two acts.** Load = context injection, no write. Import = `--store` opt-in, through
+  the capture path.
+- **Foreign material is data**, cited and never adopted as shipped fact (NFR-03).
+- **Selectors bind, they don't filter reading** (LADR-08 keeps breadth and selectors orthogonal).
 
 ## Test References
 
 - **Skill L0 (CI-gated):** `.agents/skills/mimisbrunnr-understanding/tests/run_tests.py` — stdlib
-  `unittest`, 26 tests. A default load creates no files (NFR-01); store-export five-part rendering keeps
+  `unittest`, 28 tests. A default load creates no files (NFR-01); store-export five-part rendering keeps
   uuid/version attribution; `proposed` and `program` scope are flagged, never promoted (NFR-03); `--asof`
   filters the validity window and states the omission; foreign material is cited as data with truncation
   disclosed; import is refused without `--store` and emits nothing (NFR-02); the `--store` payload carries
   selectors and bundle flags while writing nothing; "no selectors ⇒ no association"; and the dump → load
   round trip that makes cross-session sharing real (LADR-07). Run:
   `python3 -B .agents/skills/mimisbrunnr-understanding/tests/run_tests.py`. Wired into
-  `.github/workflows/pr-gate.yml` beside the capture skill's harness.
+  `.github/workflows/pr-gate.yml`.
 - **L0:** `tests/SmoothAiProductContextMemory.Application.UnitTest/Features/Export/ExportRendererTests.cs`
-  — `Understanding_kind_renders_with_all_five_parts` locks in that an `understanding`-kind memory exports
-  its kind and all five parts. It guards LADR-04's mapping; it is not a test of new export code, because
-  the renderer was already kind-generic.
+  — `Understanding_kind_renders_with_all_five_parts` locks in that an `understanding`-kind memory exports its
+  kind and all five parts. It guards LADR-04's mapping; it is not a test of new export code, because the
+  renderer was already kind-generic.
 
 ## Quality Constraints
 
-- The rename is bounded to type names and internal identifiers (LADR-05) and is a **separate change**.
-  Any migration it generates is a defect. NFR-04 verifies it by diffing the OpenAPI document to zero
-  changes and by round-tripping a pre-rename jsonb row with its values intact — a renamed jsonb key
-  reads back as `null`/default and deserializes *successfully*, so assert on values, not on success.
 - The default load path must never call `SaveChanges` (NFR-01).
+- No migration is generated for the shape; an `understanding` kind is a value, not a schema change.
 
 ## Migration Plans
 
-- **`mimisbrunnr-context-memory` documentation must note the load skill as a reader + conditional
-  importer**, so the two skills' docs agree and the "sole writer" invariant is preserved.
-- **EXPORT_AGENTS / HLD-005's "no import" stance is amended for this capability only.** The forensic
-  dump and dossier remain one-way; the understanding import path is the scoped exception.
-- **The rename does not create a migration.** Verify NFR-04 after it.
+- **`mimisbrunnr-context-memory` documentation must note the load skill as a reader + conditional importer**,
+  so the two skills' docs agree and the "sole writer" invariant is preserved.
+- **EXPORT_AGENTS / HLD-005's "no import" stance is amended for this capability only.** The forensic dump
+  and dossier remain one-way; the understanding import path is the scoped exception.
+- **No rename and no migration.** The Understanding is a kind with default values; memory keeps its name.
 
 ## Changelog
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
-| 2026-09-19 | Self-review pass on the skill: fixed candidate decomposition splitting hard-wrapped prose per physical line (mid-sentence fragments reached the capture path), and a store-export import dropping three of the five parts plus lifecycle/provenance — both were fidelity defects against `BR-43`/NFR-03. Added a dump path guard matching the forensic export's root/repo-root refusal. Harness 19 -> 26 tests. | self-review |
-| 2026-09-19 | **Implemented.** `understanding` added to `KindValue`; skill delivers `load` (context-only), `import --store` (capture-path payload with `--tickets`/`--tags`/`--repository`/`--scope` binding and bundle flagging) and `dump --currentsession`; 19-test skill harness wired into the PR gate; L0 export test locks the five-part mapping. Verified: 515 tests pass across L0/L1/L2, 0 failures. Discovery finding recorded: `kind` is open vocabulary (no allowed-set validation, kind-generic renderer and query), so write/query/export needed **one constant** rather than the four separate code items planned. | LADR-01, LADR-04 |
-| 2026-09-19 | Bounded the `Memory`→`Understanding` rename to type names and made it a **separate change**. Discovery found serialization is convention-based (`JsonSerializerDefaults.Web`, zero `JsonPropertyName` attributes, `JsonbConverter` on the same convention), so a property name is both the JSON field and the stored jsonb key — a property rename is an API and data break the compiler cannot see. NFR-04 gained an OpenAPI-diff and jsonb round-trip check; a `[JsonPropertyName]` shim on every renamed member was considered and rejected. | LADR-05; NFR-04 |
-| 2026-09-19 | Created — discovery HLD for understanding transfer and loading. Defines Understanding as a `kind`, the default load (context-only) and opt-in import (`--store`) split, the five-part shape mapping onto existing fields, the code-only rename, and foreign-input-as-data handling. Amends the no-import stance for this capability only. | BRD-003 (BR-38…BR-45) |
+| 2026-09-19 | Rebuilt for the one-model model: Understanding is a **kind** of memory in the existing store, cross-repo by default scope and no repo anchor (no nullable scope), reusing `is_current` version semantics. Added load breadth (`--all` vs understanding-only, LADR-08). Retracted the earlier `Memory`→`Understanding` code rename (memory is the correct name) — LADR-05 and NFR-04 removed. Retracted the "understanding rather than memory" vocabulary requirement in favour of "memory is the correct name". | LADR-01, LADR-04, LADR-08; BRD-003 |
+| 2026-09-19 | Created — discovery HLD for understanding. | BRD-003 |

@@ -120,13 +120,17 @@ def in_window(parts: dict, asof: dt.date | None) -> bool:
     return True
 
 
-def render_store(records: list[dict], src: str, asof: dt.date | None) -> list[str]:
+def render_store(records: list[dict], src: str, asof: dt.date | None,
+                 all_kinds: bool = False) -> list[str]:
     out: list[str] = []
-    shown = skipped = 0
+    shown = non_kind = out_of_window = 0
     for record in records:
         parts = five_parts(record)
+        if not all_kinds and parts["kind"] != KIND_UNDERSTANDING:
+            non_kind += 1
+            continue
         if not in_window(parts, asof):
-            skipped += 1
+            out_of_window += 1
             continue
         shown += 1
         out.append(f"\n## {parts['subject']}")
@@ -147,9 +151,18 @@ def render_store(records: list[dict], src: str, asof: dt.date | None) -> list[st
             out.append(f"- **{'; '.join(flags)}**")
         if parts["sources"]:
             out.append(f"- Provenance: {json.dumps(parts['sources'], ensure_ascii=False)}")
-    header = [f"- Rendered {shown} record(s) from {src}."]
+    skipped = non_kind + out_of_window
+    header = [f"- Rendered {shown} record(s) from {src}."
+              f" Breadth: {'all (memory + understanding)' if all_kinds else 'understanding only'}."]
     if skipped:
-        header.append(f"- {skipped} record(s) omitted: outside the --asof validity window.")
+        reasons = []
+        if non_kind > 0:
+            reasons.append(f"{non_kind} not understanding-kind (scoped memory)")
+        if out_of_window > 0:
+            reasons.append(f"{out_of_window} outside the --asof validity window")
+        header.append(f"- {skipped} record(s) omitted: {', '.join(reasons)}.")
+        if non_kind > 0:
+            header.append("- Pass `--all` to also include scoped memory records.")
     return header + out
 
 
@@ -188,7 +201,7 @@ def cmd_load(args: argparse.Namespace) -> int:
 
     lines = ["# Loaded material — cited grounding context", ""]
     if records is not None:
-        lines += render_store(records, src, args.asof)
+        lines += render_store(records, src, args.asof, all_kinds=args.all_kinds)
         if args.max_chars != DEFAULT_MAX_CHARS:
             lines.append("- `--max-chars` does not apply to a store export; it was not used.")
     else:
@@ -422,6 +435,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     load = sub.add_parser("load", help="Render material as cited grounding context (no write).")
     load.add_argument("input", help="Path to a store export or a foreign document; - for stdin.")
     load.add_argument("--format", choices=("store", "foreign", "auto"), default="auto")
+    load.add_argument("--all", action="store_true", dest="all_kinds",
+                      help="Breadth: also render non-understanding (scoped memory) records. "
+                           "Omitting it returns only the understanding-kind.")
     load.add_argument("--asof", type=dt.date.fromisoformat,
                       help="Only render records valid at this date (store exports).")
     load.add_argument("--max-chars", type=int, default=DEFAULT_MAX_CHARS,

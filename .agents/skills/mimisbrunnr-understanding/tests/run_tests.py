@@ -54,6 +54,28 @@ STORE_EXPORT = {
     ]
 }
 
+# A store export mixing an understanding-kind with scoped memory, for breadths tests.
+MIXED_EXPORT = {
+    "understandings": [
+        {
+            "uuid": "aaaaaaaa-0000-0000-0000-000000000001",
+            "version": 1,
+            "subject": "Graph over joins",
+            "statement": "The graph is a path",
+            "kind": "understanding",
+            "status": "approved",
+        },
+        {
+            "uuid": "bbbbbbbb-0000-0000-0000-000000000002",
+            "version": 1,
+            "subject": "Storage engine",
+            "statement": "Postgres is the storage engine",
+            "kind": "architecture",
+            "status": "approved",
+        },
+    ]
+}
+
 
 def run(argv, expect=0):
     out, err = io.StringIO(), io.StringIO()
@@ -107,6 +129,24 @@ class LoadTests(unittest.TestCase):
             self.assertIn("Stale-image trap", out)
             self.assertNotIn("Proposed retry policy", out)
             self.assertIn("omitted", out)
+
+    def test_load_default_returns_understanding_only(self):
+        """Breadth default: a store export returns only understanding-kind records, and states the
+        scoped-memory omission rather than silently dropping it."""
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "mixed.json", json.dumps(MIXED_EXPORT))
+            _, out, _ = run(["load", src, "--format", "store"])
+            self.assertIn("The graph is a path", out)                 # understanding kind
+            self.assertNotIn("Postgres is the storage engine", out)   # scoped memory kind
+            self.assertIn("Pass `--all` to also include", out)
+
+    def test_load_all_unions_memory_and_understanding(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "mixed.json", json.dumps(MIXED_EXPORT))
+            _, out, _ = run(["load", src, "--format", "store", "--all"])
+            self.assertIn("Postgres is the storage engine", out)      # scoped memory now included
+            self.assertIn("The graph is a path", out)                  # understanding still present
+            self.assertIn("all (memory + understanding)", out)
 
     def test_foreign_material_is_cited_as_data_not_instructions(self):
         with tempfile.TemporaryDirectory() as tmp:

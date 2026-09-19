@@ -115,7 +115,7 @@ Hosted on **GitHub** at `https://github.com/generic-automation-and-it/project`. 
 
 | Date | Change | Ref |
 |---|---|---|
-| 2026-09-19 | Added BRD-003 (understanding transfer and loading, `BR-38`–`BR-46`) and HLD-007 (design, 7 LADRs / 4 NFRs), the `mimisbrunnr-understanding` skill (load / `--store` import / `--currentsession` session dump) with a CI-gated 26-test harness, the **Understanding** glossary term, and `understanding` as an open kind value. | BRD-003, HLD-007 |
+| 2026-09-19 | Added BRD-003 (understanding, `BR-38`–`BR-45`) and HLD-007 (design, 8 LADRs / 3 NFRs), the `mimisbrunnr-understanding` skill (breadth-controlled load / `--store` import / `--currentsession` session dump) with a CI-gated 28-test harness, and the **Understanding** glossary term as an open kind value. An Understanding is a memory of `kind = understanding`, cross-repo by default scope and no repo anchor, stored in the existing models — memory keeps its name. | BRD-003, HLD-007 |
 | 2026-09-17 | HLD-002 write-pipeline closure delivered: delegated read/write execution, conflict mechanics, and MCP capability split -- detail in the skill and AI-development changelogs. | HLD-002 |
 | 2026-09-16 | Corrected README temporal-validity wording: retrieval filters validity windows only when `asOf` is supplied. | PR #65 review |
 | 2026-09-16 | CI/CD summary now states main-only image publication and no PR/manual build-record or coverage artifact uploads. | PR #65 |

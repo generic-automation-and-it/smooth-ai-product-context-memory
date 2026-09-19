@@ -89,21 +89,27 @@ Temporal validity (`valid_from` / `valid_until`) keeps retrieved context current
 
 ### Understanding — the distilled skill
 
-An **Understanding** is the distilled, self-contained unit of hard-won knowledge that remains after an
-experience is discarded — the non-obvious root cause, the rejected approach and why, the convention that
-is not visible in code. It is not a session log, a summary, or documentation of the code; it is the
-transferable skill a future agent can act on as if it had learned it firsthand. It is stored as a memory
-of `kind = understanding`, with the five parts **trigger · knowledge · why · boundaries · provenance**
-mapped onto the stored fields ([BRD-003](docs/brd/003-understanding-transfer/)).
+Memory is the full, scoped record (product / customer / program / self, one repo, tickets) — and it can
+be redundant with code or an `AGENTS.md`, because it is a snapshot of context. An **Understanding** is
+different: a distilled, self-contained unit of hard-won knowledge inherited across lifecycles and
+iterations — the non-obvious root cause, the rejected approach and why, the convention that is not
+visible in code. It is *not* a session log, a summary, or documentation of the code; it is the
+transferable skill a future agent can act on as if it had learned it firsthand.
+
+An Understanding is stored as a **memory of `kind = understanding`** — the same models, the same
+`is_current` version semantics, the same defaults. Its group carries the default scope and omits the
+repo anchor, so unlike a scoped memory fact it is **not tied to one repo** and can cross repos
+([BRD-003](docs/brd/003-understanding-transfer/)). No nullable scope, no new column.
 
 The `mimisbrunnr-understanding` skill makes it portable:
 
-- **Load** an Understanding export — or **any** prior material (a session, meeting notes, a transcript)
-  — into a new or running agent's context. This is the default and **writes nothing** to the store.
-- **Import** it back into the store via an opt-in `--store` switch, through the normal capture path, so
-  it compounds.
+- **Load with `--all`** — recalls **memory + understanding** into a new or running agent's context.
+- **Load understandings only** — a targeted import returns **only** the understanding-kind, so the agent
+  inherits distilled learnings without the scoped record.
+- **Import (via `--store`)** captures it back into the store through the normal capture path, so it
+  compounds.
 - **`--currentsession`** dumps the current session's context to `.context/understandings/<folder>/`,
-  discoverable by name, for simple cross-session / cross-repo context sharing.
+  discoverable by name, for cross-session / cross-repo sharing.
 
 Loaded material is **data, not orders** — cited, never adopted as instructions or shipped fact
 ([HLD-007](docs/hlds/007-understanding-transfer/)).
