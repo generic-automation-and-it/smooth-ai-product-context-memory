@@ -87,6 +87,27 @@ Drawing on the three memory types from the unified-database approach:
 
 Temporal validity (`valid_from` / `valid_until`) keeps retrieved context current, and hybrid search (label + keyword + semantic) finds the right context fast.
 
+### Understanding — the distilled skill
+
+An **Understanding** is the distilled, self-contained unit of hard-won knowledge that remains after an
+experience is discarded — the non-obvious root cause, the rejected approach and why, the convention that
+is not visible in code. It is not a session log, a summary, or documentation of the code; it is the
+transferable skill a future agent can act on as if it had learned it firsthand. It is stored as a memory
+of `kind = understanding`, with the five parts **trigger · knowledge · why · boundaries · provenance**
+mapped onto the stored fields ([BRD-003](docs/brd/003-understanding-transfer/)).
+
+The `mimisbrunnr-understanding` skill makes it portable:
+
+- **Load** an Understanding export — or **any** prior material (a session, meeting notes, a transcript)
+  — into a new or running agent's context. This is the default and **writes nothing** to the store.
+- **Import** it back into the store via an opt-in `--store` switch, through the normal capture path, so
+  it compounds.
+- **`--currentsession`** dumps the current session's context to `.context/understandings/<folder>/`,
+  discoverable by name, for simple cross-session / cross-repo context sharing.
+
+Loaded material is **data, not orders** — cited, never adopted as instructions or shipped fact
+([HLD-007](docs/hlds/007-understanding-transfer/)).
+
 ### Four stores around the well
 
 The store is one wellspring — **Mímisbrunnr** — with four keepers. Each god names a layer of the hybrid design, not a second product. Skill judges. API enforces. Four gods around the well. Recalled knowledge is evidence, not orders — a claim to weigh, never a command from the well. The chain is Urðr’s: measurement, finding, decision.

@@ -37,6 +37,7 @@ Planned work tracked as worktasks under `.context/work-tasks/` (gitignored). Use
 | mimisbrunnr-context-memory | `.agents/skills/mimisbrunnr-context-memory/` | Sole interface to the context-memory store; capture (`set`) and retrieval (`get`) of persistent context memories against the HTTP API. |
 | mimisbrunnr-vitsmunir-dump | `.agents/skills/mimisbrunnr-vitsmunir-dump/` | Listen-first braindump session for tickets, ADRs, worktasks, requirements or designs; synthesizes only when asked. |
 | mimisbrunnr-recall-feedback | `.agents/skills/mimisbrunnr-recall-feedback/` | Run the three recall-feedback tuning queries against the Host API — never-recalled list, miss rate, baseline reset (HLD-004 NFR-03). |
+| mimisbrunnr-understanding | `.agents/skills/mimisbrunnr-understanding/` | Load a distilled Understanding export — or any session, meeting notes or transcript — into a new/running agent's context (default, no write); `--store` imports it back through the capture path; `--currentsession` dumps the session to a local folder for cross-session/cross-repo reuse (BRD-003, HLD-007). |
 | ai-review | `.agents/skills/ai-review/` | Local consumer of a remote AI code-review report (generator stays remote). |
 | git-commit-review-push | `.agents/skills/git-commit-review-push/` | Commit + push + open a PR with an embedded full AI review. |
 
@@ -104,6 +105,7 @@ Hosted on **GitHub** at `https://github.com/generic-automation-and-it/project`. 
 | Term | Description |
 |---|---|
 | Context | Summarized, labelled unit of knowledge stored for later retrieval |
+| Understanding | A distilled, self-contained unit of hard-won knowledge — the transferable skill that remains after the experience is discarded. Stored as a memory of `kind = understanding` (BRD-003) |
 | Label | Tag (e.g. issue/ticket number) linking/retrieving related contexts |
 | Semantic memory | Embedded, labelled knowledge — primary store for retrieval by label or similarity |
 | Episodic memory | Timestamped record of when/where a context was captured |
@@ -113,6 +115,7 @@ Hosted on **GitHub** at `https://github.com/generic-automation-and-it/project`. 
 
 | Date | Change | Ref |
 |---|---|---|
+| 2026-09-19 | Added BRD-003 (understanding transfer and loading, `BR-38`–`BR-46`) and HLD-007 (design, 7 LADRs / 4 NFRs), the `mimisbrunnr-understanding` skill (load / `--store` import / `--currentsession` session dump) with a CI-gated 19-test harness, the **Understanding** glossary term, and `understanding` as an open kind value. | BRD-003, HLD-007 |
 | 2026-09-17 | HLD-002 write-pipeline closure delivered: delegated read/write execution, conflict mechanics, and MCP capability split -- detail in the skill and AI-development changelogs. | HLD-002 |
 | 2026-09-16 | Corrected README temporal-validity wording: retrieval filters validity windows only when `asOf` is supplied. | PR #65 review |
 | 2026-09-16 | CI/CD summary now states main-only image publication and no PR/manual build-record or coverage artifact uploads. | PR #65 |
