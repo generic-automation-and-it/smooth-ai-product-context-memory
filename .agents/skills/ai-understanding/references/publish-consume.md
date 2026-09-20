@@ -58,12 +58,14 @@ internal hostname. Record the shape of the problem, not the value. See
 The source is a local path to a published archive — always positional; `--path` overrides only the
 target store it unpacks into (default `.context/understandings/`), never the source. How the archive
 arrived — mail, chat, a shared drive — is out of band. **This skill does not fetch remote content**, and
-`ai-asset-sync` does not transport Understandings. No approval prompt gates the unpack: the source path
+`ai-asset-sync` (an upstream template skill, **not present in this repo**) does not transport Understandings. No approval prompt gates the unpack: the source path
 is the consent, and the reconciliation table below is reported per slug after writing.
 
 A zip is untrusted input. Refuse any entry whose resolved path escapes the target store (`..` segments,
 absolute paths, symlinks), and reject the whole archive with a clear message rather than unpacking part
-of it.
+of it. **List the archive before extracting any of it** — `unzip -l <zip>` — and check every entry
+against that rule there; no enforcing script exists yet (LADR-008 is specification only), so the listing
+is the only gate, and extracting first to inspect afterwards has already lost.
 
 Reconcile per incoming slug. The key is the slug, and an incoming copy **keeps its own stamped folder**:
 under LADR-010 the same slug in two folders is a version chain, not an index failure, so there is nothing

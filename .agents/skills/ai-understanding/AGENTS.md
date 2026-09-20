@@ -118,6 +118,7 @@ No automated tests. The generator's validation paths (missing/placeholder `descr
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-20 | Two more local fixes to the cloned upstream copy: the dangling `ai-asset-sync` reference qualified (it is an upstream-template skill, not present here), and `publish-consume.md` mirrored the `unzip -l` listing step `SKILL.md` gained — the reference is the Full contract, so it had to carry the mechanic too. Both are upstream's; raise them there or the next sync reintroduces them. | PR #86 review |
 | 2026-09-20 | Two local fixes to the cloned upstream copy: `placeholder()` is total over parsed frontmatter and the `provenance` loop guards for `str` like every sibling check, so a block list where a scalar belongs is reported instead of raising `AttributeError` out of the validator; and `allowed-tools` gained `zip`/`unzip`, without which the documented `--publish`/`--consume` could not run at all. The consume step now says to list the archive before extracting any of it, since no enforcing script exists yet. Both defects are upstream's — raise them in `smooth-devex-template` or the next clone reintroduces them. | PR #86 review |
 | 2026-09-19 | Initial version. Slug-folder store under `.context/`, generated reference index, `scope`-gated publish, consumption via `ai-asset-sync`. | |
 | 2026-09-19 | Recorded the _Children of Time_ provenance of the term, to stop the name being genericized into something that invites session logs. | |
