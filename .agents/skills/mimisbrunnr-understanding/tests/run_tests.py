@@ -343,12 +343,67 @@ class ImportTests(unittest.TestCase):
             for invented in ("sources", "originUuid", "validFrom", "status"):
                 self.assertNotIn(invented, candidate)
 
+    def test_short_candidates_are_reported_not_silently_dropped(self):
+        """Regression: a sub-threshold candidate was filtered inside the splitter, so input vanished
+        with nothing said — against the skill's own never-silently-dropped contract."""
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md",
+                        "- ok\n"
+                        "- This candidate is long enough to carry a fact.\n"
+                        "- x\n")
+            _, out, _ = run(["import", src, "--store"])
+            payload = json.loads(out[out.index("{"):out.rindex("}") + 1])
+            self.assertEqual(len(payload["candidates"]), 1)
+            self.assertIn(f"Set aside 2 candidate(s) under {uc.MIN_CANDIDATE_CHARS} characters", out)
+            # The dropped text itself is named, so the omission is auditable rather than a count.
+            self.assertIn("'ok'", out)
+            self.assertIn("'x'", out)
+
+    def test_statementless_understanding_record_is_reported(self):
+        """Regression: an understanding-kind record with an empty statement hit a bare `continue`,
+        so it left no trace in the output at all."""
+        export = {"understandings": [{
+            "uuid": "cccccccc-0000-0000-0000-000000000003",
+            "version": 1,
+            "subject": "Empty",
+            "description": "has a body but no statement",
+            "statement": "",
+            "kind": "understanding",
+            "status": "active",
+        }]}
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "empty.json", json.dumps(export))
+            _, out, _ = run(["import", src, "--store"])
+            payload = json.loads(out[out.index("{"):out.rindex("}") + 1])
+            self.assertEqual(payload["candidates"], [])
+            self.assertIn("carrying no statement", out)
+
+    def test_bare_json_array_is_classified_visibly(self):
+        """A bare JSON array of statement-less dicts parses as a store export and yields nothing.
+        That classification is a known limitation, not a fixed behaviour — what is pinned here is
+        that it stays *visible*: a zero-record render that says so, never a silent empty load."""
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "arr.json", json.dumps([{"a": 1}, {"b": 2}]))
+            rc, out, _ = run(["load", src])
+            self.assertEqual(rc, 0)
+            self.assertIn("Rendered 0 record(s)", out)
+            self.assertIn("2 record(s) omitted", out)
+
 
 class DumpTests(unittest.TestCase):
     def test_dump_requires_currentsession(self):
         rc, _, err = run(["dump"])
         self.assertEqual(rc, 1)
         self.assertIn("--currentsession", err)
+
+    def test_dump_from_a_missing_file_reports_not_found(self):
+        """Regression: `--from` on an absent path raised FileNotFoundError out of read_input, while
+        the sibling `import` and `load` paths both answered `NOT FOUND` with exit 2."""
+        with tempfile.TemporaryDirectory() as tmp:
+            absent = str(Path(tmp) / "nope.md")
+            rc, _, err = run(["dump", "--currentsession", "--from", absent], expect=2)
+            self.assertEqual(rc, 2)
+            self.assertIn("NOT FOUND", err)
 
     def test_dump_writes_discoverable_folder_and_marker(self):
         with tempfile.TemporaryDirectory() as tmp:
