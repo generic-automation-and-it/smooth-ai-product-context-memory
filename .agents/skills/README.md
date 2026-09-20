@@ -17,6 +17,7 @@ Skills live **flat**, one directory per skill directly under `.agents/skills/`. 
 | **context-load-agents-context** | Load ancestor AGENTS.md context for a file | `/context-load-agents-context` |
 | **context-load-context** | Load domain context before implementation | `/context-load-context auth` |
 | **mimisbrunnr-context-memory** | Get/set persistent context-memory records; sole authority on the write path to the store | `/mimisbrunnr-context-memory [--dryrun] [--approve]` |
+| [**mimisbrunnr-bootstrap**](mimisbrunnr-bootstrap/README.md) | Build a cited, reviewable durable-context baseline for one existing project, optionally focused on its next feature | `/mimisbrunnr-bootstrap <repository> [next-feature focus]` |
 | **create-hld** | Author a design-only High-Level Design under `docs/hlds/NNN-<slug>/` | `/create-hld <kebab-slug>` |
 | **git-commit** | Commit with conventional format | `/git-commit [--autonomous]` |
 | **git-commit-push** | Commit and push to remote | `/git-commit-push [--autonomous]` |
@@ -57,6 +58,20 @@ call** (R13), so the switches trade inspection against irreversibility, not agai
 `--dryrun` and `--approve` are **mutually exclusive** — one writes nothing, the other is the permission to
 write canon. A plain `set`'s digest is a receipt, not a gate: it is rendered after the transaction commits.
 
+### mimisbrunnr-bootstrap capability gate
+
+See the [practical guide](mimisbrunnr-bootstrap/README.md) for prompts, preview review, reruns, and
+troubleshooting.
+
+Bootstrap always produces an offline candidate preview before storage. Comparison with existing memory,
+capture, and recall verification require the registered capability-limited context-memory workers. A new
+project starts storage only after explicit approval, which may include creating its durable group; that
+group can remain if later capture pauses or fails. The full memory-set `--dryrun` is available only for an
+existing group, or after separately authorized group creation, so it must not be presented as guaranteeing
+zero mutations overall. When the workers are unavailable, the skill reports those stages as unavailable
+and stops with the preview; it never falls back to a direct client or claims that the baseline was stored
+or verified.
+
 ### git-commit / git-commit-push / git-commit-push-pr switches
 
 The `--autonomous` switch suppresses all interactive questions across the entire commit chain. When passed, the agent uses its best judgment on commit grouping, message selection, and PR title — it never stops to ask.
@@ -70,7 +85,7 @@ The `--autonomous` switch suppresses all interactive questions across the entire
 
 ## Model Selection
 
-Skills are classified by complexity tier. Each SKILL.md carries a `models` frontmatter block with the recommended model per tool. When a skill is invoked as a sub-agent, use the model from its `models` block.
+Skills are classified by complexity tier. Legacy skills carry a top-level `models` block; `mimisbrunnr-bootstrap` uses the validator-compatible `metadata.models` location for the same recommendation. When a skill is invoked as a sub-agent, use the model recommendation from its own frontmatter.
 
 | Complexity | Claude Code | GitHub Copilot | OpenAI Codex |
 |-----------|-------------|----------------|--------------|
@@ -97,6 +112,7 @@ Skills are classified by complexity tier. Each SKILL.md carries a `models` front
 | **ai-template-sync** | high | Interactive multi-turn Q&A + conditional file sync across tools |
 | **create-hld** | high | Multi-turn clarification gates + architectural judgment (LADRs, NFRs, diagrams) |
 | **mimisbrunnr-context-memory** | high | Write path performs semantic cross-group dedup, link derivation, atomicity splitting and summary/keyword generation — judgement the database cannot express as constraints |
+| **mimisbrunnr-bootstrap** | high | Source-backed project synthesis, consequential questioning, conflict preservation and reviewed candidate selection require product judgement |
 
 ### Sub-skill invocation model guidance
 
@@ -114,7 +130,7 @@ Skills are flat under `.agents/skills/`; the category lives in the folder-name p
 | `agile-` | `agile-github-breakdown`, `agile-github-task-from-diff` |
 | `ai-` | `ai-review`, `ai-terse`, `ai-template-sync` |
 | `context-` | `context-load-agents-context`, `context-load-context` |
-| `mimisbrunnr-` | `mimisbrunnr-vitsmunir-dump`, `mimisbrunnr-context-memory` |
+| `mimisbrunnr-` | `mimisbrunnr-vitsmunir-dump`, `mimisbrunnr-bootstrap`, `mimisbrunnr-context-memory`, `mimisbrunnr-recall-feedback`, `mimisbrunnr-understanding` |
 | `git-` | `git-commit`, `git-commit-push`, `git-commit-push-pr`, `git-commit-review-push`, `git-sync` |
 | _(none)_ | `create-hld`, `manage-rule-system` |
 
