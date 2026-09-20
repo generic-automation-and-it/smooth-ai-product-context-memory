@@ -2,14 +2,14 @@
 
 | | |
 |---|---|
-| **Status** | Implemented (record + query mechanism); NFR evidence pending |
+| **Status** | Complete — record + query mechanism and all three NFR evidence accepted |
 | **Owner** | generik0 |
 | **Tracker** | Context-memory tuning |
-| **Last updated** | 2026-09-18 |
+| **Last updated** | 2026-09-20 |
 
 > Delivers **intent + spec** — what we are building and why, the decisions behind it, and the quality bar
-> it must meet. The record-and-query mechanism (workstreams 02/03) is implemented; the NFR evidence is
-> workstream-04 scope.
+> it must meet. The record-and-query mechanism (workstreams 02/03) is implemented, and NFR-01..03 are now
+> verified against the shipped implementation (workstream 04).
 
 ## Intent
 
@@ -110,9 +110,11 @@ See [`./nfrs/`](./nfrs/).
 
 | NFR | Attribute | Target (summary) | Status |
 |-----|-----------|------------------|--------|
-| [NFR-01](./nfrs/NFR-01-confidentiality.md) | Confidentiality | No content, no query text, in any feedback record | Draft |
-| [NFR-02](./nfrs/NFR-02-read-path-cost.md) | Performance | Retrieval latency unchanged; no contention on hot rows | Draft — [placement measured](./nfrs/NFR-02-placement-evidence-2026-09-18.md) |
-| [NFR-03](./nfrs/NFR-03-actionability.md) | Actionability | Answers the three tuning questions or it is not worth building | Draft |
+| [NFR-01](./nfrs/NFR-01-confidentiality.md) | Confidentiality | No content, no query text, in any feedback record | [Accepted](./nfrs/NFR-01-evidence-2026-09-20.md) |
+| [NFR-02](./nfrs/NFR-02-read-path-cost.md) | Performance | Retrieval latency unchanged; no contention on hot rows | [Accepted](./nfrs/NFR-02-evidence-2026-09-20.md) |
+| [NFR-03](./nfrs/NFR-03-actionability.md) | Actionability | Answers the three tuning questions or it is not worth building | [Accepted](./nfrs/NFR-03-evidence-2026-09-20.md) |
 
-NFR-02 stays Draft deliberately: the measured evidence settled which placement to build, not that the
-shipped write path meets the target. All three are verified against the implementation, not the prototype.
+NFR-01..03 are verified against the shipped implementation, not the prototype. The placement evidence
+([2026-09-18](./nfrs/NFR-02-placement-evidence-2026-09-18.md)) settled *where* feedback lives; the
+[HLD-001 `pg_trgm` reopening evidence](./nfrs/HLD-001-pg-trgm-reopening-evidence-2026-09-20.md) records that
+the reopening threshold is met (the adopting decision stays HLD-001's).
