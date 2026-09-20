@@ -42,7 +42,7 @@ flowchart LR
     D -->|"set"| E[HTTP API]
     E --> F[(PostgreSQL+AGE)]
     E --> G[(blob)]
-    B -->|"read export"| E
+    B -->|"read local export / foreign file"| H[(prior material on disk)]
 ```
 
 ## Architecture Decisions
@@ -105,6 +105,7 @@ See [./ladrs/](./ladrs/). All Draft.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-20 | Corrected the system diagram: the load skill reads prior material **from disk**, not from the HTTP API/store — the shipped client is file-only with no network, so the draw had shown a boundary the design forbids. `c4-context.md`'s loadSkill relation redirected to a disk material element, and the AGENTS mermaid now reads a local export/file rather than hitting `E`. The sibling flow diagram already modeled it correctly. | PR #86 review |
 | 2026-09-19 | Self-review (iter 4): fixed the import path collapsing a scoped memory fact into an understanding. Import of a store export now takes only `kind = understanding` records (LADR-01). | self-review |
 | 2026-09-19 | Rebuilt for the one-model model: Understanding is a **kind** of memory in the existing store, cross-repo by default scope and no repo anchor (no nullable scope), reusing `is_current` version semantics. Added load breadth (`--all` vs understanding-only, LADR-08). Retracted the earlier `Memory`→`Understanding` code rename (memory is the correct name) — LADR-05 and NFR-04 removed. Retracted the "understanding rather than memory" vocabulary requirement in favour of "memory is the correct name". | LADR-01, LADR-04, LADR-08; BRD-003 |
 | 2026-09-19 | Created — discovery HLD for understanding. | BRD-003 |
