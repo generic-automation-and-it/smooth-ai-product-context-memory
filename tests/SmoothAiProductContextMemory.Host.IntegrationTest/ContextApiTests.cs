@@ -549,23 +549,35 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
         JsonElement created = await SetMemory(group, "Recalled fact", "Claim", MemoryVersion.MemoryVersionStatus.Approved);
         Guid memoryUuid = created.GetProperty("items")[0].GetProperty("uuid").GetGuid();
 
+        // A second memory that no query in this test matches, so never-recalled has something to return.
+        JsonElement untouched = await SetMemory(
+            group, "Unretrieved subject", "Never queried claim", MemoryVersion.MemoryVersionStatus.Approved);
+        Guid untouchedUuid = untouched.GetProperty("items")[0].GetProperty("uuid").GetGuid();
+
         // A hit query writes a record for the returned memory; an empty query writes a miss record.
         (await _http.PostAsJsonAsync("/api/context/query", new { query = "Recalled fact", limit = 50 }, Ct))
             .StatusCode.ShouldBe(HttpStatusCode.OK);
         (await _http.PostAsJsonAsync("/api/context/query", new { query = "zz-no-such-memory-xyz", limit = 50 }, Ct))
             .StatusCode.ShouldBe(HttpStatusCode.OK);
 
-        // never-recalled returns identity + capture time only; the just-recalled memory is absent.
+        // never-recalled excludes anything captured within 7 days of asOf (NpgsqlRecallFeedbackQuery
+        // RecentlyCapturedGraceDays), and both memories above were captured now. Asking as of a date
+        // past that window is what puts them in scope — with asOf=today every assertion below passes
+        // vacuously, because the grace filter alone removes them whether or not a feedback row exists.
+        string asOf = $"{DateTimeOffset.UtcNow.AddDays(8):yyyy-MM-dd}";
         using HttpResponseMessage never = await _http.GetAsync(
-            $"/api/context/recall-feedback/never-recalled?asOf={DateTimeOffset.UtcNow:yyyy-MM-dd}&limit=500", Ct);
+            $"/api/context/recall-feedback/never-recalled?asOf={asOf}&limit=500", Ct);
         never.StatusCode.ShouldBe(HttpStatusCode.OK);
         JsonElement neverBody = await never.Content.ReadFromJsonAsync<JsonElement>(Json, Ct);
-        JsonElement neverItems = neverBody.GetProperty("items");
-        neverItems.EnumerateArray().ShouldNotContain(i => i.GetProperty("memoryUuid").GetGuid() == memoryUuid);
-        foreach (JsonElement item in neverItems.EnumerateArray())
-        {
-            item.TryGetProperty("capturedOn", out _).ShouldBeTrue();
-        }
+        JsonElement[] neverItems = [.. neverBody.GetProperty("items").EnumerateArray()];
+
+        // In scope and never queried, so present; in scope but recalled, so filtered by its feedback row.
+        neverItems.ShouldContain(i => i.GetProperty("memoryUuid").GetGuid() == untouchedUuid);
+        neverItems.ShouldNotContain(i => i.GetProperty("memoryUuid").GetGuid() == memoryUuid);
+
+        // Identity + capture time only, asserted on a row known to be present.
+        JsonElement untouchedRow = neverItems.Single(i => i.GetProperty("memoryUuid").GetGuid() == untouchedUuid);
+        untouchedRow.GetProperty("capturedOn").GetDateTimeOffset().ShouldBeLessThan(DateTimeOffset.UtcNow.AddMinutes(1));
 
         // miss-rate is derivable over the window from the hit + miss just recorded.
         DateTimeOffset to = DateTimeOffset.UtcNow;
