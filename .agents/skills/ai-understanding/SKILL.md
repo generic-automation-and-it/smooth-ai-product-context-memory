@@ -3,6 +3,8 @@ name: ai-understanding
 description: Export this session's hard-won knowledge into Understandings under .context/understandings/<subject>-<yyyyMMdd-HHmm>/<slug>.md (one file per unit, grouped into a subject folder stamped with when it was created), import matching ones back at task start, and publish/consume them across workspaces as a zip. Trigger on "export the understandings", "make an Understanding of this", "encode this", "what did we learn", "/ai-understanding", or when a session resolved something that cost real effort and would cost the same again. Not a session log and not code documentation.
 allowed-tools:
   - Bash(python3 .agents/skills/ai-understanding/scripts/understanding_index.py:*)
+  - Bash(zip:*)
+  - Bash(unzip:*)
   - Read
   - Write
   - Edit
@@ -383,7 +385,7 @@ Sharing is sending someone the zip. Full contract: `references/publish-consume.m
 
 The reverse of publish: another workspace's archive becomes available here.
 
-The source is a local path to a published archive — always positional; `--path` overrides only the store it unpacks into (default `.context/understandings/`), never the source. How it arrived — mail, chat, a drive — is out of band; this skill does not fetch remote content. Extraction refuses any entry whose resolved path escapes the store (`..` segments, absolute paths, symlinks) and rejects the whole archive rather than unpacking part of it.
+The source is a local path to a published archive — always positional; `--path` overrides only the store it unpacks into (default `.context/understandings/`), never the source. How it arrived — mail, chat, a drive — is out of band; this skill does not fetch remote content. Extraction refuses any entry whose resolved path escapes the store (`..` segments, absolute paths, symlinks) and rejects the whole archive rather than unpacking part of it. **List the archive before extracting any of it** — `unzip -l <zip>` — and check every entry against that rule there; no enforcing script exists yet (LADR-008 is specification only), so the listing is the only gate, and extracting first to inspect afterwards has already lost.
 
 Reconciliation, per incoming slug. The key is the slug; an incoming copy keeps its own stamped folder, because a slug in two folders is a version chain rather than an error:
 
