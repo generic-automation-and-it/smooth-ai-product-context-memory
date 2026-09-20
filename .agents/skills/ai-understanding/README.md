@@ -42,8 +42,10 @@ A file is a **question and its answer**, plus why it holds and where it stops ap
 
 Ask for `--export --all` to skip the "which of these should I write?" question.
 
-Sharing is sending someone the folder. They read it in any editor; their agent reads it the same way
-yours does.
+Sharing goes through `--publish`, which writes a zip; the other side runs `--consume <zip>`. The
+publish step is what runs the pre-publish secret check and the `--portable-only` scope filter, so
+hand-copying the store folder skips both. Inside the archive each unit is still plain Markdown —
+readable in any editor, and their agent reads it the same way yours does.
 
 ## The rest
 
