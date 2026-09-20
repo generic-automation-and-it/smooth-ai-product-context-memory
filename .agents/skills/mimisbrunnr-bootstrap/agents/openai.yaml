@@ -1,0 +1,4 @@
+interface:
+  display_name: "Bootstrap Project Context"
+  short_description: "Build a reviewed repository memory baseline"
+  default_prompt: "Use $mimisbrunnr-bootstrap to preview a source-backed context baseline for this repository."

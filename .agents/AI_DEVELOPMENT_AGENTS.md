@@ -40,6 +40,7 @@ This is a unified AI development experience folder that centralizes skills, prom
 | `.agents/skills/context-load-context/` | Load or create functional `*AGENTS.md` context files |
 | `.agents/skills/context-load-agents-context/` | Load ancestor AGENTS.md context for a target file |
 | `.agents/skills/mimisbrunnr-context-memory/` | Skill to store/retrieve persistent context memories (sole authority on the write path; the `mimisbrunnr-understanding` skill is a reader + conditional importer) |
+| `.agents/skills/mimisbrunnr-bootstrap/` | Build a cited, practitioner-reviewed durable-context baseline for one existing project, optionally focused on its next feature; without registered capability-limited workers it stops after the offline preview |
 | `.agents/skills/mimisbrunnr-recall-feedback/` | Run the three HLD-004 NFR-03 recall-feedback tuning queries against the Host API |
 | `.agents/skills/mimisbrunnr-understanding/` | Load memory + understanding out of the store into an agent, import foreign material back in, dump the current session |
 | `.agents/skills/create-hld/` | Author a design-only High-Level Design under `docs/hlds/NNN-<slug>/` |
@@ -145,6 +146,7 @@ ls -la | grep -E '(\.claude|\.codex|\.cursor)'
 
 | Date | Change | Reason |
 | :---- | :---- | :---- |
+| 2026-09-20 | Registered `mimisbrunnr-bootstrap`: bounded project-context candidate preview with optional feature focus; comparison, capture and recall require capability-limited workers and have no direct-client fallback. | BR-46 local proposal |
 | 2026-09-20 | Added `ai-understanding` and `mimisbrunnr-understanding` to the skills inventory — both shipped without an inventory row. | PR #86 review |
 | 2026-09-19 | Added `mimisbrunnr-recall-feedback` to the skills inventory. | HLD-004 NFR-03 |
 | 2026-09-17 | Registered context-memory read/write workers; read worker uses a read-only MCP surface with no Bash or mutation methods. | HLD-002 capability split |
