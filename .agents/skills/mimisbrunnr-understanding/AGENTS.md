@@ -76,7 +76,7 @@ DB and wire are unchanged.
 
 ## Test References
 
-- **Committed L0 harness (CI-gated):** `tests/run_tests.py` — stdlib `unittest`, 30 tests, no external
+- **Committed L0 harness (CI-gated):** `tests/run_tests.py` — stdlib `unittest`, 34 tests, no external
   runner. A default load creates no files (NFR-01); store-export five-part rendering keeps uuid/version
   attribution; `proposed`/`program` scope flagged, never promoted (NFR-03); `--asof` filters the validity
   window and states the omission; foreign material cited as data with truncation disclosed; import refused
@@ -90,6 +90,7 @@ DB and wire are unchanged.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-20 | Review fixes: `import` no longer drops input in silence — the sub-threshold length filter moved out of `split_candidates` into the caller, which names each candidate it sets aside, and an understanding-kind record with an empty statement is reported instead of hitting a bare `continue`. `dump --from` on an absent path answers `NOT FOUND` with exit 2, matching `import` and `load`. README corrected: a load is not an import, and `--store` prepares a capture rather than performing one. Harness 30 -> 34 tests. | PR #86 review |
 | 2026-09-19 | Self-review (iter 5/6): pinned the `--all` with `--asof` combination so the two omission reasons are counted separately, and corrected the leftover rename non-negotiable to state memory keeps its name. Harness 29 -> 30 tests. | self-review |
 | 2026-09-19 | Self-review (iter 4): import of a store export is now understanding-only. It used to stamp every record `kind = understanding`, so a scoped memory fact in a mixed export was collapsed into an understanding (LADR-01 defect). Non-understanding records are now skipped and the skip is reported. Harness 28 -> 29 tests. | self-review |
 | 2026-09-19 | Self-review fixes: hard-wrapped prose no longer becomes one candidate per physical line (it was handing the capture path mid-sentence fragments); a store-export import now carries all five parts plus lifecycle/provenance instead of only statement+description; `dump` refuses the filesystem root and a repository root; inapplicable flags are reported. Harness 19 -> 26 tests. | self-review |
