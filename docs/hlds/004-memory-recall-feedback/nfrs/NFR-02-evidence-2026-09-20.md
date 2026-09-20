@@ -38,19 +38,19 @@ per-test database. Every step measures the shipped path, not a prototype.
 
 | Configuration | p50 (ms) | p95 (ms) | p95 delta (ms) | p95 across rounds (ms) | spread (ms) |
 |---|---|---|---|---|---|
-| feedback off | 4.980 | 5.834 | 0.000 | 5.330–6.019 | 0.689 |
-| feedback on | 6.041 | 6.751 | 0.917 | 5.534–7.322 | 1.788 |
+| feedback off | 4.659 | 5.686 | 0.000 | 4.827–5.929 | 1.102 |
+| feedback on | 5.404 | 6.619 | 0.933 | 5.559–7.055 | 1.496 |
 
-The off↔on p95 gap is 0.917 ms against the widest single-config run-to-run spread of 1.788 ms — **within
+The off↔on p95 gap is 0.933 ms against the widest single-config run-to-run spread of 1.496 ms — **within
 measurement noise**. The write is fire-and-forget on a fresh connection outside the retrieval's unit of work,
 so it runs concurrently with, and cannot block, the retrieval.
 
 ### Concurrency — no contention
 
-16 workers × 20 retrievals of one popular memory: p50 11.345 ms, p95 19.727 ms, ~1,191 ops/s, **0 lock
-timeouts (`55P03`)**. Append-only records never serialise on a shared row, so a popular memory is not a hot
-row. (The counter-column placement — the rejected LADR-02 option A — serialised outright; see the placement
-evidence.)
+16 workers × 20 retrievals of one popular memory (the shared-row contention shape the NFR names): p50
+15.097 ms, p95 23.866 ms, ~931 ops/s, **0 lock timeouts (`55P03`)**. Append-only records never serialise on a
+shared row, so a popular memory is not a hot row. (The counter-column placement — the rejected LADR-02 option A
+— serialised outright; see the placement evidence.)
 
 ### Failure injection — retrieval unaffected
 
