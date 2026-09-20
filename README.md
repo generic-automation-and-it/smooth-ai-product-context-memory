@@ -106,10 +106,12 @@ path, not under a single-repo query — it is a distilled learning, not a fact o
 The `mimisbrunnr-understanding` skill makes it portable:
 
 - **Load with `--all`** — recalls **memory + understanding** into a new or running agent's context.
-- **Load understandings only** — a targeted import returns **only** the understanding-kind, so the agent
-  inherits distilled learnings without the scoped record.
-- **Import (via `--store`)** captures it back into the store through the normal capture path, so it
-  compounds.
+- **Load understandings only** — the default load returns **only** the understanding-kind, so the agent
+  inherits distilled learnings without the scoped record. Load and import are separate operations: a
+  load writes nothing.
+- **Import (via `--store`)** prepares the material for capture through the normal capture path — it
+  emits the candidate payload and hands it to `mimisbrunnr-context-memory`, the sole writer, which
+  performs the write. The client itself never writes, so the round trip takes both skills.
 - **`--currentsession`** dumps the current session's context to `.context/mimisbrunnr-understandings/<folder>/`,
   discoverable by name, for cross-session / cross-repo sharing.
 
