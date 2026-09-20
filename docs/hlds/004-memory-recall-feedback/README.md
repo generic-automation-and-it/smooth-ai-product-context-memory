@@ -94,8 +94,8 @@ side channel around a constraint the rest of the design honours.
 
 ## Architecture Decisions (LADRs)
 
-LADRs 01–03 are strategic; 04 is tactical. See [`./ladrs/`](./ladrs/). LADR-01..04 are Accepted; the
-three NFRs remain Draft pending workstream-04 evidence.
+LADRs 01–03 are strategic; 04 is tactical. See [`./ladrs/`](./ladrs/). LADR-01..04 and NFR-01..03 are
+Accepted; the NFR evidence is recorded in [`./nfrs/`](./nfrs/).
 
 | LADR | Decision | Status |
 |------|----------|--------|
