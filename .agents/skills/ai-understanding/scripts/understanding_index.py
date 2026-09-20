@@ -138,8 +138,14 @@ def unquote(value: str) -> str:
     return value
 
 
-def placeholder(value: str) -> bool:
-    return value.startswith("<") and value.endswith(">")
+def placeholder(value: object) -> bool:
+    """Total over the parsed frontmatter, not just over strings.
+
+    Every value here comes from a file a human hand-edited, so a field the schema wants as a
+    scalar arrives as a block list often enough to matter. A validator that raises on malformed
+    input reports nothing about the file it was handed, which is the one job it has.
+    """
+    return isinstance(value, str) and value.startswith("<") and value.endswith(">")
 
 
 def read_unit(unit_file: Path, subject: str) -> tuple[dict | None, list[str]]:
@@ -172,7 +178,7 @@ def read_unit(unit_file: Path, subject: str) -> tuple[dict | None, list[str]]:
     else:
         for key in ("learned", "session", "source"):
             value = provenance.get(key)
-            if not value or placeholder(value):
+            if not isinstance(value, str) or not value or placeholder(value):
                 problems.append(f"{where}: 'provenance.{key}' is missing or still a placeholder")
 
     context = fields.get("agents_context")
