@@ -51,7 +51,7 @@ acting on it.
 Understandings are written during debugging, when a literal value is the fastest thing to type. Before
 anything leaves the workspace, confirm no unit carries a credential, token, connection string, or
 internal hostname. Record the shape of the problem, not the value. See
-`.github/instructions/skills/skill-secret-handling.instructions.md`.
+`.github/instructions/skill-secret-handling.instructions.md`.
 
 ## Consume
 
