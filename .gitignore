@@ -405,7 +405,9 @@ MigrationBackup/
 # Local AI context / work tasks (not tracked in source control)
 .context/
 
-# Generated Markdown export of the context-memory store (WT-4). Disposable; never commit.
+# Disposable generated local state — never commit: memory Markdown export
+# (.context/mimisbrunnr-memories/), understanding store (.context/understandings/),
+# session dumps (.context/mimisbrunnr-understandings/).
 /export/
 .context/mimisbrunnr-memories/
 .context/understandings/
