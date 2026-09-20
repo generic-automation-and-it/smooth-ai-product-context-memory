@@ -255,7 +255,10 @@ public sealed class NfrEvidenceTests : PersistenceTestBase
         on.P95Ms.ShouldBeLessThan(off.P95Ms + 2.0,
             "the feedback write exceeded its per-retrieval budget; re-measure before raising this ceiling");
 
-        Concurrency conc = await MeasureConcurrencyAsync(criteria);
+        // The contention shape is one popular memory, not a batch: the NFR-02 criterion is that a second
+        // reader of the *same* memory does not queue behind the first. The sensitive-phrase query returns
+        // exactly that one memory, so every worker contends on the same shared uuid.
+        Concurrency conc = await MeasureConcurrencyAsync(Req(SensitivePhraseText, RetrievalLimit));
         report.AppendLine();
         report.AppendLine(string.Create(
             CultureInfo.InvariantCulture,
@@ -311,6 +314,7 @@ public sealed class NfrEvidenceTests : PersistenceTestBase
     {
         var samples = new double[ConcurrentWorkers * OperationsPerWorker];
         int lockTimeouts = 0;
+        int emptyResponses = 0;
         Stopwatch wall = Stopwatch.StartNew();
 
         await Task.WhenAll(Enumerable.Range(0, ConcurrentWorkers).Select(async worker =>
@@ -327,7 +331,11 @@ public sealed class NfrEvidenceTests : PersistenceTestBase
                 sw.Restart();
                 try
                 {
-                    await h.Handle(criteria, Ct);
+                    QueryMemories.Response resp = await h.Handle(criteria, Ct);
+                    if (resp.Items.Count == 0)
+                    {
+                        Interlocked.Increment(ref emptyResponses);
+                    }
                 }
                 catch (PostgresException ex)
                     when (string.Equals(ex.SqlState, PostgresErrorCodes.LockNotAvailable, StringComparison.Ordinal))
@@ -342,6 +350,9 @@ public sealed class NfrEvidenceTests : PersistenceTestBase
 
         wall.Stop();
         Array.Sort(samples);
+        // The contention shape must actually retrieve the popular memory, or the test passes vacuously.
+        emptyResponses.ShouldBe(0,
+            "the popular-memory retrieval returned nothing; the contention shape was not exercised");
         return new Concurrency(
             Percentile(samples, 0.50),
             Percentile(samples, 0.95),
