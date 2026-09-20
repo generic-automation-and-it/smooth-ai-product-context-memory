@@ -36,10 +36,12 @@ This is a unified AI development experience folder that centralizes skills, prom
 | `.agents/skills/ai-review/` | Local consumer of a remote AI code-review report |
 | `.agents/skills/ai-terse/` | Reformat this turn's reply into terse, high-density output with a TL;DR |
 | `.agents/skills/ai-template-sync/` | UPSERT the smooth-devex-template agentic scaffold into an existing repo |
+| `.agents/skills/ai-understanding/` | Export a session's Understandings to `.context/understandings/`, import matching ones back, publish/consume across workspaces as a zip — plain Markdown, no store |
 | `.agents/skills/context-load-context/` | Load or create functional `*AGENTS.md` context files |
 | `.agents/skills/context-load-agents-context/` | Load ancestor AGENTS.md context for a target file |
 | `.agents/skills/mimisbrunnr-context-memory/` | Skill to store/retrieve persistent context memories (sole interface to the context-memory store) |
 | `.agents/skills/mimisbrunnr-recall-feedback/` | Run the three HLD-004 NFR-03 recall-feedback tuning queries against the Host API |
+| `.agents/skills/mimisbrunnr-understanding/` | Load memory + understanding out of the store into an agent, import foreign material back in, dump the current session |
 | `.agents/skills/create-hld/` | Author a design-only High-Level Design under `docs/hlds/NNN-<slug>/` |
 | `.agents/skills/git-commit/` | Commit with conventional format |
 | `.agents/skills/git-commit-push/` | Commit and push to remote |
@@ -143,6 +145,7 @@ ls -la | grep -E '(\.claude|\.codex|\.cursor)'
 
 | Date | Change | Reason |
 | :---- | :---- | :---- |
+| 2026-09-20 | Added `ai-understanding` and `mimisbrunnr-understanding` to the skills inventory — both shipped without an inventory row. | PR #86 review |
 | 2026-09-19 | Added `mimisbrunnr-recall-feedback` to the skills inventory. | HLD-004 NFR-03 |
 | 2026-09-17 | Registered context-memory read/write workers; read worker uses a read-only MCP surface with no Bash or mutation methods. | HLD-002 capability split |
 | 2026-09-14 | This-repo skills renamed: `ai-brain-dump` → `mimisbrunnr-vitsmunir-dump`; `context-memory` → `mimisbrunnr-context-memory`. Upstream skills unchanged. | |
