@@ -9,7 +9,7 @@ public class GitignoreExportTests
         string[] lines = File.ReadAllLines(Path.Combine(root, ".gitignore"));
 
         lines.ShouldContain("/export/");
-        lines.ShouldContain(".context/export/");
+        lines.ShouldContain(".context/mimisbrunnr-memories/");
     }
 
     private static string FindRepoRoot()

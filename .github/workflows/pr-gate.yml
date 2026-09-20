@@ -16,6 +16,7 @@ on:
       - tests/**
       - scripts/**
       - .agents/skills/mimisbrunnr-context-memory/**
+      - .agents/skills/mimisbrunnr-understanding/**
       - .agents/agents/memory-read.md
       - .agents/agents/memory-write.md
       - .github/agents/memory-read.agent.md
@@ -39,6 +40,7 @@ on:
       - tests/**
       - scripts/**
       - .agents/skills/mimisbrunnr-context-memory/**
+      - .agents/skills/mimisbrunnr-understanding/**
       - .agents/agents/memory-read.md
       - .agents/agents/memory-write.md
       - .github/agents/memory-read.agent.md
@@ -81,6 +83,9 @@ jobs:
         run: |
           python3 -B .agents/skills/mimisbrunnr-context-memory/tests/run_tests.py
           python3 -B .agents/skills/mimisbrunnr-context-memory/tests/measure_cost.py
+
+      - name: Test understanding skill
+        run: python3 -B .agents/skills/mimisbrunnr-understanding/tests/run_tests.py
 
       - name: Install .NET SDK
         uses: actions/setup-dotnet@v4

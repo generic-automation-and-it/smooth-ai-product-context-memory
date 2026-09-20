@@ -66,5 +66,15 @@ public sealed class MemoryVersion
         public const string Backlog = "backlog";
         public const string Preference = "preference";
         public const string Divergence = "divergence";
+
+        /// <summary>
+        /// A distilled, self-contained unit of hard-won knowledge inherited across lifecycles and
+        /// iterations — the transferable skill that remains after the experience is discarded. Unlike a
+        /// scoped memory fact, an understanding is not tied to one repo or scope; its group carries the
+        /// default values and omits the repo anchor so it can cross repos. Stored with the same models,
+        /// <c>is_current</c> version semantics and defaults as any other memory; see HLD 007 (understanding
+        /// transfer) LADR-01 / LADR-04. Deliberately the same table — no nullable scope, no new column.
+        /// </summary>
+        public const string Understanding = "understanding";
     }
 }

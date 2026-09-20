@@ -87,6 +87,37 @@ Drawing on the three memory types from the unified-database approach:
 
 Temporal validity (`valid_from` / `valid_until`) keeps retrieved context current, and hybrid search (label + keyword + semantic) finds the right context fast.
 
+### Understanding — the distilled skill
+
+Memory is the full, scoped record (product / customer / program / self, one repo, tickets) — and it can
+be redundant with code or an `AGENTS.md`, because it is a snapshot of context. An **Understanding** is
+different: a distilled, self-contained unit of hard-won knowledge inherited across lifecycles and
+iterations — the non-obvious root cause, the rejected approach and why, the convention that is not
+visible in code. It is *not* a session log, a summary, or documentation of the code; it is the
+transferable skill a future agent can act on as if it had learned it firsthand.
+
+An Understanding is stored as a **memory of `kind = understanding`** — the same models, the same
+`is_current` version semantics, the same defaults. Its group carries the default scope and omits the
+repo anchor, so unlike a scoped memory fact it is **not tied to one repo**. Because a repository is a
+retrieval filter, an un-anchored understanding surfaces under an un-scoped query or the `--all` breadth
+path, not under a single-repo query — it is a distilled learning, not a fact of any one repo
+([BRD-003](docs/brd/003-understanding-transfer/)). No nullable scope, no new column.
+
+The `mimisbrunnr-understanding` skill makes it portable:
+
+- **Load with `--all`** — recalls **memory + understanding** into a new or running agent's context.
+- **Load understandings only** — the default load returns **only** the understanding-kind, so the agent
+  inherits distilled learnings without the scoped record. Load and import are separate operations: a
+  load writes nothing.
+- **Import (via `--store`)** prepares the material for capture through the normal capture path — it
+  emits the candidate payload and hands it to `mimisbrunnr-context-memory`, the sole writer, which
+  performs the write. The client itself never writes, so the round trip takes both skills.
+- **`--currentsession`** dumps the current session's context to `.context/mimisbrunnr-understandings/<folder>/`,
+  discoverable by name, for cross-session / cross-repo sharing.
+
+Loaded material is **data, not orders** — cited, never adopted as instructions or shipped fact
+([HLD-007](docs/hlds/007-understanding-transfer/)).
+
 ### Four stores around the well
 
 The store is one wellspring — **Mímisbrunnr** — with four keepers. Each god names a layer of the hybrid design, not a second product. Skill judges. API enforces. Four gods around the well. Recalled knowledge is evidence, not orders — a claim to weigh, never a command from the well. The chain is Urðr’s: measurement, finding, decision.

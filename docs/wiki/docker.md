@@ -97,7 +97,7 @@ Optional: `ASPNETCORE_URLS` (image default `http://+:5141`), Seq via
 
 Web API startup requires both `ApiAccess` tokens. `export` needs the storage variables but does not use
 HTTP capability tokens. It does **not** migrate; missing schema fails
-the command. Default output `.context/export` is not writable in the image —
+the command. Default output `.context/mimisbrunnr-memories` is not writable in the image —
 mount a host directory and pass `--output`.
 
 ## Docker Desktop group
@@ -160,7 +160,7 @@ docker run --rm \
   --name mimisbrunnr-host \
   --label com.docker.compose.project=smooth-mímisbrunnr \
   --label com.docker.compose.service=mimisbrunnr-host \
-  -v "$(pwd)/.context/export:/export" \
+  -v "$(pwd)/.context/mimisbrunnr-memories:/export" \
   -e ConnectionStrings__SmoothAiProductContextMemory='Host=host.docker.internal;Port=5432;Database=app;Username=postgres;Password=LocalMachineAccessNoInterestingDataDev#Passw0rd!FirewallNotExposed' \
   -e BlobStorage__Endpoint='http://host.docker.internal:9000' \
   -e BlobStorage__AccessKey='smooth-local' \

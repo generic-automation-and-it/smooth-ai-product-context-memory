@@ -1,6 +1,6 @@
 ---
 name: mimisbrunnr-context-memory
-description: Get and set persistent context-memory records — the sole interface to the SmoothAiProductContextMemory store. Use when you need to record a durable fact, decision, preference, or constraint for later retrieval across sessions, or when you need to recall what was previously captured about a subject, ticket, repository, or scope. Captures byproduct facts during work and writes them at an explicit end-of-task checkpoint.
+description: Get and set persistent context-memory records — the sole authority on the write path to the SmoothAiProductContextMemory store. Use when you need to record a durable fact, decision, preference, or constraint for later retrieval across sessions, or when you need to recall what was previously captured about a subject, ticket, repository, or scope. Captures byproduct facts during work and writes them at an explicit end-of-task checkpoint.
 models:
   claude: opus       # high-complexity; write path performs semantic dedup, link derivation, atomicity, summary/keyword generation
   copilot: auto
@@ -9,8 +9,8 @@ models:
 
 # Context Memory
 
-Get and set persistent, summarised, labelled context. The skill is the **sole interface** to the
-context-memory store and the **sole authority** on the write path. It performs the semantic work
+Get and set persistent, summarised, labelled context. The skill is the **sole authority** on the write path to the
+context-memory store. It performs the semantic work
 the database cannot express as constraints.
 
 ## Modes & Switches

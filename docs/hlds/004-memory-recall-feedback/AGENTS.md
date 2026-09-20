@@ -68,6 +68,7 @@ Targets and verification live in [./nfrs/](./nfrs/). Two shape how code is writt
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-19 | Fixed a ~50/50 flake in `RecallFeedbackPersistenceTests.Write_persists_hit_records_sharing_a_retrieval_id`: it asserted insertion order with an order-sensitive `ShouldBe`, but rows are read `ORDER BY retrieval_id, memory_uuid` over two random uuids. Now order-insensitive — order is incidental to the claim being tested. | test flake |
 | 2026-09-14 | Created — discovery HLD for recall feedback. Placement deliberately left open. | Gap identified during pre-dogfooding review |
 | 2026-09-14 | Added business-authority back-reference to BRD 001, completing the three-place rule. | BRD 001 |
 | 2026-09-16 | README Intent reworded: the stemming/trigram deferral is closed — stemming adopted and trigram rejected on HLD-001's measured evidence; trigram's reopening threshold now waits on this HLD's feedback data. | HLD-001 NFR-02 recall-tuning measurements |

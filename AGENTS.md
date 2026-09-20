@@ -29,17 +29,6 @@ Persistent memory service for AI agents: stores summarized, labelled context (li
 
 Planned work tracked as worktasks under `.context/work-tasks/` (gitignored). Use `/create worktask`. **Never reference worktask IDs (e.g. `WT-04`) in delivered artefacts** — code, comments, `*AGENTS.md`, HLDs, changelogs. Worktasks are short-lived and gitignored; cite the durable authority instead (HLD, LADR, NFR, PR, issue).
 
-## Skills
-
-| Skill | Path | Purpose |
-|---|---|---|
-| agile-github-breakdown | `.agents/skills/agile-github-breakdown/` | Braindump/Feature → GitHub Feature + Task graph (Project = initiative, Feature = epic, Task = story). |
-| mimisbrunnr-context-memory | `.agents/skills/mimisbrunnr-context-memory/` | Sole interface to the context-memory store; capture (`set`) and retrieval (`get`) of persistent context memories against the HTTP API. |
-| mimisbrunnr-vitsmunir-dump | `.agents/skills/mimisbrunnr-vitsmunir-dump/` | Listen-first braindump session for tickets, ADRs, worktasks, requirements or designs; synthesizes only when asked. |
-| mimisbrunnr-recall-feedback | `.agents/skills/mimisbrunnr-recall-feedback/` | Run the three recall-feedback tuning queries against the Host API — never-recalled list, miss rate, baseline reset (HLD-004 NFR-03). |
-| ai-review | `.agents/skills/ai-review/` | Local consumer of a remote AI code-review report (generator stays remote). |
-| git-commit-review-push | `.agents/skills/git-commit-review-push/` | Commit + push + open a PR with an embedded full AI review. |
-
 ## Rules
 
 Rules live under `.agents/rules/` as `*.instructions.md`, auto-loaded every session by Claude Code / Cursor / Copilot / Codex (symlinks in `.agents/AI_DEVELOPMENT_AGENTS.md`). Scoping is **per-file** frontmatter: `paths` (Claude), `globs`+`alwaysApply` (Cursor), `applyTo` (Copilot). Category subfolders are organizational only — they don't change loading. One exception: prompt-scoped rules may be deferred for Claude and re-injected on demand by a `UserPromptSubmit` hook (e.g. `code-review-standards`). See `.agents/rules/meta/rules.instructions.md`.
@@ -48,7 +37,7 @@ Rules live under `.agents/rules/` as `*.instructions.md`, auto-loaded every sess
 |----------|--------|----------|
 | _(cross-cutting)_ | `.agents/rules/` | `ai-workflow-rules`, `code-review-standards` (hook-deferred), `project-overview`, `skill-secret-handling`, `clean-code`, `solid-principles` |
 | git | `.agents/rules/git/` | `git-policy`, `pr-standards` |
-| meta | `.agents/rules/meta/` | `rules` (file convention), `knowledge-conventional-contexts-quality` (AGENTS.md quality) |
+| meta | `.agents/rules/meta/` | `rules` (file convention), `knowledge-conventional-contexts-quality` (AGENTS.md quality), `understandings` (rules vs AGENTS.md vs Understandings, and which wins) |
 | backend (`**/*.cs`) | `.agents/rules/backend/` | api-mediator-validation, architecture-slices, backend-logging-conventions, external-api-clients, migrations, readonly-collections, wiremock-stubbing |
 
 ## Build / Test
@@ -104,6 +93,7 @@ Hosted on **GitHub** at `https://github.com/generic-automation-and-it/project`. 
 | Term | Description |
 |---|---|
 | Context | Summarized, labelled unit of knowledge stored for later retrieval |
+| Understanding | A distilled, self-contained unit of hard-won knowledge — the transferable skill that remains after the experience is discarded. Stored as a memory of `kind = understanding` (BRD-003) |
 | Label | Tag (e.g. issue/ticket number) linking/retrieving related contexts |
 | Semantic memory | Embedded, labelled knowledge — primary store for retrieval by label or similarity |
 | Episodic memory | Timestamped record of when/where a context was captured |
@@ -113,6 +103,9 @@ Hosted on **GitHub** at `https://github.com/generic-automation-and-it/project`. 
 
 | Date | Change | Ref |
 |---|---|---|
+| 2026-09-19 | Removed the root `## Skills` table — it duplicated `.agents/skills/` and only filled context; skills remain discoverable by directory and self-describing in their own `*AGENTS.md`. Glossary terms kept. | context hygiene |
+| 2026-09-20 | Review fix: root changelog LADR count corrected 8 -> 7, matching the 7 LADR files shipped (LADR-05 and NFR-04 were removed with the retracted rename). Also corrected the AI_DEVELOPMENT_AGENTS.md symlink-direction row: `.agents/rules` is the symlink to `.github/instructions`, not the reverse. | PR #86 review |
+| 2026-09-19 | Added BRD-003 (understanding, `BR-38`–`BR-45`) and HLD-007 (design, 7 LADRs / 3 NFRs), the `mimisbrunnr-understanding` skill (breadth-controlled load / `--store` import / `--currentsession` session dump) with a CI-gated 34-test harness, and the **Understanding** glossary term as an open kind value. An Understanding is a memory of `kind = understanding`, cross-repo by default scope and no repo anchor, stored in the existing models — memory keeps its name. | BRD-003, HLD-007 |
 | 2026-09-17 | HLD-002 write-pipeline closure delivered: delegated read/write execution, conflict mechanics, and MCP capability split -- detail in the skill and AI-development changelogs. | HLD-002 |
 | 2026-09-16 | Corrected README temporal-validity wording: retrieval filters validity windows only when `asOf` is supplied. | PR #65 review |
 | 2026-09-16 | CI/CD summary now states main-only image publication and no PR/manual build-record or coverage artifact uploads. | PR #65 |

@@ -43,16 +43,16 @@ public class ExportPathsTests
     }
 
     [Fact]
-    public void Memory_files_use_mem_prefix()
+    public void Memory_files_use_mem_prefix_with_db_version()
     {
         IReadOnlyDictionary<Guid, string> files = ExportPaths.AssignMemoryFiles(
         [
-            new ExportPaths.MemoryInput(First, "postgres-storage"),
+            new ExportPaths.MemoryInput(First, "postgres-storage", CurrentVersion: 2),
         ]);
 
-        files[First].ShouldBe("mem-postgres-storage.md");
+        files[First].ShouldBe("mem-postgres-storage.v2.md");
         ExportPaths.MemoryFile("persistence-layer", files[First])
-            .ShouldBe("groups/persistence-layer/mem-postgres-storage.md");
+            .ShouldBe("groups/persistence-layer/mem-postgres-storage.v2.md");
     }
 
     [Fact]
@@ -60,12 +60,12 @@ public class ExportPathsTests
     {
         IReadOnlyDictionary<Guid, string> files = ExportPaths.AssignMemoryFiles(
         [
-            new ExportPaths.MemoryInput(Second, "dup"),
-            new ExportPaths.MemoryInput(First, "dup"),
+            new ExportPaths.MemoryInput(Second, "dup", CurrentVersion: 1),
+            new ExportPaths.MemoryInput(First, "dup", CurrentVersion: 1),
         ]);
 
-        files[First].ShouldBe("mem-dup.md");
-        files[Second].ShouldBe($"mem-dup--{ExportPaths.CollisionSuffix(Second)}.md");
+        files[First].ShouldBe("mem-dup.v1.md");
+        files[Second].ShouldBe($"mem-dup.v1--{ExportPaths.CollisionSuffix(Second)}.md");
     }
 
     [Fact]
@@ -75,13 +75,13 @@ public class ExportPathsTests
         var third = Guid.Parse("22222222-2222-2222-2222-333333333333");
         IReadOnlyDictionary<Guid, string> files = ExportPaths.AssignMemoryFiles(
         [
-            new ExportPaths.MemoryInput(First, "dup"),
-            new ExportPaths.MemoryInput(Second, "dup"),
-            new ExportPaths.MemoryInput(third, "dup"),
+            new ExportPaths.MemoryInput(First, "dup", CurrentVersion: 1),
+            new ExportPaths.MemoryInput(Second, "dup", CurrentVersion: 1),
+            new ExportPaths.MemoryInput(third, "dup", CurrentVersion: 1),
         ]);
 
         files.Values.Distinct(StringComparer.Ordinal).Count().ShouldBe(3);
-        files[third].ShouldBe($"mem-dup--{third:N}.md");
+        files[third].ShouldBe($"mem-dup.v1--{third:N}.md");
     }
 
     [Fact]

@@ -53,6 +53,10 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
             .StatusCode.ShouldBe(HttpStatusCode.Forbidden);
         (await read.PostAsJsonAsync("/api/context/initiatives", new { }, Ct))
             .StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        (await read.GetAsync($"/api/context/recall-feedback/miss-rate?from={DateTimeOffset.UtcNow:yyyy-MM-dd}&to={DateTimeOffset.UtcNow:yyyy-MM-dd}", Ct))
+            .StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await read.PostAsJsonAsync("/api/context/recall-feedback/reset", new { }, Ct))
+            .StatusCode.ShouldBe(HttpStatusCode.Forbidden);
     }
 
     [Fact]
@@ -78,6 +82,9 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
             (HttpMethod.Post, "/api/context/labels"),
             (HttpMethod.Get, "/api/context/initiatives"),
             (HttpMethod.Post, "/api/context/initiatives"),
+            (HttpMethod.Get, $"/api/context/recall-feedback/never-recalled?asOf={DateTimeOffset.UtcNow:yyyy-MM-dd}"),
+            (HttpMethod.Get, $"/api/context/recall-feedback/miss-rate?from={DateTimeOffset.UtcNow:yyyy-MM-dd}&to={DateTimeOffset.UtcNow:yyyy-MM-dd}"),
+            (HttpMethod.Post, "/api/context/recall-feedback/reset"),
         })
         {
             using var request = new HttpRequestMessage(method, path);
@@ -535,6 +542,61 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
         memoryProperties.ShouldContain("createUuid");
     }
 
+    [Fact]
+    public async Task Recall_feedback_tuning_surfaces_round_trip()
+    {
+        Guid group = await ResolveGroup(MemoryGroup.ScopeDimensionValue.Product);
+        JsonElement created = await SetMemory(group, "Recalled fact", "Claim", MemoryVersion.MemoryVersionStatus.Approved);
+        Guid memoryUuid = created.GetProperty("items")[0].GetProperty("uuid").GetGuid();
+
+        // A second memory that no query in this test matches, so never-recalled has something to return.
+        JsonElement untouched = await SetMemory(
+            group, "Unretrieved subject", "Never queried claim", MemoryVersion.MemoryVersionStatus.Approved);
+        Guid untouchedUuid = untouched.GetProperty("items")[0].GetProperty("uuid").GetGuid();
+
+        // A hit query writes a record for the returned memory; an empty query writes a miss record.
+        (await _http.PostAsJsonAsync("/api/context/query", new { query = "Recalled fact", limit = 50 }, Ct))
+            .StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await _http.PostAsJsonAsync("/api/context/query", new { query = "zz-no-such-memory-xyz", limit = 50 }, Ct))
+            .StatusCode.ShouldBe(HttpStatusCode.OK);
+
+        // never-recalled excludes anything captured within 7 days of asOf (NpgsqlRecallFeedbackQuery
+        // RecentlyCapturedGraceDays), and both memories above were captured now. Asking as of a date
+        // past that window is what puts them in scope — with asOf=today every assertion below passes
+        // vacuously, because the grace filter alone removes them whether or not a feedback row exists.
+        string asOf = $"{DateTimeOffset.UtcNow.AddDays(8):yyyy-MM-dd}";
+        using HttpResponseMessage never = await _http.GetAsync(
+            $"/api/context/recall-feedback/never-recalled?asOf={asOf}&limit=500", Ct);
+        never.StatusCode.ShouldBe(HttpStatusCode.OK);
+        JsonElement neverBody = await never.Content.ReadFromJsonAsync<JsonElement>(Json, Ct);
+        JsonElement[] neverItems = [.. neverBody.GetProperty("items").EnumerateArray()];
+
+        // In scope and never queried, so present; in scope but recalled, so filtered by its feedback row.
+        neverItems.ShouldContain(i => i.GetProperty("memoryUuid").GetGuid() == untouchedUuid);
+        neverItems.ShouldNotContain(i => i.GetProperty("memoryUuid").GetGuid() == memoryUuid);
+
+        // Identity + capture time only, asserted on a row known to be present.
+        JsonElement untouchedRow = neverItems.Single(i => i.GetProperty("memoryUuid").GetGuid() == untouchedUuid);
+        untouchedRow.GetProperty("capturedOn").GetDateTimeOffset().ShouldBeLessThan(DateTimeOffset.UtcNow.AddMinutes(1));
+
+        // miss-rate is derivable over the window from the hit + miss just recorded.
+        DateTimeOffset to = DateTimeOffset.UtcNow;
+        using HttpResponseMessage rate = await _http.GetAsync(
+            $"/api/context/recall-feedback/miss-rate?from={WebUtility.UrlEncode(to.AddHours(-1).ToString("O"))}&to={WebUtility.UrlEncode(to.ToString("O"))}", Ct);
+        string ratePayload = await rate.Content.ReadAsStringAsync(Ct);
+        rate.StatusCode.ShouldBe(HttpStatusCode.OK, ratePayload);
+        JsonElement rateBody = JsonSerializer.Deserialize<JsonElement>(ratePayload, Json);
+        rateBody.GetProperty("retrievals").GetInt32().ShouldBeGreaterThanOrEqualTo(2);
+        rateBody.GetProperty("misses").GetInt32().ShouldBeGreaterThanOrEqualTo(1);
+        rateBody.GetProperty("missRate").GetDouble().ShouldBeGreaterThan(0);
+
+        // reset (write capability) clears the baseline and returns the deleted count.
+        using HttpResponseMessage reset = await _http.PostAsJsonAsync("/api/context/recall-feedback/reset", new { }, Ct);
+        reset.StatusCode.ShouldBe(HttpStatusCode.OK);
+        JsonElement resetBody = await reset.Content.ReadFromJsonAsync<JsonElement>(Json, Ct);
+        resetBody.GetProperty("recordsDeleted").GetInt32().ShouldBeGreaterThan(0);
+    }
+
     private static readonly string[] ExpectedRoutes =
     [
         "/api/context/preflight",
@@ -551,6 +613,9 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
         "/api/context/tickets/paths",
         "/api/context/labels",
         "/api/context/initiatives",
+        "/api/context/recall-feedback/never-recalled",
+        "/api/context/recall-feedback/miss-rate",
+        "/api/context/recall-feedback/reset",
     ];
 
     [Fact]

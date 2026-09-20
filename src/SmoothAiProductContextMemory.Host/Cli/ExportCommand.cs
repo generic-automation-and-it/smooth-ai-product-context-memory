@@ -15,8 +15,8 @@ internal static class ExportCommand
     {
         var outputOption = new Option<string>("--output")
         {
-            Description = "Directory to write the generated Markdown tree. Default: .context/export",
-            DefaultValueFactory = _ => Path.Combine(".context", "export"),
+            Description = "Directory to write the generated Markdown tree. Default: .context/mimisbrunnr-memories",
+            DefaultValueFactory = _ => Path.Combine(".context", "mimisbrunnr-memories"),
         };
         var historyOption = new Option<bool>("--history")
         {

@@ -90,6 +90,7 @@ than Draft — a Draft may be revised by this work, a Blocked may not be resolve
 - **A widened memory carries the reason it was added and its original scope.** A relationship does not make a rule applicable to another product or customer (`BR-19`).
 - **`no-links-in-slice`, not `orphan`.** A slice cannot establish that a memory is unlinked anywhere in the store. `weak-summary` is analysis, not observation — which is what keeps it distinct from HLD-004's observed signal.
 - **`specification` versus `architecture` must stay sharply separated:** specification carries what must observably be true (acceptance criteria, behaviours, interfaces); architecture carries why the shape is what it is (decisions, rejected alternatives, boundaries). If the distinction stops holding, merge them — do not let both exist while blurring.
+- **Understanding is a `kind`, not a new export surface here.** It rides on this export (and the forensic dump) as a selectable kind; the load/import of Understandings is a separate capability owned by HLD 007, not a change to this read-only dossier.
 
 ## Quality Constraints
 
@@ -113,6 +114,7 @@ Targets and verification live in [./nfrs/](./nfrs/). Three shape how code is wri
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-19 | Scoped the "no import / projection is never a source" principle to the dossier and noted the understanding load/import capability as a separate concern owned by HLD 007 (opt-in `--store` through the capture skill). Understanding rides on this export as a selectable kind. | HLD-007; BRD-003 |
 | 2026-09-15 | Replaced NFR-04's stale near-miss harness count with a dated evidence reference and the current verification command; full dossier verification remains unclaimed. | PR #63 review finding 2 |
 | 2026-09-15 | Aligned LADR-10 with the current near-miss helper schema: unchanged originalQuery/facetMatchMode, per-record lifecycle/applicability and explicit proposed evidence. Selection/disclosure and blocked tag decisions unchanged; no new verification recorded. | LADR-10 |
 | 2026-09-15 | Finalized ticket representation/writer and evidence-only helper acceptance using final HLD-003 verification. Performance and full-suite gates passed; full dossier remains In Discovery and tag identity/synonym decisions remain blocked. | LADRs 09-11; HLD-003 final NFR-02 evidence |

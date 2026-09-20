@@ -16,7 +16,7 @@ Skills live **flat**, one directory per skill directly under `.agents/skills/`. 
 | **ai-template-sync** | UPSERT smooth-devex-template scaffold into an existing repo | `/ai-template-sync` |
 | **context-load-agents-context** | Load ancestor AGENTS.md context for a file | `/context-load-agents-context` |
 | **context-load-context** | Load domain context before implementation | `/context-load-context auth` |
-| **mimisbrunnr-context-memory** | Get/set persistent context-memory records; sole interface to the store | `/mimisbrunnr-context-memory [--dryrun] [--approve]` |
+| **mimisbrunnr-context-memory** | Get/set persistent context-memory records; sole authority on the write path to the store | `/mimisbrunnr-context-memory [--dryrun] [--approve]` |
 | **create-hld** | Author a design-only High-Level Design under `docs/hlds/NNN-<slug>/` | `/create-hld <kebab-slug>` |
 | **git-commit** | Commit with conventional format | `/git-commit [--autonomous]` |
 | **git-commit-push** | Commit and push to remote | `/git-commit-push [--autonomous]` |
