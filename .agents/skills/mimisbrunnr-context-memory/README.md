@@ -7,7 +7,7 @@
 
 ## Intent review
 
-The skill is the **sole interface** to the context-memory store. It captures candidate facts
+The skill is the **sole authority** on the context-memory write path. It captures candidate facts
 byproduct-style during work and writes them at an explicit end-of-task checkpoint. Its whole value is
 in the **write path**: it performs the semantic work the database cannot express as constraints —
 cross-group deduplication, link derivation, secret redaction, atomicity checking, and summary/keyword

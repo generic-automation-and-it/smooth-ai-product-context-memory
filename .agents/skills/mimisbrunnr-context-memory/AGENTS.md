@@ -236,6 +236,7 @@ redaction detector is a stdin→stdout fingerprint script reporting rule names o
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-20 | The "sole interface to the store" claim retired from the five remaining living docs (`SKILL.md` prose + description, `README.md`, `.agents/skills/README.md`, `docs/wiki/architecture.md`, `AI_DEVELOPMENT_AGENTS.md` root table) — `mimisbrunnr-understanding` is a reader + conditional importer, so this skill is the sole **authority on the write path**, not the sole interface. The prior row's narrowing is now fully propagated instead of landing in `AGENTS.md` only. | PR #86 review |
 | 2026-09-19 | Narrowed "sole interface" to "sole authority on the write path" and noted the read/load sibling (`mimisbrunnr-understanding`) as a reader + conditional importer that hands `--store` material to this capture path. | HLD-007 LADR-03; BRD-003 |
 | 2026-09-17 | Test References corrected: the PR-gate skill step runs both `run_tests.py` and `measure_cost.py`, not `run_tests.py` alone. | `.github/workflows/pr-gate.yml` |
 | 2026-09-17 | Both stdio MCP servers answer malformed JSON with a JSON-RPC parse error (-32700) and non-object messages with Invalid Request (-32600) instead of crashing the worker; parsing is shared through `memory_read_mcp.respond`. | code review |

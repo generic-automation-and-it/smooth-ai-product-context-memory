@@ -39,7 +39,7 @@ This is a unified AI development experience folder that centralizes skills, prom
 | `.agents/skills/ai-understanding/` | Export a session's Understandings to `.context/understandings/`, import matching ones back, publish/consume across workspaces as a zip — plain Markdown, no store |
 | `.agents/skills/context-load-context/` | Load or create functional `*AGENTS.md` context files |
 | `.agents/skills/context-load-agents-context/` | Load ancestor AGENTS.md context for a target file |
-| `.agents/skills/mimisbrunnr-context-memory/` | Skill to store/retrieve persistent context memories (sole interface to the context-memory store) |
+| `.agents/skills/mimisbrunnr-context-memory/` | Skill to store/retrieve persistent context memories (sole authority on the write path; the `mimisbrunnr-understanding` skill is a reader + conditional importer) |
 | `.agents/skills/mimisbrunnr-recall-feedback/` | Run the three HLD-004 NFR-03 recall-feedback tuning queries against the Host API |
 | `.agents/skills/mimisbrunnr-understanding/` | Load memory + understanding out of the store into an agent, import foreign material back in, dump the current session |
 | `.agents/skills/create-hld/` | Author a design-only High-Level Design under `docs/hlds/NNN-<slug>/` |
@@ -55,7 +55,7 @@ This is a unified AI development experience folder that centralizes skills, prom
 | `.cursor` → `.agents` | Symbolic link for Cursor AI compatibility |
 | `CLAUDE.md` → `AGENTS.md` | Symbolic link alias for Claude-compatible root context discovery |
 | `GEMINI.md` → `AGENTS.md` | Symbolic link alias for Gemini-compatible root context discovery |
-| `.github/instructions` → `../.agents/rules` | Symbolic link exposing rule files at `.github/instructions/**.instructions.md` for GitHub Copilot path-specific instructions |
+| `.agents/rules` → `../.github/instructions` | Symlink exposing the rule files to path-specific consumers; `.github/instructions/` is the real directory holding `**.instructions.md`, read natively by GitHub Copilot |
 
 ### Tool Compatibility Matrix
 
