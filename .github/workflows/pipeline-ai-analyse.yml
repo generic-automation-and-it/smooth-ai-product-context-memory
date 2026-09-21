@@ -79,8 +79,8 @@ jobs:
         with:
           repository: generic-automation-and-it/smooth-ai-report-review
           # `main` currently points at the merged OpenCode v2 migration commit
-          # (feat[148], PR #149) that .github/workflows/pipeline-code-review-report.yml
-          # pins by SHA, so this stays on the same v2 line as the gate.
+          # (feat[148], PR #149) — the same ref the gate tracks — so this stays
+          # on the same v2 line as the gate.
           # SMOOTH_AI_REVIEW_TOOLS_REF Variable overrides this when set.
           ref: ${{ vars.SMOOTH_AI_REVIEW_TOOLS_REF || 'main' }}
           path: .smooth-ai-review-tools

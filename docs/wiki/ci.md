@@ -49,9 +49,11 @@ The publish workflow does **not** run on pull requests.
 - **Triggers:** `pull_request` (opened/synchronize/reopened/ready_for_review), an `/ai-review` comment from an
   OWNER/MEMBER/COLLABORATOR, and `workflow_dispatch`.
 - **Packaging:** local job, **not** a reusable-workflow call. The job checks out
-  `generic-automation-and-it/smooth-ai-report-review` at a pinned SHA into `.review-tools/` and invokes that repo's
-  `.agents/skills/ai-review-report/scripts/run-review.sh`. Bump the pinned `ref:` deliberately; a SHA predating that
-  entrypoint fails the gate with "No such file or directory".
+  `generic-automation-and-it/smooth-ai-report-review` tracking `main` (the consumer owns that repo, so a floating ref
+  is acceptable) into `.review-tools/` and invokes that repo's
+  `.agents/skills/ai-review-report/scripts/run-review.sh`. Re-verify on upstream drift; a `main` that drops that
+  entrypoint fails the gate with "No such file or directory", and one that leaves the v2 line fails as `gzip: stdin:
+  not in gzip format`.
 - **Why local-job:** the review provider is a private vLLM gateway that requires a client certificate and a private
   CA. opencode's provider SDKs use Node/Bun `fetch`, which supports neither, so the job must first start a loopback
   terminator. A reusable-workflow caller cannot inject a step into the callee's job, and a separate job would get a
