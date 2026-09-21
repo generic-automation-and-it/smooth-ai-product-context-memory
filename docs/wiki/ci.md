@@ -84,7 +84,7 @@ tiers, so an unconfigured consumer lands where a configured one already is. The 
 Why that model is safe in the case the fallback actually describes: an unconfigured consumer has
 `OPENCODE_REVIEW_REPORT_CONFIG` unset too, so `prepare-opencode-config.sh` loads **upstream's** committed
 `assets/opencode.json` — `.github/opencode.json` is not in play on that path. `glm-5.2` is declared under
-`go-openai` in **both** configs (upstream's verified at the pin the gate resolves, `7cc2d09`), so it resolves whether or not the config
+`go-openai` in **both** configs (upstream's committed asset, at whatever `main` ref the gate checks out), so it resolves whether or not the config
 Variable is set. The binding constraint is in any case `_rp_model_family_ok`, not either `models` block — see
 [the models caveat above](#provider-wiring-the-anthropicvllm-alternative) — but a fallback model that no loaded
 config declares would still be a trap for the next reader.
@@ -158,8 +158,7 @@ both bare and fails loudly when they are empty. The fallbacks are duplicated per
 Do not "align" the analyse fallbacks onto the gate's. The mechanism is not the one you might assume: the analyse job
 never sets `OPENCODE_REVIEW_REPORT_CONFIG`, so `prepare-opencode-config.sh` falls back to **upstream's** committed
 `assets/opencode.json` rather than this repo's `.github/opencode.json`. That asset pins the **public**
-`https://api.anthropic.com` as the `anthropic` provider's `baseURL` (still true at the pin the gate resolves —
-`7cc2d09`), so pointing
+`https://api.anthropic.com` as the `anthropic` provider's `baseURL` (still true on upstream `main`), so pointing
 auto-fix at `ANTHROPIC` sends the placeholder `OPENCODE_ANTHROPIC_API_KEY` to the real Anthropic API and fails on
 **auth**, not on a dead loopback socket. The gate's `http://127.0.0.1:8888/v1` literal is never in play there at
 all — it exists only in this repo's config, which that job does not load.
@@ -193,12 +192,14 @@ that is not yours.
 | Fixed base | `ANTHROPIC`, `OPENCODE-GO-OPENAI`, `OPENCODE-GO-ANTHROPIC`, `OPEN_ROUTER` | the API key Secret only |
 | Variable base | `GEMINI`, `COPILOT`, `OPENAI` | the key **and** an `OPENCODE_REVIEW_REPORT_<P>_URL` Variable |
 
-**Read that table against the pin, not against upstream `main`.** It lists what `_rp_provider_fields` accepts at
-the SHA the gate checks out (`7cc2d09`, the merged OpenCode v2 migration). Upstream's v2 `resolve-provider.sh` accepts
+**Read that table against the ref actually checked out.** It lists what `_rp_provider_fields` accepts at the ref the
+gate checks out — `main` (the consumer owns `generic-automation-and-it/smooth-ai-report-review`, and is not on the
+third-party-supply-chain-averse path that motivates SHA-pinning, so the upstream checkout tracks `main`). Upstream's
+v2 `resolve-provider.sh` accepts
 `OPENCODE-GO-RESPONSES`, but this consumer's provider-id ladder has **no row** for it — it falls to the bare
 `go-openai` literal, so setting that provider here silently routes to the wrong family until the ladder and model
-tiers are extended together. Note the two workflows disagree on the ref: the gate pins a SHA, while
-`pipeline-ai-analyse.yml` tracks `main` (overridable via `SMOOTH_AI_REVIEW_TOOLS_REF`). Re-read the
+tiers are extended together. Both the gate and `pipeline-ai-analyse.yml` track `main` (the analyse sibling via
+`SMOOTH_AI_REVIEW_TOOLS_REF`). Re-read the
 function at whichever ref you are changing.
 
 There is no fallback URL for the variable-base three — `_rp_resolve` hard-fails on an empty value. That is why the
@@ -240,11 +241,11 @@ printf 'keep A\n<!-- marker -->\nkeep B\n' | sed '/^<!--/,/-->$/d'   # prints on
 ```
 
 Verify a PR body by round-trip rather than by eye. First fetch the lib — `.review-tools/` is created by the gate's checkout step and does **not** exist in a
-clone, so pin-matched fetch is the only way to run it locally:
+clone, so a matching-ref fetch is the only way to run it locally (the gate waits on `main`; fetching the raw file at `main` is closest to what ran):
 
 ```bash
 gh api "repos/generic-automation-and-it/smooth-ai-report-review/contents/\
-.agents/skills/ai-review-report/scripts/lib/extract-review-notes.sh?ref=7cc2d093864ddc912223391a479a61677f4fba14" \
+.agents/skills/ai-review-report/scripts/lib/extract-review-notes.sh?ref=main" \
   --jq .content | base64 -d > /tmp/extract-review-notes.sh
 ```
 

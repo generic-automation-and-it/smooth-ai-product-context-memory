@@ -11,21 +11,24 @@
 #   Use this packaging ONLY when your org's `allowed_actions: "selected"` allow-list
 #   blocks a cross-org reusable-workflow call (the consumer's `generic-automation-and-it`
 #   is not on the allow-list, and the org admin has refused or stalled the request
-#   to add it). SHA pinning satisfies `sha_pinning_required: true` for both the
-#   `uses:` steps and the upstream-repo `ref:` below, so the `uses:`-level checks
-#   pass. The script payload that runs is the SAME third-party code the policy was
-#   meant to gate — technically compliant, but contrary to its intent. The consumer
-#   MUST get security sign-off from the org/enterprise admin before adopting this
+#   to add it). SHA pinning satisfies `sha_pinning_required: true` for the
+#   `uses:` steps; the upstream-repo `ref:` here tracks `main` because the
+#   consumer owns that repo (no third-party supply-chain risk). The script
+#   payload that runs is the SAME third-party code the policy was meant to gate —
+#   technically compliant, but contrary to its intent. The consumer MUST get
+#   security sign-off from the org/enterprise admin before adopting this
 #   packaging. If the admin can add `generic-automation-and-it/smooth-ai-report-review@*`
 #   to the allow-list, prefer the reusable-workflow caller (.docs/examples/code-review-caller.yml)
 #   — it is the path the policy was designed to govern and is materially easier to
 #   audit.
 #
-# Versioning: pin BOTH the workflow actions (e.g. actions/checkout@<sha>) AND the
-# upstream ref below. The floating major tag (`@v2`) is NOT safe here — the
-# whole point of SHA-pinning the upstream checkout is to preserve the guarantee
-# the policy is after. Update the `ref:` below in lockstep with upstream
-# releases you want to consume.
+# Versioning: pin the workflow actions (e.g. actions/checkout@<sha>). The
+# upstream repo `ref:` below tracks `main` rather than a SHA — the consumer owns
+# `generic-automation-and-it/smooth-ai-report-review` (same org), so the
+# third-party supply-chain concern that motivates SHA-pinning the upstream
+# checkout does not apply here. Re-verify `main` still ships run-review.sh and
+# stays on the OpenCode v2 line on upstream drift. Consumers that do NOT own the
+# upstream repo should SHA-pin the `ref:` instead of tracking `main`.
 #
 # Configuration (set in YOUR repo/org):
 #   Secrets   — the selected provider's API key, canonical names:
@@ -226,39 +229,41 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref || github.ref }}
           repository: ${{ github.repository }}
 
-      - name: Checkout smooth-ai-report-review (pinned SHA)
+      - name: Checkout smooth-ai-report-review
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          # SHA pin (NOT a floating tag) — the whole point of the local-job
-          # packaging is to preserve the supply-chain guarantee the allow-list
-          # policy is after. Bump this in lockstep with the upstream ref you
-          # want to consume. The reusable-workflow's `job_workflow_sha` default
-          # does not exist in this packaging (there is no reusable call), so
-          # pin a concrete commit SHA. A full 40-char SHA is also what the
-          # reusable workflow's own ref policy prefers (LADR-059).
+          # The consumer owns the upstream repo, so `ref` tracks `main` rather
+          # than a pinned SHA (see the ref rationale on the `ref:` line below).
+          # The reusable-workflow's `job_workflow_sha` default does not exist in
+          # this packaging (there is no reusable call). The `uses:` steps above
+          # are still SHA-pinned to the allow-listed actions.
           #
-          # IMPORTANT: the SHA MUST be a commit on `main` that contains
+          # IMPORTANT: `main` MUST always contain
           # `.agents/skills/ai-review-report/scripts/run-review.sh` — the
-          # entrypoint the "Run review gate" step below invokes — AND is on the
-          # OpenCode v2 line (major `2`). Pinning a pre-entrypoint commit 404s
-          # the script and the gate dies at "No such file or directory" on the
-          # next step. Pinning a PRE-V2 commit is worse: the scripts resolve and
-          # run, then fail against a CLI that is no longer what they expect —
-          # exactly the defect this consumer hit (v1 scripts + `OPENCODE_CLI_VERSION`
-          # pinned to a 2.x release → the v1 installer resolves versions against
-          # the v1 npm package and feeds a small error body to `tar`,
-          # surfacing as `gzip: stdin: not in gzip format`). Upstream's own
-          # local-job template shipped that stale pre-v2 pin for a while; see
-          # upstream `.docs/examples/code-review-local.yml`.
-          #
-          # The SHA below is the merged OpenCode v2 migration commit on `main`
-          # (feat[148], PR #149) — verified to contain run-review.sh and the v2
-          # installer (`https://opencode.ai/v2/install`, which rejects pins
-          # outside `2.x`). Keep `OPENCODE_CLI_VERSION` on the same 2.x line.
-          # A floating tag is deliberately NOT allowed here (see the versioning
-          # note at the top of this file).
+          # entrypoint the "Run review gate" step below invokes — AND stay on the
+          # OpenCode v2 line (major `2`). A pre-entrypoint commit 404s the script
+          # and the gate dies at "No such file or directory" on the next step. A
+          # PRE-V2 commit is worse: the scripts resolve and run, then fail against
+          # a CLI that is no longer what they expect — exactly the defect this
+          # consumer hit (v1 scripts + `OPENCODE_CLI_VERSION` pinned to a 2.x
+          # release → the v1 installer resolves versions against the v1 npm
+          # package and feeds a small error body to `tar`, surfacing as
+          # `gzip: stdin: not in gzip format`). Re-verify `main` on upstream drift.
+          # Keep `OPENCODE_CLI_VERSION` on the same 2.x line.
           repository: generic-automation-and-it/smooth-ai-report-review
-          ref: 7cc2d093864ddc912223391a479a61677f4fba14 # upstream main, OpenCode v2 migration (feat[148], PR #149), 2026-09-21
+          # Tracks upstream `main`, not a pinned SHA. The consumer owns
+          # `generic-automation-and-it/smooth-ai-report-review` (same org), so the
+          # third-party-supply-chain concern that motivates SHA pinning does not
+          # apply here and a floating `main` is acceptable. The `ref:` must always
+          # be a commit on `main` that contains
+          # `.agents/skills/ai-review-report/scripts/run-review.sh` — the entrypoint
+          # the "Run review gate" step invokes — AND is on the OpenCode v2 line
+          # (major `2`). Pinning a pre-entrypoint commit 404s the script; pinning a
+          # PRE-V2 commit is worse: the scripts resolve and run, then fail against a
+          # CLI that is no longer what they expect (v1 scripts + `OPENCODE_CLI_VERSION`
+          # on a 2.x release → `gzip: stdin: not in gzip format`). Track `main` and
+          # re-verify on upstream drift.
+          ref: main
           path: .review-tools
 
       # ── Code graph analysis (LADR-049) ──────────────────────────────────────

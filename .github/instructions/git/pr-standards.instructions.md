@@ -84,11 +84,11 @@ Rules that follow from that:
   `<!-- conductor-workspace-link -->` to PR descriptions it creates — anything below it
   is invisible to the review prompt.
 - Verify by round-trip, never by eye. The lib lives in the gate's runner-only
-  `.review-tools/` checkout, so fetch it at the pinned SHA first:
+  `.review-tools/` checkout, so fetch it at a matching ref first (the gate checks out `main`):
 
   ```bash
   gh api "repos/generic-automation-and-it/smooth-ai-report-review/contents/\
-  .agents/skills/ai-review-report/scripts/lib/extract-review-notes.sh?ref=7cc2d093864ddc912223391a479a61677f4fba14" \
+  .agents/skills/ai-review-report/scripts/lib/extract-review-notes.sh?ref=main" \
     --jq .content | base64 -d > /tmp/extract-review-notes.sh
   gh pr view <n> --json body --jq .body | bash /tmp/extract-review-notes.sh
   ```
