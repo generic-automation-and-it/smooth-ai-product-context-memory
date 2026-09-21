@@ -1,6 +1,6 @@
 # NFR-03: Actionability
 
-**Status:** Draft
+**Status:** Accepted — [evidence](./NFR-03-evidence-2026-09-20.md)
 
 ## Requirement
 

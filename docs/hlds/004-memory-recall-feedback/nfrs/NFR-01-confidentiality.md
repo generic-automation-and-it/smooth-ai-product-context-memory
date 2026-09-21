@@ -1,6 +1,6 @@
 # NFR-01: Confidentiality
 
-**Status:** Draft
+**Status:** Accepted — [evidence](./NFR-01-evidence-2026-09-20.md)
 
 ## Requirement
 
