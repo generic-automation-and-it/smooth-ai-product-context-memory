@@ -174,6 +174,7 @@ is the current design authority, superseding HLD-003 LADR-02 before any ticket m
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-20 | `SMOOTH_NFR_BENCH=1` `NfrEvidenceTests` added in the component test — env-gated evidence harness driving the shipped `QueryMemories.Handler` → `NpgsqlRecallFeedback`/`NpgsqlRecallFeedbackQuery` to verify NFR-01..03. Not part of the PR gate; mirror of the placement/recall-tuning evidence harnesses. | HLD-004 workstream 04 |
 | 2026-09-18 | `recall_feedback` table added — SQL-created, outside the six EF entities, no `append_only_guard` trigger, excluded from backup/restore, accessed via `IRecallFeedback`/`IRecallFeedbackQuery`. | HLD-004 LADR-02/03/04 |
 | 2026-09-17 | Serialized memory-edge duplicate check/create with a transaction advisory lock; batch digest now uses actual graph create outcomes. | HLD-002 LADR-05 |
 | 2026-09-17 | Cheap query, memory traversal and ticket traversal projections now include version sources and created-on for attributed delegated reads; AGE transaction behavior unchanged. | HLD-002 NFR-04 |
