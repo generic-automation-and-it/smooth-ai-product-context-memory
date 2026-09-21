@@ -88,7 +88,7 @@ Rules that follow from that:
 
   ```bash
   gh api "repos/generic-automation-and-it/smooth-ai-report-review/contents/\
-  .agents/skills/ai-review-report/scripts/lib/extract-review-notes.sh?ref=4bdfea4f361218d88745dfcbad0b00a108a129f2" \
+  .agents/skills/ai-review-report/scripts/lib/extract-review-notes.sh?ref=7cc2d093864ddc912223391a479a61677f4fba14" \
     --jq .content | base64 -d > /tmp/extract-review-notes.sh
   gh pr view <n> --json body --jq .body | bash /tmp/extract-review-notes.sh
   ```

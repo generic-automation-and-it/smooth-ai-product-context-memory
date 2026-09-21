@@ -22,7 +22,7 @@
 #   audit.
 #
 # Versioning: pin BOTH the workflow actions (e.g. actions/checkout@<sha>) AND the
-# upstream ref below. The floating major tag (`@v1`) is NOT safe here — the
+# upstream ref below. The floating major tag (`@v2`) is NOT safe here — the
 # whole point of SHA-pinning the upstream checkout is to preserve the guarantee
 # the policy is after. Update the `ref:` below in lockstep with upstream
 # releases you want to consume.
@@ -44,7 +44,10 @@
 #               OPENCODE_REVIEW_REPORT_MODEL_{PRIMARY,SECONDARY,ORCHESTRATOR},
 #               OPENCODE_REVIEW_REPORT_CONFIG (custom opencode.json path, repo-relative,
 #                 blank → committed default; LADR-047),
-#               OPENCODE_CLI_VERSION (opencode version pin — recommended to pin for supply-chain hygiene; blank → latest, which is the weak default),
+#               OPENCODE_CLI_VERSION (opencode version pin — recommended to pin
+#                 for supply-chain hygiene; must be a 2.x release since the gate
+#                 runs on the OpenCode v2 line; blank → reuse an existing v2, or
+#                 install the latest v2 when none is available),
 #               OPENCODE_REVIEW_REPORT_MAX_FILE_COUNT (too-many-files threshold, default 100),
 #               OPENCODE_REVIEW_REPORT_EXCLUDE_DELETED (default 0), and
 #               OPENCODE_REVIEW_REPORT_EXCLUDE_GENERATED_PATHS (newline-separated exact
@@ -236,11 +239,26 @@ jobs:
           #
           # IMPORTANT: the SHA MUST be a commit on `main` that contains
           # `.agents/skills/ai-review-report/scripts/run-review.sh` — the
-          # entrypoint the "Run review gate" step below invokes. Pinning to a
-          # pre-entrypoint commit 404s the script and the gate dies at "No such
-          # file or directory". Verified present at the pin below.
+          # entrypoint the "Run review gate" step below invokes — AND is on the
+          # OpenCode v2 line (major `2`). Pinning a pre-entrypoint commit 404s
+          # the script and the gate dies at "No such file or directory" on the
+          # next step. Pinning a PRE-V2 commit is worse: the scripts resolve and
+          # run, then fail against a CLI that is no longer what they expect —
+          # exactly the defect this consumer hit (v1 scripts + `OPENCODE_CLI_VERSION`
+          # pinned to a 2.x release → the v1 installer resolves versions against
+          # the v1 npm package and feeds a small error body to `tar`,
+          # surfacing as `gzip: stdin: not in gzip format`). Upstream's own
+          # local-job template shipped that stale pre-v2 pin for a while; see
+          # upstream `.docs/examples/code-review-local.yml`.
+          #
+          # The SHA below is the merged OpenCode v2 migration commit on `main`
+          # (feat[148], PR #149) — verified to contain run-review.sh and the v2
+          # installer (`https://opencode.ai/v2/install`, which rejects pins
+          # outside `2.x`). Keep `OPENCODE_CLI_VERSION` on the same 2.x line.
+          # A floating tag is deliberately NOT allowed here (see the versioning
+          # note at the top of this file).
           repository: generic-automation-and-it/smooth-ai-report-review
-          ref: 4bdfea4f361218d88745dfcbad0b00a108a129f2 # upstream main, 2026-09-18
+          ref: 7cc2d093864ddc912223391a479a61677f4fba14 # upstream main, OpenCode v2 migration (feat[148], PR #149), 2026-09-21
           path: .review-tools
 
       # ── Code graph analysis (LADR-049) ──────────────────────────────────────
