@@ -4,8 +4,9 @@
 # (any name works). The job's only `uses:` entries are `actions/checkout` and
 # `actions/cache` — both GitHub-owned, so both are already
 # allow-listed by every org using `allowed_actions: "selected"` and `github_owned_allowed: true`
-# — and it checks out the upstream tooling repo at a pinned SHA, then invokes the
-# same `run-review.sh` entrypoint that the reusable-workflow packaging uses.
+# — and it checks out the upstream tooling repo tracking `main` (the consumer owns
+# it — see the Versioning note below), then invokes the same `run-review.sh`
+# entrypoint that the reusable-workflow packaging uses.
 #
 # ⚠️  WHEN TO USE THIS — read the README "Local-job packaging" section first.
 #   Use this packaging ONLY when your org's `allowed_actions: "selected"` allow-list
