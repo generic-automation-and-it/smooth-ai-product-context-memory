@@ -103,7 +103,7 @@ Hosted on **GitHub** at `https://github.com/generic-automation-and-it/project`. 
 
 | Date | Change | Ref |
 |---|---|---|
-| 2026-09-21 | Added npm and Claude plugin distribution metadata plus Node launchers for portable Mímisbrunnr context-memory and Understanding clients. | package distribution |
+| 2026-09-21 | Added npm and Claude plugin distribution metadata plus Node launchers under `npm/cli/` for portable Mímisbrunnr context-memory and Understanding clients. | package distribution |
 | 2026-09-19 | Removed the root `## Skills` table — it duplicated `.agents/skills/` and only filled context; skills remain discoverable by directory and self-describing in their own `*AGENTS.md`. Glossary terms kept. | context hygiene |
 | 2026-09-20 | Review fix: root changelog LADR count corrected 8 -> 7, matching the 7 LADR files shipped (LADR-05 and NFR-04 were removed with the retracted rename). Also corrected the AI_DEVELOPMENT_AGENTS.md symlink-direction row: `.agents/rules` is the symlink to `.github/instructions`, not the reverse. | PR #86 review |
 | 2026-09-19 | Added BRD-003 (understanding, `BR-38`–`BR-45`) and HLD-007 (design, 7 LADRs / 3 NFRs), the `mimisbrunnr-understanding` skill (breadth-controlled load / `--store` import / `--currentsession` session dump) with a CI-gated 34-test harness, and the **Understanding** glossary term as an open kind value. An Understanding is a memory of `kind = understanding`, cross-repo by default scope and no repo anchor, stored in the existing models — memory keeps its name. | BRD-003, HLD-007 |

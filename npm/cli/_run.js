@@ -10,7 +10,7 @@ import { existsSync } from "node:fs";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export function runClient(relScript) {
-  const script = join(__dirname, "..", relScript);
+  const script = join(__dirname, "..", "..", relScript);
   if (!existsSync(script)) {
     console.error(`mimisbrunnr: script not found: ${script}`);
     process.exit(2);

@@ -12,12 +12,12 @@
   "license": "MIT",
   "type": "module",
   "bin": {
-    "mimisbrunnr": "./bin/mimisbrunnr.js",
-    "mimisbrunnr-context-memory": "./bin/mimisbrunnr-context-memory.js",
-    "mimisbrunnr-understanding": "./bin/mimisbrunnr-understanding.js"
+    "mimisbrunnr": "./npm/cli/mimisbrunnr.js",
+    "mimisbrunnr-context-memory": "./npm/cli/mimisbrunnr-context-memory.js",
+    "mimisbrunnr-understanding": "./npm/cli/mimisbrunnr-understanding.js"
   },
   "files": [
-    "bin/",
+    "npm/cli/",
     ".agents/skills/mimisbrunnr-context-memory/scripts/",
     ".agents/skills/mimisbrunnr-understanding/scripts/",
     "README.md"

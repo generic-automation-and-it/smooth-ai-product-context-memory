@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// Package smoke test — verify the shipped python clients resolve and execute
-// --help without importing the whole mimisbrunnr runtime.
-import { existsSync } from "node:fs";
+// Pack and install the package in isolation, then execute every public CLI.
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -9,32 +9,69 @@ import { spawnSync } from "node:child_process";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkgRoot = join(__dirname, "..");
 
-const clients = [
-  ".agents/skills/mimisbrunnr-context-memory/scripts/context_memory_client.py",
-  ".agents/skills/mimisbrunnr-understanding/scripts/understanding_client.py",
+const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+const tempRoot = mkdtempSync(join(tmpdir(), "mimisbrunnr-npm-smoke-"));
+const packDir = join(tempRoot, "pack");
+const installDir = join(tempRoot, "install");
+mkdirSync(packDir);
+
+const commands = [
+  ["mimisbrunnr", ["context-memory", "--help"]],
+  ["mimisbrunnr-context-memory", ["--help"]],
+  ["mimisbrunnr-understanding", ["--help"]],
 ];
 
-let ok = true;
-for (const rel of clients) {
-  const script = join(pkgRoot, rel);
-  if (!existsSync(script)) {
-    console.error(`FAIL: missing ${rel}`);
-    ok = false;
-    continue;
+function run(command, args, options = {}) {
+  const result = spawnSync(command, args, {
+    cwd: pkgRoot,
+    encoding: "utf8",
+    ...options,
+  });
+  if (result.error) {
+    throw new Error(`${command} failed to start: ${result.error.message}`);
   }
-  const res = spawnSync("python3", [script, "--help"], { encoding: "utf8" });
-  if (res.error) {
-    console.error(`FAIL: python3 not runnable — ${res.error.message}`);
-    ok = false;
-    continue;
+  if (result.status !== 0) {
+    throw new Error(
+      `${command} ${args.join(" ")} exited ${result.status}\n${result.stderr || result.stdout}`,
+    );
   }
-  if (res.status !== 0) {
-    console.error(`FAIL: ${rel} --help exited ${res.status}`);
-    ok = false;
-    continue;
-  }
-  console.log(`OK: ${rel} --help`);
+  return result;
 }
 
-if (!ok) process.exit(1);
+try {
+  const packed = run(npm, ["pack", "--json", "--pack-destination", packDir]);
+  const [{ filename }] = JSON.parse(packed.stdout);
+  const tarball = join(packDir, filename);
+
+  run(npm, [
+    "install",
+    "--ignore-scripts",
+    "--no-audit",
+    "--no-fund",
+    "--prefix",
+    installDir,
+    tarball,
+  ]);
+
+  const packageJson = JSON.parse(
+    readFileSync(join(installDir, "node_modules", "@generic-automation-and-it", "mimisbrunnr-skills", "package.json")),
+  );
+  if (packageJson.name !== "@generic-automation-and-it/mimisbrunnr-skills") {
+    throw new Error("installed package identity does not match");
+  }
+
+  for (const [name, args] of commands) {
+    const executable = join(
+      installDir,
+      "node_modules",
+      ".bin",
+      process.platform === "win32" ? `${name}.cmd` : name,
+    );
+    run(executable, args, { cwd: installDir });
+    console.log(`OK: ${name} ${args.join(" ")}`);
+  }
+} finally {
+  rmSync(tempRoot, { recursive: true, force: true });
+}
+
 console.log("npm smoke passed.");
