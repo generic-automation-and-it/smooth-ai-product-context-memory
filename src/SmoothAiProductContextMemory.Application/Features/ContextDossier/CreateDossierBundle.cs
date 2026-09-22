@@ -274,7 +274,13 @@ public static class CreateDossierBundle
                 hits.Add(new DossierLimitHit(DossierOmissionReason.DepthReached, anchor.WidenDepth));
             }
 
-            if (itemCount + omittedCount >= anchor.ItemLimit && selection.Selected.Count > anchor.ItemLimit)
+            // The selection path fetches at the item limit; when it hit that ceiling (LimitReached) it
+            // cannot know whether more matched, so truncation must be reported, not silent (NFR-03,
+            // NFR-04). The strict-exceeds case covers a selection that came back over the limit through a
+            // union of anchors and widening.
+            if (selection.LimitReached
+                || (selection.Selected.Count >= anchor.ItemLimit
+                    && itemCount + omittedCount >= anchor.ItemLimit))
             {
                 hits.Add(new DossierLimitHit(DossierOmissionReason.CapReached, anchor.ItemLimit));
             }

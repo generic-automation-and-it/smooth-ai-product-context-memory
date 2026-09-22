@@ -1,16 +1,24 @@
 using System.Text;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.Logging.Abstractions;
+using Npgsql;
 using SmoothAiProductContextMemory.Application.Abstractions;
 using SmoothAiProductContextMemory.Application.Features.ContextDossier;
 using SmoothAiProductContextMemory.Domain;
 using SmoothAiProductContextMemory.Domain.Entities;
 using SmoothAiProductContextMemory.Infrastructure.Persistence;
+using SmoothAiProductContextMemory.Infrastructure.Persistence.Extensions;
 
 namespace SmoothAiProductContextMemory.Application.ComponentTest.Features;
 
-public sealed class DossierBundleHandlerTests(AspireFixture aspire) : HandlerTestBase(aspire)
+public sealed class DossierBundleHandlerTests : HandlerTestBase
 {
+    private readonly AspireFixture _aspire;
+
+    public DossierBundleHandlerTests(AspireFixture aspire) : base(aspire) => _aspire = aspire;
+
     private static readonly DateTimeOffset ValidFrom = new(2024, 3, 1, 12, 0, 0, TimeSpan.Zero);
     private static readonly DateTimeOffset CreatedOn = new(2024, 3, 2, 9, 0, 0, TimeSpan.Zero);
     private static readonly Guid ProductGroupUuid = Guid.Parse("11111111-1111-1111-1111-111111111111");
@@ -117,6 +125,7 @@ public sealed class DossierBundleHandlerTests(AspireFixture aspire) : HandlerTes
         long versionsBefore = Db.MemoryVersions.LongCount();
         long groupsBefore = Db.MemoryGroups.LongCount();
         long labelsBefore = Db.Labels.LongCount();
+        int edgesBefore = (await Graph.ListAllAsync(Ct)).Count;
 
         await handler.Handle(BundleRequest(), Ct);
 
@@ -124,6 +133,10 @@ public sealed class DossierBundleHandlerTests(AspireFixture aspire) : HandlerTes
         Db.MemoryVersions.LongCount().ShouldBe(versionsBefore);
         Db.MemoryGroups.LongCount().ShouldBe(groupsBefore);
         Db.Labels.LongCount().ShouldBe(labelsBefore);
+        // Graph identity: no vertex and no edge added — including the "missing" contradicts edge a
+        // contradiction finding describes (NFR-06 / LADR-06). Edges are the surface a findings write path
+        // would most plausibly touch.
+        (await Graph.ListAllAsync(Ct)).Count.ShouldBe(edgesBefore);
     }
 
     [Fact]
@@ -135,6 +148,74 @@ public sealed class DossierBundleHandlerTests(AspireFixture aspire) : HandlerTes
             () => traversal.WidenAsync(query, Ct));
         await Should.ThrowAsync<ArgumentOutOfRangeException>(
             () => traversal.WidenAsync(query with { MaxDepth = 0 }, Ct));
+    }
+
+    [Fact]
+    public async Task Bundle_is_byte_identical_across_a_restart()
+    {
+        // NFR-02: byte-equality must hold across a process restart, not just two calls in one process.
+        // Two independent EF contexts, handlers and data sources over the same unchanged store simulate a
+        // restart: no in-process caching, no change-tracker or handler-scoped state, and no hash-seed
+        // dependence can leak into the bytes. Hash-seed dependence specifically is caught because each
+        // context recompiles its query plan in a fresh process-equivalent state.
+        await SeedForBundleAsync();
+        var blobs = new DictionaryBlobStorage();
+        blobs.Add(BlobAddress, "THE_BODY");
+
+        await using (RestartLine first = NewRestartLine())
+        {
+            CreateDossierBundle.Handler firstHandler = BundleHandlerFor(first.Db, blobs);
+            byte[] firstBytes = SerializeToBytes(await firstHandler.Handle(BundleRequest(), Ct));
+
+            // A fresh context + fresh handler against the same store — the "restart".
+            await using (RestartLine second = NewRestartLine())
+            {
+                CreateDossierBundle.Handler secondHandler = BundleHandlerFor(second.Db, blobs);
+                byte[] secondBytes = SerializeToBytes(await secondHandler.Handle(BundleRequest(), Ct));
+
+                firstBytes.ShouldBe(secondBytes);
+            }
+        }
+    }
+
+    private CreateDossierBundle.Handler BundleHandlerFor(SmoothAiProductContextMemoryDbContext db, IBlobStorage blobs) =>
+        new(db, new NpgsqlMemorySearch(db), new NpgsqlMemoryTraversal(db), new NpgsqlTicketGraph(db),
+            new NpgsqlMemoryGraph(db), blobs, NullLogger<CreateDossierBundle.Handler>.Instance);
+
+    /// <summary>
+    /// An independent EF context over the same store, so a restart-equivalent read can be produced
+    /// without sharing any in-process state with the test base's <see cref="Db"/>.
+    /// </summary>
+    private RestartLine NewRestartLine()
+    {
+        // The base builds its data source via NpgsqlDataSourceFactory (which initialises AGE on every
+        // physical connection). A restart-equivalent context must do the same or the AGE reads fail.
+        // The connection string exposed on the live connection drops the password, so rebuild it from
+        // the Aspire fixture (which owns the credentials) for the same database.
+        NpgsqlDataSource dataSource = NpgsqlDataSourceFactory.Create(
+            _aspire.CreateDatabaseConnectionString(CurrentDatabaseName()));
+        var options = new DbContextOptionsBuilder<SmoothAiProductContextMemoryDbContext>()
+            .UseNpgsql(dataSource, npgsql => npgsql.UseSmoothAiProductContextMemoryHistory())
+            .Options;
+        return new RestartLine(new SmoothAiProductContextMemoryDbContext(options), dataSource);
+    }
+
+    private string CurrentDatabaseName()
+    {
+        var builder = new NpgsqlConnectionStringBuilder(Db.Database.GetDbConnection().ConnectionString);
+        return builder.Database ?? throw new InvalidOperationException("The test database name could not be read.");
+    }
+
+    private static byte[] SerializeToBytes(object value) =>
+        JsonSerializer.SerializeToUtf8Bytes(value, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
+    private sealed record RestartLine(SmoothAiProductContextMemoryDbContext Db, NpgsqlDataSource DataSource) : IAsyncDisposable
+    {
+        public async ValueTask DisposeAsync()
+        {
+            await Db.DisposeAsync();
+            await DataSource.DisposeAsync();
+        }
     }
 
     private static string Serialize(object value) =>

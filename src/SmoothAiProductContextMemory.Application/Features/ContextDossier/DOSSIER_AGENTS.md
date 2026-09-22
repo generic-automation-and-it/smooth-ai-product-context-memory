@@ -76,11 +76,13 @@ sequenceDiagram
 ## Test References
 
 - L0: `tests/.../Application.UnitTest/Features/ContextDossier/` — validators (depth absent/0/6 refused), provenance tiebreak, bounded omission reasons, no generation timestamp (schema-level), mechanical collapse, manifest count == item count, payload byte-equality, kind=understanding like any kind.
-- L1: `tests/.../Application.ComponentTest/Features/DossierBundleHandlerTests.cs` — byte-identity across calls and restart, reorder anchors/tags, hidden-dimension drop at depth, preview blob-free, zero-write, understanding citation, store-layer depth refusal.
+- L1: `tests/.../Application.ComponentTest/Features/DossierBundleHandlerTests.cs` — byte-identity across calls and restart (a fresh EF context + handler + data source over the same store, so no in-process caching or hash-seed dependence leaks into the bytes), reorder anchors/tags, hidden-dimension drop at depth, preview blob-free, zero-write, understanding citation, store-layer depth refusal.
+- L1 evidence (env-gated): `tests/.../Application.ComponentTest/Features/DossierWorkflowBenchmarkTests.cs` — the NFR-03 reference-workflow measurement harness (`SMOOTH_DOSSIER_BENCH=1`). It seeds a representative store and records slice size, item-limit fit, payload size, and preview/bundle latency for the spec-preparation, handover and re-entry workflows. Reported values are evidence, never an asserted cap.
 
 ## Migration Plans
 
 - Numeric item limit is provisional (`DossierDefaults.ItemLimit = 500`) pending reference-workflow validation; recorded per export, never cited as a specification (NFR-03).
+- **Measured observation (2026-09-23):** `DossierSelection.ResolveAsync` caps both anchor resolution and widening at `MemorySearchDefaults.MaxLimit` (200), so a bundle's selected count can never exceed 200 and the 500 item cap is **not** the effective bound — the handover workflow reached 200 (the search limit), not 500. Either the item limit should track the selection limit or the selection should be able to return up to the stated cap; flag, don't silently assume.
 - The dossier skill (composition, focus, findings taxonomy) and tag identity/synonyms remain separate, blocked workstreams — not part of this deterministic side.
 
 ## Changelog
@@ -88,3 +90,4 @@ sequenceDiagram
 | Date | Change | Ref |
 |:-----|:-------|:----|
 | 2026-09-22 | Created — deterministic bundle/preview half of HLD-005 contextual export. Bundle + preview slices, shared selection, new store widening read, two Host endpoints, L0 + L1 tests. | HLD-005 |
+| 2026-09-23 | Added the NFR-03 reference-workflow measurement harness (`DossierWorkflowBenchmarkTests`, `SMOOTH_DOSSIER_BENCH=1`) and the NFR-02 cross-restart byte-equality L1 test. Recorded that the selection caps at 200 (MaxLimit), not the 500 item cap. | HLD-005 NFR-02/NFR-03 |

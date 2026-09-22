@@ -1,3 +1,5 @@
+using SmoothAiProductContextMemory.Application.Abstractions;
+
 namespace SmoothAiProductContextMemory.Application.Features.ContextDossier;
 
 /// <summary>
@@ -6,7 +8,13 @@ namespace SmoothAiProductContextMemory.Application.Features.ContextDossier;
 /// </summary>
 public static class DossierDefaults
 {
-    public const int ItemLimit = 500;
+    /// <summary>
+    /// Stated, configurable item limit (HLD-005 NFR-03). Deliberately equals the reachable bound of the
+    /// selection path (<see cref="MemorySearchDefaults.MaxLimit"/>): both anchor resolution and widening
+    /// fetch at that ceiling, so the stated limit here is the effective bound and can actually be hit and
+    /// reported, never a number the selection cannot reach.
+    /// </summary>
+    public const int ItemLimit = MemorySearchDefaults.MaxLimit;
 }
 
 /// <summary>
