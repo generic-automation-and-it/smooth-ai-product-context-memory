@@ -46,6 +46,149 @@ public sealed class NpgsqlMemoryTraversal(SmoothAiProductContextMemoryDbContext 
         return paths;
     }
 
+    public async Task<MemoryWidenResult> WidenAsync(
+        MemoryWidenQuery query,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        // Store-layer bound refusal, mirroring FindPathsAsync. A direct caller bypassing the request
+        // validator must not get an unbounded widening, because the bound is the export's cost control
+        // and completeness claim (HLD-005 NFR-03).
+        ArgumentOutOfRangeException.ThrowIfLessThan(query.MaxDepth, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(query.MaxDepth, MemoryTraversalDefaults.MaxDepth);
+        ArgumentOutOfRangeException.ThrowIfLessThan(query.Limit, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(query.Limit, MemorySearchDefaults.MaxLimit);
+        if (query.SourceUuids.Count == 0)
+        {
+            throw new ArgumentException("SourceUuids must not be empty.", nameof(query));
+        }
+
+        await using NpgsqlCommand command = await CreateWidenCommandAsync(query, cancellationToken);
+        await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+        await reader.ReadAsync(cancellationToken);
+        try
+        {
+            var memories = JsonSerializer.Deserialize<CheapMemory[]>(reader.GetString(0), TraversalJson) ?? [];
+            return new MemoryWidenResult(
+                memories,
+                reader.GetBoolean(1),
+                reader.GetBoolean(2),
+                reader.GetBoolean(3));
+        }
+        catch (JsonException)
+        {
+            throw new InvalidOperationException("Stored widening data could not be read.");
+        }
+    }
+
+    internal async Task<NpgsqlCommand> CreateWidenCommandAsync(
+        MemoryWidenQuery query,
+        CancellationToken cancellationToken)
+    {
+        await db.Database.OpenConnectionAsync(cancellationToken);
+        var connection = (NpgsqlConnection)db.Database.GetDbConnection();
+        var transaction = db.Database.CurrentTransaction?.GetDbTransaction() as NpgsqlTransaction;
+
+        var command = new NpgsqlCommand
+        {
+            Connection = connection,
+            Transaction = transaction,
+            CommandText = BuildWidenSql(query),
+        };
+
+        command.Parameters.Add(new NpgsqlParameter("depth", NpgsqlDbType.Integer) { Value = query.MaxDepth });
+        command.Parameters.Add(new NpgsqlParameter("kind", NpgsqlDbType.Text)
+        {
+            Value = query.Kind ?? (object)DBNull.Value,
+        });
+        command.Parameters.Add(new NpgsqlParameter("status", NpgsqlDbType.Text)
+        {
+            Value = query.Status ?? (object)DBNull.Value,
+        });
+        command.Parameters.Add(new NpgsqlParameter("requiredScope", NpgsqlDbType.Text)
+        {
+            Value = query.RequiredScopeDimension ?? (object)DBNull.Value,
+        });
+        command.Parameters.Add(new NpgsqlParameter("hiddenScopes", NpgsqlDbType.Array | NpgsqlDbType.Text)
+        {
+            Value = query.HiddenDimensions.ToArray(),
+        });
+        command.Parameters.Add(new NpgsqlParameter("limit", NpgsqlDbType.Integer) { Value = query.Limit });
+
+        return command;
+    }
+
+    private static string BuildWidenSql(MemoryWidenQuery query)
+    {
+        string sources = string.Join(", ", query.SourceUuids.Select(u => CypherLiteral.Quote(u.ToString("D"))));
+        string edge = $"[:{AgeSession.EdgeLabel}*1..{query.MaxDepth.ToString(CultureInfo.InvariantCulture)}]";
+        string pattern = query.Direction switch
+        {
+            TraversalDirection.Inbound => $"(s:{AgeSession.VertexLabel})<-{edge}-(t:{AgeSession.VertexLabel})",
+            TraversalDirection.Either => $"(s:{AgeSession.VertexLabel})-{edge}-(t:{AgeSession.VertexLabel})",
+            _ => $"(s:{AgeSession.VertexLabel})-{edge}->(t:{AgeSession.VertexLabel})",
+        };
+
+        string cypher = $"""
+            MATCH p = {pattern}
+            WHERE s.memory_uuid IN [{sources}]
+            RETURN nodes(p), length(p)
+            """;
+
+        string cypherDollar = CypherLiteral.DollarWrap(cypher);
+        // Every vertex a path crosses is gated, not only the endpoints. A path through a hidden memory
+        // is dropped whole, never shortened (HLD-005 NFR-01). The same text surgery the proven
+        // single-source statement applies to vertex rendering is reused here.
+        const string nodeList = "replace(tr.nodes::text, '::vertex', '')::jsonb";
+        const string crossesHidden = $"""
+            EXISTS (
+                SELECT 1 FROM jsonb_array_elements({nodeList}) AS hop_node
+                JOIN memory hop_memory ON hop_memory.uuid = (hop_node -> 'properties' ->> 'memory_uuid')::uuid
+                JOIN memory_group hop_group ON hop_group.id = hop_memory.group_id
+                WHERE hop_group.scope_dimension = ANY(@hiddenScopes)
+            )
+            """;
+
+        return $"""
+            WITH walked AS MATERIALIZED (
+                SELECT tr.nodes::text AS nodes, tr.depth AS depth,
+                       {crossesHidden} AS hidden
+                FROM ag_catalog.cypher('{AgeSession.GraphName}', {cypherDollar})
+                    AS tr(nodes ag_catalog.agtype, depth ag_catalog.agtype)
+            ), surviving AS MATERIALIZED (
+                SELECT nodes FROM walked WHERE NOT hidden
+            ), reached AS MATERIALIZED (
+                SELECT DISTINCT m.uuid, g.uuid AS group_uuid, m.name, m.description, v.statement,
+                       v.content_summary, v.kind, m.facets, m.tags, v.status, v.confidence,
+                       g.scope_dimension, g.scope_identifier, v.valid_from, v.valid_until, v.version,
+                       v.is_current, v.sources, v.created_on
+                FROM surviving sv
+                CROSS JOIN LATERAL jsonb_array_elements(replace(sv.nodes, '::vertex', '')::jsonb) AS node
+                JOIN memory m ON m.uuid = (node -> 'properties' ->> 'memory_uuid')::uuid
+                JOIN memory_group g ON g.id = m.group_id
+                JOIN memory_version v ON v.memory_id = m.id AND v.is_current
+                WHERE (@requiredScope IS NULL OR g.scope_dimension = @requiredScope)
+                  AND (@kind IS NULL OR v.kind = @kind)
+                  AND (@status IS NULL OR v.status = @status)
+            ), ranked AS MATERIALIZED (
+                SELECT * FROM reached
+                ORDER BY valid_from, created_on, uuid
+                LIMIT @limit
+            )
+            SELECT COALESCE((SELECT jsonb_agg(jsonb_build_object(
+                       'uuid', uuid, 'groupUuid', group_uuid, 'name', name, 'description', description,
+                       'statement', statement, 'contentSummary', content_summary, 'kind', kind,
+                       'facets', facets, 'tags', tags, 'status', status, 'confidence', confidence,
+                       'scopeDimension', scope_dimension, 'scopeIdentifier', scope_identifier,
+                       'validFrom', valid_from, 'validUntil', valid_until, 'version', version,
+                       'isCurrent', is_current, 'sources', sources, 'createdOn', created_on)
+                       ORDER BY valid_from, created_on, uuid) FROM ranked), '[]'::jsonb)::text,
+                   EXISTS (SELECT 1 FROM walked WHERE (depth::text)::int >= @depth),
+                   (SELECT count(*) > @limit FROM reached),
+                   EXISTS (SELECT 1 FROM walked WHERE hidden);
+            """;
+    }
+
     /// <summary>
     /// Internal so the NFR-02 benchmark can <c>EXPLAIN</c> the statement the store actually runs.
     /// A benchmark that plans a hand-written copy measures the copy.

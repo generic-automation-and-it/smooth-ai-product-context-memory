@@ -210,6 +210,7 @@ sequenceDiagram
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-22 | Added `ContextDossier` — the deterministic side of HLD-005 contextual export. Two read slices (`CreateDossierBundle`, `CreateDossierPreview`) resolve an anchor set (repo/initiative/ticket/tags/kind/status), widen over the graph bounded 1-5 and scope-gated at every vertex, collapse mechanically, order deterministically, and record the effective selection in a manifest. No model, no write, no generation timestamp; `kind = understanding` selected like any kind. New store read `IMemoryTraversal.WidenAsync` enforces the 1-5 bound. | HLD-005 |
 | 2026-09-17 | Delivered caller-selected create UUIDs, same-batch new-memory links, divergence counting, provenance on cheap reads, resolved dry-run identities, and graph-failure rollback coverage. | HLD-002 LADR-05/LADR-07, NFR-03/NFR-04 |
 | 2026-09-17 | Added ordered repeated version targets so stated-authority outcomes retain losing claims while leaving the selected winner current in one transaction. | HLD-002 LADR-01/LADR-04 |
 | 2026-09-17 | Approved additive create identity and same-transaction new-memory link contract; implementation and L0/L1/L2 evidence follow in this delivery. | HLD-002 LADR-05/LADR-07 |

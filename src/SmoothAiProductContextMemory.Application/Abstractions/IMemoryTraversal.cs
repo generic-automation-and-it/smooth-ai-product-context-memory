@@ -14,6 +14,13 @@ namespace SmoothAiProductContextMemory.Application.Abstractions;
 public interface IMemoryTraversal
 {
     Task<IReadOnlyList<MemoryPath>> FindPathsAsync(MemoryPathQuery query, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Widens from a <em>set</em> of source memory identities over the graph, bounded by depth,
+    /// scope-gated at every vertex crossed. Returns the distinct reached memories (never the sources
+    /// themselves — those are anchor-resolved separately) and whether a bound was reached.
+    /// </summary>
+    Task<MemoryWidenResult> WidenAsync(MemoryWidenQuery query, CancellationToken cancellationToken);
 }
 
 public enum TraversalDirection
@@ -83,3 +90,51 @@ public static class MemoryTraversalDefaults
     /// </summary>
     public const int MaxDepth = 5;
 }
+
+/// <summary>
+/// A widening request over a <em>set</em> of source memory identities: every memory reachable from any
+/// source within the depth bound, with the whole route dropped when it crosses a hidden-dimension
+/// vertex. The handler resolves the scope rule before constructing this, so the provider only
+/// translates predicates (HLD-005 LADR-03).
+/// </summary>
+public sealed record MemoryWidenQuery
+{
+    /// <summary>Anchor memory identities to widen from. Never empty.</summary>
+    public required IReadOnlyList<Guid> SourceUuids { get; init; }
+
+    /// <summary>
+    /// Hop bound, always supplied. <c>required</c> rather than defaulted for the same reason as
+    /// <see cref="MemoryPathQuery.MaxDepth"/>: an export's reach determines both its cost and its
+    /// completeness claim, so the bound is the last place to inherit an unexamined number (LADR-03).
+    /// </summary>
+    public required int MaxDepth { get; init; }
+
+    public TraversalDirection Direction { get; init; } = TraversalDirection.Outbound;
+
+    /// <summary>Relational predicate on the reached memory's current version.</summary>
+    public string? Kind { get; init; }
+
+    public string? Status { get; init; }
+
+    public string? RequiredScopeDimension { get; init; }
+
+    /// <summary>
+    /// Dimensions a path must not cross. From <see cref="MemoryScopeFilter.HiddenDimensions"/> — not
+    /// the excluded set, which is empty for every explicit dimension. A path through a hidden memory is
+    /// dropped whole, never shortened (HLD-005 NFR-01).
+    /// </summary>
+    public IReadOnlyList<string> HiddenDimensions { get; init; } = [];
+
+    public int Limit { get; init; } = MemorySearchDefaults.Limit;
+}
+
+/// <summary>
+/// The distinct memories reached by a widening, plus disclosure of which bounds were reached and whether
+/// a path through a hidden memory was dropped. The sources themselves are not included — they are
+/// anchor-resolved separately.
+/// </summary>
+public sealed record MemoryWidenResult(
+    IReadOnlyList<CheapMemory> Memories,
+    bool DepthLimitReached,
+    bool LimitReached,
+    bool HiddenPathDropped);

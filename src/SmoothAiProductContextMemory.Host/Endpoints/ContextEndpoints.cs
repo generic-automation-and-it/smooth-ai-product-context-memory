@@ -1,5 +1,6 @@
 using Mediator;
 using Microsoft.AspNetCore.Mvc;
+using SmoothAiProductContextMemory.Application.Features.ContextDossier;
 using SmoothAiProductContextMemory.Application.Features.Groups;
 using SmoothAiProductContextMemory.Application.Features.Initiatives;
 using SmoothAiProductContextMemory.Application.Features.Labels;
@@ -83,6 +84,17 @@ internal static class ContextEndpoints
         // maxDepth is on the body, not defaulted server-side: a bound the caller never stated is a
         // bound the caller never considered, and nothing in the graph store stops an unbounded walk.
         group.MapPost("/paths", (FindPaths.Request body, IMediator mediator, CancellationToken ct) =>
+            mediator.Send(body, ct))
+            .RequireCapability(ApiCapability.Read);
+
+        // The dossier read halves (HLD-005): the API assembles the bundle, the skill composes the
+        // dossier. Both are read-only, mediate to Application, and never call a model. WidenDepth is
+        // required on the wire, with no server-side default.
+        group.MapPost("/dossier/bundle", (CreateDossierBundle.Request body, IMediator mediator, CancellationToken ct) =>
+            mediator.Send(body, ct))
+            .RequireCapability(ApiCapability.Read);
+
+        group.MapPost("/dossier/preview", (CreateDossierPreview.Request body, IMediator mediator, CancellationToken ct) =>
             mediator.Send(body, ct))
             .RequireCapability(ApiCapability.Read);
 
