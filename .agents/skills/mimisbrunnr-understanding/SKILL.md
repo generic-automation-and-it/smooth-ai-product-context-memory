@@ -1,3 +1,12 @@
+---
+name: mimisbrunnr-understanding
+description: Load a Mímisbrunnr Understanding export — or any prior material (session, meeting notes, transcript) — into a new or running agent's session context, and share context across sessions and repositories. The load/transfer counterpart to mimisbrunnr-context-memory.
+models:
+  claude: opus       # high-complexity; judgment about what is understanding vs scoped fact, and capture-path funneling
+  copilot: auto
+  codex: gpt-5.5
+---
+
 # mimisbrunnr-understanding
 
 Load a Mímisbrunnr **Understanding** export — or **any** prior material (a session, meeting notes, a

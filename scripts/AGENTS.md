@@ -31,6 +31,7 @@ Operational checks support operator decisions; a preflight must never repair the
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-21 | Added npm package smoke coverage that packs and installs the tarball in isolation, then executes every public CLI help path. | npm skill distribution |
 | 2026-09-17 | Release smoke now generates separate read/write API tokens and exercises routes with least-capability credentials. | HLD-002 NFR-04 |
 | 2026-09-16 | Added the release-policy harness to Test References. | PR #65 review |
 | 2026-09-16 | Restricted release policy to main pushes and added negative event/ref tests; removed tag/manual publication paths. | PR #65 |
