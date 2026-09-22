@@ -42,12 +42,14 @@ retrospective guess. The provisional value is not a specification and must not b
 - **L1** — assert a preview performs **zero** blob reads, using a counting blob-storage test double.
 - **L1** — assert every limit reached appears in the manifest, and that reaching one never produces a silently shorter payload.
 - **Skill-level test** — assert the preview carries its assumptions and an uncertainty statement, and that monetary cost is either present or explicitly marked unavailable.
+- **L1** — assert the preview prices a slice whose selected memories include `kind = understanding` items under the same item cap and reach limits; the kind is not a separate, cheaper category (LADR-15).
 - **Reference-workflow validation** — run the three representative workflows, record slice size, composition usage, and whether the document was fit for its task. These runs **set** the numeric limits. Benchmarked behind an environment flag in the style of the existing traversal benchmark, so the ordinary test run stays fast.
 
 ## Acceptance Criteria
 
 - No request can be made without an explicit widening bound; depth outside 1–5 is refused at both the validator and the store layer.
 - A preview hydrates no body and states its assumptions, its uncertainty, and whether monetary cost is known.
+- A `kind = understanding` item is priced and capped like any other selected item; the preview never under-counts it (LADR-15).
 - The practitioner can narrow or cancel from the preview; cancelling leaves the store unchanged.
 - Scope beyond a limit is refused and reported; no response is silently truncated or broadened.
 - Numeric item and latency limits are recorded as derived from the reference workflows, with the value used captured per export — not inherited from this document as an assumption.
