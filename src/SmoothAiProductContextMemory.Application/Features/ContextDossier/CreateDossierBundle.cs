@@ -120,17 +120,21 @@ public static class CreateDossierBundle
             // later one collapses into the earlier, reported as omitted — never silently dropped.
             (items, omitted) = CollapseSameBlob(items, omitted);
 
-            // Cut-on-cap decided by the ordering above.
-            if (items.Count + omitted.Count > anchor.ItemLimit)
+            // Cut-on-cap decided by the ordering above. Only the present items are trimmed — the
+            // already-accounted omissions (collapsed / unreadable) never consume the present budget,
+            // and counting them into the trigger would make the tail-cut overlap the kept set and
+            // double-count an item into both items and omitted.
+            bool capReached = items.Count > anchor.ItemLimit;
+            if (capReached)
             {
-                int excess = items.Count + omitted.Count - anchor.ItemLimit;
+                int excess = items.Count - anchor.ItemLimit;
                 var cut = items.TakeLast(excess).ToArray();
                 omitted.AddRange(cut.Select(i => new DossierOmittedItem(i.Uuid, DossierOmissionReason.CapReached)));
                 items = [.. items.Take(anchor.ItemLimit)];
             }
 
             IReadOnlyList<DossierEdge> edges = await CollectEdgesAsync(graph, selection, cancellationToken);
-            IReadOnlyList<DossierLimitHit> limitsHit = BuildLimitsHit(selection, items.Count, omitted.Count, anchor);
+            IReadOnlyList<DossierLimitHit> limitsHit = BuildLimitsHit(selection, items.Count, omitted.Count, anchor, capReached);
 
             DossierManifest manifest = BuildManifest(anchor, selection, items.Count + omitted.Count, limitsHit);
 
@@ -266,7 +270,8 @@ public static class CreateDossierBundle
             DossierSelectionResult selection,
             int itemCount,
             int omittedCount,
-            DossierAnchor anchor)
+            DossierAnchor anchor,
+            bool capReached)
         {
             var hits = new List<DossierLimitHit>();
             if (selection.DepthLimitReached)
@@ -277,12 +282,18 @@ public static class CreateDossierBundle
             // The selection path fetches at the item limit; when it hit that ceiling (LimitReached) it
             // cannot know whether more matched, so truncation must be reported, not silent (NFR-03,
             // NFR-04). The strict-exceeds case covers a selection that came back over the limit through a
-            // union of anchors and widening.
-            if (selection.LimitReached
+            // union of anchors and widening. A history-inflated cut (many versions of a few selected
+            // memories) exceeds the cap without the memory count reaching the fetch ceiling, so the cut
+            // itself is the signal and is named too.
+            if (capReached
+                || selection.LimitReached
                 || (selection.Selected.Count >= anchor.ItemLimit
                     && itemCount + omittedCount >= anchor.ItemLimit))
             {
-                hits.Add(new DossierLimitHit(DossierOmissionReason.CapReached, anchor.ItemLimit));
+                if (hits.All(h => h.Limit != DossierOmissionReason.CapReached))
+                {
+                    hits.Add(new DossierLimitHit(DossierOmissionReason.CapReached, anchor.ItemLimit));
+                }
             }
 
             return [.. hits];
