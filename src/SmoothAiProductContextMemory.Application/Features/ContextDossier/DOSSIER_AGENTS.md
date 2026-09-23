@@ -81,8 +81,8 @@ sequenceDiagram
 
 ## Migration Plans
 
-- Numeric item limit is provisional (`DossierDefaults.ItemLimit = 500`) pending reference-workflow validation; recorded per export, never cited as a specification (NFR-03).
-- **Measured observation (2026-09-23):** `DossierSelection.ResolveAsync` caps both anchor resolution and widening at `MemorySearchDefaults.MaxLimit` (200), so a bundle's selected count can never exceed 200 and the 500 item cap is **not** the effective bound — the handover workflow reached 200 (the search limit), not 500. Either the item limit should track the selection limit or the selection should be able to return up to the stated cap; flag, don't silently assume.
+- The numeric item limit is provisional (`DossierDefaults.ItemLimit`) pending reference-workflow validation; recorded per export, never cited as a specification (NFR-03). It is deliberately bound to the selection path's fetch ceiling (`MemorySearchDefaults.MaxLimit`, 200) so the stated cap is the effective, reachable bound — a higher stated cap would be an unreachable number that can never be hit or reported.
+- **Historical (2026-09-23):** earlier this dropped to 200 because selection fetched at `MemorySearchDefaults.MaxLimit`, so a 500 cap was unreachable. Any later raise of `MemorySearchDefaults.MaxLimit` must keep the dossier cap equal to it, or the cap is again dead. `cap reached` is reported on the cut itself (`LimitReached` or a history-inflated item cut), so a slice that fills the bound is never presented as complete.
 - The dossier skill (composition, focus, findings taxonomy) and tag identity/synonyms remain separate, blocked workstreams — not part of this deterministic side.
 
 ## Changelog
@@ -91,3 +91,4 @@ sequenceDiagram
 |:-----|:-------|:----|
 | 2026-09-22 | Created — deterministic bundle/preview half of HLD-005 contextual export. Bundle + preview slices, shared selection, new store widening read, two Host endpoints, L0 + L1 tests. | HLD-005 |
 | 2026-09-23 | Added the NFR-03 reference-workflow measurement harness (`DossierWorkflowBenchmarkTests`, `SMOOTH_DOSSIER_BENCH=1`) and the NFR-02 cross-restart byte-equality L1 test. Recorded that the selection caps at 200 (MaxLimit), not the 500 item cap. | HLD-005 NFR-02/NFR-03 |
+| 2026-09-23 | Migration Plans updated to the shipped state: the dossier item cap is bound to the selection fetch ceiling (`MemorySearchDefaults.MaxLimit`), resolving the earlier 500-vs-200 flag rather than leaving it open. | HLD-005 NFR-03 |
