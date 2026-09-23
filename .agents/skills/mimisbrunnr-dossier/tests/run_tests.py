@@ -202,6 +202,26 @@ class Nfr04ReconciliationTests(unittest.TestCase):
         cats = [f["category"] for f in doc.findings]
         self.assertIn("provenance-cycle", cats)
 
+    def test_claim_order_is_topological_not_business_key(self):
+        """LADR-07: the dossier's claim order follows the deterministic topological order over the
+        ordering relations, not business-key recency. A superseding claim that happens to be
+        business-newer than the claim it replaces must not be reordered ahead of it; the superseded
+        claim is read first."""
+        # A supersedes B. A has the EARLIER business key (validFrom/createdOn), so business-key sort
+        # would put A first; topological order (superseded first) must put B first.
+        a = _mk("aaaaaaaa-0000-4000-8000-000000000001", "A", "The default is A.",
+                created="2026-01-01T10:00:00Z")
+        b = _mk("bbbbbbbb-0000-4000-8000-000000000002", "B", "The default is B.",
+                created="2026-02-01T10:00:00Z")
+        edges = [{"sourceUuid": a["uuid"], "targetUuid": b["uuid"], "relation": "supersedes", "reason": "x"}]
+        doc = dc.compose(_bundle([a, b], edges), focus=None)
+        self.assertTrue(doc.reconciliation["closed"])
+        order = [c["origins"][0]["name"] for c in doc.claims if c.get("surfaced")]
+        self.assertEqual(order, ["B", "A"])
+        # The renderer emits them in the same order.
+        rendered = dc.render(doc)
+        self.assertLess(rendered.index("### B"), rendered.index("### A"))
+
     def test_per_focus_accounts_same_selected_and_carries_every_finding(self):
         """NFR-04 / LADR-12: every focus of one fixture accounts for the same selected memories and
         carries every finding the unfocused dossier carries."""

@@ -651,6 +651,14 @@ def compose(bundle, focus=UNFOCUSED, judgements=None, asof=None, store_name=STOR
 
     # 5. Focus lens (LADR-12). What the lens does not surface is listed as omitted with
     #    ``outside-focus``; membership is never changed.
+    #    The claim's topological position is computed here and used by the renderer to order claims
+    #    (LADR-07). A consolidated claim takes the earliest position among its origins, so the
+    #    superseded/superseding relation reads in order rather than in business-key recency.
+    pos = {item["uuid"]: i for i, item in enumerate(ordered)}
+
+    def _claim_order(claim):
+        return min((pos.get(o["uuid"], len(pos)) for o in claim["origins"]), default=len(pos))
+
     claims = []
     for claim in present_claims:
         origin = claim["origins"][0]
@@ -658,12 +666,16 @@ def compose(bundle, focus=UNFOCUSED, judgements=None, asof=None, store_name=STOR
         rendered = dict(claim)
         rendered["depth"] = depth
         rendered["surfaced"] = surfaced
+        rendered["_order"] = _claim_order(claim)
         if not surfaced:
             # The whole claim (every origin) is set aside by the lens; each is listed as omitted.
             for member in claim["origins"]:
                 omitted.append({"uuid": member["uuid"], "reason": "outside-focus",
                                 "name": member.get("name")})
         claims.append(rendered)
+
+    # Order claims topologically (LADR-07) so the exposed data and the rendered document agree.
+    claims.sort(key=lambda c: c["_order"])
 
     # 6. Findings (LADR-13, NFR-04); focus-invariant in presence.
     findings = derive_findings(items, edges, ordered, present_claims, equivalence_proposals,
@@ -829,12 +841,11 @@ def render(dossier):
 
 
 def _order_claims(dossier):
-    # Claim order follows the bundle ordering where possible: use the topological order of the primary
-    # origin, falling back to identity order. A focus may re-weight but never changes membership.
-    # Claims the focus lens set aside (``outside-focus``) are not rendered here; they are listed in
-    # the omitted section instead.
-    ordered = [claim for claim in dossier.claims if claim.get("surfaced", True)]
-    return ordered
+    # The surface claim order follows the deterministic topological order of the bundle (LADR-07),
+    # applied to ``dossier.claims`` during composition. A focus may re-weight depth but never changes
+    # membership, so the set surfaced is identical across focuses; what the focus set aside
+    # (``outside-focus``) is not rendered here but listed in the omitted section.
+    return [claim for claim in dossier.claims if claim.get("surfaced", True)]
 
 
 def _conditions(item):
@@ -916,7 +927,7 @@ def _near_miss_helper_path():
 
 def read_bundle(path_or_url):
     if path_or_url.startswith("http://") or path_or_url.startswith("https://"):
-        return fetch_bundle_from_api(path_or_url)
+        return fetch_bundle_from_api(path_or_url, {})
     return json.loads(Path(path_or_url).read_text(encoding="utf-8"))
 
 
