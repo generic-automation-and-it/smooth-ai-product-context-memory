@@ -446,7 +446,7 @@ jobs:
           HEAD_REPO: ${{ steps.pr.outputs.head_repo }}
         run: |
           set -euo pipefail
-          changed_paths="$(git status --porcelain -- . ':!ci_temp' ':!.context' ':!.smooth-ai-review-tools')"
+          changed_paths="$(git status --porcelain -- . ':(exclude,glob)ci_temp/**')"
           if [ -z "$changed_paths" ]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "No file changes produced by ai-analyse."
@@ -454,7 +454,7 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A -- . ':!ci_temp' ':!.context' ':!.smooth-ai-review-tools'
+          git add -A -- . ':(exclude,glob)ci_temp/**'
           # Belt-and-suspenders: re-check the cached diff after staging so a rename
           # or pathspec quirk cannot produce an empty commit.
           if [ -z "$(git diff --cached --name-only)" ]; then
