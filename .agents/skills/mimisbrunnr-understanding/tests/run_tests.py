@@ -635,6 +635,33 @@ class DumpRedactionTests(unittest.TestCase):
             self.assertIn("REFUSED", err)
             self.assertFalse(out_dir.exists())
 
+    def _dump_with_redactor(self, tmp: str, redactor_source: str) -> tuple[int, str, Path]:
+        content = write(tmp, "c.md", "# Deploy\n\nNothing secret here at all.")
+        out_dir = Path(tmp) / "deploy"
+        fake = Path(write(tmp, "fake_redact.py", redactor_source))
+        original = uc.REDACTOR
+        uc.REDACTOR = fake
+        try:
+            rc, _, err = run(["dump", "--currentsession", "--from", content, "--out", str(out_dir)])
+        finally:
+            uc.REDACTOR = original
+        return rc, err, out_dir
+
+    def test_dump_is_refused_when_the_redactor_exits_non_zero(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, err, out_dir = self._dump_with_redactor(tmp, "import sys\nsys.exit(3)\n")
+            self.assertEqual(rc, 1)
+            self.assertIn("REFUSED", err)
+            self.assertFalse(out_dir.exists())
+
+    def test_dump_is_refused_when_the_redactor_output_is_malformed(self):
+        for output in ("not json", "{}", '{"results": []}'):
+            with self.subTest(output=output), tempfile.TemporaryDirectory() as tmp:
+                rc, err, out_dir = self._dump_with_redactor(tmp, f"print({output!r})\n")
+                self.assertEqual(rc, 1)
+                self.assertIn("REFUSED", err)
+                self.assertFalse(out_dir.exists())
+
     def test_dump_folder_loads_by_folder_path(self):
         with tempfile.TemporaryDirectory() as tmp:
             content = write(tmp, "c.md", "# Cutover\n\nThe AGE cutover needed an index rebuild.")

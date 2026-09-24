@@ -597,8 +597,11 @@ def redact(content: str) -> tuple[str, dict[str, int]] | None:
                           capture_output=True, text=True, encoding="utf-8")
     if proc.returncode != 0:
         return None
-    result = json.loads(proc.stdout)["results"][0]
-    return result["redacted"], {f["rule_name"]: f["hit_count"] for f in result["findings"]}
+    try:
+        result = json.loads(proc.stdout)["results"][0]
+        return result["redacted"], {f["rule_name"]: f["hit_count"] for f in result["findings"]}
+    except (ValueError, KeyError, IndexError, TypeError):
+        return None
 
 
 def cmd_dump(args: argparse.Namespace) -> int:
