@@ -12,7 +12,7 @@ durability boundary is the archive a human keeps.
 
 | Tier | Path | Tracked | Lifetime | Purpose |
 |------|------|---------|----------|---------|
-| Working memory | `.context/understandings/<subject>-<yyyyMMdd-HHmm>/<slug>.md` | No | This workspace | Where export lands — one stamped folder per export run; a slug repeated across folders is a version chain, newest current |
+| Working memory | `.context/understandings/<subject>-<yyyyMMdd-HHmm>/<slug>.understanding.md` | No | This workspace | Where export lands — one stamped folder per export run; a slug repeated across folders is a version chain, newest current |
 | Published archive | `.context/understandings-publish/understandings-<YYYYMMDD-HHMMSS>.zip` by default, or `--path` when given | No | Whoever keeps the file | A snapshot of the store, mailed, dropped in a channel, or copied to a stick |
 
 Nothing is published implicitly — it takes the `--publish` invocation. No approval prompt gates the
@@ -40,7 +40,7 @@ acting on it.
 
 1. Read the working store's index; select every unit, or only `portable` units with `--portable-only`.
 2. No approval needed — the default archive path, or an explicit `--path`, is the consent. Step 7 reports the slug list and the path after writing.
-3. Archive each `<subject>-<yyyyMMdd-HHmm>/<slug>.md`, plus its `<slug>.assets/` when it has one. Filter per Understanding, never per subject — one subject routinely mixes scopes. Subject folders keep their stamp verbatim: publishing never re-stamps, because the stamp records when the knowledge was learned and the archive name already records when it was sent.
+3. Archive each `<subject>-<yyyyMMdd-HHmm>/<slug>.understanding.md`, plus its `<slug>.assets/` when it has one. Filter per Understanding, never per subject — one subject routinely mixes scopes. Subject folders keep their stamp verbatim: publishing never re-stamps, because the stamp records when the knowledge was learned and the archive name already records when it was sent.
 4. When `--portable-only` excludes a unit that an archived unit's `links` or `provenance.inherited` names, drop the brackets around that `[[slug]]` in the archived copy and keep the entry — the same convention the store uses for a pruned ancestor. Without `--portable-only` every unit is present and the case cannot arise.
 5. On each archived copy, set `provenance.published_from` and leave the working copy untouched.
 6. Regenerate an `INDEX.md` inside the archive covering only the archived units, using the index script against the staged tree.
@@ -48,9 +48,16 @@ acting on it.
 
 ### Pre-publish check
 
-Understandings are written during debugging, when a literal value is the fastest thing to type. Before
-anything leaves the workspace, confirm no unit carries a credential, token, connection string, or
-internal hostname. Record the shape of the problem, not the value. See
+The **second** net, not the first: redaction happens at write time (`SKILL.md`, *Redact before you write*),
+because a value that reaches a unit is already one `--publish` away from leaving the workspace. This check
+catches what that step missed, and it catches units written before the step existed.
+
+Before anything leaves the workspace, confirm no unit carries a credential, token, connection string, or
+internal hostname. Where one does, strike it in the **working copy** before archiving: the archive is
+generated from the store, so fixing the store fixes every archive after it. That edit is the one exception
+to immutability (`SKILL.md`, *Redact before you write*) — a credential is not knowledge, so it is repaired
+in place rather than superseded, which would leave the value on disk. Record the shape of the problem, not
+the value. See
 `.github/instructions/skill-secret-handling.instructions.md`.
 
 ## Consume
@@ -97,12 +104,12 @@ After reconciling, regenerate the working index.
 ## Lifecycle
 
 ```
-session → .context/understandings/<subject>-<yyyyMMdd-HHmm>/<slug>.md   (--export, one folder per run; newest copy of a slug is current)
-        → .context/understandings-publish/understandings-<stamp>.zip     (--publish, per-unit scope filter)
-        → handed over out of band                                        (mail, chat, drive)
-        → .context/understandings/<subject>-<yyyyMMdd-HHmm>/<slug>.md   (--consume, into that workspace's store)
-        → session                                                        (--import, matched by question)
-        → *AGENTS.md  or  .github/instructions/                          (--promote, when it stops being an observation)
+session → .context/understandings/<subject>-<yyyyMMdd-HHmm>/<slug>.understanding.md  (--export, one folder per run; newest copy of a slug is current)
+        → .context/understandings-publish/understandings-<stamp>.zip                 (--publish, per-unit scope filter)
+        → handed over out of band                                                    (mail, chat, drive)
+        → .context/understandings/<subject>-<yyyyMMdd-HHmm>/<slug>.understanding.md  (--consume, into that workspace's store)
+        → session                                                                    (--import, matched by question)
+        → *AGENTS.md  or  .github/instructions/                                      (--promote, when it stops being an observation)
 ```
 
 Promotion is the exit from this loop. An Understanding that has been consumed, confirmed, and applied
