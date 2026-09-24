@@ -449,3 +449,9 @@ FodyWeavers.xsd
 # Review-gate tooling checkouts (created on CI runners, never committed)
 .review-tools/
 .smooth-ai-review-tools/
+
+# Review-gate scratch. `ci_temp` has no trailing slash because upstream's local-review.sh creates it
+# as a symlink, which a directory-only pattern misses. `ci_temp_logs/` is a sibling, not a child, so
+# it survives the gate's `rm -rf ci_temp` cleanup.
+ci_temp
+ci_temp_logs/
