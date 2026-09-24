@@ -116,7 +116,7 @@ overrides for a one-off.
 
 ## Test
 
-Committed harness: `python3 -B .agents/skills/mimisbrunnr-dossier/tests/run_tests.py` (31 tests).
+Committed harness: `python3 -B .agents/skills/mimisbrunnr-dossier/tests/run_tests.py` (34 tests).
 
 ## Related
 

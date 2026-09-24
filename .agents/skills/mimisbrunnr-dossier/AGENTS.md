@@ -128,4 +128,4 @@ the only file it writes is the local dossier artefact. Tests: `tests/run_tests.p
 | Date | Change | Ref |
 |:-----|:-------|:----|
 | 2026-09-22 | Created — read-only dossier composer contract (LADR-02/04/05/07/08/12/13/14/15, NFR-01..07). | HLD-005; BRD-002 |
-| 2026-09-23 | Implemented the judgement skeleton (`scripts/dossier_composer.py`), the invocation contract (`SKILL.md`), and the committed L0 harness (`tests/run_tests.py`, 31 tests, NFR-04/05/06/07). | HLD-005; BRD-002 |
+| 2026-09-23 | Implemented the judgement skeleton (`scripts/dossier_composer.py`), the invocation contract (`SKILL.md`), and the committed L0 harness (`tests/run_tests.py`, 34 tests, NFR-04/05/06/07). | HLD-005; BRD-002 |

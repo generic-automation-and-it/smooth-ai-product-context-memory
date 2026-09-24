@@ -12,8 +12,8 @@ calls a model — composition judgement that needs a model is supplied by the ca
 skill) as ``judgements``; this module enforces the deterministic rules around that judgement and
 delivers the invariants the NFRs require.
 
-Usage (requests a bundle from the Host API, read-only):
-    python3 -B dossier_composer.py bundle --base-url .. --focus architecture --out path/to/artefact.md
+Usage (fetch a bundle from the Host API, read-only; --base-url is a top-level option):
+    python3 -B dossier_composer.py --base-url http://localhost:5141 bundle --body '{"repo":"kingstown","widenDepth":3}'
 
 Usage (offline, compose from a previously saved bundle JSON):
     python3 -B dossier_composer.py compose --bundle bundle.json --focus architecture --out artefact.md
@@ -63,6 +63,11 @@ FINDING_CATEGORIES = (
 )
 _OBSERVATION = "observation"
 _ANALYSIS = "analysis"
+
+# The only finding categories a caller may inject via judgement. Contradictions and gaps are the
+# judgement findings (LADR-02); near-miss-tag is the evidence-only helper's output, fed back through
+# the skill. The deterministic categories the composer derives itself are never caller-overridable (F4).
+_CALLER_MERGEABLE_FINDINGS = ("contradiction", "gap", "near-miss-tag")
 
 LIFECYCLE_CURRENT = "current"
 LIFECYCLE_PROPOSED = "proposed"
@@ -118,8 +123,12 @@ def validate_bundle(bundle):
         _require(omitted["reason"] in OMISSION_REASONS,
                  f"unknown omission reason '{omitted['reason']}'")
     # A memory must not be listed in both items and omitted: that would render it as both a claim and
-    # an omission while the count still closes, hiding the double-count (LADR-05 / NFR-04).
-    item_ids = {i["uuid"] for i in bundle["items"]}
+    # an omission while the count still closes, hiding the double-count (LADR-05 / NFR-04). A duplicate
+    # item uuid would likewise let by_uuid silently dedupe and produce an unchecked ✗ FAILED render.
+    item_uuids = [i["uuid"] for i in bundle["items"]]
+    _require(len(set(item_uuids)) == len(item_uuids),
+             "bundle: an item uuid appears more than once")
+    item_ids = set(item_uuids)
     omitted_ids = {o["uuid"] for o in bundle["omitted"]}
     _require(not (item_ids & omitted_ids),
              "bundle: an item is listed in both items and omitted")
@@ -299,10 +308,17 @@ def consolidate(items, equivalences, edges, asof=None):
     uncertain = []
     for idx, group in enumerate(equivalences or []):
         uuids = group.get("uuids") or []
-        members = [by_uuid.get(u) for u in uuids]
-        members = [m for m in members if m is not None]
-        if not members:
-            continue
+        # Validate the caller-supplied equivalence group before applying it (F3). A group must name at
+        # least two distinct uuids, every one selected in this bundle — an absent or duplicated uuid
+        # would silently consolidate on a subset or render duplicate origin citations.
+        if len(uuids) < 2:
+            raise ValueError("equivalences: each group requires at least two uuids")
+        if len(set(uuids)) != len(uuids):
+            raise ValueError("equivalences: a group contains a duplicate uuid")
+        missing = [u for u in uuids if u not in by_uuid]
+        if missing:
+            raise ValueError(f"equivalences: uuid {missing[0]} is not selected in this bundle")
+        members = [by_uuid[u] for u in uuids]
         # Reject overlapping groups: a uuid in two equivalence proposals would render the same memory
         # as two claim headers while reconciliation still closes (an uncheckable double). Fail loud
         # like validate_bundle rather than silently duplicating (LADR-05).
@@ -478,18 +494,34 @@ def derive_findings(items, edges, ordered, present_claims, equivalences, asof=No
         category = f.get("category")
         if category not in FINDING_CATEGORIES:
             raise ValueError(f"unknown finding category '{category}'")
+        # Only contradiction/gap/near-miss-tag are caller-mergeable; the deterministic categories are
+        # the composer's to derive, not to override (F4).
+        if category not in _CALLER_MERGEABLE_FINDINGS:
+            raise ValueError(f"finding category '{category}' is not caller-mergeable")
         if category == "contradiction":
             _validate_contradiction(f, by_uuid, edges, asof)
         if category == "gap":
             grounds = f.get("ground")
             if grounds not in ("task", "included-claim", "expectation"):
                 raise ValueError("gap: requires one of BR-27's grounds (task / included-claim / expectation)")
+        basis = f.get("basis")
+        if not basis or not str(basis).strip():
+            raise ValueError(f"{category}: requires a non-empty basis")
+        classification = f.get("classification")
+        if classification not in (_OBSERVATION, _ANALYSIS):
+            raise ValueError(f"{category}: classification must be observation or analysis")
+        mems = f.get("memories") or []
+        for m in mems:
+            if not m.get("uuid") or m["uuid"] not in by_uuid:
+                raise ValueError(f"{category}: each memory must be selected in this bundle")
+            if not isinstance(m.get("version"), int) or m["version"] < 1:
+                raise ValueError(f"{category}: each memory requires a version >= 1")
         findings.append({
             "category": category,
-            "classification": f.get("classification", _ANALYSIS),
-            "basis": f.get("basis"),
+            "classification": classification,
+            "basis": str(basis),
             "scope": f.get("scope", scope_text),
-            "memories": f.get("memories", []),
+            "memories": mems,
         })
 
     # Deterministic ordering: by category (taxonomy order), then by memory identity.
@@ -939,10 +971,10 @@ def near_miss_findings(payload):
 
 
 def _near_miss_helper_path():
-    candidate = Path(__file__).resolve().parents[2] / "mimisbrunnr-context-memory" / "scripts" / "near_miss_tags.py"
-    if candidate.exists():
-        return candidate
-    return Path(__file__).resolve().parents[1] / "mimisbrunnr-context-memory" / "scripts" / "near_miss_tags.py"
+    # The shared evidence-only helper lives in the sibling skill's scripts dir. This skill's own
+    # directory never contains a nested copy, so there is no usable fallback — a missing helper must
+    # fail loudly in the caller rather than point at a path that can never resolve (R3).
+    return Path(__file__).resolve().parents[2] / "mimisbrunnr-context-memory" / "scripts" / "near_miss_tags.py"
 
 
 # ---------------------------------------------------------------------------- CLI (read-only)

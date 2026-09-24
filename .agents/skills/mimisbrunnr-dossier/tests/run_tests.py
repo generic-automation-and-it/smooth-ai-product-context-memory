@@ -258,6 +258,45 @@ class Nfr04ReconciliationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             dc.compose(bad, focus=None)
 
+    def test_equivalence_group_rejects_missing_or_duplicate_members(self):
+        """reviewer finding 3: an equivalence group naming a non-selected uuid, a duplicate uuid, or
+        fewer than two members is rejected fail-loud rather than silently consolidated on a subset."""
+        a = _mk("aaaaaaaa-0000-4000-8000-000000000001", "A", "x.")
+        b = _mk("bbbbbbbb-0000-4000-8000-000000000002", "B", "x.")
+        missing = {"equivalences": [{"uuids": [a["uuid"], "cccccccc-0000-4000-8000-000000000003"], "meaning": "m"}]}
+        with self.assertRaises(ValueError):
+            dc.compose(_bundle([a]), focus=None, judgements=missing)
+        dup = {"equivalences": [{"uuids": [a["uuid"], a["uuid"]], "meaning": "m"}]}
+        with self.assertRaises(ValueError):
+            dc.compose(_bundle([a, b]), focus=None, judgements=dup)
+        single = {"equivalences": [{"uuids": [a["uuid"]], "meaning": "m"}]}
+        with self.assertRaises(ValueError):
+            dc.compose(_bundle([a, b]), focus=None, judgements=single)
+
+    def test_judgement_finding_requires_basis_and_selected_memory(self):
+        """reviewer finding 4: a caller-supplied finding must carry a non-empty basis, an observation or
+        analysis classification, and every memory selected with a valid version; deterministic
+        categories are not caller-mergeable."""
+        a = _mk("aaaaaaaa-0000-4000-8000-000000000001", "A", "x.")
+        no_basis = {"findings": [{"category": "gap", "ground": "task", "memories": []}]}
+        with self.assertRaises(ValueError):
+            dc.compose(_bundle([a]), focus=None, judgements=no_basis)
+        bad_mem = {"findings": [{"category": "gap", "ground": "task", "basis": "why", "memories": [{"uuid": "cccccccc-0000-4000-8000-000000000003", "version": 1}]}]}
+        with self.assertRaises(ValueError):
+            dc.compose(_bundle([a]), focus=None, judgements=bad_mem)
+        # A deterministic category (stale) is not caller-mergeable.
+        deterministic = {"findings": [{"category": "stale", "basis": "why", "memories": []}]}
+        with self.assertRaises(ValueError):
+            dc.compose(_bundle([a]), focus=None, judgements=deterministic)
+
+    def test_bundle_duplicate_item_uuid_is_rejected(self):
+        """reviewer finding (validate_bundle): a bundle carrying duplicate item uuids is rejected so
+        the render cannot silently dedupe into an unchecked uncovered count."""
+        a = _mk("aaaaaaaa-0000-4000-8000-000000000001", "A", "x.")
+        bad = _bundle([a, a])
+        with self.assertRaises(ValueError):
+            dc.compose(bad, focus=None)
+
     def test_consolidated_no_source_origin_shows_unattributed(self):
         """reviewer finding (render): a consolidated group with an origin lacking recorded sources is
         shown as provenance-incomplete, not as distinct independent observations (no fabricated
