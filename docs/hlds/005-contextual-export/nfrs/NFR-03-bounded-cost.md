@@ -42,12 +42,14 @@ retrospective guess. The provisional value is not a specification and must not b
 - **L1** — assert a preview performs **zero** blob reads, using a counting blob-storage test double.
 - **L1** — assert every limit reached appears in the manifest, and that reaching one never produces a silently shorter payload.
 - **Skill-level test** — assert the preview carries its assumptions and an uncertainty statement, and that monetary cost is either present or explicitly marked unavailable.
+- **L1** — assert the preview prices a slice whose selected memories include `kind = understanding` items under the same item cap and reach limits; the kind is not a separate, cheaper category (LADR-15).
 - **Reference-workflow validation** — run the three representative workflows, record slice size, composition usage, and whether the document was fit for its task. These runs **set** the numeric limits. Benchmarked behind an environment flag in the style of the existing traversal benchmark, so the ordinary test run stays fast.
 
 ## Acceptance Criteria
 
 - No request can be made without an explicit widening bound; depth outside 1–5 is refused at both the validator and the store layer.
 - A preview hydrates no body and states its assumptions, its uncertainty, and whether monetary cost is known.
+- A `kind = understanding` item is priced and capped like any other selected item; the preview never under-counts it (LADR-15).
 - The practitioner can narrow or cancel from the preview; cancelling leaves the store unchanged.
 - Scope beyond a limit is refused and reported; no response is silently truncated or broadened.
 - Numeric item and latency limits are recorded as derived from the reference workflows, with the value used captured per export — not inherited from this document as an assumption.
@@ -58,3 +60,33 @@ Goal 4 (cost visible before it is paid) and Goal 1 (bounded selection). LADR-02 
 the skill's, which is why the preview must be servable without it), LADR-03 (the bound, and the history
 policy the preview must price), LADR-14 (the preview is the first half of the operation, not a detached
 estimate). `BR-32`, and `BR-30` for the no-silent-truncation half.
+
+## Reference-workflow measurements (2026-09-24)
+
+Recorded by `DossierWorkflowBenchmarkTests` behind `SMOOTH_DOSSIER_BENCH=1` against a seeded store
+(620 memories / 1400 edges, kind=understanding and history present, programme-scoped memories present).
+Command: `SMOOTH_DOSSIER_BENCH=1 dotnet test tests/SmoothAiProductContextMemory.Application.ComponentTest
+--filter DossierWorkflowBenchmarkTests`. The reported values are evidence, not a specification.
+
+| Workflow | Selected | Widened | Edges | Item limit hit? | Blob reads | Payload (KiB) | Bundle p95 (ms) |
+|---|---|---|---|---|---|---|---|
+| spec preparation | 54 | 19 | 0 | no | 0 | 33.6 | 260.8 |
+| handover | 400 | 200 | 583 | yes (200) | 0 | 233.7 | 2074.3 |
+| re-entry | 61 | 26 | 0 | no | 0 | 37.8 | 339.8 |
+
+Preview p95 for the same shapes: spec 244.5 ms, handover 2032.2 ms, re-entry 302.3 ms.
+
+> **Re-measured 2026-09-24 after the widening source-exclusion fix.** The 2026-09-23 run counted every
+> anchor memory as a widened memory (the widening read returned the sources), so `Widened` equalled
+> `Selected` and the anchor-to-anchor edges inflated `Edges`. `WidenAsync` now excludes the sources, so
+> the `Widened`/`Edges` columns above are the genuinely-reached values. `Selected` for handover is the
+> pre-cut count (400, inflated by history versions of the widened memories) that the 200-item cap cut.
+
+**Item limit = the reachable bound.** `DossierDefaults.ItemLimit` equals `MemorySearchDefaults.MaxLimit` (200),
+the ceiling both anchor resolution and widening fetch at, so the stated limit is the effective bound and
+`cap reached` is honestly reported when it is hit — the handover workflow reached it and the manifest
+names it. A limit the selection cannot reach would be a number that never fires; aligning the two makes
+the bound real and the truncation visible (NFR-04). Composition usage and whether each document was fit
+for its task (fidelity of conditions and exceptions) are the dossier skill's reference-example review
+(NFR-07), assessed separately; the latency record above is the slice-size cost the preview must make
+knowable.

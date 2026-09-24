@@ -23,10 +23,12 @@ structure.
 - **L1** — assert the selection path never calls `SaveChanges`, as a direct assertion on the context rather than an inference from counts.
 - **Skill-level test** — assert the dossier skill exposes no write operation. A capability-absence test, so adding one breaks the build.
 - **L1** — run an export over a slice whose facets are absent from the registry; assert the registry is unchanged. This is the most plausible accidental write, because registering an observed facet looks helpful.
+- **L1** — the same zero-write snapshot over a slice whose selected items are `kind = understanding`. Assert no row, version, vertex, edge or blob change — the kind is not an exemption from read-only (LADR-15).
 
 ## Acceptance Criteria
 
 - Every row, version, vertex, edge and blob count is identical before and after an export.
+- That identity holds for an export selecting `kind = understanding` items; the zero-write guarantee is kind-independent (LADR-15).
 - The selection path issues no `SaveChanges`.
 - The composing skill has no write capability, proven by test rather than by policy.
 - An unregistered facet encountered during selection remains unregistered.

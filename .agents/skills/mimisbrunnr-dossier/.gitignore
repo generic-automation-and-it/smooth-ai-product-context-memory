@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+# The composed dossier artefact is a generated projection and is never committed. It lands in the
+# repository's local AI context tree, which is itself gitignored (see the root .gitignore).
+.context/mimisbrunnr-dossier/

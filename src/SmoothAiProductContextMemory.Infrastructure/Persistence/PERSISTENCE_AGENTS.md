@@ -192,6 +192,7 @@ is the current design authority, superseding HLD-003 LADR-02 before any ticket m
 | 2026-09-13 | Characterised relationship uniqueness/integrity as the relational store provides it (duplicate directed triple, direction, cascade, self-link persists, cross-group). No production change. | HLD-003 |
 | 2026-09-13 | AGE foundation review fixes: idempotent migration guards, runtime PG/AGE version-pairing assert after migrate, migrate fails loudly without registered `NpgsqlDataSource`, multi-instance rollout constraint documented. | HLD-003 |
 | 2026-09-13 | AGE foundation: extension-bearing image, per-connection session init, non-transactional graph/label migration. `memory_link` unchanged. | HLD-003 |
+| 2026-09-23 | `NpgsqlMemoryTraversal.WidenAsync` (HLD-005): set-source widening over the graph, depth 1-5 enforced at the store layer, and per-vertex hidden-dimension gating (a path crossing a hidden scope is dropped whole, never shortened). | HLD-005 NFR-01 |
 | 2026-09-13 | `.docs`→`docs` move and ADR-0002→HLD 001 authority retarget recorded; ADR-era citations now reference HLD 001 (blob storage → LADR-06, in-database enforcement → LADR-07). | — |
 | 2026-09-11 | Documented that `ix_memory_version_validity` (GIST over `tstzrange`) is unreachable from LINQ; `NpgsqlMemorySearch` uses scalar validity comparisons and `@>` for facet/tag GIN matching. No schema change. | PR #14 review |
 | 2026-09-10 | Additive `memory_version.summary_stamp` jsonb (D42) + `append_only_guard` equality-list extension + btree on `memory_group.repo`. | PR #14, ADR-0003 |

@@ -27,7 +27,7 @@ must remain isolated from the test fixture and development installation.
   Aspire means the same AppHost runs against Docker (the default) or Podman with no code or config
   change; set `DOTNET_ASPIRE_CONTAINER_RUNTIME=podman` to switch. Verified working under both. Do not
   add runtime-specific wiring to the AppHost. Container images are **registry-qualified and pinned**
-  (`docker.io/apache/age:release_PG17_1.7.0`, `quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z`) because Podman refuses to resolve short names
+  (`docker.io/apache/age:release_PG17_1.7.0`, `cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1`) because Podman refuses to resolve short names
   non-interactively unless the host's `registries.conf` happens to allow it.
 - **Source mode remains the development default.** Starting it compiles Host from the working tree and
   starts Týr/Iðunn/Saga. The separate release profile may package this same live AppHost, DCP, and
@@ -230,6 +230,7 @@ Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgr
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-24 | MinIO image moved to `cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1`: quay.io `minio/minio` stopped serving (repo returns 401, tag no longer active), so fresh pulls failed and the CI test host never created its blob container. Chainguard's free tier publishes only `:latest`, hence the digest pin. The image runs non-root and cannot write a volume the old root-run image created, so the dev blob container runs `--user 0:0`; existing `mimisbrunnr-blob-well` data keeps working (verified against a root-owned volume). | PR #99 |
 | 2026-09-17 | Added secret Aspire parameters for distinct API read/write tokens and injects them into project and image Host modes. | HLD-002 NFR-04 |
 | 2026-09-17 | Approved secret parameter injection for separate context API read/write capabilities. | HLD-002 NFR-04 |
 | 2026-09-16 | Limited bind-address validation to release mode and added development-mode regression cases. | PR #65 review |

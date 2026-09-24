@@ -5,7 +5,9 @@ namespace SmoothAiProductContextMemory.AppHost;
 
 internal static class DistributedApplicationBuilderExtensions
 {
-    private const string BlobImage = "quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z";
+    // Upstream MinIO community images are gone from Docker Hub and quay.io; Chainguard's free tier
+    // only publishes :latest, so it is pinned by digest. Keep identical to the test Aspire host.
+    private const string BlobImage = "cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1";
     private const string SeqImageRegistry = "docker.io";
     private const string SeqImage = "datalust/seq";
     private const string SeqImageTag = "2025.2";
@@ -112,7 +114,10 @@ internal static class DistributedApplicationBuilderExtensions
                 .WithEnvironment("MINIO_ROOT_PASSWORD", configuration.BlobSecretKey)
                 .WithVolume(configuration.BlobDataVolume, "/data")
                 .WithContainerName(configuration.BlobContainerName)
+                // Chainguard's image runs as a non-root user, which cannot write a data volume created
+                // by the earlier root-run MinIO image; run as root so existing dev volumes keep working.
                 .WithContainerRuntimeArgs(
+                    "--user", "0:0",
                     "--label", $"com.docker.compose.project={configuration.DockerDesktopGroupName}",
                     "--label", $"com.docker.compose.service={configuration.BlobContainerName}",
                     "--label", $"{AppHostConfiguration.OwnershipLabel}={configuration.InstallationId}",
