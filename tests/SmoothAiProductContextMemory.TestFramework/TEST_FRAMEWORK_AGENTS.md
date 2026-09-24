@@ -53,6 +53,7 @@ Shared xunit.v3 test fixtures and helpers reused across the L0/L1/L2 test projec
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-24 | Test Aspire MinIO image moved to `cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1` (same pin as the dev AppHost): quay.io `minio/minio` stopped serving, so CI could not pull the old tag and `mimisbrunnr-testcontainer-blob` was never created. Runs non-root; the test container has no named volume, so no ownership issue. Remove a local persistent `mimisbrunnr-testcontainer-blob` once to pick up the new image. | PR #99 |
 | 2026-09-13 | Added `Telemetry/TelemetryCapture` + `CapturedSpan`, `Logging/CapturingLoggerProvider`, `Fixtures/TestHttpClientFactory`, and a `ConfigureTestServices` hook on `WebAppFixture` so L2 can assert OTLP export, health and NFR-05 confidentiality. | PR #36 |
 | 2026-09-13 | Test Docker Desktop group relabelled `Mímisbrunnr-Testing` → `smooth-mímisbrunnr-testing`, so it sorts beside the runtime group `smooth-mímisbrunnr`. Container names unchanged. Persistent containers keep the old label until removed — recreate once. | PR #36 |
 | 2026-09-13 | Test Docker Desktop group is `smooth-mímisbrunnr-testing`; containers are `mimisbrunnr-testcontainer-{tech}`. Recreate persistent containers once so Aspire does not keep the old names/labels. | — |
