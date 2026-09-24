@@ -28,6 +28,9 @@ The dump:
 - Writes a local Markdown projection of the session's understanding.
 - Changes **nothing** in the store — it is an export, not a write (NFR-01).
 - Is written to the gitignored `.context/` tree, so it is not committed.
+- Is **redacted before it is written**, by the capture skill's `redact.py` over stdin. A dump exists to
+  be carried out of the workspace, so a secret must be gone before the file exists. If the redactor
+  cannot run, the dump is refused and nothing is written (fail closed). Amended 2026-09-24.
 
 Another session or repository can then **load** that folder via the same skill, regardless of whether
 the originating repo is the same.

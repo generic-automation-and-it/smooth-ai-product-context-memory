@@ -22,9 +22,9 @@ Map the five parts onto existing fields, and add **no new column** and **no null
 
 | Understanding part | Stored field |
 |---|---|
-| **The knowledge** | `Statement` |
+| **Answer** (formerly *the knowledge*) | `Statement` |
 | **Why** | `ContentSummary` (AI TL;DR of the reasoning/failure) |
-| **Trigger** | `Description` — the situation in which the Understanding applies |
+| **Question** (formerly *trigger*) | `Description` — the question a reader has when the Understanding applies |
 | **Boundaries** | `ValidUntil` + the group's scope |
 | **Provenance** | `Sources` + `ValidFrom` + `CreatedOn` |
 
@@ -49,6 +49,12 @@ is made nullable, and no column is added.
   and breaks the atomic-fact model.
 
 ## Consequences
+
+- **2026-09-24 amendment — vocabulary.** *Trigger* and *the knowledge* are renamed **question** and
+  **answer**, matching the `ai-understanding` file format, which made the unit an explicit
+  question/answer pair so a trigger cannot be broader than its body. Stored fields are unchanged; the
+  load renderer prints `Question:` / `Answer:` and still reads a legacy `trigger` key. See LADR-09 for
+  the file-format mapping.
 
 - No migration is required for the Understanding shape (the `kind` constant is a value, not a schema change).
 - An Understanding is rendered from the same fields as any memory, so the export path needs no new shape

@@ -1,6 +1,6 @@
 ---
 name: ai-understanding
-description: Export this session's hard-won knowledge into Understandings under .context/understandings/<subject>-<yyyyMMdd-HHmm>/<slug>.md (one file per unit, grouped into a subject folder stamped with when it was created), import matching ones back at task start, and publish/consume them across workspaces as a zip. Trigger on "export the understandings", "make an Understanding of this", "encode this", "what did we learn", "/ai-understanding", or when a session resolved something that cost real effort and would cost the same again. Not a session log and not code documentation.
+description: Export this session's hard-won knowledge into Understandings under .context/understandings/<subject>-<yyyyMMdd-HHmm>/<slug>.understanding.md (one file per unit, grouped into a subject folder stamped with when it was created), import matching ones back at task start, and publish/consume them across workspaces as a zip. Trigger on "export the understandings", "make an Understanding of this", "encode this", "what did we learn", "/ai-understanding", or when a session resolved something that cost real effort and would cost the same again. Not a session log and not code documentation.
 allowed-tools:
   - Bash(python3 .agents/skills/ai-understanding/scripts/understanding_index.py:*)
   - Bash(zip:*)
@@ -38,7 +38,7 @@ The working store is **local and disposable** (`.context/` is gitignored). That 
 
 ## TL;DR
 
-1. Working store: `.context/understandings/<subject>-<yyyyMMdd-HHmm>/<slug>.md` — a stamped folder is **one export run**, holding only what that run produced.
+1. Working store: `.context/understandings/<subject>-<yyyyMMdd-HHmm>/<slug>.understanding.md` — a stamped folder is **one export run**, holding only what that run produced.
 2. `.context/understandings/INDEX.md` is a generated table of **unit + description + question**, one row per slug resolving to its newest version — the only file an agent reads to decide what to load, and the **first thing an export reads**.
 3. One session may yield **several** Understandings; each is its own file, each stands alone, and they share a `provenance.session` value.
 4. A slug is a version key, not a unique name. Same question → reuse the slug and write the complete improved unit into this run's folder. Different question → distinct slug. Never edit or delete a previous copy; newest wins.
@@ -48,11 +48,11 @@ The working store is **local and disposable** (`.context/` is gitignored). That 
 
 ```
 .context/understandings/
-  INDEX.md                            # generated — one row per slug, resolving to its newest version
-  <subject>-<yyyyMMdd-HHmm>/          # ONE EXPORT RUN — holds only what that run produced
-    <slug>.md                        # one Understanding (frontmatter + body)
-    <slug>.assets/                   # only when a unit carries artifacts — repro, log excerpt, diagram
-  _unfiled/                           # exempt from the stamp — a permanent catch-all, not a body of work
+  INDEX.md                    # generated — one row per slug, resolving to its newest version
+  <subject>-<yyyyMMdd-HHmm>/  # ONE EXPORT RUN — holds only what that run produced
+    <slug>.understanding.md   # one Understanding (frontmatter + body)
+    <slug>.assets/            # only when a unit carries artifacts — repro, log excerpt, diagram
+  _unfiled/                   # exempt from the stamp — a permanent catch-all, not a body of work
 ```
 
 **A stamped folder is one export run; a slug is the knowledge.** The same slug appearing in several stamped folders is a **version chain**, not an error: the newest stamp is the current version, the rest are history. `INDEX.md` lists the current version only. The subject *name* is reused across runs so a body of work stays browsable together; the *stamp* is new every run. Use `_unfiled/` for an Understanding belonging to no particular topic.
@@ -62,9 +62,9 @@ Almost every unit is a single file — evidence normally belongs inline, quoted 
 The `-yyyyMMdd-HHmm` stamp (24-hour, UTC — archives are consumed on other machines, so the zone is fixed) records when the run wrote the folder and is set once, never bumped — a unit's own `updated` field tracks freshness. It is what orders versions and what stops two sessions colliding on one folder name.
 
 ```
-agent-memory-design-20260101-0900/store-decay.md     # v1 — superseded, on disk, unlisted
-agent-memory-design-20260211-1430/store-decay.md     # v2 — superseded
-agent-memory-design-20260305-1105/store-decay.md     # v3 — CURRENT, the only one INDEX.md shows
+agent-memory-design-20260101-0900/store-decay.understanding.md     # v1 — superseded, on disk, unlisted
+agent-memory-design-20260211-1430/store-decay.understanding.md     # v2 — superseded
+agent-memory-design-20260305-1105/store-decay.understanding.md     # v3 — CURRENT, the only one INDEX.md shows
 ```
 
 A unit that genuinely needs artifacts gets a sibling `<slug>.assets/` directory. Naming it after the slug is what prevents the collisions a shared directory would cause, and it is paid for only by the rare unit that needs it.
@@ -78,7 +78,7 @@ Export and import are about **this session's memory**: export writes what the se
 | Switch | Effect |
 |--------|--------|
 | `--export [--path <dir>]` _(default)_ | **Reconcile against `INDEX.md`**, then write this run's new and improved units to a new `.context/understandings/<subject>-<yyyyMMdd-HHmm>/`, or under `--path` when given. Proposes the split first; writes nothing and creates no folder when nothing changed |
-| `--export --all [--path <dir>]` | Same, but write every qualifying candidate without pausing for the user to cut the list |
+| `--export --all [--path <dir>]` | Same, but breadth-first: write every candidate without pausing for the user to cut the list, **and hold the qualifying bar loosely** — a marginal candidate is written, not dropped, because the user prunes afterwards |
 | `--import` | Load Understandings whose question matches one the task will make you ask |
 | `--publish [--portable-only] [--path <target>]` | Write every unit to a zip under `.context/understandings-publish/`, or to `--path` when given; `--portable-only` restricts the archive to `scope: portable` units |
 | `--consume <zip> [--path <dir>]` | Unpack a published archive into the working store — `.context/understandings/` by default, or `--path` when given |
@@ -86,9 +86,18 @@ Export and import are about **this session's memory**: export writes what the se
 | `--index` | Regenerate `INDEX.md` from the store |
 | `--review` | Advisory decay report — what is contested, never inherited, or overdue a re-check |
 
-`--all` applies only to `--export`, where it means "skip the cut". `--publish`'s scope filter is a
-separate switch, `--portable-only` — the two are unrelated despite the old design overloading `--all`
-for both.
+`--all` applies only to `--export`, where it means two things at once: **skip the cut**, and **widen
+what qualifies**. The second half is the one that gets lost — an agent can honour "never ask" to the
+letter while filtering hard upstream, and still report one unit as a complete export. Under `--all`,
+resolve a marginal candidate toward writing it: the user asked for breadth and prunes what they did not
+want. `--publish`'s scope filter is a separate switch, `--portable-only` — the two are unrelated despite
+the old design overloading `--all` for both.
+
+`--all` does **not** turn proposals into commitments, and it does **not** override the qualifying
+test. An unbuilt recommendation is still a proposal: label it as proposed and record that it was
+not approved or implemented. Toolchain knowledge still goes to its `*AGENTS.md` home, even when
+the user asks for every candidate. Breadth means “show the marginal qualifying residue”, not
+“store everything mentioned in the session”.
 
 `--path` is always the **target** a mode writes to, overriding its default — never a source.
 `--consume`'s source stays positional.
@@ -98,6 +107,13 @@ for both.
 | `--export` | `.context/understandings/` | another store directory |
 | `--publish` | `.context/understandings-publish/` | any file or directory path |
 | `--consume <source>` | `.context/understandings/` | the store to unpack into |
+
+**On `--export` only** (a bare invocation included, since that is an export), free text that is not a switch is the run's **focus**, taken verbatim
+(`--export aspire wiremock stubs`). It names the subject and tells the reconcile step what the run is about,
+so the split proposal leads with the units inside it. It narrows nothing by itself: a qualifying candidate
+outside the focus is still proposed, so the user cuts it rather than never seeing it. With no focus given,
+infer the subject from the session as before. The other modes' positional arguments are their own —
+`--consume`'s source and `--promote`'s slug are never read as a focus.
 
 Single-dash spellings of the long switches (`-all`, `-export`) are accepted as typed — they are
 unambiguous here, and rejecting them would fail a run for a keystroke. An unrecognised switch is not
@@ -122,10 +138,19 @@ Then classify every candidate against the index:
 
 | Candidate matches | Action | Reported as |
 |---|---|---|
-| Nothing in the index | Write it in this run's new folder | `new` |
+| Nothing in the index, and the qualifying test below routes it **to** the store | Write it in this run's new folder | `new` |
 | A current unit, same question, and this session changed nothing | **Write nothing** | `already known` |
 | A current unit, same question, and this session refined it — corrected a claim, moved `confidence`, added a boundary | Write the **complete improved unit** into this run's new folder, reusing the slug | `improved` |
 | A current slug, but a genuinely different question | New unit, disambiguated slug, in this run's folder | `new (disambiguated)` |
+| Nothing in the index, but the qualifying test routes it **away** — another artefact already holds the **reusable** knowledge, not merely a decision about it | **Write nothing.** Name that file | `has another home` |
+
+Rows two to four are decided against the index alone. Rows one and five **split the absent-index case
+between them**, and *What qualifies: nothing with another home* below is what decides which of the two
+applies — so no candidate ever maps to both, and an absent-index candidate is not `new` until that test
+has been run on it. `has another home` is the exclusion's only reporting slot, and prose does not satisfy
+it: **name the file that holds the knowledge**, or the skip is unauditable and indistinguishable from a
+candidate you forgot. Under `--all` it should be rare — the bar is loose there, and a document that
+covers part of the knowledge is not a claim on the rest.
 
 **Judge "same question" generously.** This step decides everything, and judging it strictly is what
 produced three answers to one question under three slugs. The test:
@@ -151,8 +176,8 @@ unit and setting it aside is not inheritance. If the run genuinely inherited not
 field back to find units nothing ever inherits, and a store where no unit carries it makes `--review`
 report "nothing flagged" because it has nothing to read.
 
-**Report every candidate under one of the four outcomes.** A silent skip is indistinguishable from a
-missed export.
+**Report every candidate under one of the five outcomes**, and give `has another home` the path it
+requires. A silent skip is indistinguishable from a missed export.
 
 ### What a run writes
 
@@ -179,7 +204,17 @@ Work down this list. The store is the residue after the other homes have taken w
 | Functional intent about a code area | the nearest `*AGENTS.md` |
 | A decision the user made | a rule |
 | A design decision with trade-offs | an LADR in the nearest `*AGENTS.md` |
+| A decision already recorded elsewhere, where the **reusable reasoning or diagnostic behind it is not** | **here** — that record has no claim on this |
 | **Reusable, and none of the above has a claim on it** | **here** |
+
+**A document that records *what was decided* has no claim on *how to recognise it, re-derive it, or
+choose again*.** The ADR, NFR or LADR carries the verdict — the option selected, the number it moved.
+The Understanding carries the failure signature that identified the problem, the miss profile of each
+option not chosen, the diagnostic that separates this cause from the one it looks like. "We selected
+`english`; recall 0.44 → 0.78" and "each configuration has a distinct miss profile, here is what each one
+misses and how to choose" answer two different questions, and the first does not make the second
+redundant. Ask what question the other document answers, not what it is about — a document **mentioning**
+the topic is not a claim on it.
 
 "Not written down yet" is not the same as "no other home". If something belongs in an `*AGENTS.md` and
 nobody has written it, write it there — otherwise the store becomes the place for anything unfiled.
@@ -191,11 +226,16 @@ the requirements that came out of it are.
 
 Outcomes are the one kind with no fallback. An `*AGENTS.md` records what the code does, not what is still
 owed, so the state of a piece of work — its issues, its open decisions, its unbuilt specifications — lands
-here or nowhere. Those units go stale fastest: give the date and the command that re-checks them.
+here or nowhere. Those units go stale fastest: give the date, and put the command that re-checks them in `recheck`.
 
 ### When to propose one unprompted
 
 After resolving something about **the system** that cost real effort and would cost the same again: a non-obvious root cause in the domain, a constraint the data or an integration imposes, a convention not visible in the code, a rejected design and why it was rejected. Effort alone does not qualify it — a toolchain quirk can cost a whole afternoon and still belong in an `*AGENTS.md` rather than here.
+
+**Timing: at a phase boundary, not mid-task.** Exporting converts a primary source — the session as it
+happened — into a secondary one. That conversion is only worth making when the session is about to be lost
+to a clear, a compact, or a handoff. Mid-task there is nothing to decide: carry on, and export at the
+boundary, where you can see what the work actually settled.
 
 **Propose it. Ask before writing.** The user decides what becomes memory.
 
@@ -209,12 +249,33 @@ A single session frequently contains more than one durable lesson. Split it — 
 
 When proposing a split, ask with `AskUserQuestion` — recommend **write every candidate** first, with
 cutting specific slugs as the alternative, rather than a prose list a reader could mistake for output.
-**With `--all`, skip the ask entirely** — write every candidate that qualifies and report what was
-written, so the user prunes afterwards instead of beforehand.
+**With `--all`, skip the ask entirely and widen the bar** — write every candidate, resolving a marginal
+one toward writing rather than dropping, and report what was written, so the user prunes afterwards
+instead of beforehand. `--all` is a request for breadth: a one-unit export out of a session carrying
+several lessons answers the letter of the switch and defeats its purpose.
+
+### Redact before you write
+
+Understandings get written during debugging, when a literal value is the fastest thing to type — and they
+are **exportable by design**, so a value that lands in one is a value that leaves the workspace in a zip.
+Redaction belongs here, at write time; the pre-publish check in `references/publish-consume.md` is the
+second net, not the first.
+
+Write `<REDACTED>` in place of any credential, token, connection string, or internal hostname, and quote
+only the lines of an artifact that carry the signal. Record the **shape** of the problem rather than the
+value: that a connection string was missing `Enlist=false` is the knowledge, the connection string is not.
+
+If the redacted form no longer carries the knowledge, the unit is the wrong size — state the shape in prose
+instead, or say so and ask. Never keep a value in order to preserve a lesson.
+
+**Striking a value already on disk is the one edit allowed to an existing copy.** Immutability protects
+knowledge, and a credential is not knowledge — so replace it with `<REDACTED>` in place, in every copy that
+carries it, rather than writing a new version and leaving the value in history. Report it as a redaction,
+never as an `improved` unit: nothing about the knowledge changed.
 
 ### Writing one
 
-Copy `assets/UNDERSTANDING.template.md` to `.context/understandings/<subject>-<yyyyMMdd-HHmm>/<slug>.md` — or under `--path` when given — and fill it.
+Copy `assets/UNDERSTANDING.template.md` to `.context/understandings/<subject>-<yyyyMMdd-HHmm>/<slug>.understanding.md` — or under `--path` when given — and fill it.
 
 Subject **name**: kebab-case, names the topic or piece of work. Reuse the name a body of work already
 uses in the store — `ls .context/understandings/` shows them — so its runs stay browsable together.
@@ -229,19 +290,21 @@ stamp does not gain seconds to avoid this.
 holds a copy of a versioned slug. The subject is derived from the parent folder, so it is never written
 into frontmatter and cannot drift.
 
-Slug: kebab-case, names the **knowledge**, not the incident. `npgsql-enum-mapping-needs-datasource` — not `tuesday-db-bug`.
+Slug: kebab-case, names the **knowledge**, not the incident. `npgsql-enum-mapping-needs-datasource` — not `tuesday-db-bug`. The file is the slug plus the `.understanding.md` postfix — `npgsql-enum-mapping-needs-datasource.understanding.md` — which is what a path glob selects on, so a unit written without it is invisible to the generator and reported as a rename.
 
 Frontmatter fields:
 
 | Field | Meaning |
 |-------|---------|
-| `slug` | Must equal the file name without `.md`. Addresses the **knowledge**, not one copy of it — repeated across stamped folders it forms a version chain, and a `[[slug]]` resolves if any version exists |
+| `slug` | Must equal the file name without the `.understanding.md` postfix. Addresses the **knowledge**, not one copy of it — repeated across stamped folders it forms a version chain, and a `[[slug]]` resolves if any version exists |
 | `description` | One line — what this knowledge is. Appears in `INDEX.md` |
 | `question` | **Optional.** The question a reader has at the moment this applies, when there is a natural one — one question, one answer. Omit it on an outcome record, where `description` is the match. Appears in `INDEX.md` |
 | `scope` | `portable` (true of the stack/tooling anywhere) or `repo-specific` (true only here). Governs export |
-| `confidence` | `observed` (seen once), `verified` (reproduced, or confirmed against source), `contested` (the system disagreed). It records how the knowledge was obtained, **not that it is correct**. **One unverified claim sets the whole unit**: a unit is `verified` only if *every* claim in it was checked — infer one seam, one cause, one "probably" and it is `observed`, or verify that claim before writing. A single reasoned-but-unchecked line inside an otherwise-verified unit is how a wrong mechanism has twice propagated here, because readers trust the label, not the sentence |
+| `confidence` | `observed` (seen once or reasoned from evidence), `verified` (reproduced, or confirmed against source), `contested` (the system disagreed). It records how the knowledge was obtained, **not that it is correct**. **One unverified claim sets the whole unit**: a unit is `verified` only if *every* claim in it was checked — infer one seam, one cause, one "probably" and it is `observed`, or verify that claim before writing. A hypothesis must say that it is a hypothesis in its description and **Answer**; `observed` does not mean the hypothesis was observed in the system. A single reasoned-but-unchecked line inside an otherwise-verified unit is how a wrong mechanism has twice propagated here, because readers trust the label, not the sentence |
 | `links` | `[[slug]]` references to related Understandings |
 | `agents_context` | Path to the nearest `*AGENTS.md` this bears on, when it concerns a specific code area |
+| `recheck` | **Optional.** One command that re-checks whether this still holds, runnable exactly as written. `--review` prints it beside a staleness flag, which is what makes the flag actionable rather than a nag. Expected on an outcome unit, whose facts decay fastest. It must test the claim, not merely locate the text that describes it; omit it when no executable check exists and say so in **Boundaries** |
+| `skills` | **Optional.** The skill an agent should invoke to act on this knowledge, by bare name — never knowledge *about* a skill, which has another home. Not `[[slug]]` references |
 | `provenance.learned` | Date, absolute |
 | `provenance.session` | Shared by all slugs encoded from one session |
 | `provenance.source` | What produced it — a failure, a doc, an experiment |
@@ -252,6 +315,17 @@ Frontmatter fields:
 Body sections: **Answer** (direct operational guidance, answering the frontmatter question and nothing wider), **Why** (the reasoning or failure behind it — enough to judge an edge case the Answer does not cover), **Boundaries** (where it stops applying). The question lives in frontmatter only, so `INDEX.md` never drifts from the unit.
 
 **Write it terse.** Every line earns its place or comes out. Cut what the reader already knows, what the code shows, and anything said once already. Prefer a table to a paragraph and a command to a description of a command. There is no length to fill and none to stay under — but a unit that does not fit on one screen is usually two units, or one unit padded. Density is the point: a reader who skips half of it has been failed twice, once by the noise and once by the signal they missed in it.
+
+**Write it durable.** The unit outlives the tree it was written against: `--review` flags one at 90 days,
+and a refactor lands sooner than that. State behaviour, contracts, types, invariants and commands. Never a
+line number, and never a file path in the body — where a path *is* the knowledge it belongs in
+`agents_context`, which the generator checks still exists. A path in the body rots silently, and a unit
+whose every claim was true of a structure that has since moved still reads as `verified`.
+
+**Separate proposals from outcomes.** If the session recommends work that was not approved or built,
+say **proposed, not implemented** in the Answer or Boundaries. Do not call it “owed”, “required”, or a
+“backlog” unless an issue, decision, or other artifact actually made it so. Preserve the recommendation
+and its destination, but do not manufacture authorization for the next agent.
 
 Keeping the answer inside the question's scope is what stops a unit over-reaching: an answer that outgrows its question means the question was too narrow, and a question no answer covers means it was too broad. Both are visible on one screen.
 
@@ -285,7 +359,7 @@ If it needs must/never language, it is not an Understanding — propose it as a 
 ### Slug reuse is versioning, not a collision
 
 A slug already in the store is **not** a name clash to resolve — it is the address of knowledge you are
-about to revise. The four outcomes are stated once, in *Step one: reconcile with the store* above; this
+about to revise. The five outcomes are stated once, in *Step one: reconcile with the store* above; this
 section only says what reuse means and what it is not.
 
 - **Same question → reuse the slug**, and write the complete improved unit into this run's folder. That
@@ -359,7 +433,7 @@ python3 .agents/skills/ai-understanding/scripts/understanding_index.py --review
 | `contested` | Confirm it against the system and raise it back to `verified`, or retire it |
 | `never inherited` | The question probably does not match what anyone asks. Re-word it, or accept the unit was never needed and prune it. Counts inheritance of **any** version of the slug, so a unit revised three times is not reported unused because the lineage names an earlier copy |
 | superseded copies | How many revisions of a slug sit on disk unlisted. Prune guidance only — nothing removes history automatically, and a deep chain is signal that the knowledge is still moving |
-| overdue re-check | Read it against the current system. Outcome units are flagged after 30 days, knowledge after 90 |
+| overdue re-check | Run the unit's `recheck` command — the report prints it beside the flag — then read the unit against what it says. Outcome units are flagged after 30 days, knowledge after 90. A flagged unit carrying no `recheck` is reported as carrying none: add one while you are in there |
 
 Advisory only — it never changes the exit code, because none of it is wrong, it is just decaying. Act on it
 when you are already in the store; do not make a project of it.
@@ -373,7 +447,7 @@ gitignored, so an archive that someone keeps is the only form that survives the 
 The store is never shared through the repository (LADR-008).
 
 - Destination: `.context/understandings-publish/understandings-<YYYYMMDD-HHMMSS>.zip` by default, or `--path` (a file or directory) when given. Outside the store, so the index generator never mistakes it for a subject folder, and never a tracked path.
-- The archive mirrors the store: `<subject>-<yyyyMMdd-HHmm>/<slug>.md` with stamps carried verbatim — never re-stamped — plus each unit's `<slug>.assets/` and a regenerated `INDEX.md` covering only the published units.
+- The archive mirrors the store: `<subject>-<yyyyMMdd-HHmm>/<slug>.understanding.md` with stamps carried verbatim — never re-stamped — plus each unit's `<slug>.assets/` and a regenerated `INDEX.md` covering only the published units.
 - Publishing filters **per Understanding, not per subject** — a subject folder routinely mixes scopes. By default every unit publishes; pass `--portable-only` to restrict the archive to `scope: portable` units, for the cross-repo case. Never let `--portable-only` publish a `repo-specific` unit — that filter is the only thing preventing a local quirk from being shipped to another repo with provenance that makes it look universally verified.
 - When `--portable-only` excludes a unit that a published unit links to, the archived copy drops the brackets around that `[[slug]]` and keeps the entry, so the archive's own index validates.
 - Each archived copy records `provenance.published_from`; the working copy is left in place.
@@ -385,7 +459,7 @@ Sharing is sending someone the zip. Full contract: `references/publish-consume.m
 
 The reverse of publish: another workspace's archive becomes available here.
 
-The source is a local path to a published archive — always positional; `--path` overrides only the store it unpacks into (default `.context/understandings/`), never the source. How it arrived — mail, chat, a drive — is out of band; this skill does not fetch remote content. Extraction refuses any entry whose resolved path escapes the store (`..` segments, absolute paths, symlinks) and rejects the whole archive rather than unpacking part of it. **List the archive before extracting any of it** — `unzip -l <zip>` — and check every entry against that rule there; no enforcing script exists yet (LADR-008 is specification only), so the listing is the only gate, and extracting first to inspect afterwards has already lost.
+The source is a local path to a published archive — always positional; `--path` overrides only the store it unpacks into (default `.context/understandings/`), never the source. How it arrived — mail, chat, a drive — is out of band; this skill does not fetch remote content. Extraction refuses any entry whose resolved path escapes the store (`..` segments, absolute paths, symlinks) and rejects the whole archive rather than unpacking part of it.
 
 Reconciliation, per incoming slug. The key is the slug; an incoming copy keeps its own stamped folder, because a slug in two folders is a version chain rather than an error:
 
@@ -409,11 +483,11 @@ Propose the promotion; the user decides. Once promoted, the Understanding record
 ## Guardrails
 
 - Writing to a mode's default location, or to an explicit `--path`, needs no approval — the location was already chosen, by default or by the user typing it. Report what was written and where, every time; removing the prompt must not remove the user's chance to notice.
-- Ask before promoting, and before a `--consume` makes an incoming copy the current version of a slug this workspace already holds — both change durable state someone already chose to keep or rely on. A local `--export` writing an `improved` version does **not** ask: it adds a copy and destroys nothing, and the four outcomes are reported. On `--export`, propose the split with `AskUserQuestion` (recommending "write every candidate" first) before writing, unless `--all` was passed — the user's own instruction to skip that ask.
-- Never edit, overwrite or delete an existing copy of a slug. An improvement is a new complete copy in this run's folder; history is immutable.
+- Ask before promoting, and before a `--consume` makes an incoming copy the current version of a slug this workspace already holds — both change durable state someone already chose to keep or rely on. A local `--export` writing an `improved` version does **not** ask: it adds a copy and destroys nothing, and the five outcomes are reported. On `--export`, propose the split with `AskUserQuestion` (recommending "write every candidate" first) before writing, unless `--all` was passed — the user's own instruction to skip that ask *and* to hold the qualifying bar loosely, writing a marginal candidate rather than dropping it.
+- Never edit, overwrite or delete an existing copy of a slug. An improvement is a new complete copy in this run's folder; history is immutable. The **one** exception is striking a credential value that should never have been written — see *Redact before you write*; that is a repair, not a revision.
 - Never write an Understanding in must/never language.
 - Never let an Understanding contradict a rule without flagging it.
-- No secrets, tokens, or credential values in an Understanding — they are exportable by design. Record the shape of the problem, not the value.
+- No secrets, tokens, or credential values in an Understanding — they are exportable by design. Redact at write time, writing `<REDACTED>` in place of the value, and record the shape of the problem instead — see *Redact before you write*. Never keep a value in order to preserve a lesson.
 
 ## Changelog
 
@@ -430,4 +504,7 @@ Propose the promotion; the user decides. Once promoted, the Understanding record
 | 2026-09-19 | Subject folder gained a `-yyyyMMdd-HHmm` creation stamp (LADR-007). Reuse the existing stamped folder for work already in the store; mint a new one only for genuinely new work. `_unfiled` stays unstamped. | |
 | 2026-09-19 | Publish is a zip under `.context/understandings-publish/`, consume takes a local zip (LADR-008); the tracked destination and the `ai-asset-sync` route are gone. Stamp is UTC. Export lists the store before choosing a folder; consume merges an already-present slug into its local folder. | |
 | 2026-09-19 | `--path` added as the one target-override switch for `--export`/`--publish`/`--consume`, replacing ad-hoc destination language; a specified destination is now the approval, so Guardrails and the Publish/Consume sections no longer ask before writing to a default or `--path` location — only merge and promote still ask. `--export`'s pre-write cut is an `AskUserQuestion` (write-everything recommended first) rather than a prose list. Deterministic-phrasing line added to Language. | |
+| 2026-09-20 | **LADR-011: `--all` means breadth, not only silence.** It waives the user's cut *and* loosens the qualifying bar, so a marginal candidate is written rather than dropped. The qualifying test separates a decision already recorded elsewhere from the reusable reasoning behind it, which that record has no claim on. The reconcile step gained a fifth outcome, `has another home`, reported with the path of the file that holds the knowledge. | |
 | 2026-09-19 | **LADR-010: a slug is a version key, not a unique name.** An export run writes its own stamped folder holding only that run's output; an improved unit is re-written in full into it carrying `provenance.supersedes`; previous copies are immutable, unlisted and exempt from validation; `INDEX.md` shows the newest version of each slug. `duplicate_slugs` retired. Export gained the reconcile step (read `INDEX.md` first, four outcomes, generous same-question test, `provenance.inherited` from what it read); import gained the newer-wins precedence rule; consume treats an incoming duplicate as a version. | |
+| 2026-09-21 | Four takes from `mattpocock/skills` (`handoff` and its siblings): a **durability** rule for the body (behaviour and contracts, never a path or line number — paths belong in the checked `agents_context`); **redaction at write time** with `<REDACTED>`, demoting the pre-publish check to the second net; an optional **`recheck`** command that `--review` prints beside a staleness flag; an optional **`skills`** pointer. Export gained a free-text **focus** argument and a timing rule — export at a phase boundary, because it converts a primary source into a secondary one. | |
+| 2026-09-22 | **LADR-013: a unit file is `<slug>.understanding.md`.** The type postfix mirrors `.instructions.md` and gives the governance rule a path glob to attach to, so `.agents/rules/meta/understandings.instructions.md` is scoped `**/*understanding.md` instead of always-applying. `INDEX.md` and `<slug>.assets/` keep their names; an un-postfixed unit in an existing store is reported as a rename rather than skipped. | |
