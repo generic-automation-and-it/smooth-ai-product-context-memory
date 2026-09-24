@@ -61,8 +61,9 @@ reads it the same way yours does.
 
 - **`SKILL.md`** — the full contract, written for the agent rather than for you.
 - **`.agents/rules/meta/understandings.instructions.md`** — governance: how Understandings differ from
-  rules and from `AGENTS.md`, and which wins when they disagree. Loaded every session, so agents follow it
-  without being asked.
+  rules and from `AGENTS.md`, and which wins when they disagree. Scoped to `**/*understanding.md`, so it
+  attaches when an Understanding is opened rather than loading every session; `SKILL.md` points to it at
+  the export decisions it governs.
 - **`AGENTS.md`** (in this folder) — the design decisions and why, if you are changing the skill itself.
 
 The name is borrowed from Adrian Tchaikovsky's _Children of Time_, where an Understanding is knowledge
