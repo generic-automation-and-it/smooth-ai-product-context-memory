@@ -133,6 +133,9 @@ public sealed class DossierBundleHandlerTests : HandlerTestBase
         Db.MemoryVersions.LongCount().ShouldBe(versionsBefore);
         Db.MemoryGroups.LongCount().ShouldBe(groupsBefore);
         Db.Labels.LongCount().ShouldBe(labelsBefore);
+        // The facet observed during selection is not registered — registering an observed facet is the
+        // most plausible accidental write on a read path (NFR-06).
+        Db.Memories.Single(m => m.Uuid == AnchorUuid).Facets.ShouldBe(new[] { "unregistered-facet" });
         // Graph identity: no vertex and no edge added — including the "missing" contradicts edge a
         // contradiction finding describes (NFR-06 / LADR-06). Edges are the surface a findings write path
         // would most plausibly touch.

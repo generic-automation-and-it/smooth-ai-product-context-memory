@@ -222,6 +222,55 @@ class Nfr04ReconciliationTests(unittest.TestCase):
         rendered = dc.render(doc)
         self.assertLess(rendered.index("### B"), rendered.index("### A"))
 
+    def test_consolidation_gates_on_derived_lifecycle(self):
+        """NFR-07 / reviewer finding 1: the equivalence gate compares the derived lifecycle, not raw
+        status. Two same-status items where one has expired differ in derived lifecycle, so they are
+        not consolidated and the expired origin's state survives."""
+        live = _mk("aaaaaaaa-0000-4000-8000-000000000001", "Live", "The default is A.",
+                   created="2026-01-01T10:00:00Z")
+        expired = _mk("bbbbbbbb-0000-4000-8000-000000000002", "Expired", "The default is A.",
+                      created="2026-01-02T10:00:00Z", valid_until="2020-01-01")
+        judg = {"equivalences": [{"uuids": [live["uuid"], expired["uuid"]], "meaning": "same"}]}
+        doc = dc.compose(_bundle([live, expired]), focus=None, judgements=judg)
+        self.assertEqual(doc.reconciliation["present"], 2)
+        cats = [f["category"] for f in doc.findings]
+        self.assertIn("equivalence-uncertain", cats)
+        self.assertEqual(doc.lifecycle[expired["uuid"]], "no-longer-true")
+
+    def test_overlapping_equivalence_groups_are_rejected(self):
+        """reviewer finding 2: a uuid in two equivalence proposals is rejected fail-loud rather than
+        rendered as two claim headers over one memory."""
+        x = _mk("aaaaaaaa-0000-4000-8000-000000000001", "X", "same.")
+        y = _mk("bbbbbbbb-0000-4000-8000-000000000002", "Y", "same.")
+        z = _mk("cccccccc-0000-4000-8000-000000000003", "Z", "same.")
+        judg = {"equivalences": [
+            {"uuids": [x["uuid"], y["uuid"]], "meaning": "a"},
+            {"uuids": [x["uuid"], z["uuid"]], "meaning": "b"},
+        ]}
+        with self.assertRaises(ValueError):
+            dc.compose(_bundle([x, y, z]), focus=None, judgements=judg)
+
+    def test_bundle_items_and_omitted_must_be_disjoint(self):
+        """reviewer finding (validate_bundle): an item listed in both items and omitted is rejected
+        rather than double-counted into present and omitted at once."""
+        a = _mk("aaaaaaaa-0000-4000-8000-000000000001", "A", "x")
+        bad = _bundle([a], omitted=[{"uuid": a["uuid"], "reason": "cap reached"}])
+        with self.assertRaises(ValueError):
+            dc.compose(bad, focus=None)
+
+    def test_consolidated_no_source_origin_shows_unattributed(self):
+        """reviewer finding (render): a consolidated group with an origin lacking recorded sources is
+        shown as provenance-incomplete, not as distinct independent observations (no fabricated
+        provenance)."""
+        x = _mk("aaaaaaaa-0000-4000-8000-000000000001", "X", "same.", source_ref="SAME")
+        y = _mk("bbbbbbbb-0000-4000-8000-000000000002", "Y", "same.", source_ref="SAME")
+        y["sources"] = []
+        judg = {"equivalences": [{"uuids": [x["uuid"], y["uuid"]], "meaning": "same"}]}
+        doc = dc.compose(_bundle([x, y]), focus=None, judgements=judg)
+        rendered = dc.render(doc)
+        self.assertIn("provenance incomplete for at least one origin", rendered)
+        self.assertNotIn("these are distinct sources", rendered)
+
     def test_per_focus_accounts_same_selected_and_carries_every_finding(self):
         """NFR-04 / LADR-12: every focus of one fixture accounts for the same selected memories and
         carries every finding the unfocused dossier carries."""

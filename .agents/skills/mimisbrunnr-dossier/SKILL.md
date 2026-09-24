@@ -23,7 +23,10 @@ selection the practitioner approved in the preview, the difference is reported (
 ## Workflow
 
 ```bash
-# 1. Preview (prices the selection without bodies or composition — NFR-03). Read-only.
+# 1. Fetch the bundle for the anchor set. This is the deterministic bundle, not the preview:
+#    the NFR-03 preview (prices the selection without bodies) and the LADR-14 preview-vs-bundle
+#    difference check are performed by the agent directly against the Host API —
+#    POST /api/context/dossier/preview and POST /api/context/dossier/bundle. Read-only.
 python3 -B .agents/skills/mimisbrunnr-dossier/scripts/dossier_composer.py \
   bundle --body '{"repo":"kingstown","widenDepth":3}' | head
 
@@ -113,7 +116,7 @@ overrides for a one-off.
 
 ## Test
 
-Committed harness: `python3 -B .agents/skills/mimisbrunnr-dossier/tests/run_tests.py` (26 tests).
+Committed harness: `python3 -B .agents/skills/mimisbrunnr-dossier/tests/run_tests.py` (31 tests).
 
 ## Related
 

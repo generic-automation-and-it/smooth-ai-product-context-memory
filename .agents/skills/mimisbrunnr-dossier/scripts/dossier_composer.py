@@ -117,6 +117,12 @@ def validate_bundle(bundle):
                  "omitted: requires uuid and reason")
         _require(omitted["reason"] in OMISSION_REASONS,
                  f"unknown omission reason '{omitted['reason']}'")
+    # A memory must not be listed in both items and omitted: that would render it as both a claim and
+    # an omission while the count still closes, hiding the double-count (LADR-05 / NFR-04).
+    item_ids = {i["uuid"] for i in bundle["items"]}
+    omitted_ids = {o["uuid"] for o in bundle["omitted"]}
+    _require(not (item_ids & omitted_ids),
+             "bundle: an item is listed in both items and omitted")
     # The manifest count is the trustworthy left-hand side: it must equal the bundle's item+omitted
     # counts (NFR-04 L1 test). This is what makes the dossier's reconciliation start from a reliable
     # number.
@@ -297,8 +303,18 @@ def consolidate(items, equivalences, edges, asof=None):
         members = [m for m in members if m is not None]
         if not members:
             continue
+        # Reject overlapping groups: a uuid in two equivalence proposals would render the same memory
+        # as two claim headers while reconciliation still closes (an uncheckable double). Fail loud
+        # like validate_bundle rather than silently duplicating (LADR-05).
+        overlap = [m["uuid"] for m in members if m["uuid"] in accepted_members]
+        if overlap:
+            raise ValueError(
+                f"equivalences: uuid {overlap[0]} appears in more than one group")
         app = {_applicability(m) for m in members}
-        life = {_lifecycle_sig(m) for m in members}
+        # Gate on the derived lifecycle (mark_lifecycle), not the raw status: an expired origin carries
+        # a no-longer-true lifecycle even when its status string matches a still-current sibling, and
+        # status synonyms (retired vs superseded) must not spuriously split an equivalent group (NFR-07).
+        life = {mark_lifecycle(m, edges, asof) for m in members}
         if len(app) == 1 and len(life) == 1:
             groups.append(group)
             for m in members:
@@ -463,7 +479,7 @@ def derive_findings(items, edges, ordered, present_claims, equivalences, asof=No
         if category not in FINDING_CATEGORIES:
             raise ValueError(f"unknown finding category '{category}'")
         if category == "contradiction":
-            _validate_contradiction(f, by_uuid)
+            _validate_contradiction(f, by_uuid, edges, asof)
         if category == "gap":
             grounds = f.get("ground")
             if grounds not in ("task", "included-claim", "expectation"):
@@ -498,7 +514,7 @@ def _superseded(item, edges):
     )
 
 
-def _validate_contradiction(f, by_uuid):
+def _validate_contradiction(f, by_uuid, edges=None, asof=None):
     mems = f.get("memories") or []
     if len(mems) < 2:
         raise ValueError("contradiction: requires at least two memories")
@@ -507,11 +523,12 @@ def _validate_contradiction(f, by_uuid):
         raise ValueError("contradiction: memories must be selected in this bundle")
     # Applicability + lifecycle precondition (LADR-04): a scoped exception is not a conflict of the
     # general rule, and a proposed change is not a conflict of shipped behaviour. Incompatible for the
-    # same circumstances is required.
+    # same circumstances is required. Lifecycle is derived (mark_lifecycle) so a "proposal" status and
+    # an expired origin are caught as proposed/no-longer-true rather than only the literal "proposed".
     apps = [_applicability(i) for i in items]
-    statuses = {_lifecycle_sig(i) for i in items}
+    statuses = {mark_lifecycle(i, edges, asof) for i in items}
     scoped = len(set(apps)) > 1
-    proposed_ship = ("proposed" in statuses)
+    proposed_ship = (LIFECYCLE_PROPOSED in statuses)
     if scoped or proposed_ship:
         raise ValueError(
             "contradiction: claims differ in applicability or lifecycle, so they are not a conflict "
@@ -801,19 +818,25 @@ def render(dossier):
         lines.append("")
         lines.append(f"**Lifecycle:** {lifecycle}.")
         if claim.get("consolidated"):
+            source_desc = (f"these re-capture one source" if _same_source(origins)
+                           else (f"provenance incomplete for at least one origin — shown as unattributed"
+                                 if not all(o.get("sources") for o in origins)
+                                 else "these are distinct sources, shown as independent observations"))
             lines.append(f"> **analysis** — consolidation basis: "
                          f"{claim.get('equivalenceClass') or 'equivalent restatements'}. "
                          f"The {len(origins)} capture(s) share meaning, applicability and lifecycle, so "
                          f"they are presented once with every origin retained. Several captures of one "
                          f"source are not independent corroboration — "
-                         f"{'these re-capture one source' if _same_source(origins) else 'these are distinct sources, shown as independent observations'}.")
+                         f"{source_desc}.")
             lines.append("")
         # The substantive statement, cited (NFR-05). A consolidated claim cites every origin.
         lines.append(f"- {primary.get('statement') or ''} — {_cite(primary)}")
         for other in origins[1:]:
             lines.append(f"  - also from — {_cite(other)}")
-        if not (origins[0].get("sources") or []):
-            lines.append(f"  - _no recorded source or confidence — provenance was never captured._")
+        for origin in origins:
+            if not (origin.get("sources") or []):
+                lines.append(
+                    f"  - _{_cite(origin)}: no recorded source or confidence — provenance was never captured._")
         # Conditions / exceptions preserved verbatim where paraphrase would change meaning (NFR-07).
         for cond in _conditions(primary):
             lines.append(f"  - condition: {cond} — {_cite(primary)}")
@@ -927,7 +950,11 @@ def _near_miss_helper_path():
 
 def read_bundle(path_or_url):
     if path_or_url.startswith("http://") or path_or_url.startswith("https://"):
-        return fetch_bundle_from_api(path_or_url, {})
+        # A saved bundle URL is fetched as JSON — the --bundle argument names a bundle to compose,
+        # not an API base. An API base would be a different mode (fetch a fresh bundle with anchors).
+        import urllib.request
+        with urllib.request.urlopen(path_or_url, timeout=60) as resp:
+            return json.loads(resp.read().decode("utf-8"))
     return json.loads(Path(path_or_url).read_text(encoding="utf-8"))
 
 

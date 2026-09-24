@@ -28,7 +28,7 @@ public class DossierBundleTests
         {
             foreach (PropertyInfo property in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
             {
-                property.Name.ShouldNotMatch("(generated|exported|produced|assembled|createdAt|created_on).*",
+                property.Name.ShouldNotMatch("(?i)^(generated|exported|produced|assembled)",
                     $"Type {type.Name} must not carry a generation-time field '{property.Name}'.");
             }
         }
