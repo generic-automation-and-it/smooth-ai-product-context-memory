@@ -43,6 +43,11 @@ public sealed class NpgsqlSnapshotRepository(IBlobStorage blobStorage, IBlobCata
         SnapshotTicketVertex[] ticketVertices = await ReadTicketVerticesAsync(db, cancellationToken);
         SnapshotTicketEdge[] ticketEdges = await ReadTicketEdgesAsync(db, cancellationToken);
 
+        // Resolve the blob set while the database snapshot is still held, so the walk and the state
+        // citing it describe the same moment (LADR-03). Committing first would let a blob be deleted
+        // between commit and walk and be recorded missing though it existed at capture.
+        SnapshotWalkResult walk = await WalkBlobsAsync(memoryVersions, cancellationToken);
+
         await transaction.CommitAsync(cancellationToken);
 
         var capture = new SnapshotCapture(
@@ -56,8 +61,6 @@ public sealed class NpgsqlSnapshotRepository(IBlobStorage blobStorage, IBlobCata
             edges,
             ticketVertices,
             ticketEdges);
-
-        SnapshotWalkResult walk = await WalkBlobsAsync(memoryVersions, cancellationToken);
 
         return new SnapshotCaptureResult(
             capture,

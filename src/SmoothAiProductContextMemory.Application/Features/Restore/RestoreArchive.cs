@@ -47,13 +47,15 @@ public static class RestoreArchive
             SnapshotCapture capture = await archive.ReadCaptureAsync(request.ArchivePath, cancellationToken);
             SnapshotArchive opened = await archive.ReadAsync(request.ArchivePath, cancellationToken);
 
-            await RestoreObjectsAsync(capture, request.ArchivePath, cancellationToken);
-
             RestoreResults restored = await repository.RestoreAsync(
                 request.ConnectionString,
                 capture,
                 request.OverrideNonEmpty,
                 cancellationToken);
+
+            // Only after the empty-target refusal and DB rebuild succeed do we write blob bodies, so a
+            // refused or failed restore never leaves newly-orphaned objects behind.
+            await RestoreObjectsAsync(capture, request.ArchivePath, cancellationToken);
 
             var lines = new List<ReconciliationLine>
             {
@@ -64,7 +66,7 @@ public static class RestoreArchive
                 new($"objects        manifest={opened.Manifest.Counts.Objects} restored={restored.Objects}", restored.Objects == opened.Manifest.Counts.Objects),
                 new($"ticket vertices manifest={opened.Manifest.Counts.TicketVertices} restored={restored.TicketVertices}", restored.TicketVertices == opened.Manifest.Counts.TicketVertices),
                 new($"ticket edges   manifest={opened.Manifest.Counts.TicketEdges} restored={restored.TicketEdges}", restored.TicketEdges == opened.Manifest.Counts.TicketEdges),
-                new($"traversal      restored paths={restored.TraversalPathCount}", restored.TraversalPathCount > 0),
+                new($"traversal      restored paths={restored.TraversalPathCount} manifest edges={opened.Manifest.Counts.Edges}", restored.TraversalPathCount == opened.Manifest.Counts.Edges),
             };
 
             bool reconciled = lines.All(l => l.Matches);

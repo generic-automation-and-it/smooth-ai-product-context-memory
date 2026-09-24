@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using SmoothAiProductContextMemory.Application.Features.Snapshot;
 
 namespace SmoothAiProductContextMemory.Host.Snapshot;
@@ -12,7 +13,8 @@ namespace SmoothAiProductContextMemory.Host.Snapshot;
 /// </summary>
 public sealed class SnapshotJobCoordinator(
     IServiceScopeFactory scopeFactory,
-    IConfiguration configuration)
+    IConfiguration configuration,
+    ILogger<SnapshotJobCoordinator> logger)
 {
     private readonly SemaphoreSlim _mutex = new(1, 1);
     private SnapshotJobState? _latest;
@@ -27,7 +29,7 @@ public sealed class SnapshotJobCoordinator(
     public async Task<SnapshotJobState> StartAsync(CancellationToken cancellationToken)
     {
         var job = new SnapshotJobState { Id = Guid.NewGuid(), Status = SnapshotJobStatus.Running };
-        string destination = Path.Combine(DestinationDirectory, $"snapshot-{DateTime.UtcNow:yyyyMMdd-HHmmss}.tar");
+        string destination = Path.Combine(DestinationDirectory, $"snapshot-{DateTime.UtcNow:yyyyMMdd-HHmmss}-{Guid.NewGuid():N[..8]}.tar");
         job.DestinationPath = destination;
 
         await _mutex.WaitAsync(cancellationToken);
@@ -64,8 +66,9 @@ public sealed class SnapshotJobCoordinator(
             }
             catch (Exception ex)
             {
+                logger.LogError(ex, "Snapshot job failed");
                 job.Status = SnapshotJobStatus.Failed;
-                job.Error = ex.Message;
+                job.Error = "Snapshot failed.";
             }
         });
 

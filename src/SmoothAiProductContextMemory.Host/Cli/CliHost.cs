@@ -14,7 +14,7 @@ namespace SmoothAiProductContextMemory.Host.Cli;
 /// </summary>
 internal static class CliHost
 {
-    public static CliHostResult Build()
+    public static CliHostResult Build(bool requireConnectionString = true)
     {
         HostApplicationBuilder builder = Microsoft.Extensions.Hosting.Host.CreateApplicationBuilder(
             new HostApplicationBuilderSettings { Args = [] });
@@ -26,11 +26,14 @@ internal static class CliHost
         builder.Services.AddApplication();
         builder.Services.AddInfrastructure(builder.Configuration);
 
-        string connectionString = builder.Configuration.GetConnectionString("SmoothAiProductContextMemory")
-            ?? throw new InvalidOperationException(
+        string? connectionString = builder.Configuration.GetConnectionString("SmoothAiProductContextMemory");
+        if (requireConnectionString && string.IsNullOrWhiteSpace(connectionString))
+        {
+            throw new InvalidOperationException(
                 "A connection string named 'SmoothAiProductContextMemory' is required.");
+        }
 
-        return new CliHostResult(builder.Build(), connectionString);
+        return new CliHostResult(builder.Build(), connectionString ?? string.Empty);
     }
 }
 

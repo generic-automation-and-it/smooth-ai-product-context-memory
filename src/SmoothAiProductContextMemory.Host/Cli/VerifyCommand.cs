@@ -24,7 +24,7 @@ internal static class VerifyCommand
         {
             string archivePath = parseResult.GetValue(archiveArgument)!;
 
-            CliHostResult host = CliHost.Build();
+            CliHostResult host = CliHost.Build(requireConnectionString: false);
             using (host.Host)
             using (IServiceScope scope = host.Host.Services.CreateScope())
             {
