@@ -390,8 +390,7 @@ def _source_signature(item):
     )
 
 
-def derive_findings(items, edges, ordered, present_claims, equivalences, asof=None,
-                    judgements=None, uncertain=None, store_name=STORE_NAME):
+def derive_findings(items, edges, asof=None, judgements=None, uncertain=None):
     """Derive the deterministic findings plus merge in the caller's (model's) semantic findings.
 
     Every finding carries a basis, a scope (the examined material, never the store or the product),
@@ -401,7 +400,6 @@ def derive_findings(items, edges, ordered, present_claims, equivalences, asof=No
     scope_text = f"the {len(items)} selected memory(ies) in this bundle"
     findings = []
     by_uuid = {item["uuid"]: item for item in items}
-    uuids = set(by_uuid)
 
     # Edge indices.
     out_edges = {}
@@ -727,9 +725,7 @@ def compose(bundle, focus=UNFOCUSED, judgements=None, asof=None, store_name=STOR
     claims.sort(key=lambda c: c["_order"])
 
     # 6. Findings (LADR-13, NFR-04); focus-invariant in presence.
-    findings = derive_findings(items, edges, ordered, present_claims, equivalence_proposals,
-                               asof=asof, judgements=judgements, uncertain=uncertain,
-                               store_name=store_name)
+    findings = derive_findings(items, edges, asof=asof, judgements=judgements, uncertain=uncertain)
 
     # 7. Reconciliation (NFR-04), closed in the dossier.
     reconciliation = reconcile(bundle, claims, omitted)
@@ -758,10 +754,6 @@ def _now_iso():
 def _cite(item):
     return CITATION_FORM.format(
         uuid=item["uuid"], version=item["version"], created_on=item.get("createdOn") or "unknown")
-
-
-def _origin_line(origin):
-    return f"- {origin.get('statement') or ''} — {_cite(origin)} — lifecycle: {origin.get('status') or 'unknown'}"
 
 
 def render(dossier):
