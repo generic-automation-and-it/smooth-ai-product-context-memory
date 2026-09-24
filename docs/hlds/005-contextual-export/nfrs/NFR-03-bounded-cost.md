@@ -61,7 +61,7 @@ the skill's, which is why the preview must be servable without it), LADR-03 (the
 policy the preview must price), LADR-14 (the preview is the first half of the operation, not a detached
 estimate). `BR-32`, and `BR-30` for the no-silent-truncation half.
 
-## Reference-workflow measurements (2026-09-23)
+## Reference-workflow measurements (2026-09-24)
 
 Recorded by `DossierWorkflowBenchmarkTests` behind `SMOOTH_DOSSIER_BENCH=1` against a seeded store
 (620 memories / 1400 edges, kind=understanding and history present, programme-scoped memories present).
@@ -70,11 +70,17 @@ Command: `SMOOTH_DOSSIER_BENCH=1 dotnet test tests/SmoothAiProductContextMemory.
 
 | Workflow | Selected | Widened | Edges | Item limit hit? | Blob reads | Payload (KiB) | Bundle p95 (ms) |
 |---|---|---|---|---|---|---|---|
-| spec preparation | 54 | 54 | 0 | no | 0 | 33.8 | 239.2 |
-| handover | 200 | 200 | 128 | yes (200) | 0 | 168.8 | 1978.8 |
-| re-entry | 61 | 61 | 0 | no | 0 | 38.1 | 267.0 |
+| spec preparation | 54 | 19 | 0 | no | 0 | 33.6 | 260.8 |
+| handover | 400 | 200 | 583 | yes (200) | 0 | 233.7 | 2074.3 |
+| re-entry | 61 | 26 | 0 | no | 0 | 37.8 | 339.8 |
 
-Preview p95 for the same shapes: spec 226.3 ms, handover 1964.6 ms, re-entry 260.0 ms.
+Preview p95 for the same shapes: spec 244.5 ms, handover 2032.2 ms, re-entry 302.3 ms.
+
+> **Re-measured 2026-09-24 after the widening source-exclusion fix.** The 2026-09-23 run counted every
+> anchor memory as a widened memory (the widening read returned the sources), so `Widened` equalled
+> `Selected` and the anchor-to-anchor edges inflated `Edges`. `WidenAsync` now excludes the sources, so
+> the `Widened`/`Edges` columns above are the genuinely-reached values. `Selected` for handover is the
+> pre-cut count (400, inflated by history versions of the widened memories) that the 200-item cap cut.
 
 **Item limit = the reachable bound.** `DossierDefaults.ItemLimit` equals `MemorySearchDefaults.MaxLimit` (200),
 the ceiling both anchor resolution and widening fetch at, so the stated limit is the effective bound and
