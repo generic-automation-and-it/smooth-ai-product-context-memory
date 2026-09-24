@@ -51,6 +51,9 @@ HostConfiguration__UseProject=false \
 docker build -t smooth-ai-product-context-memory:local .           # Host image (see docs/wiki/docker.md)
 dotnet run --project src/SmoothAiProductContextMemory.ChatHost     # ChatHost standalone (separate from API Host)
 dotnet run --project src/SmoothAiProductContextMemory.Host -- export [--output DIR] [--history] [--force]
+dotnet run --project src/SmoothAiProductContextMemory.Host -- snapshot [--output DIR]  # corpus snapshot archive (tar + manifest)
+dotnet run --project src/SmoothAiProductContextMemory.Host -- verify <archive>         # offline archive verification (exit 0 = clean)
+dotnet run --project src/SmoothAiProductContextMemory.Host -- restore <archive> [--force]  # restore + printed reconciliation
                                                                    # generated Markdown dump of the store (never commit the output)
 
 SMOOTH_AGE_BENCH=1 dotnet test tests/SmoothAiProductContextMemory.Infrastructure.ComponentTest \
@@ -103,6 +106,7 @@ Hosted on **GitHub** at `https://github.com/generic-automation-and-it/project`. 
 
 | Date | Change | Ref |
 |---|---|---|
+| 2026-09-24 | Implemented HLD-006 (corpus snapshot and restore): a `snapshot` CLI verb writing one self-verifying tar + manifest archive capturing relational + AGE graph + referenced blob bodies from a consistent `REPEATABLE READ` snapshot; an offline `verify` verb (tamper suite, capture-time-inconsistency classification); a `restore` verb that ends in a printed reconciliation; HTTP `preflight` and accepted-then-poll `snapshot` endpoints under `/api/context`; one-shot container entrypoints for the same verbs; and HLD-001 NFR-03 closed by HLD-006 NFR-02. | HLD-006, BR-37 |
 | 2026-09-24 | `.gitignore` gained the review-gate scratch paths `ci_temp` (no trailing slash, so it also matches the symlink upstream's `local-review.sh` creates) and `ci_temp_logs/`. Neither was ignored before, and `pipeline-ai-analyse.yml` commits with `git add -A` excluding only `ci_temp`, `.context` and `.smooth-ai-review-tools`, so preserved gate logs could have landed in an auto-fix commit. Mirrors upstream `smooth-ai-report-review`. | `.gitignore` |
 | 2026-09-23 | Added HLD-005 (contextual knowledge export) implementation: a read-only bundle/preview API (`POST /api/context/dossier/{bundle,preview}`), the `ContextDossier` Application slice with deterministic scope-safe selection, `NpgsqlMemoryTraversal.WidenAsync`, a read-only dossier composer skill (`.agents/skills/mimisbrunnr-dossier/`), and LADR-15 closing the `kind = understanding` dossier-side design gap. | HLD-005, BRD-002 |
 | 2026-09-21 | Added npm and Claude plugin distribution metadata plus Node launchers under `npm/cli/` for portable Mímisbrunnr context-memory and Understanding clients. | package distribution |

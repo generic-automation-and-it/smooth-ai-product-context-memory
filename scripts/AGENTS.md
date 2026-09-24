@@ -19,6 +19,7 @@ Operational checks support operator decisions; a preflight must never repair the
 - A clean snapshot is not a reservation: writers must remain stopped from the final precheck through migration. Host startup applies migrations, so checking after startup is too late.
 - Same-group repeated memberships are not cross-group ownership conflicts. Malformed containers or identity types block preflight even though some live reads treat them as absent; silently skipping them would claim migration readiness without establishing it.
 - The checker needs only `public.memory_group`, not AGE or the ticket migration. The [ticket migration runbook](../docs/hlds/003-graph-edges-on-age/ticket-migration-runbook.md) targets legacy data before graph backfill; it refuses installed/partially installed ticket graph objects.
+- The one-shot `restore` verb's built-in reconciliation supersedes `scripts/verify-graph-restore.sh`/`seed-graph-sample.sh` for the HLD 001 NFR-03 round-trip: it restores both stores from a self-verifying snapshot archive and prints a reconciliation (counts, blob resolution, bounded traversal) instead of `pg_dump`/`pg_restore` around `docker exec`. Those scripts remain as operational tooling for the graph-only, pre-HLD-006 pre-upgrade check but no longer own the restore-verification claim.
 
 ## Test References
 
@@ -31,6 +32,7 @@ Operational checks support operator decisions; a preflight must never repair the
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-24 | `verify-graph-restore.sh` / `seed-graph-sample.sh` restore-verification role superseded by the one-shot `restore` verb's built-in reconciliation (HLD-006). Scripts retained for the graph-only pre-upgrade check. | HLD-006 |
 | 2026-09-21 | Added npm package smoke coverage that packs and installs the tarball in isolation, then executes every public CLI help path. | npm skill distribution |
 | 2026-09-17 | Release smoke now generates separate read/write API tokens and exercises routes with least-capability credentials. | HLD-002 NFR-04 |
 | 2026-09-16 | Added the release-policy harness to Test References. | PR #65 review |

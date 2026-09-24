@@ -13,7 +13,7 @@ namespace SmoothAiProductContextMemory.Infrastructure.Storage;
 /// client-side and content-addressed by SHA-256 of the uncompressed bytes. Buckets, object keys and
 /// ETags never escape this class, so the backing store stays swappable.
 /// </summary>
-public sealed class S3BlobStorage : IBlobStorage, IAsyncDisposable
+public sealed class S3BlobStorage : IBlobStorage, IBlobCatalog, IAsyncDisposable
 {
     private readonly IMinioClient _client;
     private readonly string _bucket;
@@ -107,6 +107,30 @@ public sealed class S3BlobStorage : IBlobStorage, IAsyncDisposable
 
     public async Task<bool> ExistsAsync(string address, CancellationToken cancellationToken = default)
         => await ObjectExistsAsync(ToObjectKey(address), cancellationToken);
+
+    /// <summary>
+    /// Enumerates every stored object's content address. Read-only listing for orphan accounting
+    /// (LADR-03 / LADR-06) — the snapshot archive's membership is derived from the database, and this
+    /// list is only ever compared against it for the report.
+    /// </summary>
+    public async Task<string[]> ListAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var addresses = new List<string>();
+            ListObjectsArgs args = new ListObjectsArgs().WithBucket(_bucket).WithRecursive(true);
+            await foreach (Item item in _client.ListObjectsEnumAsync(args, cancellationToken))
+            {
+                addresses.Add(item.Key);
+            }
+
+            return addresses.ToArray();
+        }
+        catch (BucketNotFoundException)
+        {
+            return [];
+        }
+    }
 
     /// <summary>
     /// Deletes the object at the given address. Deliberately absent from <see cref="IBlobStorage"/>:

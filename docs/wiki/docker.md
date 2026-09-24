@@ -173,6 +173,44 @@ docker run --rm \
 Arguments after the image name reach `Program` (`args[0] == "export"`). Do not
 replace `ENTRYPOINT` with a baked `dotnet …` web command.
 
+## Run standalone (`snapshot`, `verify`, `restore`)
+
+The same image runs the one-shot HLD-006 verbs; the container entrypoint and the dev CLI verb are one
+code path per verb (LADR-07). `verify` needs only the archive mounted (no database, no object store);
+`snapshot` and `restore` need the storage connection variables. The first argument after the image name
+selects the verb:
+
+```bash
+# snapshot — write a self-verifying tar + manifest archive to the mounted volume
+docker run --rm \
+  --name mimisbrunnr-host \
+  -v "$(pwd)/.context/snapshots:/snapshots" \
+  -e ConnectionStrings__SmoothAiProductContextMemory='Host=host.docker.internal;Port=5432;Database=app;Username=postgres;Password=...' \
+  -e BlobStorage__Endpoint='http://host.docker.internal:9000' \
+  -e BlobStorage__AccessKey='smooth-local' \
+  -e BlobStorage__SecretKey='...' \
+  -e BlobStorage__Bucket='smooth-mimisbrunnr-memory-well' \
+  smooth-ai-product-context-memory:local \
+  snapshot --output /snapshots
+
+# verify — offline integrity check; exit code 0 = clean, ≠0 = finding
+docker run --rm -v "$(pwd)/.context/snapshots:/snapshots" \
+  smooth-ai-product-context-memory:local verify /snapshots/snapshot-<ts>.tar
+
+# restore — rebuild both stores into an empty target, print reconciliation; add --force to override
+docker run --rm \
+  -v "$(pwd)/.context/snapshots:/snapshots" \
+  -e ConnectionStrings__SmoothAiProductContextMemory='...' \
+  -e BlobStorage__Endpoint='http://host.docker.internal:9000' \
+  -e BlobStorage__AccessKey='smooth-local' \
+  -e BlobStorage__SecretKey='...' \
+  -e BlobStorage__Bucket='smooth-mimisbrunnr-memory-well' \
+  smooth-ai-product-context-memory:local restore /snapshots/snapshot-<ts>.tar
+```
+
+`verify` writes nothing and touches nothing but the archive; `restore` refuses a non-empty target
+unless `--force` is passed. `snapshot` and `restore` are read-only against / rebuild the stores.
+
 ## AppHost consumption
 
 Default: AppHost **compiles Host from the working tree** and starts

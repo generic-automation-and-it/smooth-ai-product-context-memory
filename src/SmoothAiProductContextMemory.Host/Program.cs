@@ -6,12 +6,26 @@ using SmoothAiProductContextMemory.Host.Cli;
 using SmoothAiProductContextMemory.Host.Configuration;
 using SmoothAiProductContextMemory.Host.Endpoints;
 using SmoothAiProductContextMemory.Host.HealthChecks;
+using SmoothAiProductContextMemory.Host.Snapshot;
 using SmoothAiProductContextMemory.Infrastructure;
 
-if (args.Length > 0 && string.Equals(args[0], "export", StringComparison.OrdinalIgnoreCase))
+if (args.Length > 0)
 {
-    Environment.ExitCode = await ExportCommand.InvokeAsync(args[1..]);
-    return;
+    // One-shot CLI verbs: dev CLI and container entrypoint share one code path per verb (LADR-07).
+    Func<string[], Task<int>>? verb = args[0].ToLowerInvariant() switch
+    {
+        "export" => ExportCommand.InvokeAsync,
+        "snapshot" => SnapshotCommand.InvokeAsync,
+        "verify" => VerifyCommand.InvokeAsync,
+        "restore" => RestoreCommand.InvokeAsync,
+        _ => null,
+    };
+
+    if (verb is not null)
+    {
+        Environment.ExitCode = await verb(args[1..]);
+        return;
+    }
 }
 
 var builder = WebApplication.CreateBuilder(args);
@@ -32,6 +46,7 @@ builder.Services.AddOptions<ApiAccessOptions>()
         "ApiAccess read and write tokens must be distinct.")
     .ValidateOnStart();
 builder.Services.AddSingleton<ApiAccessAuthorizer>();
+builder.Services.AddSingleton<SnapshotJobCoordinator>();
 
 // Unknown JSON properties are a caller mistake, not data to ignore. A misspelled field (e.g.
 // `initiative` where the contract says `initiativeName`) was absorbed silently and the request

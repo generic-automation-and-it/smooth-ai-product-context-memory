@@ -16,4 +16,11 @@ public static class Sha256ContentAddress
         string hash = Convert.ToHexStringLower(SHA256.HashData(content));
         return $"{hash[..2]}/{hash[2..4]}/{hash}";
     }
+
+    /// <summary>Bare lowercase SHA-256 hex of the content — used as the archive entry hash.</summary>
+    public static string Hash(byte[] content)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        return Convert.ToHexStringLower(SHA256.HashData(content));
+    }
 }
