@@ -671,5 +671,18 @@ class DumpRedactionTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertIn("AGE cutover needed an index rebuild", out)
 
+    def test_dump_folder_imports_by_folder_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            content = write(tmp, "c.md", "# Cutover\n\nThe AGE cutover needed an index rebuild.")
+            out_dir = Path(tmp) / "cutover"
+            run(["dump", "--currentsession", "--from", content, "--out", str(out_dir)])
+            rc, out, _ = run(["import", str(out_dir), "--store"])
+            self.assertEqual(rc, 0)
+            payload = json.loads(out.split("\n", 1)[1].split("\n\n", 1)[0])
+            self.assertEqual(payload["sourceKind"], "foreign")
+            self.assertTrue(payload["source"].endswith("_session.md"))
+            self.assertIn("The AGE cutover needed an index rebuild.",
+                          [c["statement"] for c in payload["candidates"]])
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
