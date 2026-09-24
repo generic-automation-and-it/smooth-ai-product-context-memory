@@ -390,11 +390,19 @@ class Nfr05AttributionTests(unittest.TestCase):
             "11111111-1111-1111-1111-111111111111",
             "22222222-2222-2222-2222-222222222222",
             "33333333-3333-3333-3333-333333333333")], "meaning": "same default rule"}]}
+        examined = 0
         for focus in list(dc.FOCUSES) + [None]:
             doc = dc.compose(bundle, focus=focus, judgements=judg)
             rendered = dc.render(doc)
-            uncited = [l for l in _statement_lines(rendered) if not _has_citation(l)]
+            stmts = _statement_lines(rendered)
+            # A focus may set every claim aside (outside-focus); only a surfaced claim must render
+            # as a classifiable statement, so the invariant cannot pass on a silent renderer change.
+            if any(c["surfaced"] for c in doc.claims):
+                self.assertTrue(stmts, f"surfaced claims rendered no statements under focus={focus}")
+            examined += len(stmts)
+            uncited = [l for l in stmts if not _has_citation(l)]
             self.assertEqual(uncited, [], f"uncited substantive statements under focus={focus}")
+        self.assertGreater(examined, 0, "no substantive statements examined under any focus")
 
     def test_three_captures_collapsing_cite_all_three_origins(self):
         """NFR-05: a collapsed claim cites every origin, not the one the composition preferred."""
