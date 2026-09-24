@@ -18,7 +18,7 @@ authority is [BRD-003](../../brd/003-understanding-transfer/).
 - **Never weaken the model with nullables.** Cross-repo reach is default scope + no repo anchor, not
   nullable scope (LADR-01, LADR-04).
 - **Never add a column for the Understanding shape.** The five parts map onto existing fields
-  (LADR-04). The one judgement call is `trigger`→`Description`.
+  (LADR-04). The one judgement call is `question` (formerly `trigger`)→`Description`.
 - **Never write on the default load path.** A load without `--store` changes nothing in the store (NFR-01).
 - **Never write on import except through the capture path.** A direct write is a defect and creates a
   second writer (LADR-03).
@@ -60,8 +60,8 @@ See [./ladrs/](./ladrs/). All Draft.
   closed enum or a validation allow-list — that breaks the open vocabulary the Domain states as deliberate.
 - **Cross-repo reach is by defaults, not nullables.** The Understanding's group carries the default scope and
   omits the repo anchor; `Repo` is already optional, `ScopeDimension` stays required (LADR-01).
-- **The five-part shape maps onto existing fields.** knowledge→`Statement`, why→`ContentSummary`,
-  trigger→`Description`, boundaries→`ValidUntil`+scope, provenance→`Sources`+`ValidFrom`+`CreatedOn`
+- **The five-part shape maps onto existing fields.** answer→`Statement`, why→`ContentSummary`,
+  question→`Description`, boundaries→`ValidUntil`+scope, provenance→`Sources`+`ValidFrom`+`CreatedOn`
   (LADR-04).
 - **Version semantics are reused.** The existing `is_current` swap applies; the version chain is the delta.
   No new delta column (LADR-04).
@@ -105,6 +105,7 @@ See [./ladrs/](./ladrs/). All Draft.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-24 | LADR-09 added: load/import read the `ai-understanding` `.understanding.md` format and store folders (newest version per slug) as structured input instead of foreign prose. LADR-04 vocabulary amended trigger/knowledge → question/answer. LADR-07 amended: the session dump is redacted before write and refused if the redactor cannot run. | LADR-04, LADR-07, LADR-09 |
 | 2026-09-20 | Corrected the system diagram: the load skill reads prior material **from disk**, not from the HTTP API/store — the shipped client is file-only with no network, so the draw had shown a boundary the design forbids. `c4-context.md`'s loadSkill relation redirected to a disk material element, and the AGENTS mermaid now reads a local export/file rather than hitting `E`. The sibling flow diagram already modeled it correctly. | PR #86 review |
 | 2026-09-19 | Self-review (iter 4): fixed the import path collapsing a scoped memory fact into an understanding. Import of a store export now takes only `kind = understanding` records (LADR-01). | self-review |
 | 2026-09-19 | Rebuilt for the one-model model: Understanding is a **kind** of memory in the existing store, cross-repo by default scope and no repo anchor (no nullable scope), reusing `is_current` version semantics. Added load breadth (`--all` vs understanding-only, LADR-08). Retracted the earlier `Memory`→`Understanding` code rename (memory is the correct name) — LADR-05 and NFR-04 removed. Retracted the "understanding rather than memory" vocabulary requirement in favour of "memory is the correct name". | LADR-01, LADR-04, LADR-08; BRD-003 |

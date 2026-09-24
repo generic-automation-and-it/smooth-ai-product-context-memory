@@ -107,8 +107,8 @@ class LoadTests(unittest.TestCase):
             rc, out, _ = run(["load", src, "--format", "store"])
             self.assertEqual(rc, 0)
             self.assertIn("Stale-image trap", out)
-            self.assertIn("Trigger:", out)
-            self.assertIn("Knowledge:", out)
+            self.assertIn("Question:", out)
+            self.assertIn("Answer:", out)
             self.assertIn("Why:", out)
             # Attribution survives the load (NFR-03).
             self.assertIn("11111111-1111-1111-1111-111111111111", out)
@@ -473,6 +473,176 @@ class DumpTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertIn("AGE cutover needed a trigger rebuild", out)
 
+
+
+def unit_text(slug: str, answer: str, updated: str = "2026-09-20", confidence: str = "verified",
+              scope: str = "portable") -> str:
+    return f"""---
+slug: {slug}
+description: Enum mapping has to be registered on the data source
+question: Why does an enum column read back as an integer?
+scope: {scope}
+confidence: {confidence}
+provenance:
+  learned: {updated}
+  session: demo
+  source: a failing read in a component test
+  inherited:
+    - [[older-unit]]
+updated: {updated}
+---
+
+# Npgsql enum mapping
+
+## Answer
+
+{answer}
+
+## Why
+
+Mapping on the context options is too late for the data source.
+
+## Boundaries
+
+Npgsql 8 and later.
+"""
+
+
+def unit_store(tmp: str) -> Path:
+    """A store holding two versions of one slug plus a second slug."""
+    store = Path(tmp) / "understandings"
+    for folder, slug, answer, updated in (
+        ("npgsql-20260910-0900", "npgsql-enum", "Old answer that was superseded.", "2026-09-10"),
+        ("npgsql-20260920-1400", "npgsql-enum", "Register the enum on the data source builder.",
+         "2026-09-20"),
+        ("retry-20260915-1000", "retry-budget", "Retries share one budget across the request.",
+         "2026-09-15"),
+    ):
+        (store / folder).mkdir(parents=True, exist_ok=True)
+        (store / folder / f"{slug}.understanding.md").write_text(
+            unit_text(slug, answer, updated), encoding="utf-8")
+    return store
+
+
+class UnderstandingFileTests(unittest.TestCase):
+    """ai-understanding's on-disk format is a first-class input, not foreign prose."""
+
+    def test_unit_file_renders_parts_not_raw_frontmatter(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write(tmp, "npgsql-enum.understanding.md",
+                         unit_text("npgsql-enum", "Register the enum on the data source builder."))
+            rc, out, _ = run(["load", path])
+            self.assertEqual(rc, 0)
+            self.assertIn("Question: Why does an enum column read back as an integer?", out)
+            self.assertIn("Answer: Register the enum on the data source builder.", out)
+            self.assertIn("Boundaries: Npgsql 8 and later.", out)
+            self.assertNotIn("slug: npgsql-enum", out)
+            self.assertNotIn("foreign material", out)
+
+    def test_loading_a_store_folder_takes_the_newest_version_of_each_slug(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, _ = run(["load", str(unit_store(tmp))])
+            self.assertEqual(rc, 0)
+            self.assertIn("Register the enum on the data source builder.", out)
+            self.assertIn("Retries share one budget", out)
+            self.assertNotIn("Old answer that was superseded.", out)
+            self.assertIn("1 older version(s) of a slug passed over", out)
+            self.assertIn("npgsql-20260920-1400/npgsql-enum.understanding.md", out)
+
+    def test_contested_and_repo_specific_units_are_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write(tmp, "x.understanding.md",
+                         unit_text("x", "An answer long enough.", confidence="contested",
+                                   scope="repo-specific"))
+            _, out, _ = run(["load", path])
+            self.assertIn("confidence: contested", out)
+            self.assertIn("repo-specific", out)
+
+    def test_import_of_a_unit_maps_fields_instead_of_capturing_frontmatter(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write(tmp, "npgsql-enum.understanding.md",
+                         unit_text("npgsql-enum", "Register the enum on the data source builder."))
+            rc, out, _ = run(["import", path, "--store"])
+            self.assertEqual(rc, 0)
+            payload = json.loads(out.split("\n", 1)[1].split("\n\n", 1)[0])
+            self.assertEqual(payload["sourceKind"], "understanding-file")
+            [candidate] = payload["candidates"]
+            self.assertEqual(candidate["statement"], "Register the enum on the data source builder.")
+            self.assertEqual(candidate["description"],
+                             "Why does an enum column read back as an integer?")
+            self.assertIn("Boundaries: Npgsql 8 and later.", candidate["contentSummary"])
+            self.assertIsNone(candidate["validUntil"])
+            self.assertEqual(candidate["validFrom"], "2026-09-20")
+            self.assertEqual(candidate["confidence"], "verified")
+            self.assertIn({"kind": "understanding-file", "reference": "npgsql-enum"},
+                          candidate["sources"])
+
+    def test_import_of_a_store_folder_takes_current_versions_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _, out, _ = run(["import", str(unit_store(tmp)), "--store"])
+            self.assertIn("Candidates: 2;", out)
+            self.assertNotIn("Old answer that was superseded.", out)
+
+    def test_explicit_understanding_format_on_other_input_fails_loudly(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write(tmp, "notes.md", "Just notes, no frontmatter.")
+            rc, _, err = run(["load", path, "--format", "understanding"])
+            self.assertEqual(rc, 2)
+            self.assertIn("NOT AN UNDERSTANDING", err)
+
+    def test_folder_with_nothing_loadable_is_an_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, _, err = run(["load", tmp])
+            self.assertEqual(rc, 2)
+            self.assertIn("NO LOADABLE MATERIAL", err)
+
+    def test_store_export_trigger_key_still_reads_as_question(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            export = {"understandings": [{"subject": "S", "trigger": "When X?",
+                                          "statement": "Then Y.", "kind": "understanding"}]}
+            path = write(tmp, "e.json", json.dumps(export))
+            _, out, _ = run(["load", path])
+            self.assertIn("Question: When X?", out)
+
+
+class DumpRedactionTests(unittest.TestCase):
+    """A dump is carried to other sessions and repositories, so secrets never reach its file."""
+
+    def test_secret_is_redacted_before_the_dump_is_written(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            token = "ghp_" + "a" * 36
+            content = write(tmp, "c.md", f"# Deploy\n\nThe deploy used token {token} to push.")
+            out_dir = Path(tmp) / "deploy"
+            rc, out, _ = run(["dump", "--currentsession", "--from", content, "--out", str(out_dir)])
+            self.assertEqual(rc, 0)
+            written = (out_dir / "_session.md").read_text(encoding="utf-8")
+            self.assertNotIn(token, written)
+            self.assertIn("<redacted-github-token>", written)
+            self.assertIn("REDACTED before writing: github-token x1", out)
+
+    def test_dump_is_refused_when_the_redactor_cannot_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            content = write(tmp, "c.md", "# Deploy\n\nNothing secret here at all.")
+            out_dir = Path(tmp) / "deploy"
+            original = uc.REDACTOR
+            uc.REDACTOR = Path(tmp) / "missing-redact.py"
+            try:
+                rc, _, err = run(["dump", "--currentsession", "--from", content,
+                                  "--out", str(out_dir)])
+            finally:
+                uc.REDACTOR = original
+            self.assertEqual(rc, 1)
+            self.assertIn("REFUSED", err)
+            self.assertFalse(out_dir.exists())
+
+    def test_dump_folder_loads_by_folder_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            content = write(tmp, "c.md", "# Cutover\n\nThe AGE cutover needed an index rebuild.")
+            out_dir = Path(tmp) / "cutover"
+            run(["dump", "--currentsession", "--from", content, "--out", str(out_dir)])
+            rc, out, _ = run(["load", str(out_dir)])
+            self.assertEqual(rc, 0)
+            self.assertIn("AGE cutover needed an index rebuild", out)
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

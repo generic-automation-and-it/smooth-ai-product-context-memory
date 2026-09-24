@@ -15,7 +15,8 @@ Three operations:
 
 ```bash
 # Load a store export or a foreign document into context (no write)
-python3 .../understanding_client.py load <input> [--format store|foreign] [--asof YYYY-MM-DD]
+# <input> may be a store export, an ai-understanding .understanding.md unit or store folder, or a dump folder
+python3 .../understanding_client.py load <input> [--format store|understanding|foreign] [--asof YYYY-MM-DD]
 
 # Capture material back into the store (opt-in --store), bound by selectors
 python3 .../understanding_client.py import <input> --store \
@@ -33,7 +34,10 @@ python3 .../understanding_client.py dump --currentsession [--out .context/mimisb
   capture path — atomicity, redaction, dedup/link — never a direct write (HLD-007 LADR-03).
 - **The session dump is an export.** `--currentsession` writes to
   `.context/mimisbrunnr-understandings/<session-folder>/`, with a fitting folder name reported on output so another
-  agent can discover it (HLD-007 LADR-07). It changes nothing in the store.
+  agent can discover it (HLD-007 LADR-07). It changes nothing in the store, and its content is redacted
+  before it is written.
+- **ai-understanding files are structured input.** A `.understanding.md` unit, or a whole store folder
+  (newest version per slug), loads as question/answer/why/boundaries rather than raw prose (HLD-007 LADR-09).
 
 Business authority: [BRD-003](../../../docs/brd/003-understanding-transfer/). Design:
 [HLD-007](../../../docs/hlds/007-understanding-transfer/).
