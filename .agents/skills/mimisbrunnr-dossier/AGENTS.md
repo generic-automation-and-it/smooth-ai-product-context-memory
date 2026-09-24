@@ -129,3 +129,5 @@ the only file it writes is the local dossier artefact. Tests: `tests/run_tests.p
 |:-----|:-------|:----|
 | 2026-09-22 | Created — read-only dossier composer contract (LADR-02/04/05/07/08/12/13/14/15, NFR-01..07). | HLD-005; BRD-002 |
 | 2026-09-23 | Implemented the judgement skeleton (`scripts/dossier_composer.py`), the invocation contract (`SKILL.md`), and the committed L0 harness (`tests/run_tests.py`, 34 tests, NFR-04/05/06/07). | HLD-005; BRD-002 |
+| 2026-09-24 | Added the "Never consolidate on wording alone" Non-Negotiable (equivalence = meaning + applicability + lifecycle) and enforced it in the composer's equivalence-group validation. | HLD-005 LADR-05; PR #99 review |
+| 2026-09-24 | Post-merge review follow-up: removed the dead `_origin_line` helper and `derive_findings`' unread parameters; the NFR-05 attribution test can no longer pass vacuously (surfaced claims must render statements, and at least one focus must examine some); README relabels `bundle` as the deterministic bundle, not the priced preview. | PR #99 review |
