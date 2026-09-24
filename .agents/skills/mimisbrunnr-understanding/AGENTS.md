@@ -89,13 +89,14 @@ DB and wire are unchanged.
 
 ## Test References
 
-- **Committed L0 harness (CI-gated):** `tests/run_tests.py` — stdlib `unittest`, 45 tests, no external
+- **Committed L0 harness (CI-gated):** `tests/run_tests.py` — stdlib `unittest`, 48 tests, no external
   runner. A default load creates no files (NFR-01); store-export five-part rendering keeps uuid/version
   attribution; `proposed`/`program` scope flagged, never promoted (NFR-03); `--asof` filters the validity
   window and states the omission; foreign material cited as data with truncation disclosed; import refused
   without `--store` and emitting nothing (NFR-02); the `--store` payload carrying selectors and bundle
   flags while writing nothing; "no selectors ⇒ no association"; the dump → load round trip (LADR-07); `.understanding.md` units and store folders read as structured
-  input with newest-version-per-slug (LADR-09); the dump's redaction and its fail-closed refusal.
+  input with newest-version-per-slug, including import from a dump folder (LADR-09); the dump's
+  redaction and its fail-closed refusal on a missing, non-zero-exit or malformed-output redactor.
   Run: `python3 -B .agents/skills/mimisbrunnr-understanding/tests/run_tests.py`. The PR gate runs it.
 - These tests validate plumbing and the non-destructive guarantees, **not** LLM judgement or live API
   behaviour. The client makes no network call.
@@ -104,6 +105,7 @@ DB and wire are unchanged.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-24 | Review fixes: malformed or empty redactor output now refuses the dump instead of raising; tests added for the redactor's non-zero-exit and malformed-output branches and for import from a dump folder. Harness 45 -> 48 tests. | PR #101 review |
 | 2026-09-24 | Migrated the `smooth-devex-template` Understanding changes that apply to a loader. **Reads the `ai-understanding` format:** `load`/`import` parse `.understanding.md` units (new `--format understanding`, auto-detected) instead of treating them as foreign prose, which captured the frontmatter block as a fact; a folder input now works (it raised `IsADirectoryError`) and resolves an `ai-understanding` store to the newest version of each slug, or a dump folder to its `_session.md`. **Vocabulary:** trigger/knowledge → question/answer in render, dump template and docs; a legacy `trigger` key still reads. **Write-time redaction:** `dump --currentsession` scrubs content through the capture skill's `redact.py` before writing and refuses if it cannot run. **Durability:** proposing an Understanding now states no file paths or line numbers in the answer. Harness 34 -> 45 tests. | HLD-007 LADR-04, LADR-07, LADR-09 |
 | 2026-09-21 | Added portable skill metadata so Claude, Copilot, and Codex can select an appropriate model when loading Understanding transfers. | npm/Claude plugin distribution |
 | 2026-09-20 | Review fixes: `import` no longer drops input in silence — the sub-threshold length filter moved out of `split_candidates` into the caller, which names each candidate it sets aside, and an understanding-kind record with an empty statement is reported instead of hitting a bare `continue`. `dump --from` on an absent path answers `NOT FOUND` with exit 2, matching `import` and `load`. README corrected: a load is not an import, and `--store` prepares a capture rather than performing one. Harness 30 -> 34 tests. | PR #86 review |

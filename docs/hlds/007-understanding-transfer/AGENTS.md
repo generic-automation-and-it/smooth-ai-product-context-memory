@@ -75,12 +75,14 @@ See [./ladrs/](./ladrs/). All Draft except LADR-09, which is Accepted.
 ## Test References
 
 - **Skill L0 (CI-gated):** `.agents/skills/mimisbrunnr-understanding/tests/run_tests.py` — stdlib
-  `unittest`, 34 tests. A default load creates no files (NFR-01); store-export five-part rendering keeps
+  `unittest`, 48 tests. A default load creates no files (NFR-01); store-export five-part rendering keeps
   uuid/version attribution; `proposed` and `program` scope are flagged, never promoted (NFR-03); `--asof`
   filters the validity window and states the omission; foreign material is cited as data with truncation
   disclosed; import is refused without `--store` and emits nothing (NFR-02); the `--store` payload carries
   selectors and bundle flags while writing nothing; "no selectors ⇒ no association"; and the dump → load
-  round trip that makes cross-session sharing real (LADR-07). Run:
+  round trip that makes cross-session sharing real (LADR-07); `.understanding.md` units and store folders
+  read as structured input with newest-version-per-slug, import from a dump folder (LADR-09); and the
+  dump's redaction, failing closed on a missing, failing or malformed redactor (LADR-07). Run:
   `python3 -B .agents/skills/mimisbrunnr-understanding/tests/run_tests.py`. Wired into
   `.github/workflows/pr-gate.yml`.
 - **L0:** `tests/SmoothAiProductContextMemory.Application.UnitTest/Features/Export/ExportRendererTests.cs`
