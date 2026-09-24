@@ -47,7 +47,7 @@ flowchart LR
 
 ## Architecture Decisions
 
-See [./ladrs/](./ladrs/). All Draft.
+See [./ladrs/](./ladrs/). All Draft except LADR-09, which is Accepted.
 
 ## Key Behaviors
 
