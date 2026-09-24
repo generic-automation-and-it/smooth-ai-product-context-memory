@@ -61,11 +61,36 @@ public class DossierBundleValidatorTests
 
     [Theory]
     [InlineData(0)]
-    [InlineData(6)]
+    [InlineData(-1)]
+    [InlineData(MemoryTraversalDefaults.MaxDepth + 1)]
     public void Preview_rejects_widen_depth_outside_the_bound(int widenDepth)
     {
         var result = _previewValidator.TestValidate(Preview() with { WidenDepth = widenDepth });
         result.ShouldHaveValidationErrorFor(x => x.WidenDepth);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(3)]
+    [InlineData(MemoryTraversalDefaults.MaxDepth)]
+    public void Preview_accepts_widen_depth_within_the_bound(int widenDepth)
+    {
+        var result = _previewValidator.TestValidate(Preview() with { WidenDepth = widenDepth });
+        result.ShouldNotHaveValidationErrorFor(x => x.WidenDepth);
+    }
+
+    [Fact]
+    public void Preview_rejects_ticket_key_without_provider()
+    {
+        var result = _previewValidator.TestValidate(Preview() with { TicketKey = "ACM-1" });
+        result.ShouldHaveValidationErrorFor(x => x.TicketProvider);
+    }
+
+    [Fact]
+    public void Preview_rejects_ticket_provider_without_key()
+    {
+        var result = _previewValidator.TestValidate(Preview() with { TicketProvider = "jira" });
+        result.ShouldHaveValidationErrorFor(x => x.TicketKey);
     }
 
     [Fact]

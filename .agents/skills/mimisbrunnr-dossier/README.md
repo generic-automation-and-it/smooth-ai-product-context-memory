@@ -14,7 +14,7 @@ follow. It never calls a model from Application or Host — judgement lives here
 
 ```bash
 python3 -B .agents/skills/mimisbrunnr-dossier/scripts/dossier_composer.py \
-  bundle --body '{"repo":"kingstown","widenDepth":3}'          # preview / request the bundle
+  bundle --body '{"repo":"kingstown","widenDepth":3}'          # the deterministic bundle (bodies hydrated), not the priced /preview
 python3 -B .agents/skills/mimisbrunnr-dossier/scripts/dossier_composer.py \
   compose --bundle bundle.json --focus architecture \
   --out .context/mimisbrunnr-dossier/architecture.md           # compose + write the artefact

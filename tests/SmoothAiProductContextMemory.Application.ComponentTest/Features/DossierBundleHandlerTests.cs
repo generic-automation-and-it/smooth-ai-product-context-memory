@@ -95,6 +95,10 @@ public sealed class DossierBundleHandlerTests : HandlerTestBase
         response.Bundle.Omitted.ShouldNotContain(o => o.Uuid == HiddenUuid);
         response.Bundle.Edges.ShouldNotContain(e =>
             e.SourceUuid == HiddenUuid || e.TargetUuid == HiddenUuid);
+
+        // Dropped whole, never shortened: the visible neighbour and its edge from the anchor survive.
+        response.Bundle.Items.ShouldContain(i => i.Uuid == VisibleDeepUuid);
+        response.Bundle.Edges.ShouldContain(e => e.SourceUuid == AnchorUuid && e.TargetUuid == VisibleDeepUuid);
     }
 
     [Fact]
@@ -158,9 +162,9 @@ public sealed class DossierBundleHandlerTests : HandlerTestBase
     {
         // NFR-02: byte-equality must hold across a process restart, not just two calls in one process.
         // Two independent EF contexts, handlers and data sources over the same unchanged store simulate a
-        // restart: no in-process caching, no change-tracker or handler-scoped state, and no hash-seed
-        // dependence can leak into the bytes. Hash-seed dependence specifically is caught because each
-        // context recompiles its query plan in a fresh process-equivalent state.
+        // restart: no in-process caching, no change-tracker or handler-scoped state can leak into the bytes.
+        // Both contexts share one process, so string hash randomization (per-process) is NOT exercised here;
+        // cross-process byte stability rests on the fully deterministic orderings (validity, capture, identity).
         await SeedForBundleAsync();
         var blobs = new DictionaryBlobStorage();
         blobs.Add(BlobAddress, "THE_BODY");
