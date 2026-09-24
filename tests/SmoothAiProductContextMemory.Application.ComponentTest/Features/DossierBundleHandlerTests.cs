@@ -95,6 +95,10 @@ public sealed class DossierBundleHandlerTests : HandlerTestBase
         response.Bundle.Omitted.ShouldNotContain(o => o.Uuid == HiddenUuid);
         response.Bundle.Edges.ShouldNotContain(e =>
             e.SourceUuid == HiddenUuid || e.TargetUuid == HiddenUuid);
+
+        // Dropped whole, never shortened: the visible neighbour and its edge from the anchor survive.
+        response.Bundle.Items.ShouldContain(i => i.Uuid == VisibleDeepUuid);
+        response.Bundle.Edges.ShouldContain(e => e.SourceUuid == AnchorUuid && e.TargetUuid == VisibleDeepUuid);
     }
 
     [Fact]
