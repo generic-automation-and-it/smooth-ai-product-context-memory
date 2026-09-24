@@ -32,7 +32,8 @@ public sealed record DossierSelectionResult(
     int EdgeCount,
     bool DepthLimitReached,
     bool HiddenPathDropped,
-    bool LimitReached);
+    bool LimitReached,
+    IReadOnlyList<MemoryRelationship> Edges);
 
 /// <summary>
 /// The deterministic selection half of a dossier read (HLD-005 LADR-03): resolve the anchor set
@@ -77,6 +78,30 @@ public static class DossierSelection
         // Anchor resolution: repo/initiative/tags/kind/status through the search abstraction in one
         // indexed statement; the ticket through the accepted ITicketGraph separation (mirrors
         // FindTicketPaths), which grants no scope consent from ticket identity (HLD-003 LADR-08).
+        // A ticket anchor is traversed first so the selected uuids narrow the anchor search in SQL
+        // before the row ceiling, rather than intersecting an already-truncated result set (HLD-005
+        // NFR-03). Ticket identity grants no scope consent; the traversal is scope-gated separately.
+        TicketTraversalResult? ticketResult = null;
+        if (anchor.Ticket is { } ticket)
+        {
+            ticketResult = await ticketGraph.TraverseAsync(
+                new TicketTraversalQuery
+                {
+                    Anchor = ticket,
+                    MaxDepth = anchor.WidenDepth,
+                    RequiredScopeDimension = scopePlan.RequiredDimension,
+                    HiddenDimensions = hiddenDimensions,
+                    Kind = Blank(anchor.Kind),
+                    PathLimit = MemorySearchDefaults.MaxLimit,
+                    MemoryLimit = MemorySearchDefaults.MaxLimit,
+                },
+                cancellationToken);
+        }
+
+        HashSet<Guid>? ticketUuids = ticketResult is null
+            ? null
+            : new HashSet<Guid>(ticketResult.Items.Select(i => i.Uuid));
+
         MemorySearchCriteria criteria = new()
         {
             Repo = Blank(anchor.Repo),
@@ -89,6 +114,7 @@ public static class DossierSelection
             CurrentOnly = true,
             AsOf = anchor.AsOf,
             Limit = MemorySearchDefaults.MaxLimit,
+            UuidFilter = ticketUuids is { Count: > 0 } ? [.. ticketUuids] : null,
         };
 
         IReadOnlyList<CheapMemory> matched = await search.SearchAsync(criteria, cancellationToken);
@@ -98,25 +124,6 @@ public static class DossierSelection
         foreach (CheapMemory m in matched)
         {
             reachedVia[m.Uuid] = ["anchor"];
-        }
-
-        if (anchor.Ticket is { } ticket)
-        {
-            TicketTraversalResult ticketResult = await ticketGraph.TraverseAsync(
-                new TicketTraversalQuery
-                {
-                    Anchor = ticket,
-                    MaxDepth = anchor.WidenDepth,
-                    RequiredScopeDimension = scopePlan.RequiredDimension,
-                    HiddenDimensions = hiddenDimensions,
-                    Kind = Blank(anchor.Kind),
-                },
-                cancellationToken);
-
-            // Conjunctive across categories: a ticket-selected memory must also satisfy the search
-            // criteria. A no-match is a no-match — never broaden to return something.
-            var ticketUuids = new HashSet<Guid>(ticketResult.Items.Select(i => i.Uuid));
-            anchorUuids.RemoveWhere(u => !ticketUuids.Contains(u));
         }
 
         // No-match stays a no-match: do not broaden the criteria to produce a result.
@@ -129,7 +136,8 @@ public static class DossierSelection
                 EdgeCount: 0,
                 DepthLimitReached: false,
                 HiddenPathDropped: false,
-                LimitReached: false);
+                LimitReached: false,
+                Edges: []);
         }
 
         // Widening over the graph from the resolved anchor identities, bounded by WidenDepth,
@@ -177,31 +185,41 @@ public static class DossierSelection
                 .OrderBy(c => c.Memory, DossierSelectionCompare.Instance)
         ];
 
-        int edgeCount = await CountEdgesAsync(graph, selected, cancellationToken);
+        IReadOnlyList<MemoryRelationship> edges = await LoadEdgesAsync(graph, selected, cancellationToken);
+
+        bool depthLimitReached = widened.DepthLimitReached
+            || (ticketResult?.Disclosure.DepthLimitReached ?? false);
+        bool limitReached = widened.LimitReached
+            || (ticketResult?.Disclosure.MemoryLimitReached ?? false)
+            || (ticketResult?.Disclosure.PathLimitReached ?? false);
 
         return new DossierSelectionResult(
             selected,
             AnchorCount: anchorUuids.Count,
             WidenedCount: widened.Memories.Count,
-            EdgeCount: edgeCount,
-            DepthLimitReached: widened.DepthLimitReached,
+            EdgeCount: edges.Count,
+            DepthLimitReached: depthLimitReached,
             HiddenPathDropped: widened.HiddenPathDropped,
-            LimitReached: widened.LimitReached);
+            LimitReached: limitReached,
+            Edges: edges);
     }
 
-    private static async Task<int> CountEdgesAsync(
+    private static async Task<IReadOnlyList<MemoryRelationship>> LoadEdgesAsync(
         IMemoryGraph graph,
         IReadOnlyList<SelectedClaim> selected,
         CancellationToken cancellationToken)
     {
         if (selected.Count == 0)
         {
-            return 0;
+            return [];
         }
 
+        // Edges among the selected memories only, loaded once so the manifest count and the returned
+        // edges come from one read (HLD-005 F6). A selected memory's relationship to a hidden one is
+        // absent, because the hidden memory is never selected (NFR-01).
         var uuids = new HashSet<Guid>(selected.Select(c => c.Memory.Uuid));
         IReadOnlyList<MemoryRelationship> all = await graph.ListAllAsync(cancellationToken);
-        return all.Count(e => uuids.Contains(e.SourceUuid) && uuids.Contains(e.TargetUuid));
+        return [.. all.Where(e => uuids.Contains(e.SourceUuid) && uuids.Contains(e.TargetUuid))];
     }
 
     private static string? Blank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;

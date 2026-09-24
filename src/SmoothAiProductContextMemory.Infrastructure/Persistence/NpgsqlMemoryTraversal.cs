@@ -113,6 +113,10 @@ public sealed class NpgsqlMemoryTraversal(SmoothAiProductContextMemoryDbContext 
         {
             Value = query.HiddenDimensions.ToArray(),
         });
+        command.Parameters.Add(new NpgsqlParameter("sourceUuids", NpgsqlDbType.Array | NpgsqlDbType.Uuid)
+        {
+            Value = query.SourceUuids.ToArray(),
+        });
         command.Parameters.Add(new NpgsqlParameter("limit", NpgsqlDbType.Integer) { Value = query.Limit });
 
         return command;
@@ -167,7 +171,10 @@ public sealed class NpgsqlMemoryTraversal(SmoothAiProductContextMemoryDbContext 
                 JOIN memory m ON m.uuid = (node -> 'properties' ->> 'memory_uuid')::uuid
                 JOIN memory_group g ON g.id = m.group_id
                 JOIN memory_version v ON v.memory_id = m.id AND v.is_current
-                WHERE (@requiredScope IS NULL OR g.scope_dimension = @requiredScope)
+                -- A widening never returns the source memories themselves: those are anchor-resolved
+                -- separately, so they must not appear in the reached set or consume LIMIT slots.
+                WHERE m.uuid <> ALL(@sourceUuids)
+                  AND (@requiredScope IS NULL OR g.scope_dimension = @requiredScope)
                   AND (@kind IS NULL OR v.kind = @kind)
                   AND (@status IS NULL OR v.status = @status)
             ), ranked AS MATERIALIZED (

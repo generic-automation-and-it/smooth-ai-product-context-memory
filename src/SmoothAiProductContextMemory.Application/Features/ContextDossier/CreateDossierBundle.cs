@@ -133,7 +133,7 @@ public static class CreateDossierBundle
                 items = [.. items.Take(anchor.ItemLimit)];
             }
 
-            IReadOnlyList<DossierEdge> edges = await CollectEdgesAsync(graph, selection, cancellationToken);
+            IReadOnlyList<DossierEdge> edges = CollectEdges(selection);
             IReadOnlyList<DossierLimitHit> limitsHit = BuildLimitsHit(selection, items.Count, omitted.Count, anchor, capReached);
 
             DossierManifest manifest = BuildManifest(anchor, selection, items.Count + omitted.Count, limitsHit);
@@ -248,18 +248,12 @@ public static class CreateDossierBundle
             return (kept, omitted);
         }
 
-        private async Task<IReadOnlyList<DossierEdge>> CollectEdgesAsync(
-            IMemoryGraph graph,
-            DossierSelectionResult selection,
-            CancellationToken cancellationToken)
+        private static IReadOnlyList<DossierEdge> CollectEdges(DossierSelectionResult selection)
         {
-            // Edges among the selected memories only. A selected memory's relationship to a hidden one
-            // is absent, because the hidden memory is never selected (NFR-01).
-            HashSet<Guid> uuids = new(selection.Selected.Select(c => c.Memory.Uuid));
-            IReadOnlyList<MemoryRelationship> all = await graph.ListAllAsync(cancellationToken);
-
-            return [.. all
-                .Where(e => uuids.Contains(e.SourceUuid) && uuids.Contains(e.TargetUuid))
+            // Edges among the selected memories, loaded once by the selection (F6). A selected
+            // memory's relationship to a hidden one is absent, because the hidden memory is never
+            // selected (NFR-01).
+            return [.. selection.Edges
                 .OrderBy(e => e.SourceUuid)
                 .ThenBy(e => e.Relation, StringComparer.Ordinal)
                 .ThenBy(e => e.TargetUuid)
