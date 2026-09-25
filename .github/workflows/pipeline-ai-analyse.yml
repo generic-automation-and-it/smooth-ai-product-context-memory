@@ -446,7 +446,17 @@ jobs:
           HEAD_REPO: ${{ steps.pr.outputs.head_repo }}
         run: |
           set -euo pipefail
-          changed_paths="$(git status --porcelain -- . ':(exclude,glob)ci_temp/**')"
+          # ci_temp, .context and .smooth-ai-review-tools are all gitignored here
+          # (see .gitignore), so plain `git status`/`git add -A .` already skip
+          # them without needing an exclude pathspec. Do NOT name `ci_temp` in a
+          # pathspec (exclude or otherwise) to "keep it out" -- explicitly
+          # referencing an ignored path is what makes git treat it as a deliberate
+          # request to add/inspect it, and `git add` then refuses (exit 1, "The
+          # following paths are ignored ... Use -f") the instant it reaches that
+          # path while walking `.`. Confirmed empirically: a bare `git add -A .`
+          # silently skips a gitignored directory; naming it via
+          # `:(exclude,glob)ci_temp/**` is what broke this step.
+          changed_paths="$(git status --porcelain -- .)"
           if [ -z "$changed_paths" ]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "No file changes produced by ai-analyse."
@@ -454,17 +464,7 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # `git add -A .` recurses into the working tree and refuses (exit 1) the
-          # instant it reaches the gitignored `ci_temp` scratch directory itself --
-          # the exclude pathspec above only keeps its *contents* out of the index,
-          # it does not stop git from tripping over the ignored directory entry
-          # while walking `.`. Move it out of the tree for the add, then restore it
-          # immediately so the later "Post ai-analyse summary" step can still read
-          # ci_temp/analyse_out.md.
-          ci_temp_stash="${RUNNER_TEMP}/ci_temp.commit-fixes.$$"
-          mv ci_temp "$ci_temp_stash"
           git add -A -- .
-          mv "$ci_temp_stash" ci_temp
           # Belt-and-suspenders: re-check the cached diff after staging so a rename
           # or pathspec quirk cannot produce an empty commit.
           if [ -z "$(git diff --cached --name-only)" ]; then
