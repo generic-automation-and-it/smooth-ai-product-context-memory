@@ -75,13 +75,24 @@ public sealed class NpgsqlSnapshotRepository(IBlobStorage blobStorage, IBlobCata
                 ticketEdges.Length));
     }
 
+    public async Task<bool> IsTargetEmptyAsync(string connectionString, CancellationToken cancellationToken)
+    {
+        await using NpgsqlDataSource dataSource = NpgsqlDataSourceFactory.Create(connectionString);
+        await using var db = CreateContext(dataSource);
+        await using IDbContextTransaction transaction =
+            await db.Database.BeginTransactionAsync(RestoreIsolation, cancellationToken);
+        return await IsEmptyAsync(db, cancellationToken);
+    }
+
     public async Task<RestoreResults> RestoreAsync(
         string connectionString,
         SnapshotCapture capture,
+        SnapshotCounts expected,
         bool overrideNonEmpty,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(capture);
+        ArgumentNullException.ThrowIfNull(expected);
 
         await using NpgsqlDataSource dataSource = NpgsqlDataSourceFactory.Create(connectionString);
         await using var db = CreateContext(dataSource);
@@ -96,37 +107,53 @@ public sealed class NpgsqlSnapshotRepository(IBlobStorage blobStorage, IBlobCata
 
         await ClearStoresAsync(db, cancellationToken);
         await RestoreRelationalAsync(db, capture, cancellationToken);
-
-        int vertices = await RestoreVerticesAsync(db, capture, cancellationToken);
-        int edges = await RestoreEdgesAsync(db, capture, cancellationToken);
-        int ticketVertices = await RestoreTicketVerticesAsync(db, capture, cancellationToken);
-        int ticketEdges = await RestoreTicketEdgesAsync(db, capture, cancellationToken);
-
+        await RestoreVerticesAsync(db, capture, cancellationToken);
+        await RestoreEdgesAsync(db, capture, cancellationToken);
+        await RestoreTicketVerticesAsync(db, capture, cancellationToken);
+        await RestoreTicketEdgesAsync(db, capture, cancellationToken);
         await ResetSequencesAsync(db, cancellationToken);
-        int traversalPathCount = await RunTraversalAsync(db, cancellationToken);
 
-        // The restore should not commit if a store write failed — the reconciliation runs after
-        // commit but the traversal and the row writes happened in one transaction, so a throw here
-        // rolls the whole restore back (no partial success, LADR-05).
+        // Counts are read back from the restored stores, never echoed from the capture: a Cypher
+        // MATCH that finds no endpoint makes its CREATE a silent no-op, so only a read-back can see
+        // a dropped edge. Reconcile before commit so a mismatch rolls back (LADR-05 / NFR-02).
+        RestoreResults readBack = await ReadBackAsync(db, cancellationToken);
+        if (!Closes(readBack, expected))
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            return readBack;
+        }
+
         await transaction.CommitAsync(cancellationToken);
-
-        int objects = capture.MemoryVersions
-            .Select(v => v.BlobAddress)
-            .Where(a => !string.IsNullOrWhiteSpace(a))
-            .Cast<string>()
-            .Distinct(StringComparer.Ordinal)
-            .Count();
-
-        return new RestoreResults(
-            capture.Memories.Count,
-            capture.MemoryVersions.Count,
-            vertices,
-            edges,
-            objects,
-            ticketVertices,
-            ticketEdges,
-            traversalPathCount);
+        return readBack with { Committed = true };
     }
+
+    private static bool Closes(RestoreResults readBack, SnapshotCounts expected) =>
+        readBack.Memories == expected.Memories
+        && readBack.Versions == expected.Versions
+        && readBack.Vertices == expected.Vertices
+        && readBack.Edges == expected.Edges
+        && readBack.TicketVertices == expected.TicketVertices
+        && readBack.TicketEdges == expected.TicketEdges
+        && readBack.TraversalPathCount == expected.Edges;
+
+    private static async Task<RestoreResults> ReadBackAsync(
+        SmoothAiProductContextMemoryDbContext db,
+        CancellationToken cancellationToken) =>
+        new(
+            await CountAsync(db, "memory", cancellationToken),
+            await CountAsync(db, "memory_version", cancellationToken),
+            await CountAsync(db, $"memory_graph.\"{AgeSession.VertexLabel}\"", cancellationToken),
+            await CountAsync(db, $"memory_graph.\"{AgeSession.EdgeLabel}\"", cancellationToken),
+            await CountAsync(db, "memory_graph.\"Ticket\"", cancellationToken),
+            await CountAsync(db, "memory_graph.\"TICKET_PARENT\"", cancellationToken),
+            await RunTraversalAsync(db, cancellationToken),
+            Committed: false);
+
+    private static async Task<int> CountAsync(
+        SmoothAiProductContextMemoryDbContext db,
+        string table,
+        CancellationToken cancellationToken) =>
+        checked((int)await ExecuteScalarLongAsync(db, $"SELECT count(*) FROM {table}", cancellationToken));
 
     private async Task<SnapshotWalkResult> WalkBlobsAsync(MemoryVersion[] versions, CancellationToken cancellationToken)
     {
@@ -183,7 +210,7 @@ public sealed class NpgsqlSnapshotRepository(IBlobStorage blobStorage, IBlobCata
         await db.SaveChangesAsync(cancellationToken);
     }
 
-    private static async Task<int> RestoreVerticesAsync(
+    private static async Task RestoreVerticesAsync(
         SmoothAiProductContextMemoryDbContext db,
         SnapshotCapture capture,
         CancellationToken cancellationToken)
@@ -193,11 +220,9 @@ public sealed class NpgsqlSnapshotRepository(IBlobStorage blobStorage, IBlobCata
             string cypher = $"MERGE (n:{AgeSession.VertexLabel} {{memory_uuid: {Quote(vertex.MemoryUuid)}}})";
             await ExecuteCypherAsync(db, cypher, cancellationToken);
         }
-
-        return capture.Vertices.Count;
     }
 
-    private static async Task<int> RestoreEdgesAsync(
+    private static async Task RestoreEdgesAsync(
         SmoothAiProductContextMemoryDbContext db,
         SnapshotCapture capture,
         CancellationToken cancellationToken)
@@ -210,11 +235,9 @@ public sealed class NpgsqlSnapshotRepository(IBlobStorage blobStorage, IBlobCata
                 $"CREATE (s)-[:{AgeSession.EdgeLabel} {{relation: {Quote(edge.Relation)}, reason: {Quote(edge.Reason)}}}]->(t)";
             await ExecuteCypherAsync(db, cypher, cancellationToken);
         }
-
-        return capture.Edges.Count;
     }
 
-    private static async Task<int> RestoreTicketVerticesAsync(
+    private static async Task RestoreTicketVerticesAsync(
         SmoothAiProductContextMemoryDbContext db,
         SnapshotCapture capture,
         CancellationToken cancellationToken)
@@ -224,11 +247,9 @@ public sealed class NpgsqlSnapshotRepository(IBlobStorage blobStorage, IBlobCata
             string cypher = $"MERGE (t:Ticket {{provider: {Quote(vertex.Provider)}, key: {Quote(vertex.Key)}}})";
             await ExecuteCypherAsync(db, cypher, cancellationToken);
         }
-
-        return capture.TicketVertices.Count;
     }
 
-    private static async Task<int> RestoreTicketEdgesAsync(
+    private static async Task RestoreTicketEdgesAsync(
         SmoothAiProductContextMemoryDbContext db,
         SnapshotCapture capture,
         CancellationToken cancellationToken)
@@ -247,8 +268,6 @@ public sealed class NpgsqlSnapshotRepository(IBlobStorage blobStorage, IBlobCata
                 $"CREATE (p)-[:TICKET_PARENT {{{props}}}]->(c)";
             await ExecuteCypherAsync(db, cypher, cancellationToken);
         }
-
-        return capture.TicketEdges.Count;
     }
 
     private static async Task<SnapshotVertex[]> ReadMemoryVerticesAsync(

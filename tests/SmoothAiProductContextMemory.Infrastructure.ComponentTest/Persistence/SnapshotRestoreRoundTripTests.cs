@@ -42,17 +42,19 @@ public sealed class SnapshotRestoreRoundTripTests : PersistenceTestBase
     public SnapshotRestoreRoundTripTests(AspireFixture aspire) : base(aspire)
     {
         _aspire = aspire;
-        _blob = new Lazy<S3BlobStorage>(() => new S3BlobStorage(
-            Microsoft.Extensions.Options.Options.Create(new BlobStorageOptions
-            {
-                Endpoint = aspire.BlobEndpoint,
-                AccessKey = AspireFixture.BlobAccessKey,
-                SecretKey = AspireFixture.BlobSecretKey,
-                Bucket = $"snap-shot-{Guid.NewGuid():N}",
-            }),
-            new TestHttpClientFactory(),
-            Microsoft.Extensions.Logging.Abstractions.NullLogger<S3BlobStorage>.Instance));
+        _blob = new Lazy<S3BlobStorage>(() => CreateBlob("snap-shot"));
     }
+
+    private S3BlobStorage CreateBlob(string prefix) => new(
+        Microsoft.Extensions.Options.Options.Create(new BlobStorageOptions
+        {
+            Endpoint = _aspire.BlobEndpoint,
+            AccessKey = AspireFixture.BlobAccessKey,
+            SecretKey = AspireFixture.BlobSecretKey,
+            Bucket = $"{prefix}-{Guid.NewGuid():N}",
+        }),
+        new TestHttpClientFactory(),
+        Microsoft.Extensions.Logging.Abstractions.NullLogger<S3BlobStorage>.Instance);
 
     [Fact]
     public async Task SnapshotThenRestore_Reconciles_And_PreservesTicketDirection()
@@ -80,7 +82,8 @@ public sealed class SnapshotRestoreRoundTripTests : PersistenceTestBase
             .Handle(new VerifyArchive.Request(snapshot.DestinationPath), Ct);
         verified.IsClean.ShouldBeTrue();
 
-        // Restore into a fresh scratch database + the same blob bucket.
+        // Restore into a fresh scratch database + a fresh, empty blob bucket, so the body check
+        // proves the restore wrote it rather than finding the source's copy.
         await using SmoothAiProductContextMemoryTestDatabase target = await SmoothAiProductContextMemoryTestDatabase.CreateAsync(
             _aspire,
             $"infra-roundtrip-{Guid.NewGuid():N}",
@@ -92,24 +95,29 @@ public sealed class SnapshotRestoreRoundTripTests : PersistenceTestBase
                 .UseNpgsql(targetDataSource, npgsql => npgsql.UseSmoothAiProductContextMemoryHistory())
                 .Options);
 
+        await using S3BlobStorage targetBlob = CreateBlob("snap-target");
+        (await targetBlob.ExistsAsync(source.Address, Ct)).ShouldBeFalse();
+
         RestoreArchive.Response restore = await new RestoreArchive.Handler(
-            Repository,
+            new NpgsqlSnapshotRepository(targetBlob, targetBlob),
             Archive,
-            Blob,
+            targetBlob,
             Loggers.CreateLogger<RestoreArchive.Handler>())
             .Handle(new RestoreArchive.Request(snapshot.DestinationPath, target.ConnectionString), Ct);
 
         restore.Reconciled.ShouldBeTrue();
+        restore.Restored.Committed.ShouldBeTrue();
+        restore.Objects.ShouldBe(1);
         restore.Restored.Memories.ShouldBe(source.Memories);
         restore.Restored.Versions.ShouldBe(source.Versions);
         restore.Restored.Vertices.ShouldBe(source.Vertices);
         restore.Restored.Edges.ShouldBe(source.Edges);
         restore.Restored.TicketVertices.ShouldBe(source.TicketVertices);
         restore.Restored.TicketEdges.ShouldBe(source.TicketEdges);
-        restore.Restored.TraversalPathCount.ShouldBeGreaterThan(0);
+        restore.Restored.TraversalPathCount.ShouldBe(source.Edges);
 
-        // The blob body was restored to the object store.
-        (await Blob.GetAsync(source.Address, Ct)).ShouldNotBeNull();
+        // The blob body was restored into the (previously empty) target object store.
+        (await targetBlob.GetAsync(source.Address, Ct)).ShouldNotBeNull();
 
         // The restored ticket hierarchy reads parent->child, not inverted.
         var ticketGraph = new NpgsqlTicketGraph(targetDb);
@@ -154,6 +162,33 @@ public sealed class SnapshotRestoreRoundTripTests : PersistenceTestBase
             Blob,
             Loggers.CreateLogger<RestoreArchive.Handler>())
             .Handle(new RestoreArchive.Request(hole, target.ConnectionString), Ct).AsTask());
+    }
+
+    [Fact]
+    public async Task Restore_SilentlyDroppedEdge_RollsBack_And_LeavesTargetEmpty()
+    {
+        await SeedCorpusAsync();
+        SnapshotCaptureResult captured = await Repository.CaptureAsync(ConnectionString, Ct);
+
+        // An edge whose endpoint vertex is absent: its Cypher MATCH finds nothing, so the CREATE is a
+        // silent no-op. Only a read-back reconciliation can see it; echoed counts would pass.
+        var dangling = new SnapshotEdge(Guid.NewGuid(), Guid.NewGuid(), "depends_on", "reason");
+        SnapshotCapture tampered = captured.Capture with { Edges = [.. captured.Capture.Edges, dangling] };
+        SnapshotCounts expected = captured.Counts with { Edges = captured.Counts.Edges + 1 };
+
+        await using SmoothAiProductContextMemoryTestDatabase target = await SmoothAiProductContextMemoryTestDatabase.CreateAsync(
+            _aspire,
+            $"infra-drop-{Guid.NewGuid():N}",
+            Ct);
+        await using NpgsqlDataSource targetDataSource = NpgsqlDataSourceFactory.Create(target.ConnectionString);
+        await MigrateAsync(targetDataSource, Ct);
+
+        RestoreResults restored = await Repository.RestoreAsync(
+            target.ConnectionString, tampered, expected, overrideNonEmpty: false, Ct);
+
+        restored.Committed.ShouldBeFalse();
+        restored.Edges.ShouldBe(captured.Counts.Edges);
+        (await Repository.IsTargetEmptyAsync(target.ConnectionString, Ct)).ShouldBeTrue();
     }
 
     private static void RewriteWithoutBlob(string sourcePath, string destPath)

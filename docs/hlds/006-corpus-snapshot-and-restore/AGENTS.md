@@ -1,6 +1,6 @@
 # AGENTS.md - Corpus snapshot and restore
 
-AI Context: HLD for corpus snapshot and restore. Updated: 2026-09-24
+AI Context: HLD for corpus snapshot and restore. Updated: 2026-09-25
 
 > AI-coder context for this HLD. Architecture diagrams live in [`./diagrams/`](./diagrams/),
 > decisions in [`./ladrs/`](./ladrs/), quality spec in [`./nfrs/`](./nfrs/). This file is
@@ -56,6 +56,7 @@ See [./ladrs/](./ladrs/). All Draft.
 - **The archive is a single tar with a JSON manifest.** One entry per member (relational capture, graph capture, each referenced blob body) plus `manifest.json`, which lists each entry with its SHA-256 hash and the corpus-level counts. Blob bodies are content-addressed under their cited address. The manifest carries no generation timestamp inside hashed content — the snapshot date lives in archive metadata only.
 - **Capture is one consistent database snapshot.** Relational rows, AGE graph and the blob reference walk are read against one `REPEATABLE READ` snapshot on a single Npgsql connection, so the blob set and the state citing it describe the same moment (LADR-03). Blob bodies are then read through `IBlobStorage`.
 - **Preflight serves the last snapshot's stored result, not a fresh walk.** A per-request full corpus walk would make a casually-called check expensive; preflight reports the last snapshot's count/orphan numbers plus how old it is, persisted in a gitignored metadata file written by the snapshot (LADR-04).
+- **Restore reconciles by read-back, before commit.** Every reconciled count is `count(*)` over the restored table or AGE label inside the restore transaction — never echoed from the archive, because a Cypher `MATCH` that finds no endpoint makes its `CREATE` a silent no-op. Any mismatch (or traversal ≠ edges) rolls the transaction back and the printed reconciliation shows `committed no — rolled back`. Order: pre-validate blob entries → refuse non-empty target → write bodies → confirm each cited address exists in the object store → database restore. A database failure therefore leaves at worst unreferenced objects, never a committed database citing absent bodies. Consequence: an archive holding a capture-time mismatched body now fails restore loudly (the body lands under its real hash, not the cited address) instead of reporting OK.
 
 ## Quality Constraints
 
@@ -74,6 +75,7 @@ Targets and verification live in [./nfrs/](./nfrs/). Two shape how code is writt
 
 | Date | Change | Ref |
 | :---- | :---- | :---- |
+| 2026-09-25 | Review fixes. (1) Snapshot filename used `{Guid:N[..8]}`, an invalid Guid format that threw `FormatException` on every HTTP and CLI snapshot — now `ToString("N")[..8]`; pinned by the new L2 `SnapshotApiTests` (accepted → poll → Completed → preflight reports it), which fails with 500 without the fix. (2) Restore reconciliation was tautological (counts echoed from the archive) and evaluated after commit; it now reads counts back inside the transaction and rolls back on mismatch, with bodies written and confirmed before any database mutation. New L1 test pins a silently dropped edge rolling back; the round trip now restores into a fresh bucket. | HLD-006 LADR-05, NFR-02 |
 | 2026-09-24 | Implementation delivered: one tar + JSON manifest per snapshot (archive format documented in Key Behaviors), capture from a single `REPEATABLE READ` snapshot, offline `verify` with tamper suite, `restore` with printed reconciliation, HTTP preflight/snapshot endpoints, one-shot container/CLI verbs, and a persisted last-snapshot metadata store for preflight. | HLD-006, BR-37 |
 | 2026-09-16 | Created — discovery HLD for verified corpus snapshot and restore. Motivated by reuse analysis of forkd's manifest-verified snapshot-pack pattern mapped onto HLD 001 NFR-03 (Draft) and BRD-001's recorded durability gap. | BRD-001; HLD 001 NFR-03 |
 | 2026-09-16 | LADR-07 added: surfaces split by liveness — preflight/snapshot as HTTP on the running Host, verify/restore as one-shot containers from the same image. Driven by the Docker-release constraint (no SDK on user machines); C1 and NFR-04 updated to match. | LADR-07 |

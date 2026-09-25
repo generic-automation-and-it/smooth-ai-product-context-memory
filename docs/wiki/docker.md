@@ -207,7 +207,7 @@ docker run --rm \
   smooth-ai-product-context-memory:local restore /snapshots/snapshot-<ts>.tar
 ```
 
-`verify` writes nothing and touches nothing but the archive; `restore` refuses a non-empty target
+`restore` writes bodies first, then rebuilds the database and reads every count back before committing — any mismatch rolls the database back and the reconciliation prints `committed no — rolled back` with exit 1. The target database must already be migrated. `verify` writes nothing and touches nothing but the archive; `restore` refuses a non-empty target
 unless `--force` is passed. `snapshot` and `restore` are read-only against / rebuild the stores.
 
 ## AppHost consumption

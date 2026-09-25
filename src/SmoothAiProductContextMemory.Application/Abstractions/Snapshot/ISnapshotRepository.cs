@@ -18,14 +18,24 @@ public interface ISnapshotRepository
         CancellationToken cancellationToken);
 
     /// <summary>
-    /// Restores the captured state into the target database, then returns counts for the
-    /// reconciliation. Refuses a non-empty target unless <paramref name="overrideNonEmpty"/> is set
-    /// (LADR-05). Restores relational rows, Memory/Ticket vertices, then LINKS/TICKET_PARENT edges,
-    /// in one transaction, honouring the append-only triggers (SET LOCAL) and the AGE session rules.
+    /// Whether the target database holds no corpus. Lets the caller refuse a non-empty target before
+    /// writing anything to either store; <see cref="RestoreAsync"/> re-checks inside its transaction.
+    /// </summary>
+    Task<bool> IsTargetEmptyAsync(
+        string connectionString,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Restores the captured state into the target database, reads every count back from the
+    /// restored tables and graph labels inside the same transaction, and commits only when each
+    /// read-back count equals <paramref name="expected"/> and the bounded traversal reaches every
+    /// edge — otherwise it rolls back, so a partial restore is never committed (LADR-05 / NFR-02).
+    /// Refuses a non-empty target unless <paramref name="overrideNonEmpty"/> is set.
     /// </summary>
     Task<RestoreResults> RestoreAsync(
         string connectionString,
         SnapshotCapture capture,
+        SnapshotCounts expected,
         bool overrideNonEmpty,
         CancellationToken cancellationToken);
 }
@@ -36,13 +46,17 @@ public sealed record SnapshotCaptureResult(
     SnapshotWalkResult Walk,
     SnapshotCounts Counts);
 
-/// <summary>Post-restore store counts and a bounded-traversal result, used to close the reconciliation.</summary>
+/// <summary>
+/// Store counts read back from the restored database (not echoed from the archive) plus a
+/// bounded-traversal result, used to close the reconciliation. <c>Committed</c> is false when the
+/// read-back disagreed with the manifest and the restore was rolled back.
+/// </summary>
 public sealed record RestoreResults(
     int Memories,
     int Versions,
     int Vertices,
     int Edges,
-    int Objects,
     int TicketVertices,
     int TicketEdges,
-    int TraversalPathCount);
+    int TraversalPathCount,
+    bool Committed);

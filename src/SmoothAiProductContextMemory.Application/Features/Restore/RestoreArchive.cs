@@ -21,7 +21,8 @@ public static class RestoreArchive
     public sealed record Response(
         bool Reconciled,
         IReadOnlyList<ReconciliationLine> Lines,
-        RestoreResults Restored);
+        RestoreResults Restored,
+        int Objects);
 
     public sealed record ReconciliationLine(string Statement, bool Matches);
 
@@ -58,24 +59,44 @@ public static class RestoreArchive
                     $"Archive is missing blob entries for {missing.Length} referenced address(es).");
             }
 
+            // Refuse a non-empty target before writing anything to either store; the repository
+            // re-checks inside its transaction.
+            if (!request.OverrideNonEmpty
+                && !await repository.IsTargetEmptyAsync(request.ConnectionString, cancellationToken))
+            {
+                throw new InvalidOperationException(
+                    "Restore target is not empty; overrideNonEmpty is required to clear it.");
+            }
+
+            // Bodies go first: content-addressed writes are idempotent, so a later database failure
+            // leaves at worst unreferenced objects, never a committed database citing absent bodies.
+            await RestoreObjectsAsync(opened, addresses, cancellationToken);
+            int objects = await CountPresentAsync(addresses, cancellationToken);
+            SnapshotCounts expected = opened.Manifest.Counts;
+            if (objects != expected.Objects)
+            {
+                throw new InvalidOperationException(
+                    $"Object store holds {objects} of {expected.Objects} referenced bodies after restore; database left untouched.");
+            }
+
             RestoreResults restored = await repository.RestoreAsync(
                 request.ConnectionString,
                 capture,
+                expected,
                 request.OverrideNonEmpty,
                 cancellationToken);
 
-            await RestoreObjectsAsync(opened, addresses, cancellationToken);
-
             var lines = new List<ReconciliationLine>
             {
-                new($"row memories  manifest={opened.Manifest.Counts.Memories} restored={restored.Memories}", restored.Memories == opened.Manifest.Counts.Memories),
-                new($"row versions  manifest={opened.Manifest.Counts.Versions} restored={restored.Versions}", restored.Versions == opened.Manifest.Counts.Versions),
-                new($"graph vertices manifest={opened.Manifest.Counts.Vertices} restored={restored.Vertices}", restored.Vertices == opened.Manifest.Counts.Vertices),
-                new($"graph edges    manifest={opened.Manifest.Counts.Edges} restored={restored.Edges}", restored.Edges == opened.Manifest.Counts.Edges),
-                new($"objects        manifest={opened.Manifest.Counts.Objects} restored={restored.Objects}", restored.Objects == opened.Manifest.Counts.Objects),
-                new($"ticket vertices manifest={opened.Manifest.Counts.TicketVertices} restored={restored.TicketVertices}", restored.TicketVertices == opened.Manifest.Counts.TicketVertices),
-                new($"ticket edges   manifest={opened.Manifest.Counts.TicketEdges} restored={restored.TicketEdges}", restored.TicketEdges == opened.Manifest.Counts.TicketEdges),
-                new($"traversal      restored paths={restored.TraversalPathCount} manifest edges={opened.Manifest.Counts.Edges}", restored.TraversalPathCount == opened.Manifest.Counts.Edges),
+                new($"row memories   manifest={expected.Memories} restored={restored.Memories}", restored.Memories == expected.Memories),
+                new($"row versions   manifest={expected.Versions} restored={restored.Versions}", restored.Versions == expected.Versions),
+                new($"graph vertices manifest={expected.Vertices} restored={restored.Vertices}", restored.Vertices == expected.Vertices),
+                new($"graph edges    manifest={expected.Edges} restored={restored.Edges}", restored.Edges == expected.Edges),
+                new($"objects        manifest={expected.Objects} restored={objects}", objects == expected.Objects),
+                new($"ticket vertices manifest={expected.TicketVertices} restored={restored.TicketVertices}", restored.TicketVertices == expected.TicketVertices),
+                new($"ticket edges   manifest={expected.TicketEdges} restored={restored.TicketEdges}", restored.TicketEdges == expected.TicketEdges),
+                new($"traversal      restored paths={restored.TraversalPathCount} manifest edges={expected.Edges}", restored.TraversalPathCount == expected.Edges),
+                new($"committed      {(restored.Committed ? "yes" : "no — rolled back")}", restored.Committed),
             };
 
             bool reconciled = lines.All(l => l.Matches);
@@ -85,7 +106,7 @@ public static class RestoreArchive
                 reconciled,
                 restored.TraversalPathCount);
 
-            return new Response(reconciled, lines, restored);
+            return new Response(reconciled, lines, restored, objects);
         }
 
         private static string[] ReferencedAddresses(SnapshotCapture capture) =>
@@ -95,6 +116,22 @@ public static class RestoreArchive
                 .Cast<string>()
                 .Distinct(StringComparer.Ordinal)
                 .ToArray();
+
+        private async Task<int> CountPresentAsync(
+            IReadOnlyList<string> addresses,
+            CancellationToken cancellationToken)
+        {
+            int present = 0;
+            foreach (string address in addresses)
+            {
+                if (await blobStorage.ExistsAsync(address, cancellationToken))
+                {
+                    present++;
+                }
+            }
+
+            return present;
+        }
 
         private async Task RestoreObjectsAsync(
             SnapshotArchive opened,
