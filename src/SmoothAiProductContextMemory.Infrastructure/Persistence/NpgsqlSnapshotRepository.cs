@@ -310,12 +310,15 @@ public sealed class NpgsqlSnapshotRepository(IBlobStorage blobStorage, IBlobCata
         SmoothAiProductContextMemoryDbContext db,
         CancellationToken cancellationToken)
     {
+        // Bind p=parent, c=child to match the canonical TICKET_PARENT direction
+        // (NpgsqlTicketGraph CREATE (p)-[:TICKET_PARENT]->(c)), so edge.Provider is the
+        // child and edge.ParentProvider is the parent — the same mapping restore uses.
         string cypher = """
-            MATCH (c:Ticket)-[e:TICKET_PARENT]->(p:Ticket)
-            RETURN c.provider, c.key, p.provider, p.key, e.reason, e.source, e.recordedAt, e.observedAt
+            MATCH (p:Ticket)-[e:TICKET_PARENT]->(c:Ticket)
+            RETURN p.provider, p.key, c.provider, c.key, e.reason, e.source, e.recordedAt, e.observedAt
             """;
         await using NpgsqlCommand command = CypherCommand(
-            db, cypher, ["cprovider", "ckey", "pprovider", "pkey", "reason", "source", "recorded", "observed"]);
+            db, cypher, ["pprovider", "pkey", "cprovider", "ckey", "reason", "source", "recorded", "observed"]);
         await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
         var rows = new List<SnapshotTicketEdge>();
         while (await reader.ReadAsync(cancellationToken))
@@ -324,10 +327,10 @@ public sealed class NpgsqlSnapshotRepository(IBlobStorage blobStorage, IBlobCata
                 ? DateTimeOffset.Parse(observed, CultureInfo.InvariantCulture)
                 : null;
             rows.Add(new SnapshotTicketEdge(
-                ReadAgtypeString(reader, 0),
-                ReadAgtypeString(reader, 1),
                 ReadAgtypeString(reader, 2),
                 ReadAgtypeString(reader, 3),
+                ReadAgtypeString(reader, 0),
+                ReadAgtypeString(reader, 1),
                 ReadAgtypeString(reader, 4),
                 ReadAgtypeString(reader, 5),
                 DateTimeOffset.Parse(ReadAgtypeString(reader, 6), CultureInfo.InvariantCulture),

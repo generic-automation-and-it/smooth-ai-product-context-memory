@@ -104,16 +104,27 @@ public class TarSnapshotArchiveTests
     }
 
     [Fact]
-    public void Verify_Delivers_NoContent_OnFindings()
+    public async Task TicketEdges_RoundTrip_PreservingParentChildDirection()
     {
-        // The manifest deliberately excludes memory content; verify output is hashes/identifiers only.
-        SnapshotManifest manifest = new(
-            SnapshotFormat.Version,
-            [new SnapshotArchiveEntry("entry", "abc", 3)],
-            new SnapshotCounts(0, 0, 0, 0, 0, 0, 0),
-            new SnapshotExclusions(["recall_feedback"]));
+        string path = TempArchive();
+        string address = Sha256ContentAddress.Compute(Body);
+        var capture = new SnapshotCapture(
+            [], [], [], [], [], [], [], [],
+            [
+                new SnapshotTicketVertex("jira", "PARENT"),
+                new SnapshotTicketVertex("jira", "CHILD"),
+            ],
+            [
+                new SnapshotTicketEdge("jira", "CHILD", "jira", "PARENT", "depends_on", "api", DateTimeOffset.UtcNow, null),
+            ]);
+        var walk = new SnapshotWalkResult([new SnapshotBlob(address, SnapshotBlobState.Ok)], 0, 0);
 
-        manifest.Counts.Memories.ShouldBe(0);
+        await _archive.WriteAsync(path, capture, walk, _ => Task.FromResult(Body), TestContext.Current.CancellationToken);
+
+        SnapshotCapture round = await _archive.ReadCaptureAsync(path, TestContext.Current.CancellationToken);
+        round.TicketEdges.Count.ShouldBe(1);
+        round.TicketEdges[0].Key.ShouldBe("CHILD");
+        round.TicketEdges[0].ParentKey.ShouldBe("PARENT");
     }
 
     private static (SnapshotCapture, SnapshotWalkResult) Capture(string address, SnapshotBlobState state)
