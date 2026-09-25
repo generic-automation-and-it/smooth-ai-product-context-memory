@@ -454,7 +454,17 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A -- . ':(exclude,glob)ci_temp/**'
+          # `git add -A .` recurses into the working tree and refuses (exit 1) the
+          # instant it reaches the gitignored `ci_temp` scratch directory itself --
+          # the exclude pathspec above only keeps its *contents* out of the index,
+          # it does not stop git from tripping over the ignored directory entry
+          # while walking `.`. Move it out of the tree for the add, then restore it
+          # immediately so the later "Post ai-analyse summary" step can still read
+          # ci_temp/analyse_out.md.
+          ci_temp_stash="${RUNNER_TEMP}/ci_temp.commit-fixes.$$"
+          mv ci_temp "$ci_temp_stash"
+          git add -A -- .
+          mv "$ci_temp_stash" ci_temp
           # Belt-and-suspenders: re-check the cached diff after staging so a rename
           # or pathspec quirk cannot produce an empty commit.
           if [ -z "$(git diff --cached --name-only)" ]; then
