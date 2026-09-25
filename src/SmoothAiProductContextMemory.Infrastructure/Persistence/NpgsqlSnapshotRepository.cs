@@ -190,7 +190,7 @@ public sealed class NpgsqlSnapshotRepository(IBlobStorage blobStorage, IBlobCata
     {
         foreach (SnapshotVertex vertex in capture.Vertices)
         {
-            string cypher = $"MERGE (n:{AgeSession.VertexLabel}) {{memory_uuid: {Quote(vertex.MemoryUuid)}}}";
+            string cypher = $"MERGE (n:{AgeSession.VertexLabel} {{memory_uuid: {Quote(vertex.MemoryUuid)}}})";
             await ExecuteCypherAsync(db, cypher, cancellationToken);
         }
 
@@ -204,11 +204,10 @@ public sealed class NpgsqlSnapshotRepository(IBlobStorage blobStorage, IBlobCata
     {
         foreach (SnapshotEdge edge in capture.Edges)
         {
-            string cypher = $$"""
-                MATCH (s:{{AgeSession.VertexLabel}} {memory_uuid: {{Quote(edge.SourceUuid)}}}),
-                      (t:{{AgeSession.VertexLabel}} {memory_uuid: {{Quote(edge.TargetUuid)}}})
-                CREATE (s)-[:{{AgeSession.EdgeLabel}} {relation: {{Quote(edge.Relation)}}, reason: {{Quote(edge.Reason)}}}]->(t)
-                """;
+            string cypher =
+                $"MATCH (s:{AgeSession.VertexLabel} {{memory_uuid: {Quote(edge.SourceUuid)}}}), " +
+                $"(t:{AgeSession.VertexLabel} {{memory_uuid: {Quote(edge.TargetUuid)}}}) " +
+                $"CREATE (s)-[:{AgeSession.EdgeLabel} {{relation: {Quote(edge.Relation)}, reason: {Quote(edge.Reason)}}}]->(t)";
             await ExecuteCypherAsync(db, cypher, cancellationToken);
         }
 
@@ -222,7 +221,7 @@ public sealed class NpgsqlSnapshotRepository(IBlobStorage blobStorage, IBlobCata
     {
         foreach (SnapshotTicketVertex vertex in capture.TicketVertices)
         {
-            string cypher = $"MERGE (t:Ticket) {{provider: {Quote(vertex.Provider)}, key: {Quote(vertex.Key)}}}";
+            string cypher = $"MERGE (t:Ticket {{provider: {Quote(vertex.Provider)}, key: {Quote(vertex.Key)}}})";
             await ExecuteCypherAsync(db, cypher, cancellationToken);
         }
 
@@ -239,12 +238,13 @@ public sealed class NpgsqlSnapshotRepository(IBlobStorage blobStorage, IBlobCata
             string observed = edge.ObservedAt is null
                 ? string.Empty
                 : $", observedAt: {Quote(edge.ObservedAt.Value.ToString("O", CultureInfo.InvariantCulture))}";
-            string cypher = $$"""
-                MATCH (c:Ticket {provider: {{Quote(edge.Provider)}}, key: {{Quote(edge.Key)}}}),
-                      (p:Ticket {provider: {{Quote(edge.ParentProvider)}}, key: {{Quote(edge.ParentKey)}}})
-                CREATE (p)-[:TICKET_PARENT {reason: {{Quote(edge.Reason)}}, source: {{Quote(edge.Source)}},
-                    recordedAt: {{Quote(edge.RecordedAt.ToString("O", CultureInfo.InvariantCulture))}}{{observed}}]->(c)
-                """;
+            string props =
+                $"reason: {Quote(edge.Reason)}, source: {Quote(edge.Source)}, " +
+                $"recordedAt: {Quote(edge.RecordedAt.ToString("O", CultureInfo.InvariantCulture))}{observed}";
+            string cypher =
+                $"MATCH (c:Ticket {{provider: {Quote(edge.Provider)}, key: {Quote(edge.Key)}}}), " +
+                $"(p:Ticket {{provider: {Quote(edge.ParentProvider)}, key: {Quote(edge.ParentKey)}}}) " +
+                $"CREATE (p)-[:TICKET_PARENT {{{props}}}]->(c)";
             await ExecuteCypherAsync(db, cypher, cancellationToken);
         }
 
