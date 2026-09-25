@@ -24,7 +24,7 @@ internal static class SnapshotCommand
         command.SetAction(async (parseResult, cancellationToken) =>
         {
             string output = parseResult.GetValue(outputOption) ?? Path.Combine(".context", "snapshots");
-            string destination = Path.Combine(output, $"snapshot-{DateTime.UtcNow:yyyyMMdd-HHmmss}-{Guid.NewGuid():N[..8]}.tar");
+            string destination = Path.Combine(output, $"snapshot-{DateTime.UtcNow:yyyyMMdd-HHmmss}-{Guid.NewGuid().ToString("N")[..8]}.tar");
 
             CliHostResult host = CliHost.Build();
             using (host.Host)

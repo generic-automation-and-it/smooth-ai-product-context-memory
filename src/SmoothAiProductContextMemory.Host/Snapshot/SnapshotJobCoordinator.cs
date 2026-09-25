@@ -33,7 +33,7 @@ public sealed class SnapshotJobCoordinator(
         string connectionString = ConnectionString;
 
         var job = new SnapshotJobState { Id = Guid.NewGuid(), Status = SnapshotJobStatus.Running };
-        string destination = Path.Combine(DestinationDirectory, $"snapshot-{DateTime.UtcNow:yyyyMMdd-HHmmss}-{Guid.NewGuid():N[..8]}.tar");
+        string destination = Path.Combine(DestinationDirectory, $"snapshot-{DateTime.UtcNow:yyyyMMdd-HHmmss}-{Guid.NewGuid().ToString("N")[..8]}.tar");
         job.DestinationPath = destination;
 
         await _mutex.WaitAsync(cancellationToken);
