@@ -107,6 +107,6 @@ public sealed class SnapshotEvidenceTests : PersistenceTestBase
         snapshot.Memories.ShouldBe(MemoryCount);
         snapshot.Objects.ShouldBe(blobAddress.Count);
         snapshot.Edges.ShouldBe(MemoryCount - 1);
-        snapshotSeconds.ShouldBeLessThan(600.0); // single-digit-minute ceiling (NFR-04)
+        snapshotSeconds.ShouldBeLessThan(540.0); // single-digit-minute ceiling (NFR-04, ≤ 9m)
     }
 }

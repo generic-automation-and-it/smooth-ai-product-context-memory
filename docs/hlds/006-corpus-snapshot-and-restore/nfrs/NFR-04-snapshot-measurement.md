@@ -7,7 +7,7 @@ a full snapshot of the reference corpus completes in single-digit minutes, measu
 | | |
 |---|---|
 | **Date** | 2026-09-25 |
-| **Stack** | Host from working tree; PostgreSQL+AGE `docker.io/apache/age:release_PG17_1.7.0` (Postgres 17) + MinIO blob store, via the Aspire test harness |
+| **Stack** | `SnapshotStore.Handler` in-process over `NpgsqlSnapshotRepository` + `TarSnapshotArchive` (no Host process started); PostgreSQL+AGE `docker.io/apache/age:release_PG17_1.7.0` (Postgres 17) + MinIO blob store, via the Aspire test harness |
 | **Hardware** | local Docker (Apple Silicon) |
 | **Corpus** | 1,000 memories, 1,000 versions, 999 `:LINKS` edges, 1,000 blob bodies |
 | **Seed time** | 7.6 s (excluded — not part of the snapshot) |
