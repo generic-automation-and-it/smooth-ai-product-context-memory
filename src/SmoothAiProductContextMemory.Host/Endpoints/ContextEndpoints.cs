@@ -130,6 +130,7 @@ internal static class ContextEndpoints
                     job.Objects,
                     job.DanglingReferences,
                     job.UnreferencedObjects,
+                    job.MismatchedBodies,
                 })
                 : Results.Ok(new { Status = "none" }))
             .RequireCapability(ApiCapability.Read);

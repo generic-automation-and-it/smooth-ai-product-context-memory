@@ -32,52 +32,58 @@ public sealed class SnapshotJobCoordinator(
         // throws rather than leaving a phantom `Running` job behind.
         string connectionString = ConnectionString;
 
-        var job = new SnapshotJobState { Id = Guid.NewGuid(), Status = SnapshotJobStatus.Running };
-        string destination = Path.Combine(DestinationDirectory, $"snapshot-{DateTime.UtcNow:yyyyMMdd-HHmmss}-{Guid.NewGuid().ToString("N")[..8]}.tar");
-        job.DestinationPath = destination;
-
         await _mutex.WaitAsync(cancellationToken);
         try
         {
+            // Single-slot invariant: refuse a second trigger while one snapshot is still running,
+            // returning the in-flight job so the caller polls the one that is actually running.
+            if (_latest is { Status: SnapshotJobStatus.Running } running)
+            {
+                return running;
+            }
+
+            var job = new SnapshotJobState { Id = Guid.NewGuid(), Status = SnapshotJobStatus.Running };
+            job.DestinationPath = Path.Combine(DestinationDirectory, $"snapshot-{DateTime.UtcNow:yyyyMMdd-HHmmss}-{Guid.NewGuid().ToString("N")[..8]}.tar");
             _latest = job;
+
+            _ = Task.Run(async () =>
+            {
+                using IServiceScope scope = scopeFactory.CreateScope();
+                var mediator = scope.ServiceProvider.GetRequiredService<Mediator.IMediator>();
+                try
+                {
+                    SnapshotStore.Response response = await mediator.Send(
+                        new SnapshotStore.Request(connectionString, job.DestinationPath),
+                        CancellationToken.None);
+
+                    // Populate every result field before flipping Status to Completed, so a poller
+                    // reading until Status == Completed can never observe it with null/zero payload.
+                    job.ResultPath = response.DestinationPath;
+                    job.Memories = response.Memories;
+                    job.Versions = response.Versions;
+                    job.Vertices = response.Vertices;
+                    job.Edges = response.Edges;
+                    job.Objects = response.Objects;
+                    job.DanglingReferences = response.DanglingReferences;
+                    job.UnreferencedObjects = response.UnreferencedObjects;
+                    job.MismatchedBodies = response.MismatchedBodies;
+                    job.Status = SnapshotJobStatus.Completed;
+                    Volatile.Write(ref _latest, job);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Snapshot job failed");
+                    job.Status = SnapshotJobStatus.Failed;
+                    job.Error = "Snapshot failed.";
+                }
+            });
+
+            return job;
         }
         finally
         {
             _mutex.Release();
         }
-
-        _ = Task.Run(async () =>
-        {
-            using IServiceScope scope = scopeFactory.CreateScope();
-            var mediator = scope.ServiceProvider.GetRequiredService<Mediator.IMediator>();
-            try
-            {
-                SnapshotStore.Response response = await mediator.Send(
-                    new SnapshotStore.Request(connectionString, destination),
-                    CancellationToken.None);
-
-                // Populate every result field before flipping Status to Completed, so a poller
-                // reading until Status == Completed can never observe it with null/zero payload.
-                job.ResultPath = response.DestinationPath;
-                job.Memories = response.Memories;
-                job.Versions = response.Versions;
-                job.Vertices = response.Vertices;
-                job.Edges = response.Edges;
-                job.Objects = response.Objects;
-                job.DanglingReferences = response.DanglingReferences;
-                job.UnreferencedObjects = response.UnreferencedObjects;
-                job.Status = SnapshotJobStatus.Completed;
-                Volatile.Write(ref _latest, job);
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Snapshot job failed");
-                job.Status = SnapshotJobStatus.Failed;
-                job.Error = "Snapshot failed.";
-            }
-        });
-
-        return job;
     }
 }
 
@@ -106,6 +112,8 @@ public sealed class SnapshotJobState
     public int DanglingReferences { get; set; }
 
     public int UnreferencedObjects { get; set; }
+
+    public int MismatchedBodies { get; set; }
 }
 
 public enum SnapshotJobStatus
