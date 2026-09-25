@@ -54,8 +54,14 @@ public sealed record SnapshotWriteReport(
     int UnreferencedObjects,
     int MismatchedBodies);
 
-/// <summary>An opened archive: the manifest, the actual archive member names, and a way to read entry bytes.</summary>
+/// <summary>
+/// An opened archive: the manifest, the actual archive member names, and accessors for reading entry
+/// bytes either by member name or by blob content address. The blob accessors encapsulate the
+/// archive's blob entry-name convention so callers never see the <c>blobs/</c> prefix.
+/// </summary>
 public sealed record SnapshotArchive(
     SnapshotManifest Manifest,
     IReadOnlyList<string> EntryNames,
-    Func<string, Task<byte[]>> ReadEntryAsync);
+    Func<string, Task<byte[]>> ReadEntryAsync,
+    Func<string, bool> ContainsBlob,
+    Func<string, byte[]> ReadBlob);

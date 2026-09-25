@@ -1,6 +1,6 @@
 # AGENTS.md - Corpus snapshot and restore
 
-AI Context: HLD for corpus snapshot and restore. Updated: 2026-09-16
+AI Context: HLD for corpus snapshot and restore. Updated: 2026-09-24
 
 > AI-coder context for this HLD. Architecture diagrams live in [`./diagrams/`](./diagrams/),
 > decisions in [`./ladrs/`](./ladrs/), quality spec in [`./nfrs/`](./nfrs/). This file is
@@ -15,7 +15,8 @@ Business authority is [BRD-001](../../brd/001-context-memory/) — principally `
 survives the loss of its machine), supported by `BR-13` and `BR-16`; it closes
 HLD 001 NFR-03's Draft recoverability claim for the snapshot path.
 
-**This HLD is In Discovery.** All LADRs are Draft — flag deviations rather than silently overriding.
+**This HLD is implemented (2026-09-24); the LADRs remain Draft pending acceptance review — flag
+deviations rather than silently overriding.**
 
 ## Non-Negotiables
 

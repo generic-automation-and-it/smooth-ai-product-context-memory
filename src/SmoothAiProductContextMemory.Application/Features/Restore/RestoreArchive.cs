@@ -47,15 +47,24 @@ public static class RestoreArchive
             SnapshotCapture capture = await archive.ReadCaptureAsync(request.ArchivePath, cancellationToken);
             SnapshotArchive opened = await archive.ReadAsync(request.ArchivePath, cancellationToken);
 
+            // Pre-validate every referenced blob body is present before any DB mutation, so a missing
+            // entry fails the restore loudly with no partial success and no --force-on-retry (NFR-02).
+            // ReadBlob would throw IndexOutOfRange on an absent entry, so check membership first.
+            string[] addresses = ReferencedAddresses(capture);
+            string[] missing = addresses.Where(a => !opened.ContainsBlob(a)).ToArray();
+            if (missing.Length > 0)
+            {
+                throw new InvalidOperationException(
+                    $"Archive is missing blob entries for {missing.Length} referenced address(es).");
+            }
+
             RestoreResults restored = await repository.RestoreAsync(
                 request.ConnectionString,
                 capture,
                 request.OverrideNonEmpty,
                 cancellationToken);
 
-            // Only after the empty-target refusal and DB rebuild succeed do we write blob bodies, so a
-            // refused or failed restore never leaves newly-orphaned objects behind.
-            await RestoreObjectsAsync(capture, request.ArchivePath, cancellationToken);
+            await RestoreObjectsAsync(opened, addresses, cancellationToken);
 
             var lines = new List<ReconciliationLine>
             {
@@ -79,15 +88,22 @@ public static class RestoreArchive
             return new Response(reconciled, lines, restored);
         }
 
-        private async Task RestoreObjectsAsync(SnapshotCapture capture, string archivePath, CancellationToken cancellationToken)
-        {
-            foreach (string address in capture.MemoryVersions
+        private static string[] ReferencedAddresses(SnapshotCapture capture) =>
+            capture.MemoryVersions
                 .Select(v => v.BlobAddress)
                 .Where(static a => !string.IsNullOrEmpty(a))
                 .Cast<string>()
-                .Distinct(StringComparer.Ordinal))
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+
+        private async Task RestoreObjectsAsync(
+            SnapshotArchive opened,
+            IReadOnlyList<string> addresses,
+            CancellationToken cancellationToken)
+        {
+            foreach (string address in addresses)
             {
-                byte[] body = await archive.ReadBlobAsync(archivePath, address, cancellationToken);
+                byte[] body = opened.ReadBlob(address);
                 await blobStorage.StoreAsync(new MemoryStream(body, writable: false), cancellationToken: cancellationToken);
             }
         }

@@ -183,7 +183,6 @@ selects the verb:
 ```bash
 # snapshot — write a self-verifying tar + manifest archive to the mounted volume
 docker run --rm \
-  --name mimisbrunnr-host \
   -v "$(pwd)/.context/snapshots:/snapshots" \
   -e ConnectionStrings__SmoothAiProductContextMemory='Host=host.docker.internal;Port=5432;Database=app;Username=postgres;Password=...' \
   -e BlobStorage__Endpoint='http://host.docker.internal:9000' \

@@ -341,14 +341,30 @@ public sealed class NpgsqlSnapshotRepository(IBlobStorage blobStorage, IBlobCata
         SmoothAiProductContextMemoryDbContext db,
         CancellationToken cancellationToken)
     {
-        long memories = await ExecuteScalarLongAsync(db, "SELECT count(*) FROM memory", cancellationToken);
-        if (memories > 0)
+        // Every table ClearStoresAsync deletes must be guarded, so a target holding registry history
+        // or a populated graph is refused rather than silently wiped. `initiative` and `label` are
+        // excluded: migrations seed the `to-be-decided` initiative and default facet labels on a
+        // fresh database, so a freshly-migrated target carries those rows and must still count as
+        // empty for a first restore.
+        string[] relational = ["memory", "memory_version", "group_description", "memory_group"];
+        foreach (string table in relational)
         {
-            return false;
+            if (await ExecuteScalarLongAsync(db, $"SELECT count(*) FROM {table}", cancellationToken) > 0)
+            {
+                return false;
+            }
         }
 
-        long vertices = await ExecuteScalarLongAsync(db, "SELECT count(*) FROM memory_graph.\"Memory\"", cancellationToken);
-        return vertices == 0;
+        string[] graph = ["Memory", "LINKS", "TICKET_PARENT", "Ticket"];
+        foreach (string label in graph)
+        {
+            if (await ExecuteScalarLongAsync(db, $"SELECT count(*) FROM memory_graph.\"{label}\"", cancellationToken) > 0)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static async Task ClearStoresAsync(

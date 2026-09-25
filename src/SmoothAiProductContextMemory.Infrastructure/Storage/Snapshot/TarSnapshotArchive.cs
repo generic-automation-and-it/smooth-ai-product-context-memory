@@ -115,15 +115,20 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
         SnapshotManifest manifest = Deserialize<SnapshotManifest>(manifestBytes);
         string[] names = entries.Keys.ToArray();
 
-        return Task.FromResult(new SnapshotArchive(manifest, names, name =>
-        {
-            if (!entries.TryGetValue(name, out byte[]? content))
+        return Task.FromResult(new SnapshotArchive(
+            manifest,
+            names,
+            name =>
             {
-                throw new KeyNotFoundException($"Archive entry not found: {name}");
-            }
+                if (!entries.TryGetValue(name, out byte[]? content))
+                {
+                    throw new KeyNotFoundException($"Archive entry not found: {name}");
+                }
 
-            return Task.FromResult(content);
-        }));
+                return Task.FromResult(content);
+            },
+            address => entries.ContainsKey(BlobEntryName(address)),
+            address => entries[BlobEntryName(address)]));
     }
 
     public Task<SnapshotVerification> VerifyAsync(string archivePath, CancellationToken cancellationToken)

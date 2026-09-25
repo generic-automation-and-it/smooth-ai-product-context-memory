@@ -73,7 +73,11 @@ The store is append-heavy by design, yet the read path stays small — a deep we
 - **Temporal validity** (`valid_from` / `valid_until`) filters claims outside their validity window when callers supply `asOf`; default queries do not apply this filter.
 - **Recall feedback** (in discovery) tracks hits, misses and never-recalled memories to sharpen retrieval over time ([HLD-004](docs/hlds/004-memory-recall-feedback/)).
 
-The store optimizes for durability; the read path optimizes for precision-per-token.
+The store optimizes for durability; the read path optimizes for precision-per-token. Back it up as one
+self-verifying corpus snapshot (relational + graph + blob bodies in a single tar + manifest), validate it
+offline, and restore it into an empty target — via the running API for `snapshot`/`preflight` and the
+published image's one-shot verbs for `verify`/`restore` (Docker only, no .NET SDK). Commands in
+[docs/wiki/docker.md](docs/wiki/docker.md).
 
 ### Memory model
 
@@ -279,6 +283,7 @@ tests/
 | AI tooling setup | [`docs/wiki/ai-tooling.md`](docs/wiki/ai-tooling.md) |
 | Testing strategy | [`docs/wiki/testing.md`](docs/wiki/testing.md) |
 | CI/CD pipeline | [`docs/wiki/ci.md`](docs/wiki/ci.md) |
+| Container images & durability (`snapshot`/`verify`/`restore`) | [`docs/wiki/docker.md`](docs/wiki/docker.md) |
 | Architecture decisions & NFRs | [`docs/hlds/`](docs/hlds/) |
 
 ---
