@@ -229,9 +229,14 @@ public sealed class NpgsqlSnapshotRepository(IBlobStorage blobStorage, IBlobCata
     {
         foreach (SnapshotEdge edge in capture.Edges)
         {
+            // Property predicates, not an inline map: `{memory_uuid: x}` compiles to `properties @>`
+            // and sequentially scans the vertex table; `WHERE s.memory_uuid = x` is served by
+            // ix_memory_vertex_uuid (PERSISTENCE_AGENTS non-negotiable). This runs once per captured
+            // edge, so on a large corpus restore the inline form costs N full vertex scans.
             string cypher =
-                $"MATCH (s:{AgeSession.VertexLabel} {{memory_uuid: {Quote(edge.SourceUuid)}}}), " +
-                $"(t:{AgeSession.VertexLabel} {{memory_uuid: {Quote(edge.TargetUuid)}}}) " +
+                $"MATCH (s:{AgeSession.VertexLabel}), (t:{AgeSession.VertexLabel}) " +
+                $"WHERE s.memory_uuid = {Quote(edge.SourceUuid)} " +
+                $"  AND t.memory_uuid = {Quote(edge.TargetUuid)} " +
                 $"CREATE (s)-[:{AgeSession.EdgeLabel} {{relation: {Quote(edge.Relation)}, reason: {Quote(edge.Reason)}}}]->(t)";
             await ExecuteCypherAsync(db, cypher, cancellationToken);
         }
@@ -262,9 +267,13 @@ public sealed class NpgsqlSnapshotRepository(IBlobStorage blobStorage, IBlobCata
             string props =
                 $"reason: {Quote(edge.Reason)}, source: {Quote(edge.Source)}, " +
                 $"recordedAt: {Quote(edge.RecordedAt.ToString("O", CultureInfo.InvariantCulture))}{observed}";
+            // Predicate form, mirroring NpgsqlTicketGraph.MutationPredicate: the inline-map anchor
+            // compiles to `properties @>` and scans the vertex table. Ticket provider/key equality
+            // has dedicated HASH expression indexes, so the predicate form is index-served.
             string cypher =
-                $"MATCH (c:Ticket {{provider: {Quote(edge.Provider)}, key: {Quote(edge.Key)}}}), " +
-                $"(p:Ticket {{provider: {Quote(edge.ParentProvider)}, key: {Quote(edge.ParentKey)}}}) " +
+                $"MATCH (c:Ticket), (p:Ticket) " +
+                $"WHERE c.provider = {Quote(edge.Provider)} AND c.key = {Quote(edge.Key)} " +
+                $"  AND p.provider = {Quote(edge.ParentProvider)} AND p.key = {Quote(edge.ParentKey)} " +
                 $"CREATE (p)-[:TICKET_PARENT {{{props}}}]->(c)";
             await ExecuteCypherAsync(db, cypher, cancellationToken);
         }
