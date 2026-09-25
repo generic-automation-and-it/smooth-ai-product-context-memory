@@ -24,7 +24,7 @@ internal static class SnapshotCommand
         command.SetAction(async (parseResult, cancellationToken) =>
         {
             string output = parseResult.GetValue(outputOption) ?? Path.Combine(".context", "snapshots");
-            string destination = Path.Combine(output, $"snapshot-{DateTime.UtcNow:yyyyMMdd-HHmmss}.tar");
+            string destination = Path.Combine(output, $"snapshot-{DateTime.UtcNow:yyyyMMdd-HHmmss}-{Guid.NewGuid():N[..8]}.tar");
 
             CliHostResult host = CliHost.Build();
             using (host.Host)
@@ -38,9 +38,13 @@ internal static class SnapshotCommand
 
                 Console.WriteLine(
                     $"Snapshot wrote {response.DestinationPath} ({response.Memories} memories, {response.Versions} versions, {response.Vertices} vertices, {response.Edges} edges).");
-            }
+                Console.WriteLine(
+                    $"dangling={response.DanglingReferences} unreferenced={response.UnreferencedObjects} mismatched={response.MismatchedBodies}");
 
-            return 0;
+                // A snapshot with dangling references or mismatched bodies is not complete; exit
+                // non-zero so a script can gate on it rather than treating a degraded archive as clean.
+                return response.DanglingReferences != 0 || response.MismatchedBodies != 0 ? 1 : 0;
+            }
         });
 
         ParseResult parsed = command.Parse(args);

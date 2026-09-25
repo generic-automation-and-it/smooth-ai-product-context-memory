@@ -28,6 +28,10 @@ public sealed class SnapshotJobCoordinator(
 
     public async Task<SnapshotJobState> StartAsync(CancellationToken cancellationToken)
     {
+        // Read the connection string before publishing any job state, so a missing configuration
+        // throws rather than leaving a phantom `Running` job behind.
+        string connectionString = ConnectionString;
+
         var job = new SnapshotJobState { Id = Guid.NewGuid(), Status = SnapshotJobStatus.Running };
         string destination = Path.Combine(DestinationDirectory, $"snapshot-{DateTime.UtcNow:yyyyMMdd-HHmmss}-{Guid.NewGuid():N[..8]}.tar");
         job.DestinationPath = destination;
@@ -42,8 +46,6 @@ public sealed class SnapshotJobCoordinator(
             _mutex.Release();
         }
 
-        string connectionString = ConnectionString;
-
         _ = Task.Run(async () =>
         {
             using IServiceScope scope = scopeFactory.CreateScope();
@@ -54,7 +56,8 @@ public sealed class SnapshotJobCoordinator(
                     new SnapshotStore.Request(connectionString, destination),
                     CancellationToken.None);
 
-                job.Status = SnapshotJobStatus.Completed;
+                // Populate every result field before flipping Status to Completed, so a poller
+                // reading until Status == Completed can never observe it with null/zero payload.
                 job.ResultPath = response.DestinationPath;
                 job.Memories = response.Memories;
                 job.Versions = response.Versions;
@@ -63,6 +66,8 @@ public sealed class SnapshotJobCoordinator(
                 job.Objects = response.Objects;
                 job.DanglingReferences = response.DanglingReferences;
                 job.UnreferencedObjects = response.UnreferencedObjects;
+                job.Status = SnapshotJobStatus.Completed;
+                Volatile.Write(ref _latest, job);
             }
             catch (Exception ex)
             {

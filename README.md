@@ -75,8 +75,9 @@ The store is append-heavy by design, yet the read path stays small — a deep we
 
 The store optimizes for durability; the read path optimizes for precision-per-token. Back it up as one
 self-verifying corpus snapshot (relational + graph + blob bodies in a single tar + manifest), validate it
-offline, and restore it into an empty target — via the running API for `snapshot`/`preflight` and the
-published image's one-shot verbs for `verify`/`restore` (Docker only, no .NET SDK). Commands in
+offline, and restore it into an empty target. `preflight` and `snapshot` run on the running API
+(`POST /api/context/snapshot` and `/snapshot/preflight`); `snapshot` is also available as a one-shot
+verb, and `verify`/`restore` run as one-shot verbs only — all via Docker, no .NET SDK. Commands in
 [docs/wiki/docker.md](docs/wiki/docker.md).
 
 ### Memory model
