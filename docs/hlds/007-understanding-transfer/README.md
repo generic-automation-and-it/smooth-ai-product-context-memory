@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft |
+| **Status** | Accepted — implemented; all LADRs and NFRs accepted. BRD-003 §8 value assumptions 1–2 carried open pending usage evidence |
 | **Owner** | generik0 |
 | **Tracker** | Understanding |
 | **Business authority** | [BRD-003 — Understanding](../../brd/003-understanding-transfer/) (`BR-38` … `BR-45`), extending [BRD-001](../../brd/001-context-memory/) |
