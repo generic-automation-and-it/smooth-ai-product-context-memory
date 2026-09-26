@@ -16,7 +16,8 @@ session context, and share context across sessions and repositories.
 ```bash
 # Load a store export or a foreign document into context (no write)
 # <input> may be a store export, an ai-understanding .understanding.md unit or store folder, or a dump folder
-python3 .../understanding_client.py load <input> [--format store|understanding|foreign] [--asof YYYY-MM-DD]
+python3 .../understanding_client.py load <input> \
+  [--format store|understanding|foreign|auto] [--all] [--asof YYYY-MM-DD] [--max-chars N]
 
 # Capture material back into the store (opt-in --store), bound by selectors
 python3 .../understanding_client.py import <input> --store \
