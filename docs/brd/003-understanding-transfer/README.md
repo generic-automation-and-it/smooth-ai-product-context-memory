@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Document** | Business Requirements Document |
-| **Status** | Approved — delivered by HLD 007; §8 value assumptions 1–2 carried open pending usage evidence |
+| **Status** | Approved — delivered by HLD 007; §8 value assumption 1 carried open pending usage evidence, assumption 2 validated with a stated boundary |
 | **Owner** | Product owner / practitioner |
 | **Last updated** | 2026-09-26 |
 | **Extends** | [BRD 001 — Cross-product linked context memory](../001-context-memory/) |
@@ -205,12 +205,12 @@ writes nothing to the store and is an export.
 
 ### Assumptions to validate
 
-Outcomes recorded 2026-09-26.
+Outcomes recorded 2026-09-26. Breadth works as specified (HLD-007 LADR-08, L1 and skill L0); assumption 2 was validated on a single observed `load` (understanding-only breadth; the `--all` arm is not yet run), while assumption 1 is carried open pending recall-feedback evidence (HLD-004 NFR-03). The boundary of each is stated in the row below.
 
 | Assumption | Outcome |
 |---|---|
-| Understanding is a useful distinct kind and its cross-repo reach is genuinely needed. | **Open.** A value assumption; no usage evidence exists yet. The mechanism is proven (HLD-007 LADR-01), the need is not. Validate through recall-feedback on understanding-kind memories (HLD-004) once some are captured. |
-| Loading with controlled breadth is genuinely useful — the agent can act on a distilled understanding without the full scoped record. | **Open.** A value assumption. Breadth works as specified (HLD-007 LADR-08, L1 and skill L0); whether agents act well on understanding-only loads needs usage evidence. |
+| Understanding is a useful distinct kind and its cross-repo reach is genuinely needed. | **Open — carried forward.** No understanding-kind memory is captured in the store yet (none written via `import --store`), so no recall-feedback (HLD-004 NFR-03) signal exists and the need cannot be measured. The mechanism is proven (HLD-007 LADR-01), the need is not. **Closure path is not merely capture-then-query:** recall feedback records only through `QueryMemories.Handler`, and the understanding skill `load` makes no network call, so a file-only load records no feedback and is invisible to the `never-recalled`/`miss-rate` surfaces. Closes when understanding-kind memories are captured and retrieved through the retrieval path that records feedback (a `kind = understanding` query via the `mimisbrunnr-context-memory` client hits `QueryMemories`), so their recall is observable under the `never-recalled`/`miss-rate` surfaces — or the load path is instrumented to record recall feedback. |
+| Loading with controlled breadth is genuinely useful — the agent can act on a distilled understanding without the full scoped record. | **Validated, with a stated boundary.** Usage evidence 2026-09-26: `mimisbrunnr-understanding load <local store-export folder>` rendered understanding-only breadth (newest per slug, 2 units); the agent cited that output as grounding context and recorded this §8 outcome from it, with no full scoped record needed. Single observed instance of the `load` path, and that instance was the understanding-only breadth — the `--all` arm has not been run. Sustained validation of this row needs repeated `load` runs at both breadths; recall-feedback (HLD-004 NFR-03) on captured understanding-kind memories is the indirect store-side signal and is assumption 1's closure condition. |
 | The default-scope, no-repo-anchor representation is sufficient for cross-repo recall. | **Validated, with a stated boundary.** L1 `UnderstandingTransferStoreTests`: an un-scoped query recalls a no-repo product-scope understanding; a one-repository query deliberately does not (HLD-007 LADR-01). Sufficient for un-scoped and `--all` recall; surfacing under a repo-filtered query would be a separate retrieval decision. |
 
 ## 9. Risks
