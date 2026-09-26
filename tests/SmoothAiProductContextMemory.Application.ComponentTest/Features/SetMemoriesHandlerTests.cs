@@ -352,6 +352,45 @@ public sealed class SetMemoriesHandlerTests(AspireFixture aspire) : HandlerTestB
             && l.Relation == MemoryRelation.Contradicts).ShouldBe(2);
     }
 
+    [Fact]
+    public async Task Cancelled_token_aborts_the_write_without_committing()
+    {
+        var group = TestEntities.NewGroup();
+        Db.MemoryGroups.Add(group);
+        await Db.SaveChangesAsync(Ct);
+        Db.ChangeTracker.Clear();
+
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Should.ThrowAsync<OperationCanceledException>(async () =>
+            await NewHandler().Handle(Write(group.Uuid, "Cancelled subject", "Claim"), cts.Token));
+
+        (await Db.Memories.AsNoTracking().CountAsync(m => m.GroupId == group.Id, Ct)).ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Duplicate_subject_in_batch_conflicts_before_any_write()
+    {
+        var group = TestEntities.NewGroup();
+        Db.MemoryGroups.Add(group);
+        await Db.SaveChangesAsync(Ct);
+        Db.ChangeTracker.Clear();
+
+        SetMemories.Request request = new(
+            group.Uuid,
+            [
+                Write(group.Uuid, "Shared subject", "Claim 1").Items[0],
+                Write(group.Uuid, "Shared subject", "Claim 2").Items[0],
+            ],
+            null,
+            null);
+
+        await Should.ThrowAsync<ConflictException>(async () => await NewHandler().Handle(request, Ct));
+
+        (await Db.Memories.AsNoTracking().CountAsync(m => m.GroupId == group.Id, Ct)).ShouldBe(0);
+    }
+
     private sealed class FailAfterFirstCreateGraph(IMemoryGraph inner) : IMemoryGraph
     {
         private int _creates;

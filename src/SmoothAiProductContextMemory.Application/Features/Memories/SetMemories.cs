@@ -199,6 +199,55 @@ public static class SetMemories
             var plannedVersionTargets = new Dictionary<Guid, (Memory Memory, MemoryVersion Current, int NextVersion)>();
             var plannedCreateUuids = new HashSet<Guid>();
 
+            // The plan resolves every write against stored state in one pass. The per-item checks below
+            // are mere set lookups; the stored state they consult is fetched here in four batched
+            // queries instead of once per item, which keeps a 200-item write at four round-trips
+            // instead of up to ~800.
+            Guid[] targetUuids = request.Items
+                .Where(i => i.Uuid is not null)
+                .Select(i => i.Uuid!.Value)
+                .Distinct()
+                .ToArray();
+            Guid[] createUuids = request.Items
+                .Where(i => i.Uuid is null && i.CreateUuid is not null)
+                .Select(i => i.CreateUuid!.Value)
+                .Distinct()
+                .ToArray();
+            string[] newSubjectSlugs = request.Items
+                .Where(i => i.Uuid is null)
+                .Select(i => Slug.Subject(i.Description))
+                .Distinct()
+                .ToArray();
+
+            Dictionary<Guid, Memory> memoriesByUuid = (targetUuids.Length == 0
+                    ? []
+                    : await db.Memories
+                        .Where(m => targetUuids.Contains(m.Uuid))
+                        .ToArrayAsync(cancellationToken))
+                .ToDictionary(m => m.Uuid);
+
+            long[] targetMemoryIds = memoriesByUuid.Values.Select(m => m.Id).ToArray();
+            Dictionary<long, MemoryVersion> currentByMemoryId = (targetMemoryIds.Length == 0
+                    ? []
+                    : await db.MemoryVersions
+                        .Where(v => targetMemoryIds.Contains(v.MemoryId) && v.IsCurrent)
+                        .ToArrayAsync(cancellationToken))
+                .ToDictionary(v => v.MemoryId);
+
+            HashSet<Guid> takenCreateUuids = createUuids.Length == 0
+                ? []
+                : (await db.Memories
+                    .Where(m => createUuids.Contains(m.Uuid))
+                    .Select(m => m.Uuid)
+                    .ToArrayAsync(cancellationToken)).ToHashSet();
+
+            HashSet<string> takenSubjectSlugs = newSubjectSlugs.Length == 0
+                ? []
+                : (await db.Memories
+                    .Where(m => m.GroupId == group.Id && newSubjectSlugs.Contains(m.SubjectSlug))
+                    .Select(m => m.SubjectSlug)
+                    .ToArrayAsync(cancellationToken)).ToHashSet(StringComparer.Ordinal);
+
             for (int index = 0; index < request.Items.Count; index++)
             {
                 MemoryWrite item = request.Items[index];
@@ -208,13 +257,16 @@ public static class SetMemories
                 {
                     if (!plannedVersionTargets.TryGetValue(target, out var versionTarget))
                     {
-                        Memory memory = await db.Memories
-                            .SingleOrDefaultAsync(m => m.Uuid == target, cancellationToken)
-                            ?? throw new NotFoundException($"Memory '{target}' was not found.");
+                        if (!memoriesByUuid.TryGetValue(target, out Memory? memory))
+                        {
+                            throw new NotFoundException($"Memory '{target}' was not found.");
+                        }
 
-                        MemoryVersion current = await db.MemoryVersions
-                            .SingleOrDefaultAsync(v => v.MemoryId == memory.Id && v.IsCurrent, cancellationToken)
-                            ?? throw new ConflictException($"Memory '{target}' has no current version.");
+                        if (!currentByMemoryId.TryGetValue(memory.Id, out MemoryVersion? current))
+                        {
+                            throw new ConflictException($"Memory '{target}' has no current version.");
+                        }
+
                         versionTarget = (memory, current, current.Version + 1);
                     }
 
@@ -248,18 +300,14 @@ public static class SetMemories
                             $"CreateUuid '{createUuid}' is used twice in this batch.");
                     }
 
-                    bool identityTaken = await db.Memories
-                        .AnyAsync(m => m.Uuid == createUuid, cancellationToken);
-                    if (identityTaken)
+                    if (takenCreateUuids.Contains(createUuid))
                     {
                         throw new ConflictException(
                             $"CreateUuid '{createUuid}' already belongs to an existing memory.");
                     }
                 }
 
-                bool subjectTaken = await db.Memories
-                    .AnyAsync(m => m.GroupId == group.Id && m.SubjectSlug == slug, cancellationToken);
-                if (subjectTaken)
+                if (takenSubjectSlugs.Contains(slug))
                 {
                     throw new ConflictException(
                         $"Subject '{slug}' already exists in this group. Send it as a version bump.");
@@ -290,13 +338,26 @@ public static class SetMemories
                 .Select(i => i.Uuid!.Value)
                 .ToHashSet();
 
+            // External link endpoints (not created in this batch) are resolved against the store in one
+            // query, so the per-link check below is a set lookup rather than an AnyAsync per endpoint.
+            HashSet<Guid> externalUuids = links
+                .SelectMany(l => new[] { l.SourceUuid, l.TargetUuid })
+                .Where(u => !batchUuids.Contains(u))
+                .ToHashSet();
+            HashSet<Guid> existingUuids = externalUuids.Count == 0
+                ? []
+                : (await db.Memories
+                    .Where(m => externalUuids.Contains(m.Uuid))
+                    .Select(m => m.Uuid)
+                    .ToArrayAsync(cancellationToken)).ToHashSet();
+
             var planned = new List<PlannedLink>(links.Count);
             var seen = new HashSet<(Guid Source, Guid Target, string Relation)>();
 
             foreach (LinkWrite link in links)
             {
-                await EnsureMemoryExistsAsync(link.SourceUuid, batchUuids, cancellationToken);
-                await EnsureMemoryExistsAsync(link.TargetUuid, batchUuids, cancellationToken);
+                EnsureMemoryExists(link.SourceUuid, batchUuids, existingUuids);
+                EnsureMemoryExists(link.TargetUuid, batchUuids, existingUuids);
 
                 bool duplicateInBatch = !seen.Add((link.SourceUuid, link.TargetUuid, link.Relation));
                 bool duplicateInStore = !duplicateInBatch
@@ -314,21 +375,17 @@ public static class SetMemories
             return planned;
         }
 
-        private async Task EnsureMemoryExistsAsync(
+        private static void EnsureMemoryExists(
             Guid uuid,
             HashSet<Guid> batchUuids,
-            CancellationToken cancellationToken)
+            HashSet<Guid> existingUuids)
         {
-            if (batchUuids.Contains(uuid))
+            if (batchUuids.Contains(uuid) || existingUuids.Contains(uuid))
             {
                 return;
             }
 
-            bool exists = await db.Memories.AnyAsync(m => m.Uuid == uuid, cancellationToken);
-            if (!exists)
-            {
-                throw new NotFoundException($"Memory '{uuid}' was not found.");
-            }
+            throw new NotFoundException($"Memory '{uuid}' was not found.");
         }
 
         private async Task<IReadOnlyList<string>> PlanLabelsAsync(
@@ -340,11 +397,19 @@ public static class SetMemories
                 return [];
             }
 
+            string[] namesDistinct = names.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+
+            HashSet<string> existingNames = namesDistinct.Length == 0
+                ? []
+                : (await db.Labels
+                    .Where(l => namesDistinct.Contains(l.Name))
+                    .Select(l => l.Name)
+                    .ToArrayAsync(cancellationToken)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
             var toInsert = new List<string>();
-            foreach (string name in names.Distinct(StringComparer.OrdinalIgnoreCase))
+            foreach (string name in namesDistinct)
             {
-                bool exists = await db.Labels.AnyAsync(l => l.Name == name, cancellationToken);
-                if (!exists)
+                if (!existingNames.Contains(name))
                 {
                     toInsert.Add(name);
                 }
