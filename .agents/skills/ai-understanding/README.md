@@ -69,3 +69,46 @@ reads it the same way yours does.
 The name is borrowed from Adrian Tchaikovsky's _Children of Time_, where an Understanding is knowledge
 distilled and handed to a generation that never had the experience which produced it. That is the
 contract: the session is discarded, the transferable part survives.
+
+## How this differs from the harness's context compaction
+
+Agent harnesses (Claude Code, OpenCode, Codex) compact a conversation automatically when the context
+window fills: the transcript is replaced by a summary so the **current task can keep going**. An
+Understanding keeps **knowledge** for an agent that never saw the session. They solve different problems
+and work best together.
+
+| | Harness compaction | Understanding |
+|---|---|---|
+| Trigger | Automatic, near the context limit | On request, at a phase boundary — proposed, you approve |
+| Goal | Continue this task | Hand knowledge to a future agent |
+| Content | Task state: todo, files touched, next step, attempts | Only what has no other home — no narrative, no paths, no toolchain |
+| Lifetime | Inside one session | Files, zip, or the Mímisbrunnr store — across sessions, workspaces, repos |
+| Loading | Whole summary always in context | Only units whose question matches, via `INDEX.md` |
+| Controls | None | Reconcile against the index, versions, `confidence`, `recheck`, `--review`, write-time redaction |
+| Trust | Summary reads as fact | Evidence — the system outranks it; a wrong unit is marked `contested` |
+| Repeated use | Summary of a summary drifts | Improved units are rewritten in full; history kept |
+
+**What you gain over compaction**
+
+- It outlives the session: compaction dies with it; an Understanding can be published or imported.
+- It costs less context: a question match loads zero or one unit, where a summary always rides along.
+- It keeps the *why*: failure signatures, rejected options and diagnostics are what compaction drops first.
+- It travels safely: `scope: portable` with `--portable-only` crosses repos without shipping local quirks.
+- It maintains itself: versions, confidence, staleness and lineage — compaction has none of these.
+- It is safer: redacted at write time, you approve what is kept, and it is read as data rather than orders.
+
+**What it costs**
+
+- It cannot resume a task on its own — task state is excluded by design, so compaction or a handoff is still needed for that.
+- It is not free: an export needs a strong model, judgement, a pass over the whole session, and your approval.
+- It depends on judgement, and has failed there: one question saved under six slugs, a `--all` export
+  writing one unit out of six, a `verified` unit that was wrong.
+- It can be lost: `.context/` is gitignored, so an unpublished store disappears with the workspace.
+- It can go unread: a badly worded question never matches, and the task-start read depends on the host
+  repository's root `AGENTS.md`.
+
+**Using them together:** let compaction run within a session. Before a clear, compact or handoff, run
+`/ai-understanding` for the knowledge (and `mimisbrunnr-understanding dump --currentsession` if the task
+itself needs to continue elsewhere). In the next session, `--import` here or
+`mimisbrunnr-understanding load <folder>` picks it up. Nothing links compaction to an export today, so
+the hard-won part is lost exactly when compaction fires unless you ask first.
