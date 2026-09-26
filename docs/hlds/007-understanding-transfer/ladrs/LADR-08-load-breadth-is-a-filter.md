@@ -1,6 +1,6 @@
 # LADR-08: Load breadth is a filter, not two products
 
-**Status:** Draft
+**Status:** Accepted
 
 ## Context
 
@@ -39,3 +39,7 @@ Both are non-destructive (NFR-01): they read the store and write nothing.
 
 - **NFR-01** — both breadth modes are non-destructive.
 - **BRD-003 BR-42**.
+
+## Evidence (2026-09-26)
+
+L1 `tests/SmoothAiProductContextMemory.Application.ComponentTest/Features/UnderstandingTransferStoreTests.cs`: `Kind = understanding` returns only the understanding and the un-filtered query returns both kinds, with zero writes on either; skill L0 `.agents/skills/mimisbrunnr-understanding/tests/run_tests.py` pins `--all` vs understanding-only rendering.

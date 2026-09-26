@@ -11,9 +11,7 @@ models:
   codex: gpt-5.5
 ---
 
-# Vitsmunir Dump
-
-## Modes & Switches
+## Switches
 
 All switches are **OFF by default**. With no switches the skill behaves exactly as a silent listen-first
 capture: no questions, no tools, no synthesis until asked.
@@ -35,6 +33,8 @@ wins over sparse `--oktoask` for Listen cadence.
 bloat. `--oktoreaddocs` and `--oktowebsearch` are expensive — they re-enable the file/web payloads that
 get injected into context and re-billed every turn, which is the very cost the listen-first default avoids.
 `--all` is expensive because it includes both tool switches. Use the tool switches (and `--all`) deliberately.
+
+# Vitsmunir Dump
 
 ## Core Posture
 
@@ -71,7 +71,7 @@ For each braindump message:
 - Summarize only the newly added information or the evolving theme.
 - Do not produce a full requirements spec unless asked.
 
-Questioning during Listen depends on the active switches (see Modes & Switches):
+Questioning during Listen depends on the active switches (see **Switches** above):
 
 - **Default (no switch):** Do not ask clarifying questions. Capture silently.
 - **`--oktoask` (sparse):** Ask only when an item is a genuine blocker or internally contradictory in a way

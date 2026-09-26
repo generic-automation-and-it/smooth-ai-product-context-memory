@@ -40,3 +40,7 @@ material is surfaced, not silently resolved.
   second authority.
 - A conflict or proposed-status question from imported material is reported for the practitioner's
   judgement, not auto-resolved.
+
+## Evidence (2026-09-26)
+
+Stays **Draft** with NFR-02: the store refuses a direct duplicate write (L1), but that the `--store` path runs every capture stage is not yet evidenced end to end — see NFR-02's open items.

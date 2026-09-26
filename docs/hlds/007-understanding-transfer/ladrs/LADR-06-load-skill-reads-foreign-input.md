@@ -1,6 +1,6 @@
 # LADR-06: The load skill accepts arbitrary external input, loaded as data
 
-**Status:** Draft
+**Status:** Accepted
 
 ## Context
 
@@ -38,3 +38,7 @@ redaction apply only when `--store` is passed, through the capture path (LADR-03
 - Foreign material is always cited, never adopted (NFR-03).
 - Only the `--store` path applies atomicity/redaction, so foreign material that is merely loaded (the
   default) is not quietly decomposed.
+
+## Evidence (2026-09-26)
+
+Skill L0 `.agents/skills/mimisbrunnr-understanding/tests/run_tests.py`: foreign material is cited as data with truncation disclosed; `proposed` and `program` scope are flagged, never promoted; foreign input carries no fabricated provenance keys.

@@ -16,6 +16,54 @@ models:
   codex: gpt-5.5
 ---
 
+## Switches
+
+Export and import are about **this session's memory**: export writes what the session learned to disk, import loads it back. Publish and consume are the separate, rarer cross-workspace operations.
+
+| Switch | Effect |
+|--------|--------|
+| `--export [--path <dir>]` _(default)_ | **Reconcile against `INDEX.md`**, then write this run's new and improved units to a new `.context/understandings/<subject>-<yyyyMMdd-HHmm>/`, or under `--path` when given. Proposes the split first; writes nothing and creates no folder when nothing changed |
+| `--export --all [--path <dir>]` | Same, but breadth-first: write every candidate without pausing for the user to cut the list, **and hold the qualifying bar loosely** — a marginal candidate is written, not dropped, because the user prunes afterwards |
+| `--import` | Load Understandings whose question matches one the task will make you ask |
+| `--publish [--portable-only] [--path <target>]` | Write every unit to a zip under `.context/understandings-publish/`, or to `--path` when given; `--portable-only` restricts the archive to `scope: portable` units |
+| `--consume <zip> [--path <dir>]` | Unpack a published archive into the working store — `.context/understandings/` by default, or `--path` when given |
+| `--promote <slug>` | Escalate an Understanding to a `*AGENTS.md` context file or a rule |
+| `--index` | Regenerate `INDEX.md` from the store |
+| `--review` | Advisory decay report — what is contested, never inherited, or overdue a re-check |
+
+`--all` applies only to `--export`, where it means two things at once: **skip the cut**, and **widen
+what qualifies**. The second half is the one that gets lost — an agent can honour "never ask" to the
+letter while filtering hard upstream, and still report one unit as a complete export. Under `--all`,
+resolve a marginal candidate toward writing it: the user asked for breadth and prunes what they did not
+want. `--publish`'s scope filter is a separate switch, `--portable-only` — the two are unrelated despite
+the old design overloading `--all` for both.
+
+`--all` does **not** turn proposals into commitments, and it does **not** override the qualifying
+test. An unbuilt recommendation is still a proposal: label it as proposed and record that it was
+not approved or implemented. Toolchain knowledge still goes to its `*AGENTS.md` home, even when
+the user asks for every candidate. Breadth means “show the marginal qualifying residue”, not
+“store everything mentioned in the session”.
+
+`--path` is always the **target** a mode writes to, overriding its default — never a source.
+`--consume`'s source stays positional.
+
+| Mode | Default target | `--path` overrides it to |
+|---|---|---|
+| `--export` | `.context/understandings/` | another store directory |
+| `--publish` | `.context/understandings-publish/` | any file or directory path |
+| `--consume <source>` | `.context/understandings/` | the store to unpack into |
+
+**On `--export` only** (a bare invocation included, since that is an export), free text that is not a switch is the run's **focus**, taken verbatim
+(`--export aspire wiremock stubs`). It names the subject and tells the reconcile step what the run is about,
+so the split proposal leads with the units inside it. It narrows nothing by itself: a qualifying candidate
+outside the focus is still proposed, so the user cuts it rather than never seeing it. With no focus given,
+infer the subject from the session as before. The other modes' positional arguments are their own —
+`--consume`'s source and `--promote`'s slug are never read as a focus.
+
+Single-dash spellings of the long switches (`-all`, `-export`) are accepted as typed — they are
+unambiguous here, and rejecting them would fail a run for a keystroke. An unrecognised switch is not
+guessed at: say what was passed and ask.
+
 # Understanding — Skill
 
 An **Understanding** is the **input and outcome of a session's memory**, kept so another agent can act on
@@ -70,54 +118,6 @@ agent-memory-design-20260305-1105/store-decay.understanding.md     # v3 — CURR
 A unit that genuinely needs artifacts gets a sibling `<slug>.assets/` directory. Naming it after the slug is what prevents the collisions a shared directory would cause, and it is paid for only by the rare unit that needs it.
 
 The subject is **not** how knowledge is found. Retrieval is by **question** — a future agent has a question in mind, not a subject, so the index lists every unit regardless of which subject produced it.
-
-## Switches
-
-Export and import are about **this session's memory**: export writes what the session learned to disk, import loads it back. Publish and consume are the separate, rarer cross-workspace operations.
-
-| Switch | Effect |
-|--------|--------|
-| `--export [--path <dir>]` _(default)_ | **Reconcile against `INDEX.md`**, then write this run's new and improved units to a new `.context/understandings/<subject>-<yyyyMMdd-HHmm>/`, or under `--path` when given. Proposes the split first; writes nothing and creates no folder when nothing changed |
-| `--export --all [--path <dir>]` | Same, but breadth-first: write every candidate without pausing for the user to cut the list, **and hold the qualifying bar loosely** — a marginal candidate is written, not dropped, because the user prunes afterwards |
-| `--import` | Load Understandings whose question matches one the task will make you ask |
-| `--publish [--portable-only] [--path <target>]` | Write every unit to a zip under `.context/understandings-publish/`, or to `--path` when given; `--portable-only` restricts the archive to `scope: portable` units |
-| `--consume <zip> [--path <dir>]` | Unpack a published archive into the working store — `.context/understandings/` by default, or `--path` when given |
-| `--promote <slug>` | Escalate an Understanding to a `*AGENTS.md` context file or a rule |
-| `--index` | Regenerate `INDEX.md` from the store |
-| `--review` | Advisory decay report — what is contested, never inherited, or overdue a re-check |
-
-`--all` applies only to `--export`, where it means two things at once: **skip the cut**, and **widen
-what qualifies**. The second half is the one that gets lost — an agent can honour "never ask" to the
-letter while filtering hard upstream, and still report one unit as a complete export. Under `--all`,
-resolve a marginal candidate toward writing it: the user asked for breadth and prunes what they did not
-want. `--publish`'s scope filter is a separate switch, `--portable-only` — the two are unrelated despite
-the old design overloading `--all` for both.
-
-`--all` does **not** turn proposals into commitments, and it does **not** override the qualifying
-test. An unbuilt recommendation is still a proposal: label it as proposed and record that it was
-not approved or implemented. Toolchain knowledge still goes to its `*AGENTS.md` home, even when
-the user asks for every candidate. Breadth means “show the marginal qualifying residue”, not
-“store everything mentioned in the session”.
-
-`--path` is always the **target** a mode writes to, overriding its default — never a source.
-`--consume`'s source stays positional.
-
-| Mode | Default target | `--path` overrides it to |
-|---|---|---|
-| `--export` | `.context/understandings/` | another store directory |
-| `--publish` | `.context/understandings-publish/` | any file or directory path |
-| `--consume <source>` | `.context/understandings/` | the store to unpack into |
-
-**On `--export` only** (a bare invocation included, since that is an export), free text that is not a switch is the run's **focus**, taken verbatim
-(`--export aspire wiremock stubs`). It names the subject and tells the reconcile step what the run is about,
-so the split proposal leads with the units inside it. It narrows nothing by itself: a qualifying candidate
-outside the focus is still proposed, so the user cuts it rather than never seeing it. With no focus given,
-infer the subject from the session as before. The other modes' positional arguments are their own —
-`--consume`'s source and `--promote`'s slug are never read as a focus.
-
-Single-dash spellings of the long switches (`-all`, `-export`) are accepted as typed — they are
-unambiguous here, and rejecting them would fail a run for a keystroke. An unrecognised switch is not
-guessed at: say what was passed and ask.
 
 ## Export (default mode)
 

@@ -7,6 +7,17 @@ models:
   codex: gpt-5.5
 ---
 
+## Switches
+
+The three operations are **never conflated** — a load is context-injection, an import is an opt-in write,
+a dump is an export. All switches are **off by default**.
+
+| Operation | Default | Writes to store? | Through capture path? |
+|---|---|---|---|
+| **Load** | context-injection | no | n/a |
+| **Import** (`--store`) | opt-in | yes, only with `--store` | yes |
+| **Dump** (`--currentsession`) | export to local folder | no | n/a |
+
 # mimisbrunnr-understanding
 
 Load a Mímisbrunnr **Understanding** export — or **any** prior material (a session, meeting notes, a
@@ -17,14 +28,6 @@ capture path (preflight → redact → dedup/link → atomicity → write), neve
 Use this skill when a practitioner wants to seed an agent with prior knowledge, or to bring material
 already written somewhere into the store so it compounds. It is the **load/transfer** counterpart to
 `mimisbrunnr-context-memory` (the sole writer of clean facts).
-
-## Three operations — never conflated
-
-| Operation | Default | Writes to store? | Through capture path? |
-|---|---|---|---|
-| **Load** | context-injection | no | n/a |
-| **Import** (`--store`) | opt-in | yes, only with `--store` | yes |
-| **Dump** (`--currentsession`) | export to local folder | no | n/a |
 
 ## Load (default)
 

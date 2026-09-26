@@ -1,6 +1,6 @@
 # AGENTS.md — Understanding
 
-AI Context: HLD for understanding. Updated: 2026-09-19
+AI Context: HLD for understanding. Updated: 2026-09-26
 
 ## TL;DR
 
@@ -47,7 +47,7 @@ flowchart LR
 
 ## Architecture Decisions
 
-See [./ladrs/](./ladrs/). All Draft except LADR-09, which is Accepted.
+See [./ladrs/](./ladrs/). Accepted: LADR-01, 02, 04, 06, 07, 08, 09. Draft: LADR-03, held with NFR-02 until the capture stages on the import path are evidenced end to end.
 
 ## Key Behaviors
 
@@ -90,6 +90,16 @@ See [./ladrs/](./ladrs/). All Draft except LADR-09, which is Accepted.
   kind and all five parts. It guards LADR-04's mapping; it is not a test of new export code, because the
   renderer was already kind-generic.
 
+- **L1 (store level):** `tests/SmoothAiProductContextMemory.Application.ComponentTest/Features/UnderstandingTransferStoreTests.cs`
+  against real PostgreSQL+AGE. NFR-01: the read paths a load consumes (query at both breadths, forensic
+  export, dossier bundle/preview) leave every entity count, the current-version set, AGE vertex/edge
+  counts and the label registry unchanged, issue zero `SaveChanges` (interceptor on `HandlerTestBase`) and
+  zero blob stores (counting double). BR-40: an understanding is versioned by the existing `is_current`
+  swap, and a same-subject write without the uuid is refused. BR-41: an un-scoped query reaches a
+  no-repo product group and a one-repository query does not. `kind` stays open (an unlisted kind
+  validates). The load client itself is file-only, so it is never the subject of an L1 test.
+  `recall_feedback` telemetry written by query is not store content (HLD-004) and is out of NFR-01's scope.
+
 ## Quality Constraints
 
 - The default load path must never call `SaveChanges` (NFR-01).
@@ -107,6 +117,7 @@ See [./ladrs/](./ladrs/). All Draft except LADR-09, which is Accepted.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-26 | Closure evidence: L1 store-level tests added (`UnderstandingTransferStoreTests`). LADR-01/02/04/06/07/08 and NFR-01/03 promoted `Draft` → `Accepted`, each with an Evidence section. NFR-02 and LADR-03 stay `Draft`: redaction/atomicity/conflict surfacing are capture-skill judgement stages no L1 test can assert end to end. NFR-01 scope boundary recorded — `recall_feedback` telemetry is outside it. BRD-003 §8 outcomes recorded (one validated, two value assumptions carried open). HLD and BRD-003 status stay `Draft` until NFR-02 closes. | NFR-01, NFR-02, NFR-03; BR-40, BR-41 |
 | 2026-09-24 | LADR-09 added: load/import read the `ai-understanding` `.understanding.md` format and store folders (newest version per slug) as structured input instead of foreign prose. LADR-04 vocabulary amended trigger/knowledge → question/answer. LADR-07 amended: the session dump is redacted before write and refused if the redactor cannot run. | LADR-04, LADR-07, LADR-09 |
 | 2026-09-20 | Corrected the system diagram: the load skill reads prior material **from disk**, not from the HTTP API/store — the shipped client is file-only with no network, so the draw had shown a boundary the design forbids. `c4-context.md`'s loadSkill relation redirected to a disk material element, and the AGENTS mermaid now reads a local export/file rather than hitting `E`. The sibling flow diagram already modeled it correctly. | PR #86 review |
 | 2026-09-19 | Self-review (iter 4): fixed the import path collapsing a scoped memory fact into an understanding. Import of a store export now takes only `kind = understanding` records (LADR-01). | self-review |
