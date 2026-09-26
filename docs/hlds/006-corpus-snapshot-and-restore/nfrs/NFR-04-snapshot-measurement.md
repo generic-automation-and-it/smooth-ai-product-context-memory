@@ -40,4 +40,6 @@ written to a temp directory; blob bodies are content-addressed and stored in Min
 ## Result
 
 A full corpus snapshot at 1,000 memories / 1,000 bodies completes in **2.80 s** — over an order of
-magnitude inside the single-digit-minute target. The NFR-04 operability claim is evidenced.
+magnitude inside the single-digit-minute target. This evidences the NFR-04 **timing** criterion only;
+the other operability criteria (read-only byte-equality, verify with no service, container count
+unchanged) remain Draft and are not measured by this harness.

@@ -1,6 +1,6 @@
 # NFR-03: Recoverability
 
-**Status:** Closed (superseded by [HLD-006 NFR-02](../../../hlds/006-corpus-snapshot-and-restore/nfrs/NFR-02-consistency.md))
+**Status:** Closed on HLD-006 acceptance (superseded by [HLD-006 NFR-02](../../../hlds/006-corpus-snapshot-and-restore/nfrs/NFR-02-consistency.md))
 
 > This Draft claim is closed by HLD-006's corpus snapshot and restore. Its "two stores restore to a
 > mutually consistent state" requirement is now HLD-006 NFR-02, whose snapshot artefact carries a

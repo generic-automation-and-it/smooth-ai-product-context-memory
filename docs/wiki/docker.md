@@ -210,6 +210,31 @@ docker run --rm \
 `restore` writes bodies first, then rebuilds the database and reads every count back before committing — any mismatch rolls the database back and the reconciliation prints `committed no — rolled back` with exit 1. The target database must already be migrated. `verify` writes nothing and touches nothing but the archive; `restore` refuses a non-empty target
 unless `--force` is passed. `snapshot` and `restore` are read-only against / rebuild the stores.
 
+## Run `preflight`/`snapshot` against the running API
+
+The HLD-006 `snapshot` and `snapshot/preflight` HTTP endpoints run on the API, accepted-then-poll:
+`POST /api/context/snapshot` returns `202 Accepted` with a job id; poll `GET /api/context/snapshot/status`
+until `Status` is `Completed` (or `Failed`). `POST /api/context/snapshot/preflight` is a read-only report
+of whether a snapshot exists, its recency and the corpus counts, with `Write`/`Read` capability
+respectively. The archive is written to the host's `.context/snapshots`, so it is reachable from the
+running container's mounted volume:
+
+```bash
+# preflight — read-only report (no snapshot written)
+curl -X POST http://localhost:5141/api/context/snapshot/preflight
+
+# snapshot — trigger, returns a job id (202 Accepted)
+curl -X POST http://localhost:5141/api/context/snapshot
+
+# status — poll until Status == Completed / Failed
+curl http://localhost:5141/api/context/snapshot/status
+```
+
+The status payload carries the result counts (memories, versions, vertices, edges, objects,
+dangling references, unreferenced objects, mismatched bodies) and `ResultPath` once complete. A degraded
+snapshot (nonzero `MismatchedBodies`) still reports `Completed` — the nonzero count is the signal, do not
+rely on `Status` alone.
+
 ## AppHost consumption
 
 Default: AppHost **compiles Host from the working tree** and starts

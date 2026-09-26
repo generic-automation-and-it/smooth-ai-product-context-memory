@@ -15,8 +15,9 @@ Business authority is [BRD-001](../../brd/001-context-memory/) — principally `
 survives the loss of its machine), supported by `BR-13` and `BR-16`; it closes
 HLD 001 NFR-03's Draft recoverability claim for the snapshot path.
 
-**This HLD is implemented (2026-09-24); the LADRs remain Draft pending acceptance review — flag
-deviations rather than silently overriding.**
+**This HLD's implementation landed on the branch (2026-09-24) but the HLD itself remains In
+Discovery pending acceptance review; the LADRs stay Draft — flag deviations rather than silently
+overriding.**
 
 ## Non-Negotiables
 
@@ -68,7 +69,7 @@ Targets and verification live in [./nfrs/](./nfrs/). Two shape how code is writt
 ## Migration Plans
 
 - On acceptance, HLD 001 NFR-03 (Recoverability, Draft) is closed by this design's NFR-02 and must be updated in the same change to point here.
-- `scripts/verify-graph-restore.sh` and `scripts/seed-graph-sample.sh` remain as operational tooling until the restore command's built-in reconciliation supersedes the former; record the supersession in `scripts/AGENTS.md` when it happens.
+- The restore command's built-in reconciliation has superseded `scripts/verify-graph-restore.sh` for the full-corpus round-trip; the supersession is recorded in `scripts/AGENTS.md` and the script remains for a lighter graph-only round-trip alongside `scripts/seed-graph-sample.sh`.
 - The deferred GC sweep (HLD 001 migration plan) becomes designable once snapshot orphan accounting has produced growth data; it is a separate future HLD, not an extension of this one.
 
 ## Changelog
