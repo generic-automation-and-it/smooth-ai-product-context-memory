@@ -1,5 +1,6 @@
 using System.Formats.Tar;
 using System.Text;
+using System.Text.Json;
 using SmoothAiProductContextMemory.Application.Abstractions.Snapshot;
 using SmoothAiProductContextMemory.Domain.Entities;
 using SmoothAiProductContextMemory.Infrastructure.Storage;
@@ -14,8 +15,7 @@ public class TarSnapshotArchiveTests
 
     [Fact]
     public async Task WrittenArchive_VerifiesClean_And_RoundTripsCapture()
-    {
-        string path = TempArchive();
+    {        string path = TempArchive();
         string address = Sha256ContentAddress.Compute(Body);
         (SnapshotCapture capture, SnapshotWalkResult walk) = Capture(address, SnapshotBlobState.Ok);
 
@@ -101,6 +101,58 @@ public class TarSnapshotArchiveTests
 
         SnapshotVerification verification = await _archive.VerifyAsync(tampered, TestContext.Current.CancellationToken);
         verification.IsClean.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Verify_Reports_DanglingReferences_As_NotClean()
+    {
+        // A dangling (Missing) blob is never archived, so by itself verify would report the archive
+        // clean. The manifest now records the count and verify must surface it as a defect.
+        string path = TempArchive();
+        string address = Sha256ContentAddress.Compute(Body);
+        (SnapshotCapture capture, SnapshotWalkResult walk) = Capture(address, SnapshotBlobState.Missing);
+        await _archive.WriteAsync(path, capture, walk, _ => Task.FromResult(Body), TestContext.Current.CancellationToken);
+
+        SnapshotVerification verification = await _archive.VerifyAsync(path, TestContext.Current.CancellationToken);
+        verification.IsClean.ShouldBeFalse();
+        verification.Findings.ShouldContain(f => f.Kind == SnapshotFindingKind.CaptureTimeDefect);
+    }
+
+    [Fact]
+    public async Task Verify_Reports_MismatchedBodies_As_NotClean()
+    {
+        string path = TempArchive();
+        byte[] actual = Encoding.UTF8.GetBytes("content that hashes elsewhere.");
+        string cited = Sha256ContentAddress.Compute(Body);
+        (SnapshotCapture capture, SnapshotWalkResult walk) = Capture(cited, SnapshotBlobState.Mismatch);
+        await _archive.WriteAsync(path, capture, walk, _ => Task.FromResult(actual), TestContext.Current.CancellationToken);
+
+        SnapshotVerification verification = await _archive.VerifyAsync(path, TestContext.Current.CancellationToken);
+        verification.IsClean.ShouldBeFalse();
+        verification.Findings.ShouldContain(f => f.Kind == SnapshotFindingKind.CaptureTimeDefect);
+    }
+
+    [Fact]
+    public async Task ReadCaptureAsync_Refuses_Unsupported_FormatVersion_Before_Materialising()
+    {
+        // ReadAsync gates on the manifest format; ReadCaptureAsync must gate the same way so a
+        // newer-format archive is refused before its member bytes are deserialised.
+        string path = TempArchive();
+        string address = Sha256ContentAddress.Compute(Body);
+        (SnapshotCapture capture, SnapshotWalkResult walk) = Capture(address, SnapshotBlobState.Ok);
+        await _archive.WriteAsync(path, capture, walk, _ => Task.FromResult(Body), TestContext.Current.CancellationToken);
+
+        Dictionary<string, byte[]> entries = ReadTar(path);
+        SnapshotManifest manifest = JsonSerializer.Deserialize<SnapshotManifest>(entries[SnapshotEntryNames.Manifest])!;
+        entries[SnapshotEntryNames.Manifest] = JsonSerializer.SerializeToUtf8Bytes(
+            manifest with { FormatVersion = SnapshotFormat.Version + 1 });
+        string newer = TempArchive();
+        WriteTar(newer, entries);
+
+        await Should.ThrowAsync<InvalidDataException>(async () =>
+            await _archive.ReadCaptureAsync(newer, TestContext.Current.CancellationToken));
+        await Should.ThrowAsync<InvalidDataException>(async () =>
+            await _archive.ReadAsync(newer, TestContext.Current.CancellationToken));
     }
 
     [Fact]

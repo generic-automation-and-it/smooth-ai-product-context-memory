@@ -23,4 +23,5 @@ public enum SnapshotFindingKind
     UnexpectedEntry,
     CaptureTimeInconsistency,
     CountMismatch,
+    CaptureTimeDefect,
 }

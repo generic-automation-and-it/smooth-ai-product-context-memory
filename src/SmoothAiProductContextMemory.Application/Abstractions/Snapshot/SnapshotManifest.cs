@@ -6,11 +6,20 @@ namespace SmoothAiProductContextMemory.Application.Abstractions.Snapshot;
 /// carries no generation timestamp inside the hashed content — the snapshot date lives in archive
 /// metadata (LADR-02). Counts are what the restore reconciliation closes against (LADR-05).
 /// </summary>
+/// <remarks>
+/// <see cref="DanglingReferences"/> and <see cref="MismatchedBodies"/> record the capture-time
+/// defects that were surfaced but not faithfully archived: a dangling reference has no body in
+/// the archive, so a restore of this archive must fail on it, and verify must therefore not
+/// report it clean. Without these counts an archive that downloaded a store with an unresolvable
+/// reference would verify clean and then fail restore (LADR-02).
+/// </remarks>
 public sealed record SnapshotManifest(
     int FormatVersion,
     IReadOnlyList<SnapshotArchiveEntry> Entries,
     SnapshotCounts Counts,
-    SnapshotExclusions Exclusions);
+    SnapshotExclusions Exclusions,
+    int DanglingReferences = 0,
+    int MismatchedBodies = 0);
 
 /// <summary>One archive member: its logical name inside the archive and its content hash.</summary>
 public sealed record SnapshotArchiveEntry(string Name, string Sha256, long Size);

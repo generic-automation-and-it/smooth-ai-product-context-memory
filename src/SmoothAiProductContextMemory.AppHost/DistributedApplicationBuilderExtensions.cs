@@ -202,6 +202,7 @@ internal static class DistributedApplicationBuilderExtensions
             host
                 .WithHttpEndpoint(port: configuration.HostPort, targetPort: 5141, name: "http")
                 .WithContainerName(configuration.HostContainerName)
+                .WithVolume(configuration.HostContextVolume, "/app/.context")
                 .WithContainerRuntimeArgs(
                     "--label", $"com.docker.compose.project={configuration.DockerDesktopGroupName}",
                     "--label", $"com.docker.compose.service={configuration.HostContainerName}",

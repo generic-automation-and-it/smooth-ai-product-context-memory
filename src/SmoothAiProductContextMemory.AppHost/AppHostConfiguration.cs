@@ -43,6 +43,7 @@ internal sealed partial record AppHostConfiguration(
     internal string PostgresDataVolume => VolumeName("postgres-data");
     internal string BlobDataVolume => VolumeName("blob-well-data");
     internal string SeqDataVolume => VolumeName("seq-data");
+    internal string HostContextVolume => VolumeName("host-context");
 
     internal static AppHostConfiguration Create(IConfiguration configuration)
     {

@@ -90,7 +90,7 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
 
         var exclusions = new SnapshotExclusions(["recall_feedback"]);
 
-        SnapshotManifest manifest = new(SnapshotFormat.Version, entries, counts, exclusions);
+        SnapshotManifest manifest = new(SnapshotFormat.Version, entries, counts, exclusions, dangling, mismatched);
         await writeEntry(SnapshotEntryNames.Manifest, Serialize(manifest));
 
         int unreferenced = walk.UnreferencedObjects;
@@ -107,17 +107,7 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
     {
         Dictionary<string, byte[]> entries = ReadEntries(archivePath);
 
-        if (!entries.TryGetValue(SnapshotEntryNames.Manifest, out byte[]? manifestBytes))
-        {
-            throw new InvalidDataException("Archive has no manifest.");
-        }
-
-        SnapshotManifest manifest = Deserialize<SnapshotManifest>(manifestBytes);
-        if (manifest.FormatVersion != SnapshotFormat.Version)
-        {
-            throw new InvalidDataException(
-                $"Archive format version {manifest.FormatVersion} is not supported (expected {SnapshotFormat.Version}); restore is refused because a newer/older member layout cannot be interpreted safely.");
-        }
+        SnapshotManifest manifest = ReadAndGateManifest(entries);
 
         string[] names = entries.Keys.ToArray();
 
@@ -206,12 +196,28 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
 
         ReconcileCounts(manifest, entries, findings);
 
+        if (manifest.DanglingReferences > 0)
+        {
+            findings.Add(new SnapshotFinding(SnapshotFindingKind.CaptureTimeDefect, null,
+                $"Archive recorded {manifest.DanglingReferences} dangling reference(s) at capture; those bodies were never archived, so this archive cannot restore cleanly."));
+        }
+
+        if (manifest.MismatchedBodies > 0)
+        {
+            findings.Add(new SnapshotFinding(SnapshotFindingKind.CaptureTimeDefect, null,
+                $"Archive recorded {manifest.MismatchedBodies} mismatched blob body/bodies at capture; the stored body disagreed with the database-cited address."));
+        }
+
         return Task.FromResult(new SnapshotVerification(findings.Count == 0, findings));
     }
 
     public Task<SnapshotCapture> ReadCaptureAsync(string archivePath, CancellationToken cancellationToken)
     {
         Dictionary<string, byte[]> entries = ReadEntries(archivePath);
+
+        // Gate on the manifest format before materialising any member layout, exactly as ReadAsync
+        // does, so a newer-format archive is refused before its member bytes are deserialised.
+        _ = ReadAndGateManifest(entries);
 
         var capture = new SnapshotCapture(
             Deserialize<Initiative[]>(Require(entries, SnapshotEntryNames.Initiatives)),
@@ -226,6 +232,23 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
             Deserialize<SnapshotTicketEdge[]>(Require(entries, SnapshotEntryNames.TicketEdges)));
 
         return Task.FromResult(capture);
+    }
+
+    private static SnapshotManifest ReadAndGateManifest(IReadOnlyDictionary<string, byte[]> entries)
+    {
+        if (!entries.TryGetValue(SnapshotEntryNames.Manifest, out byte[]? manifestBytes))
+        {
+            throw new InvalidDataException("Archive has no manifest.");
+        }
+
+        SnapshotManifest manifest = Deserialize<SnapshotManifest>(manifestBytes);
+        if (manifest.FormatVersion != SnapshotFormat.Version)
+        {
+            throw new InvalidDataException(
+                $"Archive format version {manifest.FormatVersion} is not supported (expected {SnapshotFormat.Version}); restore is refused because a newer/older member layout cannot be interpreted safely.");
+        }
+
+        return manifest;
     }
 
     private static byte[] Require(IReadOnlyDictionary<string, byte[]> entries, string name) =>
@@ -291,7 +314,9 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
 
     private static byte[] Serialize<T>(T value) => JsonSerializer.SerializeToUtf8Bytes(value, Json);
 
-    private static T Deserialize<T>(byte[] bytes) => JsonSerializer.Deserialize<T>(bytes, Json)!;
+    private static T Deserialize<T>(byte[] bytes) =>
+        JsonSerializer.Deserialize<T>(bytes, Json)
+        ?? throw new InvalidDataException($"Archive member '{typeof(T).Name}' deserialized to null.");
 
     private static string BlobEntryName(string address) => $"blobs/{address}";
 }
