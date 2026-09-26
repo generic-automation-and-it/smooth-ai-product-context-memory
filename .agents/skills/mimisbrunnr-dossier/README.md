@@ -62,8 +62,8 @@ the same saved bundle — try a few focuses on one bundle without re-asking the 
 ## Focus: reading the same material for a different purpose
 
 A focus changes what gets emphasized and in what order — it never changes *what's in* the document.
-Anything a focus doesn't lead with is still there, just later, or listed as omitted with the reason
-`outside-focus`.
+Material a focus doesn't lead with is not reordered into the document — it is listed as omitted with the
+reason `outside-focus`.
 
 | Focus | Leads with |
 |---|---|
@@ -83,7 +83,7 @@ Anything a focus doesn't lead with is still there, just later, or listed as omit
   `provenance-cycle` and `equivalence-uncertain` on its own; `gap` and `contradiction` are the semantic
   judgement you supply (see `SKILL.md`), so the two commands above report neither — an empty result for
   those two means "not examined", not "none found".
-- **A reconciliation line** — present + merged + omitted always adds up to what the bundle actually
+- **A reconciliation line** — present + consolidated + omitted always adds up to what the bundle actually
   contained. If something's missing from the document, that line is where you'd catch it.
 
 ## Guarantees worth knowing about
@@ -111,8 +111,8 @@ python3 -B .agents/skills/mimisbrunnr-dossier/tests/run_tests.py
   you're changing the skill itself.
 - **`docs/hlds/005-contextual-export/`** — the design: why a dossier exists, the determinism boundary
   between bundle and dossier, the full findings taxonomy.
-- **`.agents/skills/mimisbrunnr-context-memory/`** — the capture skill and the only thing in this
-  system that can write. This skill only ever reads.
+- **`.agents/skills/mimisbrunnr-context-memory/`** — the capture skill and the only path in this skill
+  set that can write. This skill only ever reads.
 - **`.agents/skills/mimisbrunnr-understanding/`** — the sibling that loads and imports Understandings;
   this skill selects and composes them alongside every other kind of memory, but doesn't load or write
   them.

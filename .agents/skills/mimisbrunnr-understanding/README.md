@@ -1,5 +1,8 @@
 ## Switches
 
+The three operations are **never conflated** — a load is context-injection, an import is an opt-in
+write, a dump is an export. All switches are **off by default**.
+
 | Operation | Default | Writes to store? |
 |---|---|---|
 | `load` | context-injection | no |
