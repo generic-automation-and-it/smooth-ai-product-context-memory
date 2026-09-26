@@ -1,6 +1,6 @@
 # AGENTS.md — Understanding (BRD)
 
-AI Context: BRD for understanding. Updated: 2026-09-19
+AI Context: BRD for understanding. Updated: 2026-09-26
 
 ## TL;DR
 
@@ -66,5 +66,6 @@ design (one-model storage, load breadth split, portable export).
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-26 | BRD status promoted `Draft` → `Approved`: `BR-38` … `BR-45` delivered by HLD 007 (all LADRs/NFRs `Accepted`, L1 `UnderstandingTransferStoreTests`). §8 assumption 3 validated; value assumptions 1–2 carried open with reason — they need usage evidence (recall feedback on understanding-kind memories, HLD-004) and cannot close before the capability is in use. | HLD-007; BRD-003 §8 |
 | 2026-09-19 | Rebuilt for the one-model model: Understanding is a **kind** of memory (`kind = understanding`) stored in the existing models, not a separate artifact. Cross-repo reach via default scope and no repo anchor (no nullables). Added load-breadth (`--all` vs understanding-only) and the portable session export. Retracted the earlier vocabulary-rename requirement: memory is the correct name. `BR-45` is now the portable export, not a rename. | BRD-003 |
 | 2026-09-19 | Created — BRD-003 for understanding. | BRD-003 |

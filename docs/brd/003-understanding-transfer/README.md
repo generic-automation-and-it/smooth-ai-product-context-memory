@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Document** | Business Requirements Document |
-| **Status** | Draft |
+| **Status** | Approved — delivered by HLD 007; §8 value assumptions 1–2 carried open pending usage evidence |
 | **Owner** | Product owner / practitioner |
 | **Last updated** | 2026-09-26 |
 | **Extends** | [BRD 001 — Cross-product linked context memory](../001-context-memory/) |
