@@ -46,6 +46,7 @@ from that — nothing added, nothing quietly dropped.
 
 ```bash
 # 1. Ask the store for everything about this repo, following recorded links up to 3 hops out.
+mkdir -p .context/mimisbrunnr-dossier
 python3 -B .agents/skills/mimisbrunnr-dossier/scripts/dossier_composer.py \
   bundle --body '{"repo":"kingstown","widenDepth":3}' > .context/mimisbrunnr-dossier/bundle.json
 
