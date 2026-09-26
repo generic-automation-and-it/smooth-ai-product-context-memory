@@ -105,7 +105,7 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
 
     public Task<SnapshotArchive> ReadAsync(string archivePath, CancellationToken cancellationToken)
     {
-        Dictionary<string, byte[]> entries = ReadEntries(archivePath);
+        (var entries, _) = ReadEntries(archivePath);
 
         SnapshotManifest manifest = ReadAndGateManifest(entries);
 
@@ -129,8 +129,17 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
 
     public Task<SnapshotVerification> VerifyAsync(string archivePath, CancellationToken cancellationToken)
     {
-        Dictionary<string, byte[]> entries = ReadEntries(archivePath);
+        (var entries, var repeatedNames) = ReadEntries(archivePath);
         var findings = new List<SnapshotFinding>();
+
+        // The archive-side twin of the manifest's duplicate-entry guard: every repeated member name
+        // is a Corruption finding, so a duplicated member is reported rather than silently resolved
+        // last-wins. Reported, never thrown.
+        foreach (string repeated in repeatedNames)
+        {
+            findings.Add(new SnapshotFinding(SnapshotFindingKind.Corruption, repeated,
+                "Archive contains the same member name more than once."));
+        }
 
         SnapshotManifest manifest;
         if (!entries.TryGetValue(SnapshotEntryNames.Manifest, out byte[]? manifestBytes))
@@ -155,6 +164,17 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
         {
             findings.Add(new SnapshotFinding(SnapshotFindingKind.Corruption, SnapshotEntryNames.Manifest,
                 $"Archive format version {manifest.FormatVersion} is not supported (expected {SnapshotFormat.Version}); the member layout cannot be interpreted safely."));
+            return Task.FromResult(new SnapshotVerification(false, findings));
+        }
+
+        // A tampered manifest can name the format version correctly while carrying an explicitly
+        // null entry list or corpus count (an absent property deserialises the same way). Every
+        // branch below dereferences both, so reject the shape here instead of letting a
+        // NullReferenceException escape — verify reports, it never throws.
+        if (manifest.Entries is null || manifest.Counts is null)
+        {
+            findings.Add(new SnapshotFinding(SnapshotFindingKind.Corruption, SnapshotEntryNames.Manifest,
+                "Manifest is missing its entry list or corpus counts, so it cannot be verified."));
             return Task.FromResult(new SnapshotVerification(false, findings));
         }
 
@@ -225,7 +245,7 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
 
     public Task<SnapshotCapture> ReadCaptureAsync(string archivePath, CancellationToken cancellationToken)
     {
-        Dictionary<string, byte[]> entries = ReadEntries(archivePath);
+        (var entries, _) = ReadEntries(archivePath);
 
         // Gate on the manifest format before materialising any member layout, exactly as ReadAsync
         // does, so a newer-format archive is refused before its member bytes are deserialised.
@@ -270,7 +290,7 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
 
     public Task<byte[]> ReadBlobAsync(string archivePath, string address, CancellationToken cancellationToken)
     {
-        Dictionary<string, byte[]> entries = ReadEntries(archivePath);
+        (var entries, _) = ReadEntries(archivePath);
         return Task.FromResult(Require(entries, BlobEntryName(address)));
     }
 
@@ -346,20 +366,29 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
         }
     }
 
-    private static Dictionary<string, byte[]> ReadEntries(string archivePath)
+    private static (Dictionary<string, byte[]> Entries, IReadOnlyList<string> RepeatedNames) ReadEntries(string archivePath)
     {
         using FileStream stream = File.OpenRead(archivePath);
         using var tar = new TarReader(stream);
 
+        // A repeated member name is tamper, not a duplicate to collapse: every member except the
+        // manifest is hash-declared, so one name appearing twice means the archive carries a member
+        // the manifest never described. Collect the repeats alongside the map and let VerifyAsync
+        // report them; the readers below keep last-wins, which is the only ordering a corrupt
+        // archive is read in anyway.
         var entries = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+        var repeated = new List<string>();
         while (tar.GetNextEntry() is { } entry)
         {
             using var buffer = new MemoryStream();
             entry.DataStream?.CopyTo(buffer);
-            entries[entry.Name] = buffer.ToArray();
+            if (!entries.TryAdd(entry.Name, buffer.ToArray()))
+            {
+                repeated.Add(entry.Name);
+            }
         }
 
-        return entries;
+        return (entries, repeated);
     }
 
     private static bool TryBlobAddress(string entryName, out string address)
