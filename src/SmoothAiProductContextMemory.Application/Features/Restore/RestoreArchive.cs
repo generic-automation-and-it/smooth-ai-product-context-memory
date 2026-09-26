@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using FluentValidation;
 using Mediator;
 using Microsoft.Extensions.Logging;
@@ -45,6 +46,15 @@ public static class RestoreArchive
         {
             logger.LogInformation("Restore started");
 
+            // Verifying the archive is a prerequisite to any mutation, so a tampered archive (or one
+            // the verifier already rejects) is refused before either store is touched (R01).
+            SnapshotVerification verification = await archive.VerifyAsync(request.ArchivePath, cancellationToken);
+            if (!verification.IsClean)
+            {
+                throw new InvalidOperationException(
+                    $"Archive failed verification with {verification.Findings.Count} finding(s); restore refused so no mutation is attempted.");
+            }
+
             SnapshotCapture capture = await archive.ReadCaptureAsync(request.ArchivePath, cancellationToken);
             SnapshotArchive opened = await archive.ReadAsync(request.ArchivePath, cancellationToken);
 
@@ -71,7 +81,7 @@ public static class RestoreArchive
             // Bodies go first: content-addressed writes are idempotent, so a later database failure
             // leaves at worst unreferenced objects, never a committed database citing absent bodies.
             await RestoreObjectsAsync(opened, addresses, cancellationToken);
-            int objects = await CountPresentAsync(addresses, cancellationToken);
+            int objects = await VerifyRestoredObjectsAsync(addresses, cancellationToken);
             SnapshotCounts expected = opened.Manifest.Counts;
             if (objects != expected.Objects)
             {
@@ -117,20 +127,51 @@ public static class RestoreArchive
                 .Distinct(StringComparer.Ordinal)
                 .ToArray();
 
-        private async Task<int> CountPresentAsync(
+        private async Task<int> VerifyRestoredObjectsAsync(
             IReadOnlyList<string> addresses,
             CancellationToken cancellationToken)
         {
+            // Restore must prove each destination body hashes to its address and refuse a corrupted
+            // or mismatched pre-existing object, not merely confirm a key exists (R03). The S3 writer
+            // skips upload when the destination key already exists, so existence is not integrity.
             int present = 0;
             foreach (string address in addresses)
             {
-                if (await blobStorage.ExistsAsync(address, cancellationToken))
+                BlobContent? blob = await blobStorage.GetAsync(address, cancellationToken);
+                if (blob is null)
                 {
-                    present++;
+                    throw new InvalidOperationException(
+                        $"Restored body '{address}' is missing from the object store after restore; database left untouched.");
                 }
+
+                await using (blob)
+                {
+                    if (!ContentMatchesAddress(await ReadAllAsync(blob.Content, cancellationToken), address))
+                    {
+                        throw new InvalidOperationException(
+                            $"Restored body '{address}' does not hash to its content address; refusing to report success while the destination is corrupt.");
+                    }
+                }
+
+                present++;
             }
 
             return present;
+        }
+
+        private static bool ContentMatchesAddress(byte[] content, string address)
+        {
+            const char separator = '/';
+            string expected = address[(address.LastIndexOf(separator) + 1)..];
+            string actual = Convert.ToHexStringLower(SHA256.HashData(content));
+            return string.Equals(actual, expected, StringComparison.Ordinal);
+        }
+
+        private static async Task<byte[]> ReadAllAsync(Stream stream, CancellationToken cancellationToken)
+        {
+            await using var buffer = new MemoryStream();
+            await stream.CopyToAsync(buffer, cancellationToken);
+            return buffer.ToArray();
         }
 
         private async Task RestoreObjectsAsync(
