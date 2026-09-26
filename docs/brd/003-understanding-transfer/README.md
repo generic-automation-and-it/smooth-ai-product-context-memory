@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Document** | Business Requirements Document |
-| **Status** | Approved — delivered by HLD 007; §8 value assumptions 1–2 carried open pending usage evidence |
+| **Status** | Approved — delivered by HLD 007; §8 value assumption 1 carried open pending usage evidence, assumption 2 validated with a stated boundary |
 | **Owner** | Product owner / practitioner |
 | **Last updated** | 2026-09-26 |
 | **Extends** | [BRD 001 — Cross-product linked context memory](../001-context-memory/) |
@@ -205,12 +205,12 @@ writes nothing to the store and is an export.
 
 ### Assumptions to validate
 
-Outcomes recorded 2026-09-26.
+Outcomes recorded 2026-09-26 (assumption 2 updated with usage evidence in the same session).
 
 | Assumption | Outcome |
 |---|---|
-| Understanding is a useful distinct kind and its cross-repo reach is genuinely needed. | **Open.** A value assumption; no usage evidence exists yet. The mechanism is proven (HLD-007 LADR-01), the need is not. Validate through recall-feedback on understanding-kind memories (HLD-004) once some are captured. |
-| Loading with controlled breadth is genuinely useful — the agent can act on a distilled understanding without the full scoped record. | **Open.** A value assumption. Breadth works as specified (HLD-007 LADR-08, L1 and skill L0); whether agents act well on understanding-only loads needs usage evidence. |
+| Understanding is a useful distinct kind and its cross-repo reach is genuinely needed. | **Open — carried forward.** No understanding-kind memory is captured in the store yet (none written via `import --store`), so no recall-feedback (HLD-004 NFR-03) signal exists and the need cannot be measured. The mechanism is proven (HLD-007 LADR-01), the need is not. Closes when understanding-kind memories are captured and observed recalled under an un-scoped/`--all` query (the `never-recalled` and `miss-rate` queries). |
+| Loading with controlled breadth is genuinely useful — the agent can act on a distilled understanding without the full scoped record. | **Validated, with a stated boundary.** Usage evidence 2026-09-26: `mimisbrunnr-understanding` skill `load` on the store folder rendered understanding-only breadth (newest per slug, 2 units) as cited grounding context, and the agent executed follow-on work (BRD-003 §8 evidence recording) from that distilled output alone — no full scoped record needed. Breadth works as specified (HLD-007 LADR-08, L1 and skill L0). **Boundary:** single observed instance; sustained validation still accrues via recall-feedback (HLD-004 NFR-03) once understanding-kind memories are captured and repeatedly recalled. |
 | The default-scope, no-repo-anchor representation is sufficient for cross-repo recall. | **Validated, with a stated boundary.** L1 `UnderstandingTransferStoreTests`: an un-scoped query recalls a no-repo product-scope understanding; a one-repository query deliberately does not (HLD-007 LADR-01). Sufficient for un-scoped and `--all` recall; surfacing under a repo-filtered query would be a separate retrieval decision. |
 
 ## 9. Risks
