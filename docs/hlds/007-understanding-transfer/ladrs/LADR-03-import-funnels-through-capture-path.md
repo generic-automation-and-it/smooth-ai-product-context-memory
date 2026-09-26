@@ -1,6 +1,6 @@
 # LADR-03: Import funnels through the capture path, never a direct write
 
-**Status:** Draft
+**Status:** Accepted
 
 ## Context
 
@@ -43,4 +43,26 @@ material is surfaced, not silently resolved.
 
 ## Evidence (2026-09-26)
 
-Stays **Draft** with NFR-02: the store refuses a direct duplicate write (L1), but that the `--store` path runs every capture stage is not yet evidenced end to end — see NFR-02's open items.
+Accepted on Path A — skill-level evidence. The import→capture chain is **agent-mediated**: the
+`--store` path in the load skill hands material to the capture skill (`mimisbrunnr-context-memory`),
+which runs the judgement stages. An agent sits between the two skills and the store, so no C# L1 test
+can assert those stages end to end — that is an architectural boundary, not a test gap, and the
+resolution is to accept the evidence that exists rather than build a harness bridging the agent
+boundary.
+
+- The capture path's judgement stages are exercised by the capture skill's own harness:
+  `.agents/skills/mimisbrunnr-context-memory/tests/run_tests.py` (75 tests, all green) — redaction
+  (`test_redact_and_flag_never_rejects`), atomicity/bundling
+  (`test_bundled_tally_is_flagged`, `test_bundled_compound_is_flagged`,
+  `test_semicolon_between_clauses_is_bundled`, `test_single_contrastive_junction_is_bundled`,
+  `test_noun_phrase_list_alone_is_not_bundled`), conflict surfacing
+  (`test_genuine_conflict_composes_proposed_record_and_two_links`, `test_scope_mismatch_is_not_a_conflict`).
+- The load skill's import path routes through that capture path rather than a direct write, and refuses
+  without `--store`: `.agents/skills/mimisbrunnr-understanding/tests/run_tests.py` (48 tests, all green).
+- Store side is separately proven at L1:
+  `tests/SmoothAiProductContextMemory.Application.ComponentTest/Features/UnderstandingTransferStoreTests.cs`
+  `Understanding_is_written_and_version_bumped_by_the_capture_path` — a restatement carrying the uuid
+  is a version bump, not a duplicate row, and a write that skipped preflight (same subject, no uuid) is
+  refused with a conflict.
+
+

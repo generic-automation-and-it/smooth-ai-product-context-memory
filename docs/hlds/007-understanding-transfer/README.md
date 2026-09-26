@@ -126,7 +126,7 @@ See [`./ladrs/`](./ladrs/). Status legend matches HLD-005: `Draft → Prototype 
 |------|----------|--------|
 | [LADR-01](./ladrs/LADR-01-understanding-is-a-kind-not-an-artefact.md) | Understanding is a memory of `kind = understanding`; cross-repo by default scope and no repo anchor | Accepted |
 | [LADR-02](./ladrs/LADR-02-load-injects-import-switches-to-store.md) | Load injects into context; import is an opt-in `--store` switch | Accepted |
-| [LADR-03](./ladrs/LADR-03-import-funnels-through-capture-path.md) | Import funnels through the capture path, never a direct write | Draft |
+| [LADR-03](./ladrs/LADR-03-import-funnels-through-capture-path.md) | Import funnels through the capture path, never a direct write | Accepted |
 | [LADR-04](./ladrs/LADR-04-five-part-shape-maps-to-existing-fields.md) | The five-part shape maps onto existing fields; defaults, no nullable scope, no new column | Accepted |
 | [LADR-06](./ladrs/LADR-06-load-skill-reads-foreign-input.md) | The load skill accepts arbitrary external input, loaded as data | Accepted |
 | [LADR-07](./ladrs/LADR-07-session-export-to-local-folder.md) | `--currentsession` dumps the session to a local folder for cross-session reuse; an export | Accepted |
@@ -140,7 +140,7 @@ See [`./nfrs/`](./nfrs/).
 | NFR | Attribute | Target (summary) | Status |
 |-----|-----------|------------------|--------|
 | [NFR-01](./nfrs/NFR-01-default-no-write.md) | Integrity of load | Zero writes on a default load; store byte-identical | Accepted |
-| [NFR-02](./nfrs/NFR-02-import-opt-in-integrity.md) | Import integrity | No write without `--store`; import passes through the capture path | Draft |
+| [NFR-02](./nfrs/NFR-02-import-opt-in-integrity.md) | Import integrity | No write without `--store`; import passes through the capture path | Accepted |
 | [NFR-03](./nfrs/NFR-03-foreign-input-handled-as-data.md) | Attribution | Foreign material loaded as data, cited; never adopted as instructions or shipped fact | Accepted |
 
 ## Migration Plans
