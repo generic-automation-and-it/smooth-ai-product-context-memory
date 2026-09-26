@@ -113,6 +113,12 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
         }
 
         SnapshotManifest manifest = Deserialize<SnapshotManifest>(manifestBytes);
+        if (manifest.FormatVersion != SnapshotFormat.Version)
+        {
+            throw new InvalidDataException(
+                $"Archive format version {manifest.FormatVersion} is not supported (expected {SnapshotFormat.Version}); restore is refused because a newer/older member layout cannot be interpreted safely.");
+        }
+
         string[] names = entries.Keys.ToArray();
 
         return Task.FromResult(new SnapshotArchive(
@@ -152,6 +158,13 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
         {
             findings.Add(new SnapshotFinding(SnapshotFindingKind.Corruption, SnapshotEntryNames.Manifest,
                 "Manifest is not valid JSON."));
+            return Task.FromResult(new SnapshotVerification(false, findings));
+        }
+
+        if (manifest.FormatVersion != SnapshotFormat.Version)
+        {
+            findings.Add(new SnapshotFinding(SnapshotFindingKind.Corruption, SnapshotEntryNames.Manifest,
+                $"Archive format version {manifest.FormatVersion} is not supported (expected {SnapshotFormat.Version}); the member layout cannot be interpreted safely."));
             return Task.FromResult(new SnapshotVerification(false, findings));
         }
 
