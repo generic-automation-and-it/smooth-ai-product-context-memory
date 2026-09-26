@@ -98,9 +98,26 @@ public static class DossierSelection
                 cancellationToken);
         }
 
+        bool ticketSupplied = anchor.Ticket is { };
         HashSet<Guid>? ticketUuids = ticketResult is null
             ? null
             : new HashSet<Guid>(ticketResult.Items.Select(i => i.Uuid));
+
+        // A supplied ticket that resolves to no eligible identities (missing, hidden, or no eligible
+        // memories) must stay a no-match; broadening to an unrestricted search would silently select
+        // unrelated visible memories (R07 / H7).
+        if (ticketSupplied && ticketUuids is { Count: 0 })
+        {
+            return new DossierSelectionResult(
+                Selected: [],
+                AnchorCount: 0,
+                WidenedCount: 0,
+                EdgeCount: 0,
+                DepthLimitReached: false,
+                HiddenPathDropped: false,
+                LimitReached: false,
+                Edges: []);
+        }
 
         MemorySearchCriteria criteria = new()
         {
@@ -114,7 +131,7 @@ public static class DossierSelection
             CurrentOnly = true,
             AsOf = anchor.AsOf,
             Limit = MemorySearchDefaults.MaxLimit,
-            UuidFilter = ticketUuids is { Count: > 0 } ? [.. ticketUuids] : null,
+            UuidFilter = ticketSupplied ? [.. ticketUuids!] : null,
         };
 
         IReadOnlyList<CheapMemory> matched = await search.SearchAsync(criteria, cancellationToken);

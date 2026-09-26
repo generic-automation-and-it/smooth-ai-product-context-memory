@@ -90,7 +90,7 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
 
         var exclusions = new SnapshotExclusions(["recall_feedback"]);
 
-        SnapshotManifest manifest = new(SnapshotFormat.Version, entries, counts, exclusions);
+        SnapshotManifest manifest = new(SnapshotFormat.Version, entries, counts, exclusions, dangling, mismatched);
         await writeEntry(SnapshotEntryNames.Manifest, Serialize(manifest));
 
         int unreferenced = walk.UnreferencedObjects;
@@ -105,19 +105,9 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
 
     public Task<SnapshotArchive> ReadAsync(string archivePath, CancellationToken cancellationToken)
     {
-        Dictionary<string, byte[]> entries = ReadEntries(archivePath);
+        (var entries, _) = ReadEntries(archivePath);
 
-        if (!entries.TryGetValue(SnapshotEntryNames.Manifest, out byte[]? manifestBytes))
-        {
-            throw new InvalidDataException("Archive has no manifest.");
-        }
-
-        SnapshotManifest manifest = Deserialize<SnapshotManifest>(manifestBytes);
-        if (manifest.FormatVersion != SnapshotFormat.Version)
-        {
-            throw new InvalidDataException(
-                $"Archive format version {manifest.FormatVersion} is not supported (expected {SnapshotFormat.Version}); restore is refused because a newer/older member layout cannot be interpreted safely.");
-        }
+        SnapshotManifest manifest = ReadAndGateManifest(entries);
 
         string[] names = entries.Keys.ToArray();
 
@@ -139,8 +129,17 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
 
     public Task<SnapshotVerification> VerifyAsync(string archivePath, CancellationToken cancellationToken)
     {
-        Dictionary<string, byte[]> entries = ReadEntries(archivePath);
+        (var entries, var repeatedNames) = ReadEntries(archivePath);
         var findings = new List<SnapshotFinding>();
+
+        // The archive-side twin of the manifest's duplicate-entry guard: every repeated member name
+        // is a Corruption finding, so a duplicated member is reported rather than silently resolved
+        // last-wins. Reported, never thrown.
+        foreach (string repeated in repeatedNames)
+        {
+            findings.Add(new SnapshotFinding(SnapshotFindingKind.Corruption, repeated,
+                "Archive contains the same member name more than once."));
+        }
 
         SnapshotManifest manifest;
         if (!entries.TryGetValue(SnapshotEntryNames.Manifest, out byte[]? manifestBytes))
@@ -168,7 +167,30 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
             return Task.FromResult(new SnapshotVerification(false, findings));
         }
 
-        Dictionary<string, SnapshotArchiveEntry> byName = manifest.Entries.ToDictionary(e => e.Name, StringComparer.Ordinal);
+        // A tampered manifest can name the format version correctly while carrying an explicitly
+        // null entry list or corpus count (an absent property deserialises the same way). Every
+        // branch below dereferences both, so reject the shape here instead of letting a
+        // NullReferenceException escape — verify reports, it never throws.
+        if (manifest.Entries is null || manifest.Counts is null)
+        {
+            findings.Add(new SnapshotFinding(SnapshotFindingKind.Corruption, SnapshotEntryNames.Manifest,
+                "Manifest is missing its entry list or corpus counts, so it cannot be verified."));
+            return Task.FromResult(new SnapshotVerification(false, findings));
+        }
+
+        // The manifest is the only unhashed member, so its entry list is trusted input: a repeated
+        // name is tamper, not a duplicate to collapse. Report it rather than letting the duplicate
+        // key throw out of verify — the same "reports, it never throws" rule the corrupt-member
+        // branches in CheckCount follow.
+        var byName = new Dictionary<string, SnapshotArchiveEntry>(StringComparer.Ordinal);
+        foreach (SnapshotArchiveEntry entry in manifest.Entries)
+        {
+            if (!byName.TryAdd(entry.Name, entry))
+            {
+                findings.Add(new SnapshotFinding(SnapshotFindingKind.Corruption, entry.Name,
+                    "Manifest lists the same entry name more than once."));
+            }
+        }
 
         // Every manifest entry must be present and hash-identical in the archive.
         foreach (SnapshotArchiveEntry expected in manifest.Entries)
@@ -206,12 +228,28 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
 
         ReconcileCounts(manifest, entries, findings);
 
+        if (manifest.DanglingReferences > 0)
+        {
+            findings.Add(new SnapshotFinding(SnapshotFindingKind.CaptureTimeDefect, null,
+                $"Archive recorded {manifest.DanglingReferences} dangling reference(s) at capture; those bodies were never archived, so this archive cannot restore cleanly."));
+        }
+
+        if (manifest.MismatchedBodies > 0)
+        {
+            findings.Add(new SnapshotFinding(SnapshotFindingKind.CaptureTimeDefect, null,
+                $"Archive recorded {manifest.MismatchedBodies} mismatched blob body/bodies at capture; the stored body disagreed with the database-cited address."));
+        }
+
         return Task.FromResult(new SnapshotVerification(findings.Count == 0, findings));
     }
 
     public Task<SnapshotCapture> ReadCaptureAsync(string archivePath, CancellationToken cancellationToken)
     {
-        Dictionary<string, byte[]> entries = ReadEntries(archivePath);
+        (var entries, _) = ReadEntries(archivePath);
+
+        // Gate on the manifest format before materialising any member layout, exactly as ReadAsync
+        // does, so a newer-format archive is refused before its member bytes are deserialised.
+        _ = ReadAndGateManifest(entries);
 
         var capture = new SnapshotCapture(
             Deserialize<Initiative[]>(Require(entries, SnapshotEntryNames.Initiatives)),
@@ -228,6 +266,23 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
         return Task.FromResult(capture);
     }
 
+    private static SnapshotManifest ReadAndGateManifest(IReadOnlyDictionary<string, byte[]> entries)
+    {
+        if (!entries.TryGetValue(SnapshotEntryNames.Manifest, out byte[]? manifestBytes))
+        {
+            throw new InvalidDataException("Archive has no manifest.");
+        }
+
+        SnapshotManifest manifest = Deserialize<SnapshotManifest>(manifestBytes);
+        if (manifest.FormatVersion != SnapshotFormat.Version)
+        {
+            throw new InvalidDataException(
+                $"Archive format version {manifest.FormatVersion} is not supported (expected {SnapshotFormat.Version}); restore is refused because a newer/older member layout cannot be interpreted safely.");
+        }
+
+        return manifest;
+    }
+
     private static byte[] Require(IReadOnlyDictionary<string, byte[]> entries, string name) =>
         entries.TryGetValue(name, out byte[]? content)
             ? content
@@ -235,7 +290,7 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
 
     public Task<byte[]> ReadBlobAsync(string archivePath, string address, CancellationToken cancellationToken)
     {
-        Dictionary<string, byte[]> entries = ReadEntries(archivePath);
+        (var entries, _) = ReadEntries(archivePath);
         return Task.FromResult(Require(entries, BlobEntryName(address)));
     }
 
@@ -244,6 +299,15 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
         IReadOnlyDictionary<string, byte[]> entries,
         ICollection<SnapshotFinding> findings)
     {
+        // Every corpus count the manifest records must match what the archive actually holds; an
+        // altered manifest count on an untouched archive must be caught here (R02).
+        CheckCount(entries, SnapshotEntryNames.Memories, manifest.Counts.Memories, "memory", findings);
+        CheckCount(entries, SnapshotEntryNames.MemoryVersions, manifest.Counts.Versions, "memory version", findings);
+        CheckCount(entries, SnapshotEntryNames.Vertices, manifest.Counts.Vertices, "graph vertex", findings);
+        CheckCount(entries, SnapshotEntryNames.Edges, manifest.Counts.Edges, "graph edge", findings);
+        CheckCount(entries, SnapshotEntryNames.TicketVertices, manifest.Counts.TicketVertices, "ticket vertex", findings);
+        CheckCount(entries, SnapshotEntryNames.TicketEdges, manifest.Counts.TicketEdges, "ticket edge", findings);
+
         int objects = 0;
         foreach (string name in entries.Keys)
         {
@@ -260,20 +324,71 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
         }
     }
 
-    private static Dictionary<string, byte[]> ReadEntries(string archivePath)
+    private static void CheckCount(
+        IReadOnlyDictionary<string, byte[]> entries,
+        string entryName,
+        int expected,
+        string label,
+        ICollection<SnapshotFinding> findings)
+    {
+        if (!entries.TryGetValue(entryName, out byte[]? content))
+        {
+            findings.Add(new SnapshotFinding(SnapshotFindingKind.CountMismatch, entryName,
+                $"{label} entry is absent from the archive; the manifest claims {expected}."));
+            return;
+        }
+
+        // The member entries are serialized JSON arrays; count the elements without binding to the
+        // concrete entity shape so verify stays independent of the model. A member already flagged
+        // corrupt above may not parse at all, so an unparseable or non-array member becomes a
+        // finding naming it rather than an exception: verify reports, it never throws.
+        try
+        {
+            using var document = JsonDocument.Parse(content);
+            if (document.RootElement.ValueKind is not JsonValueKind.Array)
+            {
+                findings.Add(new SnapshotFinding(SnapshotFindingKind.Corruption, entryName,
+                    $"{label} entry is not a JSON array, so its element count cannot be reconciled against the manifest."));
+                return;
+            }
+
+            int actual = document.RootElement.GetArrayLength();
+            if (actual != expected)
+            {
+                findings.Add(new SnapshotFinding(SnapshotFindingKind.CountMismatch, entryName,
+                    $"{label} count in archive ({actual}) does not match the manifest ({expected})."));
+            }
+        }
+        catch (JsonException)
+        {
+            findings.Add(new SnapshotFinding(SnapshotFindingKind.Corruption, entryName,
+                $"{label} entry is not valid JSON, so its element count cannot be reconciled against the manifest."));
+        }
+    }
+
+    private static (Dictionary<string, byte[]> Entries, IReadOnlyList<string> RepeatedNames) ReadEntries(string archivePath)
     {
         using FileStream stream = File.OpenRead(archivePath);
         using var tar = new TarReader(stream);
 
+        // A repeated member name is tamper, not a duplicate to collapse: every member except the
+        // manifest is hash-declared, so one name appearing twice means the archive carries a member
+        // the manifest never described. Collect the repeats alongside the map and let VerifyAsync
+        // report them; the readers below keep last-wins, which is the only ordering a corrupt
+        // archive is read in anyway.
         var entries = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+        var repeated = new List<string>();
         while (tar.GetNextEntry() is { } entry)
         {
             using var buffer = new MemoryStream();
             entry.DataStream?.CopyTo(buffer);
-            entries[entry.Name] = buffer.ToArray();
+            if (!entries.TryAdd(entry.Name, buffer.ToArray()))
+            {
+                repeated.Add(entry.Name);
+            }
         }
 
-        return entries;
+        return (entries, repeated);
     }
 
     private static bool TryBlobAddress(string entryName, out string address)
@@ -291,7 +406,9 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
 
     private static byte[] Serialize<T>(T value) => JsonSerializer.SerializeToUtf8Bytes(value, Json);
 
-    private static T Deserialize<T>(byte[] bytes) => JsonSerializer.Deserialize<T>(bytes, Json)!;
+    private static T Deserialize<T>(byte[] bytes) =>
+        JsonSerializer.Deserialize<T>(bytes, Json)
+        ?? throw new InvalidDataException($"Archive member '{typeof(T).Name}' deserialized to null.");
 
     private static string BlobEntryName(string address) => $"blobs/{address}";
 }
