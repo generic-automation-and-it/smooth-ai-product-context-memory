@@ -158,7 +158,19 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
             return Task.FromResult(new SnapshotVerification(false, findings));
         }
 
-        Dictionary<string, SnapshotArchiveEntry> byName = manifest.Entries.ToDictionary(e => e.Name, StringComparer.Ordinal);
+        // The manifest is the only unhashed member, so its entry list is trusted input: a repeated
+        // name is tamper, not a duplicate to collapse. Report it rather than letting the duplicate
+        // key throw out of verify — the same "reports, it never throws" rule the corrupt-member
+        // branches in CheckCount follow.
+        var byName = new Dictionary<string, SnapshotArchiveEntry>(StringComparer.Ordinal);
+        foreach (SnapshotArchiveEntry entry in manifest.Entries)
+        {
+            if (!byName.TryAdd(entry.Name, entry))
+            {
+                findings.Add(new SnapshotFinding(SnapshotFindingKind.Corruption, entry.Name,
+                    "Manifest lists the same entry name more than once."));
+            }
+        }
 
         // Every manifest entry must be present and hash-identical in the archive.
         foreach (SnapshotArchiveEntry expected in manifest.Entries)

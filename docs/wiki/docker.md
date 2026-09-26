@@ -277,7 +277,7 @@ binaries, not one command plus a flag:
 
 ```bash
 scripts/stop-dev-stack.sh    # remove mimisbrunnr-{postgres,blob-well,seq,host}; keep named volumes
-scripts/reset-dev-stack.sh   # same, then destroy mimisbrunnr-{postgres,blob-well,seq}-data
+scripts/reset-dev-stack.sh   # same, then destroy mimisbrunnr-{postgres,blob-well,seq}-data and mimisbrunnr-host-context
 ```
 
 `reset-dev-stack.sh` has no prompt. Choosing it **is** the explicit ask — it
