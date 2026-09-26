@@ -47,7 +47,7 @@ flowchart LR
 
 ## Architecture Decisions
 
-See [./ladrs/](./ladrs/). Accepted: LADR-01, 02, 04, 06, 07, 08, 09. Draft: LADR-03, held with NFR-02 until the capture stages on the import path are evidenced end to end.
+See [./ladrs/](./ladrs/). Accepted: LADR-01, 02, 03, 04, 06, 07, 08, 09. Draft: none — NFR-02 accepted 2026-09-26, releasing LADR-03.
 
 ## Key Behaviors
 
@@ -117,6 +117,7 @@ See [./ladrs/](./ladrs/). Accepted: LADR-01, 02, 04, 06, 07, 08, 09. Draft: LADR
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-26 | Review fixes for the NFR-02/LADR-03 promotion: the decision summary listed LADR-03 as Draft (contradicting its own file and the changelog row above); NFR-02's `Verification` still prescribed the two L1 end-to-end import tests the new Evidence section rules unreachable, so both bullets now carry the accepted deviation; and the store-side Evidence bullet credited the L1 test with closing "no write without `--store`" although `UnderstandingTransferStoreTests` drives `SetMemories.Handler` directly and never sees the skill switch — that criterion belongs to the load harness, as already mapped. | NFR-02, LADR-03 |
 | 2026-09-26 | NFR-02 and LADR-03 promoted `Draft` → `Accepted` via Path A (skill-level evidence). The import→capture chain is agent-mediated — the load skill's `--store` path hands material to the capture skill, and an agent sits between the skills and the store — so no C# L1 test can assert redaction/atomicity/conflict-surfacing end to end. Accepted instead: the capture skill's harness (`.agents/skills/mimisbrunnr-context-memory/tests/run_tests.py`, 75 tests) exercises those judgement stages, the load skill's harness (48 tests) proves the import path routes through the capture path and refuses without `--store`, and L1 `UnderstandingTransferStoreTests` covers the store side. Cross-language harness (Path B) rejected as duplicative. | NFR-02, LADR-03 |
 | 2026-09-26 | Closure evidence: L1 store-level tests added (`UnderstandingTransferStoreTests`). LADR-01/02/04/06/07/08 and NFR-01/03 promoted `Draft` → `Accepted`, each with an Evidence section. NFR-02 and LADR-03 stay `Draft`: redaction/atomicity/conflict surfacing are capture-skill judgement stages no L1 test can assert end to end. NFR-01 scope boundary recorded — `recall_feedback` telemetry is outside it. BRD-003 §8 outcomes recorded (one validated, two value assumptions carried open). HLD and BRD-003 status stay `Draft` until NFR-02 closes. | NFR-01, NFR-02, NFR-03; BR-40, BR-41 |
 | 2026-09-24 | LADR-09 added: load/import read the `ai-understanding` `.understanding.md` format and store folders (newest version per slug) as structured input instead of foreign prose. LADR-04 vocabulary amended trigger/knowledge → question/answer. LADR-07 amended: the session dump is redacted before write and refused if the redactor cannot run. | LADR-04, LADR-07, LADR-09 |

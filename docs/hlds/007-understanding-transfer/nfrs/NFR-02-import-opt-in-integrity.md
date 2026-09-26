@@ -19,9 +19,11 @@ being written directly:
 - **Skill-level test** — assert the default load exposes no write, and that the `--store` path calls the
   capture path's pre-write stages (redact, dedup, atomicity) rather than a direct `set`.
 - **L1** — import a foreign document containing a bundled fact, a secret and a restatement; assert the
-  store ends with an atomic split, a redacted blob, and a version bump, not a raw duplicate.
+  store ends with an atomic split, a redacted blob, and a version bump, not a raw duplicate. Not
+  achievable at L1 without a cross-language harness — accepted deviation, see Evidence.
 - **L1** — import material that proposes a position contradicting a stored fact; assert a genuine
-  conflict is reported and unresolved.
+  conflict is reported and unresolved. Same accepted deviation: conflict surfacing is a capture-skill
+  judgement stage, evidenced at skill level, see Evidence.
 
 ## Acceptance Criteria
 
@@ -63,8 +65,9 @@ evidence that exists rather than build a harness bridging the agent boundary (th
   `tests/SmoothAiProductContextMemory.Application.ComponentTest/Features/UnderstandingTransferStoreTests.cs`
   `Understanding_is_written_and_version_bumped_by_the_capture_path` — a restatement carrying the uuid is
   a version bump, not a duplicate row, and a write that skipped preflight (same subject, no uuid) is
-  refused with a conflict. This closes the "no write without `--store`", "restatement is a version bump",
-  and "capture path's full judgement" criteria at the store boundary.
+  refused with a conflict. This closes the "restatement is a version bump" and "capture path's full
+  judgement" criteria at the store boundary; the `--store` opt-in itself is a skill switch the store
+  never sees, and is closed by the load harness above.
 - **Scope boundary:** "no secret reaches the blob or DB" and "a bundled fact is split" are asserted at
   the skill level as redact/bundle-flag stages; the case where the secret or bundle is produced by the
   agent's judgement rather than by the skill is, by design, outside any automated test's reach.
