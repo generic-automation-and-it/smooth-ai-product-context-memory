@@ -100,18 +100,6 @@ public sealed class UnderstandingTransferStoreTests(AspireFixture aspire) : Hand
     }
 
     [Fact]
-    public void Kind_vocabulary_stays_open()
-    {
-        var validator = new SetMemories.Validator();
-        Guid group = Guid.NewGuid();
-
-        validator.Validate(Write(group, "Subject", "Answer")).IsValid.ShouldBeTrue();
-        SetMemories.Request unlisted = Write(group, "Subject", "Answer");
-        unlisted = unlisted with { Items = [unlisted.Items[0] with { Kind = UnregisteredKind }] };
-        validator.Validate(unlisted).IsValid.ShouldBeTrue();
-    }
-
-    [Fact]
     public async Task Cross_repo_reach_comes_from_default_scope_and_no_repo_anchor()
     {
         Seeded seeded = await SeedAsync();
@@ -282,22 +270,22 @@ public sealed class UnderstandingTransferStoreTests(AspireFixture aspire) : Hand
             groupUuid,
             [
                 new SetMemories.MemoryWrite(
-                    uuid,
-                    "Name",
-                    description,
-                    statement,
-                    "Why",
-                    kind,
-                    ["transfer"],
-                    [SharedTag],
-                    MemoryVersion.MemoryVersionStatus.Approved,
-                    80,
-                    "blob-body",
-                    null,
-                    DateTimeOffset.UtcNow.AddDays(-1),
-                    null,
-                    "test-model",
-                    "prompt-1")
+                    Uuid: uuid,
+                    Name: "Name",
+                    Description: description,
+                    Statement: statement,
+                    ContentSummary: "Why",
+                    Kind: kind,
+                    Facets: ["transfer"],
+                    Tags: [SharedTag],
+                    Status: MemoryVersion.MemoryVersionStatus.Approved,
+                    Confidence: 80,
+                    Content: "blob-body",
+                    Sources: null,
+                    ValidFrom: DateTimeOffset.UtcNow.AddDays(-1),
+                    ValidUntil: null,
+                    SummaryModel: "test-model",
+                    SummaryPromptVersion: "prompt-1")
             ],
             null,
             null);

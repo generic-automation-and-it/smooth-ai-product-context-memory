@@ -233,6 +233,20 @@ public class SetMemoriesValidatorTests
         result.ShouldHaveValidationErrorFor("Links[0].Reason");
     }
 
+    /// <summary>The vocabulary of kinds is open: the understanding kind and any unregistered kind both validate.</summary>
+    [Fact]
+    public void Accepts_understanding_and_unregistered_kinds()
+    {
+        SetMemories.Request baseRequest = ValidRequest();
+        SetMemories.MemoryWrite baseItem = baseRequest.Items[0];
+
+        _validator.TestValidate(baseRequest with { Items = [baseItem with { Kind = "understanding" }] })
+            .ShouldNotHaveAnyValidationErrors();
+
+        _validator.TestValidate(baseRequest with { Items = [baseItem with { Kind = "never-registered-kind" }] })
+            .ShouldNotHaveAnyValidationErrors();
+    }
+
     private static SetMemories.Request ValidRequest() =>
         new(
             Guid.NewGuid(),
