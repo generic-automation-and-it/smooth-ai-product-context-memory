@@ -71,7 +71,7 @@ For each braindump message:
 - Summarize only the newly added information or the evolving theme.
 - Do not produce a full requirements spec unless asked.
 
-Questioning during Listen depends on the active switches (see Modes & Switches):
+Questioning during Listen depends on the active switches (see **Switches** above):
 
 - **Default (no switch):** Do not ask clarifying questions. Capture silently.
 - **`--oktoask` (sparse):** Ask only when an item is a genuine blocker or internally contradictory in a way

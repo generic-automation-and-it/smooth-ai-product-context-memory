@@ -41,7 +41,7 @@ coherent and the guardrails reinforce it well (e.g. *"if the user says just list
 if you notice issues"*).
 
 The default with **no switches** is still pure silent listen-first. Questioning and grounding are
-strictly opt-in via the switches documented below (and in [`SKILL.md`](./SKILL.md)).
+strictly opt-in via the switches documented at the top of this file (and in [`SKILL.md`](./SKILL.md)).
 
 ## Does "only listen, summarize at the end" reduce token usage?
 

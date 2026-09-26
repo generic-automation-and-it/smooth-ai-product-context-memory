@@ -19,7 +19,9 @@ memories yourself.
 - **Drafting a design doc or an HLD** — ground it in what's already been captured, with citations you
   can check.
 - **Auditing the store itself** — the findings report is the only place that surfaces contradictions
-  and gaps nobody happened to notice because they never asked the right question.
+  and gaps nobody happened to notice because they never asked the right question — and the `gap` and
+  `contradiction` entries in it are the semantic judgement you supply, not something the composer
+  derives on its own (see *What you get back* below).
 
 ## What it is not
 
@@ -45,16 +47,16 @@ from that — nothing added, nothing quietly dropped.
 ```bash
 # 1. Ask the store for everything about this repo, following recorded links up to 3 hops out.
 python3 -B .agents/skills/mimisbrunnr-dossier/scripts/dossier_composer.py \
-  bundle --body '{"repo":"kingstown","widenDepth":3}' > bundle.json
+  bundle --body '{"repo":"kingstown","widenDepth":3}' > .context/mimisbrunnr-dossier/bundle.json
 
 # 2. Turn that bundle into a readable document, angled for an architecture write-up.
 python3 -B .agents/skills/mimisbrunnr-dossier/scripts/dossier_composer.py \
-  compose --bundle bundle.json --focus architecture \
+  compose --bundle .context/mimisbrunnr-dossier/bundle.json --focus architecture \
   --out .context/mimisbrunnr-dossier/architecture.md
 ```
 
 Step 1 costs a request against the store; step 2 is free to re-run as many times as you like against
-the same saved `bundle.json` — try a few focuses on one bundle without re-asking the store.
+the same saved bundle — try a few focuses on one bundle without re-asking the store.
 
 ## Focus: reading the same material for a different purpose
 
@@ -75,10 +77,11 @@ Anything a focus doesn't lead with is still there, just later, or listed as omit
 
 - **The dossier** — an ordered document. Every substantive statement is cited to a specific memory's
   identity, version and capture time, so you can go verify anything that matters.
-- **Findings** — a short, bounded list of what's wrong with the material itself: a `gap` (something
-  the slice never addresses), a `contradiction` (two memories disagreeing, with no silent tie-break),
-  `stale` or `superseded-still-referenced` claims, a `weak-summary`, and a few more — always with the
-  evidence that produced them, never a vague "seems off."
+- **Findings** — a short, bounded list of what's wrong with the material itself. The composer derives
+  `no-links-in-slice`, `unattributed`, `stale`, `superseded-still-referenced`, `weak-summary`,
+  `provenance-cycle` and `equivalence-uncertain` on its own; `gap` and `contradiction` are the semantic
+  judgement you supply (see `SKILL.md`), so the two commands above report neither — an empty result for
+  those two means "not examined", not "none found".
 - **A reconciliation line** — present + merged + omitted always adds up to what the bundle actually
   contained. If something's missing from the document, that line is where you'd catch it.
 
