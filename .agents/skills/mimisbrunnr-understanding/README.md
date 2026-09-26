@@ -1,15 +1,15 @@
-# mimisbrunnr-understanding
-
-Load a Mímisbrunnr **Understanding** export — or any prior material — into a new or running agent's
-session context, and share context across sessions and repositories.
-
-Three operations:
+## Switches
 
 | Operation | Default | Writes to store? |
 |---|---|---|
 | `load` | context-injection | no |
 | `import --store` | opt-in | yes, through the capture path |
 | `dump --currentsession` | export to local folder | no |
+
+# mimisbrunnr-understanding
+
+Load a Mímisbrunnr **Understanding** export — or any prior material — into a new or running agent's
+session context, and share context across sessions and repositories.
 
 ## Usage
 

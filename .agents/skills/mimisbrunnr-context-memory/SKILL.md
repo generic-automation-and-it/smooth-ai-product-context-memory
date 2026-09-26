@@ -7,13 +7,7 @@ models:
   codex: gpt-5.5
 ---
 
-# Context Memory
-
-Get and set persistent, summarised, labelled context. The skill is the **sole authority** on the write path to the
-context-memory store. It performs the semantic work
-the database cannot express as constraints.
-
-## Modes & Switches
+## Switches
 
 All switches are **OFF by default**. With no switches the skill captures silently during work and
 writes nothing until an explicit `set` at the end-of-task checkpoint.
@@ -34,6 +28,12 @@ permission to write. Treat a request for both as an error: ask which one is mean
 batch many summary, keyword, dedup and link judgements into one invocation. Delegation may raise total
 token spend because each agent establishes context; its benefit is main-context longevity and a
 structural read boundary. `--dryrun` performs the same judgement work as write but no persistence.
+
+# Context Memory
+
+Get and set persistent, summarised, labelled context. The skill is the **sole authority** on the write path to the
+context-memory store. It performs the semantic work
+the database cannot express as constraints.
 
 ## Core Posture
 

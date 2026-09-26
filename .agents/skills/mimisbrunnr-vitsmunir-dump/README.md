@@ -1,3 +1,23 @@
+## Modes & cost trade-off
+
+The listen-first default can be relaxed with opt-in switches. They sit at very different price
+points — the cheap ones add conversational turns; the expensive ones re-enable the tool-result
+bloat the default was built to avoid.
+
+| Switch | Cost impact | Why |
+|--------|-------------|-----|
+| _(none)_ | **Baseline** | Pure silent listen-first. No questions, no tools. |
+| `--oktoask` (tool-free questions) | **Small** | A few extra output tokens (the question) + occasional extra turns (re-billing the growing prefix at cache-discounted rates). The big token sink — tool-result bloat — stays OFF. |
+| `--thinking` (liberal questioning) | **Moderate** | More questions → more round-trips → more turns re-billing context. Bounded by conversation length. |
+| `--oktoreaddocs` | **Large** | Reintroduces exactly what the skill avoids: file/code dumps injected into context and re-sent on every subsequent turn. The heaviest lever. |
+| `--oktowebsearch` | **Large** | Web-search result payloads are big and likewise re-billed each turn. |
+| `--all` | **Large** | Turns on every other switch, including both tool switches. Same cost class as `--oktoreaddocs` + `--oktowebsearch`. |
+| Conclusion liberal Q&A | **Small, one-time** | A single bounded burst before synthesis; often *net-negative* cost because it prevents a wrong-synthesis + rework loop. |
+
+**Bottom line:** `--oktoask` and `--thinking` cost little and can pay for themselves by catching
+misunderstandings before synthesis. `--oktoreaddocs`, `--oktowebsearch`, and `--all` re-enable the skill's
+*primary* savings as a cost — use them deliberately, not by default.
+
 # mimisbrunnr-vitsmunir-dump — Intent & Token-Usage Review
 
 > Companion notes to [`SKILL.md`](./SKILL.md). Explains what this skill is for and why
@@ -57,23 +77,3 @@ strictly opt-in via the switches documented below (and in [`SKILL.md`](./SKILL.m
 Compared to a default "helpful" agent that eagerly reads files, asks questions, and
 re-summarizes each turn, this skill should **reduce total tokens** — primarily by **deferring
 all tool use** and **brevity during capture**, not by shrinking context.
-
-## Modes & cost trade-off
-
-The listen-first default can be relaxed with opt-in switches. They sit at very different price
-points — the cheap ones add conversational turns; the expensive ones re-enable the tool-result
-bloat the default was built to avoid.
-
-| Switch | Cost impact | Why |
-|--------|-------------|-----|
-| _(none)_ | **Baseline** | Pure silent listen-first. No questions, no tools. |
-| `--oktoask` (tool-free questions) | **Small** | A few extra output tokens (the question) + occasional extra turns (re-billing the growing prefix at cache-discounted rates). The big token sink — tool-result bloat — stays OFF. |
-| `--thinking` (liberal questioning) | **Moderate** | More questions → more round-trips → more turns re-billing context. Bounded by conversation length. |
-| `--oktoreaddocs` | **Large** | Reintroduces exactly what the skill avoids: file/code dumps injected into context and re-sent on every subsequent turn. The heaviest lever. |
-| `--oktowebsearch` | **Large** | Web-search result payloads are big and likewise re-billed each turn. |
-| `--all` | **Large** | Turns on every other switch, including both tool switches. Same cost class as `--oktoreaddocs` + `--oktowebsearch`. |
-| Conclusion liberal Q&A | **Small, one-time** | A single bounded burst before synthesis; often *net-negative* cost because it prevents a wrong-synthesis + rework loop. |
-
-**Bottom line:** `--oktoask` and `--thinking` cost little and can pay for themselves by catching
-misunderstandings before synthesis. `--oktoreaddocs`, `--oktowebsearch`, and `--all` re-enable the skill's
-*primary* savings as a cost — use them deliberately, not by default.
