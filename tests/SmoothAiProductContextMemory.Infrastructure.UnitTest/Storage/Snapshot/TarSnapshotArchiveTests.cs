@@ -13,6 +13,10 @@ public class TarSnapshotArchiveTests
     private readonly TarSnapshotArchive _archive = new();
     private static readonly byte[] Body = Encoding.UTF8.GetBytes("Document body without newlines.");
 
+    // Matches the archive's own serialization (JsonSerializerDefaults.Web) so manifest
+    // round-trips in tests interpret property names the same way the writer produced them.
+    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+
     [Fact]
     public async Task WrittenArchive_VerifiesClean_And_RoundTripsCapture()
     {        string path = TempArchive();
@@ -143,7 +147,7 @@ public class TarSnapshotArchiveTests
         await _archive.WriteAsync(path, capture, walk, _ => Task.FromResult(Body), TestContext.Current.CancellationToken);
 
         Dictionary<string, byte[]> entries = ReadTar(path);
-        SnapshotManifest manifest = JsonSerializer.Deserialize<SnapshotManifest>(entries[SnapshotEntryNames.Manifest])!;
+        SnapshotManifest manifest = JsonSerializer.Deserialize<SnapshotManifest>(entries[SnapshotEntryNames.Manifest], Json)!;
         entries[SnapshotEntryNames.Manifest] = JsonSerializer.SerializeToUtf8Bytes(
             manifest with { FormatVersion = SnapshotFormat.Version + 1 });
         string newer = TempArchive();
@@ -153,6 +157,28 @@ public class TarSnapshotArchiveTests
             await _archive.ReadCaptureAsync(newer, TestContext.Current.CancellationToken));
         await Should.ThrowAsync<InvalidDataException>(async () =>
             await _archive.ReadAsync(newer, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task Verify_Detects_AlteredManifestCount()
+    {
+        // An altered manifest count on an untouched archive must be caught (R02). Verify reconciles
+        // every counted corpus row against the archive, not just the blob/object count.
+        string path = TempArchive();
+        string address = Sha256ContentAddress.Compute(Body);
+        (SnapshotCapture capture, SnapshotWalkResult walk) = Capture(address, SnapshotBlobState.Ok);
+        await _archive.WriteAsync(path, capture, walk, _ => Task.FromResult(Body), TestContext.Current.CancellationToken);
+
+        Dictionary<string, byte[]> entries = ReadTar(path);
+        SnapshotManifest manifest = JsonSerializer.Deserialize<SnapshotManifest>(entries[SnapshotEntryNames.Manifest], Json)!;
+        entries[SnapshotEntryNames.Manifest] = JsonSerializer.SerializeToUtf8Bytes(
+            manifest with { Counts = manifest.Counts with { Memories = 99999 } });
+        string tampered = TempArchive();
+        WriteTar(tampered, entries);
+
+        SnapshotVerification verification = await _archive.VerifyAsync(tampered, TestContext.Current.CancellationToken);
+        verification.IsClean.ShouldBeFalse();
+        verification.Findings.ShouldContain(f => f.Kind == SnapshotFindingKind.CountMismatch);
     }
 
     [Fact]

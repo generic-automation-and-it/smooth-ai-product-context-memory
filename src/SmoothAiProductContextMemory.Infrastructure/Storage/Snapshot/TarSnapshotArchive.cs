@@ -267,6 +267,15 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
         IReadOnlyDictionary<string, byte[]> entries,
         ICollection<SnapshotFinding> findings)
     {
+        // Every corpus count the manifest records must match what the archive actually holds; an
+        // altered manifest count on an untouched archive must be caught here (R02).
+        CheckCount(entries, SnapshotEntryNames.Memories, manifest.Counts.Memories, "memory", findings);
+        CheckCount(entries, SnapshotEntryNames.MemoryVersions, manifest.Counts.Versions, "memory version", findings);
+        CheckCount(entries, SnapshotEntryNames.Vertices, manifest.Counts.Vertices, "graph vertex", findings);
+        CheckCount(entries, SnapshotEntryNames.Edges, manifest.Counts.Edges, "graph edge", findings);
+        CheckCount(entries, SnapshotEntryNames.TicketVertices, manifest.Counts.TicketVertices, "ticket vertex", findings);
+        CheckCount(entries, SnapshotEntryNames.TicketEdges, manifest.Counts.TicketEdges, "ticket edge", findings);
+
         int objects = 0;
         foreach (string name in entries.Keys)
         {
@@ -281,6 +290,31 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
             findings.Add(new SnapshotFinding(SnapshotFindingKind.CountMismatch, null,
                 $"Object count in archive ({objects}) does not match the manifest ({manifest.Counts.Objects})."));
         }
+    }
+
+    private static void CheckCount(
+        IReadOnlyDictionary<string, byte[]> entries,
+        string entryName,
+        int expected,
+        string label,
+        ICollection<SnapshotFinding> findings)
+    {
+        int actual = entries.TryGetValue(entryName, out byte[]? content)
+            ? DeserializeArrayCount(content)
+            : -1;
+        if (actual != expected)
+        {
+            findings.Add(new SnapshotFinding(SnapshotFindingKind.CountMismatch, null,
+                $"{label} count in archive ({actual}) does not match the manifest ({expected})."));
+        }
+    }
+
+    private static int DeserializeArrayCount(byte[] content)
+    {
+        // The member entries are serialized JSON arrays; count the elements without binding to the
+        // concrete entity shape so verify stays independent of the model.
+        using var document = JsonDocument.Parse(content);
+        return document.RootElement.GetArrayLength();
     }
 
     private static Dictionary<string, byte[]> ReadEntries(string archivePath)
