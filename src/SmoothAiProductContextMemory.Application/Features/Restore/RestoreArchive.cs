@@ -56,7 +56,7 @@ public static class RestoreArchive
             if (missing.Length > 0)
             {
                 throw new InvalidOperationException(
-                    $"Archive is missing blob entries for {missing.Length} referenced address(es).");
+                    $"Archive is missing {missing.Length} referenced blob entr(ies); restore is refused so the database is never left citing absent bodies. This is either a truncated/tampered archive or a dangling reference that was already unresolvable at capture (which verify reports as clean but cannot restore).");
             }
 
             // Refuse a non-empty target before writing anything to either store; the repository

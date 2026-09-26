@@ -48,7 +48,7 @@ public static class SnapshotPreflight
 
             return new Response(
                 metadata.LastSnapshotAt,
-                $"{age.TotalMinutes:F0} minutes ago",
+                FormatRecency(age),
                 metadata.Counts.Memories,
                 metadata.Counts.Versions,
                 metadata.Counts.Vertices,
@@ -56,6 +56,17 @@ public static class SnapshotPreflight
                 metadata.Counts.Objects,
                 metadata.DanglingReferences,
                 metadata.UnreferencedObjects);
+        }
+
+        // Scale to minutes/hours/days so the recency statement stays readable as the snapshot ages
+        // (raw minutes reads "10080 minutes ago" at a week). Clamp at zero: clock skew ahead of the
+        // capture time would otherwise render a negative age.
+        private static string FormatRecency(TimeSpan age)
+        {
+            if (age < TimeSpan.Zero) return "just now";
+            if (age.TotalHours < 1) return $"{(int)age.TotalMinutes} minutes ago";
+            if (age.TotalDays < 1) return $"{(int)age.TotalHours} hours ago";
+            return $"{(int)age.TotalDays} days ago";
         }
     }
 }
