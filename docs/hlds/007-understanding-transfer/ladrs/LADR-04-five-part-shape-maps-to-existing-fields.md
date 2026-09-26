@@ -1,6 +1,6 @@
 # LADR-04: The Understanding maps onto existing memory fields; defaults, no new column
 
-**Status:** Draft
+**Status:** Accepted
 
 ## Context
 
@@ -62,3 +62,7 @@ is made nullable, and no column is added.
 - Version semantics are unchanged; the current-version chain already gives the delta.
 - The `trigger`→`Description` mapping is the single judgement call; it is recorded here so it can be
   revisited if use demands a dedicated field.
+
+## Evidence (2026-09-26)
+
+L0 `ExportRendererTests.Understanding_kind_renders_with_all_five_parts`; L1 `tests/SmoothAiProductContextMemory.Application.ComponentTest/Features/UnderstandingTransferStoreTests.cs`: a restatement carrying the uuid is a version bump with exactly one current version (the existing `is_current` swap), no new column, and `kind` stays open vocabulary (an unlisted kind validates).

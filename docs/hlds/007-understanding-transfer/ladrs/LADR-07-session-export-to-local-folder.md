@@ -1,6 +1,6 @@
 # LADR-07: The current session dumps to a local folder for cross-session reuse
 
-**Status:** Draft
+**Status:** Accepted
 
 ## Context
 
@@ -56,3 +56,7 @@ the originating repo is the same.
 - **LADR-02** — the load side that consumes a dumped folder.
 - **NFR-01** — a session dump is an export and writes nothing to the store.
 - **BRD-003 BR-45**, **BRD-002** (§10 glossary "Session export").
+
+## Evidence (2026-09-26)
+
+Skill L0 `.agents/skills/mimisbrunnr-understanding/tests/run_tests.py`: the dump → load round trip, the discoverable folder name, refusal of the filesystem and repository roots, and fail-closed redaction.

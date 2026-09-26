@@ -1,6 +1,6 @@
 # NFR-01: Integrity of load — zero writes on a default load
 
-**Status:** Draft
+**Status:** Accepted
 
 ## Requirement
 
@@ -35,3 +35,7 @@ The guarantee is tied to the default: the load path has no write side effect. Wr
 
 Goal 2 (loading injects into context, writes nothing), LADR-02. `BR-41`, and `BRD-002`'s `BR-31`
 inheritance.
+
+## Evidence (2026-09-26)
+
+L1 `tests/SmoothAiProductContextMemory.Application.ComponentTest/Features/UnderstandingTransferStoreTests.cs` `Default_load_read_paths_write_nothing_to_any_store`: over a seeded slice (versioned understanding, repo-anchored decision, an edge, blobs, a registered label) it runs query at both breadths plus an unregistered facet and kind, the forensic export, and dossier bundle and preview, then asserts identical counts for all six entities, the identical current-version set, identical AGE vertex/edge counts, zero `SaveChanges` (interceptor count), zero blob stores (counting double), and the unregistered facet/kind still unregistered. The load client is file-only, so this is proven over the read paths that produce what a load consumes. **Scope boundary:** query records recall telemetry in `recall_feedback` (HLD-004 LADR-02) — a SQL-only table outside the six entities and excluded from backup/restore; it is not store content and is out of this NFR's scope. Skill L0 `.agents/skills/mimisbrunnr-understanding/tests/run_tests.py` covers the no-write default invocation.

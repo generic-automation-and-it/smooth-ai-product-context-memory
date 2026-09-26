@@ -6,7 +6,7 @@
 | **Owner** | generik0 |
 | **Tracker** | Understanding |
 | **Business authority** | [BRD-003 — Understanding](../../brd/003-understanding-transfer/) (`BR-38` … `BR-45`), extending [BRD-001](../../brd/001-context-memory/) |
-| **Last updated** | 2026-09-19 |
+| **Last updated** | 2026-09-26 |
 
 > Discovery / prototyping HLD. Delivers **intent + spec** — what we are building and why, the decisions
 > behind it, and the quality bar it must meet. No implementation plan; execution is tracked in the
@@ -124,13 +124,13 @@ See [`./ladrs/`](./ladrs/). Status legend matches HLD-005: `Draft → Prototype 
 
 | LADR | Decision | Status |
 |------|----------|--------|
-| [LADR-01](./ladrs/LADR-01-understanding-is-a-kind-not-an-artefact.md) | Understanding is a memory of `kind = understanding`; cross-repo by default scope and no repo anchor | Draft |
-| [LADR-02](./ladrs/LADR-02-load-injects-import-switches-to-store.md) | Load injects into context; import is an opt-in `--store` switch | Draft |
+| [LADR-01](./ladrs/LADR-01-understanding-is-a-kind-not-an-artefact.md) | Understanding is a memory of `kind = understanding`; cross-repo by default scope and no repo anchor | Accepted |
+| [LADR-02](./ladrs/LADR-02-load-injects-import-switches-to-store.md) | Load injects into context; import is an opt-in `--store` switch | Accepted |
 | [LADR-03](./ladrs/LADR-03-import-funnels-through-capture-path.md) | Import funnels through the capture path, never a direct write | Draft |
-| [LADR-04](./ladrs/LADR-04-five-part-shape-maps-to-existing-fields.md) | The five-part shape maps onto existing fields; defaults, no nullable scope, no new column | Draft |
-| [LADR-06](./ladrs/LADR-06-load-skill-reads-foreign-input.md) | The load skill accepts arbitrary external input, loaded as data | Draft |
-| [LADR-07](./ladrs/LADR-07-session-export-to-local-folder.md) | `--currentsession` dumps the session to a local folder for cross-session reuse; an export | Draft |
-| [LADR-08](./ladrs/LADR-08-load-breadth-is-a-filter.md) | Load breadth is a filter (`--all` union vs understanding-only); not two products | Draft |
+| [LADR-04](./ladrs/LADR-04-five-part-shape-maps-to-existing-fields.md) | The five-part shape maps onto existing fields; defaults, no nullable scope, no new column | Accepted |
+| [LADR-06](./ladrs/LADR-06-load-skill-reads-foreign-input.md) | The load skill accepts arbitrary external input, loaded as data | Accepted |
+| [LADR-07](./ladrs/LADR-07-session-export-to-local-folder.md) | `--currentsession` dumps the session to a local folder for cross-session reuse; an export | Accepted |
+| [LADR-08](./ladrs/LADR-08-load-breadth-is-a-filter.md) | Load breadth is a filter (`--all` union vs understanding-only); not two products | Accepted |
 | [LADR-09](./ladrs/LADR-09-load-reads-ai-understanding-files.md) | Load and import read the ai-understanding `.understanding.md` format (and store folders, newest version per slug) as structured input | Accepted |
 
 ## Non-Functional Requirements
@@ -139,9 +139,9 @@ See [`./nfrs/`](./nfrs/).
 
 | NFR | Attribute | Target (summary) | Status |
 |-----|-----------|------------------|--------|
-| [NFR-01](./nfrs/NFR-01-default-no-write.md) | Integrity of load | Zero writes on a default load; store byte-identical | Draft |
+| [NFR-01](./nfrs/NFR-01-default-no-write.md) | Integrity of load | Zero writes on a default load; store byte-identical | Accepted |
 | [NFR-02](./nfrs/NFR-02-import-opt-in-integrity.md) | Import integrity | No write without `--store`; import passes through the capture path | Draft |
-| [NFR-03](./nfrs/NFR-03-foreign-input-handled-as-data.md) | Attribution | Foreign material loaded as data, cited; never adopted as instructions or shipped fact | Draft |
+| [NFR-03](./nfrs/NFR-03-foreign-input-handled-as-data.md) | Attribution | Foreign material loaded as data, cited; never adopted as instructions or shipped fact | Accepted |
 
 ## Migration Plans
 

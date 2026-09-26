@@ -34,3 +34,11 @@ being written directly:
 ## Applies To
 
 Goal 3 (import is opt-in and goes through the capture path), LADR-02, LADR-03. `BR-43`.
+
+## Evidence and open items (2026-09-26)
+
+Status stays **Draft**.
+
+- **Met — store side:** L1 `tests/SmoothAiProductContextMemory.Application.ComponentTest/Features/UnderstandingTransferStoreTests.cs` `Understanding_is_written_and_version_bumped_by_the_capture_path` — a restatement carrying the uuid is a version bump, not a duplicate row, and a write that skipped preflight (same subject, no uuid) is refused with a conflict. Skill L0 `.agents/skills/mimisbrunnr-understanding/tests/run_tests.py`: no write and nothing emitted without `--store`.
+- **Open:** the redaction, atomicity-split and conflict-surfacing criteria are judgement stages in the capture skill (Python), not in the backend. The import → capture chain is mediated by the agent, so no L1 test can assert "a secret is redacted before the blob write" or "a bundled fact is split" end to end without a cross-language harness. Closing this needs either that harness or an explicit decision to accept skill-level evidence for those stages.
+

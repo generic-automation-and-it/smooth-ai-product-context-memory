@@ -5,7 +5,7 @@
 | **Document** | Business Requirements Document |
 | **Status** | Draft |
 | **Owner** | Product owner / practitioner |
-| **Last updated** | 2026-09-19 |
+| **Last updated** | 2026-09-26 |
 | **Extends** | [BRD 001 — Cross-product linked context memory](../001-context-memory/) |
 | **Related** | [HLD 007 — Understanding](../../hlds/007-understanding-transfer/) |
 
@@ -205,10 +205,13 @@ writes nothing to the store and is an export.
 
 ### Assumptions to validate
 
-- Understanding is a useful distinct kind and its cross-repo reach is genuinely needed.
-- Loading with controlled breadth is genuinely useful — i.e. the agent can act on a distilled
-  understanding without the full scoped record.
-- The default-scope, no-repo-anchor representation is sufficient for cross-repo recall.
+Outcomes recorded 2026-09-26.
+
+| Assumption | Outcome |
+|---|---|
+| Understanding is a useful distinct kind and its cross-repo reach is genuinely needed. | **Open.** A value assumption; no usage evidence exists yet. The mechanism is proven (HLD-007 LADR-01), the need is not. Validate through recall-feedback on understanding-kind memories (HLD-004) once some are captured. |
+| Loading with controlled breadth is genuinely useful — the agent can act on a distilled understanding without the full scoped record. | **Open.** A value assumption. Breadth works as specified (HLD-007 LADR-08, L1 and skill L0); whether agents act well on understanding-only loads needs usage evidence. |
+| The default-scope, no-repo-anchor representation is sufficient for cross-repo recall. | **Validated, with a stated boundary.** L1 `UnderstandingTransferStoreTests`: an un-scoped query recalls a no-repo product-scope understanding; a one-repository query deliberately does not (HLD-007 LADR-01). Sufficient for un-scoped and `--all` recall; surfacing under a repo-filtered query would be a separate retrieval decision. |
 
 ## 9. Risks
 
