@@ -6,14 +6,14 @@ ASP.NET Core composition root (Minimal API). Wires the application together and 
 
 ## Non-Negotiables
 
-- **Keep business logic out of Host.** Endpoints translate HTTP to a Mediator request and back; they contain no domain or orchestration logic. The `export` CLI is the same rule: parse argv, compose DI, dispatch `ExportStore` — no rendering.
+- **Keep business logic out of Host.** Endpoints translate HTTP to a Mediator request and back; they contain no domain or orchestration logic. The one-shot CLI verbs (`export`/`snapshot`/`verify`/`restore`) follow the same rule: parse argv, compose DI, dispatch a handler — no rendering.
 - **One endpoint per use case** under `Endpoints/`; cross-cutting composition (DI, middleware, observability, problem-details) lives in `Configuration/`.
 - **`Program` ends with `public partial class Program { }`** so integration tests can target it via `WebApplicationFactory<Program>`.
 - **References Application, Domain, and Infrastructure** — it is the only project that composes all layers.
 
 ## Key Behaviors
 
-- **CLI branch:** when the first argument is `export`, `Program.cs` does **not** build a `WebApplication`. It uses `Host.CreateApplicationBuilder` + `AddApplication` + `AddInfrastructure` and runs `ExportStore` once. No Kestrel, OpenAPI, or `DatabaseMigrationHostedService`. Missing schema fails the command; migrate is not a side effect of export.
+- **CLI branch:** when the first argument is one of `export`/`snapshot`/`verify`/`restore`, `Program.cs` does **not** build a `WebApplication`. It uses `Host.CreateApplicationBuilder` + `AddApplication` + `AddInfrastructure` and runs that verb's command once. No Kestrel, OpenAPI, or `DatabaseMigrationHostedService`. Each verb builds its own host inline (no `WebApplication`), so the HLD-006 non-negotiable that verify connects to no service holds by construction. Missing schema fails the command; migrate is not a side effect of these verbs.
 - **Local ports are `5141` (http) and `7141` (https).** The number is derived from the product name so it is stable and collision-unlikely against other local services: the ASCII bit string of `smooth-ai-product-context-memory` is 256 bits long and contains **141 set bits**, giving `5000 + 141`. Reproduce with `python3 -c "n='smooth-ai-product-context-memory'; print(5000 + ''.join(format(ord(c),'08b') for c in n).count('1'))"`. If the product is renamed, recompute rather than keeping the old number. The previous `5080`/`7080` pair collided with unrelated local containers.
 - Composition: `UseConfiguredSerilog()`, `AddServiceDefaults()`, OpenAPI, Scalar at `/scalar/v1`, ProblemDetails, `AddApplication`/`AddInfrastructure`, health checks, then endpoint mapping. Un-routed `/` still 404.
 - **Serilog is the only logging pipeline.** `UseConfiguredSerilog` reads `Logging:Serilog` (not a top-level `Serilog` section) and adds an async Seq sink when `ConnectionStrings:seq` is present; `SEQ_URI` is honoured only as an override. `Aspire.Hosting.Seq` publishes `ConnectionStrings:seq` and no `SEQ_URI` — reading only the latter is why Seq received nothing.
@@ -54,6 +54,7 @@ Approved release-image plan (2026-09-13):
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-26 | CLI-branch bullets updated to name all four one-shot verbs (`export`/`snapshot`/`verify`/`restore`) through the shared `Program.cs` dispatch, so the verify-connects-to-nothing non-negotiable is anchored for the `Cli/` folder. | /ai-review PR #106 |
 | 2026-09-19 | Read-capability enumeration extended with the two recall-feedback read surfaces (`never-recalled`, `miss-rate`); `reset` needs write. | HLD-004, PR #79 |
 | 2026-09-17 | OpenAPI schema IDs now use full nested CLR names, preventing vertical slices' repeated `Request`/`Response` names from colliding and exposing the wrong contract. | HLD-002 wire compatibility |
 | 2026-09-17 | Context routes now require distinct runtime read/write Bearer capabilities; public health/OpenAPI/Scalar remain unchanged. | HLD-002 NFR-04 |

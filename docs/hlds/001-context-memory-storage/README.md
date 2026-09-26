@@ -134,6 +134,6 @@ See [`./nfrs/`](./nfrs/).
 |-----|-----------|------------------|--------|
 | [NFR-01](./nfrs/NFR-01-integrity.md) | Integrity | Every stated constraint provably enforced or provably soft | Accepted |
 | [NFR-02](./nfrs/NFR-02-performance.md) | Performance | Compound retrieval index-served, no sequential scan | Accepted |
-| [NFR-03](./nfrs/NFR-03-recoverability.md) | Recoverability | Two stores restore to a mutually consistent state | Draft |
+| [NFR-03](./nfrs/NFR-03-recoverability.md) | Recoverability | Two stores restore to a mutually consistent state | Closed on HLD-006 acceptance |
 | [NFR-04](./nfrs/NFR-04-inspectability.md) | Inspectability | A human can read the store without a database client | Accepted |
 | [NFR-05](./nfrs/NFR-05-confidentiality.md) | Confidentiality | Content never logged; immutability implications stated | Accepted |

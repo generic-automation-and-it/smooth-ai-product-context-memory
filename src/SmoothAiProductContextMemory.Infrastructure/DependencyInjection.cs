@@ -4,10 +4,12 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Npgsql;
 using SmoothAiProductContextMemory.Application.Abstractions;
+using SmoothAiProductContextMemory.Application.Abstractions.Snapshot;
 using SmoothAiProductContextMemory.Application.Common.Persistence;
 using SmoothAiProductContextMemory.Infrastructure.Export;
 using SmoothAiProductContextMemory.Infrastructure.Persistence;
 using SmoothAiProductContextMemory.Infrastructure.Storage;
+using SmoothAiProductContextMemory.Infrastructure.Storage.Snapshot;
 
 namespace SmoothAiProductContextMemory.Infrastructure;
 
@@ -18,7 +20,18 @@ public static class DependencyInjection
         services.AddBlobStorage(configuration);
         services.AddPersistence(configuration);
         services.AddScoped<IMarkdownExportSink, FileSystemMarkdownExportSink>();
+        services.AddSnapshot(configuration);
         return services;
+    }
+
+    private static void AddSnapshot(this IServiceCollection services, IConfiguration configuration)
+    {
+        services
+            .AddOptions<SnapshotMetadataOptions>()
+            .Bind(configuration.GetSection(SnapshotMetadataOptions.SectionName));
+        services.AddSingleton<ISnapshotMetadataStore, FileSnapshotMetadataStore>();
+        services.AddSingleton<ISnapshotArchive, TarSnapshotArchive>();
+        services.AddScoped<ISnapshotRepository, NpgsqlSnapshotRepository>();
     }
 
     private static IServiceCollection AddPersistence(this IServiceCollection services, IConfiguration configuration)
@@ -69,7 +82,9 @@ public static class DependencyInjection
 
         services.AddSingleton<IValidateOptions<BlobStorageOptions>, BlobStorageOptionsValidator>();
         services.AddHttpClient(BlobStorageOptions.HttpClientName);
-        services.AddSingleton<IBlobStorage, S3BlobStorage>();
+        services.AddSingleton<S3BlobStorage>();
+        services.AddSingleton<IBlobStorage>(sp => sp.GetRequiredService<S3BlobStorage>());
+        services.AddSingleton<IBlobCatalog>(sp => sp.GetRequiredService<S3BlobStorage>());
 
         return services;
     }

@@ -16,6 +16,9 @@ public sealed class HostWebAppFixture : WebAppFixture<HostApp::Program>
     private readonly string _databaseName = $"host-integration-{Guid.NewGuid():N}";
     private readonly string _bucket = $"host-int-{Guid.NewGuid():N}";
 
+    /// <summary>Per-fixture scratch directory for snapshot archives and the preflight metadata file.</summary>
+    public string SnapshotDirectory { get; } = Path.Combine(Path.GetTempPath(), $"host-int-snapshots-{Guid.NewGuid():N}");
+
     protected override string DatabaseName => _databaseName;
 
     protected override bool RecreateDatabaseOnInitialize => true;
@@ -31,6 +34,8 @@ public sealed class HostWebAppFixture : WebAppFixture<HostApp::Program>
         overrides["BlobStorage:Bucket"] = _bucket;
         overrides["ApiAccess:ReadToken"] = ReadToken;
         overrides["ApiAccess:WriteToken"] = WriteToken;
+        overrides["Snapshot:Directory"] = SnapshotDirectory;
+        overrides["Snapshot:DestinationDirectory"] = SnapshotDirectory;
         return Task.CompletedTask;
     }
 

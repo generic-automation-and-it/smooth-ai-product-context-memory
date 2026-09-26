@@ -13,6 +13,13 @@ EF Core + PostgreSQL index over blob-stored content. **Six** entities: `Initiati
   instead. Both indexes are created by `20260914120000_AddGraphPropertyIndexes` and are invisible to the EF
   model snapshot, like every other graph object. Writing the wrong form is not a compile error and not a test
   failure — it is a plan regression, so check `EXPLAIN` (HLD-003 LADR-06).
+- **A node pattern's property map sits inside its own parens, never after them.** `MERGE (n:Memory {props})`
+  is one node pattern; `MERGE (n:Memory) {props}` is a syntax error at the AGE/Cypher parser, not a C# compile
+  error or a unit-test failure — it only surfaces against a real AGE session (an L1/component test or later).
+  When hand-building multi-line interpolated Cypher, render the actual string before trusting the source's
+  brace/paren layout by eye: a missing or misplaced closing brace inside a multi-line literal is invisible
+  when reading interpolated helper calls, and easy to mistake for a string-templating/escaping bug instead of
+  the plain paren/brace-placement typo it usually is.
 - **Domain entities carry no EF attributes** and reference nothing from `Microsoft.EntityFrameworkCore`; all mapping is fluent in `Persistence/Configurations/`.
 - **`MemoryVersion` and `GroupDescription` are append-only**, enforced by DB triggers. Never edit or delete a row in place — a correction is a new version with a higher version number.
 - **Every JSONB element carries its own `v` shape marker** (`{"v":1,"provider":"jira","key":"ACM-1","url":"..."}`). It is set in exactly one place — `JsonShapeDocument.Create`/base `V` property — and never hand-written. Do not bypass the typed model. Retrofitting is impossible.
@@ -161,7 +168,7 @@ is the current design authority, superseding HLD-003 LADR-02 before any ticket m
   Benchmark acceptance comes from the four explicit passes, not gated skips.
 
 - **L0** — `tests/SmoothAiProductContextMemory.Domain.UnitTest/` (`SlugTests`, `JsonShapeDocumentTests`, `EntityInvariantTests`); `tests/SmoothAiProductContextMemory.Infrastructure.UnitTest/` (`ModelShapeGuardTests`, `NpgsqlDataSourceFactoryTests`).
-- **L1** — `tests/SmoothAiProductContextMemory.Infrastructure.ComponentTest/Persistence/` against real PostgreSQL via `AspireFixture`, fresh migrated database per test (`PersistenceTestBase`). Relationship uniqueness/integrity contract: `LinkTests` (duplicate directed triple refused by `CreateAsync`, same pair different relations, opposite directions, trigger cascade inbound+outbound, group-delete orphan=0, mid-delete rollback, vertex identity-only, self-link persists at store, cross-group). AGE pool-recycle and cross-session visibility: `AgeFoundationTests`. NFR-02 relational one-hop numbers live in `docs/hlds/003-graph-edges-on-age/nfrs/NFR-02-one-hop-baseline.md`; the post-cutover AGE measurements and the baseline comparison are in `docs/hlds/003-graph-edges-on-age/nfrs/NFR-02-traversal-measurements.md`. Bounded traversal: `TraversalTests`. Benchmark: `Nfr02BenchmarkTests` (env-gated `SMOOTH_AGE_BENCH=1`).
+- **L1** — `tests/SmoothAiProductContextMemory.Infrastructure.ComponentTest/Persistence/` against real PostgreSQL via `AspireFixture`, fresh migrated database per test (`PersistenceTestBase`). Relationship uniqueness/integrity contract: `LinkTests` (duplicate directed triple refused by `CreateAsync`, same pair different relations, opposite directions, trigger cascade inbound+outbound, group-delete orphan=0, mid-delete rollback, vertex identity-only, self-link persists at store, cross-group). AGE pool-recycle and cross-session visibility: `AgeFoundationTests`. NFR-02 relational one-hop numbers live in `docs/hlds/003-graph-edges-on-age/nfrs/NFR-02-one-hop-baseline.md`; the post-cutover AGE measurements and the baseline comparison are in `docs/hlds/003-graph-edges-on-age/nfrs/NFR-02-traversal-measurements.md`. Bounded traversal: `TraversalTests`. Benchmark: `Nfr02BenchmarkTests` (env-gated `SMOOTH_AGE_BENCH=1`). HLD-006 snapshot/restore round trip: `SnapshotRestoreRoundTripTests` (reconciliation closes, `TICKET_PARENT` direction preserved, missing-blob negative control, non-empty refusal, dangling-edge rollback) plus the env-gated `SMOOTH_SNAPSHOT_BENCH=1` `SnapshotEvidenceTests` NFR-04 timing harness.
 
 ## Quality Constraints
 
@@ -174,6 +181,8 @@ is the current design authority, superseding HLD-003 LADR-02 before any ticket m
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-25 | Added L1 coverage for HLD-006: a snapshot→restore round-trip test (reconciliation closes, `TICKET_PARENT` direction preserved), a missing-blob negative control, and an empty-refusal test, plus the env-gated `SnapshotEvidenceTests` harness recording the NFR-04 snapshot timing (2.80 s at 1,000 memories/1,000 bodies). This surfaced and fixed two restore bugs: invalid vertex `MERGE (n:Memory) {props}` syntax and misplaced interpolation braces in the edge Cypher. | HLD-006 |
+| 2026-09-25 | Documented the node-pattern property-map placement rule (`MERGE (n:Label {props})`, never `MERGE (n:Label) {props}`) after HLD-006's snapshot-restore Cypher shipped with the latter and failed at the AGE parser, not at compile time. | HLD-006 |
 | 2026-09-20 | `SMOOTH_NFR_BENCH=1` `NfrEvidenceTests` added in the component test — env-gated evidence harness driving the shipped `QueryMemories.Handler` → `NpgsqlRecallFeedback`/`NpgsqlRecallFeedbackQuery` to verify NFR-01..03. Not part of the PR gate; mirror of the placement/recall-tuning evidence harnesses. | HLD-004 workstream 04 |
 | 2026-09-18 | `recall_feedback` table added — SQL-created, outside the six EF entities, no `append_only_guard` trigger, excluded from backup/restore, accessed via `IRecallFeedback`/`IRecallFeedbackQuery`. | HLD-004 LADR-02/03/04 |
 | 2026-09-17 | Serialized memory-edge duplicate check/create with a transaction advisory lock; batch digest now uses actual graph create outcomes. | HLD-002 LADR-05 |

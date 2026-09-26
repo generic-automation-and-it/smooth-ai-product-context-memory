@@ -1,6 +1,13 @@
 # NFR-03: Recoverability
 
-**Status:** Draft
+**Status:** Closed on HLD-006 acceptance (superseded by [HLD-006 NFR-02](../../../hlds/006-corpus-snapshot-and-restore/nfrs/NFR-02-consistency.md))
+
+> This Draft claim is closed by HLD-006's corpus snapshot and restore. Its "two stores restore to a
+> mutually consistent state" requirement is now HLD-006 NFR-02, whose snapshot artefact carries a
+> self-verifying manifest and whose restore ends in a printed reconciliation (rows, versions,
+> vertices, edges, objects, zero dangling references, bounded traversal). The prior operational
+> round-trip script (`scripts/verify-graph-restore.sh`) is superseded by the restore command's
+> built-in reconciliation.
 
 ## Requirement
 
