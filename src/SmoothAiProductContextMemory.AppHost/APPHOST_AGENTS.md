@@ -68,7 +68,7 @@ must remain isolated from the test fixture and development installation.
 - **Postgres and MinIO use persistent named volumes.** Dev data survives container restarts.
 - **`ContainerLifetime.Persistent` stays the default** on postgres/blob/seq. Captured memories and blobs must survive an AppHost exit. Do not change it to session lifetime to "fix" leftover containers — that is the supported teardown's job.
 - **Never glob `mimisbrunnr-*` for teardown.** That prefix also matches `mimisbrunnr-testcontainer-*` (TestFramework.Aspire). Stop and reset use an exact allowlist (`mimisbrunnr-postgres`, `mimisbrunnr-blob-well`, `mimisbrunnr-seq`, `mimisbrunnr-host`) plus the `com.docker.compose.project=smooth-mímisbrunnr` label (does not match `smooth-mímisbrunnr-testing`).
-- **Stop and reset are distinct binaries.** `scripts/stop-dev-stack.sh` removes the four allowlisted containers and leaves named volumes. `scripts/reset-dev-stack.sh` is the only volume-destroy path (`mimisbrunnr-postgres-data`, `mimisbrunnr-blob-well-data`, `mimisbrunnr-seq-data`). Do not add a `--volumes` flag to stop. There is no prompt on reset — choosing that command is the explicit ask.
+- **Stop and reset are distinct binaries.** `scripts/stop-dev-stack.sh` removes the four allowlisted containers and leaves named volumes. `scripts/reset-dev-stack.sh` is the only volume-destroy path (`mimisbrunnr-postgres-data`, `mimisbrunnr-blob-well-data`, `mimisbrunnr-seq-data`, `mimisbrunnr-host-context`). The `host-context` volume exists only in image mode and holds the Host container's `.context` snapshot archives; it must be in the allowlist or reset stops yielding an empty corpus. Do not add a `--volumes` flag to stop. There is no prompt on reset — choosing that command is the explicit ask.
 - **Postgres image is the AGE-bearing pin** `docker.io/apache/age:release_PG17_1.7.0` (Postgres 17 + AGE 1.7.0), not Aspire's `library/postgres:17.7`. Same major as the previous default, so the named volume is compatible. A major mismatch against `mimisbrunnr-postgres-data` refuses to start and looks like a broken image — drop that volume only if the major actually changed. Recreate `mimisbrunnr-postgres` once after the image pin so the persistent container is not still running the old image.
 - **Every dev container carries `com.docker.compose.project` / `com.docker.compose.service` labels**
   so Docker Desktop groups them under the `smooth-mímisbrunnr` project while keeping the explicit
@@ -163,7 +163,7 @@ Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgr
 - **Context:** An ambiguous `--volumes` / `--force` on a shared teardown can drop the captured corpus.
   That is a worse defect than leftover containers.
 - **Decision:** `scripts/stop-dev-stack.sh` (containers only) and `scripts/reset-dev-stack.sh`
-  (containers, then the three named volumes). Reset may call stop. No volume flag on stop. No prompt
+  (containers, then the four allowlisted named volumes). Reset may call stop. No volume flag on stop. No prompt
   on reset — the distinct command is the explicit ask.
 - **Consequences:** Two entry points to document. Historical orphan volumes from renames are out of
   both scripts.
@@ -230,6 +230,7 @@ Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgr
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-26 | `mimisbrunnr-host-context` added to the `reset-dev-stack.sh` volume allowlist and named in the "Stop and reset are distinct binaries" non-negotiable and LADR-001. The image-mode `host-context` volume was created but never destroyed, so the script's closing claim that the next start is an empty corpus was false once snapshot archives were persisted there (LADR-003 keeps these names in sync with the C# constants). | HLD-006 |
 | 2026-09-26 | The Host image now creates `/app/.context` (including the default `snapshots` subdir) owned by the non-root app user during build, so a default-user container can write the default snapshot and metadata paths without a pre-created host mount. | HLD-006 |
 | 2026-09-26 | The published Host container now gets a `host-context` volume mounted at `/app/.context`, so HTTP snapshots written to `.context/snapshots` survive a host-container restart/removal (and `stop-dev-stack.sh`, which keeps volumes) instead of living in the container's ephemeral writable layer. The project/working-tree mode already wrote to the host workspace. | HLD-006 |
 | 2026-09-24 | MinIO image moved to `cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1`: quay.io `minio/minio` stopped serving (repo returns 401, tag no longer active), so fresh pulls failed and the CI test host never created its blob container. Chainguard's free tier publishes only `:latest`, hence the digest pin. The image runs non-root and cannot write a volume the old root-run image created, so the dev blob container runs `--user 0:0`; existing `mimisbrunnr-blob-well` data keeps working (verified against a root-owned volume). | PR #99 |

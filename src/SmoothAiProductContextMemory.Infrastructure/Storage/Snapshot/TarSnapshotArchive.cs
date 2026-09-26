@@ -299,22 +299,39 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
         string label,
         ICollection<SnapshotFinding> findings)
     {
-        int actual = entries.TryGetValue(entryName, out byte[]? content)
-            ? DeserializeArrayCount(content)
-            : -1;
-        if (actual != expected)
+        if (!entries.TryGetValue(entryName, out byte[]? content))
         {
-            findings.Add(new SnapshotFinding(SnapshotFindingKind.CountMismatch, null,
-                $"{label} count in archive ({actual}) does not match the manifest ({expected})."));
+            findings.Add(new SnapshotFinding(SnapshotFindingKind.CountMismatch, entryName,
+                $"{label} entry is absent from the archive; the manifest claims {expected}."));
+            return;
         }
-    }
 
-    private static int DeserializeArrayCount(byte[] content)
-    {
         // The member entries are serialized JSON arrays; count the elements without binding to the
-        // concrete entity shape so verify stays independent of the model.
-        using var document = JsonDocument.Parse(content);
-        return document.RootElement.GetArrayLength();
+        // concrete entity shape so verify stays independent of the model. A member already flagged
+        // corrupt above may not parse at all, so an unparseable or non-array member becomes a
+        // finding naming it rather than an exception: verify reports, it never throws.
+        try
+        {
+            using var document = JsonDocument.Parse(content);
+            if (document.RootElement.ValueKind is not JsonValueKind.Array)
+            {
+                findings.Add(new SnapshotFinding(SnapshotFindingKind.Corruption, entryName,
+                    $"{label} entry is not a JSON array, so its element count cannot be reconciled against the manifest."));
+                return;
+            }
+
+            int actual = document.RootElement.GetArrayLength();
+            if (actual != expected)
+            {
+                findings.Add(new SnapshotFinding(SnapshotFindingKind.CountMismatch, entryName,
+                    $"{label} count in archive ({actual}) does not match the manifest ({expected})."));
+            }
+        }
+        catch (JsonException)
+        {
+            findings.Add(new SnapshotFinding(SnapshotFindingKind.Corruption, entryName,
+                $"{label} entry is not valid JSON, so its element count cannot be reconciled against the manifest."));
+        }
     }
 
     private static Dictionary<string, byte[]> ReadEntries(string archivePath)

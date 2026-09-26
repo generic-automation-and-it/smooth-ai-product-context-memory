@@ -19,6 +19,7 @@ Implements the contracts defined in Application — EF Core + PostgreSQL persist
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-26 | `TarSnapshotArchive` count reconciliation no longer throws on an unparseable or non-array corpus member: it emits a `Corruption` finding naming the member (matching the hash-mismatch finding) instead of letting `JsonException` escape `VerifyAsync`, so a corrupt member still returns a findings list rather than a raw stack trace from the `verify` verb. Count findings now carry the member name, as `SnapshotFinding` documents. | HLD-006 |
 | 2026-09-26 | `TarSnapshotArchive` verify now reconciles every manifest corpus count (memories, versions, graph vertices/edges, ticket vertices/edges) against the archive member element counts, not just the blob/object count, so an altered manifest count on an untouched archive is caught. | HLD-006 |
 | 2026-09-26 | `TarSnapshotArchive` records `DanglingReferences` and `MismatchedBodies` in the manifest and verify now reports an archive with either as non-clean, so a capture with an unresolvable reference no longer verifies clean but fails restore. `ReadCaptureAsync` now gates on the manifest format version before deserialising member layouts (matching `ReadAsync`), and `Deserialize<T>` returns a clean `InvalidDataException` instead of null-forgiving. | HLD-006 |
 | 2026-09-13 | `NpgsqlMemoryGraph` implements `IMemoryGraph`. `memory_link` dropped; `memory_graph_cascade` is the one delete path. | HLD-003 |
