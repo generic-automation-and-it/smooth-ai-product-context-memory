@@ -198,6 +198,25 @@ dotnet tool run reportgenerator \
   "-reporttypes:HtmlInline_AzurePipelines;Cobertura;TextSummary;MarkdownSummaryGithub" \
   || record_failure "Coverage report generation failed."
 
+# Coverage floor: a drop below it fails the gate, so the suite cannot quietly regress. Overridable
+# with COVERAGE_THRESHOLD; the value is a regression guard, not a target.
+coverage_threshold="${COVERAGE_THRESHOLD:-50}"
+summary_file="${coverage_directory}/Summary.txt"
+if [ -f "${summary_file}" ]; then
+  line_coverage="$(grep -oE 'Line coverage: [0-9.]+%' "${summary_file}" | grep -oE '[0-9.]+' | head -n 1)"
+  if [ -n "${line_coverage}" ]; then
+    if awk "BEGIN { exit !(${line_coverage} >= ${coverage_threshold}) }"; then
+      echo "Coverage OK: ${line_coverage}% (threshold ${coverage_threshold}%)."
+    else
+      record_failure "Line coverage ${line_coverage}% is below the ${coverage_threshold}% threshold."
+    fi
+  else
+    record_failure "Could not parse line coverage from ${summary_file}."
+  fi
+else
+  record_failure "Coverage summary file ${summary_file} is missing."
+fi
+
 if [ "${#failures[@]}" -gt 0 ]; then
   printf 'Aspire test with coverage failed:\n'
   printf ' - %s\n' "${failures[@]}"
