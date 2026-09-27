@@ -34,10 +34,7 @@ internal static class VerifyCommand
                     new VerifyArchive.Request(archivePath),
                     cancellationToken);
 
-                foreach (SnapshotFinding finding in response.Findings)
-                {
-                    Console.WriteLine($"  {finding.Kind}: {finding.EntryName} — {finding.Message}");
-                }
+                CliFindingRenderer.PrintFindings(response.Findings);
 
                 Console.WriteLine(
                     response.IsClean

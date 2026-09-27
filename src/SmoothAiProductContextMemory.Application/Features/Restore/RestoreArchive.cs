@@ -4,6 +4,7 @@ using Mediator;
 using Microsoft.Extensions.Logging;
 using SmoothAiProductContextMemory.Application.Abstractions;
 using SmoothAiProductContextMemory.Application.Abstractions.Snapshot;
+using SmoothAiProductContextMemory.Application.Common.Exceptions;
 using SmoothAiProductContextMemory.Domain.Entities;
 
 namespace SmoothAiProductContextMemory.Application.Features.Restore;
@@ -47,16 +48,22 @@ public static class RestoreArchive
             logger.LogInformation("Restore started");
 
             // Verifying the archive is a prerequisite to any mutation, so a tampered archive (or one
-            // the verifier already rejects) is refused before either store is touched (R01).
+            // the verifier already rejects) is refused before either store is touched (R01). The
+            // refusal carries the findings as payload so the operator learns which member failed;
+            // the message stays shape-only (NFR-05).
             SnapshotVerification verification = await archive.VerifyAsync(request.ArchivePath, cancellationToken);
             if (!verification.IsClean)
             {
-                throw new InvalidOperationException(
-                    $"Archive failed verification with {verification.Findings.Count} finding(s); restore refused so no mutation is attempted.");
+                throw new ArchiveVerificationFailedException(
+                    verification.Findings,
+                    ReferencedBlobFindingCount(verification.Findings));
             }
 
-            SnapshotCapture capture = await archive.ReadCaptureAsync(request.ArchivePath, cancellationToken);
+            // One open reads the members once and carries both the deserialised capture and the open
+            // archive — restore needs both, and reading them separately would materialise the tar
+            // twice (H13).
             SnapshotArchive opened = await archive.ReadAsync(request.ArchivePath, cancellationToken);
+            SnapshotCapture capture = opened.Capture;
 
             // Pre-validate every referenced blob body is present before any DB mutation, so a missing
             // entry fails the restore loudly with no partial success and no --force-on-retry (NFR-02).
@@ -66,7 +73,7 @@ public static class RestoreArchive
             if (missing.Length > 0)
             {
                 throw new InvalidOperationException(
-                    $"Archive is missing {missing.Length} referenced blob entr(ies); restore is refused so the database is never left citing absent bodies. This is either a truncated/tampered archive or a dangling reference that was already unresolvable at capture (which verify reports as clean but cannot restore).");
+                    $"Archive is missing {missing.Length} referenced blob entr(ies); restore is refused so the database is never left citing absent bodies. This is either a truncated/tampered archive, or the blob body was never archived because it was already unresolvable at capture.");
             }
 
             // Refuse a non-empty target before writing anything to either store; the repository
@@ -126,6 +133,15 @@ public static class RestoreArchive
                 .Cast<string>()
                 .Distinct(StringComparer.Ordinal)
                 .ToArray();
+
+        // Count of a verification's findings that concern a referenced blob body being absent or
+        // defective — the operand of the "M referenced blob(s) absent" part of the refusal shape.
+        private static int ReferencedBlobFindingCount(IReadOnlyList<SnapshotFinding> findings) =>
+            findings.Count(static f =>
+                f.Kind == SnapshotFindingKind.CaptureTimeDefect
+                || (f.EntryName is { } name
+                    && (name.StartsWith("blobs/", StringComparison.Ordinal)
+                        || name == SnapshotEntryNames.Manifest)));
 
         private async Task<int> VerifyRestoredObjectsAsync(
             IReadOnlyList<string> addresses,

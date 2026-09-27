@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Npgsql;
 using SmoothAiProductContextMemory.Application.Abstractions;
 using SmoothAiProductContextMemory.Application.Abstractions.Snapshot;
+using SmoothAiProductContextMemory.Application.Common.Exceptions;
 using SmoothAiProductContextMemory.Application.Features.Restore;
 using SmoothAiProductContextMemory.Application.Features.Snapshot;
 using SmoothAiProductContextMemory.Application.Features.Verify;
@@ -155,13 +156,24 @@ public sealed class SnapshotRestoreRoundTripTests : PersistenceTestBase
         await using NpgsqlDataSource targetDataSource = NpgsqlDataSourceFactory.Create(target.ConnectionString);
         await MigrateAsync(targetDataSource, Ct);
 
-        // A missing blob entry must fail the restore loudly before any DB mutation.
-        await Should.ThrowAsync<InvalidOperationException>(() => new RestoreArchive.Handler(
+        // A missing blob entry must fail the restore loudly before any DB mutation. The refusal is
+        // the typed one so the test discriminates: a generic InvalidOperationException would also be
+        // thrown by an operational failure, which is the other exit code.
+        var refusal = await Should.ThrowAsync<ArchiveVerificationFailedException>(() => new RestoreArchive.Handler(
             Repository,
             Archive,
             Blob,
             Loggers.CreateLogger<RestoreArchive.Handler>())
             .Handle(new RestoreArchive.Request(hole, target.ConnectionString), Ct).AsTask());
+
+        // The findings travel as payload so the operator learns which member failed, and the message
+        // stays shape-only (NFR-05).
+        refusal.Findings.ShouldNotBeEmpty();
+        refusal.Message.ShouldNotContain(Environment.NewLine);
+
+        // "Before any DB mutation" is the claim the comment makes, so assert it: the refusal is a
+        // pre-mutation gate, not a rollback.
+        (await Repository.IsTargetEmptyAsync(target.ConnectionString, Ct)).ShouldBeTrue();
     }
 
     [Fact]

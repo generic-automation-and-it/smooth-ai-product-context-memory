@@ -16,12 +16,14 @@ public interface ISnapshotArchive
     /// cites is still recorded faithfully under that cited address (LADR-02) — it is a capture-time
     /// cross-store inconsistency to be surfaced, not a reason to skip the body. A dangling (unresolvable)
     /// body cannot be written. Copies are never deleted; accounting is reporting only (LADR-06).
+    /// <see cref="ReadBlob"/> returns the body plus the SHA-256 already computed by the capture walk,
+    /// so the writer does not hash every blob a second time to fill its manifest entry (H13).
     /// </summary>
     Task<SnapshotWriteReport> WriteAsync(
         string destinationPath,
         SnapshotCapture capture,
         SnapshotWalkResult walk,
-        Func<string, Task<byte[]>> readBlobAsync,
+        Func<string, Task<(byte[] Content, string Sha256)>> readBlobAsync,
         CancellationToken cancellationToken);
 
     /// <summary>Opens an archive for reading, returning its manifest and entry access.</summary>
@@ -55,13 +57,16 @@ public sealed record SnapshotWriteReport(
     int MismatchedBodies);
 
 /// <summary>
-/// An opened archive: the manifest, the actual archive member names, and accessors for reading entry
-/// bytes either by member name or by blob content address. The blob accessors encapsulate the
-/// archive's blob entry-name convention so callers never see the <c>blobs/</c> prefix.
+/// An opened archive: the manifest, the actual archive member names, accessors for reading entry
+/// bytes either by member name or by blob content address, and the already-deserialised capture.
+/// The blob accessors encapsulate the archive's blob entry-name convention so callers never see the
+/// <c>blobs/</c> prefix. The capture is carried here so a caller that needs both the capture and the
+/// open archive (restore) does not read and materialise the tar twice (H13).
 /// </summary>
 public sealed record SnapshotArchive(
     SnapshotManifest Manifest,
     IReadOnlyList<string> EntryNames,
+    SnapshotCapture Capture,
     Func<string, Task<byte[]>> ReadEntryAsync,
     Func<string, bool> ContainsBlob,
     Func<string, byte[]> ReadBlob);

@@ -23,84 +23,94 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
         string destinationPath,
         SnapshotCapture capture,
         SnapshotWalkResult walk,
-        Func<string, Task<byte[]>> readBlobAsync,
+        Func<string, Task<(byte[] Content, string Sha256)>> readBlobAsync,
         CancellationToken cancellationToken)
     {
         string directory = Path.GetDirectoryName(Path.GetFullPath(destinationPath)) ?? Directory.GetCurrentDirectory();
         Directory.CreateDirectory(directory);
 
-        await using FileStream stream = File.Create(destinationPath);
-        using var tar = new TarWriter(stream, TarEntryFormat.Ustar, leaveOpen: false);
-
-        var entries = new List<SnapshotArchiveEntry>();
-        var writeEntry = async (string name, byte[] content) =>
+        // Write to a temp path then atomically move, so a failure mid-write leaves no truncated
+        // archive at the final destination (H12). Overwrite guard: the final path is only replaced
+        // on a successful, complete write.
+        string tempPath = destinationPath + ".tmp";
+        SnapshotWriteReport report;
+        await using (FileStream stream = File.Create(tempPath))
         {
-            tar.WriteEntry(new PaxTarEntry(TarEntryType.RegularFile, name)
-            {
-                DataStream = new MemoryStream(content, writable: false),
-            });
-            entries.Add(new SnapshotArchiveEntry(name, Sha256ContentAddress.Hash(content), content.Length));
-        };
+            using var tar = new TarWriter(stream, TarEntryFormat.Ustar, leaveOpen: false);
 
-        await writeEntry(SnapshotEntryNames.Initiatives, Serialize(capture.Initiatives));
-        await writeEntry(SnapshotEntryNames.Labels, Serialize(capture.Labels));
-        await writeEntry(SnapshotEntryNames.MemoryGroups, Serialize(capture.MemoryGroups));
-        await writeEntry(SnapshotEntryNames.GroupDescriptions, Serialize(capture.GroupDescriptions));
-        await writeEntry(SnapshotEntryNames.Memories, Serialize(capture.Memories));
-        await writeEntry(SnapshotEntryNames.MemoryVersions, Serialize(capture.MemoryVersions));
-        await writeEntry(SnapshotEntryNames.Vertices, Serialize(capture.Vertices));
-        await writeEntry(SnapshotEntryNames.Edges, Serialize(capture.Edges));
-        await writeEntry(SnapshotEntryNames.TicketVertices, Serialize(capture.TicketVertices));
-        await writeEntry(SnapshotEntryNames.TicketEdges, Serialize(capture.TicketEdges));
-
-        int objects = 0;
-        int mismatched = 0;
-        int dangling = 0;
-        foreach (SnapshotBlob blob in walk.Blobs)
-        {
-            switch (blob.State)
+            var entries = new List<SnapshotArchiveEntry>();
+            var writeEntry = async (string name, byte[] content, string? sha256 = null) =>
             {
-                case SnapshotBlobState.Ok:
-                    byte[] body = await readBlobAsync(blob.Address);
-                    await writeEntry(BlobEntryName(blob.Address), body);
-                    objects++;
-                    break;
-                case SnapshotBlobState.Mismatch:
-                    // Faithfully archived under the cited address so verify can report the
-                    // capture-time inconsistency distinctly from transit corruption (LADR-02).
-                    byte[] mismatchedBody = await readBlobAsync(blob.Address);
-                    await writeEntry(BlobEntryName(blob.Address), mismatchedBody);
-                    objects++;
-                    mismatched++;
-                    break;
-                case SnapshotBlobState.Missing:
-                    dangling++;
-                    break;
+                tar.WriteEntry(new PaxTarEntry(TarEntryType.RegularFile, name)
+                {
+                    DataStream = new MemoryStream(content, writable: false),
+                });
+                entries.Add(new SnapshotArchiveEntry(name, sha256 ?? Sha256ContentAddress.Hash(content), content.Length));
+            };
+
+            await writeEntry(SnapshotEntryNames.Initiatives, Serialize(capture.Initiatives));
+            await writeEntry(SnapshotEntryNames.Labels, Serialize(capture.Labels));
+            await writeEntry(SnapshotEntryNames.MemoryGroups, Serialize(capture.MemoryGroups));
+            await writeEntry(SnapshotEntryNames.GroupDescriptions, Serialize(capture.GroupDescriptions));
+            await writeEntry(SnapshotEntryNames.Memories, Serialize(capture.Memories));
+            await writeEntry(SnapshotEntryNames.MemoryVersions, Serialize(capture.MemoryVersions));
+            await writeEntry(SnapshotEntryNames.Vertices, Serialize(capture.Vertices));
+            await writeEntry(SnapshotEntryNames.Edges, Serialize(capture.Edges));
+            await writeEntry(SnapshotEntryNames.TicketVertices, Serialize(capture.TicketVertices));
+            await writeEntry(SnapshotEntryNames.TicketEdges, Serialize(capture.TicketEdges));
+
+            int objects = 0;
+            int mismatched = 0;
+            int dangling = 0;
+            foreach (SnapshotBlob blob in walk.Blobs)
+            {
+                switch (blob.State)
+                {
+                    case SnapshotBlobState.Ok:
+                        (byte[] body, string bodySha256) = await readBlobAsync(blob.Address);
+                        await writeEntry(BlobEntryName(blob.Address), body, bodySha256);
+                        objects++;
+                        break;
+                    case SnapshotBlobState.Mismatch:
+                        // Faithfully archived under the cited address so verify can report the
+                        // capture-time inconsistency distinctly from transit corruption (LADR-02).
+                        (byte[] mismatchedBody, string mismatchedSha256) = await readBlobAsync(blob.Address);
+                        await writeEntry(BlobEntryName(blob.Address), mismatchedBody, mismatchedSha256);
+                        objects++;
+                        mismatched++;
+                        break;
+                    case SnapshotBlobState.Missing:
+                        dangling++;
+                        break;
+                }
             }
+
+            var counts = new SnapshotCounts(
+                capture.Memories.Count,
+                capture.MemoryVersions.Count,
+                capture.Vertices.Count,
+                capture.Edges.Count,
+                objects,
+                capture.TicketVertices.Count,
+                capture.TicketEdges.Count);
+
+            var exclusions = new SnapshotExclusions(["recall_feedback"]);
+
+            SnapshotManifest manifest = new(SnapshotFormat.Version, entries, counts, exclusions, dangling, mismatched);
+            await writeEntry(SnapshotEntryNames.Manifest, Serialize(manifest));
+
+            int unreferenced = walk.UnreferencedObjects;
+
+            report = new SnapshotWriteReport(
+                destinationPath,
+                counts,
+                dangling,
+                unreferenced,
+                mismatched);
         }
 
-        var counts = new SnapshotCounts(
-            capture.Memories.Count,
-            capture.MemoryVersions.Count,
-            capture.Vertices.Count,
-            capture.Edges.Count,
-            objects,
-            capture.TicketVertices.Count,
-            capture.TicketEdges.Count);
-
-        var exclusions = new SnapshotExclusions(["recall_feedback"]);
-
-        SnapshotManifest manifest = new(SnapshotFormat.Version, entries, counts, exclusions, dangling, mismatched);
-        await writeEntry(SnapshotEntryNames.Manifest, Serialize(manifest));
-
-        int unreferenced = walk.UnreferencedObjects;
-
-        return new SnapshotWriteReport(
-            destinationPath,
-            counts,
-            dangling,
-            unreferenced,
-            mismatched);
+        File.Move(tempPath, destinationPath, overwrite: true);
+        return report;
     }
 
     public Task<SnapshotArchive> ReadAsync(string archivePath, CancellationToken cancellationToken)
@@ -108,12 +118,14 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
         (var entries, _) = ReadEntries(archivePath);
 
         SnapshotManifest manifest = ReadAndGateManifest(entries);
+        SnapshotCapture capture = ReadCapture(entries);
 
         string[] names = entries.Keys.ToArray();
 
         return Task.FromResult(new SnapshotArchive(
             manifest,
             names,
+            capture,
             name =>
             {
                 if (!entries.TryGetValue(name, out byte[]? content))
@@ -157,6 +169,15 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
         {
             findings.Add(new SnapshotFinding(SnapshotFindingKind.Corruption, SnapshotEntryNames.Manifest,
                 "Manifest is not valid JSON."));
+            return Task.FromResult(new SnapshotVerification(false, findings));
+        }
+        catch (InvalidDataException)
+        {
+            // Deserialize<T> throws InvalidDataException when the member bytes are the literal
+            // `null` JSON value — not a JsonException, so it must be caught here or the verifier
+            // escapes with a raw stack trace. Same "verify reports, it never throws" contract.
+            findings.Add(new SnapshotFinding(SnapshotFindingKind.Corruption, SnapshotEntryNames.Manifest,
+                "Manifest is a null value, so it cannot be verified."));
             return Task.FromResult(new SnapshotVerification(false, findings));
         }
 
@@ -251,7 +272,11 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
         // does, so a newer-format archive is refused before its member bytes are deserialised.
         _ = ReadAndGateManifest(entries);
 
-        var capture = new SnapshotCapture(
+        return Task.FromResult(ReadCapture(entries));
+    }
+
+    private static SnapshotCapture ReadCapture(IReadOnlyDictionary<string, byte[]> entries) =>
+        new(
             Deserialize<Initiative[]>(Require(entries, SnapshotEntryNames.Initiatives)),
             Deserialize<Label[]>(Require(entries, SnapshotEntryNames.Labels)),
             Deserialize<MemoryGroup[]>(Require(entries, SnapshotEntryNames.MemoryGroups)),
@@ -262,9 +287,6 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
             Deserialize<SnapshotEdge[]>(Require(entries, SnapshotEntryNames.Edges)),
             Deserialize<SnapshotTicketVertex[]>(Require(entries, SnapshotEntryNames.TicketVertices)),
             Deserialize<SnapshotTicketEdge[]>(Require(entries, SnapshotEntryNames.TicketEdges)));
-
-        return Task.FromResult(capture);
-    }
 
     private static SnapshotManifest ReadAndGateManifest(IReadOnlyDictionary<string, byte[]> entries)
     {

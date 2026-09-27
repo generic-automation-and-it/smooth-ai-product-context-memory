@@ -1,6 +1,7 @@
 using System.CommandLine;
 using Mediator;
 using Microsoft.Extensions.DependencyInjection;
+using SmoothAiProductContextMemory.Application.Common.Exceptions;
 using SmoothAiProductContextMemory.Application.Features.Restore;
 
 namespace SmoothAiProductContextMemory.Host.Cli;
@@ -35,9 +36,22 @@ internal static class RestoreCommand
             {
                 IMediator mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
 
-                RestoreArchive.Response response = await mediator.Send(
-                    new RestoreArchive.Request(archivePath, host.ConnectionString, force),
-                    cancellationToken);
+                RestoreArchive.Response response;
+                try
+                {
+                    response = await mediator.Send(
+                        new RestoreArchive.Request(archivePath, host.ConnectionString, force),
+                        cancellationToken);
+                }
+                catch (ArchiveVerificationFailedException ex)
+                {
+                    // Integrity failure — the archive itself is bad, distinct from an operational
+                    // failure (exit 2 vs exit 1) so an operator script can tell them apart. Print
+                    // the findings the way verify does; nothing was mutated.
+                    CliFindingRenderer.PrintFindings(ex.Findings);
+                    Console.WriteLine($"Restore refused: {ex.Message}");
+                    return 2;
+                }
 
                 foreach (RestoreArchive.ReconciliationLine line in response.Lines)
                 {
