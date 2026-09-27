@@ -6,7 +6,7 @@ allowed-tools:
   - Edit
   - Write
   - Bash(.agents/skills/manage-rule-system/scripts/inject-context.sh:*)
-effort: medium   # cross-tool frontmatter authoring
+effort: medium  # cross-tool frontmatter authoring
 ---
 
 # Manage Rule System — Skill

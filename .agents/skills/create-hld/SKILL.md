@@ -1,16 +1,13 @@
 ---
 name: create-hld
-description: >
-    Invoke to author a High-Level Design (HLD) at discovery / prototyping phase.
-    Design-only: delivers intent + spec for AI and humans to build against — no
-    implementation plan, no code outside examples/. Trigger keywords: "HLD",
-    "high level design", "design doc", "architecture design", "create a design".
-    Also triggers on /create-hld.
-allowed-tools: >
-    Bash(.agents/skills/create-hld/scripts/scaffold-hld.sh:*),
-    Bash(.agents/skills/create-hld/scripts/hld-agents-rules.sh:*),
-    Read, Write, Edit
-effort: xhigh    # clarification gates + architectural judgement that downstream work builds on
+description: 'Invoke to author a High-Level Design (HLD) at discovery / prototyping phase. Design-only: delivers intent + spec for AI and humans to build against — no implementation plan, no code outside examples/. Trigger keywords: "HLD", "high level design", "design doc", "architecture design", "create a design". Also triggers on /create-hld.'
+allowed-tools:
+  - Bash(.agents/skills/create-hld/scripts/scaffold-hld.sh:*)
+  - Bash(.agents/skills/create-hld/scripts/hld-agents-rules.sh:*)
+  - Read
+  - Write
+  - Edit
+effort: xhigh  # multi-step clarification gates + architectural judgment
 ---
 
 # Create HLD — High-Level Design authoring

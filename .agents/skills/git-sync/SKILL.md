@@ -3,7 +3,7 @@ name: git-sync
 description: Sync the current working branch with origin/main and optionally resolve merge conflicts. Use when synchronizing local branch with the latest changes from main, with automatic or manual conflict resolution.
 allowed-tools:
   - Bash(.agents/skills/git-sync/scripts/safe-sync.sh:*)
-effort: low      # fetch + merge; raise the session effort for a hard conflict
+effort: medium  # --fix resolves conflicts by merging the intent of both sides; the default path is script-only
 ---
 
 # Git Sync with Main

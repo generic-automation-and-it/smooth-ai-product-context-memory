@@ -10,7 +10,7 @@ allowed-tools:
   - Edit
   - Glob
   - Grep
-effort: high     # multi-turn judgement on what qualifies, merge/promotion decisions
+effort: high  # multi-turn judgment on what qualifies, merge/promotion decisions
 ---
 
 ## Switches

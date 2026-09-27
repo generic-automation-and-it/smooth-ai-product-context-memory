@@ -1,7 +1,7 @@
 ---
 name: mimisbrunnr-understanding
 description: Load a Mímisbrunnr Understanding export — or any prior material (session, meeting notes, transcript) — into a new or running agent's session context, and share context across sessions and repositories. The load/transfer counterpart to mimisbrunnr-context-memory.
-effort: high     # judgement on understanding vs scoped fact, and capture-path funneling
+effort: high  # judgement on understanding vs scoped fact, and capture-path funneling
 ---
 
 ## Switches

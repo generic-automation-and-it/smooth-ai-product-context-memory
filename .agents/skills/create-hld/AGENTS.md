@@ -14,7 +14,7 @@ Authoring skill for design-only HLD folders under `docs/hlds/NNN-<slug>/`. The s
 
 - The index is `max(existing NNN)+1`, computed by globbing `docs/hlds/[0-9][0-9][0-9]-*/`. A non-conforming folder name (no 3-digit prefix) is silently ignored, so a stray dir won't shift numbering.
 - Scripts are `bash` + coreutils only and discover repo root via `git rev-parse` — no Claude-specific behaviour, so Codex/Copilot/Cursor run them identically. Both must stay executable (`chmod +x`).
-- Effort is **`xhigh`**: multi-turn clarification gates + architectural judgment that downstream work builds on, unlike the script-driven `low` skills.
+- Effort is **`xhigh`**: multi-turn clarification gates + architectural judgment, unlike the script-driven `low`-effort skills.
 
 ## Changelog
 
@@ -22,4 +22,4 @@ Authoring skill for design-only HLD folders under `docs/hlds/NNN-<slug>/`. The s
 |:-----|:-------|:----|
 | 2026-06-16 | Initial version — ported from upstream `create-hld`, made project-agnostic (Linear→tracker, `.docs/hld`→`.docs/hlds`, dropped historical TEMPLATE_HLD.md and repo-specific reference HLDs). | |
 | 2026-09-13 | Output dir moved `.docs/hlds/` → `docs/hlds/` so docs are visible. | |
-| 2026-09-27 | `models:` (`claude: opus`) replaced by `effort: xhigh`; skills no longer pick a model per provider. | |
+| 2026-09-27 | Synced to `smooth-devex-template` PR #84: `models:` (`claude: opus`) replaced by `effort: xhigh`; frontmatter normalised to the shared shape (one-line `description`, block-list `allowed-tools`). | |

@@ -4,7 +4,7 @@ description: Commit current changes with conventional commits format, respecting
 allowed-tools:
   - Bash(git add:*)
   - Bash(git commit:*)
-effort: low      # diff review + conventional commit message
+effort: low  # diff review + conventional commit, straightforward
 ---
 
 # Git Commit with Conventional Format

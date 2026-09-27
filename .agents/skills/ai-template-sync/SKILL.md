@@ -7,7 +7,7 @@ allowed-tools:
   - Bash(mktemp:*)
   - Bash(bash:*)
   - Bash(rm:*)
-effort: high     # interactive multi-turn Q&A + conditional file sync across tools
+effort: medium  # scripted copy/compare; the judgment is flag choice, the rules-layout pre-flight and the conflict table
 ---
 
 # AI Template Sync — Skill

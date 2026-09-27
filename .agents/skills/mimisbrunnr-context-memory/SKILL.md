@@ -1,7 +1,7 @@
 ---
 name: mimisbrunnr-context-memory
 description: Get and set persistent context-memory records — the sole authority on the write path to the SmoothAiProductContextMemory store. Use when you need to record a durable fact, decision, preference, or constraint for later retrieval across sessions, or when you need to recall what was previously captured about a subject, ticket, repository, or scope. Captures byproduct facts during work and writes them at an explicit end-of-task checkpoint.
-effort: xhigh    # sole write path: semantic dedup, link derivation, atomicity, summary generation
+effort: xhigh  # sole write path to the store every later session builds on: semantic dedup, link derivation, atomicity, summary generation
 ---
 
 ## Switches

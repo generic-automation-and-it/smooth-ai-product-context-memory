@@ -1,7 +1,7 @@
 ---
 name: ai-terse
 description: 'Reformat one reply into terse, high-density output: answer first, bullets/tables, no preamble or niceties, end with a TL;DR. Trigger on "/ai-terse", "give it to me straight", "no fluff", "bullet it", "tl;dr this", or any signal the user wants signal over rapport. Skip when they want exploration, emotional support, or teaching.'
-effort: low      # single-turn reformatting, no tools or deep reasoning
+effort: medium  # judges what is signal, compresses without losing meaning, and names holes/ignored input
 ---
 
 # Terse

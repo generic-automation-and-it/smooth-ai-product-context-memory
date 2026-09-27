@@ -1,7 +1,7 @@
 ---
 name: context-load-context
 description: Load or create functional AGENTS.md context files before implementation work. Use when starting frontend/backend/devops code changes, when a task references a domain or feature, or when required context is missing and must be discovered or created.
-effort: low      # file discovery and loading
+effort: low  # file discovery and loading, minimal reasoning
 ---
 
 # Load Context — Phase 0 of AI Coding Workflow
