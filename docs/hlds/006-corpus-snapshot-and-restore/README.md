@@ -61,8 +61,14 @@ disposable and outside backup by design.
 
 A backup discovered to be corrupt at restore time is not a backup. The archive carries a
 manifest: every entry named with its content hash, plus corpus-level counts (memories, versions,
-vertices, edges, objects). Verification recomputes hashes and reconciles counts — no database,
-no running service, no restore required.
+vertices, edges, objects), plus the capture-time defect counts — dangling references and
+mismatched bodies. Verification recomputes hashes and reconciles counts, **and** refuses an
+archive whose format version it does not support and reports an archive that recorded a
+dangling or mismatched body at capture as non-clean — no database, no running service, no
+restore required. The version gate and the defect counts are what keep a pre-fix archive (which
+carried no such counts and so reported clean for a capture that could not restore) from being
+certified; without them, an archive that downloaded a store with an unresolvable reference would
+verify clean and then fail restore.
 
 Bodies are already content-addressed, so for them the check is double-strength: the recomputed
 hash must match both the manifest *and* the address the database row cites. A mismatch is not

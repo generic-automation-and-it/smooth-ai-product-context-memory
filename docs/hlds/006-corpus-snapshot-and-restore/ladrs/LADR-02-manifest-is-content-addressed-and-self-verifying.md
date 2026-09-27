@@ -12,9 +12,14 @@ already exists as data: every body's correct hash is its database-cited address.
 ## Decision
 
 **Carry** a manifest inside the archive: one entry per archive member with its content hash, plus
-corpus-level counts — memories, versions, vertices, edges, objects — and a statement of what is
+corpus-level counts — memories, versions, vertices, edges, objects — plus the capture-time
+defect counts (dangling references, mismatched bodies) and a statement of what is
 deliberately excluded (recall feedback, per HLD 004). Verification recomputes hashes and
-reconciles counts using only the archive.
+reconciles counts using only the archive, **and** refuses an archive whose format version it
+does not support and reports an archive that recorded a dangling or mismatched body at capture
+as non-clean — the version gate and the defect counts are what stop a pre-fix archive (which
+carried no such counts and so verified clean for a capture that could not restore) from being
+certified.
 
 For bodies, the manifest hash must equal the database-cited address captured in the same
 archive. Agreement proves cross-store consistency at capture; disagreement is classified as a

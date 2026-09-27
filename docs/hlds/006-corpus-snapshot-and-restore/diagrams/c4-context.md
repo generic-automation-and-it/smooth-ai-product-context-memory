@@ -41,13 +41,14 @@ flowchart TD
     D -->|no| E[Record dangling reference<br/>report, never repair]
     D -->|yes| F[Add object to archive<br/>hash must equal address]
     C --> G[Count unreferenced objects<br/>report, never delete]
-    E --> H[Write manifest: entries + hashes + counts + exclusions]
+    E --> H[Write manifest: entries + hashes + counts<br/>+ dangling/mismatched counts + exclusions]
     F --> H
     G --> H
     H --> I[(Archive)]
 
-    I --> J[Verify: recompute hashes,<br/>reconcile counts — offline]
-    J -->|mismatch| K[Fail loudly, name entry,<br/>classify corruption vs capture-time]
+    I --> J[Verify: recompute hashes, reconcile counts,<br/>gate format version, flag dangling/mismatched<br/>defects — offline]
+    J -->|unsupported format version| K[Refuse: member layout cannot<br/>be interpreted safely]
+    J -->|mismatch / capture-time defect| K
     J -->|clean| L[Archive trusted]
 
     I --> M{Restore target empty?}
