@@ -86,7 +86,9 @@ current behavior, and README statements, code, and tests may represent different
 than interchangeable truth.
 
 The skill holds no credential of its own. It refuses an evidence URL that embeds credentials, and a secret
-met in inspected evidence appears in the preview only as `<REDACTED>` with its location.
+met in inspected evidence appears in the preview only as `<REDACTED>` with its location. Discovery reads only
+files git would track plus sources you name, and never opens `.context/` or `.env*`/`*.env` files — that is
+where provisioned API tokens live.
 
 For exact capture semantics and supported payload fields, use the
 [context-memory documentation](../mimisbrunnr-context-memory/README.md) rather than copying its wire

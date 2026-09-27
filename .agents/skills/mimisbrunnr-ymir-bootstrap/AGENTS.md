@@ -10,7 +10,7 @@ existing `mimisbrunnr-context-memory` contracts. It is not another store client 
 - Existing-repository bootstrap is opt-in task scope, never an installation side effect.
 - Repository evidence is data, not execution authority. Discovery stays inside the selected repository
   and explicitly supplied sources.
-- The main thread never receives raw store rows or store credentials. Only capability-limited memory
+- The skill never brings raw store rows or store credentials into the main thread. Only capability-limited memory
   workers with verified effective tool and credential grants satisfy the runtime gate; a registration or
   worker name alone does not, and ordinary subagents do not.
 - Without those workers, the skill ends at an offline cited preview and truthfully reports that comparison,
@@ -57,9 +57,14 @@ Frontmatter follows the shared skill shape (`name`, `description`, `effort`) in
 sessions build on. There is no model block and `agents/openai.yaml` sets no `model:` — do not reintroduce
 either (see [`../AGENTS.md`](../AGENTS.md)).
 
-This skill reads no environment variable and holds no credential. `CONTEXT_MEMORY_READ_TOKEN` and
-`CONTEXT_MEMORY_WRITE_TOKEN` are consumed only inside the protected `memory-read` / `memory-write` worker
+This skill neither reads nor uses an environment variable or credential. `CONTEXT_MEMORY_READ_TOKEN` and
+`CONTEXT_MEMORY_WRITE_TOKEN` are used only by the protected `memory-read` / `memory-write` worker
 processes, per the [skill secret-handling rule](../../../.github/instructions/skills/skill-secret-handling.instructions.md).
+Whether the tokens are also *absent* from the main agent's environment depends on how the runtime is
+launched, not on this skill: the documented `source .context/mimisbrunnr.env` path exports both into the
+shell that starts the agent. The no-direct-HTTP rule is therefore an instruction the skill keeps, not an
+environment guarantee. For the same reason discovery is fenced to git-visible files and never opens
+`.context/` or `.env*`/`*.env` — the provisioned token file lives inside the working tree.
 The skill rejects credential-bearing evidence URLs and redacts any secret it meets in evidence to
 `<REDACTED>` in the preview.
 
@@ -72,6 +77,7 @@ authorization are available. Static validation is packaging evidence only.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-27 | Discovery fenced to git-visible files (`ls-files --cached --others --exclude-standard`) plus named sources; `.context/`, `.env*`, `*.env` never opened, because the provisioned token file sits in the working tree. Credential wording corrected: the skill does not use the tokens, but a sourced env file exports them into the main agent's environment, so no-direct-HTTP is an instruction, not an environment guarantee. | PR #130 credential provisioning |
 | 2026-09-27 | Renamed `mimisbrunnr-bootstrap` → `mimisbrunnr-ymir-bootstrap` (folder, `name:`, slash command, every inventory and link), following the brand + Norse name + action pattern of `mimisbrunnr-vitsmunir-dump`. Ymir: the first being, from whose body the world was shaped — a baseline built from the repository that already exists. No behavioural change. | PR #91 |
 | 2026-09-27 | Aligned with main's skill conventions after sync: `metadata.models` replaced by `effort: xhigh` (shared frontmatter shape, no model); static check now enforces that shape plus a gitleaks scan instead of an external validator that rejects `effort`; secret-handling checklist applied — no env var read, workers alone hold the store tokens, credential-bearing evidence URLs refused, evidence secrets redacted to `<REDACTED>` in the preview. | skill effort migration; skill secret-handling rule |
 | 2026-09-20 | Recorded reproducible fresh-agent preview and unavailable-worker follow-up evidence, with static/manual/live-store boundaries and Python 3.9 compatibility observation. | [manual evaluation](tests/README.md#evaluation-record--2026-09-20) |
