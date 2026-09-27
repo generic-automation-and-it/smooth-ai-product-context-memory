@@ -66,9 +66,12 @@ Before running any query, confirm the base URL resolves to loopback. A non-loopb
 token would cross a network — refuse it rather than retargeting an origin the guard did not approve.
 
 ```bash
-# set -u makes an unset CONTEXT_MEMORY_BASE_URL fail loudly, then assert the host is loopback
-case "${CONTEXT_MEMORY_BASE_URL:-http://localhost:5141}" in
-  http://localhost:*|http://127.0.0.1:*|https://localhost:*|https://127.0.0.1:*) : ;;
-  *) echo "refusing non-loopback CONTEXT_MEMORY_BASE_URL: ${CONTEXT_MEMORY_BASE_URL}"; exit 1 ;;
-esac
+# ${VAR:-default} supplies loopback when unset, then the case asserts the host is loopback.
+# Run in a subshell — `exit 1` aborts only that subshell, not the operator's interactive shell.
+(
+  case "${CONTEXT_MEMORY_BASE_URL:-http://localhost:5141}" in
+    http://localhost:*|http://127.0.0.1:*|https://localhost:*|https://127.0.0.1:*) : ;;
+    *) echo "refusing non-loopback CONTEXT_MEMORY_BASE_URL: ${CONTEXT_MEMORY_BASE_URL}"; exit 1 ;;
+  esac
+)
 ```

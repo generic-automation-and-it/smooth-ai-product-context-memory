@@ -93,8 +93,9 @@ under `CONTEXT_MEMORY_READ_TOKEN` / `CONTEXT_MEMORY_WRITE_TOKEN`, plus `CONTEXT_
 (default `http://localhost:5141`) — see [setup.md](setup.md) for the mapping and the one-command
 provisioner that writes all of them to one file. `scripts/provision-credentials.sh` writes
 `.context/mimisbrunnr.env` with both name forms; the container reads the `ApiAccess__*` names from that
-file via `--env-file`, and the skills `source` the same file. `.context/` is bind-mounted into the
-Host container, so one file is the single source of truth.
+file via `--env-file`, and the skills `source` the same file — so one file is the single source of truth.
+(The container does not see the host's `.context/` directory; the AppHost mounts it as a *named*
+volume, so the container relies on `--env-file` rather than the host file being present inside it.)
 
 Owned skill client intentionally accepts loopback API origins only. Non-loopback deployments need a
 separately reviewed trusted-origin configuration; agent-controlled arbitrary HTTPS origins are rejected
@@ -302,10 +303,11 @@ HostConfiguration__Image=smooth-ai-product-context-memory:local \
 The container path injects `ConnectionStrings__SmoothAiProductContextMemory`
 (the key `AddInfrastructure` reads), plus `ApiAccess__ReadToken` and
 `ApiAccess__WriteToken` from secret Aspire parameters. That override is container-only. For source
-mode, set `Parameters:api-read-token` and `Parameters:api-write-token` with AppHost user secrets, or
-run `scripts/provision-credentials.sh` and `source .context/mimisbrunnr.env` so the skills pick up the
-same values — the tokens are required in **every** run mode, not just the container path. See
-[setup.md](setup.md).
+mode, run `scripts/provision-credentials.sh` first — it writes the AppHost user secrets
+(`Parameters:api-read-token` / `Parameters:api-write-token`) **and** the skill-side env file, so the
+service and the skills carry the same values. (Setting the secrets manually, or `--skip-apphost`,
+leaves the skill-side and service-side tokens unlinked and every skill request `403`s.) The tokens are
+required in **every** run mode, not just the container path. See [setup.md](setup.md).
 
 ## Stop and reset the AppHost stack
 

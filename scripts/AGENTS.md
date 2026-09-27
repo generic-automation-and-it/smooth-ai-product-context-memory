@@ -33,6 +33,7 @@ Operational checks support operator decisions; a preflight must never repair the
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-27 | `provision-credentials.sh` now also writes the AppHost user secrets (`Parameters:api-read-token` / `api-write-token`) so Aspire injects the same values the skills hold, closing the AppHost run-mode gap; a `--skip-apphost` flag escapes it for SDK-less environments. | batch3 review |
 | 2026-09-27 | Added `provision-credentials.sh`, a one-command API credential provisioner that writes both the server `ApiAccess__*` and skill `CONTEXT_MEMORY_*` token name forms to a gitignored, mode-600 env file — removing the manual dashboard-copy step from the first-run path. | batch3 |
 | 2026-09-24 | `verify-graph-restore.sh` restore-verification role superseded by the one-shot `restore` verb's built-in reconciliation (HLD-006). `verify-graph-preupgrade.sh` (NFR-04 pre-upgrade) unaffected. | HLD-006 |
 | 2026-09-21 | Added npm package smoke coverage that packs and installs the tarball in isolation, then executes every public CLI help path. | npm skill distribution |

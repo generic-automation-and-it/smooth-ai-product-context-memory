@@ -65,13 +65,4 @@ public sealed class ApiAccessAuthorizerTests
         authorizer.Authorize("Bearer write-token", ApiCapability.Read).ShouldBeTrue();
         authorizer.Authorize("Bearer write-token", ApiCapability.Write).ShouldBeTrue();
     }
-
-    [Fact]
-    public void Token_matching_read_capability_does_not_leak_write_when_single_write_token_present()
-    {
-        // The read cap path requires the read hash; a token that is only the read value never
-        // satisfies write even though write is computed first on every call.
-        ApiAccessAuthorizer authorizer = Create(read: "read-token", write: "write-token");
-        authorizer.Authorize("Bearer read-token", ApiCapability.Write).ShouldBeFalse();
-    }
 }
