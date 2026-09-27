@@ -46,11 +46,14 @@ For a local deployment, run the provisioner once:
 scripts/provision-credentials.sh
 ```
 
-It writes two distinct random tokens (`openssl rand -hex 32`, each) to `.context/mimisbrunnr.env` with
-**both** name forms — the server `ApiAccess__*` names and the skill `CONTEXT_MEMORY_*` names — with
-restrictive permissions (mode 600) and a confirmed gitignore entry (`*.env` and `.context/` are both
-ignored). The container reads the same file's `ApiAccess__*` names via `--env-file`, and you `source`
-it for the skills, so the service and the skills read one source of truth. The script also writes the
+It writes two distinct random tokens (`openssl rand -hex 32`, each) to two gitignored env files (`*.env`
+and `.context/` are both ignored, mode 600). `.context/mimisbrunnr.env` is **sourceable** and carries
+**both** name forms that are valid shell identifiers — the server `ApiAccess__*` names and the skill
+`CONTEXT_MEMORY_*` names — and the standalone Host reads its `ApiAccess__*` names via `--env-file`.
+`.context/mimisbrunnr.env.controller` carries the `Parameters__api-read-token` /
+`Parameters__api-write-token` names for the published controller's `--env-file`. The two `Parameters__*`
+names are not valid shell identifiers, so they must not live in the sourceable file — separating the two
+parser grammars is what keeps `set -a && source` from printing a token. The script also writes the
 AppHost user secrets (`Parameters:api-read-token` / `Parameters:api-write-token`) so the AppHost path
 injects the same values rather than generating its own.
 
@@ -86,10 +89,11 @@ returns `403`. The dashboard-local `/login?t=…` URL is only for the dashboard 
 credentials. Add `--skip-apphost` if you have no .NET SDK and only need the env file.
 
 **User secrets load in Development only.** For the published `-apphost` controller (which runs in
-Production, where user secrets are not loaded), pass the env file via `--env-file` instead — the
-provisioner now writes the `Parameters__api-read-token` / `Parameters__api-write-token` names into the
-file, and that env-var spelling load in every environment. Without one of those two bridges the
-controller regenerates its own per-session tokens and every skill request returns `403`.
+Production, where user secrets are not loaded), pass `.context/mimisbrunnr.env.controller` via
+`--env-file` instead — the provisioner writes the `Parameters__api-read-token` /
+`Parameters__api-write-token` names into that controller env file, and that env-var spelling loads in
+every environment. Without one of those two bridges the controller regenerates its own per-session
+tokens and every skill request returns `403`.
 
 ### Direct Host run
 
