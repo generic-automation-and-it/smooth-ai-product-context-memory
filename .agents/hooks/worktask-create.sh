@@ -52,8 +52,8 @@ WORK TASK CREATION TRIGGERED — Follow these steps:
    ✓ UI/UX specification: if frontend changes, describe UI structure or wireframes
 
    **Phase 4-6 (Tyr/Thor) execution**:
-   ✓ Testing expectations: what tests are required (unit, integration, E2E)
-   ✓ Test tiers required: L0 (unit), L1 (integration), L2 (E2E) expectations
+   ✓ Testing expectations: what tests are required (unit, component, integration)
+   ✓ Test tiers required: L0 (unit), L1 (component), L2 (integration) expectations
 
    **Phase 7 (Heimdall) review gates**:
    ✓ Non-functional requirements: performance, security, compliance, scalability constraints
