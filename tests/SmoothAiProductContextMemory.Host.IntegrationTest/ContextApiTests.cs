@@ -85,6 +85,11 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
             (HttpMethod.Get, $"/api/context/recall-feedback/never-recalled?asOf={DateTimeOffset.UtcNow:yyyy-MM-dd}"),
             (HttpMethod.Get, $"/api/context/recall-feedback/miss-rate?from={DateTimeOffset.UtcNow:yyyy-MM-dd}&to={DateTimeOffset.UtcNow:yyyy-MM-dd}"),
             (HttpMethod.Post, "/api/context/recall-feedback/reset"),
+            (HttpMethod.Post, "/api/context/dossier/bundle"),
+            (HttpMethod.Post, "/api/context/dossier/preview"),
+            (HttpMethod.Post, "/api/context/snapshot/preflight"),
+            (HttpMethod.Post, "/api/context/snapshot"),
+            (HttpMethod.Get, "/api/context/snapshot/status"),
         })
         {
             using var request = new HttpRequestMessage(method, path);
@@ -95,6 +100,11 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
             using HttpResponseMessage response = await anonymous.SendAsync(request, Ct);
             response.StatusCode.ShouldBe(HttpStatusCode.Forbidden, $"{method} {path}");
         }
+        // An unmatched /api/context path is denied by the middleware's default-deny arm, not by any
+        // endpoint's capability metadata — so a route added without .RequireCapability(...) still fails
+        // closed. This is the assertion that catches a new endpoint shipping unauthenticated-by-omission.
+        using HttpResponseMessage unmatched = await anonymous.GetAsync("/api/context/does-not-exist", Ct);
+        unmatched.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
         (await anonymous.GetAsync("/openapi/v1.json", Ct)).StatusCode.ShouldBe(HttpStatusCode.OK);
     }
 
@@ -616,6 +626,11 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
         "/api/context/recall-feedback/never-recalled",
         "/api/context/recall-feedback/miss-rate",
         "/api/context/recall-feedback/reset",
+        "/api/context/dossier/bundle",
+        "/api/context/dossier/preview",
+        "/api/context/snapshot/preflight",
+        "/api/context/snapshot",
+        "/api/context/snapshot/status",
     ];
 
     [Fact]
