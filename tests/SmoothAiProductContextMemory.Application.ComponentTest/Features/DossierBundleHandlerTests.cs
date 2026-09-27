@@ -147,6 +147,51 @@ public sealed class DossierBundleHandlerTests : HandlerTestBase
     }
 
     [Fact]
+    public async Task Ticket_anchor_truncated_empty_matches_preview_and_discloses_limits()
+    {
+        // A supplied ticket that hits a path/depth limit and yields zero eligible identities must be a
+        // truncated-empty result, not a complete-empty one. The selection path propagates the ticket
+        // traversal's disclosure flags (DossierSelection), and the bundle and preview over the same
+        // selection must report the same limits (LADR-201). This is the only path that reaches the
+        // zero-match disclosure; no prior test supplied a ticket anchor.
+        await SeedForBundleAsync();
+        var blobs = new DictionaryBlobStorage();
+        blobs.Add(BlobAddress, "THE_BODY");
+
+        var ticketGraph = new FakeTicketGraph(new TicketTraversalResult(
+            Paths: [],
+            Items: [],
+            Disclosure: new TicketTraversalDisclosure(
+                MaxDepth: 3, PathLimit: 50, MemoryLimit: 50,
+                DepthLimitReached: true, PathLimitReached: true, MemoryLimitReached: false)));
+
+        CreateDossierBundle.Handler bundle = new(
+            AppDb, Search, new NpgsqlMemoryTraversal(Db), ticketGraph, Graph, blobs,
+            NullLogger<CreateDossierBundle.Handler>.Instance);
+        CreateDossierPreview.Handler preview = new(
+            Search, new NpgsqlMemoryTraversal(Db), ticketGraph, Graph,
+            NullLogger<CreateDossierPreview.Handler>.Instance);
+
+        CreateDossierBundle.Request bundleRequest = BundleRequest(
+            ticketProvider: "jira", ticketKey: "ACM-999");
+        CreateDossierPreview.Request previewRequest = PreviewRequest(
+            ticketProvider: "jira", ticketKey: "ACM-999");
+
+        CreateDossierBundle.Response bundleResponse = await bundle.Handle(bundleRequest, Ct);
+        CreateDossierPreview.Response previewResponse = await preview.Handle(previewRequest, Ct);
+
+        bundleResponse.Bundle.Manifest.NoMatch.ShouldBeTrue();
+        bundleResponse.Bundle.Manifest.LimitsHit.ShouldContain(l => l.Limit == DossierOmissionReason.DepthReached);
+        bundleResponse.Bundle.Manifest.LimitsHit.ShouldContain(l => l.Limit == DossierOmissionReason.CapReached);
+        bundleResponse.Bundle.Items.ShouldBeEmpty();
+
+        // The preview over the same selection discloses the same limits — bundle never reports a cap
+        // the consent artefact did not show.
+        previewResponse.NoMatch.ShouldBeTrue();
+        previewResponse.LimitsHit.ShouldBe(bundleResponse.Bundle.Manifest.LimitsHit);
+    }
+
+    [Fact]
     public async Task Widen_depth_outside_one_to_five_is_refused_at_the_store_layer()
     {
         var traversal = new NpgsqlMemoryTraversal(Db);
@@ -228,12 +273,13 @@ public sealed class DossierBundleHandlerTests : HandlerTestBase
     private static string Serialize(object value) =>
         JsonSerializer.Serialize(value, new JsonSerializerOptions(JsonSerializerDefaults.Web));
 
-    private static CreateDossierBundle.Request BundleRequest(IReadOnlyList<string>? tags = null) =>
+    private static CreateDossierBundle.Request BundleRequest(
+        IReadOnlyList<string>? tags = null, string? ticketProvider = null, string? ticketKey = null) =>
         new(
             Repo: "kingstown",
             InitiativeName: null,
-            TicketProvider: null,
-            TicketKey: null,
+            TicketProvider: ticketProvider,
+            TicketKey: ticketKey,
             Tags: tags ?? ["tag-1"],
             Kind: null,
             Status: null,
@@ -242,13 +288,14 @@ public sealed class DossierBundleHandlerTests : HandlerTestBase
             AsOf: null,
             WidenDepth: 3);
 
-    private static CreateDossierPreview.Request PreviewRequest() =>
+    private static CreateDossierPreview.Request PreviewRequest(
+        IReadOnlyList<string>? tags = null, string? ticketProvider = null, string? ticketKey = null) =>
         new(
             Repo: "kingstown",
             InitiativeName: null,
-            TicketProvider: null,
-            TicketKey: null,
-            Tags: ["tag-1"],
+            TicketProvider: ticketProvider,
+            TicketKey: ticketKey,
+            Tags: tags ?? ["tag-1"],
             Kind: null,
             Status: null,
             ScopeDimension: null,
@@ -339,20 +386,20 @@ public sealed class DossierBundleHandlerTests : HandlerTestBase
 
     private static MemoryVersion Version(
         long memoryId, int version, string statement, bool isCurrent, string kind, string? blobAddress = null) => new()
-    {
-        MemoryId = memoryId,
-        Version = version,
-        IsCurrent = isCurrent,
-        Statement = statement,
-        ContentSummary = $"Summary of {statement}",
-        BlobAddress = blobAddress,
-        Kind = kind,
-        Confidence = 80,
-        Status = MemoryVersion.MemoryVersionStatus.Approved,
-        Sources = [SourceDocument.Create("jira", "ACM-1", ValidFrom)],
-        ValidFrom = ValidFrom,
-        CreatedOn = CreatedOn,
-    };
+        {
+            MemoryId = memoryId,
+            Version = version,
+            IsCurrent = isCurrent,
+            Statement = statement,
+            ContentSummary = $"Summary of {statement}",
+            BlobAddress = blobAddress,
+            Kind = kind,
+            Confidence = 80,
+            Status = MemoryVersion.MemoryVersionStatus.Approved,
+            Sources = [SourceDocument.Create("jira", "ACM-1", ValidFrom)],
+            ValidFrom = ValidFrom,
+            CreatedOn = CreatedOn,
+        };
 
     private sealed class DictionaryBlobStorage : IBlobStorage
     {
@@ -375,5 +422,16 @@ public sealed class DossierBundleHandlerTests : HandlerTestBase
 
         public Task<bool> ExistsAsync(string address, CancellationToken cancellationToken = default) =>
             Task.FromResult(_blobs.ContainsKey(address));
+    }
+
+    private sealed class FakeTicketGraph(TicketTraversalResult result) : ITicketGraph
+    {
+        public Task LockAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task<bool> ChangeParentAsync(TicketParentChange change, CancellationToken cancellationToken) =>
+            Task.FromResult(false);
+
+        public Task<TicketTraversalResult> TraverseAsync(TicketTraversalQuery query, CancellationToken cancellationToken) =>
+            Task.FromResult(result);
     }
 }

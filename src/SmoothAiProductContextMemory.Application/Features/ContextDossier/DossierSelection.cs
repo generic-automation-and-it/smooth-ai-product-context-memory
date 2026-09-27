@@ -282,6 +282,33 @@ public static class DossierSelection
             DossierDefaults.ItemLimit);
     }
 
+    /// <summary>
+    /// The limits a selection discloses, shared by the bundle and the preview (LADR-201) so the
+    /// consent artefact and the distributed bundle report the same set. Both are derivable from the
+    /// selection alone — a depth bound hit, and the fetch ceiling hit where the selection cannot know
+    /// whether more matched. The preview is blob-free by structure, so it cannot predict the
+    /// history-inflated item cut the bundle makes; that cap is disclosed by the bundle through its
+    /// omitted list (per-item <see cref="DossierOmissionReason.CapReached"/>), never through a limit
+    /// the preview was not shown.
+    /// </summary>
+    internal static IReadOnlyList<DossierLimitHit> BuildLimitsHit(
+        DossierSelectionResult selection,
+        DossierAnchor anchor)
+    {
+        var hits = new List<DossierLimitHit>();
+        if (selection.DepthLimitReached)
+        {
+            hits.Add(new DossierLimitHit(DossierOmissionReason.DepthReached, anchor.WidenDepth));
+        }
+
+        if (selection.LimitReached)
+        {
+            hits.Add(new DossierLimitHit(DossierOmissionReason.CapReached, anchor.ItemLimit));
+        }
+
+        return [.. hits];
+    }
+
     /// <summary>The recorded effective selection, in a form sufficient to repeat it (BR-20).</summary>
     public static DossierSelectionPlan BuildPlan(DossierAnchor anchor) =>
         new(

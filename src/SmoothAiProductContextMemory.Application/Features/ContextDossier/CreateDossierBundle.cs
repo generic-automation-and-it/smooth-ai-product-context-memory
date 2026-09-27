@@ -75,7 +75,7 @@ public static class CreateDossierBundle
                     anchor,
                     selection,
                     selectedCount: 0,
-                    BuildLimitsHit(selection, 0, 0, anchor, capReached: false));
+                    DossierSelection.BuildLimitsHit(selection, anchor));
                 return new Response(new DossierBundle([], [], [], emptyManifest with { NoMatch = true }));
             }
 
@@ -142,7 +142,7 @@ public static class CreateDossierBundle
             }
 
             IReadOnlyList<DossierEdge> edges = CollectEdges(selection);
-            IReadOnlyList<DossierLimitHit> limitsHit = BuildLimitsHit(selection, items.Count, omitted.Count, anchor, capReached);
+            IReadOnlyList<DossierLimitHit> limitsHit = DossierSelection.BuildLimitsHit(selection, anchor);
 
             DossierManifest manifest = BuildManifest(anchor, selection, items.Count + omitted.Count, limitsHit);
 
@@ -266,39 +266,6 @@ public static class CreateDossierBundle
                 .ThenBy(e => e.Relation, StringComparer.Ordinal)
                 .ThenBy(e => e.TargetUuid)
                 .Select(e => new DossierEdge(e.SourceUuid, e.TargetUuid, e.Relation, e.Reason))];
-        }
-
-        private static DossierLimitHit[] BuildLimitsHit(
-            DossierSelectionResult selection,
-            int itemCount,
-            int omittedCount,
-            DossierAnchor anchor,
-            bool capReached)
-        {
-            var hits = new List<DossierLimitHit>();
-            if (selection.DepthLimitReached)
-            {
-                hits.Add(new DossierLimitHit(DossierOmissionReason.DepthReached, anchor.WidenDepth));
-            }
-
-            // The selection path fetches at the item limit; when it hit that ceiling (LimitReached) it
-            // cannot know whether more matched, so truncation must be reported, not silent (NFR-03,
-            // NFR-04). The strict-exceeds case covers a selection that came back over the limit through a
-            // union of anchors and widening. A history-inflated cut (many versions of a few selected
-            // memories) exceeds the cap without the memory count reaching the fetch ceiling, so the cut
-            // itself is the signal and is named too.
-            if (capReached
-                || selection.LimitReached
-                || (selection.Selected.Count >= anchor.ItemLimit
-                    && itemCount + omittedCount >= anchor.ItemLimit))
-            {
-                if (hits.All(h => h.Limit != DossierOmissionReason.CapReached))
-                {
-                    hits.Add(new DossierLimitHit(DossierOmissionReason.CapReached, anchor.ItemLimit));
-                }
-            }
-
-            return [.. hits];
         }
 
         private static DossierManifest BuildManifest(

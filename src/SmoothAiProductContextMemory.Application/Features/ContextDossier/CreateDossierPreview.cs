@@ -92,16 +92,7 @@ public static class CreateDossierPreview
                 selection.EdgeCount,
                 selection.HiddenPathDropped);
 
-            var limitsHit = new List<DossierLimitHit>();
-            if (selection.DepthLimitReached)
-            {
-                limitsHit.Add(new DossierLimitHit(DossierOmissionReason.DepthReached, anchor.WidenDepth));
-            }
-
-            if (selection.LimitReached)
-            {
-                limitsHit.Add(new DossierLimitHit(DossierOmissionReason.CapReached, anchor.ItemLimit));
-            }
+            IReadOnlyList<DossierLimitHit> limitsHit = DossierSelection.BuildLimitsHit(selection, anchor);
 
             DossierCostEstimate cost = new(
                 MonetaryAvailable: false,
