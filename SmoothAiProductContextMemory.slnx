@@ -63,6 +63,9 @@
     <File Path=".agents/rules/meta/knowledge-conventional-contexts-quality.instructions.md" />
     <File Path=".agents/rules/meta/rules.instructions.md" />
   </Folder>
+  <Folder Name="/.agents/rules/skills/">
+    <File Path=".agents/rules/skills/skill-secret-handling.instructions.md" />
+  </Folder>
   <Folder Name="/.agents/setup/scripts/">
     <File Path=".agents/setup/scripts/agents-setup.ps1" />
     <File Path=".agents/setup/scripts/agents-setup.sh" />

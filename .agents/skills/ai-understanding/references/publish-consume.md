@@ -58,7 +58,7 @@ generated from the store, so fixing the store fixes every archive after it. That
 to immutability (`SKILL.md`, *Redact before you write*) — a credential is not knowledge, so it is repaired
 in place rather than superseded, which would leave the value on disk. Record the shape of the problem, not
 the value. See
-`.github/instructions/skill-secret-handling.instructions.md`.
+`.github/instructions/skills/skill-secret-handling.instructions.md`.
 
 ## Consume
 
