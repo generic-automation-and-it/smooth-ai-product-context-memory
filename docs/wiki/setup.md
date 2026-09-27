@@ -49,8 +49,10 @@ scripts/provision-credentials.sh
 It writes two distinct random tokens (`openssl rand -hex 32`, each) to `.context/mimisbrunnr.env` with
 **both** name forms — the server `ApiAccess__*` names and the skill `CONTEXT_MEMORY_*` names — with
 restrictive permissions (mode 600) and a confirmed gitignore entry (`*.env` and `.context/` are both
-ignored). `.context/` is Docker bind-mounted into the Host container, and the same file is what you
-`source` for the skills, so the service and the skills read one source of truth.
+ignored). The container reads the same file's `ApiAccess__*` names via `--env-file`, and you `source`
+it for the skills, so the service and the skills read one source of truth. The script also writes the
+AppHost user secrets (`Parameters:api-read-token` / `Parameters:api-write-token`) so the AppHost path
+injects the same values rather than generating its own.
 
 Re-running without `--rotate` reuses the existing tokens. To regenerate:
 
@@ -65,6 +67,7 @@ Options:
 | `--rotate` | Regenerate the tokens even if the file already exists |
 | `--env-file PATH` | Write to a different path (default `.context/mimisbrunnr.env`) |
 | `--base-url URL` | The skill-side base URL (default `http://localhost:5141`) |
+| `--skip-apphost` | Do not write the AppHost user secrets (e.g. no .NET SDK) |
 
 ## Run modes
 
@@ -72,13 +75,15 @@ Options:
 
 ```bash
 scripts/provision-credentials.sh
-source .context/mimisbrunnr.env        # exports CONTEXT_MEMORY_* for the skills
+set -a && source .context/mimisbrunnr.env && set +a   # exports CONTEXT_MEMORY_* for the skills
 dotnet run --project src/SmoothAiProductContextMemory.AppHost
 ```
 
-The AppHost compiles the Host from the working tree and injects the server-side tokens; the skills pick
-up the `CONTEXT_MEMORY_*` names from the exported environment. The dashboard-local `/login?t=…` URL is
-only for the dashboard UI, not the API credentials.
+The script writes the AppHost user secrets (`Parameters:api-read-token` / `Parameters:api-write-token`),
+so Aspire injects the same values the skills hold rather than generating per-session tokens of its own.
+Without that bridge the AppHost would serve tokens the skills do not carry and every skill request
+returns `403`. The dashboard-local `/login?t=…` URL is only for the dashboard UI, not the API
+credentials. Add `--skip-apphost` if you have no .NET SDK and only need the env file.
 
 ### Direct Host run
 

@@ -12,8 +12,8 @@ leave the store.
 
 Base URL: `CONTEXT_MEMORY_BASE_URL` (default `http://localhost:5141`). Loopback origins only — the
 client refuses any origin that is not localhost/127.0.0.1, so a value like `https://api.example.com`
-fails before a request is sent. Export it once, or `source .context/mimisbrunnr.env` if you provisioned
-via `scripts/provision-credentials.sh`.
+fails before a request is sent. Export it once, or `set -a && source .context/mimisbrunnr.env && set +a`
+if you provisioned via `scripts/provision-credentials.sh`.
 
 API access requires runtime credentials: `CONTEXT_MEMORY_READ_TOKEN` for the two read queries and
 `CONTEXT_MEMORY_WRITE_TOKEN` for reset (write includes read). The **values** are runtime-only — never

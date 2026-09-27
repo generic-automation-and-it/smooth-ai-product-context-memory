@@ -2,22 +2,31 @@
 # One-command API credential provisioning for a local Mímisbrunnr deployment.
 #
 # Writes two distinct random Bearer tokens to a gitignored env file that BOTH the service and the
-# host-side skills read. One file, two name forms, one source of truth:
+# host-side skills read, AND bridges the AppHost path so Aspire injects the same values. One file, two
+# name forms, one source of truth:
 #   - ApiAccess__ReadToken / ApiAccess__WriteToken   (what the Host's authorizer reads)
 #   - CONTEXT_MEMORY_READ_TOKEN / CONTEXT_MEMORY_WRITE_TOKEN / CONTEXT_MEMORY_BASE_URL
 #                                                   (what the skills read)
-# The values are identical across the two name forms; only the env var names differ. That mapping is
-# what removes the manual dashboard-copy step from the first-run path.
+# The values are identical across the two name forms; only the env var names differ.
 #
 # The tokens are runtime configuration only: the Host hashes them at startup and never writes them to
 # the store, so regenerating them invalidates no data. Deleting the file and re-running is a complete
 # recovery procedure. See docs/wiki/setup.md.
 #
+# Run modes this makes work with the same tokens:
+#   - Container: the Host reads the ApiAccess__* names from this file via `--env-file`.
+#   - Direct Host run: the exported ApiAccess__* names are ordinary .NET configuration.
+#   - AppHost: Aspire's `AddParameter("api-read-token", secret: true)` falls back to user secrets, so
+#     the script writes `Parameters:api-read-token` / `Parameters:api-write-token` for the AppHost
+#     project — making Aspire inject the same values the skills hold. Without this, the AppHost
+#     generates its own per-session tokens and every skill request 403s.
+#
 # Usage:
-#   scripts/provision-credentials.sh [--rotate] [--env-file PATH] [--base-url URL]
-#     --rotate     regenerate the tokens even if the file already exists
-#     --env-file   write to this path (default .context/mimisbrunnr.env)
-#     --base-url   the skill-side base URL (default http://localhost:5141)
+#   scripts/provision-credentials.sh [--rotate] [--env-file PATH] [--base-url URL] [--skip-apphost]
+#     --rotate       regenerate the tokens even if the file already exists
+#     --env-file     write to this path (default .context/mimisbrunnr.env)
+#     --base-url     the skill-side base URL (default http://localhost:5141)
+#     --skip-apphost do not write the AppHost user secrets (e.g. no .NET SDK / gitignored env)
 #
 # Idempotent: re-running without --rotate reuses the existing tokens and just reprints the export
 # lines. Secrets must never be committed — *.env and .context/ are both gitignored.
@@ -25,15 +34,18 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+APPHOST_PROJECT="${ROOT_DIR}/src/SmoothAiProductContextMemory.AppHost"
 ENV_FILE="${ROOT_DIR}/.context/mimisbrunnr.env"
 BASE_URL="http://localhost:5141"
 ROTATE=0
+WRITE_APPHOST=1
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --rotate) ROTATE=1; shift ;;
     --env-file) ENV_FILE="$2"; shift 2 ;;
     --base-url) BASE_URL="$2"; shift 2 ;;
+    --skip-apphost) WRITE_APPHOST=0; shift ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -61,6 +73,18 @@ EOF
   echo "Wrote credentials to ${ENV_FILE}" >&2
 else
   echo "Reusing existing credentials in ${ENV_FILE}" >&2
+  READ_TOKEN="$(grep -m1 '^ApiAccess__ReadToken=' "$ENV_FILE" | cut -d= -f2-)"
+  WRITE_TOKEN="$(grep -m1 '^ApiAccess__WriteToken=' "$ENV_FILE" | cut -d= -f2-)"
+fi
+
+if [[ "$WRITE_APPHOST" -eq 1 ]]; then
+  if [[ -f "${APPHOST_PROJECT}/SmoothAiProductContextMemory.AppHost.csproj" ]]; then
+    dotnet user-secrets set "Parameters:api-read-token" "$READ_TOKEN" --project "$APPHOST_PROJECT" >/dev/null
+    dotnet user-secrets set "Parameters:api-write-token" "$WRITE_TOKEN" --project "$APPHOST_PROJECT" >/dev/null
+    echo "Wrote AppHost user secrets (Parameters:api-read-token / api-write-token)" >&2
+  else
+    echo "warning: AppHost project not found at ${APPHOST_PROJECT}; skipping AppHost bridge" >&2
+  fi
 fi
 
 # Sourceable export lines for the operator's shell: the file already declares the CONTEXT_MEMORY_*
