@@ -13,7 +13,7 @@ effort: medium   # diff classification + issue authoring across layers
 
 ## Overview
 
-Generate a GitHub **Task** issue from the current branch diff versus main. The task is horizontally sliced — scoped to one technical layer (backend, tests, docs, ai-tooling, config) — and added to the local GitHub Project as a sub-issue of a vertically sliced parent **Feature** issue.
+Generate a GitHub **Task** issue from the current branch diff versus main. The task is horizontally sliced — scoped to one technical layer (backend, tests, docs, ai-tooling, config) — and, unless `--noparentid` is passed, added to the local GitHub Project as a sub-issue of a vertically sliced parent **Feature** issue. With `--noparentid` the issue is created in the repo only: no project, no parent Feature.
 
 ## Workflow
 
