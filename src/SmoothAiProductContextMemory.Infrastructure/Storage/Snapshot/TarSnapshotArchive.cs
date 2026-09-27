@@ -257,17 +257,6 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
         return Task.FromResult(new SnapshotVerification(findings.Count == 0, findings));
     }
 
-    public Task<SnapshotCapture> ReadCaptureAsync(string archivePath, CancellationToken cancellationToken)
-    {
-        (var entries, _) = ReadEntries(archivePath);
-
-        // Gate on the manifest format before materialising any member layout, exactly as ReadAsync
-        // does, so a newer-format archive is refused before its member bytes are deserialised.
-        _ = ReadAndGateManifest(entries);
-
-        return Task.FromResult(ReadCapture(entries));
-    }
-
     private static SnapshotCapture ReadCapture(IReadOnlyDictionary<string, byte[]> entries) =>
         new(
             Deserialize<Initiative[]>(Require(entries, SnapshotEntryNames.Initiatives)),

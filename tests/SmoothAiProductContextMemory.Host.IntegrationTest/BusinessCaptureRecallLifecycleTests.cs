@@ -657,25 +657,25 @@ public sealed class BusinessCaptureRecallLifecycleTests(HostWebAppFixture fixtur
         Guid? uuid = null,
         DateTimeOffset? validUntil = null,
         string status = MemoryVersion.MemoryVersionStatus.Approved) => new
-    {
-        uuid,
-        createUuid,
-        name = description,
-        description,
-        statement,
-        contentSummary,
-        kind,
-        facets = facets ?? [],
-        tags = tags ?? [],
-        status,
-        confidence,
-        content,
-        sources = new[] { new { kind = sourceKind, reference = sourceReference, capturedAt = sourceCapturedAt } },
-        validFrom,
-        validUntil,
-        summaryModel = "business-lifecycle-test-model",
-        summaryPromptVersion = "1",
-    };
+        {
+            uuid,
+            createUuid,
+            name = description,
+            description,
+            statement,
+            contentSummary,
+            kind,
+            facets = facets ?? [],
+            tags = tags ?? [],
+            status,
+            confidence,
+            content,
+            sources = new[] { new { kind = sourceKind, reference = sourceReference, capturedAt = sourceCapturedAt } },
+            validFrom,
+            validUntil,
+            summaryModel = "business-lifecycle-test-model",
+            summaryPromptVersion = "1",
+        };
 
     private static object Link(Guid sourceUuid, Guid targetUuid, string relation, string reason) => new
     {

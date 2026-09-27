@@ -10,8 +10,6 @@ internal static class HealthCheckExtensions
     internal const string ReadinessPath = "/health";
     internal const string LivenessPath = "/alive";
 
-    private const string LivenessTag = "live";
-
     internal static IServiceCollection AddSmoothAiProductContextMemoryHealthChecks(this IServiceCollection services)
     {
         services.AddSingleton<MigrationReadinessState>();
@@ -34,7 +32,7 @@ internal static class HealthCheckExtensions
         app.MapHealthChecks(ReadinessPath);
         app.MapHealthChecks(
             LivenessPath,
-            new HealthCheckOptions { Predicate = registration => registration.Tags.Contains(LivenessTag) });
+            new HealthCheckOptions { Predicate = _ => false });
 
         return app;
     }

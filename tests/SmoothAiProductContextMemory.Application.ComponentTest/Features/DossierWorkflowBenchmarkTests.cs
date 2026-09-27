@@ -323,20 +323,20 @@ public sealed class DossierWorkflowBenchmarkTests(AspireFixture aspire) : Handle
     private static MemoryVersion Version(
         long memoryId, int version, bool isCurrent, string kind, string status,
         DateTimeOffset validFrom, DateTimeOffset createdOn) => new()
-    {
-        MemoryId = memoryId,
-        Version = version,
-        IsCurrent = isCurrent,
-        Statement = $"workflow {(isCurrent ? "claim" : "prior claim")} {memoryId}",
-        ContentSummary = $"workflow {(isCurrent ? "summary" : "prior summary")} {memoryId}",
-        BlobAddress = null,
-        Kind = kind,
-        Confidence = isCurrent ? (short)80 : (short)70,
-        Status = status,
-        Sources = [SourceDocument.Create("jira", "ACM-1", validFrom)],
-        ValidFrom = validFrom,
-        CreatedOn = createdOn,
-    };
+        {
+            MemoryId = memoryId,
+            Version = version,
+            IsCurrent = isCurrent,
+            Statement = $"workflow {(isCurrent ? "claim" : "prior claim")} {memoryId}",
+            ContentSummary = $"workflow {(isCurrent ? "summary" : "prior summary")} {memoryId}",
+            BlobAddress = null,
+            Kind = kind,
+            Confidence = isCurrent ? (short)80 : (short)70,
+            Status = status,
+            Sources = [SourceDocument.Create("jira", "ACM-1", validFrom)],
+            ValidFrom = validFrom,
+            CreatedOn = createdOn,
+        };
 
     private sealed record WorkflowSpec(
         string Name,

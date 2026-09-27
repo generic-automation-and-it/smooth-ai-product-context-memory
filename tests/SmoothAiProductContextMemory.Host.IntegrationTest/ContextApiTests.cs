@@ -908,9 +908,9 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
         DateTimeOffset? validFrom = null,
         DateTimeOffset? validUntil = null,
         string[]? facets = null) => new
-    {
-        groupUuid,
-        items = new[]
+        {
+            groupUuid,
+            items = new[]
         {
             new
             {
@@ -932,9 +932,9 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
                 summaryPromptVersion = "1",
             }
         },
-        links = (object?)null,
-        labelsProposed = (object?)null,
-    };
+            links = (object?)null,
+            labelsProposed = (object?)null,
+        };
 
     private static object SetItem(string description, string statement, Guid createUuid) => new
     {

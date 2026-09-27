@@ -30,7 +30,7 @@ public class TarSnapshotArchiveTests
         verification.IsClean.ShouldBeTrue();
         verification.Findings.ShouldBeEmpty();
 
-        SnapshotCapture roundTrip = await _archive.ReadCaptureAsync(path, TestContext.Current.CancellationToken);
+        SnapshotCapture roundTrip = (await _archive.ReadAsync(path, TestContext.Current.CancellationToken)).Capture;
         roundTrip.Memories.Count.ShouldBe(capture.Memories.Count);
         roundTrip.MemoryVersions.Count.ShouldBe(capture.MemoryVersions.Count);
         roundTrip.Vertices.Count.ShouldBe(capture.Vertices.Count);
@@ -138,10 +138,11 @@ public class TarSnapshotArchiveTests
     }
 
     [Fact]
-    public async Task ReadCaptureAsync_Refuses_Unsupported_FormatVersion_Before_Materialising()
+    public async Task ReadAsync_Refuses_Unsupported_FormatVersion_Before_Materialising()
     {
-        // ReadAsync gates on the manifest format; ReadCaptureAsync must gate the same way so a
-        // newer-format archive is refused before its member bytes are deserialised.
+        // ReadAsync gates on the manifest format so a newer-format archive is refused before its
+        // member bytes are deserialised. The capture that restore reads is the one on the opened
+        // archive, so it is refused through the same gate.
         string path = TempArchive();
         string address = Sha256ContentAddress.Compute(Body);
         (SnapshotCapture capture, SnapshotWalkResult walk) = Capture(address, SnapshotBlobState.Ok);
@@ -154,8 +155,6 @@ public class TarSnapshotArchiveTests
         string newer = TempArchive();
         WriteTar(newer, entries);
 
-        await Should.ThrowAsync<InvalidDataException>(async () =>
-            await _archive.ReadCaptureAsync(newer, TestContext.Current.CancellationToken));
         await Should.ThrowAsync<InvalidDataException>(async () =>
             await _archive.ReadAsync(newer, TestContext.Current.CancellationToken));
     }
@@ -188,7 +187,7 @@ public class TarSnapshotArchiveTests
         // C1: the format version was bumped when DanglingReferences/MismatchedBodies added refusal
         // semantics. An archive stamped with a pre-bump version (field absent → 0) must be refused
         // as unsupported, not reported clean. This is the VerifyAsync finding branch (not the throw
-        // path exercised by ReadCaptureAsync_Refuses_Unsupported_FormatVersion).
+        // path exercised by ReadAsync_Refuses_Unsupported_FormatVersion).
         string path = TempArchive();
         string address = Sha256ContentAddress.Compute(Body);
         (SnapshotCapture capture, SnapshotWalkResult walk) = Capture(address, SnapshotBlobState.Ok);
@@ -284,7 +283,7 @@ public class TarSnapshotArchiveTests
 
         await _archive.WriteAsync(path, capture, walk, _ => Task.FromResult((Body, Sha256ContentAddress.Hash(Body))), TestContext.Current.CancellationToken);
 
-        SnapshotCapture round = await _archive.ReadCaptureAsync(path, TestContext.Current.CancellationToken);
+        SnapshotCapture round = (await _archive.ReadAsync(path, TestContext.Current.CancellationToken)).Capture;
         round.TicketEdges.Count.ShouldBe(1);
         round.TicketEdges[0].Key.ShouldBe("CHILD");
         round.TicketEdges[0].ParentKey.ShouldBe("PARENT");

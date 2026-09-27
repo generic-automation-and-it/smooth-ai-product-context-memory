@@ -214,4 +214,51 @@ public class DossierBundleTests
             IsCurrent: true,
             Sources: [],
             CreatedOn: createdOn);
+
+    [Fact]
+    public void BuildLimitsHit_reports_cap_when_selection_fills_the_fetch_ceiling()
+    {
+        // The anchor search fills the fetch ceiling without raising the widen/ticket limit flag, so a
+        // selection truncated to that ceiling must still report CapReached (H1) rather than present as
+        // unbounded. Both slices compute it from Selected.Count, so the convergence is preserved.
+        DossierAnchor anchor = Anchor(DossierDefaults.ItemLimit);
+        DossierSelectionResult selection = Selection(count: DossierDefaults.ItemLimit, limitReached: false);
+
+        DossierSelection.BuildLimitsHit(selection, anchor)
+            .ShouldContain(h => h.Limit == DossierOmissionReason.CapReached);
+    }
+
+    [Fact]
+    public void BuildLimitsHit_reports_no_cap_below_the_ceiling()
+    {
+        DossierAnchor anchor = Anchor(DossierDefaults.ItemLimit);
+        DossierSelectionResult selection = Selection(count: 5, limitReached: false);
+
+        DossierSelection.BuildLimitsHit(selection, anchor).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void BuildLimitsHit_reports_cap_when_the_widen_limit_flag_is_raised()
+    {
+        DossierAnchor anchor = Anchor(DossierDefaults.ItemLimit);
+        DossierSelectionResult selection = Selection(count: 5, limitReached: true);
+
+        DossierSelection.BuildLimitsHit(selection, anchor)
+            .ShouldContain(h => h.Limit == DossierOmissionReason.CapReached);
+    }
+
+    private static DossierAnchor Anchor(int itemLimit) =>
+        new(null, null, null, [], null, null, null, false, null, 3, itemLimit);
+
+    private static DossierSelectionResult Selection(int count, bool limitReached) =>
+        new(
+            Selected: [.. Enumerable.Range(0, count).Select(i =>
+                new SelectedClaim(Memory(Guid.NewGuid(), ValidFrom, CreatedOn), []))],
+            AnchorCount: count,
+            WidenedCount: 0,
+            EdgeCount: 0,
+            DepthLimitReached: false,
+            HiddenPathDropped: false,
+            LimitReached: limitReached,
+            Edges: []);
 }

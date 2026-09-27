@@ -1,20 +1,40 @@
 using System.Text;
+using Npgsql;
 
 namespace SmoothAiProductContextMemory.Infrastructure.Persistence;
 
 /// <summary>
-/// Turns AGE's textual rendering of an agtype list of vertices or edges into parseable JSON.
+/// Reads AGE's textual agtype rendering back into JSON: strips the element type annotations that
+/// makes <c>nodes(p)</c> / <c>relationships(p)</c> unparseable, and unquotes a scalar rendered via
+/// <c>::text</c>.
 /// </summary>
-/// <remarks>
-/// AGE renders each element of <c>nodes(p)</c> / <c>relationships(p)</c> with a trailing type
-/// annotation — <c>{…}::vertex</c>, <c>{…}::edge</c> — which no JSON parser accepts. Blind text
-/// replacement would also corrupt any property value that happens to contain the same characters, and
-/// <c>reason</c> is caller-supplied free text, so the annotation is removed by scanning: string
-/// literals are skipped, and only an annotation sitting between a closing brace and the next element
-/// boundary is dropped.
-/// </remarks>
 internal static class AgtypeArrayReader
 {
+    /// <summary>
+    /// Reads a scalar agtype string rendered via <c>::text</c> and unquotes it. AGE renders a string
+    /// value as a quoted JSON literal, so a scalar that is not itself a string reads back unquoted and
+    /// is returned as-is, while a string value's surrounding quotes are stripped by deserialising the
+    /// quoted span. A quote-led scalar with no interior quote (a raw string literal arising from a
+    /// non-quoted column) is returned as-is; one that is quote-led with an interior quote but is not
+    /// valid JSON raises <c>JsonException</c>.
+    /// </summary>
+    internal static string ReadScalar(string raw)
+    {
+        if (raw.Length >= 2 && raw[0] == '"')
+        {
+            int closingQuote = raw.LastIndexOf('"');
+            if (closingQuote > 0)
+            {
+                return System.Text.Json.JsonSerializer.Deserialize<string>(raw[..(closingQuote + 1)]) ?? string.Empty;
+            }
+        }
+
+        return raw;
+    }
+
+    internal static string ReadAgtypeString(NpgsqlDataReader reader, int ordinal) =>
+        ReadScalar(reader.GetString(ordinal));
+
     internal static string ToJson(string agtypeArray)
     {
         var json = new StringBuilder(agtypeArray.Length);

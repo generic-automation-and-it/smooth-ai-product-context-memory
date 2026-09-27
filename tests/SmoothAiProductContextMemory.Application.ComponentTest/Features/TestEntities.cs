@@ -11,14 +11,14 @@ internal static class TestEntities
         string scopeDimension = MemoryGroup.ScopeDimensionValue.Product,
         string? repo = null,
         List<TicketDocument>? tickets = null) => new()
-    {
-        Uuid = Guid.NewGuid(),
-        ScopeDimension = scopeDimension,
-        InitiativeId = DefaultInitiativeId,
-        Repo = repo,
-        Tickets = tickets ?? [],
-        CreatedOn = DateTimeOffset.UtcNow,
-    };
+        {
+            Uuid = Guid.NewGuid(),
+            ScopeDimension = scopeDimension,
+            InitiativeId = DefaultInitiativeId,
+            Repo = repo,
+            Tickets = tickets ?? [],
+            CreatedOn = DateTimeOffset.UtcNow,
+        };
 
     public static Memory NewMemory(long groupId, string name, string description)
     {
