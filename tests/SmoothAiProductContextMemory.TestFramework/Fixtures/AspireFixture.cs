@@ -36,6 +36,8 @@ public sealed class AspireFixture : IAsyncLifetime
 
     public void SetOutput(ITestOutputHelper? output) => _output = output;
 
+    public ITestOutputHelper? Output => _output;
+
     public string BlobEndpoint { get; private set; } = string.Empty;
 
     public string CreateDatabaseConnectionString(string databaseName)

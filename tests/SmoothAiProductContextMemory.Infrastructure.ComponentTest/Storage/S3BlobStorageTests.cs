@@ -13,9 +13,27 @@ namespace SmoothAiProductContextMemory.Infrastructure.ComponentTest.Storage;
 /// Each test uses its own bucket for isolation; the adapter creates the bucket lazily on first write.
 /// </summary>
 [Collection("Aspire")]
-public sealed class S3BlobStorageTests(AspireFixture aspire)
+public sealed class S3BlobStorageTests(AspireFixture aspire) : IAsyncLifetime
 {
     private static readonly byte[] SampleContent = Encoding.UTF8.GetBytes("Context memory stores summarised, labelled facts.");
+
+    private readonly List<string> _buckets = [];
+
+    public ValueTask InitializeAsync() => ValueTask.CompletedTask;
+
+    public async ValueTask DisposeAsync()
+    {
+        foreach (string bucket in _buckets)
+        {
+            await BlobBucketCleanup.DeleteBlobBucketAsync(
+                aspire.BlobEndpoint,
+                AspireFixture.BlobAccessKey,
+                AspireFixture.BlobSecretKey,
+                bucket,
+                report: message => aspire.Output?.WriteLine($"[S3BlobStorageTests] {message}"));
+        }
+    }
+
 
     [Fact]
     public async Task Store_ThenGet_ReturnsSameContent()
@@ -102,12 +120,15 @@ public sealed class S3BlobStorageTests(AspireFixture aspire)
 
     private S3BlobStorage CreateIsolatedStorage()
     {
+        string bucket = $"s3blob-{Guid.NewGuid():N}";
+        _buckets.Add(bucket);
+
         var options = Options.Create(new BlobStorageOptions
         {
             Endpoint = aspire.BlobEndpoint,
             AccessKey = AspireFixture.BlobAccessKey,
             SecretKey = AspireFixture.BlobSecretKey,
-            Bucket = $"s3blob-{Guid.NewGuid():N}",
+            Bucket = bucket,
         });
 
         return new S3BlobStorage(options, new TestHttpClientFactory(), NullLogger<S3BlobStorage>.Instance);
