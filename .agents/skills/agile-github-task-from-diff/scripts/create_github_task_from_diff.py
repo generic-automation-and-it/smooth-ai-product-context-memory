@@ -9,8 +9,10 @@ Vertical slicing lives at the Feature (parent issue) level.
 import argparse
 import json
 import os
+import shlex
 import subprocess
 import sys
+import urllib.parse
 
 
 def run(cmd, check=True, capture=True):
@@ -95,7 +97,7 @@ def classify_horizontal_slice(paths):
         layers.append("backend")
     if any("test" in p.lower() or "spec" in p.lower() for p in paths):
         layers.append("tests")
-    if any(p.endswith(".md") or p.startswith(("docs/", ".docs/")) for p in paths):
+    if any(p.endswith(".md") or p.startswith((".docs/", "docs/")) for p in paths):
         layers.append("documentation")
     if any(p.startswith((".agents/", ".github/")) for p in paths):
         layers.append("ai-tooling")
@@ -143,7 +145,8 @@ def build_task_body(branch_name, base_ref, base_sha, paths, status_counts, diff_
     areas = summarize_areas(paths)
     area_str = ", ".join(f"`{a}`" for a in areas)
 
-    checklist = ["- [ ] Diff reviewed and scope confirmed against parent Feature."]
+    scope_check = f"against parent Feature #{feature_issue}" if feature_issue else "against the repo"
+    checklist = [f"- [ ] Diff reviewed and scope confirmed {scope_check}."]
     if any(p.startswith(("src/", "SmoothAiProductContextMemory")) for p in paths):
         checklist.append("- [ ] Build succeeds or follow-up issue raised.")
     if any("test" in p.lower() or "spec" in p.lower() for p in paths):
@@ -211,17 +214,64 @@ def suggest_branch_name(layers, title, issue_number):
     return f"{branch_type}/{issue_number}-{slug}"
 
 
+def gh_error_detail(exc):
+    """Best-effort human-readable detail for a failed gh call."""
+    if isinstance(exc, subprocess.CalledProcessError):
+        detail = (exc.stderr or exc.stdout or "").strip()
+        return detail or f"exit code {exc.returncode}"
+    return str(exc) or exc.__class__.__name__
+
+
+def get_issue_database_id(owner, repo, issue_number):
+    """Resolve an issue number to its database id (what the sub-issues API expects)."""
+    return run_json(["gh", "api", f"/repos/{owner}/{repo}/issues/{issue_number}"])["id"]
+
+
 def link_sub_issue(owner, repo, parent_issue_number, child_issue_number):
-    """Link child issue as a sub-issue of the parent using the GitHub REST API."""
+    """Link child issue as a sub-issue of the parent. Soft-fail, reporting gh's error."""
     try:
-        run_json([
+        child_id = get_issue_database_id(owner, repo, child_issue_number)
+        # 201 may have an empty body; do not json-parse stdout. -F types sub_issue_id as int.
+        run([
             "gh", "api", "--method", "POST",
             f"/repos/{owner}/{repo}/issues/{parent_issue_number}/sub_issues",
-            "-f", f"sub_issue_id={child_issue_number}",
+            "-F", f"sub_issue_id={child_id}",
         ])
         return True
-    except Exception:
+    except Exception as exc:
+        print(f"Warning: sub-issue link failed: {gh_error_detail(exc)}", file=sys.stderr)
         return False
+
+
+def check_label(owner, repo, label):
+    """Return ("present" | "missing" | "unknown", detail). 404 is missing; any other error is unknown."""
+    path = f"/repos/{owner}/{repo}/labels/{urllib.parse.quote(label, safe='')}"
+    try:
+        run(["gh", "api", path])
+        return "present", ""
+    except subprocess.CalledProcessError as exc:
+        detail = gh_error_detail(exc)
+        if "HTTP 404" in detail:
+            return "missing", detail
+        return "unknown", detail
+    except Exception as exc:
+        return "unknown", gh_error_detail(exc)
+
+
+def label_fix_command(owner, repo, label):
+    return f"gh label create {shlex.quote(label)} --repo {owner}/{repo} --color 0075ca"
+
+
+def build_create_cmd(owner, repo, title, body, label):
+    cmd = [
+        "gh", "issue", "create",
+        "--repo", f"{owner}/{repo}",
+        "--title", title,
+        "--body", body,
+    ]
+    if label:
+        cmd += ["--label", label]
+    return cmd
 
 
 def parse_feature_issue(value):
@@ -243,7 +293,7 @@ def parse_feature_issue(value):
         raise RuntimeError(f"--feature-issue must be an integer or GitHub issue URL, got: {value}")
 
 
-def main():
+def build_parser():
     parser = argparse.ArgumentParser(
         description=(
             "Create a GitHub Task (sub-issue) from the git diff vs main, "
@@ -291,8 +341,26 @@ def main():
         "--open", action="store_true",
         help="Open the created issue in the browser.",
     )
+    parser.add_argument(
+        "--noparentid", action="store_true",
+        help=(
+            "Create the issue in the repo only: no GitHub Project and no parent Feature. "
+            "Cannot be combined with --feature-issue."
+        ),
+    )
+    return parser
 
-    args = parser.parse_args()
+
+def parse_args(argv=None):
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.noparentid and args.feature_issue:
+        parser.error("--noparentid cannot be combined with --feature-issue: a repo-only task has no parent.")
+    return args
+
+
+def main():
+    args = parse_args()
 
     ensure_tool("git")
     ensure_tool("gh")
@@ -324,28 +392,44 @@ def main():
     title = args.title or build_title(areas, layers, branch_name)
     body = build_task_body(branch_name, base_ref, base_sha, paths, status_counts, diff_stat, layers, feature_issue)
 
+    label_state, label_detail = check_label(owner, repo, args.label) if args.label else (None, "")
+
     if args.dry_run:
         print(f"Title:\n{title}\n")
         print(f"Body:\n{body}\n")
-        if args.no_project:
+        if args.noparentid:
+            print(f"Would create issue in {owner}/{repo} only (--noparentid: no project, no parent).")
+        elif args.no_project:
             print(f"Would create issue in {owner}/{repo} (no project).")
         else:
             print(f"Would create issue in {owner}/{repo} and add to project {org}/projects/{args.project}.")
+        if label_state:
+            print(f"Label '{args.label}': {'present' if label_state == 'present' else label_state.upper()}")
+            if label_state == "missing":
+                print(f"  Fix (after confirming with the user): {label_fix_command(owner, repo, args.label)}")
+            elif label_state == "unknown":
+                print(f"  Could not check label: {label_detail}")
         if feature_issue:
             print(f"Would link as sub-issue of Feature #{feature_issue}.")
         return 0
 
-    # Create the issue
-    create_cmd = [
-        "gh", "issue", "create",
-        "--repo", f"{owner}/{repo}",
-        "--title", title,
-        "--body", body,
-    ]
-    if args.label:
-        create_cmd += ["--label", args.label]
+    # Create the issue. A missing label would hard-fail gh issue create, so drop it and warn;
+    # an unknown label state (auth/network hiccup) still attempts the label as before.
+    label = args.label
+    if label_state == "missing":
+        print(
+            f"Warning: label '{label}' does not exist in {owner}/{repo}; creating the issue unlabeled. "
+            f"Fix: {label_fix_command(owner, repo, label)}",
+            file=sys.stderr,
+        )
+        label = None
+    elif label_state == "unknown":
+        print(
+            f"Warning: could not check label '{label}' ({label_detail}); applying it anyway.",
+            file=sys.stderr,
+        )
 
-    issue_url = run(create_cmd)
+    issue_url = run(build_create_cmd(owner, repo, title, body, label))
     issue_number = int(issue_url.rstrip("/").split("/")[-1])
     print(f"Created task issue #{issue_number}: {issue_url}")
     print(
@@ -354,7 +438,9 @@ def main():
     )
 
     # Add to GitHub Project (unless suppressed)
-    if args.no_project:
+    if args.noparentid:
+        print("Skipped project add and parent link (--noparentid).")
+    elif args.no_project:
         print("Skipped project add (--no-project).")
     else:
         try:

@@ -9,10 +9,7 @@ allowed-tools:
   - Bash(gh pr ready:*)
   - Bash(.agents/skills/git-commit-push-pr/scripts/get-pr-metadata.sh:*)
   - Bash(.agents/skills/git-commit-push-pr/scripts/get-base-branch.sh:*)
-models:
-  claude: sonnet      # medium-complexity; PR creation with template filling needs broader reasoning
-  copilot: auto
-  codex: gpt-5.4
+effort: medium  # PR creation with template filling
 ---
 
 # Git Commit, Push, and Create/Update Pull Request (GitHub)
@@ -52,10 +49,9 @@ Resolve the close behaviour and issue number once at the start, then apply it in
 
 ### Step 1: Commit and Push (MANDATORY)
 
-Invoke the **git-commit-push** skill as a sub-agent (medium-complexity task):
-- Claude Code: `Task(subagent_type: "general-purpose", model: "sonnet", prompt: "invoke git-commit-push skill" + args)`
-- Copilot: invoke `git-commit-push` skill with model `auto`
-- Codex: invoke git-commit-push agent (model: `gpt-5.4`)
+Invoke the **git-commit-push** skill as a sub-agent at its frontmatter `effort` (`medium`), on the session's model:
+- Claude Code: `Task(subagent_type: "general-purpose", prompt: "invoke git-commit-push skill" + args)`
+- Copilot / Codex: invoke the `git-commit-push` skill
 - If commit message provided, pass it to git-commit-push
 - If `--issue <number>` was passed, forward it to git-commit-push so the branch is renamed before the push
 - If `--autonomous` was passed, forward it to git-commit-push (and transitively to git-commit)

@@ -35,3 +35,4 @@ sequenceDiagram
 | Date | Change | Ref |
 |:-----|:-------|:----|
 | 2026-06-12 | Initial version. `get-pr-metadata.sh` rewritten to current convention and wired into SKILL.md; `push.sh` relocated to git-commit-push; redundant gh-CLI reference section removed. | |
+| 2026-09-27 | Synced to `smooth-devex-template` PR #84: `models:` replaced by `effort: medium`; the `git-commit-push` sub-agent is invoked at its frontmatter `effort` (`medium`) on the session's model. | |

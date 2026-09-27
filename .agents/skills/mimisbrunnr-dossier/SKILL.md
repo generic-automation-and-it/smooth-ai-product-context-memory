@@ -1,3 +1,13 @@
+---
+name: mimisbrunnr-dossier
+description: Compose a read-only, cited context dossier — one ordered document plus a findings report (gaps, contradictions, stale claims) — for a slice of the Mímisbrunnr store (repository, initiative, ticket, tags). Use when re-entering a repo or ticket, handing reasoning to a colleague, grounding a design document, or auditing the store. Fetches a deterministic bundle from the Host API and writes only a local gitignored artefact; never writes to the store. Triggers on "dossier", "catch me up on", "everything the store knows about".
+allowed-tools:
+  - Bash(python3 -B .agents/skills/mimisbrunnr-dossier/scripts/dossier_composer.py:*)
+  - Read
+  - Write
+effort: high  # equivalence, contradiction and gap judgement across a whole store slice
+---
+
 # mimisbrunnr-dossier
 
 Compose a **context dossier** — a read-only, focused, cited document plus its findings — for a slice of

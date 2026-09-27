@@ -52,8 +52,8 @@ WORK TASK CREATION TRIGGERED — Follow these steps:
    ✓ UI/UX specification: if frontend changes, describe UI structure or wireframes
 
    **Phase 4-6 (Tyr/Thor) execution**:
-   ✓ Testing expectations: what tests are required (unit, integration, E2E)
-   ✓ Test tiers required: L0 (unit), L1 (integration), L2 (E2E) expectations
+   ✓ Testing expectations: what tests are required (unit, component, integration)
+   ✓ Test tiers required: L0 (unit), L1 (component), L2 (integration) expectations
 
    **Phase 7 (Heimdall) review gates**:
    ✓ Non-functional requirements: performance, security, compliance, scalability constraints
@@ -85,10 +85,10 @@ WORK TASK CREATION TRIGGERED — Follow these steps:
    - Files/domains affected
    - Estimated complexity
 
-9. **Recommend orchestrator model**: Evaluate task complexity and workflow:
-   - **Single-agent (Sonnet)** — Config changes, single-file fixes, straightforward CRUD, <5 files, clear patterns. Executes lightweight path (0→1→6→7→8)
-   - **Orchestrated (Opus orchestrator)** — Cross-cutting concerns, architectural decisions, ambiguous requirements, 5+ files, new patterns, complex integrations. Executes full path (0→1→2→3→4→5→6→7→8) with multi-agent sub-teams (PO/Architect/QA in Phase 1, Backend/Frontend engineers in Phase 4-6)
-   - Present with one-line rationale and workflow
+9. **Recommend the session effort and path** — a human action; recommend a level (`low` → `max`), never claim to set it, and never recommend a model. Record it in the Execution Profile:
+   - **Lightweight path (0→1→6→7→8)** at `low`/`medium` effort — config changes, single-file fixes, straightforward CRUD, <5 files, clear patterns
+   - **Full path (0→1→2→3→4→5→6→7→8)** at `high`/`xhigh`/`max` effort — cross-cutting concerns, architectural decisions, ambiguous requirements, 5+ files, new patterns, complex integrations
+   - One-line rationale. Remind the user to set the runner's effort level before starting execution.
 
 IMPORTANT: The work task file is a filled-in copy of the template — populate with REAL content from investigation, not generic templates. An AI coder should be able to execute this task with only the information in this file and the linked context documents.
 EOF

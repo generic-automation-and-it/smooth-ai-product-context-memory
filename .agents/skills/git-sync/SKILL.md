@@ -3,10 +3,7 @@ name: git-sync
 description: Sync the current working branch with origin/main and optionally resolve merge conflicts. Use when synchronizing local branch with the latest changes from main, with automatic or manual conflict resolution.
 allowed-tools:
   - Bash(.agents/skills/git-sync/scripts/safe-sync.sh:*)
-models:
-  claude: haiku      # low-complexity; fetch + merge is straightforward; conflict resolution may briefly require sonnet
-  copilot: gpt-5.4-mini  # mini equivalent for low-complexity Copilot tasks
-  codex: gpt-5.4-mini
+effort: medium  # --fix resolves conflicts by merging the intent of both sides; the default path is script-only
 ---
 
 # Git Sync with Main
