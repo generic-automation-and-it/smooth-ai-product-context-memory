@@ -171,11 +171,11 @@ public sealed partial class NpgsqlTicketGraph(SmoothAiProductContextMemoryDbCont
             """, cancellationToken);
         await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
         if (!await reader.ReadAsync(cancellationToken)) return null;
-        var result = new TicketHierarchyHop(new TicketIdentity(MutationString(reader, 0), MutationString(reader, 1)), child,
-            MutationString(reader, 2), MutationString(reader, 3),
+        var result = new TicketHierarchyHop(new TicketIdentity(reader.GetString(0), reader.GetString(1)), child,
+            reader.GetString(2), reader.GetString(3),
             reader.IsDBNull(4) || reader.GetString(4) == "null" ? null
-                : DateTimeOffset.Parse(MutationString(reader, 4), CultureInfo.InvariantCulture),
-            DateTimeOffset.Parse(MutationString(reader, 5), CultureInfo.InvariantCulture));
+                : DateTimeOffset.Parse(reader.GetString(4), CultureInfo.InvariantCulture),
+            DateTimeOffset.Parse(reader.GetString(5), CultureInfo.InvariantCulture));
         if (await reader.ReadAsync(cancellationToken)) throw MutationConflict();
         return result;
     }
@@ -223,9 +223,6 @@ public sealed partial class NpgsqlTicketGraph(SmoothAiProductContextMemoryDbCont
 
     private static string MutationPredicate(string variable, TicketIdentity identity) =>
         $"{variable}.provider = {CypherLiteral.Quote(identity.Provider)} AND {variable}.key = {CypherLiteral.Quote(identity.Key)}";
-
-    private static string MutationString(NpgsqlDataReader reader, int ordinal) =>
-        reader.GetString(ordinal);
 
     private static ConflictException MutationConflict() => new("Ticket hierarchy change conflicts with current state.");
 }

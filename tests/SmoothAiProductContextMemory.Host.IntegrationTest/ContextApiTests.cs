@@ -99,7 +99,7 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
         })
         {
             using var request = new HttpRequestMessage(method, path);
-            if (method is not null && method != HttpMethod.Get)
+            if (method != HttpMethod.Get)
             {
                 request.Content = JsonContent.Create(new { });
             }

@@ -69,11 +69,10 @@ public static class DossierSelection
         DossierAnchor anchor,
         CancellationToken cancellationToken)
     {
-        bool hasGroupContext = false;
         MemoryScopeFilter.ScopeFilterPlan scopePlan =
-            MemoryScopeFilter.Plan(anchor.ScopeDimension, hasGroupContext);
+            MemoryScopeFilter.Plan(anchor.ScopeDimension, false);
         IReadOnlyList<string> hiddenDimensions =
-            MemoryScopeFilter.HiddenDimensions(anchor.ScopeDimension, hasGroupContext);
+            MemoryScopeFilter.HiddenDimensions(anchor.ScopeDimension, false);
 
         // Anchor resolution: repo/initiative/tags/kind/status through the search abstraction in one
         // indexed statement; the ticket through the accepted ITicketGraph separation (mirrors

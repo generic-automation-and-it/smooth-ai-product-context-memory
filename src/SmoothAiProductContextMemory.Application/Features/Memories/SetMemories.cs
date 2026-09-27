@@ -422,13 +422,24 @@ public static class SetMemories
         /// <summary>The dry-run verdict — plan counts and resolved identities, with no blob.</summary>
         private static Response Predict(WritePlan plan) =>
             new(
+                Counts(plan).Created,
+                Counts(plan).Versioned,
+                plan.Links.Count(l => !l.Skip),
+                Counts(plan).Diverged,
+                plan.Links.Count(l => l.Skip),
+                Counts(plan).LabelsProposed,
+                [.. plan.Items.Select(i => new ItemResult(i.Uuid, null, i.Mode == ItemMode.Version))]);
+
+        /// <summary>
+        /// The count fields shared by the dry-run and the persisted response. Kept in one place so a
+        /// new item mode or kind cannot silently diverge between the predict and persist paths.
+        /// </summary>
+        private static (int Created, int Versioned, int Diverged, int LabelsProposed) Counts(WritePlan plan) =>
+            (
                 plan.Items.Count(i => i.Mode == ItemMode.Create),
                 plan.Items.Count(i => i.Mode == ItemMode.Version),
-                plan.Links.Count(l => !l.Skip),
                 plan.Items.Count(i => i.Mode == ItemMode.Create && i.Write.Kind == MemoryVersion.KindValue.Divergence),
-                plan.Links.Count(l => l.Skip),
-                plan.LabelsToInsert.Count,
-                [.. plan.Items.Select(i => new ItemResult(i.Uuid, null, i.Mode == ItemMode.Version))]);
+                plan.LabelsToInsert.Count);
 
         private async Task<Response> PersistAsync(WritePlan plan, CancellationToken cancellationToken)
         {
@@ -485,13 +496,14 @@ public static class SetMemories
 
                 await transaction.CommitAsync(cancellationToken);
 
+                (int Created, int Versioned, int Diverged, int LabelsProposed) counts = Counts(plan);
                 return new Response(
-                    plan.Items.Count(i => i.Mode == ItemMode.Create),
-                    plan.Items.Count(i => i.Mode == ItemMode.Version),
+                    counts.Created,
+                    counts.Versioned,
                     linked,
-                    plan.Items.Count(i => i.Mode == ItemMode.Create && i.Write.Kind == MemoryVersion.KindValue.Divergence),
+                    counts.Diverged,
                     skipped,
-                    plan.LabelsToInsert.Count,
+                    counts.LabelsProposed,
                     results);
             }
             catch
@@ -520,7 +532,7 @@ public static class SetMemories
 
             // Navigation, not the surrogate key: EF fixes up memory_id on insert, so no intermediate
             // SaveChanges is needed to learn it.
-            MemoryVersion version = BuildVersion(1, isCurrent: true, item.Write, blobAddress);
+            MemoryVersion version = BuildVersion(1, item.Write, blobAddress);
             version.Memory = memory;
             db.MemoryVersions.Add(version);
 
@@ -542,7 +554,7 @@ public static class SetMemories
             current.IsCurrent = false;
             await errorMapper.SaveOrMapAsync(() => db.SaveChangesAsync(cancellationToken));
 
-            MemoryVersion next = BuildVersion(item.NextVersion!.Value, isCurrent: true, item.Write, blobAddress);
+            MemoryVersion next = BuildVersion(item.NextVersion!.Value, item.Write, blobAddress);
             next.MemoryId = item.MemoryId!.Value;
             db.MemoryVersions.Add(next);
             currentVersions[uuid] = next;
@@ -563,12 +575,11 @@ public static class SetMemories
 
         private static MemoryVersion BuildVersion(
             int version,
-            bool isCurrent,
             MemoryWrite item,
             string? blobAddress) => new()
             {
                 Version = version,
-                IsCurrent = isCurrent,
+                IsCurrent = true,
                 Statement = item.Statement,
                 ContentSummary = item.ContentSummary,
                 BlobAddress = blobAddress,

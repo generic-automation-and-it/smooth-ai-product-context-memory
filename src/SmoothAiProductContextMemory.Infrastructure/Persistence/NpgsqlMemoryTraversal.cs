@@ -126,12 +126,7 @@ public sealed class NpgsqlMemoryTraversal(SmoothAiProductContextMemoryDbContext 
     {
         string sources = string.Join(", ", query.SourceUuids.Select(u => CypherLiteral.Quote(u.ToString("D"))));
         string edge = $"[:{AgeSession.EdgeLabel}*1..{query.MaxDepth.ToString(CultureInfo.InvariantCulture)}]";
-        string pattern = query.Direction switch
-        {
-            TraversalDirection.Inbound => $"(s:{AgeSession.VertexLabel})<-{edge}-(t:{AgeSession.VertexLabel})",
-            TraversalDirection.Either => $"(s:{AgeSession.VertexLabel})-{edge}-(t:{AgeSession.VertexLabel})",
-            _ => $"(s:{AgeSession.VertexLabel})-{edge}->(t:{AgeSession.VertexLabel})",
-        };
+        string pattern = DirectionPattern(query.Direction, edge);
 
         string cypher = $"""
             MATCH p = {pattern}
@@ -234,18 +229,25 @@ public sealed class NpgsqlMemoryTraversal(SmoothAiProductContextMemoryDbContext 
         return command;
     }
 
-    private static string BuildCypher(MemoryPathQuery query)
+    /// <summary>
+    /// The <c>(s)-[edge]-(t)</c> pattern for a direction. Shared by the single-source and widener
+    /// builders so a new direction is added in one place. Unknown directions fail loudly rather than
+    /// silently resolving to Outbound, which previously masked a bad enum value as an outbound walk.
+    /// </summary>
+    private static string DirectionPattern(TraversalDirection direction, string edge) => direction switch
     {
-        string relationFilter = query.Relation is null
+        TraversalDirection.Inbound => $"(s:{AgeSession.VertexLabel})<-{edge}-(t:{AgeSession.VertexLabel})",
+        TraversalDirection.Either => $"(s:{AgeSession.VertexLabel})-{edge}-(t:{AgeSession.VertexLabel})",
+        TraversalDirection.Outbound => $"(s:{AgeSession.VertexLabel})-{edge}->(t:{AgeSession.VertexLabel})",
+        _ => throw new ArgumentOutOfRangeException(nameof(direction), direction, "Unknown traversal direction."),
+    };
+
+    private static string BuildCypher(MemoryPathQuery query)
+    {        string relationFilter = query.Relation is null
             ? string.Empty
             : $" {{relation: {Quote(query.Relation)}}}";
         string edge = $"[:{AgeSession.EdgeLabel}*1..{query.MaxDepth.ToString(CultureInfo.InvariantCulture)}{relationFilter}]";
-        string pattern = query.Direction switch
-        {
-            TraversalDirection.Inbound => $"(s:{AgeSession.VertexLabel})<-{edge}-(t:{AgeSession.VertexLabel})",
-            TraversalDirection.Either => $"(s:{AgeSession.VertexLabel})-{edge}-(t:{AgeSession.VertexLabel})",
-            _ => $"(s:{AgeSession.VertexLabel})-{edge}->(t:{AgeSession.VertexLabel})",
-        };
+        string pattern = DirectionPattern(query.Direction, edge);
 
         // Property predicates rather than inline maps so ix_memory_vertex_uuid serves both anchors
         // (LADR-06). The hop bound is inside the pattern; there is no unbounded form (LADR-07).
