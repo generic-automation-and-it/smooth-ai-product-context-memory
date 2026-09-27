@@ -172,7 +172,9 @@ Built on the **smooth-devex-template** AI DevEx scaffold — a ready-to-use AI a
 
 ---
 
-## Security
+## API credentials
+
+To report a vulnerability, see the [Security Policy](SECURITY.md).
 
 The API requires two **distinct** Bearer tokens — one read, one write — in **every** run mode, and
 there is **no default**: if either is blank or the two match, the process exits at startup. Set them
@@ -254,9 +256,7 @@ Target a single test project directly when iterating, e.g. `dotnet test tests/Sm
 dotnet run --project src/SmoothAiProductContextMemory.AppHost   # Aspire stack; set secret api-read-token/api-write-token parameters first (docs/wiki/docker.md)
 HostConfiguration__UseProject=false \
   dotnet run --project src/SmoothAiProductContextMemory.AppHost # same stack, pull published Host image (tag may lag)
-ApiAccess__ReadToken='<random-read-token>' \
-ApiAccess__WriteToken='<different-random-write-token>' \
-  dotnet run --project src/SmoothAiProductContextMemory.Host    # start API on its own
+dotnet run --project src/SmoothAiProductContextMemory.Host       # API on its own; tokens: see API credentials above
 docker build -t smooth-ai-product-context-memory:local .        # Host image; run contract in docs/wiki/docker.md
 ```
 
