@@ -36,7 +36,8 @@
 #               OPENCODE_GEMINI_API_KEY / OPENCODE_COPILOT_API_KEY /
 #               OPENCODE_OPENAI_API_KEY / OPENCODE_ANTHROPIC_API_KEY /
 #               OPENCODE_GO_OPENAI_API_KEY / OPENCODE_GO_ANTHROPIC_API_KEY /
-#               OPENCODE_OPENROUTER_API_KEY.
+#               OPENCODE_OPENROUTER_API_KEY (or OPENROUTER_API_KEY; the
+#               namespaced secret takes precedence).
 #               GITHUB_TOKEN is auto-injected by the runner; no explicit
 #               configuration is required, but the repo must allow the
 #               default `GITHUB_TOKEN` permission (the gate's `permissions:`
@@ -432,7 +433,10 @@ jobs:
           OPENCODE_ANTHROPIC_API_KEY: ${{ secrets.OPENCODE_ANTHROPIC_API_KEY }}
           OPENCODE_GO_OPENAI_API_KEY: ${{ secrets.OPENCODE_GO_OPENAI_API_KEY }}
           OPENCODE_GO_ANTHROPIC_API_KEY: ${{ secrets.OPENCODE_GO_ANTHROPIC_API_KEY }}
-          OPENCODE_OPENROUTER_API_KEY: ${{ secrets.OPENCODE_OPENROUTER_API_KEY }}
+          # Keep the runtime name expected by opencode.json while accepting
+          # the standard OpenRouter secret name as an alias. Direct-name
+          # precedence matches the Conductor imposter's normalization.
+          OPENCODE_OPENROUTER_API_KEY: ${{ secrets.OPENCODE_OPENROUTER_API_KEY || secrets.OPENROUTER_API_KEY }}
           # Model chain — see the reusable-workflow caller template for the
           # full preset → model map. Defaults match that mapping.
           OPENCODE_REVIEW_REPORT_MODEL_PRIMARY: ${{
