@@ -84,7 +84,8 @@ sequenceDiagram
 ## Migration Plans
 
 - The numeric item limit is provisional (`DossierDefaults.ItemLimit`) pending reference-workflow validation; recorded per export, never cited as a specification (NFR-03). It is deliberately bound to the selection path's fetch ceiling (`MemorySearchDefaults.MaxLimit`, 200) so the stated cap is the effective, reachable bound — a higher stated cap would be an unreachable number that can never be hit or reported.
-- **Historical (2026-09-23):** earlier this dropped to 200 because selection fetched at `MemorySearchDefaults.MaxLimit`, so a 500 cap was unreachable. Any later raise of `MemorySearchDefaults.MaxLimit` must keep the dossier cap equal to it, or the cap is again dead. `cap reached` is reported on the cut itself (`LimitReached` or a history-inflated item cut), so a slice that fills the bound is never presented as complete.
+- **Historical (2026-09-23):** earlier this dropped to 200 because selection fetched at `MemorySearchDefaults.MaxLimit`, so a 500 cap was unreachable. Any later raise of `MemorySearchDefaults.MaxLimit` must keep the dossier cap equal to it, or the cap is again dead.
+- A history-inflated cut is disclosed per item in `omitted` (each cut carries `cap reached`), never through `manifest.limitsHit`: the preview is blob-free by structure and could not have predicted it, so it must not appear in a consent artefact it was never shown.
 - The dossier skill (composition, focus, findings taxonomy) and tag identity/synonyms remain separate, blocked workstreams — not part of this deterministic side.
 
 ## Changelog
