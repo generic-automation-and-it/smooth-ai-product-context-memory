@@ -457,6 +457,42 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
     }
 
     [Fact]
+    public async Task As_of_query_returns_the_version_valid_at_that_time()
+    {
+        // A superseded version that was valid at asOf must be what an as-of query reports, not vanish
+        // because CurrentOnly (the default) excludes everything but the live version.
+        Guid group = await ResolveGroup(MemoryGroup.ScopeDimensionValue.Product);
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+
+        JsonElement first = await SetMemory(
+            group,
+            "Historical fact",
+            "Old claim",
+            MemoryVersion.MemoryVersionStatus.Approved,
+            validFrom: now.AddDays(-5),
+            validUntil: now.AddDays(-1));
+        Guid uuid = first.GetProperty("items")[0].GetProperty("uuid").GetGuid();
+
+        await SetMemory(
+            group,
+            "Historical fact",
+            "New claim",
+            MemoryVersion.MemoryVersionStatus.Approved,
+            uuid: uuid,
+            validFrom: now);
+
+        using HttpResponseMessage asOf = await _http.PostAsJsonAsync(
+            "/api/context/query",
+            new { groupUuid = group, asOf = now.AddDays(-2), limit = 200 },
+            Ct);
+        asOf.StatusCode.ShouldBe(HttpStatusCode.OK);
+        JsonElement items = (await asOf.Content.ReadFromJsonAsync<JsonElement>(Json, Ct)).GetProperty("items");
+        string[] statements = [.. items.EnumerateArray().Select(i => i.GetProperty("statement").GetString()!)];
+        statements.ShouldContain("Old claim");
+        statements.ShouldNotContain("New claim");
+    }
+
+    [Fact]
     public async Task Self_link_returns_400()
     {
         Guid group = await ResolveGroup(MemoryGroup.ScopeDimensionValue.Product);

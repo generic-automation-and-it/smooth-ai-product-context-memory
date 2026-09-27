@@ -52,7 +52,11 @@ public sealed class NpgsqlMemorySearch(SmoothAiProductContextMemoryDbContext db)
                    join grp in db.MemoryGroups on memory.GroupId equals grp.Id
                    select new { version, memory, grp };
 
-        if (criteria.CurrentOnly)
+        // CurrentOnly narrows to the live version. When AsOf is supplied it must be dropped: the
+        // validity-window filter alone selects the version the store believed at that moment, and a
+        // superseded version that was valid then is excluded by IsCurrent, which would wrongly make
+        // the memory vanish from an as-of query.
+        if (criteria.CurrentOnly && criteria.AsOf is null)
         {
             rows = rows.Where(x => x.version.IsCurrent);
         }
