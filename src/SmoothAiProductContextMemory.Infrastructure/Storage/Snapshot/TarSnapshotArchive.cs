@@ -23,7 +23,7 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
         string destinationPath,
         SnapshotCapture capture,
         SnapshotWalkResult walk,
-        Func<string, Task<(byte[] Content, string Sha256)>> readBlobAsync,
+        Func<string, Task<(byte[] Content, string Sha256, string? ContentType)>> readBlobAsync,
         CancellationToken cancellationToken)
     {
         string directory = Path.GetDirectoryName(Path.GetFullPath(destinationPath)) ?? Directory.GetCurrentDirectory();
@@ -41,13 +41,13 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
             using var tar = new TarWriter(stream, TarEntryFormat.Ustar, leaveOpen: false);
 
             var entries = new List<SnapshotArchiveEntry>();
-            var writeEntry = async (string name, byte[] content, string? sha256 = null) =>
+            var writeEntry = async (string name, byte[] content, string? sha256 = null, string? contentType = null) =>
             {
                 tar.WriteEntry(new PaxTarEntry(TarEntryType.RegularFile, name)
                 {
                     DataStream = new MemoryStream(content, writable: false),
                 });
-                entries.Add(new SnapshotArchiveEntry(name, sha256 ?? Sha256ContentAddress.Hash(content), content.Length));
+                entries.Add(new SnapshotArchiveEntry(name, sha256 ?? Sha256ContentAddress.Hash(content), content.Length, contentType));
             };
 
             await writeEntry(SnapshotEntryNames.Initiatives, Serialize(capture.Initiatives));
@@ -69,15 +69,15 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
                 switch (blob.State)
                 {
                     case SnapshotBlobState.Ok:
-                        (byte[] body, string bodySha256) = await readBlobAsync(blob.Address);
-                        await writeEntry(BlobEntryName(blob.Address), body, bodySha256);
+                        (byte[] body, string bodySha256, string? bodyContentType) = await readBlobAsync(blob.Address);
+                        await writeEntry(BlobEntryName(blob.Address), body, bodySha256, bodyContentType);
                         objects++;
                         break;
                     case SnapshotBlobState.Mismatch:
                         // Faithfully archived under the cited address so verify can report the
                         // capture-time inconsistency distinctly from transit corruption (LADR-02).
-                        (byte[] mismatchedBody, string mismatchedSha256) = await readBlobAsync(blob.Address);
-                        await writeEntry(BlobEntryName(blob.Address), mismatchedBody, mismatchedSha256);
+                        (byte[] mismatchedBody, string mismatchedSha256, string? mismatchedContentType) = await readBlobAsync(blob.Address);
+                        await writeEntry(BlobEntryName(blob.Address), mismatchedBody, mismatchedSha256, mismatchedContentType);
                         objects++;
                         mismatched++;
                         break;
@@ -124,12 +124,22 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
 
         string[] names = entries.Keys.ToArray();
 
+        // Lookup of a blob body's content type from the manifest entry. A v3 manifest records it per
+        // blob; a missing/older entry resolves to null, which the restore handily stores as the
+        // octet-stream default rather than dropping a value it never had.
+        var contentTypes = new Dictionary<string, string?>(StringComparer.Ordinal);
+        foreach (SnapshotArchiveEntry entry in manifest.Entries)
+        {
+            contentTypes.TryAdd(entry.Name, entry.ContentType);
+        }
+
         return Task.FromResult(new SnapshotArchive(
             manifest,
             names,
             capture,
             address => entries.ContainsKey(BlobEntryName(address)),
-            address => entries[BlobEntryName(address)]));
+            address => entries[BlobEntryName(address)],
+            address => contentTypes.TryGetValue(BlobEntryName(address), out string? contentType) ? contentType : null));
     }
 
     public Task<SnapshotVerification> VerifyAsync(string archivePath, CancellationToken cancellationToken)

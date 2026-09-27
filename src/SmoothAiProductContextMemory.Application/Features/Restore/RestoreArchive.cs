@@ -198,7 +198,11 @@ public static class RestoreArchive
             foreach (string address in addresses)
             {
                 byte[] body = opened.ReadBlob(address);
-                await blobStorage.StoreAsync(new MemoryStream(body, writable: false), cancellationToken: cancellationToken);
+                string? contentType = opened.BlobContentType(address);
+                await blobStorage.StoreAsync(
+                    new MemoryStream(body, writable: false),
+                    contentType,
+                    cancellationToken);
             }
         }
     }

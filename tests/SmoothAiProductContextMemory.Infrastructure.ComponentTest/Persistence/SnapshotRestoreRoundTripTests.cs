@@ -41,9 +41,12 @@ public sealed class SnapshotRestoreRoundTripTests : PersistenceTestBase
 
     private ILoggerFactory Loggers => LoggerFactory.Create(b => b.SetMinimumLevel(LogLevel.Debug));
 
-    public SnapshotRestoreRoundTripTests(AspireFixture aspire) : base(aspire)
+    public SnapshotRestoreRoundTripTests(AspireFixture aspire, ITestOutputHelper output) : base(aspire)
     {
         _aspire = aspire;
+        // Forward the test's output helper so the bucket-cleanup report is visible rather than a
+        // no-op (the fixture's Output falls back to TestContext.Current, which is null at teardown).
+        _aspire.SetOutput(output);
         _blob = new Lazy<S3BlobStorage>(() => CreateBlob("snap-shot"));
     }
 
@@ -141,8 +144,12 @@ public sealed class SnapshotRestoreRoundTripTests : PersistenceTestBase
         restore.Restored.TicketEdges.ShouldBe(source.TicketEdges);
         restore.Restored.TraversalPathCount.ShouldBe(source.Edges);
 
-        // The blob body was restored into the (previously empty) target object store.
-        (await targetBlob.GetAsync(source.Address, Ct)).ShouldNotBeNull();
+        // The blob body was restored into the (previously empty) target object store, carrying its
+        // content type — the field the archive format had to start recording, or a restore would be
+        // lossy in a way no restore-side code can repair (HLD-006).
+        BlobContent? restored = await targetBlob.GetAsync(source.Address, Ct);
+        restored.ShouldNotBeNull();
+        restored.ContentType.ShouldBe("text/plain");
 
         // The restored ticket hierarchy reads parent->child, not inverted.
         var ticketGraph = new NpgsqlTicketGraph(targetDb);
@@ -293,7 +300,7 @@ public sealed class SnapshotRestoreRoundTripTests : PersistenceTestBase
         await Db.SaveChangesAsync(Ct);
 
         byte[] body = System.Text.Encoding.UTF8.GetBytes("round trip body payload");
-        string address = await Blob.StoreAsync(new MemoryStream(body, writable: false), cancellationToken: Ct);
+        string address = await Blob.StoreAsync(new MemoryStream(body, writable: false), contentType: "text/plain", cancellationToken: Ct);
 
         MemoryVersion currentA = TestEntities.NewVersion(memoryA.Id, 2, "current claim", isCurrent: true);
         currentA.BlobAddress = address;

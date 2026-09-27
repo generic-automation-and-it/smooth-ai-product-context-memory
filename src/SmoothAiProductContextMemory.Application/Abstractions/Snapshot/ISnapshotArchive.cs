@@ -17,13 +17,14 @@ public interface ISnapshotArchive
     /// cross-store inconsistency to be surfaced, not a reason to skip the body. A dangling (unresolvable)
     /// body cannot be written. Copies are never deleted; accounting is reporting only (LADR-06).
     /// <see cref="ReadBlob"/> returns the body plus the SHA-256 already computed by the capture walk,
-    /// so the writer does not hash every blob a second time to fill its manifest entry (H13).
+    /// so the writer does not hash every blob a second time to fill its manifest entry (H13), and the
+    /// content type captured at read time so the manifest entry can carry it.
     /// </summary>
     Task<SnapshotWriteReport> WriteAsync(
         string destinationPath,
         SnapshotCapture capture,
         SnapshotWalkResult walk,
-        Func<string, Task<(byte[] Content, string Sha256)>> readBlobAsync,
+        Func<string, Task<(byte[] Content, string Sha256, string? ContentType)>> readBlobAsync,
         CancellationToken cancellationToken);
 
     /// <summary>Opens an archive for reading, returning its manifest and entry access.</summary>
@@ -58,4 +59,5 @@ public sealed record SnapshotArchive(
     IReadOnlyList<string> EntryNames,
     SnapshotCapture Capture,
     Func<string, bool> ContainsBlob,
-    Func<string, byte[]> ReadBlob);
+    Func<string, byte[]> ReadBlob,
+    Func<string, string?> BlobContentType);
