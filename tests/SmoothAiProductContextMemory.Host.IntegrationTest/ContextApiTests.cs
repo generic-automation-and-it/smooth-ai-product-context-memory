@@ -1,3 +1,5 @@
+extern alias HostApp;
+
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -6,6 +8,8 @@ using Microsoft.Extensions.DependencyInjection;
 using SmoothAiProductContextMemory.Application.Abstractions;
 using SmoothAiProductContextMemory.Domain;
 using SmoothAiProductContextMemory.Domain.Entities;
+using RequiredApiCapability = HostApp::SmoothAiProductContextMemory.Host.Configuration.RequiredApiCapability;
+using ApiCapability = HostApp::SmoothAiProductContextMemory.Host.Configuration.ApiCapability;
 
 namespace SmoothAiProductContextMemory.Host.IntegrationTest;
 
@@ -514,6 +518,84 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
         }
         doc.ShouldContain("bearer");
         doc.ShouldContain("Requires write capability");
+    }
+
+    /// <summary>
+    /// Pins every mapped route's capability from endpoint metadata, not a hand-maintained literal, so a
+    /// route added without an entry here is still covered. A read token must be refused on a Write route
+    /// and admitted on a Read route — a Write route downgraded to Read by omission then fails this test.
+    /// The zero-token sweep below cannot catch that (a missing token is denied regardless of capability);
+    /// only a read-token arm that reaches the route can.
+    /// </summary>
+    [Fact]
+    public async Task Every_context_route_pins_its_capability()
+    {
+        using HttpClient read = _fixture.CreateClient();
+        read.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", HostWebAppFixture.ReadToken);
+
+        EndpointDataSource endpoints = _fixture.Services.GetRequiredService<EndpointDataSource>();
+        RouteEndpoint[] contextRoutes = endpoints.Endpoints
+            .OfType<RouteEndpoint>()
+            .Where(e => e.RoutePattern.RawText?.StartsWith("/api/context", StringComparison.Ordinal) == true)
+            .ToArray();
+
+        contextRoutes.ShouldNotBeEmpty();
+
+        foreach (RouteEndpoint endpoint in contextRoutes)
+        {
+            RequiredApiCapability? capability = endpoint.Metadata.GetMetadata<RequiredApiCapability>();
+            capability.ShouldNotBeNull(
+                $"route {endpoint.RoutePattern.RawText} has no capability metadata — it would ship unauthenticated-by-omission.");
+
+            string path = MaterializeRouteTemplate(endpoint.RoutePattern.RawText!);
+            HttpMethod method = endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods
+                    .Select(m => new HttpMethod(m))
+                    .FirstOrDefault()
+                ?? HttpMethod.Get;
+
+            using var request = new HttpRequestMessage(method, path);
+            if (method != HttpMethod.Get)
+            {
+                request.Content = JsonContent.Create(new { });
+            }
+
+            using HttpResponseMessage response = await read.SendAsync(request, Ct);
+            if (capability.Value == ApiCapability.Write)
+            {
+                response.StatusCode.ShouldBe(HttpStatusCode.Forbidden, $"{method} {path} required {capability.Value}");
+            }
+            else
+            {
+                response.StatusCode.ShouldNotBe(HttpStatusCode.Forbidden, $"{method} {path} required {capability.Value}");
+            }
+        }
+    }
+
+    private static string MaterializeRouteTemplate(string template)
+    {
+        // Substitute each route parameter with a concrete value that satisfies its constraint, so a
+        // template like /memories/{uuid:guid}/versions/{version:int}/blob becomes a requestable path.
+        for (int start = template.IndexOf('{'); start >= 0;)
+        {
+            int close = template.IndexOf('}', start);
+            if (close < 0)
+            {
+                break;
+            }
+
+            string segment = template[(start + 1)..close];
+            string name = segment.Contains(':') ? segment[..segment.IndexOf(':')] : segment;
+            string replacement = segment.Contains("guid", StringComparison.OrdinalIgnoreCase)
+                ? Guid.NewGuid().ToString()
+                : segment.Contains("int", StringComparison.OrdinalIgnoreCase)
+                    ? "1"
+                    : name;
+            template = string.Concat(template.AsSpan(0, start), replacement, template.AsSpan(close + 1));
+            start = template.IndexOf('{', start + replacement.Length);
+        }
+
+        return template;
     }
 
     private static string NormalizeRouteTemplate(string template)
