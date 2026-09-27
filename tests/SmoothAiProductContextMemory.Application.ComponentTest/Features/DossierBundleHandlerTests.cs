@@ -192,6 +192,31 @@ public sealed class DossierBundleHandlerTests : HandlerTestBase
     }
 
     [Fact]
+    public async Task NonZero_history_inflated_cut_converges_preview_and_bundle()
+    {
+        // The truncated-empty path already agreed before this change (batch 2 gave the bundle the
+        // same disclosure call for a zero-match selection). The path that actually diverged — and
+        // this fix changes by deleting two bundle-only disjuncts — is the non-zero one: many version
+        // rows of a few selected memories inflate the item count past the anchor limit, producing a
+        // cut the blob-free preview cannot predict. Assert the two slices agree here too, so a future
+        // re-add of a bundle-only disjunct fails instead of slipping through a green suite.
+        await SeedHistoryInflatedBundleAsync();
+        var blobs = new DictionaryBlobStorage();
+        CreateDossierBundle.Handler bundle = BundleHandler(blobs);
+        CreateDossierPreview.Handler preview = PreviewHandler();
+
+        CreateDossierBundle.Response bundleResponse = await bundle.Handle(BundleRequest(includeHistory: true), Ct);
+        CreateDossierPreview.Response previewResponse = await preview.Handle(PreviewRequest(includeHistory: true), Ct);
+
+        bundleResponse.Bundle.Items.Count.ShouldBe(DossierDefaults.ItemLimit);
+        bundleResponse.Bundle.Omitted.ShouldContain(o => o.Reason == DossierOmissionReason.CapReached);
+        // The history-inflated cut is disclosed per-item; the manifest does NOT re-report it (the
+        // preview could not predict it). This is what pins the convergence on the non-zero path.
+        bundleResponse.Bundle.Manifest.LimitsHit.ShouldNotContain(l => l.Limit == DossierOmissionReason.CapReached);
+        previewResponse.LimitsHit.ShouldBe(bundleResponse.Bundle.Manifest.LimitsHit);
+    }
+
+    [Fact]
     public async Task Widen_depth_outside_one_to_five_is_refused_at_the_store_layer()
     {
         var traversal = new NpgsqlMemoryTraversal(Db);
@@ -274,7 +299,8 @@ public sealed class DossierBundleHandlerTests : HandlerTestBase
         JsonSerializer.Serialize(value, new JsonSerializerOptions(JsonSerializerDefaults.Web));
 
     private static CreateDossierBundle.Request BundleRequest(
-        IReadOnlyList<string>? tags = null, string? ticketProvider = null, string? ticketKey = null) =>
+        IReadOnlyList<string>? tags = null, string? ticketProvider = null, string? ticketKey = null,
+        bool includeHistory = false) =>
         new(
             Repo: "kingstown",
             InitiativeName: null,
@@ -284,12 +310,13 @@ public sealed class DossierBundleHandlerTests : HandlerTestBase
             Kind: null,
             Status: null,
             ScopeDimension: null,
-            IncludeHistory: false,
+            IncludeHistory: includeHistory,
             AsOf: null,
             WidenDepth: 3);
 
     private static CreateDossierPreview.Request PreviewRequest(
-        IReadOnlyList<string>? tags = null, string? ticketProvider = null, string? ticketKey = null) =>
+        IReadOnlyList<string>? tags = null, string? ticketProvider = null, string? ticketKey = null,
+        bool includeHistory = false) =>
         new(
             Repo: "kingstown",
             InitiativeName: null,
@@ -299,7 +326,7 @@ public sealed class DossierBundleHandlerTests : HandlerTestBase
             Kind: null,
             Status: null,
             ScopeDimension: null,
-            IncludeHistory: false,
+            IncludeHistory: includeHistory,
             AsOf: null,
             WidenDepth: 3);
 
@@ -350,6 +377,31 @@ public sealed class DossierBundleHandlerTests : HandlerTestBase
         // dropped whole — the deep->hidden edge must not surface, and hidden must be absent everywhere.
         (await Graph.CreateAsync(AnchorUuid, VisibleDeepUuid, MemoryRelation.DependsOn, "needs it", Ct)).ShouldBeTrue();
         (await Graph.CreateAsync(VisibleDeepUuid, HiddenUuid, MemoryRelation.DependsOn, "leads to hidden", Ct)).ShouldBeTrue();
+    }
+
+    private async Task SeedHistoryInflatedBundleAsync()
+    {
+        MemoryGroup product = Group(ProductGroupUuid, MemoryGroup.ScopeDimensionValue.Product);
+        Db.MemoryGroups.Add(product);
+        await Db.SaveChangesAsync(Ct);
+
+        Memory anchor = MemoryRow(product.Id, AnchorUuid, "Anchor", "Anchor fact", tags: ["tag-1"], facet: "architecture");
+        Db.Memories.Add(anchor);
+        await Db.SaveChangesAsync(Ct);
+
+        // One memory with enough versions that IncludeHistory inflates the bundle's item count past
+        // the anchor limit, producing a history-inflated cut even though the selected memory count
+        // stays far below the fetch ceiling (so LimitReached stays false — that is the divergence this
+        // fix removes).
+        for (int version = 1; version <= DossierDefaults.ItemLimit + 1; version++)
+        {
+            Db.MemoryVersions.Add(Version(
+                anchor.Id, version, $"Anchor claim {version}",
+                isCurrent: version == DossierDefaults.ItemLimit + 1,
+                kind: MemoryVersion.KindValue.Decision, blobAddress: null));
+        }
+
+        await Db.SaveChangesAsync(Ct);
     }
 
     private Task SeedVersionAsync(long memoryId, int version, string statement, string kind, string? blobAddress, bool isCurrent)
