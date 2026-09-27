@@ -235,10 +235,10 @@ public static class DossierSelection
 
         // Edges among the selected memories only, loaded once so the manifest count and the returned
         // edges come from one read (HLD-005 F6). A selected memory's relationship to a hidden one is
-        // absent, because the hidden memory is never selected (NFR-01).
+        // absent, because the hidden memory is never selected (NFR-01). The bound is the selection
+        // size, not the whole edge table (HLD-001 NFR-02).
         var uuids = new HashSet<Guid>(selected.Select(c => c.Memory.Uuid));
-        IReadOnlyList<MemoryRelationship> all = await graph.ListAllAsync(cancellationToken);
-        return [.. all.Where(e => uuids.Contains(e.SourceUuid) && uuids.Contains(e.TargetUuid))];
+        return await graph.ListEdgesAsync(uuids, cancellationToken);
     }
 
     private static string? Blank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;

@@ -243,7 +243,8 @@ public sealed class NpgsqlMemoryTraversal(SmoothAiProductContextMemoryDbContext 
     };
 
     private static string BuildCypher(MemoryPathQuery query)
-    {        string relationFilter = query.Relation is null
+    {
+        string relationFilter = query.Relation is null
             ? string.Empty
             : $" {{relation: {Quote(query.Relation)}}}";
         string edge = $"[:{AgeSession.EdgeLabel}*1..{query.MaxDepth.ToString(CultureInfo.InvariantCulture)}{relationFilter}]";

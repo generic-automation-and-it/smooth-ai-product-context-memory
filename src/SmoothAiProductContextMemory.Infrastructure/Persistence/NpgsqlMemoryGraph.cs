@@ -107,6 +107,25 @@ public sealed class NpgsqlMemoryGraph(SmoothAiProductContextMemoryDbContext db) 
     public Task<IReadOnlyList<MemoryRelationship>> ListTouchingAsync(Guid uuid, CancellationToken cancellationToken) =>
         ListAsync(ListTouchingCypher(uuid), cancellationToken);
 
+    public async Task<IReadOnlyList<MemoryRelationship>> ListEdgesAsync(
+        IReadOnlyCollection<Guid> uuids,
+        CancellationToken cancellationToken)
+    {
+        // Index-served per anchor via ix_memory_vertex_uuid (LADR-06), so the cost is bounded by the
+        // selection size rather than the whole edge table — the dossier read must not scan every edge.
+        var uuidSet = uuids.ToHashSet();
+        var byPair = new Dictionary<(Guid Source, Guid Target), MemoryRelationship>();
+        foreach (Guid uuid in uuidSet)
+        {
+            foreach (MemoryRelationship relationship in await ListTouchingAsync(uuid, cancellationToken))
+            {
+                byPair.TryAdd((relationship.SourceUuid, relationship.TargetUuid), relationship);
+            }
+        }
+
+        return [.. byPair.Values.Where(e => uuidSet.Contains(e.SourceUuid) && uuidSet.Contains(e.TargetUuid))];
+    }
+
     /// <summary>
     /// The one-hop lookup — outbound and inbound edges of one memory — exposed so the NFR-02 benchmark
     /// plans the statement the store runs rather than a hand-written copy of it.
