@@ -5,6 +5,13 @@
 # host-side skills read, AND bridges the AppHost path so Aspire injects the same values. One file, two
 # name forms, one source of truth:
 #   - ApiAccess__ReadToken / ApiAccess__WriteToken   (what the Host's authorizer reads)
+#   - Parameters__api-read-token / Parameters__api-write-token
+#                                                   (the AppHost/container controller reads these —
+#                                                    the env-var spelling of the same keys the
+#                                                    user-secrets bridge below sets, and the only form
+#                                                    that works in Production where user secrets are not
+#                                                    loaded; usable as `--env-file` for the published
+#                                                    controller)
 #   - CONTEXT_MEMORY_READ_TOKEN / CONTEXT_MEMORY_WRITE_TOKEN / CONTEXT_MEMORY_BASE_URL
 #                                                   (what the skills read)
 # The values are identical across the two name forms; only the env var names differ.
@@ -20,6 +27,9 @@
 #     the script writes `Parameters:api-read-token` / `Parameters:api-write-token` for the AppHost
 #     project — making Aspire inject the same values the skills hold. Without this, the AppHost
 #     generates its own per-session tokens and every skill request 403s.
+#     User secrets load in **Development only**. For the published `-apphost` controller (Production),
+#     the env file carries `Parameters__api-read-token` / `Parameters__api-write-token` (the env-var
+#     spelling, which loads in every environment), so pass the file via `--env-file`.
 #
 # Usage:
 #   scripts/provision-credentials.sh [--rotate] [--env-file PATH] [--base-url URL] [--skip-apphost]
@@ -65,6 +75,8 @@ if [[ ! -f "$ENV_FILE" || "$ROTATE" -eq 1 ]]; then
 # protecting at rest beyond file permissions, but does not belong in version control.
 ApiAccess__ReadToken=${READ_TOKEN}
 ApiAccess__WriteToken=${WRITE_TOKEN}
+Parameters__api-read-token=${READ_TOKEN}
+Parameters__api-write-token=${WRITE_TOKEN}
 CONTEXT_MEMORY_READ_TOKEN=${READ_TOKEN}
 CONTEXT_MEMORY_WRITE_TOKEN=${WRITE_TOKEN}
 CONTEXT_MEMORY_BASE_URL=${BASE_URL}
@@ -81,7 +93,9 @@ if [[ "$WRITE_APPHOST" -eq 1 ]]; then
   if [[ -f "${APPHOST_PROJECT}/SmoothAiProductContextMemory.AppHost.csproj" ]]; then
     dotnet user-secrets set "Parameters:api-read-token" "$READ_TOKEN" --project "$APPHOST_PROJECT" >/dev/null
     dotnet user-secrets set "Parameters:api-write-token" "$WRITE_TOKEN" --project "$APPHOST_PROJECT" >/dev/null
-    echo "Wrote AppHost user secrets (Parameters:api-read-token / api-write-token)" >&2
+    echo "Wrote AppHost user secrets (Parameters:api-read-token / api-write-token)." >&2
+    echo "NOTE: user secrets load in Development only. For the published controller (Production), pass" >&2
+    echo "the env file via --env-file (it now carries Parameters__api-read-token / __api-write-token)." >&2
   else
     echo "warning: AppHost project not found at ${APPHOST_PROJECT}; skipping AppHost bridge" >&2
   fi

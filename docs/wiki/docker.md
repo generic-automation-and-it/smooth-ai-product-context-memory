@@ -22,6 +22,13 @@ distinct. Never commit it. Keep credentials stable across restarts and upgrades.
 with an actually published `sha-<short-sha>` tag or `latest`; this documentation does not imply an
 image has already been released. Pin the controller digest for immutable deployment identity.
 
+The provisioner's `.context/mimisbrunnr.env` already carries the `Parameters__api-read-token` /
+`Parameters__api-write-token` names (plus the `ApiAccess__*` and skill `CONTEXT_MEMORY_*` forms),
+so it can be the `controller.env` credential source or merged with the engine-config keys above.
+The `Parameters__*` env-var form is what makes this work in Production — the user-secrets bridge
+(`dotnet user-secrets set Parameters:...`) is Development-only and does not reach a published
+controller.
+
 ```bash
 docker run -d --name mimisbrunnr-default-controller \
   --stop-timeout 180 \
@@ -307,7 +314,11 @@ mode, run `scripts/provision-credentials.sh` first — it writes the AppHost use
 (`Parameters:api-read-token` / `Parameters:api-write-token`) **and** the skill-side env file, so the
 service and the skills carry the same values. (Setting the secrets manually, or `--skip-apphost`,
 leaves the skill-side and service-side tokens unlinked and every skill request `403`s.) The tokens are
-required in **every** run mode, not just the container path. See [setup.md](setup.md).
+required in **every** run mode, not just the container path. The user-secrets bridge is
+**Development-only**: the published controller runs in Production, where user secrets are not loaded,
+so pass the env file via `--env-file` there (the provisioner writes `Parameters__api-read-token` /
+`Parameters__api-write-token`, the env-var spelling that loads in every environment). See
+[setup.md](setup.md).
 
 ## Stop and reset the AppHost stack
 

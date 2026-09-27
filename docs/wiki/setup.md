@@ -85,6 +85,12 @@ Without that bridge the AppHost would serve tokens the skills do not carry and e
 returns `403`. The dashboard-local `/login?t=…` URL is only for the dashboard UI, not the API
 credentials. Add `--skip-apphost` if you have no .NET SDK and only need the env file.
 
+**User secrets load in Development only.** For the published `-apphost` controller (which runs in
+Production, where user secrets are not loaded), pass the env file via `--env-file` instead — the
+provisioner now writes the `Parameters__api-read-token` / `Parameters__api-write-token` names into the
+file, and that env-var spelling load in every environment. Without one of those two bridges the
+controller regenerates its own per-session tokens and every skill request returns `403`.
+
 ### Direct Host run
 
 ```bash
