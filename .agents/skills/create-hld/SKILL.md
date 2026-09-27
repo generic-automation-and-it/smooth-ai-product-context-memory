@@ -10,10 +10,7 @@ allowed-tools: >
     Bash(.agents/skills/create-hld/scripts/scaffold-hld.sh:*),
     Bash(.agents/skills/create-hld/scripts/hld-agents-rules.sh:*),
     Read, Write, Edit
-models:
-  claude: opus        # high-complexity; multi-step clarification gates + architectural judgment
-  copilot: auto
-  codex: gpt-5.5
+effort: xhigh    # clarification gates + architectural judgement that downstream work builds on
 ---
 
 # Create HLD — High-Level Design authoring

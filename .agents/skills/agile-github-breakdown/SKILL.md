@@ -18,10 +18,7 @@ allowed-tools: >
     Bash(gh issue view:*),
     Bash(gh api:*),
     Read, Write, Edit
-models:
-  claude: opus        # high-complexity; multi-step clarification + dependency-graph judgment
-  copilot: auto
-  codex: gpt-5.5
+effort: high     # multi-step clarification + dependency-graph judgement
 ---
 
 # Create Feature — braindump/epic → GitHub Tasks

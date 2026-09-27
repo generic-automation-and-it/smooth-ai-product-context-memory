@@ -6,10 +6,7 @@ allowed-tools:
   - Bash(git commit:*)
   - Bash(git push:*)
   - Bash(.agents/skills/git-commit-push/scripts/push.sh:*)
-models:
-  claude: sonnet      # medium-complexity; branch rename logic and upstream tracking require broader reasoning
-  copilot: auto
-  codex: gpt-5.4
+effort: medium   # branch rename logic and upstream tracking
 ---
 
 # Git Commit and Push
@@ -19,10 +16,8 @@ Commit current changes using conventional commits format and push to remote repo
 ## Workflow Steps
 
 1. Check if there are any changes to commit using `git status --porcelain`
-2. If there are changes, invoke the **git-commit** skill as a sub-agent (low-complexity task):
-   - Claude Code: `Task(subagent_type: "general-purpose", model: "haiku", prompt: "invoke git-commit skill" + args)`
-   - Copilot: invoke `git-commit` skill with model `gpt-5.4-mini`
-   - Codex: invoke git-commit agent (model: `gpt-5.4-mini`)
+2. If there are changes, invoke the **git-commit** skill as a sub-agent. Do not pick a model — the sub-agent
+   inherits the session model and runs at git-commit's declared `effort: low`:
    - If commit message provided, pass it to git-commit
    - If `--autonomous` was passed, forward it to git-commit
    - This handles change analysis, staging, and committing with conventional format

@@ -9,7 +9,7 @@ Skills live **flat**, one directory per skill directly under `.agents/skills/`. 
 | Skill | Purpose | Usage |
 |-------|---------|-------|
 | **agile-github-breakdown** | Turn a braindump or existing Feature into GitHub Feature + Task issues | `/agile-github-breakdown` |
-| **agile-github-task-from-diff** | Create a GitHub Task (sub-issue) from the current git diff vs main | `/agile-github-task-from-diff` |
+| **agile-github-task-from-diff** | Create a GitHub Task (sub-issue) from the current git diff vs main | `/agile-github-task-from-diff [--feature-issue <n> \| --noparentid]` |
 | **mimisbrunnr-vitsmunir-dump** | AI Brain / Intelligence Dump — listen-first capture; synthesize on request. Vitsmunir is Old Norse for intelligence, wits, and the power of comprehension. | `/mimisbrunnr-vitsmunir-dump [--oktoask] [--thinking] [--oktoreaddocs] [--oktowebsearch] [--all]` |
 | **ai-review** | Analyze and execute AI PR review feedback (fix/skip) | `/ai-review <pr> [1=fix 2=skip …]` |
 | **ai-terse** | Reformat this turn's reply into terse, high-density output with a TL;DR | `/ai-terse` |
@@ -68,42 +68,55 @@ The `--autonomous` switch suppresses all interactive questions across the entire
 
 `--autonomous` is forwarded automatically through the skill chain: `git-commit-push-pr` → `git-commit-push` → `git-commit`.
 
-## Model Selection
+## Effort
 
-Skills are classified by complexity tier. Each SKILL.md carries a `models` frontmatter block with the recommended model per tool. When a skill is invoked as a sub-agent, use the model from its `models` block.
+Skills never choose a model and never switch model per provider — the session's model is the
+model. Each `SKILL.md` instead declares one `effort:` level in its frontmatter, on the standard AI
+harness effort scale:
 
-| Complexity | Claude Code | GitHub Copilot | OpenAI Codex |
-|-----------|-------------|----------------|--------------|
-| **low** | `haiku` | `gpt-5.4-mini` | `gpt-5.4-mini` |
-| **medium** | `sonnet` | `auto` | `gpt-5.4` |
-| **high** | `opus` | `auto` | `gpt-5.5` |
+| Level | Use for |
+|-------|---------|
+| `low` | Script-driven or single-turn work with no real judgement |
+| `medium` | Structured authoring across a few files or one clear decision |
+| `high` | Multi-turn judgement, synthesis, or interactive Q&A |
+| `xhigh` | Judgement that downstream work builds on, or an irreversible write path |
+| `max` | Never a skill default — the user raises the session to `max` when a task needs it |
 
-### Skill complexity classification
+The harness applies the level while the skill runs; a harness without a given level uses its nearest
+supported one. The user's explicit session effort always wins over a skill's declared level.
 
-| Skill | Complexity | Rationale |
-|-------|-----------|-----------|
-| **context-load-context** | low | File discovery and loading; no deep reasoning |
-| **context-load-agents-context** | low | Script-driven file traversal; no deep reasoning |
-| **git-commit** | low | Diff review + conventional commit; straightforward |
-| **git-sync** | low | Fetch + merge; straightforward git operations |
-| **git-commit-push** | medium | Branch rename logic + upstream tracking |
-| **git-commit-push-pr** | medium | PR template authoring + state management |
-| **git-commit-review-push** | medium | Branch rename logic + `/ai-review` trigger placement + upstream tracking |
-| **agile-github-breakdown** | high | Multi-turn FR/NFR → Task graph + GitHub writes |
-| **agile-github-task-from-diff** | medium | Diff classification + issue authoring |
-| **manage-rule-system** | medium | Cross-tool frontmatter authoring |
+### Skill effort classification
+
+| Skill | Effort | Rationale |
+|-------|--------|-----------|
 | **ai-terse** | low | Single-turn reply reformatting; no tools or deep reasoning |
-| **mimisbrunnr-vitsmunir-dump** | high | Multi-turn synthesis + deep requirement reasoning |
+| **context-load-agents-context** | low | Script-driven file traversal |
+| **context-load-context** | low | File discovery and loading |
+| **git-commit** | low | Diff review + conventional commit message |
+| **git-sync** | low | Fetch + merge; raise the session effort for a hard conflict |
+| **agile-github-task-from-diff** | medium | Diff classification + issue authoring |
+| **ai-review** | medium | Review analysis + code fixes across multiple files |
+| **git-commit-push** | medium | Branch rename logic + upstream tracking |
+| **git-commit-push-pr** | medium | PR template authoring + draft/ready state management |
+| **git-commit-review-push** | medium | Branch rename + `/ai-review` trigger placement + upstream tracking |
+| **manage-rule-system** | medium | Cross-tool frontmatter authoring |
+| **mimisbrunnr-recall-feedback** | medium | Three fixed recall-feedback API queries plus interpretation |
+| **agile-github-breakdown** | high | Multi-turn FR/NFR → Task graph + GitHub writes |
 | **ai-template-sync** | high | Interactive multi-turn Q&A + conditional file sync across tools |
-| **create-hld** | high | Multi-turn clarification gates + architectural judgment (LADRs, NFRs, diagrams) |
-| **mimisbrunnr-context-memory** | high | Write path performs semantic cross-group dedup, link derivation, atomicity splitting and summary/keyword generation — judgement the database cannot express as constraints |
+| **ai-understanding** | high | Multi-turn judgement on what qualifies, merge/promotion decisions |
+| **mimisbrunnr-dossier** | high | Equivalence, contradiction and gap judgement across a whole store slice |
+| **mimisbrunnr-understanding** | high | Judgement on understanding vs scoped fact, and capture-path funneling |
+| **mimisbrunnr-vitsmunir-dump** | high | Multi-turn synthesis + deep requirement reasoning |
+| **create-hld** | xhigh | Clarification gates + architectural judgement (LADRs, NFRs, diagrams) that downstream work builds on |
+| **mimisbrunnr-context-memory** | xhigh | Sole write path: semantic cross-group dedup, link derivation, atomicity splitting and summary/keyword generation — judgement the database cannot express as constraints |
 
-### Sub-skill invocation model guidance
+### Sub-skill invocation
 
-When a skill invokes another skill as a sub-agent, use the sub-skill's model tier:
+A skill that invokes another skill as a sub-agent passes no model. The sub-agent inherits the session
+model and runs at the sub-skill's declared effort:
 
-- **git-commit-push** → invokes **git-commit** (low): use `haiku` / `gpt-5.4-mini` / `gpt-5.4-mini`
-- **git-commit-push-pr** → invokes **git-commit-push** (medium): use `sonnet` / `auto` / `gpt-5.4`
+- **git-commit-push** → invokes **git-commit** (`low`)
+- **git-commit-push-pr** → invokes **git-commit-push** (`medium`)
 
 ## Naming & Ordering
 
@@ -123,9 +136,9 @@ A skill's folder name MUST equal its `name:` frontmatter (this is the slash-comm
 ## About Skills
 
 Each skill is a directory containing:
-- **SKILL.md** — The skill definition with workflow steps and `models` frontmatter
+- **SKILL.md** — The skill definition with workflow steps and `effort` frontmatter
 - **AGENTS.md** — Maintenance context for agents *modifying* the skill (coupling, rationale, drift hazards) per `.agents/rules/meta/knowledge-conventional-contexts-quality.instructions.md`
-- **agents/openai.yaml** — OpenAI Codex agent registration with model specification
+- **agents/openai.yaml** — OpenAI Codex agent registration (display name, description, default prompt; no model)
 - **scripts/** — Helper scripts (if applicable)
 - **references/** — Reference documentation (if applicable)
 

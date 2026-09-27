@@ -3,10 +3,7 @@ name: context-load-agents-context
 description: Load ancestor AGENTS.md context for a target file. Use when Codex, Claude, Copilot, or another agent needs local domain context before reading or editing source files.
 allowed-tools:
   - Bash(.agents/skills/context-load-agents-context/scripts/load-agents-context.sh:*)
-models:
-  claude: haiku      # low-complexity; script-driven file traversal with no deep reasoning required
-  copilot: gpt-5.4-mini  # mini equivalent for low-complexity Copilot tasks
-  codex: gpt-5.4-mini
+effort: low      # script-driven file traversal
 ---
 
 # Load AGENTS Context — Skill

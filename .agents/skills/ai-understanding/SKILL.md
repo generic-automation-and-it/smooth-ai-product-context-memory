@@ -10,10 +10,7 @@ allowed-tools:
   - Edit
   - Glob
   - Grep
-models:
-  claude: opus        # high-complexity; multi-turn judgment on what qualifies, merge/promotion decisions
-  copilot: auto
-  codex: gpt-5.5
+effort: high     # multi-turn judgement on what qualifies, merge/promotion decisions
 ---
 
 ## Switches

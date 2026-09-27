@@ -7,10 +7,7 @@ allowed-tools:
   - Bash(mktemp:*)
   - Bash(bash:*)
   - Bash(rm:*)
-models:
-  claude: opus      # high-complexity; interactive multi-turn Q&A + conditional file sync across tools
-  copilot: auto
-  codex: gpt-5.5
+effort: high     # interactive multi-turn Q&A + conditional file sync across tools
 ---
 
 # AI Template Sync — Skill
