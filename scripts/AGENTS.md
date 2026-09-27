@@ -33,6 +33,8 @@ Operational checks support operator decisions; a preflight must never repair the
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-27 | `provision-credentials.sh` splits the credential file: the sourceable `mimisbrunnr.env` carries only valid shell identifiers (`ApiAccess__*`, `CONTEXT_MEMORY_*`), and the `Parameters__*` names — not valid shell identifiers — move to `mimisbrunnr.env.controller` for the published-controller `--env-file`, so a `source` no longer prints a token as "command not found". Added `test-provision-credentials.sh`, wired into CI. | batch4 credential safety |
+| 2026-09-27 | `smoke-apphost-container.sh` health waits now emit the controller log, the API container log and the last HTTP status + body on a non-200, so a 404/500/refused connection no longer collapse into one indistinguishable "did not become healthy" line. | batch4 release unblock |
 | 2026-09-27 | `provision-credentials.sh` now also writes the AppHost user secrets (`Parameters:api-read-token` / `api-write-token`) so Aspire injects the same values the skills hold, closing the AppHost run-mode gap; a `--skip-apphost` flag escapes it for SDK-less environments. | batch3 review |
 | 2026-09-27 | Added `provision-credentials.sh`, a one-command API credential provisioner that writes both the server `ApiAccess__*` and skill `CONTEXT_MEMORY_*` token name forms to a gitignored, mode-600 env file — removing the manual dashboard-copy step from the first-run path. | batch3 |
 | 2026-09-24 | `verify-graph-restore.sh` restore-verification role superseded by the one-shot `restore` verb's built-in reconciliation (HLD-006). `verify-graph-preupgrade.sh` (NFR-04 pre-upgrade) unaffected. | HLD-006 |
