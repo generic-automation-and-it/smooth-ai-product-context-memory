@@ -138,12 +138,15 @@ def build_title(areas, layers, branch_name):
     return f"[{layer_tag}] Update {areas[0]} and related areas"
 
 
-def build_task_body(branch_name, base_ref, base_sha, paths, status_counts, diff_stat, layers, feature_issue):
+def build_task_body(branch_name, base_ref, base_sha, paths, status_counts, diff_stat, layers, feature_issue, repo_only=False):
     layer_str = ", ".join(f"`{layer}`" for layer in layers)
     areas = summarize_areas(paths)
     area_str = ", ".join(f"`{a}`" for a in areas)
 
-    checklist = ["- [ ] Diff reviewed and scope confirmed against parent Feature."]
+    if repo_only:
+        checklist = ["- [ ] Diff reviewed and scope confirmed."]
+    else:
+        checklist = ["- [ ] Diff reviewed and scope confirmed against parent Feature."]
     if any(p.startswith(("src/", "SmoothAiProductContextMemory")) for p in paths):
         checklist.append("- [ ] Build succeeds or follow-up issue raised.")
     if any("test" in p.lower() or "spec" in p.lower() for p in paths):
@@ -161,12 +164,16 @@ def build_task_body(branch_name, base_ref, base_sha, paths, status_counts, diff_
         f"Deleted: {status_counts.get('D', 0)}, "
         f"Renamed: {status_counts.get('R', 0)}"
     )
-    feature_ref = f"#{feature_issue}" if feature_issue else "_not specified_"
+    if repo_only:
+        parent_line = "Repo-only task: no parent Feature and no GitHub Project."
+    else:
+        feature_ref = f"#{feature_issue}" if feature_issue else "_not specified_"
+        parent_line = f"Parent feature: {feature_ref}."
 
     body = f"""\
 ## Task
 
-> **Horizontally sliced task** generated from branch `{branch_name}` diff. Parent feature: {feature_ref}.
+> **Horizontally sliced task** generated from branch `{branch_name}` diff. {parent_line}
 
 ## Context
 
@@ -264,12 +271,19 @@ def main():
         help="GitHub repo as owner/repo. Auto-detected from git remote when omitted.",
     )
     parser.add_argument(
-        "--project", type=int, default=1,
+        "--project", type=int,
         help="GitHub project number under the org (default: 1).",
     )
     parser.add_argument(
         "--no-project", action="store_true",
         help="Create the issue only; do not add it to any GitHub Project.",
+    )
+    parser.add_argument(
+        "--noparentid", action="store_true",
+        help=(
+            "Repo-only task: no parent Feature issue and no parent GitHub Project. "
+            "Implies --no-project; cannot be combined with --feature-issue, --project or --org."
+        ),
     )
     parser.add_argument(
         "--org",
@@ -293,6 +307,20 @@ def main():
     )
 
     args = parser.parse_args()
+
+    if args.noparentid:
+        conflicts = [
+            flag for flag, value in (
+                ("--feature-issue", args.feature_issue),
+                ("--project", args.project),
+                ("--org", args.org),
+            ) if value is not None
+        ]
+        if conflicts:
+            parser.error(f"--noparentid cannot be combined with {', '.join(conflicts)}")
+        args.no_project = True
+    if args.project is None:
+        args.project = 1
 
     ensure_tool("git")
     ensure_tool("gh")
@@ -322,12 +350,17 @@ def main():
 
     feature_issue = parse_feature_issue(args.feature_issue)
     title = args.title or build_title(areas, layers, branch_name)
-    body = build_task_body(branch_name, base_ref, base_sha, paths, status_counts, diff_stat, layers, feature_issue)
+    body = build_task_body(
+        branch_name, base_ref, base_sha, paths, status_counts, diff_stat, layers, feature_issue,
+        repo_only=args.noparentid,
+    )
 
     if args.dry_run:
         print(f"Title:\n{title}\n")
         print(f"Body:\n{body}\n")
-        if args.no_project:
+        if args.noparentid:
+            print(f"Would create issue in {owner}/{repo} only (no parent Feature, no project).")
+        elif args.no_project:
             print(f"Would create issue in {owner}/{repo} (no project).")
         else:
             print(f"Would create issue in {owner}/{repo} and add to project {org}/projects/{args.project}.")
@@ -355,7 +388,8 @@ def main():
 
     # Add to GitHub Project (unless suppressed)
     if args.no_project:
-        print("Skipped project add (--no-project).")
+        flag = "--noparentid" if args.noparentid else "--no-project"
+        print(f"Skipped project add ({flag}).")
     else:
         try:
             run([

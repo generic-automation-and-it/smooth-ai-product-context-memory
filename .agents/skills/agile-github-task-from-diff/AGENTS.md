@@ -13,10 +13,12 @@ Script-driven skill: `create_github_task_from_diff.py` owns diff classification,
 
 - `classify_horizontal_slice()` keys the `backend` layer off path prefixes `src/` and `SmoothAiProductContextMemory` — when this template repo is renamed, that prefix list must be updated or backend changes silently classify as `general`.
 - The script's `LAYER_TO_TYPE` map drives the suggested branch name printed after creation; `git-commit-push-pr` later parses the issue number back out of that branch name for its `Closes #` link — the two skills are coupled through the `<type>/<issue>-slug` convention, not through any shared code.
+- `--noparentid` is the explicit "repo-only" mode: it forces `no_project` and is rejected alongside `--feature-issue`, `--project` or `--org`. `--project` therefore has no argparse default — it resolves to `1` after the conflict check, so an explicit `--project 1` is still detected as a conflict.
 - Sub-issue linking uses a REST endpoint (`POST .../sub_issues`) that fails soft: the script prints a manual-link fallback instead of erroring, so a "created but not linked" outcome is normal, not a bug.
 
 ## Changelog
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-27 | Added `--noparentid`: create the task on the repo only, with no parent Feature and no parent Project. Body and acceptance criteria state repo-only scope; SKILL.md gained a `switches:` frontmatter block. `models:` replaced by `effort: medium`. | |
 | 2026-06-12 | Initial version. Branch-rename derivation moved from SKILL.md prose into the script (`suggest_branch_name`); stale `ProsmarBunkering` path prefix removed. | |

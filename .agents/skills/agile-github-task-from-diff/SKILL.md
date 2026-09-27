@@ -1,10 +1,12 @@
 ---
 name: agile-github-task-from-diff
-description: Create a GitHub Task (sub-issue) from the current git diff vs main and link it as a sub-issue of a parent Feature in the local GitHub Project. Use when Codex needs to summarize branch changes into a horizontally sliced task with acceptance criteria and create it via `gh`.
-models:
-  claude: sonnet      # medium-complexity; diff analysis + issue authoring across layers
-  copilot: auto
-  codex: gpt-5.4
+description: Create a GitHub Task (sub-issue) from the current git diff vs main and link it as a sub-issue of a parent Feature in the local GitHub Project. Use when Codex needs to summarize branch changes into a horizontally sliced task with acceptance criteria and create it via `gh`. Pass `--noparentid` for a repo-only task with no parent Feature and no parent Project.
+switches:
+  - "`--feature-issue <n|url>` - link the task as a sub-issue of this parent Feature."
+  - "`--noparentid` - repo-only task: no parent Feature issue and no parent GitHub Project. Implies `--no-project`; rejects `--feature-issue`, `--project` and `--org`."
+  - "`--no-project` - create the issue without adding it to any GitHub Project."
+  - "`--dry-run` - print the generated title and body without creating anything."
+effort: medium   # diff classification + issue authoring across layers
 ---
 
 # Task From Diff
@@ -17,7 +19,7 @@ Generate a GitHub **Task** issue from the current branch diff versus main. The t
 
 1. Ensure the repo has an up-to-date `origin/main` (or override the base ref).
 2. Run a dry run to review the generated title, body, and acceptance criteria.
-3. Create the task issue, add it to the project, and optionally link it as a sub-issue of the Feature.
+3. Create the task issue, add it to the project, and optionally link it as a sub-issue of the Feature. With `--noparentid` the issue is created in the repo only — no project, no Feature link.
 4. Rename the current branch to match the `<type>/<issue>-short-description` naming standard using the newly created issue number — see [Rename Branch After Creation](#rename-branch-after-creation).
 
 ## Script
@@ -30,6 +32,9 @@ python3 .agents/skills/agile-github-task-from-diff/scripts/create_github_task_fr
 
 # Create task, add to project #1, link as sub-issue of Feature #42 (number or issue URL)
 python3 .agents/skills/agile-github-task-from-diff/scripts/create_github_task_from_diff.py --feature-issue 42
+
+# Repo-only task: no parent Feature, no parent Project
+python3 .agents/skills/agile-github-task-from-diff/scripts/create_github_task_from_diff.py --noparentid
 
 # Combine flags from the Inputs table as needed, e.g.:
 python3 .agents/skills/agile-github-task-from-diff/scripts/create_github_task_from_diff.py \
@@ -45,6 +50,7 @@ python3 .agents/skills/agile-github-task-from-diff/scripts/create_github_task_fr
 | `--repo` | _(from remote)_ | GitHub repo as `owner/repo`. Auto-detected when omitted. |
 | `--project` | `1` | GitHub project number under the org. |
 | `--no-project` | — | Create the issue only; skip adding it to any GitHub Project. |
+| `--noparentid` | — | Repo-only task: no parent Feature issue and no parent GitHub Project — the issue lives only on the repo. Implies `--no-project`; combining it with `--feature-issue`, `--project` or `--org` is an error. |
 | `--org` | _(repo owner)_ | GitHub org that owns the project. Defaults to the repo owner detected from the git remote. |
 | `--label` | `task` | Label applied to the created issue. |
 | `--base-ref` | `origin/main` → `main` | Override base ref for the diff. |
@@ -60,6 +66,7 @@ python3 .agents/skills/agile-github-task-from-diff/scripts/create_github_task_fr
 - Creates the issue via `gh issue create`.
 - Adds the issue to the GitHub Project via `gh project item-add`.
 - Links the issue as a sub-issue of the parent Feature via the GitHub REST API (`gh api POST /repos/.../sub_issues`).
+- With `--noparentid`, skips both the project add and the sub-issue link; the body states it is a repo-only task and the acceptance criteria drop the parent-Feature scope check.
 
 ## Rename Branch After Creation
 
