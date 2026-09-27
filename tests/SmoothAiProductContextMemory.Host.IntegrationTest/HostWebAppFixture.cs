@@ -45,4 +45,26 @@ public sealed class HostWebAppFixture : WebAppFixture<HostApp::Program>
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", WriteToken);
         return Task.CompletedTask;
     }
+
+    protected override async ValueTask DisposeCleanupAsync()
+    {
+        // A teardown failure must not skip the sibling cleanup or the shared Aspire fixture disposal,
+        // so each step is guarded and reports through the test output rather than propagating.
+        try
+        {
+            string maintenance = Aspire.CreateDatabaseConnectionString("postgres");
+            await PostgreSqlDatabaseManager.DropDatabaseIfExistsAsync(maintenance, _databaseName);
+        }
+        catch (Exception exception)
+        {
+            Aspire.Output?.WriteLine($"[HostWebAppFixture] failed to drop test database '{_databaseName}': {exception.Message}");
+        }
+
+        await BlobBucketCleanup.DeleteBlobBucketAsync(
+            Aspire.BlobEndpoint,
+            AspireFixture.BlobAccessKey,
+            AspireFixture.BlobSecretKey,
+            _bucket,
+            report: message => Aspire.Output?.WriteLine($"[HostWebAppFixture] {message}"));
+    }
 }

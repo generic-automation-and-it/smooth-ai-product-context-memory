@@ -7,8 +7,6 @@ internal static class DistributedApplicationBuilderExtensions
 {
     private const string DockerDesktopGroupName = "smooth-mímisbrunnr-testing";
     private const string PostgresContainerName = "mimisbrunnr-testcontainer-postgres";
-    private const string RedisContainerName = "mimisbrunnr-testcontainer-redis";
-    private const string WireMockContainerName = "mimisbrunnr-testcontainer-wiremock";
     private const string BlobContainerName = "mimisbrunnr-testcontainer-blob";
     private const string BlobAccessKey = "minioadmin";
     private const int BlobPort = 9002;
@@ -18,7 +16,6 @@ internal static class DistributedApplicationBuilderExtensions
     // Chainguard. Its free tier only publishes :latest, so it is pinned by digest. Keep identical to
     // src/SmoothAiProductContextMemory.AppHost.
     private const string BlobImage = "cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1";
-    private const string WireMockImage = "docker.io/wiremock/wiremock";
     private const string BlobSecretKey = "LocalMachineAccessNoInterestingDataTestDev#Passw0rd!FirewallNotExposed";
     // Aspire 13.5.3 defaults to library/postgres:17.7. AGE's PG17 image keeps the same major.
     // Pairing recorded in HLD 003 / NFR-04.
@@ -35,8 +32,6 @@ internal static class DistributedApplicationBuilderExtensions
             secret: true);
 
         builder.AddPostgresDependency(postgresPassword);
-        builder.AddRedisDependency();
-        builder.AddWireMockDependency();
         builder.AddBlobDependency();
     }
 
@@ -73,26 +68,5 @@ internal static class DistributedApplicationBuilderExtensions
         postgres.AddDatabase("infra-component");
         postgres.AddDatabase("infra-integration");
         postgres.AddDatabase("host-integration");
-    }
-
-    private static void AddRedisDependency(this IDistributedApplicationBuilder builder)
-    {
-        builder.AddRedis("redis", port: 16379)
-            .WithContainerName(RedisContainerName)
-            .WithContainerRuntimeArgs(
-                "--label", $"com.docker.compose.project={DockerDesktopGroupName}",
-                "--label", $"com.docker.compose.service={RedisContainerName}")
-            .WithLifetime(ContainerLifetime.Persistent);
-    }
-
-    private static void AddWireMockDependency(this IDistributedApplicationBuilder builder)
-    {
-        builder.AddContainer("wiremock", WireMockImage)
-            .WithHttpEndpoint(port: 19091, targetPort: 8080)
-            .WithContainerName(WireMockContainerName)
-            .WithContainerRuntimeArgs(
-                "--label", $"com.docker.compose.project={DockerDesktopGroupName}",
-                "--label", $"com.docker.compose.service={WireMockContainerName}")
-            .WithLifetime(ContainerLifetime.Persistent);
     }
 }

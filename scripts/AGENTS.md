@@ -20,6 +20,7 @@ Operational checks support operator decisions; a preflight must never repair the
 - Same-group repeated memberships are not cross-group ownership conflicts. Malformed containers or identity types block preflight even though some live reads treat them as absent; silently skipping them would claim migration readiness without establishing it.
 - The checker needs only `public.memory_group`, not AGE or the ticket migration. The [ticket migration runbook](../docs/hlds/003-graph-edges-on-age/ticket-migration-runbook.md) targets legacy data before graph backfill; it refuses installed/partially installed ticket graph objects.
 - The one-shot `restore` verb's built-in reconciliation supersedes `scripts/verify-graph-restore.sh` for the HLD 001 NFR-03 round-trip: it restores both stores from a self-verifying snapshot archive and prints a reconciliation (counts, blob resolution, bounded traversal) instead of `pg_dump`/`pg_restore` around `docker exec`. `verify-graph-restore.sh` remains for a lighter graph-only round-trip and `seed-graph-sample.sh` still seeds the NFR-03/NFR-04 checks; the separate NFR-04 pre-upgrade check (`verify-graph-preupgrade.sh`) is unaffected.
+- `provision-credentials.sh` writes the API Bearer tokens to a gitignored env file (`.context/mimisbrunnr.env`) with **both** name forms — the server `ApiAccess__*` names and the skill `CONTEXT_MEMORY_*` names — so the service and the host-side skills read one source of truth. Idempotent (re-runs reuse existing values), `--rotate` regenerates, mode 600. The tokens are runtime configuration only and never touch the store, so rotating them invalidates no data.
 
 ## Test References
 
@@ -32,6 +33,8 @@ Operational checks support operator decisions; a preflight must never repair the
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-27 | `provision-credentials.sh` now also writes the AppHost user secrets (`Parameters:api-read-token` / `api-write-token`) so Aspire injects the same values the skills hold, closing the AppHost run-mode gap; a `--skip-apphost` flag escapes it for SDK-less environments. | batch3 review |
+| 2026-09-27 | Added `provision-credentials.sh`, a one-command API credential provisioner that writes both the server `ApiAccess__*` and skill `CONTEXT_MEMORY_*` token name forms to a gitignored, mode-600 env file — removing the manual dashboard-copy step from the first-run path. | batch3 |
 | 2026-09-24 | `verify-graph-restore.sh` restore-verification role superseded by the one-shot `restore` verb's built-in reconciliation (HLD-006). `verify-graph-preupgrade.sh` (NFR-04 pre-upgrade) unaffected. | HLD-006 |
 | 2026-09-21 | Added npm package smoke coverage that packs and installs the tarball in isolation, then executes every public CLI help path. | npm skill distribution |
 | 2026-09-17 | Release smoke now generates separate read/write API tokens and exercises routes with least-capability credentials. | HLD-002 NFR-04 |

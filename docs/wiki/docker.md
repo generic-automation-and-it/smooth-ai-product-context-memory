@@ -22,6 +22,13 @@ distinct. Never commit it. Keep credentials stable across restarts and upgrades.
 with an actually published `sha-<short-sha>` tag or `latest`; this documentation does not imply an
 image has already been released. Pin the controller digest for immutable deployment identity.
 
+The provisioner's `.context/mimisbrunnr.env` already carries the `Parameters__api-read-token` /
+`Parameters__api-write-token` names (plus the `ApiAccess__*` and skill `CONTEXT_MEMORY_*` forms),
+so it can be the `controller.env` credential source or merged with the engine-config keys above.
+The `Parameters__*` env-var form is what makes this work in Production — the user-secrets bridge
+(`dotnet user-secrets set Parameters:...`) is Development-only and does not reach a published
+controller.
+
 ```bash
 docker run -d --name mimisbrunnr-default-controller \
   --stop-timeout 180 \
@@ -88,6 +95,15 @@ build args, never baked into layers.
 | `ApiAccess__ReadToken` | Bearer token accepted by read-only context routes. Must differ from write token. |
 | `ApiAccess__WriteToken` | Bearer token accepted by all context routes. |
 
+The `ApiAccess__*` names are what the server reads. The host-side skills read the **same two values**
+under `CONTEXT_MEMORY_READ_TOKEN` / `CONTEXT_MEMORY_WRITE_TOKEN`, plus `CONTEXT_MEMORY_BASE_URL`
+(default `http://localhost:5141`) — see [setup.md](setup.md) for the mapping and the one-command
+provisioner that writes all of them to one file. `scripts/provision-credentials.sh` writes
+`.context/mimisbrunnr.env` with both name forms; the container reads the `ApiAccess__*` names from that
+file via `--env-file`, and the skills `source` the same file — so one file is the single source of truth.
+(The container does not see the host's `.context/` directory; the AppHost mounts it as a *named*
+volume, so the container relies on `--env-file` rather than the host file being present inside it.)
+
 Owned skill client intentionally accepts loopback API origins only. Non-loopback deployments need a
 separately reviewed trusted-origin configuration; agent-controlled arbitrary HTTPS origins are rejected
 to prevent Bearer-token exfiltration.
@@ -145,10 +161,15 @@ docker run --rm \
   -e BlobStorage__AccessKey='smooth-local' \
   -e BlobStorage__SecretKey='LocalMachineAccessNoInterestingDataDev#Passw0rd!FirewallNotExposed' \
   -e BlobStorage__Bucket='smooth-mimisbrunnr-memory-well' \
-  -e ApiAccess__ReadToken='replace-with-a-random-read-token' \
-  -e ApiAccess__WriteToken='replace-with-a-different-random-write-token' \
+  --env-file .context/mimisbrunnr.env \
   smooth-ai-product-context-memory:local
 ```
+
+The two `ApiAccess__*` tokens come from `--env-file .context/mimisbrunnr.env` (written by
+`scripts/provision-credentials.sh`), not inline `-e` — an inline `-e` value lands the secret in shell
+history and in any command that gets copied or pasted. The inline form shown above is the **variable
+inventory** for everything that is deployment-specific (connection string, blob endpoint/keys/bucket);
+the tokens are deliberately not inlined.
 
 Probe: `http://localhost:5141/openapi/v1.json` (there is no in-image healthcheck).
 "Container running" is not "service working" — migrations need a reachable database.
@@ -289,7 +310,15 @@ HostConfiguration__Image=smooth-ai-product-context-memory:local \
 The container path injects `ConnectionStrings__SmoothAiProductContextMemory`
 (the key `AddInfrastructure` reads), plus `ApiAccess__ReadToken` and
 `ApiAccess__WriteToken` from secret Aspire parameters. That override is container-only. For source
-mode, set `Parameters:api-read-token` and `Parameters:api-write-token` with AppHost user secrets.
+mode, run `scripts/provision-credentials.sh` first — it writes the AppHost user secrets
+(`Parameters:api-read-token` / `Parameters:api-write-token`) **and** the skill-side env file, so the
+service and the skills carry the same values. (Setting the secrets manually, or `--skip-apphost`,
+leaves the skill-side and service-side tokens unlinked and every skill request `403`s.) The tokens are
+required in **every** run mode, not just the container path. The user-secrets bridge is
+**Development-only**: the published controller runs in Production, where user secrets are not loaded,
+so pass the env file via `--env-file` there (the provisioner writes `Parameters__api-read-token` /
+`Parameters__api-write-token`, the env-var spelling that loads in every environment). See
+[setup.md](setup.md).
 
 ## Stop and reset the AppHost stack
 

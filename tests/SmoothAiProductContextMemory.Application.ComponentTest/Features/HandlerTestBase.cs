@@ -17,6 +17,7 @@ public abstract class HandlerTestBase(AspireFixture aspire) : IAsyncLifetime
 {
     private SmoothAiProductContextMemoryTestDatabase? _database;
     private NpgsqlDataSource? _dataSource;
+    private readonly string _bucket = $"app-comp-{Guid.NewGuid():N}";
 
     protected SmoothAiProductContextMemoryDbContext Db { get; private set; } = default!;
 
@@ -64,7 +65,7 @@ public abstract class HandlerTestBase(AspireFixture aspire) : IAsyncLifetime
             Endpoint = aspire.BlobEndpoint,
             AccessKey = AspireFixture.BlobAccessKey,
             SecretKey = AspireFixture.BlobSecretKey,
-            Bucket = $"app-comp-{Guid.NewGuid():N}",
+            Bucket = _bucket,
         });
         Blob = new S3BlobStorage(blobOptions, new TestHttpClientFactory(), Loggers.CreateLogger<S3BlobStorage>());
     }
@@ -87,6 +88,13 @@ public abstract class HandlerTestBase(AspireFixture aspire) : IAsyncLifetime
         {
             await _database.DisposeAsync();
         }
+
+        await BlobBucketCleanup.DeleteBlobBucketAsync(
+            aspire.BlobEndpoint,
+            AspireFixture.BlobAccessKey,
+            AspireFixture.BlobSecretKey,
+            _bucket,
+            report: message => aspire.Output?.WriteLine($"[HandlerTestBase] {message}"));
     }
 
     private static async Task ApplyMigrationsAsync(NpgsqlDataSource dataSource, CancellationToken cancellationToken)

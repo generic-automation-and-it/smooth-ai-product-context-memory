@@ -45,7 +45,7 @@ public abstract class PersistenceTestBase(AspireFixture aspire) : IAsyncLifetime
         Db = new SmoothAiProductContextMemoryDbContext(options);
     }
 
-    public async ValueTask DisposeAsync()
+    public virtual async ValueTask DisposeAsync()
     {
         if (Db is not null)
         {

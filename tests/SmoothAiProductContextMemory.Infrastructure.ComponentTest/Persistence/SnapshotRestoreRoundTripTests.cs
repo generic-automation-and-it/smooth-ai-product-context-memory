@@ -31,6 +31,7 @@ public sealed class SnapshotRestoreRoundTripTests : PersistenceTestBase
 
     private readonly Lazy<S3BlobStorage> _blob;
     private readonly AspireFixture _aspire;
+    private readonly List<string> _buckets = [];
 
     private NpgsqlSnapshotRepository Repository => new(Blob, Blob);
 
@@ -46,16 +47,39 @@ public sealed class SnapshotRestoreRoundTripTests : PersistenceTestBase
         _blob = new Lazy<S3BlobStorage>(() => CreateBlob("snap-shot"));
     }
 
-    private S3BlobStorage CreateBlob(string prefix) => new(
-        Microsoft.Extensions.Options.Options.Create(new BlobStorageOptions
+    public override async ValueTask DisposeAsync()
+    {
+        // The round trip writes bodies into the snap-shot and snap-target buckets; without a drain
+        // MinIO refuses to remove them (BucketNotEmpty) and every run leaks another bucket. This is
+        // the one bucket-owning fixture BlobBucketCleanup did not reach (batch3 closure of finding 2).
+        foreach (string bucket in _buckets)
         {
-            Endpoint = _aspire.BlobEndpoint,
-            AccessKey = AspireFixture.BlobAccessKey,
-            SecretKey = AspireFixture.BlobSecretKey,
-            Bucket = $"{prefix}-{Guid.NewGuid():N}",
-        }),
-        new TestHttpClientFactory(),
-        Microsoft.Extensions.Logging.Abstractions.NullLogger<S3BlobStorage>.Instance);
+            await BlobBucketCleanup.DeleteBlobBucketAsync(
+                _aspire.BlobEndpoint,
+                AspireFixture.BlobAccessKey,
+                AspireFixture.BlobSecretKey,
+                bucket,
+                report: message => _aspire.Output?.WriteLine($"[SnapshotRestoreRoundTripTests] {message}"));
+        }
+
+        await base.DisposeAsync();
+    }
+
+    private S3BlobStorage CreateBlob(string prefix)
+    {
+        string bucket = $"{prefix}-{Guid.NewGuid():N}";
+        _buckets.Add(bucket);
+        return new S3BlobStorage(
+            Microsoft.Extensions.Options.Options.Create(new BlobStorageOptions
+            {
+                Endpoint = _aspire.BlobEndpoint,
+                AccessKey = AspireFixture.BlobAccessKey,
+                SecretKey = AspireFixture.BlobSecretKey,
+                Bucket = bucket,
+            }),
+            new TestHttpClientFactory(),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<S3BlobStorage>.Instance);
+    }
 
     [Fact]
     public async Task SnapshotThenRestore_Reconciles_And_PreservesTicketDirection()

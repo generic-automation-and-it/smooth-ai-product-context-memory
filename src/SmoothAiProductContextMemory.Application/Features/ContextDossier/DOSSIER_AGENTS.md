@@ -13,7 +13,9 @@ Deterministic side of HLD-005 contextual export: `POST /api/context/dossier/bund
 - **Never write.** No version, edge, label registration, or blob. The selection path never calls `SaveChanges`.
 - **No generation timestamp anywhere in the payload** — that would break byte-equality (NFR-02). Stored times are data.
 - **`kind = understanding` is a kind like any other** (LADR-15): same selection, widening, scope gating, citation, reconciliation, read-only. Adds no special path.
-- **Omission reasons come from the bounded set** in `DossierOmissionReason`. No free text (NFR-04).
+- **Omission reasons come from the bounded set** in `DossierOmissionReason` — exactly `cap reached`, `depth reached`, `unreadable body`, `collapsed into another claim`, `hidden by scope`. No free text (NFR-04).
+- **`outside-focus` (named in HLD-005 NFR-04) is deliberately NOT a bundle `omitted` reason.** It is a composition/focus-side concept owned by the blocked, skill-side dossier workstream; the deterministic bundle has no focus, so it never emits it. Do not add it to `DossierOmissionReason` to "complete" the set against NFR-04 — that would let a future version disagree with the preview over one selection. The focused-dossier omission accounting is the skill's to implement.
+- **`manifest.limitsHit` is a deliberate subset of `DossierOmissionReason`, not a separate set** — only `depth reached` and `cap reached`, i.e. the limits the blob-free preview can foresee. The per-item `cap reached` a history-inflated cut produces stays in the `omitted` list and never enters `limitsHit` (the preview could not have predicted it). `DossierLimitHit.Limit` is populated from the same enum constants, so no second bounded set exists.
 
 ## System Context
 
@@ -91,6 +93,7 @@ sequenceDiagram
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-27 | Record pass: documented the deliberate bounded-reason relationships so a future reader does not "fix" them — `DossierOmissionReason` is exactly the 5 bundle values (no `outside-focus`, which is the blocked skill-side composition's); `limitsHit` is a subset of that same enum (`depth reached`, `cap reached` only), not a separate set. | record pass, HLD-005 NFR-04 |
 | 2026-09-22 | Created — deterministic bundle/preview half of HLD-005 contextual export. Bundle + preview slices, shared selection, new store widening read, two Host endpoints, L0 + L1 tests. | HLD-005 |
 | 2026-09-23 | Added the NFR-03 reference-workflow measurement harness (`DossierWorkflowBenchmarkTests`, `SMOOTH_DOSSIER_BENCH=1`) and the NFR-02 cross-restart byte-equality L1 test. Recorded that the selection caps at 200 (MaxLimit), not the 500 item cap. | HLD-005 NFR-02/NFR-03 |
 | 2026-09-23 | Migration Plans updated to the shipped state: the dossier item cap is bound to the selection fetch ceiling (`MemorySearchDefaults.MaxLimit`), resolving the earlier 500-vs-200 flag rather than leaving it open. | HLD-005 NFR-03 |

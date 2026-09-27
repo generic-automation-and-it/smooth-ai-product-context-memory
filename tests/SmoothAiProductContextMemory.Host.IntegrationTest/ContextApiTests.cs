@@ -1,6 +1,8 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.DependencyInjection;
 using SmoothAiProductContextMemory.Application.Abstractions;
 using SmoothAiProductContextMemory.Domain;
 using SmoothAiProductContextMemory.Domain.Entities;
@@ -85,6 +87,11 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
             (HttpMethod.Get, $"/api/context/recall-feedback/never-recalled?asOf={DateTimeOffset.UtcNow:yyyy-MM-dd}"),
             (HttpMethod.Get, $"/api/context/recall-feedback/miss-rate?from={DateTimeOffset.UtcNow:yyyy-MM-dd}&to={DateTimeOffset.UtcNow:yyyy-MM-dd}"),
             (HttpMethod.Post, "/api/context/recall-feedback/reset"),
+            (HttpMethod.Post, "/api/context/dossier/bundle"),
+            (HttpMethod.Post, "/api/context/dossier/preview"),
+            (HttpMethod.Post, "/api/context/snapshot/preflight"),
+            (HttpMethod.Post, "/api/context/snapshot"),
+            (HttpMethod.Get, "/api/context/snapshot/status"),
         })
         {
             using var request = new HttpRequestMessage(method, path);
@@ -95,6 +102,11 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
             using HttpResponseMessage response = await anonymous.SendAsync(request, Ct);
             response.StatusCode.ShouldBe(HttpStatusCode.Forbidden, $"{method} {path}");
         }
+        // An unmatched /api/context path is denied by the middleware's default-deny arm, not by any
+        // endpoint's capability metadata — so a route added without .RequireCapability(...) still fails
+        // closed. This is the assertion that catches a new endpoint shipping unauthenticated-by-omission.
+        using HttpResponseMessage unmatched = await anonymous.GetAsync("/api/context/does-not-exist", Ct);
+        unmatched.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
         (await anonymous.GetAsync("/openapi/v1.json", Ct)).StatusCode.ShouldBe(HttpStatusCode.OK);
     }
 
@@ -476,15 +488,49 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
         using HttpResponseMessage scalar = await _http.GetAsync("/scalar/v1", Ct);
         scalar.StatusCode.ShouldBe(HttpStatusCode.OK);
 
+        // Derive the expected inventory from the app's mapped routes rather than a hand-maintained
+        // literal. The OpenAPI document is auto-generated from those same routes, so this asserts the
+        // generator emitted a path for every registered `/api/context` route — the real failure mode is
+        // an operation transformer or path filter silently dropping a route, which only comparing
+        // registrations against the served document catches. Route parameter constraints (`{version:int}`)
+        // are stripped because the OpenAPI document renders them as a bare `{version}`.
+        EndpointDataSource endpoints = _fixture.Services.GetRequiredService<EndpointDataSource>();
+        string[] mappedContextRoutes = endpoints.Endpoints
+            .OfType<RouteEndpoint>()
+            .Select(e => e.RoutePattern.RawText)
+            .Where(p => p is not null && p.StartsWith("/api/context", StringComparison.Ordinal))
+            .Cast<string>()
+            .Select(NormalizeRouteTemplate)
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(p => p, StringComparer.Ordinal)
+            .ToArray();
+
         using HttpResponseMessage openapi = await _http.GetAsync("/openapi/v1.json", Ct);
         openapi.StatusCode.ShouldBe(HttpStatusCode.OK);
         string doc = await openapi.Content.ReadAsStringAsync(Ct);
-        foreach (string route in ExpectedRoutes)
+        foreach (string route in mappedContextRoutes)
         {
             doc.ShouldContain(route);
         }
         doc.ShouldContain("bearer");
         doc.ShouldContain("Requires write capability");
+    }
+
+    private static string NormalizeRouteTemplate(string template)
+    {
+        // Strip route parameter constraints ({version:int} -> {version}) so the derived template
+        // matches the OpenAPI document's path rendering.
+        for (int start = template.IndexOf('{'); start >= 0; start = template.IndexOf('{', start + 1))
+        {
+            int colon = template.IndexOf(':', start);
+            int close = template.IndexOf('}', start);
+            if (colon > 0 && colon < close)
+            {
+                template = template[..colon] + template[close..];
+            }
+        }
+
+        return template;
     }
 
     /// <summary>
@@ -596,27 +642,6 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
         JsonElement resetBody = await reset.Content.ReadFromJsonAsync<JsonElement>(Json, Ct);
         resetBody.GetProperty("recordsDeleted").GetInt32().ShouldBeGreaterThan(0);
     }
-
-    private static readonly string[] ExpectedRoutes =
-    [
-        "/api/context/preflight",
-        "/api/context/memories",
-        "/api/context/memories/{uuid}/versions",
-        "/api/context/memories/{uuid}/versions/{version}/blob",
-        "/api/context/query",
-        "/api/context/groups/resolve",
-        "/api/context/groups/{uuid}",
-        "/api/context/groups/{uuid}/descriptions",
-        "/api/context/links",
-        "/api/context/paths",
-        "/api/context/tickets/parent",
-        "/api/context/tickets/paths",
-        "/api/context/labels",
-        "/api/context/initiatives",
-        "/api/context/recall-feedback/never-recalled",
-        "/api/context/recall-feedback/miss-rate",
-        "/api/context/recall-feedback/reset",
-    ];
 
     [Fact]
     public async Task Propose_label_is_draft()

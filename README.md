@@ -168,7 +168,35 @@ Built on the **smooth-devex-template** AI DevEx scaffold — a ready-to-use AI a
 | Validation | FluentValidation in a fail-fast Mediator pipeline |
 | Persistence | EF Core + PostgreSQL (`Npgsql.EntityFrameworkCore.PostgreSQL`) |
 | Observability | Serilog + OpenTelemetry, Scalar OpenAPI UI |
-| Testing | xunit.v3 · Shouldly · Bogus · Respawn |
+| Testing | xunit.v3 · Shouldly · Respawn |
+
+---
+
+## API credentials
+
+The API requires two **distinct** Bearer tokens — one read, one write — in **every** run mode, and
+there is **no default**: if either is blank or the two match, the process exits at startup. Set them
+before running anything. The two tokens are the same values the host-side skills read under different
+names; the one-command provisioner writes both name forms to one gitignored file.
+
+```bash
+scripts/provision-credentials.sh           # writes .context/mimisbrunnr.env (both token name forms, mode 600)
+set -a && source .context/mimisbrunnr.env && set +a
+```
+
+To run the API on its own (without the provisioner), generate the values rather than inventing them
+(`openssl rand -hex 32`, twice) and pass them under the server-side names — they must differ:
+
+```bash
+ApiAccess__ReadToken='some-random-read-token' \
+ApiAccess__WriteToken='a-different-random-write-token' \
+  dotnet run --project src/SmoothAiProductContextMemory.Host
+```
+
+The skills read the **same two values** as `CONTEXT_MEMORY_READ_TOKEN`, `CONTEXT_MEMORY_WRITE_TOKEN`
+and `CONTEXT_MEMORY_BASE_URL` (default `http://localhost:5141`). See
+[docs/wiki/setup.md](docs/wiki/setup.md) for the full credential model, the name mapping and the
+regeneration procedure — rotation invalidates no data, because the tokens are never written to the store.
 
 ---
 
@@ -223,12 +251,10 @@ Target a single test project directly when iterating, e.g. `dotnet test tests/Sm
 ### Run locally
 
 ```bash
-dotnet run --project src/SmoothAiProductContextMemory.AppHost   # Aspire stack; set secret api-read-token/api-write-token parameters first (docs/wiki/docker.md)
+dotnet run --project src/SmoothAiProductContextMemory.AppHost   # Aspire stack; tokens: run scripts/provision-credentials.sh first (docs/wiki/setup.md)
 HostConfiguration__UseProject=false \
   dotnet run --project src/SmoothAiProductContextMemory.AppHost # same stack, pull published Host image (tag may lag)
-ApiAccess__ReadToken='<random-read-token>' \
-ApiAccess__WriteToken='<different-random-write-token>' \
-  dotnet run --project src/SmoothAiProductContextMemory.Host    # start API on its own
+dotnet run --project src/SmoothAiProductContextMemory.Host       # API on its own; tokens: see API credentials above
 docker build -t smooth-ai-product-context-memory:local .        # Host image; run contract in docs/wiki/docker.md
 ```
 
@@ -273,7 +299,7 @@ tests/
   SmoothAiProductContextMemory.*.ComponentTest/     # L1 — in-memory EF Core / real isolated DB + Respawn
   SmoothAiProductContextMemory.*.IntegrationTest/   # L2 — full stack, real PostgreSQL
   SmoothAiProductContextMemory.TestFramework/       # Shared fixtures
-  SmoothAiProductContextMemory.TestFramework.Aspire/# Aspire dependency host (PostgreSQL + WireMock)
+  SmoothAiProductContextMemory.TestFramework.Aspire/ # Aspire dependency host (PostgreSQL/AGE + MinIO blob)
 ```
 
 ---
@@ -289,6 +315,7 @@ tests/
 | Testing strategy | [`docs/wiki/testing.md`](docs/wiki/testing.md) |
 | CI/CD pipeline | [`docs/wiki/ci.md`](docs/wiki/ci.md) |
 | Container images & durability (`snapshot`/`verify`/`restore`) | [`docs/wiki/docker.md`](docs/wiki/docker.md) |
+| Setup & credentials (tokens, name mapping, provisioning) | [`docs/wiki/setup.md`](docs/wiki/setup.md) |
 | Architecture decisions & NFRs | [`docs/hlds/`](docs/hlds/) |
 
 ---
