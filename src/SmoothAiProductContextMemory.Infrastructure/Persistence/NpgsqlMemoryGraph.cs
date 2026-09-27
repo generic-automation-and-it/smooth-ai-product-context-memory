@@ -141,10 +141,10 @@ public sealed class NpgsqlMemoryGraph(SmoothAiProductContextMemoryDbContext db) 
         while (await reader.ReadAsync(cancellationToken))
         {
             rows.Add(new MemoryRelationship(
-                Guid.Parse(CypherLiteral.ReadAgtypeString(reader, 0)),
-                Guid.Parse(CypherLiteral.ReadAgtypeString(reader, 1)),
-                CypherLiteral.ReadAgtypeString(reader, 2),
-                CypherLiteral.ReadAgtypeString(reader, 3)));
+                Guid.Parse(AgtypeArrayReader.ReadAgtypeString(reader, 0)),
+                Guid.Parse(AgtypeArrayReader.ReadAgtypeString(reader, 1)),
+                AgtypeArrayReader.ReadAgtypeString(reader, 2),
+                AgtypeArrayReader.ReadAgtypeString(reader, 3)));
         }
 
         return rows;
