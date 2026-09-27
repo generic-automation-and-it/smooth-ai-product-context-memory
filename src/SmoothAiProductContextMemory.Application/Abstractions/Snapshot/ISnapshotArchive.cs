@@ -16,12 +16,14 @@ public interface ISnapshotArchive
     /// cites is still recorded faithfully under that cited address (LADR-02) — it is a capture-time
     /// cross-store inconsistency to be surfaced, not a reason to skip the body. A dangling (unresolvable)
     /// body cannot be written. Copies are never deleted; accounting is reporting only (LADR-06).
+    /// <see cref="ReadBlob"/> returns the body plus the SHA-256 already computed by the capture walk,
+    /// so the writer does not hash every blob a second time to fill its manifest entry (H13).
     /// </summary>
     Task<SnapshotWriteReport> WriteAsync(
         string destinationPath,
         SnapshotCapture capture,
         SnapshotWalkResult walk,
-        Func<string, Task<byte[]>> readBlobAsync,
+        Func<string, Task<(byte[] Content, string Sha256)>> readBlobAsync,
         CancellationToken cancellationToken);
 
     /// <summary>Opens an archive for reading, returning its manifest and entry access.</summary>
@@ -37,13 +39,10 @@ public interface ISnapshotArchive
 
     /// <summary>
     /// Deserializes an archive's relational + graph capture back into a <see cref="SnapshotCapture"/>
-    /// so it can be restored. Blob bodies are not returned here — the caller reads them separately
-    /// via <see cref="ReadBlobAsync"/> when re-checking references against the archive.
+    /// so it can be restored. Blob bodies are not returned here — the caller reads them from the
+    /// opened archive via <see cref="SnapshotArchive.ReadBlob"/> when re-checking references.
     /// </summary>
     Task<SnapshotCapture> ReadCaptureAsync(string archivePath, CancellationToken cancellationToken);
-
-    /// <summary>Reads one blob body from the archive by its content address.</summary>
-    Task<byte[]> ReadBlobAsync(string archivePath, string address, CancellationToken cancellationToken);
 }
 
 /// <summary>Outcome of an archive write. Counts, the destination, and the report's key numbers.</summary>
@@ -55,13 +54,15 @@ public sealed record SnapshotWriteReport(
     int MismatchedBodies);
 
 /// <summary>
-/// An opened archive: the manifest, the actual archive member names, and accessors for reading entry
-/// bytes either by member name or by blob content address. The blob accessors encapsulate the
-/// archive's blob entry-name convention so callers never see the <c>blobs/</c> prefix.
+/// An opened archive: the manifest, the actual archive member names, the already-deserialised
+/// capture, and accessors for reading a blob body by its content address or testing for one.
+/// The blob accessors encapsulate the archive's blob entry-name convention so callers never see the
+/// <c>blobs/</c> prefix. The capture is carried here so a caller that needs both the capture and the
+/// open archive (restore) does not read and materialise the tar twice (H13).
 /// </summary>
 public sealed record SnapshotArchive(
     SnapshotManifest Manifest,
     IReadOnlyList<string> EntryNames,
-    Func<string, Task<byte[]>> ReadEntryAsync,
+    SnapshotCapture Capture,
     Func<string, bool> ContainsBlob,
     Func<string, byte[]> ReadBlob);

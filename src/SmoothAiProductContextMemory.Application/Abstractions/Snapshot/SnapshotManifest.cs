@@ -43,7 +43,10 @@ public sealed record SnapshotExclusions(IReadOnlyList<string> Items);
 /// <summary>Archive format version. Bump on any breaking change to the member layout.</summary>
 public static class SnapshotFormat
 {
-    public const int Version = 1;
+    // v2: added DanglingReferences/MismatchedBodies with refusal semantics — an archive that
+    // recorded a dangling or mismatched body at capture now verifies non-clean, so archives written
+    // before the field existed (v1, field absent→0) can no longer be certified restorable.
+    public const int Version = 2;
 }
 
 /// <summary>Canonical logical names for archive members that are not blob bodies.</summary>

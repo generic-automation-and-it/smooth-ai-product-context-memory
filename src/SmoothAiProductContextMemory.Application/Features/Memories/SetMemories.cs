@@ -201,8 +201,9 @@ public static class SetMemories
 
             // The plan resolves every write against stored state in one pass. The per-item checks below
             // are mere set lookups; the stored state they consult is fetched here in four batched
-            // queries instead of once per item, which keeps a 200-item write at four round-trips
-            // instead of up to ~800.
+            // queries instead of once per item. That is a lookup count, not a round-trip count: the
+            // per-item blob store, the per-versioned-item save and the per-link existence check plus
+            // create all remain linear in batch size.
             Guid[] targetUuids = request.Items
                 .Where(i => i.Uuid is not null)
                 .Select(i => i.Uuid!.Value)
@@ -222,7 +223,7 @@ public static class SetMemories
             Dictionary<Guid, Memory> memoriesByUuid = (targetUuids.Length == 0
                     ? []
                     : await db.Memories
-                        .Where(m => targetUuids.Contains(m.Uuid))
+                        .Where(m => m.GroupId == group.Id && targetUuids.Contains(m.Uuid))
                         .ToArrayAsync(cancellationToken))
                 .ToDictionary(m => m.Uuid);
 
@@ -565,24 +566,24 @@ public static class SetMemories
             bool isCurrent,
             MemoryWrite item,
             string? blobAddress) => new()
-        {
-            Version = version,
-            IsCurrent = isCurrent,
-            Statement = item.Statement,
-            ContentSummary = item.ContentSummary,
-            BlobAddress = blobAddress,
-            Kind = item.Kind,
-            Confidence = item.Confidence,
-            Status = item.Status,
-            Sources = item.Sources?
+            {
+                Version = version,
+                IsCurrent = isCurrent,
+                Statement = item.Statement,
+                ContentSummary = item.ContentSummary,
+                BlobAddress = blobAddress,
+                Kind = item.Kind,
+                Confidence = item.Confidence,
+                Status = item.Status,
+                Sources = item.Sources?
                 .Select(s => SourceDocument.Create(s.Kind, s.Reference, s.CapturedAt))
                 .ToList() ?? [],
-            ValidFrom = item.ValidFrom,
-            ValidUntil = item.ValidUntil,
-            CreatedOn = DateTimeOffset.UtcNow,
-            SummaryStamp = string.IsNullOrWhiteSpace(item.SummaryModel)
+                ValidFrom = item.ValidFrom,
+                ValidUntil = item.ValidUntil,
+                CreatedOn = DateTimeOffset.UtcNow,
+                SummaryStamp = string.IsNullOrWhiteSpace(item.SummaryModel)
                 ? null
                 : SummaryStampDocument.Create(item.SummaryModel, item.SummaryPromptVersion ?? string.Empty),
-        };
+            };
     }
 }

@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using FluentValidation;
 using Mediator;
 using Microsoft.Extensions.Logging;
@@ -95,7 +96,7 @@ public static class SnapshotStore
                 written.MismatchedBodies);
         }
 
-        private async Task<byte[]> ReadBlobAsync(string address)
+        private async Task<(byte[] Content, string Sha256)> ReadBlobAsync(string address)
         {
             BlobContent? content = await blobStorage.GetAsync(address);
             if (content is null)
@@ -107,7 +108,10 @@ public static class SnapshotStore
             {
                 using var buffer = new MemoryStream();
                 await content.Content.CopyToAsync(buffer);
-                return buffer.ToArray();
+                byte[] bytes = buffer.ToArray();
+                // The writer uses this precomputed hash for the manifest entry, so it does not hash
+                // every body a second time (H13).
+                return (bytes, Convert.ToHexStringLower(SHA256.HashData(bytes)));
             }
         }
     }

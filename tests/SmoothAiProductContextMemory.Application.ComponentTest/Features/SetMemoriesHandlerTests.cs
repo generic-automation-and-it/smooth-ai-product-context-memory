@@ -423,6 +423,40 @@ public sealed class SetMemoriesHandlerTests(AspireFixture aspire) : HandlerTestB
     private SetMemories.Handler NewHandler() =>
         new(AppDb, Graph, Blob, ErrorMapper, Loggers.CreateLogger<SetMemories.Handler>());
 
+    /// <summary>
+    /// A version target must resolve inside the group the write names. The lookup was by uuid alone
+    /// while the create path already scoped its slug check to the group, so a write naming group A
+    /// could bump is_current on a memory belonging to group B — group isolation was not an invariant
+    /// on the version path. The target is therefore reported not-found rather than silently versioned.
+    /// </summary>
+    [Fact]
+    public async Task Version_target_in_another_group_is_not_found_and_writes_nothing()
+    {
+        MemoryGroup owner = TestEntities.NewGroup();
+        MemoryGroup other = TestEntities.NewGroup();
+        Db.MemoryGroups.AddRange(owner, other);
+        await Db.SaveChangesAsync(Ct);
+
+        SetMemories.Response created = await NewHandler().Handle(
+            Write(owner.Uuid, "Subject", "Claim 1"), Ct);
+        Guid uuid = created.Items[0].Uuid.ShouldNotBeNull();
+
+        await Should.ThrowAsync<NotFoundException>(() => NewHandler().Handle(
+            Write(other.Uuid, "Subject", "Claim 2", uuid), Ct).AsTask());
+
+        // The refused write must leave the owning group's memory exactly as it was: one version,
+        // still current, and the original statement intact.
+        long memoryId = await Db.Memories.Where(m => m.Uuid == uuid).Select(m => m.Id).SingleAsync(Ct);
+        List<MemoryVersion> versions = await Db.MemoryVersions.AsNoTracking()
+            .Where(v => v.MemoryId == memoryId)
+            .ToListAsync(Ct);
+
+        versions.Count.ShouldBe(1);
+        versions.Count(v => v.IsCurrent).ShouldBe(1);
+        versions.Single().Version.ShouldBe(1);
+        versions.Single().Statement.ShouldBe("Claim 1");
+    }
+
     private static SetMemories.Request Write(Guid groupUuid, string description, string statement, Guid? uuid = null) =>
         new(
             groupUuid,

@@ -571,6 +571,98 @@ class Nfr06CapabilityAbsenceTests(unittest.TestCase):
         self.assertTrue(hasattr(dc, "cmd_bundle"))
 
 
+class CredentialTransportTests(unittest.TestCase):
+    """The read token is a capability for the whole corpus, so the two guards the sibling
+    context-memory client already had are part of this skill's contract: the origin must be
+    loopback, and a credential-bearing request must not follow a redirect. Without the first, a
+    `--base-url` or `CONTEXT_MEMORY_BASE_URL` of someone else's host receives the token. Without
+    the second, a 302 from a loopback base forwards the `Authorization` header to whatever host it
+    names — CPython's default redirect handler rebuilds the request with the original headers."""
+
+    def test_non_loopback_origins_are_refused(self):
+        for base in ("http://evil.example:5141",
+                     "https://api.example.com",
+                     "http://10.0.0.5:5141",
+                     "http://localhost.evil.example:5141",   # suffix, not the loopback host
+                     "http://127.0.0.1.evil.example:5141",   # loopback as a prefix, not the host
+                     "ftp://localhost:5141",
+                     "file:///etc/passwd"):
+            with self.subTest(base=base):
+                with self.assertRaises(ValueError):
+                    dc._assert_loopback(base)
+
+    def test_loopback_forms_are_accepted(self):
+        # urlparse lowercases the host, so an uppercase or bracketed form must still pass.
+        for base in ("http://localhost:5141", "https://localhost",
+                     "http://127.0.0.1:5141", "http://[::1]:5141", "http://LOCALHOST:5141"):
+            with self.subTest(base=base):
+                dc._assert_loopback(base)  # must not raise
+
+    def test_a_non_loopback_base_is_refused_before_any_request(self):
+        # Proves the guard runs pre-flight rather than alongside the request: no opener is built
+        # and no bytes leave, because the assertion is the ValueError itself.
+        with self.assertRaises(ValueError):
+            dc.fetch_bundle_from_api("http://evil.example:5141", {"anchor": {}})
+
+    def test_the_opener_refuses_redirects_and_uses_no_proxy(self):
+        # Pins the composition, not just the class: dropping _NoRedirect from the opener — or
+        # letting a proxy observe the header — fails here even though the guards still exist.
+        import urllib.request
+
+        captured = {}
+
+        class _FakeResponse:
+            def read(self):
+                return b'{"bundle": {}}'
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        class _FakeOpener:
+            def open(self, req, timeout=None):
+                captured["headers"] = dict(req.headers)
+                return _FakeResponse()
+
+        def _fake_build_opener(*handlers):
+            captured["handlers"] = handlers
+            return _FakeOpener()
+
+        real_build = urllib.request.build_opener
+        urllib.request.build_opener = _fake_build_opener
+        try:
+            os.environ["CONTEXT_MEMORY_READ_TOKEN"] = "test-token-not-a-real-secret"
+            try:
+                dc.fetch_bundle_from_api("http://localhost:5141", {"anchor": {}})
+            finally:
+                os.environ.pop("CONTEXT_MEMORY_READ_TOKEN", None)
+        finally:
+            urllib.request.build_opener = real_build
+
+        handlers = captured["handlers"]
+        # build_opener accepts handler classes or instances and instantiates the former itself,
+        # so accept either — what matters is that the redirect-refusing handler reaches it.
+        self.assertTrue(any(isinstance(h, dc._NoRedirect) or h is dc._NoRedirect for h in handlers),
+                        f"opener carries no redirect-refusing handler: {handlers}")
+        self.assertTrue(any(type(h).__name__ == "ProxyHandler" and not h.proxies
+                            for h in handlers),
+                        f"opener does not disable proxies: {handlers}")
+        # The token is attached, so the guards above are load-bearing rather than decorative.
+        self.assertIn("Authorization", captured["headers"])
+
+    def test_the_redirect_handler_raises_rather_than_rewriting_the_request(self):
+        import urllib.request
+
+        handler = dc._NoRedirect()
+        with self.assertRaises(OSError):
+            handler.redirect_request(
+                urllib.request.Request("http://localhost:5141/api"),
+                fp=None, code=302, msg="Found", headers={},
+                newurl="http://attacker.example/collect")
+
+
 class NearMissTagTests(unittest.TestCase):
     """LADR-10 / NFR-04: `near-miss-tag` is evidence-only skill output via the shared helper.
     No evidence means no finding; no tag-graph or store-wide completeness claim is made."""

@@ -105,17 +105,20 @@ public static class DossierSelection
 
         // A supplied ticket that resolves to no eligible identities (missing, hidden, or no eligible
         // memories) must stay a no-match; broadening to an unrestricted search would silently select
-        // unrelated visible memories (R07 / H7).
+        // unrelated visible memories (R07 / H7). The traversal may have hit a depth/path/memory limit
+        // even while yielding nothing — propagate its disclosure flags so a truncated-empty result is
+        // not reported as complete-empty (H5).
         if (ticketSupplied && ticketUuids is { Count: 0 })
         {
+            var disclosure = ticketResult?.Disclosure;
             return new DossierSelectionResult(
                 Selected: [],
                 AnchorCount: 0,
                 WidenedCount: 0,
                 EdgeCount: 0,
-                DepthLimitReached: false,
+                DepthLimitReached: disclosure?.DepthLimitReached ?? false,
                 HiddenPathDropped: false,
-                LimitReached: false,
+                LimitReached: (disclosure?.MemoryLimitReached ?? false) || (disclosure?.PathLimitReached ?? false),
                 Edges: []);
         }
 
