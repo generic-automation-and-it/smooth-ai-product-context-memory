@@ -20,5 +20,6 @@ Script-driven skill: `create_github_task_from_diff.py` owns diff classification,
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-27 | `SKILL.md` Overview no longer implies a parent Feature link is the default: the sub-issue link is stated as conditional on `--feature-issue` (default none), matching the workflow step and the Inputs table. | |
 | 2026-09-27 | Added `--noparentid`: create the task on the repo only, with no parent Feature and no parent Project. Body and acceptance criteria state repo-only scope; SKILL.md gained a `switches:` frontmatter block. `models:` replaced by `effort: medium`. | |
 | 2026-06-12 | Initial version. Branch-rename derivation moved from SKILL.md prose into the script (`suggest_branch_name`); stale `ProsmarBunkering` path prefix removed. | |
