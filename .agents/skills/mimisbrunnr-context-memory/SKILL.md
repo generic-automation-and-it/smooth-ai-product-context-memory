@@ -100,7 +100,9 @@ Before writing, delegate **one bounded clarification round** to `memory-write` �
    **across groups**, not within. Semantic equivalence — *"PostgreSQL is the storage engine"* vs *"we
    store in Postgres"* — is matched here, because the database's `subject_slug` unique index is an
    exact-match backstop only. A candidate with an existing subject becomes a **version bump** (same
-   subject, new claim) rather than a duplicate insert.
+   subject, new claim) rather than a duplicate insert — **but only when the match is inside this
+   group**. A `uuid` version target owned by another group is a `404` (see the `set` body below), so a
+   **cross-group** subject match becomes a **new memory in this group plus a typed link**, never a bump.
 2. **Link derivation** — propose typed links (`depends_on`, `relates_to`, `contradicts`, `supersedes`,
    `implements`) to mentally-related existing memories, each with a mandatory `reason`.
 3. **Ticket uniqueness** — confirm no candidate's ticket is already owned by another group. Send the
@@ -150,7 +152,7 @@ stale, not an alternative reading.
 |---|---|---|
 | 1 | **Preflight** | Batched exact cross-group subject/ticket backstops plus intra-batch collision detection. Array-in/array-out; writes and judges nothing. |
 | 2 | **Redact** | Detect secrets/tokens/connection strings in the captured content and scrub them **before** the blob write. Content addressing makes a blob immutable — a leaked secret cannot be edited out later, only orphaned. Redaction must precede the blob write. The record of what was scrubbed goes to the digest (digest-only; content is never logged). |
-| 3 | **Dedupe / derive links** | The cross-group subject match and link derivation, applied to the write decision from the preflight. Locate existing subjects; the same-subject/cross-group result decides version-bump vs new-memory vs skip. |
+| 3 | **Dedupe / derive links** | The cross-group subject match and link derivation, applied to the write decision from the preflight. Locate existing subjects; the result decides version-bump vs new-memory vs skip **qualified by group**: a match inside this group is a version bump, a match in another group is a new memory here plus a typed link (a foreign `uuid` target is a `404`, never a bump). |
 | 4 | **Atomicity check** | Confirm each record is one atomic fact. Split bundled candidates; route the unprocessable remainder to `skipped`. |
 | 5 | **Write** | Single transactional `set`. Version bump ordering: flip the old `is_current` to `false` *before* inserting the new current, both **in one transaction**, or a failure between them strands zero current versions. |
 
