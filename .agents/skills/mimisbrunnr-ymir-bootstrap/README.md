@@ -1,6 +1,8 @@
 # Bootstrap Project Context
 
-Use `mimisbrunnr-bootstrap` when an existing repository needs a small, durable context baseline before
+Ymir is the first being of Norse myth, from whose body the gods shaped the world — as this baseline is shaped from the repository that already exists.
+
+Use `mimisbrunnr-ymir-bootstrap` when an existing repository needs a small, durable context baseline before
 future product or engineering work. It is useful when source already contains important rules, vocabulary,
 constraints, and decisions that should be recalled without re-deriving them every session.
 
@@ -28,13 +30,13 @@ a direct client fallback.
 For a general baseline:
 
 ```text
-Use $mimisbrunnr-bootstrap to preview a durable context baseline for this repository.
+Use $mimisbrunnr-ymir-bootstrap to preview a durable context baseline for this repository.
 ```
 
 To deepen the same bounded baseline around one upcoming change:
 
 ```text
-Use $mimisbrunnr-bootstrap to preview this repository's baseline, with extra focus on the planned
+Use $mimisbrunnr-ymir-bootstrap to preview this repository's baseline, with extra focus on the planned
 subscription-renewal feature. Do not inspect unrelated services.
 ```
 
@@ -82,6 +84,9 @@ what is present in the checkout, not what is deployed. Plans and proposed featur
 stay visible; dates, rationale, and provenance are never invented. A proposed feature is separate from
 current behavior, and README statements, code, and tests may represent different evidence classes rather
 than interchangeable truth.
+
+The skill holds no credential of its own. It refuses an evidence URL that embeds credentials, and a secret
+met in inspected evidence appears in the preview only as `<REDACTED>` with its location.
 
 For exact capture semantics and supported payload fields, use the
 [context-memory documentation](../mimisbrunnr-context-memory/README.md) rather than copying its wire

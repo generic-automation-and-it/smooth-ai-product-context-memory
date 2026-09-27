@@ -1,11 +1,7 @@
 ---
-name: mimisbrunnr-bootstrap
-description: Build a small, source-backed Mímisbrunnr baseline for an existing repository, optionally deepened for the next feature. Use when a user explicitly asks to bootstrap project context for later product-consistent work; do not treat installation or ordinary repository inspection as permission to ingest a repository.
-metadata:
-  models:
-    claude: opus
-    copilot: auto
-    codex: gpt-5.5
+name: mimisbrunnr-ymir-bootstrap
+description: Build a small, source-backed Mímisbrunnr baseline for an existing repository, optionally deepened for the next feature. Use when a user explicitly asks to bootstrap project context for later product-consistent work; do not treat installation or ordinary repository inspection as permission to ingest a repository. Ymir is the first being of Norse myth, from whose body the gods shaped the world — as this baseline is shaped from the repository that already exists.
+effort: xhigh  # source-backed baseline later sessions build on: consequential questions, conflict preservation, reviewed selection
 ---
 
 # Bootstrap Project Context
@@ -43,7 +39,10 @@ At the start, establish:
 - any user-approved external evidence sources.
 
 Anchor repository scope to verified local identity such as the repository root, repository name, and
-revision. Never record a remote URL containing credentials or tokens. Stay inside the selected repository
+revision. Never record a remote URL containing credentials or tokens, and reject a user-supplied evidence
+source whose URL embeds credentials before echoing, citing, or opening it. If inspected evidence contains a
+secret, cite only its location and show the value as `<REDACTED>` in the preview; never carry it into a
+candidate or a runtime token into any output. Stay inside the selected repository
 and explicitly supplied external sources. Do not discover or inspect personal vaults, sibling repositories,
 other workspaces, issue trackers, or services merely because they may contain useful context.
 

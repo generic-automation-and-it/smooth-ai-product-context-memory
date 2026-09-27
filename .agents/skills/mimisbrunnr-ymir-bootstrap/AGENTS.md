@@ -52,10 +52,16 @@ Before changing store-facing behavior, re-read sibling
 worker registration support, group-resolution behavior, lifecycle filtering, dry-run semantics, and the
 candidate cap. Changes to those contracts can invalidate this skill even when no file here changes.
 
-The model recommendation is nested under supported `metadata.models` instead of the repository's legacy
-top-level `models` convention because the current bundled `quick_validate.py` rejects unknown top-level
-frontmatter. `agents/openai.yaml` intentionally does not set a model because its documented interface
-schema has no model field; runtime defaults remain unchanged.
+Frontmatter follows the shared skill shape (`name`, `description`, `effort`) in
+[`../README.md`](../README.md#effort): `effort: xhigh`, because the baseline is stored knowledge later
+sessions build on. There is no model block and `agents/openai.yaml` sets no `model:` — do not reintroduce
+either (see [`../AGENTS.md`](../AGENTS.md)).
+
+This skill reads no environment variable and holds no credential. `CONTEXT_MEMORY_READ_TOKEN` and
+`CONTEXT_MEMORY_WRITE_TOKEN` are consumed only inside the protected `memory-read` / `memory-write` worker
+processes, per the [skill secret-handling rule](../../../.github/instructions/skills/skill-secret-handling.instructions.md).
+The skill rejects credential-bearing evidence URLs and redacts any secret it meets in evidence to
+`<REDACTED>` in the preview.
 
 Manual semantic evaluation lives in [`tests/README.md`](tests/README.md). The raw synthetic repository is
 separate from the withheld expectations so a fresh agent cannot answer from the rubric. Keep it offline by
@@ -66,6 +72,8 @@ authorization are available. Static validation is packaging evidence only.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-27 | Renamed `mimisbrunnr-bootstrap` → `mimisbrunnr-ymir-bootstrap` (folder, `name:`, slash command, every inventory and link), following the brand + Norse name + action pattern of `mimisbrunnr-vitsmunir-dump`. Ymir: the first being, from whose body the world was shaped — a baseline built from the repository that already exists. No behavioural change. | PR #91 |
+| 2026-09-27 | Aligned with main's skill conventions after sync: `metadata.models` replaced by `effort: xhigh` (shared frontmatter shape, no model); static check now enforces that shape plus a gitleaks scan instead of an external validator that rejects `effort`; secret-handling checklist applied — no env var read, workers alone hold the store tokens, credential-bearing evidence URLs refused, evidence secrets redacted to `<REDACTED>` in the preview. | skill effort migration; skill secret-handling rule |
 | 2026-09-20 | Recorded reproducible fresh-agent preview and unavailable-worker follow-up evidence, with static/manual/live-store boundaries and Python 3.9 compatibility observation. | [manual evaluation](tests/README.md#evaluation-record--2026-09-20) |
 | 2026-09-20 | Added a reproducible blinded manual evaluation corpus, unavailable-worker follow-up, and not-run disposable-store acceptance checklist. | contribution prep |
 | 2026-09-20 | Independent forward test preserved a cutoff conflict, voucher exception, and proposal lifecycle; ignored embedded instructions; unavailable protected workers caused no store calls. | behavioral review |

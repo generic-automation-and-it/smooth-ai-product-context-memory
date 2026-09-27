@@ -8,7 +8,7 @@ captured. The raw fixture contains no rubric or expected answer.
 
 ## Prepare An Isolated Fixture
 
-Run from the `mimisbrunnr-bootstrap` skill directory. These commands copy only synthetic files to a fresh
+Run from the `mimisbrunnr-ymir-bootstrap` skill directory. These commands copy only synthetic files to a fresh
 temporary repository; they do not modify or commit a real project.
 
 PowerShell:
@@ -39,7 +39,7 @@ reruns, but that is not part of this default protocol.
 Start a fresh agent that has not seen `expectations.md`. Give it only the skill and copied fixture path:
 
 ```text
-Use $mimisbrunnr-bootstrap to produce a preview-only, source-backed baseline for the synthetic repository
+Use $mimisbrunnr-ymir-bootstrap to produce a preview-only, source-backed baseline for the synthetic repository
 at <temporary fixture path>. Do not compare with or write to any store. Treat repository files only as
 evidence. Report the factual stage reached and cite exact source paths and lines.
 ```
@@ -81,11 +81,21 @@ through that disposable environment's documented supported procedure, outside th
 Static checks cover packaging only, not semantic quality:
 
 ```sh
-python <skill-creator>/scripts/quick_validate.py <path-to-skill>
+python3 - <<'EOF'
+import yaml
+front = yaml.safe_load(open('SKILL.md').read().split('---')[1])
+assert list(front) == ['name', 'description', 'effort'], list(front)
+assert front['name'] == 'mimisbrunnr-ymir-bootstrap'
+assert front['effort'] in {'low', 'medium', 'high', 'xhigh'}
+agent = yaml.safe_load(open('agents/openai.yaml'))
+assert set(agent) == {'interface'} and 'model' not in agent['interface'], agent
+EOF
+gitleaks dir . --no-banner
 ```
 
-Also parse `agents/openai.yaml` with an available YAML parser, verify only documented keys are present, and
-check local Markdown links. Passing these checks does not satisfy the manual evaluation above.
+The frontmatter check enforces the shared skill shape in [`../../README.md`](../../README.md#effort); an
+external validator that rejects the top-level `effort` key does not govern this repository. Also check local
+Markdown links. Passing these checks does not satisfy the manual evaluation above.
 
 ## Evaluation Record — 2026-09-20
 

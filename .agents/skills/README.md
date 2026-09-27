@@ -17,7 +17,7 @@ Skills live **flat**, one directory per skill directly under `.agents/skills/`. 
 | **context-load-agents-context** | Load ancestor AGENTS.md context for a file | `/context-load-agents-context` |
 | **context-load-context** | Load domain context before implementation | `/context-load-context auth` |
 | **mimisbrunnr-context-memory** | Get/set persistent context-memory records; sole authority on the write path to the store | `/mimisbrunnr-context-memory [--dryrun] [--approve]` |
-| [**mimisbrunnr-bootstrap**](mimisbrunnr-bootstrap/README.md) | Build a cited, reviewable durable-context baseline for one existing project, optionally focused on its next feature | `/mimisbrunnr-bootstrap <repository> [next-feature focus]` |
+| **mimisbrunnr-ymir-bootstrap** | Build a cited, reviewable durable-context baseline for one existing project, optionally focused on its next feature. Ymir is the first being of Norse myth, from whose body the gods shaped the world — as this baseline is shaped from the repository that already exists. | `/mimisbrunnr-ymir-bootstrap <repository> [next-feature focus]` |
 | **create-hld** | Author a design-only High-Level Design under `docs/hlds/NNN-<slug>/` | `/create-hld <kebab-slug>` |
 | **git-commit** | Commit with conventional format | `/git-commit [--autonomous]` |
 | **git-commit-push** | Commit and push to remote | `/git-commit-push [--autonomous]` |
@@ -58,9 +58,9 @@ call** (R13), so the switches trade inspection against irreversibility, not agai
 `--dryrun` and `--approve` are **mutually exclusive** — one writes nothing, the other is the permission to
 write canon. A plain `set`'s digest is a receipt, not a gate: it is rendered after the transaction commits.
 
-### mimisbrunnr-bootstrap capability gate
+### mimisbrunnr-ymir-bootstrap capability gate
 
-See the [practical guide](mimisbrunnr-bootstrap/README.md) for prompts, preview review, reruns, and
+See the [practical guide](mimisbrunnr-ymir-bootstrap/README.md) for prompts, preview review, reruns, and
 troubleshooting.
 
 Bootstrap always produces an offline candidate preview before storage. Comparison with existing memory,
@@ -122,7 +122,7 @@ Two parents own most skills here, and their SKILL.md files are kept byte-identic
 | **mimisbrunnr-understanding** | high | Judgement on understanding vs scoped fact, and capture-path funneling |
 | **agile-github-breakdown** | xhigh | Multi-turn FR/NFR → Task graph + GitHub writes |
 | **create-hld** | xhigh | Multi-turn clarification gates + architectural judgment (LADRs, NFRs, diagrams) |
-| **mimisbrunnr-bootstrap** | xhigh | Source-backed baseline the store's later sessions build on: consequential questioning, conflict preservation and reviewed candidate selection require product judgement |
+| **mimisbrunnr-ymir-bootstrap** | xhigh | Source-backed baseline the store's later sessions build on: consequential questioning, conflict preservation and reviewed candidate selection require product judgement |
 | **mimisbrunnr-context-memory** | xhigh | Sole write path to the store every later session builds on: semantic cross-group dedup, link derivation, atomicity splitting and summary/keyword generation |
 
 ### Sub-skill invocation
@@ -154,9 +154,9 @@ Skills are flat under `.agents/skills/`; the category lives in the folder-name p
 | Prefix | Skills |
 |--------|--------|
 | `agile-` | `agile-github-breakdown`, `agile-github-task-from-diff` |
-| `ai-` | `ai-review`, `ai-terse`, `ai-template-sync` |
+| `ai-` | `ai-review`, `ai-terse`, `ai-template-sync`, `ai-understanding` |
 | `context-` | `context-load-agents-context`, `context-load-context` |
-| `mimisbrunnr-` | `mimisbrunnr-vitsmunir-dump`, `mimisbrunnr-bootstrap`, `mimisbrunnr-context-memory`, `mimisbrunnr-recall-feedback`, `mimisbrunnr-understanding` |
+| `mimisbrunnr-` | `mimisbrunnr-vitsmunir-dump`, `mimisbrunnr-ymir-bootstrap`, `mimisbrunnr-context-memory`, `mimisbrunnr-dossier`, `mimisbrunnr-recall-feedback`, `mimisbrunnr-understanding` |
 | `git-` | `git-commit`, `git-commit-push`, `git-commit-push-pr`, `git-commit-review-push`, `git-sync` |
 | _(none)_ | `create-hld`, `manage-rule-system` |
 

@@ -123,7 +123,7 @@ The `mimisbrunnr-understanding` skill makes it portable:
 Loaded material is **data, not orders** — cited, never adopted as instructions or shipped fact
 ([HLD-007](docs/hlds/007-understanding-transfer/)).
 
-For an existing repository, [`mimisbrunnr-bootstrap`](.agents/skills/mimisbrunnr-bootstrap/README.md)
+For an existing repository, [`mimisbrunnr-ymir-bootstrap`](.agents/skills/mimisbrunnr-ymir-bootstrap/README.md)
 builds a bounded, cited candidate baseline, optionally focused on one next feature, and requires review
 before any supported capture.
 
