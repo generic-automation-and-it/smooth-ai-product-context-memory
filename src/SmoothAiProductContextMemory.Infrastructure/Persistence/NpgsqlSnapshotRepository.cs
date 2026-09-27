@@ -289,7 +289,7 @@ public sealed class NpgsqlSnapshotRepository(IBlobStorage blobStorage, IBlobCata
         var rows = new List<SnapshotVertex>();
         while (await reader.ReadAsync(cancellationToken))
         {
-            rows.Add(new SnapshotVertex(Guid.Parse(ReadAgtypeString(reader, 0))));
+            rows.Add(new SnapshotVertex(Guid.Parse(CypherLiteral.ReadAgtypeString(reader, 0))));
         }
 
         return rows.ToArray();
@@ -309,10 +309,10 @@ public sealed class NpgsqlSnapshotRepository(IBlobStorage blobStorage, IBlobCata
         while (await reader.ReadAsync(cancellationToken))
         {
             rows.Add(new SnapshotEdge(
-                Guid.Parse(ReadAgtypeString(reader, 0)),
-                Guid.Parse(ReadAgtypeString(reader, 1)),
-                ReadAgtypeString(reader, 2),
-                ReadAgtypeString(reader, 3)));
+                Guid.Parse(CypherLiteral.ReadAgtypeString(reader, 0)),
+                Guid.Parse(CypherLiteral.ReadAgtypeString(reader, 1)),
+                CypherLiteral.ReadAgtypeString(reader, 2),
+                CypherLiteral.ReadAgtypeString(reader, 3)));
         }
 
         return rows.ToArray();
@@ -328,7 +328,7 @@ public sealed class NpgsqlSnapshotRepository(IBlobStorage blobStorage, IBlobCata
         var rows = new List<SnapshotTicketVertex>();
         while (await reader.ReadAsync(cancellationToken))
         {
-            rows.Add(new SnapshotTicketVertex(ReadAgtypeString(reader, 0), ReadAgtypeString(reader, 1)));
+            rows.Add(new SnapshotTicketVertex(CypherLiteral.ReadAgtypeString(reader, 0), CypherLiteral.ReadAgtypeString(reader, 1)));
         }
 
         return rows.ToArray();
@@ -355,13 +355,13 @@ public sealed class NpgsqlSnapshotRepository(IBlobStorage blobStorage, IBlobCata
                 ? DateTimeOffset.Parse(observed, CultureInfo.InvariantCulture)
                 : null;
             rows.Add(new SnapshotTicketEdge(
-                ReadAgtypeString(reader, 2),
-                ReadAgtypeString(reader, 3),
-                ReadAgtypeString(reader, 0),
-                ReadAgtypeString(reader, 1),
-                ReadAgtypeString(reader, 4),
-                ReadAgtypeString(reader, 5),
-                DateTimeOffset.Parse(ReadAgtypeString(reader, 6), CultureInfo.InvariantCulture),
+                CypherLiteral.ReadAgtypeString(reader, 2),
+                CypherLiteral.ReadAgtypeString(reader, 3),
+                CypherLiteral.ReadAgtypeString(reader, 0),
+                CypherLiteral.ReadAgtypeString(reader, 1),
+                CypherLiteral.ReadAgtypeString(reader, 4),
+                CypherLiteral.ReadAgtypeString(reader, 5),
+                DateTimeOffset.Parse(CypherLiteral.ReadAgtypeString(reader, 6), CultureInfo.InvariantCulture),
                 observedAt));
         }
 
@@ -507,21 +507,6 @@ public sealed class NpgsqlSnapshotRepository(IBlobStorage blobStorage, IBlobCata
 
     private static string Quote(string value) => CypherLiteral.Quote(value);
 
-    private static string ReadAgtypeString(NpgsqlDataReader reader, int ordinal)
-    {
-        string raw = reader.GetString(ordinal);
-        if (raw.Length >= 2 && raw[0] == '"')
-        {
-            int closingQuote = raw.LastIndexOf('"');
-            if (closingQuote > 0)
-            {
-                return System.Text.Json.JsonSerializer.Deserialize<string>(raw[..(closingQuote + 1)]) ?? string.Empty;
-            }
-        }
-
-        return raw;
-    }
-
     private static string? ReadOptionalAgtypeString(NpgsqlDataReader reader, int ordinal)
     {
         if (reader.IsDBNull(ordinal))
@@ -530,6 +515,6 @@ public sealed class NpgsqlSnapshotRepository(IBlobStorage blobStorage, IBlobCata
         }
 
         string raw = reader.GetString(ordinal);
-        return string.Equals(raw, "null", StringComparison.Ordinal) ? null : ReadAgtypeString(reader, ordinal);
+        return string.Equals(raw, "null", StringComparison.Ordinal) ? null : CypherLiteral.ReadAgtypeString(reader, ordinal);
     }
 }

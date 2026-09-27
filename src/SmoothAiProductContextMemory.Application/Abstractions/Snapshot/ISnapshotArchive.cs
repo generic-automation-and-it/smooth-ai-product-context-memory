@@ -36,13 +36,6 @@ public interface ISnapshotArchive
     /// zero findings; any truncated, altered or missing entry is detected and named.
     /// </summary>
     Task<SnapshotVerification> VerifyAsync(string archivePath, CancellationToken cancellationToken);
-
-    /// <summary>
-    /// Deserializes an archive's relational + graph capture back into a <see cref="SnapshotCapture"/>
-    /// so it can be restored. Blob bodies are not returned here — the caller reads them from the
-    /// opened archive via <see cref="SnapshotArchive.ReadBlob"/> when re-checking references.
-    /// </summary>
-    Task<SnapshotCapture> ReadCaptureAsync(string archivePath, CancellationToken cancellationToken);
 }
 
 /// <summary>Outcome of an archive write. Counts, the destination, and the report's key numbers.</summary>

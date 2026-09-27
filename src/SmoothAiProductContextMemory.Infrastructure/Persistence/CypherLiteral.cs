@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using Npgsql;
 
 namespace SmoothAiProductContextMemory.Infrastructure.Persistence;
 
@@ -53,6 +54,28 @@ internal static class CypherLiteral
 
         builder.Append('\'');
         return builder.ToString();
+    }
+
+    /// <summary>
+    /// Reads a scalar agtype string rendered via <c>::text</c> and unquotes it. AGE renders a string
+    /// value as a quoted JSON literal, so a scalar that is not itself a string reads back quoted; the
+    /// surrounding quotes are stripped by deserialising the quoted span. A scalar that happens to start
+    /// with a quote but is not a JSON string (a raw string literal arising from a non-quoted column)
+    /// is returned as-is.
+    /// </summary>
+    internal static string ReadAgtypeString(NpgsqlDataReader reader, int ordinal)
+    {
+        string raw = reader.GetString(ordinal);
+        if (raw.Length >= 2 && raw[0] == '"')
+        {
+            int closingQuote = raw.LastIndexOf('"');
+            if (closingQuote > 0)
+            {
+                return System.Text.Json.JsonSerializer.Deserialize<string>(raw[..(closingQuote + 1)]) ?? string.Empty;
+            }
+        }
+
+        return raw;
     }
 
     /// <summary>
