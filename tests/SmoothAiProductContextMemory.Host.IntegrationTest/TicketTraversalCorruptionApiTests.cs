@@ -25,7 +25,10 @@ public sealed class TicketTraversalCorruptionApiTests(HostWebAppFixture fixture)
 
         using HttpResponseMessage declaration = await fixture.HttpClient.PutAsJsonAsync("/api/context/tickets/parent", new
         {
-            child, parent = anchor, reason = "private-declaration-marker", source = "private-source-marker",
+            child,
+            parent = anchor,
+            reason = "private-declaration-marker",
+            source = "private-source-marker",
         }, Ct);
         declaration.StatusCode.ShouldBe(HttpStatusCode.OK);
         using HttpResponseMessage valid = await fixture.HttpClient.PostAsJsonAsync("/api/context/tickets/paths", query, Ct);
@@ -65,7 +68,8 @@ public sealed class TicketTraversalCorruptionApiTests(HostWebAppFixture fixture)
     {
         using HttpResponseMessage response = await fixture.HttpClient.PostAsJsonAsync("/api/context/groups/resolve", new
         {
-            tickets = new[] { new { ticket.Provider, ticket.Key, url = "" } }, scopeDimension = "product",
+            tickets = new[] { new { ticket.Provider, ticket.Key, url = "" } },
+            scopeDimension = "product",
         }, Ct);
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
         return (await response.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("uuid").GetGuid();

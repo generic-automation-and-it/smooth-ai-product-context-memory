@@ -393,7 +393,8 @@ public sealed class TicketTraversalTests(AspireFixture aspire) : PersistenceTest
 
     private static TicketTraversalQuery Query(string key, int depth, string? scope = null) => new()
     {
-        Anchor = Id(key), MaxDepth = depth,
+        Anchor = Id(key),
+        MaxDepth = depth,
         RequiredScopeDimension = MemoryScopeFilter.Plan(scope, hasGroupContext: false).RequiredDimension,
         HiddenDimensions = MemoryScopeFilter.HiddenDimensions(scope, hasGroupContext: false),
     };
