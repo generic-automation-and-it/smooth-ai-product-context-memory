@@ -54,6 +54,7 @@ Approved release-image plan (2026-09-13):
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-27 | `/alive` now expresses "carries no checks" directly — `Predicate = _ => false` — replacing the `LivenessTag = "live"` tag-filter mechanism, which matched no registration because no health check was ever tagged `live`, and so only obscured that the predicate selects nothing. Behaviour unchanged: `/health` runs every check, `/alive` answers only that the process responds. | PR #120 review |
 | 2026-09-26 | CLI-branch bullets updated to name all four one-shot verbs (`export`/`snapshot`/`verify`/`restore`) through the shared `Program.cs` dispatch, so the verify-connects-to-nothing non-negotiable is anchored for the `Cli/` folder. | /ai-review PR #106 |
 | 2026-09-19 | Read-capability enumeration extended with the two recall-feedback read surfaces (`never-recalled`, `miss-rate`); `reset` needs write. | HLD-004, PR #79 |
 | 2026-09-17 | OpenAPI schema IDs now use full nested CLR names, preventing vertical slices' repeated `Request`/`Response` names from colliding and exposing the wrong contract. | HLD-002 wire compatibility |
