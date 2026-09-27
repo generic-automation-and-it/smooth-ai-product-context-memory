@@ -38,6 +38,10 @@ LABEL org.opencontainers.image.source="https://github.com/generic-automation-and
 ENV ASPNETCORE_URLS=http://+:5141 \
     ASPNETCORE_HTTP_PORTS=5141
 EXPOSE 5141
+# The default snapshot and metadata output live under .context; create it owned
+# by the non-root app user so a default-user container can write a snapshot
+# without a pre-created host mount (R06).
+RUN mkdir -p /app/.context/snapshots && chown -R $APP_UID /app/.context
 USER $APP_UID
 
 ENTRYPOINT ["./SmoothAiProductContextMemory.Host"]

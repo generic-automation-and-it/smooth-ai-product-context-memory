@@ -39,7 +39,7 @@ or the full dossier implementation.
 
 ## Architecture Decisions
 
-See [./ladrs/](./ladrs/). LADRs 01–08 and 12–14 Draft; 09 Accepted and implemented;
+See [./ladrs/](./ladrs/). LADRs 01–08 and 12–15 Draft; 09 Accepted and implemented;
 10 Blocked with a verified evidence-only interim; 11 ticket half Accepted and implemented, tag half Blocked.
 
 | LADR | Decision | Why it matters |
@@ -58,6 +58,7 @@ See [./ladrs/](./ladrs/). LADRs 01–08 and 12–14 Draft; 09 Accepted and imple
 | [LADR-12](./ladrs/LADR-12-focus-is-a-composition-lens.md) | Focus is a lens over one unfocused bundle | Filtering by focus breaks completeness, reproducibility and comparability at once |
 | [LADR-13](./ladrs/LADR-13-findings-carry-a-basis-and-a-scope.md) | Findings carry a basis and a scope | An inference that reads as a discovery is the most persuasive and least checkable thing a composition emits |
 | [LADR-14](./ladrs/LADR-14-preview-and-composition-bind-to-one-selection.md) | Preview and composition bind to one selection | Re-selecting at composition time is the implementation default and makes the consent step decorative |
+| [LADR-15](./ladrs/LADR-15-understanding-additional-kind.md) | `kind = understanding` is a first-class selectable kind on this read-only export | Closes the design gap where the kind was asserted only as an AGENTS.md line with no dossier-side semantics |
 
 **"Blocked" is not in the shared status vocabulary.** It is used here for a decision with a missing input:
 an upstream gap makes at least one option unbuildable, so the options cannot be compared. Each blocked
@@ -90,7 +91,7 @@ than Draft — a Draft may be revised by this work, a Blocked may not be resolve
 - **A widened memory carries the reason it was added and its original scope.** A relationship does not make a rule applicable to another product or customer (`BR-19`).
 - **`no-links-in-slice`, not `orphan`.** A slice cannot establish that a memory is unlinked anywhere in the store. `weak-summary` is analysis, not observation — which is what keeps it distinct from HLD-004's observed signal.
 - **`specification` versus `architecture` must stay sharply separated:** specification carries what must observably be true (acceptance criteria, behaviours, interfaces); architecture carries why the shape is what it is (decisions, rejected alternatives, boundaries). If the distinction stops holding, merge them — do not let both exist while blurring.
-- **Understanding is a `kind`, not a new export surface here.** It rides on this export (and the forensic dump) as a selectable kind; the load/import of Understandings is a separate capability owned by HLD 007, not a change to this read-only dossier.
+- **Understanding is a `kind`, not a new export surface here.** It rides on this export (and the forensic dump) as a selectable kind (LADR-15): selected by the same anchor set, widening bound and scope gating, cited to the NFR-05 / HLD-007 NFR-03 attribution bar, and reconciled in the same closed arithmetic — none of which is an exemption. The load/import of Understandings is a separate capability owned by HLD 007, not a change to this read-only dossier.
 
 ## Quality Constraints
 
@@ -114,6 +115,7 @@ Targets and verification live in [./nfrs/](./nfrs/). Three shape how code is wri
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-22 | Added LADR-15: `kind = understanding` is a first-class selectable kind on the bundle/dossier, closing the gap where the kind was asserted only as a one-line Key Behaviour with no dossier-side semantics. Each NFR-01..07 Verification/Acceptance list names the Understanding-kind case (same selection, widening, scope gating, citation, reconciliation, confidentiality, read-only and fidelity guarantees; load/import stays HLD-007's). | HLD-007; BRD-003; LADR-15 |
 | 2026-09-19 | Scoped the "no import / projection is never a source" principle to the dossier and noted the understanding load/import capability as a separate concern owned by HLD 007 (opt-in `--store` through the capture skill). Understanding rides on this export as a selectable kind. | HLD-007; BRD-003 |
 | 2026-09-15 | Replaced NFR-04's stale near-miss harness count with a dated evidence reference and the current verification command; full dossier verification remains unclaimed. | PR #63 review finding 2 |
 | 2026-09-15 | Aligned LADR-10 with the current near-miss helper schema: unchanged originalQuery/facetMatchMode, per-record lifecycle/applicability and explicit proposed evidence. Selection/disclosure and blocked tag decisions unchanged; no new verification recorded. | LADR-10 |

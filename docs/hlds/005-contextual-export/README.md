@@ -6,7 +6,7 @@
 | **Owner** | generik0 |
 | **Tracker** | Contextual export |
 | **Business authority** | [BRD-002 — Contextual knowledge export](../../brd/002-contextual-export/) (`BR-18` … `BR-36`) |
-| **Last updated** | 2026-09-15 |
+| **Last updated** | 2026-09-22 |
 
 > Discovery / prototyping HLD. Delivers **intent + spec** — what we are building and why, the decisions
 > behind it, and the quality bar it must meet. No implementation plan; execution is tracked in the
@@ -89,6 +89,7 @@ unfocused bundle and never changes what was selected (LADR-12).
 - The document is identifiable as a generated projection, states the focus that produced it, and reads as evidence rather than instruction.
 - Any focus from the bounded set produces a document ordered and weighted for that work; requesting none produces the complete unfocused document.
 - Two focuses of one slice contain the same selected knowledge; whatever a focus does not surface is listed as omitted with reason `outside-focus`.
+- A `kind = understanding` memory is a selectable, composable kind like any other: selected under the same anchor set and widening, cited to the same attribution bar, reconciled in the same arithmetic (LADR-15). Its load/import stays a separate capability owned by HLD 007.
 - Gaps, contradictions and quality problems are present under every focus.
 
 ### 3. Findings as first-class output
@@ -164,8 +165,8 @@ cannot — and pretending otherwise would either forbid the judgement or make th
 ## Architecture Decisions (LADRs)
 
 LADRs 01–06 are strategic, 07–08 tactical, **09–11 track anchor prerequisites**: tickets are now
-implemented and accepted against final verification; tags remain blocked. LADRs 12–14 were appended after
-the original set (12 and 13 strategic, 14 tactical), because numbers are never reassigned. See
+implemented and accepted against final verification; tags remain blocked. LADRs 12–15 were appended after
+the original set (12, 13 and 15 strategic, 14 tactical), because numbers are never reassigned. See
 [`./ladrs/`](./ladrs/).
 
 **Status legend.** `Draft → Prototype → Accepted` is the shared vocabulary. **Blocked** is used here for
@@ -189,6 +190,7 @@ without it. It is not a deferred decision — it is a decision with a missing in
 | [LADR-12](./ladrs/LADR-12-focus-is-a-composition-lens.md) | Focus is a composition lens over one unfocused bundle | Draft |
 | [LADR-13](./ladrs/LADR-13-findings-carry-a-basis-and-a-scope.md) | Every finding carries a stated basis and is scoped to the examined material | Draft |
 | [LADR-14](./ladrs/LADR-14-preview-and-composition-bind-to-one-selection.md) | Preview and composition bind to one recorded selection | Draft |
+| [LADR-15](./ladrs/LADR-15-understanding-additional-kind.md) | `kind = understanding` is a first-class selectable kind on this read-only export | Draft |
 
 ### Resolved tickets, blocked tags
 

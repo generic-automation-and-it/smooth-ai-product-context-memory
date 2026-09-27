@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Npgsql;
@@ -20,6 +21,9 @@ public abstract class HandlerTestBase(AspireFixture aspire) : IAsyncLifetime
     protected SmoothAiProductContextMemoryDbContext Db { get; private set; } = default!;
 
     protected IApplicationDbContext AppDb => Db;
+
+    /// <summary>Counts every <c>SaveChanges</c> on <see cref="Db"/>, so a read path can assert it issued none.</summary>
+    protected SaveChangesCounter SaveChanges { get; } = new();
 
     protected IBlobStorage Blob { get; private set; } = default!;
 
@@ -47,6 +51,7 @@ public abstract class HandlerTestBase(AspireFixture aspire) : IAsyncLifetime
 
         var options = new DbContextOptionsBuilder<SmoothAiProductContextMemoryDbContext>()
             .UseNpgsql(_dataSource, npgsql => npgsql.UseSmoothAiProductContextMemoryHistory())
+            .AddInterceptors(SaveChanges)
             .Options;
 
         Db = new SmoothAiProductContextMemoryDbContext(options);
@@ -93,5 +98,27 @@ public abstract class HandlerTestBase(AspireFixture aspire) : IAsyncLifetime
 
         await using ServiceProvider provider = services.BuildServiceProvider();
         await provider.MigrateSmoothAiProductContextMemoryAsync(cancellationToken);
+    }
+
+    protected sealed class SaveChangesCounter : SaveChangesInterceptor
+    {
+        private int _count;
+
+        public int Count => _count;
+
+        public override InterceptionResult<int> SavingChanges(DbContextEventData eventData, InterceptionResult<int> result)
+        {
+            Interlocked.Increment(ref _count);
+            return result;
+        }
+
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _count);
+            return ValueTask.FromResult(result);
+        }
     }
 }

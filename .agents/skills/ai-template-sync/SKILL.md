@@ -7,10 +7,7 @@ allowed-tools:
   - Bash(mktemp:*)
   - Bash(bash:*)
   - Bash(rm:*)
-models:
-  claude: opus      # high-complexity; interactive multi-turn Q&A + conditional file sync across tools
-  copilot: auto
-  codex: gpt-5.5
+effort: medium  # scripted copy/compare; the judgment is flag choice, the rules-layout pre-flight and the conflict table
 ---
 
 # AI Template Sync — Skill
@@ -46,8 +43,10 @@ bash sync.sh --template-url https://github.com/generic-automation-and-it/smooth-
   --landing "$PWD" --tools <claude,codex,copilot> --overwrite <global|none> [--dotnet]
 ```
 
-Caveats (one line): the runner needs **Bash + git + network**; a **private** template needs
-`gh`-auth or a token embedded in the clone URL.
+Caveats: the runner needs **Bash + git + network**. A **private** template needs git to be
+authenticated beforehand (`gh auth login` + `gh auth setup-git`, or any git credential helper).
+Never put a token in `--template-url`: the scripts refuse a URL with embedded credentials (exit 64),
+because the value would be model-visible and logged.
 
 > The interactive phases below (1–3) still apply — gather intent and run the pre-flight before
 > invoking the cloned script. Phase 0 only solves *getting the files*, not the decisions.

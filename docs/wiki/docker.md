@@ -173,6 +173,93 @@ docker run --rm \
 Arguments after the image name reach `Program` (`args[0] == "export"`). Do not
 replace `ENTRYPOINT` with a baked `dotnet …` web command.
 
+## Run standalone (`snapshot`, `verify`, `restore`)
+
+The same image runs the one-shot HLD-006 verbs; the container entrypoint and the dev CLI verb are one
+code path per verb (LADR-07). `verify` needs only the archive mounted (no database, no object store);
+`snapshot` and `restore` need the storage connection variables. The first argument after the image name
+selects the verb:
+
+```bash
+# snapshot — write a self-verifying tar + manifest archive to the mounted volume
+docker run --rm \
+  -v "$(pwd)/.context/snapshots:/snapshots" \
+  -e ConnectionStrings__SmoothAiProductContextMemory='Host=host.docker.internal;Port=5432;Database=app;Username=postgres;Password=...' \
+  -e BlobStorage__Endpoint='http://host.docker.internal:9000' \
+  -e BlobStorage__AccessKey='smooth-local' \
+  -e BlobStorage__SecretKey='...' \
+  -e BlobStorage__Bucket='smooth-mimisbrunnr-memory-well' \
+  smooth-ai-product-context-memory:local \
+  snapshot --output /snapshots
+
+# verify — offline integrity check; exit code 0 = clean, ≠0 = finding
+docker run --rm -v "$(pwd)/.context/snapshots:/snapshots" \
+  smooth-ai-product-context-memory:local verify /snapshots/snapshot-<ts>.tar
+
+# restore — rebuild both stores into an empty target, print reconciliation; add --force to override
+docker run --rm \
+  -v "$(pwd)/.context/snapshots:/snapshots" \
+  -e ConnectionStrings__SmoothAiProductContextMemory='...' \
+  -e BlobStorage__Endpoint='http://host.docker.internal:9000' \
+  -e BlobStorage__AccessKey='smooth-local' \
+  -e BlobStorage__SecretKey='...' \
+  -e BlobStorage__Bucket='smooth-mimisbrunnr-memory-well' \
+  smooth-ai-product-context-memory:local restore /snapshots/snapshot-<ts>.tar
+```
+
+`restore` writes bodies first, then rebuilds the database and reads every count back before committing — any mismatch rolls the database back and the reconciliation prints `committed no — rolled back` with exit 1. The target database must already be migrated. `verify` writes nothing and touches nothing but the archive; `restore` refuses a non-empty target
+unless `--force` is passed. `snapshot` and `restore` are read-only against / rebuild the stores.
+
+### Exit codes
+
+| Verb | 0 | 1 | 2 |
+|---|---|---|---|
+| `verify` | clean | findings present | — |
+| `restore` | reconciliation closes | reconciliation failed, or an operational failure (database unreachable, target not migrated) | **archive integrity failure** — the archive failed offline verification and nothing was mutated |
+
+`restore` exits **2** specifically so a script can tell a bad archive from an unreachable database.
+Both codes mean the target was not committed, but only 2 is worth retrying after replacing the
+archive. On a 2, the per-finding detail (kind, member name, message) is printed before the summary,
+so the reason does not have to be recovered by re-running `verify`.
+
+### Archive format version: v1 archives are refused
+
+The archive format is versioned and the version is recorded in the manifest. `SnapshotFormat.Version`
+moved **1 → 2** when the manifest gained the dangling-reference and mismatched-body counts, because
+those counts carry refusal semantics: a v1 archive recording a body it could not resolve would
+deserialise them as zero and then verify *clean* before failing to restore. The gate now refuses a v1
+archive outright rather than misreading it.
+
+**If you hold a v1 archive, re-capture it from the live store before deploying this build.** A v1
+archive is not restorable by a current build, and there is no conversion path. To find out what you
+hold, run `verify` against it with the *old* build — a v1 archive verifies clean there by
+construction, which is exactly why the version gate exists.
+
+## Run `preflight`/`snapshot` against the running API
+
+The HLD-006 `snapshot` and `snapshot/preflight` HTTP endpoints run on the API, accepted-then-poll:
+`POST /api/context/snapshot` returns `202 Accepted` with a job id; poll `GET /api/context/snapshot/status`
+until `Status` is `Completed` (or `Failed`). `POST /api/context/snapshot/preflight` is a read-only report
+of whether a snapshot exists, its recency and the corpus counts, with `Write`/`Read` capability
+respectively. The archive is written to the host's `.context/snapshots`, so it is reachable from the
+running container's mounted volume:
+
+```bash
+# preflight — read-only report (no snapshot written)
+curl -X POST http://localhost:5141/api/context/snapshot/preflight
+
+# snapshot — trigger, returns a job id (202 Accepted)
+curl -X POST http://localhost:5141/api/context/snapshot
+
+# status — poll until Status == Completed / Failed
+curl http://localhost:5141/api/context/snapshot/status
+```
+
+The status payload carries the result counts (memories, versions, vertices, edges, objects,
+dangling references, unreferenced objects, mismatched bodies) and `ResultPath` once complete. A degraded
+snapshot (nonzero `MismatchedBodies`) still reports `Completed` — the nonzero count is the signal, do not
+rely on `Status` alone.
+
 ## AppHost consumption
 
 Default: AppHost **compiles Host from the working tree** and starts
@@ -215,7 +302,7 @@ binaries, not one command plus a flag:
 
 ```bash
 scripts/stop-dev-stack.sh    # remove mimisbrunnr-{postgres,blob-well,seq,host}; keep named volumes
-scripts/reset-dev-stack.sh   # same, then destroy mimisbrunnr-{postgres,blob-well,seq}-data
+scripts/reset-dev-stack.sh   # same, then destroy mimisbrunnr-{postgres,blob-well,seq}-data and mimisbrunnr-host-context
 ```
 
 `reset-dev-stack.sh` has no prompt. Choosing it **is** the explicit ask — it

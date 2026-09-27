@@ -352,6 +352,45 @@ public sealed class SetMemoriesHandlerTests(AspireFixture aspire) : HandlerTestB
             && l.Relation == MemoryRelation.Contradicts).ShouldBe(2);
     }
 
+    [Fact]
+    public async Task Cancelled_token_aborts_the_write_without_committing()
+    {
+        var group = TestEntities.NewGroup();
+        Db.MemoryGroups.Add(group);
+        await Db.SaveChangesAsync(Ct);
+        Db.ChangeTracker.Clear();
+
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Should.ThrowAsync<OperationCanceledException>(async () =>
+            await NewHandler().Handle(Write(group.Uuid, "Cancelled subject", "Claim"), cts.Token));
+
+        (await Db.Memories.AsNoTracking().CountAsync(m => m.GroupId == group.Id, Ct)).ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Duplicate_subject_in_batch_conflicts_before_any_write()
+    {
+        var group = TestEntities.NewGroup();
+        Db.MemoryGroups.Add(group);
+        await Db.SaveChangesAsync(Ct);
+        Db.ChangeTracker.Clear();
+
+        SetMemories.Request request = new(
+            group.Uuid,
+            [
+                Write(group.Uuid, "Shared subject", "Claim 1").Items[0],
+                Write(group.Uuid, "Shared subject", "Claim 2").Items[0],
+            ],
+            null,
+            null);
+
+        await Should.ThrowAsync<ConflictException>(async () => await NewHandler().Handle(request, Ct));
+
+        (await Db.Memories.AsNoTracking().CountAsync(m => m.GroupId == group.Id, Ct)).ShouldBe(0);
+    }
+
     private sealed class FailAfterFirstCreateGraph(IMemoryGraph inner) : IMemoryGraph
     {
         private int _creates;
@@ -383,6 +422,40 @@ public sealed class SetMemoriesHandlerTests(AspireFixture aspire) : HandlerTestB
 
     private SetMemories.Handler NewHandler() =>
         new(AppDb, Graph, Blob, ErrorMapper, Loggers.CreateLogger<SetMemories.Handler>());
+
+    /// <summary>
+    /// A version target must resolve inside the group the write names. The lookup was by uuid alone
+    /// while the create path already scoped its slug check to the group, so a write naming group A
+    /// could bump is_current on a memory belonging to group B — group isolation was not an invariant
+    /// on the version path. The target is therefore reported not-found rather than silently versioned.
+    /// </summary>
+    [Fact]
+    public async Task Version_target_in_another_group_is_not_found_and_writes_nothing()
+    {
+        MemoryGroup owner = TestEntities.NewGroup();
+        MemoryGroup other = TestEntities.NewGroup();
+        Db.MemoryGroups.AddRange(owner, other);
+        await Db.SaveChangesAsync(Ct);
+
+        SetMemories.Response created = await NewHandler().Handle(
+            Write(owner.Uuid, "Subject", "Claim 1"), Ct);
+        Guid uuid = created.Items[0].Uuid.ShouldNotBeNull();
+
+        await Should.ThrowAsync<NotFoundException>(() => NewHandler().Handle(
+            Write(other.Uuid, "Subject", "Claim 2", uuid), Ct).AsTask());
+
+        // The refused write must leave the owning group's memory exactly as it was: one version,
+        // still current, and the original statement intact.
+        long memoryId = await Db.Memories.Where(m => m.Uuid == uuid).Select(m => m.Id).SingleAsync(Ct);
+        List<MemoryVersion> versions = await Db.MemoryVersions.AsNoTracking()
+            .Where(v => v.MemoryId == memoryId)
+            .ToListAsync(Ct);
+
+        versions.Count.ShouldBe(1);
+        versions.Count(v => v.IsCurrent).ShouldBe(1);
+        versions.Single().Version.ShouldBe(1);
+        versions.Single().Statement.ShouldBe("Claim 1");
+    }
 
     private static SetMemories.Request Write(Guid groupUuid, string description, string statement, Guid? uuid = null) =>
         new(

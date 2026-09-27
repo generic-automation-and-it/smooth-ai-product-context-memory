@@ -67,7 +67,11 @@ public sealed class TicketTraversalBenchmarkTests(AspireFixture aspire) : Persis
         {
             var query = new TicketTraversalQuery
             {
-                Anchor = root, MaxDepth = depth, PathLimit = 200, MemoryLimit = 200, Kind = "decision",
+                Anchor = root,
+                MaxDepth = depth,
+                PathLimit = 200,
+                MemoryLimit = 200,
+                Kind = "decision",
                 RequiredScopeDimension = MemoryScopeFilter.Plan("product", false).RequiredDimension,
                 HiddenDimensions = MemoryScopeFilter.HiddenDimensions("product", false),
             };

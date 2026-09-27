@@ -42,6 +42,7 @@ whose count also includes unrelated skill tests. This does not evaluate LLM rele
 the tests below for full composition remain required, not claimed passed.
 
 - **Skill-level test** — compose a dossier from a fixture bundle; parse the produced document and assert the reconciliation closes exactly. This is the load-bearing test of the whole design: it is the one that catches a composition that quietly dropped material.
+- **Skill-level test** — the same reconciliation over a fixture bundle whose selected items mix `kind = understanding` with other kinds. Assert they account in the same arithmetic and that every finding category applies to them (LADR-15).
 - **Skill-level test** — assert every omission reason and every finding category is drawn from the bounded set; an unknown value fails.
 - **Skill-level test** — assert every finding carries a basis and a scope qualification, and that no finding phrases a slice observation as a store-wide claim.
 - **Skill-level near-miss fixtures**: an evidence-backed vocabulary mismatch cites actual examined
@@ -56,6 +57,7 @@ the tests below for full composition remain required, not claimed passed.
 ## Acceptance Criteria
 
 - The reconciliation closes exactly for every dossier, and is visible in the dossier itself.
+- `kind = understanding` items are accounted in the same closed reconciliation, with no `none-detected` claim exempting them (LADR-15).
 - Every omission reason and finding category comes from the bounded set; both sets are defined before first use.
 - No finding asserts a store-wide or product-wide fact; every one is scoped to the examined material, and `None detected` carries that qualification.
 - Every focus of one bundle accounts for the same selected memories, and carries every finding the unfocused dossier carries.

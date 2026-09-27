@@ -28,7 +28,7 @@ Rules are organized into category subfolders for navigation only — folder plac
 | Location | Use for |
 |----------|---------|
 | `.agents/rules/*.instructions.md` (flat) | Cross-cutting rules with no ≥2-member category (AI workflow, code-review guidance, project overview) |
-| `.agents/rules/<category>/` | A folder created when 2+ rules share a topic — currently `backend/`, `git/`, `meta/` |
+| `.agents/rules/<category>/` | Normally a folder created when 2+ rules share a topic — currently `backend/`, `git/`, `meta/`; `skills/` preserves the template's canonical secret-handling rule path with one local rule |
 
 See `.agents/skills/manage-rule-system/SKILL.md` for the directory contract.
 
@@ -91,7 +91,7 @@ touch .agents/rules/my-new-rule.instructions.md
 touch .agents/rules/backend/my-rule.instructions.md
 ```
 
-Then add frontmatter + content. Create a `<category>/` subfolder only when 2+ rules share a topic.
+Then add frontmatter + content. Create a `<category>/` subfolder when 2+ rules share a topic, except when preserving a canonical upstream rule path such as `skills/`.
 
 ## Tool Compatibility Matrix
 
@@ -103,3 +103,9 @@ Then add frontmatter + content. Create a `<category>/` subfolder only when 2+ ru
 | Codex | any directory | `AGENTS.md` | none |
 
 The rule files physically live in `.github/instructions/`, a **real directory** read natively by Copilot Coding Agent and Code Review on github.com (not Copilot Chat) — no symlink resolution required server-side. The local-agent paths `.agents/rules`, `.claude/rules`, and `.cursor/rules` are symlinks resolving back to `.github/instructions/`, so all four tools share one source of truth.
+
+## Changelog
+
+| Date | Change |
+|:-----|:-------|
+| 2026-09-27 | Documented the canonical-upstream-path exception for the new `skills/` category. |

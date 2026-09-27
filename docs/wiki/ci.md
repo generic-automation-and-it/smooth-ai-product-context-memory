@@ -22,7 +22,7 @@ The publish workflow does **not** run on pull requests.
 7. **Build** — `dotnet build --no-restore --configuration Release`.
 8. **Test controller preflight and lifecycle** - `python3 scripts/test-apphost-entrypoint.py`; engine-free tests against the built AppHost output.
 9. **Aspire test with coverage** — local action `.github/actions/aspire-test-with-coverage`:
-    - Starts `tests/SmoothAiProductContextMemory.TestFramework.Aspire`, keeps its PID inside the action script, and waits for PostgreSQL (`127.0.0.1:15432`, image `docker.io/apache/age:release_PG17_1.7.0`), Redis (`127.0.0.1:16379`), WireMock (`http://127.0.0.1:19091/__admin/health`), MinIO TCP (`127.0.0.1:9002`), then MinIO HTTP (`http://127.0.0.1:9002/minio/health/live`). On MinIO timeout the action dumps `docker logs mimisbrunnr-testcontainer-blob`. MinIO image is pinned to `quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z`.
+    - Starts `tests/SmoothAiProductContextMemory.TestFramework.Aspire`, keeps its PID inside the action script, and waits for PostgreSQL (`127.0.0.1:15432`, image `docker.io/apache/age:release_PG17_1.7.0`), Redis (`127.0.0.1:16379`), WireMock (`http://127.0.0.1:19091/__admin/health`), MinIO TCP (`127.0.0.1:9002`), then MinIO HTTP (`http://127.0.0.1:9002/minio/health/live`). On MinIO timeout the action dumps `docker logs mimisbrunnr-testcontainer-blob`. MinIO image is pinned by digest to `cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1` (Chainguard; upstream MinIO images are no longer served by Docker Hub or quay.io).
    - Restores .NET tools (`dotnet tool restore`) after the dependency pre-warm, matching the proven CI timing before tests start.
    - Prepares `artifacts/testresults/` and `artifacts/coverage/`.
     - Runs test projects in order: Host integration → Application/Infrastructure component → Domain/Application/Infrastructure/Host/AppHost unit tests.
@@ -49,9 +49,55 @@ The publish workflow does **not** run on pull requests.
 - **Triggers:** `pull_request` (opened/synchronize/reopened/ready_for_review), an `/ai-review` comment from an
   OWNER/MEMBER/COLLABORATOR, and `workflow_dispatch`.
 - **Packaging:** local job, **not** a reusable-workflow call. The job checks out
-  `generic-automation-and-it/smooth-ai-report-review` at a pinned SHA into `.review-tools/` and invokes that repo's
-  `.agents/skills/ai-review-report/scripts/run-review.sh`. Bump the pinned `ref:` deliberately; a SHA predating that
-  entrypoint fails the gate with "No such file or directory".
+  `generic-automation-and-it/smooth-ai-report-review` tracking `main` (the consumer owns that repo, so a floating ref
+  is acceptable) into `.review-tools/` and invokes that repo's
+  `.agents/skills/ai-review-report/scripts/run-review.sh`. Re-verify on upstream drift; a `main` that drops that
+  entrypoint fails the gate with "No such file or directory", and one that leaves the v2 line fails as `gzip: stdin:
+  not in gzip format`.
+
+### Credential isolation for the review and auto-fix jobs
+
+The gate's PR, tooling, and trusted-`main` checkouts use `persist-credentials: false`. Its parent
+`run-review.sh` still receives `GITHUB_TOKEN` for `gh` calls and private Git
+fetches; a one-shot Git helper reads the token from `GH_TOKEN` without storing
+it in `.git/config` or embedding it in a remote URL. Auto-fix uses the same
+helper for its pre-push `git fetch` and selected PAT/GITHUB_TOKEN push. Every Git command in the
+gate and auto-fix commit step has `core.hooksPath=/dev/null`, including re-fetch,
+checkout, commit, and push. This prevents model-written hooks from running later
+with a GitHub credential.
+
+Both jobs install the upstream OpenCode v2 CLI **without provider secrets**, then
+replace its launcher with the trusted `main` copy of `.github/scripts/opencode-credential-guard.sh` before
+starting the OpenCode service. The guard keeps only the review provider's key
+and, for auto-fix when distinct, the analyse provider's key (the service starts
+before the fallback chain runs). It removes GitHub/OIDC/other provider tokens,
+rejects credentialed proxy URL values, and hardens the resolved model config:
+the `review` and `analyse` agents cannot read `.git` or `.env` files, `analyse`
+cannot edit them, and both agents lose `grep` because OpenCode matches its
+permission against the query rather than the file path. The review agent keeps
+the upstream `external_directory` setting needed by chunk working directories;
+the auto-fix agent denies external-directory access. The gate retains the
+upstream default config when no override is set; a configured
+`OPENCODE_REVIEW_REPORT_CONFIG` is loaded from the trusted `main` checkout.
+OpenCode v2 currently ignores `OPENCODE_CONFIG`, so the guard also copies the
+hardened resolved config to the ephemeral runner's global config path. Its
+`debug config` compatibility alias is emitted only when the real CLI reports
+that global file as loaded and its bytes match the resolved file; the upstream
+health check still fails closed on a foreign service. Both model invocations
+fail closed if the PR checkout introduces a project `opencode.json(c)` or `.opencode/` directory in
+the OpenCode invocation path: OpenCode v2 discovers those independently of
+`OPENCODE_CONFIG`, and a project plugin could execute before tool permissions.
+Such a PR needs human review before the AI gate can safely run.
+
+Both jobs check out this repo's CI helpers from `main` into ignored
+`.context/trusted-ci/`; auto-fix always fetches `smooth-ai-report-review` tooling,
+so neither the installer, guard, nor the optional mTLS proxy is executed from
+the PR head. Provider
+secrets are scoped to its Initialize and Run steps, not the job. The push step
+retains PAT-first / `GITHUB_TOKEN` fallback and workflow-file scope handling,
+but uses `.github/scripts/git-credential-from-env.sh` with a plain HTTPS URL;
+the selected token never enters `git push` arguments. Local contract test:
+`bash .github/scripts/test-opencode-credential-guard.sh`.
 - **Why local-job:** the review provider is a private vLLM gateway that requires a client certificate and a private
   CA. opencode's provider SDKs use Node/Bun `fetch`, which supports neither, so the job must first start a loopback
   terminator. A reusable-workflow caller cannot inject a step into the callee's job, and a separate job would get a
@@ -84,7 +130,7 @@ tiers, so an unconfigured consumer lands where a configured one already is. The 
 Why that model is safe in the case the fallback actually describes: an unconfigured consumer has
 `OPENCODE_REVIEW_REPORT_CONFIG` unset too, so `prepare-opencode-config.sh` loads **upstream's** committed
 `assets/opencode.json` — `.github/opencode.json` is not in play on that path. `glm-5.2` is declared under
-`go-openai` in **both** configs (upstream's verified at pin `4bdfea4`), so it resolves whether or not the config
+`go-openai` in **both** configs (upstream's committed asset, at whatever `main` ref the gate checks out), so it resolves whether or not the config
 Variable is set. The binding constraint is in any case `_rp_model_family_ok`, not either `models` block — see
 [the models caveat above](#provider-wiring-the-anthropicvllm-alternative) — but a fallback model that no loaded
 config declares would still be a trap for the next reader.
@@ -142,11 +188,15 @@ OPENCODE_ANALYSE_PROVIDER is unset"*. Set both, or auto-fix stops running. Note 
 `OPENCODE_REVIEW_REPORT_CONFIG`, so its fallback chain — which still resolves to the review provider — reaches the
 **public** `api.anthropic.com` carrying the placeholder key and fails on auth; only its primary target is live.
 
+When an OpenRouter provider is selected, the workflows pass the secret through as
+`OPENCODE_OPENROUTER_API_KEY`. They accept either that namespaced secret or the standard
+`OPENROUTER_API_KEY` name; when both are configured, the namespaced secret wins.
+
 ### Fallback literals when the Variables are unset
 
 Every **Variable** row in the table above has a hardcoded fallback in the workflow YAML for the run where it is not
 set. The two `Secret` rows do not, and must not — a secret with a committed default is the shape
-[`skill-secret-handling`](../../.agents/rules/skill-secret-handling.instructions.md) forbids; the gate forwards
+[`skill-secret-handling`](../../.agents/rules/skills/skill-secret-handling.instructions.md) forbids; the gate forwards
 both bare and fails loudly when they are empty. The fallbacks are duplicated per workflow rather than shared, and the two workflows
 **deliberately disagree**:
 
@@ -158,7 +208,7 @@ both bare and fails loudly when they are empty. The fallbacks are duplicated per
 Do not "align" the analyse fallbacks onto the gate's. The mechanism is not the one you might assume: the analyse job
 never sets `OPENCODE_REVIEW_REPORT_CONFIG`, so `prepare-opencode-config.sh` falls back to **upstream's** committed
 `assets/opencode.json` rather than this repo's `.github/opencode.json`. That asset pins the **public**
-`https://api.anthropic.com` as the `anthropic` provider's `baseURL` (verified at pin `4bdfea4`), so pointing
+`https://api.anthropic.com` as the `anthropic` provider's `baseURL` (still true on upstream `main`), so pointing
 auto-fix at `ANTHROPIC` sends the placeholder `OPENCODE_ANTHROPIC_API_KEY` to the real Anthropic API and fails on
 **auth**, not on a dead loopback socket. The gate's `http://127.0.0.1:8888/v1` literal is never in play there at
 all — it exists only in this repo's config, which that job does not load.
@@ -192,11 +242,14 @@ that is not yours.
 | Fixed base | `ANTHROPIC`, `OPENCODE-GO-OPENAI`, `OPENCODE-GO-ANTHROPIC`, `OPEN_ROUTER` | the API key Secret only |
 | Variable base | `GEMINI`, `COPILOT`, `OPENAI` | the key **and** an `OPENCODE_REVIEW_REPORT_<P>_URL` Variable |
 
-**Read that table against the pin, not against upstream `main`.** It lists what `_rp_provider_fields` accepts at
-the SHA the gate checks out (`4bdfea4`). Upstream `main` has since added `OPENCODE-GO-RESPONSES`, which this pin
-rejects as an unknown provider — and which has no row in the gate's provider-id ladder, so bumping the pin without
-adding one would silently map it to `anthropic`. The two workflows do not even agree on the ref: the gate pins a
-SHA, while `pipeline-ai-analyse.yml` tracks `main` (overridable via `SMOOTH_AI_REVIEW_TOOLS_REF`). Re-read the
+**Read that table against the ref actually checked out.** It lists what `_rp_provider_fields` accepts at the ref the
+gate checks out — `main` (the consumer owns `generic-automation-and-it/smooth-ai-report-review`, and is not on the
+third-party-supply-chain-averse path that motivates SHA-pinning, so the upstream checkout tracks `main`). Upstream's
+v2 `resolve-provider.sh` accepts
+`OPENCODE-GO-RESPONSES`, but this consumer's provider-id ladder has **no row** for it — it falls to the bare
+`go-openai` literal, so setting that provider here silently routes to the wrong family until the ladder and model
+tiers are extended together. Both the gate and `pipeline-ai-analyse.yml` track `main` (the analyse sibling via
+`SMOOTH_AI_REVIEW_TOOLS_REF`). Re-read the
 function at whichever ref you are changing.
 
 There is no fallback URL for the variable-base three — `_rp_resolve` hard-fails on an empty value. That is why the
@@ -238,11 +291,11 @@ printf 'keep A\n<!-- marker -->\nkeep B\n' | sed '/^<!--/,/-->$/d'   # prints on
 ```
 
 Verify a PR body by round-trip rather than by eye. First fetch the lib — `.review-tools/` is created by the gate's checkout step and does **not** exist in a
-clone, so pin-matched fetch is the only way to run it locally:
+clone, so a matching-ref fetch is the only way to run it locally (the gate waits on `main`; fetching the raw file at `main` is closest to what ran):
 
 ```bash
 gh api "repos/generic-automation-and-it/smooth-ai-report-review/contents/\
-.agents/skills/ai-review-report/scripts/lib/extract-review-notes.sh?ref=4bdfea4f361218d88745dfcbad0b00a108a129f2" \
+.agents/skills/ai-review-report/scripts/lib/extract-review-notes.sh?ref=main" \
   --jq .content | base64 -d > /tmp/extract-review-notes.sh
 ```
 

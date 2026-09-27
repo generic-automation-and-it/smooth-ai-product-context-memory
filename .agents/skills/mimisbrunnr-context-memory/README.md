@@ -1,3 +1,17 @@
+## Switches & cost trade-off
+
+| Switch | Cost impact | Why |
+|--------|-------------|-----|
+| _(none)_ | **Baseline** | Silent capture; write only at checkpoint; no approval override. |
+| `--dryrun` | **Same as a real write** | Full pipeline, no persistence. Costs the LLM judgements but writes nothing. The **only** pre-write inspection point — a plain `set`'s digest arrives after the transaction has committed. |
+| `--approve` | **No extra cost, narrower gate** | Writes `rule`/`nfr`/`decision` as `approved` rather than `proposed`. Saves a human round-trip at the cost of canon becoming citable without review — the "ask about what is not reversible" rule. Without it the fact is still stored, just not yet citable. |
+| `--deepsearch` | **Bounded opt-in** | Adds four keyword passes of 25 and five depth-one traversals of 20, capped at 400 unique UUID/version candidates. Reports saturation and possible omissions. |
+
+**Bottom line:** writes are expensive by design (R13) and cheap by default for reads. The skill's value
+is not that it is cheap — it is that it is the *only* way to make real, long-lived memory, and it makes
+retrieval cheap. Reach for `--dryrun` when a batch is large or unfamiliar — paying the pipeline twice is
+cheaper than untangling a wrong dedup decision. Skip `--approve` unless the human has explicitly confirmed.
+
 # mimisbrunnr-context-memory — Intent & Token-Usage Review
 
 > Companion notes to [`SKILL.md`](./SKILL.md). Explains what this skill is for and — because
@@ -72,17 +86,3 @@ and exposed token counts separately.
 - **The stamp that enables bulk regeneration also costs.** The model identifier and prompt version are
   stored per summary so a bad summary batch can be regenerated — but the regeneration is itself N LLM
   calls. The stamp is insurance that costs when used.
-
-## Switches & cost trade-off
-
-| Switch | Cost impact | Why |
-|--------|-------------|-----|
-| _(none)_ | **Baseline** | Silent capture; write only at checkpoint; no approval override. |
-| `--dryrun` | **Same as a real write** | Full pipeline, no persistence. Costs the LLM judgements but writes nothing. The **only** pre-write inspection point — a plain `set`'s digest arrives after the transaction has committed. |
-| `--approve` | **No extra cost, narrower gate** | Writes `rule`/`nfr`/`decision` as `approved` rather than `proposed`. Saves a human round-trip at the cost of canon becoming citable without review — the "ask about what is not reversible" rule. Without it the fact is still stored, just not yet citable. |
-| `--deepsearch` | **Bounded opt-in** | Adds four keyword passes of 25 and five depth-one traversals of 20, capped at 400 unique UUID/version candidates. Reports saturation and possible omissions. |
-
-**Bottom line:** writes are expensive by design (R13) and cheap by default for reads. The skill's value
-is not that it is cheap — it is that it is the *only* way to make real, long-lived memory, and it makes
-retrieval cheap. Reach for `--dryrun` when a batch is large or unfamiliar — paying the pipeline twice is
-cheaper than untangling a wrong dedup decision. Skip `--approve` unless the human has explicitly confirmed.

@@ -27,6 +27,16 @@ lineage is superseded by the restore command's built-in reconciliation.
 - Restore refuses a non-empty target without an explicit override.
 - Recall-feedback absence after restore is expected and asserted, not reported as loss.
 
+## Evidence
+
+- Reconciled counts are read back from the restored tables and AGE labels inside the restore
+  transaction and checked before commit; a mismatch rolls back. L1
+  `SnapshotRestoreRoundTripTests`: round trip into a fresh database and fresh bucket closes with
+  `Committed = true`; a silently dropped edge (endpoint vertex absent) rolls back and leaves the
+  target empty; a removed blob entry fails before any mutation; a non-empty target is refused.
+- Not yet evidenced: recall-feedback absence assertion after restore; restore of an archive that
+  recorded dangling references at capture (currently unrestorable — open finding).
+
 ## Applies To
 
 Goals 1 and 3; the restore command (LADR-05) and corpus membership (LADR-03).

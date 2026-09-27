@@ -4,7 +4,7 @@ using System.Text;
 namespace SmoothAiProductContextMemory.Infrastructure.Persistence;
 
 /// <summary>
-/// Cypher literal escaping, shared by the relationship write path and the traversal read path.
+/// Cypher literal escaping, shared by the graph write path and the traversal read path.
 /// </summary>
 /// <remarks>
 /// AGE requires <c>cypher()</c>'s map argument to be a prepared-statement parameter of type

@@ -2,7 +2,7 @@
 
 ## TL;DR
 
-Middle of the git skill chain: delegates committing to `git-commit` (haiku-tier sub-agent), then pushes via `scripts/push.sh`, which owns upstream tracking, the nothing-to-push case, and `--issue`-driven branch rename.
+Middle of the git skill chain: delegates committing to `git-commit` (`effort: low` sub-agent), then pushes via `scripts/push.sh`, which owns upstream tracking, the nothing-to-push case, and `--issue`-driven branch rename.
 
 ## Key Behaviors
 
@@ -15,3 +15,4 @@ Middle of the git skill chain: delegates committing to `git-commit` (haiku-tier 
 | Date | Change | Ref |
 |:-----|:-------|:----|
 | 2026-06-12 | Initial version. Push/rename plumbing moved from SKILL.md prose into `scripts/push.sh` (relocated from git-commit-push-pr, extended with `--rename`). | |
+| 2026-09-27 | Synced to `smooth-devex-template` PR #84: `models:` replaced by `effort: medium`; the `git-commit` sub-agent is invoked at its frontmatter `effort` (`low`) on the session's model. | |

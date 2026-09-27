@@ -141,10 +141,10 @@ public sealed class NpgsqlMemoryGraph(SmoothAiProductContextMemoryDbContext db) 
         while (await reader.ReadAsync(cancellationToken))
         {
             rows.Add(new MemoryRelationship(
-                Guid.Parse(ReadAgtypeString(reader, 0)),
-                Guid.Parse(ReadAgtypeString(reader, 1)),
-                ReadAgtypeString(reader, 2),
-                ReadAgtypeString(reader, 3)));
+                Guid.Parse(AgtypeArrayReader.ReadAgtypeString(reader, 0)),
+                Guid.Parse(AgtypeArrayReader.ReadAgtypeString(reader, 1)),
+                AgtypeArrayReader.ReadAgtypeString(reader, 2),
+                AgtypeArrayReader.ReadAgtypeString(reader, 3)));
         }
 
         return rows;
@@ -186,21 +186,6 @@ public sealed class NpgsqlMemoryGraph(SmoothAiProductContextMemoryDbContext db) 
     private static string Quote(string value) => CypherLiteral.Quote(value);
 
     private static string DollarWrap(string cypher) => CypherLiteral.DollarWrap(cypher);
-
-    private static string ReadAgtypeString(NpgsqlDataReader reader, int ordinal)
-    {
-        string raw = reader.GetString(ordinal);
-        if (raw.Length >= 2 && raw[0] == '"')
-        {
-            int closingQuote = raw.LastIndexOf('"');
-            if (closingQuote > 0)
-            {
-                return System.Text.Json.JsonSerializer.Deserialize<string>(raw[..(closingQuote + 1)]) ?? string.Empty;
-            }
-        }
-
-        return raw;
-    }
 
     private static long ParseAgtypeInteger(string? value)
     {

@@ -1,0 +1,25 @@
+{
+  "name": "mimisbrunnr",
+  "owner": {
+    "name": "generic-automation-and-it",
+    "email": "generic-automation-and-it@users.noreply.github.com"
+  },
+  "version": "1.0.0",
+  "description": "Mímisbrunnr — persistent AI context-memory skills. Get/set durability for agent knowledge, braindump capture, recall-feedback tuning, and Understanding transfer.",
+  "plugins": [
+    {
+      "name": "mimisbrunnr",
+      "source": "https://github.com/generic-automation-and-it/smooth-ai-product-context-memory",
+      "description": "The four Mímisbrunnr skills: context-memory (get/set write authority), vitsmunir-dump (braindump capture), recall-feedback (retrieval health queries), and understanding (load/import/session-dump).",
+      "version": "1.0.0",
+      "category": "data-analysis",
+      "skills": [
+        "mimisbrunnr-context-memory",
+        "mimisbrunnr-vitsmunir-dump",
+        "mimisbrunnr-recall-feedback",
+        "mimisbrunnr-understanding"
+      ],
+      "commands": []
+    }
+  ]
+}

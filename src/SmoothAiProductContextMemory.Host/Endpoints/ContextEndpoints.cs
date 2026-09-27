@@ -1,5 +1,6 @@
 using Mediator;
 using Microsoft.AspNetCore.Mvc;
+using SmoothAiProductContextMemory.Application.Features.ContextDossier;
 using SmoothAiProductContextMemory.Application.Features.Groups;
 using SmoothAiProductContextMemory.Application.Features.Initiatives;
 using SmoothAiProductContextMemory.Application.Features.Labels;
@@ -7,8 +8,10 @@ using SmoothAiProductContextMemory.Application.Features.Links;
 using SmoothAiProductContextMemory.Application.Features.Memories;
 using SmoothAiProductContextMemory.Application.Features.Preflight;
 using SmoothAiProductContextMemory.Application.Features.RecallFeedback;
+using SmoothAiProductContextMemory.Application.Features.Snapshot;
 using SmoothAiProductContextMemory.Application.Features.Tickets;
 using SmoothAiProductContextMemory.Host.Configuration;
+using SmoothAiProductContextMemory.Host.Snapshot;
 
 namespace SmoothAiProductContextMemory.Host.Endpoints;
 
@@ -84,6 +87,52 @@ internal static class ContextEndpoints
         // bound the caller never considered, and nothing in the graph store stops an unbounded walk.
         group.MapPost("/paths", (FindPaths.Request body, IMediator mediator, CancellationToken ct) =>
             mediator.Send(body, ct))
+            .RequireCapability(ApiCapability.Read);
+
+        // The dossier read halves (HLD-005): the API assembles the bundle, the skill composes the
+        // dossier. Both are read-only, mediate to Application, and never call a model. WidenDepth is
+        // required on the wire, with no server-side default.
+        group.MapPost("/dossier/bundle", (CreateDossierBundle.Request body, IMediator mediator, CancellationToken ct) =>
+            mediator.Send(body, ct))
+            .RequireCapability(ApiCapability.Read);
+
+        group.MapPost("/dossier/preview", (CreateDossierPreview.Request body, IMediator mediator, CancellationToken ct) =>
+            mediator.Send(body, ct))
+            .RequireCapability(ApiCapability.Read);
+
+        // Snapshot + preflight (HLD-006): preflight is a read-only operational report; the snapshot
+        // trigger returns an accepted-then-poll ticket rather than holding the connection for the
+        // full corpus walk. verify and restore deliberately have NO HTTP surface (LADR-07) — they run
+        // as one-shot container/CLI verbs only.
+        group.MapPost("/snapshot/preflight", (IMediator mediator, CancellationToken ct) =>
+            mediator.Send(new SnapshotPreflight.Request(), ct))
+            .RequireCapability(ApiCapability.Read);
+
+        group.MapPost("/snapshot", async (SnapshotJobCoordinator coordinator, CancellationToken ct) =>
+        {
+            SnapshotJobState job = await coordinator.StartAsync(ct);
+            return Results.Accepted((string?)null, new { job.Id, Status = job.Status.ToString(), job.DestinationPath });
+        })
+            .RequireCapability(ApiCapability.Write);
+
+        group.MapGet("/snapshot/status", (SnapshotJobCoordinator coordinator) =>
+            coordinator.Latest is { } job
+                ? Results.Ok(new
+                {
+                    job.Id,
+                    Status = job.Status.ToString(),
+                    job.ResultPath,
+                    job.Error,
+                    job.Memories,
+                    job.Versions,
+                    job.Vertices,
+                    job.Edges,
+                    job.Objects,
+                    job.DanglingReferences,
+                    job.UnreferencedObjects,
+                    job.MismatchedBodies,
+                })
+                : Results.Ok(new { Status = "none" }))
             .RequireCapability(ApiCapability.Read);
 
         group.MapPut("/tickets/parent", (SetTicketParent.Request body, IMediator mediator, CancellationToken ct) =>

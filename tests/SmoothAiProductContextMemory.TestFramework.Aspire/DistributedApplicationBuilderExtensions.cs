@@ -14,9 +14,10 @@ internal static class DistributedApplicationBuilderExtensions
     private const int BlobPort = 9002;
     private const int BlobConsolePort = 19092;
     // Registry-qualified so Podman never has to resolve a short image name.
-    // docker.io/minio/minio is no longer publicly pullable (upstream removed Hub images);
-    // quay.io hosts the last community server releases.
-    private const string BlobImage = "quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z";
+    // Upstream MinIO community images are gone from Docker Hub and quay.io, so the image comes from
+    // Chainguard. Its free tier only publishes :latest, so it is pinned by digest. Keep identical to
+    // src/SmoothAiProductContextMemory.AppHost.
+    private const string BlobImage = "cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1";
     private const string WireMockImage = "docker.io/wiremock/wiremock";
     private const string BlobSecretKey = "LocalMachineAccessNoInterestingDataTestDev#Passw0rd!FirewallNotExposed";
     // Aspire 13.5.3 defaults to library/postgres:17.7. AGE's PG17 image keeps the same major.

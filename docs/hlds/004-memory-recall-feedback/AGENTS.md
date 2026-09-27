@@ -10,12 +10,11 @@ quality bar in [./nfrs/](./nfrs/); context and recall path in
 [./diagrams/c4-context.md](./diagrams/c4-context.md). Business authority is
 [BRD 001](../../brd/001-context-memory/).
 
-**The record-and-query mechanism is implemented** (workstreams 02/03): LADR-01..04 are Accepted and the
-write path and three tuning surfaces ship. The three NFRs stay **Draft** — the placement was settled
-and the mechanism built, but their full evidence (recognisable-phrase confidentiality on hit and miss, latency
-p50/p95, growth projection, never-recalled-set equality, attributable before/after) is workstream-04 scope.
-Do not reopen LADR-02 without new measurements — the
-[evidence](./nfrs/NFR-02-placement-evidence-2026-09-18.md) records what would have to change first.
+**The mechanism is implemented** (workstreams 02/03): LADR-01..04 are Accepted and the write path and three
+tuning surfaces ship. **NFR-01..03 are Accepted** on evidence gathered against the shipped path
+(workstream 04) by the env-gated [`NfrEvidenceTests`](../../../../tests/SmoothAiProductContextMemory.Infrastructure.ComponentTest/Persistence/NfrEvidenceTests.cs)
+(`SMOOTH_NFR_BENCH=1`). Do not reopen LADR-02 without new measurements — the
+[placement evidence](./nfrs/NFR-02-placement-evidence-2026-09-18.md) records what would have to change first.
 
 ## Non-Negotiables
 
@@ -30,7 +29,8 @@ Do not reopen LADR-02 without new measurements — the
 
 ## Architecture Decisions
 
-See [./ladrs/](./ladrs/). LADR-01..04 Accepted; the three NFRs remain Draft pending workstream-04 evidence.
+See [./ladrs/](./ladrs/). LADR-01..04 and NFR-01..03 are Accepted; the NFR evidence is recorded in the
+`nfrs/` folder.
 
 | LADR | Decision | Why it matters |
 |------|----------|----------------|
@@ -62,12 +62,19 @@ Targets and verification live in [./nfrs/](./nfrs/). Two shape how code is writt
 - The telemetry-derived placement (LADR-02, option C) was rejected rather than chosen, so this design takes on no dependency on an observability retention policy owned elsewhere. Reviving C would reintroduce that coupling, and would buy a latency saving the measurements could not detect.
 - Feedback retention is a bound, not a policy: **30 days or 2,000,000 records, whichever comes first** (193 bytes/record measured, ~9.4 KiB per 50-memory retrieval, ~370 MiB at the cap). If long-term trend analysis is ever wanted, that is a different design — old recall data describes a store and a recall implementation that no longer exist.
 - The feedback table sits outside the six entity types the DbContext exposes and `ModelShapeGuardTests` asserts. **It is not an EF entity** — decided deliberately: `recall_feedback` is SQL-created by the `AddRecallFeedbackTable` migration, invisible to the model snapshot, and accessed only through `IRecallFeedback`/`IRecallFeedbackQuery` → `NpgsqlRecallFeedback`/`NpgsqlRecallFeedbackQuery`, mirroring the `ITicketGraph` boundary. Do not add a `DbSet`; that breaks the six-entity guard. The prototype's surrogate `bigserial` key is scaffolding and was not carried into the shipped record shape.
-- **What the placement evidence does not discharge.** It settled which mechanism to build, measured at the prototype boundary. Workstreams 02/03 shipped the fire-and-forget writer, the identical-results-with-feedback-on-and-off criterion against the retrieval handler, the never-recalled/miss-rate queries and the reset. What remains for workstream 04 is the full NFR-01..03 evidence: recognisable-phrase confidentiality on both paths, latency p50/p95 with feedback on/off, concurrent-recall-of-a-popular-memory, growth projection from an *observed* retrieval rate, never-recalled-set equality, and attributable before/after.
+- **The placement evidence was prototype boundary; the NFR evidence is shipped-path.** The placement evidence
+  settled which mechanism to build, measured at the prototype boundary. Workstreams 02/03 shipped the
+  fire-and-forget writer, the identical-results-with-feedback-on-and-off criterion against the retrieval
+  handler, the never-recalled/miss-rate queries and the reset. Workstream 04 (now delivered) verified the
+  NFR-01..03 criteria against the shipped path via `SMOOTH_NFR_BENCH=1` `NfrEvidenceTests`:
+  recognisable-phrase confidentiality on both paths, latency p50/p95, concurrent-recall-of-a-popular-memory,
+  growth projection, never-recalled-set equality, and attributable before/after. Evidence docs in `nfrs/`.
 
 ## Changelog
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-20 | NFR-01..03 closed on evidence gathered against the shipped path by the env-gated `NfrEvidenceTests` (`SMOOTH_NFR_BENCH=1`): recognisable-phrase confidentiality on hit and miss (phrase in no record, shape CHECK `23514`), latency p50/p95 within noise (0.917 ms gap vs 1.788 ms spread), no concurrency contention (0 `55P03`), failure injection leaves byte-identical results, growth bounded (156 bytes/row, ~297 MiB at cap), never-recalled set equality (1,904 = untouched pool), miss-rate derivability, resettable baseline. NFR-01..03 moved to Accepted; HLD-001 `pg_trgm` reopening threshold recorded as met (evidence only). | `NfrEvidenceTests`, NFR-01/02/03 evidence, HLD-001-pg-trgm-reopening-evidence |
 | 2026-09-19 | Fixed a ~50/50 flake in `RecallFeedbackPersistenceTests.Write_persists_hit_records_sharing_a_retrieval_id`: it asserted insertion order with an order-sensitive `ShouldBe`, but rows are read `ORDER BY retrieval_id, memory_uuid` over two random uuids. Now order-insensitive — order is incidental to the claim being tested. | test flake |
 | 2026-09-14 | Created — discovery HLD for recall feedback. Placement deliberately left open. | Gap identified during pre-dogfooding review |
 | 2026-09-14 | Added business-authority back-reference to BRD 001, completing the three-place rule. | BRD 001 |

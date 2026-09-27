@@ -3,8 +3,10 @@
 
 Three operations, two of which write nothing:
 
-  load  <input> [--format store|foreign|auto] [--asof YYYY-MM-DD] [--max-chars N]
-      Render material as cited grounding context on stdout. Non-destructive.
+  load  <input> [--format store|understanding|foreign|auto] [--asof YYYY-MM-DD] [--max-chars N]
+      Render material as cited grounding context on stdout. Non-destructive. <input> may be a folder:
+      an ai-understanding store (every `*.understanding.md`, newest version per slug) or a session
+      dump folder (its `_session.md`).
 
   import <input> --store [--tickets ..] [--tags ..] [--repository ..] [--scope ..]
       Refused without --store. Decomposes the material into candidate atomic facts and emits a
@@ -14,11 +16,11 @@ Three operations, two of which write nothing:
 
   dump --currentsession [--from FILE|-] [--out DIR] [--session-name NAME]
       Write the current session's understanding to .context/mimisbrunnr-understandings/<folder>/. An export,
-      not a store write. The folder name is reported on stdout so another session or repository can
-      discover it by name.
+      not a store write. The content is redacted before it reaches disk. The folder name is reported on
+      stdout so another session or repository can discover it by name.
 
 This client holds no write capability and no secret. Understanding's five parts map onto the stored
-fields per HLD 007 LADR-04: knowledge->statement, why->contentSummary, trigger->description,
+fields per HLD 007 LADR-04: answer->statement, why->contentSummary, question->description,
 boundaries->validUntil/scope, provenance->sources/validFrom/createdOn.
 """
 
@@ -28,11 +30,16 @@ import argparse
 import datetime as dt
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
 KIND_UNDERSTANDING = "understanding"
 DUMP_MARKER = ".mimisbrunnr-understanding-dump"
+SESSION_FILE = "_session.md"
+UNIT_SUFFIX = ".understanding.md"
+REDACTOR = Path(__file__).resolve().parents[2] / "mimisbrunnr-context-memory" / "scripts" / "redact.py"
+_STAMP = re.compile(r"-(\d{8}-\d{4})$")
 DEFAULT_MAX_CHARS = 12000
 # A candidate below this is punctuation, a stray word, or a table rule — never a fact. Short
 # candidates are reported rather than dropped in silence: this client never discards input
@@ -90,10 +97,12 @@ def five_parts(record: dict) -> dict:
     """Project a stored record onto the five parts (HLD 007 LADR-04)."""
     return {
         "subject": record.get("subject") or record.get("name") or "(untitled)",
-        "trigger": record.get("description") or record.get("trigger") or "",
-        "knowledge": record.get("statement") or "",
+        "question": (record.get("description") or record.get("question")
+                     or record.get("trigger") or ""),
+        "answer": record.get("statement") or "",
         "why": record.get("contentSummary") or record.get("why") or "",
         "boundaries": record.get("validUntil") or record.get("boundaries") or "",
+        "validUntil": record.get("validUntil") or "",
         "scope": record.get("scope") or "",
         "status": record.get("status") or "",
         "uuid": record.get("uuid") or "",
@@ -102,6 +111,9 @@ def five_parts(record: dict) -> dict:
         "createdOn": record.get("createdOn") or "",
         "sources": record.get("sources") or [],
         "kind": record.get("kind") or "",
+        "origin": record.get("origin") or "",
+        "confidence": record.get("confidence") or "",
+        "portability": record.get("portability") or "",
     }
 
 
@@ -138,11 +150,12 @@ def render_store(records: list[dict], src: str, asof: dt.date | None,
             continue
         shown += 1
         out.append(f"\n## {parts['subject']}")
-        cite = [p for p in (parts["uuid"], f"v{parts['version']}" if parts["version"] else "",
+        cite = [p for p in (parts["uuid"] or parts["origin"],
+                            f"v{parts['version']}" if parts["version"] else "",
                             parts["createdOn"] or parts["validFrom"]) if p]
         if cite:
             out.append(f"- Source: {' · '.join(str(c) for c in cite)}")
-        for label, key in (("Trigger", "trigger"), ("Knowledge", "knowledge"),
+        for label, key in (("Question", "question"), ("Answer", "answer"),
                            ("Why", "why"), ("Boundaries", "boundaries")):
             if parts[key]:
                 out.append(f"- {label}: {parts[key]}")
@@ -151,6 +164,10 @@ def render_store(records: list[dict], src: str, asof: dt.date | None,
             flags.append(f"status: {parts['status']}")
         if parts["scope"] in ("program", "self"):
             flags.append(f"{parts['scope']} scope, not shipped product fact")
+        if parts["confidence"] and parts["confidence"] != "verified":
+            flags.append(f"confidence: {parts['confidence']}")
+        if parts["portability"] == "repo-specific":
+            flags.append("repo-specific, may not hold in another repository")
         if flags:
             out.append(f"- **{'; '.join(flags)}**")
         if parts["sources"]:
@@ -168,6 +185,155 @@ def render_store(records: list[dict], src: str, asof: dt.date | None,
         if non_kind > 0:
             header.append("- Pass `--all` to also include scoped memory records.")
     return header + out
+
+
+def parse_frontmatter(body: str) -> tuple[dict, str] | None:
+    """Parse the flat YAML subset ai-understanding writes: scalars, one nested map, block lists."""
+    if not body.startswith("---\n"):
+        return None
+    end = body.find("\n---", 3)
+    if end == -1:
+        return None
+    fields: dict = {}
+    section = sub_key = None
+    for raw in body[4:end].splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if raw == raw.lstrip():
+            key, _, value = line.partition(":")
+            value = value.strip().strip("'\"")
+            fields[key.strip()] = value or None
+            section = None if value else key.strip()
+            sub_key = None
+        elif section is None:
+            continue
+        elif line.startswith("- "):
+            item = line[2:].strip().strip("'\"")
+            if sub_key is not None:
+                fields[section][sub_key] = (fields[section].get(sub_key) or []) + [item]
+            else:
+                fields[section] = (fields[section] if isinstance(fields[section], list) else []) + [item]
+        else:
+            key, _, value = line.partition(":")
+            value = value.strip().strip("'\"")
+            if not isinstance(fields[section], dict):
+                fields[section] = {}
+            fields[section][key.strip()] = value or None
+            sub_key = None if value else key.strip()
+    return fields, body[end + 4:]
+
+
+def split_sections(body: str) -> tuple[str, dict]:
+    title, sections, current = "", {}, None
+    for line in body.splitlines():
+        if line.startswith("# ") and not title:
+            title = line[2:].strip()
+        elif line.startswith("## "):
+            current = line[3:].strip().lower()
+            sections[current] = []
+        elif current is not None:
+            sections[current].append(line)
+    return title, {name: "\n".join(lines).strip() for name, lines in sections.items()}
+
+
+def parse_unit(body: str, name: str) -> dict | None:
+    """Project one ai-understanding unit onto a store-shaped record, or None if it is not one."""
+    parsed = parse_frontmatter(body)
+    if parsed is None:
+        return None
+    fields, rest = parsed
+    if not name.endswith(UNIT_SUFFIX) and not fields.get("slug"):
+        return None
+    title, sections = split_sections(rest)
+    provenance = fields.get("provenance") if isinstance(fields.get("provenance"), dict) else {}
+    slug = fields.get("slug") or name.removesuffix(UNIT_SUFFIX)
+    sources = [{"kind": "understanding-file", "reference": slug}]
+    if isinstance(provenance.get("source"), str):
+        sources.append({"kind": "origin", "reference": provenance["source"]})
+    return {
+        "slug": slug,
+        "subject": title or slug,
+        "description": fields.get("question") or fields.get("description") or "",
+        "statement": sections.get("answer", ""),
+        "contentSummary": sections.get("why", ""),
+        "boundaries": sections.get("boundaries", ""),
+        "kind": KIND_UNDERSTANDING,
+        "validFrom": provenance.get("learned") or fields.get("updated") or "",
+        "updated": fields.get("updated") or "",
+        "confidence": fields.get("confidence") or "",
+        "portability": fields.get("scope") or "",
+        "sources": sources,
+    }
+
+
+def collect_units(folder: Path) -> tuple[list[dict], list[str]]:
+    """Newest version of each slug under an ai-understanding store, with what was passed over.
+
+    A slug repeated across stamped folders is a version chain; the newest stamp is current, falling
+    back to `updated` — the same precedence the ai-understanding index applies.
+    """
+    newest: dict[str, tuple[tuple[str, str], dict]] = {}
+    superseded, unreadable = 0, []
+    for unit_file in sorted(folder.rglob(f"*{UNIT_SUFFIX}")):
+        record = parse_unit(unit_file.read_text(encoding="utf-8", errors="replace"), unit_file.name)
+        if record is None:
+            unreadable.append(str(unit_file.relative_to(folder)))
+            continue
+        record["origin"] = str(unit_file.relative_to(folder))
+        stamp = _STAMP.search(unit_file.parent.name)
+        rank = (stamp.group(1) if stamp else "", record["updated"])
+        held = newest.get(record["slug"])
+        if held is not None:
+            superseded += 1
+            if held[0] >= rank:
+                continue
+        newest[record["slug"]] = (rank, record)
+    notes = []
+    if superseded:
+        notes.append(f"{superseded} older version(s) of a slug passed over; the newest version of "
+                     "each slug is current.")
+    if unreadable:
+        notes.append(f"{len(unreadable)} unit file(s) without frontmatter were not read: "
+                     + ", ".join(unreadable))
+    return [record for _, record in newest.values()], notes
+
+
+def read_material(src: str, fmt: str) -> tuple[str, str, list[dict] | None, str, list[str]] | int:
+    """Resolve an input into (label, source kind, records, body, notes), or an exit code."""
+    path = Path(src)
+    if src != "-" and not path.exists():
+        print(f"NOT FOUND: {src}", file=sys.stderr)
+        return 2
+    if src != "-" and path.is_dir():
+        if fmt in ("auto", "understanding") and any(path.rglob(f"*{UNIT_SUFFIX}")):
+            records, notes = collect_units(path)
+            return src, "understanding-file", records, "", notes
+        if fmt in ("auto", "foreign") and (path / SESSION_FILE).is_file():
+            session = path / SESSION_FILE
+            return str(session), "foreign", None, read_input(str(session)), []
+        print(f"NO LOADABLE MATERIAL: {src} holds no *{UNIT_SUFFIX} unit and no {SESSION_FILE} "
+              f"for --format {fmt}.", file=sys.stderr)
+        return 2
+
+    body = read_input(src)
+    if fmt in ("store", "auto"):
+        records = parse_store_export(body)
+        if records is not None:
+            return src, "store-export", records, body, []
+        if fmt == "store":
+            print(f"NOT A STORE EXPORT: {src} could not be parsed as one.", file=sys.stderr)
+            return 2
+    if fmt in ("understanding", "auto"):
+        unit = parse_unit(body, path.name)
+        if unit is not None:
+            unit["origin"] = path.name
+            return src, "understanding-file", [unit], body, []
+        if fmt == "understanding":
+            print(f"NOT AN UNDERSTANDING: {src} carries no ai-understanding frontmatter.",
+                  file=sys.stderr)
+            return 2
+    return src, "foreign", None, body, []
 
 
 def render_foreign(body: str, src: str, max_chars: int) -> list[str]:
@@ -190,20 +356,13 @@ def render_foreign(body: str, src: str, max_chars: int) -> list[str]:
 
 
 def cmd_load(args: argparse.Namespace) -> int:
-    src = args.input
-    if src != "-" and not Path(src).exists():
-        print(f"NOT FOUND: {src}", file=sys.stderr)
-        return 2
-    body = read_input(src)
-
-    records = None
-    if args.format in ("store", "auto"):
-        records = parse_store_export(body)
-        if records is None and args.format == "store":
-            print(f"NOT A STORE EXPORT: {src} could not be parsed as one.", file=sys.stderr)
-            return 2
+    material = read_material(args.input, args.format)
+    if isinstance(material, int):
+        return material
+    src, _, records, body, notes = material
 
     lines = ["# Loaded material — cited grounding context", ""]
+    lines += [f"- {note}" for note in notes]
     if records is not None:
         lines += render_store(records, src, args.asof, all_kinds=args.all_kinds)
         if args.max_chars != DEFAULT_MAX_CHARS:
@@ -276,13 +435,10 @@ def cmd_import(args: argparse.Namespace) -> int:
         print("REFUSED: import requires --store. Nothing was written.", file=sys.stderr)
         return 1
 
-    src = args.input
-    if src != "-" and not Path(src).exists():
-        print(f"NOT FOUND: {src}", file=sys.stderr)
-        return 2
-    body = read_input(src)
-
-    records = parse_store_export(body)
+    material = read_material(args.input, "auto")
+    if isinstance(material, int):
+        return material
+    src, source_kind, records, body, notes = material
     skipped_kind = 0
     empty_statement = 0
     too_short: list[str] = []
@@ -297,24 +453,28 @@ def cmd_import(args: argparse.Namespace) -> int:
             if parts["kind"] != KIND_UNDERSTANDING:
                 skipped_kind += 1
                 continue
-            if not parts["knowledge"]:
+            if not parts["answer"]:
                 # Same contract as the short-candidate case: an unusable record is reported, never
                 # dropped in silence. A stored understanding with no statement is a store defect
                 # worth surfacing at the boundary that noticed it.
                 empty_statement += 1
                 continue
-            candidates.append({
-                "statement": parts["knowledge"],
-                "description": parts["trigger"],
-                "contentSummary": parts["why"],
+            candidate = {
+                "statement": parts["answer"],
+                "description": parts["question"],
+                "contentSummary": summary_with_boundaries(parts),
                 "validFrom": parts["validFrom"] or None,
-                "validUntil": parts["boundaries"] or None,
+                "validUntil": parts["validUntil"] or None,
                 "status": parts["status"] or None,
                 "scope": parts["scope"] or None,
                 "sources": parts["sources"],
                 "originUuid": parts["uuid"] or None,
                 "originVersion": parts["version"],
-            })
+            }
+            for key in ("confidence", "portability"):
+                if parts[key]:
+                    candidate[key] = parts[key]
+            candidates.append(candidate)
     else:
         # Foreign material carries no provenance of its own beyond the file it came from, and none
         # is invented here (NFR-03).
@@ -334,7 +494,7 @@ def cmd_import(args: argparse.Namespace) -> int:
     payload = {
         "via": "mimisbrunnr-understanding import",
         "source": src,
-        "sourceKind": "store-export" if records is not None else "foreign",
+        "sourceKind": source_kind,
         "store": True,
         "binding": {
             "tickets": tickets,
@@ -349,6 +509,8 @@ def cmd_import(args: argparse.Namespace) -> int:
     print("IMPORT PREPARED — hand this to mimisbrunnr-context-memory (the sole writer).")
     print(json.dumps(payload, indent=2, ensure_ascii=False))
     print()
+    for note in notes:
+        print(note)
     print(f"Candidates: {len(candidates)}; "
           f"flagged as possibly bundled: {sum(1 for c in candidates if c['bundledCandidate'])}.")
     if skipped_kind:
@@ -367,6 +529,13 @@ def cmd_import(args: argparse.Namespace) -> int:
         print("NOTE: no selectors supplied, so no association is made "
               "(--tickets/--tags/--repository/--scope).")
     return 0
+
+
+def summary_with_boundaries(parts: dict) -> str:
+    """Prose boundaries have no date to live in `validUntil`, so they travel with the why."""
+    if parts["boundaries"] and not parts["validUntil"]:
+        return "\n\n".join(p for p in (parts["why"], f"Boundaries: {parts['boundaries']}") if p)
+    return parts["why"]
 
 
 def split_list(value: str | None) -> list[str]:
@@ -407,12 +576,32 @@ def derive_folder_name(content: str, explicit: str | None) -> str:
 
 SESSION_TEMPLATE = """## Understandings
 
-_(One entry per Understanding, each with: trigger, knowledge, why, boundaries, provenance.)_
+_(One entry per Understanding, each with: question, answer, why, boundaries, provenance. State
+behaviour, contracts and invariants, not file paths or line numbers, which rot. Never a credential
+value; the dump redacts what it recognises, but that is the second net, not the first.)_
 
 ## Decisions
 
 ## Open questions
 """
+
+
+def redact(content: str) -> tuple[str, dict[str, int]] | None:
+    """Scrub secrets with the capture skill's redactor; None when it cannot run.
+
+    Content goes over stdin, never argv, matching the redactor's own contract.
+    """
+    if not REDACTOR.is_file():
+        return None
+    proc = subprocess.run([sys.executable, "-B", str(REDACTOR)], input=json.dumps([content]),
+                          capture_output=True, text=True, encoding="utf-8")
+    if proc.returncode != 0:
+        return None
+    try:
+        result = json.loads(proc.stdout)["results"][0]
+        return result["redacted"], {f["rule_name"]: f["hit_count"] for f in result["findings"]}
+    except (ValueError, KeyError, IndexError, TypeError):
+        return None
 
 
 def cmd_dump(args: argparse.Namespace) -> int:
@@ -425,6 +614,16 @@ def cmd_dump(args: argparse.Namespace) -> int:
         return 2
 
     content = read_input(args.from_file) if args.from_file else ""
+    findings: dict[str, int] = {}
+    if content.strip():
+        # A dump exists to be carried to another session or repository, so a secret must be gone
+        # before the file exists, not caught later on the way out (fail closed).
+        scrubbed = redact(content)
+        if scrubbed is None:
+            print(f"REFUSED: the redactor ({REDACTOR}) could not run, so the dump cannot be "
+                  "scrubbed. Nothing was written.", file=sys.stderr)
+            return 1
+        content, findings = scrubbed
     folder_name = derive_folder_name(content, args.session_name)
 
     if args.out:
@@ -449,16 +648,19 @@ def cmd_dump(args: argparse.Namespace) -> int:
         f"- Generated: {dt.datetime.now().isoformat(timespec='seconds')}",
         "- A projection of this session's context. Generated, never maintained; regenerate rather "
         "than edit.",
-        "- Load it with: `understanding_client.py load <this folder>/_session.md`",
+        "- Load it with: `understanding_client.py load <this folder>`",
         "",
         content.strip() if content.strip() else SESSION_TEMPLATE,
         "",
     ]
-    (folder / "_session.md").write_text("\n".join(body), encoding="utf-8")
+    (folder / SESSION_FILE).write_text("\n".join(body), encoding="utf-8")
 
     if existed:
         print(f"REPLACED existing dump: {folder} (a dump is regenerated, never appended to)")
     print(f"SESSION DUMP WRITTEN: {folder}")
+    if findings:
+        print("REDACTED before writing: "
+              + ", ".join(f"{name} x{count}" for name, count in sorted(findings.items())))
     print(f"Discover this folder by name: {folder.name}")
     print("This is an export. The store was not changed.")
     if not content.strip():
@@ -475,8 +677,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     sub = parser.add_subparsers(dest="command", required=True)
 
     load = sub.add_parser("load", help="Render material as cited grounding context (no write).")
-    load.add_argument("input", help="Path to a store export or a foreign document; - for stdin.")
-    load.add_argument("--format", choices=("store", "foreign", "auto"), default="auto")
+    load.add_argument("input", help="Store export, ai-understanding unit or store folder, session "
+                                    "dump folder, or a foreign document; - for stdin.")
+    load.add_argument("--format", choices=("store", "understanding", "foreign", "auto"),
+                      default="auto")
     load.add_argument("--all", action="store_true", dest="all_kinds",
                       help="Breadth: also render non-understanding (scoped memory) records. "
                            "Omitting it returns only the understanding-kind.")
@@ -486,7 +690,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                       help=f"Foreign-material render cap (default {DEFAULT_MAX_CHARS}).")
 
     imp = sub.add_parser("import", help="Prepare a capture payload (requires --store).")
-    imp.add_argument("input")
+    imp.add_argument("input", help="Same inputs as load.")
     imp.add_argument("--store", action="store_true",
                      help="The opt-in switch that makes import a capture.")
     imp.add_argument("--tickets", help="Comma-separated ticket keys to bind.")

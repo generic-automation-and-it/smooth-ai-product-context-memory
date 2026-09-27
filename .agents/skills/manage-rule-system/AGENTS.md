@@ -14,4 +14,5 @@ Convention skill for `.agents/rules/` files, injected on demand by `scripts/inje
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-27 | Documented `skills/` as the canonical upstream path exception to the usual two-rule category threshold. | template PR #85 |
 | 2026-06-12 | Initial version. | |

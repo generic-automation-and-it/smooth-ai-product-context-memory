@@ -33,11 +33,13 @@ Concretely, the bundle must be free of every ordinary source of run-to-run varia
 - **L1** — call twice with the anchor set supplied in a different order, and with tags listed in a different order; assert identical payloads. Request order must not be result order.
 - **L1** — seed a store where two memories tie on validity and capture time; assert the identity tiebreak resolves them stably.
 - **L1** — seed a slice that exceeds the item cap; assert both runs cut at the same boundary and that the manifest names the same cut.
+- **L1** — the same byte-equality assertions over a slice whose selected memories include `kind = understanding` items, mixed with other kinds. Assert they order on the same tiebreak and collapse under the same mechanical rule (LADR-15).
 - **L0** — assert the payload contains no generation timestamp, as a schema-level test rather than an inspection.
 
 ## Acceptance Criteria
 
 - Two bundles from one request against an unchanged store are byte-identical, including after a restart.
+- `kind = understanding` memories reproduce to the same byte-identical bundle as any other kind, on the same tiebreak and collapse rule (LADR-15).
 - The effective selection is recorded in the bundle in a form sufficient to repeat it.
 - Reordering the anchors or the tags in a request changes nothing in the response.
 - Every ordering has a documented, tested tiebreak; no ordering falls back to database order.

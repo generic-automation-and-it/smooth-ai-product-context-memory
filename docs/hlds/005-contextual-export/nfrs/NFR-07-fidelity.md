@@ -21,6 +21,7 @@ condition is not.
 - **Skill-level test** — a fixture where two claims share wording but differ in customer scope. Assert they are not consolidated.
 - **Skill-level test** — a fixture where three origins are re-captures of one source. Assert the document does not present them as independent corroboration.
 - **Skill-level test** — a fixture that exceeds the composition budget. Assert conditions and exceptions on included claims are intact and the shortfall appears as an omission, not as silently shortened claims.
+- **Skill-level test** — a `kind = understanding` fixture whose claim carries a scoped condition or exception. Assert it survives composition verbatim where paraphrase would change meaning, and that the kind is not treated as less fidelity-critical than stored product claims (LADR-15).
 
 ## Acceptance Criteria
 
@@ -30,6 +31,7 @@ condition is not.
 - No consolidation merges claims differing in meaning, applicability or lifecycle; uncertain equivalence keeps the distinction.
 - Multiple origins are never presented as corroboration without distinguishing independent captures from copies of one source.
 - Reaching a budget produces a reported omission, never a claim stripped of its conditions.
+- The fidelity bar applies without distinction to `kind = understanding` items (LADR-15).
 
 ## Applies To
 

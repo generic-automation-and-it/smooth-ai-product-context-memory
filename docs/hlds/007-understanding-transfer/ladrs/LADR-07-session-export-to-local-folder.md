@@ -1,6 +1,6 @@
 # LADR-07: The current session dumps to a local folder for cross-session reuse
 
-**Status:** Draft
+**Status:** Accepted
 
 ## Context
 
@@ -28,6 +28,9 @@ The dump:
 - Writes a local Markdown projection of the session's understanding.
 - Changes **nothing** in the store — it is an export, not a write (NFR-01).
 - Is written to the gitignored `.context/` tree, so it is not committed.
+- Is **redacted before it is written**, by the capture skill's `redact.py` over stdin. A dump exists to
+  be carried out of the workspace, so a secret must be gone before the file exists. If the redactor
+  cannot run, the dump is refused and nothing is written (fail closed). Amended 2026-09-24.
 
 Another session or repository can then **load** that folder via the same skill, regardless of whether
 the originating repo is the same.
@@ -53,3 +56,7 @@ the originating repo is the same.
 - **LADR-02** — the load side that consumes a dumped folder.
 - **NFR-01** — a session dump is an export and writes nothing to the store.
 - **BRD-003 BR-45**, **BRD-002** (§10 glossary "Session export").
+
+## Evidence (2026-09-26)
+
+Skill L0 `.agents/skills/mimisbrunnr-understanding/tests/run_tests.py`: the dump → load round trip, the discoverable folder name, refusal of the filesystem and repository roots, and fail-closed redaction.

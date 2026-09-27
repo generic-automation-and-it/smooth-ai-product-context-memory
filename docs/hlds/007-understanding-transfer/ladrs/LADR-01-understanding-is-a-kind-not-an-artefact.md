@@ -1,6 +1,6 @@
 # LADR-01: Understanding is a memory of `kind = understanding`
 
-**Status:** Draft
+**Status:** Accepted
 
 ## Context
 
@@ -61,3 +61,7 @@ queries one specific repo. That is the intended behaviour — a cross-repo learn
 one repo — but an implementer must not assume a `Repo = null` understanding will surface under a
 repo-filtered `query`. If a repo-scoped query should also surface it, that is a separate retrieval
 decision, not a storage one.
+
+## Evidence (2026-09-26)
+
+L1 `tests/SmoothAiProductContextMemory.Application.ComponentTest/Features/UnderstandingTransferStoreTests.cs`: an `understanding`-kind memory is written and versioned through `SetMemories` with no new entity or table; its group keeps a non-null product `ScopeDimension` and no repo; an un-scoped query returns it and a one-repository query does not (the boundary above).

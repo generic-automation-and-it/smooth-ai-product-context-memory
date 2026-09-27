@@ -1,6 +1,6 @@
 # NFR-03: Attribution — foreign material is loaded as data, never adopted
 
-**Status:** Draft
+**Status:** Accepted
 
 ## Requirement
 
@@ -31,3 +31,7 @@ adopted:
 
 Goal 2 and Goal 3, LADR-06. `BR-42`, and BRD-001's `BR-12` (recalled knowledge is evidence, not
 instruction) inheritance.
+
+## Evidence (2026-09-26)
+
+Skill L0 `.agents/skills/mimisbrunnr-understanding/tests/run_tests.py`: directive and proposed-status foreign material rendered as cited data. L1 `tests/SmoothAiProductContextMemory.Application.ComponentTest/Features/UnderstandingTransferStoreTests.cs` `Query_keeps_understanding_attribution`: an understanding retrieved for loading keeps its uuid, current version and `CreatedOn`.

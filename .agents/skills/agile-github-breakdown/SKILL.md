@@ -1,27 +1,16 @@
 ---
 name: agile-github-breakdown
-description: >
-    Invoke to turn a clarified braindump, meeting, or existing GitHub Feature into terse
-    Feature + Task content — FR/NFR translated into acceptance criteria, an explicit
-    dependency graph, soft technology suggestions, and GitHub writes gated behind a
-    dry-run preview. Trigger keywords: "create stories", "break this epic down",
-    "produce stories for", "turn this braindump into a feature", "agile github breakdown".
-    Also triggers on /agile-github-breakdown. Complements mimisbrunnr-vitsmunir-dump (run after its
-    synthesize step) and shares GitHub Project / sub-issue / gh conventions with
-    agile-github-task-from-diff — but that skill sources an untyped subtask from a git
-    diff; this one sources Feature + Task issues from contextual knowledge (braindumps,
-    transcripts, existing Features), never a diff.
-allowed-tools: >
-    Bash(.agents/skills/agile-github-breakdown/scripts/parse_frnfr.py:*),
-    Bash(.agents/skills/agile-github-breakdown/scripts/validate_story_graph.py:*),
-    Bash(.agents/skills/agile-github-breakdown/scripts/create_github_breakdown.py:*),
-    Bash(gh issue view:*),
-    Bash(gh api:*),
-    Read, Write, Edit
-models:
-  claude: opus        # high-complexity; multi-step clarification + dependency-graph judgment
-  copilot: auto
-  codex: gpt-5.5
+description: 'Invoke to turn a clarified braindump, meeting, or existing GitHub Feature into terse Feature + Task content — FR/NFR translated into acceptance criteria, an explicit dependency graph, soft technology suggestions, and GitHub writes gated behind a dry-run preview. Trigger keywords: "create stories", "break this epic down", "produce stories for", "turn this braindump into a feature", "agile github breakdown". Also triggers on /agile-github-breakdown. Complements mimisbrunnr-vitsmunir-dump (run after its synthesize step) and shares GitHub Project / sub-issue / gh conventions with agile-github-task-from-diff — but that skill sources an untyped subtask from a git diff; this one sources Feature + Task issues from contextual knowledge (braindumps, transcripts, existing Features), never a diff.'
+allowed-tools:
+  - Bash(.agents/skills/agile-github-breakdown/scripts/parse_frnfr.py:*)
+  - Bash(.agents/skills/agile-github-breakdown/scripts/validate_story_graph.py:*)
+  - Bash(.agents/skills/agile-github-breakdown/scripts/create_github_breakdown.py:*)
+  - Bash(gh issue view:*)
+  - Bash(gh api:*)
+  - Read
+  - Write
+  - Edit
+effort: xhigh  # multi-step clarification + dependency-graph judgment
 ---
 
 # Create Feature — braindump/epic → GitHub Tasks

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Data-destroying reset of the local AppHost stack.
 #
-# THIS DELETES captured memories, blobs, and Seq logs. There is no prompt — choosing this
-# command instead of scripts/stop-dev-stack.sh IS the explicit ask.
+# THIS DELETES captured memories, blobs, Seq logs, and host-container snapshot archives.
+# There is no prompt — choosing this command instead of scripts/stop-dev-stack.sh IS the explicit ask.
 #
-# Removes the four AppHost containers (via stop-dev-stack.sh) then the three named volumes.
+# Removes the four AppHost containers (via stop-dev-stack.sh) then the four named volumes.
 # Does not touch mimisbrunnr-testcontainer-* or historical orphan volumes from renames.
 #
 # Names must match DistributedApplicationBuilderExtensions.cs. Do not glob mimisbrunnr-*.
@@ -23,6 +23,7 @@ VOLUMES=(
     mimisbrunnr-postgres-data
     mimisbrunnr-blob-well-data
     mimisbrunnr-seq-data
+    mimisbrunnr-host-context
 )
 
 if ! command -v "$RUNTIME" >/dev/null 2>&1; then
@@ -30,7 +31,7 @@ if ! command -v "$RUNTIME" >/dev/null 2>&1; then
     exit 1
 fi
 
-echo "WARNING: destroying named volumes (memories, blobs, Seq logs)"
+echo "WARNING: destroying named volumes (memories, blobs, Seq logs, host-context snapshots)"
 
 "$SCRIPT_DIR/stop-dev-stack.sh"
 

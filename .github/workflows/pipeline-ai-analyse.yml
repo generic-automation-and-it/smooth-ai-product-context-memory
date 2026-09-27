@@ -78,10 +78,10 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           repository: generic-automation-and-it/smooth-ai-report-review
-          # Pinned to `main` to match the local thin caller's `tools_ref: main`
-          # (the local pipeline-code-review-report.yml also `uses:` this repo
-          # at @main). SMOOTH_AI_REVIEW_TOOLS_REF Variable overrides both when
-          # set.
+          # `main` currently points at the merged OpenCode v2 migration commit
+          # (feat[148], PR #149) — the same ref the gate tracks — so this stays
+          # on the same v2 line as the gate.
+          # SMOOTH_AI_REVIEW_TOOLS_REF Variable overrides this when set.
           ref: ${{ vars.SMOOTH_AI_REVIEW_TOOLS_REF || 'main' }}
           path: .smooth-ai-review-tools
 
@@ -262,13 +262,6 @@ jobs:
       OPENCODE_REVIEW_REPORT_GEMINI_URL: ${{ vars.OPENCODE_REVIEW_REPORT_GEMINI_URL }}
       OPENCODE_REVIEW_REPORT_COPILOT_URL: ${{ vars.OPENCODE_REVIEW_REPORT_COPILOT_URL }}
       OPENCODE_REVIEW_REPORT_OPENAI_URL: ${{ vars.OPENCODE_REVIEW_REPORT_OPENAI_URL }}
-      OPENCODE_GEMINI_API_KEY: ${{ secrets.OPENCODE_GEMINI_API_KEY }}
-      OPENCODE_COPILOT_API_KEY: ${{ secrets.OPENCODE_COPILOT_API_KEY }}
-      OPENCODE_OPENAI_API_KEY: ${{ secrets.OPENCODE_OPENAI_API_KEY }}
-      OPENCODE_ANTHROPIC_API_KEY: ${{ secrets.OPENCODE_ANTHROPIC_API_KEY }}
-      OPENCODE_GO_OPENAI_API_KEY: ${{ secrets.OPENCODE_GO_OPENAI_API_KEY }}
-      OPENCODE_GO_ANTHROPIC_API_KEY: ${{ secrets.OPENCODE_GO_ANTHROPIC_API_KEY }}
-      OPENCODE_OPENROUTER_API_KEY: ${{ secrets.OPENCODE_OPENROUTER_API_KEY }}
       OPENCODE_REVIEW_REPORT_DISABLE_CLAUDE_CODE: ${{ vars.OPENCODE_REVIEW_REPORT_DISABLE_CLAUDE_CODE || '1' }}
       OPENCODE_CLI_VERSION: ${{ vars.OPENCODE_CLI_VERSION || '' }}
       OPENCODE_TOOL_CODE_REVIEW_GRAPH_VERSION: ${{ vars.OPENCODE_TOOL_CODE_REVIEW_GRAPH_VERSION || '' }}
@@ -299,38 +292,26 @@ jobs:
           repository: ${{ steps.pr.outputs.head_repo }}
           persist-credentials: false
 
-      - name: Locate analyse tooling
-        id: locate_tooling
-        env:
-          HEAD_REPO: ${{ steps.pr.outputs.head_repo }}
-        run: |
-          set -euo pipefail
-          if [ "$HEAD_REPO" != "${{ github.repository }}" ]; then
-            echo "fetch_tools=true" >> "$GITHUB_OUTPUT"
-            echo "Fork PR or reusable caller detected — using pinned review tooling instead of scripts from the PR head"
-          elif [ -f ".agents/skills/ai-analyse/SKILL.md" ] && \
-               [ -f ".agents/skills/ai-review-report/scripts/lib/opencode-with-fallback.sh" ] && \
-               [ -f ".agents/skills/ai-review/scripts/copilot-review.sh" ]; then
-            echo "REVIEW_SKILL_DIR=.agents/skills/ai-review-report" >> "$GITHUB_ENV"
-            echo "ANALYSE_SKILL_DIR=.agents/skills/ai-analyse" >> "$GITHUB_ENV"
-            echo "AI_REVIEW_DIR=.agents/skills/ai-review" >> "$GITHUB_ENV"
-            echo "fetch_tools=false" >> "$GITHUB_OUTPUT"
-            echo "✓ Using analyse skill from the repository under review"
-          else
-            echo "fetch_tools=true" >> "$GITHUB_OUTPUT"
-            echo "Analyse skill not present in this repository — fetching tooling repo"
-          fi
+      # workflow_run YAML comes from main, but the working tree above is the PR
+      # head. Never execute its copy of a credential guard before injecting
+      # provider secrets. Keep the trusted helper under the ignored .context/.
+      - name: Checkout trusted CI helpers
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          repository: ${{ github.repository }}
+          ref: main
+          path: .context/trusted-ci
+          persist-credentials: false
 
       - name: Fetch analyse tooling
-        if: steps.locate_tooling.outputs.fetch_tools == 'true'
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           repository: generic-automation-and-it/smooth-ai-report-review
           ref: ${{ vars.SMOOTH_AI_REVIEW_TOOLS_REF || 'main' }}
           path: .smooth-ai-review-tools
+          persist-credentials: false
 
       - name: Register fetched analyse tooling
-        if: steps.locate_tooling.outputs.fetch_tools == 'true'
         run: |
           set -euo pipefail
           test -f ".smooth-ai-review-tools/.agents/skills/ai-review-report/scripts/lib/opencode-with-fallback.sh"
@@ -340,16 +321,28 @@ jobs:
           echo "ANALYSE_SKILL_DIR=.smooth-ai-review-tools/.agents/skills/ai-analyse" >> "$GITHUB_ENV"
           echo "AI_REVIEW_DIR=.smooth-ai-review-tools/.agents/skills/ai-review" >> "$GITHUB_ENV"
 
-      - name: Initialize OPENCODE
+      - name: Install guarded OpenCode
         run: |
           set -euo pipefail
-          # Install opencode via the shared lib (LADR-048) so this workflow
-          # honours OPENCODE_CLI_VERSION the same way the review
-          # gate does. Post-install orchestration below stays inline because
-          # it is analyse-specific.
+          bash .context/trusted-ci/.github/scripts/install-guarded-opencode.sh \
+            .smooth-ai-review-tools/.agents/skills/ai-review-report/scripts/lib/install-opencode.sh
+
+      - name: Initialize OPENCODE
+        env:
+          OPENCODE_GEMINI_API_KEY: ${{ secrets.OPENCODE_GEMINI_API_KEY }}
+          OPENCODE_COPILOT_API_KEY: ${{ secrets.OPENCODE_COPILOT_API_KEY }}
+          OPENCODE_OPENAI_API_KEY: ${{ secrets.OPENCODE_OPENAI_API_KEY }}
+          OPENCODE_ANTHROPIC_API_KEY: ${{ secrets.OPENCODE_ANTHROPIC_API_KEY }}
+          OPENCODE_GO_OPENAI_API_KEY: ${{ secrets.OPENCODE_GO_OPENAI_API_KEY }}
+          OPENCODE_GO_ANTHROPIC_API_KEY: ${{ secrets.OPENCODE_GO_ANTHROPIC_API_KEY }}
+          OPENCODE_OPENROUTER_API_KEY: ${{ secrets.OPENCODE_OPENROUTER_API_KEY || secrets.OPENROUTER_API_KEY }}
+        run: |
+          set -euo pipefail
+          # The preceding step installed the shared CLI and credential guard
+          # without provider secrets. This step resolves the same provider
+          # chain and starts the service with only its required keys.
           export PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          bash "${REVIEW_SKILL_DIR}/scripts/lib/install-opencode.sh"
           # Two-name dispatch: this workflow is workflow_run-triggered, so its
           # YAML always executes from the DEFAULT branch while the scripts come
           # from the fetched tooling checkout. Across the LADR-071 rename
@@ -364,8 +357,25 @@ jobs:
           else
             bash "${REVIEW_SKILL_DIR}/scripts/lib/setup-opencode-config.sh"
           fi
+          # opencode v2 binds one shared background service's config when that
+          # service STARTS; an already-running one silently ignores this step's
+          # OPENCODE_CONFIG (LADR-071/087). Stop it first so `stats` starts a
+          # fresh service bound to our config — a reused self-hosted runner
+          # would otherwise analyse with the previous job's provider and
+          # permissions, with nothing in the log to say so.
+          opencode service stop >/dev/null 2>&1 || true
           opencode stats >/dev/null || true
-          bash "${REVIEW_SKILL_DIR}/scripts/lib/opencode-health.sh" || true
+          # Exit 3 = the managed config is not confirmed (foreign binding, or
+          # unreadable). Fatal: an autonomous fixer running under someone
+          # else's provider and permission policy is strictly worse than the
+          # gate doing so. Any other non-zero is a liveness blip and stays
+          # advisory, per LADR-028.
+          _health_rc=0
+          bash "${REVIEW_SKILL_DIR}/scripts/lib/opencode-health.sh" || _health_rc=$?
+          if [ "$_health_rc" -eq 3 ]; then
+            echo "❌ Aborting: opencode is not confirmed to be using this run's managed config (see above)." >&2
+            exit 1
+          fi
           bash "${REVIEW_SKILL_DIR}/scripts/lib/resolve-provider.sh"
           if [ -n "${OPENCODE_ANALYSE_MODEL:-}" ]; then
             OPENCODE_PROVIDER_SCOPE=analyse bash "${REVIEW_SKILL_DIR}/scripts/lib/resolve-provider.sh"
@@ -404,8 +414,18 @@ jobs:
           } > ci_temp/analyse_prompt.md
 
       - name: Run ai-analyse
+        env:
+          OPENCODE_GEMINI_API_KEY: ${{ secrets.OPENCODE_GEMINI_API_KEY }}
+          OPENCODE_COPILOT_API_KEY: ${{ secrets.OPENCODE_COPILOT_API_KEY }}
+          OPENCODE_OPENAI_API_KEY: ${{ secrets.OPENCODE_OPENAI_API_KEY }}
+          OPENCODE_ANTHROPIC_API_KEY: ${{ secrets.OPENCODE_ANTHROPIC_API_KEY }}
+          OPENCODE_GO_OPENAI_API_KEY: ${{ secrets.OPENCODE_GO_OPENAI_API_KEY }}
+          OPENCODE_GO_ANTHROPIC_API_KEY: ${{ secrets.OPENCODE_GO_ANTHROPIC_API_KEY }}
+          OPENCODE_OPENROUTER_API_KEY: ${{ secrets.OPENCODE_OPENROUTER_API_KEY || secrets.OPENROUTER_API_KEY }}
         run: |
           set -euo pipefail
+          export PATH="$HOME/.opencode/bin:$PATH"
+          [ "$(command -v opencode)" = "$HOME/.opencode/bin/opencode" ]
           export OPENCODE_AGENT=analyse
           export OPENCODE_MIN_OUTPUT_BYTES=50
           primary_target="${OPENCODE_REVIEW_REPORT_PROVIDER_ID}/${OPENCODE_REVIEW_REPORT_MODEL_PRIMARY}"
@@ -425,11 +445,31 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OPENCODE_ANALYSE_GH_TOKEN: ${{ secrets.OPENCODE_ANALYSE_GH_TOKEN }}
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: core.hooksPath
+          GIT_CONFIG_VALUE_0: /dev/null
           HEAD_REF: ${{ steps.pr.outputs.head_ref }}
           HEAD_REPO: ${{ steps.pr.outputs.head_repo }}
         run: |
           set -euo pipefail
-          changed_paths="$(git status --porcelain -- . ':!ci_temp' ':!.context' ':!.smooth-ai-review-tools')"
+          # The checkout no longer persists credentials, so the pre-push
+          # re-fetch needs the same one-shot helper as the final push.
+          export GH_TOKEN="$GITHUB_TOKEN"
+          export GIT_CONFIG_COUNT=3
+          export GIT_CONFIG_KEY_1=credential.helper GIT_CONFIG_VALUE_1=
+          export GIT_CONFIG_KEY_2=credential.helper
+          export GIT_CONFIG_VALUE_2="!bash ${GITHUB_WORKSPACE}/.context/trusted-ci/.github/scripts/git-credential-from-env.sh"
+          # ci_temp, .context and .smooth-ai-review-tools are all gitignored here
+          # (see .gitignore), so plain `git status`/`git add -A .` already skip
+          # them without needing an exclude pathspec. Do NOT name `ci_temp` in a
+          # pathspec (exclude or otherwise) to "keep it out" -- explicitly
+          # referencing an ignored path is what makes git treat it as a deliberate
+          # request to add/inspect it, and `git add` then refuses (exit 1, "The
+          # following paths are ignored ... Use -f") the instant it reaches that
+          # path while walking `.`. Confirmed empirically: a bare `git add -A .`
+          # silently skips a gitignored directory; naming it via
+          # `:(exclude,glob)ci_temp/**` is what broke this step.
+          changed_paths="$(git status --porcelain -- .)"
           if [ -z "$changed_paths" ]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "No file changes produced by ai-analyse."
@@ -437,7 +477,7 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A -- . ':!ci_temp' ':!.context' ':!.smooth-ai-review-tools'
+          git add -A -- .
           # Belt-and-suspenders: re-check the cached diff after staging so a rename
           # or pathspec quirk cannot produce an empty commit.
           if [ -z "$(git diff --cached --name-only)" ]; then
@@ -463,8 +503,16 @@ jobs:
           push_ref="HEAD:${HEAD_REF}"
           echo "::add-mask::${GITHUB_TOKEN}"
           push_with_token() {
+            # A subshell keeps the selected credential out of the parent and
+            # the git argv; the trusted helper reads GH_TOKEN only when Git asks.
             local token="$1"
-            git push "https://x-access-token:${token}@github.com/${HEAD_REPO}.git" "${push_ref}"
+            (
+              unset GITHUB_TOKEN OPENCODE_ANALYSE_GH_TOKEN
+              export GH_TOKEN="$token"
+              git -c credential.helper= \
+                  -c "credential.helper=!bash ${GITHUB_WORKSPACE}/.context/trusted-ci/.github/scripts/git-credential-from-env.sh" \
+                  push "https://github.com/${HEAD_REPO}.git" "${push_ref}"
+            )
           }
           skip_push() {
             local reason="$1" message="$2"

@@ -57,6 +57,12 @@ done
 [ -d "$LANDING" ] || { echo "landing dir does not exist: $LANDING" >&2; exit 66; }
 case "$OVERWRITE" in global|none) ;; *) echo "--overwrite must be global|none" >&2; exit 64 ;; esac
 [ -z "$TEMPLATE_REF" ] || [ -n "$TEMPLATE_URL" ] || { echo "--template-ref requires --template-url" >&2; exit 64; }
+# A credential in the URL would be echoed below and land in shell history and
+# git error output; private templates authenticate via gh / a credential helper.
+if printf '%s' "$TEMPLATE_URL" | grep -Eiq '^https?://[^/@]+@'; then
+  echo "--template-url must not embed credentials; authenticate with 'gh auth login' + 'gh auth setup-git' (or a git credential helper) instead" >&2
+  exit 64
+fi
 
 # Resolve the template source: --template-url (clone) XOR --template XOR default (git toplevel).
 if [ -n "$TEMPLATE_URL" ]; then

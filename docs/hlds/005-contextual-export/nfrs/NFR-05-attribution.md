@@ -25,6 +25,7 @@ memory identity, version, and capture time. Zero uncited substantive statements.
 - **Skill-level test** — assert every composition-authored statement carries the analysis marker, that no stored claim carries it, and that every analysis statement carries a basis.
 - **Skill-level test** — a fixture whose memory has no recorded source or confidence: assert the document says so rather than presenting the claim as attributed.
 - **Skill-level test** — a fixture containing an imperative product rule: assert it appears attributed to its memory and does not appear as a directive addressed to the reader.
+- **Skill-level test** — a fixture carrying a `kind = understanding` memory: assert it is cited with memory identity, version and capture time, and that a proposed-status position within it is flagged as proposed rather than shipped (LADR-15, HLD-007 NFR-03).
 - **Skill-level test** — assert superseded and stale items carry their status marker adjacent to the citation, and that a current item never does.
 - **L0** — assert the citation form is a single fixed shape, as a rendering test.
 
@@ -37,6 +38,7 @@ memory identity, version, and capture time. Zero uncited substantive statements.
 - A claim with no recorded provenance is shown as such.
 - Attributed normative content keeps its meaning without becoming an instruction to the reader.
 - Supersession and staleness are marked at the point of use, not only in a header.
+- A `kind = understanding` item is cited to the same standard, and its proposed positions are flagged as proposed (LADR-15).
 - The document identifies itself as a generated projection, with the moment it describes, and — when focused — the focus that produced it.
 
 ## Applies To

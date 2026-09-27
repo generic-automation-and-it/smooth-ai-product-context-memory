@@ -98,6 +98,11 @@ public sealed class NpgsqlMemorySearch(SmoothAiProductContextMemoryDbContext db)
             rows = rows.Where(x => x.memory.GroupId == groupId);
         }
 
+        if (criteria.UuidFilter is { Count: > 0 } uuids)
+        {
+            rows = rows.Where(x => uuids.Contains(x.memory.Uuid));
+        }
+
         if (criteria.Repo is { } repo)
         {
             rows = rows.Where(x => x.grp.Repo == repo);

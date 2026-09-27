@@ -24,12 +24,14 @@ Specifically:
 - **L2** — seed a store where a programme-scoped memory is reachable at depth 2 from a product-scoped anchor. Assert it is absent from the bundle, that its uuid appears nowhere in the response, and that the path through it is absent rather than shortened.
 - **L2** — the same assertion on the reason text of every edge returned.
 - **L1** — assert the scope plan is pushed into the composed statement, using the hidden-dimension set rather than the excluded-dimension set. The latter is empty for every explicit dimension, so a wiring mistake there stops filtering exactly when the caller narrows — the same trap HLD-003 records for traversal.
+- **L1** — seed a store whose `kind = understanding` memory is scoped to a hidden dimension and reachable at depth 1 from a visible anchor. Assert it is absent, its uuid appears nowhere, and the path through it is dropped whole — the Understanding is a kind, not an exemption from this rule (LADR-15).
 - **L0** — assert the artefact banner is emitted and that the default output path is in the ignore set, as an exact-string test.
 - **Repository check** — the default output directory is gitignored; asserted as a literal-line test, not by inspection.
 
 ## Acceptance Criteria
 
 - A hidden memory reachable at any depth from any anchor appears in no bundle, dossier, manifest, preview, citation, finding or omission entry.
+- A hidden `kind = understanding` memory is held to the same rule; the kind confers no confidentiality exemption (LADR-15).
 - No edge reason, path, count or omission entry reveals the existence of a hidden memory — including by counting it.
 - A visible memory's relationship to a hidden one is absent, so the hidden memory cannot be inferred from what its neighbour links to.
 - An export requested without declaring a hidden dimension returns the narrowed result and never signals that something was withheld.

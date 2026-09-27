@@ -1,6 +1,6 @@
 # LADR-04: The Understanding maps onto existing memory fields; defaults, no new column
 
-**Status:** Draft
+**Status:** Accepted
 
 ## Context
 
@@ -22,9 +22,9 @@ Map the five parts onto existing fields, and add **no new column** and **no null
 
 | Understanding part | Stored field |
 |---|---|
-| **The knowledge** | `Statement` |
+| **Answer** (formerly *the knowledge*) | `Statement` |
 | **Why** | `ContentSummary` (AI TL;DR of the reasoning/failure) |
-| **Trigger** | `Description` — the situation in which the Understanding applies |
+| **Question** (formerly *trigger*) | `Description` — the question a reader has when the Understanding applies |
 | **Boundaries** | `ValidUntil` + the group's scope |
 | **Provenance** | `Sources` + `ValidFrom` + `CreatedOn` |
 
@@ -50,9 +50,19 @@ is made nullable, and no column is added.
 
 ## Consequences
 
+- **2026-09-24 amendment — vocabulary.** *Trigger* and *the knowledge* are renamed **question** and
+  **answer**, matching the `ai-understanding` file format, which made the unit an explicit
+  question/answer pair so a trigger cannot be broader than its body. Stored fields are unchanged; the
+  load renderer prints `Question:` / `Answer:` and still reads a legacy `trigger` key. See LADR-09 for
+  the file-format mapping.
+
 - No migration is required for the Understanding shape (the `kind` constant is a value, not a schema change).
 - An Understanding is rendered from the same fields as any memory, so the export path needs no new shape
   handling beyond recognising the kind.
 - Version semantics are unchanged; the current-version chain already gives the delta.
 - The `trigger`→`Description` mapping is the single judgement call; it is recorded here so it can be
   revisited if use demands a dedicated field.
+
+## Evidence (2026-09-26)
+
+L0 `ExportRendererTests.Understanding_kind_renders_with_all_five_parts`; L1 `tests/SmoothAiProductContextMemory.Application.ComponentTest/Features/UnderstandingTransferStoreTests.cs`: a restatement carrying the uuid is a version bump with exactly one current version (the existing `is_current` swap), no new column, and `kind` stays open vocabulary (an unlisted kind validates).

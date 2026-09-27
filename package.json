@@ -1,0 +1,35 @@
+{
+  "name": "@generic-automation-and-it/mimisbrunnr-skills",
+  "version": "1.0.0",
+  "description": "Mímisbrunnr persistent AI context-memory skills — the agent-facing client scripts that get/set durable context, braindump, recall-feedback tune, and transfer Understandings.",
+  "keywords": [
+    "ai-memory",
+    "context-memory",
+    "persistent-memory",
+    "agent-skills",
+    "mimisbrunnr"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "mimisbrunnr": "./npm/cli/mimisbrunnr.js",
+    "mimisbrunnr-context-memory": "./npm/cli/mimisbrunnr-context-memory.js",
+    "mimisbrunnr-understanding": "./npm/cli/mimisbrunnr-understanding.js"
+  },
+  "files": [
+    "npm/cli/",
+    ".agents/skills/mimisbrunnr-context-memory/scripts/",
+    ".agents/skills/mimisbrunnr-understanding/scripts/",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node scripts/npm-smoke.js"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  }
+}

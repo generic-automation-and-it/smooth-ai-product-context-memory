@@ -1,6 +1,6 @@
 # LADR-02: Load injects into context; import is an opt-in `--store` switch
 
-**Status:** Draft
+**Status:** Accepted
 
 ## Context
 
@@ -36,3 +36,7 @@ capture.
   safe by default.
 - Import is a deliberate act (NFR-02), so nothing reaches the store without a decision.
 - The load skill exposes the `--store` switch as the one thing that turns a read into a capture.
+
+## Evidence (2026-09-26)
+
+Skill L0 `.agents/skills/mimisbrunnr-understanding/tests/run_tests.py`: a default load creates no files and import is refused without `--store`, emitting nothing. The load client is file-only and never reaches the store; L1 `tests/SmoothAiProductContextMemory.Application.ComponentTest/Features/UnderstandingTransferStoreTests.cs` proves the store read paths a load consumes (query, export, dossier) write nothing.

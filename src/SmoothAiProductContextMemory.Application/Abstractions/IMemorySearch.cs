@@ -51,6 +51,13 @@ public sealed record MemorySearchCriteria
     /// <summary>Surrogate group key, already resolved from a ticket lookup.</summary>
     public long? GroupId { get; init; }
 
+    /// <summary>
+    /// Narrow the search to these memory identities before the row ceiling is applied. Lets a ticket
+    /// (or other pre-resolved) anchor conjunctively restrict the search in SQL rather than by filtering
+    /// an already-truncated result set in memory (HLD-005 NFR-03).
+    /// </summary>
+    public IReadOnlyList<Guid>? UuidFilter { get; init; }
+
     public string? Repo { get; init; }
 
     public string? InitiativeName { get; init; }

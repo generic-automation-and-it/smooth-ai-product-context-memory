@@ -1,6 +1,6 @@
 # NFR-02: Performance — read-path cost
 
-**Status:** Draft
+**Status:** Accepted — [evidence](./NFR-02-evidence-2026-09-20.md)
 
 ## Requirement
 

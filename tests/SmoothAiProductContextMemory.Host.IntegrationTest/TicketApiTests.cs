@@ -155,7 +155,11 @@ public sealed class TicketApiTests(HostWebAppFixture fixture) : IClassFixture<Ho
     {
         using HttpResponseMessage response = await _http.PutAsJsonAsync("/api/context/tickets/parent", new
         {
-            child, parent, expectedParent, reason = "Declared by practitioner", source = "HTTP test",
+            child,
+            parent,
+            expectedParent,
+            reason = "Declared by practitioner",
+            source = "HTTP test",
         }, Ct);
         response.StatusCode.ShouldBe(HttpStatusCode.OK, await response.Content.ReadAsStringAsync(Ct));
         return await response.Content.ReadFromJsonAsync<JsonElement>(Ct);
@@ -165,7 +169,11 @@ public sealed class TicketApiTests(HostWebAppFixture fixture) : IClassFixture<Ho
     {
         using HttpResponseMessage response = await _http.PostAsJsonAsync("/api/context/tickets/paths", new
         {
-            anchor, maxDepth = 3, scopeDimension = scope, pathLimit = 50, memoryLimit = 50,
+            anchor,
+            maxDepth = 3,
+            scopeDimension = scope,
+            pathLimit = 50,
+            memoryLimit = 50,
         }, Ct);
         response.StatusCode.ShouldBe(HttpStatusCode.OK, await response.Content.ReadAsStringAsync(Ct));
         return await response.Content.ReadFromJsonAsync<JsonElement>(Ct);

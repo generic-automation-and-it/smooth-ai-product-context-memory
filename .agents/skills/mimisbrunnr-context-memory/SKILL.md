@@ -1,19 +1,10 @@
 ---
 name: mimisbrunnr-context-memory
 description: Get and set persistent context-memory records — the sole authority on the write path to the SmoothAiProductContextMemory store. Use when you need to record a durable fact, decision, preference, or constraint for later retrieval across sessions, or when you need to recall what was previously captured about a subject, ticket, repository, or scope. Captures byproduct facts during work and writes them at an explicit end-of-task checkpoint.
-models:
-  claude: opus       # high-complexity; write path performs semantic dedup, link derivation, atomicity, summary/keyword generation
-  copilot: auto
-  codex: gpt-5.5
+effort: xhigh  # sole write path to the store every later session builds on: semantic dedup, link derivation, atomicity, summary generation
 ---
 
-# Context Memory
-
-Get and set persistent, summarised, labelled context. The skill is the **sole authority** on the write path to the
-context-memory store. It performs the semantic work
-the database cannot express as constraints.
-
-## Modes & Switches
+## Switches
 
 All switches are **OFF by default**. With no switches the skill captures silently during work and
 writes nothing until an explicit `set` at the end-of-task checkpoint.
@@ -34,6 +25,12 @@ permission to write. Treat a request for both as an error: ask which one is mean
 batch many summary, keyword, dedup and link judgements into one invocation. Delegation may raise total
 token spend because each agent establishes context; its benefit is main-context longevity and a
 structural read boundary. `--dryrun` performs the same judgement work as write but no persistence.
+
+# Context Memory
+
+Get and set persistent, summarised, labelled context. The skill is the **sole authority** on the write path to the
+context-memory store. It performs the semantic work
+the database cannot express as constraints.
 
 ## Core Posture
 
@@ -100,7 +97,9 @@ Before writing, delegate **one bounded clarification round** to `memory-write` �
    **across groups**, not within. Semantic equivalence — *"PostgreSQL is the storage engine"* vs *"we
    store in Postgres"* — is matched here, because the database's `subject_slug` unique index is an
    exact-match backstop only. A candidate with an existing subject becomes a **version bump** (same
-   subject, new claim) rather than a duplicate insert.
+   subject, new claim) rather than a duplicate insert — **but only when the match is inside this
+   group**. A `uuid` version target owned by another group is a `404` (see the `set` body below), so a
+   **cross-group** subject match becomes a **new memory in this group plus a typed link**, never a bump.
 2. **Link derivation** — propose typed links (`depends_on`, `relates_to`, `contradicts`, `supersedes`,
    `implements`) to mentally-related existing memories, each with a mandatory `reason`.
 3. **Ticket uniqueness** — confirm no candidate's ticket is already owned by another group. Send the
@@ -150,7 +149,7 @@ stale, not an alternative reading.
 |---|---|---|
 | 1 | **Preflight** | Batched exact cross-group subject/ticket backstops plus intra-batch collision detection. Array-in/array-out; writes and judges nothing. |
 | 2 | **Redact** | Detect secrets/tokens/connection strings in the captured content and scrub them **before** the blob write. Content addressing makes a blob immutable — a leaked secret cannot be edited out later, only orphaned. Redaction must precede the blob write. The record of what was scrubbed goes to the digest (digest-only; content is never logged). |
-| 3 | **Dedupe / derive links** | The cross-group subject match and link derivation, applied to the write decision from the preflight. Locate existing subjects; the same-subject/cross-group result decides version-bump vs new-memory vs skip. |
+| 3 | **Dedupe / derive links** | The cross-group subject match and link derivation, applied to the write decision from the preflight. Locate existing subjects; the result decides version-bump vs new-memory vs skip **qualified by group**: a match inside this group is a version bump, a match in another group is a new memory here plus a typed link (a foreign `uuid` target is a `404`, never a bump). |
 | 4 | **Atomicity check** | Confirm each record is one atomic fact. Split bundled candidates; route the unprocessable remainder to `skipped`. |
 | 5 | **Write** | Single transactional `set`. Version bump ordering: flip the old `is_current` to `false` *before* inserting the new current, both **in one transaction**, or a failure between them strands zero current versions. |
 
@@ -178,7 +177,7 @@ The **semantic dedup** decision is a two-call composition, never a single prefli
 
 1. **Recall inside `memory-write`** — `context_memory_client.py query` with `{"facets": [...], "kind": ..., "includeProposed": true, "currentOnly": true, "limit": 200}`. Do **not** pass the candidate description as free-text: `/query` free-text is AND-of-all-lexemes (stemmed, `english` configuration), so a natural-language candidate still defeats recall — stemming forgives inflections, not sentence structure. Raw result rows never return to the main thread.
    - **Facet/tag match is ANY by default** — a query returns rows carrying *any* of the requested facets, so a batch's facet set unifies disjoint rows (the recall union rather than an empty set). Containment (only rows carrying *every* requested facet) is opt-in via `"facetMatchMode": "all"`; do not use it for recall, it is the deliberate-narrowing form.
-2. **Judge** — compare each recalled row's cheap fields to the candidate and decide, per pair, `version_bump` (send the matched row's `uuid` in `set`) / `new_memory` / `skip`. This LLM judgement is where the semantic equivalence (e.g. *"we store in Postgres"* vs *"PostgreSQL is the storage engine"*) is resolved.
+2. **Judge** — compare each recalled row's cheap fields to the candidate and decide, per pair, `version_bump` (send the matched row's `uuid` in `set` **— only if that row is in the request's `groupUuid`; a cross-group match is `new_memory` plus a typed link, because a foreign `uuid` target is a `404`**) / `new_memory` / `skip`. This LLM judgement is where the semantic equivalence (e.g. *"we store in Postgres"* vs *"PostgreSQL is the storage engine"*) is resolved.
 3. `/preflight` contributes only the **exact-match backstop**, **intra-batch collisions**, and **ticket-uniqueness conflicts**. It judges nothing. Candidate recall for the semantic step comes from `/query`, not `/preflight`.
 
 For a rule-resolvable disagreement, invoke `authority.py` with the selected authority and winner. A
@@ -236,7 +235,9 @@ preflight is exact-match recall over the subject, so a claim body would change n
 ], "links": [], "labelsProposed": []}
 ```
 
-`uuid` non-null is the version-bump target. `createUuid` is an optional caller-selected identity for a
+`uuid` non-null is the version-bump target, and it must be owned by the request's `groupUuid` — a version
+target in another group is a `404`, so a cross-group subject match becomes a new memory in this group
+(plus a typed link, never a bump). `createUuid` is an optional caller-selected identity for a
 new memory; never supply both. The write agent supplies `createUuid` for every create so dry-run and
 write share identities and links can target any new item. Legacy clients may omit both for an unlinked
 server-identified create. `groupUuid` sits on the **request**, never on an item. `--dryrun` appends
