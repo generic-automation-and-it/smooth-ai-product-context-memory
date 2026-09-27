@@ -18,6 +18,11 @@ param(
 $ErrorActionPreference = "Stop"
 if (-not (Test-Path $Landing)) { throw "landing dir does not exist: $Landing" }
 if ($TemplateRef -and -not $TemplateUrl) { throw "-TemplateRef requires -TemplateUrl" }
+# A credential in the URL would be echoed below and land in shell history and
+# git error output; private templates authenticate via gh / a credential helper.
+if ($TemplateUrl -match '^https?://[^/@]+@') {
+  throw "-TemplateUrl must not embed credentials; authenticate with 'gh auth login' + 'gh auth setup-git' (or a git credential helper) instead"
+}
 function Test-Tool([string]$t) { return (($Tools -split ',') -contains $t) }
 
 # Resolve the template source: -TemplateUrl (clone) XOR -Template XOR default (git toplevel).
