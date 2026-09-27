@@ -284,10 +284,13 @@ public static class DossierSelection
 
     /// <summary>
     /// The limits a selection discloses, shared by the bundle and the preview (LADR-201) so the
-    /// consent artefact and the distributed bundle report the same set. Both are derivable from the
-    /// selection alone — a depth bound hit, and the fetch ceiling hit where the selection cannot know
-    /// whether more matched. The preview is blob-free by structure, so it cannot predict the
-    /// history-inflated item cut the bundle makes; that cap is disclosed by the bundle through its
+    /// consent artefact and the distributed bundle report the same set. All three are derivable from
+    /// the selection alone — a depth bound hit, a fetch-ceiling hit (where the selection cannot know
+    /// whether more matched), and a selection that filled or exceeded the stated ceiling
+    /// (<see cref="DossierAnchor.ItemLimit"/>) even when no widen/ticket limit flag was raised, so a
+    /// truncated-to-the-ceiling result is never presented as unbounded. The preview knows
+    /// <c>Selected.Count</c>, so that last one is predictable by both slices. The history-inflated
+    /// item cut the bundle makes but the preview cannot predict is disclosed by the bundle through its
     /// omitted list (per-item <see cref="DossierOmissionReason.CapReached"/>), never through a limit
     /// the preview was not shown.
     /// </summary>
@@ -301,7 +304,10 @@ public static class DossierSelection
             hits.Add(new DossierLimitHit(DossierOmissionReason.DepthReached, anchor.WidenDepth));
         }
 
-        if (selection.LimitReached)
+        // The anchor search fills the fetch ceiling without raising a widen/ticket limit flag, so
+        // LimitReached alone misses a selection that was truncated by the ceiling. Selected.Count
+        // reaching the ceiling is the conservative signal both slices can compute identically.
+        if (selection.LimitReached || selection.Selected.Count >= anchor.ItemLimit)
         {
             hits.Add(new DossierLimitHit(DossierOmissionReason.CapReached, anchor.ItemLimit));
         }
