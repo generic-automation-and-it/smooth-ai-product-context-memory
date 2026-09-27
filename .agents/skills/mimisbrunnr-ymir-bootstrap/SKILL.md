@@ -82,13 +82,16 @@ For every candidate retain:
 - source date only when the source actually provides one;
 - lifecycle and evidence class.
 
-When composing the existing writer payload, use only its supported source fields: `kind`, `reference`,
-and `capturedAt`. Encode repository-relative path, line/span, and revision or working-tree marker in
-`reference`. `capturedAt` is the known time that provenance was captured or observed; it is not the source
-document's publication date, the claim's effective business time, or the store ingestion timestamp. Omit
-it when that observation time is unknown. Preserve a dated source's stated date in the preview/reference
-and use `validFrom` only when the evidence establishes when the claim became true. Do not invent new wire
-fields to mirror the richer preview or conflate these time axes.
+When composing the existing writer payload, put provenance in the item's `sources` array, whose entries
+are `{kind, reference, capturedAt}` and carry nothing else. `reference` and `capturedAt` are members of a
+`sources` entry, not top-level item fields; the endpoint rejects an unknown property with a `400`, so
+there is no place for them at item level. Encode repository-relative path, line/span, and revision or
+working-tree marker in `reference`. `capturedAt` is the known time that provenance was captured or
+observed; it is not the source document's publication date, the claim's effective business time, or the
+store ingestion timestamp. Omit it when that observation time is unknown. Preserve a dated source's
+stated date in the preview/reference and use `validFrom` only when the evidence establishes when the
+claim became true. Do not invent new wire fields to mirror the richer preview or conflate these time
+axes.
 
 Never invent rationale, dates, deployment state, or provenance. Checked-out code is not proof that behavior
 is deployed or shipped.

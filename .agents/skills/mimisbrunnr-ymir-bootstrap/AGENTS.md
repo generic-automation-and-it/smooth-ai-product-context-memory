@@ -21,8 +21,9 @@ existing `mimisbrunnr-context-memory` contracts. It is not another store client 
   never create one solely to preview, and disclose any separately authorized group creation.
 - The preview and authorization checkpoint must preserve evidence class, lifecycle, provenance, uncertainty,
   and the writer's 20-candidate cap. Capture permission is not canonical `--approve` permission.
-- Source payloads use the existing `kind`, `reference`, and `capturedAt` contract. Keep richer provenance in
-  the review display rather than inventing wire fields.
+- Source payloads carry provenance in the item's `sources` array, whose entries are
+  `{kind, reference, capturedAt}` — members of a source entry, not top-level item fields. Keep richer
+  provenance in the review display rather than inventing wire fields.
 
 ## System Context
 
@@ -34,8 +35,8 @@ sequenceDiagram
     participant W as Protected write worker
     U->>B: Opt in and choose repository/feature scope
     B->>B: Inspect bounded sources and cite candidate preview
-    B->>R: Compare only when requested and safely available
     B-->>U: Review preview, gaps, conflicts, and lifecycle
+    B->>R: Compare only when requested and safely available
     U->>B: Authorize exact capture and any group creation
     B->>W: Run sole-authority pipeline and capture
     B->>R: Ask realistic recall question(s)
@@ -77,6 +78,7 @@ authorization are available. Static validation is packaging evidence only.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-27 | AI review fixes: provenance fields `reference`/`capturedAt` corrected to members of the item's `sources` array (`{kind, reference, capturedAt}`) rather than top-level set item fields, which the endpoint rejects with a `400` — `SetMemories.MemoryWrite` has no such properties, they arrive through `SourceInput` (`SKILL.md`, `Non-Negotiables` above). The `System Context` diagram now reviews the preview before store comparison, matching `SKILL.md` steps 2-3 and the "after the human has reviewed the offline preview" gate. Documentation only; no runtime or contract change. | AI PR review |
 | 2026-09-27 | Discovery fenced to git-visible files (`ls-files --cached --others --exclude-standard`) plus named sources; `.context/`, `.env*`, `*.env` never opened, because the provisioned token file sits in the working tree. Credential wording corrected: the skill does not use the tokens, but a sourced env file exports them into the main agent's environment, so no-direct-HTTP is an instruction, not an environment guarantee. | PR #130 credential provisioning |
 | 2026-09-27 | Renamed `mimisbrunnr-bootstrap` → `mimisbrunnr-ymir-bootstrap` (folder, `name:`, slash command, every inventory and link), following the brand + Norse name + action pattern of `mimisbrunnr-vitsmunir-dump`. Ymir: the first being, from whose body the world was shaped — a baseline built from the repository that already exists. No behavioural change. | PR #91 |
 | 2026-09-27 | Aligned with main's skill conventions after sync: `metadata.models` replaced by `effort: xhigh` (shared frontmatter shape, no model); static check now enforces that shape plus a gitleaks scan instead of an external validator that rejects `effort`; secret-handling checklist applied — no env var read, workers alone hold the store tokens, credential-bearing evidence URLs refused, evidence secrets redacted to `<REDACTED>` in the preview. | skill effort migration; skill secret-handling rule |
