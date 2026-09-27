@@ -51,6 +51,13 @@ public sealed class ObservabilityWebAppFixture : WebAppFixture<HostApp::Program>
         return Task.CompletedTask;
     }
 
+    protected override async ValueTask DisposeCleanupAsync()
+    {
+        string maintenance = Aspire.CreateDatabaseConnectionString("postgres");
+        await PostgreSqlDatabaseManager.DropDatabaseIfExistsAsync(maintenance, _databaseName);
+        await TestBucketCleanup.DeleteBlobBucketAsync(Aspire.BlobEndpoint, AspireFixture.BlobAccessKey, AspireFixture.BlobSecretKey, _bucket);
+    }
+
     protected override void ConfigureTestServices(IServiceCollection services)
     {
         services.AddSingleton<ILoggerProvider>(Logs);

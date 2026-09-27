@@ -45,4 +45,11 @@ public sealed class HostWebAppFixture : WebAppFixture<HostApp::Program>
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", WriteToken);
         return Task.CompletedTask;
     }
+
+    protected override async ValueTask DisposeCleanupAsync()
+    {
+        string maintenance = Aspire.CreateDatabaseConnectionString("postgres");
+        await PostgreSqlDatabaseManager.DropDatabaseIfExistsAsync(maintenance, _databaseName);
+        await TestBucketCleanup.DeleteBlobBucketAsync(Aspire.BlobEndpoint, AspireFixture.BlobAccessKey, AspireFixture.BlobSecretKey, _bucket);
+    }
 }

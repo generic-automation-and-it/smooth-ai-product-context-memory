@@ -93,6 +93,14 @@ public abstract class WebAppFixture<TProgram> : IAsyncLifetime
     /// <summary>Override to run post-boot setup (e.g. trigger a sync cycle before tests run).</summary>
     protected virtual Task PostInitializeAsync() => Task.CompletedTask;
 
+    /// <summary>
+    /// Override to tear down per-test resources (isolated database, scratch bucket) that the
+    /// application created but that live outside the web host. Called after the host factory is
+    /// disposed (so the app's connections are gone) and before the shared Aspire fixture is disposed.
+    /// Default is a no-op.
+    /// </summary>
+    protected virtual ValueTask DisposeCleanupAsync() => ValueTask.CompletedTask;
+
     public async ValueTask DisposeAsync()
     {
         HttpClient?.Dispose();
@@ -103,6 +111,7 @@ public abstract class WebAppFixture<TProgram> : IAsyncLifetime
             await _factory.DisposeAsync();
         }
 
+        await DisposeCleanupAsync();
         await _aspire.DisposeAsync();
     }
 }
