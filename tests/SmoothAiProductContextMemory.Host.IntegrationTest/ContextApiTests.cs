@@ -493,6 +493,38 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
     }
 
     [Fact]
+    public async Task As_of_query_after_version_bump_returns_one_row_per_memory()
+    {
+        // A version bump without an explicit validUntil leaves the superseded version open; an as-of
+        // query must still report the memory once (the live-at-asOf version), never duplicate it.
+        Guid group = await ResolveGroup(MemoryGroup.ScopeDimensionValue.Product);
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+
+        JsonElement first = await SetMemory(
+            group,
+            "Bumped fact",
+            "Claim v1",
+            MemoryVersion.MemoryVersionStatus.Approved);
+        Guid uuid = first.GetProperty("items")[0].GetProperty("uuid").GetGuid();
+        await SetMemory(
+            group,
+            "Bumped fact",
+            "Claim v2",
+            MemoryVersion.MemoryVersionStatus.Approved,
+            uuid: uuid);
+
+        using HttpResponseMessage asOf = await _http.PostAsJsonAsync(
+            "/api/context/query",
+            new { groupUuid = group, asOf = now, limit = 200 },
+            Ct);
+        asOf.StatusCode.ShouldBe(HttpStatusCode.OK);
+        JsonElement items = (await asOf.Content.ReadFromJsonAsync<JsonElement>(Json, Ct)).GetProperty("items");
+        items.EnumerateArray()
+            .Where(i => i.GetProperty("uuid").GetGuid() == uuid)
+            .ShouldHaveSingleItem();
+    }
+
+    [Fact]
     public async Task Self_link_returns_400()
     {
         Guid group = await ResolveGroup(MemoryGroup.ScopeDimensionValue.Product);

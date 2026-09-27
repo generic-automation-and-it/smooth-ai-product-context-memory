@@ -548,14 +548,24 @@ public static class SetMemories
             Guid uuid = item.Uuid!.Value;
             MemoryVersion current = currentVersions.GetValueOrDefault(uuid) ?? item.CurrentVersion!;
 
+            MemoryVersion next = BuildVersion(item.NextVersion!.Value, item.Write, blobAddress);
+            next.MemoryId = item.MemoryId!.Value;
+
+            // The superseded version's validity window closes where the new one begins, so an as-of
+            // query returns exactly one version per memory. Without this, two versions hold overlapping
+            // open windows and a past-asOf query returns the memory twice. Close only when it narrows
+            // (or the old window is open) — never extend a finite window past its declared end.
+            if (current.ValidUntil is null || current.ValidUntil > next.ValidFrom)
+            {
+                current.ValidUntil = next.ValidFrom;
+            }
+
             // Ordered, not merely atomic: the partial unique index forbids two currents, so the flip
             // must reach the database before the new current is inserted. Nothing forbids zero
             // currents, which is why both statements sit inside the caller's transaction.
             current.IsCurrent = false;
             await errorMapper.SaveOrMapAsync(() => db.SaveChangesAsync(cancellationToken));
 
-            MemoryVersion next = BuildVersion(item.NextVersion!.Value, item.Write, blobAddress);
-            next.MemoryId = item.MemoryId!.Value;
             db.MemoryVersions.Add(next);
             currentVersions[uuid] = next;
 
