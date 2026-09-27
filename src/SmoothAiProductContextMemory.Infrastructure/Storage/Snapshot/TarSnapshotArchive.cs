@@ -29,9 +29,11 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
         string directory = Path.GetDirectoryName(Path.GetFullPath(destinationPath)) ?? Directory.GetCurrentDirectory();
         Directory.CreateDirectory(directory);
 
-        // Write to a temp path then atomically move, so a failure mid-write leaves no truncated
-        // archive at the final destination (H12). Overwrite guard: the final path is only replaced
-        // on a successful, complete write.
+        // Write to a temp path and move it into place only on success, so a failure mid-write leaves
+        // no truncated archive at the destination (H12). The move is an atomic *replace*, not a
+        // refusal to overwrite: an existing archive at the destination is superseded only by a
+        // complete write. Refusing a non-empty destination is a different guarantee, and the
+        // Markdown export sink is where that one lives.
         string tempPath = destinationPath + ".tmp";
         SnapshotWriteReport report;
         await using (FileStream stream = File.Create(tempPath))
@@ -126,15 +128,6 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
             manifest,
             names,
             capture,
-            name =>
-            {
-                if (!entries.TryGetValue(name, out byte[]? content))
-                {
-                    throw new KeyNotFoundException($"Archive entry not found: {name}");
-                }
-
-                return Task.FromResult(content);
-            },
             address => entries.ContainsKey(BlobEntryName(address)),
             address => entries[BlobEntryName(address)]));
     }
@@ -309,12 +302,6 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
         entries.TryGetValue(name, out byte[]? content)
             ? content
             : throw new InvalidDataException($"Archive is missing required entry: {name}");
-
-    public Task<byte[]> ReadBlobAsync(string archivePath, string address, CancellationToken cancellationToken)
-    {
-        (var entries, _) = ReadEntries(archivePath);
-        return Task.FromResult(Require(entries, BlobEntryName(address)));
-    }
 
     private static void ReconcileCounts(
         SnapshotManifest manifest,

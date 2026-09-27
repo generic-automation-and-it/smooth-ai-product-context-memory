@@ -210,6 +210,31 @@ docker run --rm \
 `restore` writes bodies first, then rebuilds the database and reads every count back before committing — any mismatch rolls the database back and the reconciliation prints `committed no — rolled back` with exit 1. The target database must already be migrated. `verify` writes nothing and touches nothing but the archive; `restore` refuses a non-empty target
 unless `--force` is passed. `snapshot` and `restore` are read-only against / rebuild the stores.
 
+### Exit codes
+
+| Verb | 0 | 1 | 2 |
+|---|---|---|---|
+| `verify` | clean | findings present | — |
+| `restore` | reconciliation closes | reconciliation failed, or an operational failure (database unreachable, target not migrated) | **archive integrity failure** — the archive failed offline verification and nothing was mutated |
+
+`restore` exits **2** specifically so a script can tell a bad archive from an unreachable database.
+Both codes mean the target was not committed, but only 2 is worth retrying after replacing the
+archive. On a 2, the per-finding detail (kind, member name, message) is printed before the summary,
+so the reason does not have to be recovered by re-running `verify`.
+
+### Archive format version: v1 archives are refused
+
+The archive format is versioned and the version is recorded in the manifest. `SnapshotFormat.Version`
+moved **1 → 2** when the manifest gained the dangling-reference and mismatched-body counts, because
+those counts carry refusal semantics: a v1 archive recording a body it could not resolve would
+deserialise them as zero and then verify *clean* before failing to restore. The gate now refuses a v1
+archive outright rather than misreading it.
+
+**If you hold a v1 archive, re-capture it from the live store before deploying this build.** A v1
+archive is not restorable by a current build, and there is no conversion path. To find out what you
+hold, run `verify` against it with the *old* build — a v1 archive verifies clean there by
+construction, which is exactly why the version gate exists.
+
 ## Run `preflight`/`snapshot` against the running API
 
 The HLD-006 `snapshot` and `snapshot/preflight` HTTP endpoints run on the API, accepted-then-poll:
