@@ -67,7 +67,15 @@ public static class CreateDossierBundle
             if (selection.Selected.Count == 0)
             {
                 logger.LogInformation("Context dossier bundle completed. No match.");
-                DossierManifest emptyManifest = BuildManifest(anchor, selection, selectedCount: 0, limitsHit: []);
+                // A zero-match selection can still be truncated — a supplied ticket that hit a depth /
+                // path / memory cap yields nothing — so disclose it through the same conversion the
+                // preview uses rather than hard-coding an empty list: a truncated-empty result is not
+                // a complete-empty one.
+                DossierManifest emptyManifest = BuildManifest(
+                    anchor,
+                    selection,
+                    selectedCount: 0,
+                    BuildLimitsHit(selection, 0, 0, anchor, capReached: false));
                 return new Response(new DossierBundle([], [], [], emptyManifest with { NoMatch = true }));
             }
 

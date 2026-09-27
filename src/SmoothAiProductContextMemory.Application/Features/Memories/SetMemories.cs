@@ -201,8 +201,9 @@ public static class SetMemories
 
             // The plan resolves every write against stored state in one pass. The per-item checks below
             // are mere set lookups; the stored state they consult is fetched here in four batched
-            // queries instead of once per item, which keeps a 200-item write at four round-trips
-            // instead of up to ~800.
+            // queries instead of once per item. That is a lookup count, not a round-trip count: the
+            // per-item blob store, the per-versioned-item save and the per-link existence check plus
+            // create all remain linear in batch size.
             Guid[] targetUuids = request.Items
                 .Where(i => i.Uuid is not null)
                 .Select(i => i.Uuid!.Value)

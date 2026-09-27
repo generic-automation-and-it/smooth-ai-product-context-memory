@@ -985,10 +985,23 @@ def read_bundle(path_or_url):
 
 
 def _assert_loopback(base):
-    """N1: the read token is a capability for the whole corpus; send it only to loopback."""
+    """N1: the read token is a capability for the whole corpus; send it only to loopback.
+
+    The whole first condition of the sibling client's `base_url()` guard, not just the host check:
+    a base carrying credentials, a path, a query or a fragment is not an origin, and accepting one
+    turns a typo into a 404 from a doubled path instead of an actionable refusal.
+    """
     parsed = urlparse(base)
-    if parsed.scheme not in ("http", "https") or parsed.hostname not in ("localhost", "127.0.0.1", "::1"):
-        raise ValueError("Context-memory API origin must be loopback (localhost/127.0.0.1/::1)")
+    if (parsed.scheme not in ("http", "https")
+            or parsed.hostname not in ("localhost", "127.0.0.1", "::1")
+            or parsed.username
+            or parsed.password
+            or parsed.path not in ("", "/")
+            or parsed.query
+            or parsed.fragment):
+        raise ValueError(
+            "Context-memory API base must be a bare http(s) loopback origin, "
+            "e.g. http://localhost:5141 (localhost/127.0.0.1/::1)")
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -1004,7 +1017,9 @@ def fetch_bundle_from_api(base_url, body):
     Reads the base URL and read token from the environment (skill-secret-handling): the token value
     never appears in a committed file. Makes no write and never calls a write endpoint (NFR-06).
     """
-    base = base_url or os.environ.get("CONTEXT_MEMORY_BASE_URL", "http://localhost:5141").rstrip("/")
+    # Normalise both the --base-url override and the environment default, so a trailing slash cannot
+    # double the path separator below.
+    base = (base_url or os.environ.get("CONTEXT_MEMORY_BASE_URL", "http://localhost:5141")).rstrip("/")
     _assert_loopback(base)
     token = os.environ.get("CONTEXT_MEMORY_READ_TOKEN")
     req = urllib.request.Request(

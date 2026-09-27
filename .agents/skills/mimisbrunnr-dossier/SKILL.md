@@ -106,7 +106,8 @@ and its memories by identity + version (LADR-13). Findings are focus-invariant i
 The bundle is requested from the Host API. The base URL is read from `CONTEXT_MEMORY_BASE_URL`
 (default `http://localhost:5141`) and the read token from `CONTEXT_MEMORY_READ_TOKEN`, both by a
 script — the token value never appears in a committed file (skill-secret-handling). `--base-url`
-overrides for a one-off.
+overrides for a one-off. The base must be a bare http(s) loopback origin (`localhost`, `127.0.0.1`
+or `::1`) — userinfo, a path, a query or a fragment is refused, and a trailing slash is ignored.
 
 ## Scripts
 
@@ -116,7 +117,7 @@ overrides for a one-off.
 
 ## Test
 
-Committed harness: `python3 -B .agents/skills/mimisbrunnr-dossier/tests/run_tests.py` (34 tests).
+Committed harness: `python3 -B .agents/skills/mimisbrunnr-dossier/tests/run_tests.py` (39 tests).
 
 ## Related
 

@@ -236,7 +236,9 @@ preflight is exact-match recall over the subject, so a claim body would change n
 ], "links": [], "labelsProposed": []}
 ```
 
-`uuid` non-null is the version-bump target. `createUuid` is an optional caller-selected identity for a
+`uuid` non-null is the version-bump target, and it must be owned by the request's `groupUuid` — a version
+target in another group is a `404`, so a cross-group subject match becomes a new memory in this group
+(plus a typed link, never a bump). `createUuid` is an optional caller-selected identity for a
 new memory; never supply both. The write agent supplies `createUuid` for every create so dry-run and
 write share identities and links can target any new item. Legacy clients may omit both for an unlinked
 server-identified create. `groupUuid` sits on the **request**, never on an item. `--dryrun` appends
