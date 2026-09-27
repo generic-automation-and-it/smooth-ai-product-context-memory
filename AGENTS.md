@@ -46,6 +46,7 @@ Rules live under `.agents/rules/` as `*.instructions.md`, auto-loaded every sess
 ```bash
 dotnet build SmoothAiProductContextMemory.slnx                     # build
 dotnet test  SmoothAiProductContextMemory.slnx                     # run all tests
+scripts/provision-credentials.sh                                  # one-command credential provisioner (required by every run mode; writes .context/mimisbrunnr.env)
 dotnet run --project src/SmoothAiProductContextMemory.AppHost      # Aspire: Host from working tree + postgres/blob/seq (group smooth-mímisbrunnr)
 HostConfiguration__UseProject=false \
   dotnet run --project src/SmoothAiProductContextMemory.AppHost    # same stack, pull published Host image (tag may lag)
@@ -76,7 +77,7 @@ Target a single test project (`dotnet test tests/<Project>`) or `ls tests/` to l
 
 ## Test Framework
 
-xunit.v3 · Shouldly · Bogus · Respawn. Three tiers (drives where a test belongs):
+xunit.v3 · Shouldly · Respawn. Three tiers (drives where a test belongs):
 
 - **L0** `*.UnitTest` — no I/O, in-process.
 - **L1** component — `Application.ComponentTest` (handlers vs real Postgres via Aspire); `Infrastructure.ComponentTest` (real isolated DB).
@@ -111,6 +112,7 @@ Hosted on **GitHub** at `https://github.com/generic-automation-and-it/smooth-ai-
 
 | Date | Change | Ref |
 |---|---|---|
+| 2026-09-27 | Corrected three stale documentation surfaces left by the credential/test-harness cleanup: the `## Build / Test` catalogue now lists `scripts/provision-credentials.sh` (required by every run mode — the Host authorizer throws at startup without it), both testing inventories dropped `Bogus` after confirming no test `csproj` still references it, and the README structure tree now names the Aspire test dependency host as PostgreSQL/AGE + MinIO blob instead of the removed WireMock container. | batch3 review |
 | 2026-09-27 | Batch 3 delivery: a `scripts/provision-credentials.sh` one-command credential provisioner (writes both server `ApiAccess__*` and skill `CONTEXT_MEMORY_*` token name forms to a gitignored mode-600 env file), the `recall-feedback` skill's `$BASE` → `$CONTEXT_MEMORY_BASE_URL` repair plus loopback smoke check, the Host authorization/OpenAPI route inventories extended to all 24 mapped routes with direct `ApiAccessAuthorizer` unit tests and an unmatched-route default-deny assertion, test-harness cleanup (dropped the unused Redis/WireMock containers and placeholder test, per-test DB+bucket teardown, removed the unused `Bogus` package), and three documentation surfaces — a README `## API credentials` must-do above `## Getting Started`, the new `docs/wiki/setup.md` credential page (with the accepted-states decisions recorded), and `docs/wiki/docker.md` `--env-file` + skill-name mapping. | batch3 |
 | 2026-09-27 | Review and analyse workflows now accept the standard `OPENROUTER_API_KEY` secret as an alias for `OPENCODE_OPENROUTER_API_KEY`, preserving the namespaced secret's precedence and the runtime variable expected by the OpenRouter config. This mirrors the normalization shipped in upstream `smooth-ai-report-review` PR #173; the retired `.conductor` kit is not restored. | upstream PR #173 |
 | 2026-09-27 | Hardened AI review and auto-fix credential handling: non-persisted checkouts, guarded OpenCode model env and file permissions, trusted auto-fix tooling, hook-proof Git operations, and a one-shot push credential helper preserving PAT-first fallback. | template PR #85 security follow-up |

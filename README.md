@@ -168,7 +168,7 @@ Built on the **smooth-devex-template** AI DevEx scaffold — a ready-to-use AI a
 | Validation | FluentValidation in a fail-fast Mediator pipeline |
 | Persistence | EF Core + PostgreSQL (`Npgsql.EntityFrameworkCore.PostgreSQL`) |
 | Observability | Serilog + OpenTelemetry, Scalar OpenAPI UI |
-| Testing | xunit.v3 · Shouldly · Bogus · Respawn |
+| Testing | xunit.v3 · Shouldly · Respawn |
 
 ---
 
@@ -299,7 +299,7 @@ tests/
   SmoothAiProductContextMemory.*.ComponentTest/     # L1 — in-memory EF Core / real isolated DB + Respawn
   SmoothAiProductContextMemory.*.IntegrationTest/   # L2 — full stack, real PostgreSQL
   SmoothAiProductContextMemory.TestFramework/       # Shared fixtures
-  SmoothAiProductContextMemory.TestFramework.Aspire/# Aspire dependency host (PostgreSQL + WireMock)
+  SmoothAiProductContextMemory.TestFramework.Aspire/ # Aspire dependency host (PostgreSQL/AGE + MinIO blob)
 ```
 
 ---
