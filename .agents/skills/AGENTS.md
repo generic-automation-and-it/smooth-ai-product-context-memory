@@ -30,6 +30,7 @@ First-party AI agent skills. They legitimately run shell, `gh`/`git`, and templa
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-27 | `mimisbrunnr-ymir-bootstrap` added at `effort: xhigh` in `README.md` → Effort. The Naming & Ordering table gained the two skills it was missing (`ai-understanding`, `mimisbrunnr-dossier`), and the Quick Reference bootstrap row dropped its one-off link to match its siblings. | skill effort migration |
 | 2026-09-27 | Synced template PR #85's secret-handling checklist, marked the removed SkillSpector gate historical, and documented the local runtime-token consumers. | template PR #85 |
 | 2026-06-21 | Initial version — documents the SkillSpector baseline gate contract and the secret-handling guardrail for skills. | #52 |
 | 2026-06-21 | LADR-001: gate on the deterministic static scan; LLM semantic stage runs as a non-blocking advisory (policy A). Resolves the static-vs-LLM baseline mismatch that failed the gate on run 27907080342. | #52 |

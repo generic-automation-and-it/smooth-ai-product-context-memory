@@ -59,7 +59,7 @@ Run this when **authoring or reviewing** a skill that touches a secret or launch
 
 ## Current Status
 
-**Several local skills handle runtime tokens:** `mimisbrunnr-context-memory` (read/write API tokens), `mimisbrunnr-dossier` (read token), and their supporting MCP/client processes. `ai-template-sync` reads no secret but refuses a `--template-url` with embedded credentials. This repository does not include the template's `ai-asset-sync` skill or SkillSpector gate. The model-process checklist applies whenever a skill launches a tool-using model; it is not a claim that these clients do so.
+**Several local skills handle runtime tokens:** `mimisbrunnr-context-memory` (read/write API tokens), `mimisbrunnr-dossier` (read token), and their supporting MCP/client processes. `ai-template-sync` reads no secret but refuses a `--template-url` with embedded credentials. `mimisbrunnr-ymir-bootstrap` reads no secret either: store access is delegated to the context-memory workers, it refuses credential-bearing evidence URLs, and it redacts secrets met in evidence to `<REDACTED>` in its preview. This repository does not include the template's `ai-asset-sync` skill or SkillSpector gate. The model-process checklist applies whenever a skill launches a tool-using model; it is not a claim that these clients do so.
 
 ## Changelog
 
@@ -67,6 +67,7 @@ Run this when **authoring or reviewing** a skill that touches a secret or launch
 
 | Date | Change |
 |:-----|:-------|
+| 2026-09-27 | Current Status names `mimisbrunnr-ymir-bootstrap` as a no-secret skill that delegates store access and refuses credential-bearing evidence URLs. |
 | 2026-09-27 | Named the tested one-shot Git helper for exact-token pushes after a local `gh auth git-credential` precedence probe. |
 | 2026-09-27 | Synced the template PR #85 checklist into the `skills/` category and adapted examples, status, and scan instructions to this repository's actual token consumers and tooling. |
 | 2026-08-29 | Dropped the SkillSpector workflow example after that workflow was removed. |
