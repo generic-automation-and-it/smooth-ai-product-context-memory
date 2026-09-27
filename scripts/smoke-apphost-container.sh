@@ -150,14 +150,44 @@ cleanup() {
 }
 trap cleanup EXIT
 
+last_health_status=""
+last_health_body=""
+
+# Probe the API health endpoint without --fail so a non-200 is distinguishable from a refused
+# connection (000). Captures the status and body for the diagnostics dump, so a 404, a 500 and a
+# refused connection are no longer reported identically.
+probe_health() {
+  local tmp_body
+  tmp_body="$(mktemp)"
+  last_health_status="$(curl -s -o "$tmp_body" -w '%{http_code}' "http://$engine_bind_address:$api_port/health" 2>/dev/null || true)"
+  last_health_body="$(head -c 2000 "$tmp_body" 2>/dev/null || true)"
+  rm -f "$tmp_body"
+  [ "$last_health_status" = "200" ]
+}
+
+dump_health_diagnostics() {
+  local reason="$1"
+  echo "=== smoke health diagnostics: $reason ===" >&2
+  echo "--- last health HTTP status: ${last_health_status:-none} ---" >&2
+  if [ -n "${last_health_body:-}" ]; then
+    echo "--- last health HTTP body ---" >&2
+    echo "$last_health_body" >&2
+  fi
+  echo "--- controller (${controller_name}) log, tail 80 ---" >&2
+  engine logs --tail 80 "$controller_name" >&2 2>&1 || true
+  echo "--- API container (mimisbrunnr-${installation_id}-host) log, tail 80 ---" >&2
+  engine logs --tail 80 "mimisbrunnr-${installation_id}-host" >&2 2>&1 || true
+}
+
 wait_for_health() {
   for _ in $(seq 1 120); do
-    if curl --fail --silent "http://$engine_bind_address:$api_port/health" >/dev/null 2>&1; then
+    if probe_health; then
       return
     fi
 
     if [ "$(engine inspect --format '{{.State.Running}}' "$controller_name" 2>/dev/null || true)" != true ]; then
       echo "controller exited before the API became healthy" >&2
+      dump_health_diagnostics "controller exited"
       return 1
     fi
 
@@ -165,6 +195,7 @@ wait_for_health() {
   done
 
   echo "API did not become healthy within 120 seconds" >&2
+  dump_health_diagnostics "health timeout"
   return 1
 }
 
@@ -176,7 +207,7 @@ wait_for_reconciled_health() {
     current_host_id="$(engine inspect --format '{{.Id}}' "$host_name" 2>/dev/null || true)"
     if [ -n "$current_host_id" ] &&
       [ "$current_host_id" != "$previous_host_id" ] &&
-      curl --fail --silent "http://$engine_bind_address:$api_port/health" >/dev/null 2>&1; then
+      probe_health; then
       return
     fi
 
@@ -184,6 +215,7 @@ wait_for_reconciled_health() {
   done
 
   echo "reconciled API did not become healthy within 120 seconds" >&2
+  dump_health_diagnostics "reconciled health timeout"
   return 1
 }
 
