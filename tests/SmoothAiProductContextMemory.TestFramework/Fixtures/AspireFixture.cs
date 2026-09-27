@@ -34,9 +34,20 @@ public sealed class AspireFixture : IAsyncLifetime
     private string? _postgresBaseConnectionString;
     private ITestOutputHelper? _output;
 
+    /// <summary>
+    /// xUnit v3 does not inject <see cref="ITestOutputHelper"/> into a collection fixture, so the
+    /// fixture cannot receive it by construction. A consumer may still override via
+    /// <see cref="SetOutput"/>; otherwise <see cref="Output"/> and <see cref="Log"/> fall back to the
+    /// live <c>TestContext.Current.TestOutputHelper</c>, which is populated for the running test — so
+    /// the cleanup report callbacks and fixture log lines are never silently discarded.
+    /// </summary>
+    public AspireFixture()
+    {
+    }
+
     public void SetOutput(ITestOutputHelper? output) => _output = output;
 
-    public ITestOutputHelper? Output => _output;
+    public ITestOutputHelper? Output => _output ?? TestContext.Current?.TestOutputHelper;
 
     public string BlobEndpoint { get; private set; } = string.Empty;
 
@@ -405,7 +416,7 @@ public sealed class AspireFixture : IAsyncLifetime
     {
         try
         {
-            _output?.WriteLine($"[AspireFixture {DateTime.UtcNow:HH:mm:ss.fff}] {message}");
+            Output?.WriteLine($"[AspireFixture {DateTime.UtcNow:HH:mm:ss.fff}] {message}");
         }
         catch (InvalidOperationException)
         {
