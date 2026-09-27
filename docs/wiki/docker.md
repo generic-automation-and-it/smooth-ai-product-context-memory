@@ -88,6 +88,14 @@ build args, never baked into layers.
 | `ApiAccess__ReadToken` | Bearer token accepted by read-only context routes. Must differ from write token. |
 | `ApiAccess__WriteToken` | Bearer token accepted by all context routes. |
 
+The `ApiAccess__*` names are what the server reads. The host-side skills read the **same two values**
+under `CONTEXT_MEMORY_READ_TOKEN` / `CONTEXT_MEMORY_WRITE_TOKEN`, plus `CONTEXT_MEMORY_BASE_URL`
+(default `http://localhost:5141`) — see [setup.md](setup.md) for the mapping and the one-command
+provisioner that writes all of them to one file. `scripts/provision-credentials.sh` writes
+`.context/mimisbrunnr.env` with both name forms; the container reads the `ApiAccess__*` names from that
+file via `--env-file`, and the skills `source` the same file. `.context/` is bind-mounted into the
+Host container, so one file is the single source of truth.
+
 Owned skill client intentionally accepts loopback API origins only. Non-loopback deployments need a
 separately reviewed trusted-origin configuration; agent-controlled arbitrary HTTPS origins are rejected
 to prevent Bearer-token exfiltration.
@@ -145,10 +153,15 @@ docker run --rm \
   -e BlobStorage__AccessKey='smooth-local' \
   -e BlobStorage__SecretKey='LocalMachineAccessNoInterestingDataDev#Passw0rd!FirewallNotExposed' \
   -e BlobStorage__Bucket='smooth-mimisbrunnr-memory-well' \
-  -e ApiAccess__ReadToken='replace-with-a-random-read-token' \
-  -e ApiAccess__WriteToken='replace-with-a-different-random-write-token' \
+  --env-file .context/mimisbrunnr.env \
   smooth-ai-product-context-memory:local
 ```
+
+The two `ApiAccess__*` tokens come from `--env-file .context/mimisbrunnr.env` (written by
+`scripts/provision-credentials.sh`), not inline `-e` — an inline `-e` value lands the secret in shell
+history and in any command that gets copied or pasted. The inline form shown above is the **variable
+inventory** for everything that is deployment-specific (connection string, blob endpoint/keys/bucket);
+the tokens are deliberately not inlined.
 
 Probe: `http://localhost:5141/openapi/v1.json` (there is no in-image healthcheck).
 "Container running" is not "service working" — migrations need a reachable database.
@@ -289,7 +302,10 @@ HostConfiguration__Image=smooth-ai-product-context-memory:local \
 The container path injects `ConnectionStrings__SmoothAiProductContextMemory`
 (the key `AddInfrastructure` reads), plus `ApiAccess__ReadToken` and
 `ApiAccess__WriteToken` from secret Aspire parameters. That override is container-only. For source
-mode, set `Parameters:api-read-token` and `Parameters:api-write-token` with AppHost user secrets.
+mode, set `Parameters:api-read-token` and `Parameters:api-write-token` with AppHost user secrets, or
+run `scripts/provision-credentials.sh` and `source .context/mimisbrunnr.env` so the skills pick up the
+same values — the tokens are required in **every** run mode, not just the container path. See
+[setup.md](setup.md).
 
 ## Stop and reset the AppHost stack
 

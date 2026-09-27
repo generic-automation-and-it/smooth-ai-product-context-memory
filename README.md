@@ -168,6 +168,34 @@ Built on the **smooth-devex-template** AI DevEx scaffold — a ready-to-use AI a
 
 ---
 
+## Security
+
+The API requires two **distinct** Bearer tokens — one read, one write — in **every** run mode, and
+there is **no default**: if either is blank or the two match, the process exits at startup. Set them
+before running anything. The two tokens are the same values the host-side skills read under different
+names; the one-command provisioner writes both name forms to one gitignored file.
+
+```bash
+scripts/provision-credentials.sh           # writes .context/mimisbrunnr.env (both token name forms, mode 600)
+set -a && source .context/mimisbrunnr.env && set +a
+```
+
+To run the API on its own (without the provisioner), generate the values rather than inventing them
+(`openssl rand -hex 32`, twice) and pass them under the server-side names — they must differ:
+
+```bash
+ApiAccess__ReadToken='some-random-read-token' \
+ApiAccess__WriteToken='a-different-random-write-token' \
+  dotnet run --project src/SmoothAiProductContextMemory.Host
+```
+
+The skills read the **same two values** as `CONTEXT_MEMORY_READ_TOKEN`, `CONTEXT_MEMORY_WRITE_TOKEN`
+and `CONTEXT_MEMORY_BASE_URL` (default `http://localhost:5141`). See
+[docs/wiki/setup.md](docs/wiki/setup.md) for the full credential model, the name mapping and the
+regeneration procedure — rotation invalidates no data, because the tokens are never written to the store.
+
+---
+
 ## Getting Started
 
 ### Prerequisites
@@ -285,6 +313,7 @@ tests/
 | Testing strategy | [`docs/wiki/testing.md`](docs/wiki/testing.md) |
 | CI/CD pipeline | [`docs/wiki/ci.md`](docs/wiki/ci.md) |
 | Container images & durability (`snapshot`/`verify`/`restore`) | [`docs/wiki/docker.md`](docs/wiki/docker.md) |
+| Setup & credentials (tokens, name mapping, provisioning) | [`docs/wiki/setup.md`](docs/wiki/setup.md) |
 | Architecture decisions & NFRs | [`docs/hlds/`](docs/hlds/) |
 
 ---
