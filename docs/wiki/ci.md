@@ -144,6 +144,10 @@ OPENCODE_ANALYSE_PROVIDER is unset"*. Set both, or auto-fix stops running. Note 
 `OPENCODE_REVIEW_REPORT_CONFIG`, so its fallback chain — which still resolves to the review provider — reaches the
 **public** `api.anthropic.com` carrying the placeholder key and fails on auth; only its primary target is live.
 
+When an OpenRouter provider is selected, the workflows pass the secret through as
+`OPENCODE_OPENROUTER_API_KEY`. They accept either that namespaced secret or the standard
+`OPENROUTER_API_KEY` name; when both are configured, the namespaced secret wins.
+
 ### Fallback literals when the Variables are unset
 
 Every **Variable** row in the table above has a hardcoded fallback in the workflow YAML for the run where it is not
