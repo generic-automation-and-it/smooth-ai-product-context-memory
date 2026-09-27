@@ -12,10 +12,11 @@ internal static class AgtypeArrayReader
 {
     /// <summary>
     /// Reads a scalar agtype string rendered via <c>::text</c> and unquotes it. AGE renders a string
-    /// value as a quoted JSON literal, so a scalar that is not itself a string reads back quoted; the
-    /// surrounding quotes are stripped by deserialising the quoted span. A quote-led scalar with no
-    /// interior quote (a raw string literal arising from a non-quoted column) is returned as-is; one
-    /// that is quote-led with an interior quote but is not valid JSON raises <c>JsonException</c>.
+    /// value as a quoted JSON literal, so a scalar that is not itself a string reads back unquoted and
+    /// is returned as-is, while a string value's surrounding quotes are stripped by deserialising the
+    /// quoted span. A quote-led scalar with no interior quote (a raw string literal arising from a
+    /// non-quoted column) is returned as-is; one that is quote-led with an interior quote but is not
+    /// valid JSON raises <c>JsonException</c>.
     /// </summary>
     internal static string ReadScalar(string raw)
     {

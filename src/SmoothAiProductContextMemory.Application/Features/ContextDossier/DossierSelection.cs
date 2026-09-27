@@ -284,7 +284,7 @@ public static class DossierSelection
 
     /// <summary>
     /// The limits a selection discloses, shared by the bundle and the preview (LADR-201) so the
-    /// consent artefact and the distributed bundle report the same set. All three are derivable from
+    /// consent artefact and the distributed bundle report the same set. All of them are derivable from
     /// the selection alone — a depth bound hit, a fetch-ceiling hit (where the selection cannot know
     /// whether more matched), and a selection that filled or exceeded the stated ceiling
     /// (<see cref="DossierAnchor.ItemLimit"/>) even when no widen/ticket limit flag was raised, so a
