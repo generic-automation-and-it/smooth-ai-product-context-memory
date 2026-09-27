@@ -222,7 +222,7 @@ public static class SetMemories
             Dictionary<Guid, Memory> memoriesByUuid = (targetUuids.Length == 0
                     ? []
                     : await db.Memories
-                        .Where(m => targetUuids.Contains(m.Uuid))
+                        .Where(m => m.GroupId == group.Id && targetUuids.Contains(m.Uuid))
                         .ToArrayAsync(cancellationToken))
                 .ToDictionary(m => m.Uuid);
 
@@ -565,24 +565,24 @@ public static class SetMemories
             bool isCurrent,
             MemoryWrite item,
             string? blobAddress) => new()
-        {
-            Version = version,
-            IsCurrent = isCurrent,
-            Statement = item.Statement,
-            ContentSummary = item.ContentSummary,
-            BlobAddress = blobAddress,
-            Kind = item.Kind,
-            Confidence = item.Confidence,
-            Status = item.Status,
-            Sources = item.Sources?
+            {
+                Version = version,
+                IsCurrent = isCurrent,
+                Statement = item.Statement,
+                ContentSummary = item.ContentSummary,
+                BlobAddress = blobAddress,
+                Kind = item.Kind,
+                Confidence = item.Confidence,
+                Status = item.Status,
+                Sources = item.Sources?
                 .Select(s => SourceDocument.Create(s.Kind, s.Reference, s.CapturedAt))
                 .ToList() ?? [],
-            ValidFrom = item.ValidFrom,
-            ValidUntil = item.ValidUntil,
-            CreatedOn = DateTimeOffset.UtcNow,
-            SummaryStamp = string.IsNullOrWhiteSpace(item.SummaryModel)
+                ValidFrom = item.ValidFrom,
+                ValidUntil = item.ValidUntil,
+                CreatedOn = DateTimeOffset.UtcNow,
+                SummaryStamp = string.IsNullOrWhiteSpace(item.SummaryModel)
                 ? null
                 : SummaryStampDocument.Create(item.SummaryModel, item.SummaryPromptVersion ?? string.Empty),
-        };
+            };
     }
 }
