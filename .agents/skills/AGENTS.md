@@ -2,29 +2,27 @@
 
 ## TL;DR
 
-First-party AI agent skills. They legitimately run shell, `gh`/`git`, and template file operations, which the NVIDIA SkillSpector gate (`.github/workflows/skill-scan.yml`) rates HIGH for an untrusted third party — so accepted, inherent findings are **omitted from the published SARIF** via a justified allowlist, and the gate fails only on **new** findings.
+First-party AI agent skills. They legitimately run shell, `gh`/`git`, and template file operations. This repository no longer has the former SkillSpector gate or baseline; review security-sensitive skill changes directly and run a local secret scan.
 
 ## Non-Negotiables
 
-- **Secrets go through the environment, never into text.** Any skill needing a secret MUST follow `.github/instructions/skill-secret-handling.instructions.md`: a script reads the value from a runtime environment variable; the value never appears in `SKILL.md`, prompts, agent YAML, README, or any committed file. No skill handles a real secret today.
-- **Never silence a SkillSpector finding by removing a skill's capability.** If the flagged behavior is the skill's actual job (shell out to `gh`, swap a symlink, refresh a template dir), keep it and add a justified entry to `.github/skillspector-baseline.yml`. A green gate bought by gutting a skill is a failure.
-- **Every baseline entry needs a written `reason`.** The allowlist is auditable, not a blanket mute. A new finding id, or the same id in a new file, is not baselined and blocks the PR until reviewed.
+- **Secrets go through the environment, never into text.** Any skill needing a secret MUST follow `.github/instructions/skills/skill-secret-handling.instructions.md`: a script reads the value from a runtime environment variable; the value never appears in `SKILL.md`, prompts, agent YAML, README, or any committed file. Local context-memory and dossier clients consume runtime API tokens.
+- **Review actual capabilities.** If a security scanner flags legitimate skill behavior (shelling out to `gh`, swapping a symlink, refreshing a template directory), investigate and document it; do not gut a skill to silence a finding.
 
 ## Architecture Decisions
 
-### LADR-001 — Gate on the deterministic static scan; LLM semantic stage is advisory
+### LADR-001 — Historical SkillSpector gate: deterministic static scan; LLM semantic stage advisory
 
-- **Date:** 2026-06-21 · **Status:** Accepted
+- **Date:** 2026-06-21 · **Status:** Retired (workflow removed 2026-08-29)
 - **Context:** The accepted-findings baseline is built from a static (`--no-llm`) scan. When the LLM semantic stage runs (provider/model supplied via org settings), its analyzers surface **additional, nondeterministic** findings whose ids/locations are not in the static baseline. Those count as ACTIVE and fail the gate — so a model or prompt change re-breaks the gate even though no skill changed.
-- **Decision:** The gate runs a **deterministic static scan (`--no-llm`)** whose baseline-aware decision is authoritative. The **LLM semantic stage runs as a separate non-blocking advisory scan** (`continue-on-error`, self-skips with no key); its findings are rendered in the job summary via `--advisory` and **never affect the gate decision**.
-- **Consequences:** The gate is stable across model/prompt drift and needs no LLM key to function. Static analyzers still block real dangerous patterns (`curl|bash`, `eval`, `rm -rf`, secret exfiltration), so the gate stays meaningful. Trade-off: a *semantic-only* dangerous pattern (one no static rule catches) would surface in the advisory section for human review rather than hard-blocking. To make the semantic layer hard-block instead, gate on the LLM report and baseline its findings (accepting periodic re-triage on drift).
+- **Decision at the time:** The gate ran a **deterministic static scan (`--no-llm`)** whose baseline-aware decision was authoritative. The **LLM semantic stage ran as a separate non-blocking advisory scan** (`continue-on-error`, self-skips with no key); its findings were rendered in the job summary via `--advisory` and **did not affect the gate decision**.
+- **Consequences then:** The gate was stable across model/prompt drift and needed no LLM key. The workflow and its baseline have since been removed; this decision is retained only as history and supplies no present security gate.
 
 ## Key Behaviors
 
-- The gate decision is computed by `.github/scripts/skillspector-report.py`, not by SkillSpector's raw `risk > 50` exit code (which is pinned at 100 for first-party skills by design). The script subtracts baselined findings and fails only on active ones; a scan error still hard-fails.
-- The job summary lists **Active** findings (gate-failing) separately from **Accepted (baselined)** findings, and flags stale baseline entries after a fix removes a finding.
+- Historical SkillSpector gate details in LADR-001 describe a removed workflow, not a current PR gate. For current skill changes, inspect the diff and run a local secret scan; do not imply the former gate still runs.
 - **Skills pick an effort level, never a model.** Every `SKILL.md` frontmatter is `name`, one-line `description`, optional block-list `allowed-tools`, then `effort` (`low` | `medium` | `high` | `xhigh` | `max`) — the shape and per-skill levels are tabled in `README.md` → Effort. There is no per-provider model block and `agents/openai.yaml` carries no `model:`: the session's model runs every skill, and a sub-skill is invoked at its own `effort`. Re-adding a `models:` block or a per-runner model hint reintroduces the provider coupling this removed. `max` is deliberately unused by any skill — it is the user's explicit escalation. Exception: the `smooth-ai-report-review` skills (`ai-review`, `git-commit-review-push`) stay byte-identical to that parent, including `ai-review`'s `switches:` list.
-- Two scans run per CI invocation (policy A, LADR-001): a **gating static scan** (`--no-llm`, drives the decision + SARIF) and, when a key is configured, a **non-gating LLM advisory scan** rendered as a separate, clearly-labeled summary section. The baseline (`skillspector-baseline.yml`) covers only the static scan.
+- A tool-using model launched by a skill must receive only the credentials it needs and be fenced from checkout metadata and secret files, as described in the secret-handling rule. The local context-memory clients are not model-launching skills.
 
 ## Changelog
 
@@ -32,6 +30,8 @@ First-party AI agent skills. They legitimately run shell, `gh`/`git`, and templa
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-27 | `mimisbrunnr-ymir-bootstrap` added at `effort: xhigh` in `README.md` → Effort. The Naming & Ordering table gained the two skills it was missing (`ai-understanding`, `mimisbrunnr-dossier`), and the Quick Reference bootstrap row dropped its one-off link to match its siblings. | skill effort migration |
+| 2026-09-27 | Synced template PR #85's secret-handling checklist, marked the removed SkillSpector gate historical, and documented the local runtime-token consumers. | template PR #85 |
 | 2026-06-21 | Initial version — documents the SkillSpector baseline gate contract and the secret-handling guardrail for skills. | #52 |
 | 2026-06-21 | LADR-001: gate on the deterministic static scan; LLM semantic stage runs as a non-blocking advisory (policy A). Resolves the static-vs-LLM baseline mismatch that failed the gate on run 27907080342. | #52 |
 | 2026-07-31 | SARIF now **omits** baselined findings instead of marking them `suppressions`; the code-scanning check was red because the back end did not honor SARIF suppressions. Summary "Accepted (baselined)" section is unchanged (reads the scan output). | |

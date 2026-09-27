@@ -18,8 +18,12 @@ second writer.
   prompt text alone is not a security boundary.
 - **Project agent registrations live in `.agents/agents/` for Claude-compatible runtimes and
   `.github/agents/` for Copilot.** Skill-local files hold detailed contracts; project registrations
-  make workers discoverable and point at them. Codex has no equivalent repository custom-agent
-  registration; Codex is not structurally supported for this delegation until its runtime gains one.
+  make workers discoverable and point at them. Current Codex supports project custom agents through
+  [`.codex/agents/*.toml`](https://learn.chatgpt.com/docs/agent-configuration/subagents), but this
+  repository ships only Markdown Codex worker profiles, not TOML profiles, and their intended MCP/tool
+  grants were absent from the contribution runtime. Treat a registration file or worker name as
+  insufficient: delegation is supported only when the runtime exposes the capability-limited workers
+  with their intended grants.
   Read worker has no generic
   shell/write-client access; its MCP server strips `CONTEXT_MEMORY_WRITE_TOKEN` and exposes only reads.
   Write worker also has no shell/file tools; typed write MCP methods bound its mutation surface.
@@ -239,6 +243,7 @@ redaction detector is a stdin→stdout fingerprint script reporting rule names o
 | 2026-09-27 | Qualified the cross-group dedup restatement at the `SKILL.md` semantic-dedup **Judge** step (the only site that instructs the model to emit a recalled row's `uuid` as a `version_bump` target) with the same group rule the `set` body states: a same-subject match is a version bump **only inside the request's `groupUuid`**, and a cross-group match is a new memory plus a typed link, because a foreign `uuid` target is a `404` (group-scoped version-target lookup in `SetMemories.cs`). The recall query that feeds that step is deliberately cross-group, so the unqualified wording produced a guaranteed `404`. | `SKILL.md` |
 | 2026-09-27 | Qualified both cross-group dedup restatements (`SKILL.md` stage-3 item 1 and the write-pipeline table's stage-3 row) with the group rule already stated in the `set` body: a same-subject match is a version bump **only inside the writing group**, and a cross-group match is a new memory plus a typed link. Unqualified, both restatements instructed a `uuid` target the server 404s (group-scoped version-target lookup in `SetMemories.cs`). Restatements kept — they are the drift countermeasure, not redundancy. | `SKILL.md` |
 | 2026-09-26 | `SKILL.md`/`README.md` re-laid out switches-first: the switch table now opens each file ahead of the H1, matching `mimisbrunnr-vitsmunir-dump` and `mimisbrunnr-understanding`. In-body pointers updated; no behavioural or contract change. | PR #108 |
+| 2026-09-20 | Replaced the outdated universal Codex custom-agent limitation with the current `.codex/agents/*.toml` capability and kept the actual safety gate on verified effective MCP/tool grants; no runtime configuration was added. | [OpenAI Codex subagents documentation](https://learn.chatgpt.com/docs/agent-configuration/subagents) |
 | 2026-09-20 | The "sole interface to the store" claim retired from the five remaining living docs (`SKILL.md` prose + description, `README.md`, `.agents/skills/README.md`, `docs/wiki/architecture.md`, `AI_DEVELOPMENT_AGENTS.md` root table) — `mimisbrunnr-understanding` is a reader + conditional importer, so this skill is the sole **authority on the write path**, not the sole interface. The prior row's narrowing is now fully propagated instead of landing in `AGENTS.md` only. | PR #86 review |
 | 2026-09-19 | Narrowed "sole interface" to "sole authority on the write path" and noted the read/load sibling (`mimisbrunnr-understanding`) as a reader + conditional importer that hands `--store` material to this capture path. | HLD-007 LADR-03; BRD-003 |
 | 2026-09-17 | Test References corrected: the PR-gate skill step runs both `run_tests.py` and `measure_cost.py`, not `run_tests.py` alone. | `.github/workflows/pr-gate.yml` |

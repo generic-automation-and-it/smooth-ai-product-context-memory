@@ -54,6 +54,50 @@ The publish workflow does **not** run on pull requests.
   `.agents/skills/ai-review-report/scripts/run-review.sh`. Re-verify on upstream drift; a `main` that drops that
   entrypoint fails the gate with "No such file or directory", and one that leaves the v2 line fails as `gzip: stdin:
   not in gzip format`.
+
+### Credential isolation for the review and auto-fix jobs
+
+The gate's PR, tooling, and trusted-`main` checkouts use `persist-credentials: false`. Its parent
+`run-review.sh` still receives `GITHUB_TOKEN` for `gh` calls and private Git
+fetches; a one-shot Git helper reads the token from `GH_TOKEN` without storing
+it in `.git/config` or embedding it in a remote URL. Auto-fix uses the same
+helper for its pre-push `git fetch` and selected PAT/GITHUB_TOKEN push. Every Git command in the
+gate and auto-fix commit step has `core.hooksPath=/dev/null`, including re-fetch,
+checkout, commit, and push. This prevents model-written hooks from running later
+with a GitHub credential.
+
+Both jobs install the upstream OpenCode v2 CLI **without provider secrets**, then
+replace its launcher with the trusted `main` copy of `.github/scripts/opencode-credential-guard.sh` before
+starting the OpenCode service. The guard keeps only the review provider's key
+and, for auto-fix when distinct, the analyse provider's key (the service starts
+before the fallback chain runs). It removes GitHub/OIDC/other provider tokens,
+rejects credentialed proxy URL values, and hardens the resolved model config:
+the `review` and `analyse` agents cannot read `.git` or `.env` files, `analyse`
+cannot edit them, and both agents lose `grep` because OpenCode matches its
+permission against the query rather than the file path. The review agent keeps
+the upstream `external_directory` setting needed by chunk working directories;
+the auto-fix agent denies external-directory access. The gate retains the
+upstream default config when no override is set; a configured
+`OPENCODE_REVIEW_REPORT_CONFIG` is loaded from the trusted `main` checkout.
+OpenCode v2 currently ignores `OPENCODE_CONFIG`, so the guard also copies the
+hardened resolved config to the ephemeral runner's global config path. Its
+`debug config` compatibility alias is emitted only when the real CLI reports
+that global file as loaded and its bytes match the resolved file; the upstream
+health check still fails closed on a foreign service. Both model invocations
+fail closed if the PR checkout introduces a project `opencode.json(c)` or `.opencode/` directory in
+the OpenCode invocation path: OpenCode v2 discovers those independently of
+`OPENCODE_CONFIG`, and a project plugin could execute before tool permissions.
+Such a PR needs human review before the AI gate can safely run.
+
+Both jobs check out this repo's CI helpers from `main` into ignored
+`.context/trusted-ci/`; auto-fix always fetches `smooth-ai-report-review` tooling,
+so neither the installer, guard, nor the optional mTLS proxy is executed from
+the PR head. Provider
+secrets are scoped to its Initialize and Run steps, not the job. The push step
+retains PAT-first / `GITHUB_TOKEN` fallback and workflow-file scope handling,
+but uses `.github/scripts/git-credential-from-env.sh` with a plain HTTPS URL;
+the selected token never enters `git push` arguments. Local contract test:
+`bash .github/scripts/test-opencode-credential-guard.sh`.
 - **Why local-job:** the review provider is a private vLLM gateway that requires a client certificate and a private
   CA. opencode's provider SDKs use Node/Bun `fetch`, which supports neither, so the job must first start a loopback
   terminator. A reusable-workflow caller cannot inject a step into the callee's job, and a separate job would get a
@@ -152,7 +196,7 @@ When an OpenRouter provider is selected, the workflows pass the secret through a
 
 Every **Variable** row in the table above has a hardcoded fallback in the workflow YAML for the run where it is not
 set. The two `Secret` rows do not, and must not — a secret with a committed default is the shape
-[`skill-secret-handling`](../../.agents/rules/skill-secret-handling.instructions.md) forbids; the gate forwards
+[`skill-secret-handling`](../../.agents/rules/skills/skill-secret-handling.instructions.md) forbids; the gate forwards
 both bare and fails loudly when they are empty. The fallbacks are duplicated per workflow rather than shared, and the two workflows
 **deliberately disagree**:
 

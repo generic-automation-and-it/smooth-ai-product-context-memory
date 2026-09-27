@@ -18,6 +18,7 @@ UPSERT distributor for the agentic scaffold: all decisions (tools, overwrite sco
 
 - Section D (`copilot` in `--tools`) replaces `.github/instructions/` and re-points the `.agents/rules` symlink — this is the one destructive-looking step, which is why SKILL.md Phase 2 runs even in Global mode and why the script refuses when `.agents/rules` is a real directory.
 - `--template-ref` falls back from `git clone --branch` (tags/branches) to full-clone + detached checkout (SHAs); a failed shallow attempt is silently retried, so a slow pinned clone is expected for SHA pins.
+- `--template-url` / `-TemplateUrl` with credentials (`http(s)://user[:pass]@…`) is refused (exit 64 / throw) before it is echoed or cloned: the value would be model-visible, logged, and left in shell history. Private templates rely on pre-configured git auth (`gh auth setup-git` or a credential helper). `ssh://git@…` and `git@host:` are not credentials and pass.
 - `sync.ps1` ends rules-only mode with `return` inside `try` — the `finally` block still removes the temp clone; don't convert it to `exit`.
 
 ## Changelog
@@ -25,3 +26,4 @@ UPSERT distributor for the agentic scaffold: all decisions (tools, overwrite sco
 | Date | Change | Ref |
 |:-----|:-------|:----|
 | 2026-06-12 | Initial version. Added `--rules-only` / `--template-ref` rules-distribution mode to both scripts; Phase 0 compressed to use `--template-url` self-acquire. | |
+| 2026-09-27 | Both scripts refuse a credentialed `--template-url`; SKILL.md no longer suggests embedding a token in the clone URL (skill-secret-handling). | |

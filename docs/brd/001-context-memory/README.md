@@ -4,8 +4,9 @@
 |---|---|
 | **Document** | Business Requirements Document |
 | **Status** | Approved |
+| **BR-46 amendment status** | Local proposal pending upstream acceptance |
 | **Owner** | Product owner / practitioner |
-| **Last updated** | 2026-09-16 |
+| **Last updated** | 2026-09-20 |
 | **Related** | [HLD 001 — Storage](../../hlds/001-context-memory-storage/) · [HLD 002 — Write pipeline](../../hlds/002-context-memory-write-pipeline/) · [HLD 003 — Graph edges](../../hlds/003-graph-edges-on-age/) · [HLD 004 — Recall feedback](../../hlds/004-memory-recall-feedback/) · [HLD 006 — Corpus snapshot and restore](../../hlds/006-corpus-snapshot-and-restore/) |
 | **Extended by** | [BRD 002 — Contextual knowledge export](../002-contextual-export/) — continues this requirement space at `BR-18` |
 
@@ -110,7 +111,7 @@ rather than solving it.
 | Replacing issue trackers or documentation | The store *references* work items; it does not own them |
 | Autonomous action on stored knowledge | A wrong answer causes confusion; a wrong action causes an incident. Acting requires approval, audit and rollback mechanisms not in this scope |
 | Hosted or cloud-synchronised storage | Contradicts the ownership and privacy objective |
-| Ingesting existing historical material | Value accrues from forward capture; back-filling is a separate initiative |
+| Ingesting existing historical material | Value accrues from forward capture; back-filling remains a separate initiative. BR-46 proposes a narrow exception for a practitioner-reviewed bootstrap of one chosen project; it does not authorize general historical ingestion |
 
 ---
 
@@ -132,6 +133,18 @@ Knowledge is recorded at a natural checkpoint, not through continuous prompting.
 Work produces credentials and secrets incidentally. Once stored, such material is difficult to remove.
 Prevention at capture is required; removal after the fact is not sufficient.
 *Accepted when:* detected sensitive content is removed before storage, and the fact is still captured.
+
+### Initial project bootstrap
+
+**BR-46 — A practitioner may establish an initial durable-context baseline from one chosen project.**
+This is an optional, bounded start to forward capture, not a general historical-ingestion programme and
+not recurring maintenance. The practitioner may name a next feature to sharpen the baseline, but the
+project remains the boundary. Evidence must remain attributable; conflicts and lifecycle differences
+must remain visible rather than being flattened into one answer. Only a reviewed selection is captured.
+*Accepted when:* the practitioner can inspect cited candidate context and consequential unanswered
+questions for the chosen project and optional feature before selecting anything for capture; rerunning
+the bootstrap avoids duplicate knowledge; and a realistic recall shows what was recovered, what remains
+uncovered, and whether the selected context can be found again.
 
 ### Retrieval
 
@@ -234,6 +247,7 @@ store from it; how recently a copy was made is visible without asking.
 | **Traceability** | Every recalled claim carries a source |
 | **Contradiction** | Decisions reversing earlier ones are surfaced, not discovered later |
 | **Trust** | The practitioner consults the store by preference rather than reconstructing from source. This is the real measure — the others are proxies, and a knowledge base that exists but is not consulted has failed however complete it is |
+| **Bootstrap coverage** | After an optional initial bootstrap, realistic recall makes both recovered context and remaining gaps visible without duplicate capture on a rerun |
 
 ---
 
