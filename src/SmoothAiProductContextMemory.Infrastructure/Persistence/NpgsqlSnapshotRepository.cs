@@ -237,7 +237,7 @@ public sealed class NpgsqlSnapshotRepository(IBlobStorage blobStorage, IBlobCata
                 $"MATCH (s:{AgeSession.VertexLabel}), (t:{AgeSession.VertexLabel}) " +
                 $"WHERE s.memory_uuid = {Quote(edge.SourceUuid)} " +
                 $"  AND t.memory_uuid = {Quote(edge.TargetUuid)} " +
-                $"CREATE (s)-[:{AgeSession.EdgeLabel} {{relation: {Quote(edge.Relation)}, reason: {Quote(edge.Reason)}}}]->(t)";
+                $"CREATE (s)-[:{AgeSession.EdgeLabel} {{relation: {CypherLiteral.Quote(edge.Relation)}, reason: {CypherLiteral.Quote(edge.Reason)}}}]->(t)";
             await ExecuteCypherAsync(db, cypher, cancellationToken);
         }
     }
@@ -249,7 +249,7 @@ public sealed class NpgsqlSnapshotRepository(IBlobStorage blobStorage, IBlobCata
     {
         foreach (SnapshotTicketVertex vertex in capture.TicketVertices)
         {
-            string cypher = $"MERGE (t:Ticket {{provider: {Quote(vertex.Provider)}, key: {Quote(vertex.Key)}}})";
+            string cypher = $"MERGE (t:Ticket {{provider: {CypherLiteral.Quote(vertex.Provider)}, key: {CypherLiteral.Quote(vertex.Key)}}})";
             await ExecuteCypherAsync(db, cypher, cancellationToken);
         }
     }
@@ -263,17 +263,17 @@ public sealed class NpgsqlSnapshotRepository(IBlobStorage blobStorage, IBlobCata
         {
             string observed = edge.ObservedAt is null
                 ? string.Empty
-                : $", observedAt: {Quote(edge.ObservedAt.Value.ToString("O", CultureInfo.InvariantCulture))}";
+                : $", observedAt: {CypherLiteral.Quote(edge.ObservedAt.Value.ToString("O", CultureInfo.InvariantCulture))}";
             string props =
-                $"reason: {Quote(edge.Reason)}, source: {Quote(edge.Source)}, " +
-                $"recordedAt: {Quote(edge.RecordedAt.ToString("O", CultureInfo.InvariantCulture))}{observed}";
+                $"reason: {CypherLiteral.Quote(edge.Reason)}, source: {CypherLiteral.Quote(edge.Source)}, " +
+                $"recordedAt: {CypherLiteral.Quote(edge.RecordedAt.ToString("O", CultureInfo.InvariantCulture))}{observed}";
             // Predicate form, mirroring NpgsqlTicketGraph.MutationPredicate: the inline-map anchor
             // compiles to `properties @>` and scans the vertex table. Ticket provider/key equality
             // has dedicated HASH expression indexes, so the predicate form is index-served.
             string cypher =
                 $"MATCH (c:Ticket), (p:Ticket) " +
-                $"WHERE c.provider = {Quote(edge.Provider)} AND c.key = {Quote(edge.Key)} " +
-                $"  AND p.provider = {Quote(edge.ParentProvider)} AND p.key = {Quote(edge.ParentKey)} " +
+                $"WHERE c.provider = {CypherLiteral.Quote(edge.Provider)} AND c.key = {CypherLiteral.Quote(edge.Key)} " +
+                $"  AND p.provider = {CypherLiteral.Quote(edge.ParentProvider)} AND p.key = {CypherLiteral.Quote(edge.ParentKey)} " +
                 $"CREATE (p)-[:TICKET_PARENT {{{props}}}]->(c)";
             await ExecuteCypherAsync(db, cypher, cancellationToken);
         }
@@ -504,8 +504,6 @@ public sealed class NpgsqlSnapshotRepository(IBlobStorage blobStorage, IBlobCata
     }
 
     private static string Quote(Guid uuid) => CypherLiteral.Quote(uuid.ToString("D"));
-
-    private static string Quote(string value) => CypherLiteral.Quote(value);
 
     private static string? ReadOptionalAgtypeString(NpgsqlDataReader reader, int ordinal)
     {
