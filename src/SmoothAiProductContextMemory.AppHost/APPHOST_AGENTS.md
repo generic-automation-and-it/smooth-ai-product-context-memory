@@ -21,8 +21,7 @@ must remain isolated from the test fixture and development installation.
   MinIO bucket `smooth-mimisbrunnr-memory-well` is transliterated for the same reason — S3 bucket names
   are DNS labels (lowercase ASCII, digits, hyphens).
 - **No collision with TestFramework.Aspire.** Container names are `mimisbrunnr-*` (no `testcontainer` segment);
-  ports must not equal those of the test fixture (Postgres `15432`, Redis `16379`, WireMock `19091`,
-  MinIO `9002` s3 / `19092` console).
+  ports must not equal those of the test fixture (Postgres `15432`, MinIO `9002` s3 / `19092` console).
 - **Container runtime agnostic, and runtime selection is Aspire's job.** Registering containers through
   Aspire means the same AppHost runs against Docker (the default) or Podman with no code or config
   change; set `DOTNET_ASPIRE_CONTAINER_RUNTIME=podman` to switch. Verified working under both. Do not
@@ -230,6 +229,7 @@ Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgr
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-27 | Test-fixture port-collision note narrowed to Postgres + MinIO; Redis (`16379`) and WireMock (`19091`) removed from the test dependency set alongside their unused containers. | batch3 |
 | 2026-09-26 | `mimisbrunnr-host-context` added to the `reset-dev-stack.sh` volume allowlist and named in the "Stop and reset are distinct binaries" non-negotiable and LADR-001. The image-mode `host-context` volume was created but never destroyed, so the script's closing claim that the next start is an empty corpus was false once snapshot archives were persisted there (LADR-003 keeps these names in sync with the C# constants). | HLD-006 |
 | 2026-09-26 | The Host image now creates `/app/.context` (including the default `snapshots` subdir) owned by the non-root app user during build, so a default-user container can write the default snapshot and metadata paths without a pre-created host mount. | HLD-006 |
 | 2026-09-26 | The published Host container now gets a `host-context` volume mounted at `/app/.context`, so HTTP snapshots written to `.context/snapshots` survive a host-container restart/removal (and `stop-dev-stack.sh`, which keeps volumes) instead of living in the container's ephemeral writable layer. The project/working-tree mode already wrote to the host workspace. | HLD-006 |
