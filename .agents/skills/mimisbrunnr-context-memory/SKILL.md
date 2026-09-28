@@ -94,12 +94,14 @@ Before writing, delegate **one bounded clarification round** to `memory-write` �
 *within* the batch. This single traversal serves four purposes (batched, not four separate lookups):
 
 1. **Deduplication** — match each candidate's subject (`description`) against existing memories
-   **across groups**, not within. Semantic equivalence — *"PostgreSQL is the storage engine"* vs *"we
-   store in Postgres"* — is matched here, because the database's `subject_slug` unique index is an
-   exact-match backstop only. A candidate with an existing subject becomes a **version bump** (same
-   subject, new claim) rather than a duplicate insert — **but only when the match is inside this
-   group**. A `uuid` version target owned by another group is a `404` (see the `set` body below), so a
-   **cross-group** subject match becomes a **new memory in this group plus a typed link**, never a bump.
+   **across groups**: the read is deliberately wider than the group you are writing to, so a same
+   subject elsewhere is *seen* rather than silently duplicated. Semantic equivalence — *"PostgreSQL is
+   the storage engine"* vs *"we store in Postgres"* — is matched here, because the database's
+   `subject_slug` unique index is an exact-match backstop only. A candidate with an existing subject
+   becomes a **version bump** (same subject, new claim) rather than a duplicate insert — **but only when
+   the match is inside this group**, because a memory's identity is `(group, uuid)`. A `uuid` version
+   target owned by another group is a `404` (see the `set` body below), so a **cross-group** subject
+   match becomes a **new memory in this group plus a typed link**, never a bump.
 2. **Link derivation** — propose typed links (`depends_on`, `relates_to`, `contradicts`, `supersedes`,
    `implements`) to mentally-related existing memories, each with a mandatory `reason`.
 3. **Ticket uniqueness** — confirm no candidate's ticket is already owned by another group. Send the
@@ -292,8 +294,11 @@ Maintain a running capture with these buckets, surfaced only when the user final
   pinned by the persistence layer — follow them exactly.
 - **Never touch `is_current`.** The single transactional `set` endpoint owns the current flag.
 - **Redaction runs before the blob write.** This ordering is non-negotiable.
-- **Deduplication is cross-group.** Grouping is episodic (by ticket); the same subject legitimately
-  arises under different tickets. A per-group check will miss it.
+- **Subject matching reads across groups; versioning is scoped to the group you are writing to.** The
+  recall is deliberately cross-group, so a same-subject memory elsewhere is *seen* — but a memory's
+  identity is `(group, uuid)`, so only a match **inside** this group is a version bump. A cross-group
+  match is a new memory in this group plus a typed link, never a bump. A cross-group duplicate is
+  therefore not detected or merged; that is the accepted cost of the group-scoped write path.
 - **The registry is advisory.** Facets have no FK. You may propose new labels; do not treat the
   registry as a closed set.
 - **Programme knowledge is never citable as shipped product behaviour.** Enforced at retrieval, but

@@ -19,9 +19,18 @@ its own string-similarity heuristic returning nothing on exactly the Postgres pa
 **Assign** semantic subject matching to the skill, and treat the database's uniqueness index
 explicitly as an **exact-match backstop only**.
 
-Matching runs on the **subject**, not the claim, and **across groups** rather than within one —
-grouping is episodic, by work item, so the same subject legitimately arises under different tickets. A
-within-group check would miss precisely the duplicates that matter.
+Matching runs on the **subject**, not the claim, and **within the group being written to** — a memory's
+identity is `(group, uuid)`, and the version-target lookup enforces it. Grouping is episodic, by work
+item, so the same subject *can* arise under different tickets; the decision is that a capture in another
+group is a **separate memory**, not a version of this one, and the cross-group relationship is left to
+be expressed as a link or a stated authority rather than inferred by subject matching.
+
+*(Amended 2026-09-28. This previously read "**across groups** rather than within one … A within-group
+check would miss precisely the duplicates that matter", and the alternative below was rejected on the
+same grounds. The trade is now accepted deliberately: cross-group duplicates are possible and the store
+does not detect them, in exchange for a write path that touches only the named group's rows and so needs
+no cross-group lock ordering. The rejected alternative is retained below as the decision this one
+overturns.)*
 
 Recall is narrowed by classification first, then a bounded candidate set is judged. The judgement is
 the model's; string similarity may act as a **negative-only** pre-filter and is never the deciding
@@ -40,7 +49,7 @@ negative pairs, not asserted as "deduplication held".
 ## Alternatives Considered
 
 - **String or trigram similarity as the decision** — rejected: demonstrably fails on the motivating case, and a threshold tuned to catch it produces false matches on related-but-distinct subjects.
-- **Within-group matching only** — rejected: grouping is episodic, so the duplicates that matter are cross-group by construction.
+- **Within-group matching only** — rejected when this decision was first made: grouping is episodic, so the duplicates that matter are cross-group by construction. **This is now the adopted design** (amended 2026-09-28) for the reasons in the decision above; the original rejection rationale is kept as the cost being accepted, not as a live objection.
 - **Vector similarity search** — deferred: index-first retrieval outperforms vectors below roughly a thousand records, and the volume does not yet justify the infrastructure.
 - **Match on the claim rather than the subject** — rejected: the claim is the thing that legitimately changes, so matching on it defeats versioning entirely.
 

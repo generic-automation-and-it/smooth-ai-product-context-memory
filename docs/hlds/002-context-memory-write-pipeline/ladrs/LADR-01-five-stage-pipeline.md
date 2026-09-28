@@ -17,7 +17,7 @@ placed after the write has nothing left to prevent.
 **Specify** all five together as one pipeline with a **fixed, canonical order**, executed in that order
 and never re-sequenced.
 
-1. **Preflight** — one *batched* exact cross-group read-before-write serving subject and ticket
+1. **Preflight** — one *batched* exact read-before-write serving subject and ticket, scoped to the group being written to *(amended 2026-09-28; previously "exact cross-group")*
    backstops plus intra-batch collision detection. Array in, array out. Writes nothing, judges nothing.
    Ticket uniqueness is the one concern that needs the caller's target group: "already owned by
    **another** group" is undecidable without it, so a candidate declares the group it is bound for and

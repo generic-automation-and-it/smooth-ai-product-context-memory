@@ -1,6 +1,6 @@
 # NFR-02: Correctness — deduplication accuracy
 
-**Status:** Accepted
+**Status:** Accepted — **evidence basis withdrawn 2026-09-28**; accuracy still unmeasured, see Verification
 
 ## Requirement
 
@@ -20,7 +20,14 @@ no live contradictions, so the fixture must be built rather than harvested.
 
 - **Positive pairs** — e.g. *"PostgreSQL is the storage engine"* against *"we store in Postgres"* → must version.
 - **Negative controls** — e.g. *"Auth issues tokens with a one-hour expiry"* against *"Auth uses a revocable session cookie"* → must not version. Same domain, same vocabulary, different claim.
-- Pairs placed in **different groups**, since cross-group matching is the requirement.
+- Pairs placed in **the same group**, since matching is now group-scoped. *(Amended 2026-09-28; this previously read "**different** groups, since cross-group matching is the requirement".)*
+
+> **Evidence withdrawn 2026-09-28.** This NFR's cross-group fixture can no longer be produced by the
+> shipped write path: a cross-group pair cannot version, so the measurement it was taken against no longer
+> describes the system. The accuracy claim below is therefore **unevidenced, not disproven**. Re-running
+> it requires the fixture to place pairs in one group, and the negative-control count is still
+> unbalanced (fewer negatives than positives), which the acceptance criteria below already require to be
+> fixed. Closure of this NFR is a batch-5 work item; it is not treated as accepted-and-closed meanwhile.
 - Each pair asserts its decision individually; the pass criterion is countable — N equivalent pairs collapse to M subjects, with an exact skipped count.
 
 The fixture drives the **model judgement**, not a string heuristic. A test that encodes the rule and

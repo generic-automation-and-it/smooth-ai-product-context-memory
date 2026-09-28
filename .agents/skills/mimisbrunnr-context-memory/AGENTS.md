@@ -47,9 +47,14 @@ second writer.
 - **Redaction precedes the blob write.** Content addressing (HLD 001 (storage)) makes a blob immutable and its
   hash stable. A leaked secret cannot be edited out afterwards, only orphaned. This ordering is
   non-negotiable.
-- **Deduplication is cross-group**, not within a group. Grouping is episodic (by ticket); the same
-  subject legitimately arises under different tickets. A per-group check misses it. The database's
-  unique `(group_id, subject_slug)` is an exact-match backstop only.
+- **Subject matching reads across groups, but a version bump is scoped to the writing group.** A memory's
+  identity is `(group, uuid)`, decided 2026-09-28 with HLD-002 amended to match. The recall is
+  deliberately cross-group so a same-subject memory elsewhere is *seen*; only a match inside the
+  request's `groupUuid` may be bumped, and a cross-group match becomes a new memory plus a typed link.
+  The database's unique `(group_id, subject_slug)` is an exact-match backstop only, and a cross-group
+  duplicate is neither detected nor merged — the accepted cost. **Do not "fix" the unqualified
+  "deduplication is cross-group" wording this replaced by widening the version-target lookup**; that
+  would reintroduce cross-group lock ordering and is a design change, not a bug fix.
 - **The registry is advisory.** `memory.facets` has no FK to `label` by design (HLD 001 (storage)). The skill
   proposes new labels; it must not treat the registry as a closed set.
 - **Blobs are never deleted on the write path.** Content addressing means identical bytes share one
@@ -240,6 +245,7 @@ redaction detector is a stdin→stdout fingerprint script reporting rule names o
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-28 | **Memory identity decided group-scoped**, with HLD-002 amended to match, so the two files that stated the overturned rule as rationale now state the shipped rule. The **behaviour contract was already correct** and is unchanged: recall reads across groups, a match inside the writing group is a version bump, a cross-group match is a new memory plus a typed link (the 2026-09-27 rows already qualified every `uuid`-emitting site). What changed is the two rationale sentences — the non-negotiable "Deduplication is cross-group … a per-group check misses it" and the `SKILL.md` Listen-stage restatement, which asserted a within-group check as a defect. They now separate the two things the old wording conflated: the read is cross-group, the *versioning target* is group-scoped, and a cross-group duplicate is an accepted cost rather than a bug. The non-negotiable gained an explicit "do not widen the version-target lookup" clause, because the old wording reads as an instruction to do exactly that. The deliberate triple restatement of the rule is preserved — only its wording changed. | HLD-002 LADR-01, LADR-04 |
 | 2026-09-27 | Qualified the cross-group dedup restatement at the `SKILL.md` semantic-dedup **Judge** step (the only site that instructs the model to emit a recalled row's `uuid` as a `version_bump` target) with the same group rule the `set` body states: a same-subject match is a version bump **only inside the request's `groupUuid`**, and a cross-group match is a new memory plus a typed link, because a foreign `uuid` target is a `404` (group-scoped version-target lookup in `SetMemories.cs`). The recall query that feeds that step is deliberately cross-group, so the unqualified wording produced a guaranteed `404`. | `SKILL.md` |
 | 2026-09-27 | Qualified both cross-group dedup restatements (`SKILL.md` stage-3 item 1 and the write-pipeline table's stage-3 row) with the group rule already stated in the `set` body: a same-subject match is a version bump **only inside the writing group**, and a cross-group match is a new memory plus a typed link. Unqualified, both restatements instructed a `uuid` target the server 404s (group-scoped version-target lookup in `SetMemories.cs`). Restatements kept — they are the drift countermeasure, not redundancy. | `SKILL.md` |
 | 2026-09-26 | `SKILL.md`/`README.md` re-laid out switches-first: the switch table now opens each file ahead of the H1, matching `mimisbrunnr-vitsmunir-dump` and `mimisbrunnr-understanding`. In-body pointers updated; no behavioural or contract change. | PR #108 |
