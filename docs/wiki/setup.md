@@ -35,8 +35,8 @@ values under different names**, and nothing bridged them.
 
 `CONTEXT_MEMORY_BASE_URL` is used by the host-side skills only; the server derives nothing from it. The
 server reads its tokens from the `ApiAccess` section, the skills read theirs from `CONTEXT_MEMORY_*`,
-and both must carry the **same values**. The provisioner below writes both name forms into one gitignored
-file so they can never drift.
+and both must carry the **same values**. The provisioner below writes both name forms into two gitignored
+env files — one per parser grammar, described next — so they can never drift.
 
 ## One-command provisioning
 

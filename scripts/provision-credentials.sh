@@ -70,7 +70,19 @@ done
 
 mkdir -p "$(dirname "$ENV_FILE")"
 
+# A pre-split file (written before the two-file layout) carries the `Parameters__*` names itself and has
+# no `.controller` sibling, so the reuse branch below would leave it unsplit: `source` still prints a
+# token and the published controller's `--env-file` does not exist. Treat that state as needing the
+# (re)write, exactly like a missing or rotated file. The grep runs only once the file is known to exist,
+# so it cannot fail on a missing path under `set -e`.
+needs_write=0
 if [[ ! -f "$ENV_FILE" || "$ROTATE" -eq 1 ]]; then
+  needs_write=1
+elif [[ ! -f "${ENV_FILE}.controller" ]] || grep -q '^Parameters__' "$ENV_FILE"; then
+  needs_write=1
+fi
+
+if [[ "$needs_write" -eq 1 ]]; then
   READ_TOKEN="$(openssl rand -hex 32)"
   WRITE_TOKEN="$(openssl rand -hex 32)"
   if [[ "$READ_TOKEN" == "$WRITE_TOKEN" ]]; then

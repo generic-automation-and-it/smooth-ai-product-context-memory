@@ -154,14 +154,17 @@ last_health_status=""
 last_health_body=""
 
 # Probe the API health endpoint without --fail so a non-200 is distinguishable from a refused
-# connection (000). Captures the status and body for the diagnostics dump, so a 404, a 500 and a
-# refused connection are no longer reported identically.
+# connection (000). Both the body and the status must come back on **stdout**: the `curl` wrapper
+# runs curl inside a throwaway `--rm` container whenever the engine bind address is not loopback (the
+# default on non-Desktop engines), so a `-o` target file would be written in the container's
+# filesystem and discarded — the body would never reach the diagnostics dump. curl writes the body
+# first and the status last, so a trailing-line split recovers both; the status is additionally
+# matched as a bare three-digit line, so an engine line landing after it cannot break the comparison.
 probe_health() {
-  local tmp_body
-  tmp_body="$(mktemp)"
-  last_health_status="$(curl -s -o "$tmp_body" -w '%{http_code}' "http://$engine_bind_address:$api_port/health" 2>/dev/null || true)"
-  last_health_body="$(head -c 2000 "$tmp_body" 2>/dev/null || true)"
-  rm -f "$tmp_body"
+  local response
+  response="$(curl -s -w '\n%{http_code}' "http://$engine_bind_address:$api_port/health" 2>/dev/null || true)"
+  last_health_status="$(printf '%s\n' "$response" | grep -E '^[0-9]{3}$' | tail -n 1 || true)"
+  last_health_body="$(printf '%s\n' "$response" | sed '$d' | head -c 2000 || true)"
   [ "$last_health_status" = "200" ]
 }
 

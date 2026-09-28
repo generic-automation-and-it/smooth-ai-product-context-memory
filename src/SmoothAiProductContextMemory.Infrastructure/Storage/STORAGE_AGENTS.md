@@ -57,6 +57,7 @@ abstraction only, so the S3 implementation can be replaced without touching Appl
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-27 | Archive format `SnapshotFormat.Version` 2→3: `SnapshotArchiveEntry` carries `ContentType` for every blob body, and restore passes it to the object store. A MIME type cannot be re-derived from content, so the loss begins at capture, and a pre-v3 archive (field absent → null) would restore every body as `application/octet-stream` — it is refused at `TarSnapshotArchive` rather than misread. **Existing v2 archives require re-capture.** | PR review |
 | 2026-09-16 | Deletion removed from `IBlobStorage`: normal application code structurally cannot delete objects; concrete adapter keeps a documented test-only delete. Guarded by `BlobStorageCapabilityGuardTests`. | HLD-001 AGENTS.md migration plans |
 | 2026-09-13 | `.docs`→`docs` move recorded — the HLD 001 LADR-06 reference path now resolves under the visible `docs/hlds/` tree. | — |
 | 2026-08-30 | Created — blob storage abstraction + MinIO S3 implementation, content addressing, gzip compression, lazy bucket creation. | — |
