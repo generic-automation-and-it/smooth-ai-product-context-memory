@@ -73,16 +73,20 @@ mkdir -p "$(dirname "$ENV_FILE")"
 # A pre-split file (written before the two-file layout) carries the `Parameters__*` names itself and has
 # no `.controller` sibling, so the reuse branch below would leave it unsplit: `source` still prints a
 # token and the published controller's `--env-file` does not exist. Treat that state as needing the
-# (re)write, exactly like a missing or rotated file. The grep runs only once the file is known to exist,
-# so it cannot fail on a missing path under `set -e`.
+# rewrite, but NOT as a rotation: re-splitting must carry the file's existing token values forward, or
+# an operator upgrading on the documented idempotent path would silently invalidate the tokens a running
+# Host and its skills already hold. Only a missing file or an explicit --rotate regenerates. The grep
+# runs only once the file is known to exist, so it cannot fail on a missing path under `set -e`.
 needs_write=0
+regenerate=0
 if [[ ! -f "$ENV_FILE" || "$ROTATE" -eq 1 ]]; then
   needs_write=1
+  regenerate=1
 elif [[ ! -f "${ENV_FILE}.controller" ]] || grep -q '^Parameters__' "$ENV_FILE"; then
-  needs_write=1
+  needs_write=1   # re-split the pair, keeping the existing token values
 fi
 
-if [[ "$needs_write" -eq 1 ]]; then
+if [[ "$regenerate" -eq 1 ]]; then
   READ_TOKEN="$(openssl rand -hex 32)"
   WRITE_TOKEN="$(openssl rand -hex 32)"
   if [[ "$READ_TOKEN" == "$WRITE_TOKEN" ]]; then
@@ -122,7 +126,14 @@ EOF
   chmod 600 "${ENV_FILE}.controller"
   echo "Wrote credentials to ${ENV_FILE} and ${ENV_FILE}.controller" >&2
 else
-  echo "Reusing existing credentials in ${ENV_FILE}" >&2
+  # Reuse, whether or not the pair is rewritten. The re-split branch above sets needs_write without
+  # regenerate, and this branch is only reachable when the file exists, so the parse always has the
+  # ApiAccess__* names to read.
+  if [[ "$needs_write" -eq 1 ]]; then
+    echo "Re-splitting the credential pair in ${ENV_FILE}, keeping the existing tokens" >&2
+  else
+    echo "Reusing existing credentials in ${ENV_FILE}" >&2
+  fi
   READ_TOKEN="$(grep -m1 '^ApiAccess__ReadToken=' "$ENV_FILE" | cut -d= -f2-)"
   WRITE_TOKEN="$(grep -m1 '^ApiAccess__WriteToken=' "$ENV_FILE" | cut -d= -f2-)"
 fi
