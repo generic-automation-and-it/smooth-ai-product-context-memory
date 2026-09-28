@@ -36,9 +36,11 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
         // Markdown export sink is where that one lives.
         string tempPath = destinationPath + ".tmp";
         SnapshotWriteReport report;
-        await using (FileStream stream = File.Create(tempPath))
+        FileStream? stream = null;
+        try
         {
-            using var tar = new TarWriter(stream, TarEntryFormat.Ustar, leaveOpen: false);
+            stream = File.Create(tempPath);
+            var tar = new TarWriter(stream, TarEntryFormat.Ustar, leaveOpen: true);
 
             var entries = new List<SnapshotArchiveEntry>();
             var writeEntry = async (string name, byte[] content, string? sha256 = null, string? contentType = null) =>
@@ -109,9 +111,38 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
                 dangling,
                 unreferenced,
                 mismatched);
+
+            tar.Dispose();
+            // The rename is atomic; the write is not durable until the data is on the device. Without
+            // this a crash between the two leaves a correctly-named archive holding none of its
+            // content -- and the per-member checksums that would catch it are inside it.
+            stream.Flush(flushToDisk: true);
+            await stream.DisposeAsync();
+            stream = null;
+
+            File.Move(tempPath, destinationPath, overwrite: true);
+        }
+        finally
+        {
+            if (stream is not null)
+            {
+                await stream.DisposeAsync();
+            }
+
+            // A failed, cancelled or killed write leaves a content-bearing temp file beside the
+            // destination, under a name derived from it, holding a second copy of the corpus that
+            // nothing later cleans. On success the move has already consumed it, so this is a no-op.
+            // A cleanup failure is swallowed so it cannot mask the failure that caused it.
+            try
+            {
+                File.Delete(tempPath);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Nothing actionable here: the original failure is the one worth reporting.
+            }
         }
 
-        File.Move(tempPath, destinationPath, overwrite: true);
         return report;
     }
 
@@ -144,8 +175,19 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
 
     public Task<SnapshotVerification> VerifyAsync(string archivePath, CancellationToken cancellationToken)
     {
-        (var entries, var repeatedNames) = ReadEntries(archivePath);
+        (var entries, var repeatedNames, var unreadable) = TryReadEntries(archivePath);
         var findings = new List<SnapshotFinding>();
+
+        // Verify reports; it never throws. Every other failure mode here already resolves to a
+        // finding, and a container that cannot be read at all -- truncated, not a tar, or absent --
+        // is the case an operator most needs reported rather than thrown, since a stack trace says
+        // nothing about which archive is unusable. ReadAsync still throws on the same input, because
+        // a restore must refuse rather than restore half an archive.
+        if (unreadable is not null)
+        {
+            findings.Add(unreadable);
+            return Task.FromResult(new SnapshotVerification(false, findings));
+        }
 
         // The archive-side twin of the manifest's duplicate-entry guard: every repeated member name
         // is a Corruption finding, so a duplicated member is reported rather than silently resolved
@@ -371,6 +413,38 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
         {
             findings.Add(new SnapshotFinding(SnapshotFindingKind.Corruption, entryName,
                 $"{label} entry is not valid JSON, so its element count cannot be reconciled against the manifest."));
+        }
+    }
+
+    /// <summary>
+    /// Reads the archive's members, converting a container that cannot be read at all into a finding.
+    /// </summary>
+    /// <remarks>
+    /// The exception's own message is deliberately not carried into the finding: the I/O ones embed
+    /// the full archive path, and a finding is a value returned to a caller and rendered in a report,
+    /// so a filesystem layout would become part of the diagnostic surface. The exception *type* is
+    /// kept, since "truncated" (end of stream) and "not a tar" (invalid data) are different answers
+    /// for the operator and neither is guessable from a fixed sentence.
+    ///
+    /// Cancellation is not caught: an aborted verify is not a defect in the archive.
+    /// </remarks>
+    private static (Dictionary<string, byte[]> Entries, IReadOnlyList<string> RepeatedNames, SnapshotFinding? Unreadable)
+        TryReadEntries(string archivePath)
+    {
+        try
+        {
+            (var entries, var repeated) = ReadEntries(archivePath);
+            return (entries, repeated, null);
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException)
+        {
+            return (
+                new Dictionary<string, byte[]>(StringComparer.Ordinal),
+                [],
+                new SnapshotFinding(
+                    SnapshotFindingKind.Corruption,
+                    null,
+                    $"Archive could not be read as a tar container ({ex.GetType().Name}). It is truncated, not a tar archive, or unreadable."));
         }
     }
 

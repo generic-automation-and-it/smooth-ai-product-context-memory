@@ -36,6 +36,14 @@ public interface ISnapshotArchive
     /// database-cited address. No service, database, object store or network. A clean archive yields
     /// zero findings; any truncated, altered or missing entry is detected and named.
     /// </summary>
+    /// <remarks>
+    /// This never throws for a defective or absent archive — including a truncated one, a file that
+    /// is not a tar container, and a path that does not exist, all of which are reported as findings.
+    /// That is the contract callers script against, and it is why the container read is wrapped
+    /// separately from the member checks rather than being allowed to escape.
+    /// <see cref="ReadAsync"/> deliberately differs: it throws on the same inputs, because a restore
+    /// must refuse rather than restore half an archive.
+    /// </remarks>
     Task<SnapshotVerification> VerifyAsync(string archivePath, CancellationToken cancellationToken);
 }
 
