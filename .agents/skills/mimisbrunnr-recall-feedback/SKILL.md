@@ -77,12 +77,18 @@ token would cross a network — refuse it rather than retargeting an origin the 
 import sys, urllib.parse
 url = sys.argv[1]
 parsed = urllib.parse.urlparse(url)
+# Report only parsed, non-secret parts. The raw url is never echoed: the branch below is reached
+# precisely when it carries userinfo, so printing it would write a credential to the terminal and
+# into any agent or CI transcript — in a guard whose purpose is to stop the token crossing.
 if parsed.scheme not in ("http", "https") or parsed.username or parsed.password \
         or parsed.path not in ("", "/") or parsed.query or parsed.fragment:
-    print(f"refusing CONTEXT_MEMORY_BASE_URL: {url} (must be a bare HTTP(S) origin)", file=sys.stderr)
+    print("refusing CONTEXT_MEMORY_BASE_URL: must be a bare HTTP(S) origin with no "
+          f"credentials, path, query or fragment (got scheme={parsed.scheme!r}, "
+          f"userinfo={'present' if parsed.username or parsed.password else 'absent'}, "
+          f"path={parsed.path!r})", file=sys.stderr)
     sys.exit(1)
 if parsed.hostname not in ("localhost", "127.0.0.1", "::1"):
-    print(f"refusing non-loopback CONTEXT_MEMORY_BASE_URL: {url}", file=sys.stderr)
+    print(f"refusing non-loopback CONTEXT_MEMORY_BASE_URL host: {parsed.hostname}", file=sys.stderr)
     sys.exit(1)
 PY
 )
