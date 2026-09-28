@@ -45,6 +45,42 @@ public sealed class LinkTests : PersistenceTestBase
     }
 
     [Fact]
+    public async Task ListEdgesAsync_ReturnsEveryRelationOfAMultiRelationPair()
+    {
+        var (a, b) = await SeedPairAsync();
+
+        (await Graph.CreateAsync(a.Uuid, b.Uuid, MemoryRelation.DependsOn, "reason 1", Ct)).ShouldBeTrue();
+        (await Graph.CreateAsync(a.Uuid, b.Uuid, MemoryRelation.RelatesTo, "reason 2", Ct)).ShouldBeTrue();
+
+        IReadOnlyList<MemoryRelationship> selected = await Graph.ListEdgesAsync([a.Uuid, b.Uuid], Ct);
+
+        // The selection is exactly the pair under test, so every returned edge must be an edge of it —
+        // and both relations must survive. A dedup keyed on (source, target) returns 1 here.
+        selected.Count.ShouldBe(2);
+        selected.ShouldContain(l => l.SourceUuid == a.Uuid && l.TargetUuid == b.Uuid
+            && l.Relation == MemoryRelation.DependsOn);
+        selected.ShouldContain(l => l.SourceUuid == a.Uuid && l.TargetUuid == b.Uuid
+            && l.Relation == MemoryRelation.RelatesTo);
+    }
+
+    [Fact]
+    public async Task ListEdgesAsync_ExcludesEdgesReachingOutsideTheSelection()
+    {
+        var (a, b) = await SeedPairAsync();
+        var c = TestEntities.NewMemory(b.GroupId, "C", "Subject C");
+        Db.Memories.Add(c);
+        await Db.SaveChangesAsync(Ct);
+
+        (await Graph.CreateAsync(a.Uuid, b.Uuid, MemoryRelation.DependsOn, "inside", Ct)).ShouldBeTrue();
+        (await Graph.CreateAsync(b.Uuid, c.Uuid, MemoryRelation.DependsOn, "outside", Ct)).ShouldBeTrue();
+
+        // Only the anchor's own edges: the per-uuid touch read sees (b,c) when anchoring on b, and the
+        // bound filter is what drops it. Anchoring on a single memory must return only its own edges.
+        IReadOnlyList<MemoryRelationship> anchored = await Graph.ListEdgesAsync([b.Uuid], Ct);
+        anchored.ShouldAllBe(l => l.SourceUuid == b.Uuid && l.TargetUuid == c.Uuid);
+    }
+
+    [Fact]
     public async Task SameDirectedRelation_IsRejected()
     {
         var (a, b) = await SeedPairAsync();

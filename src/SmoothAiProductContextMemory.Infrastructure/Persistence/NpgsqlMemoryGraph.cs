@@ -114,16 +114,21 @@ public sealed class NpgsqlMemoryGraph(SmoothAiProductContextMemoryDbContext db) 
         // Index-served per anchor via ix_memory_vertex_uuid (LADR-06), so the cost is bounded by the
         // selection size rather than the whole edge table — the dossier read must not scan every edge.
         var uuidSet = uuids.ToHashSet();
-        var byPair = new Dictionary<(Guid Source, Guid Target), MemoryRelationship>();
+        // Keyed on the same triple ExistsAsync matches (source, target AND relation), which is what
+        // identifies a link in this store: a pair may hold several relations, and keying on the pair
+        // alone kept only the first and silently dropped the rest from the dossier. The accumulator is
+        // still needed — ListTouchingCypher's self-link UNION returns one row per self-link, so the same
+        // edge is seen once from each endpoint.
+        var byTriple = new Dictionary<(Guid Source, Guid Target, string Relation), MemoryRelationship>();
         foreach (Guid uuid in uuidSet)
         {
             foreach (MemoryRelationship relationship in await ListTouchingAsync(uuid, cancellationToken))
             {
-                byPair.TryAdd((relationship.SourceUuid, relationship.TargetUuid), relationship);
+                byTriple.TryAdd((relationship.SourceUuid, relationship.TargetUuid, relationship.Relation), relationship);
             }
         }
 
-        return [.. byPair.Values.Where(e => uuidSet.Contains(e.SourceUuid) && uuidSet.Contains(e.TargetUuid))];
+        return [.. byTriple.Values.Where(e => uuidSet.Contains(e.SourceUuid) && uuidSet.Contains(e.TargetUuid))];
     }
 
     /// <summary>
