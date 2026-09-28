@@ -56,8 +56,9 @@ negative pairs, not asserted as "deduplication held".
 ## Consequences
 
 - Deduplication quality is a property of the skill, not a guarantee of the schema — the single largest correctness risk in the system, and named as such.
-- Cross-group semantic matching and link derivation share one bounded candidate set. Exact subject and
-  ticket backstops remain the separate batched preflight.
+- Subject recall is **group-blind** and link derivation shares one bounded candidate set across groups,
+  while the semantic match decision and the version target are scoped to the group being written to.
+  Exact subject and ticket backstops remain the separate batched preflight.
 - Text search stems (`english` configuration) since HLD-001's recall-tuning measurement; this widens candidate recall only — the equivalence decision stays here, in the skill.
 - Testing must be adversarial, including negative controls, or it measures nothing.
 

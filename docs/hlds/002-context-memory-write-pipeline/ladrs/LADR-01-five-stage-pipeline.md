@@ -17,11 +17,12 @@ placed after the write has nothing left to prevent.
 **Specify** all five together as one pipeline with a **fixed, canonical order**, executed in that order
 and never re-sequenced.
 
-1. **Preflight** — one *batched* exact read-before-write serving subject and ticket, scoped to the group being written to *(amended 2026-09-28; previously "exact cross-group")*
-   backstops plus intra-batch collision detection. Array in, array out. Writes nothing, judges nothing.
+1. **Preflight** — one *batched* exact read-before-write serving subject and ticket backstops plus
+   intra-batch collision detection. Array in, array out. Writes nothing, judges nothing.
    Ticket uniqueness is the one concern that needs the caller's target group: "already owned by
    **another** group" is undecidable without it, so a candidate declares the group it is bound for and
-   self-ownership is not a conflict. Subject recall stays group-blind.
+   self-ownership is not a conflict. Subject recall stays group-blind — a same-subject memory in
+   another group is deliberately returned so the caller can link its twin.
 2. **Redact** — scrub detected secrets before anything reaches storage.
 3. **Dedupe and derive links** — semantic subject judgement and typed-link derivation use bounded
    `/query` recall in addition to preflight facts. Optional deep search adds bounded keyword and
