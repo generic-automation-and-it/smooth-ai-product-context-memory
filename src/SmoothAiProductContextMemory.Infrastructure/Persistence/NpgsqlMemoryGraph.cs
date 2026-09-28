@@ -107,6 +107,30 @@ public sealed class NpgsqlMemoryGraph(SmoothAiProductContextMemoryDbContext db) 
     public Task<IReadOnlyList<MemoryRelationship>> ListTouchingAsync(Guid uuid, CancellationToken cancellationToken) =>
         ListAsync(ListTouchingCypher(uuid), cancellationToken);
 
+    public async Task<IReadOnlyList<MemoryRelationship>> ListEdgesAsync(
+        IReadOnlyCollection<Guid> uuids,
+        CancellationToken cancellationToken)
+    {
+        // Index-served per anchor via ix_memory_vertex_uuid (LADR-06), so the cost is bounded by the
+        // selection size rather than the whole edge table — the dossier read must not scan every edge.
+        var uuidSet = uuids.ToHashSet();
+        // Keyed on the same triple ExistsAsync matches (source, target AND relation), which is what
+        // identifies a link in this store: a pair may hold several relations, and keying on the pair
+        // alone kept only the first and silently dropped the rest from the dossier. The accumulator is
+        // still needed — ListTouchingCypher's self-link UNION returns one row per self-link, so the same
+        // edge is seen once from each endpoint.
+        var byTriple = new Dictionary<(Guid Source, Guid Target, string Relation), MemoryRelationship>();
+        foreach (Guid uuid in uuidSet)
+        {
+            foreach (MemoryRelationship relationship in await ListTouchingAsync(uuid, cancellationToken))
+            {
+                byTriple.TryAdd((relationship.SourceUuid, relationship.TargetUuid, relationship.Relation), relationship);
+            }
+        }
+
+        return [.. byTriple.Values.Where(e => uuidSet.Contains(e.SourceUuid) && uuidSet.Contains(e.TargetUuid))];
+    }
+
     /// <summary>
     /// The one-hop lookup — outbound and inbound edges of one memory — exposed so the NFR-02 benchmark
     /// plans the statement the store runs rather than a hand-written copy of it.

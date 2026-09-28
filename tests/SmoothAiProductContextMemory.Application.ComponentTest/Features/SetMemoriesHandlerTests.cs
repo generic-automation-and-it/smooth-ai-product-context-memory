@@ -418,6 +418,9 @@ public sealed class SetMemoriesHandlerTests(AspireFixture aspire) : HandlerTestB
 
         public Task<IReadOnlyList<MemoryRelationship>> ListTouchingAsync(Guid uuid, CancellationToken cancellationToken) =>
             inner.ListTouchingAsync(uuid, cancellationToken);
+
+        public Task<IReadOnlyList<MemoryRelationship>> ListEdgesAsync(IReadOnlyCollection<Guid> uuids, CancellationToken cancellationToken) =>
+            inner.ListEdgesAsync(uuids, cancellationToken);
     }
 
     private SetMemories.Handler NewHandler() =>

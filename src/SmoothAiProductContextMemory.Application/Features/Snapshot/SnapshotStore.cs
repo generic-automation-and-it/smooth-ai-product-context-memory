@@ -96,7 +96,7 @@ public static class SnapshotStore
                 written.MismatchedBodies);
         }
 
-        private async Task<(byte[] Content, string Sha256)> ReadBlobAsync(string address)
+        private async Task<(byte[] Content, string Sha256, string? ContentType)> ReadBlobAsync(string address)
         {
             BlobContent? content = await blobStorage.GetAsync(address);
             if (content is null)
@@ -110,8 +110,9 @@ public static class SnapshotStore
                 await content.Content.CopyToAsync(buffer);
                 byte[] bytes = buffer.ToArray();
                 // The writer uses this precomputed hash for the manifest entry, so it does not hash
-                // every body a second time (H13).
-                return (bytes, Convert.ToHexStringLower(SHA256.HashData(bytes)));
+                // every body a second time (H13). The content type travels with the body so the
+                // manifest entry records it (HLD-006).
+                return (bytes, Convert.ToHexStringLower(SHA256.HashData(bytes)), content.ContentType);
             }
         }
     }

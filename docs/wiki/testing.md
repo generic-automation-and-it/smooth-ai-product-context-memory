@@ -28,7 +28,7 @@ those methods build — a benchmark that plans a hand-written copy measures the 
 
 ## Test Infrastructure
 
-Shared fixtures live in `tests/SmoothAiProductContextMemory.TestFramework/`. Container orchestration (PostgreSQL, Redis, WireMock, MinIO) lives in `tests/SmoothAiProductContextMemory.TestFramework.Aspire/`.
+Shared fixtures live in `tests/SmoothAiProductContextMemory.TestFramework/`. Container orchestration (PostgreSQL, MinIO) lives in `tests/SmoothAiProductContextMemory.TestFramework.Aspire/`.
 
 ### AspireFixture
 

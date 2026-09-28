@@ -69,11 +69,10 @@ public static class DossierSelection
         DossierAnchor anchor,
         CancellationToken cancellationToken)
     {
-        bool hasGroupContext = false;
         MemoryScopeFilter.ScopeFilterPlan scopePlan =
-            MemoryScopeFilter.Plan(anchor.ScopeDimension, hasGroupContext);
+            MemoryScopeFilter.Plan(anchor.ScopeDimension, false);
         IReadOnlyList<string> hiddenDimensions =
-            MemoryScopeFilter.HiddenDimensions(anchor.ScopeDimension, hasGroupContext);
+            MemoryScopeFilter.HiddenDimensions(anchor.ScopeDimension, false);
 
         // Anchor resolution: repo/initiative/tags/kind/status through the search abstraction in one
         // indexed statement; the ticket through the accepted ITicketGraph separation (mirrors
@@ -236,10 +235,10 @@ public static class DossierSelection
 
         // Edges among the selected memories only, loaded once so the manifest count and the returned
         // edges come from one read (HLD-005 F6). A selected memory's relationship to a hidden one is
-        // absent, because the hidden memory is never selected (NFR-01).
+        // absent, because the hidden memory is never selected (NFR-01). The bound is the selection
+        // size, not the whole edge table (HLD-005 NFR-03; index-served per HLD-003 LADR-06).
         var uuids = new HashSet<Guid>(selected.Select(c => c.Memory.Uuid));
-        IReadOnlyList<MemoryRelationship> all = await graph.ListAllAsync(cancellationToken);
-        return [.. all.Where(e => uuids.Contains(e.SourceUuid) && uuids.Contains(e.TargetUuid))];
+        return await graph.ListEdgesAsync(uuids, cancellationToken);
     }
 
     private static string? Blank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;

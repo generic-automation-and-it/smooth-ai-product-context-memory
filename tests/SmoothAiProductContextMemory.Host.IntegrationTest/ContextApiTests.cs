@@ -1,3 +1,5 @@
+extern alias HostApp;
+
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -6,6 +8,8 @@ using Microsoft.Extensions.DependencyInjection;
 using SmoothAiProductContextMemory.Application.Abstractions;
 using SmoothAiProductContextMemory.Domain;
 using SmoothAiProductContextMemory.Domain.Entities;
+using RequiredApiCapability = HostApp::SmoothAiProductContextMemory.Host.Configuration.RequiredApiCapability;
+using ApiCapability = HostApp::SmoothAiProductContextMemory.Host.Configuration.ApiCapability;
 
 namespace SmoothAiProductContextMemory.Host.IntegrationTest;
 
@@ -95,7 +99,7 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
         })
         {
             using var request = new HttpRequestMessage(method, path);
-            if (method is not null && method != HttpMethod.Get)
+            if (method != HttpMethod.Get)
             {
                 request.Content = JsonContent.Create(new { });
             }
@@ -514,6 +518,155 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
         }
         doc.ShouldContain("bearer");
         doc.ShouldContain("Requires write capability");
+    }
+
+    /// <summary>
+    /// Pins every mapped route's capability against <see cref="ExpectedCapabilities"/>, a hand-written
+    /// policy table, and then against what the middleware actually enforces. Three separate checks, and
+    /// the policy table is not redundant: a check derived from the route's own
+    /// <c>RequireCapability</c> metadata would compare enforcement against the declaration, so declaring
+    /// a Write route as Read moves the assertion into the permissive branch and the suite ratifies the
+    /// weaker capability instead of catching it. The table is the only statement of intent here.
+    /// A read token must be refused on a Write route and admitted on a Read route. The zero-token sweep
+    /// above cannot establish either (a missing token is denied regardless of capability); only a
+    /// read-token arm that reaches the route can.
+    /// </summary>
+    [Fact]
+    public async Task Every_context_route_pins_its_capability()
+    {
+        using HttpClient read = _fixture.CreateClient();
+        read.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", HostWebAppFixture.ReadToken);
+
+        EndpointDataSource endpoints = _fixture.Services.GetRequiredService<EndpointDataSource>();
+        RouteEndpoint[] contextRoutes = endpoints.Endpoints
+            .OfType<RouteEndpoint>()
+            .Where(e => e.RoutePattern.RawText?.StartsWith("/api/context", StringComparison.Ordinal) == true)
+            .ToArray();
+
+        contextRoutes.ShouldNotBeEmpty();
+
+        foreach (RouteEndpoint endpoint in contextRoutes)
+        {
+            string template = endpoint.RoutePattern.RawText!;
+            HttpMethod method = endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods
+                    .Select(m => new HttpMethod(m))
+                    .FirstOrDefault()
+                ?? HttpMethod.Get;
+            string key = $"{method} {template}";
+
+            // (1) Every mapped route has a stated policy. A new route is a policy decision, so the
+            // omission fails here rather than defaulting to whatever the route happens to declare.
+            ExpectedCapabilities.ContainsKey(key).ShouldBeTrue(
+                $"route {key} has no entry in ExpectedCapabilities — adding a route means stating its capability policy.");
+
+            // (2) The declared capability matches the policy. Checked against the policy rather than
+            // against the declaration alone: a test derived only from the declaration cannot catch a
+            // mis-declared capability, because the declaration is what it would be comparing to.
+            RequiredApiCapability? capability = endpoint.Metadata.GetMetadata<RequiredApiCapability>();
+            capability.ShouldNotBeNull(
+                $"route {template} has no capability metadata — it would ship unauthenticated-by-omission.");
+            capability.Value.ShouldBe(
+                ExpectedCapabilities[key],
+                $"route {key} declares {capability.Value} but policy says {ExpectedCapabilities[key]}");
+
+            // (3) The middleware enforces the declared capability.
+            string path = MaterializeRouteTemplate(template);
+            using var request = new HttpRequestMessage(method, path);
+            if (method != HttpMethod.Get)
+            {
+                request.Content = JsonContent.Create(new { });
+            }
+
+            using HttpResponseMessage response = await read.SendAsync(request, Ct);
+            if (capability.Value == ApiCapability.Write)
+            {
+                response.StatusCode.ShouldBe(HttpStatusCode.Forbidden, $"{method} {path} required {capability.Value}");
+            }
+            else
+            {
+                response.StatusCode.ShouldNotBe(HttpStatusCode.Forbidden, $"{method} {path} required {capability.Value}");
+            }
+        }
+
+        // (4) No policy entry survives the route it described — a rename or removal that leaves the
+        // policy behind is a stale assertion, which is how a hand-maintained list rots.
+        foreach (string key in ExpectedCapabilities.Keys)
+        {
+            contextRoutes.ShouldContain(
+                e => $"{new HttpMethod(e.Metadata.GetMetadata<HttpMethodMetadata>()!.HttpMethods.First())} {e.RoutePattern.RawText}" == key,
+                $"policy entry '{key}' does not match any mapped route");
+        }
+    }
+
+    /// <summary>
+    /// The capability policy for every mapped <c>/api/context</c> route: which capability a caller must
+    /// hold. This is the independent statement of intent that a route's own
+    /// <c>RequireCapability(...)</c> metadata cannot supply — a check derived only from that metadata
+    /// compares enforcement against the declaration, so mis-declaring a route moves the assertion into
+    /// the other branch and the suite ratifies the weaker capability instead of catching it.
+    /// Written by hand deliberately, and for a bounded reason: a route added without a policy entry fails
+    /// the sweep, and an entry left behind by a removed route fails too, so this list cannot drift
+    /// silently in either direction. Write includes read.
+    /// The rule separating them is intent to change store state, not the HTTP verb — a POST that only
+    /// reads is Read, and any operation that can create, supersede, link, register, trigger or reset is
+    /// Write.
+    /// </summary>
+    private static readonly Dictionary<string, ApiCapability> ExpectedCapabilities = new()
+    {
+        // Read-only queries and projections.
+        ["GET /api/context/labels"] = ApiCapability.Read,
+        ["POST /api/context/labels"] = ApiCapability.Write,   // proposing a label writes a draft row
+        ["GET /api/context/initiatives"] = ApiCapability.Read,
+        ["POST /api/context/initiatives"] = ApiCapability.Write,
+        ["POST /api/context/query"] = ApiCapability.Read,
+        ["POST /api/context/paths"] = ApiCapability.Read,
+        ["POST /api/context/tickets/paths"] = ApiCapability.Read,
+        ["GET /api/context/memories/{uuid:guid}/versions"] = ApiCapability.Read,
+        ["GET /api/context/memories/{uuid:guid}/versions/{version:int}/blob"] = ApiCapability.Read,
+        ["POST /api/context/dossier/bundle"] = ApiCapability.Read,
+        ["POST /api/context/dossier/preview"] = ApiCapability.Read,
+        ["GET /api/context/recall-feedback/never-recalled"] = ApiCapability.Read,
+        ["GET /api/context/recall-feedback/miss-rate"] = ApiCapability.Read,
+        ["POST /api/context/snapshot/preflight"] = ApiCapability.Read,
+        ["GET /api/context/snapshot/status"] = ApiCapability.Read,
+
+        // Mutating: create, supersede, link, register, trigger, reset.
+        ["POST /api/context/preflight"] = ApiCapability.Write,
+        ["POST /api/context/memories"] = ApiCapability.Write,
+        ["POST /api/context/links"] = ApiCapability.Write,
+        ["POST /api/context/groups/resolve"] = ApiCapability.Write,   // may create a group
+        ["PATCH /api/context/groups/{uuid:guid}"] = ApiCapability.Write,
+        ["POST /api/context/groups/{uuid:guid}/descriptions"] = ApiCapability.Write,
+        ["PUT /api/context/tickets/parent"] = ApiCapability.Write,
+        ["POST /api/context/recall-feedback/reset"] = ApiCapability.Write,
+        ["POST /api/context/snapshot"] = ApiCapability.Write,          // triggers a corpus walk
+    };
+
+    private static string MaterializeRouteTemplate(string template)
+    {
+        // Substitute each route parameter with a concrete value that satisfies its constraint, so a
+        // template like /memories/{uuid:guid}/versions/{version:int}/blob becomes a requestable path.
+        for (int start = template.IndexOf('{'); start >= 0;)
+        {
+            int close = template.IndexOf('}', start);
+            if (close < 0)
+            {
+                break;
+            }
+
+            string segment = template[(start + 1)..close];
+            string name = segment.Contains(':') ? segment[..segment.IndexOf(':')] : segment;
+            string replacement = segment.Contains("guid", StringComparison.OrdinalIgnoreCase)
+                ? Guid.NewGuid().ToString()
+                : segment.Contains("int", StringComparison.OrdinalIgnoreCase)
+                    ? "1"
+                    : name;
+            template = string.Concat(template.AsSpan(0, start), replacement, template.AsSpan(close + 1));
+            start = template.IndexOf('{', start + replacement.Length);
+        }
+
+        return template;
     }
 
     private static string NormalizeRouteTemplate(string template)

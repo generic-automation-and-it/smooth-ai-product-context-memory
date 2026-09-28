@@ -22,6 +22,16 @@ public interface IMemoryGraph
     Task<IReadOnlyList<MemoryRelationship>> ListAllAsync(CancellationToken cancellationToken);
 
     Task<IReadOnlyList<MemoryRelationship>> ListTouchingAsync(Guid uuid, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Lists the edges whose two endpoints are both in <paramref name="uuids"/>. Bounded by the size
+    /// of the selection (index-served per uuid, HLD-003 LADR-06) rather than the whole edge set, so a
+    /// read that needs only a selected subset does not scan every edge. Used by the dossier selection
+    /// (HLD-005), whose bounded-cost bar is NFR-03.
+    /// </summary>
+    Task<IReadOnlyList<MemoryRelationship>> ListEdgesAsync(
+        IReadOnlyCollection<Guid> uuids,
+        CancellationToken cancellationToken);
 }
 
 public sealed record MemoryRelationship(Guid SourceUuid, Guid TargetUuid, string Relation, string Reason);

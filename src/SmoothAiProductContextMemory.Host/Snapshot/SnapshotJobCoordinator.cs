@@ -48,10 +48,15 @@ public sealed class SnapshotJobCoordinator(
 
             _ = Task.Run(async () =>
             {
-                using IServiceScope scope = scopeFactory.CreateScope();
-                var mediator = scope.ServiceProvider.GetRequiredService<Mediator.IMediator>();
                 try
                 {
+                    // CreateScope / GetRequiredService are fallible and must sit inside the try: if
+                    // either throws, the task would fault fire-and-forget and the job would stay
+                    // Running forever, handing that dead job to every later caller until restart
+                    // (the single-slot guard refuses to replace it).
+                    using IServiceScope scope = scopeFactory.CreateScope();
+                    var mediator = scope.ServiceProvider.GetRequiredService<Mediator.IMediator>();
+
                     SnapshotStore.Response response = await mediator.Send(
                         new SnapshotStore.Request(connectionString, job.DestinationPath),
                         CancellationToken.None);

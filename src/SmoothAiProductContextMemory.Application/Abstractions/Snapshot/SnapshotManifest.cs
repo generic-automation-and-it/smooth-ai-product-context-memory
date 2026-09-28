@@ -21,8 +21,12 @@ public sealed record SnapshotManifest(
     int DanglingReferences = 0,
     int MismatchedBodies = 0);
 
-/// <summary>One archive member: its logical name inside the archive and its content hash.</summary>
-public sealed record SnapshotArchiveEntry(string Name, string Sha256, long Size);
+/// <summary>
+/// One archive member: its logical name inside the archive and its content hash. Blob bodies also
+/// carry their content type, because a restore cannot re-derive a MIME type from content — the loss
+/// would start at capture if the field were absent from the archive (HLD-006).
+/// </summary>
+public sealed record SnapshotArchiveEntry(string Name, string Sha256, long Size, string? ContentType = null);
 
 /// <summary>
 /// Corpus-level counts, each of which the restore reconciliation must reproduce exactly.
@@ -46,7 +50,11 @@ public static class SnapshotFormat
     // v2: added DanglingReferences/MismatchedBodies with refusal semantics — an archive that
     // recorded a dangling or mismatched body at capture now verifies non-clean, so archives written
     // before the field existed (v1, field absent→0) can no longer be certified restorable.
-    public const int Version = 2;
+    // v3: SnapshotArchiveEntry carries ContentType for blob bodies. A restore cannot re-derive a
+    // body's MIME type from content, so the loss begins at capture; archives written before the
+    // field existed (v2, field absent→null) would restore bodies as application/octet-stream, so
+    // they carry the same refusal semantics as v2.
+    public const int Version = 3;
 }
 
 /// <summary>Canonical logical names for archive members that are not blob bodies.</summary>

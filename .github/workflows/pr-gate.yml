@@ -15,6 +15,8 @@ on:
       - src/**
       - tests/**
       - scripts/**
+      - npm/**
+      - package.json
       - .agents/skills/mimisbrunnr-context-memory/**
       - .agents/skills/mimisbrunnr-understanding/**
       - .agents/skills/mimisbrunnr-dossier/**
@@ -24,6 +26,7 @@ on:
       - .github/agents/memory-write.agent.md
       - .mcp.json
       - .github/actions/**
+      - .github/scripts/**
       - .github/workflows/pr-gate.yml
       - .github/workflows/publish-image.yml
   pull_request:
@@ -40,6 +43,8 @@ on:
       - src/**
       - tests/**
       - scripts/**
+      - npm/**
+      - package.json
       - .agents/skills/mimisbrunnr-context-memory/**
       - .agents/skills/mimisbrunnr-understanding/**
       - .agents/skills/mimisbrunnr-dossier/**
@@ -49,6 +54,7 @@ on:
       - .github/agents/memory-write.agent.md
       - .mcp.json
       - .github/actions/**
+      - .github/scripts/**
       - .github/workflows/pr-gate.yml
       - .github/workflows/publish-image.yml
   workflow_dispatch:
@@ -78,8 +84,19 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       - name: Test release policy
         run: python3 -B -m unittest discover -s scripts -p 'test_release_policy.py' -v
+
+      - name: Test credential guard
+        run: bash .github/scripts/test-opencode-credential-guard.sh
+
+      - name: Test credential provisioner
+        run: bash scripts/test-provision-credentials.sh
 
       - name: Test context-memory skill
         run: |
@@ -102,6 +119,9 @@ jobs:
 
       - name: Build
         run: dotnet build --configuration "$BUILD_CONFIGURATION" --no-restore
+
+      - name: Verify formatting
+        run: dotnet format SmoothAiProductContextMemory.slnx --verify-no-changes --no-restore
 
       - name: Test controller preflight and lifecycle
         run: python3 scripts/test-apphost-entrypoint.py

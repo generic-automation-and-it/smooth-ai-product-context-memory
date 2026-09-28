@@ -44,3 +44,12 @@ zero, negatives and anything above five before the request reaches the store.
 
 - **README, Guiding Principle** — bounded paths between known endpoints, not whole-graph algorithms.
 - **NFR-02** — the depth-3 target this bound brackets.
+
+## Availability note (2026-09-27)
+
+The 120-second statement timeout behind this bound (see `NpgsqlDataSourceFactory`) is accepted for the
+MVP target. The bound is the primary control, so the timeout only fires on pathological data rather
+than on an unbounded query, and a single-user local store tolerates a rare long-running query. The
+recorded dependency: **the "long stop" is two minutes, and it becomes the only bound if a traversal
+limit is ever widened or made unbounded** — raising `MaxDepth` beyond 5, or introducing an unbounded
+traversal path, re-opens this decision and must be re-measured at that point.
