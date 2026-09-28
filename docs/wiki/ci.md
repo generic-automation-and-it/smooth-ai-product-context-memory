@@ -8,7 +8,7 @@ The publish workflow does **not** run on pull requests.
 
 - **Workflow:** `.github/workflows/pr-gate.yml`
 - **Triggers:** `pull_request` → `main` (including PR branch updates), `push` → `main`, and manual `workflow_dispatch`.
-- **Paths filter:** source/tests, scripts, the two owned skills (context-memory and understanding) and context-memory's two project-agent registrations, the `.mcp.json` MCP server config, Dockerfiles, solution/build/package inputs, local actions, and PR/publish workflows trigger checks. Docs-only PRs skip the gate; dispatch and reusable workflow calls run explicitly.
+- **Paths filter:** source/tests, scripts, npm (`npm/**`, `package.json`), the three owned skills (context-memory, understanding, dossier) and context-memory's two project-agent registrations, the `.mcp.json` MCP server config, Dockerfiles, solution/build/package inputs, local actions and scripts (`.github/actions/**`, `.github/scripts/**`), and PR/publish workflows trigger checks. Docs-only PRs skip the gate; dispatch and reusable workflow calls run explicitly.
 - **Policy checks:** main-only release event/promotion tests and engine-free controller preflight/lifecycle tests run with the build. PRs also build both container architectures on native runners without publication. PR/manual CI keeps logs, summaries, and caches, but uploads neither Docker build records nor coverage artifacts. Images are build-only; full packaged-controller smoke runs in the main publication pipeline.
 
 ### Steps
@@ -17,19 +17,27 @@ The publish workflow does **not** run on pull requests.
 2. **Test release policy** - `python3 -B -m unittest discover -s scripts -p 'test_release_policy.py' -v`; fails closed before installing the SDK.
 3. **Test context-memory skill** - two scripts in one step: `python3 -B .agents/skills/mimisbrunnr-context-memory/tests/run_tests.py` (deterministic plumbing, agent grants, deep-search bounds, divergence composition) and `python3 -B .agents/skills/mimisbrunnr-context-memory/tests/measure_cost.py` (reproducible structural cost evidence; never emits memory content).
 4. **Test understanding skill** - `python3 -B .agents/skills/mimisbrunnr-understanding/tests/run_tests.py`; the 34-test harness pinning a load writes nothing (NFR-01), import is refused without `--store` and never writes directly (NFR-02), loaded material is cited as data (NFR-03), and the session dump round-trips.
-5. **Install .NET SDK** — `actions/setup-dotnet@v4` (version from the `DOTNET_VERSION` env, currently `10.0.x`).
-6. **Restore** — `dotnet restore`.
-7. **Build** — `dotnet build --no-restore --configuration Release`.
-8. **Test controller preflight and lifecycle** - `python3 scripts/test-apphost-entrypoint.py`; engine-free tests against the built AppHost output.
-9. **Aspire test with coverage** — local action `.github/actions/aspire-test-with-coverage`:
+5. **Test dossier skill** - `python3 -B .agents/skills/mimisbrunnr-dossier/tests/run_tests.py`; the read-only composer harness, including the credential-transport guard and the per-focus reconciliation.
+6. **Set up Python** — `actions/setup-python@v5`, pinned to 3.12. The skill clients require a modern interpreter; an unpinned runner default can be too old for them.
+7. **Test credential guard** - `bash .github/scripts/test-opencode-credential-guard.sh`; exercises the trusted-`main` credential-isolation guard the AI review and auto-fix jobs run through, rather than trusting it as prose.
+8. **Test credential provisioner** - `bash scripts/test-provision-credentials.sh`; drives the real provisioner into a scratch `--env-file` and asserts neither parser grammar leaks a token.
+9. **Install .NET SDK** — `actions/setup-dotnet@v4` (version from the `DOTNET_VERSION` env, currently `10.0.x`).
+10. **Restore** — `dotnet restore`.
+11. **Build** — `dotnet build --no-restore --configuration Release`.
+12. **Verify formatting** — `dotnet format --verify-no-changes --no-restore`; whitespace only, not a style gate.
+13. **Test controller preflight and lifecycle** - `python3 scripts/test-apphost-entrypoint.py`; engine-free tests against the built AppHost output.
+14. **Aspire test with coverage** — local action `.github/actions/aspire-test-with-coverage`:
     - Starts `tests/SmoothAiProductContextMemory.TestFramework.Aspire`, keeps its PID inside the action script, and waits for PostgreSQL (`127.0.0.1:15432`, image `docker.io/apache/age:release_PG17_1.7.0`), MinIO TCP (`127.0.0.1:9002`), then MinIO HTTP (`http://127.0.0.1:9002/minio/health/live`). On MinIO timeout the action dumps `docker logs mimisbrunnr-testcontainer-blob`. MinIO image is pinned by digest to `cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1` (Chainguard; upstream MinIO images are no longer served by Docker Hub or quay.io). The test dependency set is PostgreSQL + MinIO only — the Redis and WireMock waits were removed with the unused containers.
    - Restores .NET tools (`dotnet tool restore`) after the dependency pre-warm, matching the proven CI timing before tests start.
    - Prepares `artifacts/testresults/` and `artifacts/coverage/`.
     - Runs test projects in order: Host integration → Application/Infrastructure component → Domain/Application/Infrastructure/Host/AppHost unit tests.
    - Generates coverage reports with `dotnet tool run reportgenerator`.
+   - **Enforces a line-coverage floor** (`COVERAGE_THRESHOLD`, default `50`). This is a regression guard, not a target: a regression is a drop, so the floor is deliberately well under the observed aggregate. It fails closed — an unparseable coverage summary records a failure and exits non-zero rather than passing the gate silently.
    - Stops the Aspire host from the action script's teardown trap once tests and coverage have finished or failed.
-10. **Publish coverage summary** (`if: always()`) — appends `artifacts/coverage/SummaryGithub.md` to the GitHub step summary.
-11. **Upload coverage artifacts** — uploads `artifacts/coverage/` as `coverage-report` only for main pushes (including failed main runs). PR and manual CI skip upload.
+15. **Publish coverage summary** (`if: always()`) — appends `artifacts/coverage/SummaryGithub.md` to the GitHub step summary.
+16. **Upload coverage artifacts** — uploads `artifacts/coverage/` as `coverage-report` only for main pushes (including failed main runs). PR and manual CI skip upload.
+
+**The gate is merge-blocking on:** build (Release), the Aspire-backed suite, the line-coverage floor, the formatting check, and the two credential test harnesses. Coverage is gated, not only reported.
 
 ## .NET local tools
 

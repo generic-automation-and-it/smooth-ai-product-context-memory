@@ -26,6 +26,7 @@ on:
       - .github/agents/memory-write.agent.md
       - .mcp.json
       - .github/actions/**
+      - .github/scripts/**
       - .github/workflows/pr-gate.yml
       - .github/workflows/publish-image.yml
   pull_request:
@@ -53,6 +54,7 @@ on:
       - .github/agents/memory-write.agent.md
       - .mcp.json
       - .github/actions/**
+      - .github/scripts/**
       - .github/workflows/pr-gate.yml
       - .github/workflows/publish-image.yml
   workflow_dispatch:
