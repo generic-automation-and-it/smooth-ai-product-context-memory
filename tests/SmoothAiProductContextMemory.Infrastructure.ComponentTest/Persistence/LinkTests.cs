@@ -44,6 +44,26 @@ public sealed class LinkTests : PersistenceTestBase
         stored.Count(l => l.SourceUuid == a.Uuid && l.TargetUuid == b.Uuid).ShouldBe(2);
     }
 
+    [Theory]
+    [InlineData("\"Cited\" from ADR-3, not paraphrased")]
+    [InlineData("plain reason with no quote at all")]
+    [InlineData("interior \"quotes\" that do not lead the value")]
+    [InlineData("\"a\" and \"b\" two quoted runs")]
+    [InlineData("a value ending in a quote \"")]
+    public async Task Reason_RoundTripsExactly_EvenWhenQuoteLed(string reason)
+    {
+        // A ::text cast of a string property already yields the value, so a quote-led reason is data,
+        // not encoding. This reader used to strip a leading quote and deserialise to the last one,
+        // which reduced this first case to "Cited" and threw JsonException on the fourth. Every other
+        // reason in the set is here to show the identity read is not merely quote-tolerant.
+        var (a, b) = await SeedPairAsync();
+
+        (await Graph.CreateAsync(a.Uuid, b.Uuid, MemoryRelation.DependsOn, reason, Ct)).ShouldBeTrue();
+
+        MemoryRelationship stored = (await Graph.ListTouchingAsync(a.Uuid, Ct)).Single();
+        stored.Reason.ShouldBe(reason);
+    }
+
     [Fact]
     public async Task ListEdgesAsync_ReturnsEveryRelationOfAMultiRelationPair()
     {
