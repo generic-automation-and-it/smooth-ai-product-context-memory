@@ -10,6 +10,10 @@
 *.userosscache
 *.sln.docstates
 *.env
+# The provisioner's controller env file is mode 600 and gitignored, but a documented
+# `--env-file PATH` writes the same bearer tokens to a caller-chosen location that
+# `*.env` does not cover. Bare-name (no trailing slash) so it matches the file itself.
+*.env.controller
 
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs
