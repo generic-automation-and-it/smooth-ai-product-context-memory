@@ -138,6 +138,37 @@ else
   WRITE_TOKEN="$(grep -m1 '^ApiAccess__WriteToken=' "$ENV_FILE" | cut -d= -f2-)"
 fi
 
+# Re-split: the pair is inconsistent (no .controller sibling, or Parameters__* still in the sourceable
+# file) but the tokens are good, so rewrite both files from the parsed values. This must be a separate
+# step from the generate branch above — gating it on `regenerate` reported "Re-splitting" and printed
+# the controller path while writing nothing, so an upgrading operator kept a sourceable file that still
+# printed a token and had no controller env file at all.
+if [[ "$needs_write" -eq 1 && "$regenerate" -eq 0 ]]; then
+  cat > "${ENV_FILE}" <<EOF
+# Mímisbrunnr API credentials — re-split $(date -u +%Y-%m-%dT%H:%M:%SZ), token values unchanged.
+# Sourceable (valid identifiers only) and usable as the standalone Host's \`--env-file\`.
+ApiAccess__ReadToken=${READ_TOKEN}
+ApiAccess__WriteToken=${WRITE_TOKEN}
+CONTEXT_MEMORY_READ_TOKEN=${READ_TOKEN}
+CONTEXT_MEMORY_WRITE_TOKEN=${WRITE_TOKEN}
+CONTEXT_MEMORY_BASE_URL=${BASE_URL}
+EOF
+  chmod 600 "$ENV_FILE"
+  cat > "${ENV_FILE}.controller" <<EOF
+# Mímisbrunnr controller credentials — re-split $(date -u +%Y-%m-%dT%H:%M:%SZ). Pass to the
+# published \`-apphost\` controller via \`--env-file\`. The Parameters__* names are not shell
+# identifiers, so this file is for a container env-file, never for \`source\`.
+ApiAccess__ReadToken=${READ_TOKEN}
+ApiAccess__WriteToken=${WRITE_TOKEN}
+Parameters__api-read-token=${READ_TOKEN}
+Parameters__api-write-token=${WRITE_TOKEN}
+CONTEXT_MEMORY_READ_TOKEN=${READ_TOKEN}
+CONTEXT_MEMORY_WRITE_TOKEN=${WRITE_TOKEN}
+CONTEXT_MEMORY_BASE_URL=${BASE_URL}
+EOF
+  chmod 600 "${ENV_FILE}.controller"
+fi
+
 if [[ "$WRITE_APPHOST" -eq 1 ]]; then
   if [[ -f "${APPHOST_PROJECT}/SmoothAiProductContextMemory.AppHost.csproj" ]]; then
     dotnet user-secrets set "Parameters:api-read-token" "$READ_TOKEN" --project "$APPHOST_PROJECT" >/dev/null

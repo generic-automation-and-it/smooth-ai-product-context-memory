@@ -521,11 +521,15 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
     }
 
     /// <summary>
-    /// Pins every mapped route's capability from endpoint metadata, not a hand-maintained literal, so a
-    /// route added without an entry here is still covered. A read token must be refused on a Write route
-    /// and admitted on a Read route — a Write route downgraded to Read by omission then fails this test.
-    /// The zero-token sweep below cannot catch that (a missing token is denied regardless of capability);
-    /// only a read-token arm that reaches the route can.
+    /// Pins every mapped route's capability against <see cref="ExpectedCapabilities"/>, a hand-written
+    /// policy table, and then against what the middleware actually enforces. Three separate checks, and
+    /// the policy table is not redundant: a check derived from the route's own
+    /// <c>RequireCapability</c> metadata would compare enforcement against the declaration, so declaring
+    /// a Write route as Read moves the assertion into the permissive branch and the suite ratifies the
+    /// weaker capability instead of catching it. The table is the only statement of intent here.
+    /// A read token must be refused on a Write route and admitted on a Read route. The zero-token sweep
+    /// above cannot establish either (a missing token is denied regardless of capability); only a
+    /// read-token arm that reaches the route can.
     /// </summary>
     [Fact]
     public async Task Every_context_route_pins_its_capability()
