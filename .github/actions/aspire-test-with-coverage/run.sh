@@ -15,11 +15,19 @@ coverage_directory="${artifacts_root}/coverage"
 # projects in the denominator make the floor a measure of the harness, not of the product.
 #
 # Narrowing this RAISES the number rather than risking the floor, which was worth measuring rather
-# than assuming. Run locally over the Application and Infrastructure component projects (the ones
-# that exercise the harness most), the harness sat at 34.08% line coverage against the product's
-# 51.65% — below the product, so removing it from the denominator lifts the metric. The 50% floor is
-# therefore unchanged and still meaningful; it is now a claim about the store rather than about the
-# store plus its scaffolding.
+# than assuming. Run locally with this exact filter, the test harness
+# (SmoothAiProductContextMemory.TestFramework) sits at 34.08% line coverage against the product's
+# 51.65% over the component projects that exercise it most — below the product, so removing it from
+# the denominator lifts the metric. The 50% floor is therefore unchanged and still meaningful; it is
+# now a claim about the store rather than about the store plus its scaffolding.
+#
+# MEASURE THE SHIPPED STRING, NOT A LOOKALIKE. The first version of this filter repeated the
+# `Include=` key once per assembly, which this collector rejects; it then failed *closed* in the worst
+# available way — "The Data Collector will be ignored", no coverage file written, and every test
+# project reported as failed. The measurement that motivated the change had been taken with a
+# hand-written filter that happened to be valid, so the change was argued for on evidence that did
+# not cover the thing that broke. Build the string in one place, run the real script to print it, and
+# paste *that* into a `--collect` to test it.
 #
 # Naming the assemblies is also a tripwire: a new product project has to be added here deliberately
 # rather than silently entering or leaving the denominator.
@@ -29,8 +37,19 @@ product_assemblies=(
   SmoothAiProductContextMemory.Infrastructure
   SmoothAiProductContextMemory.Host
 )
-coverage_includes="$(printf 'Include=[%s]*,' "${product_assemblies[@]}")"
-coverage_collect="XPlat Code Coverage;Format=cobertura;${coverage_includes}ExcludeByFile=**/*.g.cs,**/obj/**,**/Migrations/*.cs,**/*ModelSnapshot.cs"
+# ONE `Include=` key whose value is a comma-separated list of bracketed patterns. Two forms look
+# equivalent and are both rejected by the collector's friendly-name parser, which fails *closed* in the
+# worst way: it prints "is not valid. The Data Collector will be ignored", no coverage file is written,
+# and every test project is then reported as failed because the collector it was told to use vanished.
+#   - `Include=[A]*,Include=[B]*`  — repeated keys. Rejected.
+#   - `Include=[A]*,[B]*,` + next key with no `;` — the trailing comma swallows the following key.
+# The separator between `Include=` and the next key is a SEMICOLON, not a comma.
+coverage_includes="Include="
+for index in "${!product_assemblies[@]}"; do
+  [[ ${index} -gt 0 ]] && coverage_includes+=","
+  coverage_includes+="[${product_assemblies[$index]}]*"
+done
+coverage_collect="XPlat Code Coverage;Format=cobertura;${coverage_includes};ExcludeByFile=**/*.g.cs,**/obj/**,**/Migrations/*.cs,**/*ModelSnapshot.cs"
 aspire_pid=""
 
 cleanup() {
