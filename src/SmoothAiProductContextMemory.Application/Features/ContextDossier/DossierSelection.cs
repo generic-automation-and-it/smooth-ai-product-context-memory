@@ -91,6 +91,15 @@ public static class DossierSelection
                     RequiredScopeDimension = scopePlan.RequiredDimension,
                     HiddenDimensions = hiddenDimensions,
                     Kind = Blank(anchor.Kind),
+                    // Mirrors Kind, and carries the same obligation: the traversal's identity set is the
+                    // filter the anchor search then applies its own status to, so leaving the status out
+                    // here pre-filters that set. With Status null the SQL takes its second branch, and
+                    // ExcludeProposed at its default of true drops every proposed memory — so an anchor
+                    // of ticket + status=proposed searched a set holding none and always reported noMatch,
+                    // while RetrievalPolicy below recorded the status as honoured. ExcludeProposed is
+                    // deliberately left at its default: the SQL's first branch supersedes it once
+                    // @status is not null, which is the rule FindTicketPaths relies on too.
+                    Status = Blank(anchor.Status),
                     PathLimit = MemorySearchDefaults.MaxLimit,
                     MemoryLimit = MemorySearchDefaults.MaxLimit,
                 },
