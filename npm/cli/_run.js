@@ -28,7 +28,7 @@ function checkPythonFloor() {
   });
   if (probe.error || probe.status !== 0) {
     console.error(
-      "mimisbrunnr: could not determine the python3 version. Install Python 3.9 or newer, " +
+      `mimisbrunnr: could not determine the python3 version. Install Python ${MIN_PYTHON.join(".")} or newer, ` +
         "or put a suitable python3 first on PATH."
     );
     process.exit(2);

@@ -38,10 +38,14 @@ SMOOTH_AGE_BENCH=1 dotnet test tests/SmoothAiProductContextMemory.Infrastructure
 ```
 
 > **A benchmark gate is legitimate; a boolean-correctness gate is not.** `Nfr02BenchmarkTests` asserts
-> p95 *and* the query plan, which is a measurement. The other five assert countable outcomes rather
-> than wall clock, and two of them gate correctness claims for three **Accepted** NFRs — so if one is
-> skipped in an environment where it matters, its NFR's evidence is unevidenced and the Accepted
-> status is carrying more than it can. That is why the gates are catalogued rather than incidental.
+> p95 *and* the query plan, which is a measurement. Of the other five, three also assert a wall-clock
+> target — `SnapshotEvidenceTests` against HLD-006 NFR-04's ≤ 9m snapshot ceiling, and
+> `FeedbackPlacementEvidenceTests` / `NfrEvidenceTests` against a 2 ms per-retrieval write budget — while
+> `DossierWorkflowBenchmarkTests` asserts countable invariants (manifest reconciliation, no-match) and
+> `RecallTuningEvidenceTests` asserts nothing at all, recording the precision/recall table, the plans and
+> the percentiles. Each harness in the table above is what produces the measurement its evidence document
+> records, so one skipped in an environment where it matters leaves that number unevidenced rather than
+> failing. That is why the gates are catalogued rather than incidental.
 
 It measures through the shipped code path (`IMemoryTraversal`, `IMemoryGraph`) and `EXPLAIN`s the statement
 those methods build — a benchmark that plans a hand-written copy measures the copy.

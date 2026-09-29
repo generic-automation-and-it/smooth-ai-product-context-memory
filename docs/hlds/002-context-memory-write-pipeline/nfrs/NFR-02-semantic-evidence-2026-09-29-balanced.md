@@ -95,10 +95,16 @@ done
 |---|---|---|---|
 | `model-verdicts-2026-09-17.json` | 0.9000 | 0.8333 | `s4` — the impossible cross-group bump |
 | `model-verdicts-2026-09-29.json` | 1.0000 | 1.0000 | none |
-| `model-verdicts-2026-09-29-balanced.json` (this run) | 1.0000 | 1.0000 | none |
 
 The 0.9 / 0.8333 figure is therefore reproducible on demand rather than quoted from memory — which is
 what let the withdrawn-evidence correction be checked rather than believed.
+
+**This run's own verdicts are deliberately not in that table.** `model-verdicts-2026-09-29-balanced.json`
+echoes `s11`–`s14`, which the ten-scenario freeze does not contain, so adding it to the loop above would
+abort on `score: verdict names unknown scenario id` instead of printing a figure — the same rule the
+paragraph above states, applied to this document's own table. It re-scores against the live
+fourteen-scenario `scenarios.json` using the command in **Result** above (1.0000 / 1.0000), and only
+for as long as that live fixture stays as committed.
 
 ## Boundaries
 

@@ -23,8 +23,8 @@ with an actually published `sha-<short-sha>` tag or `latest`; this documentation
 image has already been released. Pin the controller digest for immutable deployment identity.
 
 The provisioner's `.context/mimisbrunnr.env.controller` already carries the `Parameters__api-read-token` /
-`Parameters__api-write-token` names (plus the `ApiAccess__*` and skill `CONTEXT_MEMORY_*` forms),
-so it can be the `controller.env` credential source or merged with the engine-config keys above.
+`Parameters__api-write-token` names, so it can be the `controller.env` credential source or merged with
+the engine-config keys above.
 The `Parameters__*` env-var form is what makes this work in Production — the user-secrets bridge
 (`dotnet user-secrets set Parameters:...`) is Development-only and does not reach a published
 controller.
