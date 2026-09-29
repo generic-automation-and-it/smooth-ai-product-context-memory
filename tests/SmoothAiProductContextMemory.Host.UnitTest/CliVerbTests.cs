@@ -26,19 +26,23 @@ public sealed class CliVerbTests
     [Theory]
     [InlineData("verify")]
     [InlineData("restore")]
-    [InlineData("snapshot")]
-    [InlineData("export")]
-    public async Task Every_verb_refuses_an_empty_argv_rather_than_defaulting(string verb)
+    public async Task A_verb_that_requires_an_argument_refuses_an_empty_argv_rather_than_defaulting(string verb)
     {
-        // `verify` and `restore` require an archive path; `snapshot` requires an output; `export` is
-        // all-optional. A verb that accepted no arguments would act on the corpus — the exact
-        // irreversible direction the exit codes exist to make visible.
+        // Only these two require an argument. A verb that accepted no arguments would act on the
+        // corpus — the exact irreversible direction the exit codes exist to make visible.
+        //
+        // `snapshot` and `export` are deliberately NOT here: both give `--output` a
+        // DefaultValueFactory, so an empty argv is a *valid* invocation by design and there is no
+        // argument contract to protect. They previously sat in this theory anyway, and passed only
+        // because an unconfigured host fails inside AddInfrastructure before the verb does anything —
+        // the "passes for the wrong reason" hazard the restore case below already documents. A change
+        // making either verb reject an empty argv would not have been caught, and a change making one
+        // accept it would not have been either, because the assertion was satisfied by a configuration
+        // failure rather than by the argument check.
         int exit = verb switch
         {
             "verify" => await VerifyCommand.InvokeAsync([]),
             "restore" => await RestoreCommand.InvokeAsync([]),
-            "snapshot" => await SnapshotCommand.InvokeAsync([]),
-            "export" => await ExportCommand.InvokeAsync([]),
             _ => throw new ArgumentOutOfRangeException(nameof(verb), verb, "unknown verb"),
         };
 
