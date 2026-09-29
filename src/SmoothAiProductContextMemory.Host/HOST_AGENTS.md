@@ -45,6 +45,20 @@ both planes. Health, OpenAPI and Scalar stay
 public. Tokens come only from runtime configuration, compare in constant time, and never enter logs,
 traces, committed settings or OpenAPI examples.
 
+Configuration keys the Host reads beyond the standard .NET ones:
+
+| Key | Read by | Default | Meaning |
+|---|---|---|---|
+| `ApiAccess:ReadToken` / `ApiAccess:WriteToken` | `ApiAccessAuthorizer` | none — startup fails | The two distinct Bearer capabilities. Both are required and must differ; either blank or a match exits at startup. |
+| `Snapshot:Directory` | `ISnapshotMetadataStore` | `.context` | Where the last-snapshot summary is written. |
+| `Snapshot:DestinationDirectory` | `SnapshotJobCoordinator` | `.context/snapshots` | Where an HTTP-triggered snapshot writes its archive. |
+| `Snapshot:RestoreStatementTimeoutSeconds` | `NpgsqlSnapshotRepository` | `900` | Per-statement budget for the restore transaction only, applied with `SET LOCAL`. Exists because restore is sized by the corpus, not by a request: batches are bounded, and a large `memory_version` insert or a per-row cascade delete would otherwise exceed the data source's 120 s default and roll the whole restore back with no knob. Clamped to `1..86400`; a value outside that falls back to the default rather than removing the ceiling. The 120 s default is untouched everywhere else. |
+
+> `Snapshot__Directory` is **not** a key — the env-var spelling of `Snapshot:Directory` is
+> `Snapshot__Directory`, but nothing reads it. A worktask item asked for it to be documented under that
+> name; grepping the source found only `Snapshot:Directory` and `Snapshot:DestinationDirectory`, so the
+> table records the keys the code actually binds.
+
 Approved release-image plan (2026-09-13):
 
 1. Repo-root multi-stage Dockerfile: copy CPM props + `NuGet.Config` + Host graph csprojs, restore, copy sources, publish; runtime `aspnet:10.0-alpine`, non-root, OCI labels, `ENTRYPOINT` the Host binary.
@@ -56,6 +70,10 @@ Approved release-image plan (2026-09-13):
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-29 | **The CLI-verb test gap is closed**, superseding the 2026-09-27 row that recorded it open. `CliVerbTests` now covers what that row said would be difficult: the argv contract per verb, and the exit codes the snapshot-integrity NFR is defined against — no Aspire stack needed, because `verify` takes no connection string and `restore` verifies the archive before touching either store. The assertion that `restore` exits **2** (integrity) rather than 1 (operational) required the *full* host configuration, not just a connection string: resolving the repository pulls in blob storage, and that happens before the verb's own try/catch, so a half-configured host fails inside System.CommandLine's default handler and returns 1 — the test would have passed for the wrong reason. That is now stated in the test. | MVP completion |
+| 2026-09-29 | **The `ExpectedRoutes` derivation concern is already closed** — recorded here because a worktask item was still describing it as open. `Scalar_and_openapi_list_routes` derives its expected inventory from `EndpointDataSource`, so a route added to code is caught without editing a list; the hand-written literal is gone. What *is* still hand-maintained is `ExpectedCapabilities` (11 Write / 13 Read), and that is deliberate: it is the statement of intent that the derived checks cannot supply, since a policy derived from a route's own metadata would compare enforcement against the declaration. | record pass |
+| 2026-09-29 | `SnapshotJobCoordinator`'s two untested paths are now covered: the single-slot refusal (a second trigger while one runs returns **the same job id**, not a new one) and the read-config-before-publishing-a-job path, so a misconfiguration cannot leave a phantom `Running` job that the guard would then hand to every later caller. | MVP completion |
+| 2026-09-29 | **Declined, with reason: the two oversized files are recorded rather than split.** `SetMemories.cs` (602 lines) and `ContextApiTests.cs` (1145) are the two largest files in the tree, and neither violates a rule — `clean-code.instructions.md` sets no numeric size limit, and both are cohesive single-purpose units (one use case; one route surface's HTTP contract). Splitting the write path's `SetMemories` would be a mechanical refactor that touches every `SetMemories.Request`/`Handler` call site across the suite, at the exact moment this branch is also changing that handler's persistence shape, the traversal's SQL and the archive format. The cost of getting that wrong is a corrupted write, and a structural refactor riding alongside thirty correctness changes is the likeliest way for one to slip through a green suite. **Trigger to revisit:** on a batch that does *not* already change the write path, split `SetMemories` along its existing seams (validator / plan builder / handler) and give `ContextApiTests` one file per resource area. | record pass |
 | 2026-09-27 | `SnapshotJobCoordinator` moved `CreateScope`/`GetRequiredService` inside the job's `try`, so a failing setup marks the job `Failed` instead of faulting fire-and-forget and leaving it `Running` forever (the single-slot guard would hand that dead job to every later caller). Pinned by `SnapshotJobCoordinatorTests`. | batch4 |
 | 2026-09-28 | Added the independent capability-policy guard the batch-4 sweep could not provide. `Every_context_route_pins_its_capability` now also asserts each mapped route appears in a hand-written `ExpectedCapabilities` policy (11 Write / 13 Read) and that its declaration equals it, alongside the existing metadata-present and enforced-at-runtime checks. Without it the sweep compared enforcement against the declaration, so mis-declaring a write route as Read moved the assertion into the other branch and the suite passed on the weaker capability. Verified by mutation, not by passing: downgrading `POST /labels` to Read and removing a policy entry each now fail with a named message. | mvp-readiness pass 4 |
 | 2026-09-27 | `ContextApiTests` gained `Every_context_route_pins_its_capability`: it derives each mapped route's `RequiredApiCapability` from endpoint metadata (via the `HostApp` alias) and asserts a read token is refused on Write and admitted on Read, so a route downgraded to Read by omission fails a test. | batch4 |

@@ -214,7 +214,12 @@ sequenceDiagram
 ## Quality Constraints
 
 - Target query (current, approved, facet, repo, ticket, in-scope, validity) is one SQL statement. `memory_group.repo` has a btree; facets/tags have GIN and are matched with `&&` (overlap, default "any") or `@>` (containment, "all" via `FacetMatchMode`); full text matches the two `to_tsvector('english', … || ' ' || …)` GIN expressions verbatim — changing either concatenation or the configuration on one side only silently drops the index (config selected by HLD-001's recall-tuning measurement).
-- Bind locally; no auth. Do not return raw blob URLs.
+- Bind locally; **no blob-URL auth, which is not the same as the service having none.** Do not return raw
+  or presigned blob URLs: a body is fetched through `GET /api/context/memories/{uuid}/versions/{v}/blob`,
+  which carries the caller's read capability, so the URL itself is never a bearer. The service *does*
+  authenticate every `/api/context` route through `ApiAccessAuthorizer` (`ApiAccess:ReadToken` /
+  `ApiAccess:WriteToken`, see `HOST_AGENTS.md`); "no auth" in this line has always meant the blob URL,
+  and is now said so because the unqualified form reads as the stronger and wrong claim.
 
 ## Changelog
 

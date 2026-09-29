@@ -1,6 +1,7 @@
 # NFR-03: Recoverability
 
-**Status:** Closed on HLD-006 acceptance (superseded by [HLD-006 NFR-02](../../../hlds/006-corpus-snapshot-and-restore/nfrs/NFR-02-consistency.md))
+**Status:** Closed — HLD-006 accepted 2026-09-29 and its NFR-02 is the governing recoverability
+evidence (supersedes [HLD-006 NFR-02](../../../hlds/006-corpus-snapshot-and-restore/nfrs/NFR-02-consistency.md))
 
 > This Draft claim is closed by HLD-006's corpus snapshot and restore. Its "two stores restore to a
 > mutually consistent state" requirement is now HLD-006 NFR-02, whose snapshot artefact carries a
@@ -8,6 +9,13 @@
 > vertices, edges, objects, zero dangling references, bounded traversal). The prior operational
 > round-trip script (`scripts/verify-graph-restore.sh`) is superseded by the restore command's
 > built-in reconciliation.
+>
+> **Both claims in that paragraph are true now; neither was when it was written.** It said "closed on
+> HLD-006 *acceptance*" while HLD-006 still read `In Discovery` — a requirement closed on a design
+> that had not been accepted. It also called the script superseded while the root `AGENTS.md` and
+> HLD-003 NFR-03 still presented `verify-graph-restore.sh` as *the* NFR-03 tool. `scripts/AGENTS.md`
+> now states the split explicitly: the restore verb is the NFR-03 round-trip, and the script remains
+> for a lighter graph-only check.
 
 ## Requirement
 

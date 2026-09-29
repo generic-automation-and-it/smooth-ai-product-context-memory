@@ -4,7 +4,7 @@
 |---|---|
 | **Document** | Business Requirements Document |
 | **Status** | Approved |
-| **BR-46 amendment status** | Local proposal pending upstream acceptance |
+| **BR-46 amendment status** | Implemented and accepted **in this repository** by the `mimisbrunnr-ymir-bootstrap` skill (merged as PR #91). There is no separate upstream acceptor to wait on and no pending decision: this BRD is the authority for the requirement, and the skill satisfies it. |
 | **Owner** | Product owner / practitioner |
 | **Last updated** | 2026-09-20 |
 | **Related** | [HLD 001 — Storage](../../hlds/001-context-memory-storage/) · [HLD 002 — Write pipeline](../../hlds/002-context-memory-write-pipeline/) · [HLD 003 — Graph edges](../../hlds/003-graph-edges-on-age/) · [HLD 004 — Recall feedback](../../hlds/004-memory-recall-feedback/) · [HLD 006 — Corpus snapshot and restore](../../hlds/006-corpus-snapshot-and-restore/) |

@@ -2,11 +2,11 @@
 
 | | |
 |---|---|
-| **Status** | In Discovery |
+| **Status** | Accepted — implemented; `ContextDossier` slice, the bundle/preview API and the read-only composer all shipped |
 | **Owner** | generik0 |
 | **Tracker** | Contextual export |
 | **Business authority** | [BRD-002 — Contextual knowledge export](../../brd/002-contextual-export/) (`BR-18` … `BR-36`) |
-| **Last updated** | 2026-09-22 |
+| **Last updated** | 2026-09-29 |
 
 > Discovery / prototyping HLD. Delivers **intent + spec** — what we are building and why, the decisions
 > behind it, and the quality bar it must meet. No implementation plan; execution is tracked in the

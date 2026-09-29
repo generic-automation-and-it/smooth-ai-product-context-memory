@@ -2,11 +2,11 @@
 
 | | |
 |---|---|
-| **Status** | In Discovery |
+| **Status** | Accepted — implemented; the `snapshot`/`verify`/`restore` verbs, the archive format (now v3) and the HTTP surface all shipped |
 | **Owner** | generik0 |
 | **Tracker** | Context-memory operability |
 | **Business authority** | [BRD-001 — Cross-product linked context memory](../../brd/001-context-memory/) (`BR-37`, supported by `BR-13`, `BR-16`) |
-| **Last updated** | 2026-09-16 |
+| **Last updated** | 2026-09-29 |
 
 > Discovery / prototyping HLD. This document delivers **intent + spec** — what we are
 > building and why, the decisions behind it, and the quality bar it must meet. It does
@@ -69,6 +69,20 @@ restore required. The version gate and the defect counts are what keep a pre-fix
 carried no such counts and so reported clean for a capture that could not restore) from being
 certified; without them, an archive that downloaded a store with an unresolvable reference would
 verify clean and then fail restore.
+
+The current format version is **3**, and every version below it is refused outright rather than
+read with a default:
+
+| Version | Change | Why an older archive is refused rather than read |
+|---|---|---|
+| 1 | original layout | No `DanglingReferences`/`MismatchedBodies` counts, so an archive that recorded a body it could not resolve deserialises them as zero and then verifies *clean* before failing to restore |
+| 2 | added those two counts, with refusal semantics | `SnapshotArchiveEntry` has no `ContentType`, so a restore cannot re-derive a body's MIME type and every body comes back as `application/octet-stream` — a loss that begins at capture and is invisible afterwards |
+| 3 | current; `ContentType` per blob body | — |
+
+Each bump is a breaking change to the member layout, and the gate is `refuse`, not `read with a
+default`, precisely because a default is indistinguishable from a recorded value. The round-trip
+test asserts the restored body's **type**, not only its bytes: counts and hashes reconcile clean
+whether or not a field is right.
 
 Bodies are already content-addressed, so for them the check is double-strength: the recomputed
 hash must match both the manifest *and* the address the database row cites. A mismatch is not

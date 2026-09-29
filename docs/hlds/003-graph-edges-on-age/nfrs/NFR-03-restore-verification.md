@@ -1,5 +1,18 @@
 # NFR-03 — Restore verification (relational rows and graph edges)
 
+**Status:** Accepted — **superseded as the NFR-03 tool 2026-09-29**; retained as the record of the
+graph-only `pg_dump`/`pg_restore` round trip, with
+[HLD-006 NFR-02](../../../../hlds/006-corpus-snapshot-and-restore/nfrs/NFR-02-consistency.md) now the
+governing recoverability evidence.
+
+> The status line was previously absent altogether, which left this file's authority ambiguous: a
+> reader could take `**PASSED**` in the result table as the current NFR-03 evidence. The restore
+> **verb** supersedes it — it restores both stores from a self-verifying archive and prints a
+> reconciliation instead of wrapping `docker exec` — and HLD-001 NFR-03 now says so. This script
+> remains useful and is still wired: it is a lighter, graph-only check against a `pg_dump` copy,
+> which is a different thing from verifying a self-describing archive, and `scripts/AGENTS.md`
+> records both roles so neither is presented as the sole NFR-03 tool.
+
 Recorded post-cutover, with a populated graph. This is the check NFR-03 singles out as the one most
 likely to be skipped and the most expensive to skip: a backup that silently omits graph data looks
 entirely successful until the first traversal after a restore.

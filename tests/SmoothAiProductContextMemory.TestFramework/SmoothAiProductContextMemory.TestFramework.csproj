@@ -16,7 +16,6 @@
     <PackageReference Include="Minio" />
     <PackageReference Include="Npgsql" />
     <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
-    <PackageReference Include="Respawn" />
     <PackageReference Include="xunit.v3.extensibility.core" />
   </ItemGroup>
 

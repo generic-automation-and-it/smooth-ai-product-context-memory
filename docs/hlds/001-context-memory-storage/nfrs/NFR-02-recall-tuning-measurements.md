@@ -1,6 +1,13 @@
 # NFR-02 evidence: recall-tuning measurements (text-search configuration)
 
 **Date:** 2026-09-16
+
+> **Stale relative to the code — re-measure before quoting these numbers.** Measured 2026-09-16; the
+> search implementation changed on 2026-09-24, after which the `english` stemming/FTS decision below
+> remained the shipped configuration but the surrounding predicates did not. Nothing here claims the
+> figures still hold. `SMOOTH_FTS_BENCH=1` re-runs the harness that produced them. The *decision*
+> (stemming, trigram rejected) is unaffected — that is why HLD-002 and the skill docs still cite this
+> document as the authority for recall tuning rather than the numbers.
 **Status:** Measured — selected `english`; `pg_trgm` rejected; both deferrals closed
 **Command:** `SMOOTH_FTS_BENCH=1 dotnet test tests/SmoothAiProductContextMemory.Infrastructure.ComponentTest --filter RecallTuningEvidenceTests`
 **Environment:** Aspire test fixture, `docker.io/apache/age:release_PG17_1.7.0`, isolated per-test database, macOS/arm64 dev host.

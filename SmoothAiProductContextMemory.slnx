@@ -53,7 +53,6 @@
     <File Path=".agents/rules/backend/external-api-clients.instructions.md" />
     <File Path=".agents/rules/backend/migrations.instructions.md" />
     <File Path=".agents/rules/backend/readonly-collections.instructions.md" />
-    <File Path=".agents/rules/backend/wiremock-stubbing.instructions.md" />
   </Folder>
   <Folder Name="/.agents/rules/git/">
     <File Path=".agents/rules/git/git-policy.instructions.md" />

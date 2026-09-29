@@ -65,7 +65,10 @@ The publish workflow does **not** run on pull requests.
 
 ### Credential isolation for the review and auto-fix jobs
 
-The gate's PR, tooling, and trusted-`main` checkouts use `persist-credentials: false`. Its parent
+The gate's PR, tooling, and trusted-`main` checkouts use `persist-credentials: false`, **and so do all
+three of the auto-fix job's checkouts** — the PR head, the trusted `main` helpers, and the fetched
+analyse tooling. (Verified 2026-09-29 against `pipeline-ai-analyse.yml`; the sentence previously named
+only the gate, which left the auto-fix job's checkouts unstated rather than unprotected.) Its parent
 `run-review.sh` still receives `GITHUB_TOKEN` for `gh` calls and private Git
 fetches; a one-shot Git helper reads the token from `GH_TOKEN` without storing
 it in `.git/config` or embedding it in a remote URL. Auto-fix uses the same
