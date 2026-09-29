@@ -8,6 +8,21 @@ appears in argv (visible to ps/logs). Redact-and-flag (LADR-003): a leak is scru
 never a reason to reject the fact.
 
 Favours false positives: an NFR or rule is worth flagging; a leaked secret that slips through is not.
+
+WHAT THIS GATES, PRECISELY. The rules are fixed-shape fingerprints, not semantic detection. The `set`
+path now scrubs through them automatically and refuses to write when the scrubber cannot run — that is
+a **fail-closed gate on recognition**, and it is easy to describe as more than it is:
+
+- It catches a value that *matches* a known form: `AKIA…`, `gh[pousr]_…`, a PEM block, or a
+  `secret=` / `token:` / `password=` assignment carrying one.
+- It does **not** catch a secret that matches no rule. A bare high-entropy value, a base64 blob with
+  no label, an unusual vendor token format, or a password in prose all pass through untouched.
+
+So the correct claim is "recognisable secrets are gated, and the gate never silently fails open" — not
+"sensitive material never reaches storage". BR-03's business decision about whether such material may
+be stored at all is a separate, still-open product question; this is the mechanical half of it, and the
+mechanical half is bounded by the rule set above. Widening the rules is the lever if the gap matters;
+that is a deliberate, separate decision rather than something this module does implicitly.
 """
 
 import argparse

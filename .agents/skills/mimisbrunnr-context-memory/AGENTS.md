@@ -47,6 +47,14 @@ second writer.
 - **Redaction precedes the blob write.** Content addressing (HLD 001 (storage)) makes a blob immutable and its
   hash stable. A leaked secret cannot be edited out afterwards, only orphaned. This ordering is
   non-negotiable.
+- **The redaction gate is a gate on *recognition*, not on secrets.** `set` scrubs automatically and
+  refuses to write when the scrubber cannot run, so it can never fail open — but `redact.py` matches
+  fixed-shape fingerprints (`AKIA…`, `gh[pousr]_…`, PEM blocks, `secret=`/`token:`/`password=`
+  assignments). A bare high-entropy value, an unlabelled base64 blob, an unusual vendor token format or
+  a password in prose passes through untouched. Describe this control as *"recognisable secrets are
+  gated, and the gate never fails open"*; **do not** describe it as "sensitive material never reaches
+  storage", which overstates it. Widening the rule set is the lever, and that is a deliberate separate
+  decision. `redact.py` carries the same statement at its top.
 - **Subject matching reads across groups, but a version bump is scoped to the writing group.** A memory's
   identity is `(group, uuid)`, decided 2026-09-28 with HLD-002 amended to match. The recall is
   deliberately cross-group so a same-subject memory elsewhere is *seen*; only a match inside the
