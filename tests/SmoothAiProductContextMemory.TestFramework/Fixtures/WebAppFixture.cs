@@ -10,7 +10,7 @@ namespace SmoothAiProductContextMemory.TestFramework.Fixtures;
 
 /// <summary>
 /// Generic in-process web-host fixture built on <see cref="WebApplicationFactory{TProgram}"/> and
-/// backed by <see cref="AspireFixture"/> (PostgreSQL + WireMock containers).
+/// backed by <see cref="AspireFixture"/> (PostgreSQL + AGE and MinIO blob containers).
 /// Close it for a Host's entry point in an integration test:
 /// <c>public sealed class HostWebAppFixture : WebAppFixture&lt;Program&gt;;</c>
 /// Override <see cref="EnrichConfigurationAsync"/> to inject app-specific connection strings and
@@ -44,6 +44,13 @@ public abstract class WebAppFixture<TProgram> : IAsyncLifetime
 
     public async ValueTask InitializeAsync()
     {
+        // Captured here rather than left to the fallback, because the fallback reads
+        // TestContext.Current — which is null by the time DisposeCleanupAsync runs, so every
+        // teardown report a subclass writes through Aspire.Output would be discarded. xUnit v3 does
+        // not inject ITestOutputHelper into a collection fixture, which is why this is the only place
+        // the running test's helper can still be reached.
+        _aspire.SetOutput(TestContext.Current?.TestOutputHelper);
+
         await _aspire.InitializeAsync();
 
         if (RecreateDatabaseOnInitialize)

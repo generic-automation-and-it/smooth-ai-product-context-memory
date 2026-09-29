@@ -117,6 +117,10 @@ public sealed class NpgsqlMemoryTraversal(SmoothAiProductContextMemoryDbContext 
         {
             Value = query.SourceUuids.ToArray(),
         });
+        command.Parameters.Add(new NpgsqlParameter("asOf", NpgsqlDbType.TimestampTz)
+        {
+            Value = query.AsOf ?? (object)DBNull.Value,
+        });
         command.Parameters.Add(new NpgsqlParameter("limit", NpgsqlDbType.Integer) { Value = query.Limit });
 
         return command;
@@ -172,6 +176,10 @@ public sealed class NpgsqlMemoryTraversal(SmoothAiProductContextMemoryDbContext 
                   AND (@requiredScope IS NULL OR g.scope_dimension = @requiredScope)
                   AND (@kind IS NULL OR v.kind = @kind)
                   AND (@status IS NULL OR v.status = @status)
+                  -- Same window predicate the anchor search applies, so a supplied AsOf bounds the
+                  -- whole selection rather than only its first stage.
+                  AND (@asOf IS NULL OR (v.valid_from <= @asOf
+                                         AND (v.valid_until IS NULL OR v.valid_until > @asOf)))
             ), ranked AS MATERIALIZED (
                 SELECT * FROM reached
                 ORDER BY valid_from, created_on, uuid

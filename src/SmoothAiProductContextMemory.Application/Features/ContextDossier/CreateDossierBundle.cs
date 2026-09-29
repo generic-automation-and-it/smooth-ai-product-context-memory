@@ -108,6 +108,17 @@ public static class CreateDossierBundle
                         continue;
                     }
 
+                    // A supplied AsOf bounds history as well as the current version. Without this,
+                    // `--include-history` emitted every version ever written whatever the anchor
+                    // said, so a manifest could record an AsOf and a bundle could contradict it —
+                    // the versions a reader would most expect to be filtered out are exactly the
+                    // superseded ones. Same window rule as the anchor search and the widening.
+                    if (request.AsOf is { } asOf
+                        && (row.ValidFrom > asOf || (row.ValidUntil is { } until && until <= asOf)))
+                    {
+                        continue;
+                    }
+
                     (DossierMemory? memory, DossierOmittedItem? omission) =
                         await BuildItemAsync(row, claim, request, cancellationToken);
                     if (memory is not null)

@@ -109,7 +109,13 @@ public sealed partial class NpgsqlTicketGraph
                 JOIN public.memory_group g ON g.id = selected_group.group_id
                 JOIN public.memory m ON m.group_id = g.id
                 JOIN public.memory_version v ON v.memory_id = m.id AND v.is_current
-                WHERE v.status <> 'proposed' AND (@kind IS NULL OR v.kind = @kind)
+                -- Parenthesised as one unit because AND binds tighter than OR: written flat, the
+                -- status opt-in would swallow every other predicate and admit rows from hidden
+                -- dimensions. The bracket shape mirrors NpgsqlMemorySearch exactly, so the two
+                -- retrieval surfaces answer "may I see a proposed record?" the same way.
+                WHERE ((@status IS NOT NULL AND v.status = @status)
+                   OR (@status IS NULL AND (@exclude_proposed = false OR v.status <> 'proposed')))
+                  AND (@kind IS NULL OR v.kind = @kind)
                   AND (@required IS NULL OR g.scope_dimension = @required)
                   AND g.scope_dimension <> ALL(@hidden)
             ), memory_selection AS (
@@ -148,6 +154,8 @@ public sealed partial class NpgsqlTicketGraph
         command.Parameters.AddWithValue("memories", query.MemoryLimit);
         command.Parameters.Add(new NpgsqlParameter("kind", NpgsqlDbType.Text) { Value = query.Kind ?? (object)DBNull.Value });
         command.Parameters.Add(new NpgsqlParameter("required", NpgsqlDbType.Text) { Value = query.RequiredScopeDimension ?? (object)DBNull.Value });
+        command.Parameters.Add(new NpgsqlParameter("status", NpgsqlDbType.Text) { Value = query.Status ?? (object)DBNull.Value });
+        command.Parameters.AddWithValue("exclude_proposed", query.ExcludeProposed);
         return command;
     }
 }

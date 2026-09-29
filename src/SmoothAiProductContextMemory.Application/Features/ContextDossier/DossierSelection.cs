@@ -170,6 +170,11 @@ public static class DossierSelection
                 HiddenDimensions = hiddenDimensions,
                 Kind = Blank(anchor.Kind),
                 Status = Blank(anchor.Status),
+                // Carried for the same reason the anchor search carries it: a supplied AsOf must
+                // bound the whole selection. Widening without it could add a memory the anchor
+                // search had already excluded by validity window, while the manifest recorded the
+                // AsOf as though the whole plan honoured it.
+                AsOf = anchor.AsOf,
                 Limit = MemorySearchDefaults.MaxLimit,
             },
             cancellationToken);
@@ -314,6 +319,25 @@ public static class DossierSelection
         return [.. hits];
     }
 
+    /// <summary>
+    /// The recorded retrieval policy, derived from what the anchor actually selects rather than
+    /// asserted as a fixed string.
+    /// </summary>
+    /// <remarks>
+    /// This was the literal <c>"current-only, proposed-excluded unless status requested"</c>, which
+    /// described an opt-in the ticket traversal did not have: the SQL hard-coded
+    /// <c>status &lt;&gt; 'proposed'</c>, and the traversal query carried no status field, so
+    /// <c>ticket + status=proposed</c> always returned <c>noMatch</c> while the manifest told a caller
+    /// the opposite. A manifest is a record of the effective selection sufficient to repeat it
+    /// (BR-20), so a clause naming a capability the request cannot exercise is a false record, not a
+    /// conservative one. The opt-in now exists on the traversal, and this derives the clause from the
+    /// anchor so the two cannot drift again.
+    /// </remarks>
+    internal static string RetrievalPolicy(DossierAnchor anchor) =>
+        anchor.Status is { Length: > 0 } status
+            ? $"current-only, status={status}"
+            : "current-only, proposed-excluded";
+
     /// <summary>The recorded effective selection, in a form sufficient to repeat it (BR-20).</summary>
     public static DossierSelectionPlan BuildPlan(DossierAnchor anchor) =>
         new(
@@ -330,7 +354,7 @@ public static class DossierSelection
             anchor.WidenDepth,
             DossierCombinationRule.Value,
             anchor.IncludeHistory ? "included" : "current-only",
-            "current-only, proposed-excluded unless status requested");
+            RetrievalPolicy(anchor));
 
     private sealed class DossierSelectionCompare : IComparer<CheapMemory>
     {

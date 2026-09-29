@@ -342,8 +342,58 @@ public sealed class TraversalTests : PersistenceTestBase
             Ct));
     }
 
-    private sealed record Chain(Guid GroupUuid, Guid A, Guid B, Guid C, Guid D);
+    [Fact]
+    public async Task Widen_HonoursAsOf()
+    {
+        // The dossier anchor search honoured AsOf while widening ignored it, so a manifest recorded
+        // an AsOf that only the first selection stage applied and the second could contradict by
+        // adding a memory the anchor search had excluded. The window predicate is the same one the
+        // search uses: valid_from <= asOf and (valid_until is null or valid_until > asOf).
+        var asOf = new DateTimeOffset(2026, 9, 29, 0, 0, 0, TimeSpan.Zero);
+        MemoryGroup group = await SeedGroupAsync();
+        Memory source = await SeedMemoryAsync(group.Id, "Source", "Subject source");
+        // Seeded with the window at insert: memory_version is append-only, and its trigger admits
+        // only an is_current flip, so a validity window cannot be corrected by an UPDATE afterwards.
+        Memory open = await SeedWindowedAsync(group.Id, "Open", asOf.AddDays(-10), null);
+        Memory closed = await SeedWindowedAsync(group.Id, "Closed", asOf.AddDays(-10), asOf.AddDays(-1));
+        Memory future = await SeedWindowedAsync(group.Id, "Future", asOf.AddDays(1), null);
 
+        (await Graph.CreateAsync(source.Uuid, open.Uuid, MemoryRelation.RelatesTo, "to open", Ct)).ShouldBeTrue();
+        (await Graph.CreateAsync(source.Uuid, closed.Uuid, MemoryRelation.RelatesTo, "to closed", Ct)).ShouldBeTrue();
+        (await Graph.CreateAsync(source.Uuid, future.Uuid, MemoryRelation.RelatesTo, "to future", Ct)).ShouldBeTrue();
+
+        MemoryWidenResult unbounded = await Traversal.WidenAsync(
+            new MemoryWidenQuery { SourceUuids = [source.Uuid], MaxDepth = 1 }, Ct);
+        unbounded.Memories.Select(m => m.Uuid).Order()
+            .ShouldBe(new[] { open.Uuid, closed.Uuid, future.Uuid }.Order());
+
+        MemoryWidenResult bounded = await Traversal.WidenAsync(
+            new MemoryWidenQuery { SourceUuids = [source.Uuid], MaxDepth = 1, AsOf = asOf }, Ct);
+        // Only the memory whose current version is valid at asOf. A closed window and a not-yet-open
+        // one are both excluded, and the source itself is never in a widening result.
+        bounded.Memories.Select(m => m.Uuid).ShouldBe([open.Uuid]);
+
+        // An AsOf far in the future still excludes the closed window, while an open-ended one
+        // (valid_until is null) is valid at any point — so the filter narrows, it does not empty.
+        (await Traversal.WidenAsync(
+            new MemoryWidenQuery { SourceUuids = [source.Uuid], MaxDepth = 1, AsOf = asOf.AddYears(5) }, Ct))
+            .Memories.Select(m => m.Uuid).Order()
+            .ShouldBe(new[] { open.Uuid, future.Uuid }.Order());
+    }
+
+    private async Task<Memory> SeedWindowedAsync(
+        long groupId, string name, DateTimeOffset validFrom, DateTimeOffset? validUntil)
+    {
+        Memory memory = TestEntities.NewMemory(groupId, name, $"Subject {name}");
+        Db.Memories.Add(memory);
+        await Db.SaveChangesAsync(Ct);
+        Db.MemoryVersions.Add(TestEntities.NewVersion(
+            memory.Id, 1, $"Claim {name}", validFrom: validFrom, validUntil: validUntil));
+        await Db.SaveChangesAsync(Ct);
+        return memory;
+    }
+
+    private sealed record Chain(Guid GroupUuid, Guid A, Guid B, Guid C, Guid D);
     private async Task<Chain> SeedChainAsync()
     {
         MemoryGroup group = await SeedGroupAsync();

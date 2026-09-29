@@ -31,7 +31,14 @@ public static class DependencyInjection
             .Bind(configuration.GetSection(SnapshotMetadataOptions.SectionName));
         services.AddSingleton<ISnapshotMetadataStore, FileSnapshotMetadataStore>();
         services.AddSingleton<ISnapshotArchive, TarSnapshotArchive>();
-        services.AddScoped<ISnapshotRepository, NpgsqlSnapshotRepository>();
+        // Options are handed to the repository directly rather than through IOptions<T>: restore is
+        // a bulk operation whose statement budget is a function of the corpus size, and a caller
+        // configuring `Snapshot:RestoreStatementTimeoutSeconds` should not also have to restart
+        // anything to have it take effect on the next restore.
+        services.AddScoped<ISnapshotRepository>(sp => new NpgsqlSnapshotRepository(
+            sp.GetRequiredService<IBlobStorage>(),
+            sp.GetRequiredService<IBlobCatalog>(),
+            sp.GetRequiredService<IOptions<SnapshotMetadataOptions>>().Value));
     }
 
     private static IServiceCollection AddPersistence(this IServiceCollection services, IConfiguration configuration)

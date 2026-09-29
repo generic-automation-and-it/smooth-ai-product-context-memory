@@ -23,6 +23,12 @@ public sealed class ServiceProviderFixture : IAsyncDisposable
 
     public ServiceCollection Start(Dictionary<string, string?>? configurationOverrides = null)
     {
+        // Captured at Start, the earliest point a caller reaches the fixture from inside a running
+        // test. The logger factory's own fallback reads TestContext.Current, which is gone by the
+        // time the provider is disposed, so a log line emitted during teardown would otherwise be
+        // written to nothing and read as a silent pass.
+        _loggerFactory.SetOutput(TestContext.Current?.TestOutputHelper);
+
         _services = new ServiceCollection();
 
         if (configurationOverrides is not null)

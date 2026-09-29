@@ -36,6 +36,16 @@ public sealed record TicketTraversalQuery
 
     public string? Kind { get; init; }
 
+    /// <summary>
+    /// Exact status match. When null, <see cref="ExcludeProposed"/> applies instead — the same shape
+    /// <see cref="IMemorySearch.MemorySearchCriteria"/> uses, so a caller reads one rule for both
+    /// retrieval surfaces rather than discovering that ticket traversal has no way to ask for a
+    /// proposed record at all.
+    /// </summary>
+    public string? Status { get; init; }
+
+    public bool ExcludeProposed { get; init; } = true;
+
     public int PathLimit { get; init; } = 50;
 
     public int MemoryLimit { get; init; } = 50;

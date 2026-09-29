@@ -245,6 +245,32 @@ public class TarSnapshotArchiveTests
     }
 
     [Fact]
+    public async Task Verify_Detects_AnArchiveMemberTheManifestDoesNotList()
+    {
+        // UnexpectedEntry had no assertion and no test even built the shape it exists for: a member in
+        // the container that the manifest does not list. Every tamper case either mutated a listed
+        // member or removed one, so the surplus-member branch was dead as far as the suite could see.
+        // It is the branch that catches a member *added* to the archive — a tampered payload the
+        // manifest never accounted for, which no count comparison would notice.
+        string path = TempArchive();
+        string address = Sha256ContentAddress.Compute(Body);
+        (SnapshotCapture capture, SnapshotWalkResult walk) = Capture(address, SnapshotBlobState.Ok);
+        await _archive.WriteAsync(path, capture, walk, _ => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
+
+        Dictionary<string, byte[]> entries = ReadTar(path);
+        entries["blobs/smuggled"] = "not what the manifest promised"u8.ToArray();
+        string tampered = TempArchive();
+        WriteTar(tampered, entries);
+
+        SnapshotVerification verification = await _archive.VerifyAsync(tampered, TestContext.Current.CancellationToken);
+
+        verification.IsClean.ShouldBeFalse();
+        SnapshotFinding finding = verification.Findings
+            .Single(f => f.Kind == SnapshotFindingKind.UnexpectedEntry);
+        finding.EntryName.ShouldBe("blobs/smuggled");
+    }
+
+    [Fact]
     public async Task Verify_Reports_NullEntriesOrCounts_As_NotClean()
     {
         // T3: a manifest with a null entry list or corpus counts must be rejected, not dereferenced
