@@ -26,14 +26,14 @@
       "expected": { "verdict": "split", "count": 3, "reason": "three atomic facts bundled into one record" }
     },
     {
-      "id": "s4-cross-group-version-bump",
+      "id": "s4-cross-group-match-is-not-a-bump",
       "stage": "dedup",
       "candidate_description": "A memory is one atomic fact with four content fields.",
       "candidate_statement": "Each memory is a single atomic fact.",
       "recall_set": [
         { "uuid": "m-002", "group_uuid": "g-99", "description": "A memory is one atomic fact with four content fields", "statement": "Each memory carries four content fields.", "kind": "domain-model", "content_summary": "Memory is a single atomic fact." }
       ],
-      "expected": { "verdict": "version_bump", "target_uuid": "m-002", "reason": "same subject captured under a different group/ticket" }
+      "expected": { "verdict": "new_memory", "reason": "same subject, but the match is in another group: identity is (group, uuid), so a foreign uuid target is a 404. Capture a new memory here and derive a typed link to the twin rather than a version bump." }
     },
     {
       "id": "s5-link-derivation",
