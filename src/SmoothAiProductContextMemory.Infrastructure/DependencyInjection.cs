@@ -31,10 +31,17 @@ public static class DependencyInjection
             .Bind(configuration.GetSection(SnapshotMetadataOptions.SectionName));
         services.AddSingleton<ISnapshotMetadataStore, FileSnapshotMetadataStore>();
         services.AddSingleton<ISnapshotArchive, TarSnapshotArchive>();
-        // Options are handed to the repository directly rather than through IOptions<T>: restore is
-        // a bulk operation whose statement budget is a function of the corpus size, and a caller
-        // configuring `Snapshot:RestoreStatementTimeoutSeconds` should not also have to restart
-        // anything to have it take effect on the next restore.
+        // Constructed directly rather than resolved as IOptions<T> by the repository. A previous
+        // comment here justified that by claiming a caller changing
+        // `Snapshot:RestoreStatementTimeoutSeconds` "should not also have to restart anything" — that
+        // was false. `IOptions<T>` is a singleton whose `Value` is itself cached, so injecting it
+        // snapshots the value at first resolution exactly as this does; the two are the same on that
+        // axis and the comment overstated a difference that does not exist.
+        //
+        // The reason to construct directly is narrower: the repository needs one field from the
+        // options object, and taking the object rather than the whole options type keeps the
+        // dependency on the value explicit at the registration site, where the other snapshot
+        // dependencies are already visible.
         services.AddScoped<ISnapshotRepository>(sp => new NpgsqlSnapshotRepository(
             sp.GetRequiredService<IBlobStorage>(),
             sp.GetRequiredService<IBlobCatalog>(),
