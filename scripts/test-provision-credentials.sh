@@ -10,6 +10,27 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
 
+# `stat` for a file's permission bits is spelled two incompatible ways: GNU uses `-c '%a'`, BSD/macOS
+# uses `-f '%Lp'`, and the two do not fail the same way. The wrong flag on GNU does not merely error —
+# `stat -f` there means *filesystem status*, so it prints a filesystem report **to stdout** and exits
+# non-zero. An expression like
+#     stat -f '%Lp' "$f" 2>/dev/null || stat -c '%a' "$f"
+# therefore captures that report and has the fallback's answer *appended* to it, yielding something
+# like `  File: "f" ... 600` — never equal to `600`, so the mode assertion below fails on every Linux
+# run. `2>/dev/null` hides the diagnostic but not the stdout. This harness is CI-gated on ubuntu, so
+# it was red on the gate while passing on the author's macOS.
+#
+# Probed once into a function rather than expressed as a fallback, for two reasons: the probe sends
+# both streams to /dev/null so no diagnostic can be captured by a caller, and a function has no second
+# command to append to. Ordering the flags "correctly" would only move the trap to the other platform.
+if stat -c '%a' /dev/null >/dev/null 2>&1; then
+  # GNU coreutils.
+  file_mode() { stat -c '%a' "$1"; }
+else
+  # BSD / macOS.
+  file_mode() { stat -f '%Lp' "$1"; }
+fi
+
 # The scratch dir is outside the checkout, so the unignored-path refusal below would otherwise fire
 # on every call here. The refusal has its own test below.
 provision() {
@@ -128,7 +149,20 @@ grep -q '^#' "$narrow/creds.env.controller" \
 unignored_out="$scratch/unignored-report"
 unignored_name="not-an-env-file"
 unignored_path="$scratch/$unignored_name"
-if git -C "$repo_root" check-ignore -q "$unignored_path" 2>/dev/null; then
+# Three outcomes, not two. `check-ignore` exits non-zero both for "not ignored" and for "cannot
+# answer" — the latter happens when git cannot resolve the repository at all (a read-only mount of a
+# linked worktree, whose .git is a file pointing outside the mount, is the case that surfaced this).
+# Collapsing them makes the harness report a product failure for an environment it cannot evaluate,
+# which is the same class of defect as the `stat` bug this section sits next to: a check that reads as
+# an assertion but is not one here.
+git_usable=0
+if git -C "$repo_root" rev-parse --git-dir >/dev/null 2>&1; then
+  git_usable=1
+fi
+
+if [ "$git_usable" -eq 0 ]; then
+  echo "SKIP: git cannot resolve a repository at $repo_root, so the ignore-refusal cannot be evaluated" >&2
+elif git -C "$repo_root" check-ignore -q "$unignored_path" 2>/dev/null; then
   echo "SKIP: $unignored_path is unexpectedly ignored by this checkout" >&2
 else
   if (cd "$repo_root" && scripts/provision-credentials.sh \
@@ -155,7 +189,7 @@ permissive="$scratch/permissive"
 mkdir -p "$permissive"
 (umask 022 && provision --env-file "$permissive/creds.env" --skip-apphost >/dev/null)
 for created in "$permissive/creds.env" "$permissive/creds.env.controller"; do
-  mode="$(stat -f '%Lp' "$created" 2>/dev/null || stat -c '%a' "$created")"
+  mode="$(file_mode "$created")"
   case "$mode" in
     600|400) ;;
     *) echo "FAIL: $created has mode $mode; a bearer-token file must be owner-only" >&2; exit 1 ;;
@@ -216,7 +250,7 @@ data = json.load(open(sys.argv[1], encoding="utf-8-sig"))
 assert data["Parameters:api-read-token"] == sys.argv[2], "read token not in user secrets"
 assert data["Parameters:api-write-token"] == sys.argv[3], "write token not in user secrets"
 PY
-secrets_mode="$(stat -f '%Lp' "$secrets_json" 2>/dev/null || stat -c '%a' "$secrets_json")"
+secrets_mode="$(file_mode "$secrets_json")"
 case "$secrets_mode" in
   600|400) ;;
   *) echo "FAIL: user secrets file has mode $secrets_mode" >&2; exit 1 ;;
