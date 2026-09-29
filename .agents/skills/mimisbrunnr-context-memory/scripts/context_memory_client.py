@@ -15,6 +15,8 @@ import urllib.error
 import urllib.request
 from urllib.parse import urlparse
 
+import redact
+
 DEFAULT_BASE_URL = "http://localhost:5141"
 ENV_BASE_URL = "CONTEXT_MEMORY_BASE_URL"
 ENV_READ_TOKEN = "CONTEXT_MEMORY_READ_TOKEN"
@@ -169,11 +171,20 @@ def cmd_preflight(args):
 
 
 def cmd_set(args):
-    """POST /api/context/memories. --dryrun appends ?dryRun=true."""
+    """POST /api/context/memories. --dryrun appends ?dryRun=true.
+
+    Redaction runs here, not as a separate tool the caller may forget: the blob is immutable once
+    written, so a secret that reaches the server can only be orphaned, never edited out. The
+    digest reports rule names and counts only, never the span.
+    """
     payload = read_payload(args.payload)
     validate_set_payload(payload)
+    payload, findings = scrub_or_refuse(payload)
     query = {"dryRun": "true"} if args.dryrun else None
     resp = _request("POST", "/api/context/memories", payload, query=query)
+    if findings:
+        resp["redaction"] = [{"rule_name": name, "hit_count": count}
+                             for name, count in sorted(findings.items())]
     print(json.dumps(resp, indent=2))
     return resp
 
@@ -190,6 +201,26 @@ def validate_set_payload(payload):
             f"Batch has {len(payload['items'])} items; cap is {MAX_CANDIDATES}. "
             "Split into multiple checkpoints.",
         )
+
+
+def scrub_or_refuse(payload):
+    """Scrub a `set` payload, or refuse the write. Never returns unscubbed content.
+
+    The redaction gate is fail-closed because the failure it guards against is irreversible: a
+    blob is content-addressed, so a secret that reaches storage can only be orphaned, never
+    edited out. "The scrubber was unavailable" is therefore not a reason to proceed — it is the
+    condition under which proceeding is most likely to be wrong. The exception text names the
+    failure, never the content, so the refusal is safe to print into a transcript.
+    """
+    try:
+        return redact.scrub_set_payload(payload)
+    except Exception as exc:  # noqa: BLE001 — the point is that no exception escapes as a write
+        raise ClientError(
+            0,
+            "redactor-unavailable",
+            f"The redactor could not run ({type(exc).__name__}), so this write would store "
+            "unscrubbed content. Nothing was sent.",
+        ) from None
 
 
 def cmd_query(args):

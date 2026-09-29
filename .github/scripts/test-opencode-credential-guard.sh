@@ -76,6 +76,18 @@ for name in ("review", "analyse"):
 assert {"action": "edit", "resource": "*.git/*", "effect": "deny"} in agents["analyse"]["permissions"]
 PY
 
+# A thread's environment is a different file holding the same bytes, one level deeper than the
+# process one, so a single-depth glob denies the process form and admits the thread form.
+python3 - "$repo_root/.github/scripts/harden-opencode-config.py" <<'PY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("harden", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+for pattern in ("*/proc/*/environ", "*/proc/*/cmdline",
+                "*/proc/*/task/*/environ", "*/proc/*/task/*/cmdline"):
+    assert pattern in module.DENIED_PATHS, f"{pattern} is not denied"
+PY
+
 if OPENCODE_REVIEW_REPORT_PROVIDER=UNKNOWN "$scratch/opencode" --version >/dev/null 2>&1; then
   echo 'unknown provider was not rejected' >&2
   exit 1
@@ -92,6 +104,42 @@ if (cd "$scratch/project/nested" && GITHUB_WORKSPACE="$scratch/project" \
   echo 'project config override was not rejected' >&2
   exit 1
 fi
+
+# A deny glob matches the path the model asks for, not what that path resolves to. A symlink
+# committed in a pull request therefore reads a denied target through an innocuous repo path, and
+# no deny rule can see it — so the guard resolves the target itself, before the model starts.
+rm -f "$scratch/project/opencode.json"
+ln -s /proc/self/environ "$scratch/project/docs-leak"
+if (cd "$scratch/project/nested" && GITHUB_WORKSPACE="$scratch/project" \
+    "$scratch/opencode" --version >/dev/null 2>&1); then
+  echo 'symlink to a denied path was not rejected' >&2
+  exit 1
+fi
+ln -s "$HOME/.config/gh/hosts.yml" "$scratch/project/creds"
+if (cd "$scratch/project/nested" && GITHUB_WORKSPACE="$scratch/project" \
+    "$scratch/opencode" --version >/dev/null 2>&1); then
+  echo 'symlink to a credential file outside the checkout was not rejected' >&2
+  exit 1
+fi
+# A symlinked *directory* is never traversed, so a file-only scan would miss it entirely.
+ln -s /proc/self "$scratch/project/docs"
+if (cd "$scratch/project/nested" && GITHUB_WORKSPACE="$scratch/project" \
+    "$scratch/opencode" --version >/dev/null 2>&1); then
+  echo 'directory symlink to a denied path was not rejected' >&2
+  exit 1
+fi
+rm -f "$scratch/project/docs-leak" "$scratch/project/creds" "$scratch/project/docs"
+# An in-checkout symlink is the shape this repository itself ships, and must keep working.
+ln -s ../.github/instructions "$scratch/project/rules"
+(cd "$scratch/project/nested" && GITHUB_WORKSPACE="$scratch/project" \
+  "$scratch/opencode" --version >/dev/null)
+rm -f "$scratch/project/rules"
+# ... and so must a symlink out to a location that carries nothing sensitive.
+mkdir -p "$scratch/cache"
+ln -s "$scratch/cache" "$scratch/project/tool-cache"
+(cd "$scratch/project/nested" && GITHUB_WORKSPACE="$scratch/project" \
+  "$scratch/opencode" --version >/dev/null)
+rm -f "$scratch/project/tool-cache"
 
 cat > "$scratch/installer" <<'FAKE_INSTALL'
 #!/usr/bin/env bash

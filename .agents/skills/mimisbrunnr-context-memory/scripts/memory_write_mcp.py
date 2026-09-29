@@ -60,8 +60,16 @@ def call_tool(name, arguments):
         return client._request(method, path, payload)
     if name == "set":
         client.validate_set_payload(payload)
+        # Redaction is not a separate tool here. A tool the caller must remember is a tool that
+        # gets skipped, and the cost of skipping it is a permanent blob: content addressing means
+        # a leaked secret can be orphaned but never edited out. Fail closed like the CLI path.
+        payload, findings = client.scrub_or_refuse(payload)
         query = {"dryRun": "true"} if arguments.get("dryRun") else None
-        return client._request("POST", "/api/context/memories", payload, query=query)
+        result = client._request("POST", "/api/context/memories", payload, query=query)
+        if findings and isinstance(result, dict):
+            result["redaction"] = [{"rule_name": rule, "hit_count": count}
+                                   for rule, count in sorted(findings.items())]
+        return result
     if name == "update_group":
         return client._request("PATCH", f"/api/context/groups/{arguments['uuid']}", payload)
     if name == "append_description":

@@ -312,6 +312,148 @@ class WritePayloadTests(unittest.TestCase):
             handler.redirect_request(request, None, 302, "Found", {}, "https://evil.example/")
 
 
+PLANTED = {
+    "items": [{
+        "name": "CI deploy key",
+        "description": "ci deploy key",
+        "statement": "The pipeline authenticates with AKIAIOSFODNN7EXAMPLE.",
+        "contentSummary": "Because CI runs unattended.",
+        "content": "export GITHUB_TOKEN=ghp_0123456789abcdefghijklmnopqrstuvwxyzAB",
+        "facets": ["ops", "api_key=sk-live-abcdefgh12345678"],
+        "tags": ["token: ghp_0123456789abcdefghijklmnopqrstuvwxyzAB"],
+        "sources": [{"kind": "doc", "reference": "Host=db;Password=hunter2hunter2;"}],
+    }],
+    "links": [{"sourceUuid": "1", "targetUuid": "2", "relation": "relates",
+               "reason": "cites the deploy note: api_key=sk-live-zzzzzzzz99999999"}],
+    "labelsProposed": ["password=hunter2hunter2"],
+}
+PLANTED_SECRETS = (
+    "AKIAIOSFODNN7EXAMPLE",
+    "ghp_0123456789abcdefghijklmnopqrstuvwxyzAB",
+    "sk-live-abcdefgh12345678",
+    "sk-live-zzzzzzzz99999999",
+    "hunter2hunter2",
+)
+
+
+def _assert_no_secret(testcase, payload):
+    """Fail if any planted secret survives anywhere in the request body, at any depth."""
+    serialised = json.dumps(payload, sort_keys=True)
+    for secret in PLANTED_SECRETS:
+        testcase.assertNotIn(secret, serialised, f"planted secret survived into the payload: {secret}")
+
+
+class SetRedactionGateTests(unittest.TestCase):
+    """The `set` path scrubs before it posts. A separate `redact` tool does not gate anything."""
+
+    def test_cli_set_posts_no_planted_secret(self):
+        with patch.object(client, "read_payload", return_value=copy.deepcopy(PLANTED)), \
+                patch.object(client, "_request", return_value={"created": 1}) as request, \
+                redirect_stdout(io.StringIO()):
+            client.cmd_set(SimpleNamespace(payload=None, dryrun=False))
+        posted = request.call_args.args[2]
+        _assert_no_secret(self, posted)
+
+    def test_mcp_set_posts_no_planted_secret(self):
+        with patch.object(write_mcp.client, "_request", return_value={"created": 1}) as request:
+            write_mcp.call_tool("set", {"payload": copy.deepcopy(PLANTED)})
+        _assert_no_secret(self, request.call_args.args[2])
+
+    def test_dry_run_is_scrubbed_too(self):
+        # A dry run is a preview of what would be stored, so an unscubbed dry run is a preview of
+        # a blob that cannot later be repaired. Gating only the persisting call would let the
+        # secret be reviewed, approved and then stored verbatim.
+        with patch.object(write_mcp.client, "_request", return_value={"dryRun": True}) as request:
+            write_mcp.call_tool("set", {"payload": copy.deepcopy(PLANTED), "dryRun": True})
+        _assert_no_secret(self, request.call_args.args[2])
+
+    def test_digest_reports_rule_names_and_counts_only(self):
+        with patch.object(client, "read_payload", return_value=copy.deepcopy(PLANTED)), \
+                patch.object(client, "_request", return_value={"created": 1}), \
+                redirect_stdout(io.StringIO()):
+            response = client.cmd_set(SimpleNamespace(payload=None, dryrun=False))
+        serialised = json.dumps(response)
+        _assert_no_secret(self, response)
+        self.assertTrue(response["redaction"])
+        for entry in response["redaction"]:
+            self.assertEqual(set(entry), {"rule_name", "hit_count"})
+        names = {entry["rule_name"] for entry in response["redaction"]}
+        self.assertIn("aws-access-key-id", names)
+        self.assertIn("github-token", names)
+
+    def test_clean_content_reports_no_redaction_key(self):
+        clean = {"items": [{"name": "n", "description": "d", "statement": "A fact.",
+                            "contentSummary": "why", "content": "text"}], "links": []}
+        with patch.object(client, "read_payload", return_value=copy.deepcopy(clean)), \
+                patch.object(client, "_request", return_value={"created": 1}), \
+                redirect_stdout(io.StringIO()):
+            response = client.cmd_set(SimpleNamespace(payload=None, dryrun=False))
+        self.assertNotIn("redaction", response)
+
+    def test_caller_payload_is_not_mutated(self):
+        # A shallow copy shares item dicts, so an in-place scrub would silently rewrite what the
+        # caller still holds — including the test's own fixture, which is how this gate could
+        # look like it passed while a retry posted the original.
+        original = copy.deepcopy(PLANTED)
+        with patch.object(write_mcp.client, "_request", return_value={"created": 1}) as request:
+            write_mcp.call_tool("set", {"payload": PLANTED})
+        _assert_no_secret(self, request.call_args.args[2])
+        self.assertEqual(original, PLANTED)
+
+    def test_unavailable_redactor_refuses_the_write(self):
+        # Fail closed. "The scrubber could not run" is precisely the condition under which
+        # proceeding stores unscubbed content, and the blob is immutable once written.
+        with patch.object(client, "read_payload", return_value=copy.deepcopy(PLANTED)), \
+                patch.object(client, "_request") as request, \
+                patch.object(client.redact, "scrub_set_payload", side_effect=RuntimeError("boom")):
+            with self.assertRaises(client.ClientError) as error:
+                client.cmd_set(SimpleNamespace(payload=None, dryrun=False))
+        self.assertIn("redactor-unavailable", str(error.exception))
+        request.assert_not_called()
+
+    def test_redactor_refusal_carries_no_content(self):
+        with patch.object(client, "read_payload", return_value=copy.deepcopy(PLANTED)), \
+                patch.object(client, "_request"), \
+                patch.object(client.redact, "scrub_set_payload", side_effect=RuntimeError("boom")):
+            with self.assertRaises(client.ClientError) as error:
+                client.cmd_set(SimpleNamespace(payload=None, dryrun=False))
+        self.assertNotIn("boom", str(error.exception))
+
+    def test_mcp_refusal_is_a_jsonrpc_error_not_a_crash(self):
+        with patch.object(client.redact, "scrub_set_payload", side_effect=RuntimeError("boom")):
+            response = read_mcp.respond(
+                json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                            "params": {"name": "set", "arguments": {"payload": copy.deepcopy(PLANTED)}}}),
+                write_mcp.handle)
+        self.assertEqual(response["error"]["code"], -32000)
+        self.assertIn("redactor-unavailable", response["error"]["message"])
+        for secret in PLANTED_SECRETS:
+            self.assertNotIn(secret, response["error"]["message"])
+
+    def test_scrub_covers_every_declared_content_field(self):
+        scrubbed, findings = redact.scrub_set_payload(copy.deepcopy(PLANTED))
+        _assert_no_secret(self, scrubbed)
+        self.assertTrue(findings)
+        # Each rule shape is planted in a different field, so a field dropped from the walk
+        # shows up as a missing rule name rather than as a silently cleaner payload.
+        self.assertEqual(findings.get("aws-access-key-id"), 1)   # statement
+        self.assertEqual(findings.get("github-token"), 2)        # content and tags
+        self.assertEqual(findings.get("connection-string-password"), 2)  # sources[].reference, labelsProposed
+        self.assertEqual(findings.get("generic-secret-assignment"), 2)  # facets, links[].reason
+
+    def test_non_string_content_fields_survive_untouched(self):
+        payload = {"items": [{"statement": None, "content": 42, "tags": ["ok", None],
+                              "sources": ["not-a-dict"]}], "links": [None], "labelsProposed": [None]}
+        scrubbed, findings = redact.scrub_set_payload(payload)
+        self.assertEqual(scrubbed["items"][0]["statement"], None)
+        self.assertEqual(scrubbed["items"][0]["content"], 42)
+        self.assertEqual(scrubbed["items"][0]["tags"], ["ok", None])
+        self.assertEqual(scrubbed["items"][0]["sources"], ["not-a-dict"])
+        self.assertEqual(scrubbed["links"], [None])
+        self.assertEqual(scrubbed["labelsProposed"], [None])
+        self.assertEqual(findings, {})
+
+
 class DeepSearchTests(unittest.TestCase):
     def test_default_client_query_has_no_deepsearch_pass(self):
         with patch.object(client, "read_payload", return_value={}), \

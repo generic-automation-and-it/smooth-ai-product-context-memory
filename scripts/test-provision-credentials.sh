@@ -10,9 +10,13 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
 
-"$repo_root/scripts/provision-credentials.sh" \
-  --env-file "$scratch/creds.env" \
-  --skip-apphost >/dev/null
+# The scratch dir is outside the checkout, so the unignored-path refusal below would otherwise fire
+# on every call here. The refusal has its own test below.
+provision() {
+  "$repo_root/scripts/provision-credentials.sh" --allow-unignored-env-file "$@"
+}
+
+provision --env-file "$scratch/creds.env" --skip-apphost >/dev/null
 
 read_token="$(grep -m1 '^ApiAccess__ReadToken=' "$scratch/creds.env" | cut -d= -f2-)"
 write_token="$(grep -m1 '^ApiAccess__WriteToken=' "$scratch/creds.env" | cut -d= -f2-)"
@@ -57,7 +61,7 @@ grep -q '^Parameters__api-write-token=' "$scratch/creds.env.controller" \
 # --- reuse and migration paths ------------------------------------------------------------------
 # A plain re-run must reuse the existing values: the Host and the skills already hold them, so
 # regenerating here would silently invalidate both and 403 every request until a restart.
-reused="$(bash "$repo_root/scripts/provision-credentials.sh" --env-file "$scratch/creds.env" --skip-apphost 2>&1)"
+reused="$(provision --env-file "$scratch/creds.env" --skip-apphost 2>&1)"
 grep -q 'Reusing existing credentials' <<<"$reused" \
   || { echo "FAIL: a plain re-run did not report reusing the existing credentials" >&2; echo "$reused" >&2; exit 1; }
 after_reuse="$(grep -m1 '^ApiAccess__ReadToken=' "$scratch/creds.env" | cut -d= -f2-)"
@@ -65,7 +69,7 @@ after_reuse="$(grep -m1 '^ApiAccess__ReadToken=' "$scratch/creds.env" | cut -d= 
   || { echo "FAIL: a plain re-run rotated the read token" >&2; exit 1; }
 
 # --rotate must regenerate.
-bash "$repo_root/scripts/provision-credentials.sh" --env-file "$scratch/creds.env" --skip-apphost --rotate >/dev/null
+provision --env-file "$scratch/creds.env" --skip-apphost --rotate >/dev/null
 after_rotate="$(grep -m1 '^ApiAccess__ReadToken=' "$scratch/creds.env" | cut -d= -f2-)"
 [ "$after_rotate" != "$read_token" ] \
   || { echo "FAIL: --rotate did not regenerate the read token" >&2; exit 1; }
@@ -86,7 +90,7 @@ CONTEXT_MEMORY_BASE_URL=http://localhost:5141
 EOF
 legacy_read="$(grep -m1 '^ApiAccess__ReadToken=' "$legacy" | cut -d= -f2-)"
 
-migrated="$(bash "$repo_root/scripts/provision-credentials.sh" --env-file "$legacy" --skip-apphost 2>&1)"
+migrated="$(provision --env-file "$legacy" --skip-apphost 2>&1)"
 grep -q 'Re-splitting' <<<"$migrated" \
   || { echo "FAIL: a pre-split file was not re-split" >&2; echo "$migrated" >&2; exit 1; }
 [ -f "$legacy.controller" ] \
@@ -101,8 +105,125 @@ after_split="$(grep -m1 '^ApiAccess__ReadToken=' "$legacy" | cut -d= -f2-)"
 grep -q "^Parameters__api-read-token=$legacy_read" "$legacy.controller" \
   || { echo "FAIL: the re-split controller file does not carry the preserved token" >&2; exit 1; }
 
+# --- least privilege in the controller file -------------------------------------------------------
+# The controller reads two keys. Every other name in that file is a second copy of a bearer
+# credential in a file whose only consumer ignores them. Uses its own file: the migration case above
+# deliberately removes the original's controller sibling to simulate the pre-split layout.
+narrow="$scratch/narrow"
+mkdir -p "$narrow"
+provision --env-file "$narrow/creds.env" --skip-apphost >/dev/null
+if grep -qE '^(ApiAccess__|CONTEXT_MEMORY_)' "$narrow/creds.env.controller"; then
+  echo "FAIL: the controller env file carries names beyond Parameters__*" >&2
+  exit 1
+fi
+grep -q '^Parameters__api-read-token=' "$narrow/creds.env.controller" \
+  || { echo "FAIL: the controller env file lost its read token" >&2; exit 1; }
+grep -q '^#' "$narrow/creds.env.controller" \
+  || { echo "FAIL: the controller env file lost its explanatory header" >&2; exit 1; }
+
+# --- an unignored --env-file is refused -----------------------------------------------------------
+# The token file is only safe from version control while something ignores it. A caller-chosen path
+# outside .context/ and not ending in .env is covered by neither `*.env` nor `.context/`, and
+# setup.md asserts it is gitignored regardless of where it points.
+unignored_out="$scratch/unignored-report"
+unignored_name="not-an-env-file"
+unignored_path="$scratch/$unignored_name"
+if git -C "$repo_root" check-ignore -q "$unignored_path" 2>/dev/null; then
+  echo "SKIP: $unignored_path is unexpectedly ignored by this checkout" >&2
+else
+  if (cd "$repo_root" && scripts/provision-credentials.sh \
+        --env-file "$unignored_path" --skip-apphost) >"$unignored_out" 2>&1; then
+    echo "FAIL: wrote credentials to a path git does not ignore" >&2
+    exit 1
+  fi
+  grep -q 'git does not ignore' "$unignored_out" \
+    || { echo "FAIL: the refusal did not explain itself:" >&2; cat "$unignored_out" >&2; exit 1; }
+  [ ! -e "$unignored_path" ] \
+    || { echo "FAIL: a token file was created despite the refusal" >&2; exit 1; }
+  # The override must actually work, or the refusal is the only outcome an operator can reach.
+  provision --env-file "$unignored_path" --skip-apphost >/dev/null
+  grep -q '^ApiAccess__ReadToken=' "$unignored_path" \
+    || { echo "FAIL: --allow-unignored-env-file did not write the file" >&2; exit 1; }
+fi
+
+# --- files are never group- or world-readable, even under a permissive umask ---------------------
+# Two separate claims, and only one of them is observable here.
+#
+# The end state is observable: run under umask 022 — the common default, under which an un-narrowed
+# create is 644 — and assert the resulting mode.
+permissive="$scratch/permissive"
+mkdir -p "$permissive"
+(umask 022 && provision --env-file "$permissive/creds.env" --skip-apphost >/dev/null)
+for created in "$permissive/creds.env" "$permissive/creds.env.controller"; do
+  mode="$(stat -f '%Lp' "$created" 2>/dev/null || stat -c '%a' "$created")"
+  case "$mode" in
+    600|400) ;;
+    *) echo "FAIL: $created has mode $mode; a bearer-token file must be owner-only" >&2; exit 1 ;;
+  esac
+done
+#
+# The *window* is not observable, and this test does not claim to cover it. `chmod 600` after the
+# write reaches the same end state whether or not the file was briefly 644, so no post-hoc assertion
+# can tell the two apart — the exposure is over before any test could look. What is assertable is
+# that the script narrows the umask itself, so the file is never created wide. That is a structural
+# check on the script, not a behavioural one, and it is labelled as such rather than dressed up as
+# evidence about the window itself.
+grep -Eq '^umask 0?77$' "$repo_root/scripts/provision-credentials.sh" \
+  || { echo "FAIL: the script does not narrow its umask, so token files are briefly created" >&2
+       echo "  group/world-readable before chmod 600. That window is not observable by any" >&2
+       echo "  assertion below and is asserted structurally only." >&2; exit 1; }
+
+# --- a corrupt reuse file is refused, not propagated ----------------------------------------------
+# Reuse that does not re-validate its parse rewrites a truncated file *keeping the broken value*,
+# then propagates that value into the controller file and the user secrets.
+corrupt="$scratch/corrupt.env"
+sed 's/^ApiAccess__ReadToken=.*/ApiAccess__ReadToken=deadbeef/' "$permissive/creds.env" >"$corrupt"
+corrupt_out="$scratch/corrupt-report"
+if provision --env-file "$corrupt" --skip-apphost >"$corrupt_out" 2>&1; then
+  echo "FAIL: reused a file whose read token is not a 64-char hex token" >&2
+  exit 1
+fi
+grep -q 'not a 64-character hex token' "$corrupt_out" \
+  || { echo "FAIL: the corrupt-file refusal did not explain itself:" >&2; cat "$corrupt_out" >&2; exit 1; }
+grep -q 'deadbeef' "$corrupt.controller" 2>/dev/null \
+  && { echo "FAIL: the corrupt value was propagated into the controller file" >&2; exit 1; }
+
+# Identical read and write tokens mean the read capability is the write capability.
+identical="$scratch/identical.env"
+sed "s/^ApiAccess__WriteToken=.*/ApiAccess__WriteToken=$(grep -m1 '^ApiAccess__ReadToken=' "$permissive/creds.env" | cut -d= -f2-)/" \
+  "$permissive/creds.env" >"$identical"
+if provision --env-file "$identical" --skip-apphost >"$scratch/identical-report" 2>&1; then
+  echo "FAIL: reused a file whose read and write tokens are identical" >&2
+  exit 1
+fi
+grep -q 'identical' "$scratch/identical-report" \
+  || { echo "FAIL: the identical-token refusal did not explain itself" >&2; exit 1; }
+
+# --- AppHost user secrets carry the token without it ever being an argv element -------------------
+# `dotnet user-secrets set NAME VALUE` puts the value in the process table. Point HOME at a scratch
+# dir so the real user-secrets store is untouched, and assert the file the SDK reads.
+secrets_home="$scratch/secrets-home"
+mkdir -p "$secrets_home"
+HOME="$secrets_home" provision --env-file "$scratch/apphost.env" >/dev/null
+secrets_json="$secrets_home/.microsoft/usersecrets/smooth-project-memory-host/secrets.json"
+[ -f "$secrets_json" ] \
+  || { echo "FAIL: AppHost user secrets were not written to $secrets_json" >&2; exit 1; }
+apphost_read="$(grep -m1 '^ApiAccess__ReadToken=' "$scratch/apphost.env" | cut -d= -f2-)"
+apphost_write="$(grep -m1 '^ApiAccess__WriteToken=' "$scratch/apphost.env" | cut -d= -f2-)"
+python3 - "$secrets_json" "$apphost_read" "$apphost_write" <<'PY'
+import json, sys
+data = json.load(open(sys.argv[1], encoding="utf-8-sig"))
+assert data["Parameters:api-read-token"] == sys.argv[2], "read token not in user secrets"
+assert data["Parameters:api-write-token"] == sys.argv[3], "write token not in user secrets"
+PY
+secrets_mode="$(stat -f '%Lp' "$secrets_json" 2>/dev/null || stat -c '%a' "$secrets_json")"
+case "$secrets_mode" in
+  600|400) ;;
+  *) echo "FAIL: user secrets file has mode $secrets_mode" >&2; exit 1 ;;
+esac
+
 echo "provision-credentials.sh security and reuse checks passed."
 
-# The sibling credential-guard harness (test-opencode-credential-guard.sh) is NOT run here: the guard
-# uses `declare -A`, which needs bash 4.0, and this script must stay runnable on the macOS default
-# bash 3.2 where the harness exits 2 on an associative-array error. CI is ubuntu (bash 5) and runs it.
+# The sibling credential-guard harness (test-opencode-credential-guard.sh) runs on the same bash
+# 3.2 as this script: the guard no longer uses `declare -A`, so it is runnable on macOS too and the
+# two harnesses can be run back to back locally.
