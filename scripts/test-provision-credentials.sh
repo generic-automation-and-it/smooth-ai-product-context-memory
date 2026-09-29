@@ -8,7 +8,17 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 scratch="$(mktemp -d)"
-trap 'rm -rf "$scratch"' EXIT
+# The ignore-refusal cases below write inside the checkout, which is the only way to make git give a
+# real "not ignored" answer rather than "cannot answer". Both paths are removed on every exit path,
+# including a failure or an interrupt, so a red run cannot leave a token file in the working tree.
+inside_name="provision-harness-unignored-probe"
+inside_path="$repo_root/$inside_name"
+accepted_dir="$repo_root/.context"
+accepted_path="$accepted_dir/provision-harness-accepted.env"
+cleanup_probe_files() {
+  rm -f "$inside_path" "$inside_path.controller" "$accepted_path" "$accepted_path.controller"
+}
+trap 'cleanup_probe_files; rm -rf "$scratch"' EXIT
 
 # `stat` for a file's permission bits is spelled two incompatible ways: GNU uses `-c '%a'`, BSD/macOS
 # uses `-f '%Lp'`, and the two do not fail the same way. The wrong flag on GNU does not merely error —
@@ -149,12 +159,33 @@ grep -q '^#' "$narrow/creds.env.controller" \
 unignored_out="$scratch/unignored-report"
 unignored_name="not-an-env-file"
 unignored_path="$scratch/$unignored_name"
-# Three outcomes, not two. `check-ignore` exits non-zero both for "not ignored" and for "cannot
-# answer" — the latter happens when git cannot resolve the repository at all (a read-only mount of a
-# linked worktree, whose .git is a file pointing outside the mount, is the case that surfaced this).
-# Collapsing them makes the harness report a product failure for an environment it cannot evaluate,
-# which is the same class of defect as the `stat` bug this section sits next to: a check that reads as
-# an assertion but is not one here.
+# Two refusals have to be exercised, and they are different answers from git, not the same one.
+#
+#   1. "not ignored"  — check-ignore exits 1. A real answer. This is the case the guard exists for: a
+#      path inside the repository that `git add .` would stage.
+#   2. "cannot answer" — check-ignore exits 128, which is what it does for a path *outside* the
+#      repository. Nothing there is ignored, so the guard refuses, but it is refusing for a different
+#      reason.
+#
+# The scratch dir is outside the checkout, so an earlier version of this section only ever produced
+# case 2 — and asserted on message text, which both branches emit, so a mutation treating 128 as
+# acceptable passed. The named scenario was never run. Case 1 needs a path inside the checkout that
+# no rule covers, which is what forces a genuine exit 1.
+inside_name="provision-harness-unignored-probe"
+inside_path="$repo_root/$inside_name"
+# The guard's accept branch needs the mirror of case 1: a path inside the repository that git *does*
+# ignore, so the guard permits it with no override. `.context/` is covered by the repo's own ignore
+# rules, which makes it the one in-repo location an operator is actually directed to use. It is
+# gitignored, so it does not exist in a fresh clone; create it, and remove it again if it was ours.
+created_context_dir=0
+if [ ! -d "$accepted_dir" ]; then
+  mkdir -p "$accepted_dir"
+  created_context_dir=1
+fi
+
+# Three outcomes for case 2, not two. Collapsing "cannot answer" into a product failure reports a
+# broken environment as a broken script, which is the same class of defect as the `stat` bug this
+# section sits next to: a check that reads as an assertion but is not one here.
 git_usable=0
 if git -C "$repo_root" rev-parse --git-dir >/dev/null 2>&1; then
   git_usable=1
@@ -162,14 +193,57 @@ fi
 
 if [ "$git_usable" -eq 0 ]; then
   echo "SKIP: git cannot resolve a repository at $repo_root, so the ignore-refusal cannot be evaluated" >&2
-elif git -C "$repo_root" check-ignore -q "$unignored_path" 2>/dev/null; then
-  echo "SKIP: $unignored_path is unexpectedly ignored by this checkout" >&2
+  exit 0
+fi
+
+# --- case 1: inside the repository, not ignored, refused --------------------------------------------
+# Asserted on the exit code of check-ignore itself, not on the provisioner's message, so this cannot
+# pass by the two branches producing the same text.
+if git -C "$repo_root" check-ignore -q "$inside_path" 2>/dev/null; then
+  echo "SKIP: $inside_name is unexpectedly ignored by this checkout" >&2
+elif [ $? -ne 1 ]; then
+  echo "SKIP: check-ignore could not answer for an in-repo path" >&2
 else
   if (cd "$repo_root" && scripts/provision-credentials.sh \
-        --env-file "$unignored_path" --skip-apphost) >"$unignored_out" 2>&1; then
-    echo "FAIL: wrote credentials to a path git does not ignore" >&2
+        --env-file "$inside_path" --skip-apphost) >"$unignored_out" 2>&1; then
+    echo "FAIL: wrote credentials to an in-repo path git does not ignore" >&2
+    rm -f "$inside_path" "$inside_path.controller"
     exit 1
   fi
+  grep -q 'git does not ignore' "$unignored_out" \
+    || { echo "FAIL: the refusal did not explain itself:" >&2; cat "$unignored_out" >&2; rm -f "$inside_path" "$inside_path.controller"; exit 1; }
+  [ ! -e "$inside_path" ] \
+    || { echo "FAIL: a token file was created despite the refusal" >&2; rm -f "$inside_path" "$inside_path.controller"; exit 1; }
+  # The override must actually work, or the refusal is the only outcome an operator can reach.
+  (cd "$repo_root" && scripts/provision-credentials.sh \
+      --env-file "$inside_path" --allow-unignored-env-file --skip-apphost) >/dev/null 2>&1
+  grep -q '^ApiAccess__ReadToken=' "$inside_path" \
+    || { echo "FAIL: --allow-unignored-env-file did not write the file" >&2; rm -f "$inside_path" "$inside_path.controller"; exit 1; }
+  rm -f "$inside_path" "$inside_path.controller"
+fi
+
+# --- the guard's accept branch: in-repo and git-ignored, permitted with no override ------------------
+if ! git -C "$repo_root" check-ignore -q "$accepted_path" 2>/dev/null; then
+  echo "SKIP: $accepted_path is not ignored by this checkout, so the accept branch cannot be evaluated" >&2
+elif (cd "$repo_root" && scripts/provision-credentials.sh \
+        --env-file "$accepted_path" --skip-apphost) >"$unignored_out" 2>&1; then
+  :
+else
+  echo "FAIL: refused a path git does ignore, with no override given:" >&2
+  cat "$unignored_out" >&2
+  rm -f "$accepted_path" "$accepted_path.controller"
+  exit 1
+fi
+grep -q '^ApiAccess__ReadToken=' "$accepted_path" \
+  || { echo "FAIL: the accept branch wrote no token" >&2; rm -f "$accepted_path" "$accepted_path.controller"; exit 1; }
+rm -f "$accepted_path" "$accepted_path.controller"
+
+# --- case 2: outside the repository, which git cannot answer for --------------------------------------
+if (cd "$repo_root" && scripts/provision-credentials.sh \
+      --env-file "$unignored_path" --skip-apphost) >"$unignored_out" 2>&1; then
+  echo "FAIL: wrote credentials to a path outside the repository" >&2
+  exit 1
+else
   grep -q 'git does not ignore' "$unignored_out" \
     || { echo "FAIL: the refusal did not explain itself:" >&2; cat "$unignored_out" >&2; exit 1; }
   [ ! -e "$unignored_path" ] \
