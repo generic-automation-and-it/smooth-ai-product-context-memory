@@ -266,6 +266,104 @@ public class TarSnapshotArchiveTests
     }
 
     [Fact]
+    public async Task Verify_Reports_TruncatedMember_As_NotClean_WithoutThrowing()
+    {
+        // Every other tamper case here rewrites a well-formed tar, so the archive *container* was
+        // never exercised -- and the container is the one layer a half-copied or truncated archive
+        // fails at. The header declares the full member size and the file carries fewer bytes, which
+        // is what truncation looks like on disk and is independent of the writer's block padding.
+        string path = TempArchive();
+        string address = Sha256ContentAddress.Compute(Body);
+        (SnapshotCapture capture, SnapshotWalkResult walk) = Capture(address, SnapshotBlobState.Ok);
+        await _archive.WriteAsync(path, capture, walk, _ => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
+
+        Dictionary<string, byte[]> entries = ReadTar(path);
+        string truncated = TempArchive();
+        // Written by the real writer, then cut inside the final member's body. Building the tar by
+        // hand would test this handler's header parser rather than its truncation handling, and a
+        // malformed header fails the same way a truncated one does -- for the wrong reason.
+        byte[] bytes = File.ReadAllBytes(path);
+        int lastMemberDataStart = LastMemberDataOffset(bytes);
+        await File.WriteAllBytesAsync(truncated, bytes.AsSpan(0, lastMemberDataStart + 16).ToArray(), TestContext.Current.CancellationToken);
+
+        SnapshotVerification verification = await _archive.VerifyAsync(truncated, TestContext.Current.CancellationToken);
+        verification.IsClean.ShouldBeFalse();
+        verification.Findings.ShouldNotBeEmpty();
+    }
+
+    [Fact]
+    public async Task Verify_Reports_NonTarFile_As_NotClean_WithoutThrowing()
+    {
+        // A file that is not a tar at all -- the wrong path, a text file, an empty capture.
+        string notATar = TempArchive();
+        await File.WriteAllTextAsync(notATar, "this is not a tar archive, it is just some text", TestContext.Current.CancellationToken);
+
+        SnapshotVerification verification = await _archive.VerifyAsync(notATar, TestContext.Current.CancellationToken);
+        verification.IsClean.ShouldBeFalse();
+        verification.Findings.ShouldNotBeEmpty();
+    }
+
+    [Fact]
+    public async Task Verify_Reports_MissingArchiveFile_As_NotClean_WithoutThrowing()
+    {
+        // The file verify was pointed at does not exist. It is a defect to report, not an unhandled
+        // FileNotFoundException -- otherwise the operator sees a stack trace instead of the answer.
+        string absent = Path.Combine(Path.GetDirectoryName(TempArchive())!, "never-written.tar");
+
+        SnapshotVerification verification = await _archive.VerifyAsync(absent, TestContext.Current.CancellationToken);
+        verification.IsClean.ShouldBeFalse();
+        verification.Findings.ShouldNotBeEmpty();
+    }
+
+    [Fact]
+    public async Task Write_LeavesNoTempFile_WhenTheBlobReadFails()
+    {
+        // The temp-then-move guarantees the *destination* is never a partial archive, which is what
+        // it is for. It says nothing about the temp path: on a failed write that file held the whole
+        // corpus so far, under a name derived from the destination, and nothing cleaned it up.
+        string path = TempArchive();
+        string address = Sha256ContentAddress.Compute(Body);
+        (SnapshotCapture capture, SnapshotWalkResult walk) = Capture(address, SnapshotBlobState.Ok);
+
+        await Should.ThrowAsync<InvalidOperationException>(() => _archive.WriteAsync(
+            path,
+            capture,
+            walk,
+            _ => throw new InvalidOperationException("blob store unavailable"),
+            TestContext.Current.CancellationToken));
+
+        File.Exists(path + ".tmp").ShouldBeFalse();
+        File.Exists(path).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Write_RemovesTheTempFile_OnSuccessToo()
+    {
+        // The success path moves the temp file, so nothing is left to delete -- asserted so the
+        // cleanup cannot regress into one that only runs on failure.
+        string path = TempArchive();
+        string address = Sha256ContentAddress.Compute(Body);
+        (SnapshotCapture capture, SnapshotWalkResult walk) = Capture(address, SnapshotBlobState.Ok);
+
+        await _archive.WriteAsync(path, capture, walk, _ => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
+
+        File.Exists(path).ShouldBeTrue();
+        File.Exists(path + ".tmp").ShouldBeFalse();
+        Directory.GetFiles(Path.GetDirectoryName(path)!).ShouldNotContain(path + ".tmp");
+    }
+
+    [Fact]
+    public async Task Verify_Reports_EmptyFile_As_NotClean_WithoutThrowing()
+    {
+        string empty = TempArchive();
+        await File.WriteAllBytesAsync(empty, [], TestContext.Current.CancellationToken);
+
+        SnapshotVerification verification = await _archive.VerifyAsync(empty, TestContext.Current.CancellationToken);
+        verification.IsClean.ShouldBeFalse();
+        verification.Findings.ShouldNotBeEmpty();
+    }
+
+    [Fact]
     public async Task TicketEdges_RoundTrip_PreservingParentChildDirection()
     {
         string path = TempArchive();
@@ -347,5 +445,25 @@ public class TarSnapshotArchiveTests
                 DataStream = new MemoryStream(content, writable: false),
             });
         }
+    }
+
+    /// <summary>
+    /// Byte offset at which the last member's body begins, located by walking the real headers. Used
+    /// to cut the file inside a member rather than in tar's trailing zero blocks, so the truncation
+    /// removes data instead of padding.
+    /// </summary>
+    private static int LastMemberDataOffset(byte[] tarBytes)
+    {
+        using var stream = new MemoryStream(tarBytes, writable: false);
+        using var tar = new TarReader(stream);
+        int offset = 0;
+        int lastHeader = 0;
+        while (tar.GetNextEntry() is { } entry)
+        {
+            lastHeader = offset;
+            offset += 512 + (int)Math.Ceiling(entry.DataStream!.Length / 512d) * 512;
+        }
+
+        return lastHeader + 512;
     }
 }

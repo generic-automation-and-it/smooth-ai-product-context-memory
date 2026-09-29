@@ -480,9 +480,13 @@ class SemanticFixtureTests(unittest.TestCase):
                             for scenario in payload["scenarios"]))
 
     def test_committed_blinded_semantic_evidence_scores_cleanly(self):
+        # 2026-09-29 run supersedes 2026-09-17. Both remain on disk: the earlier verdicts are the
+        # record of what the model said on that date, not a config to be edited. The superseded run
+        # is the one that expected a cross-group version bump, which the shipped group-scoped
+        # identity forbids, so it cannot be re-used as an expectation.
         completed = subprocess.run(
             [sys.executable, str(HERE / "fixtures" / "score_fixtures.py"),
-             "--model-verdicts", str(HERE / "fixtures" / "model-verdicts-2026-09-17.json")],
+             "--model-verdicts", str(HERE / "fixtures" / "model-verdicts-2026-09-29.json")],
             capture_output=True,
             text=True,
             check=False,

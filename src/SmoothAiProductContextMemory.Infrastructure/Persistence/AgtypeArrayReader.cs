@@ -5,35 +5,26 @@ namespace SmoothAiProductContextMemory.Infrastructure.Persistence;
 
 /// <summary>
 /// Reads AGE's textual agtype rendering back into JSON: strips the element type annotations that
-/// makes <c>nodes(p)</c> / <c>relationships(p)</c> unparseable, and unquotes a scalar rendered via
-/// <c>::text</c>.
+/// makes <c>nodes(p)</c> / <c>relationships(p)</c> unparseable.
 /// </summary>
 internal static class AgtypeArrayReader
 {
     /// <summary>
-    /// Reads a scalar agtype string rendered via <c>::text</c> and unquotes it. AGE renders a string
-    /// value as a quoted JSON literal, so a scalar that is not itself a string reads back unquoted and
-    /// is returned as-is, while a string value's surrounding quotes are stripped by deserialising the
-    /// quoted span. A quote-led scalar with no interior quote (a raw string literal arising from a
-    /// non-quoted column) is returned as-is; one that is quote-led with an interior quote but is not
-    /// valid JSON raises <c>JsonException</c>.
+    /// Reads a scalar agtype string rendered via <c>::text</c>. The cast already yields the value
+    /// itself, so this is the identity and there is nothing to parse.
     /// </summary>
-    internal static string ReadScalar(string raw)
-    {
-        if (raw.Length >= 2 && raw[0] == '"')
-        {
-            int closingQuote = raw.LastIndexOf('"');
-            if (closingQuote > 0)
-            {
-                return System.Text.Json.JsonSerializer.Deserialize<string>(raw[..(closingQuote + 1)]) ?? string.Empty;
-            }
-        }
-
-        return raw;
-    }
-
+    /// <remarks>
+    /// This deliberately has no unquoting step. The premise such a step rested on — that AGE renders a
+    /// string value as a quoted JSON literal — does not hold: a <c>::text</c> cast of a string property
+    /// returns it unquoted, with interior quotes intact. A quote-led value is therefore <em>data</em>,
+    /// not encoding, and stripping it destroys content. Measured on the pinned AGE 1.7: a reason of
+    /// <c>"Cited" from ADR-3, not paraphrased</c> is delivered as those 35 characters and was being
+    /// reduced to <c>Cited</c>; a value with a second quoted run raised <c>JsonException</c>. The
+    /// ticket-graph reader has always read this cast raw, which is the correct treatment — the two
+    /// readers of one column are now the same read.
+    /// </remarks>
     internal static string ReadAgtypeString(NpgsqlDataReader reader, int ordinal) =>
-        ReadScalar(reader.GetString(ordinal));
+        reader.GetString(ordinal);
 
     internal static string ToJson(string agtypeArray)
     {

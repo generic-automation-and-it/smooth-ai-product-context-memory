@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Accepted; all LADR decisions implemented and verified; NFR-03 live all-outcomes evidence and NFR-05 provider telemetry remain open |
+| **Status** | Accepted; all LADR decisions implemented and verified; NFR-03 live all-outcomes evidence, NFR-05 provider telemetry, and **NFR-02's re-evidencing under group-scoped identity** remain open |
 | **Owner** | generik0 |
 | **Tracker** | Context-memory MVP |
 | **Last updated** | 2026-09-17 |
@@ -51,7 +51,7 @@ that never changed.
 
 - A semantically equivalent, surface-different candidate becomes a version, not a second memory.
 - A related-but-distinct candidate becomes a new memory, not a version.
-- Matching runs **across groups**, since the same subject legitimately arises under different work items.
+- Matching runs **within the group being written to**, not across groups. A memory's identity is the pair `(group, uuid)`: the version-target lookup and the create-path subject-slug uniqueness are both scoped to the named group, so a subject captured under a second group is a **separate memory**, not a version of the first. *(Amended 2026-09-28. This previously read "across groups, since the same subject legitimately arises under different work items" — see the changelog row.)*
 - Accuracy is measured as recall *and* precision against authored pairs, not asserted.
 
 ### 3. Relationships get created at all
@@ -145,7 +145,7 @@ See [`./nfrs/`](./nfrs/).
 | NFR | Attribute | Target (summary) | Status |
 |-----|-----------|------------------|--------|
 | [NFR-01](./nfrs/NFR-01-secret-containment.md) | Security | No detected secret reaches storage; content never logged | Accepted |
-| [NFR-02](./nfrs/NFR-02-deduplication-accuracy.md) | Correctness | Measured recall *and* precision against authored pairs | Accepted |
+| [NFR-02](./nfrs/NFR-02-deduplication-accuracy.md) | Correctness | Measured recall *and* precision against authored pairs | Accepted, **evidence withdrawn 2026-09-28** — cross-group fixture no longer producible |
 | [NFR-03](./nfrs/NFR-03-auditability.md) | Auditability | Mechanical outcomes covered; one live delegated all-outcomes receipt remains | Draft |
 | [NFR-04](./nfrs/NFR-04-poisoning-resistance.md) | Security | Retrieved memories render as quoted data, never instructions | Accepted |
 | [NFR-05](./nfrs/NFR-05-cost.md) | Cost | Logical/API/blob bounds measured; provider token telemetry and live delegated run remain open | Draft |

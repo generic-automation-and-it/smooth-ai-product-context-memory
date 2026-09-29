@@ -1,6 +1,6 @@
 # NFR-02: Correctness — deduplication accuracy
 
-**Status:** Accepted
+**Status:** Accepted — **evidence basis withdrawn 2026-09-28**; accuracy still unmeasured, see Verification
 
 ## Requirement
 
@@ -20,7 +20,23 @@ no live contradictions, so the fixture must be built rather than harvested.
 
 - **Positive pairs** — e.g. *"PostgreSQL is the storage engine"* against *"we store in Postgres"* → must version.
 - **Negative controls** — e.g. *"Auth issues tokens with a one-hour expiry"* against *"Auth uses a revocable session cookie"* → must not version. Same domain, same vocabulary, different claim.
-- Pairs placed in **different groups**, since cross-group matching is the requirement.
+- Pairs placed in **the same group**, since matching is now group-scoped. *(Amended 2026-09-28; this previously read "**different** groups, since cross-group matching is the requirement".)*
+
+> **Evidence withdrawn 2026-09-28.** This NFR's cross-group fixture can no longer be produced by the
+> shipped write path: a cross-group pair cannot version, so the measurement it was taken against no longer
+> describes the system. The accuracy claim below is therefore **unevidenced, not disproven**. Re-running
+> it requires the fixture to place pairs in one group, and the negative-control count is still
+> unbalanced (fewer negatives than positives), which the acceptance criteria below already require to be
+> fixed. Closure of this NFR is a batch-5 work item; it is not treated as accepted-and-closed meanwhile.
+>
+> **The withdrawal was itself incomplete, corrected 2026-09-29.** Sweeping the *spec* was not the same as
+> sweeping the *evidence*: the skill's committed semantic fixture still expected a cross-group
+> `version_bump`, a committed verdicts file recorded the model performing it, and the CI-gated harness
+> asserted recall and precision of exactly 1.0 — so the defect was **certified, not caught**. Re-scored
+> against the corrected expectation that run yields 0.9 / 0.8333. The fixture, a new verdicts run, and the
+> evidence document are corrected; see
+> [NFR-02-semantic-evidence-2026-09-17.md](./NFR-02-semantic-evidence-2026-09-17.md). Sweeping a decision
+> through a design set means checking the fixtures and recorded measurements too, not only the prose.
 - Each pair asserts its decision individually; the pass criterion is countable — N equivalent pairs collapse to M subjects, with an exact skipped count.
 
 The fixture drives the **model judgement**, not a string heuristic. A test that encodes the rule and

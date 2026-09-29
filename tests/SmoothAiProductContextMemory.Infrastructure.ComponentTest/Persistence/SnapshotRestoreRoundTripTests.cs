@@ -85,6 +85,51 @@ public sealed class SnapshotRestoreRoundTripTests : PersistenceTestBase
     }
 
     [Fact]
+    public async Task Capture_PreservesAQuoteLedEdgeReason_AndRestoreReturnsItVerbatim()
+    {
+        // The reconciliation elsewhere in this file asserts counts, and a truncated reason satisfies
+        // every count and every hash — which is how a 35-character reason could reach the archive as
+        // "Cited" and still verify clean. This asserts the value, at both ends of the round trip.
+        const string reason = "\"Cited\" from ADR-3, not paraphrased";
+        var (source, target) = await SeedLinkedPairAsync();
+        (await new NpgsqlMemoryGraph(Db).CreateAsync(
+            source.Uuid, target.Uuid, MemoryRelation.DependsOn, reason, Ct)).ShouldBeTrue();
+
+        SnapshotCaptureResult captured = await Repository.CaptureAsync(ConnectionString, Ct);
+        captured.Capture.Edges.ShouldHaveSingleItem().Reason.ShouldBe(reason);
+
+        string archivePath = Path.Combine(Path.GetTempPath(), $"snap-reason-{Guid.NewGuid():N}.tar");
+        await new SnapshotStore.Handler(
+            Repository,
+            Archive,
+            Blob,
+            new FileSnapshotMetadataStore(CreateMetadataOptions()),
+            Loggers.CreateLogger<SnapshotStore.Handler>())
+            .Handle(new SnapshotStore.Request(ConnectionString, archivePath), Ct);
+
+        await using SmoothAiProductContextMemoryTestDatabase scratch =
+            await SmoothAiProductContextMemoryTestDatabase.CreateAsync(_aspire, $"reason-{Guid.NewGuid():N}", Ct);
+        await using NpgsqlDataSource scratchDataSource = NpgsqlDataSourceFactory.Create(scratch.ConnectionString);
+        await MigrateAsync(scratchDataSource, Ct);
+        await using var scratchDb = new SmoothAiProductContextMemoryDbContext(
+            new DbContextOptionsBuilder<SmoothAiProductContextMemoryDbContext>()
+                .UseNpgsql(scratchDataSource, npgsql => npgsql.UseSmoothAiProductContextMemoryHistory())
+                .Options);
+
+        RestoreArchive.Response restore = await new RestoreArchive.Handler(
+            new NpgsqlSnapshotRepository(Blob, Blob), Archive, Blob,
+            Loggers.CreateLogger<RestoreArchive.Handler>())
+            .Handle(new RestoreArchive.Request(archivePath, scratch.ConnectionString), Ct);
+        restore.Reconciled.ShouldBeTrue();
+
+        // Read the edge back through the graph reader, so this covers the same ::text cast the
+        // corruption lived in rather than re-reading the archive member.
+        IReadOnlyList<MemoryRelationship> restored = await new NpgsqlMemoryGraph(scratchDb)
+            .ListTouchingAsync(source.Uuid, Ct);
+        restored.ShouldHaveSingleItem().Reason.ShouldBe(reason);
+    }
+
+    [Fact]
     public async Task SnapshotThenRestore_Reconciles_And_PreservesTicketDirection()
     {
         var source = await SeedCorpusAsync();
@@ -317,6 +362,24 @@ public sealed class SnapshotRestoreRoundTripTests : PersistenceTestBase
         int edges = (int)await ScalarAsync(Db, "SELECT count(*) FROM memory_graph.\"LINKS\"", Ct);
         int ticketEdges = (int)await ScalarAsync(Db, "SELECT count(*) FROM memory_graph.\"TICKET_PARENT\"", Ct);
         return (2, 3, 2, edges, 2, ticketEdges, address);
+    }
+
+    private async Task<(Memory Source, Memory Target)> SeedLinkedPairAsync()
+    {
+        var group = TestEntities.NewGroup(scopeDimension: MemoryGroup.ScopeDimensionValue.Product);
+        Db.MemoryGroups.Add(group);
+        await Db.SaveChangesAsync(Ct);
+
+        var source = TestEntities.NewMemory(group.Id, "quote-source", "quote source subject");
+        var target = TestEntities.NewMemory(group.Id, "quote-target", "quote target subject");
+        Db.Memories.AddRange(source, target);
+        await Db.SaveChangesAsync(Ct);
+
+        Db.MemoryVersions.Add(TestEntities.NewVersion(source.Id, 1, "source claim", isCurrent: true));
+        Db.MemoryVersions.Add(TestEntities.NewVersion(target.Id, 1, "target claim", isCurrent: true));
+        await Db.SaveChangesAsync(Ct);
+
+        return (source, target);
     }
 
     private static async Task<long> ScalarAsync(SmoothAiProductContextMemoryDbContext db, string sql, CancellationToken ct)
