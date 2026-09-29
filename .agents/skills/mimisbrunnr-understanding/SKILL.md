@@ -22,6 +22,11 @@ transcript) — into a new or running agent's session context. By default this *
 and writes nothing**. Passing `--store` captures the material back into Mímisbrunnr through the normal
 capture path (preflight → redact → dedup/link → atomicity → write), never as a direct write.
 
+Requires **Python 3.9 or newer**; the npm launcher (`npm/cli/_run.js`) checks the floor and refuses
+below it. The sibling `mimisbrunnr-context-memory` client normalises a sub-second fraction before
+parsing for the same reason — `fromisoformat` only accepts an arbitrary number of fractional digits
+from 3.11, and `System.Text.Json` emits a 7-digit tick count.
+
 Use this skill when a practitioner wants to seed an agent with prior knowledge, or to bring material
 already written somewhere into the store so it compounds. It is the **load/transfer** counterpart to
 `mimisbrunnr-context-memory` (the sole writer of clean facts).

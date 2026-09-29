@@ -16,6 +16,13 @@ all.** It requests a deterministic **bundle** from the Host API, applies judgeme
 **dossier**, and writes only the local artefact to a gitignored path. It never writes to the store and
 never calls a write endpoint.
 
+Requires **Python 3.9 or newer**. The composer normalises a sub-second fraction before parsing,
+because `datetime.fromisoformat` only accepts an arbitrary number of fractional digits from 3.11
+while `System.Text.Json` emits a 7-digit tick count or a trailing-zero-trimmed fraction. Without
+that, every capture timestamp silently became "unknown" on 3.9 and 3.10 — no error, just a dossier
+that looked complete and carried no capture times. The npm launcher (`npm/cli/_run.js`) checks the
+floor and refuses below it.
+
 Use this when a practitioner wants *everything the store knows about one slice of work, in one readable
 artefact* — re-entering a repository, handing reasoning to a colleague, writing a design document, or
 assessing the store's gaps and contradictions.

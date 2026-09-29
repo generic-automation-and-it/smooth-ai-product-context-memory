@@ -228,17 +228,31 @@ flowchart LR
   scorer-only. A run where the model reads `scenarios.json` is circular and invalid evidence.
   **The judgement itself is not CI-gated, but the harness is:** `run_tests.py::SemanticFixtureTests`
   invokes the scorer twice and the PR gate runs `run_tests.py` — once to prove the blinded emitter
-  withholds `id`/`expected`/`note`, and once to assert the **committed** verdicts file scores exactly
+  withholds `expected`/`note`/`axis`, and once to assert the **committed** verdicts file scores exactly
   recall 1.0 / precision 1.0. So a stale expectation is not inert: it is *certified*. A fixture whose
   expected verdict contradicts the shipped contract will not fail a test, it will make the recorded run
   look perfect.
-- **Committed verdicts are matched to scenarios by POSITION, not by id.** `score_fixtures.py` zips
-  `scenarios` against the verdicts list, so inserting, deleting or reordering a scenario silently
-  misaligns every verdict after it — and the 1.0/1.0 assertion then certifies the wrong verdicts
-  against the wrong scenarios without any test failing. **Append new scenarios at the end, or rewrite
-  the whole verdicts file and re-run the model.** Each run is a new dated file
-  (`model-verdicts-<date>.json`); a previous run is a record of what the model said that day and is
-  never edited in place, so a superseded run stays available for re-scoring.
+- **Verdicts pair by `id`, not by position.** The emitter emits each scenario's `id` — an identifier is
+  not an answer, so blinding is intact — and the scorer refuses a verdicts file whose entries carry no
+  id unless `--allow-legacy-positional` is passed. This matters because positional pairing meant that
+  inserting, deleting or reordering a scenario silently misaligned every verdict after it, and the
+  1.0/1.0 assertion above would then have certified the wrong verdicts against the wrong scenarios
+  **with no test failing**. `test_reordering_the_verdicts_does_not_change_the_score` is the property
+  positional pairing could not have. **Appending is no longer the only safe edit** — adding, inserting
+  or reordering is fine; a new *run* is still required, since a run's verdicts are a record of one
+  model's judgements on one day.
+- **Each run is a new dated file** (`model-verdicts-<date>.json`, with a qualifier when one day holds
+  two runs); a previous run is a record of what the model said that day and is never edited in place,
+  so a superseded run stays available for re-scoring. A dated run is only re-scorable against the
+  fixture it was taken against, so freeze that too (`scenarios-<date>.json`) — otherwise re-scoring a
+  ten-verdict run against today's fourteen-scenario fixture is a length error, not a measurement.
+  `scenarios-2026-09-17.json` is the frozen set behind the 0.9 / 0.8333 and 1.0 / 1.0 historical runs.
+- **Every scenario declares its `axis`** — `recall_positive`, `precision_negative` or `not_dedup` — and
+  the scorer and harness both refuse a set with fewer negative controls than positive pairs. Declared
+  rather than inferred from the expected verdict word, because a scenario expecting `new_memory` for a
+  reason unrelated to matching would otherwise inflate the negative count, and a matcher that matches
+  nothing scores perfect precision. `axis` is withheld from the blinded input: it would tell the model
+  which way the pair is meant to fall.
 - The skill's test approach is specified in `docs/hlds/002-context-memory-write-pipeline/nfrs/NFR-02-deduplication-accuracy.md`. These
   are not this repo's L0/L1/L2 tiers, which apply to the C# API (PR #14).
 

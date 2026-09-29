@@ -352,6 +352,25 @@ def _render_path(path):
     return f"depth={path.get('depth')}: {chain}{endpoint_label} ({endpoint.get('uuid', '?')})"
 
 
+def _widen_subsecond(value):
+    """Pad or trim a sub-second fraction to exactly six digits.
+
+    `fromisoformat` accepts any fractional length only from Python 3.11; 3.10 and earlier accept 3
+    or 6, so the 7-digit tick count and the trailing-zero-trimmed fraction that `System.Text.Json`
+    emits both raise `ValueError`. The regex above already accepted 1..16 digits, so on 3.9 or 3.10
+    a *valid* `observedAt` passed the shape check and was then rejected by the parse — a ticket
+    hierarchy declaration refused for a reason the wire contract does not support, and only on the
+    interpreters CI never runs.
+
+    Six digits is microsecond resolution, the finest this comparison uses. The original string is
+    untouched: the check validates, it never rewrites what goes on the wire.
+    """
+    def widen(match):
+        return "." + match.group(1)[1:][:6].ljust(6, "0")
+
+    return re.sub(r"(?<=:\d\d)(\.\d+)", widen, value, count=1)
+
+
 def _ticket_text(value, field, limit):
     try:
         valid = (isinstance(value, str) and bool(value.strip()) and "\0" not in value
@@ -395,7 +414,9 @@ def cmd_ticket_parent(args):
                 value,
             ):
                 raise ValueError()
-            datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
+            datetime.fromisoformat(
+                _widen_subsecond(value.replace("Z", "+00:00"))
+            ).astimezone(timezone.utc)
         except (TypeError, ValueError, OverflowError):
             raise ClientError(0, "bad-input", "'observedAt' must be a wire-compatible ISO timestamp with timezone") from None
     operation = ("remove" if payload["parent"] is None else

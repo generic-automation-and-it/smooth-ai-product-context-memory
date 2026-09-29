@@ -10,9 +10,11 @@ Run: python3 tests/run_tests.py
 
 import importlib.util
 import copy
+import datetime as _dt
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -618,17 +620,25 @@ class SemanticFixtureTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 0)
         payload = json.loads(completed.stdout)
         self.assertTrue(payload["scenarios"])
-        self.assertTrue(all("id" not in scenario and "expected" not in scenario and "note" not in scenario
+        # `id` is now emitted, because without it the scorer can only pair by position — and the
+        # 1.0/1.0 assertion below would then certify the wrong verdicts against the wrong scenarios
+        # with nothing failing. An identifier is not an answer, so this does not unblind the run.
+        # `axis` must stay withheld: it says which way the pair is meant to fall.
+        self.assertTrue(all("id" in scenario for scenario in payload["scenarios"]))
+        self.assertTrue(all("expected" not in scenario and "note" not in scenario
+                            and "axis" not in scenario
                             for scenario in payload["scenarios"]))
+        self.assertEqual(len({scenario["id"] for scenario in payload["scenarios"]}),
+                         len(payload["scenarios"]))
 
     def test_committed_blinded_semantic_evidence_scores_cleanly(self):
-        # 2026-09-29 run supersedes 2026-09-17. Both remain on disk: the earlier verdicts are the
-        # record of what the model said on that date, not a config to be edited. The superseded run
-        # is the one that expected a cross-group version bump, which the shipped group-scoped
-        # identity forbids, so it cannot be re-used as an expectation.
+        # The 2026-09-29-balanced run is the current measurement: same-group pairs throughout, as
+        # the group-scoped identity amendment requires, and balanced controls. Earlier dated runs
+        # stay on disk as the record of what the model said on the day, and are re-scorable against
+        # the frozen fixture they were taken against — see the two re-scoring tests below.
         completed = subprocess.run(
             [sys.executable, str(HERE / "fixtures" / "score_fixtures.py"),
-             "--model-verdicts", str(HERE / "fixtures" / "model-verdicts-2026-09-29.json")],
+             "--model-verdicts", str(HERE / "fixtures" / "model-verdicts-2026-09-29-balanced.json")],
             capture_output=True,
             text=True,
             check=False,
@@ -637,6 +647,86 @@ class SemanticFixtureTests(unittest.TestCase):
         score = json.loads(completed.stdout)
         self.assertEqual(score["recall"], 1.0)
         self.assertEqual(score["precision"], 1.0)
+        self.assertEqual(score["paired_by"], "id")
+
+    def test_superseded_runs_remain_re_scorable_against_their_own_fixture(self):
+        # A dated verdicts file is only re-scorable against the fixture that run saw. Scoring a
+        # ten-verdict run against today's fourteen-scenario fixture is a length error, not a
+        # re-scoring — so the fixture is frozen alongside the run.
+        for run, expected_recall, expected_precision, failing in (
+            ("model-verdicts-2026-09-17.json", 0.9, 0.8333, "s4-cross-group-match-is-not-a-bump"),
+            ("model-verdicts-2026-09-29.json", 1.0, 1.0, None),
+        ):
+            with self.subTest(run=run):
+                completed = subprocess.run(
+                    [sys.executable, str(HERE / "fixtures" / "score_fixtures.py"),
+                     "--fixtures", str(HERE / "fixtures" / "scenarios-2026-09-17.json"),
+                     "--model-verdicts", str(HERE / "fixtures" / run),
+                     "--allow-legacy-positional"],
+                    capture_output=True, text=True, check=False)
+                score = json.loads(completed.stdout)
+                self.assertEqual(score["recall"], expected_recall)
+                self.assertEqual(score["precision"], expected_precision)
+                self.assertEqual(score["paired_by"], "position (legacy)")
+                mismatched = [row["id"] for row in score["rows"] if not row["match"]]
+                self.assertEqual(mismatched, [failing] if failing else [])
+
+    def test_a_verdicts_file_without_ids_is_refused_by_default(self):
+        # Otherwise a new run could be scored positionally and inherit the silent-misalignment bug.
+        completed = subprocess.run(
+            [sys.executable, str(HERE / "fixtures" / "score_fixtures.py"),
+             "--model-verdicts", str(HERE / "fixtures" / "model-verdicts-2026-09-29.json")],
+            capture_output=True, text=True, check=False)
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("allow-legacy-positional", completed.stderr)
+
+    def test_reordering_the_verdicts_does_not_change_the_score(self):
+        # The property positional pairing could not have. Reversed input, same score.
+        fixtures = HERE / "fixtures"
+        verdicts = json.loads((fixtures / "model-verdicts-2026-09-29-balanced.json").read_text())
+        reordered = HERE.parent / "tests" / ".reordered-verdicts.json"
+        reordered.write_text(json.dumps(list(reversed(verdicts))))
+        try:
+            completed = subprocess.run(
+                [sys.executable, str(fixtures / "score_fixtures.py"),
+                 "--model-verdicts", str(reordered)],
+                capture_output=True, text=True, check=False)
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            score = json.loads(completed.stdout)
+            self.assertEqual(score["recall"], 1.0)
+            self.assertEqual(score["precision"], 1.0)
+            self.assertTrue(all(row["match"] for row in score["rows"]))
+        finally:
+            reordered.unlink()
+
+    def test_negative_controls_are_at_least_as_numerous_as_positive_pairs(self):
+        # NFR-02's acceptance criterion, asserted so it cannot quietly unbalance again. Labelled on
+        # the fixture rather than inferred from the verdict word: a scenario that happens to expect
+        # new_memory for a reason unrelated to matching would otherwise inflate the negative count.
+        scenarios = json.loads((HERE / "fixtures" / "scenarios.json").read_text())["scenarios"]
+        positives = [s["id"] for s in scenarios if s.get("axis") == "recall_positive"]
+        negatives = [s["id"] for s in scenarios if s.get("axis") == "precision_negative"]
+        self.assertTrue(positives, "no recall positives declared")
+        self.assertGreaterEqual(len(negatives), len(positives),
+                                f"{len(negatives)} negative controls against {len(positives)} "
+                                "positive pairs; a matcher that matches nothing would score perfect "
+                                "precision")
+        self.assertTrue(all(s.get("axis") in ("recall_positive", "precision_negative", "not_dedup")
+                            for s in scenarios), "a scenario is unlabelled or carries an unknown axis")
+
+    def test_every_dedup_pair_sits_in_one_group(self):
+        # The amendment that withdrew the original evidence: identity is (group, uuid), so a
+        # cross-group pair cannot version and must not be scored as though it could. The one
+        # deliberate exception is the cross-group scenario itself, which is a negative control
+        # precisely because it must not bump.
+        scenarios = json.loads((HERE / "fixtures" / "scenarios.json").read_text())["scenarios"]
+        for scenario in scenarios:
+            if scenario.get("axis") != "recall_positive":
+                continue
+            for recalled in scenario.get("recall_set", []):
+                self.assertEqual(recalled["group_uuid"], "g-01",
+                                 f"{scenario['id']} is a recall positive but its recalled memory "
+                                 "is in another group, so the shipped write path cannot version it")
 
 
 class AgentContractTests(unittest.TestCase):
@@ -1190,6 +1280,94 @@ class NearMissTagsTests(unittest.TestCase):
                 self.assertEqual(near_miss.main(), 1)
             self.assertEqual(output.getvalue(), "")
             self.assertIn("Invalid near-miss evidence", error.getvalue())
+
+
+class SubsecondToleranceTests(unittest.TestCase):
+    """A valid `observedAt` must not be rejected on Python 3.9 or 3.10.
+
+    `System.Text.Json` emits a 7-digit tick count, and trims trailing zeros, so the store's
+    timestamps arrive at 1, 2, 4, 5 or 7 fractional digits. `fromisoformat` only accepts an
+    arbitrary length from 3.11; earlier versions take 3 or 6. The shape regex already admitted
+    1..16 digits, so on those interpreters a valid declaration passed the shape check and was then
+    refused by the parse — with an error naming a wire contract the value satisfies.
+    """
+
+    @staticmethod
+    def _parse_under_310(text):
+        """Replicates fromisoformat's pre-3.11 rule: 3 or 6 fractional digits only.
+
+        Asserting against this rather than the live `fromisoformat` is what makes the test mean the
+        same thing on CI's 3.12 as on the interpreters being fixed. On 3.12 both the widened and the
+        raw string parse, so a test using the live parser would pass with the widening deleted.
+        """
+        match = re.search(r"\.(\d+)", text)
+        if match and len(match.group(1)) not in (3, 6):
+            raise ValueError("fractional seconds must be 3 or 6 digits before Python 3.11")
+        return _dt.datetime.fromisoformat(text)
+
+    def test_widened_value_parses_under_a_strict_310_parser(self):
+        for raw in ("2026-09-18T12:34:56.1234567Z",
+                    "2026-09-18T12:34:56.5Z",
+                    "2026-09-18T12:34:56.12345Z",
+                    "2026-09-18T12:34:56.12Z"):
+            with self.subTest(raw=raw):
+                with self.assertRaises(ValueError):
+                    self._parse_under_310(raw.replace("Z", "+00:00"))
+                self._parse_under_310(client._widen_subsecond(raw.replace("Z", "+00:00")))
+
+    def test_widening_is_exactly_six_digits(self):
+        self.assertEqual(client._widen_subsecond("2026-09-18T12:34:56.1234567+00:00"),
+                         "2026-09-18T12:34:56.123456+00:00")
+        self.assertEqual(client._widen_subsecond("2026-09-18T12:34:56.5+00:00"),
+                         "2026-09-18T12:34:56.500000+00:00")
+        self.assertEqual(client._widen_subsecond("2026-09-18T12:34:56.123456+00:00"),
+                         "2026-09-18T12:34:56.123456+00:00")
+        # 3 digits is already accepted by the strict parser, so widening it changes nothing about
+        # the instant. The rule is "always six" rather than "six unless already 3 or 6" because one
+        # rule is easier to reason about than a conditional, and both name the same moment.
+        self.assertEqual(client._widen_subsecond("2026-09-18T12:34:56.123+00:00"),
+                         "2026-09-18T12:34:56.123000+00:00")
+        self.assertEqual(
+            client._widen_subsecond("2026-09-18T12:34:56.123+00:00").replace(".123000", ".123"),
+            "2026-09-18T12:34:56.123+00:00")
+
+    def test_offset_and_date_only_values_are_untouched(self):
+        # A +01:00 offset contains ":00", so a naive "pad after a colon" rule corrupts it.
+        for value in ("2026-09-18T12:34:56+01:00", "2026-09-18", "2026-09-18T12:34:56"):
+            with self.subTest(value=value):
+                self.assertEqual(client._widen_subsecond(value), value)
+
+    def test_every_fraction_the_wire_guard_admits_is_accepted(self):
+        # 1..16 digits is what the documented observedAt grammar allows. Each must survive the whole
+        # command, not just the normaliser.
+        for digits in range(1, 17):
+            value = "2026-09-18T12:34:56." + ("1" * digits) + "Z"
+            with self.subTest(digits=digits):
+                with patch.object(client, "read_payload", return_value={
+                        "child": {"provider": "gh", "key": "a"},
+                        "parent": {"provider": "gh", "key": "b"},
+                        "expectedParent": None, "reason": "r", "source": "s",
+                        "observedAt": value}), \
+                        patch.object(client, "_request", return_value={"changed": True}), \
+                        redirect_stdout(io.StringIO()):
+                    client.cmd_ticket_parent(SimpleNamespace(payload=None, dryrun=True))
+
+    def test_an_invalid_timestamp_is_still_refused(self):
+        # Tolerance must not become permissiveness: a bad calendar date, a missing offset and a
+        # non-numeric fraction all still fail.
+        for value in ("2026-13-45T12:34:56.1234567Z",
+                      "2026-09-18T12:34:56.1234567",
+                      "2026-09-18T12:34:56.abcdefgZ"):
+            with self.subTest(value=value):
+                with patch.object(client, "read_payload", return_value={
+                        "child": {"provider": "gh", "key": "a"},
+                        "parent": {"provider": "gh", "key": "b"},
+                        "expectedParent": None, "reason": "r", "source": "s",
+                        "observedAt": value}), \
+                        patch.object(client, "_request") as request, \
+                        self.assertRaises(client.ClientError):
+                    client.cmd_ticket_parent(SimpleNamespace(payload=None, dryrun=True))
+                request.assert_not_called()
 
 
 if __name__ == "__main__":

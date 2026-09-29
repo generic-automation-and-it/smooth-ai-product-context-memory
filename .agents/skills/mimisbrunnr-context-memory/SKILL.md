@@ -21,6 +21,13 @@ switches (`--dryrun` and `--deepsearch`) change *how much work* is done, never *
 it is. `--dryrun` and `--approve` are mutually exclusive — `--dryrun` writes nothing, `--approve` is the
 permission to write. Treat a request for both as an error: ask which one is meant.
 
+Requires **Python 3.9 or newer**; the npm launcher (`npm/cli/_run.js`) checks the floor and refuses
+below it. The client normalises a sub-second fraction before parsing `observedAt`, because
+`fromisoformat` only accepts an arbitrary number of fractional digits from 3.11 while
+`System.Text.Json` emits a 7-digit tick count or a trailing-zero-trimmed fraction — so on 3.9 and
+3.10 a valid ticket-hierarchy declaration was rejected by the parser after the shape check admitted
+it.
+
 **Cost note:** provider invocations and logical per-fact judgements are different units. A harness may
 batch many summary, keyword, dedup and link judgements into one invocation. Delegation may raise total
 token spend because each agent establishes context; its benefit is main-context longevity and a
