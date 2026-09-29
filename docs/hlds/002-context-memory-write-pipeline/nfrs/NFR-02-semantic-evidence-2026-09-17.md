@@ -14,8 +14,8 @@
 > intermediate correction is `model-verdicts-2026-09-29.json` (1.0 / 1.0).
 >
 > **The 0.9 / 0.8333 figure above is reproducible on demand, not quoted.** This run's fixture is frozen
-> as `scenarios-2026-09-17.json` in the skill's fixtures directory, so re-scoring needs
-> `--fixtures scenarios-2026-09-17.json --allow-legacy-positional` — without the frozen fixture the
+> as `scenarios-2026-09-29.json` in the skill's fixtures directory, so re-scoring needs
+> `--fixtures scenarios-2026-09-29.json --allow-legacy-positional` — without the frozen fixture the
 > live set has grown and the comparison would be a length error rather than a measurement. The verdicts
 > file is deliberately left on disk unedited, because it is the record of that run, not a configuration.
 >
@@ -42,7 +42,7 @@ notes. The blinded emitter strips all three fields. One same-session normalizati
 ```bash
 cd .agents/skills/mimisbrunnr-context-memory/tests/fixtures
 python3 score_fixtures.py \
-  --fixtures scenarios-2026-09-17.json \
+  --fixtures scenarios-2026-09-29.json \
   --model-verdicts model-verdicts-2026-09-17.json \
   --allow-legacy-positional
 ```

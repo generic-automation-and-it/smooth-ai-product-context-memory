@@ -254,7 +254,7 @@ flowchart LR
   so a superseded run stays available for re-scoring. A dated run is only re-scorable against the
   fixture it was taken against, so freeze that too (`scenarios-<date>.json`) — otherwise re-scoring a
   ten-verdict run against today's fourteen-scenario fixture is a length error, not a measurement.
-  `scenarios-2026-09-17.json` is the frozen set behind the 0.9 / 0.8333 and 1.0 / 1.0 historical runs.
+  `scenarios-2026-09-29.json` is the frozen set behind the 0.9 / 0.8333 and 1.0 / 1.0 historical runs.
 - **Every scenario declares its `axis`** — `recall_positive`, `precision_negative` or `not_dedup` — and
   the scorer and harness both refuse a set with fewer negative controls than positive pairs. Declared
   rather than inferred from the expected verdict word, because a scenario expecting `new_memory` for a

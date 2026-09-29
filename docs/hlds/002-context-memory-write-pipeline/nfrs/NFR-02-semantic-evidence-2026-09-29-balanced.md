@@ -80,13 +80,13 @@ changed `correct` count or a non-zero `over_merge`, not as a pass/fail flag.
 ## The superseded runs stay re-scorable
 
 A dated verdicts file is a record of what a model said on a day, and it is only re-scorable against the
-fixture that run actually saw. `scenarios-2026-09-17.json` freezes the ten-scenario set (with `s4`
-already corrected), so both earlier runs can be re-scored exactly:
+fixture that run actually saw. `scenarios-2026-09-29.json` freezes the ten-scenario set, so both
+earlier runs can be re-scored exactly:
 
 ```bash
 cd .agents/skills/mimisbrunnr-context-memory/tests/fixtures
 for run in 2026-09-17 2026-09-29; do
-  python3 score_fixtures.py --fixtures scenarios-2026-09-17.json \
+  python3 score_fixtures.py --fixtures scenarios-2026-09-29.json \
     --model-verdicts model-verdicts-$run.json --allow-legacy-positional
 done
 ```
@@ -98,6 +98,17 @@ done
 
 The 0.9 / 0.8333 figure is therefore reproducible on demand rather than quoted from memory — which is
 what let the withdrawn-evidence correction be checked rather than believed.
+
+**The frozen fixture is named for the day it was frozen, not the day the first run was taken.** It was
+committed on 2026-09-29 and its `s4` already carries the corrected expectation (`new_memory`, after the
+group-scoped identity decision). It was previously named `scenarios-2026-09-17.json`, which asserted a
+provenance it does not have: **the fixture the 2026-09-17 run actually saw was never committed**, so the
+withdrawn 1.0 / 1.0 is not reconstructible from any artefact in this repository, and an auditor
+following the old name would conclude the opposite — that it never happened. The rename is the honest
+record. The 0.9 / 0.8333 above is not a re-derivation of that run either: it is the 2026-09-17 run's
+verdicts re-scored against the *corrected* expectation, where `s4` is the sole mismatch. Both facts are
+load-bearing, and conflating them is how a withdrawn measurement gets cited as though it were
+reproduced.
 
 **This run's own verdicts are deliberately not in that table.** `model-verdicts-2026-09-29-balanced.json`
 echoes `s11`–`s14`, which the ten-scenario freeze does not contain, so adding it to the loop above would

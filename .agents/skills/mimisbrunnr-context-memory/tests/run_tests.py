@@ -660,7 +660,7 @@ class SemanticFixtureTests(unittest.TestCase):
             with self.subTest(run=run):
                 completed = subprocess.run(
                     [sys.executable, str(HERE / "fixtures" / "score_fixtures.py"),
-                     "--fixtures", str(HERE / "fixtures" / "scenarios-2026-09-17.json"),
+                     "--fixtures", str(HERE / "fixtures" / "scenarios-2026-09-29.json"),
                      "--model-verdicts", str(HERE / "fixtures" / run),
                      "--allow-legacy-positional"],
                     capture_output=True, text=True, check=False)

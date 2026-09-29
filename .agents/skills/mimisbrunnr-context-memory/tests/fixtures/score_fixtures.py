@@ -25,7 +25,7 @@ This is NOT CI-gated. Run on demand after a model has produced its verdicts:
 
 To re-score a dated run against the fixture it was actually taken against:
 
-    python3 tests/fixtures/score_fixtures.py --fixtures tests/fixtures/scenarios-2026-09-17.json \
+    python3 tests/fixtures/score_fixtures.py --fixtures tests/fixtures/scenarios-2026-09-29.json \
         --model-verdicts tests/fixtures/model-verdicts-2026-09-17.json --allow-legacy-positional
 """
 
