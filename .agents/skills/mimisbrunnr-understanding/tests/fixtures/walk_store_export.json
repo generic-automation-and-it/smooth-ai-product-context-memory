@@ -1,0 +1,68 @@
+{
+  "understandings": [
+    {
+      "uuid": "aaaaaaaa-1111-1111-1111-111111111111",
+      "version": 1,
+      "subject": "Stale-image trap",
+      "description": "Why does a green container 404 on a newly added endpoint?",
+      "statement": "A healthy container is always fresh.",
+      "contentSummary": "Superseded: v1 asserted freshness is guaranteed by a green health check.",
+      "kind": "understanding",
+      "status": "superseded",
+      "validFrom": "2026-08-01",
+      "validUntil": "2026-09-01",
+      "createdOn": "2026-08-01T10:00:00Z",
+      "sources": [{"kind": "session", "reference": "walk-run-1"}]
+    },
+    {
+      "uuid": "aaaaaaaa-1111-1111-1111-111111111111",
+      "version": 3,
+      "subject": "Stale-image trap",
+      "description": "Why does a green container 404 on a newly added endpoint?",
+      "statement": "A healthy container may run a stale build; verify freshness by calling a newly added endpoint.",
+      "contentSummary": "Green health checks prove liveness, not freshness.",
+      "kind": "understanding",
+      "status": "approved",
+      "validFrom": "2026-09-01",
+      "createdOn": "2026-09-01T10:00:00Z",
+      "sources": [{"kind": "session", "reference": "walk-run-3"}]
+    },
+    {
+      "uuid": "aaaaaaaa-2222-2222-2222-222222222222",
+      "version": 1,
+      "subject": "Graph over joins",
+      "description": "What is the graph store's relationship to relational joins?",
+      "statement": "The graph is a path, not a join.",
+      "contentSummary": "A relational join cannot express the chain from measurement to decision.",
+      "kind": "understanding",
+      "status": "approved",
+      "validFrom": "2026-09-05",
+      "createdOn": "2026-09-05T10:00:00Z",
+      "sources": [{"kind": "session", "reference": "walk-run-3"}]
+    },
+    {
+      "uuid": "bbbbbbbb-1111-1111-1111-111111111111",
+      "version": 1,
+      "subject": "Storage engine",
+      "statement": "Postgres is the storage engine.",
+      "contentSummary": "",
+      "kind": "architecture",
+      "status": "approved",
+      "validFrom": "2026-01-01",
+      "createdOn": "2026-01-01T10:00:00Z",
+      "sources": [{"kind": "session", "reference": "walk-arch"}]
+    },
+    {
+      "uuid": "bbbbbbbb-2222-2222-2222-222222222222",
+      "version": 1,
+      "subject": "Cache path",
+      "statement": "Redis holds the cache, not the store.",
+      "contentSummary": "The cache is not the store.",
+      "kind": "decision",
+      "status": "approved",
+      "validFrom": "2026-01-02",
+      "createdOn": "2026-01-02T10:00:00Z",
+      "sources": [{"kind": "session", "reference": "walk-arch"}]
+    }
+  ]
+}
