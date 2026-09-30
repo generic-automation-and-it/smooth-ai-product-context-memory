@@ -749,24 +749,60 @@ class SubsecondToleranceTests(unittest.TestCase):
 
     @staticmethod
     def _parse_under_310(text):
-        """Replicates fromisoformat's pre-3.11 rule: 3 or 6 fractional digits only.
+        """Replicates BOTH pre-3.11 `fromisoformat` rules: 3 or 6 fractional digits only, and no
+        bare `Z` as a UTC designator.
 
         Asserting against this rather than the live parser is what makes the test mean the same
         thing on CI's 3.12 as on the interpreters being fixed — on 3.12 both the widened and the raw
         string parse, so a test using the live parser would pass with the widening deleted.
+
+        The `Z` refusal is the second rule, and it is modelled explicitly rather than left to the
+        live parser. Modelling only the fraction rule made this class document a fix it did not
+        test: widening `...56.1234567Z` yields `...56.123456Z`, whose 6-digit fraction passes the
+        replica's check and then reaches a *live* `fromisoformat`, which on 3.9/3.10 rejects the
+        `Z` and raises. The test then passed its `assertRaises` for the wrong reason and failed on
+        the follow-up line, so the class that exists to prove the 3.9/3.10 behaviour was red on
+        exactly those interpreters.
         """
         match = re.search(r"\.(\d+)", text)
         if match and len(match.group(1)) not in (3, 6):
             raise ValueError("fractional seconds must be 3 or 6 digits before Python 3.11")
+        if text.endswith("Z"):
+            raise ValueError("'Z' is not a UTC designator before Python 3.11")
         return dt.datetime.fromisoformat(text)
 
-    def test_widened_value_parses_under_a_strict_310_parser(self):
+    def test_normalised_value_parses_under_a_strict_310_parser(self):
         for raw in ("2026-09-18T12:34:56.1234567Z", "2026-09-18T12:34:56.5Z",
-                    "2026-09-18T12:34:56.12345Z", "2026-09-18T12:34:56.12Z"):
+                    "2026-09-18T12:34:56.12345Z", "2026-09-18T12:34:56.12Z",
+                    "2026-09-18T12:34:56.1234567+00:00", "2026-09-18T12:34:56Z"):
             with self.subTest(raw=raw):
                 with self.assertRaises(ValueError):
                     self._parse_under_310(raw)
-                self._parse_under_310(dc.widen_subsecond(raw))
+                # The production normaliser's output, not the fraction-only widener: this is the
+                # assertion that fails if the `Z` rewrite is deleted, on any interpreter.
+                self._parse_under_310(dc.normalise_iso(raw))
+
+    def test_normalise_rewrites_a_trailing_z_and_nothing_else(self):
+        # The property that makes 3.9 work, asserted directly so it is checkable without a 3.9
+        # interpreter installed anywhere.
+        self.assertEqual(dc.normalise_iso("2026-09-18T12:34:56.1234567Z"),
+                         "2026-09-18T12:34:56.123456+00:00")
+        self.assertEqual(dc.normalise_iso("2026-09-18T12:34:56Z"),
+                         "2026-09-18T12:34:56+00:00")
+        # A non-trailing Z is not a designator and must survive untouched.
+        self.assertEqual(dc.normalise_iso("Zulu-2026-09-18T12:34:56"),
+                         "Zulu-2026-09-18T12:34:56")
+        # An explicit offset is already what 3.9 wants; it is widened, not rewritten.
+        self.assertEqual(dc.normalise_iso("2026-09-18T12:34:56.5+01:00"),
+                         "2026-09-18T12:34:56.500000+01:00")
+
+    def test_parse_time_reads_a_7_digit_z_timestamp_rather_than_returning_none(self):
+        # The symptom: None means "no capture time for this memory", so a timestamp that fails to
+        # parse does not raise — it silently removes every citation's capture time.
+        parsed = dc._parse_time("2026-09-18T12:34:56.1234567Z")
+        self.assertIsNotNone(parsed, "a 7-digit Z capture timestamp must parse, not vanish")
+        self.assertEqual(parsed.year, 2026)
+        self.assertEqual(parsed.utcoffset(), dt.timedelta(0))
 
     def test_widening_is_exactly_six_digits(self):
         self.assertEqual(dc.widen_subsecond("2026-09-18T12:34:56.1234567+00:00"),
