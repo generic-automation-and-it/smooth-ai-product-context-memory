@@ -26,8 +26,8 @@ The provisioner's `.context/mimisbrunnr.env.controller` already carries the `Par
 `Parameters__api-write-token` names, so it can be the `controller.env` credential source or merged with
 the engine-config keys above.
 The `Parameters__*` env-var form is what makes this work in Production — the user-secrets bridge
-(`dotnet user-secrets set Parameters:...`) is Development-only and does not reach a published
-controller.
+(`scripts/provision-credentials.sh`, which writes the store directly) is Development-only and does not
+reach a published controller.
 
 ```bash
 docker run -d --name mimisbrunnr-default-controller \

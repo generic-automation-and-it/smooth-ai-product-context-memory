@@ -10,11 +10,12 @@ graph — as one composed document plus a findings report. Intent in [README.md]
 [./diagrams/flow-selection-and-composition.md](./diagrams/flow-selection-and-composition.md). Business
 authority is [BRD-002](../../brd/002-contextual-export/).
 
-**This HLD remains In Discovery.** LADR-09 and LADR-11's ticket half are decision-resolved by
+**Accepted — implemented** for the shipped surface (the `ContextDossier` slice, the bundle/preview API
+and the read-only composer), matching [README.md](./README.md). LADR-09 and LADR-11's ticket half are decision-resolved by
 owner-approved HLD-003 LADR-08 and HLD-002 LADR-08, with implementation and release gates accepted
 against [final evidence](../003-graph-edges-on-age/nfrs/NFR-02-ticket-traversal-measurements.md). LADR-10 and
 LADR-11's tag half remain Blocked. Evidence-only near-miss reporting does not approve a tag graph
-or the full dossier implementation.
+or the blocked tag half.
 
 ## Non-Negotiables
 
@@ -115,6 +116,7 @@ Targets and verification live in [./nfrs/](./nfrs/). Three shape how code is wri
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-30 | Status line corrected: this file still read "This HLD remains In Discovery" while `README.md` read `Accepted — implemented`, so an agent reading only this file treated the shipped `ContextDossier` slice as unapproved and an agent reading only the README treated the Blocked tag half as resolved. The LADR statuses below are unchanged — they agree with the `README.md` table, and promoting 01–08 / 12–15 needs per-LADR acceptance evidence, not a record sync. The `README.md` near-miss paragraph no longer calls the full export "In Discovery". | HLD-005 promotion |
 | 2026-09-22 | Added LADR-15: `kind = understanding` is a first-class selectable kind on the bundle/dossier, closing the gap where the kind was asserted only as a one-line Key Behaviour with no dossier-side semantics. Each NFR-01..07 Verification/Acceptance list names the Understanding-kind case (same selection, widening, scope gating, citation, reconciliation, confidentiality, read-only and fidelity guarantees; load/import stays HLD-007's). | HLD-007; BRD-003; LADR-15 |
 | 2026-09-19 | Scoped the "no import / projection is never a source" principle to the dossier and noted the understanding load/import capability as a separate concern owned by HLD 007 (opt-in `--store` through the capture skill). Understanding rides on this export as a selectable kind. | HLD-007; BRD-003 |
 | 2026-09-15 | Replaced NFR-04's stale near-miss harness count with a dated evidence reference and the current verification command; full dossier verification remains unclaimed. | PR #63 review finding 2 |

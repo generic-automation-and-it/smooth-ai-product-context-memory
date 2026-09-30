@@ -15,9 +15,11 @@ Business authority is [BRD-001](../../brd/001-context-memory/) — principally `
 survives the loss of its machine), supported by `BR-13` and `BR-16`; it closes
 HLD 001 NFR-03's Draft recoverability claim for the snapshot path.
 
-**This HLD's implementation landed on the branch (2026-09-24) but the HLD itself remains In
-Discovery pending acceptance review; the LADRs stay Draft — flag deviations rather than silently
-overriding.**
+**Accepted — implemented** 2026-09-29, matching [README.md](./README.md): the
+`snapshot`/`verify`/`restore` verbs, the archive format (now v3) and the HTTP surface all shipped.
+**The LADRs and NFRs stay Draft** — accepting the design is not per-LADR acceptance, so each table
+row below is still open to revision on its own evidence; flag deviations rather than silently
+overriding.
 
 ## Non-Negotiables
 
@@ -68,7 +70,9 @@ Targets and verification live in [./nfrs/](./nfrs/). Two shape how code is writt
 
 ## Migration Plans
 
-- On acceptance, HLD 001 NFR-03 (Recoverability, Draft) is closed by this design's NFR-02 and must be updated in the same change to point here.
+- HLD 001 NFR-03 (Recoverability, Draft) is closed by this design's NFR-02 and was updated in the
+  same change to point here, so this precondition is discharged; its `scripts/verify-graph-restore.sh`
+  supersession note is recorded there too.
 - The restore command's built-in reconciliation has superseded `scripts/verify-graph-restore.sh` for the full-corpus round-trip; the supersession is recorded in `scripts/AGENTS.md` and the script remains for a lighter graph-only round-trip alongside `scripts/seed-graph-sample.sh`.
 - The deferred GC sweep (HLD 001 migration plan) becomes designable once snapshot orphan accounting has produced growth data; it is a separate future HLD, not an extension of this one.
 
@@ -76,6 +80,7 @@ Targets and verification live in [./nfrs/](./nfrs/). Two shape how code is writt
 
 | Date | Change | Ref |
 | :---- | :---- | :---- |
+| 2026-09-30 | Status line and first migration-plan bullet corrected. This file still read "the HLD itself remains In Discovery pending acceptance review" while `README.md` read `Accepted — implemented`, and it still opened its LADR table "All Draft" as though a promotion were pending. The bullet is now recorded as discharged: HLD 001 NFR-03 is `Closed` and points at this design's NFR-02. The LADRs and NFRs stay Draft — accepting the design is not per-LADR acceptance. | HLD-006 promotion |
 | 2026-09-27 | Record pass: corrected the design record's verify mechanism — `README.md`, `diagrams/c4-context.md` and `LADR-02` described the pre-fix check (verify only recomputes hashes + reconciles counts, manifest without defect counts), so an implementer would build a verify that certifies an unrestorable archive. They now state the shipped stronger check: the manifest carries `DanglingReferences`/`MismatchedBodies`, and verify gains the capture-time defect counts, refuses an unsupported `FormatVersion`, and reports a dangling or mismatched capture as non-clean. | record pass, HLD-006 NFR-01/LADR-02 |
 | 2026-09-25 | Review fixes. (1) Snapshot filename used `{Guid:N[..8]}`, an invalid Guid format that threw `FormatException` on every HTTP and CLI snapshot — now `ToString("N")[..8]`; pinned by the new L2 `SnapshotApiTests` (accepted → poll → Completed → preflight reports it), which fails with 500 without the fix. (2) Restore reconciliation was tautological (counts echoed from the archive) and evaluated after commit; it now reads counts back inside the transaction and rolls back on mismatch, with bodies written and confirmed before any database mutation. New L1 test pins a silently dropped edge rolling back; the round trip now restores into a fresh bucket. | HLD-006 LADR-05, NFR-02 |
 | 2026-09-24 | Implementation delivered: one tar + JSON manifest per snapshot (archive format documented in Key Behaviors), capture from a single `REPEATABLE READ` snapshot, offline `verify` with tamper suite, `restore` with printed reconciliation, HTTP preflight/snapshot endpoints, one-shot container/CLI verbs, and a persisted last-snapshot metadata store for preflight. | HLD-006, BR-37 |

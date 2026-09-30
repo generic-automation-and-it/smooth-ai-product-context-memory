@@ -96,7 +96,10 @@ The script writes the AppHost user secrets (`Parameters:api-read-token` / `Param
 so Aspire injects the same values the skills hold rather than generating per-session tokens of its own.
 Without that bridge the AppHost would serve tokens the skills do not carry and every skill request
 returns `403`. The dashboard-local `/login?t=…` URL is only for the dashboard UI, not the API
-credentials. Add `--skip-apphost` if you have no .NET SDK and only need the env file.
+credentials. Add `--skip-apphost` only when you are **not** running the AppHost from this checkout
+(for example, you run the published controller image and pass `--env-file` instead): the bridge needs
+`python3`, not the .NET SDK, so skipping it on an SDK-less machine still leaves the AppHost on tokens
+of its own and every skill request at `403`.
 
 **User secrets load in Development only.** For the published `-apphost` controller (which runs in
 Production, where user secrets are not loaded), pass `.context/mimisbrunnr.env.controller` via

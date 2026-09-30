@@ -220,7 +220,7 @@ depth-5 request was benchmarked on a three-deep hierarchy; no five-deep performa
 basis, scope and observation/analysis classification. No extra search, broadened selection, guessed
 excluded record or write. Executable `near_miss_tags.py` validates approved examined references,
 exact tag mismatch and grounded caller/skill analysis without I/O beyond stdin/stdout. NFR-04 fixes
-the taxonomy; this helper does not implement or approve the full dossier, which remains In Discovery.
+the taxonomy; this helper is not the dossier, and shipping it does not approve the full export.
 
 ## Non-Functional Requirements
 
