@@ -431,9 +431,12 @@ python3 .agents/skills/ai-understanding/scripts/understanding_index.py --review
 | `never inherited` | The question probably does not match what anyone asks. Re-word it, or accept the unit was never needed and prune it. Counts inheritance of **any** version of the slug, so a unit revised three times is not reported unused because the lineage names an earlier copy |
 | superseded copies | How many revisions of a slug sit on disk unlisted. Prune guidance only — nothing removes history automatically, and a deep chain is signal that the knowledge is still moving |
 | overdue re-check | Run the unit's `recheck` command — the report prints it beside the flag — then read the unit against what it says. Outcome units are flagged after 30 days, knowledge after 90. A flagged unit carrying no `recheck` is reported as carrying none: add one while you are in there |
+| `unpublished` | The store is gitignored and these units are newer than the newest published archive, so they would vanish with this workspace. Run `--publish` to carry them out (LADR-008: the zip is the only durable form). Listed only when the store is gitignored — the guard reports the store's own `git check-ignore` answer, and a tracked store reports nothing |
 
 Advisory only — it never changes the exit code, because none of it is wrong, it is just decaying. Act on it
-when you are already in the store; do not make a project of it.
+when you are already in the store; do not make a project of it. Every run on a gitignored store also
+prints a one-line `warning:` when it holds unpublished units, so the consequence of not publishing is
+visible without needing `--review`.
 
 Pruning is a legitimate outcome. The store earns its retrieval cost or it does not.
 

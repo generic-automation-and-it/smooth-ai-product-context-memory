@@ -145,6 +145,7 @@ No automated tests. The generator's validation paths (missing/placeholder `descr
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-30 | **Divergence from the devex template.** The index generator gained a durability guard: a gitignored store that holds units newer than the newest published archive is warned about on every write, and `--review` lists them under `unpublished`; `mimisbrunnr-understanding dump --currentsession` warns on a gitignored target. Both decide the warning via `git check-ignore`, never a text search, because the store may be tracked in another repo. The guard is advisory and never changes the exit code (LADR-008 keeps the store disposable). This repo is ahead of the template — `ai-template-sync` would revert it, so either upstream it or accept the divergence. | |
 | 2026-09-19 | Initial version. Slug-folder store under `.context/`, generated reference index, `scope`-gated publish, consumption via `ai-asset-sync`. | |
 | 2026-09-19 | Recorded the _Children of Time_ provenance of the term, to stop the name being genericized into something that invites session logs. | |
 | 2026-09-19 | Eval loops: a store rebuilt from nothing reproduces a byte-identical index, and two agent evals found both a gap (two traps never exported) and a factual error in a `verified` unit. | |

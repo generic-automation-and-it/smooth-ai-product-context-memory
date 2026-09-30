@@ -604,6 +604,22 @@ def redact(content: str) -> tuple[str, dict[str, int]] | None:
         return None
 
 
+def git_ignored(path: Path) -> bool:
+    """True when `path` is ignored by the git repo it sits in.
+
+    Mirrors the understanding-store durability guard: a dump into a gitignored folder will not
+    survive the workspace unless carried out, and the decision is the repo's, not a text search.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(path.parent), "check-ignore", "-q", "--", path.name],
+            capture_output=True,
+        )
+    except (FileNotFoundError, OSError):
+        return False
+    return proc.returncode == 0
+
+
 def cmd_dump(args: argparse.Namespace) -> int:
     if not args.currentsession:
         print("REFUSED: dump requires --currentsession.", file=sys.stderr)
@@ -663,6 +679,9 @@ def cmd_dump(args: argparse.Namespace) -> int:
               + ", ".join(f"{name} x{count}" for name, count in sorted(findings.items())))
     print(f"Discover this folder by name: {folder.name}")
     print("This is an export. The store was not changed.")
+    if git_ignored(folder):
+        print("warning: this dump folder is gitignored and will not survive the workspace — "
+              "copy it to a tracked location or load it elsewhere to keep it")
     if not content.strip():
         print("NOTE: no --from content supplied, so a template was written. "
               "Pass --from FILE or - to dump real session content.")
