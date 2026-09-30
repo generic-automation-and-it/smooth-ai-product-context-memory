@@ -579,6 +579,16 @@ jobs:
           OPENCODE_REVIEW_REPORT_ENABLE_TRIVIAL_SKIP: ${{ vars.OPENCODE_REVIEW_REPORT_ENABLE_TRIVIAL_SKIP || '1' }}
           # Run artifacts (LADR-062) — mirrors the reusable workflow.
           OPENCODE_REVIEW_REPORT_ENABLE_RUN_ARTIFACTS: ${{ vars.OPENCODE_REVIEW_REPORT_ENABLE_RUN_ARTIFACTS || '1' }}
+          # Decision model (LADR-093/096/098) — mirrors the reusable workflow.
+          # A Variable only reaches run-review.sh when it is named here; without
+          # these lines an org-level ENABLE_DECISIONS=1 is silently ignored.
+          OPENCODE_REVIEW_REPORT_ENABLE_DECISIONS: ${{ vars.OPENCODE_REVIEW_REPORT_ENABLE_DECISIONS || '0' }}
+          OPENCODE_REVIEW_REPORT_DECISIONS_PROVIDER: ${{ vars.OPENCODE_REVIEW_REPORT_DECISIONS_PROVIDER || 'OPENCODE-GO-DECISIONS' }}
+          OPENCODE_REVIEW_REPORT_DECISIONS_MODEL: ${{ vars.OPENCODE_REVIEW_REPORT_DECISIONS_MODEL || '' }}
+          OPENCODE_REVIEW_REPORT_DECISIONS_MODE: ${{ vars.OPENCODE_REVIEW_REPORT_DECISIONS_MODE || 'annotate' }}
+          OPENCODE_REVIEW_REPORT_DECISIONS_MIN_PROBABILITY: ${{ vars.OPENCODE_REVIEW_REPORT_DECISIONS_MIN_PROBABILITY || '0.5' }}
+          OPENCODE_REVIEW_REPORT_DECISIONS_TIMEOUT: ${{ vars.OPENCODE_REVIEW_REPORT_DECISIONS_TIMEOUT || '20' }}
+          OPENCODE_REVIEW_REPORT_DECISIONS_CODE_CONTEXT: ${{ vars.OPENCODE_REVIEW_REPORT_DECISIONS_CODE_CONTEXT || '1' }}
           # Bounded GitHub retry (LADR-078) — mirrors the reusable workflow.
           OPENCODE_REVIEW_REPORT_ENABLE_GH_RETRY: ${{ vars.OPENCODE_REVIEW_REPORT_ENABLE_GH_RETRY || '1' }}
           # Per-chunk review budget, seconds — mirrors the reusable workflow.
