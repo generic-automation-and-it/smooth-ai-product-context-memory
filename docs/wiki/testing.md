@@ -40,8 +40,8 @@ SMOOTH_AGE_BENCH=1 dotnet test tests/SmoothAiProductContextMemory.Infrastructure
 
 > **A benchmark gate is legitimate; a boolean-correctness gate is not.** `Nfr02BenchmarkTests` asserts
 > p95 *and* the query plan, which is a measurement. `TicketTraversalBenchmarkTests` — the second class
-> sharing the `SMOOTH_AGE_BENCH` gate — asserts a p95 target the same way and is covered by the first row
-> above. Of the other five, three also assert a wall-clock
+> sharing the `SMOOTH_AGE_BENCH` gate — asserts a p95 target the same way, so the rule in this
+> callout covers it as well. Of the other five, three also assert a wall-clock
 > target — `SnapshotEvidenceTests` against HLD-006 NFR-04's ≤ 9m snapshot ceiling, and
 > `FeedbackPlacementEvidenceTests` / `NfrEvidenceTests` against a 2 ms per-retrieval write budget — while
 > `DossierWorkflowBenchmarkTests` asserts countable invariants (manifest reconciliation, no-match) and

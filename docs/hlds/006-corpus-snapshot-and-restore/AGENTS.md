@@ -1,6 +1,6 @@
 # AGENTS.md - Corpus snapshot and restore
 
-AI Context: HLD for corpus snapshot and restore. Updated: 2026-09-25
+AI Context: HLD for corpus snapshot and restore. Updated: 2026-09-30
 
 > AI-coder context for this HLD. Architecture diagrams live in [`./diagrams/`](./diagrams/),
 > decisions in [`./ladrs/`](./ladrs/), quality spec in [`./nfrs/`](./nfrs/). This file is

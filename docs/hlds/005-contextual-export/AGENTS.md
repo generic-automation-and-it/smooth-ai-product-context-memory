@@ -1,6 +1,6 @@
 # AGENTS.md - Contextual knowledge export
 
-AI Context: HLD for contextual knowledge export. Updated: 2026-09-15
+AI Context: HLD for contextual knowledge export. Updated: 2026-09-30
 
 ## TL;DR
 
