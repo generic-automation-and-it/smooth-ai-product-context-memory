@@ -856,8 +856,15 @@ class SemanticFixtureTests(unittest.TestCase):
         self.assertNotEqual(score["accuracy"], score["recall"])
 
     def test_a_matcher_that_collapses_nothing_scores_zero_recall(self):
-        """The headline: the number a reader would quote cannot be earned without collapsing
-        anything. Under the old correct/total this run reported 0.857."""
+        """The floor: a matcher that answers nothing scores 0.0 on both figures, and 0.0 is the only
+        honest reading of "it collapsed nothing".
+
+        The 0.857 in the sibling test belongs to a *different* model and does not belong here. That
+        figure is 12/14: a matcher that collapses nothing but still answers the five negative controls
+        and the seven other-stage scenarios correctly, missing only the two recall positives. This run
+        answers nothing at all, so the old correct/total gave it 0.0 too — which is why it demonstrates
+        the floor and not the defect, and why the defect lives in the sibling test.
+        """
         scenarios = self._scenarios()
         _, score = self._score(scenarios, self._verdicts_for(
             scenarios, lambda s: "i_do_not_know"))
