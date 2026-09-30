@@ -15,6 +15,11 @@ Covers the guarantees the dossier skill must satisfy from the HLD-005 Verificati
       all origins and are not presented as corroboration; differing-customer-scope claims not
       consolidated; budget-exceeded produces a reported omission, never a stripped claim.
   NFR-06 read-only — the skill exposes no write operation (capability-absence).
+  Identity — a bundle carrying several versions of one memory is composable. Document identity is
+      (uuid, version) throughout; an omission must name the version it cut, an equivalence group names
+      a memory and expands to every version of it, and a memory's revisions render oldest-first.
+      Also the structural-validation guards: a versionless caller reference is told its shape rather
+      than its absence, and a repeated (uuid, version) is rejected.
 
 stdlib unittest; no external runner.
 """
