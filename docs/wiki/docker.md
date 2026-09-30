@@ -23,11 +23,11 @@ with an actually published `sha-<short-sha>` tag or `latest`; this documentation
 image has already been released. Pin the controller digest for immutable deployment identity.
 
 The provisioner's `.context/mimisbrunnr.env.controller` already carries the `Parameters__api-read-token` /
-`Parameters__api-write-token` names (plus the `ApiAccess__*` and skill `CONTEXT_MEMORY_*` forms),
-so it can be the `controller.env` credential source or merged with the engine-config keys above.
+`Parameters__api-write-token` names, so it can be the `controller.env` credential source or merged with
+the engine-config keys above.
 The `Parameters__*` env-var form is what makes this work in Production — the user-secrets bridge
-(`dotnet user-secrets set Parameters:...`) is Development-only and does not reach a published
-controller.
+(`scripts/provision-credentials.sh`, which writes the store directly) is Development-only and does not
+reach a published controller.
 
 ```bash
 docker run -d --name mimisbrunnr-default-controller \
@@ -97,10 +97,16 @@ build args, never baked into layers.
 
 The `ApiAccess__*` names are what the server reads. The host-side skills read the **same two values**
 under `CONTEXT_MEMORY_READ_TOKEN` / `CONTEXT_MEMORY_WRITE_TOKEN`, plus `CONTEXT_MEMORY_BASE_URL`
-(default `http://localhost:5141`) — see [setup.md](setup.md) for the mapping and the one-command
-provisioner that writes all of them to one file. `scripts/provision-credentials.sh` writes
-`.context/mimisbrunnr.env` with both name forms; the container reads the `ApiAccess__*` names from that
-file via `--env-file`, and the skills `source` the same file — so one file is the single source of truth.
+(default `http://localhost:5141`) — see [setup.md](setup.md) for the full mapping.
+`scripts/provision-credentials.sh` writes **two** gitignored files, split by parser grammar:
+
+| File | Names it carries | Why a separate file |
+|---|---|---|
+| `.context/mimisbrunnr.env` | `ApiAccess__*`, `CONTEXT_MEMORY_*` | Every name is a valid shell identifier, so `set -a && source` exports `CONTEXT_MEMORY_*` without error. This is the API container's `--env-file`. |
+| `.context/mimisbrunnr.env.controller` | `Parameters__api-read-token`, `Parameters__api-write-token` | Those names contain hyphens and are **not** shell identifiers. Keeping them in the sourceable file would make `source` print a token as "command not found". This is the published `-apphost` controller's `--env-file`, because user secrets load in Development only. |
+
+Both files hold the **same two token values** under different names, so there is still one source of
+truth — one set of values, written to whichever file each consumer's parser can read.
 (The container does not see the host's `.context/` directory; the AppHost mounts it as a *named*
 volume, so the container relies on `--env-file` rather than the host file being present inside it.)
 
@@ -176,17 +182,20 @@ Probe: `http://localhost:5141/openapi/v1.json` (there is no in-image healthcheck
 
 ## Run standalone (`export`)
 
+The deployment-specific values (connection string, blob endpoint/keys/bucket) are shown once, in the
+**variable inventory** above, and reused here by reference rather than repeated. Repeating them would
+put the same literal secret in two more places, and the page's own rule two paragraphs above is that
+a secret does not belong in a command that gets copied or pasted. Put them in an env file of your own
+and pass that:
+
 ```bash
+# .context/docker-local.env — connection string + blob settings, mode 600, gitignored
 docker run --rm \
   --name mimisbrunnr-host \
   --label com.docker.compose.project=smooth-mímisbrunnr \
   --label com.docker.compose.service=mimisbrunnr-host \
   -v "$(pwd)/.context/mimisbrunnr-memories:/export" \
-  -e ConnectionStrings__SmoothAiProductContextMemory='Host=host.docker.internal;Port=5432;Database=app;Username=postgres;Password=LocalMachineAccessNoInterestingDataDev#Passw0rd!FirewallNotExposed' \
-  -e BlobStorage__Endpoint='http://host.docker.internal:9000' \
-  -e BlobStorage__AccessKey='smooth-local' \
-  -e BlobStorage__SecretKey='LocalMachineAccessNoInterestingDataDev#Passw0rd!FirewallNotExposed' \
-  -e BlobStorage__Bucket='smooth-mimisbrunnr-memory-well' \
+  --env-file .context/docker-local.env \
   smooth-ai-product-context-memory:local \
   export --output /export
 ```
@@ -202,10 +211,14 @@ code path per verb (LADR-07). `verify` needs only the archive mounted (no databa
 selects the verb:
 
 ```bash
-# snapshot — write a self-verifying tar + manifest archive to the mounted volume
+# Both mounts matter. The first is the archive directory you asked for; the second is /app/.context,
+# where the snapshot metadata file lands (Snapshot:Directory defaults to .context). Without it that
+# file is written into the container's ephemeral layer and is gone when the container exits — the
+# archive survives, the record of what the last snapshot captured does not.
 docker run --rm \
   -v "$(pwd)/.context/snapshots:/snapshots" \
-  -e ConnectionStrings__SmoothAiProductContextMemory='Host=host.docker.internal;Port=5432;Database=app;Username=postgres;Password=...' \
+  -v mimisbrunnr-context:/app/.context \
+  -e ConnectionStrings__SmoothAiProductContextMemory='...' \
   -e BlobStorage__Endpoint='http://host.docker.internal:9000' \
   -e BlobStorage__AccessKey='smooth-local' \
   -e BlobStorage__SecretKey='...' \
@@ -220,6 +233,7 @@ docker run --rm -v "$(pwd)/.context/snapshots:/snapshots" \
 # restore — rebuild both stores into an empty target, print reconciliation; add --force to override
 docker run --rm \
   -v "$(pwd)/.context/snapshots:/snapshots" \
+  -v mimisbrunnr-context:/app/.context \
   -e ConnectionStrings__SmoothAiProductContextMemory='...' \
   -e BlobStorage__Endpoint='http://host.docker.internal:9000' \
   -e BlobStorage__AccessKey='smooth-local' \
@@ -239,20 +253,27 @@ unless `--force` is passed. `snapshot` and `restore` are read-only against / reb
 | `restore` | reconciliation closes | reconciliation failed, or an operational failure (database unreachable, target not migrated) | **archive integrity failure** — the archive failed offline verification and nothing was mutated |
 
 `restore` exits **2** specifically so a script can tell a bad archive from an unreachable database.
+These codes are asserted by `tests/SmoothAiProductContextMemory.Host.UnitTest/CliVerbTests.cs`, so a
+change to a `return` value has to be a deliberate edit there too.
 Both codes mean the target was not committed, but only 2 is worth retrying after replacing the
 archive. On a 2, the per-finding detail (kind, member name, message) is printed before the summary,
 so the reason does not have to be recovered by re-running `verify`.
 
-### Archive format version: v1 archives are refused
+### Archive format version: v1 and v2 archives are refused
 
-The archive format is versioned and the version is recorded in the manifest. `SnapshotFormat.Version`
-moved **1 → 2** when the manifest gained the dangling-reference and mismatched-body counts, because
-those counts carry refusal semantics: a v1 archive recording a body it could not resolve would
-deserialise them as zero and then verify *clean* before failing to restore. The gate now refuses a v1
-archive outright rather than misreading it.
+The archive format is versioned and the version is recorded in the manifest. The current version is
+**3**, and the gate refuses anything below it outright rather than reading a missing field as its
+default — a default is indistinguishable from a recorded value, which is how an archive that cannot
+restore comes to verify clean.
 
-**If you hold a v1 archive, re-capture it from the live store before deploying this build.** A v1
-archive is not restorable by a current build, and there is no conversion path. To find out what you
+| Version | Change | Why an older archive is refused |
+|---|---|---|
+| 1 | original layout | No dangling-reference or mismatched-body counts. An archive that recorded a body it could not resolve deserialises them as zero and then verifies *clean* before failing to restore. |
+| 2 | added those two counts, with refusal semantics | Entries carry no `ContentType`, so a restore cannot re-derive a body's MIME type from its content — every body comes back as `application/octet-stream`. The loss begins at capture and is invisible afterwards. |
+| 3 | current; `ContentType` recorded per blob body | — |
+
+**If you hold a v1 or v2 archive, re-capture it from the live store before deploying this build.**
+Neither is restorable by a current build, and there is no conversion path. To find out what you
 hold, run `verify` against it with the *old* build — a v1 archive verifies clean there by
 construction, which is exactly why the version gate exists.
 

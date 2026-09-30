@@ -8,9 +8,16 @@
 > the write would 404. Re-scoring this run against the corrected expectation gives **recall 0.9,
 > precision 0.8333**: the earlier perfect score was partly earned by an impossible behaviour.
 >
-> The corrected run is `model-verdicts-2026-09-29.json` (1.0 / 1.0). This file is **not** superseded in
-> full — nine of ten scenarios are unaffected — and the 09-17 verdicts file is deliberately left on disk
-> rather than edited, because it is the record of that run, not a configuration.
+> **Superseded in full on 2026-09-29 by the balanced, same-group re-measurement**
+> ([NFR-02-semantic-evidence-2026-09-29-balanced.md](./NFR-02-semantic-evidence-2026-09-29-balanced.md)),
+> which additionally fixes the unbalanced negative controls this run also suffered from. The
+> intermediate correction is `model-verdicts-2026-09-29.json` (1.0 / 1.0).
+>
+> **The 0.9 / 0.8333 figure above is reproducible on demand, not quoted.** This run's fixture is frozen
+> as `scenarios-2026-09-29.json` in the skill's fixtures directory, so re-scoring needs
+> `--fixtures scenarios-2026-09-29.json --allow-legacy-positional` — without the frozen fixture the
+> live set has grown and the comparison would be a length error rather than a measurement. The verdicts
+> file is deliberately left on disk unedited, because it is the record of that run, not a configuration.
 >
 > Root cause worth carrying: the fixture set, the committed verdicts and the NFR's own acceptance
 > criteria all encoded cross-group matching, and the identity decision did not sweep the *evidence*
@@ -33,8 +40,11 @@ notes. The blinded emitter strips all three fields. One same-session normalizati
 ## Result
 
 ```bash
-python3 -B .agents/skills/mimisbrunnr-context-memory/tests/fixtures/score_fixtures.py \
-  --model-verdicts .agents/skills/mimisbrunnr-context-memory/tests/fixtures/model-verdicts-2026-09-17.json
+cd .agents/skills/mimisbrunnr-context-memory/tests/fixtures
+python3 score_fixtures.py \
+  --fixtures scenarios-2026-09-29.json \
+  --model-verdicts model-verdicts-2026-09-17.json \
+  --allow-legacy-positional
 ```
 
 - Semantic scenarios: 10

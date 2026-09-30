@@ -3,6 +3,13 @@
 **Status:** Accepted, 2026-09-15. All four explicit benchmark cases passed; the ticket performance
 gate is satisfied without widening any threshold. This records local release acceptance, not publication.
 
+> **Stale relative to the code — re-measure before quoting these numbers.** Measured 2026-09-15; the
+> traversal changed materially on 2026-09-28 (the ticket traversal's status predicate and the
+> required-scope predicate were restructured, and `AsOf` was threaded through widening). The figures
+> below are a record of that run and nothing claims they still hold. The `SMOOTH_AGE_BENCH=1` gate
+> re-runs the same benchmarks; until it is re-run, treat the timings as historical and the *correctness*
+> conclusions as still valid.
+
 The original pre-merge run, tables and acceptance below are preserved as historical evidence.
 The [2026-09-15 review revalidation](#2026-09-15-review-revalidation) records later fixes and failures
 separately. Final full-suite repeat also passed: 429 tests, four intentionally gated benchmark skips.

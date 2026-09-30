@@ -2,15 +2,17 @@
 
 | | |
 |---|---|
-| **Status** | In Discovery |
+| **Status** | Accepted — implemented; `ContextDossier` slice, the bundle/preview API and the read-only composer all shipped |
 | **Owner** | generik0 |
 | **Tracker** | Contextual export |
 | **Business authority** | [BRD-002 — Contextual knowledge export](../../brd/002-contextual-export/) (`BR-18` … `BR-36`) |
-| **Last updated** | 2026-09-22 |
+| **Last updated** | 2026-09-29 |
 
-> Discovery / prototyping HLD. Delivers **intent + spec** — what we are building and why, the decisions
-> behind it, and the quality bar it must meet. No implementation plan; execution is tracked in the
-> issue/work tracker.
+> **Implemented and accepted** for the shipped surface — the `ContextDossier` slice, the
+> bundle/preview API and the read-only composer. This document still delivers **intent + spec**:
+> what the design is, the decisions behind it, and the quality bar it must meet, so behaviour
+> questions are answered against the code rather than against a plan. LADRs 10 and 11's tag half
+> remain **Blocked** and are not resolved by this acceptance.
 
 ## Intent
 
@@ -218,7 +220,7 @@ depth-5 request was benchmarked on a three-deep hierarchy; no five-deep performa
 basis, scope and observation/analysis classification. No extra search, broadened selection, guessed
 excluded record or write. Executable `near_miss_tags.py` validates approved examined references,
 exact tag mismatch and grounded caller/skill analysis without I/O beyond stdin/stdout. NFR-04 fixes
-the taxonomy; this helper does not implement or approve the full dossier, which remains In Discovery.
+the taxonomy; this helper is not the dossier, and shipping it does not approve the full export.
 
 ## Non-Functional Requirements
 

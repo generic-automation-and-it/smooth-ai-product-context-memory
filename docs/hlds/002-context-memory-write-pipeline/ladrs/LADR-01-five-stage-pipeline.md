@@ -36,7 +36,9 @@ This is still one stage and one transaction, not a second write pipeline.
 
 The **decisions and the stages are two different lists** and do not map one-to-one. Exact deduplication
 spans stages 1 and 3; semantic recall and link derivation live in stage 3; ticket uniqueness lives
-entirely in stage 1. Conflating
+entirely in stage 1. Stages 1 and 3 are **two distinct bounded reads, not one traversal** — the
+preflight supplies exact subject/ticket backstops and intra-batch collisions, stage 3 supplies the
+bounded semantic recall that deduplication and link derivation share. Conflating
 the lists is the easiest way to misread the design, so the stage numbering is declared canonical and
 any document numbering them differently is stale rather than an alternative reading.
 
@@ -61,4 +63,4 @@ in one batch sharing a subject, neither yet written, so neither is visible to th
 ## Related
 
 - **LADR-02** — why redaction occupies stage 2 specifically.
-- **LADR-05** — why link derivation shares stage 1's traversal.
+- **LADR-05** — why link derivation shares stage 3's bounded candidate recall with deduplication.

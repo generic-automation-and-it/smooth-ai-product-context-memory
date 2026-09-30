@@ -7,7 +7,69 @@ artifacts_root="${ARTIFACTS_ROOT:-artifacts}"
 timeout_seconds="${DEPENDENCY_TIMEOUT_SECONDS:-120}"
 results_directory="${artifacts_root}/testresults"
 coverage_directory="${artifacts_root}/coverage"
-coverage_collect="XPlat Code Coverage;Format=cobertura;Include=[SmoothAiProductContextMemory.*]*;ExcludeByFile=**/*.g.cs,**/obj/**,**/Migrations/*.cs,**/*ModelSnapshot.cs"
+# Scoped to the four product assemblies, not `[SmoothAiProductContextMemory.*]*`.
+#
+# That wildcard also swept in the test harness (SmoothAiProductContextMemory.TestFramework and
+# .TestFramework.Aspire) and the Aspire orchestrator, whose code the suite exercises incidentally
+# rather than deliberately — a fixture is only as covered as the tests that happen to call it. Those
+# projects in the denominator make the floor a measure of the harness, not of the product.
+#
+# Narrowing this RAISES the number rather than risking the floor, which was worth measuring rather
+# than assuming. Run locally with this exact filter, the test harness
+# (SmoothAiProductContextMemory.TestFramework) sits at 34.08% line coverage against the product's
+# 51.65% over the component projects that exercise it most — below the product, so removing it from
+# the denominator lifts the metric. The 50% floor is therefore unchanged and still meaningful; it is
+# now a claim about the store rather than about the store plus its scaffolding.
+#
+# AppHost IS EXCLUDED, AND THE REASON ABOVE IS NOT THE TRUE ONE — it is measured, not asserted.
+# SmoothAiProductContextMemory.AppHost has three dedicated unit-test classes and this script runs that
+# project deliberately (below), so "exercised incidentally" was never true of it, and the 34.08%
+# figure above says nothing about it. What the measurement actually shows: running
+# AppHost.UnitTest with `--collect "XPlat Code Coverage"` reports **no AppHost package at all**, and
+# repeating it with an explicit `[SmoothAiProductContextMemory.AppHost]*` include reports zero classes
+# at 0.0%. The three classes test `AppHostMode` (an enum), `AppHostConfiguration` and
+# `ContainerImageReference` (records) and `HostLaunchMode` (consts and expression-bodied members) —
+# shapes the collector reports no coverable executable lines for. So adding the assembly to
+# `product_assemblies` would move neither numerator nor denominator, and is deliberately NOT done: a
+# list entry would assert the assembly is measured when it is not.
+#
+# THE REAL GAP, which the exclusion must not be read as excusing: the 265-line
+# `DistributedApplicationBuilderExtensions.cs` plus `Program.cs` are the Aspire orchestration wiring,
+# have no test anywhere in the repository (the similarly-named class under TestFramework.Aspire is a
+# different one), and so are invisible to this metric by omission rather than by coverage. That is a
+# coverage gap in its own right, and closing it is not a filter change — it needs tests. If AppHost
+# ever gains coverable executable code, adding it here becomes a real decision rather than a no-op,
+# and the measured figure above is the baseline to re-derive from.
+#
+# MEASURE THE SHIPPED STRING, NOT A LOOKALIKE. The first version of this filter repeated the
+# `Include=` key once per assembly, which this collector rejects; it then failed *closed* in the worst
+# available way — "The Data Collector will be ignored", no coverage file written, and every test
+# project reported as failed. The measurement that motivated the change had been taken with a
+# hand-written filter that happened to be valid, so the change was argued for on evidence that did
+# not cover the thing that broke. Build the string in one place, run the real script to print it, and
+# paste *that* into a `--collect` to test it.
+#
+# Naming the assemblies is also a tripwire: a new product project has to be added here deliberately
+# rather than silently entering or leaving the denominator.
+product_assemblies=(
+  SmoothAiProductContextMemory.Domain
+  SmoothAiProductContextMemory.Application
+  SmoothAiProductContextMemory.Infrastructure
+  SmoothAiProductContextMemory.Host
+)
+# ONE `Include=` key whose value is a comma-separated list of bracketed patterns. Two forms look
+# equivalent and are both rejected by the collector's friendly-name parser, which fails *closed* in the
+# worst way: it prints "is not valid. The Data Collector will be ignored", no coverage file is written,
+# and every test project is then reported as failed because the collector it was told to use vanished.
+#   - `Include=[A]*,Include=[B]*`  — repeated keys. Rejected.
+#   - `Include=[A]*,[B]*,` + next key with no `;` — the trailing comma swallows the following key.
+# The separator between `Include=` and the next key is a SEMICOLON, not a comma.
+coverage_includes="Include="
+for index in "${!product_assemblies[@]}"; do
+  [[ ${index} -gt 0 ]] && coverage_includes+=","
+  coverage_includes+="[${product_assemblies[$index]}]*"
+done
+coverage_collect="XPlat Code Coverage;Format=cobertura;${coverage_includes};ExcludeByFile=**/*.g.cs,**/obj/**,**/Migrations/*.cs,**/*ModelSnapshot.cs"
 aspire_pid=""
 
 cleanup() {

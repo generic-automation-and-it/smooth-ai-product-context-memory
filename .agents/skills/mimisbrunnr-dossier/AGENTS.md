@@ -96,6 +96,27 @@ Bounded taxonomy, fixed before first export: `gap`, `contradiction`, `equivalenc
 `cap reached`, `depth reached`, `unreadable body`, `collapsed into another claim`, `hidden by scope`,
 `outside-focus`. No free text.
 
+### The bounded reason set is deliberately forked, not duplicated
+
+**Do not "fix" this by unifying the two sets.** A bundle carries per-item `omitted` reasons; its
+manifest separately carries `limitsHit`. They are two different sets over two different questions, and
+that is the point:
+
+| | Question it answers | Where it lives |
+|---|---|---|
+| `limitsHit` | *Which bound did this selection run into?* | Manifest only. A set-level fact about the whole slice. |
+| per-item `omitted` reasons | *Why is **this** item not in the document?* | Per item, so a reader can see the cost of a specific omission. |
+
+The two must **not** be collapsed, because the preview cannot compute the second one. A preview is
+blob-free, so it cannot know that a body is unreadable or that two claims collapse; it can only know
+that a ceiling was reached. If `limitsHit` absorbed the per-item reasons it would either disclose
+cuts the preview cannot foresee — making preview and bundle disagree, which is exactly the convergence
+defect the `limitsHit` ceiling-fill disclosure was added to fix — or stay silent and lose the
+disclosure. The fork is what keeps the two surfaces able to agree.
+
+Consequence to respect: `limitsHit` must only ever report a limit the preview could also have
+foreseen, and a history-inflated cut is a per-item `omitted` reason, never a `limitsHit` entry.
+
 ### Reconciliation (NFR-04)
 
 Closed in the dossier: present + consolidated + omitted-with-reason == bundle item count, visible to a

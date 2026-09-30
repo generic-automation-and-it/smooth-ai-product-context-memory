@@ -30,6 +30,12 @@ public abstract class PersistenceTestBase(AspireFixture aspire) : IAsyncLifetime
 
     public async ValueTask InitializeAsync()
     {
+        // Capture the running test's output helper into the shared fixture. xUnit v3 does not inject
+        // ITestOutputHelper into a collection fixture, and the fixture's Output otherwise falls back
+        // to TestContext.Current, which is null by the time DisposeAsync runs — so any teardown
+        // report a derived test writes is discarded rather than shown.
+        aspire.SetOutput(TestContext.Current?.TestOutputHelper);
+
         _database = await SmoothAiProductContextMemoryTestDatabase.CreateAsync(
             aspire,
             $"infra-component-{Guid.NewGuid():N}",

@@ -39,10 +39,18 @@ public sealed class FileSnapshotMetadataStore(
     }
 }
 
-/// <summary>Where the last-snapshot summary is persisted. Default is a gitignored, unsynchronised path.</summary>
+/// <summary>Snapshot and restore settings. Bound as <c>Snapshot</c> configuration.</summary>
 public sealed class SnapshotMetadataOptions
 {
     public const string SectionName = "Snapshot";
 
     public string Directory { get; set; } = ".context";
+
+    /// <summary>
+    /// Per-statement budget for the restore transaction, in seconds. Null keeps the built-in
+    /// default; see <c>NpgsqlSnapshotRepository</c> for why restore needs a different ceiling from
+    /// request traffic, and why the relaxation is scoped with <c>SET LOCAL</c> rather than applied
+    /// to the data source.
+    /// </summary>
+    public int? RestoreStatementTimeoutSeconds { get; set; }
 }

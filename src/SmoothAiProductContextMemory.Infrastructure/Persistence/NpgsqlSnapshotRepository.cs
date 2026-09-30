@@ -7,6 +7,7 @@ using SmoothAiProductContextMemory.Application.Abstractions;
 using SmoothAiProductContextMemory.Application.Abstractions.Snapshot;
 using SmoothAiProductContextMemory.Domain.Entities;
 using SmoothAiProductContextMemory.Infrastructure.Storage;
+using SmoothAiProductContextMemory.Infrastructure.Storage.Snapshot;
 
 namespace SmoothAiProductContextMemory.Infrastructure.Persistence;
 
@@ -16,11 +17,40 @@ namespace SmoothAiProductContextMemory.Infrastructure.Persistence;
 /// describe the same moment. The graph is outside the EF model, so it is read/written via raw
 /// <c>ag_catalog.cypher</c> on the same connection as the relational SQL (LADR-03 / LADR-05 / LADR-07).
 /// </summary>
-public sealed class NpgsqlSnapshotRepository(IBlobStorage blobStorage, IBlobCatalog blobCatalog)
+public sealed class NpgsqlSnapshotRepository(
+    IBlobStorage blobStorage,
+    IBlobCatalog blobCatalog,
+    SnapshotMetadataOptions? options = null)
     : ISnapshotRepository
 {
+    private readonly int? _configuredRestoreTimeoutSeconds = options?.RestoreStatementTimeoutSeconds;
+
     private const IsolationLevel CaptureIsolation = IsolationLevel.RepeatableRead;
     private const IsolationLevel RestoreIsolation = IsolationLevel.ReadCommitted;
+
+    /// <summary>
+    /// Per-statement budget for the restore transaction, in seconds. The data source's 120 s cap
+    /// (HLD-003 LADR-07) is the right default for request traffic, where it is the long stop behind
+    /// the traversal bounds — but restore is a bulk operation whose statements are sized by the
+    /// corpus, not by a request. Two statements in particular grow without bound: EF batched the
+    /// whole capture's <c>memory_version</c> rows into one INSERT, and <c>DELETE FROM memory</c> runs
+    /// a per-row cascade trigger for every row in the target. Past a few tens of thousands of rows
+    /// either exceeds 120 s, the restore rolls back whole, and there was no knob to turn.
+    /// </summary>
+    /// <remarks>
+    /// Applied with <c>SET LOCAL</c>, so it is scoped to the restore transaction and reverts on
+    /// commit or rollback. The 120 s default is untouched everywhere else, and the batching below
+    /// keeps any single statement small enough that this ceiling is a backstop rather than the
+    /// thing standing between a large corpus and a successful restore. Configurable through
+    /// <c>Snapshot__RestoreStatementTimeoutSeconds</c>.
+    /// </remarks>
+    private const int DefaultRestoreStatementTimeoutSeconds = 900;
+
+    /// <summary>
+    /// Rows per EF batch during restore. Bounds the largest statement the insert path can emit, which
+    /// is what actually made restore scale badly — the timeout raise is the backstop behind it.
+    /// </summary>
+    private const int RestoreBatchSize = 500;
 
     public async Task<SnapshotCaptureResult> CaptureAsync(
         string connectionString,
@@ -98,6 +128,13 @@ public sealed class NpgsqlSnapshotRepository(IBlobStorage blobStorage, IBlobCata
         await using var db = CreateContext(dataSource);
         await using IDbContextTransaction transaction =
             await db.Database.BeginTransactionAsync(RestoreIsolation, cancellationToken);
+
+        // SET LOCAL, so the relaxed budget lives exactly as long as this transaction and no longer.
+        // Placed before the emptiness check so a slow count on a large target is covered too.
+        await ExecuteNonQueryAsync(
+            db,
+            $"SET LOCAL statement_timeout = '{RestoreStatementTimeoutSeconds().ToString(CultureInfo.InvariantCulture)}s'",
+            cancellationToken);
 
         if (!await IsEmptyAsync(db, cancellationToken) && !overrideNonEmpty)
         {
@@ -207,6 +244,10 @@ public sealed class NpgsqlSnapshotRepository(IBlobStorage blobStorage, IBlobCata
         db.GroupDescriptions.AddRange(capture.GroupDescriptions);
         db.Memories.AddRange(capture.Memories);
         db.MemoryVersions.AddRange(capture.MemoryVersions);
+        // Bounded batches. Unbounded, EF emitted the whole capture — every memory_version row of the
+        // corpus — as one INSERT, whose cost grows with the archive and which no statement-timeout
+        // raise makes cheap. A per-row cascade trigger on the clearing DELETE has the same shape of
+        // problem and is bounded by the statement budget above rather than by batching.
         await db.SaveChangesAsync(cancellationToken);
     }
 
@@ -479,10 +520,29 @@ public sealed class NpgsqlSnapshotRepository(IBlobStorage blobStorage, IBlobCata
     private static SmoothAiProductContextMemoryDbContext CreateContext(NpgsqlDataSource dataSource)
     {
         var options = new DbContextOptionsBuilder<SmoothAiProductContextMemoryDbContext>()
-            .UseNpgsql(dataSource, npgsql => npgsql.UseSmoothAiProductContextMemoryHistory())
+            .UseNpgsql(dataSource, npgsql =>
+            {
+                npgsql.UseSmoothAiProductContextMemoryHistory();
+                // Bounds every EF batch this context emits. Restore is the only writer that uses it,
+                // and unbatched it emitted the whole capture's memory_version rows as one INSERT —
+                // a statement whose cost grows with the archive, which no statement-timeout raise
+                // makes cheap. Capture only reads, so the cap costs it nothing.
+                npgsql.MaxBatchSize(RestoreBatchSize);
+            })
             .Options;
         return new SmoothAiProductContextMemoryDbContext(options);
     }
+
+    /// <summary>
+    /// The restore statement budget, overridable by configuration and clamped to something sane.
+    /// A non-positive or absurd configured value falls back to the default rather than disabling the
+    /// ceiling, because a restore with no ceiling is the one operation where an unbounded statement
+    /// would hold locks on the only store of record.
+    /// </summary>
+    private int RestoreStatementTimeoutSeconds() =>
+        _configuredRestoreTimeoutSeconds is { } configured && configured is > 0 and <= 86_400
+            ? configured
+            : DefaultRestoreStatementTimeoutSeconds;
 
     private static async Task<long> ExecuteScalarLongAsync(
         SmoothAiProductContextMemoryDbContext db,

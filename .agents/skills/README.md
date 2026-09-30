@@ -2,7 +2,7 @@
 
 Self-contained skills for Claude Code, GitHub Copilot, and OpenAI Codex providing specialized workflows and tools.
 
-Skills live **flat**, one directory per skill directly under `.agents/skills/`. Each folder name is **category-prefixed** (`agile-`, `ai-`, `context-`, `git-`) so the listing groups by category when sorted. The prefix is the only grouping mechanism — there are no category subfolders (Claude Code discovers skills exactly one level under `.claude/skills/`).
+Skills live **flat**, one directory per skill directly under `.agents/skills/`. Each folder name is **category-prefixed** (`agile-`, `ai-`, `context-`, `git-`, `mimisbrunnr-`) so the listing groups by category when sorted. The prefix is the only grouping mechanism — there are no category subfolders (Claude Code discovers skills exactly one level under `.claude/skills/`).
 
 ## Quick Reference
 
@@ -17,6 +17,10 @@ Skills live **flat**, one directory per skill directly under `.agents/skills/`. 
 | **context-load-agents-context** | Load ancestor AGENTS.md context for a file | `/context-load-agents-context` |
 | **context-load-context** | Load domain context before implementation | `/context-load-context auth` |
 | **mimisbrunnr-context-memory** | Get/set persistent context-memory records; sole authority on the write path to the store | `/mimisbrunnr-context-memory [--dryrun] [--approve]` |
+| **mimisbrunnr-dossier** | Compose a read-only, cited context dossier for a slice of the store — document plus findings, no write capability | `/mimisbrunnr-dossier` |
+| **mimisbrunnr-understanding** | Load an Understanding export (or prior material) into agent context; `--store` funnels an import back through the capture path | `/mimisbrunnr-understanding [--store] [--currentsession] [--all]` |
+| **mimisbrunnr-recall-feedback** | Run the three recall-feedback tuning queries — never-recalled list, miss rate over a window, baseline reset | `/mimisbrunnr-recall-feedback` |
+| **ai-understanding** | Export this session's hard-won knowledge as Understandings; import, publish and consume the store | `/ai-understanding [--export] [--import] [--publish] [--consume <zip>]` |
 | **mimisbrunnr-ymir-bootstrap** | Build a cited, reviewable durable-context baseline for one existing project, optionally focused on its next feature. Ymir is the first being of Norse myth, from whose body the gods shaped the world — as this baseline is shaped from the repository that already exists. | `/mimisbrunnr-ymir-bootstrap <repository> [next-feature focus]` |
 | **create-hld** | Author a design-only High-Level Design under `docs/hlds/NNN-<slug>/` | `/create-hld <kebab-slug>` |
 | **git-commit** | Commit with conventional format | `/git-commit [--autonomous]` |
@@ -123,7 +127,7 @@ Two parents own most skills here, and their SKILL.md files are kept byte-identic
 | **agile-github-breakdown** | xhigh | Multi-turn FR/NFR → Task graph + GitHub writes |
 | **create-hld** | xhigh | Multi-turn clarification gates + architectural judgment (LADRs, NFRs, diagrams) |
 | **mimisbrunnr-ymir-bootstrap** | xhigh | Source-backed baseline the store's later sessions build on: consequential questioning, conflict preservation and reviewed candidate selection require product judgement |
-| **mimisbrunnr-context-memory** | xhigh | Sole write path to the store every later session builds on: semantic cross-group dedup, link derivation, atomicity splitting and summary/keyword generation |
+| **mimisbrunnr-context-memory** | xhigh | Sole write path to the store every later session builds on: group-scoped semantic versioning, cross-group twin linking, atomicity splitting and summary/keyword generation |
 
 ### Sub-skill invocation
 

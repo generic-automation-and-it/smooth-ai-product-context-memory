@@ -22,7 +22,7 @@ Updated: 2026-09-13
 | Validation | FluentValidation in Mediator pipeline (fail fast) |
 | Persistence | EF Core + PostgreSQL (`Npgsql.EntityFrameworkCore.PostgreSQL`) |
 | Logging/Observability | Serilog + OpenTelemetry |
-| Testing | xunit.v3 + Shouldly + Bogus + Respawn |
+| Testing | xunit.v3 + Shouldly (a fresh database per L1 test; no Respawn, no Bogus) |
 
 ## Commands
 

@@ -411,6 +411,72 @@ public sealed class TicketTraversalTests(AspireFixture aspire) : PersistenceTest
         return group;
     }
 
+    [Fact]
+    public async Task ProposedRecordsAreExcludedByDefaultAndAdmittedOnRequest()
+    {
+        // The manifest told callers "proposed-excluded unless status requested" while the SQL
+        // hard-coded `status <> 'proposed'` and the query carried no status field, so
+        // `ticket + status=proposed` always returned noMatch. The opt-in now exists; this pins both
+        // halves, because an opt-in that only works in one direction is the same defect again.
+        MemoryGroup group = await GroupAsync("product", Id("root"), Id("leaf"));
+        Memory approved = await MemoryAsync(group, status: "approved");
+        Memory proposed = await MemoryAsync(group, status: "proposed");
+        Memory superseded = await MemoryAsync(group, status: "superseded");
+        await ParentAsync("root", "leaf");
+
+        TicketTraversalResult byDefault = await Graph.TraverseAsync(Query("root", 1), Ct);
+        // The default excludes proposed only — it is not "exclude everything unapproved".
+        byDefault.Items.Select(m => m.Uuid).Order()
+            .ShouldBe(new[] { approved.Uuid, superseded.Uuid }.Order());
+        byDefault.Items.ShouldNotContain(m => m.Status == "proposed");
+
+        TicketTraversalResult requested = await Graph.TraverseAsync(
+            Query("root", 1) with { Status = "proposed" }, Ct);
+        requested.Items.Select(m => m.Uuid).ShouldBe([proposed.Uuid]);
+
+        // ExcludeProposed is the sibling /query spelling, and it must admit every status rather than
+        // only proposed.
+        TicketTraversalResult all = await Graph.TraverseAsync(
+            Query("root", 1) with { ExcludeProposed = false }, Ct);
+        all.Items.Select(m => m.Uuid).Order()
+            .ShouldBe(new[] { approved.Uuid, proposed.Uuid, superseded.Uuid }.Order());
+        all.Items.Select(m => m.Status).Order()
+            .ShouldBe(["approved", "proposed", "superseded"]);
+
+        // A status that matches nothing returns nothing, rather than falling back to the default
+        // set — otherwise an over-narrow filter would look like a hit.
+        (await Graph.TraverseAsync(Query("root", 1) with { Status = "nonexistent" }, Ct))
+            .Items.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task RequestingProposedDoesNotWidenTheScopePredicate()
+    {
+        // AND binds tighter than OR, so the status clause has to be parenthesised as one unit. Written
+        // flat, the status opt-in ORs past every other predicate and the scope boundary stops holding
+        // — a status filter must never widen what a traversal may return.
+        //
+        // The two dimensions are both *visible* on purpose. A hidden dimension is already refused
+        // earlier, by the owners gate that drops the whole route, so a test built on one would pass
+        // against the broken clause and prove nothing. The required-scope predicate is the one this
+        // surface can actually be held to.
+        MemoryGroup root = await GroupAsync("product", Id("root"));
+        MemoryGroup other = await GroupAsync("customer", Id("other"));
+        MemoryGroup leaf = await GroupAsync("product", Id("leaf"));
+        await MemoryAsync(root, status: "proposed");
+        await MemoryAsync(other, status: "proposed");
+        await MemoryAsync(leaf, status: "proposed");
+        await ParentAsync("root", "other");
+        await ParentAsync("other", "leaf");
+
+        TicketTraversalResult result = await Graph.TraverseAsync(
+            Query("root", 2, "product") with { Status = "proposed" }, Ct);
+
+        result.Items.ShouldAllBe(m => m.ScopeDimension == "product");
+        result.Items.Count.ShouldBe(2);
+        result.Items.ShouldAllBe(m => m.Status == "proposed");
+    }
+
     private async Task<Memory> MemoryAsync(
         MemoryGroup group,
         string kind = "decision",

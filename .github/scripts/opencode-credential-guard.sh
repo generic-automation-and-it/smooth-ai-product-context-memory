@@ -27,9 +27,84 @@ if [ -n "${GITHUB_WORKSPACE:-}" ]; then
     [ "$scan_dir" = "$workspace" ] && break
     scan_dir="$(dirname "$scan_dir")"
   done
+
+  # The permission fence denies paths *textually*: a rule matching /proc/*/environ denies a read of
+  # that path and nothing else. A symlink committed in a pull request is read by its repo path —
+  # `docs/leak` matches no deny rule — and the kernel resolves the target afterwards, so the fence
+  # never sees it. Combined with a prompt injection telling the model to read the file, that is a
+  # provider key in the posted review. Deny globs cannot close this; the target has to be resolved
+  # before the model starts, which is what this does.
+  #
+  # Scoped to sensitive roots rather than "any symlink leaving the workspace", so an ordinary
+  # escaping link (a shared package store, a tool cache) does not fail the gate. Every symlink this
+  # repository ships resolves inside the checkout, so on a clean tree this is a no-op.
+  #
+  # $HOME and / are in the tuple rather than left to the per-name checks below, because the fence it
+  # complements is default-allow plus a denial list: those checks name a few exact files under $HOME,
+  # so a single `ln -s ~ docs` would resolve to a directory holding every one of them — plus the
+  # runner's working directories — and reach all of them through a repo path that matches no deny
+  # glob. Naming the roots is what closes that one-line bypass.
+  #
+  # Resolution goes through os.path.realpath rather than `readlink -f`, which is not portable: BSD
+  # readlink resolves a dangling target only as far as the first real component, so on macOS a link
+  # to /proc/self/environ came back as /proc and matched nothing. Python is already required by this
+  # guard for the config fence, so it costs no new dependency.
+  python3 - "$workspace" <<'PY' || exit 65
+import os
+import sys
+
+workspace = os.path.realpath(sys.argv[1])
+sensitive = ("/proc", "/sys", "/dev", "/etc", "/var/run", "/run", "/var/folders")
+home = os.path.expanduser("~")
+# A prefix of "/" is deliberately excluded from the startswith arm below (nothing begins with "//"
+# once resolved) and is handled by the equality test, so `ln -s / docs` is refused too.
+sensitive = sensitive + (home, "/")
+
+
+def is_sensitive(target):
+    for prefix in sensitive:
+        if target == prefix or target.startswith(prefix + "/"):
+            return True
+    for relative in (".ssh", ".aws", ".config/gh", ".config/opencode", ".gnupg"):
+        base = os.path.join(home, relative)
+        if target == base or target.startswith(base + "/"):
+            return True
+    for name in (".netrc", ".git-credentials", ".npmrc", ".pypirc", ".docker/config.json"):
+        base = os.path.join(home, name)
+        if target == base:
+            return True
+    for variable in ("RUNNER_TEMP", "RUNNER_TOOL_CACHE", "XDG_CONFIG_HOME"):
+        root = os.environ.get(variable)
+        if root and (target == root or target.startswith(root.rstrip("/") + "/")):
+            return True
+    return False
+
+
+for directory, dirnames, filenames in os.walk(workspace):
+    # Both lists, not just files: a symlinked *directory* appears in dirnames and is never
+    # traversed, so scanning files alone would skip `docs -> /proc/self/environ` and everything
+    # under it. Prune it from the walk once it has been judged.
+    for name in filenames + dirnames:
+        path = os.path.join(directory, name)
+        if not os.path.islink(path):
+            continue
+        if name in dirnames:
+            dirnames.remove(name)
+        target = os.path.realpath(path)
+        if target == workspace or target.startswith(workspace + os.sep):
+            continue
+        if is_sensitive(target):
+            rel = os.path.relpath(path, workspace)
+            print(f"refusing a checkout symlink that resolves to a credential-bearing "
+                  f"path: {rel}", file=sys.stderr)
+            sys.exit(1)
+PY
 fi
 
-declare -A needed_keys=()
+# A newline-delimited list, not an associative array. `declare -A` needs bash 4, and macOS still
+# ships 3.2 — where this script aborted at startup, so the guard and its whole test harness ran
+# only on the Linux CI runner and could not be checked locally before a change like this one.
+needed_keys=$'\n'
 add_provider_key() {
   local key_name
   case "$1" in
@@ -43,7 +118,7 @@ add_provider_key() {
     '') return ;;
     *) echo "unsupported OpenCode provider selector: $1" >&2; exit 64 ;;
   esac
-  needed_keys["$key_name"]=1
+  needed_keys+="$key_name"$'\n'
 }
 
 # The v2 background service starts during the health check, before individual
@@ -53,9 +128,9 @@ add_provider_key "${OPENCODE_REVIEW_REPORT_PROVIDER:-}"
 add_provider_key "${OPENCODE_ANALYSE_PROVIDER:-}"
 
 while IFS= read -r name; do
-  if [[ -n "${needed_keys[$name]:-}" ]]; then
-    continue
-  fi
+  case "$needed_keys" in
+    *$'\n'"$name"$'\n'*) continue ;;
+  esac
   case "$name" in
     PATH|HOME|USER|LOGNAME|SHELL|LANG|LC_*|TMPDIR|TMP|TEMP|CI|GITHUB_ACTIONS|RUNNER_TEMP|NODE_EXTRA_CA_CERTS|SSL_CERT_FILE|SSL_CERT_DIR|CURL_CA_BUNDLE)
       ;;

@@ -170,7 +170,7 @@ sequenceDiagram
   cross-repo provenance links resolve; do not "complete" the symmetry by scoping them to the group.
 - Resolve-or-create matches by ticket (200 existing group) or creates (`local:<guid>` when untracked). Initiative is a **name** (entity has no uuid); default `to-be-decided`. Optional repo/scope apply on **create only** — use `PATCH /groups/{uuid}` afterwards.
 - Resolve/update acquire `ITicketGraph.LockAsync` inside an explicit EF transaction before group or ticket-owner reads. Resolve inspects every supplied ticket and rejects multiple owners or different owning groups; returning an existing group never merges unowned tickets. Update checks ownership even for already-attached tickets, then preserves additive/idempotent merge.
-- `PUT /api/context/tickets/parent` requires explicit `parent` (null removes); null/absent `expectedParent` expects absence. It returns `changed`. `POST /api/context/tickets/paths` returns `TicketTraversalResult` with required numeric `maxDepth` 1..5, outbound/inbound/either direction, scope/kind narrowing, and independent path/memory caps defaulting to 50 (1..200). Identity strings are exact, nonempty, max 512; declaration reason/source are nonempty, max 4000; embedded null characters and self-parenting are rejected. Hidden-anchor handling stays provider-side and returns an empty result, not a revealing preliminary lookup.
+- `PUT /api/context/tickets/parent` requires explicit `parent` (null removes); null/absent `expectedParent` expects absence. It returns `changed`. `POST /api/context/tickets/paths` returns `TicketTraversalResult` with required numeric `maxDepth` 1..5, outbound/inbound/either direction, scope/kind narrowing, an optional exact `status` match (which supersedes the proposed-exclusion default, so `status=proposed` is the opt-in that returns proposed records), and independent path/memory caps defaulting to 50 (1..200). Identity strings are exact, nonempty, max 512; declaration reason/source are nonempty, max 4000; embedded null characters and self-parenting are rejected. Hidden-anchor handling stays provider-side and returns an empty result, not a revealing preliminary lookup.
 - Ticket ownership uses exact provider/key application checks and a shared-lock trigger guard against
   cross-group conflicts; it is no longer solely a soft application check. The `(group_id, subject_slug)`
   unique index remains the only in-DB subject backstop.
@@ -214,7 +214,12 @@ sequenceDiagram
 ## Quality Constraints
 
 - Target query (current, approved, facet, repo, ticket, in-scope, validity) is one SQL statement. `memory_group.repo` has a btree; facets/tags have GIN and are matched with `&&` (overlap, default "any") or `@>` (containment, "all" via `FacetMatchMode`); full text matches the two `to_tsvector('english', … || ' ' || …)` GIN expressions verbatim — changing either concatenation or the configuration on one side only silently drops the index (config selected by HLD-001's recall-tuning measurement).
-- Bind locally; no auth. Do not return raw blob URLs.
+- Bind locally; **no blob-URL auth, which is not the same as the service having none.** Do not return raw
+  or presigned blob URLs: a body is fetched through `GET /api/context/memories/{uuid}/versions/{v}/blob`,
+  which carries the caller's read capability, so the URL itself is never a bearer. The service *does*
+  authenticate every `/api/context` route through `ApiAccessAuthorizer` (`ApiAccess:ReadToken` /
+  `ApiAccess:WriteToken`, see `HOST_AGENTS.md`); "no auth" in this line has always meant the blob URL,
+  and is now said so because the unqualified form reads as the stronger and wrong claim.
 
 ## Changelog
 

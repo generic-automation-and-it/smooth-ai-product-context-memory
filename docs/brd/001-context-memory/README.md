@@ -4,9 +4,9 @@
 |---|---|
 | **Document** | Business Requirements Document |
 | **Status** | Approved |
-| **BR-46 amendment status** | Local proposal pending upstream acceptance |
+| **BR-46 amendment status** | Amended **in this repository** by the `mimisbrunnr-ymir-bootstrap` skill (renamed and registered as PR #91). There is no separate upstream acceptor to wait on, so this BRD is the authority. **The offline half is delivered; the store-facing half is not yet exercised.** The skill inspects a bounded, git-visible evidence set and produces the reviewed cited candidate preview `BR-46` requires; it then fails closed to that preview unless capability-limited `memory-read` / `memory-write` workers are available, and its `AGENTS.md` records that store comparison, capture and post-capture recall were never run against a live store. The third `Accepted when:` clause — *a realistic recall shows what was recovered, what remains uncovered, and whether the selected context can be found again* — is therefore **not yet met**. |
 | **Owner** | Product owner / practitioner |
-| **Last updated** | 2026-09-20 |
+| **Last updated** | 2026-09-29 |
 | **Related** | [HLD 001 — Storage](../../hlds/001-context-memory-storage/) · [HLD 002 — Write pipeline](../../hlds/002-context-memory-write-pipeline/) · [HLD 003 — Graph edges](../../hlds/003-graph-edges-on-age/) · [HLD 004 — Recall feedback](../../hlds/004-memory-recall-feedback/) · [HLD 006 — Corpus snapshot and restore](../../hlds/006-corpus-snapshot-and-restore/) |
 | **Extended by** | [BRD 002 — Contextual knowledge export](../002-contextual-export/) — continues this requirement space at `BR-18` |
 

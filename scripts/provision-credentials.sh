@@ -41,15 +41,28 @@
 #
 # Usage:
 #   scripts/provision-credentials.sh [--rotate] [--env-file PATH] [--base-url URL] [--skip-apphost]
-#     --rotate       regenerate the tokens even if the file already exists
-#     --env-file     write to this path (default .context/mimisbrunnr.env)
-#     --base-url     the skill-side base URL (default http://localhost:5141)
-#     --skip-apphost do not write the AppHost user secrets (e.g. no .NET SDK / gitignored env)
+#                                   [--allow-unignored-env-file]
+#     --rotate                   regenerate the tokens even if the file already exists
+#     --env-file                 write to this path (default .context/mimisbrunnr.env); a relative
+#                                path is resolved against the caller's cwd
+#     --base-url                 the skill-side base URL (default http://localhost:5141)
+#     --skip-apphost             do not write the AppHost user secrets; the bridge needs python3,
+#                                not the .NET SDK (it reads the csproj with sed and writes the
+#                                store directly), so this is only for a gitignored or absent env
+#     --allow-unignored-env-file skip the git-ignore refusal below, for a path this check cannot see
+#                                as ignored
 #
 # Idempotent: re-running without --rotate reuses the existing tokens and just reprints the export
 # lines. Secrets must never be committed — *.env and .context/ are both gitignored.
 
 set -euo pipefail
+
+# Every file this script creates is created with the owner's-only bits already set, rather than
+# under the caller's umask and narrowed afterwards. `chmod 600` after the fact leaves a window in
+# which a file carrying bearer tokens is group- or world-readable — a window that is exactly as
+# long as the write, and that no test can observe, because it has already closed by the time one
+# runs.
+umask 077
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APPHOST_PROJECT="${ROOT_DIR}/src/SmoothAiProductContextMemory.AppHost"
@@ -57,6 +70,7 @@ ENV_FILE="${ROOT_DIR}/.context/mimisbrunnr.env"
 BASE_URL="http://localhost:5141"
 ROTATE=0
 WRITE_APPHOST=1
+ALLOW_UNIGNORED=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -64,9 +78,44 @@ while [[ $# -gt 0 ]]; do
     --env-file) ENV_FILE="$2"; shift 2 ;;
     --base-url) BASE_URL="$2"; shift 2 ;;
     --skip-apphost) WRITE_APPHOST=0; shift ;;
+    --allow-unignored-env-file) ALLOW_UNIGNORED=1; shift ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
+
+# Anchor a relative --env-file to the caller's working directory now, before anything reads it. The
+# writes below resolve it against the caller's cwd, but the ignore check below runs from ROOT_DIR, so
+# an unanchored path was asked about and written as two different files: git was asked whether
+# `/repo/creds.env` is ignored, and the tokens landed in `./creds.env` — a live credential file under
+# no ignore rule, which is exactly what the check below refuses. Name one path from here on.
+[[ "$ENV_FILE" = /* ]] || ENV_FILE="$PWD/$ENV_FILE"
+
+# The token file is only safe from version control while something ignores it. `*.env` and
+# `*.env.controller` cover the defaults and `.context/` covers the default directory — but a
+# caller-chosen `--env-file` whose name does not end in `.env` is covered by neither, while
+# `docs/wiki/setup.md` states the file is gitignored regardless of where it points. Ask Git rather
+# than pattern-matching its own ignore file, so nested and negated rules count the way they
+# actually apply. The `.controller` sibling is checked separately: it is a distinct file, and a
+# rule matching one does not match the other.
+#
+# `rev-parse --git-dir`, not a test for a `.git` directory: in a linked worktree `.git` is a
+# *file*, so a `-d` test silently disables the whole check for every contributor who works in one
+# — a guard that quietly does nothing is worse than no guard, because it reads as covered.
+#
+# `git check-ignore` also exits 128 for a path outside the repository, which is a refusal (nothing
+# there is ignored), so the `!` below treats it the same as "not ignored" rather than as an error
+# to be ignored.
+if [[ "$ALLOW_UNIGNORED" -eq 0 ]] && git -C "$ROOT_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+  for candidate in "$ENV_FILE" "${ENV_FILE}.controller"; do
+    if ! (cd "$ROOT_DIR" && git check-ignore -q "$candidate"); then
+      echo "refusing to write credentials to ${candidate}: git does not ignore that path, so a" >&2
+      echo "  'git add .' would stage live bearer tokens. Use a path under .context/ or ending" >&2
+      echo "  in .env, add an ignore rule, or pass --allow-unignored-env-file if the path is" >&2
+      echo "  already ignored by a means this check cannot see (an untracked parent repo, say)." >&2
+      exit 1
+    fi
+  done
+fi
 
 mkdir -p "$(dirname "$ENV_FILE")"
 
@@ -110,18 +159,16 @@ EOF
   chmod 600 "$ENV_FILE"
 
   # Published-controller env file: the `Parameters__*` names carry hyphens and are not shell
-  # identifiers, so they live here, never in the sourceable file.
+  # identifiers, so they live here, never in the sourceable file. Nothing else belongs here: the
+  # controller gets the tokens through these two names, and every additional form is a second copy
+  # of a bearer credential in a file whose only consumer reads two keys. The Host's `ApiAccess__*`
+  # names stay in the sourceable file, which is the one the container is documented to read.
   cat > "${ENV_FILE}.controller" <<EOF
 # Mímisbrunnr controller credentials — generated $(date -u +%Y-%m-%dT%H:%M:%SZ). Pass to the
 # published \`-apphost\` controller via \`--env-file\`. The Parameters__* names are not shell
 # identifiers, so this file is for a container env-file, never for \`source\`.
-ApiAccess__ReadToken=${READ_TOKEN}
-ApiAccess__WriteToken=${WRITE_TOKEN}
 Parameters__api-read-token=${READ_TOKEN}
 Parameters__api-write-token=${WRITE_TOKEN}
-CONTEXT_MEMORY_READ_TOKEN=${READ_TOKEN}
-CONTEXT_MEMORY_WRITE_TOKEN=${WRITE_TOKEN}
-CONTEXT_MEMORY_BASE_URL=${BASE_URL}
 EOF
   chmod 600 "${ENV_FILE}.controller"
   echo "Wrote credentials to ${ENV_FILE} and ${ENV_FILE}.controller" >&2
@@ -134,8 +181,29 @@ else
   else
     echo "Reusing existing credentials in ${ENV_FILE}" >&2
   fi
-  READ_TOKEN="$(grep -m1 '^ApiAccess__ReadToken=' "$ENV_FILE" | cut -d= -f2-)"
-  WRITE_TOKEN="$(grep -m1 '^ApiAccess__WriteToken=' "$ENV_FILE" | cut -d= -f2-)"
+  # `|| true` on both greps: under `set -e` a missing line aborts the assignment silently, and an env
+  # file with no `ApiAccess__*` name is exactly the truncated case the check below refuses loudly.
+  READ_TOKEN="$(grep -m1 '^ApiAccess__ReadToken=' "$ENV_FILE" | cut -d= -f2- || true)"
+  WRITE_TOKEN="$(grep -m1 '^ApiAccess__WriteToken=' "$ENV_FILE" | cut -d= -f2- || true)"
+  # A reuse path that does not check what it parsed will happily rewrite a truncated, hand-edited
+  # or half-written file *keeping the broken value*, and then write that same broken value into the
+  # controller file and the AppHost user secrets — turning a corrupt file into a confidently
+  # propagated one. The tokens are `openssl rand -hex 32`, so the shape is exactly checkable; refuse
+  # rather than guess, because silently regenerating would invalidate a token a running Host holds
+  # and the operator would not be told which of the two happened.
+  for pair in "ApiAccess__ReadToken=$READ_TOKEN" "ApiAccess__WriteToken=$WRITE_TOKEN"; do
+    if [[ ! "${pair#*=}" =~ ^[0-9a-f]{64}$ ]]; then
+      echo "refusing to reuse ${ENV_FILE}: ${pair%%=*} is not a 64-character hex token." >&2
+      echo "  The file is truncated, hand-edited or written by another tool. Repair it, or pass" >&2
+      echo "  --rotate to mint a new pair (which invalidates the tokens a running Host holds)." >&2
+      exit 1
+    fi
+  done
+  if [[ "$READ_TOKEN" == "$WRITE_TOKEN" ]]; then
+    echo "refusing to reuse ${ENV_FILE}: the read and write tokens are identical, so the read" >&2
+    echo "  capability would be the write capability. Pass --rotate to mint a new pair." >&2
+    exit 1
+  fi
 fi
 
 # Re-split: the pair is inconsistent (no .controller sibling, or Parameters__* still in the sourceable
@@ -158,21 +226,64 @@ EOF
 # Mímisbrunnr controller credentials — re-split $(date -u +%Y-%m-%dT%H:%M:%SZ). Pass to the
 # published \`-apphost\` controller via \`--env-file\`. The Parameters__* names are not shell
 # identifiers, so this file is for a container env-file, never for \`source\`.
-ApiAccess__ReadToken=${READ_TOKEN}
-ApiAccess__WriteToken=${WRITE_TOKEN}
 Parameters__api-read-token=${READ_TOKEN}
 Parameters__api-write-token=${WRITE_TOKEN}
-CONTEXT_MEMORY_READ_TOKEN=${READ_TOKEN}
-CONTEXT_MEMORY_WRITE_TOKEN=${WRITE_TOKEN}
-CONTEXT_MEMORY_BASE_URL=${BASE_URL}
 EOF
   chmod 600 "${ENV_FILE}.controller"
 fi
 
 if [[ "$WRITE_APPHOST" -eq 1 ]]; then
   if [[ -f "${APPHOST_PROJECT}/SmoothAiProductContextMemory.AppHost.csproj" ]]; then
-    dotnet user-secrets set "Parameters:api-read-token" "$READ_TOKEN" --project "$APPHOST_PROJECT" >/dev/null
-    dotnet user-secrets set "Parameters:api-write-token" "$WRITE_TOKEN" --project "$APPHOST_PROJECT" >/dev/null
+    # `dotnet user-secrets set NAME VALUE` takes the value as an argv element, which is readable in
+    # `ps` by every user on the host for the lifetime of the process and lands in any shell trace
+    # that is recording. The SDK offers no stdin form, so the store is written directly instead:
+    # the same flat {"name": "value"} JSON the command itself produces, merged into whatever is
+    # already there so an unrelated secret is not clobbered, and replaced atomically so a
+    # concurrent reader sees either the old file or the new one, never a half-written one.
+    write_apphost_secrets() {
+      local id target dir tmp
+      id="$(sed -n 's:.*<UserSecretsId>\(.*\)</UserSecretsId>.*:\1:p' \
+        "${APPHOST_PROJECT}/SmoothAiProductContextMemory.AppHost.csproj" | head -1)"
+      if [[ -z "$id" ]]; then
+        echo "warning: no <UserSecretsId> in the AppHost project; skipping the user-secrets bridge" >&2
+        return 0
+      fi
+      if [[ -n "${APPDATA:-}" ]]; then
+        dir="${APPDATA}/Microsoft/UserSecrets/${id}"
+      else
+        dir="${HOME}/.microsoft/usersecrets/${id}"
+      fi
+      target="${dir}/secrets.json"
+      mkdir -p "$dir"
+      chmod 700 "$dir" 2>/dev/null || true
+      tmp="$(mktemp "${dir}/.secrets.XXXXXX")"
+      SECRETS_TARGET="$target" SECRETS_TMP="$tmp" \
+      SECRETS_READ="$READ_TOKEN" SECRETS_WRITE="$WRITE_TOKEN" \
+        python3 - <<'PY'
+import json
+import os
+
+target = os.environ["SECRETS_TARGET"]
+merged = {}
+if os.path.exists(target):
+    try:
+        with open(target, encoding="utf-8-sig") as handle:
+            existing = json.load(handle)
+    except ValueError:
+        existing = None
+    if isinstance(existing, dict):
+        for key, value in existing.items():
+            # Accept both shapes the SDK has written: flat, and the nested {Type,Value} object.
+            merged[key] = value.get("Value") if isinstance(value, dict) and "Value" in value else value
+merged["Parameters:api-read-token"] = os.environ["SECRETS_READ"]
+merged["Parameters:api-write-token"] = os.environ["SECRETS_WRITE"]
+with open(os.environ["SECRETS_TMP"], "w", encoding="utf-8") as handle:
+    json.dump(merged, handle, indent=2)
+    handle.write("\n")
+PY
+      mv "$tmp" "$target"
+    }
+    write_apphost_secrets
     echo "Wrote AppHost user secrets (Parameters:api-read-token / api-write-token)." >&2
     echo "NOTE: user secrets load in Development only. For the published controller (Production), pass" >&2
     echo "${ENV_FILE}.controller via --env-file (it carries Parameters__api-read-token / __api-write-token)." >&2

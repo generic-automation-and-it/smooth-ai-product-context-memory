@@ -1,0 +1,83 @@
+[
+  {
+    "id": "s1-redact-planted-credential",
+    "verdict": "scrub",
+    "reason": "The candidate carries an AWS access key id in both the description and the surrounding text. Redact-and-flag: scrub the recognised span, record the rule name and count, and keep the fact."
+  },
+  {
+    "id": "s2-same-subject-version-bump",
+    "verdict": "version_bump",
+    "target_uuid": "m-001",
+    "reason": "Same subject, same group, same claim. 'We store in Postgres' and 'PostgreSQL is the storage engine' are one fact worded twice, so this is a new version of m-001 rather than a second memory."
+  },
+  {
+    "id": "s3-bundled-split-counted",
+    "verdict": "split",
+    "count": 3,
+    "reason": "Three coordinated claims in one statement: the engine choice, the JSONB requirement and the GIN index. Each stands alone and can be versioned independently, so the bundle splits rather than being written as one memory."
+  },
+  {
+    "id": "s4-cross-group-match-is-not-a-bump",
+    "verdict": "new_memory",
+    "reason": "The recalled match sits in a different group. Identity is (group, uuid), so m-002 is not a version target for a write into this group and naming it would be a 404. Capture a new memory here and derive a typed link to the twin so the relationship is still recorded."
+  },
+  {
+    "id": "s5-link-derivation",
+    "verdict": "link",
+    "link_uuid": "m-003",
+    "relation": "relates_to",
+    "reason": "The candidate restates the local-first positioning already held by m-003, so the two belong together. relates_to connects without asserting an ordering, which is the safe relation when neither memory supersedes the other."
+  },
+  {
+    "id": "s6-programme-scoped-not-product",
+    "verdict": "set_scope_program",
+    "not_product_fact": true,
+    "reason": "A monthly reporting obligation is a programme-level fact, not shipped product behaviour. Scope it to the programme so the retrieval rule has something to enforce and it is never cited as a product claim."
+  },
+  {
+    "id": "s7-adversarial-divergence",
+    "verdict": "genuine_conflict",
+    "diverged": 1,
+    "reason": "Same subject and same applicability, but the claims contradict: PostgreSQL now, SQLite next. No stated authority selects a winner, so this is a genuine conflict: one proposed divergence record plus two contradiction links, with neither claim deleted."
+  },
+  {
+    "id": "s8-near-miss-negative",
+    "verdict": "new_memory",
+    "reason": "Different claim. m-001 is about which engine was chosen for storage; this is about where the search index lives. Same subject area and heavy vocabulary overlap, but versioning would silently overwrite the engine decision with an index statement."
+  },
+  {
+    "id": "s9-authority-shipped-behaviour",
+    "verdict": "authority_resolved",
+    "diverged": 0,
+    "authority": "shipped_behavior",
+    "reason": "The specification permits a later link call, but m-005 carries a test as its source and the shipped API commits links in the same transaction. For a claim about current behaviour, verified executable behaviour outranks the specification, so no divergence record is created."
+  },
+  {
+    "id": "s10-authority-agreed-vocabulary",
+    "verdict": "authority_resolved",
+    "diverged": 0,
+    "authority": "agreed_vocabulary",
+    "reason": "Renaming a stored fact to 'note' is incidental terminology against a glossary that has already agreed the term is Context. Agreed vocabulary outranks the alternative, so the glossary stands and nothing diverges."
+  },
+  {
+    "id": "s11-token-expiry-negative",
+    "verdict": "new_memory",
+    "reason": "Same domain and much of the same vocabulary, but a different claim: how long an access token lives is not the same fact as what mechanism carries the session. Over-merging these would erase the session design."
+  },
+  {
+    "id": "s12-same-words-different-scope-negative",
+    "verdict": "new_memory",
+    "reason": "The subject is identical but the value is contradicted: 02:00 against a held 03:00. That is a disagreement to surface, not a restatement to collapse, so matching must not treat it as a version. Surfacing the contradiction is the divergence stage's job, not this one's."
+  },
+  {
+    "id": "s13-superseded-facet-negative",
+    "verdict": "new_memory",
+    "reason": "One path segment apart, and the path is the whole claim: the question is which route serves recall, and query and recall are different routes. A matcher keying on wording would merge these and lose the route the Host actually exposes."
+  },
+  {
+    "id": "s14-same-subject-paraphrase-positive",
+    "verdict": "version_bump",
+    "target_uuid": "m-010",
+    "reason": "Same subject, same group, one clause reworded and no change of claim: both say a blob's key is derived from its bytes. This is the recall axis, and missing it fills the store with duplicates of the same fact."
+  }
+]

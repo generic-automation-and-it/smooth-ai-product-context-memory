@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 using SmoothAiProductContextMemory.Application.Abstractions;
+using SmoothAiProductContextMemory.Application.Common.Models;
 using SmoothAiProductContextMemory.Application.Features.ContextDossier;
 using SmoothAiProductContextMemory.Domain;
 using SmoothAiProductContextMemory.Domain.Entities;
@@ -26,6 +27,7 @@ public sealed class DossierBundleHandlerTests : HandlerTestBase
     private static readonly Guid AnchorUuid = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
     private static readonly Guid VisibleDeepUuid = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
     private static readonly Guid HiddenUuid = Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc");
+    private static readonly Guid ProposedUuid = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddd02");
     private const string BlobAddress = "aa/bb/111111111111111111111111111111111111111111111111111111111111111";
 
     private CreateDossierBundle.Handler BundleHandler(IBlobStorage blobs) =>
@@ -192,6 +194,70 @@ public sealed class DossierBundleHandlerTests : HandlerTestBase
     }
 
     [Fact]
+    public async Task Ticket_anchor_with_a_status_reaches_the_memory_the_manifest_says_it_reached()
+    {
+        // The ticket traversal's identity set is the filter the anchor search then applies its own
+        // status to, so a status that reached only the anchor search filtered a set the traversal had
+        // already emptied. With the status absent from the traversal query the SQL took its
+        // `@status IS NULL` branch, ExcludeProposed stayed at its true default, every proposed memory
+        // was dropped before the anchor search ran, and `ticket + status=proposed` reported noMatch
+        // every time — while RetrievalPolicy recorded "current-only, status=proposed", so the artefact a
+        // caller repeats the selection from asserted the opposite of what the selection did.
+        //
+        // The fake below reproduces the traversal's real predicate rather than returning a fixed
+        // result. That is what makes this a guard on the wiring: a fake that ignored the query would
+        // hand back the proposed memory regardless and this test would pass with the defect present.
+        await SeedForProposedBundleAsync();
+        var blobs = new DictionaryBlobStorage();
+        blobs.Add(BlobAddress, "THE_BODY");
+
+        var ticketGraph = new FilteringTicketGraph([
+            new(ProposedUuid, ProductGroupUuid, "Proposed", MemoryVersion.MemoryVersionStatus.Proposed),
+            new(AnchorUuid, ProductGroupUuid, "Anchor", MemoryVersion.MemoryVersionStatus.Approved),
+        ]);
+
+        CreateDossierBundle.Handler bundle = new(
+            AppDb, Search, new NpgsqlMemoryTraversal(Db), ticketGraph, Graph, blobs,
+            NullLogger<CreateDossierBundle.Handler>.Instance);
+
+        CreateDossierBundle.Response response = await bundle.Handle(
+            BundleRequest(ticketProvider: "jira", ticketKey: "ACM-999", status: "proposed"), Ct);
+
+        // The anchor's status reaches the traversal, and ExcludeProposed is left at its default: the
+        // `@status IS NOT NULL` branch supersedes it, which is the same rule FindTicketPaths relies on.
+        ticketGraph.LastQuery.ShouldNotBeNull();
+        ticketGraph.LastQuery!.Status.ShouldBe("proposed");
+        ticketGraph.LastQuery.ExcludeProposed.ShouldBeTrue();
+
+        // The proposed memory is reached, and the manifest records the status it was reached under.
+        response.Bundle.Manifest.NoMatch.ShouldBeFalse();
+        response.Bundle.Items.ShouldContain(i => i.Uuid == ProposedUuid);
+        response.Bundle.Manifest.Selection.RetrievalPolicy.ShouldBe("current-only, status=proposed");
+
+        // And the same anchor without a status still excludes proposed, so the fix did not widen the
+        // default: this is the branch the defect lived in, and it must keep behaving as it did. The
+        // control needs an approved memory actually in the store, or the assertion would pass for the
+        // wrong reason — a no-match caused by the anchor search finding nothing, rather than by the
+        // status rule.
+        var withoutStatus = new FilteringTicketGraph([
+            new(ProposedUuid, ProductGroupUuid, "Proposed", MemoryVersion.MemoryVersionStatus.Proposed),
+            new(AnchorUuid, ProductGroupUuid, "Anchor", MemoryVersion.MemoryVersionStatus.Approved),
+        ]);
+        CreateDossierBundle.Handler defaulting = new(
+            AppDb, Search, new NpgsqlMemoryTraversal(Db), withoutStatus, Graph, blobs,
+            NullLogger<CreateDossierBundle.Handler>.Instance);
+
+        CreateDossierBundle.Response noStatus = await defaulting.Handle(
+            BundleRequest(ticketProvider: "jira", ticketKey: "ACM-999"), Ct);
+
+        withoutStatus.LastQuery!.Status.ShouldBeNull();
+        noStatus.Bundle.Manifest.NoMatch.ShouldBeFalse();
+        noStatus.Bundle.Items.ShouldNotContain(i => i.Uuid == ProposedUuid);
+        noStatus.Bundle.Items.ShouldContain(i => i.Uuid == AnchorUuid);
+        noStatus.Bundle.Manifest.Selection.RetrievalPolicy.ShouldBe("current-only, proposed-excluded");
+    }
+
+    [Fact]
     public async Task NonZero_history_inflated_cut_converges_preview_and_bundle()
     {
         // The truncated-empty path already agreed before this change (batch 2 gave the bundle the
@@ -300,7 +366,7 @@ public sealed class DossierBundleHandlerTests : HandlerTestBase
 
     private static CreateDossierBundle.Request BundleRequest(
         IReadOnlyList<string>? tags = null, string? ticketProvider = null, string? ticketKey = null,
-        bool includeHistory = false) =>
+        bool includeHistory = false, string? status = null) =>
         new(
             Repo: "kingstown",
             InitiativeName: null,
@@ -308,7 +374,7 @@ public sealed class DossierBundleHandlerTests : HandlerTestBase
             TicketKey: ticketKey,
             Tags: tags ?? ["tag-1"],
             Kind: null,
-            Status: null,
+            Status: status,
             ScopeDimension: null,
             IncludeHistory: includeHistory,
             AsOf: null,
@@ -354,6 +420,29 @@ public sealed class DossierBundleHandlerTests : HandlerTestBase
 
         (await Graph.CreateAsync(AnchorUuid, VisibleDeepUuid, MemoryRelation.DependsOn, "needs it", Ct)).ShouldBeTrue();
         (await Graph.CreateAsync(AnchorUuid, understanding.Uuid, MemoryRelation.RelatesTo, "context", Ct)).ShouldBeTrue();
+    }
+
+    private async Task SeedForProposedBundleAsync()
+    {
+        MemoryGroup product = Group(ProductGroupUuid, MemoryGroup.ScopeDimensionValue.Product);
+        Db.MemoryGroups.Add(product);
+        await Db.SaveChangesAsync(Ct);
+
+        // One proposed and one approved memory, because the assertion needs both: the proposed row is
+        // what a status=proposed anchor must reach, and the approved row is the control proving the
+        // default still excludes proposed rather than the selection simply coming back empty.
+        Memory proposed = MemoryRow(product.Id, ProposedUuid, "Proposed", "A proposed fact", tags: ["tag-1"],
+            facet: "architecture");
+        Memory approved = MemoryRow(product.Id, AnchorUuid, "Anchor", "Anchor fact", tags: ["tag-1"],
+            facet: "architecture");
+        Db.Memories.AddRange(proposed, approved);
+        await Db.SaveChangesAsync(Ct);
+
+        Db.MemoryVersions.Add(Version(proposed.Id, 1, "A proposed claim", isCurrent: true,
+            kind: MemoryVersion.KindValue.Decision, status: MemoryVersion.MemoryVersionStatus.Proposed));
+        Db.MemoryVersions.Add(Version(approved.Id, 1, "Anchor claim", isCurrent: true,
+            kind: MemoryVersion.KindValue.Decision));
+        await Db.SaveChangesAsync(Ct);
     }
 
     private async Task SeedForHiddenPathAsync()
@@ -437,7 +526,8 @@ public sealed class DossierBundleHandlerTests : HandlerTestBase
     };
 
     private static MemoryVersion Version(
-        long memoryId, int version, string statement, bool isCurrent, string kind, string? blobAddress = null) => new()
+        long memoryId, int version, string statement, bool isCurrent, string kind, string? blobAddress = null,
+        string status = MemoryVersion.MemoryVersionStatus.Approved) => new()
         {
             MemoryId = memoryId,
             Version = version,
@@ -447,7 +537,7 @@ public sealed class DossierBundleHandlerTests : HandlerTestBase
             BlobAddress = blobAddress,
             Kind = kind,
             Confidence = 80,
-            Status = MemoryVersion.MemoryVersionStatus.Approved,
+            Status = status,
             Sources = [SourceDocument.Create("jira", "ACM-1", ValidFrom)],
             ValidFrom = ValidFrom,
             CreatedOn = CreatedOn,
@@ -485,5 +575,50 @@ public sealed class DossierBundleHandlerTests : HandlerTestBase
 
         public Task<TicketTraversalResult> TraverseAsync(TicketTraversalQuery query, CancellationToken cancellationToken) =>
             Task.FromResult(result);
+    }
+
+    private sealed record TicketCandidate(Guid Uuid, Guid GroupUuid, string Name, string Status);
+
+    /// <summary>
+    /// A ticket graph that filters its candidates by the query the way the real one does, rather than
+    /// returning a fixed result. Mirrors the predicate at NpgsqlTicketGraph.Traversal.cs:116-117 —
+    /// <c>((@status IS NOT NULL AND status = @status) OR (@status IS NULL AND (NOT @exclude_proposed OR
+    /// status &lt;&gt; 'proposed')))</c> — so a caller that forgets to forward a field is reproduced here
+    /// as the empty identity set it is in production, instead of being masked by a cooperative fake.
+    /// </summary>
+    private sealed class FilteringTicketGraph(IReadOnlyList<TicketCandidate> candidates) : ITicketGraph
+    {
+        public TicketTraversalQuery? LastQuery { get; private set; }
+
+        public IReadOnlyList<CheapMemory> LastItems { get; private set; } = [];
+
+        public Task LockAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task<bool> ChangeParentAsync(TicketParentChange change, CancellationToken cancellationToken) =>
+            Task.FromResult(false);
+
+        public Task<TicketTraversalResult> TraverseAsync(
+            TicketTraversalQuery query, CancellationToken cancellationToken)
+        {
+            LastQuery = query;
+
+            var kept = candidates
+                .Where(c => query.Status is { Length: > 0 } status
+                    ? c.Status == status
+                    : !query.ExcludeProposed || c.Status != MemoryVersion.MemoryVersionStatus.Proposed)
+                .Select(c => new CheapMemory(
+                    c.Uuid, c.GroupUuid, c.Name, c.Name, "claim", "summary", "decision",
+                    ["architecture"], ["tag-1"], c.Status, 80, MemoryGroup.ScopeDimensionValue.Product,
+                    null, ValidFrom, null, 1, true, [SourceDocument.Create("jira", "ACM-999", ValidFrom)],
+                    CreatedOn))
+                .ToList();
+            LastItems = kept;
+
+            return Task.FromResult(new TicketTraversalResult(
+                Paths: [],
+                Items: kept,
+                Disclosure: new TicketTraversalDisclosure(
+                    query.MaxDepth, query.PathLimit, query.MemoryLimit, false, false, false)));
+        }
     }
 }

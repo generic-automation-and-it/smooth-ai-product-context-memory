@@ -47,6 +47,14 @@ second writer.
 - **Redaction precedes the blob write.** Content addressing (HLD 001 (storage)) makes a blob immutable and its
   hash stable. A leaked secret cannot be edited out afterwards, only orphaned. This ordering is
   non-negotiable.
+- **The redaction gate is a gate on *recognition*, not on secrets.** `set` scrubs automatically and
+  refuses to write when the scrubber cannot run, so it can never fail open — but `redact.py` matches
+  fixed-shape fingerprints (`AKIA…`, `gh[pousr]_…`, PEM blocks, `secret=`/`token:`/`password=`
+  assignments). A bare high-entropy value, an unlabelled base64 blob, an unusual vendor token format or
+  a password in prose passes through untouched. Describe this control as *"recognisable secrets are
+  gated, and the gate never fails open"*; **do not** describe it as "sensitive material never reaches
+  storage", which overstates it. Widening the rule set is the lever, and that is a deliberate separate
+  decision. `redact.py` carries the same statement at its top.
 - **Subject matching reads across groups, but a version bump is scoped to the writing group.** A memory's
   identity is `(group, uuid)`, decided 2026-09-28 with HLD-002 amended to match. The recall is
   deliberately cross-group so a same-subject memory elsewhere is *seen*; only a match inside the
@@ -228,17 +236,31 @@ flowchart LR
   scorer-only. A run where the model reads `scenarios.json` is circular and invalid evidence.
   **The judgement itself is not CI-gated, but the harness is:** `run_tests.py::SemanticFixtureTests`
   invokes the scorer twice and the PR gate runs `run_tests.py` — once to prove the blinded emitter
-  withholds `id`/`expected`/`note`, and once to assert the **committed** verdicts file scores exactly
+  withholds `expected`/`note`/`axis`, and once to assert the **committed** verdicts file scores exactly
   recall 1.0 / precision 1.0. So a stale expectation is not inert: it is *certified*. A fixture whose
   expected verdict contradicts the shipped contract will not fail a test, it will make the recorded run
   look perfect.
-- **Committed verdicts are matched to scenarios by POSITION, not by id.** `score_fixtures.py` zips
-  `scenarios` against the verdicts list, so inserting, deleting or reordering a scenario silently
-  misaligns every verdict after it — and the 1.0/1.0 assertion then certifies the wrong verdicts
-  against the wrong scenarios without any test failing. **Append new scenarios at the end, or rewrite
-  the whole verdicts file and re-run the model.** Each run is a new dated file
-  (`model-verdicts-<date>.json`); a previous run is a record of what the model said that day and is
-  never edited in place, so a superseded run stays available for re-scoring.
+- **Verdicts pair by `id`, not by position.** The emitter emits each scenario's `id` — an identifier is
+  not an answer, so blinding is intact — and the scorer refuses a verdicts file whose entries carry no
+  id unless `--allow-legacy-positional` is passed. This matters because positional pairing meant that
+  inserting, deleting or reordering a scenario silently misaligned every verdict after it, and the
+  1.0/1.0 assertion above would then have certified the wrong verdicts against the wrong scenarios
+  **with no test failing**. `test_reordering_the_verdicts_does_not_change_the_score` is the property
+  positional pairing could not have. **Appending is no longer the only safe edit** — adding, inserting
+  or reordering is fine; a new *run* is still required, since a run's verdicts are a record of one
+  model's judgements on one day.
+- **Each run is a new dated file** (`model-verdicts-<date>.json`, with a qualifier when one day holds
+  two runs); a previous run is a record of what the model said that day and is never edited in place,
+  so a superseded run stays available for re-scoring. A dated run is only re-scorable against the
+  fixture it was taken against, so freeze that too (`scenarios-<date>.json`) — otherwise re-scoring a
+  ten-verdict run against today's fourteen-scenario fixture is a length error, not a measurement.
+  `scenarios-2026-09-29.json` is the frozen set behind the 0.9 / 0.8333 and 1.0 / 1.0 historical runs.
+- **Every scenario declares its `axis`** — `recall_positive`, `precision_negative` or `not_dedup` — and
+  the scorer and harness both refuse a set with fewer negative controls than positive pairs. Declared
+  rather than inferred from the expected verdict word, because a scenario expecting `new_memory` for a
+  reason unrelated to matching would otherwise inflate the negative count, and a matcher that matches
+  nothing scores perfect precision. `axis` is withheld from the blinded input: it would tell the model
+  which way the pair is meant to fall.
 - The skill's test approach is specified in `docs/hlds/002-context-memory-write-pipeline/nfrs/NFR-02-deduplication-accuracy.md`. These
   are not this repo's L0/L1/L2 tiers, which apply to the C# API (PR #14).
 
@@ -258,6 +280,7 @@ redaction detector is a stdin→stdout fingerprint script reporting rule names o
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-09-29 | **The redaction gate closed, and it is a gate on recognition rather than on secrets.** `set` now scrubs every free-text field through `redact.scrub_set_payload` before the request is built and refuses the write if the scrubber cannot run, so `redact.py` is no longer a tool an operator may skip and the gate cannot fail open — a write that cannot be scrubbed is not written. The boundary is stated rather than implied: the rules are fixed-shape fingerprints (`AKIA…`, `gh[pousr]_…`, PEM blocks, `secret=`/`token:`/`password=` assignments), so a value matching no rule still passes, and "recognisable secrets are gated" is the claim, never "sensitive material never reaches storage". `scenarios.json` gained `axis` per scenario (2 recall positives / 5 precision negatives, asserted by the harness), the frozen `scenarios-2026-09-29.json` and the balanced run were added, and verdicts now pair by `id` with `--allow-legacy-positional` reserved for superseded runs. | HLD-002 LADR-03, NFR-02 |
 | 2026-09-29 | **The semantic-dedup fixture set still encoded the overturned rule, and CI was certifying it.** Fixture `s4-cross-group-version-bump` expected a same-subject match in `g-99` to yield `version_bump` against `m-002` — which the shipped group-scoped identity forbids, since a foreign `uuid` target is a `404`. The committed verdicts run recorded the model doing exactly that, and `run_tests.py::SemanticFixtureTests` asserts the committed run scores recall **and** precision of exactly 1.0, so the defect was certified rather than caught. Re-scoring that run against the corrected expectation gives 0.9 / 0.8333. The fixture is now `s4-cross-group-match-is-not-a-bump` expecting `new_memory` (a new memory plus a typed link to the twin), a new `model-verdicts-2026-09-29.json` carries the corrected run at 1.0 / 1.0, and the **09-17 verdicts file is left on disk unedited** — it is the record of that run, not a configuration, so it stays available for re-scoring. Two claims in this file were also wrong and are corrected above: the fixture set is **not** "not CI-gated" (the scorer is invoked twice by `run_tests.py`, which the PR gate runs), and `score_fixtures.py` matches verdicts to scenarios by **position**, so inserting or reordering a scenario silently misaligns them and the 1.0/1.0 assertion then certifies the wrong verdicts against the wrong scenarios. | HLD-002 NFR-02 |
 | 2026-09-28 | **Memory identity decided group-scoped**, with HLD-002 amended to match, so the two files that stated the overturned rule as rationale now state the shipped rule. The **behaviour contract was already correct** and is unchanged: recall reads across groups, a match inside the writing group is a version bump, a cross-group match is a new memory plus a typed link (the 2026-09-27 rows already qualified every `uuid`-emitting site). What changed is the two rationale sentences — the non-negotiable "Deduplication is cross-group … a per-group check misses it" and the `SKILL.md` Listen-stage restatement, which asserted a within-group check as a defect. They now separate the two things the old wording conflated: the read is cross-group, the *versioning target* is group-scoped, and a cross-group duplicate is an accepted cost rather than a bug. The non-negotiable gained an explicit "do not widen the version-target lookup" clause, because the old wording reads as an instruction to do exactly that. The deliberate triple restatement of the rule is preserved — only its wording changed. | HLD-002 LADR-01, LADR-04 |
 | 2026-09-27 | Qualified the cross-group dedup restatement at the `SKILL.md` semantic-dedup **Judge** step (the only site that instructs the model to emit a recalled row's `uuid` as a `version_bump` target) with the same group rule the `set` body states: a same-subject match is a version bump **only inside the request's `groupUuid`**, and a cross-group match is a new memory plus a typed link, because a foreign `uuid` target is a `404` (group-scoped version-target lookup in `SetMemories.cs`). The recall query that feeds that step is deliberately cross-group, so the unqualified wording produced a guaranteed `404`. | `SKILL.md` |

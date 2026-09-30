@@ -16,6 +16,8 @@ public static class FindTicketPaths
         string? Direction = null,
         string? ScopeDimension = null,
         string? Kind = null,
+        string? Status = null,
+        bool? IncludeProposed = null,
         int PathLimit = MemorySearchDefaults.Limit,
         int MemoryLimit = MemorySearchDefaults.Limit) : IRequest<TicketTraversalResult>;
 
@@ -34,6 +36,9 @@ public static class FindTicketPaths
                 .WithMessage("ScopeDimension must not contain a null character.");
             RuleFor(x => x.Kind).Must(value => value is null || !value.Contains('\0'))
                 .WithMessage("Kind must not contain a null character.");
+            RuleFor(x => x.Status).MaximumLength(32);
+            RuleFor(x => x.Status).Must(value => value is null || !value.Contains('\0'))
+                .WithMessage("Status must not contain a null character.");
             RuleFor(x => x.PathLimit).InclusiveBetween(1, MemorySearchDefaults.MaxLimit);
             RuleFor(x => x.MemoryLimit).InclusiveBetween(1, MemorySearchDefaults.MaxLimit);
         }
@@ -59,6 +64,12 @@ public static class FindTicketPaths
                     .RequiredDimension,
                 HiddenDimensions = MemoryScopeFilter.HiddenDimensions(request.ScopeDimension, hasGroupContext: false),
                 Kind = string.IsNullOrWhiteSpace(request.Kind) ? null : request.Kind,
+                Status = string.IsNullOrWhiteSpace(request.Status) ? null : request.Status,
+                // Null means "unspecified", which is the documented default of excluding proposed.
+                // Distinguishing it from an explicit false keeps an absent field from silently
+                // widening the result set for a caller who never asked for it.
+                ExcludeProposed = request.IncludeProposed is not true
+                    && string.IsNullOrWhiteSpace(request.Status),
                 PathLimit = request.PathLimit,
                 MemoryLimit = request.MemoryLimit,
             };

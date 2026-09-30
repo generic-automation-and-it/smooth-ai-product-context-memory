@@ -25,6 +25,7 @@ import argparse
 import datetime as dt
 import json
 import os
+import re
 import sys
 import urllib.request
 from dataclasses import dataclass, field
@@ -253,6 +254,56 @@ def _expired(item, asof):
     return until is not None and until < asof_date
 
 
+_SUBSECOND = re.compile(r"(?<=:\d\d)(\.\d+)")
+
+
+def widen_subsecond(value):
+    """Pad or trim a sub-second fraction to exactly six digits.
+
+    `datetime.fromisoformat` accepts any number of fractional digits only from Python 3.11; 3.10 and
+    earlier accept 3 or 6, so a 7-digit tick count and a trailing-zero-trimmed fraction both raise.
+    `System.Text.Json` emits exactly those two shapes, which is why CI is green — it runs 3.12,
+    where the whole question does not arise — while a 3.9 or 3.10 user gets a `ValueError`.
+
+    Here that error was caught and turned into `None`, so every capture timestamp in a composed
+    dossier silently became "unknown" and lifecycle marking stopped working, with no error anywhere.
+    The sibling client's `observedAt` guard has the same parser with a louder failure: it rejects a
+    perfectly valid ticket-hierarchy declaration.
+
+    Six digits is microsecond resolution, which is the finest anything here compares; trimming a
+    7th digit costs at most 100ns. Only the first fraction is rewritten, so a `+01:00` offset is
+    untouched, and the string on the wire is never modified — this is a local parse concern only.
+    """
+    def widen(match):
+        return "." + match.group(1)[1:][:6].ljust(6, "0")
+
+    return _SUBSECOND.sub(widen, value, count=1)
+
+
+def normalise_iso(value):
+    """Widen the sub-second fraction, then rewrite a trailing `Z` as an explicit UTC offset.
+
+    Two independent pre-3.11 `fromisoformat` restrictions have to be handled together, and fixing
+    only the first is what left this broken: the fraction may be 3 or 6 digits only, and `Z` is not
+    accepted as a UTC designator at all before 3.11. `_strptime`'s `%S` fraction group also caps at
+    six digits, so a 7-digit tick count carrying a `Z` — the exact shape `System.Text.Json` emits —
+    fell past every strptime format and reached `fromisoformat` still carrying the `Z`, which
+    3.9/3.10 reject. The `ValueError` was caught and returned as `None`, so every capture timestamp
+    in a composed dossier silently became "unknown" and lifecycle marking stopped working, with no
+    error anywhere and a green suite, because CI runs 3.12 where the whole question does not arise.
+
+    Kept as its own function so the property is assertable on *any* interpreter: the harness feeds
+    its output to a replica of the pre-3.11 rule rather than needing a 3.9 install to prove it. The
+    sibling client's `observedAt` guard normalises the suffix the same way.
+
+    Only the trailing `Z` is rewritten, and only when it is the final character, so a `+01:00` offset
+    and a mid-string `Z` are untouched. The string on the wire is never modified — this is a local
+    parse concern only.
+    """
+    widened = widen_subsecond(value)
+    return widened[:-1] + "+00:00" if widened.endswith("Z") else widened
+
+
 def _parse_time(value):
     if not value:
         return None
@@ -267,7 +318,7 @@ def _parse_time(value):
             parsed = parsed.replace(tzinfo=dt.timezone.utc)
         return parsed
     try:
-        parsed = dt.datetime.fromisoformat(text)
+        parsed = dt.datetime.fromisoformat(normalise_iso(text))
     except ValueError:
         return None
     if parsed.tzinfo is None:

@@ -168,7 +168,7 @@ Built on the **smooth-devex-template** AI DevEx scaffold — a ready-to-use AI a
 | Validation | FluentValidation in a fail-fast Mediator pipeline |
 | Persistence | EF Core + PostgreSQL (`Npgsql.EntityFrameworkCore.PostgreSQL`) |
 | Observability | Serilog + OpenTelemetry, Scalar OpenAPI UI |
-| Testing | xunit.v3 · Shouldly · Respawn |
+| Testing | xunit.v3 · Shouldly · a fresh database per test (no Respawn) |
 
 ---
 
@@ -177,12 +177,19 @@ Built on the **smooth-devex-template** AI DevEx scaffold — a ready-to-use AI a
 The API requires two **distinct** Bearer tokens — one read, one write — in **every** run mode, and
 there is **no default**: if either is blank or the two match, the process exits at startup. Set them
 before running anything. The two tokens are the same values the host-side skills read under different
-names; the one-command provisioner writes both name forms to one gitignored file.
+names; the one-command provisioner writes both name forms to **two** gitignored files, split by
+parser grammar.
 
 ```bash
-scripts/provision-credentials.sh           # writes .context/mimisbrunnr.env (both token name forms, mode 600)
+scripts/provision-credentials.sh           # writes .context/mimisbrunnr.env and .context/mimisbrunnr.env.controller, both mode 600
 set -a && source .context/mimisbrunnr.env && set +a
 ```
+
+Two files, not one: `.context/mimisbrunnr.env` is sourceable (every name is a valid shell identifier)
+and the container's `--env-file` for the API tokens; `.context/mimisbrunnr.env.controller` carries
+the `Parameters__*` names, which contain hyphens and are **not** shell identifiers, so keeping them
+out of the first file is what stops `source` from printing a token as "command not found". Both hold
+the same two token values. See [setup.md](docs/wiki/setup.md) for the full name mapping.
 
 To run the API on its own (without the provisioner), generate the values rather than inventing them
 (`openssl rand -hex 32`, twice) and pass them under the server-side names — they must differ:
@@ -296,7 +303,7 @@ src/
 
 tests/
   SmoothAiProductContextMemory.*.UnitTest/          # L0 — no I/O, in-process
-  SmoothAiProductContextMemory.*.ComponentTest/     # L1 — in-memory EF Core / real isolated DB + Respawn
+  SmoothAiProductContextMemory.*.ComponentTest/     # L1 — real isolated PostgreSQL via Aspire (per-test DB)
   SmoothAiProductContextMemory.*.IntegrationTest/   # L2 — full stack, real PostgreSQL
   SmoothAiProductContextMemory.TestFramework/       # Shared fixtures
   SmoothAiProductContextMemory.TestFramework.Aspire/ # Aspire dependency host (PostgreSQL/AGE + MinIO blob)

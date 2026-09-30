@@ -14,8 +14,14 @@ DENIED_PATHS = {
     "*.env": "deny",
     "*.env.*": "deny",
     "*.config/gh/*": "deny",
+    # A process's environment is readable at /proc/<pid>/environ — and at one more level of
+    # nesting per thread, /proc/<pid>/task/<tid>/environ, which is a *different file* with the
+    # same contents. A single-depth glob admits the thread form, so both are denied. `/proc/self`
+    # is a symlink to a pid directory and resolves through either depth.
     "*/proc/*/environ": "deny",
     "*/proc/*/cmdline": "deny",
+    "*/proc/*/task/*/environ": "deny",
+    "*/proc/*/task/*/cmdline": "deny",
 }
 
 

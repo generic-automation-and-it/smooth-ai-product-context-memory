@@ -116,6 +116,22 @@ public sealed record MemoryWidenQuery
 
     public string? Status { get; init; }
 
+    /// <summary>
+    /// Business-time point the reached memory's current version must be valid at. Null means no
+    /// window is applied.
+    /// </summary>
+    /// <remarks>
+    /// Added because the dossier anchor search honoured <c>AsOf</c> while widening silently did not,
+    /// so a manifest recorded an <c>AsOf</c> that only the first of the two selection stages honoured
+    /// — and the second stage could add memories the first had excluded. The window predicate is the
+    /// same one <see cref="IMemorySearch.MemorySearchCriteria.AsOf"/> applies, deliberately: this
+    /// filters the <em>current</em> version by its validity window rather than reconstructing the
+    /// version that was current at <c>AsOf</c>. The append-only trigger admits only an
+    /// <c>is_current</c> flip, so historical reconstruction is not available here — see
+    /// PERSISTENCE_AGENTS.md.
+    /// </remarks>
+    public DateTimeOffset? AsOf { get; init; }
+
     public string? RequiredScopeDimension { get; init; }
 
     /// <summary>

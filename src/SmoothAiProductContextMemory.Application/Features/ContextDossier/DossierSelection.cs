@@ -91,6 +91,15 @@ public static class DossierSelection
                     RequiredScopeDimension = scopePlan.RequiredDimension,
                     HiddenDimensions = hiddenDimensions,
                     Kind = Blank(anchor.Kind),
+                    // Mirrors Kind, and carries the same obligation: the traversal's identity set is the
+                    // filter the anchor search then applies its own status to, so leaving the status out
+                    // here pre-filters that set. With Status null the SQL takes its second branch, and
+                    // ExcludeProposed at its default of true drops every proposed memory — so an anchor
+                    // of ticket + status=proposed searched a set holding none and always reported noMatch,
+                    // while RetrievalPolicy below recorded the status as honoured. ExcludeProposed is
+                    // deliberately left at its default: the SQL's first branch supersedes it once
+                    // @status is not null, which is the rule FindTicketPaths relies on too.
+                    Status = Blank(anchor.Status),
                     PathLimit = MemorySearchDefaults.MaxLimit,
                     MemoryLimit = MemorySearchDefaults.MaxLimit,
                 },
@@ -170,6 +179,11 @@ public static class DossierSelection
                 HiddenDimensions = hiddenDimensions,
                 Kind = Blank(anchor.Kind),
                 Status = Blank(anchor.Status),
+                // Carried for the same reason the anchor search carries it: a supplied AsOf must
+                // bound the whole selection. Widening without it could add a memory the anchor
+                // search had already excluded by validity window, while the manifest recorded the
+                // AsOf as though the whole plan honoured it.
+                AsOf = anchor.AsOf,
                 Limit = MemorySearchDefaults.MaxLimit,
             },
             cancellationToken);
@@ -314,6 +328,30 @@ public static class DossierSelection
         return [.. hits];
     }
 
+    /// <summary>
+    /// The recorded retrieval policy, derived from what the anchor actually selects rather than
+    /// asserted as a fixed string.
+    /// </summary>
+    /// <remarks>
+    /// This was the literal <c>"current-only, proposed-excluded unless status requested"</c>, which
+    /// described an opt-in the ticket traversal did not have: the SQL hard-coded
+    /// <c>status &lt;&gt; 'proposed'</c>, and the traversal query carried no status field, so
+    /// <c>ticket + status=proposed</c> always returned <c>noMatch</c> while the manifest told a caller
+    /// the opposite. A manifest is a record of the effective selection sufficient to repeat it
+    /// (BR-20), so a clause naming a capability the request cannot exercise is a false record, not a
+    /// conservative one. The opt-in now exists on the traversal, and this derives the clause from the
+    /// anchor so the two cannot drift again.
+    ///
+    /// The blank test is <see cref="Blank"/>'s, the same one <see cref="ResolveAsync"/> applies, not a
+    /// length test: a whitespace-only status matches nothing and therefore selects with
+    /// proposed-excluded, so recording it as honoured would be the false record this method exists to
+    /// prevent.
+    /// </remarks>
+    internal static string RetrievalPolicy(DossierAnchor anchor) =>
+        Blank(anchor.Status) is { } status
+            ? $"current-only, status={status}"
+            : "current-only, proposed-excluded";
+
     /// <summary>The recorded effective selection, in a form sufficient to repeat it (BR-20).</summary>
     public static DossierSelectionPlan BuildPlan(DossierAnchor anchor) =>
         new(
@@ -330,7 +368,7 @@ public static class DossierSelection
             anchor.WidenDepth,
             DossierCombinationRule.Value,
             anchor.IncludeHistory ? "included" : "current-only",
-            "current-only, proposed-excluded unless status requested");
+            RetrievalPolicy(anchor));
 
     private sealed class DossierSelectionCompare : IComparer<CheapMemory>
     {

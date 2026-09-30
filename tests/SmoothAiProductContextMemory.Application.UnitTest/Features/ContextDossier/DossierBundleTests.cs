@@ -167,6 +167,39 @@ public class DossierBundleTests
             WidenDepth: 3, CombinationRule: DossierCombinationRule.Value,
             HistoryPolicy: "current-only", RetrievalPolicy: "current-only");
 
+    [Theory]
+    [InlineData(null, "current-only, proposed-excluded")]
+    [InlineData("", "current-only, proposed-excluded")]
+    [InlineData("proposed", "current-only, status=proposed")]
+    [InlineData("approved", "current-only, status=approved")]
+    public void RetrievalPolicy_DescribesWhatTheAnchorActuallySelects(string? status, string expected)
+    {
+        // The manifest is the record of the effective selection, sufficient to repeat it (BR-20), so
+        // its policy clause must name only capabilities the request can exercise. It read
+        // "proposed-excluded unless status requested" while the traversal had no status field at all,
+        // so `ticket + status=proposed` always returned noMatch and the manifest promised the
+        // opposite. Derived from the anchor now, so the two cannot drift again.
+        DossierAnchor anchor = new(
+            Repo: null, InitiativeName: null, Ticket: null, Tags: [], Kind: null, Status: status,
+            ScopeDimension: null, IncludeHistory: false, AsOf: null, WidenDepth: 3, ItemLimit: 200);
+
+        DossierSelection.BuildPlan(anchor).RetrievalPolicy.ShouldBe(expected);
+    }
+
+    [Fact]
+    public void RetrievalPolicy_NeverPromisesAnOptInThatWasNotRequested()
+    {
+        // The regression this replaces, stated as an assertion: with no status in the anchor, the
+        // clause must not mention requesting one.
+        DossierAnchor anchor = new(
+            Repo: null, InitiativeName: null, Ticket: null, Tags: [], Kind: null, Status: null,
+            ScopeDimension: null, IncludeHistory: false, AsOf: null, WidenDepth: 3, ItemLimit: 200);
+
+        DossierSelection.BuildPlan(anchor).RetrievalPolicy
+            .ShouldNotContain("unless status requested");
+    }
+
+
     private static DossierReach Reach() =>
         new(WidenDepth: 3, Anchors: 1, Widened: 0, Selected: 1, Edges: 0, HiddenPathDropped: false);
 

@@ -10,9 +10,11 @@ Run: python3 tests/run_tests.py
 
 import importlib.util
 import copy
+import datetime as _dt
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -312,6 +314,217 @@ class WritePayloadTests(unittest.TestCase):
             handler.redirect_request(request, None, 302, "Found", {}, "https://evil.example/")
 
 
+# One recognisable value per declared text field, and a DISTINCT one per field on purpose.
+#
+# A single shared secret would not guard the tuple. `test_scrub_covers_every_declared_content_field`
+# asserts no planted secret survives, so with one secret shared across all seven fields, dropping
+# five of them from SET_TEXT_FIELDS still leaves the secret scrubbed by the two that remained and the
+# suite stays green — the exact shape the claim "a dropped field shows up as a missing rule name"
+# asserts is impossible. `description` is server-required and the likeliest field to carry a pasted
+# connection string, so a trim that silently un-gated it would be the expensive miss.
+PLANTED_TEXT_FIELDS = {
+    "name": "CI deploy key for token=namefield0000unique0000value",
+    "description": "ci deploy key, password=descrfield0000unique000value",
+    "statement": "The pipeline authenticates with AKIAIOSFODNN7EXAMPLE.",
+    "contentSummary": "Because CI runs unattended; api_key=summaryf0000unique000v",
+    "content": "export GITHUB_TOKEN=ghp_0123456789abcdefghijklmnopqrstuvwxyzAB",
+    "summaryModel": "stamped by secret=modelfield0000unique0000val",
+    "summaryPromptVersion": "stamped by key=promptf0000unique0000ver",
+}
+
+PLANTED = {
+    "items": [{
+        **PLANTED_TEXT_FIELDS,
+        "facets": ["ops", "api_key=sk-live-abcdefgh12345678"],
+        "tags": ["token: ghp_0123456789abcdefghijklmnopqrstuvwxyzAB"],
+        "sources": [{"kind": "doc", "reference": "Host=db;Password=hunter2hunter2;"}],
+    }],
+    "links": [{"sourceUuid": "1", "targetUuid": "2", "relation": "relates",
+               "reason": "cites the deploy note: api_key=sk-live-zzzzzzzz99999999"}],
+    "labelsProposed": ["password=hunter2hunter2"],
+}
+PLANTED_SECRETS = (
+    "AKIAIOSFODNN7EXAMPLE",
+    "ghp_0123456789abcdefghijklmnopqrstuvwxyzAB",
+    "sk-live-abcdefgh12345678",
+    "sk-live-zzzzzzzz99999999",
+    "hunter2hunter2",
+    # The per-field assignment values, which are what make each field independently load-bearing.
+    "namefield0000unique0000value",
+    "descrfield0000unique000value",
+    "summaryf0000unique000v",
+    "modelfield0000unique0000val",
+    "promptf0000unique0000ver",
+)
+
+
+def _assert_no_secret(testcase, payload):
+    """Fail if any planted secret survives anywhere in the request body, at any depth."""
+    serialised = json.dumps(payload, sort_keys=True)
+    for secret in PLANTED_SECRETS:
+        testcase.assertNotIn(secret, serialised, f"planted secret survived into the payload: {secret}")
+
+
+class SetRedactionGateTests(unittest.TestCase):
+    """The `set` path scrubs before it posts. A separate `redact` tool does not gate anything."""
+
+    def test_every_declared_text_field_is_independently_planted_and_scrubbed(self):
+        # Guards SET_TEXT_FIELDS in both directions, which the payload-level assertions cannot.
+        #
+        # Declared-but-unplanted: a field added to the tuple with no recognisable value here is
+        # unverified, and the suite would read as though every declared field were covered.
+        # Planted-but-undeclared: a field dropped from the tuple is the silent un-gate, and because
+        # each field carries a distinct value, dropping any one of them leaves its own secret in the
+        # posted payload for the other tests to catch.
+        unplanted = [f for f in redact.SET_TEXT_FIELDS if f not in PLANTED_TEXT_FIELDS]
+        self.assertEqual(unplanted, [], f"declared text fields carry no planted secret: {unplanted}")
+        extra = [f for f in PLANTED_TEXT_FIELDS if f not in redact.SET_TEXT_FIELDS]
+        self.assertEqual(extra, [], f"planted text fields are not in SET_TEXT_FIELDS: {extra}")
+
+        # Each planted value is recognised by the rules on its own, so a rule that stopped matching
+        # this shape fails here rather than being masked by another field's secret being scrubbed.
+        for field, value in PLANTED_TEXT_FIELDS.items():
+            with self.subTest(field=field):
+                cleaned, _ = redact.scrub_set_payload(
+                    {"items": [{field: value}], "links": []})
+                self.assertNotEqual(
+                    cleaned["items"][0][field], value,
+                    f"{field} was not scrubbed, so a secret in it would reach storage")
+
+    def test_dropping_one_field_from_the_tuple_leaks_that_field_only(self):
+        # The property the distinct-value design exists for, asserted directly: model a trim of
+        # SET_TEXT_FIELDS and confirm exactly the dropped field's secret survives, while the fields
+        # still declared are scrubbed. Without per-field values this cannot be written, and the
+        # payload-level assertions above would stay green across the same trim.
+        trimmed = tuple(f for f in redact.SET_TEXT_FIELDS if f != "description")
+        with patch.object(redact, "SET_TEXT_FIELDS", trimmed):
+            cleaned, _ = redact.scrub_set_payload(copy.deepcopy(PLANTED))
+
+        serialised = json.dumps(cleaned, sort_keys=True)
+        self.assertIn("descrfield0000unique000value", serialised,
+                      "a field removed from the tuple must let its own secret through — if this "
+                      "fails, the planted values no longer discriminate per field")
+        for other, value in PLANTED_TEXT_FIELDS.items():
+            if other == "description":
+                continue
+            with self.subTest(field=other):
+                self.assertNotIn(value, serialised,
+                                 f"{other} is still declared and must stay scrubbed")
+
+    def test_cli_set_posts_no_planted_secret(self):
+        with patch.object(client, "read_payload", return_value=copy.deepcopy(PLANTED)), \
+                patch.object(client, "_request", return_value={"created": 1}) as request, \
+                redirect_stdout(io.StringIO()):
+            client.cmd_set(SimpleNamespace(payload=None, dryrun=False))
+        posted = request.call_args.args[2]
+        _assert_no_secret(self, posted)
+
+    def test_mcp_set_posts_no_planted_secret(self):
+        with patch.object(write_mcp.client, "_request", return_value={"created": 1}) as request:
+            write_mcp.call_tool("set", {"payload": copy.deepcopy(PLANTED)})
+        _assert_no_secret(self, request.call_args.args[2])
+
+    def test_dry_run_is_scrubbed_too(self):
+        # A dry run is a preview of what would be stored, so an unscubbed dry run is a preview of
+        # a blob that cannot later be repaired. Gating only the persisting call would let the
+        # secret be reviewed, approved and then stored verbatim.
+        with patch.object(write_mcp.client, "_request", return_value={"dryRun": True}) as request:
+            write_mcp.call_tool("set", {"payload": copy.deepcopy(PLANTED), "dryRun": True})
+        _assert_no_secret(self, request.call_args.args[2])
+
+    def test_digest_reports_rule_names_and_counts_only(self):
+        with patch.object(client, "read_payload", return_value=copy.deepcopy(PLANTED)), \
+                patch.object(client, "_request", return_value={"created": 1}), \
+                redirect_stdout(io.StringIO()):
+            response = client.cmd_set(SimpleNamespace(payload=None, dryrun=False))
+        serialised = json.dumps(response)
+        _assert_no_secret(self, response)
+        self.assertTrue(response["redaction"])
+        for entry in response["redaction"]:
+            self.assertEqual(set(entry), {"rule_name", "hit_count"})
+        names = {entry["rule_name"] for entry in response["redaction"]}
+        self.assertIn("aws-access-key-id", names)
+        self.assertIn("github-token", names)
+
+    def test_clean_content_reports_no_redaction_key(self):
+        clean = {"items": [{"name": "n", "description": "d", "statement": "A fact.",
+                            "contentSummary": "why", "content": "text"}], "links": []}
+        with patch.object(client, "read_payload", return_value=copy.deepcopy(clean)), \
+                patch.object(client, "_request", return_value={"created": 1}), \
+                redirect_stdout(io.StringIO()):
+            response = client.cmd_set(SimpleNamespace(payload=None, dryrun=False))
+        self.assertNotIn("redaction", response)
+
+    def test_caller_payload_is_not_mutated(self):
+        # A shallow copy shares item dicts, so an in-place scrub would silently rewrite what the
+        # caller still holds — including the test's own fixture, which is how this gate could
+        # look like it passed while a retry posted the original.
+        original = copy.deepcopy(PLANTED)
+        with patch.object(write_mcp.client, "_request", return_value={"created": 1}) as request:
+            write_mcp.call_tool("set", {"payload": PLANTED})
+        _assert_no_secret(self, request.call_args.args[2])
+        self.assertEqual(original, PLANTED)
+
+    def test_unavailable_redactor_refuses_the_write(self):
+        # Fail closed. "The scrubber could not run" is precisely the condition under which
+        # proceeding stores unscubbed content, and the blob is immutable once written.
+        with patch.object(client, "read_payload", return_value=copy.deepcopy(PLANTED)), \
+                patch.object(client, "_request") as request, \
+                patch.object(client.redact, "scrub_set_payload", side_effect=RuntimeError("boom")):
+            with self.assertRaises(client.ClientError) as error:
+                client.cmd_set(SimpleNamespace(payload=None, dryrun=False))
+        self.assertIn("redactor-unavailable", str(error.exception))
+        request.assert_not_called()
+
+    def test_redactor_refusal_carries_no_content(self):
+        with patch.object(client, "read_payload", return_value=copy.deepcopy(PLANTED)), \
+                patch.object(client, "_request"), \
+                patch.object(client.redact, "scrub_set_payload", side_effect=RuntimeError("boom")):
+            with self.assertRaises(client.ClientError) as error:
+                client.cmd_set(SimpleNamespace(payload=None, dryrun=False))
+        self.assertNotIn("boom", str(error.exception))
+
+    def test_mcp_refusal_is_a_jsonrpc_error_not_a_crash(self):
+        with patch.object(client.redact, "scrub_set_payload", side_effect=RuntimeError("boom")):
+            response = read_mcp.respond(
+                json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                            "params": {"name": "set", "arguments": {"payload": copy.deepcopy(PLANTED)}}}),
+                write_mcp.handle)
+        self.assertEqual(response["error"]["code"], -32000)
+        self.assertIn("redactor-unavailable", response["error"]["message"])
+        for secret in PLANTED_SECRETS:
+            self.assertNotIn(secret, response["error"]["message"])
+
+    def test_scrub_covers_every_declared_content_field(self):
+        scrubbed, findings = redact.scrub_set_payload(copy.deepcopy(PLANTED))
+        _assert_no_secret(self, scrubbed)
+        self.assertTrue(findings)
+        # Each rule shape is planted in a different field, so a field dropped from the walk
+        # shows up as a missing rule name rather than as a silently cleaner payload. The counts are
+        # the per-field attribution measured against this payload, and they are only a tripwire while
+        # every field that can hold a secret contributes to one — which is why the planted values are
+        # distinct per field rather than one shared secret.
+        self.assertEqual(findings.get("aws-access-key-id"), 1)   # statement
+        self.assertEqual(findings.get("github-token"), 2)        # content, tags
+        # description (password=), sources[].reference (Password=), labelsProposed (password=)
+        self.assertEqual(findings.get("connection-string-password"), 3)
+        # name (token=), contentSummary (api_key=), summaryModel (secret=),
+        # summaryPromptVersion (key=), facets, links[].reason
+        self.assertEqual(findings.get("generic-secret-assignment"), 6)
+
+    def test_non_string_content_fields_survive_untouched(self):
+        payload = {"items": [{"statement": None, "content": 42, "tags": ["ok", None],
+                              "sources": ["not-a-dict"]}], "links": [None], "labelsProposed": [None]}
+        scrubbed, findings = redact.scrub_set_payload(payload)
+        self.assertEqual(scrubbed["items"][0]["statement"], None)
+        self.assertEqual(scrubbed["items"][0]["content"], 42)
+        self.assertEqual(scrubbed["items"][0]["tags"], ["ok", None])
+        self.assertEqual(scrubbed["items"][0]["sources"], ["not-a-dict"])
+        self.assertEqual(scrubbed["links"], [None])
+        self.assertEqual(scrubbed["labelsProposed"], [None])
+        self.assertEqual(findings, {})
+
+
 class DeepSearchTests(unittest.TestCase):
     def test_default_client_query_has_no_deepsearch_pass(self):
         with patch.object(client, "read_payload", return_value={}), \
@@ -476,17 +689,25 @@ class SemanticFixtureTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 0)
         payload = json.loads(completed.stdout)
         self.assertTrue(payload["scenarios"])
-        self.assertTrue(all("id" not in scenario and "expected" not in scenario and "note" not in scenario
+        # `id` is now emitted, because without it the scorer can only pair by position — and the
+        # 1.0/1.0 assertion below would then certify the wrong verdicts against the wrong scenarios
+        # with nothing failing. An identifier is not an answer, so this does not unblind the run.
+        # `axis` must stay withheld: it says which way the pair is meant to fall.
+        self.assertTrue(all("id" in scenario for scenario in payload["scenarios"]))
+        self.assertTrue(all("expected" not in scenario and "note" not in scenario
+                            and "axis" not in scenario
                             for scenario in payload["scenarios"]))
+        self.assertEqual(len({scenario["id"] for scenario in payload["scenarios"]}),
+                         len(payload["scenarios"]))
 
     def test_committed_blinded_semantic_evidence_scores_cleanly(self):
-        # 2026-09-29 run supersedes 2026-09-17. Both remain on disk: the earlier verdicts are the
-        # record of what the model said on that date, not a config to be edited. The superseded run
-        # is the one that expected a cross-group version bump, which the shipped group-scoped
-        # identity forbids, so it cannot be re-used as an expectation.
+        # The 2026-09-29-balanced run is the current measurement: same-group pairs throughout, as
+        # the group-scoped identity amendment requires, and balanced controls. Earlier dated runs
+        # stay on disk as the record of what the model said on the day, and are re-scorable against
+        # the frozen fixture they were taken against — see the two re-scoring tests below.
         completed = subprocess.run(
             [sys.executable, str(HERE / "fixtures" / "score_fixtures.py"),
-             "--model-verdicts", str(HERE / "fixtures" / "model-verdicts-2026-09-29.json")],
+             "--model-verdicts", str(HERE / "fixtures" / "model-verdicts-2026-09-29-balanced.json")],
             capture_output=True,
             text=True,
             check=False,
@@ -495,6 +716,86 @@ class SemanticFixtureTests(unittest.TestCase):
         score = json.loads(completed.stdout)
         self.assertEqual(score["recall"], 1.0)
         self.assertEqual(score["precision"], 1.0)
+        self.assertEqual(score["paired_by"], "id")
+
+    def test_superseded_runs_remain_re_scorable_against_their_own_fixture(self):
+        # A dated verdicts file is only re-scorable against the fixture that run saw. Scoring a
+        # ten-verdict run against today's fourteen-scenario fixture is a length error, not a
+        # re-scoring — so the fixture is frozen alongside the run.
+        for run, expected_recall, expected_precision, failing in (
+            ("model-verdicts-2026-09-17.json", 0.9, 0.8333, "s4-cross-group-match-is-not-a-bump"),
+            ("model-verdicts-2026-09-29.json", 1.0, 1.0, None),
+        ):
+            with self.subTest(run=run):
+                completed = subprocess.run(
+                    [sys.executable, str(HERE / "fixtures" / "score_fixtures.py"),
+                     "--fixtures", str(HERE / "fixtures" / "scenarios-2026-09-29.json"),
+                     "--model-verdicts", str(HERE / "fixtures" / run),
+                     "--allow-legacy-positional"],
+                    capture_output=True, text=True, check=False)
+                score = json.loads(completed.stdout)
+                self.assertEqual(score["recall"], expected_recall)
+                self.assertEqual(score["precision"], expected_precision)
+                self.assertEqual(score["paired_by"], "position (legacy)")
+                mismatched = [row["id"] for row in score["rows"] if not row["match"]]
+                self.assertEqual(mismatched, [failing] if failing else [])
+
+    def test_a_verdicts_file_without_ids_is_refused_by_default(self):
+        # Otherwise a new run could be scored positionally and inherit the silent-misalignment bug.
+        completed = subprocess.run(
+            [sys.executable, str(HERE / "fixtures" / "score_fixtures.py"),
+             "--model-verdicts", str(HERE / "fixtures" / "model-verdicts-2026-09-29.json")],
+            capture_output=True, text=True, check=False)
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("allow-legacy-positional", completed.stderr)
+
+    def test_reordering_the_verdicts_does_not_change_the_score(self):
+        # The property positional pairing could not have. Reversed input, same score.
+        fixtures = HERE / "fixtures"
+        verdicts = json.loads((fixtures / "model-verdicts-2026-09-29-balanced.json").read_text())
+        reordered = HERE.parent / "tests" / ".reordered-verdicts.json"
+        reordered.write_text(json.dumps(list(reversed(verdicts))))
+        try:
+            completed = subprocess.run(
+                [sys.executable, str(fixtures / "score_fixtures.py"),
+                 "--model-verdicts", str(reordered)],
+                capture_output=True, text=True, check=False)
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            score = json.loads(completed.stdout)
+            self.assertEqual(score["recall"], 1.0)
+            self.assertEqual(score["precision"], 1.0)
+            self.assertTrue(all(row["match"] for row in score["rows"]))
+        finally:
+            reordered.unlink()
+
+    def test_negative_controls_are_at_least_as_numerous_as_positive_pairs(self):
+        # NFR-02's acceptance criterion, asserted so it cannot quietly unbalance again. Labelled on
+        # the fixture rather than inferred from the verdict word: a scenario that happens to expect
+        # new_memory for a reason unrelated to matching would otherwise inflate the negative count.
+        scenarios = json.loads((HERE / "fixtures" / "scenarios.json").read_text())["scenarios"]
+        positives = [s["id"] for s in scenarios if s.get("axis") == "recall_positive"]
+        negatives = [s["id"] for s in scenarios if s.get("axis") == "precision_negative"]
+        self.assertTrue(positives, "no recall positives declared")
+        self.assertGreaterEqual(len(negatives), len(positives),
+                                f"{len(negatives)} negative controls against {len(positives)} "
+                                "positive pairs; a matcher that matches nothing would score perfect "
+                                "precision")
+        self.assertTrue(all(s.get("axis") in ("recall_positive", "precision_negative", "not_dedup")
+                            for s in scenarios), "a scenario is unlabelled or carries an unknown axis")
+
+    def test_every_dedup_pair_sits_in_one_group(self):
+        # The amendment that withdrew the original evidence: identity is (group, uuid), so a
+        # cross-group pair cannot version and must not be scored as though it could. The one
+        # deliberate exception is the cross-group scenario itself, which is a negative control
+        # precisely because it must not bump.
+        scenarios = json.loads((HERE / "fixtures" / "scenarios.json").read_text())["scenarios"]
+        for scenario in scenarios:
+            if scenario.get("axis") != "recall_positive":
+                continue
+            for recalled in scenario.get("recall_set", []):
+                self.assertEqual(recalled["group_uuid"], "g-01",
+                                 f"{scenario['id']} is a recall positive but its recalled memory "
+                                 "is in another group, so the shipped write path cannot version it")
 
 
 class AgentContractTests(unittest.TestCase):
@@ -1048,6 +1349,94 @@ class NearMissTagsTests(unittest.TestCase):
                 self.assertEqual(near_miss.main(), 1)
             self.assertEqual(output.getvalue(), "")
             self.assertIn("Invalid near-miss evidence", error.getvalue())
+
+
+class SubsecondToleranceTests(unittest.TestCase):
+    """A valid `observedAt` must not be rejected on Python 3.9 or 3.10.
+
+    `System.Text.Json` emits a 7-digit tick count, and trims trailing zeros, so the store's
+    timestamps arrive at 1, 2, 4, 5 or 7 fractional digits. `fromisoformat` only accepts an
+    arbitrary length from 3.11; earlier versions take 3 or 6. The shape regex already admitted
+    1..16 digits, so on those interpreters a valid declaration passed the shape check and was then
+    refused by the parse — with an error naming a wire contract the value satisfies.
+    """
+
+    @staticmethod
+    def _parse_under_310(text):
+        """Replicates fromisoformat's pre-3.11 rule: 3 or 6 fractional digits only.
+
+        Asserting against this rather than the live `fromisoformat` is what makes the test mean the
+        same thing on CI's 3.12 as on the interpreters being fixed. On 3.12 both the widened and the
+        raw string parse, so a test using the live parser would pass with the widening deleted.
+        """
+        match = re.search(r"\.(\d+)", text)
+        if match and len(match.group(1)) not in (3, 6):
+            raise ValueError("fractional seconds must be 3 or 6 digits before Python 3.11")
+        return _dt.datetime.fromisoformat(text)
+
+    def test_widened_value_parses_under_a_strict_310_parser(self):
+        for raw in ("2026-09-18T12:34:56.1234567Z",
+                    "2026-09-18T12:34:56.5Z",
+                    "2026-09-18T12:34:56.12345Z",
+                    "2026-09-18T12:34:56.12Z"):
+            with self.subTest(raw=raw):
+                with self.assertRaises(ValueError):
+                    self._parse_under_310(raw.replace("Z", "+00:00"))
+                self._parse_under_310(client._widen_subsecond(raw.replace("Z", "+00:00")))
+
+    def test_widening_is_exactly_six_digits(self):
+        self.assertEqual(client._widen_subsecond("2026-09-18T12:34:56.1234567+00:00"),
+                         "2026-09-18T12:34:56.123456+00:00")
+        self.assertEqual(client._widen_subsecond("2026-09-18T12:34:56.5+00:00"),
+                         "2026-09-18T12:34:56.500000+00:00")
+        self.assertEqual(client._widen_subsecond("2026-09-18T12:34:56.123456+00:00"),
+                         "2026-09-18T12:34:56.123456+00:00")
+        # 3 digits is already accepted by the strict parser, so widening it changes nothing about
+        # the instant. The rule is "always six" rather than "six unless already 3 or 6" because one
+        # rule is easier to reason about than a conditional, and both name the same moment.
+        self.assertEqual(client._widen_subsecond("2026-09-18T12:34:56.123+00:00"),
+                         "2026-09-18T12:34:56.123000+00:00")
+        self.assertEqual(
+            client._widen_subsecond("2026-09-18T12:34:56.123+00:00").replace(".123000", ".123"),
+            "2026-09-18T12:34:56.123+00:00")
+
+    def test_offset_and_date_only_values_are_untouched(self):
+        # A +01:00 offset contains ":00", so a naive "pad after a colon" rule corrupts it.
+        for value in ("2026-09-18T12:34:56+01:00", "2026-09-18", "2026-09-18T12:34:56"):
+            with self.subTest(value=value):
+                self.assertEqual(client._widen_subsecond(value), value)
+
+    def test_every_fraction_the_wire_guard_admits_is_accepted(self):
+        # 1..16 digits is what the documented observedAt grammar allows. Each must survive the whole
+        # command, not just the normaliser.
+        for digits in range(1, 17):
+            value = "2026-09-18T12:34:56." + ("1" * digits) + "Z"
+            with self.subTest(digits=digits):
+                with patch.object(client, "read_payload", return_value={
+                        "child": {"provider": "gh", "key": "a"},
+                        "parent": {"provider": "gh", "key": "b"},
+                        "expectedParent": None, "reason": "r", "source": "s",
+                        "observedAt": value}), \
+                        patch.object(client, "_request", return_value={"changed": True}), \
+                        redirect_stdout(io.StringIO()):
+                    client.cmd_ticket_parent(SimpleNamespace(payload=None, dryrun=True))
+
+    def test_an_invalid_timestamp_is_still_refused(self):
+        # Tolerance must not become permissiveness: a bad calendar date, a missing offset and a
+        # non-numeric fraction all still fail.
+        for value in ("2026-13-45T12:34:56.1234567Z",
+                      "2026-09-18T12:34:56.1234567",
+                      "2026-09-18T12:34:56.abcdefgZ"):
+            with self.subTest(value=value):
+                with patch.object(client, "read_payload", return_value={
+                        "child": {"provider": "gh", "key": "a"},
+                        "parent": {"provider": "gh", "key": "b"},
+                        "expectedParent": None, "reason": "r", "source": "s",
+                        "observedAt": value}), \
+                        patch.object(client, "_request") as request, \
+                        self.assertRaises(client.ClientError):
+                    client.cmd_ticket_parent(SimpleNamespace(payload=None, dryrun=True))
+                request.assert_not_called()
 
 
 if __name__ == "__main__":

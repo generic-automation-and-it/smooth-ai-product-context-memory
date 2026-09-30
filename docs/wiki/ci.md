@@ -65,7 +65,10 @@ The publish workflow does **not** run on pull requests.
 
 ### Credential isolation for the review and auto-fix jobs
 
-The gate's PR, tooling, and trusted-`main` checkouts use `persist-credentials: false`. Its parent
+The gate's PR, tooling, and trusted-`main` checkouts use `persist-credentials: false`, **and so do all
+three of the auto-fix job's checkouts** — the PR head, the trusted `main` helpers, and the fetched
+analyse tooling. (Verified 2026-09-29 against `pipeline-ai-analyse.yml`; the sentence previously named
+only the gate, which left the auto-fix job's checkouts unstated rather than unprotected.) Its parent
 `run-review.sh` still receives `GITHUB_TOKEN` for `gh` calls and private Git
 fetches; a one-shot Git helper reads the token from `GH_TOKEN` without storing
 it in `.git/config` or embedding it in a remote URL. Auto-fix uses the same
@@ -96,6 +99,13 @@ fail closed if the PR checkout introduces a project `opencode.json(c)` or `.open
 the OpenCode invocation path: OpenCode v2 discovers those independently of
 `OPENCODE_CONFIG`, and a project plugin could execute before tool permissions.
 Such a PR needs human review before the AI gate can safely run.
+
+The same guard also resolves every symlink in the checkout and fails closed on any that
+lands outside it on a credential-bearing target — the sensitive roots, the home directory
+or the filesystem root, the named credential files under `$HOME`, and the runner's
+temporary and tool-cache directories. A deny glob matches the path a model asks for, not
+what it resolves to, so a committed `docs/leak -> /proc/self/environ` link would satisfy
+every deny rule; the target has to be resolved before the model starts.
 
 Both jobs check out this repo's CI helpers from `main` into ignored
 `.context/trusted-ci/`; auto-fix always fetches `smooth-ai-report-review` tooling,

@@ -172,6 +172,74 @@ public sealed class QueryMemoriesHandlerTests(AspireFixture aspire) : HandlerTes
     }
 
     [Fact]
+    public async Task AsOf_does_not_reconstruct_the_version_that_was_current_then()
+    {
+        // The one combination that was missing: a multi-version memory *and* an AsOf, under the
+        // default CurrentOnly. An experiment was tried and reverted in CI review that dropped
+        // CurrentOnly when AsOf was set and closed the superseded window — and nothing here would
+        // have failed, because every AsOf test so far used a single-version memory, where
+        // CurrentOnly makes no difference. The documented model is that AsOf filters validity
+        // windows on the versions the query already returns; it does not rewind.
+        //
+        // A rewind is not merely unwanted, it is unavailable: memory_version is append-only and its
+        // trigger admits only an is_current flip, so closing the superseded version's ValidUntil
+        // threw ConflictException on every version bump. That is why it was reverted, and this test
+        // is what stops it being re-landed on the strength of the intent alone.
+        var group = TestEntities.NewGroup();
+        Db.MemoryGroups.Add(group);
+        await Db.SaveChangesAsync(Ct);
+
+        var asOf = new DateTimeOffset(2026, 9, 29, 0, 0, 0, TimeSpan.Zero);
+        SetMemories.Handler set = NewSet();
+
+        // v1 valid in the past, v2 valid from the future onwards. At `asOf` neither is "current and
+        // valid", which is the honest answer; a rewind would instead return v1's claim.
+        SetMemories.Request first = Approved(group.Uuid, "Versioned fact", "Old claim");
+        first = first with
+        {
+            Items = [first.Items[0] with { ValidFrom = asOf.AddDays(-10), ValidUntil = asOf.AddDays(-5) }],
+        };
+        Guid uuid = (await set.Handle(first, Ct)).Items[0].Uuid!.Value;
+
+        SetMemories.Request second = Approved(group.Uuid, "Versioned fact", "New claim");
+        second = second with
+        {
+            Items = [second.Items[0] with
+            {
+                Uuid = uuid,
+                ValidFrom = asOf.AddDays(1),
+                ValidUntil = null,
+            }],
+        };
+        await set.Handle(second, Ct);
+
+        QueryMemories.Handler query = NewQuery();
+
+        // CurrentOnly (the default) with AsOf: the current version is judged against the window, and
+        // v2 is not yet valid at asOf — so the memory drops out rather than falling back to v1.
+        (await query.Handle(Query() with { AsOf = asOf }, Ct))
+            .Items.ShouldBeEmpty();
+
+        // Without CurrentOnly the historical version is a candidate in its own right, and it is
+        // still the window that decides — v1's window closed before asOf, so it is excluded too.
+        (await query.Handle(Query() with { AsOf = asOf, CurrentOnly = false }, Ct))
+            .Items.ShouldBeEmpty();
+
+        // A point inside v1's own window still returns nothing under the default CurrentOnly: v1 is
+        // no longer current, and the query does not rewind to find it. This is the statement that
+        // would fail if the reverted experiment were re-landed.
+        (await query.Handle(Query() with { AsOf = asOf.AddDays(-7) }, Ct)).Items.ShouldBeEmpty();
+
+        // Dropping CurrentOnly makes v1 a candidate in its own right, and then its window admits it —
+        // so the version is returned because it is valid, not because anything rewound.
+        (await query.Handle(Query() with { AsOf = asOf.AddDays(-7), CurrentOnly = false }, Ct))
+            .Items.Select(i => i.Statement).ShouldBe(["Old claim"]);
+
+        // And with no AsOf the current version is what comes back, as everywhere else.
+        (await query.Handle(Query(), Ct)).Items.Select(i => i.Statement).ShouldBe(["New claim"]);
+    }
+
+    [Fact]
     public async Task Limit_caps_the_result_set()
     {
         var group = TestEntities.NewGroup();

@@ -42,6 +42,13 @@ public abstract class HandlerTestBase(AspireFixture aspire) : IAsyncLifetime
 
     public async ValueTask InitializeAsync()
     {
+        // xUnit v3 does not inject ITestOutputHelper into a collection fixture, so the fixture's own
+        // Output falls back to TestContext.Current — which is null at teardown. The bucket-cleanup
+        // report below is therefore a silent no-op unless the test's helper is captured *here*,
+        // while the running test's context still exists. Without this a cleanup failure is swallowed
+        // and a green run is indistinguishable from a leaking one.
+        aspire.SetOutput(TestContext.Current?.TestOutputHelper);
+
         _database = await SmoothAiProductContextMemoryTestDatabase.CreateAsync(
             aspire,
             $"app-component-{Guid.NewGuid():N}",

@@ -68,9 +68,19 @@ Options:
 | Flag | Meaning |
 |---|---|
 | `--rotate` | Regenerate the tokens even if the file already exists |
-| `--env-file PATH` | Write to a different path (default `.context/mimisbrunnr.env`) |
+| `--env-file PATH` | Write to a different path (default `.context/mimisbrunnr.env`). The path must be one git ignores — under `.context/`, or a name ending in `.env` — or the run is refused; see below |
 | `--base-url URL` | The skill-side base URL (default `http://localhost:5141`) |
-| `--skip-apphost` | Do not write the AppHost user secrets (e.g. no .NET SDK) |
+| `--skip-apphost` | Do not write the AppHost user secrets. The bridge reads the AppHost `csproj` for its `UserSecretsId` and writes the user-secrets store directly, so it needs `python3` (it no longer invokes the .NET SDK at all) |
+| `--allow-unignored-env-file` | Skip the refusal below, for a path this check cannot see as ignored — an untracked parent repository, say |
+
+**The unignored-path refusal.** A token file is only safe from version control while something ignores
+it, so the script asks git (`git check-ignore`) about both the `--env-file` and its `.controller`
+sibling, and exits 1 with instructions if either is not ignored — a `git add .` would otherwise stage
+live bearer tokens. A path git cannot answer for (outside the repository) is refused the same way;
+`--allow-unignored-env-file` is the documented way past that, and the override is also right when an
+external tool already keeps the file out of version control. With no repository at all
+(`git rev-parse --git-dir` fails) the check does not apply, because there is no `git add .` to be
+staged by.
 
 ## Run modes
 
@@ -86,7 +96,10 @@ The script writes the AppHost user secrets (`Parameters:api-read-token` / `Param
 so Aspire injects the same values the skills hold rather than generating per-session tokens of its own.
 Without that bridge the AppHost would serve tokens the skills do not carry and every skill request
 returns `403`. The dashboard-local `/login?t=…` URL is only for the dashboard UI, not the API
-credentials. Add `--skip-apphost` if you have no .NET SDK and only need the env file.
+credentials. Add `--skip-apphost` only when you are **not** running the AppHost from this checkout
+(for example, you run the published controller image and pass `--env-file` instead): the bridge needs
+`python3`, not the .NET SDK, so skipping it on an SDK-less machine still leaves the AppHost on tokens
+of its own and every skill request at `403`.
 
 **User secrets load in Development only.** For the published `-apphost` controller (which runs in
 Production, where user secrets are not loaded), pass `.context/mimisbrunnr.env.controller` via

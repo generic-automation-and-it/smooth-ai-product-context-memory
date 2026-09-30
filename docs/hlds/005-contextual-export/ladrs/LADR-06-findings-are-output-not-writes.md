@@ -47,6 +47,15 @@ that two memories disagree, on the authority of one composition pass.
 
 - **Should an export be recorded as an event at all?** HLD-004 is designing recall feedback and an export is a very large recall. Whether an export contributes to that signal — and whether "findings already dismissed" belongs there — must be decided with HLD-004, not ahead of it. Trigger: HLD-004 leaving discovery.
 
+  > **The trigger has fired, and the deferral is now answerable — but HLD-004 never asked.** HLD-004
+  > reached `Complete` and none of its documents mentions export, dossier or contextual export at all
+  > (verified by grep across the whole folder, 2026-09-29), so the question was never routed to its
+  > counterparty. It cannot be closed by inferring HLD-004's answer, and it is **not** resolved here.
+  > It is recorded as open with a named owner and a live trigger: the next change to HLD-004's recall
+  > feedback surface must answer it, and until one does, a dossier export writes no feedback record
+  > and no dismissed-finding state. That is the current, intended behaviour, not a gap waiting to be
+  > noticed.
+
 ## Related
 
 - **LADR-04** — the contradiction finding this most obviously applies to.
