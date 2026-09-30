@@ -341,9 +341,14 @@ public static class DossierSelection
     /// (BR-20), so a clause naming a capability the request cannot exercise is a false record, not a
     /// conservative one. The opt-in now exists on the traversal, and this derives the clause from the
     /// anchor so the two cannot drift again.
+    ///
+    /// The blank test is <see cref="Blank"/>'s, the same one <see cref="ResolveAsync"/> applies, not a
+    /// length test: a whitespace-only status matches nothing and therefore selects with
+    /// proposed-excluded, so recording it as honoured would be the false record this method exists to
+    /// prevent.
     /// </remarks>
     internal static string RetrievalPolicy(DossierAnchor anchor) =>
-        anchor.Status is { Length: > 0 } status
+        Blank(anchor.Status) is { } status
             ? $"current-only, status={status}"
             : "current-only, proposed-excluded";
 

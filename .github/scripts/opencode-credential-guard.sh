@@ -39,6 +39,12 @@ if [ -n "${GITHUB_WORKSPACE:-}" ]; then
   # escaping link (a shared package store, a tool cache) does not fail the gate. Every symlink this
   # repository ships resolves inside the checkout, so on a clean tree this is a no-op.
   #
+  # $HOME and / are in the tuple rather than left to the per-name checks below, because the fence it
+  # complements is default-allow plus a denial list: those checks name a few exact files under $HOME,
+  # so a single `ln -s ~ docs` would resolve to a directory holding every one of them — plus the
+  # runner's working directories — and reach all of them through a repo path that matches no deny
+  # glob. Naming the roots is what closes that one-line bypass.
+  #
   # Resolution goes through os.path.realpath rather than `readlink -f`, which is not portable: BSD
   # readlink resolves a dangling target only as far as the first real component, so on macOS a link
   # to /proc/self/environ came back as /proc and matched nothing. Python is already required by this
@@ -50,6 +56,9 @@ import sys
 workspace = os.path.realpath(sys.argv[1])
 sensitive = ("/proc", "/sys", "/dev", "/etc", "/var/run", "/run", "/var/folders")
 home = os.path.expanduser("~")
+# A prefix of "/" is deliberately excluded from the startswith arm below (nothing begins with "//"
+# once resolved) and is handled by the equality test, so `ln -s / docs` is refused too.
+sensitive = sensitive + (home, "/")
 
 
 def is_sensitive(target):

@@ -100,6 +100,13 @@ the OpenCode invocation path: OpenCode v2 discovers those independently of
 `OPENCODE_CONFIG`, and a project plugin could execute before tool permissions.
 Such a PR needs human review before the AI gate can safely run.
 
+The same guard also resolves every symlink in the checkout and fails closed on any that
+lands outside it on a credential-bearing target — the sensitive roots, the home directory
+or the filesystem root, the named credential files under `$HOME`, and the runner's
+temporary and tool-cache directories. A deny glob matches the path a model asks for, not
+what it resolves to, so a committed `docs/leak -> /proc/self/environ` link would satisfy
+every deny rule; the target has to be resolved before the model starts.
+
 Both jobs check out this repo's CI helpers from `main` into ignored
 `.context/trusted-ci/`; auto-fix always fetches `smooth-ai-report-review` tooling,
 so neither the installer, guard, nor the optional mTLS proxy is executed from

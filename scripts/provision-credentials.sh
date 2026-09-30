@@ -41,10 +41,16 @@
 #
 # Usage:
 #   scripts/provision-credentials.sh [--rotate] [--env-file PATH] [--base-url URL] [--skip-apphost]
-#     --rotate       regenerate the tokens even if the file already exists
-#     --env-file     write to this path (default .context/mimisbrunnr.env)
-#     --base-url     the skill-side base URL (default http://localhost:5141)
-#     --skip-apphost do not write the AppHost user secrets (e.g. no .NET SDK / gitignored env)
+#                                   [--allow-unignored-env-file]
+#     --rotate                   regenerate the tokens even if the file already exists
+#     --env-file                 write to this path (default .context/mimisbrunnr.env); a relative
+#                                path is resolved against the caller's cwd
+#     --base-url                 the skill-side base URL (default http://localhost:5141)
+#     --skip-apphost             do not write the AppHost user secrets; the bridge needs python3,
+#                                not the .NET SDK (it reads the csproj with sed and writes the
+#                                store directly), so this is only for a gitignored or absent env
+#     --allow-unignored-env-file skip the git-ignore refusal below, for a path this check cannot see
+#                                as ignored
 #
 # Idempotent: re-running without --rotate reuses the existing tokens and just reprints the export
 # lines. Secrets must never be committed — *.env and .context/ are both gitignored.
@@ -76,6 +82,13 @@ while [[ $# -gt 0 ]]; do
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
+
+# Anchor a relative --env-file to the caller's working directory now, before anything reads it. The
+# writes below resolve it against the caller's cwd, but the ignore check below runs from ROOT_DIR, so
+# an unanchored path was asked about and written as two different files: git was asked whether
+# `/repo/creds.env` is ignored, and the tokens landed in `./creds.env` — a live credential file under
+# no ignore rule, which is exactly what the check below refuses. Name one path from here on.
+[[ "$ENV_FILE" = /* ]] || ENV_FILE="$PWD/$ENV_FILE"
 
 # The token file is only safe from version control while something ignores it. `*.env` and
 # `*.env.controller` cover the defaults and `.context/` covers the default directory — but a
@@ -168,8 +181,10 @@ else
   else
     echo "Reusing existing credentials in ${ENV_FILE}" >&2
   fi
-  READ_TOKEN="$(grep -m1 '^ApiAccess__ReadToken=' "$ENV_FILE" | cut -d= -f2-)"
-  WRITE_TOKEN="$(grep -m1 '^ApiAccess__WriteToken=' "$ENV_FILE" | cut -d= -f2-)"
+  # `|| true` on both greps: under `set -e` a missing line aborts the assignment silently, and an env
+  # file with no `ApiAccess__*` name is exactly the truncated case the check below refuses loudly.
+  READ_TOKEN="$(grep -m1 '^ApiAccess__ReadToken=' "$ENV_FILE" | cut -d= -f2- || true)"
+  WRITE_TOKEN="$(grep -m1 '^ApiAccess__WriteToken=' "$ENV_FILE" | cut -d= -f2- || true)"
   # A reuse path that does not check what it parsed will happily rewrite a truncated, hand-edited
   # or half-written file *keeping the broken value*, and then write that same broken value into the
   # controller file and the AppHost user secrets — turning a corrupt file into a confidently

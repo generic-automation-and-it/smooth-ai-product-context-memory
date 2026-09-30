@@ -248,14 +248,6 @@ public sealed class NpgsqlSnapshotRepository(
         // corpus — as one INSERT, whose cost grows with the archive and which no statement-timeout
         // raise makes cheap. A per-row cascade trigger on the clearing DELETE has the same shape of
         // problem and is bounded by the statement budget above rather than by batching.
-        // Bounded batches, configured on the context (see CreateContext). Unbounded, EF emitted the
-        // whole capture — every memory_version row of the corpus — as one INSERT. A per-row cascade
-        // trigger on the clearing DELETE has the same shape of problem and is bounded by the
-        // statement budget above rather than by batching.
-        // Bounded batches, configured on the context (see CreateContext). Unbounded, EF emitted the
-        // whole capture — every memory_version row of the corpus — as one INSERT, whose cost grows
-        // with the archive. A per-row cascade trigger on the clearing DELETE has the same shape of
-        // problem and is bounded by the statement budget above rather than by batching.
         await db.SaveChangesAsync(cancellationToken);
     }
 
