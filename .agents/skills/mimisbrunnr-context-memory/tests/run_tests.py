@@ -314,13 +314,27 @@ class WritePayloadTests(unittest.TestCase):
             handler.redirect_request(request, None, 302, "Found", {}, "https://evil.example/")
 
 
+# One recognisable value per declared text field, and a DISTINCT one per field on purpose.
+#
+# A single shared secret would not guard the tuple. `test_scrub_covers_every_declared_content_field`
+# asserts no planted secret survives, so with one secret shared across all seven fields, dropping
+# five of them from SET_TEXT_FIELDS still leaves the secret scrubbed by the two that remained and the
+# suite stays green — the exact shape the claim "a dropped field shows up as a missing rule name"
+# asserts is impossible. `description` is server-required and the likeliest field to carry a pasted
+# connection string, so a trim that silently un-gated it would be the expensive miss.
+PLANTED_TEXT_FIELDS = {
+    "name": "CI deploy key for token=namefield0000unique0000value",
+    "description": "ci deploy key, password=descrfield0000unique000value",
+    "statement": "The pipeline authenticates with AKIAIOSFODNN7EXAMPLE.",
+    "contentSummary": "Because CI runs unattended; api_key=summaryf0000unique000v",
+    "content": "export GITHUB_TOKEN=ghp_0123456789abcdefghijklmnopqrstuvwxyzAB",
+    "summaryModel": "stamped by secret=modelfield0000unique0000val",
+    "summaryPromptVersion": "stamped by key=promptf0000unique0000ver",
+}
+
 PLANTED = {
     "items": [{
-        "name": "CI deploy key",
-        "description": "ci deploy key",
-        "statement": "The pipeline authenticates with AKIAIOSFODNN7EXAMPLE.",
-        "contentSummary": "Because CI runs unattended.",
-        "content": "export GITHUB_TOKEN=ghp_0123456789abcdefghijklmnopqrstuvwxyzAB",
+        **PLANTED_TEXT_FIELDS,
         "facets": ["ops", "api_key=sk-live-abcdefgh12345678"],
         "tags": ["token: ghp_0123456789abcdefghijklmnopqrstuvwxyzAB"],
         "sources": [{"kind": "doc", "reference": "Host=db;Password=hunter2hunter2;"}],
@@ -335,6 +349,12 @@ PLANTED_SECRETS = (
     "sk-live-abcdefgh12345678",
     "sk-live-zzzzzzzz99999999",
     "hunter2hunter2",
+    # The per-field assignment values, which are what make each field independently load-bearing.
+    "namefield0000unique0000value",
+    "descrfield0000unique000value",
+    "summaryf0000unique000v",
+    "modelfield0000unique0000val",
+    "promptf0000unique0000ver",
 )
 
 
@@ -347,6 +367,49 @@ def _assert_no_secret(testcase, payload):
 
 class SetRedactionGateTests(unittest.TestCase):
     """The `set` path scrubs before it posts. A separate `redact` tool does not gate anything."""
+
+    def test_every_declared_text_field_is_independently_planted_and_scrubbed(self):
+        # Guards SET_TEXT_FIELDS in both directions, which the payload-level assertions cannot.
+        #
+        # Declared-but-unplanted: a field added to the tuple with no recognisable value here is
+        # unverified, and the suite would read as though every declared field were covered.
+        # Planted-but-undeclared: a field dropped from the tuple is the silent un-gate, and because
+        # each field carries a distinct value, dropping any one of them leaves its own secret in the
+        # posted payload for the other tests to catch.
+        unplanted = [f for f in redact.SET_TEXT_FIELDS if f not in PLANTED_TEXT_FIELDS]
+        self.assertEqual(unplanted, [], f"declared text fields carry no planted secret: {unplanted}")
+        extra = [f for f in PLANTED_TEXT_FIELDS if f not in redact.SET_TEXT_FIELDS]
+        self.assertEqual(extra, [], f"planted text fields are not in SET_TEXT_FIELDS: {extra}")
+
+        # Each planted value is recognised by the rules on its own, so a rule that stopped matching
+        # this shape fails here rather than being masked by another field's secret being scrubbed.
+        for field, value in PLANTED_TEXT_FIELDS.items():
+            with self.subTest(field=field):
+                cleaned, _ = redact.scrub_set_payload(
+                    {"items": [{field: value}], "links": []})
+                self.assertNotEqual(
+                    cleaned["items"][0][field], value,
+                    f"{field} was not scrubbed, so a secret in it would reach storage")
+
+    def test_dropping_one_field_from_the_tuple_leaks_that_field_only(self):
+        # The property the distinct-value design exists for, asserted directly: model a trim of
+        # SET_TEXT_FIELDS and confirm exactly the dropped field's secret survives, while the fields
+        # still declared are scrubbed. Without per-field values this cannot be written, and the
+        # payload-level assertions above would stay green across the same trim.
+        trimmed = tuple(f for f in redact.SET_TEXT_FIELDS if f != "description")
+        with patch.object(redact, "SET_TEXT_FIELDS", trimmed):
+            cleaned, _ = redact.scrub_set_payload(copy.deepcopy(PLANTED))
+
+        serialised = json.dumps(cleaned, sort_keys=True)
+        self.assertIn("descrfield0000unique000value", serialised,
+                      "a field removed from the tuple must let its own secret through — if this "
+                      "fails, the planted values no longer discriminate per field")
+        for other, value in PLANTED_TEXT_FIELDS.items():
+            if other == "description":
+                continue
+            with self.subTest(field=other):
+                self.assertNotIn(value, serialised,
+                                 f"{other} is still declared and must stay scrubbed")
 
     def test_cli_set_posts_no_planted_secret(self):
         with patch.object(client, "read_payload", return_value=copy.deepcopy(PLANTED)), \
@@ -437,11 +500,17 @@ class SetRedactionGateTests(unittest.TestCase):
         _assert_no_secret(self, scrubbed)
         self.assertTrue(findings)
         # Each rule shape is planted in a different field, so a field dropped from the walk
-        # shows up as a missing rule name rather than as a silently cleaner payload.
+        # shows up as a missing rule name rather than as a silently cleaner payload. The counts are
+        # the per-field attribution measured against this payload, and they are only a tripwire while
+        # every field that can hold a secret contributes to one — which is why the planted values are
+        # distinct per field rather than one shared secret.
         self.assertEqual(findings.get("aws-access-key-id"), 1)   # statement
-        self.assertEqual(findings.get("github-token"), 2)        # content and tags
-        self.assertEqual(findings.get("connection-string-password"), 2)  # sources[].reference, labelsProposed
-        self.assertEqual(findings.get("generic-secret-assignment"), 2)  # facets, links[].reason
+        self.assertEqual(findings.get("github-token"), 2)        # content, tags
+        # description (password=), sources[].reference (Password=), labelsProposed (password=)
+        self.assertEqual(findings.get("connection-string-password"), 3)
+        # name (token=), contentSummary (api_key=), summaryModel (secret=),
+        # summaryPromptVersion (key=), facets, links[].reason
+        self.assertEqual(findings.get("generic-secret-assignment"), 6)
 
     def test_non_string_content_fields_survive_untouched(self):
         payload = {"items": [{"statement": None, "content": 42, "tags": ["ok", None],
