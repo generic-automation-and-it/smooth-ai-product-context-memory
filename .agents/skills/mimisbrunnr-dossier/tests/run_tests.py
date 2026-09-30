@@ -630,7 +630,7 @@ class HistoryBundleTests(unittest.TestCase):
         and a back-dated correction is exactly how a correction is written.
         """
         v1 = _mk(self.UUID, "the rule", "the original claim", kind="decision", status="superseded",
-                 created="2026-06-01T10:00:00Z", valid_from="2026-06-01")
+                 created="2026-01-01T10:00:00Z", valid_from="2026-06-01")
         v1["version"] = 1
         v1["isCurrent"] = False
         v3 = _mk(self.UUID, "the rule", "the corrected claim", kind="decision", status="current",
