@@ -8,10 +8,11 @@
 | **Business authority** | [BRD-001 — Cross-product linked context memory](../../brd/001-context-memory/) (`BR-37`, supported by `BR-13`, `BR-16`) |
 | **Last updated** | 2026-09-29 |
 
-> Discovery / prototyping HLD. This document delivers **intent + spec** — what we are
-> building and why, the decisions behind it, and the quality bar it must meet. It does
-> **not** contain an implementation plan; execution (phasing, sub-issues, sequencing) is
-> tracked in the issue/work tracker.
+> **Implemented and accepted**: the `snapshot`/`verify`/`restore` verbs, the archive format
+> (now v3) and the HTTP surface all shipped. This document still delivers **intent + spec** —
+> what the design is, the decisions behind it, and the quality bar it must meet — so behaviour
+> questions are answered against the code rather than against a plan. It carries no
+> implementation plan; that execution is done.
 
 ## Intent
 

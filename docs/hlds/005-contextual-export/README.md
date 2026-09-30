@@ -8,9 +8,11 @@
 | **Business authority** | [BRD-002 — Contextual knowledge export](../../brd/002-contextual-export/) (`BR-18` … `BR-36`) |
 | **Last updated** | 2026-09-29 |
 
-> Discovery / prototyping HLD. Delivers **intent + spec** — what we are building and why, the decisions
-> behind it, and the quality bar it must meet. No implementation plan; execution is tracked in the
-> issue/work tracker.
+> **Implemented and accepted** for the shipped surface — the `ContextDossier` slice, the
+> bundle/preview API and the read-only composer. This document still delivers **intent + spec**:
+> what the design is, the decisions behind it, and the quality bar it must meet, so behaviour
+> questions are answered against the code rather than against a plan. LADRs 10 and 11's tag half
+> remain **Blocked** and are not resolved by this acceptance.
 
 ## Intent
 

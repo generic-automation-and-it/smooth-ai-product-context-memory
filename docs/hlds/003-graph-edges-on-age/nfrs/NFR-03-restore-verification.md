@@ -2,7 +2,7 @@
 
 **Status:** Accepted — **superseded as the NFR-03 tool 2026-09-29**; retained as the record of the
 graph-only `pg_dump`/`pg_restore` round trip, with
-[HLD-006 NFR-02](../../../../hlds/006-corpus-snapshot-and-restore/nfrs/NFR-02-consistency.md) now the
+[HLD-006 NFR-02](../../../hlds/006-corpus-snapshot-and-restore/nfrs/NFR-02-consistency.md) now the
 governing recoverability evidence.
 
 > The status line was previously absent altogether, which left this file's authority ambiguous: a

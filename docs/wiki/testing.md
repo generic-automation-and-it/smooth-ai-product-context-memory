@@ -7,13 +7,14 @@
 | L0 | Unit | `*.UnitTest` | None | Isolated logic, no I/O — pure in-process |
 | L1 | Component | `Application.ComponentTest`, `Infrastructure.ComponentTest` | PostgreSQL + MinIO | End-to-end within a layer; real DB and object storage via Aspire |
 | L2 | Integration | `Host.IntegrationTest` | PostgreSQL + MinIO | Full stack via `WebApplicationFactory` + Aspire containers |
-| — | Benchmark | `Infrastructure.ComponentTest` (env-gated) | PostgreSQL | `Nfr02BenchmarkTests` — seeds 3,000 memories / 10,000 edges, measures three traversal shapes and captures `EXPLAIN` for each. Skipped unless `SMOOTH_AGE_BENCH=1`, so the PR gate stays fast |
+| — | Benchmark | `Infrastructure.ComponentTest` **and** `Application.ComponentTest` (env-gated) | PostgreSQL | `Nfr02BenchmarkTests` — seeds 3,000 memories / 10,000 edges, measures three traversal shapes and captures `EXPLAIN` for each. Skipped unless `SMOOTH_AGE_BENCH=1`, so the PR gate stays fast |
 | — | Operational | `scripts/` | Docker | Not tests. Backup/restore round-trip and Postgres pre-upgrade checks, run by hand against a container |
 
-### Env-gated evidence harnesses — all six
+### Env-gated evidence harnesses — all six variables, seven classes
 
 Every one is skipped unless its variable is set, so the PR gate stays fast. The catalogue in the root
-`AGENTS.md` is the canonical list; this is the same six with their evidence homes.
+`AGENTS.md` is the canonical list; this is the same six with their evidence homes. Six variables gate
+seven classes, because `SMOOTH_AGE_BENCH` runs two of them.
 
 | Variable | Filter | Evidence it produces |
 |---|---|---|
@@ -38,7 +39,9 @@ SMOOTH_AGE_BENCH=1 dotnet test tests/SmoothAiProductContextMemory.Infrastructure
 ```
 
 > **A benchmark gate is legitimate; a boolean-correctness gate is not.** `Nfr02BenchmarkTests` asserts
-> p95 *and* the query plan, which is a measurement. Of the other five, three also assert a wall-clock
+> p95 *and* the query plan, which is a measurement. `TicketTraversalBenchmarkTests` — the second class
+> sharing the `SMOOTH_AGE_BENCH` gate — asserts a p95 target the same way and is covered by the first row
+> above. Of the other five, three also assert a wall-clock
 > target — `SnapshotEvidenceTests` against HLD-006 NFR-04's ≤ 9m snapshot ceiling, and
 > `FeedbackPlacementEvidenceTests` / `NfrEvidenceTests` against a 2 ms per-retrieval write budget — while
 > `DossierWorkflowBenchmarkTests` asserts countable invariants (manifest reconciliation, no-match) and
