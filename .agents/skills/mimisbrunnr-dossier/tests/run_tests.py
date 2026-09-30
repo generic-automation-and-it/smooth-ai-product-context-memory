@@ -619,9 +619,37 @@ class HistoryBundleTests(unittest.TestCase):
         self.assertEqual(doc.reconciliation["present"], 3)
 
     def test_versions_of_one_memory_render_oldest_first(self):
-        """LADR-07: a memory's own revisions are not contemporaneous, so they read in version order
-        rather than falling to whatever the business-key tiebreak happened to give."""
+        """LADR-07: a memory's own revisions are not contemporaneous, so they read in version order.
+
+        The fixture is **back-dated** on purpose, and this is the whole test. With v1 valid from
+        2026-01 and v3 from 2026-03 the business key already sorts them [1, 3], so the assertion would
+        hold with the intra-memory constraint deleted — a green test certifying a rule nothing checks.
+        A revision that corrects the record by asserting it was true all along carries the *earlier*
+        validFrom, so the business key alone would put v3 first and only version order puts v1 first.
+        That is the case the constraint exists for, and it is a real one: `valid_from` is business time
+        and a back-dated correction is exactly how a correction is written.
+        """
+        v1 = _mk(self.UUID, "the rule", "the original claim", kind="decision", status="superseded",
+                 created="2026-06-01T10:00:00Z", valid_from="2026-06-01")
+        v1["version"] = 1
+        v1["isCurrent"] = False
+        v3 = _mk(self.UUID, "the rule", "the corrected claim", kind="decision", status="current",
+                 created="2026-03-01T10:00:00Z", valid_from="2026-01-01")
+        v3["version"] = 3
+
+        # The precondition, asserted so a fixture edit cannot quietly restore the agreement that
+        # made this test unfalsifiable: the business key alone orders these the other way round.
+        self.assertEqual([i["version"] for i in sorted([v1, v3], key=dc._business_key)], [3, 1])
+
+        ordered = dc.topological_order([v3, v1], [])[0]
+        self.assertEqual([o["version"] for o in ordered], [1, 3])
+
+    def test_versions_whose_business_keys_agree_still_render_in_version_order(self):
+        """The ordinary case, and the one the back-dated fixture above cannot reach: a memory revised
+        in business-time order, where the tiebreak and the version order already coincide. Asserted so
+        the back-dated fixture is not read as a claim that revisions normally disagree."""
         v1, v3 = self._versions()
+        self.assertEqual([i["version"] for i in sorted([v1, v3], key=dc._business_key)], [1, 3])
         ordered = dc.topological_order([v3, v1], [])[0]
         self.assertEqual([o["version"] for o in ordered], [1, 3])
 
