@@ -70,8 +70,12 @@ fixture containing `expected`. Expected verdicts are scorer-only; exposing them 
   the claimed collapses. A single number covering every scenario is accuracy and must be labelled so.
 - Negative controls are present and at least as numerous as positive pairs — **for every scored fixture,
   including one passed via `--fixtures`**, which is a property of the fixture rather than of the run.
+  The one exemption is a re-score of a superseded dated run passed with `--allow-legacy-positional`:
+  its verdicts carry no `id` and therefore pair by position, and it is measured against the frozen
+  pre-`axis` fixture it actually saw, which predates the labels and could not satisfy either rule.
 - A fixture declaring no positive pair is refused as unmeasurable rather than scored with an empty
-  denominator.
+  denominator — under the same re-score exemption recall is reported as `null`, because that fixture
+  cannot produce a recall denominator at all.
 - A regression on either axis is visible as a changed count, not a passing boolean.
 - String similarity appears only as a negative-only pre-filter, never as the deciding signal.
 

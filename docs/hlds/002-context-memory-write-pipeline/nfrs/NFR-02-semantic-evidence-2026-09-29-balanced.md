@@ -101,9 +101,11 @@ cannot lift it — a matcher that collapsed nothing scores 0.0000. Precision cou
 the model actually claimed, so a claim that was not a collapse costs and a scenario it said nothing
 about does not flatter it. Accuracy is the whole-scenario figure, reported under that name because it
 is what the old `recall` was: `correct / total`. Collapsing all ten dedup-class scenarios scores
-`recall 0.0 / precision 0.2 / accuracy 0.1429`, which is what a matcher that fills the store with
-duplicates looks like — previously that run printed `recall 0.857`, a number a reader would have taken
-for a healthy matcher.
+`recall 1.0 / precision 0.2 / accuracy 0.4286` — it does collapse both positive pairs, so recall is
+the *right* answer for it and precision is what catches it, which is why recall alone cannot be the
+pass criterion. The 0.857 that the old formula printed belonged to the opposite matcher: one that
+collapses nothing and gets the other twelve scenarios right, where `correct / total` reported accuracy
+under recall's name.
 
 ## The superseded runs stay re-scorable
 

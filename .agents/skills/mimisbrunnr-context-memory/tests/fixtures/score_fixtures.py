@@ -172,7 +172,10 @@ def main():
     # pairing, which meant any frozen fixture could be scored with no negatives at all — the exact
     # condition NFR-02 exists to prevent, reachable by passing one extra flag.
     positives, negatives = axis_balance(fixtures)
-    if not args.allow_legacy_positional:
+    # Keyed on the pairing result, not the flag: a run that echoed ids and paired by id is not a
+    # superseded re-score, so a fresh run scored against a frozen pre-`axis` fixture is still refused
+    # rather than reported with no negative controls at all.
+    if not positional:
         if not positives:
             print("score: no scenario declares axis=recall_positive, so recall has no denominator. "
                   "A fixture with no positive pair cannot measure recall.", file=sys.stderr)
