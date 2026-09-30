@@ -15,6 +15,11 @@ Covers the guarantees the dossier skill must satisfy from the HLD-005 Verificati
       all origins and are not presented as corroboration; differing-customer-scope claims not
       consolidated; budget-exceeded produces a reported omission, never a stripped claim.
   NFR-06 read-only — the skill exposes no write operation (capability-absence).
+  Identity — a bundle carrying several versions of one memory is composable. Document identity is
+      (uuid, version) throughout; an omission must name the version it cut, an equivalence group names
+      a memory and expands to every version of it, and a memory's revisions render oldest-first.
+      Also the structural-validation guards: a versionless caller reference is told its shape rather
+      than its absence, and a repeated (uuid, version) is rejected.
 
 stdlib unittest; no external runner.
 """
@@ -59,7 +64,11 @@ def _mk(uuid, name, stmt, kind="requirement", status="current", scope=("product"
 
 def _bundle(items, edges=None, omitted=None, selected_count=None):
     edges = edges or []
-    omitted = omitted or []
+    # An omission names the version as well as the memory (the bundle contract carries both), so a
+    # test may say only the uuid and the fixture fills in the version every item it is paired with
+    # would have. Written by hand in a test that is specifically about a nameless or versionless
+    # omission, which is what the two structural-validation tests do.
+    omitted = [dict(o, version=o.get("version", 1)) for o in (omitted or [])]
     count = selected_count if selected_count is not None else len(items) + len(omitted)
     return {
         "items": items, "edges": edges, "omitted": omitted,
@@ -101,7 +110,7 @@ class Nfr04ReconciliationTests(unittest.TestCase):
         doc = dc.compose(_bundle(items), focus=None)
         self.assertTrue(doc.reconciliation["closed"])
         self.assertEqual(doc.reconciliation["selected"], 2)
-        self.assertEqual(doc.lifecycle[items[0]["uuid"]], "current")
+        self.assertEqual(doc.lifecycle[dc._item_key(items[0])], "current")
         # The understanding kinds are not exempt from the finding taxonomy.
         cats = {f["category"] for f in doc.findings}
         # They are examined like any other item (no-links-in-slice applies to both).
@@ -112,7 +121,7 @@ class Nfr04ReconciliationTests(unittest.TestCase):
         value fails rather than being accepted silently."""
         # Unknown omission reason is rejected by validation.
         bad = {"items": [], "edges": [], "omitted": [{"uuid": "aaaaaaaa-0000-4000-8000-000000000001",
-                                                      "reason": "because reasons"}],
+                                                      "version": 1, "reason": "because reasons"}],
                "manifest": {"selection": {}, "selectedCount": 1, "reach": {}, "limitsHit": [],
                             "noMatch": False}}
         with self.assertRaises(ValueError):
@@ -236,7 +245,7 @@ class Nfr04ReconciliationTests(unittest.TestCase):
         self.assertEqual(doc.reconciliation["present"], 2)
         cats = [f["category"] for f in doc.findings]
         self.assertIn("equivalence-uncertain", cats)
-        self.assertEqual(doc.lifecycle[expired["uuid"]], "no-longer-true")
+        self.assertEqual(doc.lifecycle[dc._item_key(expired)], "no-longer-true")
 
     def test_overlapping_equivalence_groups_are_rejected(self):
         """reviewer finding 2: a uuid in two equivalence proposals is rejected fail-loud rather than
@@ -319,7 +328,7 @@ class Nfr04ReconciliationTests(unittest.TestCase):
             "11111111-1111-1111-1111-111111111111",
             "22222222-2222-2222-2222-222222222222",
             "33333333-3333-3333-3333-333333333333")], "meaning": "same default rule"}]}
-        selected_ids = {i["uuid"] for i in bundle["items"]}
+        selected_ids = {(i["uuid"], i["version"]) for i in bundle["items"]}
         unfocused = dc.compose(bundle, focus=None, judgements=judg)
         unfocused_cats = {f["category"] for f in unfocused.findings}
         for focus in dc.FOCUSES:
@@ -328,8 +337,8 @@ class Nfr04ReconciliationTests(unittest.TestCase):
             accounted = set()
             for c in doc.claims:
                 if c.get("surfaced"):
-                    accounted.update(o["uuid"] for o in c["origins"])
-            accounted.update(o["uuid"] for o in doc.omitted)
+                    accounted.update((o["uuid"], o["version"]) for o in c["origins"])
+            accounted.update((o["uuid"], o["version"]) for o in doc.omitted)
             self.assertEqual(accounted, selected_ids, focus)
             focused_cats = {f["category"] for f in doc.findings}
             self.assertEqual(focused_cats, unfocused_cats, focus)
@@ -469,8 +478,8 @@ class Nfr05AttributionTests(unittest.TestCase):
         edges = [{"sourceUuid": current["uuid"], "targetUuid": superseded["uuid"],
                   "relation": "supersedes", "reason": "replacement"}]
         doc = dc.compose(_bundle([superseded, current], edges), focus=None)
-        self.assertEqual(doc.lifecycle[superseded["uuid"]], "superseded")
-        self.assertEqual(doc.lifecycle[current["uuid"]], "current")
+        self.assertEqual(doc.lifecycle[dc._item_key(superseded)], "superseded")
+        self.assertEqual(doc.lifecycle[dc._item_key(current)], "current")
         rendered = dc.render(doc)
         self.assertIn("**Lifecycle:** superseded.", rendered)
         self.assertIn("**Lifecycle:** current.", rendered)
@@ -570,6 +579,142 @@ class Nfr06CapabilityAbsenceTests(unittest.TestCase):
         # The CLI has a compose/bundle surface only; no subcommand writes to the store.
         self.assertTrue(hasattr(dc, "cmd_compose"))
         self.assertTrue(hasattr(dc, "cmd_bundle"))
+
+
+class HistoryBundleTests(unittest.TestCase):
+    """A bundle requested with ``includeHistory`` holds several versions of one memory as separate
+    items. The composer rejected those bundles outright — the duplicate-uuid guard read a history as
+    a duplicate — and, had it accepted them, ``by_uuid`` would have collapsed a memory to whichever
+    version came last while the reconciliation still closed. These are the tests for the identity
+    being ``(uuid, version)`` and for the two places a version is still not enough: an omission has
+    to name one, and an equivalence group names a *memory*."""
+
+    UUID = "aaaaaaaa-0000-4000-8000-000000000001"
+    OTHER = "aaaaaaaa-0000-4000-8000-000000000002"
+
+    def _versions(self):
+        v1 = _mk(self.UUID, "the rule", "the original claim", kind="decision", status="superseded",
+                 created="2026-01-01T10:00:00Z", valid_from="2026-01-01")
+        v1["version"] = 1
+        v1["isCurrent"] = False
+        v3 = _mk(self.UUID, "the rule", "the revised claim", kind="decision", status="current",
+                 created="2026-03-01T10:00:00Z", valid_from="2026-03-01")
+        v3["version"] = 3
+        return v1, v3
+
+    def test_a_history_bundle_composes_rather_than_being_rejected(self):
+        """The regression this closes: the composer raised "an item uuid appears more than once" on
+        a bundle the store produces whenever ``includeHistory`` is set."""
+        v1, v3 = self._versions()
+        bundle = _bundle([v1, v3])
+        doc = dc.compose(bundle, focus=None)
+        self.assertTrue(doc.reconciliation["closed"])
+        self.assertEqual(len(doc.claims), 2, "both versions are their own claim")
+
+    def test_every_version_survives_consolidation_and_ordering(self):
+        """No structure keyed on the uuid may drop a version: two versions, two claims, two origins
+        accounted for, and the reconciliation closing on the manifest's own count."""
+        v1, v3 = self._versions()
+        other = _mk(self.OTHER, "other", "an unrelated claim", kind="requirement")
+        doc = dc.compose(_bundle([v1, v3, other]), focus=None)
+        rendered = [dc._item_key(o) for c in doc.claims for o in c["origins"]]
+        self.assertEqual(sorted(rendered),
+                         sorted([(self.UUID, 1), (self.UUID, 3), (self.OTHER, 1)]))
+        self.assertTrue(doc.reconciliation["closed"])
+        self.assertEqual(doc.reconciliation["present"], 3)
+
+    def test_versions_of_one_memory_render_oldest_first(self):
+        """LADR-07: a memory's own revisions are not contemporaneous, so they read in version order.
+
+        The fixture is **back-dated** on purpose, and this is the whole test. With v1 valid from
+        2026-01 and v3 from 2026-03 the business key already sorts them [1, 3], so the assertion would
+        hold with the intra-memory constraint deleted — a green test certifying a rule nothing checks.
+        A revision that corrects the record by asserting it was true all along carries the *earlier*
+        validFrom, so the business key alone would put v3 first and only version order puts v1 first.
+        That is the case the constraint exists for, and it is a real one: `valid_from` is business time
+        and a back-dated correction is exactly how a correction is written.
+        """
+        v1 = _mk(self.UUID, "the rule", "the original claim", kind="decision", status="superseded",
+                 created="2026-01-01T10:00:00Z", valid_from="2026-06-01")
+        v1["version"] = 1
+        v1["isCurrent"] = False
+        v3 = _mk(self.UUID, "the rule", "the corrected claim", kind="decision", status="current",
+                 created="2026-03-01T10:00:00Z", valid_from="2026-01-01")
+        v3["version"] = 3
+
+        # The precondition, asserted so a fixture edit cannot quietly restore the agreement that
+        # made this test unfalsifiable: the business key alone orders these the other way round.
+        self.assertEqual([i["version"] for i in sorted([v1, v3], key=dc._business_key)], [3, 1])
+
+        ordered = dc.topological_order([v3, v1], [])[0]
+        self.assertEqual([o["version"] for o in ordered], [1, 3])
+
+    def test_versions_whose_business_keys_agree_still_render_in_version_order(self):
+        """The ordinary case, and the one the back-dated fixture above cannot reach: a memory revised
+        in business-time order, where the tiebreak and the version order already coincide. Asserted so
+        the back-dated fixture is not read as a claim that revisions normally disagree."""
+        v1, v3 = self._versions()
+        self.assertEqual([i["version"] for i in sorted([v1, v3], key=dc._business_key)], [1, 3])
+        ordered = dc.topological_order([v3, v1], [])[0]
+        self.assertEqual([o["version"] for o in ordered], [1, 3])
+
+    def test_an_omission_must_name_the_version_it_cut(self):
+        """An omission naming only a memory cannot be reconciled against a slice where that memory
+        is both present and cut, so the version is required rather than defaulted."""
+        v1, v3 = self._versions()
+        with self.assertRaises(ValueError):
+            dc.compose({"items": [v1, v3], "edges": [],
+                        "omitted": [{"uuid": self.UUID, "reason": "cap reached"}],
+                        "manifest": {"selection": {}, "selectedCount": 3, "reach": {},
+                                     "limitsHit": [], "noMatch": False}}, focus=None)
+
+    def test_one_memory_may_be_present_and_omitted_at_different_versions(self):
+        """The shape the version buys: v1 survives the cap while v3 is cut, which the uuid-only
+        disjointness guard rejected as a double-count."""
+        v1, v3 = self._versions()
+        bundle = _bundle([v1], omitted=[{"uuid": self.UUID, "version": 3, "reason": "cap reached"}])
+        doc = dc.compose(bundle, focus=None)
+        self.assertTrue(doc.reconciliation["closed"])
+        self.assertEqual(doc.reconciliation["present"], 1)
+        self.assertEqual(doc.reconciliation["omitted"], 1)
+
+    def test_an_equivalence_group_over_a_memory_covers_all_its_versions(self):
+        """A group names memories, and the caller does not know how many versions the slice holds.
+        Expanding to every version present is what keeps the caller's contract uuid-scoped; the gate
+        then runs across the whole set, so a superseded v1 beside a current v3 fails the lifecycle
+        gate and is reported uncertain rather than merged as corroboration (LADR-04/05)."""
+        v1, v3 = self._versions()
+        other = _mk(self.OTHER, "other", "the same rule restated", kind="decision", status="current")
+        judg = {"equivalences": [{"uuids": [self.UUID, self.OTHER], "meaning": "same rule"}]}
+        doc = dc.compose(_bundle([v1, v3, other]), focus=None, judgements=judg)
+        self.assertEqual([f["category"] for f in doc.findings if f["category"] == "equivalence-uncertain"],
+                         ["equivalence-uncertain"])
+        self.assertTrue(doc.reconciliation["closed"])
+        self.assertEqual(doc.reconciliation["present"], 3, "nothing was merged, so all three stand")
+
+    def test_a_versionless_caller_reference_is_told_its_shape_not_its_absence(self):
+        """Identity is (uuid, version), so a caller's memory reference with no version misses every key.
+        The message has to name the shape: "must be selected in this bundle" is a true statement about
+        the wrong thing, and the version rule that actually rejects it would never be reached."""
+        item = _mk(self.UUID, "a", "the rule applies", kind="decision")
+        judg = {"findings": [{"category": "gap", "classification": "observation",
+                              "basis": "nothing states this", "ground": "task",
+                              "memories": [{"uuid": self.UUID}]}]}
+        with self.assertRaises(ValueError) as caught:
+            dc.compose(_bundle([item]), focus=None, judgements=judg)
+        self.assertIn("version", str(caught.exception))
+
+    def test_consolidation_still_fires_for_a_single_version_slice(self):
+        """The expansion must not have made consolidation unreachable: two memories at one version
+        each, same applicability and lifecycle, still merge with both origins retained."""
+        a = _mk(self.UUID, "a", "the rule applies", kind="decision")
+        b = _mk(self.OTHER, "b", "the rule applies", kind="decision")
+        judg = {"equivalences": [{"uuids": [self.UUID, self.OTHER], "meaning": "same rule"}]}
+        doc = dc.compose(_bundle([a, b]), focus=None, judgements=judg)
+        consolidated = [c for c in doc.claims if c["consolidated"]]
+        self.assertEqual(len(consolidated), 1)
+        self.assertEqual(len(consolidated[0]["origins"]), 2)
+        self.assertTrue(doc.reconciliation["closed"])
 
 
 class CredentialTransportTests(unittest.TestCase):

@@ -331,6 +331,111 @@ public sealed class SnapshotRestoreRoundTripTests : PersistenceTestBase
             .Handle(new RestoreArchive.Request(snapshot.DestinationPath, ConnectionString, OverrideNonEmpty: false), Ct).AsTask());
     }
 
+    [Fact]
+    public async Task Restore_RefusesTargetHoldingOnlyACustomLabel_WithoutOverride()
+    {
+        // `label` and `initiative` are seeded by the migrations, so the emptiness check has to tell a
+        // seeded row from an operator's. It excluded both tables wholesale, while ClearStoresAsync
+        // deletes both unconditionally — so a target whose only content was one custom label was
+        // judged empty, and a restore the operator never overrode destroyed it. The first assertion is
+        // the guard; the second is the reason the guard cannot simply start counting every label row.
+        await using SmoothAiProductContextMemoryTestDatabase target =
+            await SmoothAiProductContextMemoryTestDatabase.CreateAsync(_aspire, $"infra-label-{Guid.NewGuid():N}", Ct);
+        await using NpgsqlDataSource targetDataSource = NpgsqlDataSourceFactory.Create(target.ConnectionString);
+        await MigrateAsync(targetDataSource, Ct);
+        await using var targetDb = new SmoothAiProductContextMemoryDbContext(
+            new DbContextOptionsBuilder<SmoothAiProductContextMemoryDbContext>()
+                .UseNpgsql(targetDataSource, npgsql => npgsql.UseSmoothAiProductContextMemoryHistory())
+                .Options);
+
+        // Seed rows alone: a first restore, not a populated target.
+        (await Repository.IsTargetEmptyAsync(target.ConnectionString, Ct)).ShouldBeTrue();
+
+        targetDb.Labels.Add(new Label { Name = "operator-facet", Status = Label.LabelStatus.Active });
+        await targetDb.SaveChangesAsync(Ct);
+
+        (await Repository.IsTargetEmptyAsync(target.ConnectionString, Ct)).ShouldBeFalse();
+
+        await Should.ThrowAsync<InvalidOperationException>(() => Repository.RestoreAsync(
+            target.ConnectionString,
+            EmptyCapture,
+            new SnapshotCounts(0, 0, 0, 0, 0, 0, 0),
+            overrideNonEmpty: false,
+            Ct));
+
+        // The label survives the refusal: the check is a gate, not a rollback.
+        targetDb.ChangeTracker.Clear();
+        targetDb.Labels.Single(l => l.Name == "operator-facet").ShouldNotBeNull();
+    }
+
+    [Fact]
+    public async Task Restore_RefusesAnUnusableConfiguredBudget_RatherThanSubstitutingTheDefault()
+    {
+        // The budget used to be clamped: a configured 0 or 999999 silently became 900 s. An operator
+        // who raised it to get a large corpus through still rolled back at 900 s, with nothing anywhere
+        // saying the setting had been ignored — the same invisible-budget defect as the client cap the
+        // raise was meant to lift. Refusing is loud and immediate; substituting is neither.
+        NpgsqlSnapshotRepository unusable = new(
+            Blob, Blob, new SnapshotMetadataOptions { RestoreStatementTimeoutSeconds = 0 });
+
+        InvalidOperationException refusal = await Should.ThrowAsync<InvalidOperationException>(
+            () => unusable.IsTargetEmptyAsync(ConnectionString, Ct));
+        refusal.Message.ShouldContain("Snapshot:RestoreStatementTimeoutSeconds");
+        refusal.Message.ShouldContain("1 and 86400");
+
+        // A value in range is taken rather than ignored, so the same repository shape still works.
+        NpgsqlSnapshotRepository inRange = new(
+            Blob, Blob, new SnapshotMetadataOptions { RestoreStatementTimeoutSeconds = 300 });
+        (await inRange.IsTargetEmptyAsync(ConnectionString, Ct)).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task TheConfiguredBudget_BoundsThePreFlightCheckTheRestoreRunsBehind()
+    {
+        // The pre-flight emptiness check is the operator running the count by hand against the corpus
+        // the restore is about to write, and it was the one restore-path statement with no budget at
+        // all: no SET LOCAL and no data source of its own, so it inherited the 120 s request cap. Held
+        // behind a row lock it therefore sat there for two minutes. Bounding it is observable as
+        // elapsed time, which is the only thing that separates the client half of the budget from the
+        // server half a behavioural assertion would otherwise be measuring.
+        await using SmoothAiProductContextMemoryTestDatabase target =
+            await SmoothAiProductContextMemoryTestDatabase.CreateAsync(_aspire, $"infra-budget-{Guid.NewGuid():N}", Ct);
+        await using NpgsqlDataSource targetDataSource = NpgsqlDataSourceFactory.Create(target.ConnectionString);
+        await MigrateAsync(targetDataSource, Ct);
+
+        NpgsqlSnapshotRepository budgeted = new(
+            Blob, Blob, new SnapshotMetadataOptions { RestoreStatementTimeoutSeconds = 1 });
+
+        await using var blocker = new NpgsqlConnection(target.ConnectionString);
+        await blocker.OpenAsync(Ct);
+        await using NpgsqlTransaction hold = await blocker.BeginTransactionAsync(Ct);
+        await using (NpgsqlCommand holdLock = new("LOCK TABLE memory IN ACCESS EXCLUSIVE MODE", blocker, hold))
+        {
+            await holdLock.ExecuteNonQueryAsync(Ct);
+
+            Task<bool> check = budgeted.IsTargetEmptyAsync(target.ConnectionString, Ct);
+            Task finished = await Task.WhenAny(check, Task.Delay(TimeSpan.FromSeconds(30), Ct));
+            finished.ShouldBe(check, "the pre-flight check ignored its configured one-second budget");
+
+            // Whatever the outcome — a cancellation, a timeout — the claim is the bound, not which
+            // layer gave up first, so the assertion is that it gave up at all.
+            bool failed = false;
+            try
+            {
+                await check;
+            }
+            catch (Exception)
+            {
+                failed = true;
+            }
+
+            failed.ShouldBeTrue("a blocked pre-flight check cannot have returned a trustworthy verdict");
+        }
+    }
+
+    /// <summary>A capture with nothing in it: enough shape for the refusal, which is all these use.</summary>
+    private static SnapshotCapture EmptyCapture => new([], [], [], [], [], [], [], [], [], []);
+
     private async Task<(int Memories, int Versions, int Vertices, int Edges, int TicketVertices, int TicketEdges, string Address)> SeedCorpusAsync()
     {
         var group = TestEntities.NewGroup(

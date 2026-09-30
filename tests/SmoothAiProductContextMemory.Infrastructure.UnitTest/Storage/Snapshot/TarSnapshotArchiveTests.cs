@@ -1,6 +1,7 @@
 using System.Formats.Tar;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using SmoothAiProductContextMemory.Application.Abstractions.Snapshot;
 using SmoothAiProductContextMemory.Domain.Entities;
 using SmoothAiProductContextMemory.Infrastructure.Storage;
@@ -411,6 +412,113 @@ public class TarSnapshotArchiveTests
         round.TicketEdges.Count.ShouldBe(1);
         round.TicketEdges[0].Key.ShouldBe("CHILD");
         round.TicketEdges[0].ParentKey.ShouldBe("PARENT");
+    }
+
+    [Fact]
+    public async Task Verify_Reports_ANullManifestEntry_As_NotCleanWithoutThrowing()
+    {
+        // A JSON null element in the manifest's entry list deserialises to a null SnapshotArchiveEntry,
+        // and the next statement indexed it. Verify's contract is that it reports and never throws, so
+        // the null is a finding — the one shape of corrupt manifest that produced a stack trace
+        // instead of a report an operator could act on.
+        string path = TempArchive();
+        string address = Sha256ContentAddress.Compute(Body);
+        (SnapshotCapture capture, SnapshotWalkResult walk) = Capture(address, SnapshotBlobState.Ok);
+        await _archive.WriteAsync(path, capture, walk, _ => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
+
+        Dictionary<string, byte[]> entries = ReadTar(path);
+        entries[SnapshotEntryNames.Manifest] = ManifestWithEntries(entries[SnapshotEntryNames.Manifest], "null");
+        string tampered = TempArchive();
+        WriteTar(tampered, entries);
+
+        SnapshotVerification verification = await _archive.VerifyAsync(tampered, TestContext.Current.CancellationToken);
+
+        verification.IsClean.ShouldBeFalse();
+        verification.Findings.ShouldContain(f =>
+            f.Kind == SnapshotFindingKind.Corruption && f.Message.Contains("null entry", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Verify_Reports_AManifestEntryWithNoName_As_NotCleanWithoutThrowing()
+    {
+        // The other half of the same pair: an absent or explicitly null name deserialises to a null
+        // string, which is what a Dictionary key rejects. Distinct from the null element because the
+        // entry itself is present and its hash could still be checked — only the name is unusable, so
+        // the report is about the member list as a whole rather than one bad member.
+        string path = TempArchive();
+        string address = Sha256ContentAddress.Compute(Body);
+        (SnapshotCapture capture, SnapshotWalkResult walk) = Capture(address, SnapshotBlobState.Ok);
+        await _archive.WriteAsync(path, capture, walk, _ => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
+
+        Dictionary<string, byte[]> entries = ReadTar(path);
+        entries[SnapshotEntryNames.Manifest] =
+            ManifestWithEntries(entries[SnapshotEntryNames.Manifest], """{"sha256":"x","size":1}""");
+        string tampered = TempArchive();
+        WriteTar(tampered, entries);
+
+        SnapshotVerification verification = await _archive.VerifyAsync(tampered, TestContext.Current.CancellationToken);
+
+        verification.IsClean.ShouldBeFalse();
+        verification.Findings.ShouldContain(f =>
+            f.Kind == SnapshotFindingKind.Corruption && f.Message.Contains("no name", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Verify_Detects_ABodyTheCaptureCites_ButTheArchiveNoLongerCarries()
+    {
+        // Every other check works from the manifest, and the manifest is the one member nothing
+        // hash-declares. So a body can be dropped from the archive, its manifest line deleted, the
+        // object count adjusted and the dangling counter zeroed, and verify has nothing left to
+        // disagree with: the archive verifies clean and the restore then refuses it, because the
+        // capture still cites a body that is not there. The cross-check that closes it reads the
+        // capture's own cited addresses rather than the manifest's list of them.
+        string path = TempArchive();
+        string address = Sha256ContentAddress.Compute(Body);
+        (SnapshotCapture capture, SnapshotWalkResult walk) = Capture(address, SnapshotBlobState.Ok);
+        await _archive.WriteAsync(path, capture, walk, _ => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
+
+        Dictionary<string, byte[]> entries = ReadTar(path);
+        SnapshotManifest manifest = JsonSerializer.Deserialize<SnapshotManifest>(entries[SnapshotEntryNames.Manifest], Json)!;
+        entries.Remove($"blobs/{address}");
+
+        // The tamper is internally consistent: the manifest stops listing the body and stops counting
+        // it, and claims no dangling references — otherwise a counter would have reported this for us.
+        entries[SnapshotEntryNames.Manifest] = JsonSerializer.SerializeToUtf8Bytes(manifest with
+        {
+            Entries = [.. manifest.Entries.Where(e => !e.Name.StartsWith("blobs/", StringComparison.Ordinal))],
+            Counts = manifest.Counts with { Objects = 0 },
+            DanglingReferences = 0,
+        });
+        string tampered = TempArchive();
+        WriteTar(tampered, entries);
+
+        SnapshotVerification verification = await _archive.VerifyAsync(tampered, TestContext.Current.CancellationToken);
+
+        verification.IsClean.ShouldBeFalse();
+        verification.Findings.ShouldContain(f =>
+            f.Kind == SnapshotFindingKind.MissingEntry && f.EntryName == $"blobs/{address}");
+
+        // And the archive really is one the restore path refuses, which is why verify calling it clean
+        // was a contradiction between two halves of one tool rather than a merely weak check.
+        (await _archive.ReadAsync(tampered, TestContext.Current.CancellationToken))
+            .ContainsBlob(address).ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// Replaces the manifest's entry list with raw JSON, so a null element or an entry with no name
+    /// can be written at all — neither is expressible through the strongly-typed model.
+    /// </summary>
+    private static byte[] ManifestWithEntries(byte[] manifestBytes, params string[] rawEntries)
+    {
+        JsonNode root = JsonNode.Parse(manifestBytes)!;
+        var entries = new JsonArray();
+        foreach (string raw in rawEntries)
+        {
+            entries.Add(JsonNode.Parse(raw));
+        }
+
+        root["entries"] = entries;
+        return Encoding.UTF8.GetBytes(root.ToJsonString(Json));
     }
 
     private static (SnapshotCapture, SnapshotWalkResult) Capture(string address, SnapshotBlobState state)

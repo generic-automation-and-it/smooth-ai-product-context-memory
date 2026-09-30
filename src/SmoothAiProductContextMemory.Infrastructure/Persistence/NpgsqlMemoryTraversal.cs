@@ -105,6 +105,7 @@ public sealed class NpgsqlMemoryTraversal(SmoothAiProductContextMemoryDbContext 
         {
             Value = query.Status ?? (object)DBNull.Value,
         });
+        command.Parameters.AddWithValue("excludeProposed", query.ExcludeProposed);
         command.Parameters.Add(new NpgsqlParameter("requiredScope", NpgsqlDbType.Text)
         {
             Value = query.RequiredScopeDimension ?? (object)DBNull.Value,
@@ -175,7 +176,15 @@ public sealed class NpgsqlMemoryTraversal(SmoothAiProductContextMemoryDbContext 
                 WHERE m.uuid <> ALL(@sourceUuids)
                   AND (@requiredScope IS NULL OR g.scope_dimension = @requiredScope)
                   AND (@kind IS NULL OR v.kind = @kind)
-                  AND (@status IS NULL OR v.status = @status)
+                  -- Parenthesised as one unit because AND binds tighter than OR: written flat, the
+                  -- status opt-in would swallow every other predicate and admit rows from hidden
+                  -- dimensions. The bracket shape and the precedence it encodes mirror
+                  -- NpgsqlMemorySearch and NpgsqlTicketGraph.Traversal exactly, so all three dossier
+                  -- selection stages answer "may I see a proposed record?" the same way. A null
+                  -- @status is not a licence to return everything: that was the defect, and it
+                  -- selected a proposed memory while the manifest recorded "proposed-excluded".
+                  AND ((@status IS NOT NULL AND v.status = @status)
+                       OR (@status IS NULL AND (@excludeProposed = false OR v.status <> 'proposed')))
                   -- Same window predicate the anchor search applies, so a supplied AsOf bounds the
                   -- whole selection rather than only its first stage.
                   AND (@asOf IS NULL OR (v.valid_from <= @asOf

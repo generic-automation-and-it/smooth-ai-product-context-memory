@@ -111,7 +111,7 @@ public class DossierBundleTests
         var items = new List<DossierMemory> { MemoryItem(Guid.NewGuid(), Guid.NewGuid(), "claim one", isCollapsed: false) };
         var omitted = new List<DossierOmittedItem>
         {
-            new(Guid.NewGuid(), DossierOmissionReason.UnreadableBody),
+            new(Guid.NewGuid(), Version: 1, DossierOmissionReason.UnreadableBody),
         };
 
         DossierBundle bundle = new(

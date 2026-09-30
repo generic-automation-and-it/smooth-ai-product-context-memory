@@ -13,11 +13,18 @@ internal static class NpgsqlDataSourceFactory
     /// Builds a pooled data source that initialises AGE on every physical connection.
     /// DISCARD ALL on pool return would undo LOAD/search_path, so reset-on-close is off.
     /// </summary>
-    internal static NpgsqlDataSource Create(string connectionString)
+    /// <param name="connectionString">The connection string, whose <c>Command Timeout</c> is the default.</param>
+    /// <param name="commandTimeoutSeconds">
+    /// Overrides <see cref="CommandTimeoutSeconds"/>. Capture and restore pass their own budget,
+    /// because a bulk statement sized by the corpus can outlast the request-traffic long stop and
+    /// <c>SET LOCAL statement_timeout</c> alone does not lift the client-side cap — the client gives
+    /// up first and the server keeps holding locks on the only store of record.
+    /// </param>
+    internal static NpgsqlDataSource Create(string connectionString, int? commandTimeoutSeconds = null)
     {
         var builder = new NpgsqlDataSourceBuilder(connectionString);
         builder.ConnectionStringBuilder.NoResetOnClose = true;
-        builder.ConnectionStringBuilder.CommandTimeout = CommandTimeoutSeconds;
+        builder.ConnectionStringBuilder.CommandTimeout = commandTimeoutSeconds ?? CommandTimeoutSeconds;
         builder.UsePhysicalConnectionInitializer(AgeSession.Prepare, AgeSession.PrepareAsync);
         return builder.Build();
     }

@@ -150,7 +150,7 @@ public static class CreateDossierBundle
             {
                 int excess = items.Count - anchor.ItemLimit;
                 var cut = items.TakeLast(excess).ToArray();
-                omitted.AddRange(cut.Select(i => new DossierOmittedItem(i.Uuid, DossierOmissionReason.CapReached)));
+                omitted.AddRange(cut.Select(i => new DossierOmittedItem(i.Uuid, i.Version, DossierOmissionReason.CapReached)));
                 items = [.. items.Take(anchor.ItemLimit)];
             }
 
@@ -180,7 +180,7 @@ public static class CreateDossierBundle
             (string? bodyText, string state) = await HydrateAsync(row, cancellationToken);
             if (state == DossierBodyState.NonText)
             {
-                return (null, new DossierOmittedItem(row.Memory!.Uuid, DossierOmissionReason.UnreadableBody));
+                return (null, new DossierOmittedItem(row.Memory!.Uuid, row.Version, DossierOmissionReason.UnreadableBody));
             }
 
             string? reachedVia = string.Join(", ", claim.ReachedVia);
@@ -258,7 +258,7 @@ public static class CreateDossierBundle
 
                 if (!seen.Add(item.BodyText))
                 {
-                    omitted.Add(new DossierOmittedItem(item.Uuid, DossierOmissionReason.CollapsedIntoAnotherClaim));
+                    omitted.Add(new DossierOmittedItem(item.Uuid, item.Version, DossierOmissionReason.CollapsedIntoAnotherClaim));
                 }
                 else
                 {

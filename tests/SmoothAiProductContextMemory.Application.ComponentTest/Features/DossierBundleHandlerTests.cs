@@ -238,7 +238,9 @@ public sealed class DossierBundleHandlerTests : HandlerTestBase
         // default: this is the branch the defect lived in, and it must keep behaving as it did. The
         // control needs an approved memory actually in the store, or the assertion would pass for the
         // wrong reason — a no-match caused by the anchor search finding nothing, rather than by the
-        // status rule.
+        // status rule. The seeded LINKS edge makes the exclusion one widening has to apply too: the
+        // anchor search drops the proposed row, so the only route left to bring it back is the widened
+        // stage, and that stage carried no proposed rule at all.
         var withoutStatus = new FilteringTicketGraph([
             new(ProposedUuid, ProductGroupUuid, "Proposed", MemoryVersion.MemoryVersionStatus.Proposed),
             new(AnchorUuid, ProductGroupUuid, "Anchor", MemoryVersion.MemoryVersionStatus.Approved),
@@ -443,6 +445,14 @@ public sealed class DossierBundleHandlerTests : HandlerTestBase
         Db.MemoryVersions.Add(Version(approved.Id, 1, "Anchor claim", isCurrent: true,
             kind: MemoryVersion.KindValue.Decision));
         await Db.SaveChangesAsync(Ct);
+
+        // The edge is what makes this a test of the proposed rule at all. Without it the proposed
+        // memory is only ever reachable as a ticket identity, so widening runs, finds nothing, and the
+        // control below would assert the exclusion of a memory widening could not have returned anyway
+        // — green with the defect present. Anchored on the approved memory, the no-status control now
+        // reaches the proposed one by widening, which is the route the exclusion has to hold on.
+        (await Graph.CreateAsync(AnchorUuid, ProposedUuid, MemoryRelation.DependsOn, "not yet settled", Ct))
+            .ShouldBeTrue();
     }
 
     private async Task SeedForHiddenPathAsync()

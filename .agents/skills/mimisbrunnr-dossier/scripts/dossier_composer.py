@@ -92,6 +92,33 @@ CITATION_FORM = "[memory {uuid} v{version}, captured {created_on}]"
 STORE_NAME = "Mímisbrunnr (smooth-ai-product-context-memory)"
 
 
+# ---------------------------------------------------------------------------- identity
+
+
+def _item_key(item):
+    """Document identity for one item: the memory *and* the version being rendered.
+
+    A bundle requested with ``includeHistory`` carries several versions of one memory as separate
+    items, so the uuid alone is not an identity. Every structure in this module keyed on the uuid
+    collapsed a history silently: ``by_uuid`` kept one version, ``claims_by_uuid`` rendered one
+    claim, and the reconciliation still closed — because the collapse happened upstream of anything
+    that counts.
+
+    Read with ``.get`` rather than ``[]`` on the version, for the caller's memory *references* rather
+    than for bundle items. A caller-supplied finding naming a memory with no version has to be told
+    so by the validation that already checks it (``each memory requires a version >= 1``); a missing
+    key here would raise ``KeyError`` first, turning an actionable message into a traceback from an
+    unrelated line. ``None`` simply never matches a real ``(uuid, int)`` key, so a versionless
+    reference misses the lookup and lands in the validation that names the problem. On bundle items
+    this is total regardless: ``validate_bundle`` rejects a versionless item before any of this runs.
+    """
+    return (item.get("uuid"), item.get("version"))
+
+
+def _omitted_key(omitted):
+    return (omitted.get("uuid"), omitted.get("version"))
+
+
 # ---------------------------------------------------------------------------- structural validation
 
 
@@ -123,17 +150,21 @@ def validate_bundle(bundle):
     for omitted in bundle["omitted"]:
         _require(isinstance(omitted, dict) and omitted.get("uuid") and omitted.get("reason"),
                  "omitted: requires uuid and reason")
+        _require(isinstance(omitted.get("version"), int) and omitted["version"] >= 1,
+                 f"omitted {omitted['uuid']}: version requires a positive integer")
         _require(omitted["reason"] in OMISSION_REASONS,
                  f"unknown omission reason '{omitted['reason']}'")
-    # A memory must not be listed in both items and omitted: that would render it as both a claim and
-    # an omission while the count still closes, hiding the double-count (LADR-05 / NFR-04). A duplicate
-    # item uuid would likewise let by_uuid silently dedupe and produce an unchecked ✗ FAILED render.
-    item_uuids = [i["uuid"] for i in bundle["items"]]
-    _require(len(set(item_uuids)) == len(item_uuids),
-             "bundle: an item uuid appears more than once")
-    item_ids = set(item_uuids)
-    omitted_ids = {o["uuid"] for o in bundle["omitted"]}
-    _require(not (item_ids & omitted_ids),
+    # An item must not be listed in both items and omitted: that would render it as both a claim and
+    # an omission while the count still closes, hiding the double-count (LADR-05 / NFR-04). A repeated
+    # (uuid, version) would likewise let by_key silently dedupe and produce an unchecked ✗ FAILED
+    # render. Keyed on the pair, not the uuid: with includeHistory one memory legitimately appears as
+    # several items and as several omissions, and rejecting that is what made a history bundle
+    # uncomposable while the store happily produced one.
+    item_ids = [_item_key(i) for i in bundle["items"]]
+    _require(len(set(item_ids)) == len(item_ids),
+             "bundle: the same item (uuid and version) appears more than once")
+    omitted_ids = {_omitted_key(o) for o in bundle["omitted"]}
+    _require(not (set(item_ids) & omitted_ids),
              "bundle: an item is listed in both items and omitted")
     # The manifest count is the trustworthy left-hand side: it must equal the bundle's item+omitted
     # counts (NFR-04 L1 test). This is what makes the dossier's reconciliation start from a reliable
@@ -147,7 +178,8 @@ def validate_bundle(bundle):
 
 
 def _business_key(item):
-    return (item.get("validFrom") or "", item.get("createdOn") or "", item.get("uuid") or "")
+    return (item.get("validFrom") or "", item.get("createdOn") or "", item.get("uuid") or "",
+            item.get("version") or 0)
 
 
 def topological_order(items, edges):
@@ -157,21 +189,41 @@ def topological_order(items, edges):
     for ordering (they connect without ordering). A provenance cycle is broken at a stated point and
     reported as a finding; the sort still terminates and the document is still produced.
     """
-    by_uuid = {item["uuid"]: item for item in items}
-    adj = {uuid: [] for uuid in by_uuid}
-    indeg = {uuid: 0 for uuid in by_uuid}
-    # An edge a supersedes/depends_on/implements b means b must precede a.
+    by_key = {_item_key(item): item for item in items}
+    adj = {key: [] for key in by_key}
+    indeg = {key: 0 for key in by_key}
+    # An edge a supersedes/depends_on/implements b means b must precede a. The edge names a memory,
+    # so it orders every version of it: "b supersedes a" is a statement about the memory, and a
+    # document that shows a's history must not leave some of that history un-superseded.
+    by_memory = {}
+    for key in by_key:
+        by_memory.setdefault(key[0], []).append(key)
+    for memory in by_memory.values():
+        memory.sort(key=lambda k: k[1])
     for edge in edges:
         if edge["relation"] not in ORDERING_RELATIONS:
             continue
         src, tgt = edge["sourceUuid"], edge["targetUuid"]
-        if src not in by_uuid or tgt not in by_uuid:
+        if src not in by_memory or tgt not in by_memory:
             continue
-        adj[tgt].append(src)  # tgt before src
-        indeg[src] += 1
+        for src_key in by_memory[src]:
+            for tgt_key in by_memory[tgt]:
+                adj[tgt_key].append(src_key)  # tgt before src
+                indeg[src_key] += 1
+
+    # Versions of one memory read oldest-first. A fourth ordering constraint, not a fourth relation:
+    # it states that a memory's own revisions are not contemporaneous, which the business-key
+    # tiebreak only happens to agree with because uuid is equal and validFrom usually increases.
+    # Stated here so the rendering does not depend on that coincidence. The edge is written in the
+    # same direction as the relations above — the later version is the "target", so the earlier one
+    # is emitted first.
+    for memory in by_memory.values():
+        for earlier, later in zip(memory, memory[1:]):
+            adj[earlier].append(later)
+            indeg[later] += 1
 
     import heapq
-    heap = [(_business_key(by_uuid[uuid]), uuid) for uuid in by_uuid if indeg[uuid] == 0]
+    heap = [(_business_key(by_key[key]), key) for key in by_key if indeg[key] == 0]
     heapq.heapify(heap)
     ordered = []
     cycle_findings = []
@@ -179,20 +231,20 @@ def topological_order(items, edges):
     # Kahn's algorithm with a deterministic tiebreak (LADR-07): business-time validity, then capture
     # time, then memory identity. The ``heap`` key is exactly that tuple.
     while heap:
-        _, uuid = heapq.heappop(heap)
-        ordered.append(by_uuid[uuid])
-        successors = adj.get(uuid, [])
+        _, key = heapq.heappop(heap)
+        ordered.append(by_key[key])
+        successors = adj.get(key, [])
         for succ in successors:
             indeg[succ] -= 1
             if indeg[succ] == 0:
-                heapq.heappush(heap, (_business_key(by_uuid[succ]), succ))
+                heapq.heappush(heap, (_business_key(by_key[succ]), succ))
 
-    if len(ordered) != len(by_uuid):
+    if len(ordered) != len(by_key):
         # There is a provenance cycle. Break at a stated point: the un-emitted item with the earliest
         # identity key is emitted next (stated, not traversal accident), and every un-emitted item is
         # reported as part of a cycle (LADR-07). Still produce the document.
-        in_cycle = [uuid for uuid in by_uuid if indeg[uuid] > 0]
-        in_cycle.sort(key=lambda u: _business_key(by_uuid[u]))
+        in_cycle = [key for key in by_key if indeg[key] > 0]
+        in_cycle.sort(key=lambda k: _business_key(by_key[k]))
         cycle_findings.append({
             "category": "provenance-cycle",
             "classification": _OBSERVATION,
@@ -200,13 +252,13 @@ def topological_order(items, edges):
                     f"{len(in_cycle)} memory(ies); ordering over {', '.join(ORDERING_RELATIONS)} "
                     f"left them unorderable.",
             "scope": "the selected material in this bundle",
-            "memories": [{"uuid": u, "version": by_uuid[u]["version"]} for u in in_cycle],
-            "brokenAt": in_cycle[0],
+            "memories": [{"uuid": k[0], "version": k[1]} for k in in_cycle],
+            "brokenAt": in_cycle[0][0],
         })
         # Emit the cycle members in identity order so the sort terminates deterministically; they
         # remain present (the cycle is a finding, not a dropped item).
-        for uuid in in_cycle:
-            ordered.append(by_uuid[uuid])
+        for key in in_cycle:
+            ordered.append(by_key[key])
 
     return ordered, cycle_findings
 
@@ -351,9 +403,12 @@ def consolidate(items, equivalences, edges, asof=None):
     merge for the reconciliation and rendering, and ``uncertain_findings`` carries any
     ``equivalence-uncertain`` finding.
     """
-    by_uuid = {item["uuid"]: item for item in items}
+    by_key = {_item_key(item): item for item in items}
+    keys_by_memory = {}
+    for key in by_key:
+        keys_by_memory.setdefault(key[0], []).append(key)
     present = []
-    claims_by_uuid = {}
+    claims_by_key = {}
 
     # A group is accepted if every member shares applicability AND lifecycle signature.
     accepted_members = set()
@@ -368,17 +423,21 @@ def consolidate(items, equivalences, edges, asof=None):
             raise ValueError("equivalences: each group requires at least two uuids")
         if len(set(uuids)) != len(uuids):
             raise ValueError("equivalences: a group contains a duplicate uuid")
-        missing = [u for u in uuids if u not in by_uuid]
+        missing = [u for u in uuids if u not in keys_by_memory]
         if missing:
             raise ValueError(f"equivalences: uuid {missing[0]} is not selected in this bundle")
-        members = [by_uuid[u] for u in uuids]
+        # A group names memories; every version of each named memory present in the slice is a member.
+        # A group's gate then runs across that whole set, so a memory whose v1 is superseded and whose
+        # v3 is current fails the lifecycle gate and is reported equivalence-uncertain rather than
+        # merged — the conservative answer, and the one LADR-04's "recency is not authority" implies.
+        members = [by_key[key] for u in uuids for key in sorted(keys_by_memory[u])]
         # Reject overlapping groups: a uuid in two equivalence proposals would render the same memory
         # as two claim headers while reconciliation still closes (an uncheckable double). Fail loud
         # like validate_bundle rather than silently duplicating (LADR-05).
-        overlap = [m["uuid"] for m in members if m["uuid"] in accepted_members]
+        overlap = [_item_key(m) for m in members if _item_key(m) in accepted_members]
         if overlap:
             raise ValueError(
-                f"equivalences: uuid {overlap[0]} appears in more than one group")
+                f"equivalences: uuid {overlap[0][0]} v{overlap[0][1]} appears in more than one group")
         app = {_applicability(m) for m in members}
         # Gate on the derived lifecycle (mark_lifecycle), not the raw status: an expired origin carries
         # a no-longer-true lifecycle even when its status string matches a still-current sibling, and
@@ -387,7 +446,7 @@ def consolidate(items, equivalences, edges, asof=None):
         if len(app) == 1 and len(life) == 1:
             groups.append(group)
             for m in members:
-                accepted_members.add(m["uuid"])
+                accepted_members.add(_item_key(m))
         else:
             uncertain.append({
                 "category": "equivalence-uncertain",
@@ -401,11 +460,12 @@ def consolidate(items, equivalences, edges, asof=None):
 
     # Render each accepted group as one present claim carrying every origin.
     for group in groups:
-        uuids = [u for u in group.get("uuids", []) if u in accepted_members]
-        origins = [by_uuid[u] for u in uuids if u in by_uuid]
+        uuids = [u for u in group.get("uuids", []) if u in keys_by_memory]
+        origins = [by_key[key] for u in uuids for key in sorted(keys_by_memory[u])
+                   if key in accepted_members]
         if not origins:
             continue
-        origins.sort(key=lambda m: (m["validFrom"] or "", m["createdOn"] or "", m["uuid"] or ""))
+        origins.sort(key=_business_key)
         primary = origins[0]
         claim = {
             "uuid": primary["uuid"],
@@ -415,15 +475,15 @@ def consolidate(items, equivalences, edges, asof=None):
         }
         present.append(claim)
         for o in origins:
-            claims_by_uuid[o["uuid"]] = claim
+            claims_by_key[_item_key(o)] = claim
 
     # Standalone items (not part of any accepted consolidation) become their own present claim.
     for item in items:
-        if item["uuid"] in claims_by_uuid:
+        if _item_key(item) in claims_by_key:
             continue
         claim = {"uuid": item["uuid"], "origins": [item], "consolidated": False}
         present.append(claim)
-        claims_by_uuid[item["uuid"]] = claim
+        claims_by_key[_item_key(item)] = claim
 
     # Deterministic order of present claims.
     present.sort(key=lambda c: _business_key(c["origins"][0]))
@@ -452,7 +512,7 @@ def derive_findings(items, edges, asof=None, judgements=None, uncertain=None):
     """
     scope_text = f"the {len(items)} selected memory(ies) in this bundle"
     findings = []
-    by_uuid = {item["uuid"]: item for item in items}
+    by_key = {_item_key(item): item for item in items}
 
     # Edge indices.
     out_edges = {}
@@ -550,7 +610,7 @@ def derive_findings(items, edges, asof=None, judgements=None, uncertain=None):
         if category not in _CALLER_MERGEABLE_FINDINGS:
             raise ValueError(f"finding category '{category}' is not caller-mergeable")
         if category == "contradiction":
-            _validate_contradiction(f, by_uuid, edges, asof)
+            _validate_contradiction(f, by_key, edges, asof)
         if category == "gap":
             grounds = f.get("ground")
             if grounds not in ("task", "included-claim", "expectation"):
@@ -563,10 +623,14 @@ def derive_findings(items, edges, asof=None, judgements=None, uncertain=None):
             raise ValueError(f"{category}: classification must be observation or analysis")
         mems = f.get("memories") or []
         for m in mems:
-            if not m.get("uuid") or m["uuid"] not in by_uuid:
-                raise ValueError(f"{category}: each memory must be selected in this bundle")
+            # Shape before lookup, so a malformed reference is told what is wrong with it rather than
+            # that it is absent. Now that identity is (uuid, version), a versionless reference misses
+            # every key, and "not selected in this bundle" would be a true statement about the wrong
+            # thing.
             if not isinstance(m.get("version"), int) or m["version"] < 1:
                 raise ValueError(f"{category}: each memory requires a version >= 1")
+            if not m.get("uuid") or _item_key(m) not in by_key:
+                raise ValueError(f"{category}: each memory must be selected in this bundle")
         findings.append({
             "category": category,
             "classification": classification,
@@ -597,11 +661,11 @@ def _superseded(item, edges):
     )
 
 
-def _validate_contradiction(f, by_uuid, edges=None, asof=None):
+def _validate_contradiction(f, by_key, edges=None, asof=None):
     mems = f.get("memories") or []
     if len(mems) < 2:
         raise ValueError("contradiction: requires at least two memories")
-    items = [by_uuid[m["uuid"]] for m in mems if m.get("uuid") in by_uuid]
+    items = [by_key[_item_key(m)] for m in mems if m.get("uuid") and _item_key(m) in by_key]
     if len(items) < 2:
         raise ValueError("contradiction: memories must be selected in this bundle")
     # Applicability + lifecycle precondition (LADR-04): a scoped exception is not a conflict of the
@@ -668,9 +732,9 @@ def reconcile(bundle, claims, omitted):
         if not surfaced:
             # The whole claim (and every origin) is set aside by the focus lens.
             continue
-        present_item_ids.add(origins[0]["uuid"])
-        consolidated_item_ids.update(o["uuid"] for o in origins[1:])
-    omitted_item_ids = {o["uuid"] for o in omitted}
+        present_item_ids.add(_item_key(origins[0]))
+        consolidated_item_ids.update(_item_key(o) for o in origins[1:])
+    omitted_item_ids = {_omitted_key(o) for o in omitted}
     selected = bundle["manifest"]["selectedCount"]
 
     present_count = len(present_item_ids)
@@ -747,17 +811,17 @@ def compose(bundle, focus=UNFOCUSED, judgements=None, asof=None, store_name=STOR
     omitted = list(bundle["omitted"])
 
     # 4. Lifecycle marking (NFR-07).
-    lifecycle = {item["uuid"]: mark_lifecycle(item, edges, asof) for item in items}
+    lifecycle = {_item_key(item): mark_lifecycle(item, edges, asof) for item in items}
 
     # 5. Focus lens (LADR-12). What the lens does not surface is listed as omitted with
     #    ``outside-focus``; membership is never changed.
     #    The claim's topological position is computed here and used by the renderer to order claims
     #    (LADR-07). A consolidated claim takes the earliest position among its origins, so the
     #    superseded/superseding relation reads in order rather than in business-key recency.
-    pos = {item["uuid"]: i for i, item in enumerate(ordered)}
+    pos = {_item_key(item): i for i, item in enumerate(ordered)}
 
     def _claim_order(claim):
-        return min((pos.get(o["uuid"], len(pos)) for o in claim["origins"]), default=len(pos))
+        return min((pos.get(_item_key(o), len(pos)) for o in claim["origins"]), default=len(pos))
 
     claims = []
     for claim in present_claims:
@@ -770,8 +834,8 @@ def compose(bundle, focus=UNFOCUSED, judgements=None, asof=None, store_name=STOR
         if not surfaced:
             # The whole claim (every origin) is set aside by the lens; each is listed as omitted.
             for member in claim["origins"]:
-                omitted.append({"uuid": member["uuid"], "reason": "outside-focus",
-                                "name": member.get("name")})
+                omitted.append({"uuid": member["uuid"], "version": member["version"],
+                                "reason": "outside-focus", "name": member.get("name")})
         claims.append(rendered)
 
     # Order claims topologically (LADR-07) so the exposed data and the rendered document agree.
@@ -889,7 +953,7 @@ def render(dossier):
     for claim in ordered_claims:
         origins = claim["origins"]
         primary = origins[0]
-        lifecycle = dossier.lifecycle.get(primary["uuid"], LIFECYCLE_UNKNOWN)
+        lifecycle = dossier.lifecycle.get(_item_key(primary), LIFECYCLE_UNKNOWN)
         kind_tag = f" [{primary.get('kind')}]" if primary.get("kind") else ""
         lines.append(f"### {primary.get('name') or '(untitled)'}{kind_tag}")
         lines.append("")

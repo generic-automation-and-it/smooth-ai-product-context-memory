@@ -114,7 +114,24 @@ public sealed record MemoryWidenQuery
     /// <summary>Relational predicate on the reached memory's current version.</summary>
     public string? Kind { get; init; }
 
+    /// <summary>Exact status match. When null, <see cref="ExcludeProposed"/> applies instead.</summary>
     public string? Status { get; init; }
+
+    /// <summary>
+    /// Whether a reached proposed memory is withheld. Ignored once <see cref="Status"/> is supplied,
+    /// which is the same precedence <see cref="IMemorySearch.MemorySearchCriteria"/> and
+    /// <see cref="ITicketGraph.TicketTraversalQuery"/> use.
+    /// </summary>
+    /// <remarks>
+    /// Added because widening was the only one of the three dossier selection stages that carried no
+    /// proposed rule at all — its SQL was <c>(@status IS NULL OR v.status = @status)</c>, which with a
+    /// null status admits everything. So a proposed memory reachable from an approved anchor was
+    /// selected while the manifest recorded <c>current-only, proposed-excluded</c>: the artefact a caller
+    /// repeats the selection from asserted the opposite of what the selection did. The default is
+    /// <c>true</c> so a caller that never considers the rule still gets it, which is what the other two
+    /// stages' defaults were doing.
+    /// </remarks>
+    public bool ExcludeProposed { get; init; } = true;
 
     /// <summary>
     /// Business-time point the reached memory's current version must be valid at. Null means no
