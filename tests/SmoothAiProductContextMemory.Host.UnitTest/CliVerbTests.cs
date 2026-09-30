@@ -1,5 +1,6 @@
 extern alias HostApp;
 
+using System.Text;
 using SmoothAiProductContextMemory.Host.Cli;
 
 namespace SmoothAiProductContextMemory.Host.UnitTest;
@@ -34,19 +35,55 @@ public sealed class CliVerbTests
         // `snapshot` and `export` are deliberately NOT here: both give `--output` a
         // DefaultValueFactory, so an empty argv is a *valid* invocation by design and there is no
         // argument contract to protect. They previously sat in this theory anyway, and passed only
-        // because an unconfigured host fails inside AddInfrastructure before the verb does anything —
-        // the "passes for the wrong reason" hazard the restore case below already documents. A change
-        // making either verb reject an empty argv would not have been caught, and a change making one
-        // accept it would not have been either, because the assertion was satisfied by a configuration
-        // failure rather than by the argument check.
-        int exit = verb switch
+        // because an unconfigured host fails inside AddInfrastructure before the verb does anything.
+        //
+        // The exit code alone is NOT the claim, and asserting only "non-zero" was the defect: `verify`
+        // returns 1 both for a parse error and for a clean parse whose archive turns out absent, so a
+        // regression making the argument optional would still return 1 and this would stay green. The
+        // claim is that the action never ran, and the action is the only thing that prints a
+        // `Verify …` / `Restore …` line. Asserting that line is absent is what makes the refusal
+        // observable, and unlike a code comparison it does not depend on which non-zero the parser
+        // chose.
+        //
+        // For `restore` the code is independently discriminating: 2 is "the archive is bad" and 0 is a
+        // clean reconcile, so an argument that stopped being required would have to return one of
+        // those instead of 1.
+        var stdout = new StringWriter();
+        TextWriter previous = Console.Out;
+        Console.SetOut(stdout);
+        try
         {
-            "verify" => await VerifyCommand.InvokeAsync([]),
-            "restore" => await RestoreCommand.InvokeAsync([]),
-            _ => throw new ArgumentOutOfRangeException(nameof(verb), verb, "unknown verb"),
-        };
+            int exit = verb switch
+            {
+                "verify" => await VerifyCommand.InvokeAsync([]),
+                "restore" => await RestoreCommand.InvokeAsync([]),
+                _ => throw new ArgumentOutOfRangeException(nameof(verb), verb, "unknown verb"),
+            };
 
-        exit.ShouldNotBe(0, $"{verb} accepted an empty argv and reported success");
+            // 1 is System.CommandLine's parse-failure code, and on its own it proves nothing: with the
+            // argument relaxed to ZeroOrOne the exit is *still* 1, because the action then runs and
+            // fails on the null path. The exit code is therefore not the claim.
+            exit.ShouldBe(1, $"{verb} did not fail argument parsing on an empty argv");
+
+            // The load-bearing assertion is that the PARSER rejected the argv. System.CommandLine
+            // renders the command's help on a parse error and prints nothing when the action runs, so
+            // "Usage:" is present on the refusal path and absent on the action path. That is the
+            // opposite shape to the obvious "the action did not print", which cannot work: under the
+            // ZeroOrOne mutation the action's own verdict line is also absent (it throws before
+            // printing), so an absence check passes on the regression it is meant to catch. Verified
+            // both ways: relaxing the arity makes this fail.
+            string printed = stdout.ToString();
+            printed.ShouldContain("Usage:", Case.Sensitive,
+                $"the {verb} action ran instead of the parser refusing the empty argv, so the "
+                + "required argument is no longer required");
+            printed.ShouldNotContain(verb == "verify" ? "Verify clean:" : "Restore reconciled:",
+                Case.Sensitive,
+                $"the {verb} action ran and reported, so an empty argv was accepted rather than refused");
+        }
+        finally
+        {
+            Console.SetOut(previous);
+        }
     }
 
     [Fact]
