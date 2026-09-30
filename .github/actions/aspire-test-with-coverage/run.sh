@@ -21,6 +21,26 @@ coverage_directory="${artifacts_root}/coverage"
 # the denominator lifts the metric. The 50% floor is therefore unchanged and still meaningful; it is
 # now a claim about the store rather than about the store plus its scaffolding.
 #
+# AppHost IS EXCLUDED, AND THE REASON ABOVE IS NOT THE TRUE ONE — it is measured, not asserted.
+# SmoothAiProductContextMemory.AppHost has three dedicated unit-test classes and this script runs that
+# project deliberately (below), so "exercised incidentally" was never true of it, and the 34.08%
+# figure above says nothing about it. What the measurement actually shows: running
+# AppHost.UnitTest with `--collect "XPlat Code Coverage"` reports **no AppHost package at all**, and
+# repeating it with an explicit `[SmoothAiProductContextMemory.AppHost]*` include reports zero classes
+# at 0.0%. The three classes test `AppHostMode` (an enum), `AppHostConfiguration` and
+# `ContainerImageReference` (records) and `HostLaunchMode` (consts and expression-bodied members) —
+# shapes the collector reports no coverable executable lines for. So adding the assembly to
+# `product_assemblies` would move neither numerator nor denominator, and is deliberately NOT done: a
+# list entry would assert the assembly is measured when it is not.
+#
+# THE REAL GAP, which the exclusion must not be read as excusing: the 265-line
+# `DistributedApplicationBuilderExtensions.cs` plus `Program.cs` are the Aspire orchestration wiring,
+# have no test anywhere in the repository (the similarly-named class under TestFramework.Aspire is a
+# different one), and so are invisible to this metric by omission rather than by coverage. That is a
+# coverage gap in its own right, and closing it is not a filter change — it needs tests. If AppHost
+# ever gains coverable executable code, adding it here becomes a real decision rather than a no-op,
+# and the measured figure above is the baseline to re-derive from.
+#
 # MEASURE THE SHIPPED STRING, NOT A LOOKALIKE. The first version of this filter repeated the
 # `Include=` key once per assembly, which this collector rejects; it then failed *closed* in the worst
 # available way — "The Data Collector will be ignored", no coverage file written, and every test
