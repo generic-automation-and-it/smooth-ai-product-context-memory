@@ -3,9 +3,11 @@ using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
+using NpgsqlTypes;
 using SmoothAiProductContextMemory.Application.Abstractions;
 using SmoothAiProductContextMemory.Application.Abstractions.Snapshot;
 using SmoothAiProductContextMemory.Domain.Entities;
+using SmoothAiProductContextMemory.Infrastructure.Persistence.Configurations;
 using SmoothAiProductContextMemory.Infrastructure.Storage;
 using SmoothAiProductContextMemory.Infrastructure.Storage.Snapshot;
 
@@ -38,13 +40,24 @@ public sealed class NpgsqlSnapshotRepository(
     /// either exceeds 120 s, the restore rolls back whole, and there was no knob to turn.
     /// </summary>
     /// <remarks>
-    /// Applied with <c>SET LOCAL</c>, so it is scoped to the restore transaction and reverts on
-    /// commit or rollback. The 120 s default is untouched everywhere else, and the batching below
-    /// keeps any single statement small enough that this ceiling is a backstop rather than the
-    /// thing standing between a large corpus and a successful restore. Configurable through
+    /// Applied twice, and both halves are load-bearing. <c>SET LOCAL</c> scopes the server-side
+    /// <c>statement_timeout</c> to the restore transaction and reverts it on commit or rollback; the
+    /// data source for the same operation is built with this value as its client-side
+    /// <c>CommandTimeout</c>, because the client abandons a statement at its own cap regardless of what
+    /// the server is willing to wait for. Raising only the server side left the effective budget at
+    /// <c>min(120, configured)</c>, so a large corpus rolled back at 120 s with no knob that changed
+    /// it. The request-traffic default is untouched everywhere else, and the batching below keeps any
+    /// single statement small enough that this ceiling is a backstop rather than the thing standing
+    /// between a large corpus and a successful restore. Configurable through
     /// <c>Snapshot__RestoreStatementTimeoutSeconds</c>.
     /// </remarks>
     private const int DefaultRestoreStatementTimeoutSeconds = 900;
+
+    /// <summary>
+    /// Ceiling on <see cref="DefaultRestoreStatementTimeoutSeconds"/>'s override. A day is far longer
+    /// than any legitimate restore statement and still short enough that a wedged one is caught.
+    /// </summary>
+    private const int MaxRestoreStatementTimeoutSeconds = 86_400;
 
     /// <summary>
     /// Rows per EF batch during restore. Bounds the largest statement the insert path can emit, which
@@ -56,7 +69,11 @@ public sealed class NpgsqlSnapshotRepository(
         string connectionString,
         CancellationToken cancellationToken)
     {
-        await using NpgsqlDataSource dataSource = NpgsqlDataSourceFactory.Create(connectionString);
+        // The restore budget, not the 120 s request default: capture is a bulk read over a corpus of
+        // the same shape restore writes, and a target too large to snapshot within 120 s is a target
+        // whose size is exactly what the restore budget exists for.
+        await using NpgsqlDataSource dataSource =
+            NpgsqlDataSourceFactory.Create(connectionString, RestoreStatementTimeoutSeconds());
         await using var db = CreateContext(dataSource);
         await using IDbContextTransaction transaction =
             await db.Database.BeginTransactionAsync(CaptureIsolation, cancellationToken);
@@ -107,7 +124,11 @@ public sealed class NpgsqlSnapshotRepository(
 
     public async Task<bool> IsTargetEmptyAsync(string connectionString, CancellationToken cancellationToken)
     {
-        await using NpgsqlDataSource dataSource = NpgsqlDataSourceFactory.Create(connectionString);
+        // Budgeted like the restore it gates. This is the pre-flight the operator runs by hand, so it
+        // runs on the same corpus the restore will; counting rows unbudgeted meant the check could fail
+        // on a large target for a reason the restore's own budget would have absorbed.
+        await using NpgsqlDataSource dataSource =
+            NpgsqlDataSourceFactory.Create(connectionString, RestoreStatementTimeoutSeconds());
         await using var db = CreateContext(dataSource);
         await using IDbContextTransaction transaction =
             await db.Database.BeginTransactionAsync(RestoreIsolation, cancellationToken);
@@ -124,13 +145,16 @@ public sealed class NpgsqlSnapshotRepository(
         ArgumentNullException.ThrowIfNull(capture);
         ArgumentNullException.ThrowIfNull(expected);
 
-        await using NpgsqlDataSource dataSource = NpgsqlDataSourceFactory.Create(connectionString);
+        await using NpgsqlDataSource dataSource =
+            NpgsqlDataSourceFactory.Create(connectionString, RestoreStatementTimeoutSeconds());
         await using var db = CreateContext(dataSource);
         await using IDbContextTransaction transaction =
             await db.Database.BeginTransactionAsync(RestoreIsolation, cancellationToken);
 
         // SET LOCAL, so the relaxed budget lives exactly as long as this transaction and no longer.
-        // Placed before the emptiness check so a slow count on a large target is covered too.
+        // Placed before the emptiness check so a slow count on a large target is covered too. The
+        // client-side half of the same budget is the data source's CommandTimeout above; this line
+        // alone only raises the server's willingness to wait, which is not what the client obeys.
         await ExecuteNonQueryAsync(
             db,
             $"SET LOCAL statement_timeout = '{RestoreStatementTimeoutSeconds().ToString(CultureInfo.InvariantCulture)}s'",
@@ -414,10 +438,7 @@ public sealed class NpgsqlSnapshotRepository(
         CancellationToken cancellationToken)
     {
         // Every table ClearStoresAsync deletes must be guarded, so a target holding registry history
-        // or a populated graph is refused rather than silently wiped. `initiative` and `label` are
-        // excluded: migrations seed the `to-be-decided` initiative and default facet labels on a
-        // fresh database, so a freshly-migrated target carries those rows and must still count as
-        // empty for a first restore.
+        // or a populated graph is refused rather than silently wiped.
         string[] relational = ["memory", "memory_version", "group_description", "memory_group"];
         foreach (string table in relational)
         {
@@ -425,6 +446,38 @@ public sealed class NpgsqlSnapshotRepository(
             {
                 return false;
             }
+        }
+
+        // `initiative` and `label` are guarded by what the migrations did NOT seed. A fresh database
+        // carries the `to-be-decided` initiative and the default facet labels, so counting every row
+        // would refuse every first restore. Excluding those two tables outright — which is what this
+        // used to do — is the other half of the same coin: ClearStoresAsync deletes both
+        // unconditionally, so a target holding one custom label and no memories at all was judged
+        // empty and the label was destroyed by a restore the operator never overrode. The seed set is
+        // the definition of "not operator content", read from the same constants HasData uses rather
+        // than restated, and both names arrive as parameters: no value reaches the statement text.
+        if (await ExecuteScalarLongAsync(
+                db,
+                "SELECT count(*) FROM label WHERE name <> ALL(@seedFacets)",
+                cancellationToken,
+                new NpgsqlParameter("seedFacets", NpgsqlDbType.Array | NpgsqlDbType.Text)
+                {
+                    Value = LabelConfiguration.SeedFacets,
+                }) > 0)
+        {
+            return false;
+        }
+
+        if (await ExecuteScalarLongAsync(
+                db,
+                "SELECT count(*) FROM initiative WHERE name <> @defaultInitiative",
+                cancellationToken,
+                new NpgsqlParameter("defaultInitiative", NpgsqlDbType.Text)
+                {
+                    Value = InitiativeConfiguration.DefaultInitiativeName,
+                }) > 0)
+        {
+            return false;
         }
 
         string[] graph = ["Memory", "LINKS", "TICKET_PARENT", "Ticket"];
@@ -514,6 +567,11 @@ public sealed class NpgsqlSnapshotRepository(
     {
         var connection = (NpgsqlConnection)db.Database.GetDbConnection();
         var transaction = db.Database.CurrentTransaction?.GetDbTransaction() as NpgsqlTransaction;
+        // No per-command timeout is set, so a raw statement inherits the connection's default — which
+        // is the budget, because every data source this class builds is built with it. One lever for
+        // both paths: EF batches and these raw statements read the same connection default, so the
+        // budget cannot govern one and miss the other. A command carrying its own value would be a
+        // second copy of the number to keep in step.
         return new NpgsqlCommand(sql, connection, transaction);
     }
 
@@ -534,22 +592,33 @@ public sealed class NpgsqlSnapshotRepository(
     }
 
     /// <summary>
-    /// The restore statement budget, overridable by configuration and clamped to something sane.
-    /// A non-positive or absurd configured value falls back to the default rather than disabling the
-    /// ceiling, because a restore with no ceiling is the one operation where an unbounded statement
-    /// would hold locks on the only store of record.
+    /// The statement budget for capture and restore, overridable by configuration. A configured value
+    /// outside 1–86400 seconds is rejected rather than replaced by the default: silently substituting
+    /// 900 s for an operator who asked for 3600 s gives them a restore that rolls back at 900 s and no
+    /// signal that the setting was ignored, which is the same invisible-budget defect the client-side
+    /// half of this budget had. The rejection is shape-only (NFR-05) and names the setting, not the
+    /// value that reached it.
     /// </summary>
     private int RestoreStatementTimeoutSeconds() =>
-        _configuredRestoreTimeoutSeconds is { } configured && configured is > 0 and <= 86_400
-            ? configured
-            : DefaultRestoreStatementTimeoutSeconds;
+        _configuredRestoreTimeoutSeconds is not { } configured
+            ? DefaultRestoreStatementTimeoutSeconds
+            : configured is > 0 and <= MaxRestoreStatementTimeoutSeconds
+                ? configured
+                : throw new InvalidOperationException(
+                    $"Snapshot:RestoreStatementTimeoutSeconds must be between 1 and {MaxRestoreStatementTimeoutSeconds.ToString(CultureInfo.InvariantCulture)} seconds; the value configured is not usable.");
 
     private static async Task<long> ExecuteScalarLongAsync(
         SmoothAiProductContextMemoryDbContext db,
         string sql,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        NpgsqlParameter? parameter = null)
     {
         await using NpgsqlCommand command = Command(db, sql);
+        if (parameter is not null)
+        {
+            command.Parameters.Add(parameter);
+        }
+
         object? result = await command.ExecuteScalarAsync(cancellationToken);
         return Convert.ToInt64(result, CultureInfo.InvariantCulture);
     }

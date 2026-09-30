@@ -6,12 +6,28 @@ JSON array of the model's own verdicts and scores them against the expected set.
 countable — exact match on the enumerated verdict vocabulary — plus precision/recall over the fixed
 recall set.
 
+Three numbers, and the difference between them is the whole point of this file:
+
+  recall    correct / the scenarios declared `recall_positive`. The share of genuine restatements the
+            model collapsed instead of creating a second memory. A matcher that matches nothing scores
+            0.0 here, which is the only way this number can mean anything.
+  precision correct / the predictions the model actually made. The share of claimed collapses that were
+            really collapses, over the dedup-class scenarios it claimed them on.
+  accuracy  correct / every scenario. Reported because the recall used to be this number under the
+            name recall, which let a run that missed a scenario outright still print a healthy score.
+
 Verdicts are matched to scenarios by `id`, not by position. Positional matching meant that inserting,
 deleting or reordering a scenario silently misaligned every verdict after it, and because
 `run_tests.py` asserts the committed run scores exactly 1.0/1.0, the harness would then have
 certified the wrong verdicts against the wrong scenarios with no test failing. The blinded input
-therefore carries each scenario's `id` — an identifier is not an answer, so emitting it does not
-unblind the run — and the model echoes it back.
+therefore carries each scenario's `id` and the model echoes it back.
+
+What keeps the run blinded is the emitter withholding `expected`, `note` and `axis` — asserted by
+`run_tests.py::SemanticFixtureTests`. The `id` is emitted for pairing, and an id is not a general
+licence to read intent off a string: in this fixture set `s4-cross-group-match-is-not-a-bump` and
+`s8-near-miss-negative` name their own expected verdicts, so anyone reading the repository can see
+the answers. That is a transparency property of a committed evidence file, not a property of the
+blinded input, and it is recorded here rather than papered over with a claim about identifiers.
 
 A verdicts file with no ids at all is refused unless `--allow-legacy-positional` is passed. That flag
 exists only so a superseded dated run stays re-scorable, which is how the 0.9 / 0.8333 figure was
@@ -57,6 +73,12 @@ AUX_EQUALITY_FIELDS = ("target_uuid", "link_uuid", "relation", "count", "diverge
 #   precision_negative a related-but-distinct pair that must NOT collapse
 #   not_dedup          a scenario for another stage; carries neither axis
 AXIS_VALUES = ("recall_positive", "precision_negative", "not_dedup")
+
+# Stages on which a collapse verdict is a meaningful answer, and the verdict words that mean one.
+# Declared here rather than inlined so precision's denominator is a stated question — "of the collapses
+# claimed, how many were real?" — instead of an accident of which stages happened to be enumerated.
+DEDUP_STAGES = ("dedup", "divergence")
+MERGE_VERDICTS = ("version_bump", "merge")
 
 
 def axis_balance(fixtures):
@@ -145,21 +167,33 @@ def main():
         print(f"score: expected {len(fixtures)} verdicts, got {len(model)}", file=sys.stderr)
         sys.exit(1)
 
+    # Balance is a property of the fixture, so it is checked for every run that is not a re-score of
+    # a superseded dated one. `--fixtures` used to switch the check off along with the positional
+    # pairing, which meant any frozen fixture could be scored with no negatives at all — the exact
+    # condition NFR-02 exists to prevent, reachable by passing one extra flag.
     positives, negatives = axis_balance(fixtures)
-    live = not args.fixtures and not args.allow_legacy_positional
-    if live and len(negatives) < len(positives):
-        print(f"score: {len(negatives)} negative controls against {len(positives)} positive pairs. "
-              f"NFR-02 requires at least as many negatives as positives: a matcher that matches "
-              f"nothing scores perfect precision and fills the store with duplicates.", file=sys.stderr)
-        sys.exit(1)
+    if not args.allow_legacy_positional:
+        if not positives:
+            print("score: no scenario declares axis=recall_positive, so recall has no denominator. "
+                  "A fixture with no positive pair cannot measure recall.", file=sys.stderr)
+            sys.exit(1)
+        if len(negatives) < len(positives):
+            print(f"score: {len(negatives)} negative controls against {len(positives)} positive pairs. "
+                  f"NFR-02 requires at least as many negatives as positives: a matcher that matches "
+                  f"nothing scores perfect precision and fills the store with duplicates.", file=sys.stderr)
+            sys.exit(1)
 
+    positive_ids = set(positives)
     correct = 0
+    correct_positives = 0
     rows = []
     for fixture, got in pairs:
         expected = fixture["expected"]
         got_verdict = got.get("verdict") if isinstance(got, dict) else got
         ok = scenario_matches(expected, got)
         correct += 1 if ok else 0
+        if ok and fixture["id"] in positive_ids:
+            correct_positives += 1
         rows.append(
             {
                 "id": fixture["id"],
@@ -172,31 +206,54 @@ def main():
         )
 
     total = len(fixtures)
-    recall = correct / total if total else 0.0
-    # Precision over the dedup-class scenarios: for each, the model must not over-merge (collapse a
-    # distinct claim into a version bump). Counted as the share of dedup/divergence scenarios whose
-    # verdict did not wrongly claim a version_bump/merge.
-    dedup_scenarios = [f for f in fixtures if f["stage"] in ("dedup", "divergence")]
+    accuracy = correct / total if total else 0.0
+
+    # Recall over the declared positive pairs only. The denominator is the scenarios whose expected
+    # verdict is a collapse, so a scenario for another stage — or a negative control the model got
+    # right — cannot lift it. This was `correct / total`, i.e. accuracy, wearing recall's name: a
+    # matcher that collapsed nothing scored 0.857 here, and a reader took that for recall.
+    # null, not 0.0, when the fixture declares no positive pair. A frozen fixture taken before
+    # `axis` existed cannot measure recall at all, and printing 0.0 for it invites "the model had
+    # zero recall" where the truth is "this run was never a recall measurement". Only reachable via
+    # --allow-legacy-positional, since a current run is refused for the same condition.
+    recall = correct_positives / len(positives) if positives else None
+
+    # Precision over the collapses the model actually predicted. A false positive is a claimed
+    # collapse that was not one, so the denominator is the predicted positives rather than every
+    # dedup-class scenario: the previous form divided by all seven dedup scenarios, five of which
+    # can never over-merge, so each one flattered the score.
+    predicted_positives = 0
+    correct_predictions = 0
     over_merge = 0
     for fixture, got in pairs:
-        if fixture["stage"] not in ("dedup", "divergence"):
+        if fixture["stage"] not in DEDUP_STAGES:
             continue
-        expected = fixture["expected"]["verdict"]
+        expected_verdict = fixture["expected"]["verdict"]
         got_verdict = got.get("verdict") if isinstance(got, dict) else got
-        if expected in ("new_memory", "genuine_conflict") and got_verdict in ("version_bump", "merge"):
-            over_merge += 1
-    precision = 1.0 - (over_merge / len(dedup_scenarios)) if dedup_scenarios else 1.0
+        claimed = got_verdict in MERGE_VERDICTS
+        should_claim = expected_verdict in MERGE_VERDICTS
+        if claimed:
+            predicted_positives += 1
+            if should_claim:
+                correct_predictions += 1
+            else:
+                over_merge += 1
+    precision = correct_predictions / predicted_positives if predicted_positives else 1.0
 
     print(json.dumps({
         "rows": rows,
-        "recall": round(recall, 4),
+        "recall": None if recall is None else round(recall, 4),
         "precision": round(precision, 4),
+        "accuracy": round(accuracy, 4),
         "counts": {
             "scenarios": total,
             "correct": correct,
-            "over_merge": over_merge,
             "positive_pairs": len(positives),
+            "positive_pairs_correct": correct_positives,
             "negative_controls": len(negatives),
+            "predicted_positives": predicted_positives,
+            "correct_predictions": correct_predictions,
+            "over_merge": over_merge,
         },
         "paired_by": "position (legacy)" if positional else "id",
     }, indent=2))

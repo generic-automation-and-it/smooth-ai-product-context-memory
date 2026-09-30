@@ -179,6 +179,14 @@ public static class DossierSelection
                 HiddenDimensions = hiddenDimensions,
                 Kind = Blank(anchor.Kind),
                 Status = Blank(anchor.Status),
+                // Left at its true default, for the reason the ticket traversal's is: the status opt-in
+                // supersedes it once @status is not null. This stage carried no proposed rule at all
+                // before — a null @status admitted every reached version — so a proposed memory
+                // reachable from an approved anchor was widened in while RetrievalPolicy below
+                // recorded "proposed-excluded". The default is what closes it, and it is stated here
+                // because the three stages are the third instance of this drift: each had to be told
+                // the same rule separately.
+                ExcludeProposed = true,
                 // Carried for the same reason the anchor search carries it: a supplied AsOf must
                 // bound the whole selection. Widening without it could add a memory the anchor
                 // search had already excluded by validity window, while the manifest recorded the
@@ -341,6 +349,12 @@ public static class DossierSelection
     /// (BR-20), so a clause naming a capability the request cannot exercise is a false record, not a
     /// conservative one. The opt-in now exists on the traversal, and this derives the clause from the
     /// anchor so the two cannot drift again.
+    ///
+    /// The clause stayed false a second time, for the same reason: widening was the one stage with no
+    /// proposed rule whatsoever, so a proposed memory one hop from an approved anchor was selected
+    /// under a manifest reading "proposed-excluded". Fixing the third stage is what makes this line
+    /// true — a derived clause cannot be right while one of the three stages it summarises is wrong, so
+    /// the derivation is the assertion surface and each stage is still a separate obligation.
     ///
     /// The blank test is <see cref="Blank"/>'s, the same one <see cref="ResolveAsync"/> applies, not a
     /// length test: a whitespace-only status matches nothing and therefore selects with

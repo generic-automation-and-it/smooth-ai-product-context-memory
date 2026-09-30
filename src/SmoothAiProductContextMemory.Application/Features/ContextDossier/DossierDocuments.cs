@@ -93,8 +93,18 @@ public sealed record DossierManifest(
     IReadOnlyList<DossierLimitHit> LimitsHit,
     bool NoMatch);
 
-/// <summary>An omission, with a reason from the bounded set (NFR-04).</summary>
-public sealed record DossierOmittedItem(Guid Uuid, string Reason);
+/// <summary>
+/// An omission, with a reason from the bounded set (NFR-04).
+/// </summary>
+/// <remarks>
+/// Carries the version, not just the memory. A bundle requested with <c>includeHistory</c> holds
+/// several versions of one memory as separate items, and both the cap cut and the collapse cut are
+/// decided per item — so an omission naming only the memory could not say which version was cut. The
+/// reconciliation that closes the bundle (present + consolidated + omitted == item count) is then
+/// unauditable: the same memory legitimately appears on both sides, which is indistinguishable from
+/// the double-count the composer refuses to render.
+/// </remarks>
+public sealed record DossierOmittedItem(Guid Uuid, int Version, string Reason);
 
 /// <summary>One source document citation (NFR-05).</summary>
 public sealed record DossierSource(string Kind, string Reference, DateTimeOffset? CapturedAt);

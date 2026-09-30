@@ -691,7 +691,10 @@ class SemanticFixtureTests(unittest.TestCase):
         self.assertTrue(payload["scenarios"])
         # `id` is now emitted, because without it the scorer can only pair by position — and the
         # 1.0/1.0 assertion below would then certify the wrong verdicts against the wrong scenarios
-        # with nothing failing. An identifier is not an answer, so this does not unblind the run.
+        # with nothing failing. What keeps the run blinded is the withholding asserted on the next
+        # line; the id is emitted for pairing and is not a general licence to read intent off a
+        # string, since in this fixture set two ids name their own expected verdicts. That is a
+        # transparency property of a committed evidence file, not of this input.
         # `axis` must stay withheld: it says which way the pair is meant to fall.
         self.assertTrue(all("id" in scenario for scenario in payload["scenarios"]))
         self.assertTrue(all("expected" not in scenario and "note" not in scenario
@@ -722,8 +725,14 @@ class SemanticFixtureTests(unittest.TestCase):
         # A dated verdicts file is only re-scorable against the fixture that run saw. Scoring a
         # ten-verdict run against today's fourteen-scenario fixture is a length error, not a
         # re-scoring — so the fixture is frozen alongside the run.
-        for run, expected_recall, expected_precision, failing in (
-            ("model-verdicts-2026-09-17.json", 0.9, 0.8333, "s4-cross-group-match-is-not-a-bump"),
+        #
+        # `recall` is None, not a number, for both: the frozen fixture predates `axis`, so it declares
+        # no positive pair and never measured recall. The old expectations here (0.9 / 0.8333) were
+        # accuracy and a precision whose denominator included four scenarios that cannot over-merge;
+        # both were wrong and the corrected figures are 0.9 accuracy / 0.5 precision for the 09-17 run
+        # and 1.0 / 1.0 for the 09-29 run.
+        for run, expected_precision, expected_accuracy, failing in (
+            ("model-verdicts-2026-09-17.json", 0.5, 0.9, "s4-cross-group-match-is-not-a-bump"),
             ("model-verdicts-2026-09-29.json", 1.0, 1.0, None),
         ):
             with self.subTest(run=run):
@@ -734,8 +743,9 @@ class SemanticFixtureTests(unittest.TestCase):
                      "--allow-legacy-positional"],
                     capture_output=True, text=True, check=False)
                 score = json.loads(completed.stdout)
-                self.assertEqual(score["recall"], expected_recall)
+                self.assertIsNone(score["recall"])
                 self.assertEqual(score["precision"], expected_precision)
+                self.assertEqual(score["accuracy"], expected_accuracy)
                 self.assertEqual(score["paired_by"], "position (legacy)")
                 mismatched = [row["id"] for row in score["rows"] if not row["match"]]
                 self.assertEqual(mismatched, [failing] if failing else [])
@@ -782,6 +792,151 @@ class SemanticFixtureTests(unittest.TestCase):
                                 "precision")
         self.assertTrue(all(s.get("axis") in ("recall_positive", "precision_negative", "not_dedup")
                             for s in scenarios), "a scenario is unlabelled or carries an unknown axis")
+
+    # --- the two numbers that used to be one number, and one that flattered the score -----------
+
+    # Keys on the expected side that are assertion semantics rather than something a verdict can
+    # echo: `reason_must_be_nonempty` reads the verdict's reason, and `must_not_contain` is checked
+    # against the rendered verdict — so echoing either back would make a correct answer fail.
+    _NOT_ECHOED = ("reason_must_be_nonempty", "must_not_contain")
+
+    def _verdicts_for(self, scenarios, verdict_of, reason="because"):
+        """A synthetic run. `verdict_of` returns the answer word; every other declared expectation is
+        echoed from the fixture so a scenario the model is supposed to get right does match on all
+        of them, not just the word — otherwise these tests would be measuring how many scenarios
+        happen to declare auxiliary fields rather than what they claim to."""
+        verdicts = []
+        for scenario in scenarios:
+            verdict = {"id": scenario["id"], "verdict": verdict_of(scenario), "reason": reason}
+            if verdict["verdict"] == scenario["expected"]["verdict"]:
+                for key, value in scenario["expected"].items():
+                    if key != "verdict" and key not in self._NOT_ECHOED:
+                        verdict[key] = value
+            verdicts.append(verdict)
+        return verdicts
+
+    def _score(self, scenarios, verdicts, extra=()):
+        """Score a synthetic run through the real CLI, so the numbers under test are the ones a
+        reader of the output actually sees rather than a re-implementation of them."""
+        scratch = HERE / ".synthetic-fixtures.json"
+        verdicts_path = HERE / ".synthetic-verdicts.json"
+        scratch.write_text(json.dumps({"scenarios": scenarios}))
+        verdicts_path.write_text(json.dumps(verdicts))
+        try:
+            completed = subprocess.run(
+                [sys.executable, str(HERE / "fixtures" / "score_fixtures.py"),
+                 "--fixtures", str(scratch), "--model-verdicts", str(verdicts_path), *extra],
+                capture_output=True, text=True, check=False)
+            # A refusal prints to stderr and exits 1 with no stdout, so an empty body is a refusal
+            # rather than a parse error — and the caller asserts on the message either way.
+            payload = json.loads(completed.stdout) if completed.stdout.strip() else None
+            return completed, payload
+        finally:
+            scratch.unlink()
+            verdicts_path.unlink()
+
+    def _scenarios(self):
+        return json.loads((HERE / "fixtures" / "scenarios.json").read_text())["scenarios"]
+
+    def test_recall_is_over_the_positive_pairs_not_over_every_scenario(self):
+        """The defect: recall was correct/total, so a matcher that collapsed nothing still scored
+        0.857. Collapsing exactly one of the two positive pairs is what pins the denominator — under
+        correct/total that same run reports 13/14 = 0.9286, a number that says nothing about recall."""
+        scenarios = self._scenarios()
+        positives = [s["id"] for s in scenarios if s.get("axis") == "recall_positive"]
+        collapsed = {positives[0]}
+        _, score = self._score(scenarios, self._verdicts_for(scenarios, lambda s: (
+            s["expected"]["verdict"] if s["id"] in collapsed else "i_do_not_know")))
+
+        self.assertEqual(score["recall"], 0.5)
+        self.assertEqual(score["counts"]["positive_pairs"], 2)
+        self.assertEqual(score["counts"]["positive_pairs_correct"], 1)
+        # The whole-scenario figure is a different number with a different denominator, and it is
+        # reported under its own name rather than as a second reading of recall.
+        self.assertNotEqual(score["accuracy"], score["recall"])
+
+    def test_a_matcher_that_collapses_nothing_scores_zero_recall(self):
+        """The headline: the number a reader would quote cannot be earned without collapsing
+        anything. Under the old correct/total this run reported 0.857."""
+        scenarios = self._scenarios()
+        _, score = self._score(scenarios, self._verdicts_for(
+            scenarios, lambda s: "i_do_not_know"))
+
+        self.assertEqual(score["recall"], 0.0)
+        self.assertEqual(score["accuracy"], 0.0)
+
+    def test_recall_ignores_a_scenario_for_another_stage(self):
+        """A run that gets every non-dedup scenario right and collapses nothing has recall 0.0 and
+        accuracy well above it. Under correct/total those two were the same number."""
+        scenarios = self._scenarios()
+        def verdict_of(s):
+            expected = s["expected"]["verdict"]
+            return "i_do_not_know" if expected in ("version_bump", "merge") else expected
+
+        _, score = self._score(scenarios, self._verdicts_for(scenarios, verdict_of))
+
+        self.assertEqual(score["recall"], 0.0)
+        # Not "correct over the other twelve" either: scenario_matches also holds every declared
+        # auxiliary expectation, and a synthetic run echoes only the verdict word, so accuracy lands
+        # well below 1. The claim under test is the two numbers differ, not either one's magnitude.
+        self.assertGreater(score["accuracy"], score["recall"])
+
+    def test_precision_is_over_the_collapses_actually_claimed(self):
+        """Claiming a collapse everywhere is the matcher that fills the store with duplicates. Two of
+        the ten dedup/divergence-class scenarios are real collapses, so precision is 2/10. The
+        previous denominator counted every dedup-class scenario whether or not the model claimed
+        anything on it, so each one it did *not* over-merge flattered the score; and the divergence
+        scenarios belong in the denominator because a claimed collapse there is equally false — that
+        stage's answers are a conflict or an authority resolution, never a bump."""
+        scenarios = self._scenarios()
+        dedup_class = [s for s in scenarios if s["stage"] in ("dedup", "divergence")]
+        def verdict_of(s):
+            return "version_bump" if s["stage"] in ("dedup", "divergence") else s["expected"]["verdict"]
+
+        completed, score = self._score(scenarios, self._verdicts_for(scenarios, verdict_of))
+
+        self.assertEqual(len(dedup_class), 10)
+        self.assertEqual(score["precision"], round(2 / 10, 4))
+        self.assertEqual(score["counts"]["predicted_positives"], 10)
+        self.assertEqual(score["counts"]["correct_predictions"], 2)
+        self.assertEqual(score["counts"]["over_merge"], 8)
+        # And a run that over-merges fails rather than exiting 0 on a flattering number.
+        self.assertNotEqual(completed.returncode, 0)
+
+    def test_a_fixture_with_no_negative_controls_is_refused_even_via_fixtures_flag(self):
+        """--fixtures used to switch the balance refusal off together with the positional pairing, so
+        any frozen fixture could be scored with no negatives at all — the exact condition NFR-02
+        exists to prevent, reachable by passing one extra flag. Balance is a property of the fixture,
+        not of how the run was taken, so the flag no longer exempts it."""
+        scenarios = [s for s in self._scenarios() if s.get("axis") != "precision_negative"]
+        completed, _ = self._score(
+            scenarios,
+            [{"id": s["id"], "verdict": s["expected"]["verdict"], "reason": "because"} for s in scenarios])
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("negative controls", completed.stderr)
+
+    def test_a_fixture_with_no_positive_pair_is_refused_as_unmeasurable(self):
+        """Recall has no denominator, which is a different failure from an unbalanced fixture and a
+        clearer one: a fixture with no positive pair cannot measure recall at all."""
+        scenarios = [s for s in self._scenarios() if s.get("axis") != "recall_positive"]
+        completed, _ = self._score(
+            scenarios,
+            [{"id": s["id"], "verdict": s["expected"]["verdict"], "reason": "because"} for s in scenarios])
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("recall_positive", completed.stderr)
+
+    def test_the_committed_balanced_run_is_one_on_all_three_numbers(self):
+        """The published measurement has to survive the corrected arithmetic, or the correction is
+        only a demotion of the claim rather than a demotion of the wording."""
+        completed = subprocess.run(
+            [sys.executable, str(HERE / "fixtures" / "score_fixtures.py"),
+             "--model-verdicts", str(HERE / "fixtures" / "model-verdicts-2026-09-29-balanced.json")],
+            capture_output=True, text=True, check=False)
+        score = json.loads(completed.stdout)
+        self.assertEqual((score["recall"], score["precision"], score["accuracy"]), (1.0, 1.0, 1.0))
+
 
     def test_every_dedup_pair_sits_in_one_group(self):
         # The amendment that withdrew the original evidence: identity is (group, uuid), so a

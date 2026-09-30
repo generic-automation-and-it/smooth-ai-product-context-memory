@@ -45,7 +45,7 @@ zero, negatives and anything above five before the request reaches the store.
 - **README, Guiding Principle** — bounded paths between known endpoints, not whole-graph algorithms.
 - **NFR-02** — the depth-3 target this bound brackets.
 
-## Availability note (2026-09-27)
+## Availability note (2026-09-27, amended 2026-09-30)
 
 The 120-second statement timeout behind this bound (see `NpgsqlDataSourceFactory`) is accepted for the
 MVP target. The bound is the primary control, so the timeout only fires on pathological data rather
@@ -53,3 +53,11 @@ than on an unbounded query, and a single-user local store tolerates a rare long-
 recorded dependency: **the "long stop" is two minutes, and it becomes the only bound if a traversal
 limit is ever widened or made unbounded** — raising `MaxDepth` beyond 5, or introducing an unbounded
 traversal path, re-opens this decision and must be re-measured at that point.
+
+**Amendment.** The two minutes are the *client-side* `CommandTimeout`, which is what a statement
+actually obeys; a `SET LOCAL statement_timeout` raises only how long the server is willing to wait.
+Capture and restore are sized by the corpus rather than by a request, so both now build their data
+source with the wider budget rather than raising the server side alone — until they did, the effective
+budget was `min(120, configured)` and a configured value above two minutes did nothing. The dependency
+above is unchanged and is now the only place the 120 s figure is load-bearing: request traffic still
+gets it, and capture/restore are the sole operations that raise it.

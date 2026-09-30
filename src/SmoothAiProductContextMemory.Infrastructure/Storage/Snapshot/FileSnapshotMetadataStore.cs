@@ -47,10 +47,11 @@ public sealed class SnapshotMetadataOptions
     public string Directory { get; set; } = ".context";
 
     /// <summary>
-    /// Per-statement budget for the restore transaction, in seconds. Null keeps the built-in
-    /// default; see <c>NpgsqlSnapshotRepository</c> for why restore needs a different ceiling from
-    /// request traffic, and why the relaxation is scoped with <c>SET LOCAL</c> rather than applied
-    /// to the data source.
+    /// Per-statement budget for the capture and restore data sources, in seconds. Null keeps the
+    /// built-in default; see <c>NpgsqlSnapshotRepository</c> for why these operations need a different
+    /// ceiling from request traffic, and why it is applied to both the client-side command timeout and
+    /// the transaction-local <c>statement_timeout</c>. A value outside 1–86400 is rejected rather than
+    /// replaced by the default.
     /// </summary>
     public int? RestoreStatementTimeoutSeconds { get; set; }
 }

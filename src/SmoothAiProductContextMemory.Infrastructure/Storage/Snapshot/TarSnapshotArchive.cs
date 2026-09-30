@@ -248,9 +248,29 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
         // name is tamper, not a duplicate to collapse. Report it rather than letting the duplicate
         // key throw out of verify — the same "reports, it never throws" rule the corrupt-member
         // branches in CheckCount follow.
+        //
+        // Two nulls are guarded here because both reach the dictionary and both would leave verify as
+        // a stack trace rather than a report: a JSON null element deserialises to a null
+        // SnapshotArchiveEntry, and an absent or explicitly null `Name` deserialises to a null string,
+        // which Dictionary.TryAdd rejects with ArgumentNullException. Neither is a shape this writer
+        // ever produces, which is exactly why the archive's own bytes cannot be assumed to.
         var byName = new Dictionary<string, SnapshotArchiveEntry>(StringComparer.Ordinal);
-        foreach (SnapshotArchiveEntry entry in manifest.Entries)
+        foreach (SnapshotArchiveEntry? entry in manifest.Entries)
         {
+            if (entry is null)
+            {
+                findings.Add(new SnapshotFinding(SnapshotFindingKind.Corruption, SnapshotEntryNames.Manifest,
+                    "Manifest lists a null entry, so the archive's member list cannot be interpreted."));
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(entry.Name))
+            {
+                findings.Add(new SnapshotFinding(SnapshotFindingKind.Corruption, SnapshotEntryNames.Manifest,
+                    "Manifest lists an entry with no name, so it cannot be matched to an archive member."));
+                continue;
+            }
+
             if (!byName.TryAdd(entry.Name, entry))
             {
                 findings.Add(new SnapshotFinding(SnapshotFindingKind.Corruption, entry.Name,
@@ -261,6 +281,12 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
         // Every manifest entry must be present and hash-identical in the archive.
         foreach (SnapshotArchiveEntry expected in manifest.Entries)
         {
+            if (expected is null || string.IsNullOrWhiteSpace(expected.Name))
+            {
+                // Already reported above; the loops below dereference the name, so they must not see it.
+                continue;
+            }
+
             if (!entries.TryGetValue(expected.Name, out byte[]? content))
             {
                 findings.Add(new SnapshotFinding(SnapshotFindingKind.MissingEntry, expected.Name,
@@ -293,6 +319,7 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
         }
 
         ReconcileCounts(manifest, entries, findings);
+        CheckCitedBodiesPresent(entries, findings);
 
         if (manifest.DanglingReferences > 0)
         {
@@ -371,6 +398,80 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
         {
             findings.Add(new SnapshotFinding(SnapshotFindingKind.CountMismatch, null,
                 $"Object count in archive ({objects}) does not match the manifest ({manifest.Counts.Objects})."));
+        }
+    }
+
+    /// <summary>
+    /// Every blob body a stored version cites must be in the archive under its content address.
+    /// </summary>
+    /// <remarks>
+    /// The other checks all work from the manifest, and the manifest is the one member that is not
+    /// hash-declared — so a body can be dropped from the archive and its line removed from the
+    /// manifest, the object count adjusted, and the dangling-reference counter set to zero, and verify
+    /// still reports clean. Nothing else looks at the relationship between the capture and the bodies,
+    /// which is the relationship a restore depends on: the restore refuses a capture citing an absent
+    /// body, so an archive that passes verify and then refuses to restore is a contradiction between
+    /// the two halves of the same tool. A genuine capture-time dangling reference is still counted in
+    /// the manifest and still reported; this adds the independent check the counter cannot be.
+    ///
+    /// The addresses are read out of the raw JSON rather than by binding the version model, for the
+    /// same reason CheckCount does: verify must not depend on the shape it is verifying.
+    /// </summary>
+    private static void CheckCitedBodiesPresent(
+        IReadOnlyDictionary<string, byte[]> entries,
+        ICollection<SnapshotFinding> findings)
+    {
+        if (!entries.TryGetValue(SnapshotEntryNames.MemoryVersions, out byte[]? content))
+        {
+            // Already a CountMismatch finding naming the absent member. Nothing to cross-check.
+            return;
+        }
+
+        HashSet<string> present = new(StringComparer.Ordinal);
+        foreach (string name in entries.Keys)
+        {
+            if (TryBlobAddress(name, out string? address))
+            {
+                present.Add(address);
+            }
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(content);
+            if (document.RootElement.ValueKind is not JsonValueKind.Array)
+            {
+                // Already a Corruption finding from CheckCount. The shape cannot be read, so the
+                // cross-check has nothing to say rather than a second complaint about one defect.
+                return;
+            }
+
+            var missing = new HashSet<string>(StringComparer.Ordinal);
+            foreach (JsonElement version in document.RootElement.EnumerateArray())
+            {
+                if (version.ValueKind is not JsonValueKind.Object
+                    || !version.TryGetProperty("blobAddress", out JsonElement address)
+                    || address.ValueKind is not JsonValueKind.String)
+                {
+                    continue;
+                }
+
+                string? cited = address.GetString();
+                if (!string.IsNullOrWhiteSpace(cited) && !present.Contains(cited))
+                {
+                    missing.Add(cited);
+                }
+            }
+
+            foreach (string absent in missing.Order(StringComparer.Ordinal))
+            {
+                findings.Add(new SnapshotFinding(SnapshotFindingKind.MissingEntry, BlobEntryName(absent),
+                    "A stored memory version cites this body, but the archive does not contain it."));
+            }
+        }
+        catch (JsonException)
+        {
+            // Already a Corruption finding from CheckCount.
         }
     }
 

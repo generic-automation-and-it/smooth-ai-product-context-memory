@@ -6,6 +6,13 @@ namespace SmoothAiProductContextMemory.Infrastructure.Persistence.Configurations
 
 public sealed class InitiativeConfiguration : IEntityTypeConfiguration<Initiative>
 {
+    /// <summary>
+    /// The seeded default initiative's name. Named because the restore target's emptiness check has to
+    /// tell "a row the migrations created" from "a row an operator created", and an inlined literal
+    /// here and again in that check would be two places to keep in step.
+    /// </summary>
+    public const string DefaultInitiativeName = "to-be-decided";
+
     public void Configure(EntityTypeBuilder<Initiative> builder)
     {
         builder.ToTable("initiative");
@@ -25,7 +32,7 @@ public sealed class InitiativeConfiguration : IEntityTypeConfiguration<Initiativ
         builder.HasData(new Initiative
         {
             Id = 1,
-            Name = "to-be-decided",
+            Name = DefaultInitiativeName,
             Description = "Default initiative for groups not yet assigned.",
             Status = Initiative.InitiativeStatus.Active,
         });
