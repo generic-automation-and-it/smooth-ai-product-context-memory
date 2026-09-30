@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Document** | Business Requirements Document |
-| **Status** | Approved — delivered by HLD 005 (`ContextDossier` slice, the bundle/preview API, the read-only composer); LADR-06's export-contributes-to-recall-feedback question stays open because HLD-004 has never mentioned export |
+| **Status** | Approved — delivered; whether an export counts toward recall feedback stays open, because the recall-feedback design has never considered an export |
 | **Owner** | Product owner / practitioner |
 | **Last updated** | 2026-09-29 |
 | **Extends** | [BRD 001 — Cross-product linked context memory](../001-context-memory/) |
