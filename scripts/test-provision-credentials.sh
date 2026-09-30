@@ -183,75 +183,83 @@ if [ ! -d "$accepted_dir" ]; then
   created_context_dir=1
 fi
 
+# Only these three cases need git, so only they are gated. Gating them with an early `exit 0` was a
+# regression: it also skipped the umask, corrupt-reuse, identical-token and AppHost-secrets
+# assertions below, none of which touch a repository — so on a runner where git cannot resolve one
+# (a linked-worktree mount, the case named in the comment) the gate's "Test credential provisioner"
+# step reported green having run none of them. Wrapping them in a function scopes the skip to what it
+# actually covers. `exit` inside a function still exits the harness, so a real failure still fails.
+check_ignore_refusals() {
+  # --- case 1: inside the repository, not ignored, refused ------------------------------------------
+  # Asserted on the exit code of check-ignore itself, not on the provisioner's message, so this
+  # cannot pass by the two branches producing the same text.
+  if git -C "$repo_root" check-ignore -q "$inside_path" 2>/dev/null; then
+    echo "SKIP: $inside_name is unexpectedly ignored by this checkout" >&2
+  elif [ $? -ne 1 ]; then
+    echo "SKIP: check-ignore could not answer for an in-repo path" >&2
+  else
+    if (cd "$repo_root" && scripts/provision-credentials.sh \
+          --env-file "$inside_path" --skip-apphost) >"$unignored_out" 2>&1; then
+      echo "FAIL: wrote credentials to an in-repo path git does not ignore" >&2
+      rm -f "$inside_path" "$inside_path.controller"
+      exit 1
+    fi
+    grep -q 'git does not ignore' "$unignored_out" \
+      || { echo "FAIL: the refusal did not explain itself:" >&2; cat "$unignored_out" >&2; rm -f "$inside_path" "$inside_path.controller"; exit 1; }
+    [ ! -e "$inside_path" ] \
+      || { echo "FAIL: a token file was created despite the refusal" >&2; rm -f "$inside_path" "$inside_path.controller"; exit 1; }
+    # The override must actually work, or the refusal is the only outcome an operator can reach.
+    (cd "$repo_root" && scripts/provision-credentials.sh \
+        --env-file "$inside_path" --allow-unignored-env-file --skip-apphost) >/dev/null 2>&1
+    grep -q '^ApiAccess__ReadToken=' "$inside_path" \
+      || { echo "FAIL: --allow-unignored-env-file did not write the file" >&2; rm -f "$inside_path" "$inside_path.controller"; exit 1; }
+    rm -f "$inside_path" "$inside_path.controller"
+  fi
+
+  # --- the accept branch: in-repo and git-ignored, permitted with no override -----------------------
+  if ! git -C "$repo_root" check-ignore -q "$accepted_path" 2>/dev/null; then
+    echo "SKIP: $accepted_path is not ignored by this checkout, so the accept branch cannot be evaluated" >&2
+  elif (cd "$repo_root" && scripts/provision-credentials.sh \
+          --env-file "$accepted_path" --skip-apphost) >"$unignored_out" 2>&1; then
+    :
+  else
+    echo "FAIL: refused a path git does ignore, with no override given:" >&2
+    cat "$unignored_out" >&2
+    rm -f "$accepted_path" "$accepted_path.controller"
+    exit 1
+  fi
+  if [ -f "$accepted_path" ]; then
+    grep -q '^ApiAccess__ReadToken=' "$accepted_path" \
+      || { echo "FAIL: the accept branch wrote no token" >&2; rm -f "$accepted_path" "$accepted_path.controller"; exit 1; }
+    rm -f "$accepted_path" "$accepted_path.controller"
+  fi
+
+  # --- case 2: outside the repository, which git cannot answer for ---------------------------------
+  if (cd "$repo_root" && scripts/provision-credentials.sh \
+        --env-file "$unignored_path" --skip-apphost) >"$unignored_out" 2>&1; then
+    echo "FAIL: wrote credentials to a path outside the repository" >&2
+    exit 1
+  else
+    grep -q 'git does not ignore' "$unignored_out" \
+      || { echo "FAIL: the refusal did not explain itself:" >&2; cat "$unignored_out" >&2; exit 1; }
+    [ ! -e "$unignored_path" ] \
+      || { echo "FAIL: a token file was created despite the refusal" >&2; exit 1; }
+    # The override must actually work, or the refusal is the only outcome an operator can reach.
+    provision --env-file "$unignored_path" --skip-apphost >/dev/null
+    grep -q '^ApiAccess__ReadToken=' "$unignored_path" \
+      || { echo "FAIL: --allow-unignored-env-file did not write the file" >&2; exit 1; }
+  fi
+}
+
 # Three outcomes for case 2, not two. Collapsing "cannot answer" into a product failure reports a
 # broken environment as a broken script, which is the same class of defect as the `stat` bug this
 # section sits next to: a check that reads as an assertion but is not one here.
-git_usable=0
 if git -C "$repo_root" rev-parse --git-dir >/dev/null 2>&1; then
-  git_usable=1
-fi
-
-if [ "$git_usable" -eq 0 ]; then
-  echo "SKIP: git cannot resolve a repository at $repo_root, so the ignore-refusal cannot be evaluated" >&2
-  exit 0
-fi
-
-# --- case 1: inside the repository, not ignored, refused --------------------------------------------
-# Asserted on the exit code of check-ignore itself, not on the provisioner's message, so this cannot
-# pass by the two branches producing the same text.
-if git -C "$repo_root" check-ignore -q "$inside_path" 2>/dev/null; then
-  echo "SKIP: $inside_name is unexpectedly ignored by this checkout" >&2
-elif [ $? -ne 1 ]; then
-  echo "SKIP: check-ignore could not answer for an in-repo path" >&2
+  check_ignore_refusals
 else
-  if (cd "$repo_root" && scripts/provision-credentials.sh \
-        --env-file "$inside_path" --skip-apphost) >"$unignored_out" 2>&1; then
-    echo "FAIL: wrote credentials to an in-repo path git does not ignore" >&2
-    rm -f "$inside_path" "$inside_path.controller"
-    exit 1
-  fi
-  grep -q 'git does not ignore' "$unignored_out" \
-    || { echo "FAIL: the refusal did not explain itself:" >&2; cat "$unignored_out" >&2; rm -f "$inside_path" "$inside_path.controller"; exit 1; }
-  [ ! -e "$inside_path" ] \
-    || { echo "FAIL: a token file was created despite the refusal" >&2; rm -f "$inside_path" "$inside_path.controller"; exit 1; }
-  # The override must actually work, or the refusal is the only outcome an operator can reach.
-  (cd "$repo_root" && scripts/provision-credentials.sh \
-      --env-file "$inside_path" --allow-unignored-env-file --skip-apphost) >/dev/null 2>&1
-  grep -q '^ApiAccess__ReadToken=' "$inside_path" \
-    || { echo "FAIL: --allow-unignored-env-file did not write the file" >&2; rm -f "$inside_path" "$inside_path.controller"; exit 1; }
-  rm -f "$inside_path" "$inside_path.controller"
-fi
-
-# --- the guard's accept branch: in-repo and git-ignored, permitted with no override ------------------
-if ! git -C "$repo_root" check-ignore -q "$accepted_path" 2>/dev/null; then
-  echo "SKIP: $accepted_path is not ignored by this checkout, so the accept branch cannot be evaluated" >&2
-elif (cd "$repo_root" && scripts/provision-credentials.sh \
-        --env-file "$accepted_path" --skip-apphost) >"$unignored_out" 2>&1; then
-  :
-else
-  echo "FAIL: refused a path git does ignore, with no override given:" >&2
-  cat "$unignored_out" >&2
-  rm -f "$accepted_path" "$accepted_path.controller"
-  exit 1
-fi
-grep -q '^ApiAccess__ReadToken=' "$accepted_path" \
-  || { echo "FAIL: the accept branch wrote no token" >&2; rm -f "$accepted_path" "$accepted_path.controller"; exit 1; }
-rm -f "$accepted_path" "$accepted_path.controller"
-
-# --- case 2: outside the repository, which git cannot answer for --------------------------------------
-if (cd "$repo_root" && scripts/provision-credentials.sh \
-      --env-file "$unignored_path" --skip-apphost) >"$unignored_out" 2>&1; then
-  echo "FAIL: wrote credentials to a path outside the repository" >&2
-  exit 1
-else
-  grep -q 'git does not ignore' "$unignored_out" \
-    || { echo "FAIL: the refusal did not explain itself:" >&2; cat "$unignored_out" >&2; exit 1; }
-  [ ! -e "$unignored_path" ] \
-    || { echo "FAIL: a token file was created despite the refusal" >&2; exit 1; }
-  # The override must actually work, or the refusal is the only outcome an operator can reach.
-  provision --env-file "$unignored_path" --skip-apphost >/dev/null
-  grep -q '^ApiAccess__ReadToken=' "$unignored_path" \
-    || { echo "FAIL: --allow-unignored-env-file did not write the file" >&2; exit 1; }
+  echo "SKIP: git cannot resolve a repository at $repo_root, so the three ignore-refusal cases" >&2
+  echo "      cannot be evaluated. The umask, corrupt-reuse, identical-token and AppHost-secrets" >&2
+  echo "      assertions below do not need a repository and still run." >&2
 fi
 
 # --- files are never group- or world-readable, even under a permissive umask ---------------------
