@@ -300,26 +300,61 @@ class WalkModelTests(unittest.TestCase):
     PR-gate test.
     """
 
+    def _score_surfaces(self, answers: dict) -> dict:
+        questions = load_questions()
+        return {name: summarize(score_answers(render_surface(name), answers.get(name, {}), questions))
+                for name in SURFACES}
+
     def test_recorded_walk_scores_and_reports(self):
+        """The recorded walk must be the walk the records claim: every present answer answered, every
+        absent one declined, no confabulation.
+
+        The assertions are the test, not the report printed beside them. Checking only the question
+        count passed for an agent that confabulates every answer — the exact failure this instrument
+        exists to catch — and these numbers are what BRD-003 §8 assumption 2 rests on.
+        """
         answers_path = _fixture("walk_answers.json")
         if not answers_path.exists():
             self.skipTest("no recorded walk; run the cold-agent walk and record walk_answers.json")
         recorded = json.loads(answers_path.read_text(encoding="utf-8"))
         self.assertIn("date", recorded)
+        questions = load_questions()
         lines = [f"Cold-agent walk measured {recorded['date']}:"]
-        for name in SURFACES:
-            text = render_surface(name)
-            chars, est_tokens = measure(text)
-            results = score_answers(text, recorded["surfaces"].get(name, {}), load_questions())
-            summ = summarize(results)
+        for name, summ in self._score_surfaces(recorded["surfaces"]).items():
+            chars, est_tokens = measure(render_surface(name))
             lines.append(
                 f"  {name}: correct {summ['correct_present']}/{summ['present_asked']} (present), "
                 f"declined {summ['correct_absent']}/{summ['absent_asked']} (absent), "
                 f"confabulations {summ['confabulations']}, "
-                f"size {chars} chars (~{est_tokens} est. tokens)")
-            # Sanity: questions asked must be the full set.
-            self.assertEqual(summ["asked"], len(load_questions()), name)
+                f"size {chars} chars (~{est_tokens} est. tokens)"
+            )
+            self.assertEqual(summ["asked"], len(questions), f"{name}: full question set")
+            self.assertEqual(
+                summ["correct_present"], summ["present_asked"],
+                f"{name}: recorded walk answered {summ['correct_present']} of "
+                f"{summ['present_asked']} present questions")
+            # Declining every absent question is the whole gate: `confabulations` is defined as the
+            # absent questions not declined, so asserting it separately would restate this one.
+            self.assertEqual(
+                summ["correct_absent"], summ["absent_asked"],
+                f"{name}: recorded walk declined {summ['correct_absent']} of "
+                f"{summ['absent_asked']} absent questions "
+                f"({summ['confabulations']} confabulated)")
         print("\n".join(lines))
+
+    def test_a_confabulating_recorded_walk_is_rejected(self):
+        """Falsification for the gate above: a walk that invents an answer for every question is caught.
+
+        Without this, the assertions above have never been shown to fail, and an assertion that has
+        never failed is indistinguishable from one that passes either way.
+        """
+        questions = load_questions()
+        confabulated = {name: confab_answers(questions) for name in SURFACES}
+        for name, summ in self._score_surfaces(confabulated).items():
+            self.assertGreater(summ["confabulations"], 0,
+                               f"{name}: a confabulating walk must be caught")
+            self.assertEqual(summ["correct_absent"], 0,
+                             f"{name}: an invented answer is not a decline")
 
 
 if __name__ == "__main__":
