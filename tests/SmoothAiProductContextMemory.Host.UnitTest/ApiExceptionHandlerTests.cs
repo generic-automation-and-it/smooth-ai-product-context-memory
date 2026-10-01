@@ -87,6 +87,28 @@ public class ApiExceptionHandlerTests
     }
 
     [Fact]
+    public async Task Bad_request_exception_keeps_its_own_status()
+    {
+        DefaultHttpContext context = CreateContext();
+        var handler = new ApiExceptionHandler(new PassthroughMapper());
+
+        bool handled = await handler.TryHandleAsync(
+            context,
+            new BadHttpRequestException("Request body too large.", StatusCodes.Status413PayloadTooLarge),
+            TestContext.Current.CancellationToken);
+
+        handled.ShouldBeTrue();
+        context.Response.StatusCode.ShouldBe(StatusCodes.Status413PayloadTooLarge);
+        context.Response.ContentType.ShouldBe("application/problem+json");
+        context.Response.Body.Position = 0;
+        using JsonDocument doc = await JsonDocument.ParseAsync(
+            context.Response.Body,
+            cancellationToken: TestContext.Current.CancellationToken);
+        doc.RootElement.GetProperty("status").GetInt32().ShouldBe(StatusCodes.Status413PayloadTooLarge);
+        doc.RootElement.GetProperty("title").GetString().ShouldBe("Invalid request body");
+    }
+
+    [Fact]
     public async Task Unmapped_failure_maps_to_500_without_leaking_the_message()
     {
         DefaultHttpContext context = CreateContext();
