@@ -70,6 +70,47 @@ permissions:
   contents: read
 
 jobs:
+  python-harnesses:
+    name: Python harnesses (${{ matrix.python }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.9 is the floor the skills declare (package.json `mimisbrunnrPython`, enforced by the npm
+        # launcher); 3.12 is what developers and the rest of the gate run. A 3.9-only break — a 3.10+
+        # stdlib API or syntax — is invisible to a 3.12-only gate.
+        python: ['3.9', '3.12']
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Test context-memory skill
+        run: |
+          python3 -B .agents/skills/mimisbrunnr-context-memory/tests/run_tests.py
+          python3 -B .agents/skills/mimisbrunnr-context-memory/tests/measure_cost.py
+
+      - name: Test understanding skill
+        run: |
+          python3 -B .agents/skills/mimisbrunnr-understanding/tests/run_tests.py
+          python3 -B .agents/skills/mimisbrunnr-understanding/tests/run_walk_tests.py
+
+      - name: Test dossier skill
+        run: python3 -B .agents/skills/mimisbrunnr-dossier/tests/run_tests.py
+
+      - name: Test ai-understanding skill
+        run: python3 -B .agents/skills/ai-understanding/tests/run_tests.py
+
   build-and-test:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -102,22 +143,6 @@ jobs:
 
       - name: Test Aspire test runner
         run: bash .github/actions/aspire-test-with-coverage/test-run.sh
-
-      - name: Test context-memory skill
-        run: |
-          python3 -B .agents/skills/mimisbrunnr-context-memory/tests/run_tests.py
-          python3 -B .agents/skills/mimisbrunnr-context-memory/tests/measure_cost.py
-
-      - name: Test understanding skill
-        run: |
-          python3 -B .agents/skills/mimisbrunnr-understanding/tests/run_tests.py
-          python3 -B .agents/skills/mimisbrunnr-understanding/tests/run_walk_tests.py
-
-      - name: Test dossier skill
-        run: python3 -B .agents/skills/mimisbrunnr-dossier/tests/run_tests.py
-
-      - name: Test ai-understanding skill
-        run: python3 -B .agents/skills/ai-understanding/tests/run_tests.py
 
       - name: Install .NET SDK
         uses: actions/setup-dotnet@v4
