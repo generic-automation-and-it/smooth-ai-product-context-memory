@@ -57,8 +57,6 @@ dotnet run --project src/SmoothAiProductContextMemory.Host -- verify <archive>  
 dotnet run --project src/SmoothAiProductContextMemory.Host -- restore <archive> [--force]  # restore + printed reconciliation
                                                                    # generated Markdown dump of the store (never commit the output)
 
-SMOOTH_AGE_BENCH=1 dotnet test tests/SmoothAiProductContextMemory.Infrastructure.ComponentTest \
-    --filter Nfr02BenchmarkTests                                   # NFR-02 traversal benchmark (skipped without the env var)
 SMOOTH_FTS_BENCH=1 dotnet test tests/SmoothAiProductContextMemory.Infrastructure.ComponentTest \
     --filter RecallTuningEvidenceTests                             # recall-tuning evidence harness (skipped without the env var)
 SMOOTH_FEEDBACK_BENCH=1 dotnet test tests/SmoothAiProductContextMemory.Infrastructure.ComponentTest \
@@ -68,9 +66,9 @@ SMOOTH_SNAPSHOT_BENCH=1 dotnet test tests/SmoothAiProductContextMemory.Infrastru
 SMOOTH_DOSSIER_BENCH=1 dotnet test tests/SmoothAiProductContextMemory.Application.ComponentTest \
     --filter DossierWorkflowBenchmarkTests                         # HLD-005 dossier end-to-end timing (skipped without the env var)
 SMOOTH_NFR_BENCH=1 dotnet test tests/SmoothAiProductContextMemory.Infrastructure.ComponentTest \
-    --filter NfrEvidenceTests                                      # HLD-003 NFR-04 evidence (skipped without the env var)
+    --filter NfrEvidenceTests                                      # HLD-004 NFR-01..03 evidence (skipped without the env var)
 SMOOTH_AGE_BENCH=1 dotnet test tests/SmoothAiProductContextMemory.Infrastructure.ComponentTest \
-    --filter "Nfr02BenchmarkTests|TicketTraversalBenchmarkTests"    # NFR-02 traversal benchmark — both classes share this gate
+    --filter "Nfr02BenchmarkTests|TicketTraversalBenchmarkTests"    # HLD-003 NFR-02 traversal benchmark — both classes share this gate (skipped without the env var)
 SMOOTH_WALK_BENCH=1 python3 -B \
     .agents/skills/mimisbrunnr-understanding/tests/run_walk_tests.py   # cold-agent walk harness — proves a memoryless agent can ACT on load/--all/dossier output, measures its context cost; the PR gate runs the model-free scorer/degenerate assertions, the env var adds the scored report of the recorded walk
 scripts/seed-graph-sample.sh nfr03_sample                          # populate a scratch database with memories + edges
