@@ -20,6 +20,7 @@ on:
       - .agents/skills/mimisbrunnr-context-memory/**
       - .agents/skills/mimisbrunnr-understanding/**
       - .agents/skills/mimisbrunnr-dossier/**
+      - .agents/skills/ai-understanding/**
       - .agents/agents/memory-read.md
       - .agents/agents/memory-write.md
       - .github/agents/memory-read.agent.md
@@ -48,6 +49,7 @@ on:
       - .agents/skills/mimisbrunnr-context-memory/**
       - .agents/skills/mimisbrunnr-understanding/**
       - .agents/skills/mimisbrunnr-dossier/**
+      - .agents/skills/ai-understanding/**
       - .agents/agents/memory-read.md
       - .agents/agents/memory-write.md
       - .github/agents/memory-read.agent.md

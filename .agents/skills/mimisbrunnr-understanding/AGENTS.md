@@ -80,6 +80,10 @@ DB and wire are unchanged.
 - **A folder resolves to the newest version of each slug** — stamp suffix `-yyyyMMdd-HHmm` of the parent
   folder, then `updated` — the same precedence `ai-understanding`'s index applies. Older versions are
   counted, not silently dropped.
+- **The dump warns when its folder is gitignored.** `.context/` is gitignored, so the default dump
+  location does not survive the workspace. The warning is advisory — the dump is still written and the
+  exit code is unchanged — and it asks the repo holding the folder (`git check-ignore`, never a text
+  search, since the same folder may be tracked in another repo) rather than assuming.
 - **The dump redacts before writing and fails closed.** It shells out to
   `../mimisbrunnr-context-memory/scripts/redact.py` over stdin (never argv). Both script folders ship
   together in the npm package, so the relative path holds there too.
@@ -89,14 +93,16 @@ DB and wire are unchanged.
 
 ## Test References
 
-- **Committed L0 harness (CI-gated):** `tests/run_tests.py` — stdlib `unittest`, 48 tests, no external
+- **Committed L0 harness (CI-gated):** `tests/run_tests.py` — stdlib `unittest`, 50 tests, no external
   runner. A default load creates no files (NFR-01); store-export five-part rendering keeps uuid/version
   attribution; `proposed`/`program` scope flagged, never promoted (NFR-03); `--asof` filters the validity
   window and states the omission; foreign material cited as data with truncation disclosed; import refused
   without `--store` and emitting nothing (NFR-02); the `--store` payload carrying selectors and bundle
   flags while writing nothing; "no selectors ⇒ no association"; the dump → load round trip (LADR-07); `.understanding.md` units and store folders read as structured
   input with newest-version-per-slug, including import from a dump folder (LADR-09); the dump's
-  redaction and its fail-closed refusal on a missing, non-zero-exit or malformed-output redactor.
+  redaction and its fail-closed refusal on a missing, non-zero-exit or malformed-output redactor; the
+  dump's durability warning — printed for a gitignored destination, silent for a tracked one, decided by
+  `git check-ignore` rather than a text search. Advisory: the warning never changes the exit code.
   Run: `python3 -B .agents/skills/mimisbrunnr-understanding/tests/run_tests.py`. The PR gate runs it.
 - **Cold-agent walk harness:** `tests/run_walk_tests.py` — proves an agent with no memory can **act** on
   what `load`/`--all`/the dossier slice produce (BRD-003 assumption 2), and measures what that costs in
@@ -119,6 +125,7 @@ DB and wire are unchanged.
 |:-----|:-------|:----|
 | 2026-10-01 | Walk scorer: a decline is now only the instructed phrase `not in context`. The previous fix removed two words from a decline-word list, but the list was the defect — `not present`, `no record` and `does not mention` matched inside confabulated content too, so every probe confabulation still scored as a refusal. Measured results unchanged; mutation-verified. | BRD-003 §8 assumption 2 |
 | 2026-10-01 | Walk scorer: a decline must be a decline phrase — bare `unavailable`/`absent` matched inside confabulated content and scored it as a correct refusal; regression test added. The harness is model-free, so the PR gate now runs it (the docs already claimed its degenerate assertions ran unconditionally, but no CI step ran the file). Measured results unchanged. | BRD-003 §8 assumption 2 |
+| 2026-09-30 | Test References corrected: the harness is 50 tests (two dump-durability fixtures added), the coverage sentence names them, and the walk harness's "not a PR-gate test" reason now names the gated class (`WalkModelTests` replays a recorded model run and is `skipUnless`-gated; `WalkFixtureTests` is model-free) rather than the harness as a whole. A Key Behaviors bullet records the new advisory gitignored-dump warning the client prints. | PR review |
 | 2026-09-30 | Added a cold-agent walk harness (`tests/run_walk_tests.py` + committed fixtures `walk_store_export.json`, `walk_understandings/`, `walk_bundle.json`, `walk_questions.json`, `walk_answers.json`) proving an agent with no memory can act on the `load`/`--all`/dossier output. Measured 2026-09-30: load_default 2/2 present correct + 3/3 absent declined; load_all 4/4 + 1/1; dossier_slice 4/4 + 1/1; 0 confabulations; sizes 1682/2006/2238 chars (~420/502/560 est tokens), all well under the ICM 8k-token band. The model-free degenerate assertions run unconditionally; the scored walk runs behind `SMOOTH_WALK_BENCH=1` and is not a PR-gate test. | BRD-003 §8 assumption 2 |
 | 2026-09-26 | `SKILL.md`/`README.md` re-laid out switches-first: the operation/switch table opens each file ahead of the H1, matching `mimisbrunnr-context-memory` and `mimisbrunnr-vitsmunir-dump`. The `README.md` table gained a lead-in stating the three operations are never conflated and that all switches are off by default; its `load` usage line extended to the full `SKILL.md` switch surface (`--format auto`, `--all`, `--max-chars`). No behavioural or contract change. | PR #108 |
 | 2026-09-26 | README gained "How this relates to ai-understanding and to harness compaction": the export → load/import/dump flow, a comparison with automatic compaction, and pros/cons. Docs only. | README |
