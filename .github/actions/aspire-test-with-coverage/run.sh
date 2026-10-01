@@ -200,6 +200,57 @@ record_failure() {
 
 failures=()
 
+# Test projects are discovered by tier suffix rather than listed, so a new test project cannot be
+# silently left out of the gate. TestFramework* projects are shared fixtures, not suites.
+discover_projects() {
+  local suffix=$1
+  local project
+  for project in tests/*."${suffix}"/*.csproj; do
+    [ -f "${project}" ] || continue
+    case "${project}" in
+      tests/*.TestFramework*/*) continue ;;
+    esac
+    printf '%s\n' "${project}"
+  done
+}
+
+unit_projects=()
+component_projects=()
+integration_projects=()
+while IFS= read -r project; do unit_projects+=("${project}"); done < <(discover_projects UnitTest)
+while IFS= read -r project; do component_projects+=("${project}"); done < <(discover_projects ComponentTest)
+while IFS= read -r project; do integration_projects+=("${project}"); done < <(discover_projects IntegrationTest)
+
+if [ "${#unit_projects[@]}" -eq 0 ] || [ "${#component_projects[@]}" -eq 0 ] || [ "${#integration_projects[@]}" -eq 0 ]; then
+  echo "ERROR: test discovery found ${#unit_projects[@]} unit, ${#component_projects[@]} component and ${#integration_projects[@]} integration projects; every tier must have at least one."
+  exit 1
+fi
+
+# Projects within a tier run in parallel; tiers run cheapest first (L0 → L1 → L2) so a unit failure
+# is reported before the slower database-backed tiers spend their time.
+run_phase() {
+  local label=$1
+  shift
+  local project
+  local pids=()
+  local names=()
+  echo "Phase — ${label} tests (parallel)..."
+  for project in "$@"; do
+    run_test_project "${project}" &
+    pids+=($!)
+    names+=("$(basename "${project}" .csproj)")
+  done
+  local index
+  for index in "${!pids[@]}"; do
+    wait "${pids[$index]}" || record_failure "${names[$index]} failed."
+  done
+  ensure_aspire_alive
+}
+
+# Coverage floor: a drop below it fails the gate, so the suite cannot quietly regress. Overridable
+# with COVERAGE_THRESHOLD; the value is a regression guard, not a target.
+coverage_threshold="${COVERAGE_THRESHOLD:-50}"
+
 export ASPNETCORE_URLS="http://localhost:19888"
 export ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL="http://localhost:19889"
 export ASPIRE_ALLOW_UNSECURED_TRANSPORT="true"
@@ -222,37 +273,9 @@ dotnet tool restore || exit 1
 rm -rf "${results_directory}" "${coverage_directory}"
 mkdir -p "${results_directory}" "${coverage_directory}"
 
-echo "Phase 1 — integration tests..."
-run_test_project tests/SmoothAiProductContextMemory.Host.IntegrationTest/SmoothAiProductContextMemory.Host.IntegrationTest.csproj \
-  || record_failure "Host integration tests failed."
-ensure_aspire_alive
-
-echo "Phase 2 — component tests (parallel)..."
-run_test_project tests/SmoothAiProductContextMemory.Application.ComponentTest/SmoothAiProductContextMemory.Application.ComponentTest.csproj &
-app_component_pid=$!
-run_test_project tests/SmoothAiProductContextMemory.Infrastructure.ComponentTest/SmoothAiProductContextMemory.Infrastructure.ComponentTest.csproj &
-infra_component_pid=$!
-wait "${app_component_pid}"   || record_failure "Application component tests failed."
-wait "${infra_component_pid}" || record_failure "Infrastructure component tests failed."
-ensure_aspire_alive
-
-echo "Phase 3 — unit tests (parallel)..."
-run_test_project tests/SmoothAiProductContextMemory.Domain.UnitTest/SmoothAiProductContextMemory.Domain.UnitTest.csproj &
-domain_unit_pid=$!
-run_test_project tests/SmoothAiProductContextMemory.Application.UnitTest/SmoothAiProductContextMemory.Application.UnitTest.csproj &
-app_unit_pid=$!
-run_test_project tests/SmoothAiProductContextMemory.Infrastructure.UnitTest/SmoothAiProductContextMemory.Infrastructure.UnitTest.csproj &
-infra_unit_pid=$!
-run_test_project tests/SmoothAiProductContextMemory.Host.UnitTest/SmoothAiProductContextMemory.Host.UnitTest.csproj &
-host_unit_pid=$!
-run_test_project tests/SmoothAiProductContextMemory.AppHost.UnitTest/SmoothAiProductContextMemory.AppHost.UnitTest.csproj &
-apphost_unit_pid=$!
-wait "${domain_unit_pid}" || record_failure "Domain unit tests failed."
-wait "${app_unit_pid}"    || record_failure "Application unit tests failed."
-wait "${infra_unit_pid}"  || record_failure "Infrastructure unit tests failed."
-wait "${host_unit_pid}"   || record_failure "Host unit tests failed."
-wait "${apphost_unit_pid}" || record_failure "AppHost unit tests failed."
-ensure_aspire_alive
+run_phase "L0 unit" "${unit_projects[@]}"
+run_phase "L1 component" "${component_projects[@]}"
+run_phase "L2 integration" "${integration_projects[@]}"
 
 dotnet tool run reportgenerator \
   "-reports:${results_directory}/**/coverage.cobertura.xml" \
@@ -260,9 +283,6 @@ dotnet tool run reportgenerator \
   "-reporttypes:HtmlInline_AzurePipelines;Cobertura;TextSummary;MarkdownSummaryGithub" \
   || record_failure "Coverage report generation failed."
 
-# Coverage floor: a drop below it fails the gate, so the suite cannot quietly regress. Overridable
-# with COVERAGE_THRESHOLD; the value is a regression guard, not a target.
-coverage_threshold="${COVERAGE_THRESHOLD:-50}"
 summary_file="${coverage_directory}/Summary.txt"
 if [ -f "${summary_file}" ]; then
   line_coverage="$(grep -oE 'Line coverage: [0-9.]+%' "${summary_file}" | grep -oE '[0-9.]+' | head -n 1)"
