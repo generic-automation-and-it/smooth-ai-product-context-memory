@@ -13,6 +13,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -472,6 +473,33 @@ class DumpTests(unittest.TestCase):
             rc, out, _ = run(["load", str(out_dir / "_session.md")])
             self.assertEqual(rc, 0)
             self.assertIn("AGE cutover needed a trigger rebuild", out)
+
+    def test_dump_warns_when_destination_is_gitignored(self):
+        """A dump into a gitignored folder will not survive the workspace; the repo's own gitignore
+        decision, checked via `git check-ignore`, decides the warning."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            subprocess.run(["git", "init", "-q", str(repo)], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(repo), "config", "core.excludesFile", os.devnull], check=True)
+            (repo / ".gitignore").write_text(".context/\n", encoding="utf-8")
+            out_dir = repo / ".context" / "dumps"
+            out_dir.mkdir(parents=True)
+            fold = out_dir / "sess"
+            rc, out, _ = run(["dump", "--currentsession", "--out", str(fold)])
+            self.assertEqual(rc, 0)
+            self.assertIn("gitignored", out)
+
+    def test_dump_no_warning_when_destination_is_tracked(self):
+        """A dump into a tracked folder is durable; no warning is owed."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            subprocess.run(["git", "init", "-q", str(repo)], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(repo), "config", "core.excludesFile", os.devnull], check=True)
+            (repo / ".gitignore").write_text("", encoding="utf-8")
+            out_dir = repo / "dumps"
+            rc, out, _ = run(["dump", "--currentsession", "--out", str(out_dir)])
+            self.assertEqual(rc, 0)
+            self.assertNotIn("gitignored", out)
 
 
 

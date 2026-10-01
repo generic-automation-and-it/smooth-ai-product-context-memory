@@ -41,7 +41,8 @@ or the blocked tag half.
 ## Architecture Decisions
 
 See [./ladrs/](./ladrs/). LADRs 01–08 and 12–15 Draft; 09 Accepted and implemented;
-10 Blocked with a verified evidence-only interim; 11 ticket half Accepted and implemented, tag half Blocked.
+10 Blocked with a verified evidence-only interim; 11 ticket half Accepted and implemented, tag half Blocked;
+16 Accepted (rejected option).
 
 | LADR | Decision | Why it matters |
 |------|----------|----------------|
@@ -60,6 +61,7 @@ See [./ladrs/](./ladrs/). LADRs 01–08 and 12–15 Draft; 09 Accepted and imple
 | [LADR-13](./ladrs/LADR-13-findings-carry-a-basis-and-a-scope.md) | Findings carry a basis and a scope | An inference that reads as a discovery is the most persuasive and least checkable thing a composition emits |
 | [LADR-14](./ladrs/LADR-14-preview-and-composition-bind-to-one-selection.md) | Preview and composition bind to one selection | Re-selecting at composition time is the implementation default and makes the consent step decorative |
 | [LADR-15](./ladrs/LADR-15-understanding-additional-kind.md) | `kind = understanding` is a first-class selectable kind on this read-only export | Closes the design gap where the kind was asserted only as an AGENTS.md line with no dossier-side semantics |
+| [LADR-16](./ladrs/LADR-16-no-specified-but-not-wired-finding.md) | No "specified but not wired" finding — **rejected** | A slice sees only edges with both endpoints selected, and the store holds no wiring; the question belongs to the code-side bootstrap |
 
 **"Blocked" is not in the shared status vocabulary.** It is used here for a decision with a missing input:
 an upstream gap makes at least one option unbuildable, so the options cannot be compared. Each blocked
@@ -116,6 +118,7 @@ Targets and verification live in [./nfrs/](./nfrs/). Three shape how code is wri
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-01 | Added LADR-16, rejecting a "specified but not wired" (ICM `ghost`) finding: the bundle loads only edges with both endpoints selected, so a missing `implements` edge in a slice is not absence in the store, and `implements` records capture coverage, not code. The taxonomy is unchanged and earlier dossiers read as before; the question is routed to the repository bootstrap's documented-intention vs observed-behavior classes. | LADR-16 |
 | 2026-09-30 | Status line corrected: this file still read "This HLD remains In Discovery" while `README.md` read `Accepted — implemented`, so an agent reading only this file treated the shipped `ContextDossier` slice as unapproved and an agent reading only the README treated the Blocked tag half as resolved. The LADR statuses below are unchanged — they agree with the `README.md` table, and promoting 01–08 / 12–15 needs per-LADR acceptance evidence, not a record sync. The `README.md` near-miss paragraph no longer calls the full export "In Discovery". | HLD-005 promotion |
 | 2026-09-22 | Added LADR-15: `kind = understanding` is a first-class selectable kind on the bundle/dossier, closing the gap where the kind was asserted only as a one-line Key Behaviour with no dossier-side semantics. Each NFR-01..07 Verification/Acceptance list names the Understanding-kind case (same selection, widening, scope gating, citation, reconciliation, confidentiality, read-only and fidelity guarantees; load/import stays HLD-007's). | HLD-007; BRD-003; LADR-15 |
 | 2026-09-19 | Scoped the "no import / projection is never a source" principle to the dossier and noted the understanding load/import capability as a separate concern owned by HLD 007 (opt-in `--store` through the capture skill). Understanding rides on this export as a selectable kind. | HLD-007; BRD-003 |

@@ -23,14 +23,17 @@ which Understandings to load, then reads only those folders.
 Usage:
     python3 .agents/skills/ai-understanding/scripts/understanding_index.py [store-dir]
 
-Defaults to `.context/understandings`. Pure standard library, read/write only, no network.
+Defaults to `.context/understandings`. Pure standard library plus `git check-ignore` for the
+durability warning, read/write only to the store, no network.
 Exits 1 when a current unit fails validation — the index is still written so the drift is visible.
 """
 
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
+import zipfile
 from datetime import date
 from pathlib import Path
 
@@ -67,6 +70,10 @@ BLOCK_SCALAR_RE = re.compile(r"^[|>][0-9+-]{0,2}$")
 # carrying no `question`, which record what a piece of work produced — decay faster than knowledge.
 STALE_AFTER_DAYS = 90
 STALE_AFTER_DAYS_OUTCOME = 30
+# The publish target sits beside the store (`.context/understandings-publish`), the one durable form
+# of the store (LADR-008). An archive mirrors the store's `<subject>-<stamp>/<slug>.understanding.md`
+# paths, so a unit is published exactly when its path is a member of one.
+PUBLISH_DIR_NAME = "understandings-publish"
 
 
 def parse_frontmatter(text: str) -> dict:
@@ -397,6 +404,53 @@ def stamp_of(subject: str) -> str:
     return subject[-13:] if SUBJECT_STAMP_RE.match(subject) else ""
 
 
+def is_gitignored(path: Path) -> bool:
+    """True when `path` is ignored by the git repo it sits in.
+
+    Runs `git check-ignore`, not a text search: the store may be ignored in this repo and tracked
+    in another, and only the repo actually holding it decides whether a warning is owed. Without a
+    repo, or without git on the path, the path is not ignored — nothing to warn about.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(path.parent), "check-ignore", "-q", "--", path.name],
+            capture_output=True,
+        )
+    except (FileNotFoundError, OSError):
+        return False
+    return proc.returncode == 0
+
+
+def published_paths(store: Path) -> set[str]:
+    """Every unit path held by an archive in the publish dir beside the store.
+
+    Membership, not archive time: a `--portable-only` archive is newer than the `repo-specific` units it
+    deliberately left out, so judging by time reports them published and lets them vanish unwarned. An
+    unreadable zip contributes nothing, so its units stay reported — the safe direction.
+    """
+    paths: set[str] = set()
+    pub_dir = store.parent / PUBLISH_DIR_NAME
+    if not pub_dir.is_dir():
+        return paths
+    for archive in sorted(pub_dir.glob("*.zip")):
+        try:
+            with zipfile.ZipFile(archive) as zf:
+                names = zf.namelist()
+        except (zipfile.BadZipFile, OSError):
+            continue
+        for name in names:
+            parts = Path(name).parts
+            if len(parts) >= 2 and parts[-1].endswith(UNIT_SUFFIX):
+                paths.add(f"{parts[-2]}/{parts[-1]}")
+    return paths
+
+
+def unpublished_units(units: list[dict], store: Path) -> list[dict]:
+    """Current units whose path is in no published archive. No archive means every unit."""
+    published = published_paths(store)
+    return [unit for unit in units if unit["path"] not in published]
+
+
 def version_key(record: dict) -> tuple[str, str, str]:
     """Recency of one copy of a slug. Folder stamp decides; `updated` and path break ties.
 
@@ -518,7 +572,8 @@ def days_since(value) -> int | None:
         return None
 
 
-def review(units: list[dict], superseded: list[dict] | None = None) -> list[str]:
+def review(units: list[dict], superseded: list[dict] | None = None,
+           unpublished: list[dict] | None = None) -> list[str]:
     """Advisory decay report: which units are worth re-reading, pruning or promoting.
 
     Not validation — none of this is wrong, and the report never changes the exit code. It exists
@@ -567,6 +622,13 @@ def review(units: list[dict], superseded: list[dict] | None = None) -> list[str]
             f"{slug}: {revisions[slug]} superseded copy(ies) on disk — prune guidance only; "
             f"history is never deleted automatically"
         )
+
+    if unpublished:
+        lines.append("unpublished — the store is gitignored and these units are in no published "
+                     "archive, so they would vanish with this workspace:")
+        lines.extend(f"    {unit['path']}" for unit in unpublished)
+        lines.append("    run `ai-understanding --publish` to carry them out")
+
     return lines
 
 
@@ -623,7 +685,8 @@ USAGE = f"""usage: understanding_index.py [store-dir] [--review]
 Regenerate INDEX.md from the <subject>-<yyyyMMdd-HHmm>/<slug>.understanding.md units.
 A slug repeated across stamped folders is a version chain: the newest stamp is indexed,
 older copies stay on disk unlisted and exempt from validation.
-Defaults to {DEFAULT_STORE}. --review adds an advisory decay report.
+Defaults to {DEFAULT_STORE}. --review adds an advisory decay report, including an `unpublished`
+section when the store is gitignored. A gitignored store also prints a one-line durability warning.
 
 Exit codes: 0 clean · 1 validation problems (index still written) · 2 store not found."""
 
@@ -657,8 +720,15 @@ def main(argv: list[str]) -> int:
         f"-> {store / 'INDEX.md'}"
     )
 
+    unpublished = unpublished_units(units, store) if is_gitignored(store) else []
+    if unpublished:
+        print(
+            f"warning: {store} is gitignored and {len(unpublished)} unit(s) are unpublished — "
+            f"run `ai-understanding --publish` to carry them out of this workspace"
+        )
+
     if wants_review:
-        report = review(units, superseded)
+        report = review(units, superseded, unpublished)
         print("\nreview — advisory, does not affect the exit code")
         print("\n".join(report) if report else "    nothing flagged")
 

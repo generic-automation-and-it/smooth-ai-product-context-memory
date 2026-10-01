@@ -193,6 +193,7 @@ without it. It is not a deferred decision — it is a decision with a missing in
 | [LADR-13](./ladrs/LADR-13-findings-carry-a-basis-and-a-scope.md) | Every finding carries a stated basis and is scoped to the examined material | Draft |
 | [LADR-14](./ladrs/LADR-14-preview-and-composition-bind-to-one-selection.md) | Preview and composition bind to one recorded selection | Draft |
 | [LADR-15](./ladrs/LADR-15-understanding-additional-kind.md) | `kind = understanding` is a first-class selectable kind on this read-only export | Draft |
+| [LADR-16](./ladrs/LADR-16-no-specified-but-not-wired-finding.md) | No "specified but not wired" finding — a slice cannot evidence wiring | Accepted (rejected option) |
 
 ### Resolved tickets, blocked tags
 

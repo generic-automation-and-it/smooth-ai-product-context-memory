@@ -1,0 +1,26 @@
+{
+  "date": "2026-09-30",
+  "surfaces": {
+    "load_default": {
+      "Q1": "Verify freshness by calling a newly added endpoint — a green container that 404s on a new endpoint may be running a stale build. Stated by the memory \"Stale-image trap\" (v3, uuid aaaaaaaa-1111-1111-1111-111111111111).",
+      "Q2": "The graph is a path, not a join; a relational join cannot express the chain from measurement to decision. Stated by the memory \"Graph over joins\" (uuid aaaaaaaa-2222-2222-2222-222222222222).",
+      "Q3": "not in context",
+      "Q4": "not in context",
+      "Q5": "not in context"
+    },
+    "load_all": {
+      "Q1": "A healthy container may run a stale build; verify freshness by calling a newly added endpoint — stated by the v3 (current) version of the \"Stale-image trap\" memory, uuid aaaaaaaa-1111-1111-1111-111111111111 (the v1 version asserting freshness via health check is superseded).",
+      "Q2": "The graph is a path, not a join — \"a relational join cannot express the chain from measurement to decision.\" Stated by the \"Graph over joins\" memory, uuid aaaaaaaa-2222-2222-2222-222222222222.",
+      "Q3": "Postgres is the storage engine — stated by the \"Storage engine\" record, uuid bbbbbbbb-1111-1111-1111-111111111111.",
+      "Q4": "Redis holds the cache, not the store — stated by the \"Cache path\" record, uuid bbbbbbbb-2222-2222-2222-222222222222.",
+      "Q5": "not in context"
+    },
+    "dossier_slice": {
+      "Q1": "The verified fix is to verify freshness by calling a newly added endpoint, since a healthy container may run a stale build. Stated by memory aaaaaaaa-1111-1111-1111-111111111111 v3 (subject \"Stale-image trap\").",
+      "Q2": "The graph is a path, not a join. Stated by memory aaaaaaaa-2222-2222-2222-222222222222 v1 (subject \"Graph over joins\").",
+      "Q3": "Postgres is the authoritative storage engine. Stated by memory bbbbbbbb-1111-1111-1111-111111111111 v1 (subject \"Storage engine\").",
+      "Q4": "Redis holds the cache, not the store. Stated by memory bbbbbbbb-2222-2222-2222-222222222222 v1 (subject \"Cache path\").",
+      "Q5": "not in context"
+    }
+  }
+}

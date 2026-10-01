@@ -85,6 +85,9 @@ Bounded taxonomy, fixed before first export: `gap`, `contradiction`, `equivalenc
 
 - `no-links-in-slice`, not `orphan` — a slice cannot prove a memory is unlinked anywhere.
 - `weak-summary` is **analysis**, not observation.
+- There is no "specified but not wired" (`ghost`) category — rejected in HLD-005 LADR-16: a slice sees
+  only edges with both endpoints selected, and `implements` records capture coverage, not code. A
+  specific unwired decision may still be a basis-carrying `gap`; never infer it from a missing edge.
 - `near-miss-tag` is evidence-only (LADR-10): supporting UUID/version, concrete basis, examined scope,
   observation/analysis classification. No extra search, no hidden IDs/counts, no claim about unseen
   exclusions. **No evidence means no finding.** Reuse `mimisbrunnr-context-memory/scripts/near_miss_tags.py`.
@@ -148,6 +151,7 @@ the only file it writes is the local dossier artefact. Tests: `tests/run_tests.p
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-01 | Findings section records that no `ghost` ("specified but not wired") category exists, per HLD-005 LADR-16, and that a missing `implements` edge is never a finding basis. Taxonomy unchanged. | HLD-005 LADR-16 |
 | 2026-09-27 | `SKILL.md` gained the YAML frontmatter every other skill carries (`name`, one-line `description`, block-list `allowed-tools`, `effort` — the `smooth-devex-template` shape; switches stay documented in the body). Without it the skill listed with its bare name as description and no trigger text. No behavioural change. | skill frontmatter alignment |
 | 2026-09-22 | Created — read-only dossier composer contract (LADR-02/04/05/07/08/12/13/14/15, NFR-01..07). | HLD-005; BRD-002 |
 | 2026-09-23 | Implemented the judgement skeleton (`scripts/dossier_composer.py`), the invocation contract (`SKILL.md`), and the committed L0 harness (`tests/run_tests.py`, 34 tests, NFR-04/05/06/07). | HLD-005; BRD-002 |
