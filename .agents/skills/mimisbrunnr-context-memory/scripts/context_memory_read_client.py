@@ -2,11 +2,31 @@
 """Read-only CLI surface for delegated context-memory retrieval."""
 
 import argparse
+import json
 import os
 import sys
 
 import context_memory_client as client
 import deepsearch
+
+# The read surface, declared once so the framing contract is inspectable rather than implied by which
+# subparsers happen to exist. `READ_COMMANDS` is every subcommand this client offers; a name added here
+# and not placed in one of the two sets below is a test failure, not a silently unframed surface.
+READ_COMMANDS = frozenset({
+    "probe", "query", "deepsearch", "get-versions", "get-blob", "paths", "ticket-paths", "labels",
+    "initiatives",
+})
+
+# The opt-out, with its reason recorded. Each entry must carry no recalled content, or it is a surface
+# handing an agent unframed memory. `probe` reports whether a TCP connection succeeds; it returns no
+# record, no statement and no body.
+#
+# Framed is the *default* and is computed as "everything not opted out" — deliberately not a second
+# hand-maintained list. Two lists drift: a subcommand added to one and not the other is either silently
+# unframed or silently double-declared, and both look fine. Deriving it means the only question to ask
+# is whether a name belongs in the opt-out, which is a judgement about content rather than bookkeeping.
+UNFRAMED_COMMANDS = frozenset({"probe"})
+FRAMED_COMMANDS = frozenset(READ_COMMANDS - UNFRAMED_COMMANDS)
 
 
 def main():
@@ -46,16 +66,85 @@ def main():
     if args.base_url:
         os.environ[client.ENV_BASE_URL] = args.base_url
     try:
-        args.func(args)
+        if args.command in UNFRAMED_COMMANDS:
+            args.func(args)
+        else:
+            _run_framed(args)
     except client.ClientError as error:
         print(str(error), file=sys.stderr)
         return 1
     return 0
 
 
-def print_deepsearch(args):
-    import json
+def _run_framed(args):
+    """Run a subcommand and frame whatever it printed.
 
+    Capturing stdout rather than routing each `cmd_*` through `print_recall` is what makes the framing
+    a default rather than a per-subcommand decision: nine call sites each remembering to print a notice
+    is nine chances to add a tenth and forget, and the read client's own subcommand list is the only place
+    that knows which surfaces exist.
+    """
+    import io
+    from contextlib import redirect_stdout
+
+    buffer = io.StringIO()
+    with redirect_stdout(buffer):
+        result = args.func(args)
+    raw = buffer.getvalue().strip()
+    if not raw:
+        return result
+    payload = _parse_framed_json(raw)
+    if payload is _NOT_JSON:
+        # Not JSON — a bare blob body, or a formatted error. The banner is the only framing available
+        # here, since there is no object to carry the field, and the original text is passed through
+        # untouched rather than dropped or guessed at.
+        #
+        # `print_recall` owns the banner everywhere else, and this branch is the one place the read
+        # client emits one itself. Two layers each deciding "has a banner already been printed?" is how
+        # the count reached zero once: the inner layer saw the outer's field and stayed quiet, the outer
+        # saw the inner's banner and stayed quiet, and the notice vanished entirely. One owner, one
+        # decision — this branch is the exception because it is the one with no object to frame.
+        if client.RECALL_NOTICE not in raw:
+            print(client.BANNER_PREFIX + client.RECALL_NOTICE)
+        print(raw)
+        return result
+    # A payload that already carries the notice came from the capture client's own framing layer, which
+    # also printed its banner. `print_recall` detects that and reprints nothing, so the notice appears
+    # exactly once whichever layer got there first.
+    client.print_recall(payload)
+    return result
+
+
+# Sentinel distinguishing "not JSON" from "JSON that happens to be null", which a bare `None` cannot do.
+_NOT_JSON = object()
+
+
+def _parse_framed_json(raw: str):
+    """Parse stdout that may already carry a banner from an inner framing layer.
+
+    `query` and `deepsearch` are reachable from both the capture client and the read client, and the
+    inner one frames on its own. So the text arriving here can be `banner + JSON`, and parsing the whole
+    thing as JSON fails — which previously fell through to the not-JSON branch and emitted a *second*
+    banner, which reads as emphasis and trains a reader to scroll past it.
+
+    Anything before the first brace is treated as already-emitted prose. A blob body containing a brace
+    would be misread as JSON and fail to parse, landing back in the not-JSON branch, so the fallback
+    still holds for prose.
+    """
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        pass
+    start = raw.find("{")
+    if start == -1:
+        return _NOT_JSON
+    try:
+        return json.loads(raw[start:])
+    except json.JSONDecodeError:
+        return _NOT_JSON
+
+
+def print_deepsearch(args):
     result = deepsearch.execute(client.read_payload(args.payload))
     print(json.dumps(result, indent=2))
     return result
