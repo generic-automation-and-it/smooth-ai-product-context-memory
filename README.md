@@ -86,7 +86,7 @@ Drawing on the three memory types from the unified-database approach:
 
 | Memory type | What it holds | Role here |
 |---|---|---|
-| Semantic | Summarized contexts, embedded & labelled | The primary store — distilled knowledge retrievable by label/ticket, facets and full-text lexemes. Free prose does **not** retrieve by similarity (see *Where Mímisbrunnr loses* below) |
+| Semantic | Summarized contexts, labelled | The primary store — distilled knowledge retrievable by label/ticket, facets and full-text lexemes. Free prose does **not** retrieve by similarity (see *Where Mímisbrunnr loses* below) |
 | Episodic | Timestamped events (sessions, decisions) | Provenance — when and where a context was captured |
 | Procedural | Preferences, learned behaviors | Agent/user settings that persist across sessions |
 
