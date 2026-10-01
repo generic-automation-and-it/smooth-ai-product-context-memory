@@ -111,6 +111,29 @@ jobs:
       - name: Test ai-understanding skill
         run: python3 -B .agents/skills/ai-understanding/tests/run_tests.py
 
+      - name: Test recall-feedback skill
+        run: python3 -B .agents/skills/mimisbrunnr-recall-feedback/tests/run_tests.py
+
+      - name: Test agile GitHub skills
+        run: |
+          python3 -B .agents/skills/agile-github-breakdown/scripts/test_skill_scripts.py
+          python3 -B .agents/skills/agile-github-task-from-diff/scripts/test_create_github_task_from_diff.py
+
+      # Without --postgres only the Docker-free transport checks run; the disposable-container
+      # fixture stays an operator-run check (scripts/AGENTS.md).
+      - name: Test ticket-ownership preflight
+        run: python3 -B scripts/tests/test_ticket_ownership.py
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Packs and installs the npm package in isolation and runs every public CLI through the Node
+      # launcher, which spawns this leg's Python — so the launcher's 3.9 floor is exercised too.
+      - name: Test npm package
+        run: npm test
+
   build-and-test:
     runs-on: ubuntu-latest
     timeout-minutes: 30
