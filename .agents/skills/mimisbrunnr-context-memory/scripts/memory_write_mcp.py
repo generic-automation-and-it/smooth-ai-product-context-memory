@@ -63,13 +63,10 @@ def call_tool(name, arguments):
         # Redaction is not a separate tool here. A tool the caller must remember is a tool that
         # gets skipped, and the cost of skipping it is a permanent blob: content addressing means
         # a leaked secret can be orphaned but never edited out. Fail closed like the CLI path.
-        payload, findings = client.scrub_or_refuse(payload)
+        payload, hits = client.scrub_or_refuse(payload)
         query = {"dryRun": "true"} if arguments.get("dryRun") else None
         result = client._request("POST", "/api/context/memories", payload, query=query)
-        if findings and isinstance(result, dict):
-            result["redaction"] = [{"rule_name": rule, "hit_count": count}
-                                   for rule, count in sorted(findings.items())]
-        return result
+        return client.attach_redaction(result, hits)
     if name == "update_group":
         return client._request("PATCH", client.group_path(arguments.get("uuid")), payload)
     if name == "append_description":
@@ -77,9 +74,9 @@ def call_tool(name, arguments):
     if name == "redact":
         results = []
         for index, content in enumerate(arguments["items"]):
-            redacted, findings = redact._scrub(content)
-            results.append({"index": index, "redacted": redacted, "findings": [
-                {"rule_name": rule, "hit_count": count} for rule, count in sorted(findings.items())]})
+            redacted, located = redact.scrub_located(content)
+            results.append({"index": index, "redacted": redacted,
+                            "findings": redact.findings_for(located)})
         return {"results": results}
     if name == "atomicity":
         return {"results": [atomicity.classify(item.get("statement") or item.get("description", ""))

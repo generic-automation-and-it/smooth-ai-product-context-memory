@@ -272,16 +272,14 @@ def cmd_set(args):
 
     Redaction runs here, not as a separate tool the caller may forget: the blob is immutable once
     written, so a secret that reaches the server can only be orphaned, never edited out. The
-    digest reports rule names and counts only, never the span.
+    digest names each rule, the field it altered and the offsets it replaced — never the span's text.
     """
     payload = read_payload(args.payload)
     validate_set_payload(payload)
-    payload, findings = scrub_or_refuse(payload)
+    payload, hits = scrub_or_refuse(payload)
     query = {"dryRun": "true"} if args.dryrun else None
     resp = _request("POST", "/api/context/memories", payload, query=query)
-    if findings:
-        resp["redaction"] = [{"rule_name": name, "hit_count": count}
-                             for name, count in sorted(findings.items())]
+    attach_redaction(resp, hits)
     print(json.dumps(resp, indent=2))
     return resp
 
@@ -298,6 +296,13 @@ def validate_set_payload(payload):
             f"Batch has {len(payload['items'])} items; cap is {MAX_CANDIDATES}. "
             "Split into multiple checkpoints.",
         )
+
+
+def attach_redaction(resp, hits):
+    """Put the redaction digest on a response object, so no scrub reaches the caller silently."""
+    if hits and isinstance(resp, dict):
+        resp["redaction"] = redact.digest(hits)
+    return resp
 
 
 def scrub_or_refuse(payload):

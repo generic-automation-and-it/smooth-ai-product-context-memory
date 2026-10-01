@@ -559,6 +559,115 @@ class RedactTests(unittest.TestCase):
         self.assertTrue(any(f["rule_name"] == "generic-secret-assignment" for f in result["findings"]))
 
 
+# Ordinary engineering prose that sits next to the words `key`, `token`, `secret` or `password` and
+# carries no secret. Every entry must pass through byte-identical with no finding: a gate that rewrites
+# a stored statement for using the word "key" corrupts the record it exists to protect.
+ORDINARY_PROSE = (
+    "sort key = created_on",
+    "partition key: groupUuid",
+    "idempotency key = order-123",
+    "the read token=NAME is provisioned",
+    "The primary key: memory_version_id is a bigint.",
+    "foreign key: group_id references memory_group",
+    "sort_key=created_at_utc",
+    "cache key = scope+subject",
+    "lookup key=memory_uuid_v4",
+    "Sort key: 2024-01-01T00:00:00Z",
+    "idempotency key = 550e8400-e29b-41d4-a716-446655440000",
+    "partition_key: tenant_id_v2_shard",
+    "token: required for writes",
+    "Use the token=CONTEXT_MEMORY_READ_TOKEN env var.",
+    "Set token: none, the endpoint is anonymous.",
+    "credential: provisioned by scripts/provision-credentials.sh",
+    "The secret is never logged.",
+    "The password policy requires rotation.",
+    "bearer token authentication is required",
+    "-----BEGIN PUBLIC KEY----- is the public half, safe to store.",
+    "ssh://git@github.com:org/repo.git",
+    "https://github.com/generic-automation-and-it/smooth-ai-product-context-memory",
+    "Sort by key, then by token count; the cache key is stable.",
+)
+
+
+class RedactionPrecisionTests(unittest.TestCase):
+    """The gate must not alter prose that only mentions a key or a token."""
+
+    def test_ordinary_prose_passes_byte_identical(self):
+        for text in ORDINARY_PROSE:
+            with self.subTest(text=text):
+                redacted, hits = redact.scrub_located(text)
+                self.assertEqual(redacted, text)
+                self.assertEqual(hits, [])
+
+    def test_ordinary_prose_set_reports_no_redaction_and_posts_it_unchanged(self):
+        prose = "\n".join(ORDINARY_PROSE)
+        payload = {"items": [{"name": "n", "description": prose, "statement": prose, "content": prose}],
+                   "links": [], "labelsProposed": list(ORDINARY_PROSE)}
+        with patch.object(client, "read_payload", return_value=copy.deepcopy(payload)), \
+                patch.object(client, "_request", return_value={"created": 1}) as request, \
+                redirect_stdout(io.StringIO()):
+            response = client.cmd_set(SimpleNamespace(payload=None, dryrun=False))
+        self.assertEqual(request.call_args.args[2], payload)
+        self.assertNotIn("redaction", response)
+
+    def test_a_named_secret_key_is_still_caught(self):
+        for text, secret in (("api_key = abcdefgh12345678", "abcdefgh12345678"),
+                             ("DEPLOY_TOKEN=s3cr3tvalue99", "s3cr3tvalue99"),
+                             ("client_secret: verysecretvalue", "verysecretvalue"),
+                             ("access_key=AbCdEfGh", "AbCdEfGh"),
+                             ("token: abcdef1234567890", "abcdef1234567890"),
+                             ("sort key = Zq3vL9xK2mN8pR4t", "Zq3vL9xK2mN8pR4t")):
+            with self.subTest(text=text):
+                redacted, hits = redact.scrub_located(text)
+                self.assertNotIn(secret, redacted)
+                self.assertEqual(len(hits), 1)
+
+    def test_located_offsets_cover_exactly_the_replaced_characters(self):
+        text = "deploy with DEPLOY_TOKEN=s3cr3tvalue99 and AKIAIOSFODNN7EXAMPLE today"
+        redacted, hits = redact.scrub_located(text)
+        replaced = sorted(text[start:end] for _name, start, end in hits)
+        self.assertEqual(replaced, ["AKIAIOSFODNN7EXAMPLE", "s3cr3tvalue99"])
+        self.assertEqual(redacted,
+                         "deploy with DEPLOY_TOKEN=<redacted> and <redacted-aws-access-key> today")
+
+    def test_set_digest_names_the_field_and_offsets_of_every_scrub(self):
+        original = copy.deepcopy(PLANTED)
+        with patch.object(client, "read_payload", return_value=copy.deepcopy(PLANTED)), \
+                patch.object(client, "_request", return_value={"created": 1}), \
+                redirect_stdout(io.StringIO()):
+            response = client.cmd_set(SimpleNamespace(payload=None, dryrun=False))
+        located = [(entry["rule_name"], location) for entry in response["redaction"]
+                   for location in entry["locations"]]
+        fields = {location["field"] for _rule, location in located}
+        self.assertIn("items[0].statement", fields)
+        self.assertIn("items[0].sources[0].reference", fields)
+        self.assertIn("items[0].facets[1]", fields)
+        self.assertIn("links[0].reason", fields)
+        self.assertIn("labelsProposed[0]", fields)
+        for _rule, location in located:
+            with self.subTest(field=location["field"]):
+                value = _resolve(original, location["field"])
+                span = value[location["start"]:location["end"]]
+                self.assertTrue(span, "a location must cover at least one replaced character")
+                self.assertTrue(any(secret in span or span in secret for secret in PLANTED_SECRETS),
+                                f"location does not cover a planted secret in {location['field']}")
+        # Offsets are reported; the replaced text is not.
+        _assert_no_secret(self, response["redaction"])
+
+    def test_mcp_set_digest_carries_locations_too(self):
+        with patch.object(write_mcp.client, "_request", return_value={"created": 1}):
+            result = write_mcp.call_tool("set", {"payload": copy.deepcopy(PLANTED)})
+        self.assertTrue(all(entry["locations"] for entry in result["redaction"]))
+        _assert_no_secret(self, result["redaction"])
+
+
+def _resolve(document, path):
+    """Follow a digest field path (`items[0].sources[1].reference`) into a JSON document."""
+    value = document
+    for name, index in re.findall(r"([^.\[\]]+)|\[(\d+)\]", path):
+        value = value[int(index)] if index else value[name]
+    return value
+
 class AtomicityTests(unittest.TestCase):
     def test_single_atomic_fact_is_simple(self):
         verdict = atomicity.classify("PostgreSQL stores our search index.")
@@ -999,16 +1108,18 @@ class SetRedactionGateTests(unittest.TestCase):
             write_mcp.call_tool("set", {"payload": copy.deepcopy(PLANTED), "dryRun": True})
         _assert_no_secret(self, request.call_args.args[2])
 
-    def test_digest_reports_rule_names_and_counts_only(self):
+    def test_digest_reports_rule_names_counts_and_locations_only(self):
         with patch.object(client, "read_payload", return_value=copy.deepcopy(PLANTED)), \
                 patch.object(client, "_request", return_value={"created": 1}), \
                 redirect_stdout(io.StringIO()):
             response = client.cmd_set(SimpleNamespace(payload=None, dryrun=False))
-        serialised = json.dumps(response)
         _assert_no_secret(self, response)
         self.assertTrue(response["redaction"])
         for entry in response["redaction"]:
-            self.assertEqual(set(entry), {"rule_name", "hit_count"})
+            self.assertEqual(set(entry), {"rule_name", "hit_count", "locations"})
+            self.assertEqual(entry["hit_count"], len(entry["locations"]))
+            for location in entry["locations"]:
+                self.assertEqual(set(location), {"field", "start", "end"})
         names = {entry["rule_name"] for entry in response["redaction"]}
         self.assertIn("aws-access-key-id", names)
         self.assertIn("github-token", names)
@@ -1063,8 +1174,9 @@ class SetRedactionGateTests(unittest.TestCase):
             self.assertNotIn(secret, response["error"]["message"])
 
     def test_scrub_covers_every_declared_content_field(self):
-        scrubbed, findings = redact.scrub_set_payload(copy.deepcopy(PLANTED))
+        scrubbed, hits = redact.scrub_set_payload(copy.deepcopy(PLANTED))
         _assert_no_secret(self, scrubbed)
+        findings = redact.counts(hits)
         self.assertTrue(findings)
         # Each rule shape is planted in a different field, so a field dropped from the walk
         # shows up as a missing rule name rather than as a silently cleaner payload. The counts are
@@ -1089,7 +1201,7 @@ class SetRedactionGateTests(unittest.TestCase):
         self.assertEqual(scrubbed["items"][0]["sources"], ["not-a-dict"])
         self.assertEqual(scrubbed["links"], [None])
         self.assertEqual(scrubbed["labelsProposed"], [None])
-        self.assertEqual(findings, {})
+        self.assertEqual(findings, [])
 
 
 class DeepSearchTests(unittest.TestCase):
