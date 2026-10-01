@@ -5,7 +5,7 @@
 | **Status** | Accepted — implemented |
 | **Owner** | generik0 |
 | **Tracker** | Context-memory MVP |
-| **Last updated** | 2026-09-14 |
+| **Last updated** | 2026-10-01 |
 
 > Converted from ADR-0001 (blob storage and content addressing) and ADR-0002 (persistence layer
 > architecture), which were a single design expressed as two documents. This HLD delivers **intent +
@@ -107,6 +107,18 @@ short it is.
 - We will deliberately **not** normalise for its own sake. Six entities were removed because the constraints they bought were unneeded, contrary to the design, or replaceable at zero cost.
 
 ---
+
+## Business Requirements Traced
+
+Authority is [BRD 001](../../brd/001-context-memory/). The principal requirements are listed in this
+folder's `AGENTS.md` (BR-05, BR-08, BR-09, BR-13, BR-17). Three retrieval and trust requirements are
+answered here only in part; the table states which part.
+
+| BR | What this design delivers | What it does not |
+|----|---------------------------|------------------|
+| **BR-04** — retrievable by the way work is organised | Goal 3: ticket (resolved to its group), repository, initiative, facets and tags are indexed filter dimensions of one retrieval query | "Everything related to a work item" across the ticket hierarchy is a graph traversal — [HLD 003](../003-graph-edges-on-age/) |
+| **BR-06** — recall must not overwhelm the task | Goal 3: retrieval returns cheap fields only, bodies on explicit drill-down; the result count is capped (default 50, maximum 200) | Relevance beyond lexeme-AND full-text match and the filters — no semantic ranking |
+| **BR-07** — every recalled claim explainable | LADR-03: each version row carries `confidence`, `sources` (provenance) and `created_on`, and retrieval returns all three with every item | `sources` is optional on write, so "every recalled item carries its source" is not enforced by storage — a capture without sources is stored and recalled without one |
 
 ## Diagrams
 
