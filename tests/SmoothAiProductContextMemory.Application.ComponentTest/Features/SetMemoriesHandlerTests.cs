@@ -460,6 +460,51 @@ public sealed class SetMemoriesHandlerTests(AspireFixture aspire) : HandlerTestB
         versions.Single().Statement.ShouldBe("Claim 1");
     }
 
+    /// <summary>
+    /// Identity is group-scoped (HLD-002 LADR-01/04): the same subject captured under a second group
+    /// is a separate memory, not a version of the first and not a duplicate-subject conflict.
+    /// </summary>
+    [Fact]
+    public async Task Same_subject_in_two_groups_creates_two_distinct_memories()
+    {
+        MemoryGroup first = TestEntities.NewGroup();
+        MemoryGroup second = TestEntities.NewGroup();
+        Db.MemoryGroups.AddRange(first, second);
+        await Db.SaveChangesAsync(Ct);
+
+        SetMemories.Response inFirst = await NewHandler().Handle(Write(first.Uuid, "Shared subject", "First claim"), Ct);
+        SetMemories.Response dryInSecond = await NewHandler().Handle(
+            Write(second.Uuid, "Shared subject", "Second claim") with { DryRun = true }, Ct);
+        SetMemories.Response inSecond = await NewHandler().Handle(Write(second.Uuid, "Shared subject", "Second claim"), Ct);
+
+        dryInSecond.Created.ShouldBe(1);
+        dryInSecond.Versioned.ShouldBe(0);
+        inFirst.Created.ShouldBe(1);
+        inSecond.Created.ShouldBe(1);
+        inSecond.Versioned.ShouldBe(0);
+        Guid firstUuid = inFirst.Items[0].Uuid.ShouldNotBeNull();
+        Guid secondUuid = inSecond.Items[0].Uuid.ShouldNotBeNull();
+        secondUuid.ShouldNotBe(firstUuid);
+
+        var memories = await Db.Memories.AsNoTracking()
+            .Where(m => m.Uuid == firstUuid || m.Uuid == secondUuid)
+            .Select(m => new
+            {
+                m.Uuid,
+                m.GroupId,
+                m.SubjectSlug,
+                Statements = m.Versions.OrderBy(v => v.Version).Select(v => v.Statement).ToArray(),
+            })
+            .ToArrayAsync(Ct);
+
+        memories.Length.ShouldBe(2);
+        memories.Select(m => m.SubjectSlug).Distinct().Count().ShouldBe(1);
+        memories.Single(m => m.Uuid == firstUuid).GroupId.ShouldBe(first.Id);
+        memories.Single(m => m.Uuid == firstUuid).Statements.ShouldBe(["First claim"]);
+        memories.Single(m => m.Uuid == secondUuid).GroupId.ShouldBe(second.Id);
+        memories.Single(m => m.Uuid == secondUuid).Statements.ShouldBe(["Second claim"]);
+    }
+
     private static SetMemories.Request Write(Guid groupUuid, string description, string statement, Guid? uuid = null) =>
         new(
             groupUuid,

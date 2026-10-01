@@ -1,7 +1,9 @@
 extern alias HostApp;
 
 using System.Text;
+using SmoothAiProductContextMemory.Application.Abstractions.Snapshot;
 using SmoothAiProductContextMemory.Host.Cli;
+using SmoothAiProductContextMemory.Infrastructure.Storage.Snapshot;
 
 namespace SmoothAiProductContextMemory.Host.UnitTest;
 
@@ -18,9 +20,29 @@ namespace SmoothAiProductContextMemory.Host.UnitTest;
 /// Deliberately no database. <c>verify</c> needs no connection string, and <c>restore</c> verifies the
 /// archive before touching either store, so both failure paths are reachable with a fake connection
 /// string and nothing listening on it.
+///
+/// Isolated two ways. Each verb is driven through its settings overload, so the host's configuration
+/// is exactly what the test supplies: no process-wide environment variables are mutated, and a
+/// developer's user secrets cannot point a verb at a real store. And the class runs in a
+/// non-parallel collection, because the empty-argv case redirects the process-wide
+/// <see cref="Console.Out"/>, which would swallow or interleave any concurrently running test's output.
 /// </remarks>
+[Collection(CliVerbCollection.Name)]
 public sealed class CliVerbTests
 {
+    private static readonly IReadOnlyDictionary<string, string?> NoSettings = new Dictionary<string, string?>();
+
+    // The full host configuration is required, not just a connection string: resolving the repository
+    // pulls in blob storage, and that resolution happens before the verb's own try/catch.
+    private static readonly IReadOnlyDictionary<string, string?> RestoreSettings = new Dictionary<string, string?>
+    {
+        ["ConnectionStrings:SmoothAiProductContextMemory"] = "Host=127.0.0.1;Database=none;Username=none;Password=none;Timeout=1",
+        ["BlobStorage:Endpoint"] = "http://127.0.0.1:1",
+        ["BlobStorage:AccessKey"] = "unused",
+        ["BlobStorage:SecretKey"] = "unused",
+        ["BlobStorage:Bucket"] = "unused",
+    };
+
     private static string AbsentPath() =>
         Path.Combine(Path.GetTempPath(), $"mimisbrunnr-absent-{Guid.NewGuid():N}.tar");
 
@@ -55,8 +77,8 @@ public sealed class CliVerbTests
         {
             int exit = verb switch
             {
-                "verify" => await VerifyCommand.InvokeAsync([]),
-                "restore" => await RestoreCommand.InvokeAsync([]),
+                "verify" => await VerifyCommand.InvokeAsync([], NoSettings),
+                "restore" => await RestoreCommand.InvokeAsync([], RestoreSettings),
                 _ => throw new ArgumentOutOfRangeException(nameof(verb), verb, "unknown verb"),
             };
 
@@ -96,7 +118,7 @@ public sealed class CliVerbTests
         string path = AbsentPath();
         try
         {
-            int exit = await VerifyCommand.InvokeAsync([path]);
+            int exit = await VerifyCommand.InvokeAsync([path], NoSettings);
             exit.ShouldBe(1, "an absent archive must be a finding (1), not success and not a throw");
         }
         finally
@@ -115,38 +137,80 @@ public sealed class CliVerbTests
         // script retrying on 1 must not retry on 2, and collapsing them would make a tampered archive
         // look like a transient database problem.
         //
-        // The full host configuration is required, not just a connection string: resolving the
-        // repository pulls in blob storage, and that resolution happens *before* the verb's own
-        // try/catch — so a half-configured host fails inside System.CommandLine's default handler and
-        // returns 1, which would have made this test pass for the wrong reason.
-        var settings = new Dictionary<string, string?>
-        {
-            ["ConnectionStrings__SmoothAiProductContextMemory"] = "Host=127.0.0.1;Database=none;Username=none;Password=none;Timeout=1",
-            ["BlobStorage__Endpoint"] = "http://127.0.0.1:1",
-            ["BlobStorage__AccessKey"] = "unused",
-            ["BlobStorage__SecretKey"] = "unused",
-            ["BlobStorage__Bucket"] = "unused",
-        };
-        var previous = settings.ToDictionary(
-            entry => entry.Key,
-            entry => Environment.GetEnvironmentVariable(entry.Key));
+        // The full host configuration is required (RestoreSettings): a half-configured host fails
+        // inside System.CommandLine's default handler and returns 1, which would have made this test
+        // pass for the wrong reason.
+        int exit = await RestoreCommand.InvokeAsync([AbsentPath()], RestoreSettings);
+        exit.ShouldBe(2, "an unverifiable archive must exit 2 (integrity), not 1 (operational)");
+    }
 
-        foreach ((string name, string? value) in settings)
+    [Fact]
+    public async Task Restore_of_an_archive_it_may_not_read_exits_operational_not_integrity()
+    {
+        // A permissions refusal says nothing about the archive's bytes. Reporting it as 2 would tell
+        // the operator to replace a sound archive instead of fixing a file mode.
+        if (OperatingSystem.IsWindows())
         {
-            Environment.SetEnvironmentVariable(name, value);
+            Assert.Skip("Unix file modes only.");
+            return;
         }
 
+        string path = AbsentPath();
+        await File.WriteAllBytesAsync(path, [1, 2, 3], TestContext.Current.CancellationToken);
+        File.SetUnixFileMode(path, UnixFileMode.None);
         try
         {
-            int exit = await RestoreCommand.InvokeAsync([AbsentPath()]);
-            exit.ShouldBe(2, "an unverifiable archive must exit 2 (integrity), not 1 (operational)");
+            bool bypassesModes;
+            try
+            {
+                using FileStream probe = File.OpenRead(path);
+                bypassesModes = true;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                bypassesModes = false;
+            }
+
+            Assert.SkipWhen(bypassesModes, "The test process can read a mode-000 file (running as root).");
+
+            int exit = await RestoreCommand.InvokeAsync([path], RestoreSettings);
+            exit.ShouldBe(1, "an archive the process may not open is an operational failure (1), not an integrity one (2)");
         }
         finally
         {
-            foreach ((string name, string? value) in previous)
-            {
-                Environment.SetEnvironmentVariable(name, value);
-            }
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            File.Delete(path);
         }
     }
+
+    [Fact]
+    public async Task Verify_exits_zero_on_a_clean_archive()
+    {
+        // Every other verify case exits 1, so a verb that returned 1 unconditionally passed them all.
+        string directory = Path.Combine(Path.GetTempPath(), $"mimisbrunnr-cli-{Guid.NewGuid():N}");
+        string path = Path.Combine(directory, "snapshot.tar");
+        try
+        {
+            await new TarSnapshotArchive().WriteAsync(
+                path,
+                new SnapshotCapture([], [], [], [], [], [], [], [], [], []),
+                new SnapshotWalkResult([], 0, 0),
+                (_, _) => throw new InvalidOperationException("an empty capture cites no body"),
+                TestContext.Current.CancellationToken);
+
+            int exit = await VerifyCommand.InvokeAsync([path], NoSettings);
+
+            exit.ShouldBe(0, "a clean archive must verify with exit 0");
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+}
+
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class CliVerbCollection
+{
+    public const string Name = "CLI verbs";
 }

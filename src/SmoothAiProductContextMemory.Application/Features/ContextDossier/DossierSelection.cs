@@ -69,10 +69,8 @@ public static class DossierSelection
         DossierAnchor anchor,
         CancellationToken cancellationToken)
     {
-        MemoryScopeFilter.ScopeFilterPlan scopePlan =
-            MemoryScopeFilter.Plan(anchor.ScopeDimension, false);
-        IReadOnlyList<string> hiddenDimensions =
-            MemoryScopeFilter.HiddenDimensions(anchor.ScopeDimension, false);
+        // One filter for all three stages, so a predicate cannot reach one stage and miss another.
+        SelectionFilter filter = SelectionFilter.From(anchor);
 
         // Anchor resolution: repo/initiative/tags/kind/status through the search abstraction in one
         // indexed statement; the ticket through the accepted ITicketGraph separation (mirrors
@@ -84,25 +82,7 @@ public static class DossierSelection
         if (anchor.Ticket is { } ticket)
         {
             ticketResult = await ticketGraph.TraverseAsync(
-                new TicketTraversalQuery
-                {
-                    Anchor = ticket,
-                    MaxDepth = anchor.WidenDepth,
-                    RequiredScopeDimension = scopePlan.RequiredDimension,
-                    HiddenDimensions = hiddenDimensions,
-                    Kind = Blank(anchor.Kind),
-                    // Mirrors Kind, and carries the same obligation: the traversal's identity set is the
-                    // filter the anchor search then applies its own status to, so leaving the status out
-                    // here pre-filters that set. With Status null the SQL takes its second branch, and
-                    // ExcludeProposed at its default of true drops every proposed memory — so an anchor
-                    // of ticket + status=proposed searched a set holding none and always reported noMatch,
-                    // while RetrievalPolicy below recorded the status as honoured. ExcludeProposed is
-                    // deliberately left at its default: the SQL's first branch supersedes it once
-                    // @status is not null, which is the rule FindTicketPaths relies on too.
-                    Status = Blank(anchor.Status),
-                    PathLimit = MemorySearchDefaults.MaxLimit,
-                    MemoryLimit = MemorySearchDefaults.MaxLimit,
-                },
+                filter.TicketTraversal(ticket, anchor.WidenDepth),
                 cancellationToken);
         }
 
@@ -111,39 +91,36 @@ public static class DossierSelection
             ? null
             : new HashSet<Guid>(ticketResult.Items.Select(i => i.Uuid));
 
+        // The ticket traversal's disclosure applies to every return below, the two no-match ones
+        // included: a ticket walk that was cut short can leave the anchor search with nothing to
+        // match, and that empty result is truncated, not complete.
+        bool ticketDepthLimitReached = ticketResult?.Disclosure.DepthLimitReached ?? false;
+        bool ticketLimitReached = (ticketResult?.Disclosure.MemoryLimitReached ?? false)
+            || (ticketResult?.Disclosure.PathLimitReached ?? false);
+
         // A supplied ticket that resolves to no eligible identities (missing, hidden, or no eligible
         // memories) must stay a no-match; broadening to an unrestricted search would silently select
-        // unrelated visible memories (R07 / H7). The traversal may have hit a depth/path/memory limit
+        // unrelated visible memories. The traversal may have hit a depth/path/memory limit
         // even while yielding nothing — propagate its disclosure flags so a truncated-empty result is
-        // not reported as complete-empty (H5).
+        // not reported as complete-empty.
         if (ticketSupplied && ticketUuids is { Count: 0 })
         {
-            var disclosure = ticketResult?.Disclosure;
             return new DossierSelectionResult(
                 Selected: [],
                 AnchorCount: 0,
                 WidenedCount: 0,
                 EdgeCount: 0,
-                DepthLimitReached: disclosure?.DepthLimitReached ?? false,
+                DepthLimitReached: ticketDepthLimitReached,
                 HiddenPathDropped: false,
-                LimitReached: (disclosure?.MemoryLimitReached ?? false) || (disclosure?.PathLimitReached ?? false),
+                LimitReached: ticketLimitReached,
                 Edges: []);
         }
 
-        MemorySearchCriteria criteria = new()
-        {
-            Repo = Blank(anchor.Repo),
-            InitiativeName = Blank(anchor.InitiativeName),
-            Tags = anchor.Tags,
-            Kind = Blank(anchor.Kind),
-            Status = Blank(anchor.Status),
-            RequiredScopeDimension = scopePlan.RequiredDimension,
-            ExcludedScopeDimensions = scopePlan.ExcludedDimensions,
-            CurrentOnly = true,
-            AsOf = anchor.AsOf,
-            Limit = MemorySearchDefaults.MaxLimit,
-            UuidFilter = ticketSupplied ? [.. ticketUuids!] : null,
-        };
+        MemorySearchCriteria criteria = filter.AnchorSearch(
+            Blank(anchor.Repo),
+            Blank(anchor.InitiativeName),
+            anchor.Tags,
+            ticketSupplied ? [.. ticketUuids!] : null);
 
         IReadOnlyList<CheapMemory> matched = await search.SearchAsync(criteria, cancellationToken);
 
@@ -162,38 +139,16 @@ public static class DossierSelection
                 AnchorCount: 0,
                 WidenedCount: 0,
                 EdgeCount: 0,
-                DepthLimitReached: false,
+                DepthLimitReached: ticketDepthLimitReached,
                 HiddenPathDropped: false,
-                LimitReached: false,
+                LimitReached: ticketLimitReached,
                 Edges: []);
         }
 
         // Widening over the graph from the resolved anchor identities, bounded by WidenDepth,
         // scope-gated at every vertex with the hidden-dimension set.
         MemoryWidenResult widened = await traversal.WidenAsync(
-            new MemoryWidenQuery
-            {
-                SourceUuids = [.. anchorUuids],
-                MaxDepth = anchor.WidenDepth,
-                RequiredScopeDimension = scopePlan.RequiredDimension,
-                HiddenDimensions = hiddenDimensions,
-                Kind = Blank(anchor.Kind),
-                Status = Blank(anchor.Status),
-                // Left at its true default, for the reason the ticket traversal's is: the status opt-in
-                // supersedes it once @status is not null. This stage carried no proposed rule at all
-                // before — a null @status admitted every reached version — so a proposed memory
-                // reachable from an approved anchor was widened in while RetrievalPolicy below
-                // recorded "proposed-excluded". The default is what closes it, and it is stated here
-                // because the three stages are the third instance of this drift: each had to be told
-                // the same rule separately.
-                ExcludeProposed = true,
-                // Carried for the same reason the anchor search carries it: a supplied AsOf must
-                // bound the whole selection. Widening without it could add a memory the anchor
-                // search had already excluded by validity window, while the manifest recorded the
-                // AsOf as though the whole plan honoured it.
-                AsOf = anchor.AsOf,
-                Limit = MemorySearchDefaults.MaxLimit,
-            },
+            filter.Widen([.. anchorUuids], anchor.WidenDepth),
             cancellationToken);
 
         foreach (CheapMemory reached in widened.Memories)
@@ -228,11 +183,8 @@ public static class DossierSelection
 
         IReadOnlyList<MemoryRelationship> edges = await LoadEdgesAsync(graph, selected, cancellationToken);
 
-        bool depthLimitReached = widened.DepthLimitReached
-            || (ticketResult?.Disclosure.DepthLimitReached ?? false);
-        bool limitReached = widened.LimitReached
-            || (ticketResult?.Disclosure.MemoryLimitReached ?? false)
-            || (ticketResult?.Disclosure.PathLimitReached ?? false);
+        bool depthLimitReached = widened.DepthLimitReached || ticketDepthLimitReached;
+        bool limitReached = widened.LimitReached || ticketLimitReached;
 
         return new DossierSelectionResult(
             selected,
@@ -263,7 +215,7 @@ public static class DossierSelection
         return await graph.ListEdgesAsync(uuids, cancellationToken);
     }
 
-    private static string? Blank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
+    internal static string? Blank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
 
     /// <summary>Build the anchor set from the wire fields shared by the bundle and preview requests.</summary>
     public static DossierAnchor AnchorFrom(
@@ -353,8 +305,9 @@ public static class DossierSelection
     /// The clause stayed false a second time, for the same reason: widening was the one stage with no
     /// proposed rule whatsoever, so a proposed memory one hop from an approved anchor was selected
     /// under a manifest reading "proposed-excluded". Fixing the third stage is what makes this line
-    /// true — a derived clause cannot be right while one of the three stages it summarises is wrong, so
-    /// the derivation is the assertion surface and each stage is still a separate obligation.
+    /// true — a derived clause cannot be right while one of the three stages it summarises is wrong.
+    /// All three stage queries are now built from one <see cref="SelectionFilter"/>, so the status and
+    /// proposed rule this clause summarises is the one every stage applies.
     ///
     /// The blank test is <see cref="Blank"/>'s, the same one <see cref="ResolveAsync"/> applies, not a
     /// length test: a whitespace-only status matches nothing and therefore selects with

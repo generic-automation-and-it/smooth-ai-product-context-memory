@@ -1,7 +1,9 @@
 # NFR-03: Recoverability
 
 **Status:** Closed — HLD-006 accepted 2026-09-29 and its NFR-02 is the governing recoverability
-evidence (supersedes [HLD-006 NFR-02](../../../hlds/006-corpus-snapshot-and-restore/nfrs/NFR-02-consistency.md))
+evidence (this NFR is superseded by [HLD-006 NFR-02](../../../hlds/006-corpus-snapshot-and-restore/nfrs/NFR-02-consistency.md),
+not the reverse). The closure rests on an NFR that is itself still **Draft**: HLD-006 NFR-02 has not
+been accepted, so this requirement is closed on a design whose consistency NFR is unaccepted.
 
 > This Draft claim is closed by HLD-006's corpus snapshot and restore. Its "two stores restore to a
 > mutually consistent state" requirement is now HLD-006 NFR-02, whose snapshot artefact carries a

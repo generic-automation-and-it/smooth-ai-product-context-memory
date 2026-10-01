@@ -67,11 +67,11 @@ So recall is not "locate the old session". It is: land on an anchor — a ticket
 The store is append-heavy by design, yet the read path stays small — a deep well, a small cup:
 
 - **Supersession is a version bump**, not a new record; retrieval defaults to current-only claims ([HLD-001](docs/hlds/001-context-memory-storage/)).
-- **Write-time deduplication** on the subject, within the group being written to — a memory's identity is `(group, uuid)` — with measured recall *and* precision pending re-evidence ([HLD-002 NFR-02](docs/hlds/002-context-memory-write-pipeline/nfrs/NFR-02-deduplication-accuracy.md)).
+- **Write-time deduplication** on the subject, within the group being written to — a memory's identity is `(group, uuid)` — with recall *and* precision measured on same-group pairs with balanced controls ([HLD-002 NFR-02](docs/hlds/002-context-memory-write-pipeline/nfrs/NFR-02-deduplication-accuracy.md)).
 - **Every graph traversal carries its bound** — depth is required (1–5, no server default), result limits are capped ([HLD-003 LADR-07](docs/hlds/003-graph-edges-on-age/ladrs/LADR-07-every-traversal-carries-its-bound.md)).
 - **Cheap fields first** — summaries and metadata by default; blob bodies only on explicit drill-down.
 - **Temporal validity** (`valid_from` / `valid_until`) filters claims outside their validity window when callers supply `asOf`; default queries do not apply this filter.
-- **Recall feedback** (in discovery) tracks hits, misses and never-recalled memories to sharpen retrieval over time ([HLD-004](docs/hlds/004-memory-recall-feedback/)).
+- **Recall feedback** records hits, misses and never-recalled memories to sharpen retrieval over time; its retention bound is specified but not yet enforced ([HLD-004](docs/hlds/004-memory-recall-feedback/)).
 
 The store optimizes for durability; the read path optimizes for precision-per-token. Back it up as one
 self-verifying corpus snapshot (relational + graph + blob bodies in a single tar + manifest), validate it

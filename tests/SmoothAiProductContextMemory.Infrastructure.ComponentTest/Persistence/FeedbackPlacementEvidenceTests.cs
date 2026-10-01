@@ -386,7 +386,7 @@ public sealed class FeedbackPlacementEvidenceTests : PersistenceTestBase
             $"- the retrieval in that same unit of work still returned {impact.RowsReturnedWhenFeedbackBroken} rows, "
             + $"every field identical: {impact.ResultsIdenticalWhenFeedbackBroken}");
         report.AppendLine(
-            "- this is the prototype boundary only: the shipped fire-and-forget writer and the retrieval "
+            "- this is the prototype boundary only: the shipped failure-isolated writer and the retrieval "
             + "handler it hangs off are verified where they are built.");
     }
 
@@ -633,7 +633,7 @@ public sealed class FeedbackPlacementEvidenceTests : PersistenceTestBase
     /// could reach the caller: attempting the two independently would prove nothing, because nothing
     /// could propagate between them.
     /// <para>
-    /// This is the prototype boundary. The shipped fire-and-forget writer, and the retrieval handler it
+    /// This is the prototype boundary. The shipped failure-isolated writer, and the retrieval handler it
     /// hangs off, are verified against the write path when that is built.
     /// </para>
     /// </summary>

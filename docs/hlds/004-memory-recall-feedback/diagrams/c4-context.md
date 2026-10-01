@@ -1,11 +1,14 @@
 # Diagrams — Memory recall feedback
 
-Two diagrams. An entity-relationship diagram is still omitted, now for a different reason: the placement
-question is settled — feedback lives in append-only records, and LADR-02 records the field shape — but no
-table exists yet. An ER diagram drawn ahead of the shipped one would be a second, divergent source for it.
+Two diagrams. An entity-relationship diagram is still omitted: the placement question is settled —
+feedback lives in append-only records, LADR-02 records the field shape, and the `AddRecallFeedbackTable`
+migration creates the table — and an ER diagram beside that migration would be a second, divergent source
+for it.
 
-The recall path below is unchanged by that decision: feedback was always emitted off the critical path, and
-the chosen placement is where the outcome lands, not a new step.
+The recall path below is unchanged by that decision: the chosen placement is where the outcome lands, not a
+new step. The write is **synchronous and inline** — the API records the outcome after the result is built
+and before it is returned (steps 4 and 9 below precede the response) — but guarded, so it can delay the
+response and never fail it.
 
 ---
 
@@ -84,7 +87,7 @@ sequenceDiagram
 
 1. **Feedback is emitted on the miss path too.** Recording only hits produces a record of what recall already does well and silence about everything it does badly — and the miss is the more actionable signal.
 2. **An empty result is a normal response**, not an error. The miss is interesting to *tuning*, not to the caller.
-3. **Feedback is off the critical path.** A failure to record must not fail the retrieval; losing a tuning signal is acceptable, losing a recall is not.
+3. **Feedback cannot fail the retrieval.** A failure to record is swallowed and logged; losing a tuning signal is acceptable, losing a recall is not. It is not off the critical path — the write runs before the response returns, so its cost is part of the response time (HLD-004 NFR-02 evidence).
 
 Note what is absent: no arrow returns from feedback to the query. Ranking influenced by prior recall
 would be self-reinforcing, and that failure would be slow and difficult to detect.

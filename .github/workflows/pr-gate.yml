@@ -11,6 +11,8 @@ on:
       - .dockerignore
       - Directory.Build.props
       - NuGet.Config
+      - .editorconfig
+      - .config/dotnet-tools.json
       - '*.slnx'
       - src/**
       - tests/**
@@ -21,6 +23,9 @@ on:
       - .agents/skills/mimisbrunnr-understanding/**
       - .agents/skills/mimisbrunnr-dossier/**
       - .agents/skills/ai-understanding/**
+      - .agents/skills/mimisbrunnr-recall-feedback/**
+      - .agents/skills/mimisbrunnr-ymir-bootstrap/**
+      - .agents/skills/agile-github-*/**
       - .agents/agents/memory-read.md
       - .agents/agents/memory-write.md
       - .github/agents/memory-read.agent.md
@@ -40,6 +45,8 @@ on:
       - .dockerignore
       - Directory.Build.props
       - NuGet.Config
+      - .editorconfig
+      - .config/dotnet-tools.json
       - '*.slnx'
       - src/**
       - tests/**
@@ -50,6 +57,9 @@ on:
       - .agents/skills/mimisbrunnr-understanding/**
       - .agents/skills/mimisbrunnr-dossier/**
       - .agents/skills/ai-understanding/**
+      - .agents/skills/mimisbrunnr-recall-feedback/**
+      - .agents/skills/mimisbrunnr-ymir-bootstrap/**
+      - .agents/skills/agile-github-*/**
       - .agents/agents/memory-read.md
       - .agents/agents/memory-write.md
       - .github/agents/memory-read.agent.md
@@ -70,6 +80,70 @@ permissions:
   contents: read
 
 jobs:
+  python-harnesses:
+    name: Python harnesses (${{ matrix.python }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.9 is the floor the skills declare (package.json `mimisbrunnrPython`, enforced by the npm
+        # launcher); 3.12 is what developers and the rest of the gate run. A 3.9-only break — a 3.10+
+        # stdlib API or syntax — is invisible to a 3.12-only gate.
+        python: ['3.9', '3.12']
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Test context-memory skill
+        run: |
+          python3 -B .agents/skills/mimisbrunnr-context-memory/tests/run_tests.py
+          python3 -B .agents/skills/mimisbrunnr-context-memory/tests/measure_cost.py
+
+      - name: Test understanding skill
+        run: |
+          python3 -B .agents/skills/mimisbrunnr-understanding/tests/run_tests.py
+          python3 -B .agents/skills/mimisbrunnr-understanding/tests/run_walk_tests.py
+
+      - name: Test dossier skill
+        run: python3 -B .agents/skills/mimisbrunnr-dossier/tests/run_tests.py
+
+      - name: Test ai-understanding skill
+        run: python3 -B .agents/skills/ai-understanding/tests/run_tests.py
+
+      - name: Test recall-feedback skill
+        run: python3 -B .agents/skills/mimisbrunnr-recall-feedback/tests/run_tests.py
+
+      - name: Test agile GitHub skills
+        run: |
+          python3 -B .agents/skills/agile-github-breakdown/scripts/test_skill_scripts.py
+          python3 -B .agents/skills/agile-github-task-from-diff/scripts/test_create_github_task_from_diff.py
+
+      # Without --postgres only the Docker-free transport checks run; the disposable-container
+      # fixture stays an operator-run check (scripts/AGENTS.md).
+      - name: Test ticket-ownership preflight
+        run: python3 -B scripts/tests/test_ticket_ownership.py
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Packs and installs the npm package in isolation and runs every public CLI through the Node
+      # launcher, which spawns this leg's Python — so the launcher's 3.9 floor is exercised too.
+      - name: Test npm package
+        run: npm test
+
   build-and-test:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -100,21 +174,8 @@ jobs:
       - name: Test credential provisioner
         run: bash scripts/test-provision-credentials.sh
 
-      - name: Test context-memory skill
-        run: |
-          python3 -B .agents/skills/mimisbrunnr-context-memory/tests/run_tests.py
-          python3 -B .agents/skills/mimisbrunnr-context-memory/tests/measure_cost.py
-
-      - name: Test understanding skill
-        run: |
-          python3 -B .agents/skills/mimisbrunnr-understanding/tests/run_tests.py
-          python3 -B .agents/skills/mimisbrunnr-understanding/tests/run_walk_tests.py
-
-      - name: Test dossier skill
-        run: python3 -B .agents/skills/mimisbrunnr-dossier/tests/run_tests.py
-
-      - name: Test ai-understanding skill
-        run: python3 -B .agents/skills/ai-understanding/tests/run_tests.py
+      - name: Test Aspire test runner
+        run: bash .github/actions/aspire-test-with-coverage/test-run.sh
 
       - name: Install .NET SDK
         uses: actions/setup-dotnet@v4
@@ -167,12 +228,24 @@ jobs:
           - arch: arm64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     permissions:
       contents: read
 
+    # Release mode refuses a Host image that is not digest-pinned, and a digest only exists once an
+    # image is in a registry. A job-local registry gives both images a real digest without
+    # publishing anything; the engine treats localhost registries as insecure-allowed, so the
+    # controller's engine pulls the API image from it exactly as it pulls from GHCR on main.
+    services:
+      registry:
+        image: docker.io/library/registry:2
+        ports:
+          - 5000:5000
+
     env:
       DOCKER_BUILD_RECORD_UPLOAD: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      LOCAL_API_IMAGE: localhost:5000/smooth-ai-product-context-memory
+      LOCAL_APPHOST_IMAGE: localhost:5000/smooth-ai-product-context-memory-apphost
 
     steps:
       - name: Checkout
@@ -182,29 +255,59 @@ jobs:
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          # The BuildKit container must reach the job-local registry on the runner's loopback.
+          driver-opts: network=host
 
       - name: Build API image
+        id: api
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile
           platforms: linux/${{ matrix.arch }}
-          push: false
+          push: true
+          tags: ${{ env.LOCAL_API_IMAGE }}:pr
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
           build-args: |
             REVISION=${{ github.sha }}
           cache-from: type=gha,scope=pr-api-${{ github.ref }}-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=pr-api-${{ github.ref }}-${{ matrix.arch }}
 
       - name: Build AppHost controller image
+        id: apphost
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile.apphost
           platforms: linux/${{ matrix.arch }}
-          push: false
+          push: true
+          tags: ${{ env.LOCAL_APPHOST_IMAGE }}:pr
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
           build-args: |
-            API_IMAGE=ghcr.io/${{ github.repository }}@sha256:0000000000000000000000000000000000000000000000000000000000000000
+            API_IMAGE=${{ env.LOCAL_API_IMAGE }}@${{ steps.api.outputs.digest }}
             RELEASE_VERSION=pr-${{ github.event.pull_request.number || github.run_number }}
             REVISION=${{ github.sha }}
           cache-from: type=gha,scope=pr-apphost-${{ github.ref }}-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=pr-apphost-${{ github.ref }}-${{ matrix.arch }}
+
+      # The same smoke the main publication pipeline runs against its candidates, so a change that
+      # breaks container startup fails here instead of only after merge.
+      - name: Run lifecycle and data smoke test
+        env:
+          ARCH: ${{ matrix.arch }}
+          INSTALLATION_ID: pr-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.arch }}
+          API_DIGEST: ${{ steps.api.outputs.digest }}
+          APPHOST_DIGEST: ${{ steps.apphost.outputs.digest }}
+        run: |
+          set -euo pipefail
+          case "$ARCH:$(uname -m)" in
+            amd64:x86_64|arm64:aarch64) ;;
+            *) echo "runner architecture $(uname -m) does not match matrix arch $ARCH" >&2; exit 1 ;;
+          esac
+          docker pull --platform "linux/$ARCH" "${LOCAL_APPHOST_IMAGE}@${APPHOST_DIGEST}"
+          docker image inspect "${LOCAL_APPHOST_IMAGE}@${APPHOST_DIGEST}" |
+            jq -e --arg api "HostConfiguration__Image=${LOCAL_API_IMAGE}@${API_DIGEST}" '.[0].Config.Env | index($api) != null'
+          scripts/smoke-apphost-container.sh "${LOCAL_APPHOST_IMAGE}@${APPHOST_DIGEST}"

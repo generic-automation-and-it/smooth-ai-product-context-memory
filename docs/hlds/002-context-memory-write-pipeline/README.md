@@ -2,10 +2,10 @@
 
 | | |
 |---|---|
-| **Status** | Accepted; all LADR decisions implemented and verified; NFR-03 live all-outcomes evidence, NFR-05 provider telemetry, and **NFR-02's re-evidencing under group-scoped identity** remain open |
+| **Status** | Accepted; all LADR decisions implemented and verified; NFR-03 live all-outcomes evidence and NFR-05 provider telemetry remain open; NFR-02 re-evidenced 2026-09-29 under group-scoped identity |
 | **Owner** | generik0 |
 | **Tracker** | Context-memory MVP |
-| **Last updated** | 2026-09-17 |
+| **Last updated** | 2026-10-01 |
 
 > Converted from ADR-0003. This HLD delivers **intent + spec** — the contract the agent-facing skill
 > executes and the judgement it owns. Execution is tracked in the issue/work tracker.
@@ -145,7 +145,7 @@ See [`./nfrs/`](./nfrs/).
 | NFR | Attribute | Target (summary) | Status |
 |-----|-----------|------------------|--------|
 | [NFR-01](./nfrs/NFR-01-secret-containment.md) | Security | No detected secret reaches storage; content never logged | Accepted |
-| [NFR-02](./nfrs/NFR-02-deduplication-accuracy.md) | Correctness | Measured recall *and* precision against authored pairs | Accepted, **evidence withdrawn 2026-09-28** — cross-group fixture no longer producible |
+| [NFR-02](./nfrs/NFR-02-deduplication-accuracy.md) | Correctness | Measured recall *and* precision against authored pairs | Accepted — [re-measured 2026-09-29](./nfrs/NFR-02-semantic-evidence-2026-09-29-balanced.md) on same-group pairs with balanced controls, re-scored 2026-09-30 under corrected denominators: recall / precision / accuracy 1.0000 |
 | [NFR-03](./nfrs/NFR-03-auditability.md) | Auditability | Mechanical outcomes covered; one live delegated all-outcomes receipt remains | Draft |
 | [NFR-04](./nfrs/NFR-04-poisoning-resistance.md) | Security | Retrieved memories render as quoted data, never instructions | Accepted |
 | [NFR-05](./nfrs/NFR-05-cost.md) | Cost | Logical/API/blob bounds measured; provider token telemetry and live delegated run remain open | Draft |

@@ -4,10 +4,12 @@ using System.Net;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.ServiceDiscovery;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
+using SmoothAiProductContextMemory.Host.HealthChecks;
 
 namespace SmoothAiProductContextMemory.Host.UnitTest;
 
@@ -58,11 +60,27 @@ public sealed class ServiceDefaultsTests : IAsyncDisposable
     [Fact]
     public async Task Readiness_fails_until_migrations_complete()
     {
-        using HttpClient client = _factory.CreateClient();
+        // Every other readiness check is forced healthy, so the 503 can only come from the migration
+        // latch — not from the unreachable placeholder database the shared factory points at.
+        await using WebApplicationFactory<HostApp::Program> factory = CreateFactory()
+            .WithWebHostBuilder(builder => builder.ConfigureServices(services =>
+                services.PostConfigure<HealthCheckServiceOptions>(options =>
+                {
+                    foreach (HealthCheckRegistration registration in options.Registrations
+                                 .Where(r => r.Name != "migrations"))
+                    {
+                        registration.Factory = _ => new HealthyCheck();
+                    }
+                })));
+        using HttpClient client = factory.CreateClient();
 
-        using HttpResponseMessage response = await client.GetAsync("/health", TestContext.Current.CancellationToken);
+        using HttpResponseMessage pending = await client.GetAsync("/health", TestContext.Current.CancellationToken);
+        pending.StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable);
 
-        response.StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable);
+        factory.Services.GetRequiredService<MigrationReadinessState>().MarkCompleted();
+
+        using HttpResponseMessage ready = await client.GetAsync("/health", TestContext.Current.CancellationToken);
+        ready.StatusCode.ShouldBe(HttpStatusCode.OK);
     }
 
     public async ValueTask DisposeAsync() => await _factory.DisposeAsync();
@@ -82,4 +100,12 @@ public sealed class ServiceDefaultsTests : IAsyncDisposable
                 builder.UseSetting("ApiAccess:ReadToken", "unit-test-read-token");
                 builder.UseSetting("ApiAccess:WriteToken", "unit-test-write-token");
             });
+
+    private sealed class HealthyCheck : IHealthCheck
+    {
+        public Task<HealthCheckResult> CheckHealthAsync(
+            HealthCheckContext context,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(HealthCheckResult.Healthy());
+    }
 }

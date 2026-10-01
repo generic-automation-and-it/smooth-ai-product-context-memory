@@ -15,10 +15,18 @@ inside_name="provision-harness-unignored-probe"
 inside_path="$repo_root/$inside_name"
 accepted_dir="$repo_root/.context"
 accepted_path="$accepted_dir/provision-harness-accepted.env"
+# `.context/` is gitignored, so a fresh clone has none and the accept-branch case below creates it.
+# Recorded before the trap is set, so a directory this run created is removed with the probes rather
+# than left behind in the working tree; one that already existed is never touched.
+created_context_dir=0
 cleanup_probe_files() {
   rm -f "$inside_path" "$inside_path.controller" "$accepted_path" "$accepted_path.controller"
+  if [ "$created_context_dir" -eq 1 ]; then rmdir "$accepted_dir" 2>/dev/null || true; fi
 }
 trap 'cleanup_probe_files; rm -rf "$scratch"' EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # `stat` for a file's permission bits is spelled two incompatible ways: GNU uses `-c '%a'`, BSD/macOS
 # uses `-f '%Lp'`, and the two do not fail the same way. The wrong flag on GNU does not merely error —
@@ -43,8 +51,13 @@ fi
 
 # The scratch dir is outside the checkout, so the unignored-path refusal below would otherwise fire
 # on every call here. The refusal has its own test below.
+# HOME is a scratch directory so no run reads or writes the operator's real AppHost user secrets;
+# PROVISION_HOME selects a specific one for the cases that assert on that store.
+harness_home="$scratch/home"
+mkdir -p "$harness_home"
 provision() {
-  "$repo_root/scripts/provision-credentials.sh" --allow-unignored-env-file "$@"
+  HOME="${PROVISION_HOME:-$harness_home}" APPDATA="" \
+    "$repo_root/scripts/provision-credentials.sh" --allow-unignored-env-file "$@"
 }
 
 provision --env-file "$scratch/creds.env" --skip-apphost >/dev/null
@@ -177,7 +190,6 @@ inside_path="$repo_root/$inside_name"
 # ignore, so the guard permits it with no override. `.context/` is covered by the repo's own ignore
 # rules, which makes it the one in-repo location an operator is actually directed to use. It is
 # gitignored, so it does not exist in a fresh clone; create it, and remove it again if it was ours.
-created_context_dir=0
 if [ ! -d "$accepted_dir" ]; then
   mkdir -p "$accepted_dir"
   created_context_dir=1
@@ -198,7 +210,7 @@ check_ignore_refusals() {
   elif [ $? -ne 1 ]; then
     echo "SKIP: check-ignore could not answer for an in-repo path" >&2
   else
-    if (cd "$repo_root" && scripts/provision-credentials.sh \
+    if (cd "$repo_root" && HOME="$harness_home" APPDATA="" scripts/provision-credentials.sh \
           --env-file "$inside_path" --skip-apphost) >"$unignored_out" 2>&1; then
       echo "FAIL: wrote credentials to an in-repo path git does not ignore" >&2
       rm -f "$inside_path" "$inside_path.controller"
@@ -209,7 +221,7 @@ check_ignore_refusals() {
     [ ! -e "$inside_path" ] \
       || { echo "FAIL: a token file was created despite the refusal" >&2; rm -f "$inside_path" "$inside_path.controller"; exit 1; }
     # The override must actually work, or the refusal is the only outcome an operator can reach.
-    (cd "$repo_root" && scripts/provision-credentials.sh \
+    (cd "$repo_root" && HOME="$harness_home" APPDATA="" scripts/provision-credentials.sh \
         --env-file "$inside_path" --allow-unignored-env-file --skip-apphost) >/dev/null 2>&1
     grep -q '^ApiAccess__ReadToken=' "$inside_path" \
       || { echo "FAIL: --allow-unignored-env-file did not write the file" >&2; rm -f "$inside_path" "$inside_path.controller"; exit 1; }
@@ -219,7 +231,7 @@ check_ignore_refusals() {
   # --- the accept branch: in-repo and git-ignored, permitted with no override -----------------------
   if ! git -C "$repo_root" check-ignore -q "$accepted_path" 2>/dev/null; then
     echo "SKIP: $accepted_path is not ignored by this checkout, so the accept branch cannot be evaluated" >&2
-  elif (cd "$repo_root" && scripts/provision-credentials.sh \
+  elif (cd "$repo_root" && HOME="$harness_home" APPDATA="" scripts/provision-credentials.sh \
           --env-file "$accepted_path" --skip-apphost) >"$unignored_out" 2>&1; then
     :
   else
@@ -235,7 +247,7 @@ check_ignore_refusals() {
   fi
 
   # --- case 2: outside the repository, which git cannot answer for ---------------------------------
-  if (cd "$repo_root" && scripts/provision-credentials.sh \
+  if (cd "$repo_root" && HOME="$harness_home" APPDATA="" scripts/provision-credentials.sh \
         --env-file "$unignored_path" --skip-apphost) >"$unignored_out" 2>&1; then
     echo "FAIL: wrote credentials to a path outside the repository" >&2
     exit 1
@@ -320,7 +332,7 @@ grep -q 'identical' "$scratch/identical-report" \
 # dir so the real user-secrets store is untouched, and assert the file the SDK reads.
 secrets_home="$scratch/secrets-home"
 mkdir -p "$secrets_home"
-HOME="$secrets_home" provision --env-file "$scratch/apphost.env" >/dev/null
+PROVISION_HOME="$secrets_home" provision --env-file "$scratch/apphost.env" >/dev/null
 secrets_json="$secrets_home/.microsoft/usersecrets/smooth-project-memory-host/secrets.json"
 [ -f "$secrets_json" ] \
   || { echo "FAIL: AppHost user secrets were not written to $secrets_json" >&2; exit 1; }
@@ -337,6 +349,109 @@ case "$secrets_mode" in
   600|400) ;;
   *) echo "FAIL: user secrets file has mode $secrets_mode" >&2; exit 1 ;;
 esac
+
+# --- the base URL is shell input to every `source`, so it is validated -----------------------------
+# An unvalidated `--base-url` is written into a file consumers `source`, where `$(…)` runs.
+pwned="$scratch/pwned"
+for hostile in 'http://localhost:5141/$(touch '"$pwned"')' 'http://localhost:5141`touch '"$pwned"'`' \
+               'http://localhost:5141;touch '"$pwned" 'http://operator:base-secret@localhost:5141' \
+               'http://localhost:5141/api' 'ftp://localhost:5141' 'http://localhost:5141 x' ''; do
+  injected="$scratch/injected.env"
+  rm -f "$injected" "$injected.controller"
+  if provision --env-file "$injected" --skip-apphost --base-url "$hostile" >"$scratch/injected-report" 2>&1; then
+    echo "FAIL: accepted --base-url '$hostile'" >&2
+    exit 1
+  fi
+  [ ! -e "$injected" ] || { echo "FAIL: a credential file was written for --base-url '$hostile'" >&2; exit 1; }
+  if grep -q 'base-secret' "$scratch/injected-report"; then
+    echo "FAIL: the --base-url refusal echoed a credential" >&2
+    exit 1
+  fi
+done
+[ ! -e "$pwned" ] || { echo "FAIL: a hostile --base-url executed a command" >&2; exit 1; }
+for accepted in 'http://localhost:5141' 'https://memory.internal:8443/' 'http://127.0.0.1:6000' 'http://[::1]:5141'; do
+  rm -f "$scratch/ok-url.env" "$scratch/ok-url.env.controller"
+  provision --env-file "$scratch/ok-url.env" --skip-apphost --base-url "$accepted" >/dev/null 2>&1 \
+    || { echo "FAIL: refused a bare origin --base-url '$accepted'" >&2; exit 1; }
+  got="$(set -a; . "$scratch/ok-url.env"; set +a; printf '%s' "$CONTEXT_MEMORY_BASE_URL")"
+  [ "$got" = "$accepted" ] || { echo "FAIL: sourced base URL '$got' != '$accepted'" >&2; exit 1; }
+done
+
+# A hand-edited file whose base URL is hostile is refused on reuse instead of being written back.
+tampered="$scratch/tampered.env"
+cp "$permissive/creds.env" "$tampered"
+cp "$permissive/creds.env.controller" "$tampered.controller"
+sed 's|^CONTEXT_MEMORY_BASE_URL=.*|CONTEXT_MEMORY_BASE_URL=http://x$(touch '"$pwned"')|' "$tampered" >"$tampered.tmp"
+mv "$tampered.tmp" "$tampered"
+if provision --env-file "$tampered" --skip-apphost >"$scratch/tampered-report" 2>&1; then
+  echo "FAIL: reused a file whose CONTEXT_MEMORY_BASE_URL is not a bare origin" >&2
+  exit 1
+fi
+grep -q 'not a bare http(s) origin' "$scratch/tampered-report" \
+  || { echo "FAIL: the tampered-base refusal did not explain itself:" >&2; cat "$scratch/tampered-report" >&2; exit 1; }
+[ ! -e "$pwned" ] || { echo "FAIL: a tampered base URL executed a command" >&2; exit 1; }
+
+# --- a custom base URL survives a re-split and a rotation -----------------------------------------
+custom="$scratch/custom"
+mkdir -p "$custom"
+custom_url='http://127.0.0.1:6123'
+provision --env-file "$custom/creds.env" --skip-apphost --base-url "$custom_url" >/dev/null 2>&1
+rm -f "$custom/creds.env.controller"
+provision --env-file "$custom/creds.env" --skip-apphost >/dev/null 2>&1
+grep -qx "CONTEXT_MEMORY_BASE_URL=$custom_url" "$custom/creds.env" \
+  || { echo "FAIL: a re-split reset the custom base URL" >&2; grep BASE_URL "$custom/creds.env" >&2; exit 1; }
+provision --env-file "$custom/creds.env" --skip-apphost --rotate >/dev/null 2>&1
+grep -qx "CONTEXT_MEMORY_BASE_URL=$custom_url" "$custom/creds.env" \
+  || { echo "FAIL: --rotate reset the custom base URL" >&2; exit 1; }
+# Naming a different origin rewrites the file without rotating the tokens a running Host holds.
+custom_read="$(grep -m1 '^ApiAccess__ReadToken=' "$custom/creds.env" | cut -d= -f2-)"
+moved="$(provision --env-file "$custom/creds.env" --skip-apphost --base-url 'http://localhost:7000' 2>&1)"
+grep -q 'Rewriting the base URL' <<<"$moved" \
+  || { echo "FAIL: a new --base-url did not rewrite the file:" >&2; echo "$moved" >&2; exit 1; }
+grep -qx 'CONTEXT_MEMORY_BASE_URL=http://localhost:7000' "$custom/creds.env" \
+  || { echo "FAIL: a new --base-url was not written" >&2; exit 1; }
+[ "$(grep -m1 '^ApiAccess__ReadToken=' "$custom/creds.env" | cut -d= -f2-)" = "$custom_read" ] \
+  || { echo "FAIL: changing the base URL rotated the read token" >&2; exit 1; }
+
+# --- owner-only is re-asserted on reuse, not only on create ----------------------------------------
+chmod 644 "$custom/creds.env" "$custom/creds.env.controller"
+provision --env-file "$custom/creds.env" --skip-apphost >/dev/null 2>&1
+for reused_file in "$custom/creds.env" "$custom/creds.env.controller"; do
+  mode="$(file_mode "$reused_file")"
+  case "$mode" in
+    600|400) ;;
+    *) echo "FAIL: $reused_file kept mode $mode across a reuse run" >&2; exit 1 ;;
+  esac
+done
+
+# --- --rotate --skip-apphost warns about the stale AppHost user secrets ----------------------------
+# The secrets written in the AppHost case above still hold the previous pair once the env file rotates.
+stale_report="$(PROVISION_HOME="$secrets_home" provision --env-file "$scratch/apphost.env" --rotate --skip-apphost 2>&1)"
+grep -q 'WARNING: new tokens were minted with --skip-apphost' <<<"$stale_report" \
+  || { echo "FAIL: --rotate --skip-apphost did not warn about stale AppHost user secrets:" >&2; echo "$stale_report" >&2; exit 1; }
+if grep -q "$apphost_read" <<<"$stale_report"; then
+  echo "FAIL: the stale-secrets warning printed a token" >&2
+  exit 1
+fi
+quiet_report="$(PROVISION_HOME="$secrets_home" provision --env-file "$scratch/apphost.env" --skip-apphost 2>&1)"
+if grep -q 'WARNING: new tokens' <<<"$quiet_report"; then
+  echo "FAIL: a reuse run with --skip-apphost warned about stale secrets it did not create" >&2
+  exit 1
+fi
+
+# --- a failed user-secrets write leaves no token-bearing temp file behind --------------------------
+failing_bin="$scratch/failing-bin"
+mkdir -p "$failing_bin"
+printf '#!/bin/sh\nexit 1\n' >"$failing_bin/python3"
+chmod +x "$failing_bin/python3"
+fail_home="$scratch/fail-home"
+mkdir -p "$fail_home"
+if PROVISION_HOME="$fail_home" PATH="$failing_bin:$PATH" provision --env-file "$scratch/failing.env" >/dev/null 2>&1; then
+  echo "FAIL: the provisioner succeeded although the user-secrets write failed" >&2
+  exit 1
+fi
+leftover="$(find "$fail_home" -name '.secrets.*' -print)"
+[ -z "$leftover" ] || { echo "FAIL: a user-secrets temp file survived the failure: $leftover" >&2; exit 1; }
 
 echo "provision-credentials.sh security and reuse checks passed."
 

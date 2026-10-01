@@ -1,6 +1,6 @@
 # AGENTS.md - Context memory storage
 
-AI Context: HLD for context memory storage. Updated: 2026-09-16
+AI Context: HLD for context memory storage. Updated: 2026-10-01
 
 ## TL;DR
 
@@ -11,7 +11,8 @@ quality bar in [./nfrs/](./nfrs/); containers and entity model in
 — and the only place their justification belongs — are in
 [BRD 001](../../brd/001-context-memory/): principally BR-05 (cross-product recall), BR-08 (superseded
 knowledge stays readable), BR-09 (a correction to a record is distinguishable from a change in the
-world), BR-13 (nothing silently lost) and BR-17 (readable without this application).
+world), BR-13 (nothing silently lost) and BR-17 (readable without this application). BR-04, BR-06 and BR-07 are
+answered in part — the README's *Business Requirements Traced* table states which part.
 
 ## Non-Negotiables
 
@@ -67,6 +68,8 @@ Targets and verification live in [./nfrs/](./nfrs/). Two shape how code is writt
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-01 | README gained a *Business Requirements Traced* table: BR-04, BR-06 and BR-07 previously traced to no HLD. Each is mapped to the part this design delivers (indexed filter dimensions; cheap fields and a capped result count; per-version confidence, sources and `created_on` returned with every item) and the part it does not (hierarchy traversal is HLD-003; no semantic ranking; `sources` is optional on write). | BR-04, BR-06, BR-07 |
+| 2026-10-01 | NFR-03's status line had the supersession reversed (it said it *supersedes* HLD-006 NFR-02); it now says it is superseded by HLD-006 NFR-02, and records that the closure rests on an NFR still in Draft. No status change. | NFR-03, HLD-006 NFR-02 |
 | 2026-09-16 | Recall deferral closed by measurement: FTS configuration `simple` → `english` (recall 0.44 → 0.78, precision 0.88); `pg_trgm` measured and rejected with a recorded reopening threshold. | [NFR-02 recall-tuning measurements](./nfrs/NFR-02-recall-tuning-measurements.md) |
 | 2026-09-16 | Orphan-management ambiguity closed structurally: `IBlobStorage` no longer exposes deletion; test-only delete stays on the concrete adapter; GC remains deferred behind the recorded reopening condition. HLD-006 reports orphans, never deletes. | `BlobStorageCapabilityGuardTests` |
 | 2026-09-13 | NFR-04 Accepted — export projection + byte-identical L1 assertions shipped. | NFR-04 |

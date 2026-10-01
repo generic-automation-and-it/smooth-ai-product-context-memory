@@ -28,6 +28,12 @@ public sealed class DossierBundleHandlerTests : HandlerTestBase
     private static readonly Guid VisibleDeepUuid = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
     private static readonly Guid HiddenUuid = Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc");
     private static readonly Guid ProposedUuid = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddd02");
+    private static readonly Guid FutureAnchorUuid = Guid.Parse("ffffffff-ffff-ffff-ffff-ffffffffff01");
+    private static readonly Guid FutureWidenedUuid = Guid.Parse("ffffffff-ffff-ffff-ffff-ffffffffff02");
+    private static readonly Guid OrderingFirst = Guid.Parse("eeeeeeee-eeee-eeee-eeee-eeeeeeeeee01");
+    private static readonly Guid OrderingLaterCapture = Guid.Parse("eeeeeeee-eeee-eeee-eeee-eeeeeeeeee02");
+    private static readonly Guid OrderingTieLow = Guid.Parse("eeeeeeee-eeee-eeee-eeee-eeeeeeeeee03");
+    private static readonly Guid OrderingTieHigh = Guid.Parse("eeeeeeee-eeee-eeee-eeee-eeeeeeeeee04");
     private const string BlobAddress = "aa/bb/111111111111111111111111111111111111111111111111111111111111111";
 
     private CreateDossierBundle.Handler BundleHandler(IBlobStorage blobs) =>
@@ -260,9 +266,60 @@ public sealed class DossierBundleHandlerTests : HandlerTestBase
     }
 
     [Fact]
+    public async Task Bundle_items_follow_the_provenance_order_not_the_selection_order()
+    {
+        await SeedForOrderingAsync();
+        CreateDossierBundle.Handler handler = BundleHandler(new DictionaryBlobStorage());
+
+        CreateDossierBundle.Response response = await handler.Handle(BundleRequest(includeHistory: true), Ct);
+
+        // The selection orders memories by their current version, so the history row of OrderingFirst
+        // (valid long before every other row) would otherwise trail its own current version. The
+        // bundle orders the rows themselves: validity, then capture, then identity, then version.
+        response.Bundle.Items.Select(i => (i.Uuid, i.Version)).ShouldBe(
+        [
+            (OrderingFirst, 1),
+            (OrderingTieLow, 1),
+            (OrderingTieHigh, 1),
+            (OrderingLaterCapture, 1),
+            (OrderingFirst, 2),
+        ]);
+        response.Bundle.Items.ShouldBe(
+            [.. response.Bundle.Items
+                .OrderBy(i => i.ValidFrom)
+                .ThenBy(i => i.CreatedOn)
+                .ThenBy(i => i.Uuid)
+                .ThenBy(i => i.Version)]);
+    }
+
+    [Fact]
+    public async Task AsOf_excludes_a_memory_whose_validity_starts_after_it_from_every_stage()
+    {
+        // 02:00 at +02:00 is midnight UTC, and the future rows start at 01:00 UTC. A handler that read
+        // the offset as wall-clock time would admit them; one that did not normalise would throw.
+        DateTimeOffset asOf = new(2024, 3, 10, 2, 0, 0, TimeSpan.FromHours(2));
+        await SeedForAsOfAsync(future: new DateTimeOffset(2024, 3, 10, 1, 0, 0, TimeSpan.Zero));
+        CreateDossierBundle.Handler handler = BundleHandler(new DictionaryBlobStorage());
+
+        CreateDossierBundle.Response unbounded = await handler.Handle(BundleRequest(), Ct);
+        CreateDossierBundle.Response bounded = await handler.Handle(BundleRequest(asOf: asOf), Ct);
+
+        // Control: without AsOf both future rows are reached — one as an anchor, one by widening.
+        unbounded.Bundle.Items.Select(i => i.Uuid).ShouldBe(
+            [AnchorUuid, VisibleDeepUuid, FutureAnchorUuid, FutureWidenedUuid], ignoreOrder: true);
+
+        bounded.Bundle.Items.Select(i => i.Uuid).ShouldBe([AnchorUuid, VisibleDeepUuid]);
+        bounded.Bundle.Manifest.Reach.Anchors.ShouldBe(1);
+        bounded.Bundle.Manifest.Reach.Widened.ShouldBe(1);
+        bounded.Bundle.Manifest.Reach.Selected.ShouldBe(2);
+        bounded.Bundle.Edges.Select(e => e.TargetUuid).ShouldBe([VisibleDeepUuid]);
+        bounded.Bundle.Manifest.Selection.AsOf.ShouldBe(asOf);
+    }
+
+    [Fact]
     public async Task NonZero_history_inflated_cut_converges_preview_and_bundle()
     {
-        // The truncated-empty path already agreed before this change (batch 2 gave the bundle the
+        // The truncated-empty path already agreed before this change (PR #124 gave the bundle the
         // same disclosure call for a zero-match selection). The path that actually diverged — and
         // this fix changes by deleting two bundle-only disjuncts — is the non-zero one: many version
         // rows of a few selected memories inflate the item count past the anchor limit, producing a
@@ -368,7 +425,7 @@ public sealed class DossierBundleHandlerTests : HandlerTestBase
 
     private static CreateDossierBundle.Request BundleRequest(
         IReadOnlyList<string>? tags = null, string? ticketProvider = null, string? ticketKey = null,
-        bool includeHistory = false, string? status = null) =>
+        bool includeHistory = false, string? status = null, DateTimeOffset? asOf = null) =>
         new(
             Repo: "kingstown",
             InitiativeName: null,
@@ -379,7 +436,7 @@ public sealed class DossierBundleHandlerTests : HandlerTestBase
             Status: status,
             ScopeDimension: null,
             IncludeHistory: includeHistory,
-            AsOf: null,
+            AsOf: asOf,
             WidenDepth: 3);
 
     private static CreateDossierPreview.Request PreviewRequest(
@@ -478,6 +535,58 @@ public sealed class DossierBundleHandlerTests : HandlerTestBase
         (await Graph.CreateAsync(VisibleDeepUuid, HiddenUuid, MemoryRelation.DependsOn, "leads to hidden", Ct)).ShouldBeTrue();
     }
 
+    private async Task SeedForOrderingAsync()
+    {
+        MemoryGroup product = Group(ProductGroupUuid, MemoryGroup.ScopeDimensionValue.Product);
+        Db.MemoryGroups.Add(product);
+        await Db.SaveChangesAsync(Ct);
+
+        // Inserted against the expected order, so neither insertion nor id order can pass for it.
+        Memory first = MemoryRow(product.Id, OrderingFirst, "First", "History first", tags: ["tag-1"], facet: "architecture");
+        Memory tieHigh = MemoryRow(product.Id, OrderingTieHigh, "Tie high", "Tie high", tags: ["tag-1"], facet: "architecture");
+        Memory laterCapture = MemoryRow(product.Id, OrderingLaterCapture, "Later", "Later capture", tags: ["tag-1"], facet: "architecture");
+        Memory tieLow = MemoryRow(product.Id, OrderingTieLow, "Tie low", "Tie low", tags: ["tag-1"], facet: "architecture");
+        Db.Memories.AddRange(first, tieHigh, laterCapture, tieLow);
+        await Db.SaveChangesAsync(Ct);
+
+        Db.MemoryVersions.Add(Version(first.Id, 1, "First v1", isCurrent: false, kind: MemoryVersion.KindValue.Decision,
+            validFrom: ValidFrom.AddDays(-10)));
+        Db.MemoryVersions.Add(Version(first.Id, 2, "First v2", isCurrent: true, kind: MemoryVersion.KindValue.Decision,
+            validFrom: ValidFrom.AddDays(5)));
+        Db.MemoryVersions.Add(Version(tieHigh.Id, 1, "Tie high", isCurrent: true, kind: MemoryVersion.KindValue.Decision));
+        Db.MemoryVersions.Add(Version(laterCapture.Id, 1, "Later", isCurrent: true, kind: MemoryVersion.KindValue.Decision,
+            createdOn: CreatedOn.AddHours(1)));
+        Db.MemoryVersions.Add(Version(tieLow.Id, 1, "Tie low", isCurrent: true, kind: MemoryVersion.KindValue.Decision));
+        await Db.SaveChangesAsync(Ct);
+    }
+
+    private async Task SeedForAsOfAsync(DateTimeOffset future)
+    {
+        MemoryGroup product = Group(ProductGroupUuid, MemoryGroup.ScopeDimensionValue.Product);
+        Db.MemoryGroups.Add(product);
+        await Db.SaveChangesAsync(Ct);
+
+        Memory anchor = MemoryRow(product.Id, AnchorUuid, "Anchor", "Anchor fact", tags: ["tag-1"], facet: "architecture");
+        Memory widened = MemoryRow(product.Id, VisibleDeepUuid, "Widened", "Widened fact", tags: ["other"], facet: "architecture");
+        Memory futureAnchor = MemoryRow(product.Id, FutureAnchorUuid, "Future anchor", "Future anchor fact", tags: ["tag-1"],
+            facet: "architecture");
+        Memory futureWidened = MemoryRow(product.Id, FutureWidenedUuid, "Future widened", "Future widened fact",
+            tags: ["other"], facet: "architecture");
+        Db.Memories.AddRange(anchor, widened, futureAnchor, futureWidened);
+        await Db.SaveChangesAsync(Ct);
+
+        Db.MemoryVersions.Add(Version(anchor.Id, 1, "Anchor claim", isCurrent: true, kind: MemoryVersion.KindValue.Decision));
+        Db.MemoryVersions.Add(Version(widened.Id, 1, "Widened claim", isCurrent: true, kind: MemoryVersion.KindValue.Decision));
+        Db.MemoryVersions.Add(Version(futureAnchor.Id, 1, "Future anchor claim", isCurrent: true,
+            kind: MemoryVersion.KindValue.Decision, validFrom: future));
+        Db.MemoryVersions.Add(Version(futureWidened.Id, 1, "Future widened claim", isCurrent: true,
+            kind: MemoryVersion.KindValue.Decision, validFrom: future));
+        await Db.SaveChangesAsync(Ct);
+
+        (await Graph.CreateAsync(AnchorUuid, VisibleDeepUuid, MemoryRelation.DependsOn, "needs it", Ct)).ShouldBeTrue();
+        (await Graph.CreateAsync(AnchorUuid, FutureWidenedUuid, MemoryRelation.DependsOn, "later", Ct)).ShouldBeTrue();
+    }
+
     private async Task SeedHistoryInflatedBundleAsync()
     {
         MemoryGroup product = Group(ProductGroupUuid, MemoryGroup.ScopeDimensionValue.Product);
@@ -537,7 +646,8 @@ public sealed class DossierBundleHandlerTests : HandlerTestBase
 
     private static MemoryVersion Version(
         long memoryId, int version, string statement, bool isCurrent, string kind, string? blobAddress = null,
-        string status = MemoryVersion.MemoryVersionStatus.Approved) => new()
+        string status = MemoryVersion.MemoryVersionStatus.Approved, DateTimeOffset? validFrom = null,
+        DateTimeOffset? createdOn = null) => new()
         {
             MemoryId = memoryId,
             Version = version,
@@ -549,8 +659,8 @@ public sealed class DossierBundleHandlerTests : HandlerTestBase
             Confidence = 80,
             Status = status,
             Sources = [SourceDocument.Create("jira", "ACM-1", ValidFrom)],
-            ValidFrom = ValidFrom,
-            CreatedOn = CreatedOn,
+            ValidFrom = validFrom ?? ValidFrom,
+            CreatedOn = createdOn ?? CreatedOn,
         };
 
     private sealed class DictionaryBlobStorage : IBlobStorage

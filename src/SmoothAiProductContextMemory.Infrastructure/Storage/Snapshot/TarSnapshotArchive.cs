@@ -23,14 +23,14 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
         string destinationPath,
         SnapshotCapture capture,
         SnapshotWalkResult walk,
-        Func<string, Task<(byte[] Content, string Sha256, string? ContentType)>> readBlobAsync,
+        Func<string, CancellationToken, Task<(byte[] Content, string Sha256, string? ContentType)>> readBlobAsync,
         CancellationToken cancellationToken)
     {
         string directory = Path.GetDirectoryName(Path.GetFullPath(destinationPath)) ?? Directory.GetCurrentDirectory();
         Directory.CreateDirectory(directory);
 
         // Write to a temp path and move it into place only on success, so a failure mid-write leaves
-        // no truncated archive at the destination (H12). The move is an atomic *replace*, not a
+        // no truncated archive at the destination. The move is an atomic *replace*, not a
         // refusal to overwrite: an existing archive at the destination is superseded only by a
         // complete write. Refusing a non-empty destination is a different guarantee, and the
         // Markdown export sink is where that one lives.
@@ -39,16 +39,19 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
         FileStream? stream = null;
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             stream = File.Create(tempPath);
             var tar = new TarWriter(stream, TarEntryFormat.Ustar, leaveOpen: true);
 
             var entries = new List<SnapshotArchiveEntry>();
             var writeEntry = async (string name, byte[] content, string? sha256 = null, string? contentType = null) =>
             {
-                tar.WriteEntry(new PaxTarEntry(TarEntryType.RegularFile, name)
-                {
-                    DataStream = new MemoryStream(content, writable: false),
-                });
+                await tar.WriteEntryAsync(
+                    new PaxTarEntry(TarEntryType.RegularFile, name)
+                    {
+                        DataStream = new MemoryStream(content, writable: false),
+                    },
+                    cancellationToken);
                 entries.Add(new SnapshotArchiveEntry(name, sha256 ?? Sha256ContentAddress.Hash(content), content.Length, contentType));
             };
 
@@ -68,17 +71,18 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
             int dangling = 0;
             foreach (SnapshotBlob blob in walk.Blobs)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 switch (blob.State)
                 {
                     case SnapshotBlobState.Ok:
-                        (byte[] body, string bodySha256, string? bodyContentType) = await readBlobAsync(blob.Address);
+                        (byte[] body, string bodySha256, string? bodyContentType) = await readBlobAsync(blob.Address, cancellationToken);
                         await writeEntry(BlobEntryName(blob.Address), body, bodySha256, bodyContentType);
                         objects++;
                         break;
                     case SnapshotBlobState.Mismatch:
                         // Faithfully archived under the cited address so verify can report the
                         // capture-time inconsistency distinctly from transit corruption (LADR-02).
-                        (byte[] mismatchedBody, string mismatchedSha256, string? mismatchedContentType) = await readBlobAsync(blob.Address);
+                        (byte[] mismatchedBody, string mismatchedSha256, string? mismatchedContentType) = await readBlobAsync(blob.Address, cancellationToken);
                         await writeEntry(BlobEntryName(blob.Address), mismatchedBody, mismatchedSha256, mismatchedContentType);
                         objects++;
                         mismatched++;
@@ -112,7 +116,7 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
                 unreferenced,
                 mismatched);
 
-            tar.Dispose();
+            await tar.DisposeAsync();
             // The rename is atomic; the write is not durable until the data is on the device. Without
             // this a crash between the two leaves a correctly-named archive holding none of its
             // content -- and the per-member checksums that would catch it are inside it.
@@ -120,6 +124,8 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
             await stream.DisposeAsync();
             stream = null;
 
+            // Last point at which a cancel can still mean "no archive": after the move it exists.
+            cancellationToken.ThrowIfCancellationRequested();
             File.Move(tempPath, destinationPath, overwrite: true);
         }
         finally
@@ -287,6 +293,15 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
                 continue;
             }
 
+            if (!SnapshotContentTypes.IsAllowed(expected.ContentType))
+            {
+                // The type is restored verbatim as the object's Content-Type, and the manifest is not
+                // hash-declared, so an unrecognised value is tamper rather than data. The value itself
+                // is not echoed: it is attacker-shaped text in an operator report.
+                findings.Add(new SnapshotFinding(SnapshotFindingKind.Corruption, expected.Name,
+                    "Manifest records a content type this system never writes, or one that is malformed."));
+            }
+
             if (!entries.TryGetValue(expected.Name, out byte[]? content))
             {
                 findings.Add(new SnapshotFinding(SnapshotFindingKind.MissingEntry, expected.Name,
@@ -377,7 +392,7 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
         ICollection<SnapshotFinding> findings)
     {
         // Every corpus count the manifest records must match what the archive actually holds; an
-        // altered manifest count on an untouched archive must be caught here (R02).
+        // altered manifest count on an untouched archive must be caught here.
         CheckCount(entries, SnapshotEntryNames.Memories, manifest.Counts.Memories, "memory", findings);
         CheckCount(entries, SnapshotEntryNames.MemoryVersions, manifest.Counts.Versions, "memory version", findings);
         CheckCount(entries, SnapshotEntryNames.Vertices, manifest.Counts.Vertices, "graph vertex", findings);
@@ -537,7 +552,20 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
             (var entries, var repeated) = ReadEntries(archivePath);
             return (entries, repeated, null);
         }
-        catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException)
+        catch (UnauthorizedAccessException)
+        {
+            // A permissions refusal proves nothing about the archive's content, so it must not read
+            // as Corruption: restore turns Corruption into the integrity exit code, and an operator
+            // would replace a sound archive instead of fixing a file mode.
+            return (
+                new Dictionary<string, byte[]>(StringComparer.Ordinal),
+                [],
+                new SnapshotFinding(
+                    SnapshotFindingKind.Unreadable,
+                    null,
+                    "Archive could not be opened: access was denied. This is a permissions problem, not evidence about the archive's integrity."));
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException)
         {
             return (
                 new Dictionary<string, byte[]>(StringComparer.Ordinal),

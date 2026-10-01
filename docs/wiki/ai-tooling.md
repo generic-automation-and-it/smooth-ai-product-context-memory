@@ -21,9 +21,9 @@ All three tools share a common context through the `.agents/` folder — rules, 
 - Codex was well-suited to PR workflow automation and repetitive generation tasks.
 - GitHub Copilot's web agent added value in PR review participation — visible in the PR conversation history.
 
-## ChatHost (planned)
+## ChatHost (reserved, not in the tree)
 
-ChatHost is a standalone LLM microservice — it owns the Anthropic SDK and talks to the Host API via HTTP only, keeping conversational AI out of the data API. The project is not yet in tree (planned as `src/SmoothAiProductContextMemory.ChatHost/`); until it lands, agents work with the store through the mimisbrunnr-context-memory skill against the HTTP API.
+ChatHost is a **reserved slot**, not scheduled work: the name is kept for a standalone LLM microservice that would own the Anthropic SDK and talk to the Host API over HTTP only, keeping conversational AI out of the data API. There is no project, no build output and no run command — the root `AGENTS.md` repository-layout row is a placeholder so the slot is not re-proposed from scratch. Agents work with the store through the mimisbrunnr-context-memory skill against the HTTP API.
 
 ## Recommendations (for teams adopting this approach)
 

@@ -24,7 +24,7 @@ cheaper than untangling a wrong dedup decision. Skip `--approve` unless the huma
 The skill is the **sole authority** on the context-memory write path. It captures candidate facts
 byproduct-style during work and writes them at an explicit end-of-task checkpoint. Its whole value is
 in the **write path**: it performs the semantic work the database cannot express as constraints —
-cross-group deduplication, link derivation, secret redaction, atomicity checking, and summary/keyword
+within-group deduplication (identity is `(group, uuid)`; a same-subject match in another group becomes a typed link, not a version), link derivation, secret redaction, atomicity checking, and summary/keyword
 generation. It is not a passive logger; it decides, per candidate, whether this is a new memory, a
 version bump, a divergent claim, or a skip.
 
@@ -32,7 +32,7 @@ It has 4 phases:
 
 1. **Initialize** (resolve the group from ticket/repo/initiative/scope)
 2. **Listen** (accumulate candidates silently, never write)
-3. **Compare-or-Clarify** (the bounded pre-write round: cross-group dedup + link derivation + ticket-uniqueness)
+3. **Compare-or-Clarify** (the bounded pre-write round: within-group dedup + cross-group link derivation + ticket-uniqueness)
 4. **Write** (the explicit `set` checkpoint)
 
 …plus a fixed five-stage write pipeline (preflight → redact → dedupe/derive-links → atomicity → write)
@@ -71,8 +71,8 @@ and exposed token counts separately.
   during the work that is already happening; the only extra cost is the checkpoint write. If upkeep were
   a separate task it would decay and the store would die — that is the cost the skill avoids, not a
   token cost but a decay cost.
-- **Cross-group dedup prevents store bloat.** One subject, one memory (versioned), not N near-identical
-  records. Each avoided duplicate is an LLM call and a retrieval-confusion avoided downstream.
+- **Within-group dedup prevents store bloat.** One subject per group, one memory (versioned), not N
+  near-identical records; a twin in another group is linked, not merged. Each avoided duplicate is an LLM call and a retrieval-confusion avoided downstream.
 
 ### Where it does *not* save — the caveat
 

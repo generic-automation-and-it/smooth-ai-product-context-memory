@@ -71,7 +71,7 @@ public sealed class NpgsqlMemorySearch(SmoothAiProductContextMemoryDbContext db)
             rows = rows.Where(x => x.version.Status != MemoryVersion.MemoryVersionStatus.Proposed);
         }
 
-        if (criteria.AsOf is { } asOf)
+        if (PostgresInstant.ToUtc(criteria.AsOf) is { } asOf)
         {
             rows = rows.Where(x => x.version.ValidFrom <= asOf
                 && (x.version.ValidUntil == null || x.version.ValidUntil > asOf));

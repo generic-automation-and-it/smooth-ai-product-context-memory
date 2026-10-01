@@ -28,7 +28,7 @@ resetting it before a tuning experiment is legitimate rather than destructive.
 ## Alternatives Considered
 
 - **Protect feedback like knowledge** — rejected: a category error that would fill history with noise and extend a guarantee to data whose loss costs nothing.
-- **Keep feedback indefinitely** — rejected: unbounded growth for a signal whose value decays. Old recall data describes a store and a recall implementation that no longer exist.
+- **Keep feedback indefinitely** — rejected: unbounded growth for a signal whose value decays. Old recall data describes a store and a recall implementation that no longer exist. *(The rejection stands, but the bound that implements it — LADR-02 *Retention bound* — is specified, not yet enforced, so today the table is in effect kept until a baseline reset or restore.)*
 
 ## Consequences
 

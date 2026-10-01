@@ -46,7 +46,8 @@ or feed anything back into retrieval.
   currently signal expectation, so the second option would add a contract the handler cannot honour and
   would silently drop the miss signal in the common case. The noise of recording every empty result is
   bounded and classifiable, and NFR-03's miss-rate question is well-defined over all empty retrievals.
-  The emission point is `QueryMemories.Handler`, after the response is materialised, off the critical path.
+  The emission point is `QueryMemories.Handler`, after the response is materialised and before it is
+  returned — a guarded synchronous write, so it adds to the response time but cannot fail the retrieval.
 
 ## Related
 

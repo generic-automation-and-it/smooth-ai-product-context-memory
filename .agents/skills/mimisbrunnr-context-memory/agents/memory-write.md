@@ -36,7 +36,7 @@ both API credentials; never print either credential.
 Run exactly once in fixed order:
 
 1. **Preflight**: batched cross-group read-before-write; facts only, no API judgement.
-2. **Redact**: scrub detected secrets before any content reaches storage; report rule names only.
+2. **Redact**: scrub detected secrets before any content reaches storage; report rule names, field paths and replaced offsets only — never the replaced text. If a location covers prose rather than a secret, reword it and re-run.
 3. **Dedupe / derive links**: judge subject matches and links from bounded recall.
 4. **Atomicity check**: one memory per fact; split or skip bundled claims.
 5. **Write**: one transactional `set`; API owns version ordering, identities, and graph writes.

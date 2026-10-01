@@ -252,7 +252,7 @@ public class DossierBundleTests
     public void BuildLimitsHit_reports_cap_when_selection_fills_the_fetch_ceiling()
     {
         // The anchor search fills the fetch ceiling without raising the widen/ticket limit flag, so a
-        // selection truncated to that ceiling must still report CapReached (H1) rather than present as
+        // selection truncated to that ceiling must still report CapReached rather than present as
         // unbounded. Both slices compute it from Selected.Count, so the convergence is preserved.
         DossierAnchor anchor = Anchor(DossierDefaults.ItemLimit);
         DossierSelectionResult selection = Selection(count: DossierDefaults.ItemLimit, limitReached: false);

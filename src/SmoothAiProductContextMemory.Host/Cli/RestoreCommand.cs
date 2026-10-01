@@ -8,7 +8,10 @@ namespace SmoothAiProductContextMemory.Host.Cli;
 
 internal static class RestoreCommand
 {
-    public static async Task<int> InvokeAsync(string[] args)
+    public static Task<int> InvokeAsync(string[] args) => InvokeAsync(args, settings: null);
+
+    /// <summary>Same verb with its configuration supplied in full; see <see cref="CliHost.Build"/>.</summary>
+    internal static async Task<int> InvokeAsync(string[] args, IReadOnlyDictionary<string, string?>? settings)
     {
         var archiveArgument = new Argument<string>("archive")
         {
@@ -30,7 +33,7 @@ internal static class RestoreCommand
             string archivePath = parseResult.GetValue(archiveArgument)!;
             bool force = parseResult.GetValue(forceOption);
 
-            CliHostResult host = CliHost.Build();
+            CliHostResult host = CliHost.Build(settings: settings);
             using (host.Host)
             using (IServiceScope scope = host.Host.Services.CreateScope())
             {

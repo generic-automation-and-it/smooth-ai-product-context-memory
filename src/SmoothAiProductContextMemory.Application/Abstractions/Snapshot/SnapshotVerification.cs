@@ -15,6 +15,8 @@ public sealed record SnapshotFinding(
 /// archive; <see cref="CaptureTimeInconsistency"/> is a blob whose content hash disagrees with the
 /// address the database cites — a cross-store inconsistency that existed at capture, reported
 /// distinctly because it demands store investigation rather than a retaken snapshot (LADR-02).
+/// <see cref="Unreadable"/> says nothing about the archive's bytes: the process was refused access
+/// to the file, which is an operational fault to fix in the environment, not an integrity failure.
 /// </summary>
 public enum SnapshotFindingKind
 {
@@ -24,4 +26,5 @@ public enum SnapshotFindingKind
     CaptureTimeInconsistency,
     CountMismatch,
     CaptureTimeDefect,
+    Unreadable,
 }

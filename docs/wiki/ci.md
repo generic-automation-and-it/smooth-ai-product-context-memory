@@ -7,38 +7,63 @@ The publish workflow does **not** run on pull requests.
 ## PR Gate
 
 - **Workflow:** `.github/workflows/pr-gate.yml`
-- **Triggers:** `pull_request` → `main` (including PR branch updates), `push` → `main`, and manual `workflow_dispatch`.
-- **Paths filter:** source/tests, scripts, npm (`npm/**`, `package.json`), the four skills with a gate harness (context-memory, understanding, dossier, ai-understanding) and context-memory's two project-agent registrations, the `.mcp.json` MCP server config, Dockerfiles, solution/build/package inputs, local actions and scripts (`.github/actions/**`, `.github/scripts/**`), and PR/publish workflows trigger checks. Docs-only PRs skip the gate; dispatch and reusable workflow calls run explicitly.
-- **Policy checks:** main-only release event/promotion tests and engine-free controller preflight/lifecycle tests run with the build. PRs also build both container architectures on native runners without publication. PR/manual CI keeps logs, summaries, and caches, but uploads neither Docker build records nor coverage artifacts. Images are build-only; full packaged-controller smoke runs in the main publication pipeline.
+- **Triggers:** `pull_request` → `main` (including PR branch updates), `push` → `main`, and manual `workflow_dispatch`. `publish-image.yml` also calls it as a reusable workflow with `skip-container-build: true`, because publication runs its own smoke against the pushed candidates.
+- **Paths filter** (identical lists for `push` and `pull_request`): source/tests, `scripts/**`, npm (`npm/**`, `package.json`), the skills the gate tests or ships (context-memory, understanding, dossier, ai-understanding, recall-feedback, ymir-bootstrap, `agile-github-*`) and context-memory's two project-agent registrations, the `.mcp.json` MCP server config, Dockerfiles, solution/build/package inputs, `.editorconfig` (it drives the formatting check), the `.config/dotnet-tools.json` tool manifest, local actions and scripts (`.github/actions/**`, `.github/scripts/**`), and the PR/publish workflows. Docs-only PRs skip the gate; dispatch and reusable workflow calls run explicitly. When adding a step that executes a new path, add that path to **both** lists.
+- **Artifacts:** PR/manual CI keeps logs, summaries, and caches, but uploads neither Docker build records nor coverage artifacts; main pushes may upload both.
 
-### Steps
+Three jobs run in parallel.
 
-1. **Checkout** — `actions/checkout@v4`.
-2. **Test release policy** - `python3 -B -m unittest discover -s scripts -p 'test_release_policy.py' -v`; fails closed before installing the SDK.
-3. **Test context-memory skill** - two scripts in one step: `python3 -B .agents/skills/mimisbrunnr-context-memory/tests/run_tests.py` (deterministic plumbing, agent grants, deep-search bounds, divergence composition) and `python3 -B .agents/skills/mimisbrunnr-context-memory/tests/measure_cost.py` (reproducible structural cost evidence; never emits memory content).
-4. **Test understanding skill** - `python3 -B .agents/skills/mimisbrunnr-understanding/tests/run_tests.py`; the 50-test harness pinning a load writes nothing (NFR-01), import is refused without `--store` and never writes directly (NFR-02), loaded material is cited as data (NFR-03), and the session dump round-trips. Then `run_walk_tests.py`, the cold-agent walk scorer: model-free (it scores a recorded walk), so its whole `WalkFixtureTests` class runs here — the degenerate-agent acceptance criteria plus the three-surface answerability matrix and the ICM-band size measurement; only the recorded-walk scoring in `WalkModelTests` needs `SMOOTH_WALK_BENCH=1`.
-5. **Test dossier skill** - `python3 -B .agents/skills/mimisbrunnr-dossier/tests/run_tests.py`; the read-only composer harness, including the credential-transport guard and the per-focus reconciliation.
-6. **Test ai-understanding skill** - `python3 -B .agents/skills/ai-understanding/tests/run_tests.py`; the index generator's durability-guard harness — a gitignored store holding units in no published archive (judged by archive membership, not time), a tracked store, and the exit code being unaffected by `--review`.
-7. **Set up Python** — `actions/setup-python@v5`, pinned to 3.12. The skill clients require a modern interpreter; an unpinned runner default can be too old for them.
-8. **Test credential guard** - `bash .github/scripts/test-opencode-credential-guard.sh`; exercises the trusted-`main` credential-isolation guard the AI review and auto-fix jobs run through, rather than trusting it as prose.
-9. **Test credential provisioner** - `bash scripts/test-provision-credentials.sh`; drives the real provisioner into a scratch `--env-file` and asserts neither parser grammar leaks a token.
-10. **Install .NET SDK** — `actions/setup-dotnet@v4` (version from the `DOTNET_VERSION` env, currently `10.0.x`).
-11. **Restore** — `dotnet restore`.
-12. **Build** — `dotnet build --no-restore --configuration Release`.
-13. **Verify formatting** — `dotnet format --verify-no-changes --no-restore`; whitespace only, not a style gate.
-14. **Test controller preflight and lifecycle** - `python3 scripts/test-apphost-entrypoint.py`; engine-free tests against the built AppHost output.
-15. **Aspire test with coverage** — local action `.github/actions/aspire-test-with-coverage`:
-    - Starts `tests/SmoothAiProductContextMemory.TestFramework.Aspire`, keeps its PID inside the action script, and waits for PostgreSQL (`127.0.0.1:15432`, image `docker.io/apache/age:release_PG17_1.7.0`), MinIO TCP (`127.0.0.1:9002`), then MinIO HTTP (`http://127.0.0.1:9002/minio/health/live`). On MinIO timeout the action dumps `docker logs mimisbrunnr-testcontainer-blob`. MinIO image is pinned by digest to `cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1` (Chainguard; upstream MinIO images are no longer served by Docker Hub or quay.io). The test dependency set is PostgreSQL + MinIO only — the Redis and WireMock waits were removed with the unused containers.
-   - Restores .NET tools (`dotnet tool restore`) after the dependency pre-warm, matching the proven CI timing before tests start.
-   - Prepares `artifacts/testresults/` and `artifacts/coverage/`.
-    - Runs test projects in order: Host integration → Application/Infrastructure component → Domain/Application/Infrastructure/Host/AppHost unit tests.
-   - Generates coverage reports with `dotnet tool run reportgenerator`.
-   - **Enforces a line-coverage floor** (`COVERAGE_THRESHOLD`, default `50`). This is a regression guard, not a target: a regression is a drop, so the floor is deliberately well under the observed aggregate. It fails closed — an unparseable coverage summary records a failure and exits non-zero rather than passing the gate silently.
-   - Stops the Aspire host from the action script's teardown trap once tests and coverage have finished or failed.
-16. **Publish coverage summary** (`if: always()`) — appends `artifacts/coverage/SummaryGithub.md` to the GitHub step summary.
-17. **Upload coverage artifacts** — uploads `artifacts/coverage/` as `coverage-report` only for main pushes (including failed main runs). PR and manual CI skip upload.
+### Job `python-harnesses` — matrix Python 3.9 and 3.12
 
-**The gate is merge-blocking on:** build (Release), the Aspire-backed suite, the line-coverage floor, the formatting check, and every test harness in the steps above (release policy, the four skill harnesses, the two credential harnesses, and the controller preflight). Coverage is gated, not only reported.
+3.9 is the floor the skills declare (`package.json` `mimisbrunnrPython`, enforced by the npm launcher in `npm/cli/_run.js`); 3.12 is what developers and the rest of the gate run. A 3.10+ syntax or stdlib dependency fails the 3.9 leg. `fail-fast` is off so both legs report.
+
+1. **Checkout** — `actions/checkout@v4`, `persist-credentials: false`.
+2. **Set up Python** — `actions/setup-python@v5` at the matrix version.
+3. **Test context-memory skill** — two scripts in one step: `python3 -B .agents/skills/mimisbrunnr-context-memory/tests/run_tests.py` (deterministic plumbing, agent grants, deep-search bounds, divergence composition) and `python3 -B .agents/skills/mimisbrunnr-context-memory/tests/measure_cost.py` (reproducible structural cost evidence; never emits memory content).
+4. **Test understanding skill** — `python3 -B .agents/skills/mimisbrunnr-understanding/tests/run_tests.py`; the harness pinning that a load writes nothing (NFR-01), import is refused without `--store` and never writes directly (NFR-02), loaded material is cited as data (NFR-03), and the session dump round-trips. Then `run_walk_tests.py`, the cold-agent walk scorer: model-free (it scores a recorded walk), so its whole `WalkFixtureTests` class runs here — the degenerate-agent acceptance criteria plus the three-surface answerability matrix and the ICM-band size measurement; only the recorded-walk scoring in `WalkModelTests` needs `SMOOTH_WALK_BENCH=1`.
+5. **Test dossier skill** — `python3 -B .agents/skills/mimisbrunnr-dossier/tests/run_tests.py`; the read-only composer harness, including the credential-transport guard and the per-focus reconciliation.
+6. **Test ai-understanding skill** — `python3 -B .agents/skills/ai-understanding/tests/run_tests.py`; the index generator's durability-guard harness — a gitignored store holding units in no published archive (judged by archive membership, not time), a tracked store, and the exit code being unaffected by `--review`.
+7. **Test recall-feedback skill** — `python3 -B .agents/skills/mimisbrunnr-recall-feedback/tests/run_tests.py`; the request guard driven against a fake `curl` — loopback-only origin, path validation, token never on argv.
+8. **Test agile GitHub skills** — `python3 -B .agents/skills/agile-github-breakdown/scripts/test_skill_scripts.py` and `python3 -B .agents/skills/agile-github-task-from-diff/scripts/test_create_github_task_from_diff.py`.
+9. **Test ticket-ownership preflight** — `python3 -B scripts/tests/test_ticket_ownership.py`. Without `--postgres` only the mocked-transport checks run; the disposable-container fixture remains an operator check (`scripts/AGENTS.md`).
+10. **Set up Node** — `actions/setup-node@v4`, Node 20.
+11. **Test npm package** — `npm test` (`scripts/npm-smoke.js`): packs and installs the package in isolation and runs every public CLI through the Node launcher, which spawns the leg's `python3`, so the launcher's floor check is exercised on 3.9.
+
+### Job `build-and-test`
+
+1. **Checkout** — `actions/checkout@v4`, `persist-credentials: false`.
+2. **Set up Python** — `actions/setup-python@v5`, pinned to 3.12, for the release-policy and controller-preflight tests below.
+3. **Test release policy** — `python3 -B -m unittest discover -s scripts -p 'test_release_policy.py' -v`; fails closed before installing the SDK.
+4. **Test credential guard** — `bash .github/scripts/test-opencode-credential-guard.sh`; exercises the trusted-`main` credential-isolation guard the AI review and auto-fix jobs run through, rather than trusting it as prose.
+5. **Test credential provisioner** — `bash scripts/test-provision-credentials.sh`; drives the real provisioner into a scratch `--env-file` and asserts neither parser grammar leaks a token.
+6. **Test Aspire test runner** — `bash .github/actions/aspire-test-with-coverage/test-run.sh`; runs the action's real `run.sh` with `dotnet`, `nc` and `curl` stubbed, asserting tier order, project discovery and the coverage floor without an SDK or Docker.
+7. **Install .NET SDK** — `actions/setup-dotnet@v4` (version from the `DOTNET_VERSION` env, currently `10.0.x`).
+8. **Restore** — `dotnet restore`.
+9. **Build** — `dotnet build --no-restore --configuration Release`.
+10. **Verify formatting** — `dotnet format SmoothAiProductContextMemory.slnx --verify-no-changes --no-restore`. With no subcommand `dotnet format` runs all three of its fixers — whitespace, code style and analyzers — at the default `warn` severity, so any `.editorconfig` style or analyzer rule at warning or above is gated, not only whitespace.
+11. **Test controller preflight and lifecycle** — `python3 scripts/test-apphost-entrypoint.py`; engine-free tests against the built AppHost output.
+12. **Aspire test with coverage** — local action `.github/actions/aspire-test-with-coverage` (`run.sh`):
+    - Discovers test projects by tier suffix — `tests/*.UnitTest`, `tests/*.ComponentTest`, `tests/*.IntegrationTest`, excluding `TestFramework*` fixtures — so a new test project joins the gate without editing the script. A tier with no projects fails before anything starts.
+    - Starts `tests/SmoothAiProductContextMemory.TestFramework.Aspire`, keeps its PID inside the action script, and waits for PostgreSQL (`127.0.0.1:15432`, image `docker.io/apache/age:release_PG17_1.7.0`), MinIO TCP (`127.0.0.1:9002`), then MinIO HTTP (`http://127.0.0.1:9002/minio/health/live`). On MinIO timeout the action dumps `docker logs mimisbrunnr-testcontainer-blob`. MinIO image is pinned by digest to `cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1` (Chainguard; upstream MinIO images are no longer served by Docker Hub or quay.io). The test dependency set is PostgreSQL + MinIO only.
+    - Restores .NET tools (`dotnet tool restore`) after the dependency pre-warm, then prepares `artifacts/testresults/` and `artifacts/coverage/`.
+    - Runs the tiers cheapest first — L0 unit, then L1 component, then L2 integration — with the projects inside a tier in parallel, so a unit failure is reported before the database-backed tiers spend their time.
+    - Generates coverage reports with `dotnet tool run reportgenerator`, over the four product assemblies only (Domain, Application, Infrastructure, Host).
+    - **Enforces a line-coverage floor** (`COVERAGE_THRESHOLD`, default `85`). This is a regression guard, not a target: it sits about ten points under the measured full-suite aggregate (94.6 % line on 2026-09-30), so a real regression trips it and ordinary churn does not. It fails closed — an unparseable or missing coverage summary records a failure and exits non-zero rather than passing the gate silently.
+    - Stops the Aspire host from the action script's teardown trap once tests and coverage have finished or failed.
+13. **Publish coverage summary** (`if: always()`) — appends `artifacts/coverage/SummaryGithub.md` to the GitHub step summary.
+14. **Upload coverage artifacts** — uploads `artifacts/coverage/` as `coverage-report` only for main pushes (including failed main runs). PR and manual CI skip upload.
+
+### Job `container-build` — matrix amd64 / arm64 on native runners
+
+Skipped when called with `skip-container-build: true` (the publish pipeline). Builds both images and runs the **same** lifecycle smoke the publish pipeline runs, so a change that breaks container startup fails at PR time instead of only after merge.
+
+1. **Checkout** — `actions/checkout@v4`, `persist-credentials: false`.
+2. **Set up Buildx** — `docker/setup-buildx-action@v3` with `driver-opts: network=host`, so BuildKit can reach the job-local registry.
+3. **Build API image** — `docker/build-push-action@v6` for the native platform, pushed to a job-local `registry:2` service on `localhost:5000`. Nothing is published: the registry lives and dies with the job. It exists because release mode refuses a Host image that is not digest-pinned, and a digest only exists once an image is in a registry.
+4. **Build AppHost controller image** — same, with `API_IMAGE=localhost:5000/…@<API digest>`, so the controller embeds the image just built.
+5. **Run lifecycle and data smoke test** — checks the runner's architecture matches the matrix, that the controller embeds the API digest as `HostConfiguration__Image`, then runs `scripts/smoke-apphost-container.sh` against the controller digest: start, ownership labels, blob and graph fixture, graceful stop and restart, forced-stop recovery, reset, and foreign-name collision refusal. The engine pulls the API image from the local registry exactly as it pulls from GHCR on `main`. The smoke also pulls the public Postgres/AGE, MinIO, Seq and curl images, so Docker Hub anonymous rate limits apply.
+
+**What a red run means.** The gate fails on: the Release build, the formatting check, the Aspire-backed suite, the line-coverage floor, the container smoke on either architecture, and every harness above on either Python leg. **No repository ruleset currently requires these checks** (the `main` ruleset carries deletion, non-fast-forward and pull-request rules only; verified 2026-10-01), so a red gate blocks a merge only by convention until the three job names are added as required status checks.
 
 ## .NET local tools
 
@@ -102,9 +127,14 @@ the OpenCode invocation path: OpenCode v2 discovers those independently of
 Such a PR needs human review before the AI gate can safely run.
 
 The same guard also resolves every symlink in the checkout and fails closed on any that
-lands outside it on a credential-bearing target — the sensitive roots, the home directory
-or the filesystem root, the named credential files under `$HOME`, and the runner's
-temporary and tool-cache directories. A deny glob matches the path a model asks for, not
+lands on a credential-bearing target. Outside the checkout that means the sensitive roots,
+the home directory or the filesystem root, the named credential files under `$HOME`, the
+runner's temporary and tool-cache directories, and the system temporary directories
+(`/tmp`, `/var/tmp`, `$TMPDIR`) — each compared after resolving its own symlinks, because on
+macOS `/etc`, `/tmp` and `/var` live under `/private`. Inside the checkout a link is refused
+when its resolved target matches the hardened config's own deny patterns, so
+`docs/x -> .git/config` or a link to an in-repo `.env` is caught while one to `.env.example`
+is not. A deny glob matches the path a model asks for, not
 what it resolves to, so a committed `docs/leak -> /proc/self/environ` link would satisfy
 every deny rule; the target has to be resolved before the model starts.
 

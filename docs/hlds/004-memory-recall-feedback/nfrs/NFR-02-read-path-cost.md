@@ -1,6 +1,8 @@
 # NFR-02: Performance — read-path cost
 
-**Status:** Accepted — [evidence](./NFR-02-evidence-2026-09-20.md)
+**Status:** Accepted — [evidence](./NFR-02-evidence-2026-09-20.md). The growth criterion is only half
+met: the bound is stated, but no retention job enforces it, so growth is not bounded between baseline
+resets (LADR-02 *Retention bound*).
 
 ## Requirement
 

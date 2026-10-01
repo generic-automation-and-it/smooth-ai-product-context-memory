@@ -48,10 +48,18 @@ public static class RestoreArchive
             logger.LogInformation("Restore started");
 
             // Verifying the archive is a prerequisite to any mutation, so a tampered archive (or one
-            // the verifier already rejects) is refused before either store is touched (R01). The
+            // the verifier already rejects) is refused before either store is touched. The
             // refusal carries the findings as payload so the operator learns which member failed;
             // the message stays shape-only (NFR-05).
             SnapshotVerification verification = await archive.VerifyAsync(request.ArchivePath, cancellationToken);
+            if (verification.Findings.Any(static f => f.Kind == SnapshotFindingKind.Unreadable))
+            {
+                // Not an integrity refusal: the archive was never read, so nothing is known about it.
+                // Surfacing it as one would send the operator to replace a sound archive.
+                throw new InvalidOperationException(
+                    "Archive could not be opened for reading (access denied); restore did not start. Fix the file's permissions and retry.");
+            }
+
             if (!verification.IsClean)
             {
                 throw new ArchiveVerificationFailedException(
@@ -61,7 +69,7 @@ public static class RestoreArchive
 
             // One open reads the members once and carries both the deserialised capture and the open
             // archive — restore needs both, and reading them separately would materialise the tar
-            // twice (H13).
+            // twice.
             SnapshotArchive opened = await archive.ReadAsync(request.ArchivePath, cancellationToken);
             SnapshotCapture capture = opened.Capture;
 
@@ -74,6 +82,20 @@ public static class RestoreArchive
             {
                 throw new InvalidOperationException(
                     $"Archive is missing {missing.Length} referenced blob entr(ies); restore is refused so the database is never left citing absent bodies. This is either a truncated/tampered archive, or the blob body was never archived because it was already unresolvable at capture.");
+            }
+
+            // Verify already rejects these; checked again at the point of use because the value is
+            // written verbatim as the stored object's Content-Type and is not covered by any hash.
+            SnapshotFinding[] badContentTypes = addresses
+                .Where(a => !SnapshotContentTypes.IsAllowed(opened.BlobContentType(a)))
+                .Select(a => new SnapshotFinding(
+                    SnapshotFindingKind.Corruption,
+                    $"blobs/{a}",
+                    "Manifest records a content type this system never writes, or one that is malformed."))
+                .ToArray();
+            if (badContentTypes.Length > 0)
+            {
+                throw new ArchiveVerificationFailedException(badContentTypes, badContentTypes.Length);
             }
 
             // Refuse a non-empty target before writing anything to either store; the repository
@@ -148,7 +170,7 @@ public static class RestoreArchive
             CancellationToken cancellationToken)
         {
             // Restore must prove each destination body hashes to its address and refuse a corrupted
-            // or mismatched pre-existing object, not merely confirm a key exists (R03). The S3 writer
+            // or mismatched pre-existing object, not merely confirm a key exists. The S3 writer
             // skips upload when the destination key already exists, so existence is not integrity.
             int present = 0;
             foreach (string address in addresses)

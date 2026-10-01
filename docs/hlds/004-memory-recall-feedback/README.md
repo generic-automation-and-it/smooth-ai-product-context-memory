@@ -2,14 +2,25 @@
 
 | | |
 |---|---|
-| **Status** | Complete — record + query mechanism and all three NFR evidence accepted |
+| **Status** | Implemented — retention bound and asynchronous feedback write not implemented |
 | **Owner** | generik0 |
 | **Tracker** | Context-memory tuning |
-| **Last updated** | 2026-09-20 |
+| **Business authority** | No BR traces to this HLD. It answers the BRD-001 §9 risk *Captured knowledge cannot be found again*, and records the misses BR-15 is about without delivering BR-15's question loop (Goal 2) |
+| **Last updated** | 2026-10-01 |
 
 > Delivers **intent + spec** — what we are building and why, the decisions behind it, and the quality bar
-> it must meet. The record-and-query mechanism (workstreams 02/03) is implemented, and NFR-01..03 are now
+> it must meet. The record-and-query mechanism (workstreams 02/03) is implemented, and NFR-01..03 are
 > verified against the shipped implementation (workstream 04).
+>
+> **Two parts of the specification are not implemented.** (1) The retention bound LADR-02 states — 30 days
+> or 2,000,000 records — has no enforcing job: nothing in `src/` prunes `recall_feedback`; the only
+> deletions are the practitioner's baseline reset and a snapshot restore, which clears the table. (2) The feedback write is **synchronous and inline**:
+> `QueryMemories.Handler` calls `NpgsqlRecallFeedback.Record` after building the response and before
+> returning it, and `Record` opens its own connection and runs the `INSERT` on the request thread. It is
+> guarded (a failure is swallowed and logged), so it cannot fail a retrieval, but its cost is on the
+> response path — the NFR-02 off↔on p95 gap (0.933 ms, within measurement noise) measures it end to end.
+> Reopen this HLD when either is built, or when the feedback table approaches the size the bound was
+> sized to hold (~370 MiB).
 
 ## Intent
 

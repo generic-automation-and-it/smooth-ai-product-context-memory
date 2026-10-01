@@ -559,6 +559,239 @@ class RedactTests(unittest.TestCase):
         self.assertTrue(any(f["rule_name"] == "generic-secret-assignment" for f in result["findings"]))
 
 
+# Ordinary engineering prose that sits next to the words `key`, `token`, `secret` or `password` and
+# carries no secret. Every entry must pass through byte-identical with no finding: a gate that rewrites
+# a stored statement for using the word "key" corrupts the record it exists to protect.
+ORDINARY_PROSE = (
+    "sort key = created_on",
+    "partition key: groupUuid",
+    "idempotency key = order-123",
+    "the read token=NAME is provisioned",
+    "The primary key: memory_version_id is a bigint.",
+    "foreign key: group_id references memory_group",
+    "sort_key=created_at_utc",
+    "cache key = scope+subject",
+    "lookup key=memory_uuid_v4",
+    "Sort key: 2024-01-01T00:00:00Z",
+    "idempotency key = 550e8400-e29b-41d4-a716-446655440000",
+    "partition_key: tenant_id_v2_shard",
+    "token: required for writes",
+    "Use the token=CONTEXT_MEMORY_READ_TOKEN env var.",
+    "Set token: none, the endpoint is anonymous.",
+    "credential: provisioned by scripts/provision-credentials.sh",
+    "The secret is never logged.",
+    "The password policy requires rotation.",
+    "bearer token authentication is required",
+    "-----BEGIN PUBLIC KEY----- is the public half, safe to store.",
+    "ssh://git@github.com:org/repo.git",
+    "https://github.com/generic-automation-and-it/smooth-ai-product-context-memory",
+    "Sort by key, then by token count; the cache key is stable.",
+)
+
+
+class RedactionPrecisionTests(unittest.TestCase):
+    """The gate must not alter prose that only mentions a key or a token."""
+
+    def test_ordinary_prose_passes_byte_identical(self):
+        for text in ORDINARY_PROSE:
+            with self.subTest(text=text):
+                redacted, hits = redact.scrub_located(text)
+                self.assertEqual(redacted, text)
+                self.assertEqual(hits, [])
+
+    def test_ordinary_prose_set_reports_no_redaction_and_posts_it_unchanged(self):
+        prose = "\n".join(ORDINARY_PROSE)
+        payload = {"items": [{"name": "n", "description": prose, "statement": prose, "content": prose}],
+                   "links": [], "labelsProposed": list(ORDINARY_PROSE)}
+        with patch.object(client, "read_payload", return_value=copy.deepcopy(payload)), \
+                patch.object(client, "_request", return_value={"created": 1}) as request, \
+                redirect_stdout(io.StringIO()):
+            response = client.cmd_set(SimpleNamespace(payload=None, dryrun=False))
+        self.assertEqual(request.call_args.args[2], payload)
+        self.assertNotIn("redaction", response)
+
+    def test_a_named_secret_key_is_still_caught(self):
+        for text, secret in (("api_key = abcdefgh12345678", "abcdefgh12345678"),
+                             ("DEPLOY_TOKEN=s3cr3tvalue99", "s3cr3tvalue99"),
+                             ("client_secret: verysecretvalue", "verysecretvalue"),
+                             ("access_key=AbCdEfGh", "AbCdEfGh"),
+                             ("token: abcdef1234567890", "abcdef1234567890"),
+                             ("sort key = Zq3vL9xK2mN8pR4t", "Zq3vL9xK2mN8pR4t")):
+            with self.subTest(text=text):
+                redacted, hits = redact.scrub_located(text)
+                self.assertNotIn(secret, redacted)
+                self.assertEqual(len(hits), 1)
+
+    def test_located_offsets_cover_exactly_the_replaced_characters(self):
+        text = "deploy with DEPLOY_TOKEN=s3cr3tvalue99 and AKIAIOSFODNN7EXAMPLE today"
+        redacted, hits = redact.scrub_located(text)
+        replaced = sorted(text[start:end] for _name, start, end in hits)
+        self.assertEqual(replaced, ["AKIAIOSFODNN7EXAMPLE", "s3cr3tvalue99"])
+        self.assertEqual(redacted,
+                         "deploy with DEPLOY_TOKEN=<redacted> and <redacted-aws-access-key> today")
+
+    def test_set_digest_names_the_field_and_offsets_of_every_scrub(self):
+        original = copy.deepcopy(PLANTED)
+        with patch.object(client, "read_payload", return_value=copy.deepcopy(PLANTED)), \
+                patch.object(client, "_request", return_value={"created": 1}), \
+                redirect_stdout(io.StringIO()):
+            response = client.cmd_set(SimpleNamespace(payload=None, dryrun=False))
+        located = [(entry["rule_name"], location) for entry in response["redaction"]
+                   for location in entry["locations"]]
+        fields = {location["field"] for _rule, location in located}
+        self.assertIn("items[0].statement", fields)
+        self.assertIn("items[0].sources[0].reference", fields)
+        self.assertIn("items[0].facets[1]", fields)
+        self.assertIn("links[0].reason", fields)
+        self.assertIn("labelsProposed[0]", fields)
+        for _rule, location in located:
+            with self.subTest(field=location["field"]):
+                value = _resolve(original, location["field"])
+                span = value[location["start"]:location["end"]]
+                self.assertTrue(span, "a location must cover at least one replaced character")
+                self.assertTrue(any(secret in span or span in secret for secret in PLANTED_SECRETS),
+                                f"location does not cover a planted secret in {location['field']}")
+        # Offsets are reported; the replaced text is not.
+        _assert_no_secret(self, response["redaction"])
+
+    def test_mcp_set_digest_carries_locations_too(self):
+        with patch.object(write_mcp.client, "_request", return_value={"created": 1}):
+            result = write_mcp.call_tool("set", {"payload": copy.deepcopy(PLANTED)})
+        self.assertTrue(all(entry["locations"] for entry in result["redaction"]))
+        _assert_no_secret(self, result["redaction"])
+
+
+def _resolve(document, path):
+    """Follow a digest field path (`items[0].sources[1].reference`) into a JSON document."""
+    value = document
+    for name, index in re.findall(r"([^.\[\]]+)|\[(\d+)\]", path):
+        value = value[int(index)] if index else value[name]
+    return value
+
+
+def _fake(*parts):
+    """Assemble a fake credential at runtime, so no vendor-shaped literal sits in the source file."""
+    return "".join(parts)
+
+
+_B64 = "Zq3vL9xK2mN8pR4tWb7Yc1Hd5Jf0Gs6Ue"
+# (shape, text, the values that must not survive). Every value is fake; the vendor prefixes are
+# assembled by `_fake` so a repository secret scanner does not mistake the corpus for a leak.
+SECRET_SHAPES = (
+    ("aws access key", _fake("AK", "IA", "IOSFODNN7EXAMPLE"), ["IOSFODNN7EXAMPLE"]),
+    ("aws session key", _fake("AS", "IA", "Y3FAKEFAKEFAKE12"), ["Y3FAKEFAKEFAKE12"]),
+    ("github classic", _fake("push with gh", "p_", _B64, "abc"), [_B64]),
+    ("github oauth", _fake("gh", "o_", _B64, "xyz"), [_B64]),
+    ("github fine-grained", _fake("github", "_pat_", "11ABCDEFG0", _B64, "_", _B64), [_B64]),
+    ("openai project", _fake("export OPENAI=s", "k-proj-", _B64, _B64), [_B64]),
+    ("openai legacy", _fake("s", "k-", _B64, "7Kq2"), [_B64]),
+    ("anthropic", _fake("s", "k-ant-api03-", _B64, "-", _B64), [_B64]),
+    ("stripe-style", _fake("s", "k_live_", "9Vw2Lx8Kq4Pz1Rt7"), ["9Vw2Lx8Kq4Pz1Rt7"]),
+    ("jwt", _fake("ey", "JhbGciOiJIUzI1NiJ9.", "ey", "JzdWIiOiIxMjM0In0.", "dBjftJeZ4CVPmB92K27uhbUJU1p1r"),
+     ["dBjftJeZ4CVPmB92K27uhbUJU1p1r", "JzdWIiOiIxMjM0In0"]),
+    ("authorization bearer", "Authorization: Bearer abc.DEF-ghi_123~xyz", ["abc.DEF-ghi_123~xyz"]),
+    ("authorization basic", "authorization: Basic dXNlcjpwYXNzd29yZA==", ["dXNlcjpwYXNzd29yZA=="]),
+    ("bare bearer", "curl -H 'X-Trace: 1' -H 'Bearer 9f8e7d6c5b4a39281706f5e4'", ["9f8e7d6c5b4a39281706f5e4"]),
+    ("postgres url userinfo", "postgres://app:Pa55w0rdHere@db.internal:5432/app", ["Pa55w0rdHere"]),
+    ("https url userinfo", "clone https://bot:tok-12345-secret@git.example/x.git", ["tok-12345-secret"]),
+    ("host write token env", "ApiAccess__WriteToken=Q2xpZW50V3JpdGVUb2tlbg", ["Q2xpZW50V3JpdGVUb2tlbg"]),
+    ("host read token env", "ApiAccess__ReadToken=readtokenvalue77", ["readtokenvalue77"]),
+    ("skill write token env", "CONTEXT_MEMORY_WRITE_TOKEN=wr1t3-t0k3n-value", ["wr1t3-t0k3n-value"]),
+    ("skill read token env", "export CONTEXT_MEMORY_READ_TOKEN='r34d t0k3n'", ["r34d", "t0k3n"]),
+    ("json spaced password", '{"password": "correct horse battery staple"}',
+     ["correct", "horse", "battery", "staple"]),
+    ("quoted spaced secret", 'secret="two words here"', ["two", "words", "here"]),
+    ("camelCase apiKey", 'apiKey: "a1b2c3d4e5f6g7h8"', ["a1b2c3d4e5f6g7h8"]),
+    ("camelCase clientSecret", "clientSecret=Shh-very-private-99", ["Shh-very-private-99"]),
+    ("json accessToken", '{"accessToken": "at-0001-xyz-9876"}', ["at-0001-xyz-9876"]),
+    ("x-api-key header", "x-api-key: 0a1b2c3d4e5f6a7b", ["0a1b2c3d4e5f6a7b"]),
+    ("deploy token", "DEPLOY_TOKEN=abcdef1234567890", ["abcdef1234567890"]),
+    ("passphrase", "passphrase: 'open sesame now'", ["sesame"]),
+    ("connection string", "Server=db;User Id=sa;Password=Sup3rS3cret!;Database=app", ["Sup3rS3cret!"]),
+    ("connection string quoted", 'Host=db;Password="pass with spaces";', ["pass with spaces", "spaces"]),
+    ("aws secret access key", "aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+     ["wJalrXUtnFEMI"]),
+    ("pem rsa", "-----BEGIN RSA PRIVATE KEY-----\nMIICXgIBAAKBgQC\n-----END RSA PRIVATE KEY-----",
+     ["MIICXgIBAAKBgQC"]),
+    ("pem encrypted", "-----BEGIN ENCRYPTED PRIVATE KEY-----\nMIIFHDBOBgkqhkiG9w0B\n"
+     "-----END ENCRYPTED PRIVATE KEY-----", ["MIIFHDBOBgkqhkiG9w0B"]),
+    ("pem openssh", "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAA\n"
+     "-----END OPENSSH PRIVATE KEY-----", ["b3BlbnNzaC1rZXktdjEAAAA"]),
+    ("pem pgp", "-----BEGIN PGP PRIVATE KEY BLOCK-----\n\nlQOYBF0123456789abcdef\n"
+     "-----END PGP PRIVATE KEY BLOCK-----", ["lQOYBF0123456789abcdef"]),
+    ("pem legacy encrypted headers", "-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\n"
+     "DEK-Info: AES-128-CBC,0123456789ABCDEF\n\nMIICXgIBAAKBgQCfakefake\n-----END RSA PRIVATE KEY-----",
+     ["MIICXgIBAAKBgQCfakefake", "0123456789ABCDEF"]),
+    ("pem unterminated", "pasted: -----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEF\n"
+     "AASCBKcwggSjAgEAAoIBAQC7\n", ["MIIEvQIBADANBgkqhkiG9w0BAQEF", "AASCBKcwggSjAgEAAoIBAQC7"]),
+)
+
+
+class SecretShapeCoverageTests(unittest.TestCase):
+    """Every supported shape has a positive case (HLD-002 NFR-01), and none of them leaks a tail."""
+
+    def test_the_corpus_is_at_least_twenty_five_shapes(self):
+        self.assertGreaterEqual(len({shape for shape, _text, _secrets in SECRET_SHAPES}), 25)
+
+    def test_every_shape_is_caught_with_no_fragment_surviving(self):
+        for shape, text, secrets in SECRET_SHAPES:
+            with self.subTest(shape=shape):
+                redacted, hits = redact.scrub_located(text)
+                self.assertTrue(hits, f"{shape}: no rule matched")
+                for secret in secrets:
+                    self.assertNotIn(secret, redacted, f"{shape}: '{secret}' survived")
+
+    def test_every_shape_is_caught_through_the_set_gate(self):
+        payload = {"items": [{"statement": text} for _shape, text, _secrets in SECRET_SHAPES[:20]]
+                   + [{"content": "\n".join(text for _s, text, _x in SECRET_SHAPES[20:])}],
+                   "links": []}
+        scrubbed, hits = redact.scrub_set_payload(payload)
+        serialised = json.dumps(scrubbed)
+        reported = json.dumps(redact.digest(hits))
+        for shape, _text, secrets in SECRET_SHAPES:
+            for secret in secrets:
+                with self.subTest(shape=shape):
+                    self.assertNotIn(secret, serialised)
+                    self.assertNotIn(secret, reported)
+
+    def test_the_prose_corpus_still_passes_with_the_wider_rules(self):
+        for text in ORDINARY_PROSE:
+            with self.subTest(text=text):
+                self.assertEqual(redact.scrub_located(text), (text, []))
+
+    def test_a_pem_block_does_not_swallow_the_prose_after_it(self):
+        text = ("-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEF\n-----END PRIVATE KEY-----\n"
+                "The key above was rotated on Monday.")
+        redacted, _hits = redact.scrub_located(text)
+        self.assertTrue(redacted.endswith("\nThe key above was rotated on Monday."))
+
+    def test_unterminated_pem_markers_scrub_in_linear_time(self):
+        import time
+
+        padding = "plain padding words " * 5000  # 100 000 characters of prose
+        for label in ("PRIVATE KEY", "ENCRYPTED PRIVATE KEY", "RSA PRIVATE KEY"):
+            text = (f"-----BEGIN {label}-----\n" * 2000) + padding
+            with self.subTest(label=label):
+                started = time.perf_counter()
+                redacted, hits = redact.scrub_located(text)
+                elapsed = time.perf_counter() - started
+                self.assertLess(elapsed, 0.5, f"{elapsed:.2f}s for 2000 unterminated BEGIN markers")
+                self.assertEqual(len(hits), 2000)
+                self.assertTrue(redacted.endswith(padding))
+
+    def test_repeated_rule_prefixes_scrub_in_linear_time(self):
+        # Each of these made one rule rescan the rest of the text from every candidate start while
+        # the wider rule set was written: an unbounded scheme, a value class containing `=`, and a
+        # `\b` anchor inside a token class that includes `-`.
+        import time
+
+        for fragment in ("key=", "password=", "sk-", "sk-eyJ", "a://", '"password": "', "Bearer a1"):
+            text = fragment * (120_000 // len(fragment))
+            with self.subTest(fragment=fragment):
+                started = time.perf_counter()
+                redact.scrub_located(text)
+                self.assertLess(time.perf_counter() - started, 0.5)
+
 class AtomicityTests(unittest.TestCase):
     def test_single_atomic_fact_is_simple(self):
         verdict = atomicity.classify("PostgreSQL stores our search index.")
@@ -748,6 +981,90 @@ class WritePayloadTests(unittest.TestCase):
                 with self.assertRaises(client.ClientError):
                     client.base_url()
 
+    def test_an_unparseable_base_url_is_refused_without_echoing_its_userinfo(self):
+        # `urlsplit` raises a ValueError quoting the whole netloc for an NFKC-confusable character,
+        # so the credential in the userinfo would be printed if that error escaped.
+        import traceback
+
+        for value in ("http://user:s3cret@local\uff03host:5141", "http://user:s3cret@localhost:port"):
+            with self.subTest(value=value), patch.dict(os.environ, {client.ENV_BASE_URL: value}):
+                with self.assertRaises(client.ClientError) as caught:
+                    client.base_url()
+                rendered = "".join(traceback.format_exception(
+                    type(caught.exception), caught.exception, caught.exception.__traceback__))
+                self.assertEqual(caught.exception.status_text, "bad-base-url")
+                self.assertNotIn("s3cret", rendered)
+                self.assertNotIn("user:", rendered)
+                with self.assertRaises(client.ClientError) as probed:
+                    client._probe(value)
+                self.assertNotIn("s3cret", str(probed.exception))
+
+    def test_the_cli_reports_an_unparseable_base_url_as_a_classified_error(self):
+        env = dict(os.environ, **{client.ENV_BASE_URL: "http://user:s3cret@local\uff03host:5141",
+                                  client.ENV_READ_TOKEN: "read-only"})
+        env.pop(client.ENV_WRITE_TOKEN, None)
+        for script in ("context_memory_client.py", "context_memory_read_client.py"):
+            with self.subTest(script=script):
+                completed = subprocess.run([sys.executable, "-B", str(SCRIPTS / script), "labels"],
+                                           capture_output=True, text=True, env=env, timeout=30)
+                self.assertEqual(completed.returncode, 1)
+                self.assertIn("bad-base-url", completed.stderr)
+                self.assertNotIn("Traceback", completed.stderr)
+                self.assertNotIn("s3cret", completed.stderr + completed.stdout)
+
+    def test_the_real_opener_disables_proxies_and_refuses_redirects(self):
+        # The handler is only a guard if `_open` actually installs it, and the proxy bypass only
+        # holds if the opener is built with an empty ProxyHandler rather than the environment's.
+        built = []
+        real_build = client.urllib.request.build_opener
+
+        def spy(*handlers):
+            built.append(handlers)
+            return real_build(*handlers)
+
+        request = client.urllib.request.Request("http://localhost:5141/api/context/labels")
+        with patch.object(client.urllib.request, "build_opener", side_effect=spy), \
+                patch.object(client.urllib.request.OpenerDirector, "open", return_value="sent") as sent:
+            self.assertEqual(client._open(request), "sent")
+        sent.assert_called_once()
+        self.assertEqual(sent.call_args.kwargs.get("timeout"), client.HTTP_TIMEOUT)
+        (handlers,) = built
+        self.assertIn(client._NoRedirect, handlers)
+        proxies = [h for h in handlers if isinstance(h, client.urllib.request.ProxyHandler)]
+        self.assertEqual(len(proxies), 1)
+        self.assertEqual(proxies[0].proxies, {})
+
+    def test_a_redirect_through_the_real_opener_is_refused(self):
+        # End to end: a loopback server answering 302 must not be followed with the credential.
+        import http.server
+        import threading
+
+        hits = []
+
+        class Redirect(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802
+                hits.append(self.path)
+                self.send_response(302)
+                self.send_header("Location", "/elsewhere")
+                self.end_headers()
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), Redirect)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with patch.dict(os.environ, {client.ENV_BASE_URL: f"http://127.0.0.1:{server.server_port}",
+                                         client.ENV_READ_TOKEN: "read-only"}):
+                with self.assertRaises(client.ClientError) as caught:
+                    client._request("GET", "/api/context/labels")
+        finally:
+            server.shutdown()
+            server.server_close()
+        self.assertEqual(caught.exception.status_text, "redirect-refused")
+        self.assertEqual(hits, ["/api/context/labels"])
+
     def test_redirects_are_refused(self):
         handler = client._NoRedirect()
         request = client.urllib.request.Request(
@@ -755,6 +1072,130 @@ class WritePayloadTests(unittest.TestCase):
             headers={"Authorization": "Bearer secret"})
         with self.assertRaises(client.ClientError):
             handler.redirect_request(request, None, 302, "Found", {}, "https://evil.example/")
+
+
+GOOD_UUID = "5153f72b-a965-42ce-94ef-69d5eaea05ce"
+HOSTILE_UUIDS = (
+    "../../snapshot?x=",
+    "../snapshot",
+    GOOD_UUID + "/../../snapshot",
+    GOOD_UUID + "?x=1",
+    GOOD_UUID + "#frag",
+    "%2e%2e%2fsnapshot",
+    "%2E%2E",
+    GOOD_UUID + "\n",
+    " " + GOOD_UUID,
+    "5153f72b-a965-42ce-94ef-69d5eaea05cez",
+    "",
+    None,
+    42,
+)
+
+
+class PathSegmentTests(unittest.TestCase):
+    """A uuid or version is interpolated into a URL path, so an unchecked one selects the route."""
+
+    def _surfaces(self, uuid, version=1):
+        """Every place that builds a URL from a caller-supplied segment, as zero-arg callables."""
+        return {
+            "cli get-versions": lambda: client.cmd_get_versions(
+                SimpleNamespace(uuid=uuid, scope=None)),
+            "cli get-blob": lambda: client.cmd_get_blob(
+                SimpleNamespace(uuid=uuid, version=version, scope=None)),
+            "cli update-group": lambda: client.cmd_update_group(
+                SimpleNamespace(uuid=uuid, payload=None)),
+            "cli append-description": lambda: client.cmd_append_description(
+                SimpleNamespace(uuid=uuid, payload=None)),
+            "read mcp get_versions": lambda: read_mcp.call_tool(
+                "get_versions", {"uuid": uuid}),
+            "read mcp get_blob": lambda: read_mcp.call_tool(
+                "get_blob", {"uuid": uuid, "version": version}),
+            "write mcp update_group": lambda: write_mcp.call_tool(
+                "update_group", {"uuid": uuid, "payload": {"repo": "r"}}),
+            "write mcp append_description": lambda: write_mcp.call_tool(
+                "append_description", {"uuid": uuid, "payload": {"name": "n", "body": "b"}}),
+        }
+
+    def test_hostile_uuid_segments_are_refused_before_any_request(self):
+        tokens = {client.ENV_READ_TOKEN: "read-only", client.ENV_WRITE_TOKEN: "write-only"}
+        for uuid in HOSTILE_UUIDS:
+            for name, call in self._surfaces(uuid).items():
+                with self.subTest(surface=name, uuid=uuid), patch.dict(os.environ, tokens), \
+                        patch.object(client, "read_payload", return_value={"repo": "r"}), \
+                        patch.object(client, "_open") as transport, \
+                        redirect_stdout(io.StringIO()):
+                    with self.assertRaises(client.ClientError) as caught:
+                        call()
+                    self.assertEqual(caught.exception.status_text, "bad-input")
+                    transport.assert_not_called()
+
+    def test_append_description_cannot_reach_the_snapshot_route(self):
+        # The concrete exploit: a group uuid of `../../snapshot?x=` resolved by any URL normaliser
+        # to `POST /api/context/snapshot`, which starts a corpus snapshot job with the write token.
+        seen = []
+        with patch.dict(os.environ, {client.ENV_WRITE_TOKEN: "write-only",
+                                     client.ENV_READ_TOKEN: "read-only"}), \
+                patch.object(client, "_open", side_effect=lambda request: seen.append(request.full_url)):
+            for call in (lambda: write_mcp.call_tool(
+                            "append_description",
+                            {"uuid": "../../snapshot?x=", "payload": {"name": "n", "body": "b"}}),
+                         lambda: client.cmd_append_description(
+                            SimpleNamespace(uuid="../../snapshot?x=", payload=None))):
+                with patch.object(client, "read_payload", return_value={"name": "n", "body": "b"}), \
+                        self.assertRaises(client.ClientError):
+                    call()
+        self.assertEqual(seen, [])
+
+    def test_bad_versions_are_refused(self):
+        for version in (0, -1, True, "1", "1/../../x", 1.0, None):
+            for name in ("cli get-blob", "read mcp get_blob"):
+                with self.subTest(surface=name, version=version), \
+                        patch.dict(os.environ, {client.ENV_READ_TOKEN: "read-only"}), \
+                        patch.object(client, "_open") as transport:
+                    with self.assertRaises(client.ClientError):
+                        self._surfaces(GOOD_UUID, version)[name]()
+                    transport.assert_not_called()
+
+    def test_a_canonical_uuid_builds_the_exact_route(self):
+        self.assertEqual(client.group_descriptions_path(GOOD_UUID),
+                         f"/api/context/groups/{GOOD_UUID}/descriptions")
+        self.assertEqual(client.memory_blob_path(GOOD_UUID.upper(), 3),
+                         f"/api/context/memories/{GOOD_UUID.upper()}/versions/3/blob")
+
+
+class WriteTokenSelectionTests(unittest.TestCase):
+    """The write credential is chosen by exact route, never by a substring of the path."""
+
+    def _token_for(self, method, path):
+        with patch.dict(os.environ, {client.ENV_READ_TOKEN: "read-only",
+                                     client.ENV_WRITE_TOKEN: "write-only"}), \
+                patch.object(client, "_open") as transport:
+            transport.return_value.__enter__.return_value.read.return_value = b"{}"
+            client._request(method, path)
+        return transport.call_args.args[0].get_header("Authorization")
+
+    def test_a_get_never_carries_the_write_token(self):
+        for path in (f"/api/context/groups/{GOOD_UUID}/descriptions",
+                     f"/api/context/groups/{GOOD_UUID}",
+                     "/api/context/memories/x/descriptions/versions",
+                     "/api/context/labels",
+                     "/api/context/initiatives"):
+            with self.subTest(path=path):
+                self.assertEqual(self._token_for("GET", path), "Bearer read-only")
+
+    def test_a_path_merely_containing_a_write_fragment_gets_the_read_token(self):
+        for method, path in (("POST", "/api/context/query/descriptions"),
+                             ("POST", "/api/context/groups/not-a-uuid/descriptions"),
+                             ("PATCH", "/api/context/memories/" + GOOD_UUID),
+                             ("POST", f"/api/context/groups/{GOOD_UUID}/descriptions/extra")):
+            with self.subTest(method=method, path=path):
+                self.assertEqual(self._token_for(method, path), "Bearer read-only")
+
+    def test_the_templated_write_routes_carry_the_write_token(self):
+        self.assertEqual(self._token_for("PATCH", f"/api/context/groups/{GOOD_UUID}"),
+                         "Bearer write-only")
+        self.assertEqual(self._token_for("POST", f"/api/context/groups/{GOOD_UUID}/descriptions"),
+                         "Bearer write-only")
 
 
 # One recognisable value per declared text field, and a DISTINCT one per field on purpose.
@@ -810,6 +1251,53 @@ def _assert_no_secret(testcase, payload):
 
 class SetRedactionGateTests(unittest.TestCase):
     """The `set` path scrubs before it posts. A separate `redact` tool does not gate anything."""
+
+    def test_pascal_and_upper_case_keys_are_scrubbed(self):
+        # The Host binds JSON case-insensitively, so these land in the same columns as their
+        # camelCase spellings and must be scrubbed the same way.
+        payload = {"items": [{"Content": "token: abcdef1234567890",
+                              "STATEMENT": "password=hunter2hunter2",
+                              "Facets": ["api_key=abcdefgh12345678"],
+                              "Sources": [{"Reference": "AKIAIOSFODNN7EXAMPLE"}]}],
+                   "LINKS": [{"Reason": "secret=linkreason000secret"}],
+                   "labelsproposed": ["DEPLOY_TOKEN=labelsecret0000"]}
+        with patch.object(client, "read_payload", return_value=copy.deepcopy(payload)), \
+                patch.object(client, "_request", return_value={"created": 1}) as request, \
+                redirect_stdout(io.StringIO()):
+            response = client.cmd_set(SimpleNamespace(payload=None, dryrun=False))
+        posted = json.dumps(request.call_args.args[2])
+        for secret in ("abcdef1234567890", "hunter2hunter2", "abcdefgh12345678",
+                       "AKIAIOSFODNN7EXAMPLE", "linkreason000secret", "labelsecret0000"):
+            self.assertNotIn(secret, posted)
+        fields = {location["field"] for entry in response["redaction"] for location in entry["locations"]}
+        self.assertIn("items[0].Content", fields)
+        self.assertIn("LINKS[0].Reason", fields)
+
+    def test_a_pascal_case_items_array_is_scrubbed_too(self):
+        # The client refuses a body without lowercase `items`, but the scrubber must not rely on
+        # that: it is the gate, and validation is a different contract that may change.
+        scrubbed, hits = redact.scrub_set_payload(
+            {"Items": [{"Statement": "password=hunter2hunter2"}], "items": []})
+        self.assertNotIn("hunter2hunter2", json.dumps(scrubbed))
+        self.assertEqual([hit["field"] for hit in hits], ["Items[0].Statement"])
+
+    def test_duplicate_case_keys_are_each_scrubbed(self):
+        # Which duplicate the Host keeps is its business; neither may carry a secret to it.
+        payload = {"items": [{"content": "token=abcdef1234567890",
+                              "Content": "token=0987654321fedcba",
+                              "statement": "ok", "Statement": "password=hunter2hunter2"}]}
+        scrubbed, hits = redact.scrub_set_payload(payload)
+        serialised = json.dumps(scrubbed)
+        for secret in ("abcdef1234567890", "0987654321fedcba", "hunter2hunter2"):
+            self.assertNotIn(secret, serialised)
+        self.assertEqual(scrubbed["items"][0]["statement"], "ok")
+        self.assertEqual(len(hits), 3)
+
+    def test_unlisted_keys_are_untouched_whatever_their_case(self):
+        payload = {"items": [{"Kind": "token=abcdef1234567890", "createUuid": GOOD_UUID}]}
+        scrubbed, hits = redact.scrub_set_payload(payload)
+        self.assertEqual(scrubbed, payload)
+        self.assertEqual(hits, [])
 
     def test_every_declared_text_field_is_independently_planted_and_scrubbed(self):
         # Guards SET_TEXT_FIELDS in both directions, which the payload-level assertions cannot.
@@ -875,16 +1363,18 @@ class SetRedactionGateTests(unittest.TestCase):
             write_mcp.call_tool("set", {"payload": copy.deepcopy(PLANTED), "dryRun": True})
         _assert_no_secret(self, request.call_args.args[2])
 
-    def test_digest_reports_rule_names_and_counts_only(self):
+    def test_digest_reports_rule_names_counts_and_locations_only(self):
         with patch.object(client, "read_payload", return_value=copy.deepcopy(PLANTED)), \
                 patch.object(client, "_request", return_value={"created": 1}), \
                 redirect_stdout(io.StringIO()):
             response = client.cmd_set(SimpleNamespace(payload=None, dryrun=False))
-        serialised = json.dumps(response)
         _assert_no_secret(self, response)
         self.assertTrue(response["redaction"])
         for entry in response["redaction"]:
-            self.assertEqual(set(entry), {"rule_name", "hit_count"})
+            self.assertEqual(set(entry), {"rule_name", "hit_count", "locations"})
+            self.assertEqual(entry["hit_count"], len(entry["locations"]))
+            for location in entry["locations"]:
+                self.assertEqual(set(location), {"field", "start", "end"})
         names = {entry["rule_name"] for entry in response["redaction"]}
         self.assertIn("aws-access-key-id", names)
         self.assertIn("github-token", names)
@@ -939,8 +1429,9 @@ class SetRedactionGateTests(unittest.TestCase):
             self.assertNotIn(secret, response["error"]["message"])
 
     def test_scrub_covers_every_declared_content_field(self):
-        scrubbed, findings = redact.scrub_set_payload(copy.deepcopy(PLANTED))
+        scrubbed, hits = redact.scrub_set_payload(copy.deepcopy(PLANTED))
         _assert_no_secret(self, scrubbed)
+        findings = redact.counts(hits)
         self.assertTrue(findings)
         # Each rule shape is planted in a different field, so a field dropped from the walk
         # shows up as a missing rule name rather than as a silently cleaner payload. The counts are
@@ -951,9 +1442,11 @@ class SetRedactionGateTests(unittest.TestCase):
         self.assertEqual(findings.get("github-token"), 2)        # content, tags
         # description (password=), sources[].reference (Password=), labelsProposed (password=)
         self.assertEqual(findings.get("connection-string-password"), 3)
-        # name (token=), contentSummary (api_key=), summaryModel (secret=),
-        # summaryPromptVersion (key=), facets, links[].reason
-        self.assertEqual(findings.get("generic-secret-assignment"), 6)
+        # name (token=), contentSummary (api_key=), summaryModel (secret=), summaryPromptVersion (key=)
+        self.assertEqual(findings.get("generic-secret-assignment"), 4)
+        # facets and links[].reason carry `sk-live-…`, which the vendor rule takes before the
+        # `api_key=` assignment rule sees it
+        self.assertEqual(findings.get("api-key-sk"), 2)
 
     def test_non_string_content_fields_survive_untouched(self):
         payload = {"items": [{"statement": None, "content": 42, "tags": ["ok", None],
@@ -965,7 +1458,119 @@ class SetRedactionGateTests(unittest.TestCase):
         self.assertEqual(scrubbed["items"][0]["sources"], ["not-a-dict"])
         self.assertEqual(scrubbed["links"], [None])
         self.assertEqual(scrubbed["labelsProposed"], [None])
-        self.assertEqual(findings, {})
+        self.assertEqual(findings, [])
+
+
+# Every persisting write other than `set`, with a DISTINCT planted secret in each free-text field the
+# Host stores. Hand-declared here, independently of `redact.WRITE_SPECS`, so dropping a field from the
+# spec leaves its secret in the posted body instead of shrinking the test with it.
+_TICKET = {"provider": "github", "key": "42"}
+OTHER_WRITES = {
+    "resolve_group": ("POST", "/api/context/groups/resolve", False, {
+        "name": "DEPLOY_TOKEN=XSECrg01name", "body": "password=XSECrg02body",
+        "repo": "secret=XSECrg03repo", "repoUrl": "https://bot:XSECrg04url@git.example/x.git",
+        "initiativeName": "api_key=XSECrg05init", "scopeIdentifier": "client_secret=XSECrg06scope",
+        "scopeDimension": "product",
+        "tickets": [{"provider": "local", "key": "k", "url": "https://u:XSECrg07ticket@t.example/1"}]}),
+    "update_group": ("PATCH", f"/api/context/groups/{GOOD_UUID}", True, {
+        "groupUuid": GOOD_UUID, "repo": "secret=XSECug01repo",
+        "repoUrl": "https://bot:XSECug02url@git.example/x.git",
+        "initiativeName": "api_key=XSECug03init", "scopeIdentifier": "client_secret=XSECug04scope",
+        "tickets": [{"provider": "local", "key": "k", "url": "https://u:XSECug05ticket@t.example/1"}]}),
+    "append_description": ("POST", f"/api/context/groups/{GOOD_UUID}/descriptions", True, {
+        "groupUuid": GOOD_UUID, "name": "DEPLOY_TOKEN=XSECad01name", "body": "password=XSECad02body"}),
+    "create_link": ("POST", "/api/context/links", False, {
+        "sourceUuid": GOOD_UUID, "targetUuid": GOOD_UUID, "relation": "relates_to",
+        "reason": "cites api_key=XSECcl01reason"}),
+    "ticket_parent": ("PUT", "/api/context/tickets/parent", False, {
+        "child": _TICKET, "parent": {"provider": "github", "key": "10"}, "expectedParent": None,
+        "reason": "declared; password=XSECtp01reason", "source": "secret=XSECtp02source"}),
+    "propose_label": ("POST", "/api/context/labels", False, {"name": "DEPLOY_TOKEN=XSECpl01name"}),
+    "upsert_initiative": ("POST", "/api/context/initiatives", False, {
+        "name": "secret=XSECui01name", "description": "password=XSECui02desc"}),
+}
+OTHER_WRITE_SECRETS = re.compile(r"XSEC[a-z0-9]+")
+
+CLI_WRITES = {
+    "resolve_group": client.cmd_resolve_group, "update_group": client.cmd_update_group,
+    "append_description": client.cmd_append_description, "create_link": client.cmd_create_link,
+    "ticket_parent": client.cmd_ticket_parent, "propose_label": client.cmd_propose_label,
+    "upsert_initiative": client.cmd_upsert_initiative,
+}
+
+
+class OtherWriteRedactionTests(unittest.TestCase):
+    """Every persisting write is scrubbed, not just `set` (BR-03)."""
+
+    def _planted(self, payload):
+        return OTHER_WRITE_SECRETS.findall(json.dumps(payload))
+
+    def test_the_fixture_plants_a_secret_in_every_free_text_field(self):
+        for tool, (_method, _path, _uuid, payload) in OTHER_WRITES.items():
+            with self.subTest(tool=tool):
+                text_fields = [key for key, value in payload.items()
+                               if isinstance(value, str) and key not in ("groupUuid", "sourceUuid",
+                                                                         "targetUuid", "relation",
+                                                                         "scopeDimension")]
+                self.assertEqual(len(self._planted(payload)),
+                                 len(text_fields) + len(payload.get("tickets", [])))
+
+    def test_every_mcp_write_posts_no_planted_secret(self):
+        for tool, (method, path, needs_uuid, payload) in OTHER_WRITES.items():
+            arguments = {"payload": copy.deepcopy(payload)}
+            if needs_uuid:
+                arguments["uuid"] = GOOD_UUID
+            with self.subTest(tool=tool), \
+                    patch.object(write_mcp.client, "_request", return_value={"ok": True}) as request:
+                result = write_mcp.call_tool(tool, arguments)
+                self.assertEqual(request.call_args.args[:2], (method, path))
+                posted = request.call_args.args[2]
+                self.assertEqual(self._planted(posted), [], f"{tool} posted a planted secret")
+                self.assertTrue(result["redaction"], f"{tool} scrubbed silently")
+                self.assertEqual(self._planted(result["redaction"]), [])
+
+    def test_every_cli_write_posts_no_planted_secret(self):
+        for tool, (method, path, needs_uuid, payload) in OTHER_WRITES.items():
+            args = SimpleNamespace(payload=None, dryrun=False, uuid=GOOD_UUID if needs_uuid else None)
+            with self.subTest(tool=tool), \
+                    patch.object(client, "read_payload", return_value=copy.deepcopy(payload)), \
+                    patch.object(client, "_request", return_value={"ok": True}) as request, \
+                    redirect_stdout(io.StringIO()) as out:
+                CLI_WRITES[tool](args)
+                self.assertEqual(request.call_args.args[:2], (method, path))
+                self.assertEqual(self._planted(request.call_args.args[2]), [])
+                self.assertEqual(self._planted(out.getvalue()), [])
+                self.assertIn('"redaction"', out.getvalue())
+
+    def test_ticket_parent_dry_run_previews_the_scrubbed_request(self):
+        payload = OTHER_WRITES["ticket_parent"][3]
+        with patch.object(client, "read_payload", return_value=copy.deepcopy(payload)), \
+                patch.object(client, "_request") as request, redirect_stdout(io.StringIO()):
+            result = client.cmd_ticket_parent(SimpleNamespace(payload=None, dryrun=True))
+        request.assert_not_called()
+        self.assertEqual(self._planted(result), [])
+        self.assertEqual(result["request"]["child"], _TICKET, "ticket identity must not be rewritten")
+
+    def test_an_unavailable_redactor_refuses_every_write(self):
+        for tool, (_method, _path, needs_uuid, payload) in OTHER_WRITES.items():
+            arguments = {"payload": copy.deepcopy(payload), "uuid": GOOD_UUID}
+            args = SimpleNamespace(payload=None, dryrun=False, uuid=GOOD_UUID if needs_uuid else None)
+            with self.subTest(tool=tool), \
+                    patch.object(client.redact, "scrub_payload", side_effect=RuntimeError("boom")), \
+                    patch.object(client, "read_payload", return_value=copy.deepcopy(payload)), \
+                    patch.object(client, "_request") as request:
+                for call in (lambda: write_mcp.call_tool(tool, arguments), lambda: CLI_WRITES[tool](args)):
+                    with self.assertRaises(client.ClientError) as error:
+                        call()
+                    self.assertIn("redactor-unavailable", str(error.exception))
+                request.assert_not_called()
+
+    def test_an_undeclared_write_operation_fails_closed(self):
+        with patch.object(client, "_request") as request:
+            with self.assertRaises(client.ClientError) as error:
+                client.scrubbed_write("brand_new_write", "POST", "/api/context/x", {"a": "b"})
+        self.assertIn("redactor-unavailable", str(error.exception))
+        request.assert_not_called()
 
 
 class DeepSearchTests(unittest.TestCase):

@@ -19,6 +19,29 @@
 The log assertion matters as much as the storage one: a secret scrubbed from the body and then printed
 in a diagnostic has moved, not been contained — often somewhere less protected than the store.
 
+## Verification Status
+
+Where each check runs today. Detection is client-side: the `mimisbrunnr-context-memory` skill scrubs
+before the request is built, and the Host stores what it is sent.
+
+| Check | Where it is verified | Passes |
+|---|---|---|
+| Planted secret of each shape absent from what is sent for storage | Skill harness `.agents/skills/mimisbrunnr-context-memory/tests/run_tests.py` — `RedactTests`, `SecretShapeCoverageTests`, `SetRedactionGateTests` (planted value in every declared text field, CLI and MCP) | Yes |
+| Detection failure blocks the write | Same harness — `SetRedactionGateTests.test_unavailable_redactor_refuses_the_write`, `test_redactor_refusal_carries_no_content` | Yes |
+| Digest names rule and location, never the matched span | Same harness — `SetRedactionGateTests.test_digest_reports_rule_names_counts_and_locations_only`, `RedactionPrecisionTests.test_set_digest_names_the_field_and_offsets_of_every_scrub` | Yes |
+| Non-secret content byte-identical | Same harness — `RedactionPrecisionTests.test_ordinary_prose_passes_byte_identical` | Yes |
+| Planted value in no log line | Server: `tests/SmoothAiProductContextMemory.Host.IntegrationTest/SecretContainmentTests.cs` — every Serilog level and category forced to `Verbose`, message, template, structured properties and scopes captured, during a successful write and during rejected writes (validation 400 and body-deserialisation 400) | Yes |
+| Planted value in no error response body | Same test, both rejected writes | Yes |
+
+**Not implemented: a server-side backstop.** The Host runs no detection of its own; a caller that
+bypasses the skill (direct HTTP, another client) stores whatever it sends. The client gate is the
+control. Whether a server-side backstop is required is an open owner decision, not settled here.
+
+**Observed residual, not covered by the above:** a duplicate-subject `409` names the subject slug in
+its detail, and the slug is derived from `description`. A secret placed in `description` therefore
+reaches that error body, lower-cased with separators replaced. The skill scrubs `description` like
+every other text field, so this depends on the same client gate.
+
 ## Acceptance Criteria
 
 - Zero occurrences of any planted secret in stored bodies, logs or digests.

@@ -93,9 +93,27 @@ def _read_response(request):
         raise _classify_transport_error(e) from e
 
 
+def _parse_base(value):
+    """`urlparse` the base URL without letting its error text out.
+
+    `urlsplit` rejects an NFKC-confusable character in the netloc with a ValueError that quotes the
+    whole netloc — userinfo included — and a bad port the same way. That message escaped as a
+    traceback (only `ClientError` is caught), printing whatever credential the URL carried. The
+    refusal here is fixed text and is raised outside the handler, so nothing chains the original.
+    """
+    try:
+        parsed = urlparse(value)
+        parsed.port  # noqa: B018 — parsed for its ValueError on a malformed port
+        return parsed
+    except ValueError:
+        pass
+    raise ClientError(0, "bad-base-url", "Context-memory base URL could not be parsed; "
+                      f"check {ENV_BASE_URL} for malformed or non-ASCII characters")
+
+
 def base_url():
     value = os.environ.get(ENV_BASE_URL, DEFAULT_BASE_URL).rstrip("/")
-    parsed = urlparse(value)
+    parsed = _parse_base(value)
     if parsed.scheme not in ("http", "https") or parsed.username or parsed.password \
             or parsed.path not in ("", "/") or parsed.query or parsed.fragment:
         raise ClientError(0, "bad-base-url", "Context-memory base URL must be an HTTP(S) origin")
@@ -115,6 +133,71 @@ def _open(request):
         timeout=HTTP_TIMEOUT)
 
 
+_UUID_PATTERN = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+_CANONICAL_UUID = re.compile(_UUID_PATTERN)
+
+
+def uuid_segment(value, field="uuid"):
+    """Return `value` if it is a canonical UUID, else refuse before any URL is built.
+
+    A path segment is interpolated into the request URL, so an unchecked one is a route selector:
+    `../../snapshot?x=` as a group uuid turns `append-description` into `POST /api/context/snapshot`.
+    Only the canonical 8-4-4-4-12 hex form passes, so no `/`, `.`, `?`, `%` or `#` reaches the path.
+    The refusal never echoes the value, which is caller-controlled text.
+    """
+    if not isinstance(value, str) or not _CANONICAL_UUID.fullmatch(value):
+        raise ClientError(0, "bad-input", f"'{field}' must be a canonical UUID")
+    return value
+
+
+def version_segment(value):
+    """Return `value` if it is a positive integer, else refuse before any URL is built."""
+    if type(value) is not int or value < 1:
+        raise ClientError(0, "bad-input", "'version' must be a positive integer")
+    return value
+
+
+def memory_versions_path(uuid):
+    return f"/api/context/memories/{uuid_segment(uuid)}/versions"
+
+
+def memory_blob_path(uuid, version):
+    return f"/api/context/memories/{uuid_segment(uuid)}/versions/{version_segment(version)}/blob"
+
+
+def group_path(uuid):
+    return f"/api/context/groups/{uuid_segment(uuid)}"
+
+
+def group_descriptions_path(uuid):
+    return f"{group_path(uuid)}/descriptions"
+
+
+# Routes that carry the write credential, matched exactly on (method, path). Anything else gets the
+# read credential. The two templated routes are matched against the canonical UUID form only, so a
+# path that merely *contains* `/descriptions` — or a GET to the same path — never selects the write
+# token.
+WRITE_ROUTES = frozenset({
+    ("POST", "/api/context/preflight"),
+    ("POST", "/api/context/memories"),
+    ("POST", "/api/context/groups/resolve"),
+    ("POST", "/api/context/links"),
+    ("PUT", "/api/context/tickets/parent"),
+    ("POST", "/api/context/labels"),
+    ("POST", "/api/context/initiatives"),
+})
+WRITE_ROUTE_TEMPLATES = (
+    ("PATCH", re.compile(r"/api/context/groups/" + _UUID_PATTERN)),
+    ("POST", re.compile(r"/api/context/groups/" + _UUID_PATTERN + r"/descriptions")),
+)
+
+
+def is_write_route(method, path):
+    if (method, path) in WRITE_ROUTES:
+        return True
+    return any(method == verb and template.fullmatch(path) for verb, template in WRITE_ROUTE_TEMPLATES)
+
+
 def _request(method, path, payload=None, query=None):
     url = base_url() + path
     if query:
@@ -123,17 +206,7 @@ def _request(method, path, payload=None, query=None):
         url += "?" + urlencode(query)
 
     body = None
-    write_routes = {
-        ("POST", "/api/context/preflight"),
-        ("POST", "/api/context/memories"),
-        ("POST", "/api/context/groups/resolve"),
-        ("POST", "/api/context/links"),
-        ("PUT", "/api/context/tickets/parent"),
-        ("POST", "/api/context/labels"),
-        ("POST", "/api/context/initiatives"),
-    }
-    is_write = (method, path) in write_routes or method == "PATCH" or "/descriptions" in path
-    token_name = ENV_WRITE_TOKEN if is_write else ENV_READ_TOKEN
+    token_name = ENV_WRITE_TOKEN if is_write_route(method, path) else ENV_READ_TOKEN
     token = os.environ.get(token_name)
     if not token:
         raise ClientError(0, "missing-credential", f"{token_name} is required")
@@ -149,9 +222,7 @@ def _request(method, path, payload=None, query=None):
 
 def _probe(base):
     """True if the API host accepts a TCP connection. Honest, never a silent miss."""
-    from urllib.parse import urlparse
-
-    parsed = urlparse(base)
+    parsed = _parse_base(base)
     host = parsed.hostname or "localhost"
     port = parsed.port or (443 if parsed.scheme == "https" else 80)
     try:
@@ -217,16 +288,12 @@ def cmd_set(args):
 
     Redaction runs here, not as a separate tool the caller may forget: the blob is immutable once
     written, so a secret that reaches the server can only be orphaned, never edited out. The
-    digest reports rule names and counts only, never the span.
+    digest names each rule, the field it altered and the offsets it replaced — never the span's text.
     """
     payload = read_payload(args.payload)
     validate_set_payload(payload)
-    payload, findings = scrub_or_refuse(payload)
     query = {"dryRun": "true"} if args.dryrun else None
-    resp = _request("POST", "/api/context/memories", payload, query=query)
-    if findings:
-        resp["redaction"] = [{"rule_name": name, "hit_count": count}
-                             for name, count in sorted(findings.items())]
+    resp = scrubbed_write("set", "POST", "/api/context/memories", payload, query=query)
     print(json.dumps(resp, indent=2))
     return resp
 
@@ -245,8 +312,25 @@ def validate_set_payload(payload):
         )
 
 
-def scrub_or_refuse(payload):
-    """Scrub a `set` payload, or refuse the write. Never returns unscubbed content.
+def attach_redaction(resp, hits):
+    """Put the redaction digest on a response object, so no scrub reaches the caller silently."""
+    if hits and isinstance(resp, dict):
+        resp["redaction"] = redact.digest(hits)
+    return resp
+
+
+def scrubbed_write(operation, method, path, payload, query=None):
+    """Scrub `payload` for `operation`, send it, and attach the redaction digest to the response.
+
+    The single route every persisting write takes, so a new write subcommand or MCP tool is gated by
+    calling this rather than by remembering to call the scrubber.
+    """
+    payload, hits = scrub_or_refuse(payload, operation)
+    return attach_redaction(_request(method, path, payload, query=query), hits)
+
+
+def scrub_or_refuse(payload, operation="set"):
+    """Scrub a write payload, or refuse the write. Never returns unscrubbed content.
 
     The redaction gate is fail-closed because the failure it guards against is irreversible: a
     blob is content-addressed, so a secret that reaches storage can only be orphaned, never
@@ -255,7 +339,7 @@ def scrub_or_refuse(payload):
     failure, never the content, so the refusal is safe to print into a transcript.
     """
     try:
-        return redact.scrub_set_payload(payload)
+        return redact.scrub_write_payload(operation, payload)
     except Exception as exc:  # noqa: BLE001 — the point is that no exception escapes as a write
         raise ClientError(
             0,
@@ -340,7 +424,7 @@ def cmd_query(args):
 def cmd_get_versions(args):
     resp = _request(
         "GET",
-        f"/api/context/memories/{args.uuid}/versions",
+        memory_versions_path(args.uuid),
         query={"scope": args.scope} if args.scope else None,
     )
     print(json.dumps(resp, indent=2))
@@ -351,7 +435,7 @@ def cmd_get_blob(args):
     """Returns the blob body as raw text (it is not JSON), so scope enforcement stays the API's job."""
     from urllib.parse import urlencode
 
-    url = base_url() + f"/api/context/memories/{args.uuid}/versions/{args.version}/blob"
+    url = base_url() + memory_blob_path(args.uuid, args.version)
     if args.scope:
         url += "?" + urlencode({"scope": args.scope})
     token = os.environ.get(ENV_READ_TOKEN)
@@ -362,27 +446,25 @@ def cmd_get_blob(args):
 
 
 def cmd_resolve_group(args):
-    resp = _request("POST", "/api/context/groups/resolve", read_payload(args.payload))
+    resp = scrubbed_write("resolve_group", "POST", "/api/context/groups/resolve", read_payload(args.payload))
     print(json.dumps(resp, indent=2))
     return resp
 
 
 def cmd_update_group(args):
-    resp = _request("PATCH", f"/api/context/groups/{args.uuid}", read_payload(args.payload))
+    resp = scrubbed_write("update_group", "PATCH", group_path(args.uuid), read_payload(args.payload))
     print(json.dumps(resp, indent=2))
     return resp
 
 
 def cmd_append_description(args):
-    resp = _request(
-        "POST", f"/api/context/groups/{args.uuid}/descriptions", read_payload(args.payload)
-    )
+    resp = scrubbed_write("append_description", "POST", group_descriptions_path(args.uuid), read_payload(args.payload))
     print(json.dumps(resp, indent=2))
     return resp
 
 
 def cmd_create_link(args):
-    resp = _request("POST", "/api/context/links", read_payload(args.payload))
+    resp = scrubbed_write("create_link", "POST", "/api/context/links", read_payload(args.payload))
     print(json.dumps(resp, indent=2))
     return resp
 
@@ -394,7 +476,7 @@ def cmd_labels(args):
 
 
 def cmd_propose_label(args):
-    resp = _request("POST", "/api/context/labels", read_payload(args.payload))
+    resp = scrubbed_write("propose_label", "POST", "/api/context/labels", read_payload(args.payload))
     print(json.dumps(resp, indent=2))
     return resp
 
@@ -406,7 +488,7 @@ def cmd_initiatives(args):
 
 
 def cmd_upsert_initiative(args):
-    resp = _request("POST", "/api/context/initiatives", read_payload(args.payload))
+    resp = scrubbed_write("upsert_initiative", "POST", "/api/context/initiatives", read_payload(args.payload))
     print(json.dumps(resp, indent=2))
     return resp
 
@@ -486,7 +568,7 @@ def _ticket_identity(value, field):
 
 def cmd_ticket_parent(args):
     """PUT an explicit declaration, or inspect locally without any network call."""
-    payload = read_payload(args.payload)
+    payload, hits = scrub_or_refuse(read_payload(args.payload), "ticket_parent")
     required = {"child", "parent", "expectedParent", "reason", "source"}
     if (not isinstance(payload, dict) or not required <= payload.keys()
             or payload.keys() - required - {"observedAt"}):
@@ -522,6 +604,7 @@ def cmd_ticket_parent(args):
                 "validation": "Local shape only; ownership, cycles and expected parent are unverified."}
     else:
         resp = _request("PUT", "/api/context/tickets/parent", payload)
+    attach_redaction(resp, hits)
     print(json.dumps(resp, indent=2))
     return resp
 

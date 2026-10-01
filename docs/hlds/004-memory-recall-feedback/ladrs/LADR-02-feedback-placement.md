@@ -1,6 +1,7 @@
 # LADR-02: Feedback lives in append-only records
 
-**Status:** Accepted — resolved on measurement, 2026-09-18
+**Status:** Accepted — resolved on measurement, 2026-09-18. The retention bound is specified, not
+implemented (see *Retention bound*).
 
 ## Context
 
@@ -89,6 +90,12 @@ at dogfooding volume (~200 retrievals/day, ~55 MiB) the time bound governs, and 
 (~2,000/day) the record cap bites first and holds the set under ~370 MiB. This is a bound, not a policy —
 old recall data describes a store and a recall implementation that no longer exist.
 
+**Specified, not implemented.** No shipped code enforces either limit: nothing in `src/` prunes
+`recall_feedback`. The only deletions are the practitioner's baseline reset
+(`NpgsqlRecallFeedbackQuery`, `DELETE FROM public.recall_feedback`) and a snapshot restore, which clears
+the table inside its transaction (HLD-006). The set therefore grows without bound between those events. Reopen when a retention job is built, or if the table approaches the ~370 MiB the cap was
+sized to hold.
+
 ### What this placement must not become
 
 - **Feedback does not influence ranking.** Retrieval must not read the feedback set. A store that
@@ -101,8 +108,9 @@ old recall data describes a store and a recall implementation that no longer exi
   the cross-store consistency problem and out of the HLD-006 snapshot concern entirely.
 - **A feedback failure never fails a retrieval.** Measured at the prototype boundary: a retrieval and a
   failing feedback write in one unit of work still return all 50 rows, every field identical and in the
-  same order. What that settles is that the placement admits such a boundary — the shipped fire-and-forget
-  writer, the retrieval handler it hangs off, and the identical-with-feedback-on-and-off criterion against
+  same order. What that settles is that the placement admits such a boundary — the shipped writer (a
+  guarded synchronous write on its own connection, run inline before the response returns), the retrieval
+  handler it hangs off, and the identical-with-feedback-on-and-off criterion against
   that handler are verified with the write path, not by this evidence.
 
 ## Alternatives Considered
@@ -118,7 +126,7 @@ accumulating signal.
   a correlated subquery it dominates the query's cost — the `memory` scan carrying that subplan costs
   25,397.75 of the statement's 25,468.85 — so it belongs as a join.
 - The record set grows and needs the bound above. A bound is cheap; the alternative is a second store to
-  reason about.
+  reason about. The bound is not yet enforced (see *Retention bound*).
 - The feedback table is deliberately outside the six entity types the DbContext exposes and the model-shape
   guard asserts. Whether it becomes an EF entity — and therefore a guard change — is a decision the write
   path must make deliberately rather than by adding a `DbSet` and following the compiler.

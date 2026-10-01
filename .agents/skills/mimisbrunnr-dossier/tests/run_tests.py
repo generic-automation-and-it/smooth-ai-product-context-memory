@@ -750,6 +750,29 @@ class CredentialTransportTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             dc.fetch_bundle_from_api("http://evil.example:5141", {"anchor": {}})
 
+    def test_an_unparseable_base_is_refused_without_echoing_its_userinfo(self):
+        # urlsplit's own ValueError quotes the whole netloc, userinfo included, and main() prints
+        # exception text — so the parser's message must never be the one that escapes.
+        import contextlib
+        import io
+        import traceback
+        from unittest import mock
+
+        for base in ("http://user:s3cret@local\uff03host:5141", "http://user:s3cret@localhost:port"):
+            with self.subTest(base=base):
+                with self.assertRaises(ValueError) as caught:
+                    dc._assert_loopback(base)
+                rendered = "".join(traceback.format_exception(
+                    type(caught.exception), caught.exception, caught.exception.__traceback__))
+                self.assertNotIn("s3cret", rendered)
+                self.assertNotIn("user:", rendered)
+                stderr = io.StringIO()
+                # `cmd_bundle` exports --base-url into the environment; patch.dict restores it.
+                with mock.patch.dict(os.environ), contextlib.redirect_stderr(stderr):
+                    self.assertEqual(dc.main(["--base-url", base, "bundle"]), 1)
+                self.assertNotIn("s3cret", stderr.getvalue())
+                self.assertIn("loopback origin", stderr.getvalue())
+
     def test_the_opener_refuses_redirects_and_uses_no_proxy(self):
         # Pins the composition, not just the class: dropping _NoRedirect from the opener — or
         # letting a proxy observe the header — fails here even though the guards still exist.

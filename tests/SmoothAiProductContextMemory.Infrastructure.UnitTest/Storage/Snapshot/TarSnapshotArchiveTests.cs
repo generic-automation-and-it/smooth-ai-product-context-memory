@@ -25,7 +25,7 @@ public class TarSnapshotArchiveTests
         string address = Sha256ContentAddress.Compute(Body);
         (SnapshotCapture capture, SnapshotWalkResult walk) = Capture(address, SnapshotBlobState.Ok);
 
-        SnapshotWriteReport report = await _archive.WriteAsync(path, capture, walk, _ => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
+        SnapshotWriteReport report = await _archive.WriteAsync(path, capture, walk, (_, _) => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
 
         SnapshotVerification verification = await _archive.VerifyAsync(path, TestContext.Current.CancellationToken);
         verification.IsClean.ShouldBeTrue();
@@ -45,7 +45,7 @@ public class TarSnapshotArchiveTests
         string path = TempArchive();
         string address = Sha256ContentAddress.Compute(Body);
         (SnapshotCapture capture, SnapshotWalkResult walk) = Capture(address, SnapshotBlobState.Ok);
-        await _archive.WriteAsync(path, capture, walk, _ => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
+        await _archive.WriteAsync(path, capture, walk, (_, _) => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
 
         Dictionary<string, byte[]> entries = ReadTar(path);
         entries[$"blobs/{address}"][0] ^= 0xFF; // flip one byte in the blob entry
@@ -65,7 +65,7 @@ public class TarSnapshotArchiveTests
         string cited = Sha256ContentAddress.Compute(Body); // cited address differs from actual content
         (SnapshotCapture capture, SnapshotWalkResult walk) = Capture(cited, SnapshotBlobState.Mismatch);
 
-        SnapshotWriteReport report = await _archive.WriteAsync(path, capture, walk, _ => Task.FromResult((actual, Sha256ContentAddress.Hash(actual), (string?)null)), TestContext.Current.CancellationToken);
+        SnapshotWriteReport report = await _archive.WriteAsync(path, capture, walk, (_, _) => Task.FromResult((actual, Sha256ContentAddress.Hash(actual), (string?)null)), TestContext.Current.CancellationToken);
         report.MismatchedBodies.ShouldBe(1);
 
         SnapshotVerification verification = await _archive.VerifyAsync(path, TestContext.Current.CancellationToken);
@@ -80,7 +80,7 @@ public class TarSnapshotArchiveTests
         string path = TempArchive();
         string address = Sha256ContentAddress.Compute(Body);
         (SnapshotCapture capture, SnapshotWalkResult walk) = Capture(address, SnapshotBlobState.Ok);
-        await _archive.WriteAsync(path, capture, walk, _ => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
+        await _archive.WriteAsync(path, capture, walk, (_, _) => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
 
         Dictionary<string, byte[]> entries = ReadTar(path);
         entries.Remove($"blobs/{address}");
@@ -98,7 +98,7 @@ public class TarSnapshotArchiveTests
         string path = TempArchive();
         string address = Sha256ContentAddress.Compute(Body);
         (SnapshotCapture capture, SnapshotWalkResult walk) = Capture(address, SnapshotBlobState.Ok);
-        await _archive.WriteAsync(path, capture, walk, _ => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
+        await _archive.WriteAsync(path, capture, walk, (_, _) => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
 
         Dictionary<string, byte[]> entries = ReadTar(path);
         entries[SnapshotEntryNames.Manifest][0] ^= 0xFF;
@@ -117,7 +117,7 @@ public class TarSnapshotArchiveTests
         string path = TempArchive();
         string address = Sha256ContentAddress.Compute(Body);
         (SnapshotCapture capture, SnapshotWalkResult walk) = Capture(address, SnapshotBlobState.Missing);
-        await _archive.WriteAsync(path, capture, walk, _ => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
+        await _archive.WriteAsync(path, capture, walk, (_, _) => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
 
         SnapshotVerification verification = await _archive.VerifyAsync(path, TestContext.Current.CancellationToken);
         verification.IsClean.ShouldBeFalse();
@@ -131,7 +131,7 @@ public class TarSnapshotArchiveTests
         byte[] actual = Encoding.UTF8.GetBytes("content that hashes elsewhere.");
         string cited = Sha256ContentAddress.Compute(Body);
         (SnapshotCapture capture, SnapshotWalkResult walk) = Capture(cited, SnapshotBlobState.Mismatch);
-        await _archive.WriteAsync(path, capture, walk, _ => Task.FromResult((actual, Sha256ContentAddress.Hash(actual), (string?)null)), TestContext.Current.CancellationToken);
+        await _archive.WriteAsync(path, capture, walk, (_, _) => Task.FromResult((actual, Sha256ContentAddress.Hash(actual), (string?)null)), TestContext.Current.CancellationToken);
 
         SnapshotVerification verification = await _archive.VerifyAsync(path, TestContext.Current.CancellationToken);
         verification.IsClean.ShouldBeFalse();
@@ -147,7 +147,7 @@ public class TarSnapshotArchiveTests
         string path = TempArchive();
         string address = Sha256ContentAddress.Compute(Body);
         (SnapshotCapture capture, SnapshotWalkResult walk) = Capture(address, SnapshotBlobState.Ok);
-        await _archive.WriteAsync(path, capture, walk, _ => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
+        await _archive.WriteAsync(path, capture, walk, (_, _) => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
 
         Dictionary<string, byte[]> entries = ReadTar(path);
         SnapshotManifest manifest = JsonSerializer.Deserialize<SnapshotManifest>(entries[SnapshotEntryNames.Manifest], Json)!;
@@ -163,12 +163,12 @@ public class TarSnapshotArchiveTests
     [Fact]
     public async Task Verify_Detects_AlteredManifestCount()
     {
-        // An altered manifest count on an untouched archive must be caught (R02). Verify reconciles
+        // An altered manifest count on an untouched archive must be caught. Verify reconciles
         // every counted corpus row against the archive, not just the blob/object count.
         string path = TempArchive();
         string address = Sha256ContentAddress.Compute(Body);
         (SnapshotCapture capture, SnapshotWalkResult walk) = Capture(address, SnapshotBlobState.Ok);
-        await _archive.WriteAsync(path, capture, walk, _ => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
+        await _archive.WriteAsync(path, capture, walk, (_, _) => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
 
         Dictionary<string, byte[]> entries = ReadTar(path);
         SnapshotManifest manifest = JsonSerializer.Deserialize<SnapshotManifest>(entries[SnapshotEntryNames.Manifest], Json)!;
@@ -192,7 +192,7 @@ public class TarSnapshotArchiveTests
         string path = TempArchive();
         string address = Sha256ContentAddress.Compute(Body);
         (SnapshotCapture capture, SnapshotWalkResult walk) = Capture(address, SnapshotBlobState.Ok);
-        await _archive.WriteAsync(path, capture, walk, _ => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
+        await _archive.WriteAsync(path, capture, walk, (_, _) => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
 
         Dictionary<string, byte[]> entries = ReadTar(path);
         SnapshotManifest manifest = JsonSerializer.Deserialize<SnapshotManifest>(entries[SnapshotEntryNames.Manifest], Json)!;
@@ -214,7 +214,7 @@ public class TarSnapshotArchiveTests
         string path = TempArchive();
         string address = Sha256ContentAddress.Compute(Body);
         (SnapshotCapture capture, SnapshotWalkResult walk) = Capture(address, SnapshotBlobState.Ok);
-        await _archive.WriteAsync(path, capture, walk, _ => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
+        await _archive.WriteAsync(path, capture, walk, (_, _) => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
 
         Dictionary<string, byte[]> entries = ReadTar(path);
         entries[SnapshotEntryNames.Manifest] = Encoding.UTF8.GetBytes("null");
@@ -233,7 +233,7 @@ public class TarSnapshotArchiveTests
         string path = TempArchive();
         string address = Sha256ContentAddress.Compute(Body);
         (SnapshotCapture capture, SnapshotWalkResult walk) = Capture(address, SnapshotBlobState.Ok);
-        await _archive.WriteAsync(path, capture, walk, _ => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
+        await _archive.WriteAsync(path, capture, walk, (_, _) => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
 
         Dictionary<string, byte[]> entries = ReadTar(path);
         entries.Remove(SnapshotEntryNames.Manifest);
@@ -256,7 +256,7 @@ public class TarSnapshotArchiveTests
         string path = TempArchive();
         string address = Sha256ContentAddress.Compute(Body);
         (SnapshotCapture capture, SnapshotWalkResult walk) = Capture(address, SnapshotBlobState.Ok);
-        await _archive.WriteAsync(path, capture, walk, _ => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
+        await _archive.WriteAsync(path, capture, walk, (_, _) => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
 
         Dictionary<string, byte[]> entries = ReadTar(path);
         entries["blobs/smuggled"] = "not what the manifest promised"u8.ToArray();
@@ -279,7 +279,7 @@ public class TarSnapshotArchiveTests
         string path = TempArchive();
         string address = Sha256ContentAddress.Compute(Body);
         (SnapshotCapture capture, SnapshotWalkResult walk) = Capture(address, SnapshotBlobState.Ok);
-        await _archive.WriteAsync(path, capture, walk, _ => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
+        await _archive.WriteAsync(path, capture, walk, (_, _) => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
 
         Dictionary<string, byte[]> entries = ReadTar(path);
         SnapshotManifest manifest = JsonSerializer.Deserialize<SnapshotManifest>(entries[SnapshotEntryNames.Manifest], Json)!;
@@ -302,7 +302,7 @@ public class TarSnapshotArchiveTests
         string path = TempArchive();
         string address = Sha256ContentAddress.Compute(Body);
         (SnapshotCapture capture, SnapshotWalkResult walk) = Capture(address, SnapshotBlobState.Ok);
-        await _archive.WriteAsync(path, capture, walk, _ => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
+        await _archive.WriteAsync(path, capture, walk, (_, _) => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
 
         Dictionary<string, byte[]> entries = ReadTar(path);
         string truncated = TempArchive();
@@ -343,6 +343,107 @@ public class TarSnapshotArchiveTests
     }
 
     [Fact]
+    public async Task Verify_Reports_AnArchiveItCannotOpen_AsUnreadable_NotCorruption()
+    {
+        // Restore turns Corruption into its integrity exit code, so a permissions refusal classified as
+        // Corruption told an operator to replace an archive nothing had actually looked at.
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Unix file modes only.");
+            return;
+        }
+
+        string path = TempArchive();
+        string address = Sha256ContentAddress.Compute(Body);
+        (SnapshotCapture capture, SnapshotWalkResult walk) = Capture(address, SnapshotBlobState.Ok);
+        await _archive.WriteAsync(path, capture, walk, (_, _) => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
+        File.SetUnixFileMode(path, UnixFileMode.None);
+        try
+        {
+            bool bypassesModes;
+            try
+            {
+                using FileStream probe = File.OpenRead(path);
+                bypassesModes = true;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                bypassesModes = false;
+            }
+
+            Assert.SkipWhen(bypassesModes, "The test process can read a mode-000 file (running as root).");
+
+            SnapshotVerification verification = await _archive.VerifyAsync(path, TestContext.Current.CancellationToken);
+
+            verification.IsClean.ShouldBeFalse();
+            verification.Findings.ShouldHaveSingleItem().Kind.ShouldBe(SnapshotFindingKind.Unreadable);
+        }
+        finally
+        {
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+    }
+
+    [Fact]
+    public async Task Write_StopsWhenCancelledMidWrite_AndLeavesNoArchiveOrTempFile()
+    {
+        // The token was accepted and ignored, so a cancelled HTTP snapshot job read and wrote every
+        // remaining body before noticing. Cancelling during the first blob read must stop the second.
+        string path = TempArchive();
+        byte[] second = Encoding.UTF8.GetBytes("a second body.");
+        var walk = new SnapshotWalkResult(
+            [
+                new SnapshotBlob(Sha256ContentAddress.Compute(Body), SnapshotBlobState.Ok),
+                new SnapshotBlob(Sha256ContentAddress.Compute(second), SnapshotBlobState.Ok),
+            ],
+            0,
+            0);
+        var capture = new SnapshotCapture([], [], [], [], [], [], [], [], [], []);
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        var tokensSeen = new List<CancellationToken>();
+
+        await Should.ThrowAsync<OperationCanceledException>(() => _archive.WriteAsync(
+            path,
+            capture,
+            walk,
+            (_, token) =>
+            {
+                tokensSeen.Add(token);
+                cancellation.Cancel();
+                return Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null));
+            },
+            cancellation.Token));
+
+        tokensSeen.ShouldHaveSingleItem().ShouldBe(cancellation.Token);
+        File.Exists(path).ShouldBeFalse();
+        File.Exists(path + ".tmp").ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Write_WithAnAlreadyCancelledToken_ReadsNothing_AndCreatesNoFile()
+    {
+        string path = TempArchive();
+        string address = Sha256ContentAddress.Compute(Body);
+        (SnapshotCapture capture, SnapshotWalkResult walk) = Capture(address, SnapshotBlobState.Ok);
+        int reads = 0;
+
+        await Should.ThrowAsync<OperationCanceledException>(() => _archive.WriteAsync(
+            path,
+            capture,
+            walk,
+            (_, _) =>
+            {
+                reads++;
+                return Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null));
+            },
+            new CancellationToken(canceled: true)));
+
+        reads.ShouldBe(0);
+        File.Exists(path).ShouldBeFalse();
+        File.Exists(path + ".tmp").ShouldBeFalse();
+    }
+
+    [Fact]
     public async Task Write_LeavesNoTempFile_WhenTheBlobReadFails()
     {
         // The temp-then-move guarantees the *destination* is never a partial archive, which is what
@@ -356,7 +457,7 @@ public class TarSnapshotArchiveTests
             path,
             capture,
             walk,
-            _ => throw new InvalidOperationException("blob store unavailable"),
+            (_, _) => throw new InvalidOperationException("blob store unavailable"),
             TestContext.Current.CancellationToken));
 
         File.Exists(path + ".tmp").ShouldBeFalse();
@@ -372,7 +473,7 @@ public class TarSnapshotArchiveTests
         string address = Sha256ContentAddress.Compute(Body);
         (SnapshotCapture capture, SnapshotWalkResult walk) = Capture(address, SnapshotBlobState.Ok);
 
-        await _archive.WriteAsync(path, capture, walk, _ => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
+        await _archive.WriteAsync(path, capture, walk, (_, _) => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
 
         File.Exists(path).ShouldBeTrue();
         File.Exists(path + ".tmp").ShouldBeFalse();
@@ -406,7 +507,7 @@ public class TarSnapshotArchiveTests
             ]);
         var walk = new SnapshotWalkResult([new SnapshotBlob(address, SnapshotBlobState.Ok)], 0, 0);
 
-        await _archive.WriteAsync(path, capture, walk, _ => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
+        await _archive.WriteAsync(path, capture, walk, (_, _) => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
 
         SnapshotCapture round = (await _archive.ReadAsync(path, TestContext.Current.CancellationToken)).Capture;
         round.TicketEdges.Count.ShouldBe(1);
@@ -424,7 +525,7 @@ public class TarSnapshotArchiveTests
         string path = TempArchive();
         string address = Sha256ContentAddress.Compute(Body);
         (SnapshotCapture capture, SnapshotWalkResult walk) = Capture(address, SnapshotBlobState.Ok);
-        await _archive.WriteAsync(path, capture, walk, _ => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
+        await _archive.WriteAsync(path, capture, walk, (_, _) => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
 
         Dictionary<string, byte[]> entries = ReadTar(path);
         entries[SnapshotEntryNames.Manifest] = ManifestWithEntries(entries[SnapshotEntryNames.Manifest], "null");
@@ -448,7 +549,7 @@ public class TarSnapshotArchiveTests
         string path = TempArchive();
         string address = Sha256ContentAddress.Compute(Body);
         (SnapshotCapture capture, SnapshotWalkResult walk) = Capture(address, SnapshotBlobState.Ok);
-        await _archive.WriteAsync(path, capture, walk, _ => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
+        await _archive.WriteAsync(path, capture, walk, (_, _) => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
 
         Dictionary<string, byte[]> entries = ReadTar(path);
         entries[SnapshotEntryNames.Manifest] =
@@ -475,7 +576,7 @@ public class TarSnapshotArchiveTests
         string path = TempArchive();
         string address = Sha256ContentAddress.Compute(Body);
         (SnapshotCapture capture, SnapshotWalkResult walk) = Capture(address, SnapshotBlobState.Ok);
-        await _archive.WriteAsync(path, capture, walk, _ => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
+        await _archive.WriteAsync(path, capture, walk, (_, _) => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
 
         Dictionary<string, byte[]> entries = ReadTar(path);
         SnapshotManifest manifest = JsonSerializer.Deserialize<SnapshotManifest>(entries[SnapshotEntryNames.Manifest], Json)!;
@@ -502,6 +603,160 @@ public class TarSnapshotArchiveTests
         // was a contradiction between two halves of one tool rather than a merely weak check.
         (await _archive.ReadAsync(tampered, TestContext.Current.CancellationToken))
             .ContainsBlob(address).ShouldBeFalse();
+    }
+
+    [Theory]
+    [InlineData("text/plain\r\nX-Injected: 1")]
+    [InlineData("text/html")]
+    [InlineData("text/plain; charset=utf-8; boundary=x")]
+    [InlineData("text/plain; charset=latin1")]
+    [InlineData("not a media type")]
+    public async Task Verify_Refuses_ABlobContentTypeTheSystemNeverWrites(string contentType)
+    {
+        // The content type rides in the manifest, which nothing hashes, and restore writes it verbatim
+        // as the stored object's Content-Type. An edited value therefore verified clean.
+        string tampered = await ArchiveWithBlobContentTypeAsync(contentType);
+
+        SnapshotVerification verification = await _archive.VerifyAsync(tampered, TestContext.Current.CancellationToken);
+
+        verification.IsClean.ShouldBeFalse();
+        SnapshotFinding finding = verification.Findings.ShouldHaveSingleItem();
+        finding.Kind.ShouldBe(SnapshotFindingKind.Corruption);
+        finding.EntryName.ShouldNotBeNull().ShouldStartWith("blobs/");
+        finding.Message.ShouldNotContain(contentType);
+    }
+
+    [Theory]
+    [InlineData("text/plain; charset=utf-8")]
+    [InlineData("text/plain")]
+    [InlineData("application/octet-stream")]
+    public async Task Verify_Accepts_TheContentTypesTheSystemWrites(string contentType)
+    {
+        string archive = await ArchiveWithBlobContentTypeAsync(contentType);
+
+        SnapshotVerification verification = await _archive.VerifyAsync(archive, TestContext.Current.CancellationToken);
+
+        verification.IsClean.ShouldBeTrue();
+    }
+
+    private async Task<string> ArchiveWithBlobContentTypeAsync(string contentType)
+    {
+        string path = TempArchive();
+        string address = Sha256ContentAddress.Compute(Body);
+        (SnapshotCapture capture, SnapshotWalkResult walk) = Capture(address, SnapshotBlobState.Ok);
+        await _archive.WriteAsync(path, capture, walk, (_, _) => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)"text/plain; charset=utf-8")), TestContext.Current.CancellationToken);
+
+        Dictionary<string, byte[]> entries = ReadTar(path);
+        SnapshotManifest manifest = JsonSerializer.Deserialize<SnapshotManifest>(entries[SnapshotEntryNames.Manifest], Json)!;
+        entries[SnapshotEntryNames.Manifest] = JsonSerializer.SerializeToUtf8Bytes(manifest with
+        {
+            Entries = [.. manifest.Entries.Select(e => e.Name == $"blobs/{address}" ? e with { ContentType = contentType } : e)],
+        }, Json);
+        string rewritten = TempArchive();
+        WriteTar(rewritten, entries);
+        return rewritten;
+    }
+
+    [Fact]
+    public async Task Verify_Reports_ARepeatedArchiveMember_EvenWhenBothCopiesAreIdentical()
+    {
+        // Reading the tar into a map collapses a repeated name last-wins, so without the repeat check a
+        // second copy of a member is invisible. Identical copies isolate that one guard: every hash and
+        // count still agrees.
+        string path = await CleanArchiveAsync();
+        List<(string Name, byte[] Content)> members = [.. ReadTar(path).Select(e => (e.Key, e.Value))];
+        members.Add((SnapshotEntryNames.Labels, ReadTar(path)[SnapshotEntryNames.Labels]));
+        string tampered = TempArchive();
+        WriteTarMembers(tampered, members);
+
+        SnapshotVerification verification = await _archive.VerifyAsync(tampered, TestContext.Current.CancellationToken);
+
+        verification.IsClean.ShouldBeFalse();
+        SnapshotFinding finding = verification.Findings.ShouldHaveSingleItem();
+        finding.Kind.ShouldBe(SnapshotFindingKind.Corruption);
+        finding.EntryName.ShouldBe(SnapshotEntryNames.Labels);
+        finding.Message.ShouldContain("same member name more than once");
+    }
+
+    [Fact]
+    public async Task Verify_Reports_ARepeatedManifestEntry()
+    {
+        string path = await CleanArchiveAsync();
+        Dictionary<string, byte[]> entries = ReadTar(path);
+        SnapshotManifest manifest = JsonSerializer.Deserialize<SnapshotManifest>(entries[SnapshotEntryNames.Manifest], Json)!;
+        SnapshotArchiveEntry labels = manifest.Entries.Single(e => e.Name == SnapshotEntryNames.Labels);
+        entries[SnapshotEntryNames.Manifest] = JsonSerializer.SerializeToUtf8Bytes(
+            manifest with { Entries = [.. manifest.Entries, labels] }, Json);
+        string tampered = TempArchive();
+        WriteTar(tampered, entries);
+
+        SnapshotVerification verification = await _archive.VerifyAsync(tampered, TestContext.Current.CancellationToken);
+
+        verification.IsClean.ShouldBeFalse();
+        SnapshotFinding finding = verification.Findings.ShouldHaveSingleItem();
+        finding.Kind.ShouldBe(SnapshotFindingKind.Corruption);
+        finding.EntryName.ShouldBe(SnapshotEntryNames.Labels);
+        finding.Message.ShouldContain("same entry name more than once");
+    }
+
+    [Fact]
+    public async Task Verify_Reports_ATamperedObjectCount()
+    {
+        string tampered = await ArchiveWithCountsAsync(c => c with { Objects = c.Objects + 1 });
+
+        SnapshotVerification verification = await _archive.VerifyAsync(tampered, TestContext.Current.CancellationToken);
+
+        verification.IsClean.ShouldBeFalse();
+        SnapshotFinding finding = verification.Findings.ShouldHaveSingleItem();
+        finding.Kind.ShouldBe(SnapshotFindingKind.CountMismatch);
+        finding.Message.ShouldStartWith("Object count in archive (1) does not match the manifest (2)");
+    }
+
+    [Fact]
+    public async Task Verify_Reports_ATamperedTicketEdgeCount()
+    {
+        string tampered = await ArchiveWithCountsAsync(c => c with { TicketEdges = c.TicketEdges + 3 });
+
+        SnapshotVerification verification = await _archive.VerifyAsync(tampered, TestContext.Current.CancellationToken);
+
+        verification.IsClean.ShouldBeFalse();
+        SnapshotFinding finding = verification.Findings.ShouldHaveSingleItem();
+        finding.Kind.ShouldBe(SnapshotFindingKind.CountMismatch);
+        finding.EntryName.ShouldBe(SnapshotEntryNames.TicketEdges);
+    }
+
+    private async Task<string> CleanArchiveAsync()
+    {
+        string path = TempArchive();
+        string address = Sha256ContentAddress.Compute(Body);
+        (SnapshotCapture capture, SnapshotWalkResult walk) = Capture(address, SnapshotBlobState.Ok);
+        await _archive.WriteAsync(path, capture, walk, (_, _) => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
+        (await _archive.VerifyAsync(path, TestContext.Current.CancellationToken)).IsClean.ShouldBeTrue();
+        return path;
+    }
+
+    private async Task<string> ArchiveWithCountsAsync(Func<SnapshotCounts, SnapshotCounts> tamper)
+    {
+        Dictionary<string, byte[]> entries = ReadTar(await CleanArchiveAsync());
+        SnapshotManifest manifest = JsonSerializer.Deserialize<SnapshotManifest>(entries[SnapshotEntryNames.Manifest], Json)!;
+        entries[SnapshotEntryNames.Manifest] = JsonSerializer.SerializeToUtf8Bytes(
+            manifest with { Counts = tamper(manifest.Counts) }, Json);
+        string tampered = TempArchive();
+        WriteTar(tampered, entries);
+        return tampered;
+    }
+
+    private static void WriteTarMembers(string path, IEnumerable<(string Name, byte[] Content)> members)
+    {
+        using FileStream stream = File.Create(path);
+        using var tar = new TarWriter(stream, TarEntryFormat.Ustar, leaveOpen: false);
+        foreach ((string name, byte[] content) in members)
+        {
+            tar.WriteEntry(new PaxTarEntry(TarEntryType.RegularFile, name)
+            {
+                DataStream = new MemoryStream(content, writable: false),
+            });
+        }
     }
 
     /// <summary>

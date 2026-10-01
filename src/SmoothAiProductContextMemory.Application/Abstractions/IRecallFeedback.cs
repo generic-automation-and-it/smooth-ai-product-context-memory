@@ -32,7 +32,7 @@ public sealed record RecallFeedbackRecord(
     DateTimeOffset OccurredOn);
 
 /// <summary>
-/// Fire-and-forget write of one retrieval's outcome. Failure must never propagate — losing a tuning
+/// Guarded synchronous write of one retrieval's outcome. Failure must never propagate — losing a tuning
 /// signal is acceptable, losing a recall is not.
 /// </summary>
 public interface IRecallFeedback

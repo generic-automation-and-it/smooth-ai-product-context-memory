@@ -63,13 +63,17 @@ Re-running without `--rotate` reuses the existing tokens. To regenerate:
 scripts/provision-credentials.sh --rotate
 ```
 
+**Restart the Host after `--rotate`.** The Host reads and hashes both tokens once at startup, so a running
+Host — AppHost, direct run or container — keeps accepting the old tokens and answers `403` to the new
+ones until it is restarted. Re-`source` the env file in any shell that runs the skills, too.
+
 Options:
 
 | Flag | Meaning |
 |---|---|
 | `--rotate` | Regenerate the tokens even if the file already exists |
 | `--env-file PATH` | Write to a different path (default `.context/mimisbrunnr.env`). The path must be one git ignores — under `.context/`, or a name ending in `.env` — or the run is refused; see below |
-| `--base-url URL` | The skill-side base URL (default `http://localhost:5141`) |
+| `--base-url URL` | The skill-side base URL (default `http://localhost:5141`). Must be a bare `http(s)://host[:port]` origin — anything else is refused, because the env file is `source`d. An existing custom value is kept across a re-split or `--rotate` |
 | `--skip-apphost` | Do not write the AppHost user secrets. The bridge reads the AppHost `csproj` for its `UserSecretsId` and writes the user-secrets store directly, so it needs `python3` (it no longer invokes the .NET SDK at all) |
 | `--allow-unignored-env-file` | Skip the refusal below, for a path this check cannot see as ignored — an untracked parent repository, say |
 
@@ -133,7 +137,7 @@ secret in shell history and in any command that gets copied or pasted.
   the `smooth-local` object-store key) are *not* this credential. They are development scaffolding for a
   local stack and are accepted on that basis; conflating the two — treating the bearer tokens as
   scaffolding too, or the fixed passwords as a real exposure — is the error this page exists to prevent.
-- The API publishes a host port (`-p 5141:5141`), so "isolated" is a property of the operator's network
+- The API publishes a host port (`-p 127.0.0.1:5141:5141` in [`docker.md`](docker.md)), so "isolated" is a property of the operator's network
   configuration, not something the product enforces. Publishing beyond loopback, putting the stack on
   untrusted shared network infrastructure, or running on a laptop whose firewall permits inbound
   connections re-opens the transport-hardening / token-rotation / multi-tenancy concerns that are

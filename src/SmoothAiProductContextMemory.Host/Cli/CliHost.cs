@@ -14,14 +14,30 @@ namespace SmoothAiProductContextMemory.Host.Cli;
 /// </summary>
 internal static class CliHost
 {
-    public static CliHostResult Build(bool requireConnectionString = true)
+    /// <param name="requireConnectionString">Whether a missing connection string fails the build.</param>
+    /// <param name="settings">
+    /// When supplied, the host's configuration is exactly these values — no appsettings, environment
+    /// or user secrets. Lets a test drive a verb without mutating process-wide environment variables
+    /// and without a developer's user secrets silently pointing it at a real store.
+    /// </param>
+    public static CliHostResult Build(
+        bool requireConnectionString = true,
+        IReadOnlyDictionary<string, string?>? settings = null)
     {
         HostApplicationBuilder builder = Microsoft.Extensions.Hosting.Host.CreateApplicationBuilder(
             new HostApplicationBuilderSettings { Args = [] });
 
-        // The CLI host defaults to Production, where user secrets are skipped. Load them explicitly
-        // so the documented local config path (user secrets) works for the one-shot verbs too.
-        builder.Configuration.AddUserSecrets(typeof(Program).Assembly, optional: true);
+        if (settings is not null)
+        {
+            builder.Configuration.Sources.Clear();
+            builder.Configuration.AddInMemoryCollection(settings);
+        }
+        else
+        {
+            // The CLI host defaults to Production, where user secrets are skipped. Load them explicitly
+            // so the documented local config path (user secrets) works for the one-shot verbs too.
+            builder.Configuration.AddUserSecrets(typeof(Program).Assembly, optional: true);
+        }
 
         builder.Services.AddApplication();
         builder.Services.AddInfrastructure(builder.Configuration);

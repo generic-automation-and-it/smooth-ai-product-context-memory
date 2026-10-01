@@ -23,7 +23,7 @@ seven classes, because `SMOOTH_AGE_BENCH` runs two of them.
 | `SMOOTH_FEEDBACK_BENCH=1` | `FeedbackPlacementEvidenceTests` | HLD-004 LADR-02 feedback placement |
 | `SMOOTH_SNAPSHOT_BENCH=1` | `SnapshotEvidenceTests` | HLD-006 NFR-04 snapshot timing |
 | `SMOOTH_DOSSIER_BENCH=1` | `DossierWorkflowBenchmarkTests` (`Application.ComponentTest`) | HLD-005 end-to-end dossier timing |
-| `SMOOTH_NFR_BENCH=1` | `NfrEvidenceTests` | HLD-003 NFR-04 evidence |
+| `SMOOTH_NFR_BENCH=1` | `NfrEvidenceTests` | HLD-004 NFR-01..03 evidence |
 
 ### Benchmarks are evidence, not gates
 

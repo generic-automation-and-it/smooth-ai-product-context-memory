@@ -54,7 +54,7 @@ public sealed class SnapshotRestoreRoundTripTests : PersistenceTestBase
     {
         // The round trip writes bodies into the snap-shot and snap-target buckets; without a drain
         // MinIO refuses to remove them (BucketNotEmpty) and every run leaks another bucket. This is
-        // the one bucket-owning fixture BlobBucketCleanup did not reach (batch3 closure of finding 2).
+        // the one bucket-owning fixture BlobBucketCleanup did not reach.
         foreach (string bucket in _buckets)
         {
             await BlobBucketCleanup.DeleteBlobBucketAsync(
@@ -431,6 +431,117 @@ public sealed class SnapshotRestoreRoundTripTests : PersistenceTestBase
 
             failed.ShouldBeTrue("a blocked pre-flight check cannot have returned a trustworthy verdict");
         }
+    }
+
+    [Fact]
+    public async Task TheConfiguredBudget_BoundsTheRestoreTransactionItself()
+    {
+        // The pre-flight test above covers IsTargetEmptyAsync; this is the restore transaction, which
+        // is where the budget exists for. Both halves are wired here — the data source's client
+        // CommandTimeout and the transaction's SET LOCAL statement_timeout — and with neither the
+        // blocked statement waits out the 120 s request default. Elapsed time under a held lock is the
+        // observable that separates "the configured value governs" from "some default eventually did".
+        await using SmoothAiProductContextMemoryTestDatabase target =
+            await SmoothAiProductContextMemoryTestDatabase.CreateAsync(_aspire, $"infra-restore-budget-{Guid.NewGuid():N}", Ct);
+        await using NpgsqlDataSource targetDataSource = NpgsqlDataSourceFactory.Create(target.ConnectionString);
+        await MigrateAsync(targetDataSource, Ct);
+
+        NpgsqlSnapshotRepository budgeted = new(
+            Blob, Blob, new SnapshotMetadataOptions { RestoreStatementTimeoutSeconds = 1 });
+
+        await using var blocker = new NpgsqlConnection(target.ConnectionString);
+        await blocker.OpenAsync(Ct);
+        await using NpgsqlTransaction hold = await blocker.BeginTransactionAsync(Ct);
+        await using (NpgsqlCommand holdLock = new("LOCK TABLE memory IN ACCESS EXCLUSIVE MODE", blocker, hold))
+        {
+            await holdLock.ExecuteNonQueryAsync(Ct);
+
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            Task<RestoreResults> restore = budgeted.RestoreAsync(
+                target.ConnectionString,
+                EmptyCapture,
+                new SnapshotCounts(0, 0, 0, 0, 0, 0, 0),
+                overrideNonEmpty: false,
+                Ct);
+            Task finished = await Task.WhenAny(restore, Task.Delay(TimeSpan.FromSeconds(30), Ct));
+            finished.ShouldBe(restore, "the restore transaction ignored its configured one-second budget");
+
+            await Should.ThrowAsync<Exception>(() => restore);
+            clock.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(30));
+        }
+
+        await hold.RollbackAsync(Ct);
+        (await budgeted.IsTargetEmptyAsync(target.ConnectionString, Ct)).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task ForcedRestore_ClearsRecallFeedback_ThatCitesTheReplacedCorpus()
+    {
+        // Recall feedback is excluded from the archive, so the restored corpus can never own a
+        // feedback row. memory_uuid has no FK: a row left behind by a forced restore cites a memory
+        // of the corpus that was replaced, and never-recalled / miss-rate then report against the
+        // wrong corpus. HLD-006 NFR-02 asks for the absence to be asserted after restore.
+        await SeedCorpusAsync();
+        SnapshotStore.Response snapshot = await new SnapshotStore.Handler(
+            Repository,
+            Archive,
+            Blob,
+            new FileSnapshotMetadataStore(CreateMetadataOptions()),
+            Loggers.CreateLogger<SnapshotStore.Handler>())
+            .Handle(new SnapshotStore.Request(ConnectionString, Path.Combine(Path.GetTempPath(), $"snap-{Guid.NewGuid():N}.tar")), Ct);
+
+        await InsertRecallFeedbackAsync(ConnectionString, Guid.NewGuid());
+        await InsertRecallFeedbackAsync(ConnectionString, memoryUuid: null);
+
+        RestoreArchive.Response restore = await new RestoreArchive.Handler(
+            Repository,
+            Archive,
+            Blob,
+            Loggers.CreateLogger<RestoreArchive.Handler>())
+            .Handle(new RestoreArchive.Request(snapshot.DestinationPath, ConnectionString, OverrideNonEmpty: true), Ct);
+
+        restore.Reconciled.ShouldBeTrue();
+        (await ScalarAsync(Db, "SELECT count(*) FROM recall_feedback", Ct)).ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task ATargetHoldingOnlyRecallFeedback_IsEmpty_AndTheRestoreClearsIt()
+    {
+        // Feedback is telemetry about a corpus, not corpus content: a database that has answered one
+        // query holds a miss row and nothing else, and refusing a first restore over that would make
+        // the override the normal path. The restore still clears it, so the target ends holding
+        // only the archive's corpus.
+        await using SmoothAiProductContextMemoryTestDatabase target =
+            await SmoothAiProductContextMemoryTestDatabase.CreateAsync(_aspire, $"infra-feedback-{Guid.NewGuid():N}", Ct);
+        await using NpgsqlDataSource targetDataSource = NpgsqlDataSourceFactory.Create(target.ConnectionString);
+        await MigrateAsync(targetDataSource, Ct);
+        await InsertRecallFeedbackAsync(target.ConnectionString, memoryUuid: null);
+
+        (await Repository.IsTargetEmptyAsync(target.ConnectionString, Ct)).ShouldBeTrue();
+
+        RestoreResults restored = await Repository.RestoreAsync(
+            target.ConnectionString,
+            EmptyCapture,
+            new SnapshotCounts(0, 0, 0, 0, 0, 0, 0),
+            overrideNonEmpty: false,
+            Ct);
+
+        restored.Committed.ShouldBeTrue();
+        await using NpgsqlConnection connection = await targetDataSource.OpenConnectionAsync(Ct);
+        await using NpgsqlCommand count = new("SELECT count(*) FROM recall_feedback", connection);
+        Convert.ToInt64(await count.ExecuteScalarAsync(Ct)).ShouldBe(0);
+    }
+
+    private async Task InsertRecallFeedbackAsync(string connectionString, Guid? memoryUuid)
+    {
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync(Ct);
+        await using NpgsqlCommand insert = new(
+            "INSERT INTO recall_feedback (retrieval_id, memory_uuid, shape, occurred_on) VALUES (@r, @m, 'unfiltered', now())",
+            connection);
+        insert.Parameters.AddWithValue("r", Guid.NewGuid());
+        insert.Parameters.AddWithValue("m", (object?)memoryUuid ?? DBNull.Value);
+        await insert.ExecuteNonQueryAsync(Ct);
     }
 
     /// <summary>A capture with nothing in it: enough shape for the refusal, which is all these use.</summary>
