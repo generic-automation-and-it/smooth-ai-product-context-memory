@@ -23,7 +23,7 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
         string destinationPath,
         SnapshotCapture capture,
         SnapshotWalkResult walk,
-        Func<string, Task<(byte[] Content, string Sha256, string? ContentType)>> readBlobAsync,
+        Func<string, CancellationToken, Task<(byte[] Content, string Sha256, string? ContentType)>> readBlobAsync,
         CancellationToken cancellationToken)
     {
         string directory = Path.GetDirectoryName(Path.GetFullPath(destinationPath)) ?? Directory.GetCurrentDirectory();
@@ -39,16 +39,19 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
         FileStream? stream = null;
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             stream = File.Create(tempPath);
             var tar = new TarWriter(stream, TarEntryFormat.Ustar, leaveOpen: true);
 
             var entries = new List<SnapshotArchiveEntry>();
             var writeEntry = async (string name, byte[] content, string? sha256 = null, string? contentType = null) =>
             {
-                tar.WriteEntry(new PaxTarEntry(TarEntryType.RegularFile, name)
-                {
-                    DataStream = new MemoryStream(content, writable: false),
-                });
+                await tar.WriteEntryAsync(
+                    new PaxTarEntry(TarEntryType.RegularFile, name)
+                    {
+                        DataStream = new MemoryStream(content, writable: false),
+                    },
+                    cancellationToken);
                 entries.Add(new SnapshotArchiveEntry(name, sha256 ?? Sha256ContentAddress.Hash(content), content.Length, contentType));
             };
 
@@ -68,17 +71,18 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
             int dangling = 0;
             foreach (SnapshotBlob blob in walk.Blobs)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 switch (blob.State)
                 {
                     case SnapshotBlobState.Ok:
-                        (byte[] body, string bodySha256, string? bodyContentType) = await readBlobAsync(blob.Address);
+                        (byte[] body, string bodySha256, string? bodyContentType) = await readBlobAsync(blob.Address, cancellationToken);
                         await writeEntry(BlobEntryName(blob.Address), body, bodySha256, bodyContentType);
                         objects++;
                         break;
                     case SnapshotBlobState.Mismatch:
                         // Faithfully archived under the cited address so verify can report the
                         // capture-time inconsistency distinctly from transit corruption (LADR-02).
-                        (byte[] mismatchedBody, string mismatchedSha256, string? mismatchedContentType) = await readBlobAsync(blob.Address);
+                        (byte[] mismatchedBody, string mismatchedSha256, string? mismatchedContentType) = await readBlobAsync(blob.Address, cancellationToken);
                         await writeEntry(BlobEntryName(blob.Address), mismatchedBody, mismatchedSha256, mismatchedContentType);
                         objects++;
                         mismatched++;
@@ -112,7 +116,7 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
                 unreferenced,
                 mismatched);
 
-            tar.Dispose();
+            await tar.DisposeAsync();
             // The rename is atomic; the write is not durable until the data is on the device. Without
             // this a crash between the two leaves a correctly-named archive holding none of its
             // content -- and the per-member checksums that would catch it are inside it.
@@ -120,6 +124,8 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
             await stream.DisposeAsync();
             stream = null;
 
+            // Last point at which a cancel can still mean "no archive": after the move it exists.
+            cancellationToken.ThrowIfCancellationRequested();
             File.Move(tempPath, destinationPath, overwrite: true);
         }
         finally

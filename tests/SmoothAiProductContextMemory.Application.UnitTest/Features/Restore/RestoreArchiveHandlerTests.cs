@@ -81,7 +81,7 @@ public sealed class RestoreArchiveHandlerTests
             string destinationPath,
             SnapshotCapture capture,
             SnapshotWalkResult walk,
-            Func<string, Task<(byte[] Content, string Sha256, string? ContentType)>> readBlobAsync,
+            Func<string, CancellationToken, Task<(byte[] Content, string Sha256, string? ContentType)>> readBlobAsync,
             CancellationToken cancellationToken) => throw new NotSupportedException();
 
         public Task<SnapshotArchive> ReadAsync(string archivePath, CancellationToken cancellationToken)

@@ -96,9 +96,9 @@ public static class SnapshotStore
                 written.MismatchedBodies);
         }
 
-        private async Task<(byte[] Content, string Sha256, string? ContentType)> ReadBlobAsync(string address)
+        private async Task<(byte[] Content, string Sha256, string? ContentType)> ReadBlobAsync(string address, CancellationToken cancellationToken)
         {
-            BlobContent? content = await blobStorage.GetAsync(address);
+            BlobContent? content = await blobStorage.GetAsync(address, cancellationToken);
             if (content is null)
             {
                 throw new InvalidOperationException($"Blob referenced by the captured state is missing: {address}");
@@ -107,7 +107,7 @@ public static class SnapshotStore
             await using (content)
             {
                 using var buffer = new MemoryStream();
-                await content.Content.CopyToAsync(buffer);
+                await content.Content.CopyToAsync(buffer, cancellationToken);
                 byte[] bytes = buffer.ToArray();
                 // The writer uses this precomputed hash for the manifest entry, so it does not hash
                 // every body a second time (H13). The content type travels with the body so the
