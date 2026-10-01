@@ -146,6 +146,26 @@ flowchart LR
   the logical identity that is stable across versions and groups. *Decision:* all skill inputs/outputs
   use `uuid`. *Consequence:* the skill cannot accidentally key on a row that a version bump re-points.
 
+- **LADR-006** (2026-10, accepted): A recall has one foreground deadline, and deepsearch degrades by
+  whole passes at it. *Context:* the read path told `timed-out` from `unreachable` but bounded nothing:
+  deepsearch chains up to ten calls with no overall limit, and a single timed-out pass aborted the run
+  and discarded every pass already completed, so a hung store could cost five minutes and return
+  nothing — an absence of evidence shaped exactly like an empty result. *Decision:* `RECALL_DEADLINE_SECONDS`
+  (60 s) caps one recall command; `CONTEXT_MEMORY_RECALL_DEADLINE` may shorten it and any other value is
+  refused with `bad-deadline`, never clamped. Each read's socket timeout is `min(HTTP_TIMEOUT, deadline)`;
+  a write keeps `HTTP_TIMEOUT`, because a write is not a recall. deepsearch checks the deadline before
+  each pass, uses the remaining budget as that pass's socket timeout, and on a timeout stops the chain
+  while keeping the completed passes — whole records only — disclosing `deadlineSeconds`,
+  `deadlineReached` and `passesNotRun`. *Consequence:* a recall is bounded and its shortfall is reported,
+  so a partial result can never read as the whole store. The deadline is a client-side rendering/handling
+  concern only: no Host change, no new network dependency (BR-16), and recall feedback stays server-side
+  (HLD-004 LADR-01), so the contract states that a client giving up can leave a server-recorded outcome
+  the agent never received. **Rejected alternative:** clamp an out-of-range deadline to the cap —
+  rejected because a silently adjusted budget is one the operator trusts and the system does not honour,
+  the restore statement-budget defect. **Rejected alternative:** abort deepsearch on the first timed-out
+  pass (the pre-change behaviour) — rejected because it discards completed work and returns nothing where
+  it could return something labelled partial.
+
 ## Key Behaviors
 
 - **The bundle detector scores claims, not prose.** `atomicity.py` reads the **statement**; a description is a subject label and coordination inside it is not a second claim. A reason clause (`because`, `so that`) and a noun-phrase `and` are one fact, so neither counts as a junction — scoring them made the signal fire on 12/12 candidates of a real batch, including every candidate the detector then called simple. A contrastive junction or a semicolon cannot join anything but two finite clauses, so one is decisive; additive adverbs take two.
@@ -192,6 +212,22 @@ flowchart LR
   uuid, version and capture time pass through exactly as the API returned them. A non-JSON body (a blob)
   takes the banner branch, which is the one place the read client prints prose itself, because there is
   no object to carry the field.
+- **A recall has one foreground deadline, and deepsearch degrades by whole passes at it.** The cap is
+  `RECALL_DEADLINE_SECONDS` (60 s); `CONTEXT_MEMORY_RECALL_DEADLINE` may **shorten** it and any other
+  value is refused with `bad-deadline`, never clamped — a budget that silently becomes something else is
+  worse than none (the restore statement-budget defect: a server raised its budget while the client
+  obeyed its own, so the effective budget was the smaller of two values nobody compared). Each read's
+  socket timeout is `min(HTTP_TIMEOUT, deadline)`, so a shortened deadline bounds a single `query`; a
+  **write** keeps `HTTP_TIMEOUT`, so a malformed read-path setting cannot refuse a capture. Before #146 a
+  hung store escaped as a bare `TimeoutError` traceback; the classification and the deadline are
+  deliberately separate — the first says *what happened*, the second says *how long the whole command
+  may take*. deepsearch checks the deadline before each pass and uses the remaining budget as that
+  pass's socket timeout, so a hung store cannot stretch a ten-call chain into ten separate timeouts. On a
+  timed-out pass, or once the deadline is spent, it **stops the chain and keeps the passes already
+  completed** — never a partial record — disclosing `deadlineSeconds`, `deadlineReached` and
+  `passesNotRun`, with every pass carrying a `status` of `completed` / `timed-out` / `not-run`. Recall
+  feedback stays server-side (HLD-004 LADR-01), so a client that gives up can leave a server-recorded
+  outcome the agent never received; that is a stated boundary, not a client-side fix.
 - **Approval gating governs `status`, not persistence.** `kind ∈ {rule, nfr, decision}` are **written**
   with `status: proposed` unless `--approve` is passed; they are not withheld from the store. Retrieval
   excludes or flags `proposed`, and promotion to `approved` is a later version bump. This is the "ask
@@ -255,7 +291,12 @@ flowchart LR
    and fails the other); `RecallFramingTests`, which recalls a record whose statement is a verbatim
    prompt injection through every registered read subcommand **via the client's real `main()`** and
    requires the shared notice plus intact attribution on each — driving the entry point rather than the
-   framing helper, because an earlier version passed with the whole fix reverted; and
+   framing helper, because an earlier version passed with the whole fix reverted; `RecallDeadlineTests`,
+   which pins the deadline config (defaults to the cap, shortens, refuses out-of-range/non-integer with
+   `bad-deadline` rather than clamping, refuses before transport), the single-call bound (a shortened
+   deadline reaches `_open` as the socket timeout), and deepsearch's degradation (a timed-out pass keeps
+   the completed passes, names the rest in `passesNotRun`, and a chain of slow passes stops at the wall
+   clock between passes); and
    `near_miss_tags.py` schema/scope/basis/
    bounds/output/no-I/O guarantees.
    Run: `python3 -B .agents/skills/mimisbrunnr-context-memory/tests/run_tests.py`. The PR gate runs it and
@@ -327,6 +368,7 @@ redaction detector is a stdin→stdout fingerprint script reporting rule names o
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-01 | **A recall now has one foreground deadline, and deepsearch degrades by whole passes at it.** The read path already told `timed-out` apart from `unreachable` (#146), but nothing bounded a *command*: deepsearch could chain a baseline, four keyword and five traversal calls with no overall limit, and a single timed-out pass aborted the run and discarded every pass already completed — so a five-minute hang returned nothing. `RECALL_DEADLINE_SECONDS` (60 s) is the cap; `CONTEXT_MEMORY_RECALL_DEADLINE` may shorten it and any other value is refused with `bad-deadline`, never clamped. Each read's socket timeout is `min(HTTP_TIMEOUT, deadline)`, so a shortened deadline bounds a single `query`; a write keeps `HTTP_TIMEOUT`, so a malformed read-path setting cannot refuse a capture. deepsearch checks the deadline before each pass, uses the remaining budget as that pass's socket timeout, and on a timeout stops the chain while keeping the completed passes — whole records only — disclosing `deadlineSeconds`, `deadlineReached` and `passesNotRun`, with each pass carrying a `status`. Recall feedback stays server-side (HLD-004 LADR-01), so the contract states that a client giving up can leave a server-recorded outcome the agent never received. **The harness found a second-module trap while writing the tests:** `deepsearch` was loaded before `sys.modules["context_memory_client"]` was aliased, so it held its own `ClientError` and a raised timeout was invisible to its handler — `_load` now registers each module before exec, which fixes the class for every sibling import rather than patching one. Harness 153 -> 161; both the deadline refusal and the partial-return path mutation-checked. | MemOS adoption; HLD-004 LADR-01; BR-16 |
 | 2026-10-01 | **The proxy and redirect guards are tested where they are installed.** `test_redirects_are_refused` exercised `_NoRedirect` in isolation, so dropping it — or the `ProxyHandler({})` — from `_open`'s `build_opener` call left every test green while a 302 forwarded `Authorization` and an environment proxy saw it. Two tests now pin the real opener: one spies on `build_opener` and asserts both handlers reach it with an empty proxy map and the HTTP timeout, and one drives a loopback server answering 302 through `_request` and asserts `redirect-refused` with exactly one request served. Test References updated for the redaction and path-guard classes added today. Harness 151 -> 153; both handler removals mutation-checked. | HLD-002 NFR-01 |
 | 2026-10-01 | **An unparseable base URL is a classified `bad-base-url` refusal, not a traceback that prints its userinfo.** `urlsplit` rejects an NFKC-confusable character in the netloc (`http://user:s3cret@local＃host:5141`) with a `ValueError` that quotes the whole netloc, and only `ClientError` was caught, so the credential in the URL reached stderr in a traceback. `base_url()` and `_probe` now parse through `_parse_base`, which also forces the port parse and raises fixed text outside the handler so nothing chains the original message. Covered for both CLIs end to end (exit 1, no traceback, no userinfo) and for the rendered exception chain. The dossier composer's loopback guard carries the same fix. | HLD-002 NFR-01; `.agents/rules/skills/skill-secret-handling.instructions.md` |
 | 2026-10-01 | **Every persisting write is scrubbed, not just `set`.** `resolve-group`, `update-group`, `append-description`, `create-link`, `ticket-parent`, `propose-label` and `upsert-initiative` posted their bodies raw from both the CLI and the write MCP, so a secret in a group description — an **append-only** table — a link reason, a label or initiative name, or a ticket declaration's reason/source reached storage unexamined. Each now routes through one `scrubbed_write`, with its free-text fields declared per operation in `redact.WRITE_SPECS`; the same fail-closed `redactor-unavailable` refusal and the same located digest apply, and an operation missing from the table refuses rather than passing through. Ticket identities (`provider`/`key`, `child`/`parent`/`expectedParent`) are deliberately not rewritten — they are matched exactly against stored rows — while a ticket's `url` is scrubbed. `ticket-parent --dryrun` previews the scrubbed request. Preflight persists nothing and stays unscrubbed. Harness 143 -> 149: a distinct planted secret per field per tool, declared independently of the spec, so dropping a field from the spec fails the test. | BR-03; HLD-002 NFR-01 |

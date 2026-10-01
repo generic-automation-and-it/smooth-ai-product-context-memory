@@ -33,6 +33,12 @@ sys.path.insert(0, str(SCRIPTS))
 def _load(name):
     spec = importlib.util.spec_from_file_location(name, SCRIPTS / f"{name}.py")
     module = importlib.util.module_from_spec(spec)
+    # Register before exec so a module that imports a sibling gets *this* object rather than a second
+    # copy: `deepsearch` imports `context_memory_client`, and two copies means two `ClientError` classes
+    # and two `_request` functions, so a test that raises or patches one is invisible to the other. That
+    # is the trap that made the framing tests silently patch nothing; it recurred here for deepsearch,
+    # which was loaded before the explicit alias below.
+    sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -1135,7 +1141,7 @@ class PathSegmentTests(unittest.TestCase):
         seen = []
         with patch.dict(os.environ, {client.ENV_WRITE_TOKEN: "write-only",
                                      client.ENV_READ_TOKEN: "read-only"}), \
-                patch.object(client, "_open", side_effect=lambda request: seen.append(request.full_url)):
+                patch.object(client, "_open", side_effect=lambda request, **kwargs: seen.append(request.full_url)):
             for call in (lambda: write_mcp.call_tool(
                             "append_description",
                             {"uuid": "../../snapshot?x=", "payload": {"name": "n", "body": "b"}}),
@@ -1585,7 +1591,7 @@ class DeepSearchTests(unittest.TestCase):
         baseline_rows = [self.row(index) for index in range(200)]
         calls = []
 
-        def request(method, path, payload):
+        def request(method, path, payload, **kwargs):
             calls.append((method, path, payload))
             if path.endswith("query") and payload.get("query") is None:
                 return {"items": baseline_rows}
@@ -1623,11 +1629,133 @@ class DeepSearchTests(unittest.TestCase):
         calls = []
         result = deepsearch.execute(
             {"baseline": {"groupUuid": "11111111-1111-4111-8111-111111111111"}, "keywords": []},
-            request=lambda method, path, payload: calls.append((method, path, payload))
+            request=lambda method, path, payload, **kwargs: calls.append((method, path, payload))
                 or ({"items": [self.row(1)]} if path.endswith("query") else {"paths": []}))
         self.assertFalse(any(path.endswith("paths") for _, path, _ in calls))
         self.assertTrue(result["disclosure"]["traversalSkippedForContextSelector"])
         self.assertTrue(result["disclosure"]["possiblyOmitted"])
+
+    @staticmethod
+    def row(index):
+        return {"uuid": f"00000000-0000-4000-8000-{index:012d}", "version": 1}
+
+
+class RecallDeadlineTests(unittest.TestCase):
+    """One foreground deadline per recall, and deepsearch degrades by whole passes at it.
+
+    Two defects close together. A recall command could chain ten calls with no overall bound, so a hung
+    store cost ten separate socket timeouts; and a single timed-out pass aborted deepsearch, discarding
+    every pass already completed — the expensive direction, because the caller cannot tell a partial
+    recall from an empty one. The deadline is checked before each pass and is each pass's socket budget.
+    """
+
+    def setUp(self):
+        self._previous = os.environ.pop(client.ENV_RECALL_DEADLINE, None)
+
+    def tearDown(self):
+        if self._previous is None:
+            os.environ.pop(client.ENV_RECALL_DEADLINE, None)
+        else:
+            os.environ[client.ENV_RECALL_DEADLINE] = self._previous
+
+    def test_the_deadline_defaults_to_the_cap(self):
+        self.assertEqual(client.recall_deadline(), client.RECALL_DEADLINE_SECONDS)
+
+    def test_the_deadline_may_be_shortened(self):
+        with _env(client.ENV_RECALL_DEADLINE, "5"):
+            self.assertEqual(client.recall_deadline(), 5)
+
+    def test_the_deadline_cannot_be_extended_past_the_cap(self):
+        with _env(client.ENV_RECALL_DEADLINE, str(client.RECALL_DEADLINE_SECONDS + 1)):
+            with self.assertRaises(client.ClientError) as caught:
+                client.recall_deadline()
+        self.assertEqual(caught.exception.status_text, "bad-deadline")
+
+    def test_an_out_of_range_or_unparseable_deadline_is_refused_not_defaulted(self):
+        """A budget that quietly becomes something else is worse than none — the statement-budget defect.
+
+        `""` is the one accepted non-value: it is how an unset variable is spelled in a sourced env
+        file, and it means "use the cap", not "refuse".
+        """
+        for raw in ("0", "-1", "abc", "1.5", str(client.RECALL_DEADLINE_SECONDS + 1)):
+            with self.subTest(value=raw), _env(client.ENV_RECALL_DEADLINE, raw):
+                with self.assertRaises(client.ClientError) as caught:
+                    client.recall_deadline()
+                self.assertEqual(caught.exception.status_text, "bad-deadline")
+        with _env(client.ENV_RECALL_DEADLINE, ""):
+            self.assertEqual(client.recall_deadline(), client.RECALL_DEADLINE_SECONDS)
+
+    def test_a_bad_deadline_refuses_a_recall_before_transport(self):
+        with _env(client.ENV_RECALL_DEADLINE, "9999"), \
+                patch.dict(os.environ, {client.ENV_READ_TOKEN: "test-token"}), \
+                patch.object(client, "read_payload", return_value={}), \
+                patch.object(client, "_open") as transport, \
+                redirect_stdout(io.StringIO()):
+            with self.assertRaises(client.ClientError) as caught:
+                client.cmd_query(SimpleNamespace(payload=None))
+        self.assertEqual(caught.exception.status_text, "bad-deadline")
+        transport.assert_not_called()
+
+    def test_a_shortened_deadline_bounds_a_single_recall(self):
+        """The deadline is not deepsearch-only: one query is bounded by the smaller of the two budgets."""
+        with _env(client.ENV_RECALL_DEADLINE, "3"), \
+                patch.dict(os.environ, {client.ENV_READ_TOKEN: "test-token"}), \
+                patch.object(client, "base_url", return_value="http://localhost:5141"), \
+                patch.object(client, "_open", return_value=_FakeResponse("{}")) as transport:
+            client._request("POST", "/api/context/query", {"limit": 5})
+        self.assertEqual(transport.call_args.args[1], 3)
+
+    def test_a_timed_out_pass_keeps_completed_passes_and_names_the_rest(self):
+        """A hung pass stops the chain; the passes before it are kept and the rest are named.
+
+        The baseline answers with nothing, so no traversal pass is planned and the keyword plan is the
+        whole of "the rest" — which is what makes the naming assertion exact.
+        """
+        def request(method, path, payload, **kwargs):
+            if payload.get("query") is None:
+                return {"items": []}
+            if payload.get("query") == "alpha":
+                return {"items": [self.row(2)]}
+            raise client.ClientError(0, "timed-out", "no response within 1s")
+
+        result = deepsearch.execute(
+            {"baseline": {"facets": ["storage"]}, "keywords": ["alpha", "beta", "gamma"]},
+            request=request)
+
+        # Whole passes only: alpha's record is kept entire, the hung and unstarted passes add nothing.
+        self.assertEqual(result["items"], [self.row(2)])
+        statuses = {item["value"]: item["status"] for item in result["disclosure"]["passes"]}
+        self.assertEqual(statuses[None], "completed")
+        self.assertEqual(statuses["alpha"], "completed")
+        self.assertEqual(statuses["beta"], "timed-out")
+        self.assertEqual(statuses["gamma"], "not-run")
+        self.assertEqual({item["value"] for item in result["disclosure"]["passesNotRun"]},
+                         {"beta", "gamma"})
+        self.assertTrue(result["disclosure"]["deadlineReached"])
+        self.assertTrue(result["disclosure"]["possiblyOmitted"])
+
+    def test_the_wall_clock_deadline_stops_the_chain_between_passes(self):
+        """A chain of slow-but-successful passes is bounded too, not only a pass that times out."""
+        state = {"t": 0.0}
+
+        def clock():
+            return state["t"]
+
+        def request(method, path, payload, **kwargs):
+            state["t"] += 10.0  # every pass costs more than the whole deadline
+            return {"items": []}
+
+        with _env(client.ENV_RECALL_DEADLINE, "5"):
+            result = deepsearch.execute(
+                {"baseline": {"facets": ["storage"]}, "keywords": ["alpha", "beta"]},
+                request=request, clock=clock)
+
+        statuses = {item["value"]: item["status"] for item in result["disclosure"]["passes"]}
+        self.assertEqual(statuses[None], "completed")
+        self.assertEqual(statuses["alpha"], "not-run")
+        self.assertEqual(statuses["beta"], "not-run")
+        self.assertEqual(result["disclosure"]["deadlineSeconds"], 5)
+        self.assertTrue(result["disclosure"]["deadlineReached"])
 
     @staticmethod
     def row(index):
