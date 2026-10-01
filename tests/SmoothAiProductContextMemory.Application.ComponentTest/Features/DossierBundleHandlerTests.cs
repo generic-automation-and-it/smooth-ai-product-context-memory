@@ -319,7 +319,7 @@ public sealed class DossierBundleHandlerTests : HandlerTestBase
     [Fact]
     public async Task NonZero_history_inflated_cut_converges_preview_and_bundle()
     {
-        // The truncated-empty path already agreed before this change (batch 2 gave the bundle the
+        // The truncated-empty path already agreed before this change (PR #124 gave the bundle the
         // same disclosure call for a zero-match selection). The path that actually diverged — and
         // this fix changes by deleting two bundle-only disjuncts — is the non-zero one: many version
         // rows of a few selected memories inflate the item count past the anchor limit, producing a
