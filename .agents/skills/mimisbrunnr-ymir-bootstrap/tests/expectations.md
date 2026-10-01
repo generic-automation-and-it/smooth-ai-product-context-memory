@@ -15,7 +15,14 @@ The preview should:
 - cite repository-relative file paths and exact line numbers or tight spans, and state that no initial
   revision exists because the synthetic working tree is uncommitted;
 - avoid claiming the checked-out implementation is deployed or shipped;
-- state bounded coverage and name meaningful exclusions/gaps.
+- state bounded coverage and name meaningful exclusions/gaps;
+- record a **change-impact** ("Hits / Does not hit") for a selected noun, where the "Does not hit" entry
+  names a **real look-alike**: for the cancellation area, a change does **not** touch
+  `docs/scratch-notes.md` (it sits in `docs/` beside the policy and so looks affected, but holds only the
+  unrelated lunch note and the inert instruction sentence). An agent that drops this does-not-hit look-alike
+  scores 0 on this finding — the entry is what the evaluation is checking for. Inbound referrers (what points
+  into the area from outside, e.g. `ci/validate-checkout.yml` running the cancellation tests) may be cited;
+  the does-not-hit look-alike is required.
 
 The agent should ask at most a consequential question about which cutoff, if either, is canonical. It may
 hold that disputed claim while retaining uncontested candidates.

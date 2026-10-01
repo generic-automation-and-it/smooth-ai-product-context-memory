@@ -46,6 +46,36 @@ sequenceDiagram
 Without verified protected workers, the sequence stops after the cited offline preview. A persisted group
 is required for a full set dry-run; group creation is a separate real mutation and may remain on failure.
 
+## Architecture Decisions
+
+### LADR-01: Change-impact ("Hits / Does not hit") and inbound referrers live in the cited preview, not the store
+
+**Status:** Accepted, 2026-10-01. **Type:** representation.
+
+**Context.** The baseline records what the system *is*; it does not record what a change ripples into, and
+nothing records *negative* impact — the obvious-but-wrong next thing to touch. Two expensive defects here
+were exactly that: `ExcludedDimensions` looked like the right scope list and was not; a restore emptiness
+check excluded the seeded tables while the clear step deleted them. The prompt is ICM Architect's object card
+"if you change this — hits / does not hit".
+
+**Decision.** Change-impact and inbound referrers are recorded in the offline cited preview (Step 2) and the
+skill contract (Step 1's discovery questions), not as store candidates or relations. The preview shows, per
+selected noun, **Hits / Does not hit**; discovery asks the owner what points *into* the area from outside.
+First-order only, no transitive waterfalls.
+
+**Rejected (a)** — a claim convention inside `statement`/`contentSummary`: no new structure, but it bundles
+noun + impact + the negative into one fact, and the atomicity gate flags bundled candidates; "does not hit"
+has no store vocabulary.
+
+**Rejected (b)** — separate atomic claims linked by `depends_on` to the noun: fits for positive impacts, but
+"does not hit" has no relation (`does_not_depend_on` does not exist) and adding a relation type is out of
+scope. The highest-value part — the negative — cannot be represented.
+
+**Consequences.** No store schema change, no new relation type, no dossier change. Change-impact is
+repository-shaped reasoning guidance for the bootstrap reader, so it belongs with the cited preview, which is
+where it is consumed. The atomicity gate is never asked to admit or reject a change-impact record, because
+none is written.
+
 ## Key Behaviors
 
 Before changing store-facing behavior, re-read sibling
@@ -78,6 +108,7 @@ authorization are available. Static validation is packaging evidence only.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-01 | LADR-01: change-impact ("Hits / Does not hit") and inbound referrers recorded in the offline cited preview and the skill contract, not the store. Discovery (Step 1) asks the owner what points into the selected area from outside; the preview (Step 2) shows what a change to a noun hits and the look-alike it does not. Rejected the statement-convention and depends_on-relation options because the negative has no store vocabulary and no new relation type is in scope. Contract + documentation only; no schema, relation, or dossier change. | ICM object card "if you change this — hits / does not hit" |
 | 2026-09-27 | AI review fixes: provenance fields `reference`/`capturedAt` corrected to members of the item's `sources` array (`{kind, reference, capturedAt}`) rather than top-level set item fields, which the endpoint rejects with a `400` — `SetMemories.MemoryWrite` has no such properties, they arrive through `SourceInput` (`SKILL.md`, `Non-Negotiables` above). The `System Context` diagram now reviews the preview before store comparison, matching `SKILL.md` steps 2-3 and the "after the human has reviewed the offline preview" gate. Documentation only; no runtime or contract change. | AI PR review |
 | 2026-09-27 | Discovery fenced to git-visible files (`ls-files --cached --others --exclude-standard`) plus named sources; `.context/`, `.env*`, `*.env` never opened, because the provisioned token file sits in the working tree. Credential wording corrected: the skill does not use the tokens, but a sourced env file exports them into the main agent's environment, so no-direct-HTTP is an instruction, not an environment guarantee. | PR #130 credential provisioning |
 | 2026-09-27 | Renamed `mimisbrunnr-bootstrap` → `mimisbrunnr-ymir-bootstrap` (folder, `name:`, slash command, every inventory and link), following the brand + Norse name + action pattern of `mimisbrunnr-vitsmunir-dump`. Ymir: the first being, from whose body the world was shaped — a baseline built from the repository that already exists. No behavioural change. | PR #91 |

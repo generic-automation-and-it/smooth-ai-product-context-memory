@@ -118,6 +118,10 @@ bounded batch and disclose what was deferred; never silently chunk the remainder
 Ask only questions whose answers would materially change claim meaning, scope, lifecycle, group placement,
 or authorization. A disputed candidate can be held while uncontested candidates continue.
 
+For each selected noun (the subject of a change-impact note), also ask the owner what points **into** the
+area from outside — configs, CI, scripts, other repositories — and record each inbound referrer on the claim
+it lands on. Nothing in the tree reveals these; they come from the owner. First-order only.
+
 ### 2. Present A Cited Preview
 
 Before any mutation, show a concise review table containing:
@@ -130,6 +134,9 @@ Before any mutation, show a concise review table containing:
 
 Also summarize coverage and important gaps. Say what was examined and what was intentionally excluded;
 never describe the preview as total repository understanding.
+
+For each selected noun, the preview also shows **Hits / Does not hit**: what a change to the noun ripples
+into, and the obvious-but-wrong look-alike it does **not** touch. First-order only; no transitive waterfalls.
 
 ### 3. Compare In A Supported Runtime
 
