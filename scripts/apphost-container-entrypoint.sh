@@ -1,4 +1,6 @@
-#!/bin/sh
+#!/bin/bash
+# bash, not sh: the engine hands the controller `Parameters__api-read-token` / `Parameters__api-write-token`,
+# and dash silently drops env names that are not shell identifiers, so the AppHost would never see them.
 set -eu
 
 ownership_label="io.smooth-mimisbrunnr.installation"

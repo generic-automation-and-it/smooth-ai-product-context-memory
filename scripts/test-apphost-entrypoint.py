@@ -70,6 +70,7 @@ def mock_apphost():
 
     signal.signal(signal.SIGTERM, shutdown)
     record(["child-start"])
+    record(["child-parameters", sorted(k for k in os.environ if k.startswith("Parameters__"))])
     while True:
         time.sleep(0.05)
 
@@ -134,13 +135,20 @@ class EntrypointTests(unittest.TestCase):
 
     def start(self, command):
         self.env["MOCK_STATE"] = json.dumps(self.state)
+        script = self.root / "scripts/apphost-container-entrypoint.sh"
         self.process = subprocess.Popen(
-            ["/bin/sh", str(self.root / "scripts/apphost-container-entrypoint.sh"), command],
+            [self.interpreter(script), str(script), command],
             env=self.env, cwd=self.directory,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
             start_new_session=True,
         )
         return self.process
+
+    @staticmethod
+    def interpreter(script):
+        shebang = script.read_text().splitlines()[0]
+        assert shebang.startswith("#!"), shebang
+        return shebang[2:].strip()
 
     def events(self):
         if not self.log.exists():
@@ -287,6 +295,21 @@ class EntrypointTests(unittest.TestCase):
         self.assertFalse(any(event[0] in ("stop", "rm") for event in events[child_start:child_exit]))
         self.assertEqual(events[child_exit + 1:][-8:][0],
                          ["stop", "--time", "30", "id-mimisbrunnr-test-host"])
+
+    def test_hyphenated_parameter_env_names_reach_the_apphost(self):
+        names = ["Parameters__api-read-token", "Parameters__api-write-token"]
+        for name in names:
+            self.env[name] = "token-" + name
+        process = self.start("run")
+        deadline = time.monotonic() + 15
+        while not any(event[0] == "child-parameters" for event in self.events()):
+            if process.poll() is not None or time.monotonic() >= deadline:
+                self.fail("Child did not start")
+            time.sleep(0.05)
+        process.send_signal(signal.SIGINT)
+        stdout, stderr = process.communicate(timeout=10)
+        self.assertEqual(process.returncode, 0, stdout + stderr)
+        self.assertIn(["child-parameters", names], self.events())
 
     def test_start_creates_missing_volumes_after_preflight(self):
         self.state["volumes"] = {}
