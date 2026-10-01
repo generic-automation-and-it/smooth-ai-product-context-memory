@@ -91,9 +91,9 @@ at dogfooding volume (~200 retrievals/day, ~55 MiB) the time bound governs, and 
 old recall data describes a store and a recall implementation that no longer exist.
 
 **Specified, not implemented.** No shipped code enforces either limit: nothing in `src/` prunes
-`recall_feedback`, and the only deletion is the practitioner's baseline reset
-(`NpgsqlRecallFeedbackQuery`, `DELETE FROM public.recall_feedback`). The set therefore grows without bound
-between resets. Reopen when a retention job is built, or if the table approaches the ~370 MiB the cap was
+`recall_feedback`. The only deletions are the practitioner's baseline reset
+(`NpgsqlRecallFeedbackQuery`, `DELETE FROM public.recall_feedback`) and a snapshot restore, which clears
+the table inside its transaction (HLD-006). The set therefore grows without bound between those events. Reopen when a retention job is built, or if the table approaches the ~370 MiB the cap was
 sized to hold.
 
 ### What this placement must not become

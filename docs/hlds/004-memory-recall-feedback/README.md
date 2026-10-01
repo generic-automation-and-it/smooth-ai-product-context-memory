@@ -13,8 +13,8 @@
 > verified against the shipped implementation (workstream 04).
 >
 > **Two parts of the specification are not implemented.** (1) The retention bound LADR-02 states — 30 days
-> or 2,000,000 records — has no enforcing job: nothing in `src/` prunes `recall_feedback`, and the only
-> deletion is the practitioner's baseline reset. (2) The feedback write is **synchronous and inline**:
+> or 2,000,000 records — has no enforcing job: nothing in `src/` prunes `recall_feedback`; the only
+> deletions are the practitioner's baseline reset and a snapshot restore, which clears the table. (2) The feedback write is **synchronous and inline**:
 > `QueryMemories.Handler` calls `NpgsqlRecallFeedback.Record` after building the response and before
 > returning it, and `Record` opens its own connection and runs the `INSERT` on the request thread. It is
 > guarded (a failure is swallowed and logged), so it cannot fail a retrieval, but its cost is on the
