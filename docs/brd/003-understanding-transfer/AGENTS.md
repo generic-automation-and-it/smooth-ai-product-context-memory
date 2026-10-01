@@ -1,6 +1,6 @@
 # AGENTS.md — Understanding (BRD)
 
-AI Context: BRD for understanding. Updated: 2026-09-26
+AI Context: BRD for understanding. Updated: 2026-09-30
 
 ## TL;DR
 
