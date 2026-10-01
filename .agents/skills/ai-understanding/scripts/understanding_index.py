@@ -447,7 +447,10 @@ def unpublished_units(units: list[dict], store: Path) -> list[dict]:
     newest = newest_archive_stamp(store)
     if newest is None:
         return list(units)
-    bound = newest[:12]
+    # The archive stamp is 15 chars (seconds); a subject stamp is 13 (minutes). Both sides are sliced
+    # to 13 so a unit exported in the publish minute compares equal rather than as a 13-char string
+    # against a 12-char prefix, which would flag it forever.
+    bound = newest[:13]
     return [unit for unit in units if stamp_of(unit["subject"]) > bound]
 
 

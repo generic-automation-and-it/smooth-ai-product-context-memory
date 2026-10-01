@@ -5,7 +5,7 @@
 | **Document** | Business Requirements Document |
 | **Status** | Approved — delivered by HLD 007; §8 value assumption 1 carried open pending usage evidence, assumption 2 validated with a stated boundary (closed-loop cold-agent walk at both breadths + dossier slice, 2026-09-30) |
 | **Owner** | Product owner / practitioner |
-| **Last updated** | 2026-09-26 |
+| **Last updated** | 2026-09-30 |
 | **Extends** | [BRD 001 — Cross-product linked context memory](../001-context-memory/) |
 | **Related** | [HLD 007 — Understanding](../../hlds/007-understanding-transfer/) |
 
