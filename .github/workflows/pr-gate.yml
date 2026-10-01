@@ -167,12 +167,24 @@ jobs:
           - arch: arm64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     permissions:
       contents: read
 
+    # Release mode refuses a Host image that is not digest-pinned, and a digest only exists once an
+    # image is in a registry. A job-local registry gives both images a real digest without
+    # publishing anything; the engine treats localhost registries as insecure-allowed, so the
+    # controller's engine pulls the API image from it exactly as it pulls from GHCR on main.
+    services:
+      registry:
+        image: docker.io/library/registry:2
+        ports:
+          - 5000:5000
+
     env:
       DOCKER_BUILD_RECORD_UPLOAD: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      LOCAL_API_IMAGE: localhost:5000/smooth-ai-product-context-memory
+      LOCAL_APPHOST_IMAGE: localhost:5000/smooth-ai-product-context-memory-apphost
 
     steps:
       - name: Checkout
@@ -182,29 +194,59 @@ jobs:
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          # The BuildKit container must reach the job-local registry on the runner's loopback.
+          driver-opts: network=host
 
       - name: Build API image
+        id: api
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile
           platforms: linux/${{ matrix.arch }}
-          push: false
+          push: true
+          tags: ${{ env.LOCAL_API_IMAGE }}:pr
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
           build-args: |
             REVISION=${{ github.sha }}
           cache-from: type=gha,scope=pr-api-${{ github.ref }}-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=pr-api-${{ github.ref }}-${{ matrix.arch }}
 
       - name: Build AppHost controller image
+        id: apphost
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile.apphost
           platforms: linux/${{ matrix.arch }}
-          push: false
+          push: true
+          tags: ${{ env.LOCAL_APPHOST_IMAGE }}:pr
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
           build-args: |
-            API_IMAGE=ghcr.io/${{ github.repository }}@sha256:0000000000000000000000000000000000000000000000000000000000000000
+            API_IMAGE=${{ env.LOCAL_API_IMAGE }}@${{ steps.api.outputs.digest }}
             RELEASE_VERSION=pr-${{ github.event.pull_request.number || github.run_number }}
             REVISION=${{ github.sha }}
           cache-from: type=gha,scope=pr-apphost-${{ github.ref }}-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=pr-apphost-${{ github.ref }}-${{ matrix.arch }}
+
+      # The same smoke the main publication pipeline runs against its candidates, so a change that
+      # breaks container startup fails here instead of only after merge.
+      - name: Run lifecycle and data smoke test
+        env:
+          ARCH: ${{ matrix.arch }}
+          INSTALLATION_ID: pr-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.arch }}
+          API_DIGEST: ${{ steps.api.outputs.digest }}
+          APPHOST_DIGEST: ${{ steps.apphost.outputs.digest }}
+        run: |
+          set -euo pipefail
+          case "$ARCH:$(uname -m)" in
+            amd64:x86_64|arm64:aarch64) ;;
+            *) echo "runner architecture $(uname -m) does not match matrix arch $ARCH" >&2; exit 1 ;;
+          esac
+          docker pull --platform "linux/$ARCH" "${LOCAL_APPHOST_IMAGE}@${APPHOST_DIGEST}"
+          docker image inspect "${LOCAL_APPHOST_IMAGE}@${APPHOST_DIGEST}" |
+            jq -e --arg api "HostConfiguration__Image=${LOCAL_API_IMAGE}@${API_DIGEST}" '.[0].Config.Env | index($api) != null'
+          scripts/smoke-apphost-container.sh "${LOCAL_APPHOST_IMAGE}@${APPHOST_DIGEST}"
