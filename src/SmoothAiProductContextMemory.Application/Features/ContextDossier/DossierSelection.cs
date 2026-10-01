@@ -111,6 +111,13 @@ public static class DossierSelection
             ? null
             : new HashSet<Guid>(ticketResult.Items.Select(i => i.Uuid));
 
+        // The ticket traversal's disclosure applies to every return below, the two no-match ones
+        // included: a ticket walk that was cut short can leave the anchor search with nothing to
+        // match, and that empty result is truncated, not complete.
+        bool ticketDepthLimitReached = ticketResult?.Disclosure.DepthLimitReached ?? false;
+        bool ticketLimitReached = (ticketResult?.Disclosure.MemoryLimitReached ?? false)
+            || (ticketResult?.Disclosure.PathLimitReached ?? false);
+
         // A supplied ticket that resolves to no eligible identities (missing, hidden, or no eligible
         // memories) must stay a no-match; broadening to an unrestricted search would silently select
         // unrelated visible memories (R07 / H7). The traversal may have hit a depth/path/memory limit
@@ -118,15 +125,14 @@ public static class DossierSelection
         // not reported as complete-empty (H5).
         if (ticketSupplied && ticketUuids is { Count: 0 })
         {
-            var disclosure = ticketResult?.Disclosure;
             return new DossierSelectionResult(
                 Selected: [],
                 AnchorCount: 0,
                 WidenedCount: 0,
                 EdgeCount: 0,
-                DepthLimitReached: disclosure?.DepthLimitReached ?? false,
+                DepthLimitReached: ticketDepthLimitReached,
                 HiddenPathDropped: false,
-                LimitReached: (disclosure?.MemoryLimitReached ?? false) || (disclosure?.PathLimitReached ?? false),
+                LimitReached: ticketLimitReached,
                 Edges: []);
         }
 
@@ -162,9 +168,9 @@ public static class DossierSelection
                 AnchorCount: 0,
                 WidenedCount: 0,
                 EdgeCount: 0,
-                DepthLimitReached: false,
+                DepthLimitReached: ticketDepthLimitReached,
                 HiddenPathDropped: false,
-                LimitReached: false,
+                LimitReached: ticketLimitReached,
                 Edges: []);
         }
 
@@ -228,11 +234,8 @@ public static class DossierSelection
 
         IReadOnlyList<MemoryRelationship> edges = await LoadEdgesAsync(graph, selected, cancellationToken);
 
-        bool depthLimitReached = widened.DepthLimitReached
-            || (ticketResult?.Disclosure.DepthLimitReached ?? false);
-        bool limitReached = widened.LimitReached
-            || (ticketResult?.Disclosure.MemoryLimitReached ?? false)
-            || (ticketResult?.Disclosure.PathLimitReached ?? false);
+        bool depthLimitReached = widened.DepthLimitReached || ticketDepthLimitReached;
+        bool limitReached = widened.LimitReached || ticketLimitReached;
 
         return new DossierSelectionResult(
             selected,
