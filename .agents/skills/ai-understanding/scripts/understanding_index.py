@@ -74,6 +74,9 @@ STALE_AFTER_DAYS_OUTCOME = 30
 # of the store (LADR-008). An archive mirrors the store's `<subject>-<stamp>/<slug>.understanding.md`
 # paths, so a unit is published exactly when its path is a member of one.
 PUBLISH_DIR_NAME = "understandings-publish"
+# The store's parent directory in the default layout. Its own name is what tells `context_root` that
+# the grandparent is the repo root, so an `agents_context` path resolves the same from any CWD.
+CONTEXT_DIR_NAME = ".context"
 
 
 def parse_frontmatter(text: str) -> dict:
@@ -171,8 +174,31 @@ def slug_of(unit_file: Path) -> str:
     return unit_file.name[: -len(UNIT_SUFFIX)]
 
 
-def read_unit(unit_file: Path, subject: str) -> tuple[dict | None, list[str]]:
-    """Load and validate one `<subject>-<yyyyMMdd-HHmm>/<slug>.understanding.md`."""
+def context_root(store: Path) -> Path:
+    """The directory an `agents_context` path is written relative to.
+
+    `agents_context` holds a repo-relative path, so it can only be resolved against the repository the
+    store belongs to — not against whatever directory the generator happened to be invoked from.
+    Checking it against the process CWD reported every unit's context missing when the script ran with
+    an absolute store path from elsewhere, which is the documented `[store-dir]` form: 55 false problems
+    and exit 1 on a clean store.
+
+    The store sits at `<repo>/.context/understandings`, so the repo root is two levels up. Anything
+    deeper is not this layout and falls back to the store's own parent, which is what a bespoke store
+    directory outside a repo gets.
+    """
+    context_dir = store.parent
+    if context_dir.name == CONTEXT_DIR_NAME and context_dir.parent != context_dir:
+        return context_dir.parent
+    return context_dir
+
+
+def read_unit(unit_file: Path, subject: str, root: Path | None = None) -> tuple[dict | None, list[str]]:
+    """Load and validate one `<subject>-<yyyyMMdd-HHmm>/<slug>.understanding.md`.
+
+    `root` is the directory `agents_context` resolves against; it defaults to the process CWD, which is
+    correct only when the caller had none better to offer.
+    """
     slug = slug_of(unit_file)
     where = f"{subject}/{unit_file.name}"
 
@@ -215,8 +241,13 @@ def read_unit(unit_file: Path, subject: str) -> tuple[dict | None, list[str]]:
 
     context = fields.get("agents_context")
     if isinstance(context, str) and context and not placeholder(context):
-        if not Path(context).exists():
-            problems.append(f"{where}: agents_context '{context}' does not exist")
+        # Resolved against the repo root, not the CWD: the path is repo-relative by construction, so a
+        # generator run from any other directory must reach the same verdict as one run from the root.
+        base = root if root is not None else Path.cwd()
+        if not (base / context).exists():
+            problems.append(
+                f"{where}: agents_context '{context}' does not exist under {base}"
+            )
 
     if fields.get("slug") not in (slug, None):
         problems.append(f"{where}: slug '{fields['slug']}' does not match the file name")
@@ -308,6 +339,9 @@ def load_units(store: Path) -> tuple[list[dict], list[dict], list[str]]:
     Problems come from current versions and from the folder layout. A superseded copy's own
     validation is skipped — see the module docstring for why history is exempt.
     """
+    # `agents_context` is repo-relative, so it resolves against the repo the store belongs to rather
+    # than the directory this script was invoked from — see `context_root`.
+    root = context_root(store)
     records: list[dict] = []
     problems: list[str] = []
 
@@ -351,7 +385,7 @@ def load_units(store: Path) -> tuple[list[dict], list[dict], list[str]]:
             continue
 
         for unit_file in unit_files:
-            unit, unit_problems = read_unit(unit_file, subject)
+            unit, unit_problems = read_unit(unit_file, subject, root)
             records.append({
                 # The slug comes from the file name, so a copy whose frontmatter failed to parse
                 # still takes part in version grouping instead of vanishing from it.

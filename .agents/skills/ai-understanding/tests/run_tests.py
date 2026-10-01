@@ -86,6 +86,75 @@ def argv(store: Path, review: bool = False) -> list[str]:
     return args
 
 
+class AgentsContextResolutionTests(unittest.TestCase):
+    """`agents_context` is a repo-relative path, so the verdict must not depend on the CWD.
+
+    The check used `Path(context).exists()` against the process CWD, so the documented
+    `understanding_index.py <absolute-store-dir>` form reported every unit's context missing when run
+    from anywhere but the repo root — 55 false problems and exit 1 on this repo's own clean store.
+    """
+
+    def write_context_unit(self, repo: Path, context: str) -> Path:
+        store = repo / ".context" / "understandings"
+        folder = store / "proj-20260930-1700"
+        folder.mkdir(parents=True, exist_ok=True)
+        (repo / "src").mkdir(exist_ok=True)
+        (repo / "src" / "Handler.cs").write_text("// code\n", encoding="utf-8")
+        (folder / f"alpha{ui.UNIT_SUFFIX}").write_text(
+            UNIT_FRONTMATTER.format(slug="alpha", updated="2026-09-30")
+            .replace("---\n# Answer", f"agents_context: {context}\n---\n# Answer"), encoding="utf-8")
+        return store
+
+    def test_context_is_found_when_run_from_outside_the_repo(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = make_repo(tmp, ignore_store=True)
+            store = self.write_context_unit(repo, "src/Handler.cs")
+            previous = os.getcwd()
+            os.chdir(tempfile.gettempdir())
+            try:
+                rc, _, err = run(argv(store))
+            finally:
+                os.chdir(previous)
+            self.assertEqual(rc, 0, err)
+            self.assertNotIn("does not exist", err)
+
+    def test_same_verdict_from_inside_and_outside_the_repo(self):
+        """The point of the fix: one store, one verdict, regardless of where the generator runs."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = make_repo(tmp, ignore_store=True)
+            store = self.write_context_unit(repo, "src/Handler.cs")
+            inside_rc, _, inside_err = run(argv(store))
+            previous = os.getcwd()
+            os.chdir(tempfile.gettempdir())
+            try:
+                outside_rc, _, outside_err = run(argv(store))
+            finally:
+                os.chdir(previous)
+            self.assertEqual(inside_rc, outside_rc)
+            self.assertEqual(inside_err, outside_err)
+
+    def test_a_genuinely_missing_context_is_still_reported(self):
+        """Negative control: fixing the base directory must not disable the check."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = make_repo(tmp, ignore_store=True)
+            store = self.write_context_unit(repo, "src/NotThere.cs")
+            rc, _, err = run(argv(store))
+            self.assertEqual(rc, 1)
+            self.assertIn("does not exist", err)
+
+    def test_root_is_the_repo_for_the_default_layout(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = make_repo(tmp, ignore_store=True)
+            store = repo / ".context" / "understandings"
+            self.assertEqual(ui.context_root(store), repo)
+
+    def test_root_is_the_store_parent_outside_the_default_layout(self):
+        """A bespoke store directory has no `.context` parent to climb, so it must not invent one."""
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Path(tmp) / "somewhere" / "store"
+            self.assertEqual(ui.context_root(store), store.parent)
+
+
 class DurabilityGuardTests(unittest.TestCase):
     def test_no_archive_flags_every_unit_unpublished(self):
         with tempfile.TemporaryDirectory() as tmp:
