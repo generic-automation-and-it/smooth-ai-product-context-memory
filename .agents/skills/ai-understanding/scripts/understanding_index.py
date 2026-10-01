@@ -416,9 +416,13 @@ def case_collisions(records: list[dict]) -> list[str]:
     On a case-insensitive filesystem (the default on macOS and Windows) `Foo.understanding.md` and
     `foo.understanding.md` are one file, and the second write silently replaces the first. Ordinal
     comparison cannot see it, so neither can the version grouping: a repeated slug is treated as a
-    version chain, which is correct on a case-sensitive filesystem and wrong here. Nothing detects the
-    overwrite after the fact either — by then the destination *is* the source — so the check has to run
-    before the write, which for an unpacked archive means refusing the whole thing.
+    version chain, which is correct on a case-sensitive filesystem and wrong here.
+
+    Running here catches a store that **already holds** a collision, and makes it reportable; it cannot
+    undo an overwrite. The check that prevents the overwrite is the pre-extraction refusal in
+    `publish-consume.md`, which runs before anything is written. Both are needed and neither substitutes
+    for the other: this one is mechanical and always runs, that one is the only gate that is early
+    enough to prevent.
 
     `casefold` rather than `lower` because it is the full Unicode case-folding operation, and it is what
     a filesystem compares: 'ß' folds to 'ss' and 'ﬁ' to 'fi', so two names `lower` keeps apart are one

@@ -177,13 +177,31 @@ class CaseCollisionTests(unittest.TestCase):
             store = Path(tmp) / "understandings"
             # One unit, named so its slug and its subject each collide with a name the check is fed
             # directly — the store on disk is clean, so the only way a problem appears is the wiring.
+            #
+            # The substitute records what it was handed. A lambda that ignored `records` and returned
+            # the canned problems would pass just as green if `load_units` passed the wrong records —
+            # a supersede-only list, say, or an empty one — so the call site's actual argument is
+            # asserted, not just that the function was reached.
+            seen: list[list[dict]] = []
             original = ui.case_collisions
-            ui.case_collisions = lambda records: list(problems)
+
+            def record_and_report(records):
+                seen.append(records)
+                return list(problems)
+
+            ui.case_collisions = record_and_report
             try:
                 write_unit(store, "s-20260101-0000", "alpha")
                 _units, _superseded, reported = ui.load_units(store)
             finally:
                 ui.case_collisions = original
+            self.assertEqual(
+                len(seen), 1, f"case_collisions must be called exactly once per load, saw {len(seen)}"
+            )
+            self.assertEqual(
+                sorted(r["slug"] for r in seen[0]), ["alpha"],
+                f"case_collisions must receive the store's own records, got {seen[0]}",
+            )
             self.assertTrue(
                 any("case-insensitive" in p for p in reported),
                 f"collision problems never reached load_units' problem list: {reported}",
