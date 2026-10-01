@@ -74,6 +74,63 @@ of it. **List the archive before extracting any of it** — `unzip -l <zip>` —
 against that rule there; no enforcing script exists yet (LADR-008 is specification only), so the listing
 is the only gate, and extracting first to inspect afterwards has already lost.
 
+**Refuse a case-folded collision in that same listing, before extracting.** On a case-insensitive
+filesystem (the default on macOS and Windows) `Foo-20260101-0000/x.understanding.md` and
+`foo-20260101-0000/x.understanding.md` are *one file*: the second extract silently replaces the first, and
+a parity check afterwards cannot see it because by then the destination is the source. This is the same
+class as the path-escape rule and refuses the same way — the whole archive, not the entry.
+
+Compare **every** incoming path against the target store, not just the other incoming paths, because the
+destructive case is an incoming unit landing on a *local* one that differs only by case:
+
+```bash
+ARCHIVE=understandings-20261001-120000.zip   # the archive being consumed
+STORE=.context/understandings/               # the target store (default unless --path overrides)
+
+# Fails loudly on any collision, incoming-vs-incoming and incoming-vs-local alike.
+# Both paths are passed as arguments: a heredoc arrives on stdin, so `python3 -` leaves argv empty.
+python3 - "$ARCHIVE" "$STORE" <<'PY'
+import sys, zipfile
+from pathlib import Path
+archive, store = Path(sys.argv[1]), Path(sys.argv[2])
+seen = {}
+for existing in store.rglob("*"):
+    seen.setdefault(str(existing.relative_to(store)).casefold(), existing)
+claimed = {}
+clashes = []
+with zipfile.ZipFile(archive) as zf:
+    for name in zf.namelist():
+        # The generated index is exempt, as it already is from the stray-file check: every archive
+        # carries one and every store holds one, so comparing it would refuse every archive.
+        if Path(name).name == "INDEX.md":
+            continue
+        key = str(Path(name)).casefold()
+        if key in seen:
+            clashes.append((name, f"local '{seen[key]}'"))
+        elif key in claimed:
+            clashes.append((name, f"'{claimed[key]}' elsewhere in this archive"))
+        claimed.setdefault(key, name)
+if clashes:
+    for name, target in clashes:
+        print(f"refusing: '{name}' collides on a case-insensitive filesystem with {target}")
+    sys.exit(1)
+print("no case-folded collisions")
+PY
+```
+
+Two shapes the wording of the refusal has to carry. A collision against a *local* file names that path;
+a collision between two entries of the **archive** names the other entry, because there is no local
+path to name — `claimed` remembers which entry first claimed each folded key, so the operator is sent to
+the duplicate in the archive they hold rather than to a file that does not exist. The generated
+`INDEX.md` is exempt on both sides: it is regenerated on every write (publish step 6, and the consume
+step's own regeneration afterwards), so a case fold on it cannot lose knowledge.
+
+Use `casefold`, not `lower`: it is the full Unicode folding a filesystem compares, so `straße` and
+`strasse` are caught as one file — which `lower` keeps apart. The generator applies the same rule
+mechanically and reports a collision found in the store as a validation error, so run it after unpacking
+too; the listing is the gate that prevents the overwrite, and the generator is what catches a store that
+already holds one.
+
 Reconcile per incoming slug. The key is the slug, and an incoming copy **keeps its own stamped folder**:
 under LADR-010 the same slug in two folders is a version chain, not an index failure, so there is nothing
 left to merge away:
