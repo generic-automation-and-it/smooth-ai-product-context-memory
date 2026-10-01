@@ -67,6 +67,110 @@ def _scrub_item(content):
     }
 
 
+class TransportFailureTests(unittest.TestCase):
+    """A hung store must be a classified error, never a traceback.
+
+    Driven against a real socket rather than a mock, because the defect is precisely that the timeout
+    arrives on a code path the handler did not expect: `urllib.error.URLError` covers the connect
+    phase, while a read that times out on an already-established socket raises a bare `TimeoutError`.
+    A mocked `URLError` reproduces the case that already worked and passes against the unfixed client.
+    """
+
+    def setUp(self):
+        self._timeout = client.HTTP_TIMEOUT
+        client.HTTP_TIMEOUT = 1
+        self._base = client.base_url
+        # The read token is required before any request is built, so a missing one would mask the
+        # transport behaviour under test behind a credential error.
+        self._token = os.environ.get("CONTEXT_MEMORY_READ_TOKEN")
+        os.environ["CONTEXT_MEMORY_READ_TOKEN"] = "test-token"
+
+    def tearDown(self):
+        client.HTTP_TIMEOUT = self._timeout
+        client.base_url = self._base
+        if self._token is None:
+            os.environ.pop("CONTEXT_MEMORY_READ_TOKEN", None)
+        else:
+            os.environ["CONTEXT_MEMORY_READ_TOKEN"] = self._token
+
+    def _stalled_server(self):
+        """A listener that accepts the connection and then never answers — the 'timed-out' shape."""
+        import socket
+        import threading
+
+        srv = socket.socket()
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(1)
+        accepted = threading.Event()
+
+        def accept_then_stall():
+            conn, _ = srv.accept()
+            accepted.set()
+            try:
+                conn.recv(1024)
+                # Hold the connection open without ever writing a response line.
+                threading.Event().wait(10)
+            finally:
+                conn.close()
+
+        threading.Thread(target=accept_then_stall, daemon=True).start()
+        self.addCleanup(srv.close)
+        return srv.getsockname()[1], accepted
+
+    def test_a_hung_store_is_classified_as_timed_out(self):
+        port, accepted = self._stalled_server()
+        client.base_url = lambda: f"http://127.0.0.1:{port}"
+        with self.assertRaises(client.ClientError) as caught:
+            client._request("GET", "/api/context/query")
+        accepted.wait(5)
+        self.assertEqual(
+            caught.exception.status_text, "timed-out",
+            f"a stalled store must not be reported as anything but timed-out: {caught.exception}",
+        )
+
+    def test_a_refused_connection_stays_unreachable(self):
+        """The negative control, and the reason the two are kept apart.
+
+        `unreachable` means nothing is listening; `timed-out` means something accepted the connection
+        and went quiet. A caller retries a refusal and investigates a hang, so collapsing them would
+        tell it to do the wrong thing — and a fix that classified every transport error as `timed-out`
+        would pass the test above while breaking this one.
+        """
+        import socket
+
+        probe = socket.socket()
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+        probe.close()  # nothing is listening on this port now
+        client.base_url = lambda: f"http://127.0.0.1:{port}"
+        with self.assertRaises(client.ClientError) as caught:
+            client._request("GET", "/api/context/query")
+        self.assertEqual(caught.exception.status_text, "unreachable")
+
+    def test_the_timeout_message_names_the_budget(self):
+        """The error has to say what was waited, or the agent cannot tell a hang from a slow answer."""
+        port, _ = self._stalled_server()
+        client.base_url = lambda: f"http://127.0.0.1:{port}"
+        with self.assertRaises(client.ClientError) as caught:
+            client._request("GET", "/api/context/query")
+        self.assertIn(str(client.HTTP_TIMEOUT), caught.exception.body)
+
+    def test_the_blob_fetch_path_shares_the_classification(self):
+        """`cmd_get_blob` has its own handler, duplicated from `_request`'s.
+
+        Two copies of the same four-line except block is where a fix lands in one and misses the other,
+        and the second site is the one that reads a whole memory body — the request most likely to
+        outlast the budget on a large or slow store.
+        """
+        port, _ = self._stalled_server()
+        client.base_url = lambda: f"http://127.0.0.1:{port}"
+        args = SimpleNamespace(uuid="11111111-1111-1111-1111-111111111111", version=1, scope=None)
+        with self.assertRaises(client.ClientError) as caught:
+            client.cmd_get_blob(args)
+        self.assertEqual(caught.exception.status_text, "timed-out")
+
+
 class RedactTests(unittest.TestCase):
     def test_planted_aws_key_never_leaks(self):
         item = "The deployment uses AKIAIOSFODNN7EXAMPLE for CI."

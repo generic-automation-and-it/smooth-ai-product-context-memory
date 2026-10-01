@@ -327,6 +327,23 @@ Maintain a running capture with these buckets, surfaced only when the user final
   same holds at every phase — a switch that widens *what is written* is a different kind of switch from
   one that widens *how much is inspected*.
 
+## Transport Failures (read path)
+
+A transport failure is a **classified error, never a traceback and never a silent empty result.** The
+client reports three outcomes that stay distinct, because the caller's response differs:
+
+| `status_text` | Means | Do this |
+|---|---|---|
+| `unreachable` | Nothing accepted the connection — the store is not running, or the base URL is wrong | Report it; do not retry in a loop. This is an operator action |
+| `timed-out` | The store accepted the connection and did not answer within the budget | Report it as a **hang**, not as "no results". A retry may succeed; an empty result never came back |
+| _(success, zero rows)_ | The store answered, and there is nothing | A real answer. Proceed |
+
+**Never collapse `timed-out` into empty or into `unreachable`.** An empty result is a finding the agent
+acts on; a timeout is an absence of evidence, and treating the two alike lets a hung store read as a
+store with nothing to say — the most expensive kind of miss, because it is indistinguishable from a
+correct answer. The budget is a module constant (`HTTP_TIMEOUT`); shortening it is a local change, and
+the raised error names the budget it waited so a hang is distinguishable from a slow answer.
+
 ## Retrieval (`get`)
 
 - Delegate to `memory-read`; main thread receives lookup answer or grounding brief, never raw rows.

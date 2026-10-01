@@ -10,6 +10,7 @@ import argparse
 import json
 import os
 import re
+import socket
 import sys
 import urllib.error
 import urllib.request
@@ -40,6 +41,46 @@ class ClientError(RuntimeError):
         self.status = status
         self.status_text = status_text
         self.body = body
+
+
+def _classify_transport_error(exc):
+    """`ClientError` for a transport failure, keeping a timeout distinct from a refusal.
+
+    `urllib.error.URLError` covers the connect phase, but a read that times out on an
+    already-established socket raises a bare `TimeoutError`, which is a subclass of `OSError` and
+    therefore not caught by the `URLError` handler — it escaped as a traceback. A traceback tells the
+    agent nothing it can act on, and it is the shape a *hung* store produces, which is the case an
+    agent most needs to recognise.
+
+    The two are kept apart on purpose. `unreachable` means nothing is listening; `timed-out` means
+    something accepted the connection and then went quiet. Collapsing them would report a slow or
+    overloaded store as a dead one, and the caller's response differs — retry a refusal, investigate a
+    hang. `socket.timeout` is an alias of `TimeoutError` on 3.10+, and the name is kept for the
+    narrower builds.
+    """
+    if isinstance(exc, (TimeoutError, socket.timeout)):
+        return ClientError(
+            0, "timed-out", f"no response within {HTTP_TIMEOUT}s; the store accepted the connection "
+            f"but did not answer"
+        )
+    return ClientError(0, "unreachable", str(exc))
+
+
+# A context manager wrapping the read-and-decode, so every transport site shares one handler set
+# instead of repeating the same four `except` lines. `cmd_get_blob` used to carry its own copy, which
+# is exactly how a fix lands in one and misses the other.
+def _read_response(request):
+    """Perform the request, return the decoded body, and classify every failure the same way."""
+    try:
+        with _open(request) as resp:
+            return resp.read().decode("utf-8")
+    except urllib.error.HTTPError as e:
+        raise ClientError(e.code, e.reason, e.read().decode("utf-8", errors="replace")) from e
+    except urllib.error.URLError as e:
+        # A connect-phase timeout arrives wrapped in URLError; the reason carries the timeout.
+        raise _classify_transport_error(e.reason) from e
+    except (TimeoutError, socket.timeout) as e:
+        raise _classify_transport_error(e) from e
 
 
 def base_url():
@@ -92,15 +133,8 @@ def _request(method, path, payload=None, query=None):
         headers["Content-Type"] = "application/json"
 
     req = urllib.request.Request(url, data=body, headers=headers, method=method)
-    try:
-        with _open(req) as resp:
-            raw = resp.read().decode("utf-8")
-            return json.loads(raw) if raw else None
-    except urllib.error.HTTPError as e:
-        err_body = e.read().decode("utf-8", errors="replace")
-        raise ClientError(e.code, e.reason, err_body) from e
-    except urllib.error.URLError as e:
-        raise ClientError(0, "unreachable", str(e.reason)) from e
+    raw = _read_response(req)
+    return json.loads(raw) if raw else None
 
 
 def _probe(base):
@@ -111,8 +145,6 @@ def _probe(base):
     host = parsed.hostname or "localhost"
     port = parsed.port or (443 if parsed.scheme == "https" else 80)
     try:
-        import socket
-
         with socket.create_connection((host, port), timeout=HTTP_TIMEOUT):
             return True
     except OSError:
@@ -256,13 +288,7 @@ def cmd_get_blob(args):
     if not token:
         raise ClientError(0, "missing-credential", f"{ENV_READ_TOKEN} is required")
     req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"}, method="GET")
-    try:
-        with _open(req) as resp:
-            print(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        raise ClientError(e.code, e.reason, e.read().decode("utf-8", errors="replace")) from e
-    except urllib.error.URLError as e:
-        raise ClientError(0, "unreachable", str(e.reason)) from e
+    print(_read_response(req))
 
 
 def cmd_resolve_group(args):
