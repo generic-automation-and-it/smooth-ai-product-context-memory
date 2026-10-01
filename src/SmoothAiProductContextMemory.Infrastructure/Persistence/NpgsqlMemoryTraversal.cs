@@ -120,7 +120,7 @@ public sealed class NpgsqlMemoryTraversal(SmoothAiProductContextMemoryDbContext 
         });
         command.Parameters.Add(new NpgsqlParameter("asOf", NpgsqlDbType.TimestampTz)
         {
-            Value = query.AsOf ?? (object)DBNull.Value,
+            Value = PostgresInstant.ToUtc(query.AsOf) ?? (object)DBNull.Value,
         });
         command.Parameters.Add(new NpgsqlParameter("limit", NpgsqlDbType.Integer) { Value = query.Limit });
 

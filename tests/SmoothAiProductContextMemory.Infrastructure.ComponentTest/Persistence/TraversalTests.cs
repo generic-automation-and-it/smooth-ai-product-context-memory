@@ -1,4 +1,5 @@
 using SmoothAiProductContextMemory.Application.Abstractions;
+using SmoothAiProductContextMemory.Application.Common.Models;
 using SmoothAiProductContextMemory.Application.Common.Retrieval;
 using SmoothAiProductContextMemory.Domain;
 using SmoothAiProductContextMemory.Domain.Entities;
@@ -379,6 +380,42 @@ public sealed class TraversalTests : PersistenceTestBase
             new MemoryWidenQuery { SourceUuids = [source.Uuid], MaxDepth = 1, AsOf = asOf.AddYears(5) }, Ct))
             .Memories.Select(m => m.Uuid).Order()
             .ShouldBe(new[] { open.Uuid, future.Uuid }.Order());
+    }
+
+    // A wire AsOf keeps the caller's offset, and Npgsql refuses a DateTimeOffset with a non-zero
+    // offset for a timestamptz parameter. 02:00+02:00 is midnight UTC; a memory valid from 01:00 UTC
+    // is after it, so an offset read as local wall-clock time would wrongly admit it.
+    private static readonly DateTimeOffset UtcInstant = new(2026, 9, 29, 0, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset SameInstantPlusTwo = new(2026, 9, 29, 2, 0, 0, TimeSpan.FromHours(2));
+
+    [Fact]
+    public async Task Widen_accepts_an_AsOf_with_a_non_utc_offset_as_the_same_instant()
+    {
+        SameInstantPlusTwo.ShouldBe(UtcInstant);
+        MemoryGroup group = await SeedGroupAsync();
+        Memory source = await SeedMemoryAsync(group.Id, "Source", "Subject source");
+        Memory open = await SeedWindowedAsync(group.Id, "Open", UtcInstant.AddDays(-10), null);
+        Memory future = await SeedWindowedAsync(group.Id, "Future", UtcInstant.AddHours(1), null);
+        (await Graph.CreateAsync(source.Uuid, open.Uuid, MemoryRelation.RelatesTo, "to open", Ct)).ShouldBeTrue();
+        (await Graph.CreateAsync(source.Uuid, future.Uuid, MemoryRelation.RelatesTo, "to future", Ct)).ShouldBeTrue();
+
+        MemoryWidenResult widened = await Traversal.WidenAsync(
+            new MemoryWidenQuery { SourceUuids = [source.Uuid], MaxDepth = 1, AsOf = SameInstantPlusTwo }, Ct);
+
+        widened.Memories.Select(m => m.Uuid).ShouldBe([open.Uuid]);
+    }
+
+    [Fact]
+    public async Task Search_accepts_an_AsOf_with_a_non_utc_offset_as_the_same_instant()
+    {
+        MemoryGroup group = await SeedGroupAsync();
+        Memory open = await SeedWindowedAsync(group.Id, "Open", UtcInstant.AddDays(-10), null);
+        await SeedWindowedAsync(group.Id, "Future", UtcInstant.AddHours(1), null);
+
+        IReadOnlyList<CheapMemory> searched = await new NpgsqlMemorySearch(Db).SearchAsync(
+            new MemorySearchCriteria { GroupUuid = group.Uuid, AsOf = SameInstantPlusTwo }, Ct);
+
+        searched.Select(m => m.Uuid).ShouldBe([open.Uuid]);
     }
 
     private async Task<Memory> SeedWindowedAsync(
