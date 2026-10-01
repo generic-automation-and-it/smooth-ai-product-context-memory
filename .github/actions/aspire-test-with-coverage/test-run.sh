@@ -52,7 +52,7 @@ run_case() {
   make_stubs "${bin}"
   case_log="${workdir}/dotnet-test.log"
   : > "${case_log}"
-  case_output="$(cd "${workdir}" && env "$@" PATH="${bin}:${PATH}" STUB_LOG="${case_log}" \
+  case_output="$(cd "${workdir}" && env -u COVERAGE_THRESHOLD "$@" PATH="${bin}:${PATH}" STUB_LOG="${case_log}" \
     STUB_LINE_COVERAGE="${coverage}" ARTIFACTS_ROOT="${workdir}/artifacts" \
     bash "${run_script}" 2>&1)"
   case_status=$?
@@ -109,6 +109,16 @@ mkdir -p "${empty}/tests/Alpha.UnitTest" "${empty}/tests/Alpha.ComponentTest"
 : > "${empty}/tests/Alpha.ComponentTest/Alpha.ComponentTest.csproj"
 run_case "${empty}" 99.0
 if [ "${case_status}" -ne 0 ] && [ ! -s "${case_log}" ]; then pass "an empty tier fails before any test runs"; else fail "empty tier: status ${case_status}, ran $(tr '\n' ' ' < "${case_log}")"; fi
+
+# Case 4: the default line-coverage floor is 85%, and an unparseable summary fails closed.
+run_case "${synthetic}" 84.9
+if [ "${case_status}" -ne 0 ] && printf '%s' "${case_output}" | grep -q 'below the 85% threshold'; then pass "84.9% line coverage fails the default floor"; else fail "84.9% coverage: status ${case_status}"; fi
+run_case "${synthetic}" 85.0
+if [ "${case_status}" -eq 0 ]; then pass "85.0% line coverage meets the default floor"; else fail "85.0% coverage: status ${case_status}: ${case_output}"; fi
+run_case "${synthetic}" 84.9 COVERAGE_THRESHOLD=80
+if [ "${case_status}" -eq 0 ]; then pass "COVERAGE_THRESHOLD overrides the default floor"; else fail "override: status ${case_status}"; fi
+run_case "${synthetic}" 'n/a'
+if [ "${case_status}" -ne 0 ] && printf '%s' "${case_output}" | grep -q 'Could not parse line coverage'; then pass "an unparseable coverage summary fails closed"; else fail "unparseable summary: status ${case_status}"; fi
 
 echo
 echo "${passed} passed, ${failed} failed"

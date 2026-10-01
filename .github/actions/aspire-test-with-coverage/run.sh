@@ -18,8 +18,8 @@ coverage_directory="${artifacts_root}/coverage"
 # than assuming. Run locally with this exact filter, the test harness
 # (SmoothAiProductContextMemory.TestFramework) sits at 34.08% line coverage against the product's
 # 51.65% over the component projects that exercise it most — below the product, so removing it from
-# the denominator lifts the metric. The 50% floor is therefore unchanged and still meaningful; it is
-# now a claim about the store rather than about the store plus its scaffolding.
+# the denominator lifts the metric. The floor is therefore a claim about the store rather than
+# about the store plus its scaffolding.
 #
 # AppHost IS EXCLUDED, AND THE REASON ABOVE IS NOT THE TRUE ONE — it is measured, not asserted.
 # SmoothAiProductContextMemory.AppHost has three dedicated unit-test classes and this script runs that
@@ -248,8 +248,10 @@ run_phase() {
 }
 
 # Coverage floor: a drop below it fails the gate, so the suite cannot quietly regress. Overridable
-# with COVERAGE_THRESHOLD; the value is a regression guard, not a target.
-coverage_threshold="${COVERAGE_THRESHOLD:-50}"
+# with COVERAGE_THRESHOLD; the value is a regression guard, not a target. Set about ten points under
+# the measured full-suite aggregate (94.6% line on 2026-09-30), so a real regression trips it while
+# ordinary churn does not.
+coverage_threshold="${COVERAGE_THRESHOLD:-85}"
 
 export ASPNETCORE_URLS="http://localhost:19888"
 export ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL="http://localhost:19889"
