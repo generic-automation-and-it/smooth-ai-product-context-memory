@@ -73,7 +73,7 @@ Options:
 |---|---|
 | `--rotate` | Regenerate the tokens even if the file already exists |
 | `--env-file PATH` | Write to a different path (default `.context/mimisbrunnr.env`). The path must be one git ignores — under `.context/`, or a name ending in `.env` — or the run is refused; see below |
-| `--base-url URL` | The skill-side base URL (default `http://localhost:5141`) |
+| `--base-url URL` | The skill-side base URL (default `http://localhost:5141`). Must be a bare `http(s)://host[:port]` origin — anything else is refused, because the env file is `source`d. An existing custom value is kept across a re-split or `--rotate` |
 | `--skip-apphost` | Do not write the AppHost user secrets. The bridge reads the AppHost `csproj` for its `UserSecretsId` and writes the user-secrets store directly, so it needs `python3` (it no longer invokes the .NET SDK at all) |
 | `--allow-unignored-env-file` | Skip the refusal below, for a path this check cannot see as ignored — an untracked parent repository, say |
 

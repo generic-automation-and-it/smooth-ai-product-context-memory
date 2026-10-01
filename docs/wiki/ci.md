@@ -127,9 +127,14 @@ the OpenCode invocation path: OpenCode v2 discovers those independently of
 Such a PR needs human review before the AI gate can safely run.
 
 The same guard also resolves every symlink in the checkout and fails closed on any that
-lands outside it on a credential-bearing target — the sensitive roots, the home directory
-or the filesystem root, the named credential files under `$HOME`, and the runner's
-temporary and tool-cache directories. A deny glob matches the path a model asks for, not
+lands on a credential-bearing target. Outside the checkout that means the sensitive roots,
+the home directory or the filesystem root, the named credential files under `$HOME`, the
+runner's temporary and tool-cache directories, and the system temporary directories
+(`/tmp`, `/var/tmp`, `$TMPDIR`) — each compared after resolving its own symlinks, because on
+macOS `/etc`, `/tmp` and `/var` live under `/private`. Inside the checkout a link is refused
+when its resolved target matches the hardened config's own deny patterns, so
+`docs/x -> .git/config` or a link to an in-repo `.env` is caught while one to `.env.example`
+is not. A deny glob matches the path a model asks for, not
 what it resolves to, so a committed `docs/leak -> /proc/self/environ` link would satisfy
 every deny rule; the target has to be resolved before the model starts.
 
