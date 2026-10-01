@@ -28,6 +28,11 @@ READ_COMMANDS = frozenset({
 UNFRAMED_COMMANDS = frozenset({"probe"})
 FRAMED_COMMANDS = frozenset(READ_COMMANDS - UNFRAMED_COMMANDS)
 
+# Commands whose stdout is a body, not a structured result. They are still framed — the banner is the
+# only framing a raw body can carry — but the body is never parsed and re-serialised, so a blob that
+# happens to be valid JSON comes back byte-identical to what the store holds.
+RAW_BODY_COMMANDS = frozenset({"get-blob"})
+
 
 def main():
     if os.environ.get(client.ENV_WRITE_TOKEN):
@@ -93,24 +98,28 @@ def _run_framed(args):
     raw = buffer.getvalue().strip()
     if not raw:
         return result
+    # Single emission comes from this buffer, not from a banner check: whatever the inner layer printed
+    # is captured here and discarded, and only the re-emitted payload reaches stdout. So an inner
+    # `cmd_query` banner never gets out, and `print_recall` is free to print its own on every path
+    # without coordinating with it.
     payload = _parse_framed_json(raw)
     if payload is _NOT_JSON:
-        # Not JSON — a bare blob body, or a formatted error. The banner is the only framing available
-        # here, since there is no object to carry the field, and the original text is passed through
-        # untouched rather than dropped or guessed at.
-        #
-        # `print_recall` owns the banner everywhere else, and this branch is the one place the read
-        # client emits one itself. Two layers each deciding "has a banner already been printed?" is how
-        # the count reached zero once: the inner layer saw the outer's field and stayed quiet, the outer
-        # saw the inner's banner and stayed quiet, and the notice vanished entirely. One owner, one
-        # decision — this branch is the exception because it is the one with no object to frame.
+        # Not JSON — a bare blob body, or a formatted error. There is no object to carry the field, so
+        # the banner is the only framing available, and the original text is passed through untouched
+        # rather than dropped or guessed at. The notice check is here only so a body that already
+        # arrived framed (an inner layer that printed its own) is not given a second banner.
         if client.RECALL_NOTICE not in raw:
             print(client.BANNER_PREFIX + client.RECALL_NOTICE)
         print(raw)
         return result
-    # A payload that already carries the notice came from the capture client's own framing layer, which
-    # also printed its banner. `print_recall` detects that and reprints nothing, so the notice appears
-    # exactly once whichever layer got there first.
+    if getattr(args, "command", None) in RAW_BODY_COMMANDS:
+        # A blob body that happens to be valid JSON would otherwise be re-serialised into a framed
+        # envelope: the caller asked for a body, not a parsed object, and re-indenting it changes bytes
+        # it may be hashing or diffing. Framing here is the banner only, and the body is passed through.
+        if client.RECALL_NOTICE not in raw:
+            print(client.BANNER_PREFIX + client.RECALL_NOTICE)
+        print(raw)
+        return result
     client.print_recall(payload)
     return result
 
@@ -126,10 +135,6 @@ def _parse_framed_json(raw: str):
     inner one frames on its own. So the text arriving here can be `banner + JSON`, and parsing the whole
     thing as JSON fails — which previously fell through to the not-JSON branch and emitted a *second*
     banner, which reads as emphasis and trains a reader to scroll past it.
-
-    Anything before the first brace is treated as already-emitted prose. A blob body containing a brace
-    would be misread as JSON and fail to parse, landing back in the not-JSON branch, so the fallback
-    still holds for prose.
     """
     try:
         return json.loads(raw)
