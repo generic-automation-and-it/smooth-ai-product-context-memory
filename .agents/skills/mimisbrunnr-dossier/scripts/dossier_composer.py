@@ -1100,7 +1100,7 @@ def read_bundle(path_or_url):
 
 
 def _assert_loopback(base):
-    """N1: the read token is a capability for the whole corpus; send it only to loopback.
+    """The read token is a capability for the whole corpus; send it only to loopback.
 
     The whole first condition of the sibling client's `base_url()` guard, not just the host check:
     a base carrying credentials, a path, a query or a fragment is not an origin, and accepting one
