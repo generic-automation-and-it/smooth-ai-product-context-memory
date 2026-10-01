@@ -22,6 +22,14 @@ DENIED_PATHS = {
     "*/proc/*/cmdline": "deny",
     "*/proc/*/task/*/environ": "deny",
     "*/proc/*/task/*/cmdline": "deny",
+    # OpenCode's own stored provider credentials (`opencode auth login`). CI authenticates through
+    # environment keys and never needs this file, so denying it costs nothing.
+    "*/.local/share/opencode/auth.json": "deny",
+}
+# Carved back out of the `*.env.*` denial: a template carries names, not values. The credential
+# guard's checkout-symlink scan imports both dictionaries so its notion of a denied target matches.
+ALLOWED_PATHS = {
+    "*.env.example": "allow",
 }
 
 
@@ -30,7 +38,7 @@ def fence(value):
         return value
     rules = dict(value) if isinstance(value, dict) else {"*": "allow"}
     rules.update(DENIED_PATHS)
-    rules["*.env.example"] = "allow"
+    rules.update(ALLOWED_PATHS)
     return rules
 
 

@@ -39,7 +39,7 @@ if [ -n "${GITHUB_WORKSPACE:-}" ]; then
   # escaping link (a shared package store, a tool cache) does not fail the gate. Every symlink this
   # repository ships resolves inside the checkout, so on a clean tree this is a no-op.
   #
-  # $HOME and / are in the tuple rather than left to the per-name checks below, because the fence it
+  # $HOME and / are roots rather than left to the per-name checks below, because the fence it
   # complements is default-allow plus a denial list: those checks name a few exact files under $HOME,
   # so a single `ln -s ~ docs` would resolve to a directory holding every one of them — plus the
   # runner's working directories — and reach all of them through a repo path that matches no deny
@@ -49,35 +49,70 @@ if [ -n "${GITHUB_WORKSPACE:-}" ]; then
   # readlink resolves a dangling target only as far as the first real component, so on macOS a link
   # to /proc/self/environ came back as /proc and matched nothing. Python is already required by this
   # guard for the config fence, so it costs no new dependency.
-  python3 - "$workspace" <<'PY' || exit 65
+  #
+  # Two more bypass shapes are closed here. A link that resolves *inside* the checkout is not
+  # automatically safe: `docs/x -> ../.git/config` or a link to a committed-or-generated `.env`
+  # reaches a file the deny globs name through a path they do not, so every target — inside or
+  # outside — is matched against the hardened config's own deny patterns, imported from the adjacent
+  # harden-opencode-config.py so the two lists cannot drift. And the temporary directories (/tmp,
+  # /var/tmp, $TMPDIR) are roots too: they hold other steps' scratch files, which is where a token
+  # written to disk lands. Each root is compared both as written and resolved, because on macOS
+  # /etc, /tmp and /var are themselves symlinks into /private and a resolved target never starts with
+  # the unresolved spelling.
+  python3 - "$workspace" "$(dirname "${BASH_SOURCE[0]}")/harden-opencode-config.py" <<'PY' || exit 65
+import fnmatch
+import importlib.util
 import os
 import sys
 
 workspace = os.path.realpath(sys.argv[1])
-sensitive = ("/proc", "/sys", "/dev", "/etc", "/var/run", "/run", "/var/folders")
+spec = importlib.util.spec_from_file_location("harden_opencode_config", sys.argv[2])
+harden = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(harden)
+denied_patterns = tuple(harden.DENIED_PATHS)
+allowed_patterns = tuple(harden.ALLOWED_PATHS)
+
 home = os.path.expanduser("~")
-# A prefix of "/" is deliberately excluded from the startswith arm below (nothing begins with "//"
-# once resolved) and is handled by the equality test, so `ln -s / docs` is refused too.
-sensitive = sensitive + (home, "/")
+roots = ["/proc", "/sys", "/dev", "/etc", "/var/run", "/run", "/var/folders",
+         "/tmp", "/private/tmp", "/var/tmp", "/private/var/tmp", home]
+for variable in ("RUNNER_TEMP", "RUNNER_TOOL_CACHE", "XDG_CONFIG_HOME", "TMPDIR"):
+    value = os.environ.get(variable)
+    if value:
+        roots.append(value)
+sensitive = set()
+for root in roots:
+    root = root.rstrip("/")
+    if root:
+        sensitive.add(root)
+        sensitive.add(os.path.realpath(root))
+sensitive.discard("/")
 
 
-def is_sensitive(target):
-    for prefix in sensitive:
-        if target == prefix or target.startswith(prefix + "/"):
-            return True
+def under(target, base):
+    return target == base or target.startswith(base.rstrip("/") + "/")
+
+
+def is_sensitive_outside(target):
+    # "/" is handled by equality alone: every resolved path starts with it, so `ln -s / docs` is
+    # refused without the prefix arm refusing everything.
+    if target == "/":
+        return True
+    if any(under(target, root) for root in sensitive):
+        return True
     for relative in (".ssh", ".aws", ".config/gh", ".config/opencode", ".gnupg"):
-        base = os.path.join(home, relative)
-        if target == base or target.startswith(base + "/"):
+        if under(target, os.path.join(home, relative)):
             return True
-    for name in (".netrc", ".git-credentials", ".npmrc", ".pypirc", ".docker/config.json"):
-        base = os.path.join(home, name)
-        if target == base:
-            return True
-    for variable in ("RUNNER_TEMP", "RUNNER_TOOL_CACHE", "XDG_CONFIG_HOME"):
-        root = os.environ.get(variable)
-        if root and (target == root or target.startswith(root.rstrip("/") + "/")):
+    for name in (".netrc", ".git-credentials", ".npmrc", ".pypirc", ".docker/config.json",
+                 ".local/share/opencode/auth.json"):
+        if target == os.path.join(home, name):
             return True
     return False
+
+
+def matches_deny_glob(target):
+    if any(fnmatch.fnmatchcase(target, pattern) for pattern in allowed_patterns):
+        return False
+    return any(fnmatch.fnmatchcase(target, pattern) for pattern in denied_patterns)
 
 
 for directory, dirnames, filenames in os.walk(workspace):
@@ -91,9 +126,8 @@ for directory, dirnames, filenames in os.walk(workspace):
         if name in dirnames:
             dirnames.remove(name)
         target = os.path.realpath(path)
-        if target == workspace or target.startswith(workspace + os.sep):
-            continue
-        if is_sensitive(target):
+        inside = target == workspace or target.startswith(workspace + os.sep)
+        if matches_deny_glob(target) or (not inside and is_sensitive_outside(target)):
             rel = os.path.relpath(path, workspace)
             print(f"refusing a checkout symlink that resolves to a credential-bearing "
                   f"path: {rel}", file=sys.stderr)

@@ -84,7 +84,8 @@ spec = importlib.util.spec_from_file_location("harden", sys.argv[1])
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 for pattern in ("*/proc/*/environ", "*/proc/*/cmdline",
-                "*/proc/*/task/*/environ", "*/proc/*/task/*/cmdline"):
+                "*/proc/*/task/*/environ", "*/proc/*/task/*/cmdline",
+                "*/.local/share/opencode/auth.json"):
     assert pattern in module.DENIED_PATHS, f"{pattern} is not denied"
 PY
 
@@ -129,17 +130,53 @@ if (cd "$scratch/project/nested" && GITHUB_WORKSPACE="$scratch/project" \
   exit 1
 fi
 rm -f "$scratch/project/docs-leak" "$scratch/project/creds" "$scratch/project/docs"
+
+# Each case below plants one symlink, expects the guard to refuse it, and removes it again.
+expect_symlink_refused() {
+  local link="$1" target="$2" why="$3"
+  ln -s "$target" "$scratch/project/$link"
+  if (cd "$scratch/project/nested" && GITHUB_WORKSPACE="$scratch/project" \
+      "$scratch/opencode" --version >/dev/null 2>&1); then
+    echo "symlink was not rejected: $why" >&2
+    exit 1
+  fi
+  rm -f "$scratch/project/$link"
+}
+expect_symlink_accepted() {
+  local link="$1" target="$2" why="$3"
+  ln -s "$target" "$scratch/project/$link"
+  (cd "$scratch/project/nested" && GITHUB_WORKSPACE="$scratch/project" \
+    "$scratch/opencode" --version >/dev/null) || { echo "symlink was wrongly rejected: $why" >&2; exit 1; }
+  rm -f "$scratch/project/$link"
+}
+
+# A target *inside* the checkout is not automatically safe: the deny globs name `.git` and `.env`
+# files, and a link reaches them through a path those globs do not match.
+mkdir -p "$scratch/project/.git" "$scratch/project/.github/instructions"
+printf '[credential]\n' > "$scratch/project/.git/config"
+printf 'TOKEN=synthetic\n' > "$scratch/project/.env"
+printf 'TOKEN=\n' > "$scratch/project/.env.example"
+expect_symlink_refused git-config .git/config 'in-checkout link to .git/config'
+expect_symlink_refused git-dir .git 'in-checkout link to the .git directory'
+expect_symlink_refused dotenv .env 'in-checkout link to .env'
+expect_symlink_refused dotenv-local ../project/.env 'in-checkout link to .env via a parent hop'
+expect_symlink_accepted dotenv-template .env.example 'in-checkout link to .env.example'
+# The temporary directories hold other steps' scratch files; /private/tmp is macOS's real /tmp.
+expect_symlink_refused tmp-leak /tmp/opencode-guard-probe 'link into /tmp'
+expect_symlink_refused private-tmp-leak /private/tmp/opencode-guard-probe 'link into /private/tmp'
+expect_symlink_refused var-tmp-leak /var/tmp/opencode-guard-probe 'link into /var/tmp'
+# /etc resolves to /private/etc on macOS, so an unresolved root never matched a resolved target there.
+expect_symlink_refused etc-leak /etc/hosts 'link into /etc'
+# $TMPDIR is a root wherever it points; /usr/share is otherwise benign (accepted below).
+TMPDIR=/usr/share expect_symlink_refused tmpdir-leak /usr/share/opencode-guard-probe 'link into $TMPDIR'
+rm -f "$scratch/project/.env" "$scratch/project/.env.example"
+rm -rf "$scratch/project/.git"
+
 # An in-checkout symlink is the shape this repository itself ships, and must keep working.
-ln -s ../.github/instructions "$scratch/project/rules"
-(cd "$scratch/project/nested" && GITHUB_WORKSPACE="$scratch/project" \
-  "$scratch/opencode" --version >/dev/null)
-rm -f "$scratch/project/rules"
+expect_symlink_accepted rules .github/instructions 'in-checkout link to a plain directory'
 # ... and so must a symlink out to a location that carries nothing sensitive.
-mkdir -p "$scratch/cache"
-ln -s "$scratch/cache" "$scratch/project/tool-cache"
-(cd "$scratch/project/nested" && GITHUB_WORKSPACE="$scratch/project" \
-  "$scratch/opencode" --version >/dev/null)
-rm -f "$scratch/project/tool-cache"
+expect_symlink_accepted tool-cache /usr/share 'outside link to a non-sensitive location'
+rm -rf "$scratch/project/.github"
 
 cat > "$scratch/installer" <<'FAKE_INSTALL'
 #!/usr/bin/env bash
