@@ -12,6 +12,7 @@ import os
 import re
 import socket
 import sys
+import time
 import urllib.error
 import urllib.request
 from urllib.parse import urlparse
@@ -32,6 +33,17 @@ MAX_QUERY_LIMIT = 200
 
 HTTP_TIMEOUT = 30
 
+# One foreground deadline for a recall command, in seconds. `CONTEXT_MEMORY_RECALL_DEADLINE` may
+# shorten it, never extend it past this cap: a recall that outlives the caller's patience is worse than
+# one that returns the passes it completed. The cap is deliberately larger than `HTTP_TIMEOUT`, because
+# deepsearch makes many calls and the deadline bounds the whole command while `HTTP_TIMEOUT` bounds one
+# socket read. Out-of-range or unparseable values are refused rather than silently defaulted — a budget
+# that quietly becomes something other than what was asked for is worse than no budget. The failure this
+# avoids is the restore statement-budget defect: a server raised its budget while the client obeyed its
+# own, so the effective budget was the smaller of two values nobody compared.
+RECALL_DEADLINE_SECONDS = 60
+ENV_RECALL_DEADLINE = "CONTEXT_MEMORY_RECALL_DEADLINE"
+
 
 class ClientError(RuntimeError):
     """A non-success HTTP response, surfaced as a machine-readable error."""
@@ -43,7 +55,43 @@ class ClientError(RuntimeError):
         self.body = body
 
 
-def _classify_transport_error(exc):
+def recall_deadline():
+    """The foreground deadline for one recall command, in seconds.
+
+    Config may shorten the deadline, never extend it past `RECALL_DEADLINE_SECONDS`. A value that is not
+    an integer, or is outside 1..cap, is refused rather than defaulted: silently clamping would let an
+    operator believe a recall has a budget it does not have, which is the class of bug the deadline
+    exists to close.
+    """
+    raw = os.environ.get(ENV_RECALL_DEADLINE)
+    if raw is None or raw == "":
+        return RECALL_DEADLINE_SECONDS
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        raise ClientError(
+            0, "bad-deadline",
+            f"{ENV_RECALL_DEADLINE} must be an integer number of seconds",
+        ) from None
+    if value < 1 or value > RECALL_DEADLINE_SECONDS:
+        raise ClientError(
+            0, "bad-deadline",
+            f"{ENV_RECALL_DEADLINE} must be between 1 and {RECALL_DEADLINE_SECONDS} seconds; a "
+            "configured deadline may shorten a recall, never extend it past the cap",
+        )
+    return value
+
+
+def recall_timeout():
+    """The per-request socket timeout for a read, bounded by the command deadline.
+
+    A single call cannot outlast the command that issued it, so the effective timeout is the smaller of
+    the socket budget and the recall deadline.
+    """
+    return min(HTTP_TIMEOUT, recall_deadline())
+
+
+def _classify_transport_error(exc, timeout=HTTP_TIMEOUT):
     """`ClientError` for a transport failure, keeping a timeout distinct from a refusal.
 
     `urllib.error.URLError` covers the connect phase, but a read that times out on an
@@ -60,7 +108,7 @@ def _classify_transport_error(exc):
     """
     if isinstance(exc, (TimeoutError, socket.timeout)):
         return ClientError(
-            0, "timed-out", f"no response within {HTTP_TIMEOUT}s; the store accepted the connection "
+            0, "timed-out", f"no response within {timeout:g}s; the store accepted the connection "
             f"but did not answer"
         )
     return ClientError(0, "unreachable", str(exc))
@@ -69,18 +117,25 @@ def _classify_transport_error(exc):
 # A context manager wrapping the read-and-decode, so every transport site shares one handler set
 # instead of repeating the same four `except` lines. `cmd_get_blob` used to carry its own copy, which
 # is exactly how a fix lands in one and misses the other.
-def _read_response(request):
-    """Perform the request, return the decoded body, and classify every failure the same way."""
+def _read_response(request, timeout=None):
+    """Perform the request, return the decoded body, and classify every failure the same way.
+
+    `timeout` is the socket budget for this one call. Left unset it is the recall timeout — the smaller
+    of `HTTP_TIMEOUT` and the command deadline — so a read is bounded by the deadline without every call
+    site passing it. deepsearch passes the *remaining* budget per pass, which is tighter still.
+    """
+    if timeout is None:
+        timeout = recall_timeout()
     try:
-        with _open(request) as resp:
+        with _open(request, timeout) as resp:
             return resp.read().decode("utf-8")
     except urllib.error.HTTPError as e:
         raise ClientError(e.code, e.reason, e.read().decode("utf-8", errors="replace")) from e
     except urllib.error.URLError as e:
         # A connect-phase timeout arrives wrapped in URLError; the reason carries the timeout.
-        raise _classify_transport_error(e.reason) from e
+        raise _classify_transport_error(e.reason, timeout) from e
     except (TimeoutError, socket.timeout) as e:
-        raise _classify_transport_error(e) from e
+        raise _classify_transport_error(e, timeout) from e
     except OSError as e:
         # A connection that is accepted and then reset mid-response raises neither URLError nor
         # TimeoutError — it surfaces as a bare ConnectionResetError or BrokenPipeError, both OSError
@@ -90,7 +145,7 @@ def _read_response(request):
         #
         # Classified as `unreachable`, not `timed-out`: a reset is not a hang, and the caller's
         # response to the two differs.
-        raise _classify_transport_error(e) from e
+        raise _classify_transport_error(e, timeout) from e
 
 
 def _parse_base(value):
@@ -127,10 +182,10 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         raise ClientError(code, "redirect-refused", "Credential-bearing requests do not follow redirects")
 
 
-def _open(request):
+def _open(request, timeout=HTTP_TIMEOUT):
     return urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect).open(
         request,
-        timeout=HTTP_TIMEOUT)
+        timeout=timeout)
 
 
 _UUID_PATTERN = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
@@ -198,7 +253,7 @@ def is_write_route(method, path):
     return any(method == verb and template.fullmatch(path) for verb, template in WRITE_ROUTE_TEMPLATES)
 
 
-def _request(method, path, payload=None, query=None):
+def _request(method, path, payload=None, query=None, timeout=None):
     url = base_url() + path
     if query:
         from urllib.parse import urlencode
@@ -206,7 +261,8 @@ def _request(method, path, payload=None, query=None):
         url += "?" + urlencode(query)
 
     body = None
-    token_name = ENV_WRITE_TOKEN if is_write_route(method, path) else ENV_READ_TOKEN
+    write = is_write_route(method, path)
+    token_name = ENV_WRITE_TOKEN if write else ENV_READ_TOKEN
     token = os.environ.get(token_name)
     if not token:
         raise ClientError(0, "missing-credential", f"{token_name} is required")
@@ -215,8 +271,13 @@ def _request(method, path, payload=None, query=None):
         body = json.dumps(payload).encode("utf-8")
         headers["Content-Type"] = "application/json"
 
+    if timeout is None:
+        # A read is bounded by the command deadline; a write is not a recall and keeps the socket
+        # timeout, so a malformed read-path setting cannot refuse a capture.
+        timeout = HTTP_TIMEOUT if write else recall_timeout()
+
     req = urllib.request.Request(url, data=body, headers=headers, method=method)
-    raw = _read_response(req)
+    raw = _read_response(req, timeout)
     return json.loads(raw) if raw else None
 
 
