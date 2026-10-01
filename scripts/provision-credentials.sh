@@ -45,15 +45,19 @@
 #     --rotate                   regenerate the tokens even if the file already exists
 #     --env-file                 write to this path (default .context/mimisbrunnr.env); a relative
 #                                path is resolved against the caller's cwd
-#     --base-url                 the skill-side base URL (default http://localhost:5141)
+#     --base-url                 the skill-side base URL: a bare http(s) origin, anything else is
+#                                refused (default: the file's existing value, else
+#                                http://localhost:5141); naming a different one rewrites the pair
+#                                keeping the tokens
 #     --skip-apphost             do not write the AppHost user secrets; the bridge needs python3,
 #                                not the .NET SDK (it reads the csproj with sed and writes the
-#                                store directly), so this is only for a gitignored or absent env
+#                                store directly), so this is only for a gitignored or absent env.
+#                                With --rotate it warns if those secrets still hold the old pair
 #     --allow-unignored-env-file skip the git-ignore refusal below, for a path this check cannot see
 #                                as ignored
 #
-# Idempotent: re-running without --rotate reuses the existing tokens and just reprints the export
-# lines. Secrets must never be committed — *.env and .context/ are both gitignored.
+# Idempotent: re-running without --rotate reuses the existing tokens (re-asserting mode 600) and just
+# reprints the export lines. Secrets must never be committed — *.env and .context/ are both gitignored.
 
 set -euo pipefail
 
@@ -67,21 +71,50 @@ umask 077
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APPHOST_PROJECT="${ROOT_DIR}/src/SmoothAiProductContextMemory.AppHost"
 ENV_FILE="${ROOT_DIR}/.context/mimisbrunnr.env"
-BASE_URL="http://localhost:5141"
+DEFAULT_BASE_URL="http://localhost:5141"
+BASE_URL=""
+BASE_URL_GIVEN=0
 ROTATE=0
 WRITE_APPHOST=1
 ALLOW_UNIGNORED=0
+
+# Temp files that may hold a token are removed on every exit path. A bare signal does not run an EXIT
+# trap in every shell, so each one is converted to an `exit` that does.
+TEMP_FILES=()
+cleanup_temp_files() {
+  local f
+  for f in ${TEMP_FILES[@]+"${TEMP_FILES[@]}"}; do rm -f "$f"; done
+}
+trap cleanup_temp_files EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --rotate) ROTATE=1; shift ;;
     --env-file) ENV_FILE="$2"; shift 2 ;;
-    --base-url) BASE_URL="$2"; shift 2 ;;
+    --base-url) BASE_URL="$2"; BASE_URL_GIVEN=1; shift 2 ;;
     --skip-apphost) WRITE_APPHOST=0; shift ;;
     --allow-unignored-env-file) ALLOW_UNIGNORED=1; shift ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
+
+# The base URL is written into a file that consumers `source`, so it is shell input: an unvalidated
+# `--base-url 'http://x/$(touch pwned)'` would run on every source. It is held to a bare http(s)
+# origin — host name, IPv4 or bracketed IPv6, optional port — whose character set contains nothing a
+# shell assignment can expand. The line stays unquoted on purpose: the same file is the standalone
+# Host's `docker run --env-file`, which keeps quote characters as part of the value.
+BASE_URL_PATTERN='^https?://([A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?|\[[0-9A-Fa-f:.]+\])(:[0-9]{1,5})?/?$'
+base_url_valid() {
+  [[ "$1" =~ $BASE_URL_PATTERN ]]
+}
+if [[ "$BASE_URL_GIVEN" -eq 1 ]] && ! base_url_valid "$BASE_URL"; then
+  echo "refusing --base-url: it must be a bare http(s) origin (scheme, host, optional port) with no" >&2
+  echo "  credentials, path, query or shell metacharacters." >&2
+  exit 2
+fi
 
 # Anchor a relative --env-file to the caller's working directory now, before anything reads it. The
 # writes below resolve it against the caller's cwd, but the ignore check below runs from ROOT_DIR, so
@@ -135,6 +168,31 @@ elif [[ ! -f "${ENV_FILE}.controller" ]] || grep -q '^Parameters__' "$ENV_FILE";
   needs_write=1   # re-split the pair, keeping the existing token values
 fi
 
+# The base URL is part of the file, not of the run: a re-split or a `--rotate` that does not name one
+# keeps the file's own value rather than resetting a custom origin to the default. The kept value was
+# written by an earlier run or by hand, so it is re-validated before it is written back. An explicit
+# `--base-url` that differs from the file's value rewrites the pair, keeping the tokens.
+rewrite_reason=""
+existing_base=""
+if [[ -f "$ENV_FILE" ]]; then
+  existing_base="$(grep -m1 '^CONTEXT_MEMORY_BASE_URL=' "$ENV_FILE" | cut -d= -f2- || true)"
+fi
+if [[ "$BASE_URL_GIVEN" -eq 0 ]]; then
+  if [[ -n "$existing_base" ]]; then
+    if ! base_url_valid "$existing_base"; then
+      echo "refusing to reuse ${ENV_FILE}: its CONTEXT_MEMORY_BASE_URL is not a bare http(s) origin." >&2
+      echo "  Pass --base-url to replace it." >&2
+      exit 1
+    fi
+    BASE_URL="$existing_base"
+  else
+    BASE_URL="$DEFAULT_BASE_URL"
+  fi
+elif [[ -f "$ENV_FILE" && "$BASE_URL" != "$existing_base" && "$needs_write" -eq 0 ]]; then
+  needs_write=1
+  rewrite_reason="base-url"
+fi
+
 if [[ "$regenerate" -eq 1 ]]; then
   READ_TOKEN="$(openssl rand -hex 32)"
   WRITE_TOKEN="$(openssl rand -hex 32)"
@@ -176,11 +234,17 @@ else
   # Reuse, whether or not the pair is rewritten. The re-split branch above sets needs_write without
   # regenerate, and this branch is only reachable when the file exists, so the parse always has the
   # ApiAccess__* names to read.
-  if [[ "$needs_write" -eq 1 ]]; then
+  if [[ "$rewrite_reason" == "base-url" ]]; then
+    echo "Rewriting the base URL in ${ENV_FILE}, keeping the existing tokens" >&2
+  elif [[ "$needs_write" -eq 1 ]]; then
     echo "Re-splitting the credential pair in ${ENV_FILE}, keeping the existing tokens" >&2
   else
     echo "Reusing existing credentials in ${ENV_FILE}" >&2
   fi
+  # A redirect rewrites a file's contents but not its mode, and an operator's copy or editor may have
+  # widened an existing file, so owner-only is re-asserted on every reuse rather than only on create.
+  chmod 600 "$ENV_FILE"
+  [[ ! -f "${ENV_FILE}.controller" ]] || chmod 600 "${ENV_FILE}.controller"
   # `|| true` on both greps: under `set -e` a missing line aborts the assignment silently, and an env
   # file with no `ApiAccess__*` name is exactly the truncated case the check below refuses loudly.
   READ_TOKEN="$(grep -m1 '^ApiAccess__ReadToken=' "$ENV_FILE" | cut -d= -f2- || true)"
@@ -213,7 +277,7 @@ fi
 # printed a token and had no controller env file at all.
 if [[ "$needs_write" -eq 1 && "$regenerate" -eq 0 ]]; then
   cat > "${ENV_FILE}" <<EOF
-# Mímisbrunnr API credentials — re-split $(date -u +%Y-%m-%dT%H:%M:%SZ), token values unchanged.
+# Mímisbrunnr API credentials — rewritten $(date -u +%Y-%m-%dT%H:%M:%SZ), token values unchanged.
 # Sourceable (valid identifiers only) and usable as the standalone Host's \`--env-file\`.
 ApiAccess__ReadToken=${READ_TOKEN}
 ApiAccess__WriteToken=${WRITE_TOKEN}
@@ -223,7 +287,7 @@ CONTEXT_MEMORY_BASE_URL=${BASE_URL}
 EOF
   chmod 600 "$ENV_FILE"
   cat > "${ENV_FILE}.controller" <<EOF
-# Mímisbrunnr controller credentials — re-split $(date -u +%Y-%m-%dT%H:%M:%SZ). Pass to the
+# Mímisbrunnr controller credentials — rewritten $(date -u +%Y-%m-%dT%H:%M:%SZ). Pass to the
 # published \`-apphost\` controller via \`--env-file\`. The Parameters__* names are not shell
 # identifiers, so this file is for a container env-file, never for \`source\`.
 Parameters__api-read-token=${READ_TOKEN}
@@ -231,6 +295,19 @@ Parameters__api-write-token=${WRITE_TOKEN}
 EOF
   chmod 600 "${ENV_FILE}.controller"
 fi
+
+# The AppHost user-secrets store for this project, or nothing when the project or its id is absent.
+apphost_secrets_file() {
+  local csproj="${APPHOST_PROJECT}/SmoothAiProductContextMemory.AppHost.csproj" id
+  [[ -f "$csproj" ]] || return 0
+  id="$(sed -n 's:.*<UserSecretsId>\(.*\)</UserSecretsId>.*:\1:p' "$csproj" | head -1)"
+  [[ -n "$id" ]] || return 0
+  if [[ -n "${APPDATA:-}" ]]; then
+    printf '%s\n' "${APPDATA}/Microsoft/UserSecrets/${id}/secrets.json"
+  else
+    printf '%s\n' "${HOME}/.microsoft/usersecrets/${id}/secrets.json"
+  fi
+}
 
 if [[ "$WRITE_APPHOST" -eq 1 ]]; then
   if [[ -f "${APPHOST_PROJECT}/SmoothAiProductContextMemory.AppHost.csproj" ]]; then
@@ -241,22 +318,17 @@ if [[ "$WRITE_APPHOST" -eq 1 ]]; then
     # already there so an unrelated secret is not clobbered, and replaced atomically so a
     # concurrent reader sees either the old file or the new one, never a half-written one.
     write_apphost_secrets() {
-      local id target dir tmp
-      id="$(sed -n 's:.*<UserSecretsId>\(.*\)</UserSecretsId>.*:\1:p' \
-        "${APPHOST_PROJECT}/SmoothAiProductContextMemory.AppHost.csproj" | head -1)"
-      if [[ -z "$id" ]]; then
+      local target dir tmp
+      target="$(apphost_secrets_file)"
+      if [[ -z "$target" ]]; then
         echo "warning: no <UserSecretsId> in the AppHost project; skipping the user-secrets bridge" >&2
         return 0
       fi
-      if [[ -n "${APPDATA:-}" ]]; then
-        dir="${APPDATA}/Microsoft/UserSecrets/${id}"
-      else
-        dir="${HOME}/.microsoft/usersecrets/${id}"
-      fi
-      target="${dir}/secrets.json"
+      dir="$(dirname "$target")"
       mkdir -p "$dir"
       chmod 700 "$dir" 2>/dev/null || true
       tmp="$(mktemp "${dir}/.secrets.XXXXXX")"
+      TEMP_FILES+=("$tmp")
       SECRETS_TARGET="$target" SECRETS_TMP="$tmp" \
       SECRETS_READ="$READ_TOKEN" SECRETS_WRITE="$WRITE_TOKEN" \
         python3 - <<'PY'
@@ -289,6 +361,21 @@ PY
     echo "${ENV_FILE}.controller via --env-file (it carries Parameters__api-read-token / __api-write-token)." >&2
   else
     echo "warning: AppHost project not found at ${APPHOST_PROJECT}; skipping AppHost bridge" >&2
+  fi
+elif [[ "$regenerate" -eq 1 ]]; then
+  # New tokens with the bridge skipped leave any earlier AppHost user secrets holding the old pair, and
+  # Aspire injects those into the Host — so an AppHost run 403s every skill request with no hint why.
+  # Only the key names are checked; the stored values are never read into this shell.
+  stale_secrets="$(apphost_secrets_file)"
+  if [[ -n "$stale_secrets" && -f "$stale_secrets" ]] \
+      && grep -qE '"Parameters:api-(read|write)-token"' "$stale_secrets"; then
+    echo "" >&2
+    echo "WARNING: new tokens were minted with --skip-apphost, but the AppHost user secrets at" >&2
+    echo "  ${stale_secrets}" >&2
+    echo "  still hold the PREVIOUS Parameters:api-read-token / api-write-token. An AppHost run will" >&2
+    echo "  inject those stale tokens and every skill request will 403. Re-run without --skip-apphost" >&2
+    echo "  to update them, or remove those two keys from that file." >&2
+    echo "" >&2
   fi
 fi
 
