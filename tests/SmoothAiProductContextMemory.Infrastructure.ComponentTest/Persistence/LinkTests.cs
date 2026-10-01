@@ -50,6 +50,10 @@ public sealed class LinkTests : PersistenceTestBase
     [InlineData("interior \"quotes\" that do not lead the value")]
     [InlineData("\"a\" and \"b\" two quoted runs")]
     [InlineData("a value ending in a quote \"")]
+    [InlineData("line one\nline two")]
+    [InlineData("a back\\slash and a trailing one \\")]
+    [InlineData("Mímisbrunnr – ✓")]
+    [InlineData("\"all\" of them: \\ then\nMímisbrunnr – ✓ \"")]
     public async Task Reason_RoundTripsExactly_EvenWhenQuoteLed(string reason)
     {
         // A ::text cast of a string property already yields the value, so a quote-led reason is data,
