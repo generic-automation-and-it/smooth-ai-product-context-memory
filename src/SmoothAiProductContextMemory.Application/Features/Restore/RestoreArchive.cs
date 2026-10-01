@@ -48,7 +48,7 @@ public static class RestoreArchive
             logger.LogInformation("Restore started");
 
             // Verifying the archive is a prerequisite to any mutation, so a tampered archive (or one
-            // the verifier already rejects) is refused before either store is touched (R01). The
+            // the verifier already rejects) is refused before either store is touched. The
             // refusal carries the findings as payload so the operator learns which member failed;
             // the message stays shape-only (NFR-05).
             SnapshotVerification verification = await archive.VerifyAsync(request.ArchivePath, cancellationToken);
@@ -69,7 +69,7 @@ public static class RestoreArchive
 
             // One open reads the members once and carries both the deserialised capture and the open
             // archive — restore needs both, and reading them separately would materialise the tar
-            // twice (H13).
+            // twice.
             SnapshotArchive opened = await archive.ReadAsync(request.ArchivePath, cancellationToken);
             SnapshotCapture capture = opened.Capture;
 
@@ -170,7 +170,7 @@ public static class RestoreArchive
             CancellationToken cancellationToken)
         {
             // Restore must prove each destination body hashes to its address and refuse a corrupted
-            // or mismatched pre-existing object, not merely confirm a key exists (R03). The S3 writer
+            // or mismatched pre-existing object, not merely confirm a key exists. The S3 writer
             // skips upload when the destination key already exists, so existence is not integrity.
             int present = 0;
             foreach (string address in addresses)

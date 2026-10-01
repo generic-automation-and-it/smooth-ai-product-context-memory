@@ -21,7 +21,7 @@ public sealed class S3BlobStorageTests(AspireFixture aspire, ITestOutputHelper o
 
     // xUnit v3 does not inject ITestOutputHelper into a collection fixture, so forward the test's
     // helper into the fixture — otherwise the bucket-cleanup report callback is a no-op and a
-    // swallowed cleanup failure stays invisible (the defect class batch3 closed).
+    // swallowed cleanup failure stays invisible.
     public async ValueTask InitializeAsync()
     {
         aspire.SetOutput(output);

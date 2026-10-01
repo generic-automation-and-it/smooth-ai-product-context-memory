@@ -163,7 +163,7 @@ public class TarSnapshotArchiveTests
     [Fact]
     public async Task Verify_Detects_AlteredManifestCount()
     {
-        // An altered manifest count on an untouched archive must be caught (R02). Verify reconciles
+        // An altered manifest count on an untouched archive must be caught. Verify reconciles
         // every counted corpus row against the archive, not just the blob/object count.
         string path = TempArchive();
         string address = Sha256ContentAddress.Compute(Body);

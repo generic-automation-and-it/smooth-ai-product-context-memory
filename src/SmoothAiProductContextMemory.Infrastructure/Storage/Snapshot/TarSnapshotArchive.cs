@@ -30,7 +30,7 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
         Directory.CreateDirectory(directory);
 
         // Write to a temp path and move it into place only on success, so a failure mid-write leaves
-        // no truncated archive at the destination (H12). The move is an atomic *replace*, not a
+        // no truncated archive at the destination. The move is an atomic *replace*, not a
         // refusal to overwrite: an existing archive at the destination is superseded only by a
         // complete write. Refusing a non-empty destination is a different guarantee, and the
         // Markdown export sink is where that one lives.
@@ -392,7 +392,7 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
         ICollection<SnapshotFinding> findings)
     {
         // Every corpus count the manifest records must match what the archive actually holds; an
-        // altered manifest count on an untouched archive must be caught here (R02).
+        // altered manifest count on an untouched archive must be caught here.
         CheckCount(entries, SnapshotEntryNames.Memories, manifest.Counts.Memories, "memory", findings);
         CheckCount(entries, SnapshotEntryNames.MemoryVersions, manifest.Counts.Versions, "memory version", findings);
         CheckCount(entries, SnapshotEntryNames.Vertices, manifest.Counts.Vertices, "graph vertex", findings);

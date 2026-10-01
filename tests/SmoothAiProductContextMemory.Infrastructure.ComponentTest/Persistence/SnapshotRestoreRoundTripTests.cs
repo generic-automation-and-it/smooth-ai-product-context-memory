@@ -54,7 +54,7 @@ public sealed class SnapshotRestoreRoundTripTests : PersistenceTestBase
     {
         // The round trip writes bodies into the snap-shot and snap-target buckets; without a drain
         // MinIO refuses to remove them (BucketNotEmpty) and every run leaks another bucket. This is
-        // the one bucket-owning fixture BlobBucketCleanup did not reach (batch3 closure of finding 2).
+        // the one bucket-owning fixture BlobBucketCleanup did not reach.
         foreach (string bucket in _buckets)
         {
             await BlobBucketCleanup.DeleteBlobBucketAsync(

@@ -17,7 +17,7 @@ public interface ISnapshotArchive
     /// cross-store inconsistency to be surfaced, not a reason to skip the body. A dangling (unresolvable)
     /// body cannot be written. Copies are never deleted; accounting is reporting only (LADR-06).
     /// <see cref="ReadBlob"/> returns the body plus the SHA-256 already computed by the capture walk,
-    /// so the writer does not hash every blob a second time to fill its manifest entry (H13), and the
+    /// so the writer does not hash every blob a second time to fill its manifest entry, and the
     /// content type captured at read time so the manifest entry can carry it. The token reaches every
     /// blob read and every member write; a cancelled write leaves no archive and no temp file behind.
     /// </summary>
@@ -61,7 +61,7 @@ public sealed record SnapshotWriteReport(
 /// capture, and accessors for reading a blob body by its content address or testing for one.
 /// The blob accessors encapsulate the archive's blob entry-name convention so callers never see the
 /// <c>blobs/</c> prefix. The capture is carried here so a caller that needs both the capture and the
-/// open archive (restore) does not read and materialise the tar twice (H13).
+/// open archive (restore) does not read and materialise the tar twice.
 /// </summary>
 public sealed record SnapshotArchive(
     SnapshotManifest Manifest,

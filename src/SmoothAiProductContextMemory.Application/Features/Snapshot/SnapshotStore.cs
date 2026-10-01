@@ -110,7 +110,7 @@ public static class SnapshotStore
                 await content.Content.CopyToAsync(buffer, cancellationToken);
                 byte[] bytes = buffer.ToArray();
                 // The writer uses this precomputed hash for the manifest entry, so it does not hash
-                // every body a second time (H13). The content type travels with the body so the
+                // every body a second time. The content type travels with the body so the
                 // manifest entry records it (HLD-006).
                 return (bytes, Convert.ToHexStringLower(SHA256.HashData(bytes)), content.ContentType);
             }
