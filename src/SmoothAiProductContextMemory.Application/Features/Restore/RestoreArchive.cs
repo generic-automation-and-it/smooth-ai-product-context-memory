@@ -84,6 +84,20 @@ public static class RestoreArchive
                     $"Archive is missing {missing.Length} referenced blob entr(ies); restore is refused so the database is never left citing absent bodies. This is either a truncated/tampered archive, or the blob body was never archived because it was already unresolvable at capture.");
             }
 
+            // Verify already rejects these; checked again at the point of use because the value is
+            // written verbatim as the stored object's Content-Type and is not covered by any hash.
+            SnapshotFinding[] badContentTypes = addresses
+                .Where(a => !SnapshotContentTypes.IsAllowed(opened.BlobContentType(a)))
+                .Select(a => new SnapshotFinding(
+                    SnapshotFindingKind.Corruption,
+                    $"blobs/{a}",
+                    "Manifest records a content type this system never writes, or one that is malformed."))
+                .ToArray();
+            if (badContentTypes.Length > 0)
+            {
+                throw new ArchiveVerificationFailedException(badContentTypes, badContentTypes.Length);
+            }
+
             // Refuse a non-empty target before writing anything to either store; the repository
             // re-checks inside its transaction.
             if (!request.OverrideNonEmpty

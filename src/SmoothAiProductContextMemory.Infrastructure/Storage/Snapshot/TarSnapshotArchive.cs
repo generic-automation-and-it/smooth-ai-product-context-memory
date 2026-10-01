@@ -287,6 +287,15 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
                 continue;
             }
 
+            if (!SnapshotContentTypes.IsAllowed(expected.ContentType))
+            {
+                // The type is restored verbatim as the object's Content-Type, and the manifest is not
+                // hash-declared, so an unrecognised value is tamper rather than data. The value itself
+                // is not echoed: it is attacker-shaped text in an operator report.
+                findings.Add(new SnapshotFinding(SnapshotFindingKind.Corruption, expected.Name,
+                    "Manifest records a content type this system never writes, or one that is malformed."));
+            }
+
             if (!entries.TryGetValue(expected.Name, out byte[]? content))
             {
                 findings.Add(new SnapshotFinding(SnapshotFindingKind.MissingEntry, expected.Name,

@@ -546,6 +546,58 @@ public class TarSnapshotArchiveTests
             .ContainsBlob(address).ShouldBeFalse();
     }
 
+    [Theory]
+    [InlineData("text/plain\r\nX-Injected: 1")]
+    [InlineData("text/html")]
+    [InlineData("text/plain; charset=utf-8; boundary=x")]
+    [InlineData("text/plain; charset=latin1")]
+    [InlineData("not a media type")]
+    public async Task Verify_Refuses_ABlobContentTypeTheSystemNeverWrites(string contentType)
+    {
+        // The content type rides in the manifest, which nothing hashes, and restore writes it verbatim
+        // as the stored object's Content-Type. An edited value therefore verified clean.
+        string tampered = await ArchiveWithBlobContentTypeAsync(contentType);
+
+        SnapshotVerification verification = await _archive.VerifyAsync(tampered, TestContext.Current.CancellationToken);
+
+        verification.IsClean.ShouldBeFalse();
+        SnapshotFinding finding = verification.Findings.ShouldHaveSingleItem();
+        finding.Kind.ShouldBe(SnapshotFindingKind.Corruption);
+        finding.EntryName.ShouldNotBeNull().ShouldStartWith("blobs/");
+        finding.Message.ShouldNotContain(contentType);
+    }
+
+    [Theory]
+    [InlineData("text/plain; charset=utf-8")]
+    [InlineData("text/plain")]
+    [InlineData("application/octet-stream")]
+    public async Task Verify_Accepts_TheContentTypesTheSystemWrites(string contentType)
+    {
+        string archive = await ArchiveWithBlobContentTypeAsync(contentType);
+
+        SnapshotVerification verification = await _archive.VerifyAsync(archive, TestContext.Current.CancellationToken);
+
+        verification.IsClean.ShouldBeTrue();
+    }
+
+    private async Task<string> ArchiveWithBlobContentTypeAsync(string contentType)
+    {
+        string path = TempArchive();
+        string address = Sha256ContentAddress.Compute(Body);
+        (SnapshotCapture capture, SnapshotWalkResult walk) = Capture(address, SnapshotBlobState.Ok);
+        await _archive.WriteAsync(path, capture, walk, _ => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)"text/plain; charset=utf-8")), TestContext.Current.CancellationToken);
+
+        Dictionary<string, byte[]> entries = ReadTar(path);
+        SnapshotManifest manifest = JsonSerializer.Deserialize<SnapshotManifest>(entries[SnapshotEntryNames.Manifest], Json)!;
+        entries[SnapshotEntryNames.Manifest] = JsonSerializer.SerializeToUtf8Bytes(manifest with
+        {
+            Entries = [.. manifest.Entries.Select(e => e.Name == $"blobs/{address}" ? e with { ContentType = contentType } : e)],
+        }, Json);
+        string rewritten = TempArchive();
+        WriteTar(rewritten, entries);
+        return rewritten;
+    }
+
     /// <summary>
     /// Replaces the manifest's entry list with raw JSON, so a null element or an entry with no name
     /// can be written at all — neither is expressible through the strongly-typed model.

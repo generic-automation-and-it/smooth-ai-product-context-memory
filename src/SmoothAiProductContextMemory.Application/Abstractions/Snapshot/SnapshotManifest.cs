@@ -1,3 +1,5 @@
+using System.Net.Http.Headers;
+
 namespace SmoothAiProductContextMemory.Application.Abstractions.Snapshot;
 
 /// <summary>
@@ -27,6 +29,38 @@ public sealed record SnapshotManifest(
 /// would start at capture if the field were absent from the archive (HLD-006).
 /// </summary>
 public sealed record SnapshotArchiveEntry(string Name, string Sha256, long Size, string? ContentType = null);
+
+/// <summary>
+/// The blob content types an archive may carry. <see cref="SnapshotArchiveEntry.ContentType"/> sits in
+/// the manifest, the one member nothing hash-declares, and restore hands it to the object store as the
+/// stored object's <c>Content-Type</c> — so it is untrusted input. Only what this system writes is
+/// accepted: the write path stores <c>text/plain; charset=utf-8</c>, and the object store defaults an
+/// absent type to <c>application/octet-stream</c>. Anything else is a manifest the writer never produced.
+/// </summary>
+public static class SnapshotContentTypes
+{
+    private static readonly string[] AllowedMediaTypes = ["text/plain", "application/octet-stream"];
+
+    /// <summary>True for an absent type, or a well-formed allowlisted type with at most a UTF-8 charset.</summary>
+    public static bool IsAllowed(string? contentType)
+    {
+        if (contentType is null)
+        {
+            return true;
+        }
+
+        if (!MediaTypeHeaderValue.TryParse(contentType, out MediaTypeHeaderValue? parsed)
+            || parsed.MediaType is not { } mediaType
+            || !AllowedMediaTypes.Contains(mediaType, StringComparer.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return parsed.Parameters.All(static p =>
+            string.Equals(p.Name, "charset", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(p.Value?.Trim('"'), "utf-8", StringComparison.OrdinalIgnoreCase));
+    }
+}
 
 /// <summary>
 /// Corpus-level counts, each of which the restore reconciliation must reproduce exactly.
