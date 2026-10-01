@@ -142,8 +142,9 @@ into, and the obvious-but-wrong look-alike it does **not** touch. First-order on
 
 After the human has reviewed the offline preview, use the protected workers for bounded comparison when
 available and requested. A preview-only request makes no store calls even in a supported runtime. The
-protected writer owns preflight, redaction, cross-group deduplication and link derivation, atomicity,
-lifecycle handling, and receipt composition. Do not reproduce, bypass, or weaken that pipeline.
+protected writer owns preflight, redaction, within-group deduplication (identity is `(group, uuid)`, so a
+same-subject memory in another group is a separate memory to link, not a version), link derivation,
+atomicity, lifecycle handling, and receipt composition. Do not reproduce, bypass, or weaken that pipeline.
 
 Compare candidates across all relevant known groups. On reruns:
 
