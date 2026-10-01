@@ -277,8 +277,49 @@ def _scrub_text(value, path, hits):
     return clean
 
 
-def scrub_set_payload(payload):
-    """Return (scrubbed_payload, hits) for a `set` request body.
+# Spec marker for "this value is free text": a string here is scrubbed, anything else is left alone.
+TEXT = "text"
+
+
+def _set_spec():
+    """The `set` body's free-text fields, built from the tuples above at call time."""
+    item = {field: TEXT for field in SET_TEXT_FIELDS}
+    item.update({field: [TEXT] for field in SET_LIST_FIELDS})
+    item["sources"] = [{field: TEXT for field in SET_SOURCE_FIELDS}]
+    return {"items": [item], "links": [{"reason": TEXT}], "labelsProposed": [TEXT]}
+
+
+def _fold(name):
+    """Fold a JSON key the way the Host matches it — case-insensitively.
+
+    The Host binds request JSON with case-insensitive property names, so `Statement`, `STATEMENT` and
+    `statement` all land in the same column. Matching the spec exact-case let `{"Content": "token=…"}`
+    through unscrubbed. Upper-then-casefold is a superset of an ordinal ignore-case comparison: it can
+    only match more keys than the Host does, never fewer, and an extra scrub is the safe direction.
+    """
+    return name.upper().casefold()
+
+
+def _walk(value, spec, path, hits):
+    """Return a scrubbed copy of `value` per `spec`; never mutates the input."""
+    if spec == TEXT:
+        return _scrub_text(value, path, hits)
+    if isinstance(spec, list):
+        if not isinstance(value, list):
+            return value
+        return [_walk(entry, spec[0], f"{path}[{index}]", hits) for index, entry in enumerate(value)]
+    if not isinstance(value, dict):
+        return value
+    lookup = {_fold(key): sub for key, sub in spec.items()}
+    clean = {}
+    for key, entry in value.items():
+        sub = lookup.get(_fold(key)) if isinstance(key, str) else None
+        clean[key] = entry if sub is None else _walk(entry, sub, f"{path}.{key}" if path else key, hits)
+    return clean
+
+
+def scrub_payload(payload, spec):
+    """Return (scrubbed_payload, hits) for a request body described by `spec`.
 
     Returns a **new** payload built from new containers; the input and every object reachable
     from it are left untouched, so a caller holding the original — a dry-run comparison, a
@@ -291,51 +332,19 @@ def scrub_set_payload(payload):
     turns it into what the write path reports. The matched text is never retained, logged or
     returned.
 
-    A non-dict payload is returned unchanged with no hits. Every caller validates shape
-    first and refuses a bad payload on its own terms, so this never has to decide.
+    Keys are matched case-insensitively (see `_fold`). A non-dict payload is returned unchanged with
+    no hits: every caller validates shape first and refuses a bad payload on its own terms, so this
+    never has to decide.
     """
     hits = []
     if not isinstance(payload, dict):
         return payload, hits
+    return _walk(payload, spec, "", hits), hits
 
-    def item(source, path):
-        if not isinstance(source, dict):
-            return source
-        clean = {key: _scrub_text(value, f"{path}.{key}", hits) if key in SET_TEXT_FIELDS else value
-                 for key, value in source.items()}
-        for field in SET_LIST_FIELDS:
-            values = clean.get(field)
-            if isinstance(values, list):
-                clean[field] = [_scrub_text(value, f"{path}.{field}[{index}]", hits)
-                                for index, value in enumerate(values)]
-        sources = clean.get("sources")
-        if isinstance(sources, list):
-            clean["sources"] = [
-                {key: _scrub_text(value, f"{path}.sources[{index}].{key}", hits)
-                 if key in SET_SOURCE_FIELDS else value
-                 for key, value in entry.items()}
-                if isinstance(entry, dict) else entry
-                for index, entry in enumerate(sources)
-            ]
-        return clean
 
-    def link(source, path):
-        if not isinstance(source, dict):
-            return source
-        return {key: _scrub_text(value, f"{path}.{key}", hits) if key == "reason" else value
-                for key, value in source.items()}
-
-    scrubbed = dict(payload)
-    if isinstance(payload.get("items"), list):
-        scrubbed["items"] = [item(entry, f"items[{index}]")
-                             for index, entry in enumerate(payload["items"])]
-    if isinstance(payload.get("links"), list):
-        scrubbed["links"] = [link(entry, f"links[{index}]")
-                             for index, entry in enumerate(payload["links"])]
-    if isinstance(payload.get("labelsProposed"), list):
-        scrubbed["labelsProposed"] = [_scrub_text(entry, f"labelsProposed[{index}]", hits)
-                                      for index, entry in enumerate(payload["labelsProposed"])]
-    return scrubbed, hits
+def scrub_set_payload(payload):
+    """`scrub_payload` over the `set` body (see `SET_TEXT_FIELDS` and siblings)."""
+    return scrub_payload(payload, _set_spec())
 
 
 def findings_for(located):

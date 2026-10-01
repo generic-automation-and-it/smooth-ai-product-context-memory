@@ -1168,6 +1168,53 @@ def _assert_no_secret(testcase, payload):
 class SetRedactionGateTests(unittest.TestCase):
     """The `set` path scrubs before it posts. A separate `redact` tool does not gate anything."""
 
+    def test_pascal_and_upper_case_keys_are_scrubbed(self):
+        # The Host binds JSON case-insensitively, so these land in the same columns as their
+        # camelCase spellings and must be scrubbed the same way.
+        payload = {"items": [{"Content": "token: abcdef1234567890",
+                              "STATEMENT": "password=hunter2hunter2",
+                              "Facets": ["api_key=abcdefgh12345678"],
+                              "Sources": [{"Reference": "AKIAIOSFODNN7EXAMPLE"}]}],
+                   "LINKS": [{"Reason": "secret=linkreason000secret"}],
+                   "labelsproposed": ["DEPLOY_TOKEN=labelsecret0000"]}
+        with patch.object(client, "read_payload", return_value=copy.deepcopy(payload)), \
+                patch.object(client, "_request", return_value={"created": 1}) as request, \
+                redirect_stdout(io.StringIO()):
+            response = client.cmd_set(SimpleNamespace(payload=None, dryrun=False))
+        posted = json.dumps(request.call_args.args[2])
+        for secret in ("abcdef1234567890", "hunter2hunter2", "abcdefgh12345678",
+                       "AKIAIOSFODNN7EXAMPLE", "linkreason000secret", "labelsecret0000"):
+            self.assertNotIn(secret, posted)
+        fields = {location["field"] for entry in response["redaction"] for location in entry["locations"]}
+        self.assertIn("items[0].Content", fields)
+        self.assertIn("LINKS[0].Reason", fields)
+
+    def test_a_pascal_case_items_array_is_scrubbed_too(self):
+        # The client refuses a body without lowercase `items`, but the scrubber must not rely on
+        # that: it is the gate, and validation is a different contract that may change.
+        scrubbed, hits = redact.scrub_set_payload(
+            {"Items": [{"Statement": "password=hunter2hunter2"}], "items": []})
+        self.assertNotIn("hunter2hunter2", json.dumps(scrubbed))
+        self.assertEqual([hit["field"] for hit in hits], ["Items[0].Statement"])
+
+    def test_duplicate_case_keys_are_each_scrubbed(self):
+        # Which duplicate the Host keeps is its business; neither may carry a secret to it.
+        payload = {"items": [{"content": "token=abcdef1234567890",
+                              "Content": "token=0987654321fedcba",
+                              "statement": "ok", "Statement": "password=hunter2hunter2"}]}
+        scrubbed, hits = redact.scrub_set_payload(payload)
+        serialised = json.dumps(scrubbed)
+        for secret in ("abcdef1234567890", "0987654321fedcba", "hunter2hunter2"):
+            self.assertNotIn(secret, serialised)
+        self.assertEqual(scrubbed["items"][0]["statement"], "ok")
+        self.assertEqual(len(hits), 3)
+
+    def test_unlisted_keys_are_untouched_whatever_their_case(self):
+        payload = {"items": [{"Kind": "token=abcdef1234567890", "createUuid": GOOD_UUID}]}
+        scrubbed, hits = redact.scrub_set_payload(payload)
+        self.assertEqual(scrubbed, payload)
+        self.assertEqual(hits, [])
+
     def test_every_declared_text_field_is_independently_planted_and_scrubbed(self):
         # Guards SET_TEXT_FIELDS in both directions, which the payload-level assertions cannot.
         #
