@@ -1012,6 +1012,59 @@ class WritePayloadTests(unittest.TestCase):
                 self.assertNotIn("Traceback", completed.stderr)
                 self.assertNotIn("s3cret", completed.stderr + completed.stdout)
 
+    def test_the_real_opener_disables_proxies_and_refuses_redirects(self):
+        # The handler is only a guard if `_open` actually installs it, and the proxy bypass only
+        # holds if the opener is built with an empty ProxyHandler rather than the environment's.
+        built = []
+        real_build = client.urllib.request.build_opener
+
+        def spy(*handlers):
+            built.append(handlers)
+            return real_build(*handlers)
+
+        request = client.urllib.request.Request("http://localhost:5141/api/context/labels")
+        with patch.object(client.urllib.request, "build_opener", side_effect=spy), \
+                patch.object(client.urllib.request.OpenerDirector, "open", return_value="sent") as sent:
+            self.assertEqual(client._open(request), "sent")
+        sent.assert_called_once()
+        self.assertEqual(sent.call_args.kwargs.get("timeout"), client.HTTP_TIMEOUT)
+        (handlers,) = built
+        self.assertIn(client._NoRedirect, handlers)
+        proxies = [h for h in handlers if isinstance(h, client.urllib.request.ProxyHandler)]
+        self.assertEqual(len(proxies), 1)
+        self.assertEqual(proxies[0].proxies, {})
+
+    def test_a_redirect_through_the_real_opener_is_refused(self):
+        # End to end: a loopback server answering 302 must not be followed with the credential.
+        import http.server
+        import threading
+
+        hits = []
+
+        class Redirect(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802
+                hits.append(self.path)
+                self.send_response(302)
+                self.send_header("Location", "/elsewhere")
+                self.end_headers()
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), Redirect)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with patch.dict(os.environ, {client.ENV_BASE_URL: f"http://127.0.0.1:{server.server_port}",
+                                         client.ENV_READ_TOKEN: "read-only"}):
+                with self.assertRaises(client.ClientError) as caught:
+                    client._request("GET", "/api/context/labels")
+        finally:
+            server.shutdown()
+            server.server_close()
+        self.assertEqual(caught.exception.status_text, "redirect-refused")
+        self.assertEqual(hits, ["/api/context/labels"])
+
     def test_redirects_are_refused(self):
         handler = client._NoRedirect()
         request = client.urllib.request.Request(
