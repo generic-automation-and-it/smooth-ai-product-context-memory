@@ -657,6 +657,108 @@ public class TarSnapshotArchiveTests
         return rewritten;
     }
 
+    [Fact]
+    public async Task Verify_Reports_ARepeatedArchiveMember_EvenWhenBothCopiesAreIdentical()
+    {
+        // Reading the tar into a map collapses a repeated name last-wins, so without the repeat check a
+        // second copy of a member is invisible. Identical copies isolate that one guard: every hash and
+        // count still agrees.
+        string path = await CleanArchiveAsync();
+        List<(string Name, byte[] Content)> members = [.. ReadTar(path).Select(e => (e.Key, e.Value))];
+        members.Add((SnapshotEntryNames.Labels, ReadTar(path)[SnapshotEntryNames.Labels]));
+        string tampered = TempArchive();
+        WriteTarMembers(tampered, members);
+
+        SnapshotVerification verification = await _archive.VerifyAsync(tampered, TestContext.Current.CancellationToken);
+
+        verification.IsClean.ShouldBeFalse();
+        SnapshotFinding finding = verification.Findings.ShouldHaveSingleItem();
+        finding.Kind.ShouldBe(SnapshotFindingKind.Corruption);
+        finding.EntryName.ShouldBe(SnapshotEntryNames.Labels);
+        finding.Message.ShouldContain("same member name more than once");
+    }
+
+    [Fact]
+    public async Task Verify_Reports_ARepeatedManifestEntry()
+    {
+        string path = await CleanArchiveAsync();
+        Dictionary<string, byte[]> entries = ReadTar(path);
+        SnapshotManifest manifest = JsonSerializer.Deserialize<SnapshotManifest>(entries[SnapshotEntryNames.Manifest], Json)!;
+        SnapshotArchiveEntry labels = manifest.Entries.Single(e => e.Name == SnapshotEntryNames.Labels);
+        entries[SnapshotEntryNames.Manifest] = JsonSerializer.SerializeToUtf8Bytes(
+            manifest with { Entries = [.. manifest.Entries, labels] }, Json);
+        string tampered = TempArchive();
+        WriteTar(tampered, entries);
+
+        SnapshotVerification verification = await _archive.VerifyAsync(tampered, TestContext.Current.CancellationToken);
+
+        verification.IsClean.ShouldBeFalse();
+        SnapshotFinding finding = verification.Findings.ShouldHaveSingleItem();
+        finding.Kind.ShouldBe(SnapshotFindingKind.Corruption);
+        finding.EntryName.ShouldBe(SnapshotEntryNames.Labels);
+        finding.Message.ShouldContain("same entry name more than once");
+    }
+
+    [Fact]
+    public async Task Verify_Reports_ATamperedObjectCount()
+    {
+        string tampered = await ArchiveWithCountsAsync(c => c with { Objects = c.Objects + 1 });
+
+        SnapshotVerification verification = await _archive.VerifyAsync(tampered, TestContext.Current.CancellationToken);
+
+        verification.IsClean.ShouldBeFalse();
+        SnapshotFinding finding = verification.Findings.ShouldHaveSingleItem();
+        finding.Kind.ShouldBe(SnapshotFindingKind.CountMismatch);
+        finding.Message.ShouldStartWith("Object count in archive (1) does not match the manifest (2)");
+    }
+
+    [Fact]
+    public async Task Verify_Reports_ATamperedTicketEdgeCount()
+    {
+        string tampered = await ArchiveWithCountsAsync(c => c with { TicketEdges = c.TicketEdges + 3 });
+
+        SnapshotVerification verification = await _archive.VerifyAsync(tampered, TestContext.Current.CancellationToken);
+
+        verification.IsClean.ShouldBeFalse();
+        SnapshotFinding finding = verification.Findings.ShouldHaveSingleItem();
+        finding.Kind.ShouldBe(SnapshotFindingKind.CountMismatch);
+        finding.EntryName.ShouldBe(SnapshotEntryNames.TicketEdges);
+    }
+
+    private async Task<string> CleanArchiveAsync()
+    {
+        string path = TempArchive();
+        string address = Sha256ContentAddress.Compute(Body);
+        (SnapshotCapture capture, SnapshotWalkResult walk) = Capture(address, SnapshotBlobState.Ok);
+        await _archive.WriteAsync(path, capture, walk, (_, _) => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
+        (await _archive.VerifyAsync(path, TestContext.Current.CancellationToken)).IsClean.ShouldBeTrue();
+        return path;
+    }
+
+    private async Task<string> ArchiveWithCountsAsync(Func<SnapshotCounts, SnapshotCounts> tamper)
+    {
+        Dictionary<string, byte[]> entries = ReadTar(await CleanArchiveAsync());
+        SnapshotManifest manifest = JsonSerializer.Deserialize<SnapshotManifest>(entries[SnapshotEntryNames.Manifest], Json)!;
+        entries[SnapshotEntryNames.Manifest] = JsonSerializer.SerializeToUtf8Bytes(
+            manifest with { Counts = tamper(manifest.Counts) }, Json);
+        string tampered = TempArchive();
+        WriteTar(tampered, entries);
+        return tampered;
+    }
+
+    private static void WriteTarMembers(string path, IEnumerable<(string Name, byte[] Content)> members)
+    {
+        using FileStream stream = File.Create(path);
+        using var tar = new TarWriter(stream, TarEntryFormat.Ustar, leaveOpen: false);
+        foreach ((string name, byte[] content) in members)
+        {
+            tar.WriteEntry(new PaxTarEntry(TarEntryType.RegularFile, name)
+            {
+                DataStream = new MemoryStream(content, writable: false),
+            });
+        }
+    }
+
     /// <summary>
     /// Replaces the manifest's entry list with raw JSON, so a null element or an entry with no name
     /// can be written at all — neither is expressible through the strongly-typed model.
