@@ -120,9 +120,14 @@ on a single producer upstream of it. Found by a new test that feeds case-differi
 memory case **fails without the fix** and is mutation-verified. The **group** case does not discriminate —
 `GroupSlug` routes names through `Slug.TrySubject` first, so they fold before the set sees them and the
 collision is found either way; that test is documented as a pin, not as evidence, and the group change is
-defence in depth rather than a fix. Harness 11 → 13 tests.
+defence in depth rather than a fix. Harness 9 → 13 tests with this change.
 
-Mutation-verified: removing the lower-casing in `Slug` fails 4 of 11 tests in the class — the four that assert a folded name. The collision tests feed already-distinct or already-lowercase literals and stay green, so they are not evidence for the slug property. **The earlier version of the new test also counted the two names under `OrdinalIgnoreCase`, which read as the case-insensitivity guard and was not — mutating it to `Ordinal` left the suite green, since the names differ by more than case once the uuid suffix applies. It was removed rather than kept as reassurance; a second assertion restating the first is a defect this repo has already paid for twice.** No production change. | ICM adoption |
+Mutation-verified: removing the lower-casing in `Slug` fails 5 of the 13 tests in the class — the three that
+assert a folded group slug, plus `Group_folders_differing_only_by_case_stay_distinct` and
+`Slugging_is_what_makes_case_collision_impossible`. The remaining collision tests feed already-distinct or
+already-lowercase literals and stay green, so they are not evidence for the slug property;
+`Group_folders_differing_only_by_case_stay_distinct` is the exception, because it feeds case-differing
+literals through `Slug.TrySubject` and so folds without the lower-casing. **The earlier version of the new test also counted the two names under `OrdinalIgnoreCase`, which read as the case-insensitivity guard and was not — mutating it to `Ordinal` left the suite green, since the names differ by more than case once the uuid suffix applies. It was removed rather than kept as reassurance; a second assertion restating the first is a defect this repo has already paid for twice.** No production change. | ICM adoption |
 | 2026-09-19 | Memory files carry the DB current version in the filename (`mem-<slug>.v<N>.md`), so on-disk reflects store versioning; default output dir `.context/export` -> `.context/mimisbrunnr-memories`. | export versioning |
 | 2026-09-19 | Scoped the "no import path" guardrail to this forensic dump and noted the understanding load/import capability as a deliberate exception owned by HLD 007 (opt-in `--store` through the capture skill). | HLD-007; BRD-003 |
 | 2026-09-13 | ADR-0001/0002 deleted; authority citations retargeted to HLD 001. | HLD-001 |

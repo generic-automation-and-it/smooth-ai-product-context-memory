@@ -115,7 +115,7 @@ Hosted on **GitHub** at `https://github.com/generic-automation-and-it/smooth-ai-
 | Context | Summarized, labelled unit of knowledge stored for later retrieval |
 | Understanding | A distilled, self-contained unit of hard-won knowledge — the transferable skill that remains after the experience is discarded. Stored as a memory of `kind = understanding` (BRD-003) |
 | Label | Tag (e.g. issue/ticket number) linking/retrieving related contexts |
-| Semantic memory | Embedded, labelled knowledge — primary store for retrieval by label or similarity |
+| Semantic memory | Labelled knowledge, primary store for retrieval by label/ticket, facets and full-text lexemes; free prose matches lexeme-AND, not similarity (see [`README.md`](README.md), *Where Mímisbrunnr loses*) |
 | Episodic memory | Timestamped record of when/where a context was captured |
 | Procedural memory | Persisted agent/user preferences and learned behaviors |
 

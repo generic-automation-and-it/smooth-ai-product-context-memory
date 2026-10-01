@@ -333,7 +333,7 @@ relying on the well for it.
   the gate never fails open — but the rules are fixed-shape fingerprints (`AKIA…`, `gh[pousr]_…`, PEM
   blocks, `secret=`/`token:`/`password=` assignments). A bare high-entropy value, an unlabelled blob, an
   unusual vendor token format or a password in prose passes through.
-- **Scope is declared, not discovered.** `programme` versus product knowledge is set on the group by the
+- **Scope is declared, not discovered.** `program` versus product knowledge is set on the group by the
   caller and enforced on read. A capture under the wrong scope dimension is stored correctly and retrieved
   wrongly; nothing infers the right dimension for you.
 - **A cross-group duplicate is invisible to the store.** A memory's identity is `(group, uuid)`, chosen so
