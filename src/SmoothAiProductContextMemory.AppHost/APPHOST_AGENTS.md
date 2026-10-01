@@ -229,6 +229,7 @@ Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgr
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-01 | Controller entrypoint switched from `sh` to `bash` so the hyphenated `Parameters__api-*-token` env names reach the AppHost; without them the token parameters never resolve and the host container is never created. Detail in `scripts/AGENTS.md`. | publish smoke failures since 2026-09-17 |
 | 2026-09-27 | Test-fixture port-collision note narrowed to Postgres + MinIO; Redis (`16379`) and WireMock (`19091`) removed from the test dependency set alongside their unused containers. | batch3 |
 | 2026-09-26 | `mimisbrunnr-host-context` added to the `reset-dev-stack.sh` volume allowlist and named in the "Stop and reset are distinct binaries" non-negotiable and LADR-001. The image-mode `host-context` volume was created but never destroyed, so the script's closing claim that the next start is an empty corpus was false once snapshot archives were persisted there (LADR-003 keeps these names in sync with the C# constants). | HLD-006 |
 | 2026-09-26 | The Host image now creates `/app/.context` (including the default `snapshots` subdir) owned by the non-root app user during build, so a default-user container can write the default snapshot and metadata paths without a pre-created host mount. | HLD-006 |
