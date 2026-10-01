@@ -260,7 +260,7 @@ unless `--force` is passed. `snapshot` and `restore` are read-only against / reb
 | Verb | 0 | 1 | 2 |
 |---|---|---|---|
 | `verify` | clean | findings present | — |
-| `restore` | reconciliation closes | reconciliation failed, or an operational failure (database unreachable, target not migrated) | **archive integrity failure** — the archive failed offline verification and nothing was mutated |
+| `restore` | reconciliation closes | reconciliation failed, or an operational failure (database unreachable, target not migrated, archive not readable — e.g. permission denied) | **archive integrity failure** — the archive failed offline verification and nothing was mutated |
 
 `restore` exits **2** specifically so a script can tell a bad archive from an unreachable database.
 These codes are asserted by `tests/SmoothAiProductContextMemory.Host.UnitTest/CliVerbTests.cs`, so a
