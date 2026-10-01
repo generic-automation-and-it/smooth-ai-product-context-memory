@@ -537,7 +537,20 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
             (var entries, var repeated) = ReadEntries(archivePath);
             return (entries, repeated, null);
         }
-        catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException)
+        catch (UnauthorizedAccessException)
+        {
+            // A permissions refusal proves nothing about the archive's content, so it must not read
+            // as Corruption: restore turns Corruption into the integrity exit code, and an operator
+            // would replace a sound archive instead of fixing a file mode.
+            return (
+                new Dictionary<string, byte[]>(StringComparer.Ordinal),
+                [],
+                new SnapshotFinding(
+                    SnapshotFindingKind.Unreadable,
+                    null,
+                    "Archive could not be opened: access was denied. This is a permissions problem, not evidence about the archive's integrity."));
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException)
         {
             return (
                 new Dictionary<string, byte[]>(StringComparer.Ordinal),

@@ -343,6 +343,48 @@ public class TarSnapshotArchiveTests
     }
 
     [Fact]
+    public async Task Verify_Reports_AnArchiveItCannotOpen_AsUnreadable_NotCorruption()
+    {
+        // Restore turns Corruption into its integrity exit code, so a permissions refusal classified as
+        // Corruption told an operator to replace an archive nothing had actually looked at.
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Unix file modes only.");
+            return;
+        }
+
+        string path = TempArchive();
+        string address = Sha256ContentAddress.Compute(Body);
+        (SnapshotCapture capture, SnapshotWalkResult walk) = Capture(address, SnapshotBlobState.Ok);
+        await _archive.WriteAsync(path, capture, walk, _ => Task.FromResult((Body, Sha256ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
+        File.SetUnixFileMode(path, UnixFileMode.None);
+        try
+        {
+            bool bypassesModes;
+            try
+            {
+                using FileStream probe = File.OpenRead(path);
+                bypassesModes = true;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                bypassesModes = false;
+            }
+
+            Assert.SkipWhen(bypassesModes, "The test process can read a mode-000 file (running as root).");
+
+            SnapshotVerification verification = await _archive.VerifyAsync(path, TestContext.Current.CancellationToken);
+
+            verification.IsClean.ShouldBeFalse();
+            verification.Findings.ShouldHaveSingleItem().Kind.ShouldBe(SnapshotFindingKind.Unreadable);
+        }
+        finally
+        {
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+    }
+
+    [Fact]
     public async Task Write_LeavesNoTempFile_WhenTheBlobReadFails()
     {
         // The temp-then-move guarantees the *destination* is never a partial archive, which is what

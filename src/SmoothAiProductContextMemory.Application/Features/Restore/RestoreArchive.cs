@@ -52,6 +52,14 @@ public static class RestoreArchive
             // refusal carries the findings as payload so the operator learns which member failed;
             // the message stays shape-only (NFR-05).
             SnapshotVerification verification = await archive.VerifyAsync(request.ArchivePath, cancellationToken);
+            if (verification.Findings.Any(static f => f.Kind == SnapshotFindingKind.Unreadable))
+            {
+                // Not an integrity refusal: the archive was never read, so nothing is known about it.
+                // Surfacing it as one would send the operator to replace a sound archive.
+                throw new InvalidOperationException(
+                    "Archive could not be opened for reading (access denied); restore did not start. Fix the file's permissions and retry.");
+            }
+
             if (!verification.IsClean)
             {
                 throw new ArchiveVerificationFailedException(

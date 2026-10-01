@@ -119,6 +119,53 @@ public sealed class CliVerbTests
         // repository pulls in blob storage, and that resolution happens *before* the verb's own
         // try/catch — so a half-configured host fails inside System.CommandLine's default handler and
         // returns 1, which would have made this test pass for the wrong reason.
+        int exit = await WithRestoreConfigurationAsync(() => RestoreCommand.InvokeAsync([AbsentPath()]));
+        exit.ShouldBe(2, "an unverifiable archive must exit 2 (integrity), not 1 (operational)");
+    }
+
+    [Fact]
+    public async Task Restore_of_an_archive_it_may_not_read_exits_operational_not_integrity()
+    {
+        // A permissions refusal says nothing about the archive's bytes. Reporting it as 2 would tell
+        // the operator to replace a sound archive instead of fixing a file mode.
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Unix file modes only.");
+            return;
+        }
+
+        string path = AbsentPath();
+        await File.WriteAllBytesAsync(path, [1, 2, 3], TestContext.Current.CancellationToken);
+        File.SetUnixFileMode(path, UnixFileMode.None);
+        try
+        {
+            bool bypassesModes;
+            try
+            {
+                using FileStream probe = File.OpenRead(path);
+                bypassesModes = true;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                bypassesModes = false;
+            }
+
+            Assert.SkipWhen(bypassesModes, "The test process can read a mode-000 file (running as root).");
+
+            int exit = await WithRestoreConfigurationAsync(() => RestoreCommand.InvokeAsync([path]));
+            exit.ShouldBe(1, "an archive the process may not open is an operational failure (1), not an integrity one (2)");
+        }
+        finally
+        {
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            File.Delete(path);
+        }
+    }
+
+    // The full host configuration is required, not just a connection string: resolving the repository
+    // pulls in blob storage, and that resolution happens before the verb's own try/catch.
+    private static async Task<int> WithRestoreConfigurationAsync(Func<Task<int>> invoke)
+    {
         var settings = new Dictionary<string, string?>
         {
             ["ConnectionStrings__SmoothAiProductContextMemory"] = "Host=127.0.0.1;Database=none;Username=none;Password=none;Timeout=1",
@@ -138,8 +185,7 @@ public sealed class CliVerbTests
 
         try
         {
-            int exit = await RestoreCommand.InvokeAsync([AbsentPath()]);
-            exit.ShouldBe(2, "an unverifiable archive must exit 2 (integrity), not 1 (operational)");
+            return await invoke();
         }
         finally
         {
