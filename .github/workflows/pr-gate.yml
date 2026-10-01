@@ -11,6 +11,8 @@ on:
       - .dockerignore
       - Directory.Build.props
       - NuGet.Config
+      - .editorconfig
+      - .config/dotnet-tools.json
       - '*.slnx'
       - src/**
       - tests/**
@@ -21,6 +23,9 @@ on:
       - .agents/skills/mimisbrunnr-understanding/**
       - .agents/skills/mimisbrunnr-dossier/**
       - .agents/skills/ai-understanding/**
+      - .agents/skills/mimisbrunnr-recall-feedback/**
+      - .agents/skills/mimisbrunnr-ymir-bootstrap/**
+      - .agents/skills/agile-github-*/**
       - .agents/agents/memory-read.md
       - .agents/agents/memory-write.md
       - .github/agents/memory-read.agent.md
@@ -40,6 +45,8 @@ on:
       - .dockerignore
       - Directory.Build.props
       - NuGet.Config
+      - .editorconfig
+      - .config/dotnet-tools.json
       - '*.slnx'
       - src/**
       - tests/**
@@ -50,6 +57,9 @@ on:
       - .agents/skills/mimisbrunnr-understanding/**
       - .agents/skills/mimisbrunnr-dossier/**
       - .agents/skills/ai-understanding/**
+      - .agents/skills/mimisbrunnr-recall-feedback/**
+      - .agents/skills/mimisbrunnr-ymir-bootstrap/**
+      - .agents/skills/agile-github-*/**
       - .agents/agents/memory-read.md
       - .agents/agents/memory-write.md
       - .github/agents/memory-read.agent.md
