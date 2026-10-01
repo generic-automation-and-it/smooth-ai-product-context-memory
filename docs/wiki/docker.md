@@ -119,8 +119,10 @@ Optional: `ASPNETCORE_URLS` (image default `http://+:5141`), Seq via
 
 Web API startup requires both `ApiAccess` tokens. `export` needs the storage variables but does not use
 HTTP capability tokens. It does **not** migrate; missing schema fails
-the command. Default output `.context/mimisbrunnr-memories` is not writable in the image —
-mount a host directory and pass `--output`.
+the command. The default output `.context/mimisbrunnr-memories` resolves to
+`/app/.context/mimisbrunnr-memories`, which is writable (the image creates `/app/.context` owned by the
+non-root app user) but lives in the container's ephemeral layer — with `--rm` the tree is gone when the
+container exits. Mount a host directory and pass `--output`.
 
 ## Docker Desktop group
 
@@ -161,7 +163,7 @@ docker run --rm \
   --name mimisbrunnr-host \
   --label com.docker.compose.project=smooth-mímisbrunnr \
   --label com.docker.compose.service=mimisbrunnr-host \
-  -p 5141:5141 \
+  -p 127.0.0.1:5141:5141 \
   -e ConnectionStrings__SmoothAiProductContextMemory='Host=host.docker.internal;Port=5432;Database=app;Username=postgres;Password=LocalMachineAccessNoInterestingDataDev#Passw0rd!FirewallNotExposed' \
   -e BlobStorage__Endpoint='http://host.docker.internal:9000' \
   -e BlobStorage__AccessKey='smooth-local' \
@@ -171,11 +173,19 @@ docker run --rm \
   smooth-ai-product-context-memory:local
 ```
 
+The port is published on loopback only (`127.0.0.1:`); a bare `-p 5141:5141` binds every host
+interface and puts the API on whatever network the machine is on.
+
 The two `ApiAccess__*` tokens come from `--env-file .context/mimisbrunnr.env` (written by
 `scripts/provision-credentials.sh`), not inline `-e` — an inline `-e` value lands the secret in shell
 history and in any command that gets copied or pasted. The inline form shown above is the **variable
 inventory** for everything that is deployment-specific (connection string, blob endpoint/keys/bucket);
 the tokens are deliberately not inlined.
+
+**Restart the container after `scripts/provision-credentials.sh --rotate`.** `--env-file` is read once
+when the container starts, and the Host hashes both tokens once at startup (`ApiAccessAuthorizer` is a
+singleton over `IOptions`), so a running container keeps accepting the old tokens and rejects the new
+ones the skills now carry (`403`) until it is restarted.
 
 Probe: `http://localhost:5141/openapi/v1.json` (there is no in-image healthcheck).
 "Container running" is not "service working" — migrations need a reachable database.
@@ -282,19 +292,26 @@ construction, which is exactly why the version gate exists.
 The HLD-006 `snapshot` and `snapshot/preflight` HTTP endpoints run on the API, accepted-then-poll:
 `POST /api/context/snapshot` returns `202 Accepted` with a job id; poll `GET /api/context/snapshot/status`
 until `Status` is `Completed` (or `Failed`). `POST /api/context/snapshot/preflight` is a read-only report
-of whether a snapshot exists, its recency and the corpus counts, with `Write`/`Read` capability
-respectively. The archive is written to the host's `.context/snapshots`, so it is reachable from the
-running container's mounted volume:
+of whether a snapshot exists, its recency and the corpus counts. Every route needs a Bearer token:
+preflight and status take the **read** token, the snapshot trigger the **write** token (a request without
+one is `403`). The archive is written to the host's `.context/snapshots`, so it is reachable from the
+running container's mounted volume. The examples read the tokens from the provisioner's env file and
+pass the header through `-H @…`, so the token never appears in curl's argument list (`ps`):
 
 ```bash
-# preflight — read-only report (no snapshot written)
-curl -X POST http://localhost:5141/api/context/snapshot/preflight
+set -a && source .context/mimisbrunnr.env && set +a
 
-# snapshot — trigger, returns a job id (202 Accepted)
-curl -X POST http://localhost:5141/api/context/snapshot
+# preflight — read-only report (no snapshot written); read token
+curl -X POST -H @<(printf 'Authorization: Bearer %s' "$CONTEXT_MEMORY_READ_TOKEN") \
+  http://localhost:5141/api/context/snapshot/preflight
 
-# status — poll until Status == Completed / Failed
-curl http://localhost:5141/api/context/snapshot/status
+# snapshot — trigger, returns a job id (202 Accepted); write token
+curl -X POST -H @<(printf 'Authorization: Bearer %s' "$CONTEXT_MEMORY_WRITE_TOKEN") \
+  http://localhost:5141/api/context/snapshot
+
+# status — poll until Status == Completed / Failed; read token
+curl -H @<(printf 'Authorization: Bearer %s' "$CONTEXT_MEMORY_READ_TOKEN") \
+  http://localhost:5141/api/context/snapshot/status
 ```
 
 The status payload carries the result counts (memories, versions, vertices, edges, objects,

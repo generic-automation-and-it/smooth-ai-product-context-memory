@@ -63,6 +63,10 @@ Re-running without `--rotate` reuses the existing tokens. To regenerate:
 scripts/provision-credentials.sh --rotate
 ```
 
+**Restart the Host after `--rotate`.** The Host reads and hashes both tokens once at startup, so a running
+Host — AppHost, direct run or container — keeps accepting the old tokens and answers `403` to the new
+ones until it is restarted. Re-`source` the env file in any shell that runs the skills, too.
+
 Options:
 
 | Flag | Meaning |
@@ -133,7 +137,7 @@ secret in shell history and in any command that gets copied or pasted.
   the `smooth-local` object-store key) are *not* this credential. They are development scaffolding for a
   local stack and are accepted on that basis; conflating the two — treating the bearer tokens as
   scaffolding too, or the fixed passwords as a real exposure — is the error this page exists to prevent.
-- The API publishes a host port (`-p 5141:5141`), so "isolated" is a property of the operator's network
+- The API publishes a host port (`-p 127.0.0.1:5141:5141` in [`docker.md`](docker.md)), so "isolated" is a property of the operator's network
   configuration, not something the product enforces. Publishing beyond loopback, putting the stack on
   untrusted shared network infrastructure, or running on a laptop whose firewall permits inbound
   connections re-opens the transport-hardening / token-rotation / multi-tenancy concerns that are
