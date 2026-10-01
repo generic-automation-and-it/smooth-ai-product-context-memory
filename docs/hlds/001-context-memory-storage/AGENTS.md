@@ -67,6 +67,7 @@ Targets and verification live in [./nfrs/](./nfrs/). Two shape how code is writt
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-01 | NFR-03's status line had the supersession reversed (it said it *supersedes* HLD-006 NFR-02); it now says it is superseded by HLD-006 NFR-02, and records that the closure rests on an NFR still in Draft. No status change. | NFR-03, HLD-006 NFR-02 |
 | 2026-09-16 | Recall deferral closed by measurement: FTS configuration `simple` → `english` (recall 0.44 → 0.78, precision 0.88); `pg_trgm` measured and rejected with a recorded reopening threshold. | [NFR-02 recall-tuning measurements](./nfrs/NFR-02-recall-tuning-measurements.md) |
 | 2026-09-16 | Orphan-management ambiguity closed structurally: `IBlobStorage` no longer exposes deletion; test-only delete stays on the concrete adapter; GC remains deferred behind the recorded reopening condition. HLD-006 reports orphans, never deletes. | `BlobStorageCapabilityGuardTests` |
 | 2026-09-13 | NFR-04 Accepted — export projection + byte-identical L1 assertions shipped. | NFR-04 |
