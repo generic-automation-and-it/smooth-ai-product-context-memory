@@ -51,6 +51,25 @@ public sealed class RestoreArchiveHandlerTests
         blobs.StoredContentTypes.ShouldBe(["text/plain; charset=utf-8"]);
     }
 
+    [Fact]
+    public async Task A_corrupt_object_already_at_the_cited_address_is_refused_before_the_database_is_touched()
+    {
+        // The object store skips the upload when the key already exists, so a pre-existing object
+        // holding the wrong bytes survives the restore's write. Only the read-back hash can see it;
+        // checking that the key exists would report success over a corrupt destination.
+        string address = Address(Body);
+        var blobs = new FakeBlobStorage();
+        blobs.Plant(address, Encoding.UTF8.GetBytes("not the archived body"));
+        var repository = new FakeRepository();
+        RestoreArchive.Handler handler = Handler(new FakeArchive(address, Body, contentType: null), blobs, repository);
+
+        InvalidOperationException refusal = await Should.ThrowAsync<InvalidOperationException>(
+            () => handler.Handle(Request(), Ct).AsTask());
+
+        refusal.Message.ShouldContain("does not hash to its content address");
+        repository.RestoreCalls.ShouldBe(0);
+    }
+
     private static RestoreArchive.Handler Handler(FakeArchive archive, FakeBlobStorage blobs, FakeRepository repository) =>
         new(repository, archive, blobs, NullLogger<RestoreArchive.Handler>.Instance);
 
@@ -109,6 +128,9 @@ public sealed class RestoreArchiveHandlerTests
         private readonly Dictionary<string, byte[]> _objects = new(StringComparer.Ordinal);
 
         public List<string?> StoredContentTypes { get; } = [];
+
+        /// <summary>Plants bytes under an address without hashing them, as a pre-existing object would be.</summary>
+        public void Plant(string address, byte[] content) => _objects[address] = content;
 
         public async Task<string> StoreAsync(Stream content, string? contentType = null, CancellationToken cancellationToken = default)
         {
