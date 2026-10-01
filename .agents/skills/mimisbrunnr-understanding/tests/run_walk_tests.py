@@ -61,16 +61,13 @@ ICM_TOKEN_BAND_HIGH = 8000
 # report. Characters are exact (len of the rendered text). Tokens are an estimate, not a count.
 CHARS_PER_TOKEN_ESTIMATE = 4.0
 
-DECLINE_RE = re.compile(
-    r"not in context|not in the (material|context|content|provided|rendered|given|input|surface)"
-    r"|not present|not provided|doesn'?t (mention|contain|state|say)"
-    r"|does not (mention|contain|state|say)"
-    r"|is (not|never) (mentioned|stated|present)"
-    r"|is not (in|among) (the|this|any)|absent from|no (mention|information|record|memory|unit)"
-    r"|cannot (find|determine|say|answer|locate)|not covered|none of the (material|provided|given)"
-    r"|no such (memory|unit|record)|not addressed",
-    re.IGNORECASE,
-)
+# The walk protocol tells the cold agent to answer the literal phrase "not in context" when the
+# information is absent, so that phrase is the only decline. Matching decline-sounding words instead
+# ("not present", "no record", "does not mention") also matched them inside asserted content, which
+# scored a confabulation as a correct refusal. A decline worded differently is under-credited — the
+# safe direction for an instrument whose job is to catch confabulation.
+DECLINE_PHRASE = "not in context"
+DECLINE_RE = re.compile(rf"\b{DECLINE_PHRASE}\b", re.IGNORECASE)
 
 SURFACES = ("load_default", "load_all", "dossier_slice")
 
@@ -278,13 +275,16 @@ class WalkFixtureTests(unittest.TestCase):
                 f"{name} renders ~{est_tokens} est. tokens, above the ICM {ICM_TOKEN_BAND_HIGH}-token "
                 f"band — record as a finding (do not add a cap)")
 
-    def test_decline_requires_a_decline_phrase_not_an_incidental_word(self):
-        """A confabulated answer that merely uses a word like "unavailable" or "absent" asserts
-        content; scoring it as a decline would certify confabulation as a correct refusal."""
+    def test_decline_is_the_instructed_phrase_not_a_decline_sounding_word(self):
+        """Confabulated content that merely contains decline-sounding words asserts content; scoring it
+        as a decline would certify confabulation as a correct refusal."""
         for answer in ("Redis is unavailable during restarts, so the cache path is the fallback.",
-                       "The flag is absent in prod-west-2, which is the deploy cluster."):
+                       "The flag is absent in prod-west-2, which is the deploy cluster.",
+                       "The file is not present on disk after restart.",
+                       "There is no record lock, so writes proceed. Cited: Cache path.",
+                       "The config does not mention retries; it uses prod-west-2."):
             self.assertIsNone(DECLINE_RE.search(answer), answer)
-        for answer in ("not in context", "This is absent from the material."):
+        for answer in ("not in context", "Not in context — the material does not cover it."):
             self.assertIsNotNone(DECLINE_RE.search(answer), answer)
 
 
