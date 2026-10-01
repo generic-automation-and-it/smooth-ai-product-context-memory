@@ -1,8 +1,9 @@
 # NFR-02 evidence: read-path cost against the shipped path
 
 **Date:** 2026-09-20
-**Status:** Measured — passed. The shipped fire-and-forget feedback write does not measurably change retrieval,
-does not contend, cannot fail a retrieval, and its growth is bounded.
+**Status:** Measured — passed. The shipped feedback write — guarded, synchronous, inline before the response
+returns — does not measurably change retrieval, does not contend, and cannot fail a retrieval. Its growth
+bound is stated and projected below but **not enforced**: no retention job ships (LADR-02 *Retention bound*).
 **Command:** `SMOOTH_NFR_BENCH=1 dotnet test tests/SmoothAiProductContextMemory.Infrastructure.ComponentTest --filter NfrEvidenceTests`
 **Environment:** Aspire test fixture, `docker.io/apache/age:release_PG17_1.7.0`, isolated per-test database, macOS/arm64 dev host.
 **Harness:** [`NfrEvidenceTests`](../../../../tests/SmoothAiProductContextMemory.Infrastructure.ComponentTest/Persistence/NfrEvidenceTests.cs)
@@ -42,8 +43,10 @@ per-test database. Every step measures the shipped path, not a prototype.
 | feedback on | 5.404 | 6.619 | 0.933 | 5.559–7.055 | 1.496 |
 
 The off↔on p95 gap is 0.933 ms against the widest single-config run-to-run spread of 1.496 ms — **within
-measurement noise**. The write is fire-and-forget on a fresh connection outside the retrieval's unit of work,
-so it runs concurrently with, and cannot block, the retrieval.
+measurement noise**. The write is synchronous: `QueryMemories.Handler` calls `NpgsqlRecallFeedback.Record`
+after materialising the response and before returning it, and `Record` opens a fresh connection outside the
+retrieval's unit of work and runs the `INSERT` on the request thread. It cannot change the result set, but its
+cost is part of the response time — the off↔on gap above measures it end to end, and it sits within noise.
 
 ### Concurrency — no contention
 
@@ -57,10 +60,11 @@ shared row, so a popular memory is not a hot row. (The counter-column placement 
 A feedback writer that always throws: the retrieval still returned all 50 rows, **field-for-field identical**
 to the feedback-on result. A broken feedback path cannot fail or change a retrieval.
 
-### Growth — bounded
+### Growth — bound stated, not enforced
 
 20,000 compacted records = 3.0 MiB including indexes = **156 bytes/row**, ~7.6 KiB per 50-memory retrieval.
-Projected under the stated bound (30 days or 2,000,000 records, whichever first):
+Projected under the stated bound (30 days or 2,000,000 records, whichever first) — a projection of what the
+bound would hold if enforced; no shipped job prunes the table, so between baseline resets it grows unbounded:
 
 | Retrievals/day | records in 30 days | bounded by | retained under the bound |
 |---|---|---|---|
@@ -75,7 +79,8 @@ recomputed on the shipped table.
 
 NFR-02 is **met** against the shipped path and moves from Draft to **Accepted**: latency unchanged within
 noise, no contention on a popular memory, a feedback failure leaves retrieval fully functional with
-byte-identical results, and volume is bounded. The concurrency case — the discriminator the NFR named — is
+byte-identical results, and the volume bound is stated (enforcement is not implemented — see LADR-02). The
+concurrency case — the discriminator the NFR named — is
 the decisive one and passes deterministically (0 `55P03`), not as a percentile.
 
 ## Applies To

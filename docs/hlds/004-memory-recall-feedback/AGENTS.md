@@ -1,6 +1,6 @@
 # AGENTS.md - Memory recall feedback
 
-AI Context: HLD for memory recall feedback. Updated: 2026-09-19
+AI Context: HLD for memory recall feedback. Updated: 2026-10-01
 
 ## TL;DR
 
@@ -13,7 +13,8 @@ quality bar in [./nfrs/](./nfrs/); context and recall path in
 **The mechanism is implemented** (workstreams 02/03): LADR-01..04 are Accepted and the write path and three
 tuning surfaces ship. **NFR-01..03 are Accepted** on evidence gathered against the shipped path
 (workstream 04) by the env-gated [`NfrEvidenceTests`](../../../../tests/SmoothAiProductContextMemory.Infrastructure.ComponentTest/Persistence/NfrEvidenceTests.cs)
-(`SMOOTH_NFR_BENCH=1`). Do not reopen LADR-02 without new measurements — the
+(`SMOOTH_NFR_BENCH=1`). **Two specified parts are not implemented:** the LADR-02 retention bound (no job
+prunes `recall_feedback`) and an asynchronous write (the write is synchronous and inline). Do not reopen LADR-02 without new measurements — the
 [placement evidence](./nfrs/NFR-02-placement-evidence-2026-09-18.md) records what would have to change first.
 
 ## Non-Negotiables
@@ -46,7 +47,7 @@ See [./ladrs/](./ladrs/). LADR-01..04 and NFR-01..03 are Accepted; the NFR evide
 - **"Never recalled" must exclude the recently captured**, or every new memory pollutes the signal the measure exists to provide.
 - **Feedback is intended to be excluded from backup and restore (design constraint, pending HLD-006).** It is disposable, which keeps it out of the cross-store consistency problem — but no shipped artefact implements the exclusion yet; the snapshot/restore design must not silently drop the feedback set.
 - **Resetting feedback is legitimate**, not destructive — a tuning experiment should be able to start from a clean baseline.
-- **Feedback is emitted on a fresh connection outside the retrieval's unit of work and is guarded.** `QueryMemories.Handler` builds the response, then emits outcome records through a try/catch that swallows and logs a constant non-content line — a broken feedback path can never fail a retrieval, and the result set/order/limit are already fixed before the write runs.
+- **Feedback is emitted on a fresh connection outside the retrieval's unit of work and is guarded.** `QueryMemories.Handler` builds the response, then emits outcome records through a try/catch that swallows and logs a constant non-content line — a broken feedback path can never fail a retrieval, and the result set/order/limit are already fixed before the write runs. **The write is synchronous and inline, not fire-and-forget:** it runs on the request thread before the response returns, so its cost is part of the response time (within noise per NFR-02). Do not describe it as off the critical path.
 - **The tuning surfaces are two read-only queries and a baseline reset**, under `/api/context/recall-feedback/` (`never-recalled` and `miss-rate` are GET/Read; `reset` is POST/Write), consumed by a human practitioner via the `mimisbrunnr-recall-feedback` skill. They are not the retrieval path and never feed ranking.
 
 ## Quality Constraints
@@ -60,11 +61,11 @@ Targets and verification live in [./nfrs/](./nfrs/). Two shape how code is writt
 ## Migration Plans
 
 - The telemetry-derived placement (LADR-02, option C) was rejected rather than chosen, so this design takes on no dependency on an observability retention policy owned elsewhere. Reviving C would reintroduce that coupling, and would buy a latency saving the measurements could not detect.
-- Feedback retention is a bound, not a policy: **30 days or 2,000,000 records, whichever comes first** (193 bytes/record measured, ~9.4 KiB per 50-memory retrieval, ~370 MiB at the cap). If long-term trend analysis is ever wanted, that is a different design — old recall data describes a store and a recall implementation that no longer exist.
+- Feedback retention is a bound, not a policy: **30 days or 2,000,000 records, whichever comes first** (193 bytes/record measured, ~9.4 KiB per 50-memory retrieval, ~370 MiB at the cap). **Specified, not implemented** — nothing in `src/` prunes the table; the only deletion is the baseline reset. Reopen when a retention job is built or the table nears the cap's size. If long-term trend analysis is ever wanted, that is a different design — old recall data describes a store and a recall implementation that no longer exist.
 - The feedback table sits outside the six entity types the DbContext exposes and `ModelShapeGuardTests` asserts. **It is not an EF entity** — decided deliberately: `recall_feedback` is SQL-created by the `AddRecallFeedbackTable` migration, invisible to the model snapshot, and accessed only through `IRecallFeedback`/`IRecallFeedbackQuery` → `NpgsqlRecallFeedback`/`NpgsqlRecallFeedbackQuery`, mirroring the `ITicketGraph` boundary. Do not add a `DbSet`; that breaks the six-entity guard. The prototype's surrogate `bigserial` key is scaffolding and was not carried into the shipped record shape.
 - **The placement evidence was prototype boundary; the NFR evidence is shipped-path.** The placement evidence
   settled which mechanism to build, measured at the prototype boundary. Workstreams 02/03 shipped the
-  fire-and-forget writer, the identical-results-with-feedback-on-and-off criterion against the retrieval
+  guarded synchronous writer, the identical-results-with-feedback-on-and-off criterion against the retrieval
   handler, the never-recalled/miss-rate queries and the reset. Workstream 04 (now delivered) verified the
   NFR-01..03 criteria against the shipped path via `SMOOTH_NFR_BENCH=1` `NfrEvidenceTests`:
   recognisable-phrase confidentiality on both paths, latency p50/p95, concurrent-recall-of-a-popular-memory,
@@ -74,6 +75,7 @@ Targets and verification live in [./nfrs/](./nfrs/). Two shape how code is writt
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-01 | Recorded what the shipped code does not implement. The README status moves from "Complete" to "Implemented — retention bound and asynchronous feedback write not implemented" and names its business authority (no BR traces here; it answers the BRD-001 §9 findability risk and records BR-15's misses without its question loop). LADR-02's 30 d / 2,000,000 retention bound is marked specified-not-implemented with a reopen trigger, and NFR-02's growth criterion half met. Every "fire-and-forget" / "off the critical path" claim (LADR-01, LADR-02, NFR-02 evidence ×2, diagrams, this file, `IRecallFeedback`) corrected: `NpgsqlRecallFeedback.Record` runs its `INSERT` synchronously from `QueryMemories.Handler` before the response returns. | `NpgsqlRecallFeedback`, `QueryMemories`, `NpgsqlRecallFeedbackQuery` |
 | 2026-09-20 | NFR-01..03 closed on evidence gathered against the shipped path by the env-gated `NfrEvidenceTests` (`SMOOTH_NFR_BENCH=1`): recognisable-phrase confidentiality on hit and miss (phrase in no record, shape CHECK `23514`), latency p50/p95 within noise (0.917 ms gap vs 1.788 ms spread), no concurrency contention (0 `55P03`), failure injection leaves byte-identical results, growth bounded (156 bytes/row, ~297 MiB at cap), never-recalled set equality (1,904 = untouched pool), miss-rate derivability, resettable baseline. NFR-01..03 moved to Accepted; HLD-001 `pg_trgm` reopening threshold recorded as met (evidence only). | `NfrEvidenceTests`, NFR-01/02/03 evidence, HLD-001-pg-trgm-reopening-evidence |
 | 2026-09-19 | Fixed a ~50/50 flake in `RecallFeedbackPersistenceTests.Write_persists_hit_records_sharing_a_retrieval_id`: it asserted insertion order with an order-sensitive `ShouldBe`, but rows are read `ORDER BY retrieval_id, memory_uuid` over two random uuids. Now order-insensitive — order is incidental to the claim being tested. | test flake |
 | 2026-09-14 | Created — discovery HLD for recall feedback. Placement deliberately left open. | Gap identified during pre-dogfooding review |

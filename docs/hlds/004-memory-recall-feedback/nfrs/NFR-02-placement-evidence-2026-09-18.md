@@ -99,7 +99,8 @@ hottest table, and the vacuum load that follows is carried by the read path.
   returns all 50 rows, every field identical. Attempting the two independently would prove nothing,
   because nothing could propagate between them.
 
-This is the prototype boundary. The shipped fire-and-forget writer, the retrieval handler it hangs off, and
+This is the prototype boundary. The shipped writer (a guarded synchronous write, run inline before the
+response returns), the retrieval handler it hangs off, and
 the results-identical-with-feedback-on-and-off criterion against that handler are verified with the write
 path, not here.
 
