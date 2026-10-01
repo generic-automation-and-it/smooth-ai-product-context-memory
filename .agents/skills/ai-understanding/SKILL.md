@@ -480,9 +480,12 @@ An Understanding that keeps proving true has outgrown the disposable store:
 
 **Three independent sessions is the threshold, and the evidence is `provenance.inherited`.** A unit that
 has been inherited in three distinct `provenance.session` values has been re-derived rather than recalled;
-propose promoting it. Below three, propose anyway only if you **state why** — name what makes this the
-exception (a cost that repeats, a decision already taken, a rule that is currently unwritten). The same
-arithmetic governs `propose-label` in `mimisbrunnr-context-memory`: a label seen once is a word, three
+propose promoting it. **Nothing counts that for you** — `--review` reports only `never inherited`, which
+is the complementary signal, so the count is read by hand: open every unit whose `provenance.inherited`
+names this slug and count the distinct `provenance.session` values on them. Below three, propose anyway
+only if you **state why** — name what makes this the exception (a cost that repeats, a decision already
+taken, a rule that is currently unwritten). The same arithmetic governs `propose-label` in
+`mimisbrunnr-context-memory`: a label seen once is a word, three
 times is vocabulary, and proposing below that is how the registry fills with near-synonyms nothing queries.
 
 `--review` reports the other half of this signal as `never inherited`. A unit nothing ever inherited is not

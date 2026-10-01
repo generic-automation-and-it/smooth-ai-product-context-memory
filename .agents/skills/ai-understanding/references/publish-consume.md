@@ -84,27 +84,46 @@ Compare **every** incoming path against the target store, not just the other inc
 destructive case is an incoming unit landing on a *local* one that differs only by case:
 
 ```bash
+ARCHIVE=understandings-20261001-120000.zip   # the archive being consumed
+STORE=.context/understandings/               # the target store (default unless --path overrides)
+
 # Fails loudly on any collision, incoming-vs-incoming and incoming-vs-local alike.
-python3 - <<'PY'
+# Both paths are passed as arguments: a heredoc arrives on stdin, so `python3 -` leaves argv empty.
+python3 - "$ARCHIVE" "$STORE" <<'PY'
 import sys, zipfile
 from pathlib import Path
 archive, store = Path(sys.argv[1]), Path(sys.argv[2])
 seen = {}
 for existing in store.rglob("*"):
     seen.setdefault(str(existing.relative_to(store)).casefold(), existing)
+claimed = {}
 clashes = []
 with zipfile.ZipFile(archive) as zf:
     for name in zf.namelist():
+        # The generated index is exempt, as it already is from the stray-file check: every archive
+        # carries one and every store holds one, so comparing it would refuse every archive.
+        if Path(name).name == "INDEX.md":
+            continue
         key = str(Path(name)).casefold()
-        if key in seen or key in {c[0] for c in clashes}:
-            clashes.append((key, name, seen.get(key)))
+        if key in seen:
+            clashes.append((name, f"local '{seen[key]}'"))
+        elif key in claimed:
+            clashes.append((name, f"'{claimed[key]}' elsewhere in this archive"))
+        claimed.setdefault(key, name)
 if clashes:
-    for key, name, target in clashes:
-        print(f"refusing: '{name}' is the same file as '{target}' on a case-insensitive filesystem")
+    for name, target in clashes:
+        print(f"refusing: '{name}' collides on a case-insensitive filesystem with {target}")
     sys.exit(1)
 print("no case-folded collisions")
 PY
 ```
+
+Two shapes the wording of the refusal has to carry. A collision against a *local* file names that path;
+a collision between two entries of the **archive** names the other entry, because there is no local
+path to name — `claimed` remembers which entry first claimed each folded key, so the operator is sent to
+the duplicate in the archive they hold rather than to a file that does not exist. The generated
+`INDEX.md` is exempt on both sides: it is regenerated on every write (publish step 6, and the consume
+step's own regeneration afterwards), so a case fold on it cannot lose knowledge.
 
 Use `casefold`, not `lower`: it is the full Unicode folding a filesystem compares, so `straße` and
 `strasse` are caught as one file — which `lower` keeps apart. The generator applies the same rule
