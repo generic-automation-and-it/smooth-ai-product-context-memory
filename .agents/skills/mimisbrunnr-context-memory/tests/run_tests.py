@@ -668,6 +668,130 @@ def _resolve(document, path):
         value = value[int(index)] if index else value[name]
     return value
 
+
+def _fake(*parts):
+    """Assemble a fake credential at runtime, so no vendor-shaped literal sits in the source file."""
+    return "".join(parts)
+
+
+_B64 = "Zq3vL9xK2mN8pR4tWb7Yc1Hd5Jf0Gs6Ue"
+# (shape, text, the values that must not survive). Every value is fake; the vendor prefixes are
+# assembled by `_fake` so a repository secret scanner does not mistake the corpus for a leak.
+SECRET_SHAPES = (
+    ("aws access key", _fake("AK", "IA", "IOSFODNN7EXAMPLE"), ["IOSFODNN7EXAMPLE"]),
+    ("aws session key", _fake("AS", "IA", "Y3FAKEFAKEFAKE12"), ["Y3FAKEFAKEFAKE12"]),
+    ("github classic", _fake("push with gh", "p_", _B64, "abc"), [_B64]),
+    ("github oauth", _fake("gh", "o_", _B64, "xyz"), [_B64]),
+    ("github fine-grained", _fake("github", "_pat_", "11ABCDEFG0", _B64, "_", _B64), [_B64]),
+    ("openai project", _fake("export OPENAI=s", "k-proj-", _B64, _B64), [_B64]),
+    ("openai legacy", _fake("s", "k-", _B64, "7Kq2"), [_B64]),
+    ("anthropic", _fake("s", "k-ant-api03-", _B64, "-", _B64), [_B64]),
+    ("stripe-style", _fake("s", "k_live_", "9Vw2Lx8Kq4Pz1Rt7"), ["9Vw2Lx8Kq4Pz1Rt7"]),
+    ("jwt", _fake("ey", "JhbGciOiJIUzI1NiJ9.", "ey", "JzdWIiOiIxMjM0In0.", "dBjftJeZ4CVPmB92K27uhbUJU1p1r"),
+     ["dBjftJeZ4CVPmB92K27uhbUJU1p1r", "JzdWIiOiIxMjM0In0"]),
+    ("authorization bearer", "Authorization: Bearer abc.DEF-ghi_123~xyz", ["abc.DEF-ghi_123~xyz"]),
+    ("authorization basic", "authorization: Basic dXNlcjpwYXNzd29yZA==", ["dXNlcjpwYXNzd29yZA=="]),
+    ("bare bearer", "curl -H 'X-Trace: 1' -H 'Bearer 9f8e7d6c5b4a39281706f5e4'", ["9f8e7d6c5b4a39281706f5e4"]),
+    ("postgres url userinfo", "postgres://app:Pa55w0rdHere@db.internal:5432/app", ["Pa55w0rdHere"]),
+    ("https url userinfo", "clone https://bot:tok-12345-secret@git.example/x.git", ["tok-12345-secret"]),
+    ("host write token env", "ApiAccess__WriteToken=Q2xpZW50V3JpdGVUb2tlbg", ["Q2xpZW50V3JpdGVUb2tlbg"]),
+    ("host read token env", "ApiAccess__ReadToken=readtokenvalue77", ["readtokenvalue77"]),
+    ("skill write token env", "CONTEXT_MEMORY_WRITE_TOKEN=wr1t3-t0k3n-value", ["wr1t3-t0k3n-value"]),
+    ("skill read token env", "export CONTEXT_MEMORY_READ_TOKEN='r34d t0k3n'", ["r34d", "t0k3n"]),
+    ("json spaced password", '{"password": "correct horse battery staple"}',
+     ["correct", "horse", "battery", "staple"]),
+    ("quoted spaced secret", 'secret="two words here"', ["two", "words", "here"]),
+    ("camelCase apiKey", 'apiKey: "a1b2c3d4e5f6g7h8"', ["a1b2c3d4e5f6g7h8"]),
+    ("camelCase clientSecret", "clientSecret=Shh-very-private-99", ["Shh-very-private-99"]),
+    ("json accessToken", '{"accessToken": "at-0001-xyz-9876"}', ["at-0001-xyz-9876"]),
+    ("x-api-key header", "x-api-key: 0a1b2c3d4e5f6a7b", ["0a1b2c3d4e5f6a7b"]),
+    ("deploy token", "DEPLOY_TOKEN=abcdef1234567890", ["abcdef1234567890"]),
+    ("passphrase", "passphrase: 'open sesame now'", ["sesame"]),
+    ("connection string", "Server=db;User Id=sa;Password=Sup3rS3cret!;Database=app", ["Sup3rS3cret!"]),
+    ("connection string quoted", 'Host=db;Password="pass with spaces";', ["pass with spaces", "spaces"]),
+    ("aws secret access key", "aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+     ["wJalrXUtnFEMI"]),
+    ("pem rsa", "-----BEGIN RSA PRIVATE KEY-----\nMIICXgIBAAKBgQC\n-----END RSA PRIVATE KEY-----",
+     ["MIICXgIBAAKBgQC"]),
+    ("pem encrypted", "-----BEGIN ENCRYPTED PRIVATE KEY-----\nMIIFHDBOBgkqhkiG9w0B\n"
+     "-----END ENCRYPTED PRIVATE KEY-----", ["MIIFHDBOBgkqhkiG9w0B"]),
+    ("pem openssh", "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAA\n"
+     "-----END OPENSSH PRIVATE KEY-----", ["b3BlbnNzaC1rZXktdjEAAAA"]),
+    ("pem pgp", "-----BEGIN PGP PRIVATE KEY BLOCK-----\n\nlQOYBF0123456789abcdef\n"
+     "-----END PGP PRIVATE KEY BLOCK-----", ["lQOYBF0123456789abcdef"]),
+    ("pem legacy encrypted headers", "-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\n"
+     "DEK-Info: AES-128-CBC,0123456789ABCDEF\n\nMIICXgIBAAKBgQCfakefake\n-----END RSA PRIVATE KEY-----",
+     ["MIICXgIBAAKBgQCfakefake", "0123456789ABCDEF"]),
+    ("pem unterminated", "pasted: -----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEF\n"
+     "AASCBKcwggSjAgEAAoIBAQC7\n", ["MIIEvQIBADANBgkqhkiG9w0BAQEF", "AASCBKcwggSjAgEAAoIBAQC7"]),
+)
+
+
+class SecretShapeCoverageTests(unittest.TestCase):
+    """Every supported shape has a positive case (HLD-002 NFR-01), and none of them leaks a tail."""
+
+    def test_the_corpus_is_at_least_twenty_five_shapes(self):
+        self.assertGreaterEqual(len({shape for shape, _text, _secrets in SECRET_SHAPES}), 25)
+
+    def test_every_shape_is_caught_with_no_fragment_surviving(self):
+        for shape, text, secrets in SECRET_SHAPES:
+            with self.subTest(shape=shape):
+                redacted, hits = redact.scrub_located(text)
+                self.assertTrue(hits, f"{shape}: no rule matched")
+                for secret in secrets:
+                    self.assertNotIn(secret, redacted, f"{shape}: '{secret}' survived")
+
+    def test_every_shape_is_caught_through_the_set_gate(self):
+        payload = {"items": [{"statement": text} for _shape, text, _secrets in SECRET_SHAPES[:20]]
+                   + [{"content": "\n".join(text for _s, text, _x in SECRET_SHAPES[20:])}],
+                   "links": []}
+        scrubbed, hits = redact.scrub_set_payload(payload)
+        serialised = json.dumps(scrubbed)
+        reported = json.dumps(redact.digest(hits))
+        for shape, _text, secrets in SECRET_SHAPES:
+            for secret in secrets:
+                with self.subTest(shape=shape):
+                    self.assertNotIn(secret, serialised)
+                    self.assertNotIn(secret, reported)
+
+    def test_the_prose_corpus_still_passes_with_the_wider_rules(self):
+        for text in ORDINARY_PROSE:
+            with self.subTest(text=text):
+                self.assertEqual(redact.scrub_located(text), (text, []))
+
+    def test_a_pem_block_does_not_swallow_the_prose_after_it(self):
+        text = ("-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEF\n-----END PRIVATE KEY-----\n"
+                "The key above was rotated on Monday.")
+        redacted, _hits = redact.scrub_located(text)
+        self.assertTrue(redacted.endswith("\nThe key above was rotated on Monday."))
+
+    def test_unterminated_pem_markers_scrub_in_linear_time(self):
+        import time
+
+        padding = "plain padding words " * 5000  # 100 000 characters of prose
+        for label in ("PRIVATE KEY", "ENCRYPTED PRIVATE KEY", "RSA PRIVATE KEY"):
+            text = (f"-----BEGIN {label}-----\n" * 2000) + padding
+            with self.subTest(label=label):
+                started = time.perf_counter()
+                redacted, hits = redact.scrub_located(text)
+                elapsed = time.perf_counter() - started
+                self.assertLess(elapsed, 0.5, f"{elapsed:.2f}s for 2000 unterminated BEGIN markers")
+                self.assertEqual(len(hits), 2000)
+                self.assertTrue(redacted.endswith(padding))
+
+    def test_repeated_rule_prefixes_scrub_in_linear_time(self):
+        # Each of these made one rule rescan the rest of the text from every candidate start while
+        # the wider rule set was written: an unbounded scheme, a value class containing `=`, and a
+        # `\b` anchor inside a token class that includes `-`.
+        import time
+
+        for fragment in ("key=", "password=", "sk-", "sk-eyJ", "a://", '"password": "', "Bearer a1"):
+            text = fragment * (120_000 // len(fragment))
+            with self.subTest(fragment=fragment):
+                started = time.perf_counter()
+                redact.scrub_located(text)
+                self.assertLess(time.perf_counter() - started, 0.5)
+
 class AtomicityTests(unittest.TestCase):
     def test_single_atomic_fact_is_simple(self):
         verdict = atomicity.classify("PostgreSQL stores our search index.")
@@ -1187,9 +1311,11 @@ class SetRedactionGateTests(unittest.TestCase):
         self.assertEqual(findings.get("github-token"), 2)        # content, tags
         # description (password=), sources[].reference (Password=), labelsProposed (password=)
         self.assertEqual(findings.get("connection-string-password"), 3)
-        # name (token=), contentSummary (api_key=), summaryModel (secret=),
-        # summaryPromptVersion (key=), facets, links[].reason
-        self.assertEqual(findings.get("generic-secret-assignment"), 6)
+        # name (token=), contentSummary (api_key=), summaryModel (secret=), summaryPromptVersion (key=)
+        self.assertEqual(findings.get("generic-secret-assignment"), 4)
+        # facets and links[].reason carry `sk-live-…`, which the vendor rule takes before the
+        # `api_key=` assignment rule sees it
+        self.assertEqual(findings.get("api-key-sk"), 2)
 
     def test_non_string_content_fields_survive_untouched(self):
         payload = {"items": [{"statement": None, "content": 42, "tags": ["ok", None],

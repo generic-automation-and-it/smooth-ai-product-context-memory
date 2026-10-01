@@ -15,9 +15,12 @@ WHAT THIS GATES, PRECISELY. The rules are fixed-shape fingerprints, not semantic
 path now scrubs through them automatically and refuses to write when the scrubber cannot run — that is
 a **fail-closed gate on recognition**, and it is easy to describe as more than it is:
 
-- It catches a value that *matches* a known form: `AKIA…`, `gh[pousr]_…`, a PEM block, an assignment
-  to a key whose name says secret (`password=`, `client_secret:`, `DEPLOY_TOKEN=`), or an assignment to
-  a neutral key (`key`, `token`, `credential`) whose value is itself secret-shaped.
+- It catches a value that *matches* a known form: `AKIA…`/`ASIA…`, `gh[pousr]_…`/`github_pat_…`,
+  `sk-…`/`sk-proj-…`/`sk-ant-…`, a JWT, a PEM private-key block (any label, terminated or not), URL
+  userinfo (`scheme://user:pass@host`), an `Authorization:` or `Bearer` credential, an assignment to a
+  key whose name says secret (`password=`, `"clientSecret": "…"`, `ApiAccess__WriteToken=`,
+  `CONTEXT_MEMORY_WRITE_TOKEN=`, quoted values with spaces included), or an assignment to a neutral key
+  (`key`, `token`, `credential`) whose value is itself secret-shaped.
 - It does **not** catch a secret that matches no rule. A bare high-entropy value, a base64 blob with
   no label, an unusual vendor token format, or a password in prose all pass through untouched.
 
@@ -29,6 +32,7 @@ that is a deliberate, separate decision rather than something this module does i
 """
 
 import argparse
+import bisect
 import json
 import re
 import sys
@@ -52,7 +56,7 @@ def _secret_shaped(value):
 
 
 def _not_already_redacted(value):
-    return not value.startswith("<redacted")
+    return not value.strip("\"'").startswith("<redacted")
 
 
 # Each rule is (name, pattern, value_group, placeholder, accept).
@@ -65,46 +69,104 @@ def _not_already_redacted(value):
 # Order is priority: rules are matched against the ORIGINAL text, and a match overlapping one already
 # accepted by an earlier rule is dropped. That is what lets the digest report positions in the text the
 # caller actually holds, rather than in an intermediate string a previous rule already rewrote.
+_PEM_LABEL = r"(?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?"
+
+# A value after `key = ` / `key: `. Quoted values may contain spaces (a passphrase is still a secret
+# past its first word); unquoted ones stop at whitespace, a quote, `,` or `;`.
+_QUOTED = r""""[^"\r\n]{1,512}"|'[^'\r\n]{1,512}'"""
+
+
+def _assignment(key, min_unquoted):
+    """`<key>` then `:`/`=`, then a quoted or unquoted value as group 1.
+
+    The key may be quoted (`"apiKey": …`), so a closing quote is allowed before the separator. The
+    lookbehind pins the key to the start of an identifier, which also keeps the search linear: an
+    identifier is tried once from its start rather than from every character inside it.
+    """
+    return re.compile(
+        r"(?i)(?<![A-Za-z0-9_.-])(?:" + key + r")[\"']?\s*[:=]\s*"
+        r"(" + _QUOTED + r"|[A-Za-z0-9._/+@!#$%&*?~-]{" + str(min_unquoted) + r",}={0,2})"
+    )
+
+
 RULES = [
     (
         "aws-access-key-id",
-        re.compile(r"\b(AKIA[0-9A-Z]{16})\b"),
+        re.compile(r"\b((?:AKIA|ASIA)[0-9A-Z]{16})\b"),
         0, "<redacted-aws-access-key>", None,
     ),
     (
         "github-token",
-        re.compile(r"\b(gh[pousr]_[A-Za-z0-9]{36,255})\b"),
+        re.compile(r"\b(gh[pousr]_[A-Za-z0-9]{36,255}|github_pat_[A-Za-z0-9_]{22,255})\b"),
         0, "<redacted-github-token>", None,
     ),
     (
+        # The body may not contain `-----`, so a BEGIN with no END stops at the next marker instead of
+        # scanning to the end of the text. The unbounded `.*?` this replaces was quadratic in the number
+        # of unterminated BEGIN markers (8 000 of them took 4.4 s).
         "private-key-pem",
         re.compile(
-            r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----.*?"
-            r"-----END (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----",
-            re.DOTALL,
+            r"-----BEGIN " + _PEM_LABEL + r"-----(?:[^-]|-(?!----))*?-----END " + _PEM_LABEL + r"-----"
         ),
         0, "<redacted-private-key>", None,
     ),
     (
+        # A truncated or unterminated block is still key material. Takes the BEGIN line plus the
+        # base64 and `Header: value` lines that follow it — never the prose after them.
+        "private-key-pem",
+        re.compile(
+            r"-----BEGIN " + _PEM_LABEL + r"-----"
+            r"(?:\s+(?:[A-Za-z0-9+/]{16,}={0,2}|[A-Za-z0-9+/]{0,15}={1,2}|[A-Z][A-Za-z-]*:[^\r\n]*))*"
+        ),
+        0, "<redacted-private-key>", None,
+    ),
+    (
+        "jwt",
+        re.compile(r"(?<![A-Za-z0-9_-])(eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*)"),
+        0, "<redacted-jwt>", None,
+    ),
+    (
+        "api-key-sk",
+        re.compile(r"(?<![A-Za-z0-9_-])(sk-(?:proj-|ant-|live-|test-)?[A-Za-z0-9_-]{20,}"
+                   r"|[sr]k_(?:live|test)_[A-Za-z0-9]{16,})"),
+        0, "<redacted-api-key>", _secret_shaped,
+    ),
+    (
+        "url-userinfo",
+        re.compile(r"(?i)\b[a-z][a-z0-9+.-]{0,31}://[^\s/:@?#]*:([^\s/@?#]+)@"),
+        1, PLACEHOLDER, _not_already_redacted,
+    ),
+    (
+        "authorization-header",
+        re.compile(r"(?i)\bauthorization[\"']?\s*[:=]\s*[\"']?(?:bearer|basic|token|digest)\s+"
+                   r"([A-Za-z0-9._~+/=-]{8,})"),
+        1, PLACEHOLDER, _not_already_redacted,
+    ),
+    (
+        "authorization-header",
+        re.compile(r"(?i)\bbearer\s+([A-Za-z0-9._~+/=-]{16,})"),
+        1, PLACEHOLDER, _secret_shaped,
+    ),
+    (
         "connection-string-password",
-        re.compile(r"(?i)(?:password|pwd)\s*=\s*((['\"]?)[^'\";\s&]+\2)"),
+        re.compile(r"(?i)(?:password|pwd)\s*=\s*(" + _QUOTED + r"|[^'\";\s&]+)"),
         1, PLACEHOLDER, _not_already_redacted,
     ),
     (
         "aws-secret-access-key",
-        re.compile(r"(?i)\baws_secret_access_key\s*=\s*((['\"]?)\S+\2)"),
+        re.compile(r"(?i)\baws_secret_access_key\s*=\s*(" + _QUOTED + r"|\S+)"),
         1, PLACEHOLDER, None,
     ),
     (
         # A key whose NAME says it holds a secret. Any value of eight or more characters is taken:
         # the name is the evidence, and a false positive here costs a placeholder, not a leak.
+        # camelCase (`apiKey`, `clientSecret`, `writeToken`) and env-style (`ApiAccess__WriteToken`,
+        # `CONTEXT_MEMORY_WRITE_TOKEN`) keys are covered by the suffix match.
         "generic-secret-assignment",
-        re.compile(
-            r"(?i)(?<![A-Za-z0-9_.-])"
-            r"[A-Za-z0-9_.-]*(?:secret|passwd|password|api[_-]?key|access[_-]?key|private[_-]?key"
-            r"|[A-Za-z0-9][_.-]*token)"
-            r"\s*[:=]\s*"
-            r"((['\"]?)[A-Za-z0-9._/+@!#$%&*?~-]{8,}\2)"
+        _assignment(
+            r"[A-Za-z0-9_.-]*(?:secret|passwd|password|passphrase|api[_-]?key|access[_-]?key"
+            r"|private[_-]?key|[A-Za-z0-9][_.-]*token)",
+            8,
         ),
         1, PLACEHOLDER, _not_already_redacted,
     ),
@@ -113,12 +175,7 @@ RULES = [
         # redacted only when the value itself is secret-shaped. This is the rule that used to turn
         # `sort key = created_on` into `sort key = <redacted>`.
         "generic-secret-assignment",
-        re.compile(
-            r"(?i)(?<![A-Za-z0-9_.-])"
-            r"(?:[A-Za-z0-9_.-]*key|token|credentials?)"
-            r"\s*[:=]\s*"
-            r"((['\"]?)[A-Za-z0-9._/+@!#$%&*?~=-]{16,}\2)"
-        ),
+        _assignment(r"[A-Za-z0-9_.-]*key|token|credentials?", 16),
         1, PLACEHOLDER, _secret_shaped,
     ),
 ]
@@ -148,7 +205,9 @@ def scrub_located(content):
     characters that were replaced. They locate a redaction without restating it: the span's text is
     never retained, logged or returned.
     """
-    taken = []  # (start, end, rule_name, replace_start, replace_end, replacement) over the original
+    # Accepted matches, kept sorted by start and mutually disjoint, so an overlap test is two
+    # neighbour comparisons rather than a scan — a scan made 8 000 PEM markers quadratic again.
+    starts, taken = [], []  # taken: (start, end, rule_name, value_start, value_end, replacement)
     for name, pattern, group, placeholder, accept in RULES:
         pos = 0
         while pos <= len(content):
@@ -157,14 +216,15 @@ def scrub_located(content):
                 break
             start, end = match.span()
             value_start, value_end = match.span(group)
-            value = content[value_start:value_end]
-            overlaps = any(start < t_end and t_start < end for t_start, t_end, *_ in taken)
-            if overlaps or (accept is not None and not accept(value)):
+            index = bisect.bisect_left(starts, start)
+            overlaps = ((index > 0 and taken[index - 1][1] > start)
+                        or (index < len(taken) and taken[index][0] < end))
+            if overlaps or (accept is not None and not accept(content[value_start:value_end])):
                 pos = start + 1
                 continue
-            taken.append((start, end, name, value_start, value_end, placeholder))
+            starts.insert(index, start)
+            taken.insert(index, (start, end, name, value_start, value_end, placeholder))
             pos = end if end > start else end + 1
-    taken.sort()
     out, cursor, hits = [], 0, []
     for _start, _end, name, value_start, value_end, replacement in taken:
         out.append(content[cursor:value_start])
