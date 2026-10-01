@@ -110,9 +110,12 @@ DB and wire are unchanged.
   cited** (subject/uuid/slug), and reports size in characters with a labelled token estimate. The
   model-free degenerate assertions (an agent that answers nothing scores 0 correct; an agent that answers
   everything scores 0 on the absent-answer questions) run unconditionally. The scored cold-model walk is
-  recorded 2026-09-30 in `fixtures/walk_answers.json`; `SMOOTH_WALK_BENCH=1` scores it and prints the
-  report. The file never calls a model, so the PR gate runs it: the scorer and degenerate assertions are
-  checked on every PR, the recorded-walk report only under the env var. A decline is **only** the
+  recorded 2026-09-30 in `fixtures/walk_answers.json`; `SMOOTH_WALK_BENCH=1` scores it, **asserts** that
+  every present question was answered, every absent one declined and nothing confabulated, and prints the
+  report. Those assertions are the gate — checking only the question count passed for an agent that
+  confabulates every answer — and a companion test scores a deliberately confabulating walk to show the
+  gate rejects it. The file never calls a model, so the PR gate runs it: the scorer and degenerate
+  assertions are checked on every PR, the recorded-walk gate only under the env var. A decline is **only** the
   protocol's instructed phrase `not in context`: any decline-sounding word list also matches inside
   asserted content and certifies a confabulation as a refusal. A differently-worded decline is
   under-credited, which is the safe direction for this instrument.
@@ -123,6 +126,7 @@ DB and wire are unchanged.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-01 | **The recorded walk is now gated on its scores, not just its question count.** `test_recorded_walk_scores_and_reports` asserted only that every question was asked, so replacing the whole recorded walk with an agent that confabulates every answer still passed: it printed `correct 0/2 … confabulations 3` and exited **OK**. That is the one failure this instrument exists to catch, and those numbers are what BRD-003 §8 assumption 2 rests on — the evidence was unfalsifiable. Each surface now asserts every present question answered, every absent one declined, and zero confabulations; a second test proves the gate by scoring a deliberately confabulating walk and requiring it to be caught. Verified by mutation: the confabulating record fails with `0 != 2`. The measured numbers are unchanged. | BRD-003 §8 assumption 2 |
 | 2026-10-01 | Walk scorer: a decline is now only the instructed phrase `not in context`. The previous fix removed two words from a decline-word list, but the list was the defect — `not present`, `no record` and `does not mention` matched inside confabulated content too, so every probe confabulation still scored as a refusal. Measured results unchanged; mutation-verified. | BRD-003 §8 assumption 2 |
 | 2026-10-01 | Walk scorer: a decline must be a decline phrase — bare `unavailable`/`absent` matched inside confabulated content and scored it as a correct refusal; regression test added. The harness is model-free, so the PR gate now runs it (the docs already claimed its degenerate assertions ran unconditionally, but no CI step ran the file). Measured results unchanged. | BRD-003 §8 assumption 2 |
 | 2026-09-30 | Test References corrected: the harness is 50 tests (two dump-durability fixtures added), the coverage sentence names them, and the walk harness's "not a PR-gate test" reason now names the gated class (`WalkModelTests` replays a recorded model run and is `skipUnless`-gated; `WalkFixtureTests` is model-free) rather than the harness as a whole. A Key Behaviors bullet records the new advisory gitignored-dump warning the client prints. | PR review |
