@@ -1377,6 +1377,118 @@ class SetRedactionGateTests(unittest.TestCase):
         self.assertEqual(findings, [])
 
 
+# Every persisting write other than `set`, with a DISTINCT planted secret in each free-text field the
+# Host stores. Hand-declared here, independently of `redact.WRITE_SPECS`, so dropping a field from the
+# spec leaves its secret in the posted body instead of shrinking the test with it.
+_TICKET = {"provider": "github", "key": "42"}
+OTHER_WRITES = {
+    "resolve_group": ("POST", "/api/context/groups/resolve", False, {
+        "name": "DEPLOY_TOKEN=XSECrg01name", "body": "password=XSECrg02body",
+        "repo": "secret=XSECrg03repo", "repoUrl": "https://bot:XSECrg04url@git.example/x.git",
+        "initiativeName": "api_key=XSECrg05init", "scopeIdentifier": "client_secret=XSECrg06scope",
+        "scopeDimension": "product",
+        "tickets": [{"provider": "local", "key": "k", "url": "https://u:XSECrg07ticket@t.example/1"}]}),
+    "update_group": ("PATCH", f"/api/context/groups/{GOOD_UUID}", True, {
+        "groupUuid": GOOD_UUID, "repo": "secret=XSECug01repo",
+        "repoUrl": "https://bot:XSECug02url@git.example/x.git",
+        "initiativeName": "api_key=XSECug03init", "scopeIdentifier": "client_secret=XSECug04scope",
+        "tickets": [{"provider": "local", "key": "k", "url": "https://u:XSECug05ticket@t.example/1"}]}),
+    "append_description": ("POST", f"/api/context/groups/{GOOD_UUID}/descriptions", True, {
+        "groupUuid": GOOD_UUID, "name": "DEPLOY_TOKEN=XSECad01name", "body": "password=XSECad02body"}),
+    "create_link": ("POST", "/api/context/links", False, {
+        "sourceUuid": GOOD_UUID, "targetUuid": GOOD_UUID, "relation": "relates_to",
+        "reason": "cites api_key=XSECcl01reason"}),
+    "ticket_parent": ("PUT", "/api/context/tickets/parent", False, {
+        "child": _TICKET, "parent": {"provider": "github", "key": "10"}, "expectedParent": None,
+        "reason": "declared; password=XSECtp01reason", "source": "secret=XSECtp02source"}),
+    "propose_label": ("POST", "/api/context/labels", False, {"name": "DEPLOY_TOKEN=XSECpl01name"}),
+    "upsert_initiative": ("POST", "/api/context/initiatives", False, {
+        "name": "secret=XSECui01name", "description": "password=XSECui02desc"}),
+}
+OTHER_WRITE_SECRETS = re.compile(r"XSEC[a-z0-9]+")
+
+CLI_WRITES = {
+    "resolve_group": client.cmd_resolve_group, "update_group": client.cmd_update_group,
+    "append_description": client.cmd_append_description, "create_link": client.cmd_create_link,
+    "ticket_parent": client.cmd_ticket_parent, "propose_label": client.cmd_propose_label,
+    "upsert_initiative": client.cmd_upsert_initiative,
+}
+
+
+class OtherWriteRedactionTests(unittest.TestCase):
+    """Every persisting write is scrubbed, not just `set` (BR-03)."""
+
+    def _planted(self, payload):
+        return OTHER_WRITE_SECRETS.findall(json.dumps(payload))
+
+    def test_the_fixture_plants_a_secret_in_every_free_text_field(self):
+        for tool, (_method, _path, _uuid, payload) in OTHER_WRITES.items():
+            with self.subTest(tool=tool):
+                text_fields = [key for key, value in payload.items()
+                               if isinstance(value, str) and key not in ("groupUuid", "sourceUuid",
+                                                                         "targetUuid", "relation",
+                                                                         "scopeDimension")]
+                self.assertEqual(len(self._planted(payload)),
+                                 len(text_fields) + len(payload.get("tickets", [])))
+
+    def test_every_mcp_write_posts_no_planted_secret(self):
+        for tool, (method, path, needs_uuid, payload) in OTHER_WRITES.items():
+            arguments = {"payload": copy.deepcopy(payload)}
+            if needs_uuid:
+                arguments["uuid"] = GOOD_UUID
+            with self.subTest(tool=tool), \
+                    patch.object(write_mcp.client, "_request", return_value={"ok": True}) as request:
+                result = write_mcp.call_tool(tool, arguments)
+                self.assertEqual(request.call_args.args[:2], (method, path))
+                posted = request.call_args.args[2]
+                self.assertEqual(self._planted(posted), [], f"{tool} posted a planted secret")
+                self.assertTrue(result["redaction"], f"{tool} scrubbed silently")
+                self.assertEqual(self._planted(result["redaction"]), [])
+
+    def test_every_cli_write_posts_no_planted_secret(self):
+        for tool, (method, path, needs_uuid, payload) in OTHER_WRITES.items():
+            args = SimpleNamespace(payload=None, dryrun=False, uuid=GOOD_UUID if needs_uuid else None)
+            with self.subTest(tool=tool), \
+                    patch.object(client, "read_payload", return_value=copy.deepcopy(payload)), \
+                    patch.object(client, "_request", return_value={"ok": True}) as request, \
+                    redirect_stdout(io.StringIO()) as out:
+                CLI_WRITES[tool](args)
+                self.assertEqual(request.call_args.args[:2], (method, path))
+                self.assertEqual(self._planted(request.call_args.args[2]), [])
+                self.assertEqual(self._planted(out.getvalue()), [])
+                self.assertIn('"redaction"', out.getvalue())
+
+    def test_ticket_parent_dry_run_previews_the_scrubbed_request(self):
+        payload = OTHER_WRITES["ticket_parent"][3]
+        with patch.object(client, "read_payload", return_value=copy.deepcopy(payload)), \
+                patch.object(client, "_request") as request, redirect_stdout(io.StringIO()):
+            result = client.cmd_ticket_parent(SimpleNamespace(payload=None, dryrun=True))
+        request.assert_not_called()
+        self.assertEqual(self._planted(result), [])
+        self.assertEqual(result["request"]["child"], _TICKET, "ticket identity must not be rewritten")
+
+    def test_an_unavailable_redactor_refuses_every_write(self):
+        for tool, (_method, _path, needs_uuid, payload) in OTHER_WRITES.items():
+            arguments = {"payload": copy.deepcopy(payload), "uuid": GOOD_UUID}
+            args = SimpleNamespace(payload=None, dryrun=False, uuid=GOOD_UUID if needs_uuid else None)
+            with self.subTest(tool=tool), \
+                    patch.object(client.redact, "scrub_payload", side_effect=RuntimeError("boom")), \
+                    patch.object(client, "read_payload", return_value=copy.deepcopy(payload)), \
+                    patch.object(client, "_request") as request:
+                for call in (lambda: write_mcp.call_tool(tool, arguments), lambda: CLI_WRITES[tool](args)):
+                    with self.assertRaises(client.ClientError) as error:
+                        call()
+                    self.assertIn("redactor-unavailable", str(error.exception))
+                request.assert_not_called()
+
+    def test_an_undeclared_write_operation_fails_closed(self):
+        with patch.object(client, "_request") as request:
+            with self.assertRaises(client.ClientError) as error:
+                client.scrubbed_write("brand_new_write", "POST", "/api/context/x", {"a": "b"})
+        self.assertIn("redactor-unavailable", str(error.exception))
+        request.assert_not_called()
+
+
 class DeepSearchTests(unittest.TestCase):
     def test_default_client_query_has_no_deepsearch_pass(self):
         with patch.object(client, "read_payload", return_value={}), \

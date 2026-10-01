@@ -276,10 +276,8 @@ def cmd_set(args):
     """
     payload = read_payload(args.payload)
     validate_set_payload(payload)
-    payload, hits = scrub_or_refuse(payload)
     query = {"dryRun": "true"} if args.dryrun else None
-    resp = _request("POST", "/api/context/memories", payload, query=query)
-    attach_redaction(resp, hits)
+    resp = scrubbed_write("set", "POST", "/api/context/memories", payload, query=query)
     print(json.dumps(resp, indent=2))
     return resp
 
@@ -305,8 +303,18 @@ def attach_redaction(resp, hits):
     return resp
 
 
-def scrub_or_refuse(payload):
-    """Scrub a `set` payload, or refuse the write. Never returns unscubbed content.
+def scrubbed_write(operation, method, path, payload, query=None):
+    """Scrub `payload` for `operation`, send it, and attach the redaction digest to the response.
+
+    The single route every persisting write takes, so a new write subcommand or MCP tool is gated by
+    calling this rather than by remembering to call the scrubber.
+    """
+    payload, hits = scrub_or_refuse(payload, operation)
+    return attach_redaction(_request(method, path, payload, query=query), hits)
+
+
+def scrub_or_refuse(payload, operation="set"):
+    """Scrub a write payload, or refuse the write. Never returns unscrubbed content.
 
     The redaction gate is fail-closed because the failure it guards against is irreversible: a
     blob is content-addressed, so a secret that reaches storage can only be orphaned, never
@@ -315,7 +323,7 @@ def scrub_or_refuse(payload):
     failure, never the content, so the refusal is safe to print into a transcript.
     """
     try:
-        return redact.scrub_set_payload(payload)
+        return redact.scrub_write_payload(operation, payload)
     except Exception as exc:  # noqa: BLE001 — the point is that no exception escapes as a write
         raise ClientError(
             0,
@@ -422,25 +430,25 @@ def cmd_get_blob(args):
 
 
 def cmd_resolve_group(args):
-    resp = _request("POST", "/api/context/groups/resolve", read_payload(args.payload))
+    resp = scrubbed_write("resolve_group", "POST", "/api/context/groups/resolve", read_payload(args.payload))
     print(json.dumps(resp, indent=2))
     return resp
 
 
 def cmd_update_group(args):
-    resp = _request("PATCH", group_path(args.uuid), read_payload(args.payload))
+    resp = scrubbed_write("update_group", "PATCH", group_path(args.uuid), read_payload(args.payload))
     print(json.dumps(resp, indent=2))
     return resp
 
 
 def cmd_append_description(args):
-    resp = _request("POST", group_descriptions_path(args.uuid), read_payload(args.payload))
+    resp = scrubbed_write("append_description", "POST", group_descriptions_path(args.uuid), read_payload(args.payload))
     print(json.dumps(resp, indent=2))
     return resp
 
 
 def cmd_create_link(args):
-    resp = _request("POST", "/api/context/links", read_payload(args.payload))
+    resp = scrubbed_write("create_link", "POST", "/api/context/links", read_payload(args.payload))
     print(json.dumps(resp, indent=2))
     return resp
 
@@ -452,7 +460,7 @@ def cmd_labels(args):
 
 
 def cmd_propose_label(args):
-    resp = _request("POST", "/api/context/labels", read_payload(args.payload))
+    resp = scrubbed_write("propose_label", "POST", "/api/context/labels", read_payload(args.payload))
     print(json.dumps(resp, indent=2))
     return resp
 
@@ -464,7 +472,7 @@ def cmd_initiatives(args):
 
 
 def cmd_upsert_initiative(args):
-    resp = _request("POST", "/api/context/initiatives", read_payload(args.payload))
+    resp = scrubbed_write("upsert_initiative", "POST", "/api/context/initiatives", read_payload(args.payload))
     print(json.dumps(resp, indent=2))
     return resp
 
@@ -544,7 +552,7 @@ def _ticket_identity(value, field):
 
 def cmd_ticket_parent(args):
     """PUT an explicit declaration, or inspect locally without any network call."""
-    payload = read_payload(args.payload)
+    payload, hits = scrub_or_refuse(read_payload(args.payload), "ticket_parent")
     required = {"child", "parent", "expectedParent", "reason", "source"}
     if (not isinstance(payload, dict) or not required <= payload.keys()
             or payload.keys() - required - {"observedAt"}):
@@ -580,6 +588,7 @@ def cmd_ticket_parent(args):
                 "validation": "Local shape only; ownership, cycles and expected parent are unverified."}
     else:
         resp = _request("PUT", "/api/context/tickets/parent", payload)
+    attach_redaction(resp, hits)
     print(json.dumps(resp, indent=2))
     return resp
 

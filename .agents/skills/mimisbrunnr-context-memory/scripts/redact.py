@@ -347,6 +347,34 @@ def scrub_set_payload(payload):
     return scrub_payload(payload, _set_spec())
 
 
+# The free-text fields of every other write body, per operation. Each is persisted — a group's
+# name/body as an append-only description, a link reason, a label or initiative name, a ticket
+# declaration's reason and source — so each is gated exactly like `set`.
+#
+# Ticket identities (`provider`/`key`, and `child`/`parent`/`expectedParent` on a hierarchy
+# declaration) are deliberately not walked: they are matched exactly against stored rows, so
+# rewriting one would bind the write to a different ticket. A ticket's `url` is free text and is.
+_GROUP_FIELDS = {"repo": TEXT, "repoUrl": TEXT, "initiativeName": TEXT, "scopeIdentifier": TEXT,
+                 "tickets": [{"url": TEXT}]}
+WRITE_SPECS = {
+    "resolve_group": dict(_GROUP_FIELDS, name=TEXT, body=TEXT),
+    "update_group": dict(_GROUP_FIELDS),
+    "append_description": {"name": TEXT, "body": TEXT},
+    "create_link": {"reason": TEXT},
+    "ticket_parent": {"reason": TEXT, "source": TEXT},
+    "propose_label": {"name": TEXT},
+    "upsert_initiative": {"name": TEXT, "description": TEXT},
+}
+
+
+def scrub_write_payload(operation, payload):
+    """Scrub the body of write `operation`. An operation with no declared spec raises, so a new
+    write tool cannot reach the store unscrubbed by being left out of the table."""
+    if operation == "set":
+        return scrub_set_payload(payload)
+    return scrub_payload(payload, WRITE_SPECS[operation])
+
+
 def findings_for(located):
     """Per-string findings: [{rule_name, hit_count, spans: [{start, end}]}], sorted by rule name."""
     by_rule = {}

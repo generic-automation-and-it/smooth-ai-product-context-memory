@@ -47,30 +47,32 @@ def call_tool(name, arguments):
     if name in READ_TOOLS:
         return memory_read_mcp.call_tool(name, arguments)
     payload = arguments.get("payload", {})
-    calls = {
-        "preflight": ("POST", "/api/context/preflight"),
+    if name == "preflight":
+        # Preflight matches candidates against stored subjects and persists nothing.
+        return client._request("POST", "/api/context/preflight", payload)
+    # Redaction is not a separate tool on any persisting write. A tool the caller must remember is a
+    # tool that gets skipped, and the cost of skipping it is permanent: content addressing means a
+    # leaked secret in a blob can be orphaned but never edited out, and a group description is
+    # append-only. Every branch below goes through `scrubbed_write`, which fails closed.
+    writes = {
         "resolve_group": ("POST", "/api/context/groups/resolve"),
         "create_link": ("POST", "/api/context/links"),
         "ticket_parent": ("PUT", "/api/context/tickets/parent"),
         "propose_label": ("POST", "/api/context/labels"),
         "upsert_initiative": ("POST", "/api/context/initiatives"),
     }
-    if name in calls:
-        method, path = calls[name]
-        return client._request(method, path, payload)
+    if name in writes:
+        method, path = writes[name]
+        return client.scrubbed_write(name, method, path, payload)
     if name == "set":
         client.validate_set_payload(payload)
-        # Redaction is not a separate tool here. A tool the caller must remember is a tool that
-        # gets skipped, and the cost of skipping it is a permanent blob: content addressing means
-        # a leaked secret can be orphaned but never edited out. Fail closed like the CLI path.
-        payload, hits = client.scrub_or_refuse(payload)
         query = {"dryRun": "true"} if arguments.get("dryRun") else None
-        result = client._request("POST", "/api/context/memories", payload, query=query)
-        return client.attach_redaction(result, hits)
+        return client.scrubbed_write("set", "POST", "/api/context/memories", payload, query=query)
     if name == "update_group":
-        return client._request("PATCH", client.group_path(arguments.get("uuid")), payload)
+        return client.scrubbed_write(name, "PATCH", client.group_path(arguments.get("uuid")), payload)
     if name == "append_description":
-        return client._request("POST", client.group_descriptions_path(arguments.get("uuid")), payload)
+        return client.scrubbed_write(
+            name, "POST", client.group_descriptions_path(arguments.get("uuid")), payload)
     if name == "redact":
         results = []
         for index, content in enumerate(arguments["items"]):
