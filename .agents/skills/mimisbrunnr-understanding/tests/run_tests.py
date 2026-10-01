@@ -480,6 +480,7 @@ class DumpTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp) / "repo"
             subprocess.run(["git", "init", "-q", str(repo)], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(repo), "config", "core.excludesFile", os.devnull], check=True)
             (repo / ".gitignore").write_text(".context/\n", encoding="utf-8")
             out_dir = repo / ".context" / "dumps"
             out_dir.mkdir(parents=True)
@@ -493,6 +494,7 @@ class DumpTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp) / "repo"
             subprocess.run(["git", "init", "-q", str(repo)], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(repo), "config", "core.excludesFile", os.devnull], check=True)
             (repo / ".gitignore").write_text("", encoding="utf-8")
             out_dir = repo / "dumps"
             rc, out, _ = run(["dump", "--currentsession", "--out", str(out_dir)])

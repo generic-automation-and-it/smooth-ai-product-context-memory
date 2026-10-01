@@ -11,6 +11,7 @@ warning is owed. The guard is advisory: no reported unit changes the exit code.
 from __future__ import annotations
 
 import io
+import os
 import subprocess
 import sys
 import tempfile
@@ -42,6 +43,8 @@ x
 def make_repo(tmp: str, *, ignore_store: bool) -> Path:
     """A throwaway git repo with `.context/understandings` ignored or tracked."""
     subprocess.run(["git", "init", "-q", tmp], check=True, capture_output=True)
+    # A developer's or runner's global excludes could ignore `.context/` and flip the tracked case.
+    subprocess.run(["git", "-C", tmp, "config", "core.excludesFile", os.devnull], check=True)
     ignore = ".context/\n" if ignore_store else ""
     (Path(tmp) / ".gitignore").write_text(ignore, encoding="utf-8")
     return Path(tmp)
