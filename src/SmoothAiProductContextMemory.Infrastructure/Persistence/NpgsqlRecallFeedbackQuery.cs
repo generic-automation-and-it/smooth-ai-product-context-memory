@@ -45,7 +45,7 @@ public sealed class NpgsqlRecallFeedbackQuery(
             connection);
 
         command.Parameters.AddWithValue(
-            "grace_cutoff", request.AsOf.AddDays(-RecentlyCapturedGraceDays));
+            "grace_cutoff", PostgresInstant.ToUtc(request.AsOf.AddDays(-RecentlyCapturedGraceDays)));
 
         var rows = new List<NeverRecalledRow>();
         await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -71,8 +71,8 @@ public sealed class NpgsqlRecallFeedbackQuery(
              """,
             connection);
 
-        command.Parameters.AddWithValue("from", request.From);
-        command.Parameters.AddWithValue("to", request.To);
+        command.Parameters.AddWithValue("from", PostgresInstant.ToUtc(request.From));
+        command.Parameters.AddWithValue("to", PostgresInstant.ToUtc(request.To));
 
         await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
         await reader.ReadAsync(cancellationToken);

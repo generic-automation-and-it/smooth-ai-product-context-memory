@@ -95,6 +95,33 @@ public sealed class RecallFeedbackPersistenceTests(AspireFixture aspire) : Persi
     }
 
     [Fact]
+    public async Task Never_recalled_accepts_an_as_of_with_a_non_utc_offset()
+    {
+        (_, Memory neverRecalled, Memory recalled, _) = await SeedMemoriesAsync();
+        Writer.Record([new RecallFeedbackRecord(Guid.NewGuid(), recalled.Uuid, RetrievalShape.Unfiltered, DateTimeOffset.UtcNow)]);
+
+        IReadOnlyList<NeverRecalledRow> result =
+            await Reader.NeverRecalledAsync(
+                new NeverRecalledRequest(DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(2))), Ct);
+
+        result.Select(r => r.MemoryUuid).ShouldBe([neverRecalled.Uuid]);
+    }
+
+    [Fact]
+    public async Task Miss_rate_accepts_a_window_with_a_non_utc_offset()
+    {
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        Writer.Record([new RecallFeedbackRecord(Guid.NewGuid(), null, RetrievalShape.FreeText, now)]);
+        TimeSpan offset = TimeSpan.FromHours(2);
+
+        MissRateResult result = await Reader.MissRateAsync(
+            new MissRateRequest(now.AddHours(-1).ToOffset(offset), now.AddHours(1).ToOffset(offset)), Ct);
+
+        result.Retrievals.ShouldBe(1);
+        result.Misses.ShouldBe(1);
+    }
+
+    [Fact]
     public async Task Miss_rate_over_window_is_derivable()
     {
         DateTimeOffset now = DateTimeOffset.UtcNow;
