@@ -41,7 +41,8 @@ or the blocked tag half.
 ## Architecture Decisions
 
 See [./ladrs/](./ladrs/). LADRs 01–08 and 12–15 Draft; 09 Accepted and implemented;
-10 Blocked with a verified evidence-only interim; 11 ticket half Accepted and implemented, tag half Blocked.
+10 Blocked with a verified evidence-only interim; 11 ticket half Accepted and implemented, tag half Blocked;
+16 Accepted (rejected option).
 
 | LADR | Decision | Why it matters |
 |------|----------|----------------|
