@@ -96,6 +96,35 @@ class DurabilityGuardTests(unittest.TestCase):
             self.assertIn("proj-20260930-1900", out)
             self.assertNotIn("proj-20260930-1700", out)
 
+    def test_unit_exported_before_publish_in_same_ten_minutes_is_not_flagged(self):
+        """A folder stamped 18:03 is captured by an archive stamped 18:05:30. Comparing on a
+        truncated ten-minute prefix flagged it; the archive must compare at minute precision."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = make_repo(tmp, ignore_store=True)
+            store = repo / ".context" / "understandings"
+            write_unit(store, "proj-20260930-1803", "captured")
+            write_unit(store, "proj-20260930-1805", "same-minute")
+            write_unit(store, "proj-20260930-1806", "later")
+            pub = store.parent / ui.PUBLISH_DIR_NAME
+            pub.mkdir(parents=True, exist_ok=True)
+            (pub / "understandings-20260930-180530.zip").write_bytes(b"x")
+            flagged = {u["folder"] for u in ui.unpublished_units(ui.load_units(store)[0], store)}
+            self.assertEqual(flagged, {"later"})
+
+    def test_unfiled_unit_is_flagged_even_after_a_publish(self):
+        """An unstamped `_unfiled` unit has no time to compare against the archive, so it cannot be
+        proven captured; it is reported rather than silently treated as safe."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = make_repo(tmp, ignore_store=True)
+            store = repo / ".context" / "understandings"
+            write_unit(store, "proj-20260930-1700", "old")
+            write_unit(store, ui.UNFILED, "loose")
+            pub = store.parent / ui.PUBLISH_DIR_NAME
+            pub.mkdir(parents=True, exist_ok=True)
+            (pub / "understandings-20260930-180000.zip").write_bytes(b"x")
+            flagged = {u["folder"] for u in ui.unpublished_units(ui.load_units(store)[0], store)}
+            self.assertEqual(flagged, {"loose"})
+
     def test_tracked_store_produces_no_warning(self):
         with tempfile.TemporaryDirectory() as tmp:
             repo = make_repo(tmp, ignore_store=False)

@@ -424,9 +424,7 @@ def is_gitignored(path: Path) -> bool:
 def newest_archive_stamp(store: Path) -> str | None:
     """The `yyyyMMdd-HHMMSS` stamp of the newest published archive, or None when none exists.
 
-    The publish dir sits beside the store, one level up. Unpublished is judged against the archive's
-    *minute* — a unit exported in the same minute a publish ran is already captured, so the seconds
-    are dropped from the comparison.
+    The publish dir sits beside the store, one level up.
     """
     stamps = []
     pub_dir = store.parent / PUBLISH_DIR_NAME
@@ -441,14 +439,16 @@ def newest_archive_stamp(store: Path) -> str | None:
 def unpublished_units(units: list[dict], store: Path) -> list[dict]:
     """Current units whose newest version is newer than the newest published archive.
 
-    No archive means every unit is unpublished. A subject folder without a stamp (`_unfiled`) has no
-    version to compare, so it is not flagged unless no archive exists — the conservative direction.
+    No archive means every unit is unpublished. The archive stamp is cut to its minute so it compares
+    with a folder's `yyyyMMdd-HHmm` stamp. An unstamped folder (`_unfiled`) has no time to compare, so
+    its units are always reported: a false warning costs a publish, a missed one costs the unit.
     """
     newest = newest_archive_stamp(store)
     if newest is None:
         return list(units)
-    bound = newest[:12]
-    return [unit for unit in units if stamp_of(unit["subject"]) > bound]
+    bound = newest[:13]
+    return [unit for unit in units
+            if not stamp_of(unit["subject"]) or stamp_of(unit["subject"]) > bound]
 
 
 def version_key(record: dict) -> tuple[str, str, str]:
@@ -573,7 +573,7 @@ def days_since(value) -> int | None:
 
 
 def review(units: list[dict], superseded: list[dict] | None = None,
-           store: Path | None = None) -> list[str]:
+           unpublished: list[dict] | None = None) -> list[str]:
     """Advisory decay report: which units are worth re-reading, pruning or promoting.
 
     Not validation — none of this is wrong, and the report never changes the exit code. It exists
@@ -623,14 +623,11 @@ def review(units: list[dict], superseded: list[dict] | None = None,
             f"history is never deleted automatically"
         )
 
-    if store is not None and is_gitignored(store):
-        unpublished = unpublished_units(units, store)
-        if unpublished:
-            lines.append("unpublished — the store is gitignored and these units are newer than the "
-                         "newest published archive, so they would vanish with this workspace:")
-            for unit in unpublished:
-                lines.append(f"    {unit['path']}")
-            lines.append("    run `ai-understanding --publish` to carry them out")
+    if unpublished:
+        lines.append("unpublished — the store is gitignored and these units are newer than the "
+                     "newest published archive, so they would vanish with this workspace:")
+        lines.extend(f"    {unit['path']}" for unit in unpublished)
+        lines.append("    run `ai-understanding --publish` to carry them out")
 
     return lines
 
@@ -723,16 +720,15 @@ def main(argv: list[str]) -> int:
         f"-> {store / 'INDEX.md'}"
     )
 
-    if is_gitignored(store):
-        n = len(unpublished_units(units, store))
-        if n:
-            print(
-                f"warning: {store} is gitignored and {n} unit(s) are unpublished — "
-                f"run `ai-understanding --publish` to carry them out of this workspace"
-            )
+    unpublished = unpublished_units(units, store) if is_gitignored(store) else []
+    if unpublished:
+        print(
+            f"warning: {store} is gitignored and {len(unpublished)} unit(s) are unpublished — "
+            f"run `ai-understanding --publish` to carry them out of this workspace"
+        )
 
     if wants_review:
-        report = review(units, superseded, store)
+        report = review(units, superseded, unpublished)
         print("\nreview — advisory, does not affect the exit code")
         print("\n".join(report) if report else "    nothing flagged")
 
