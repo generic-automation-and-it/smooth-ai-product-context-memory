@@ -8,8 +8,9 @@ namespace SmoothAiProductContextMemory.Infrastructure.Persistence;
 /// <summary>
 /// Append-only recall-feedback writer (HLD-004 LADR-02 placement B). One batched multi-row INSERT
 /// into <c>recall_feedback</c> on a fresh connection from the shared data source, so it is isolated
-/// from the retrieval's unit of work. Fire-and-forget: every failure is swallowed and logged as a
-/// constant non-content line — a lost tuning signal is acceptable, a failed recall is not.
+/// from the retrieval's unit of work. The write is synchronous and inline on the request (not
+/// fire-and-forget), but failure-isolated: every failure is swallowed and logged as a constant
+/// non-content line — a lost tuning signal is acceptable, a failed recall is not.
 /// </summary>
 public sealed class NpgsqlRecallFeedback(NpgsqlDataSource dataSource, ILogger<NpgsqlRecallFeedback> logger)
     : IRecallFeedback

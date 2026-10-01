@@ -30,8 +30,8 @@ namespace SmoothAiProductContextMemory.Infrastructure.ComponentTest.Persistence;
 /// The measurement notes recorded by <see cref="FeedbackPlacementEvidenceTests"/> still apply: latency
 /// comparisons rotate the order and reset between rounds, because in a fixed order the configuration
 /// measured last runs against a larger feedback table and a dirtier <c>memory</c> table. The shipped path
-/// is fire-and-forget, so the feedback write never lands on the retrieval's critical path; the latency
-/// comparison is nevertheless measured on the full handler so off-vs-on is isolated to the write.
+/// writes synchronously and inline, so the feedback write is on the retrieval's critical path; the latency
+/// comparison is measured on the full handler so off-vs-on is isolated to the write.
 /// </para>
 /// </remarks>
 public sealed class NfrEvidenceTests : PersistenceTestBase
