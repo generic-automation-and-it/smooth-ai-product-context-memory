@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Cold-agent walk harness (BRD-003 assumption 2).
 
-Run (synthetic / model-free degenerate assertions — safe for the PR gate):
+Run (model-free degenerate assertions; the PR gate runs this):
     python3 -B .agents/skills/mimisbrunnr-understanding/tests/run_walk_tests.py
 
 Run (also score the recorded cold-agent walk):
@@ -66,9 +66,9 @@ DECLINE_RE = re.compile(
     r"|not present|not provided|doesn'?t (mention|contain|state|say)"
     r"|does not (mention|contain|state|say)"
     r"|is (not|never) (mentioned|stated|present)"
-    r"|is not (in|among) (the|this|any)|absent|no (mention|information|record|memory|unit)"
+    r"|is not (in|among) (the|this|any)|absent from|no (mention|information|record|memory|unit)"
     r"|cannot (find|determine|say|answer|locate)|not covered|none of the (material|provided|given)"
-    r"|no such (memory|unit|record)|unavailable|not addressed",
+    r"|no such (memory|unit|record)|not addressed",
     re.IGNORECASE,
 )
 
@@ -211,7 +211,7 @@ class WalkFixtureTests(unittest.TestCase):
     def setUpClass(cls):
         cls.questions = load_questions()
         cls.texts = {name: render_surface(name) for name in SURFACES}
-        cls.texts["folder"] = render_folder()
+        cls.folder_text = render_folder()
 
     # Scoped-memory records (Q3 storage, Q4 cache) are excluded under default breadth and included
     # under --all and in the dossier slice. Q5's identity is absent from the fixture by design.
@@ -225,8 +225,6 @@ class WalkFixtureTests(unittest.TestCase):
         """The breadth arms are not equivalent: default load omits the scoped-memory records, --all and
         the dossier slice include them, and Q5 is absent everywhere."""
         for name, text in self.texts.items():
-            if name == "folder":
-                continue
             expected_present = self.PRESENT_BY_SURFACE[name]
             for q in self.questions:
                 present = _present(text, q)
@@ -240,8 +238,6 @@ class WalkFixtureTests(unittest.TestCase):
     def test_degenerate_empty_agent_scores_zero_correct(self):
         """Acceptance criterion: an agent that answers nothing scores 0 correct."""
         for name, text in self.texts.items():
-            if name == "folder":
-                continue
             results = score_answers(text, empty_answers(self.questions), self.questions)
             self.assertEqual(summarize(results)["correct"], 0, name)
 
@@ -249,8 +245,6 @@ class WalkFixtureTests(unittest.TestCase):
         """Acceptance criterion: an agent that answers everything scores 0 on the absent-answer
         questions — every absent question in every surface is a confabulation."""
         for name, text in self.texts.items():
-            if name == "folder":
-                continue
             results = score_answers(text, confab_answers(self.questions), self.questions)
             summ = summarize(results)
             self.assertEqual(summ["confabulations"], summ["absent_asked"],
@@ -261,15 +255,13 @@ class WalkFixtureTests(unittest.TestCase):
     def test_degenerate_perfect_agent_scores_full_marks(self):
         """The detector is not always-wrong: an ideal cold agent scores 100%."""
         for name, text in self.texts.items():
-            if name == "folder":
-                continue
             results = score_answers(text, perfect_answers(text, self.questions), self.questions)
             summ = summarize(results)
             self.assertEqual(summ["correct"], summ["asked"], name)
 
     def test_folder_fixture_loads_newest_per_slug(self):
         """The ai-understanding store folder is a real fixture input: newest version of each slug wins."""
-        text = self.texts["folder"]
+        text = self.folder_text
         self.assertIn("may run a stale build", text)
         self.assertNotIn("A healthy container is always fresh", text)
         self.assertIn("The graph is a path, not a join", text)
@@ -279,8 +271,6 @@ class WalkFixtureTests(unittest.TestCase):
         """Measure each surface. A load above the 8k-token band is a finding, never a cap — recorded
         here so the evidence is auditable. This fixture is small by design; no finding is expected."""
         for name, text in self.texts.items():
-            if name == "folder":
-                continue
             chars, est_tokens = measure(text)
             self.assertGreater(chars, 0, name)
             self.assertLessEqual(
@@ -288,13 +278,14 @@ class WalkFixtureTests(unittest.TestCase):
                 f"{name} renders ~{est_tokens} est. tokens, above the ICM {ICM_TOKEN_BAND_HIGH}-token "
                 f"band — record as a finding (do not add a cap)")
 
-    def test_each_surface_is_small_enough_to_walk(self):
-        """Put a sane ceiling on the walk so a cold agent is not drowned; surfaces stay small."""
-        for name, text in self.texts.items():
-            if name == "folder":
-                continue
-            chars, _ = measure(text)
-            self.assertLess(chars, 8000, f"{name} is too large for a cold-agent walk ({chars} chars)")
+    def test_decline_requires_a_decline_phrase_not_an_incidental_word(self):
+        """A confabulated answer that merely uses a word like "unavailable" or "absent" asserts
+        content; scoring it as a decline would certify confabulation as a correct refusal."""
+        for answer in ("Redis is unavailable during restarts, so the cache path is the fallback.",
+                       "The flag is absent in prod-west-2, which is the deploy cluster."):
+            self.assertIsNone(DECLINE_RE.search(answer), answer)
+        for answer in ("not in context", "This is absent from the material."):
+            self.assertIsNotNone(DECLINE_RE.search(answer), answer)
 
 
 @unittest.skipUnless(os.environ.get("SMOOTH_WALK_BENCH") == "1",

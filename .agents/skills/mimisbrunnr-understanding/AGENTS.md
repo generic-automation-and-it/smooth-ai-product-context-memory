@@ -104,8 +104,10 @@ DB and wire are unchanged.
   cited** (subject/uuid/slug), and reports size in characters with a labelled token estimate. The
   model-free degenerate assertions (an agent that answers nothing scores 0 correct; an agent that answers
   everything scores 0 on the absent-answer questions) run unconditionally. The scored cold-model walk is
-  recorded 2026-09-30 in `fixtures/walk_answers.json`; `SMOOTH_WALK_BENCH=1` scores it. **Not a PR-gate
-  test** — it scores a model run, so the gate runs only `run_tests.py`.
+  recorded 2026-09-30 in `fixtures/walk_answers.json`; `SMOOTH_WALK_BENCH=1` scores it and prints the
+  report. The file never calls a model, so the PR gate runs it: the scorer and degenerate assertions are
+  checked on every PR, the recorded-walk report only under the env var. A decline is a decline phrase,
+  never an incidental word (`unavailable`, bare `absent`) inside asserted content.
 - These tests validate plumbing and the non-destructive guarantees, **not** LLM judgement or live API
   behaviour. The client makes no network call.
 
@@ -113,6 +115,7 @@ DB and wire are unchanged.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-01 | Walk scorer: a decline must be a decline phrase — bare `unavailable`/`absent` matched inside confabulated content and scored it as a correct refusal; regression test added. The harness is model-free, so the PR gate now runs it (the docs already claimed its degenerate assertions ran unconditionally, but no CI step ran the file). Measured results unchanged. | BRD-003 §8 assumption 2 |
 | 2026-09-30 | Added a cold-agent walk harness (`tests/run_walk_tests.py` + committed fixtures `walk_store_export.json`, `walk_understandings/`, `walk_bundle.json`, `walk_questions.json`, `walk_answers.json`) proving an agent with no memory can act on the `load`/`--all`/dossier output. Measured 2026-09-30: load_default 2/2 present correct + 3/3 absent declined; load_all 4/4 + 1/1; dossier_slice 4/4 + 1/1; 0 confabulations; sizes 1682/2006/2238 chars (~420/502/560 est tokens), all well under the ICM 8k-token band. The model-free degenerate assertions run unconditionally; the scored walk runs behind `SMOOTH_WALK_BENCH=1` and is not a PR-gate test. | BRD-003 §8 assumption 2 |
 | 2026-09-26 | `SKILL.md`/`README.md` re-laid out switches-first: the operation/switch table opens each file ahead of the H1, matching `mimisbrunnr-context-memory` and `mimisbrunnr-vitsmunir-dump`. The `README.md` table gained a lead-in stating the three operations are never conflated and that all switches are off by default; its `load` usage line extended to the full `SKILL.md` switch surface (`--format auto`, `--all`, `--max-chars`). No behavioural or contract change. | PR #108 |
 | 2026-09-26 | README gained "How this relates to ai-understanding and to harness compaction": the export → load/import/dump flow, a comparison with automatic compaction, and pros/cons. Docs only. | README |

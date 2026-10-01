@@ -72,7 +72,7 @@ SMOOTH_NFR_BENCH=1 dotnet test tests/SmoothAiProductContextMemory.Infrastructure
 SMOOTH_AGE_BENCH=1 dotnet test tests/SmoothAiProductContextMemory.Infrastructure.ComponentTest \
     --filter "Nfr02BenchmarkTests|TicketTraversalBenchmarkTests"    # NFR-02 traversal benchmark — both classes share this gate
 SMOOTH_WALK_BENCH=1 python3 -B \
-    .agents/skills/mimisbrunnr-understanding/tests/run_walk_tests.py   # cold-agent walk harness — proves a memoryless agent can ACT on load/--all/dossier output, measures its context cost, and scores a recorded model run; NOT a PR-gate test (the model-free degenerate assertions run unconditionally; the gate runs the skill's run_tests.py)
+    .agents/skills/mimisbrunnr-understanding/tests/run_walk_tests.py   # cold-agent walk harness — proves a memoryless agent can ACT on load/--all/dossier output, measures its context cost; the PR gate runs the model-free scorer/degenerate assertions, the env var adds the scored report of the recorded walk
 scripts/seed-graph-sample.sh nfr03_sample                          # populate a scratch database with memories + edges
 scripts/verify-graph-restore.sh mimisbrunnr-postgres nfr03_sample  # NFR-03 backup/restore round trip incl. edge count
 scripts/verify-graph-preupgrade.sh <target-image>                  # NFR-04 pre-upgrade check — run before any Postgres bump
