@@ -103,19 +103,17 @@ def _run_framed(args):
     # `cmd_query` banner never gets out, and `print_recall` is free to print its own on every path
     # without coordinating with it.
     payload = _parse_framed_json(raw)
-    if payload is _NOT_JSON:
-        # Not JSON — a bare blob body, or a formatted error. There is no object to carry the field, so
-        # the banner is the only framing available, and the original text is passed through untouched
-        # rather than dropped or guessed at. The notice check is here only so a body that already
-        # arrived framed (an inner layer that printed its own) is not given a second banner.
-        if client.RECALL_NOTICE not in raw:
-            print(client.BANNER_PREFIX + client.RECALL_NOTICE)
-        print(raw)
-        return result
-    if getattr(args, "command", None) in RAW_BODY_COMMANDS:
-        # A blob body that happens to be valid JSON would otherwise be re-serialised into a framed
-        # envelope: the caller asked for a body, not a parsed object, and re-indenting it changes bytes
-        # it may be hashing or diffing. Framing here is the banner only, and the body is passed through.
+    # Two cases take the banner-and-passthrough path rather than the framed envelope, and they are the
+    # same shape: there is nothing to carry a field.
+    #
+    #  - Not JSON: a bare blob body, or a formatted error.
+    #  - A raw-body command whose output happens to parse as JSON. A `get-blob` body that is valid JSON
+    #    would otherwise be re-indented and merged into an envelope: the caller asked for a body, not a
+    #    parsed object, and re-serialising changes bytes it may be hashing or diffing.
+    if payload is _NOT_JSON or getattr(args, "command", None) in RAW_BODY_COMMANDS:
+        # The notice check is here only so output that already arrived framed (an inner layer that
+        # printed its own banner) is not given a second one; a repeated notice reads as emphasis and
+        # trains a reader to scroll past it.
         if client.RECALL_NOTICE not in raw:
             print(client.BANNER_PREFIX + client.RECALL_NOTICE)
         print(raw)
@@ -135,6 +133,10 @@ def _parse_framed_json(raw: str):
     inner one frames on its own. So the text arriving here can be `banner + JSON`, and parsing the whole
     thing as JSON fails — which previously fell through to the not-JSON branch and emitted a *second*
     banner, which reads as emphasis and trains a reader to scroll past it.
+
+    Tried on the whole text first, then from the first brace. The second attempt is what recovers the
+    already-bannered case; it cannot misclassify a raw body, because a body that parses from its first
+    brace would have parsed whole.
     """
     try:
         return json.loads(raw)
