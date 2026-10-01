@@ -163,20 +163,6 @@ class RecallFramingTests(unittest.TestCase):
             ]
         }
 
-    def _printed_json(self, fn, *args, stdin=None):
-        """Run a subcommand, returning (stdout, parsed JSON) with the banner line split off."""
-        buffer = io.StringIO()
-        payload = json.dumps(self._hostile_result())
-        with patch.object(sys, "stdin", io.StringIO(payload if stdin is None else stdin)):
-            with redirect_stdout(buffer):
-                fn(*args)
-        out = buffer.getvalue()
-        self.assertTrue(out.strip(), "the subcommand printed nothing")
-        lines = out.splitlines()
-        # The banner is the first line; the JSON document follows it.
-        self.assertTrue(lines[0].startswith("> "), f"missing prose banner: {lines[0]!r}")
-        return out, lines[0], json.loads("\n".join(lines[1:]))
-
     def _assert_framed(self, out, banner, parsed):
         self.assertIn(client.RECALL_NOTICE, banner, "the banner is not the shared notice")
         self.assertIn(
@@ -330,28 +316,36 @@ class RecallFramingTests(unittest.TestCase):
     def test_every_read_subcommand_is_framed_by_default(self):
         """The drift guard, and the acceptance criterion that matters most.
 
-        Enumerates the subcommands the read client actually registers and requires each to be framed,
-        with `probe` the single named exception. A new subcommand added later is covered by this test
-        the day it lands — which is the whole point of framing at the choke point rather than in each
-        `cmd_*`. Without it, "every surface is framed" is a claim that decays silently, because an
-        unframed subcommand still works and still returns correct data.
+        The subject list is cross-checked against `read_mcp.TOOLS` — an **independent** declaration of
+        the read surface — rather than against the read client's own `READ_COMMANDS`. Checking the
+        client's list against itself is circular: `FRAMED_COMMANDS` is *defined* as
+        `READ_COMMANDS - UNFRAMED_COMMANDS`, so the union is every value either set could take and the
+        assertion held no matter what they were. It would have stayed green with the entire MCP surface
+        unframed, which is the exact silent pass the code comment claims to prevent.
+
+        The two declarations are one-to-one: MCP names are snake_case, CLI names kebab-case.
         """
-        framed, unframed = read_client.FRAMED_COMMANDS, read_client.UNFRAMED_COMMANDS
+        mcp_names = {name for name, _description, _schema in read_mcp.TOOLS}
+        cli_names = set(read_client.READ_COMMANDS)
         self.assertEqual(
-            framed | unframed, set(read_client.READ_COMMANDS),
-            "a registered subcommand is neither framed nor explicitly opted out",
+            {name.replace("_", "-") for name in mcp_names},
+            cli_names,
+            "the MCP server and the read CLI declare different read surfaces; a tool offered on one "
+            "and not the other is a surface nothing here is checking",
         )
-        self.assertFalse(
-            framed & unframed, "a subcommand cannot be both framed and opted out"
-        )
+        overlap = read_client.FRAMED_COMMANDS & read_client.UNFRAMED_COMMANDS
+        self.assertFalse(overlap, f"a subcommand cannot be both framed and opted out: {sorted(overlap)}")
         self.assertEqual(
-            unframed, {"probe"},
+            read_client.UNFRAMED_COMMANDS, {"probe"},
             "probe reports reachability and carries no recalled content; anything else opting out is "
             "a surface returning unframed memory",
         )
         # Every content-returning subcommand is inside the framed set.
-        for name in read_client.READ_COMMANDS - {"probe"}:
-            self.assertIn(name, framed, f"{name} returns recalled memory and must be framed")
+        for name in cli_names - {"probe"}:
+            self.assertIn(
+                name, read_client.FRAMED_COMMANDS,
+                f"{name} returns recalled memory and must be framed",
+            )
 
     def test_probe_reports_no_recalled_content_so_it_opts_out(self):
         """The opt-out has a stated reason, and this is the test that keeps the reason true."""
@@ -454,6 +448,43 @@ class TransportFailureTests(unittest.TestCase):
         client.base_url = lambda: f"http://127.0.0.1:{port}"
         with self.assertRaises(client.ClientError) as caught:
             client._request("GET", "/api/context/query")
+        self.assertEqual(caught.exception.status_text, "unreachable")
+
+    def test_a_mid_response_reset_is_classified_not_a_traceback(self):
+        """A connection accepted then reset raises neither `URLError` nor `TimeoutError`.
+
+        It arrives as a bare `ConnectionResetError`, an `OSError` subclass, so before the `OSError`
+        clause it escaped as a traceback — the same failure the timeout classification was added to
+        prevent, reached by a different route. Driven for real: the server accepts, reads the request,
+        then closes the socket with `SO_LINGER` 0, which forces an RST rather than a clean FIN.
+        """
+        import socket
+        import struct
+        import threading
+
+        srv = socket.socket()
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(1)
+        port = srv.getsockname()[1]
+        self.addCleanup(srv.close)
+
+        def accept_then_reset():
+            try:
+                conn, _ = srv.accept()
+                conn.recv(4096)
+                # SO_LINGER with a zero timeout makes close() send RST, not FIN.
+                conn.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+                conn.close()
+            except OSError:
+                pass
+
+        threading.Thread(target=accept_then_reset, daemon=True).start()
+        client.base_url = lambda: f"http://127.0.0.1:{port}"
+        with self.assertRaises(client.ClientError) as caught:
+            client._request("GET", "/api/context/query")
+        # A reset is not a hang: classifying it as `timed-out` would send the caller to investigate a
+        # store that is answering, when the connection was simply dropped.
         self.assertEqual(caught.exception.status_text, "unreachable")
 
     def test_the_timeout_message_names_the_budget(self):

@@ -81,6 +81,16 @@ def _read_response(request):
         raise _classify_transport_error(e.reason) from e
     except (TimeoutError, socket.timeout) as e:
         raise _classify_transport_error(e) from e
+    except OSError as e:
+        # A connection that is accepted and then reset mid-response raises neither URLError nor
+        # TimeoutError — it surfaces as a bare ConnectionResetError or BrokenPipeError, both OSError
+        # subclasses. Without this clause it escaped as a traceback, which is the exact failure the
+        # classification exists to prevent. It must stay last: URLError is itself an OSError, so an
+        # earlier clause here would shadow the refusal control.
+        #
+        # Classified as `unreachable`, not `timed-out`: a reset is not a hang, and the caller's
+        # response to the two differs.
+        raise _classify_transport_error(e) from e
 
 
 def base_url():
