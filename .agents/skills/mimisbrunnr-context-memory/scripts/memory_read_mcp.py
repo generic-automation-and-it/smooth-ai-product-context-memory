@@ -51,7 +51,7 @@ def call_tool(name, arguments):
         return deepsearch.execute(arguments["payload"])
     if name == "get_versions":
         query = {"scope": arguments["scope"]} if arguments.get("scope") else None
-        return client._request("GET", f"/api/context/memories/{arguments['uuid']}/versions", query=query)
+        return client._request("GET", client.memory_versions_path(arguments.get("uuid")), query=query)
     if name == "get_blob":
         return _get_blob(arguments)
     if name == "paths":
@@ -73,7 +73,7 @@ def call_tool(name, arguments):
 def _get_blob(arguments):
     from urllib.parse import urlencode
 
-    url = client.base_url() + f"/api/context/memories/{arguments['uuid']}/versions/{arguments['version']}/blob"
+    url = client.base_url() + client.memory_blob_path(arguments.get("uuid"), arguments.get("version"))
     if arguments.get("scope"):
         url += "?" + urlencode({"scope": arguments["scope"]})
     token = os.environ.get(client.ENV_READ_TOKEN)

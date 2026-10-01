@@ -115,6 +115,71 @@ def _open(request):
         timeout=HTTP_TIMEOUT)
 
 
+_UUID_PATTERN = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+_CANONICAL_UUID = re.compile(_UUID_PATTERN)
+
+
+def uuid_segment(value, field="uuid"):
+    """Return `value` if it is a canonical UUID, else refuse before any URL is built.
+
+    A path segment is interpolated into the request URL, so an unchecked one is a route selector:
+    `../../snapshot?x=` as a group uuid turns `append-description` into `POST /api/context/snapshot`.
+    Only the canonical 8-4-4-4-12 hex form passes, so no `/`, `.`, `?`, `%` or `#` reaches the path.
+    The refusal never echoes the value, which is caller-controlled text.
+    """
+    if not isinstance(value, str) or not _CANONICAL_UUID.fullmatch(value):
+        raise ClientError(0, "bad-input", f"'{field}' must be a canonical UUID")
+    return value
+
+
+def version_segment(value):
+    """Return `value` if it is a positive integer, else refuse before any URL is built."""
+    if type(value) is not int or value < 1:
+        raise ClientError(0, "bad-input", "'version' must be a positive integer")
+    return value
+
+
+def memory_versions_path(uuid):
+    return f"/api/context/memories/{uuid_segment(uuid)}/versions"
+
+
+def memory_blob_path(uuid, version):
+    return f"/api/context/memories/{uuid_segment(uuid)}/versions/{version_segment(version)}/blob"
+
+
+def group_path(uuid):
+    return f"/api/context/groups/{uuid_segment(uuid)}"
+
+
+def group_descriptions_path(uuid):
+    return f"{group_path(uuid)}/descriptions"
+
+
+# Routes that carry the write credential, matched exactly on (method, path). Anything else gets the
+# read credential. The two templated routes are matched against the canonical UUID form only, so a
+# path that merely *contains* `/descriptions` — or a GET to the same path — never selects the write
+# token.
+WRITE_ROUTES = frozenset({
+    ("POST", "/api/context/preflight"),
+    ("POST", "/api/context/memories"),
+    ("POST", "/api/context/groups/resolve"),
+    ("POST", "/api/context/links"),
+    ("PUT", "/api/context/tickets/parent"),
+    ("POST", "/api/context/labels"),
+    ("POST", "/api/context/initiatives"),
+})
+WRITE_ROUTE_TEMPLATES = (
+    ("PATCH", re.compile(r"/api/context/groups/" + _UUID_PATTERN)),
+    ("POST", re.compile(r"/api/context/groups/" + _UUID_PATTERN + r"/descriptions")),
+)
+
+
+def is_write_route(method, path):
+    if (method, path) in WRITE_ROUTES:
+        return True
+    return any(method == verb and template.fullmatch(path) for verb, template in WRITE_ROUTE_TEMPLATES)
+
+
 def _request(method, path, payload=None, query=None):
     url = base_url() + path
     if query:
@@ -123,17 +188,7 @@ def _request(method, path, payload=None, query=None):
         url += "?" + urlencode(query)
 
     body = None
-    write_routes = {
-        ("POST", "/api/context/preflight"),
-        ("POST", "/api/context/memories"),
-        ("POST", "/api/context/groups/resolve"),
-        ("POST", "/api/context/links"),
-        ("PUT", "/api/context/tickets/parent"),
-        ("POST", "/api/context/labels"),
-        ("POST", "/api/context/initiatives"),
-    }
-    is_write = (method, path) in write_routes or method == "PATCH" or "/descriptions" in path
-    token_name = ENV_WRITE_TOKEN if is_write else ENV_READ_TOKEN
+    token_name = ENV_WRITE_TOKEN if is_write_route(method, path) else ENV_READ_TOKEN
     token = os.environ.get(token_name)
     if not token:
         raise ClientError(0, "missing-credential", f"{token_name} is required")
@@ -340,7 +395,7 @@ def cmd_query(args):
 def cmd_get_versions(args):
     resp = _request(
         "GET",
-        f"/api/context/memories/{args.uuid}/versions",
+        memory_versions_path(args.uuid),
         query={"scope": args.scope} if args.scope else None,
     )
     print(json.dumps(resp, indent=2))
@@ -351,7 +406,7 @@ def cmd_get_blob(args):
     """Returns the blob body as raw text (it is not JSON), so scope enforcement stays the API's job."""
     from urllib.parse import urlencode
 
-    url = base_url() + f"/api/context/memories/{args.uuid}/versions/{args.version}/blob"
+    url = base_url() + memory_blob_path(args.uuid, args.version)
     if args.scope:
         url += "?" + urlencode({"scope": args.scope})
     token = os.environ.get(ENV_READ_TOKEN)
@@ -368,15 +423,13 @@ def cmd_resolve_group(args):
 
 
 def cmd_update_group(args):
-    resp = _request("PATCH", f"/api/context/groups/{args.uuid}", read_payload(args.payload))
+    resp = _request("PATCH", group_path(args.uuid), read_payload(args.payload))
     print(json.dumps(resp, indent=2))
     return resp
 
 
 def cmd_append_description(args):
-    resp = _request(
-        "POST", f"/api/context/groups/{args.uuid}/descriptions", read_payload(args.payload)
-    )
+    resp = _request("POST", group_descriptions_path(args.uuid), read_payload(args.payload))
     print(json.dumps(resp, indent=2))
     return resp
 

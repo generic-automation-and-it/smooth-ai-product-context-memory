@@ -71,9 +71,9 @@ def call_tool(name, arguments):
                                    for rule, count in sorted(findings.items())]
         return result
     if name == "update_group":
-        return client._request("PATCH", f"/api/context/groups/{arguments['uuid']}", payload)
+        return client._request("PATCH", client.group_path(arguments.get("uuid")), payload)
     if name == "append_description":
-        return client._request("POST", f"/api/context/groups/{arguments['uuid']}/descriptions", payload)
+        return client._request("POST", client.group_descriptions_path(arguments.get("uuid")), payload)
     if name == "redact":
         results = []
         for index, content in enumerate(arguments["items"]):

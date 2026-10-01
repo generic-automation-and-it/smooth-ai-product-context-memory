@@ -757,6 +757,130 @@ class WritePayloadTests(unittest.TestCase):
             handler.redirect_request(request, None, 302, "Found", {}, "https://evil.example/")
 
 
+GOOD_UUID = "5153f72b-a965-42ce-94ef-69d5eaea05ce"
+HOSTILE_UUIDS = (
+    "../../snapshot?x=",
+    "../snapshot",
+    GOOD_UUID + "/../../snapshot",
+    GOOD_UUID + "?x=1",
+    GOOD_UUID + "#frag",
+    "%2e%2e%2fsnapshot",
+    "%2E%2E",
+    GOOD_UUID + "\n",
+    " " + GOOD_UUID,
+    "5153f72b-a965-42ce-94ef-69d5eaea05cez",
+    "",
+    None,
+    42,
+)
+
+
+class PathSegmentTests(unittest.TestCase):
+    """A uuid or version is interpolated into a URL path, so an unchecked one selects the route."""
+
+    def _surfaces(self, uuid, version=1):
+        """Every place that builds a URL from a caller-supplied segment, as zero-arg callables."""
+        return {
+            "cli get-versions": lambda: client.cmd_get_versions(
+                SimpleNamespace(uuid=uuid, scope=None)),
+            "cli get-blob": lambda: client.cmd_get_blob(
+                SimpleNamespace(uuid=uuid, version=version, scope=None)),
+            "cli update-group": lambda: client.cmd_update_group(
+                SimpleNamespace(uuid=uuid, payload=None)),
+            "cli append-description": lambda: client.cmd_append_description(
+                SimpleNamespace(uuid=uuid, payload=None)),
+            "read mcp get_versions": lambda: read_mcp.call_tool(
+                "get_versions", {"uuid": uuid}),
+            "read mcp get_blob": lambda: read_mcp.call_tool(
+                "get_blob", {"uuid": uuid, "version": version}),
+            "write mcp update_group": lambda: write_mcp.call_tool(
+                "update_group", {"uuid": uuid, "payload": {"repo": "r"}}),
+            "write mcp append_description": lambda: write_mcp.call_tool(
+                "append_description", {"uuid": uuid, "payload": {"name": "n", "body": "b"}}),
+        }
+
+    def test_hostile_uuid_segments_are_refused_before_any_request(self):
+        tokens = {client.ENV_READ_TOKEN: "read-only", client.ENV_WRITE_TOKEN: "write-only"}
+        for uuid in HOSTILE_UUIDS:
+            for name, call in self._surfaces(uuid).items():
+                with self.subTest(surface=name, uuid=uuid), patch.dict(os.environ, tokens), \
+                        patch.object(client, "read_payload", return_value={"repo": "r"}), \
+                        patch.object(client, "_open") as transport, \
+                        redirect_stdout(io.StringIO()):
+                    with self.assertRaises(client.ClientError) as caught:
+                        call()
+                    self.assertEqual(caught.exception.status_text, "bad-input")
+                    transport.assert_not_called()
+
+    def test_append_description_cannot_reach_the_snapshot_route(self):
+        # The concrete exploit: a group uuid of `../../snapshot?x=` resolved by any URL normaliser
+        # to `POST /api/context/snapshot`, which starts a corpus snapshot job with the write token.
+        seen = []
+        with patch.dict(os.environ, {client.ENV_WRITE_TOKEN: "write-only",
+                                     client.ENV_READ_TOKEN: "read-only"}), \
+                patch.object(client, "_open", side_effect=lambda request: seen.append(request.full_url)):
+            for call in (lambda: write_mcp.call_tool(
+                            "append_description",
+                            {"uuid": "../../snapshot?x=", "payload": {"name": "n", "body": "b"}}),
+                         lambda: client.cmd_append_description(
+                            SimpleNamespace(uuid="../../snapshot?x=", payload=None))):
+                with patch.object(client, "read_payload", return_value={"name": "n", "body": "b"}), \
+                        self.assertRaises(client.ClientError):
+                    call()
+        self.assertEqual(seen, [])
+
+    def test_bad_versions_are_refused(self):
+        for version in (0, -1, True, "1", "1/../../x", 1.0, None):
+            for name in ("cli get-blob", "read mcp get_blob"):
+                with self.subTest(surface=name, version=version), \
+                        patch.dict(os.environ, {client.ENV_READ_TOKEN: "read-only"}), \
+                        patch.object(client, "_open") as transport:
+                    with self.assertRaises(client.ClientError):
+                        self._surfaces(GOOD_UUID, version)[name]()
+                    transport.assert_not_called()
+
+    def test_a_canonical_uuid_builds_the_exact_route(self):
+        self.assertEqual(client.group_descriptions_path(GOOD_UUID),
+                         f"/api/context/groups/{GOOD_UUID}/descriptions")
+        self.assertEqual(client.memory_blob_path(GOOD_UUID.upper(), 3),
+                         f"/api/context/memories/{GOOD_UUID.upper()}/versions/3/blob")
+
+
+class WriteTokenSelectionTests(unittest.TestCase):
+    """The write credential is chosen by exact route, never by a substring of the path."""
+
+    def _token_for(self, method, path):
+        with patch.dict(os.environ, {client.ENV_READ_TOKEN: "read-only",
+                                     client.ENV_WRITE_TOKEN: "write-only"}), \
+                patch.object(client, "_open") as transport:
+            transport.return_value.__enter__.return_value.read.return_value = b"{}"
+            client._request(method, path)
+        return transport.call_args.args[0].get_header("Authorization")
+
+    def test_a_get_never_carries_the_write_token(self):
+        for path in (f"/api/context/groups/{GOOD_UUID}/descriptions",
+                     f"/api/context/groups/{GOOD_UUID}",
+                     "/api/context/memories/x/descriptions/versions",
+                     "/api/context/labels",
+                     "/api/context/initiatives"):
+            with self.subTest(path=path):
+                self.assertEqual(self._token_for("GET", path), "Bearer read-only")
+
+    def test_a_path_merely_containing_a_write_fragment_gets_the_read_token(self):
+        for method, path in (("POST", "/api/context/query/descriptions"),
+                             ("POST", "/api/context/groups/not-a-uuid/descriptions"),
+                             ("PATCH", "/api/context/memories/" + GOOD_UUID),
+                             ("POST", f"/api/context/groups/{GOOD_UUID}/descriptions/extra")):
+            with self.subTest(method=method, path=path):
+                self.assertEqual(self._token_for(method, path), "Bearer read-only")
+
+    def test_the_templated_write_routes_carry_the_write_token(self):
+        self.assertEqual(self._token_for("PATCH", f"/api/context/groups/{GOOD_UUID}"),
+                         "Bearer write-only")
+        self.assertEqual(self._token_for("POST", f"/api/context/groups/{GOOD_UUID}/descriptions"),
+                         "Bearer write-only")
+
+
 # One recognisable value per declared text field, and a DISTINCT one per field on purpose.
 #
 # A single shared secret would not guard the tuple. `test_scrub_covers_every_declared_content_field`
