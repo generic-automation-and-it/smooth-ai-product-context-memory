@@ -316,10 +316,12 @@ tests/
 Stated, not apologised for. Each is a property of the design, and each is a thing to check before
 relying on the well for it.
 
-- **One machine, one practitioner.** The deployment target is a local Aspire stack — Postgres+AGE, MinIO
-  and Seq on one host, reached over loopback. There is no multi-tenant isolation, no per-user identity,
-  and no horizontal scale-out. Scope is enforced as a *filter on retrieval*, not as a security boundary
-  between users.
+- **One machine, one practitioner.** Today's default deployment posture is a local Aspire stack —
+  Postgres+AGE, MinIO and Seq on one host, reached over loopback. There is no multi-tenant isolation, no
+  per-user identity, and no horizontal scale-out. Scope is enforced as a *filter on retrieval*, not as a
+  security boundary between users. A non-loopback posture is documented
+  ([`docs/wiki/docker.md`](docs/wiki/docker.md)) but the target deployment posture is one of the open
+  owner decisions below, not a settled property.
 - **No real-time multi-agent coordination.** Two agents do not converse through the store. Capture is an
   explicit end-of-task checkpoint, so a fact held by one agent is invisible to another until someone
   finalizes. There is no queue, no lock-across-agents protocol and no partial-progress write.
