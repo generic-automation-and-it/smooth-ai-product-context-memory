@@ -438,7 +438,10 @@ public sealed class NpgsqlSnapshotRepository(
         CancellationToken cancellationToken)
     {
         // Every table ClearStoresAsync deletes must be guarded, so a target holding registry history
-        // or a populated graph is refused rather than silently wiped.
+        // or a populated graph is refused rather than silently wiped. The one exception is
+        // recall_feedback: it is telemetry about a corpus, not corpus content, and a target whose
+        // only rows are feedback has no memory those rows could still describe. Counting it would
+        // refuse a first restore into a database that has merely answered one query (a miss row).
         string[] relational = ["memory", "memory_version", "group_description", "memory_group"];
         foreach (string table in relational)
         {
@@ -507,6 +510,12 @@ public sealed class NpgsqlSnapshotRepository(
         await ExecuteNonQueryAsync(db, "DELETE FROM memory_graph.\"TICKET_PARENT\"", cancellationToken);
         await ExecuteNonQueryAsync(db, "DELETE FROM memory_graph.\"Memory\"", cancellationToken);
         await ExecuteNonQueryAsync(db, "DELETE FROM memory_graph.\"Ticket\"", cancellationToken);
+
+        // Recall feedback is excluded from the archive (HLD-004: disposable tuning telemetry), so a
+        // restore can never bring the matching rows back. memory_uuid has no FK, so rows left behind
+        // would cite memories of the corpus being replaced and skew never-recalled and miss-rate
+        // against the restored one. Cleared inside the same transaction, so a rollback keeps them.
+        await ExecuteNonQueryAsync(db, "DELETE FROM recall_feedback", cancellationToken);
     }
 
     private static async Task ResetSequencesAsync(
