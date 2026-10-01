@@ -18,7 +18,18 @@ recall_feedback_guard() {
   RECALL_FEEDBACK_GUARD_BASE="${1:-${CONTEXT_MEMORY_BASE_URL:-http://localhost:5141}}" python3 - <<'PY'
 import os, sys, urllib.parse
 url = os.environ["RECALL_FEEDBACK_GUARD_BASE"]
-parsed = urllib.parse.urlparse(url)
+# A base the parser cannot read — an NFKC-confusable netloc character, a non-numeric port, an
+# unbalanced IPv6 bracket — raises ValueError whose message quotes the netloc, userinfo included.
+# This heredoc's stderr is the caller's stderr, so an uncaught one writes the credential the guard
+# exists to withhold into any agent or CI transcript. Mirrors the sibling composer's try/except
+# around urlparse and .port.
+try:
+    parsed = urllib.parse.urlparse(url)
+    parsed.port  # parsed for its ValueError on a malformed port
+    hostname = parsed.hostname
+except ValueError:
+    print("refusing CONTEXT_MEMORY_BASE_URL: not a parseable bare HTTP(S) origin", file=sys.stderr)
+    sys.exit(1)
 # Report only parsed, non-secret parts. The raw url is never echoed, for the same reason it is not
 # passed as argv: printing it would write a credential to the terminal and any agent or CI transcript.
 if parsed.scheme not in ("http", "https") or parsed.username or parsed.password \
@@ -28,8 +39,8 @@ if parsed.scheme not in ("http", "https") or parsed.username or parsed.password 
               parsed.scheme, "present" if parsed.username or parsed.password else "absent",
               parsed.path), file=sys.stderr)
     sys.exit(1)
-if parsed.hostname not in ("localhost", "127.0.0.1", "::1"):
-    print("refusing non-loopback CONTEXT_MEMORY_BASE_URL host: {}".format(parsed.hostname),
+if hostname not in ("localhost", "127.0.0.1", "::1"):
+    print("refusing non-loopback CONTEXT_MEMORY_BASE_URL host: {}".format(hostname),
           file=sys.stderr)
     sys.exit(1)
 PY

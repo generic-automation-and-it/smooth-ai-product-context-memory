@@ -50,6 +50,11 @@ records. Output is identity, count and time only.
   asserted, never glob-matched as a string: `http://localhost:5141@192.0.2.1/` has a loopback prefix
   and a non-loopback host, which is the exact bypass the guard exists to close. Mirrors
   `context_memory_client.base_url()`.
+- **A base the parser cannot read is refused with a fixed message.** `urlsplit` raises `ValueError`
+  for an NFKC-confusable netloc character, a non-numeric port or an unbalanced IPv6 bracket, and the
+  message quotes the netloc — userinfo included. The guard's stderr is the caller's stderr, so that
+  error must never escape the `try`; the sibling composer closes the same hole at
+  `dossier_composer.py:1113-1117`.
 
 ## Test References
 
@@ -61,12 +66,15 @@ records. Output is identity, count and time only.
   header file and never on argv; the header file is gone after success, curl failure and `TERM`; the
   base URL never appears in any python argv; and `SKILL.md` sources the script instead of an inline
   copy. Runs on macOS bash 3.2 and GNU bash.
-- CI wiring for this harness is owned by `.github/workflows/pr-gate.yml`; until it is listed there, run
-  it locally whenever the script changes.
+- **CI runs this harness, and a red harness is a gate failure.** `.github/workflows/pr-gate.yml`'s
+  `python-harnesses` job ("Test recall-feedback skill") runs it on both the 3.9 and 3.12 legs.
+  Run it locally whenever the script changes — the gate runs the same command.
 
 ## Changelog
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-01 | The guard refuses a base URL the parser cannot read (NFKC-confusable netloc character, non-numeric port, unbalanced IPv6 bracket) with a fixed message, and hoists `parsed.hostname` inside the same `try`. `urlsplit`'s `ValueError` quotes the netloc, userinfo included, and the guard's stderr is the caller's — so the uncaught traceback echoed the credential this script exists to withhold, the same leak closed in the sibling composer. The existing userinfo test covers only a well-formed origin, so it passed throughout. | HLD-004 NFR-03 |
+| 2026-10-01 | The stale hedge that this harness is "not yet in CI" is gone: `pr-gate.yml`'s `python-harnesses` job already runs it on the 3.9 and 3.12 legs, and the bullet now names that job rather than inviting a maintainer to weaken a step that is load-bearing. | PR review (Low) |
 | 2026-10-01 | **Guard extracted to `scripts/recall_feedback.sh` with a committed harness (`tests/run_tests.py`).** Two residual exfiltration paths closed: the request path was concatenated unvalidated after the approved origin, so `@evil.example/x` sent the bearer token off-box — it must now be absolute with no `@`, `\`, whitespace, control character or leading `//`; and the base URL reached python as argv (readable in `ps`, may carry userinfo) — it now travels in an environment variable. The header file is unlinked by an `EXIT` trap that also fires on `HUP`/`INT`/`TERM`. | HLD-004 NFR-03 |
 | 2026-09-29 | **Created — this skill was the only one in the set without an `AGENTS.md`.** It also records the B2 fix: the loopback guard ran in a detached `( ... )` subshell, so its `exit 1` gated nothing and the three requests that followed it ran regardless; the check is now a function so a refusal is the last statement before the token is read, the curls gained `--noproxy '*'`, and the token moved out of argv into a mode-600 header file. Both re-opened, for the skill package, the credential-exposing class that the redirect fix closed on the client side. | HLD-004 NFR-03 |

@@ -76,7 +76,7 @@ scripts/verify-graph-restore.sh mimisbrunnr-postgres nfr03_sample  # NFR-03 back
 scripts/verify-graph-preupgrade.sh <target-image>                  # NFR-04 pre-upgrade check — run before any Postgres bump
 scripts/check-ticket-ownership.sh                                 # read-only preflight before the ticket-graph migration
 scripts/provision-credentials.sh                                  # one-command credential provisioner (see above)
-scripts/smoke-apphost-container.sh                                # containerised release smoke against the published image
+scripts/smoke-apphost-container.sh                                # containerised lifecycle smoke — the release pipeline's published candidate and the PR gate's job-local build
 scripts/apphost-container-entrypoint.sh                           # one-shot container entrypoint for the CLI verbs
 scripts/stop-dev-stack.sh                                          # AppHost teardown: remove mimisbrunnr-{postgres,blob-well,seq,host}, keep volumes
 scripts/reset-dev-stack.sh                                         # same, then destroy named volumes (captured corpus gone)
