@@ -15,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 from contextlib import redirect_stdout, redirect_stderr
 from pathlib import Path
 
@@ -54,6 +55,20 @@ def write_unit(store: Path, subject: str, slug: str, updated: str = "2026-09-30"
     )
 
 
+def publish(store: Path, name: str, *unit_paths: str) -> None:
+    """Write a real archive holding the given `<subject>/<slug>.understanding.md` store paths."""
+    pub = store.parent / ui.PUBLISH_DIR_NAME
+    pub.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(pub / name, "w") as zf:
+        for rel in unit_paths:
+            zf.write(store / rel, rel)
+        zf.writestr("INDEX.md", "# index\n")
+
+
+def flagged(store: Path) -> set[str]:
+    return {u["folder"] for u in ui.unpublished_units(ui.load_units(store)[0], store)}
+
+
 def run(argv) -> tuple[int, str, str]:
     out, err = io.StringIO(), io.StringIO()
     with redirect_stdout(out), redirect_stderr(err):
@@ -87,43 +102,56 @@ class DurabilityGuardTests(unittest.TestCase):
             repo = make_repo(tmp, ignore_store=True)
             store = repo / ".context" / "understandings"
             write_unit(store, "proj-20260930-1700", "old")
-            pub = store.parent / ui.PUBLISH_DIR_NAME
-            pub.mkdir(parents=True, exist_ok=True)
-            (pub / "understandings-20260930-180000.zip").write_bytes(b"x")
+            publish(store, "understandings-20260930-180000.zip", "proj-20260930-1700/old.understanding.md")
             write_unit(store, "proj-20260930-1900", "new")
             rc, out, _ = run(argv(store, review=True))
             self.assertEqual(rc, 0)
             self.assertIn("proj-20260930-1900", out)
             self.assertNotIn("proj-20260930-1700", out)
 
-    def test_unit_exported_before_publish_in_same_ten_minutes_is_not_flagged(self):
-        """A folder stamped 18:03 is captured by an archive stamped 18:05:30. Comparing on a
-        truncated ten-minute prefix flagged it; the archive must compare at minute precision."""
+    def test_unit_left_out_of_a_newer_portable_only_archive_stays_unpublished(self):
+        """A `--portable-only` archive is newer than the repo-specific unit it excluded. Judging by
+        archive time reported that unit published, so it could vanish with no warning."""
         with tempfile.TemporaryDirectory() as tmp:
             repo = make_repo(tmp, ignore_store=True)
             store = repo / ".context" / "understandings"
-            write_unit(store, "proj-20260930-1803", "captured")
-            write_unit(store, "proj-20260930-1805", "same-minute")
-            write_unit(store, "proj-20260930-1806", "later")
-            pub = store.parent / ui.PUBLISH_DIR_NAME
-            pub.mkdir(parents=True, exist_ok=True)
-            (pub / "understandings-20260930-180530.zip").write_bytes(b"x")
-            flagged = {u["folder"] for u in ui.unpublished_units(ui.load_units(store)[0], store)}
-            self.assertEqual(flagged, {"later"})
+            write_unit(store, "proj-20260930-1700", "portable-one")
+            write_unit(store, "proj-20260930-1700", "repo-only")
+            publish(store, "understandings-20260930-180000.zip",
+                    "proj-20260930-1700/portable-one.understanding.md")
+            self.assertEqual(flagged(store), {"repo-only"})
 
-    def test_unfiled_unit_is_flagged_even_after_a_publish(self):
-        """An unstamped `_unfiled` unit has no time to compare against the archive, so it cannot be
-        proven captured; it is reported rather than silently treated as safe."""
+    def test_capture_is_decided_by_membership_not_by_stamp(self):
+        """A unit stamped after the archive but present in it is captured; one stamped before it but
+        absent is not. The stamp says nothing about what the archive holds."""
         with tempfile.TemporaryDirectory() as tmp:
             repo = make_repo(tmp, ignore_store=True)
             store = repo / ".context" / "understandings"
-            write_unit(store, "proj-20260930-1700", "old")
+            write_unit(store, "proj-20260930-1803", "earlier-missing")
+            write_unit(store, "proj-20260930-1806", "later-included")
+            publish(store, "understandings-20260930-180530.zip",
+                    "proj-20260930-1806/later-included.understanding.md")
+            self.assertEqual(flagged(store), {"earlier-missing"})
+
+    def test_unfiled_unit_follows_membership_like_any_other(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = make_repo(tmp, ignore_store=True)
+            store = repo / ".context" / "understandings"
+            write_unit(store, ui.UNFILED, "kept")
             write_unit(store, ui.UNFILED, "loose")
+            publish(store, "understandings-20260930-180000.zip", f"{ui.UNFILED}/kept.understanding.md")
+            self.assertEqual(flagged(store), {"loose"})
+
+    def test_unreadable_archive_counts_for_nothing(self):
+        """A corrupt zip cannot prove anything was captured; its units stay reported, without a crash."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = make_repo(tmp, ignore_store=True)
+            store = repo / ".context" / "understandings"
+            write_unit(store, "proj-20260930-1700", "alpha")
             pub = store.parent / ui.PUBLISH_DIR_NAME
             pub.mkdir(parents=True, exist_ok=True)
-            (pub / "understandings-20260930-180000.zip").write_bytes(b"x")
-            flagged = {u["folder"] for u in ui.unpublished_units(ui.load_units(store)[0], store)}
-            self.assertEqual(flagged, {"loose"})
+            (pub / "understandings-20260930-180000.zip").write_bytes(b"not a zip")
+            self.assertEqual(flagged(store), {"alpha"})
 
     def test_tracked_store_produces_no_warning(self):
         with tempfile.TemporaryDirectory() as tmp:

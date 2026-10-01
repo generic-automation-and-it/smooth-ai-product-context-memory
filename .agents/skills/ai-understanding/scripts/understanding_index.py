@@ -33,6 +33,7 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
+import zipfile
 from datetime import date
 from pathlib import Path
 
@@ -70,10 +71,9 @@ BLOCK_SCALAR_RE = re.compile(r"^[|>][0-9+-]{0,2}$")
 STALE_AFTER_DAYS = 90
 STALE_AFTER_DAYS_OUTCOME = 30
 # The publish target sits beside the store (`.context/understandings-publish`), the one durable form
-# of the store (LADR-008). An archive is `understandings-<YYYYMMDD-HHMMSS>.zip`; its stamp is what a
-# unit's durability is judged against.
+# of the store (LADR-008). An archive mirrors the store's `<subject>-<stamp>/<slug>.understanding.md`
+# paths, so a unit is published exactly when its path is a member of one.
 PUBLISH_DIR_NAME = "understandings-publish"
-ARCHIVE_RE = re.compile(r"^understandings-(\d{8}-\d{6})\.zip$")
 
 
 def parse_frontmatter(text: str) -> dict:
@@ -421,34 +421,34 @@ def is_gitignored(path: Path) -> bool:
     return proc.returncode == 0
 
 
-def newest_archive_stamp(store: Path) -> str | None:
-    """The `yyyyMMdd-HHMMSS` stamp of the newest published archive, or None when none exists.
+def published_paths(store: Path) -> set[str]:
+    """Every unit path held by an archive in the publish dir beside the store.
 
-    The publish dir sits beside the store, one level up.
+    Membership, not archive time: a `--portable-only` archive is newer than the `repo-specific` units it
+    deliberately left out, so judging by time reports them published and lets them vanish unwarned. An
+    unreadable zip contributes nothing, so its units stay reported — the safe direction.
     """
-    stamps = []
+    paths: set[str] = set()
     pub_dir = store.parent / PUBLISH_DIR_NAME
-    if pub_dir.is_dir():
-        for entry in pub_dir.iterdir():
-            match = ARCHIVE_RE.match(entry.name)
-            if match:
-                stamps.append(match.group(1))
-    return max(stamps) if stamps else None
+    if not pub_dir.is_dir():
+        return paths
+    for archive in sorted(pub_dir.glob("*.zip")):
+        try:
+            with zipfile.ZipFile(archive) as zf:
+                names = zf.namelist()
+        except (zipfile.BadZipFile, OSError):
+            continue
+        for name in names:
+            parts = Path(name).parts
+            if len(parts) >= 2 and parts[-1].endswith(UNIT_SUFFIX):
+                paths.add(f"{parts[-2]}/{parts[-1]}")
+    return paths
 
 
 def unpublished_units(units: list[dict], store: Path) -> list[dict]:
-    """Current units whose newest version is newer than the newest published archive.
-
-    No archive means every unit is unpublished. The archive stamp is cut to its minute so it compares
-    with a folder's `yyyyMMdd-HHmm` stamp. An unstamped folder (`_unfiled`) has no time to compare, so
-    its units are always reported: a false warning costs a publish, a missed one costs the unit.
-    """
-    newest = newest_archive_stamp(store)
-    if newest is None:
-        return list(units)
-    bound = newest[:13]
-    return [unit for unit in units
-            if not stamp_of(unit["subject"]) or stamp_of(unit["subject"]) > bound]
+    """Current units whose path is in no published archive. No archive means every unit."""
+    published = published_paths(store)
+    return [unit for unit in units if unit["path"] not in published]
 
 
 def version_key(record: dict) -> tuple[str, str, str]:
@@ -624,8 +624,8 @@ def review(units: list[dict], superseded: list[dict] | None = None,
         )
 
     if unpublished:
-        lines.append("unpublished — the store is gitignored and these units are newer than the "
-                     "newest published archive, so they would vanish with this workspace:")
+        lines.append("unpublished — the store is gitignored and these units are in no published "
+                     "archive, so they would vanish with this workspace:")
         lines.extend(f"    {unit['path']}" for unit in unpublished)
         lines.append("    run `ai-understanding --publish` to carry them out")
 
