@@ -70,78 +70,34 @@ start from a clean baseline. Returns the number of records deleted.
 A non-loopback base URL means the token would cross a network. The guard **stops the request** rather
 than reporting a problem and letting the next line run anyway.
 
-**Load it once per shell.** It defines `recall_feedback_curl`, the only function that sends a token, and
-`recall_feedback_guard`, the origin check both it and the operator can call directly.
+**Load it once per shell.** `scripts/recall_feedback.sh` (path relative to this skill's directory)
+defines `recall_feedback_curl`, the only function that sends a token, and `recall_feedback_guard`, the
+origin check both it and the operator can call directly. From the repository root:
 
 ```bash
-# ${VAR:-default} supplies loopback when unset. The base URL is parsed and its **resolved host**
-# asserted to be loopback — matching the raw string with a glob instead approves
-# `http://localhost:5141@192.0.2.1/` (the loopback prefix, non-loopback host via userinfo), which is
-# exactly the bypass this guard exists to close. Mirrors context_memory_client.base_url().
-#
-# The check runs in a *function*, not a `( ... )` subshell: a subshell's `exit 1` returns to the
-# caller with a non-zero status nobody tested, so the three requests that followed it ran regardless.
-# Here the guard is the last statement before the token is read, so a refusal cannot be followed by a
-# request inside the same function.
-recall_feedback_guard() {
-  local base="${CONTEXT_MEMORY_BASE_URL:-http://localhost:5141}"
-  python3 - "$base" <<'PY'
-import sys, urllib.parse
-url = sys.argv[1]
-parsed = urllib.parse.urlparse(url)
-# Report only parsed, non-secret parts. The raw url is never echoed: the branch below is reached
-# precisely when it carries userinfo, so printing it would write a credential to the terminal and
-# into any agent or CI transcript — in a guard whose purpose is to stop the token crossing.
-if parsed.scheme not in ("http", "https") or parsed.username or parsed.password \
-        or parsed.path not in ("", "/") or parsed.query or parsed.fragment:
-    print("refusing CONTEXT_MEMORY_BASE_URL: must be a bare HTTP(S) origin with no "
-          f"credentials, path, query or fragment (got scheme={parsed.scheme!r}, "
-          f"userinfo={'present' if parsed.username or parsed.password else 'absent'}, "
-          f"path={parsed.path!r})", file=sys.stderr)
-    sys.exit(1)
-if parsed.hostname not in ("localhost", "127.0.0.1", "::1"):
-    print(f"refusing non-loopback CONTEXT_MEMORY_BASE_URL host: {parsed.hostname}", file=sys.stderr)
-    sys.exit(1)
-PY
-}
-
-# The token arrives as a *function argument*, not as a curl `-H` argument. Anything in a function's
-# argument list is visible in `ps` to every user on the host for the life of the process, so
-# `-H "Authorization: Bearer $TOKEN"` puts the credential in the process table and in any shell
-# trace. curl reads the header from a file descriptor instead, so the value never becomes an argv
-# element of any process.
-recall_feedback_curl() {
-  local method="$1" path="$2" token="$3"
-  if ! recall_feedback_guard; then
-    echo "recall-feedback: origin refused; no request was sent." >&2
-    return 1
-  fi
-  if [ -z "$token" ]; then
-    echo "recall-feedback: no token supplied; no request was sent." >&2
-    return 1
-  fi
-  # Written to a mode-600 temp file rather than a pipe, so the header value never passes through a
-  # shell variable expansion visible to another process, and the file is unlinked immediately.
-  local header
-  header="$(mktemp)" || return 1
-  chmod 600 "$header"
-  printf 'Authorization: Bearer %s\n' "$token" >"$header"
-  # --noproxy '*' is not optional: curl honours http_proxy/ALL_PROXY from the environment, and a
-  # proxy set for outbound traffic would otherwise receive a loopback request *and* its header.
-  # --fail-with-body keeps a 4xx body visible instead of collapsing a refusal to an empty success.
-  local status=0
-  curl -sS --noproxy '*' --fail-with-body \
-    -X "$method" -H "@$header" \
-    "${CONTEXT_MEMORY_BASE_URL:-http://localhost:5141}${path}" || status=$?
-  rm -f "$header"
-  unset token header
-  return "$status"
-}
+source .agents/skills/mimisbrunnr-recall-feedback/scripts/recall_feedback.sh
+recall_feedback_guard && echo "origin approved"
 ```
 
+What the script enforces before any token leaves:
+
+- The base URL is **parsed** and its resolved host asserted to be loopback; a raw-string glob would
+  approve `http://localhost:5141@192.0.2.1/` (loopback prefix, non-loopback host via userinfo). A base
+  carrying credentials, a path, a query or a fragment is refused, and the refusal never echoes it.
+- The base reaches the parser through the environment, not argv, so it is never visible in `ps`.
+- The request path must be absolute and carry no `@`, `\`, whitespace or leading `//` — a path such as
+  `@evil.example/x` appended to an approved origin would otherwise move the request's host.
+- The token is read from a mode-600 header file (`-H @file`), never an argv element, and that file is
+  unlinked on success, failure and interrupt.
+- `--noproxy '*'`: curl honours `http_proxy`/`ALL_PROXY`, and a proxy would otherwise receive the
+  loopback request and its header.
+
+The refusals are checked in the calling function, not a `( ... )` subshell whose `exit 1` nobody
+tests, so a refusal cannot be followed by a request.
+
 `--fail-with-body` (curl ≥ 7.76) turns a `403` into a non-zero exit instead of a silent success, so a
-wrong token cannot read as an empty result set. On older curl, drop that one flag — the loopback
-refusal and the argv redaction are the parts that protect the token.
+wrong token cannot read as an empty result set. On older curl, drop that one flag from the script —
+the loopback refusal and the argv redaction are the parts that protect the token.
 
 **A note on what this does not prove.** The guard approves an *origin*; it does not make the response
 safe, and it does not audit the store. It exists so a misconfigured `CONTEXT_MEMORY_BASE_URL` cannot
