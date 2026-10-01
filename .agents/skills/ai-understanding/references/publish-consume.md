@@ -74,6 +74,44 @@ of it. **List the archive before extracting any of it** — `unzip -l <zip>` —
 against that rule there; no enforcing script exists yet (LADR-008 is specification only), so the listing
 is the only gate, and extracting first to inspect afterwards has already lost.
 
+**Refuse a case-folded collision in that same listing, before extracting.** On a case-insensitive
+filesystem (the default on macOS and Windows) `Foo-20260101-0000/x.understanding.md` and
+`foo-20260101-0000/x.understanding.md` are *one file*: the second extract silently replaces the first, and
+a parity check afterwards cannot see it because by then the destination is the source. This is the same
+class as the path-escape rule and refuses the same way — the whole archive, not the entry.
+
+Compare **every** incoming path against the target store, not just the other incoming paths, because the
+destructive case is an incoming unit landing on a *local* one that differs only by case:
+
+```bash
+# Fails loudly on any collision, incoming-vs-incoming and incoming-vs-local alike.
+python3 - <<'PY'
+import sys, zipfile
+from pathlib import Path
+archive, store = Path(sys.argv[1]), Path(sys.argv[2])
+seen = {}
+for existing in store.rglob("*"):
+    seen.setdefault(str(existing.relative_to(store)).casefold(), existing)
+clashes = []
+with zipfile.ZipFile(archive) as zf:
+    for name in zf.namelist():
+        key = str(Path(name)).casefold()
+        if key in seen or key in {c[0] for c in clashes}:
+            clashes.append((key, name, seen.get(key)))
+if clashes:
+    for key, name, target in clashes:
+        print(f"refusing: '{name}' is the same file as '{target}' on a case-insensitive filesystem")
+    sys.exit(1)
+print("no case-folded collisions")
+PY
+```
+
+Use `casefold`, not `lower`: it is the full Unicode folding a filesystem compares, so `straße` and
+`strasse` are caught as one file — which `lower` keeps apart. The generator applies the same rule
+mechanically and reports a collision found in the store as a validation error, so run it after unpacking
+too; the listing is the gate that prevents the overwrite, and the generator is what catches a store that
+already holds one.
+
 Reconcile per incoming slug. The key is the slug, and an incoming copy **keeps its own stamped folder**:
 under LADR-010 the same slug in two folders is a version chain, not an index failure, so there is nothing
 left to merge away:

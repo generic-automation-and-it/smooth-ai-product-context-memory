@@ -40,6 +40,33 @@ x
 """
 
 
+def case_sensitive_filesystem(directory: Path) -> bool:
+    """Whether two names differing only by case can coexist under `directory`.
+
+    Asked rather than assumed, because the answer decides which collision fixtures are runnable: on a
+    case-insensitive filesystem the colliding files cannot be created, so the on-disk wiring test skips
+    and only the pure-function coverage applies. Guessing wrong would either silently skip everywhere
+    or try to create a state the filesystem refuses.
+    """
+    probe = directory / ".case-probe"
+    try:
+        (probe / "a").mkdir(parents=True, exist_ok=True)
+        (probe / "A").mkdir()
+    except OSError:
+        return False
+    finally:
+        for child in ("a", "A"):
+            try:
+                (probe / child).rmdir()
+            except OSError:
+                pass
+        try:
+            probe.rmdir()
+        except OSError:
+            pass
+    return True
+
+
 def make_repo(tmp: str, *, ignore_store: bool) -> Path:
     """A throwaway git repo with `.context/understandings` ignored or tracked."""
     subprocess.run(["git", "init", "-q", tmp], check=True, capture_output=True)
@@ -84,6 +111,109 @@ def argv(store: Path, review: bool = False) -> list[str]:
     if review:
         args.append("--review")
     return args
+
+
+class CaseCollisionTests(unittest.TestCase):
+    """Two names that differ only by case are one file on a case-insensitive filesystem.
+
+    The check is a pure function over records, which is the only way to test it honestly: on the very
+    filesystems where the overwrite happens, the two colliding files cannot coexist on disk, so no
+    fixture can create the state. Building the records directly is not a shortcut around the test — it
+    is the only shape the test can have.
+    """
+
+    @staticmethod
+    def records(*pairs: tuple[str, str]) -> list[dict]:
+        return [{"slug": slug, "subject": subject, "path": f"{subject}/{slug}{ui.UNIT_SUFFIX}"}
+                for slug, subject in pairs]
+
+    def test_slugs_differing_only_by_case_are_reported(self):
+        found = ui.case_collisions(self.records(("Foo", "s-20260101-0000"), ("foo", "s-20260101-0000")))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("'Foo'", found[0])
+        self.assertIn("'foo'", found[0])
+        self.assertIn("case-insensitive", found[0])
+
+    def test_folders_differing_only_by_case_are_reported(self):
+        found = ui.case_collisions(self.records(("one", "S-20260101-0000"), ("two", "s-20260101-0000")))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("subject folder", found[0])
+
+    def test_a_repeated_name_is_a_version_chain_not_a_collision(self):
+        """The same slug twice is the versioning mechanism, and it must stay silent.
+
+        This is the negative control that matters: `case_collisions` runs over *every* record, so a
+        check that fired on any repeated name would flag every improved unit in the store — and
+        `group_versions` treats a repeated slug as legitimate history.
+        """
+        self.assertEqual(ui.case_collisions(self.records(("x", "a-20260101-0000"),
+                                                        ("x", "b-20260101-0200"))), [])
+
+    def test_distinct_names_are_not_reported(self):
+        self.assertEqual(ui.case_collisions(self.records(("alpha", "a-20260101-0000"),
+                                                        ("beta", "a-20260101-0000"))), [])
+
+    def test_casefold_catches_what_lower_does_not(self):
+        """`lower` keeps these apart; a filesystem does not, so the check must use `casefold`."""
+        self.assertNotEqual("straße".lower(), "strasse".lower())
+        self.assertEqual("straße".casefold(), "strasse".casefold())
+        found = ui.case_collisions(self.records(("straße", "s-20260101-0000"),
+                                                ("strasse", "s-20260101-0000")))
+        self.assertEqual(len(found), 1, found)
+
+    def test_the_check_is_wired_into_validation(self):
+        """The pure tests pass whether or not the check runs. This one does not.
+
+        `case_collisions` is only worth anything once its result reaches `load_units`'s problem list, and
+        that wiring is invisible to a test that calls the function directly — reverting it left all five
+        pure tests green. Asserted through the public entry point on a store that is *valid* in every
+        other respect, so a non-empty problem list can only come from the collision check.
+        """
+        problems = ui.case_collisions(self.records(("Foo", "s-20260101-0000"),
+                                                  ("foo", "s-20260101-0000")))
+        self.assertTrue(problems, "fixture must produce a collision for this test to mean anything")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Path(tmp) / "understandings"
+            # One unit, named so its slug and its subject each collide with a name the check is fed
+            # directly — the store on disk is clean, so the only way a problem appears is the wiring.
+            original = ui.case_collisions
+            ui.case_collisions = lambda records: list(problems)
+            try:
+                write_unit(store, "s-20260101-0000", "alpha")
+                _units, _superseded, reported = ui.load_units(store)
+            finally:
+                ui.case_collisions = original
+            self.assertTrue(
+                any("case-insensitive" in p for p in reported),
+                f"collision problems never reached load_units' problem list: {reported}",
+            )
+
+    def test_a_clean_store_reports_no_collision_problem(self):
+        """The negative control on the wiring: silence when there is nothing to report."""
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Path(tmp) / "understandings"
+            write_unit(store, "s-20260101-0000", "alpha")
+            write_unit(store, "s-20260101-0000", "beta")
+            _units, _superseded, reported = ui.load_units(store)
+            self.assertEqual([p for p in reported if "case-insensitive" in p], [])
+
+    @unittest.skipUnless(case_sensitive_filesystem(Path(tempfile.gettempdir())),
+                         "needs a case-sensitive filesystem: the colliding files cannot coexist "
+                         "where the overwrite actually happens")
+    def test_collision_on_disk_reaches_the_report_and_exit_code(self):
+        """The pure check above is worthless if its result never reaches the user.
+
+        Only runnable where two case-differing files can coexist, so on a case-insensitive machine the
+        wiring is untested by this fixture and the pure tests above are the coverage.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Path(tmp) / "understandings"
+            write_unit(store, "s-20260101-0000", "alpha")
+            write_unit(store, "s-20260101-0000", "Alpha")
+            rc, _out, err = run(argv(store))
+            self.assertEqual(rc, 1, "a case collision must be a validation failure")
+            self.assertIn("case-insensitive", err)
 
 
 class AgentsContextResolutionTests(unittest.TestCase):

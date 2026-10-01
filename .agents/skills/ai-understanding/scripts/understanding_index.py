@@ -396,6 +396,8 @@ def load_units(store: Path) -> tuple[list[dict], list[dict], list[str]]:
                 "problems": unit_problems,
             })
 
+    problems.extend(case_collisions(records))
+
     current, superseded = group_versions(records)
     for record in current:
         problems.extend(record["problems"])
@@ -406,6 +408,38 @@ def load_units(store: Path) -> tuple[list[dict], list[dict], list[str]]:
     known = {record["slug"] for record in records}
     problems.extend(dangling_references(current_units, known))
     return current_units, superseded_units, problems
+
+
+def case_collisions(records: list[dict]) -> list[str]:
+    """Slugs or subject folders that are distinct names but the same file on some filesystem.
+
+    On a case-insensitive filesystem (the default on macOS and Windows) `Foo.understanding.md` and
+    `foo.understanding.md` are one file, and the second write silently replaces the first. Ordinal
+    comparison cannot see it, so neither can the version grouping: a repeated slug is treated as a
+    version chain, which is correct on a case-sensitive filesystem and wrong here. Nothing detects the
+    overwrite after the fact either — by then the destination *is* the source — so the check has to run
+    before the write, which for an unpacked archive means refusing the whole thing.
+
+    `casefold` rather than `lower` because it is the full Unicode case-folding operation, and it is what
+    a filesystem compares: 'ß' folds to 'ss' and 'ﬁ' to 'fi', so two names `lower` keeps apart are one
+    file on disk.
+    """
+    problems = []
+    for field, kind in (("slug", "slug"), ("subject", "subject folder")):
+        buckets: dict[str, set[str]] = {}
+        for record in records:
+            buckets.setdefault(str(record[field]).casefold(), set()).add(str(record[field]))
+        for names in sorted(buckets.values(), key=sorted):
+            # One distinct name cannot collide with itself; only a genuine disagreement is a problem,
+            # and the set is what makes a repeated slug — the versioning mechanism — stay silent.
+            if len(names) > 1:
+                rendered = ", ".join(f"'{n}'" for n in sorted(names))
+                problems.append(
+                    f"{rendered} differ only by case and are one file on a case-insensitive "
+                    f"filesystem — rename so each {kind} is distinct, or the later write silently "
+                    f"replaces the earlier one"
+                )
+    return problems
 
 
 def stamp_problem(subject: str) -> str:
