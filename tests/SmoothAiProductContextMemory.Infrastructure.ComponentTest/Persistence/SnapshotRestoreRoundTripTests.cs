@@ -434,6 +434,47 @@ public sealed class SnapshotRestoreRoundTripTests : PersistenceTestBase
     }
 
     [Fact]
+    public async Task TheConfiguredBudget_BoundsTheRestoreTransactionItself()
+    {
+        // The pre-flight test above covers IsTargetEmptyAsync; this is the restore transaction, which
+        // is where the budget exists for. Both halves are wired here — the data source's client
+        // CommandTimeout and the transaction's SET LOCAL statement_timeout — and with neither the
+        // blocked statement waits out the 120 s request default. Elapsed time under a held lock is the
+        // observable that separates "the configured value governs" from "some default eventually did".
+        await using SmoothAiProductContextMemoryTestDatabase target =
+            await SmoothAiProductContextMemoryTestDatabase.CreateAsync(_aspire, $"infra-restore-budget-{Guid.NewGuid():N}", Ct);
+        await using NpgsqlDataSource targetDataSource = NpgsqlDataSourceFactory.Create(target.ConnectionString);
+        await MigrateAsync(targetDataSource, Ct);
+
+        NpgsqlSnapshotRepository budgeted = new(
+            Blob, Blob, new SnapshotMetadataOptions { RestoreStatementTimeoutSeconds = 1 });
+
+        await using var blocker = new NpgsqlConnection(target.ConnectionString);
+        await blocker.OpenAsync(Ct);
+        await using NpgsqlTransaction hold = await blocker.BeginTransactionAsync(Ct);
+        await using (NpgsqlCommand holdLock = new("LOCK TABLE memory IN ACCESS EXCLUSIVE MODE", blocker, hold))
+        {
+            await holdLock.ExecuteNonQueryAsync(Ct);
+
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            Task<RestoreResults> restore = budgeted.RestoreAsync(
+                target.ConnectionString,
+                EmptyCapture,
+                new SnapshotCounts(0, 0, 0, 0, 0, 0, 0),
+                overrideNonEmpty: false,
+                Ct);
+            Task finished = await Task.WhenAny(restore, Task.Delay(TimeSpan.FromSeconds(30), Ct));
+            finished.ShouldBe(restore, "the restore transaction ignored its configured one-second budget");
+
+            await Should.ThrowAsync<Exception>(() => restore);
+            clock.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(30));
+        }
+
+        await hold.RollbackAsync(Ct);
+        (await budgeted.IsTargetEmptyAsync(target.ConnectionString, Ct)).ShouldBeTrue();
+    }
+
+    [Fact]
     public async Task ForcedRestore_ClearsRecallFeedback_ThatCitesTheReplacedCorpus()
     {
         // Recall feedback is excluded from the archive, so the restored corpus can never own a
