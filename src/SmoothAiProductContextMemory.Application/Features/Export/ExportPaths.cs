@@ -18,7 +18,11 @@ public static class ExportPaths
 
     public static IReadOnlyDictionary<Guid, string> AssignGroupFolders(IEnumerable<GroupInput> groups)
     {
-        var used = new HashSet<string>(StringComparer.Ordinal);
+        // OrdinalIgnoreCase for the same reason as AssignMemoryFiles: a folder name is written to disk,
+        // and two group names differing only by case are one directory on a case-insensitive
+        // filesystem. Group names pass through `Slug.TrySubject`, which lower-cases, so this does not
+        // fire in practice — the guard is here so it cannot start depending on that.
+        var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var assigned = new Dictionary<Guid, string>();
 
         foreach (GroupInput group in groups.OrderBy(g => g.Uuid))
@@ -48,7 +52,18 @@ public static class ExportPaths
 
     public static IReadOnlyDictionary<Guid, string> AssignMemoryFiles(IEnumerable<MemoryInput> memories)
     {
-        var used = new HashSet<string>(StringComparer.Ordinal);
+        // OrdinalIgnoreCase, not Ordinal. These names go straight to disk, and on a case-insensitive
+        // filesystem (the default on macOS and Windows) `mem-Foo.v1.md` and `mem-foo.v1.md` are one
+        // file, so the second write silently replaces the first and no post-copy parity check can see
+        // it — by then the destination *is* the source. An ordinal set treats them as distinct, skips
+        // the collision suffix, and emits exactly the pair that collapses.
+        //
+        // Every stored `SubjectSlug` originates at `Slug.Subject`, which lower-cases, so in practice this
+        // set never fires — that is why the defect survived. `MemoryInput.SubjectSlug` is an unvalidated
+        // string, though, and `ExportStore` forwards the stored column verbatim, so an untrusted archive
+        // restore or a direct database write can carry an unslugged value. The guard has to hold at the
+        // boundary, not depend on a single producer upstream of it.
+        var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var assigned = new Dictionary<Guid, string>();
 
         foreach (MemoryInput memory in memories

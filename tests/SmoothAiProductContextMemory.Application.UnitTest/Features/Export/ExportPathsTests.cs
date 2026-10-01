@@ -48,10 +48,10 @@ public class ExportPathsTests
     {
         // The export writes these names straight to disk, and on a case-insensitive filesystem two names
         // differing only by case are one file — the second write silently replaces the first, which no
-        // check after the copy can see. `AssignMemoryFiles` is safe here only because every stored
-        // SubjectSlug originates at `Slug.Subject`, which lower-cases each character; this pins that
-        // property at the boundary the export actually uses, so a future caller passing an unslugged
-        // value fails here rather than on someone's disk.
+        // check after the copy can see.
+        //
+        // Two descriptions that fold together are one slug, so this is a genuine collision and the uuid
+        // suffix must separate them rather than both claiming one filename.
         //
         // `ShouldNotBe` on the two names is the whole assertion. An earlier version also counted them
         // under `StringComparer.OrdinalIgnoreCase`, which read as the case-insensitivity guard and was
@@ -64,17 +64,65 @@ public class ExportPathsTests
             new ExportPaths.MemoryInput(Second, Slug.Subject("STORAGE engine"), CurrentVersion: 1),
         ]);
 
-        // Two descriptions that fold together are one slug, so this is a genuine collision and the
-        // uuid suffix must separate them rather than both claiming one filename.
         files[First].ShouldNotBe(files[Second]);
+    }
+
+    [Fact]
+    public void Unslugged_subjects_differing_only_by_case_still_get_distinct_files()
+    {
+        // The backstop, and the half of the safety the test above cannot reach.
+        //
+        // `MemoryInput.SubjectSlug` is an unvalidated `string` that `ExportStore` forwards verbatim from
+        // the stored column, and the test above routes its own input through `Slug.Subject` — so it can
+        // only ever prove the slug property, never the boundary. An untrusted archive restore or a direct
+        // database write carrying an unslugged value would hand this method two names that differ only
+        // by case, and the collision suffix is what keeps them apart.
+        //
+        // This is the case where the safety stops depending on a single producer: the names arrive
+        // already wrong, and the suffix still separates them.
+        IReadOnlyDictionary<Guid, string> files = ExportPaths.AssignMemoryFiles(
+        [
+            new ExportPaths.MemoryInput(First, "STORAGE-engine", CurrentVersion: 1),
+            new ExportPaths.MemoryInput(Second, "Storage-Engine", CurrentVersion: 1),
+        ]);
+
+        files[First].ShouldNotBe(files[Second]);
+        // Distinct under the comparison that matters: the filesystem does not care which case it got.
+        new HashSet<string>(files.Values, StringComparer.OrdinalIgnoreCase)
+            .Count.ShouldBe(2, "two export files must remain distinct under case-insensitive comparison");
+    }
+
+    [Fact]
+    public void Group_folders_differing_only_by_case_stay_distinct()
+    {
+        // Pins the property at the boundary. It does **not** discriminate the comparer: mutating the
+        // `used` set back to `Ordinal` leaves this green, because `GroupSlug` routes both names through
+        // `Slug.TrySubject`, which folds them to one name before the set ever sees them — so the
+        // collision is found ordinally and the suffix applies either way. There is no input that reaches
+        // `AssignGroupFolders` with case-differing names today, which is why the guard is defence in
+        // depth rather than a fix, and why this test is a pin and not evidence.
+        IReadOnlyDictionary<Guid, string> folders = ExportPaths.AssignGroupFolders(
+        [
+            new ExportPaths.GroupInput(First, "Storage-Engine"),
+            new ExportPaths.GroupInput(Second, "STORAGE-engine"),
+        ]);
+
+        new HashSet<string>(folders.Values, StringComparer.OrdinalIgnoreCase)
+            .Count.ShouldBe(2, "two group folders must remain distinct under case-insensitive comparison");
     }
 
     [Fact]
     public void Slugging_is_what_makes_case_collision_impossible()
     {
-        // The negative control for the test above: without the slug, two subjects differing only by case
-        // would produce the same filename and the ordinal set would keep them apart. Asserting the slug
-        // collapses them is what makes the distinctness above a property of the design rather than luck.
+        // The property the whole export path rests on: `Slug.Subject` is what lower-cases, so two
+        // descriptions that differ only by case produce one subject and reach the collision suffix as a
+        // genuine collision. Without it the file names would differ by case only, which is one file on a
+        // case-insensitive volume.
+        //
+        // This duplicates `Domain.UnitTest/SlugTests.cs`, and that is deliberate rather than accidental
+        // drift: the domain test proves the slug function is correct, this one proves the export's safety
+        // depends on that function. The mutation that breaks the guarantee fails here too, which is what
+        // makes it a guard on the export rather than a restatement of the slug.
         Slug.Subject("Storage Engine").ShouldBe(Slug.Subject("STORAGE engine"));
     }
 
