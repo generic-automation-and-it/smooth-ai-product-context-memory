@@ -93,9 +93,27 @@ def _read_response(request):
         raise _classify_transport_error(e) from e
 
 
+def _parse_base(value):
+    """`urlparse` the base URL without letting its error text out.
+
+    `urlsplit` rejects an NFKC-confusable character in the netloc with a ValueError that quotes the
+    whole netloc — userinfo included — and a bad port the same way. That message escaped as a
+    traceback (only `ClientError` is caught), printing whatever credential the URL carried. The
+    refusal here is fixed text and is raised outside the handler, so nothing chains the original.
+    """
+    try:
+        parsed = urlparse(value)
+        parsed.port  # noqa: B018 — parsed for its ValueError on a malformed port
+        return parsed
+    except ValueError:
+        pass
+    raise ClientError(0, "bad-base-url", "Context-memory base URL could not be parsed; "
+                      f"check {ENV_BASE_URL} for malformed or non-ASCII characters")
+
+
 def base_url():
     value = os.environ.get(ENV_BASE_URL, DEFAULT_BASE_URL).rstrip("/")
-    parsed = urlparse(value)
+    parsed = _parse_base(value)
     if parsed.scheme not in ("http", "https") or parsed.username or parsed.password \
             or parsed.path not in ("", "/") or parsed.query or parsed.fragment:
         raise ClientError(0, "bad-base-url", "Context-memory base URL must be an HTTP(S) origin")
@@ -204,9 +222,7 @@ def _request(method, path, payload=None, query=None):
 
 def _probe(base):
     """True if the API host accepts a TCP connection. Honest, never a silent miss."""
-    from urllib.parse import urlparse
-
-    parsed = urlparse(base)
+    parsed = _parse_base(base)
     host = parsed.hostname or "localhost"
     port = parsed.port or (443 if parsed.scheme == "https" else 80)
     try:

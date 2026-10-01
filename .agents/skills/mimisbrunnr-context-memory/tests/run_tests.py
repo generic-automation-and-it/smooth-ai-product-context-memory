@@ -981,6 +981,37 @@ class WritePayloadTests(unittest.TestCase):
                 with self.assertRaises(client.ClientError):
                     client.base_url()
 
+    def test_an_unparseable_base_url_is_refused_without_echoing_its_userinfo(self):
+        # `urlsplit` raises a ValueError quoting the whole netloc for an NFKC-confusable character,
+        # so the credential in the userinfo would be printed if that error escaped.
+        import traceback
+
+        for value in ("http://user:s3cret@local\uff03host:5141", "http://user:s3cret@localhost:port"):
+            with self.subTest(value=value), patch.dict(os.environ, {client.ENV_BASE_URL: value}):
+                with self.assertRaises(client.ClientError) as caught:
+                    client.base_url()
+                rendered = "".join(traceback.format_exception(
+                    type(caught.exception), caught.exception, caught.exception.__traceback__))
+                self.assertEqual(caught.exception.status_text, "bad-base-url")
+                self.assertNotIn("s3cret", rendered)
+                self.assertNotIn("user:", rendered)
+                with self.assertRaises(client.ClientError) as probed:
+                    client._probe(value)
+                self.assertNotIn("s3cret", str(probed.exception))
+
+    def test_the_cli_reports_an_unparseable_base_url_as_a_classified_error(self):
+        env = dict(os.environ, **{client.ENV_BASE_URL: "http://user:s3cret@local\uff03host:5141",
+                                  client.ENV_READ_TOKEN: "read-only"})
+        env.pop(client.ENV_WRITE_TOKEN, None)
+        for script in ("context_memory_client.py", "context_memory_read_client.py"):
+            with self.subTest(script=script):
+                completed = subprocess.run([sys.executable, "-B", str(SCRIPTS / script), "labels"],
+                                           capture_output=True, text=True, env=env, timeout=30)
+                self.assertEqual(completed.returncode, 1)
+                self.assertIn("bad-base-url", completed.stderr)
+                self.assertNotIn("Traceback", completed.stderr)
+                self.assertNotIn("s3cret", completed.stderr + completed.stdout)
+
     def test_redirects_are_refused(self):
         handler = client._NoRedirect()
         request = client.urllib.request.Request(

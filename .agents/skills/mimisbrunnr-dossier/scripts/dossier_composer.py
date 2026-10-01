@@ -1105,9 +1105,18 @@ def _assert_loopback(base):
     The whole first condition of the sibling client's `base_url()` guard, not just the host check:
     a base carrying credentials, a path, a query or a fragment is not an origin, and accepting one
     turns a typo into a 404 from a doubled path instead of an actionable refusal.
+
+    A base `urlparse` cannot parse — an NFKC-confusable character in the netloc, a non-numeric port —
+    is refused with the same fixed message. The parser's own error quotes the netloc, userinfo
+    included, and `main` prints exception text, so letting it escape would print a credential.
     """
-    parsed = urlparse(base)
-    if (parsed.scheme not in ("http", "https")
+    try:
+        parsed = urlparse(base)
+        parsed.port  # noqa: B018 — parsed for its ValueError on a malformed port
+    except ValueError:
+        parsed = None
+    if (parsed is None
+            or parsed.scheme not in ("http", "https")
             or parsed.hostname not in ("localhost", "127.0.0.1", "::1")
             or parsed.username
             or parsed.password
