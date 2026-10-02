@@ -121,15 +121,24 @@ tokens and every skill request returns `403`.
 ### Controller container (no .NET toolchain)
 
 ```bash
-scripts/run.sh                 # macOS, Linux
-pwsh ./scripts/run.ps1         # Windows / PowerShell 7
+scripts/provision-credentials.sh   # 1. write the API tokens the skills read
+scripts/run.sh                     # 2. macOS, Linux
+pwsh ./scripts/run.ps1             #    Windows / PowerShell 7
 ```
 
-Pulls the published controller image and starts the whole stack in one command. It generates the five
-release secrets on first run — the three engine values (`PostgresConfiguration__Password`,
-`BlobConfiguration__AccessKey`, `BlobConfiguration__SecretKey`) that `docker.md` asks you to supply by
-hand — plus the two `Parameters__*` tokens, and keeps them in `~/.mimisbrunnr/controller.env` (mode
-600) so restarts do not rotate a token a running Host already holds.
+Step 2 pulls the published controller image and starts the whole stack in one command. Step 1 is the
+same provisioner every other run mode on this page uses, and here it is not optional: the launcher
+**adopts** that file's token pair rather than minting its own, so the controller and the skills hold the
+same values. Without it the stack starts and every skill request returns `403` — `run.sh` also publishes
+the client-facing values to `~/.mimisbrunnr/credentials`, but `run.ps1` writes only its own
+`Parameters__*` file.
+
+The launcher generates the five release secrets on first run — the three engine values
+(`PostgresConfiguration__Password`, `BlobConfiguration__AccessKey`,
+`BlobConfiguration__SecretKey`) that `docker.md` asks you to supply by hand — and mints the two
+`Parameters__*` tokens only when the provisioner supplied neither. It keeps them in
+`~/.mimisbrunnr/controller.env` (mode 600) so restarts do not rotate a token a running Host already
+holds.
 
 Your environment wins over the stored file, and a value supplied that way is deliberately not written
 to disk. The token names contain hyphens, so they cannot be exported by a shell at all — use

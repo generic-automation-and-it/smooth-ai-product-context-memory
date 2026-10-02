@@ -502,6 +502,10 @@ function Start-Controller {
     else {
         & docker volume create $script:StateVolume *> $null
         if ($LASTEXITCODE -ne 0) { Fail "could not create volume $($script:StateVolume)" }
+        # Mount it, not merely create it: without the -v the image's own VOLUME directive satisfies
+        # /var/lib/mimisbrunnr from an anonymous volume and this named one stays empty.
+        # docs/wiki/docker.md:38 documents this mount.
+        $arguments += @('-v', "$($script:StateVolume)`:/var/lib/mimisbrunnr")
     }
 
     $arguments += $Image

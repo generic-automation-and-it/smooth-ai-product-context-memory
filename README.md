@@ -17,9 +17,10 @@ scripts/run.sh                     # 2. pull the controller image and start the 
 
 **Step 1 is not optional if you use the skills or the MCP servers.** They authenticate with
 `CONTEXT_MEMORY_READ_TOKEN` / `CONTEXT_MEMORY_WRITE_TOKEN`, and `provision-credentials.sh` is the only
-thing that writes those names — `run.sh` generates the controller's own token pair instead. Skip it and
-the stack starts fine but every skill call returns `missing-credential`. Run `run.sh` alone only if you
-want the API and nothing is going to talk to it.
+thing that writes those names — both launchers adopt the pair from it rather than minting their own.
+Skip it and the stack starts fine, but the skills return `missing-credential` and the MCP servers
+refuse to start, naming the credential file they could not find. Run `run.sh` alone only if you want
+the API and nothing is going to talk to it.
 
 Step 1 is idempotent: re-running reuses the existing tokens rather than rotating them, because the
 running Host holds them and a rotation 403s every client until each one is re-pointed.
@@ -42,9 +43,10 @@ set -a && source .context/mimisbrunnr.env && set +a
 Run it again to pull a newer release and restart; data is preserved. `scripts/run.sh stop` stops it,
 `status` and `logs` report on it.
 
-**Windows (PowerShell 7):** the same two steps — `scripts/provision-credentials.sh`, then
-`pwsh ./scripts/run.ps1`. Both launchers **adopt** the provisioned token pair rather than minting their
-own, so the controller and the skills hold the same credentials on either platform.
+**Windows (PowerShell 7):** the launcher is `pwsh ./scripts/run.ps1`. Step 1 is still
+`scripts/provision-credentials.sh`, which is a bash script — there is no `.ps1` equivalent, so run it
+from Git Bash or WSL in this checkout. Both launchers **adopt** the provisioned token pair rather than
+minting their own, so the controller and the skills hold the same credentials on either platform.
 
 ### Use it in another repository
 
@@ -86,7 +88,7 @@ interface.
 
 ```bash
 dotnet run --project src/SmoothAiProductContextMemory.AppHost   # Aspire dev stack, Host from the working tree
-dotnet run --project src/SmoothAiProductContextMemory.Host       # API on its own; tokens: see API credentials above
+dotnet run --project src/SmoothAiProductContextMemory.Host       # API on its own; tokens: see [API credentials](#api-credentials) below
 docker build -t smooth-ai-product-context-memory:local .        # Host image; run contract in docs/wiki/docker.md
 ```
 
@@ -310,7 +312,7 @@ regeneration procedure — rotation invalidates no data, because the tokens are 
 
 To run the stack — enough for [Run it](#run-it) above:
 
-- A container runtime — Docker Desktop, Rancher Desktop, Colima, or Podman
+- A container runtime — Docker Desktop, Rancher Desktop or Colima. Rootless Docker and Podman are not wired up; see [`CONTROLLER_LAUNCHER.md`](scripts/CONTROLLER_LAUNCHER.md)
 - **Python 3 runtime** — required for agent skills (stdlib-only scripts). Do not rely on macOS `/usr/bin/python3` (Xcode stub).
 
 To build or modify the code:

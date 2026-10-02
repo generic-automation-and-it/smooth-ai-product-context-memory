@@ -535,6 +535,10 @@ up() {
   else
     docker volume create "$state_volume" >/dev/null
     mounts+=(-v "$engine_socket:$engine_socket")
+    # The named volume has to be mounted, not merely created: without it the image's own VOLUME
+    # directive satisfies /var/lib/mimisbrunnr from an anonymous volume, so the corpus lands somewhere
+    # `docker volume ls` cannot name and this one stays empty. docker.md:38 documents the mount.
+    mounts+=(-v "$state_volume:/var/lib/mimisbrunnr")
   fi
 
   log "starting $controller_name"
@@ -632,6 +636,11 @@ resolve_running_controller() {
   # installation on the same ports instead of restarting theirs.
   installation_id="${found#mimisbrunnr-}"
   installation_id="${installation_id%-controller}"
+  # The group label carries the id as well, and `status` filters its container table on it. It is built
+  # once at the top of this script from the id this invocation was given, so without re-deriving it here
+  # an adopted installation is filtered on the *default* group and prints an empty table directly above
+  # a line naming that controller as running.
+  group_name="smooth-mímisbrunnr-release-${installation_id}"
   log "no MIMIS_ID given; using the running $controller_name (installation '$installation_id')"
 }
 
