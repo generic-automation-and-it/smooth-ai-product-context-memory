@@ -69,12 +69,12 @@ Targets and verification live in [./nfrs/](./nfrs/). Two shape how code is writt
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
-| 2026-10-02 | **LADR-08 added: recall evidence stays self-authored; conversational benchmarks are the wrong population.** Every recall figure here comes from a fixture its own authors wrote, and the dedup scorer already reported accuracy as recall — so an independent fixture was considered. **Rejected:** LoCoMo / LongMemEval / OmniMemEval measure recall over dialogue turns (conversational relevance, answer-generation metric), not curated distilled labelled claims retrieved by label/facet/lexeme. A score there measures a population this system does not store, so it is the wrong-metric defect at scale. The complement is the in-use recall-feedback signal (HLD-004: never-recalled, miss-rate) — real queries against the real store. An external *authoring process* is deferred, not rejected on the merits, with a stated reopening threshold. | LADR-08; HLD-004; HLD-002 NFR-02 |
-| 2026-10-01 | README gained a *Business Requirements Traced* table: BR-04, BR-06 and BR-07 previously traced to no HLD. Each is mapped to the part this design delivers (indexed filter dimensions; cheap fields and a capped result count; per-version confidence, sources and `created_on` returned with every item) and the part it does not (hierarchy traversal is HLD-003; no semantic ranking; `sources` is optional on write). | BR-04, BR-06, BR-07 |
-| 2026-10-01 | NFR-03's status line had the supersession reversed (it said it *supersedes* HLD-006 NFR-02); it now says it is superseded by HLD-006 NFR-02, and records that the closure rests on an NFR still in Draft. No status change. | NFR-03, HLD-006 NFR-02 |
-| 2026-09-16 | Recall deferral closed by measurement: FTS configuration `simple` → `english` (recall 0.44 → 0.78, precision 0.88); `pg_trgm` measured and rejected with a recorded reopening threshold. | [NFR-02 recall-tuning measurements](./nfrs/NFR-02-recall-tuning-measurements.md) |
-| 2026-09-16 | Orphan-management ambiguity closed structurally: `IBlobStorage` no longer exposes deletion; test-only delete stays on the concrete adapter; GC remains deferred behind the recorded reopening condition. HLD-006 reports orphans, never deletes. | `BlobStorageCapabilityGuardTests` |
+| 2026-10-02 | LADR-08 added: recall evidence stays self-authored — LoCoMo/LongMemEval/OmniMemEval measure dialogue turns, not distilled labelled claims; HLD-004's in-use signal is the complement. | LADR-08 |
+| 2026-10-01 | README gained a *Business Requirements Traced* table for BR-04/06/07, each split into what this design delivers and what it does not. | BR-04, BR-06, BR-07 |
+| 2026-10-01 | NFR-03's supersession direction corrected (superseded by HLD-006 NFR-02, not the reverse). No status change. | NFR-03 |
+| 2026-09-16 | FTS `simple` → `english` (recall 0.44 → 0.78); `pg_trgm` rejected with a reopening threshold. | [NFR-02](./nfrs/NFR-02-recall-tuning-measurements.md) |
+| 2026-09-16 | `IBlobStorage` no longer exposes deletion; GC stays deferred; HLD-006 reports orphans, never deletes. | `BlobStorageCapabilityGuardTests` |
 | 2026-09-13 | NFR-04 Accepted — export projection + byte-identical L1 assertions shipped. | NFR-04 |
-| 2026-09-13 | Guard is six entities: HLD 003 dropped `MemoryLink`. Relationships live in AGE, not a seventh table. | HLD-003 |
-| 2026-09-13 | Created — converted from ADR-0001 and ADR-0002, which were one design in two documents. | ADR-0001, ADR-0002 |
-| 2026-09-13 | Added the upstream BRD as cited business authority and the rule that weakening a cited `BR-NN` escalates. | BRD 001 |
+| 2026-09-13 | Guard is six entities: HLD 003 dropped `MemoryLink`; relationships live in AGE. | HLD-003 |
+| 2026-09-13 | Created — converted from ADR-0001 and ADR-0002. | ADR-0001, ADR-0002 |
+| 2026-09-13 | Added the upstream BRD as cited business authority; weakening a cited `BR-NN` escalates. | BRD 001 |
