@@ -46,6 +46,41 @@ Run it again to pull a newer release and restart; data is preserved. `scripts/ru
 `pwsh ./scripts/run.ps1`. Both launchers **adopt** the provisioned token pair rather than minting their
 own, so the controller and the skills hold the same credentials on either platform.
 
+### Use it in another repository
+
+The store is a **service**, not a per-repository fixture: start it once on a machine, and every
+repository talks to the same memory. `scripts/run.sh` publishes the credentials to
+`~/.mimisbrunnr/credentials` — outside every checkout — so a repository never has to provision anything.
+
+**Copy the skills in:**
+
+```bash
+mkdir -p .agents/skills
+cp -R <this-repo>/.agents/skills/mimisbrunnr-* .agents/skills/
+```
+
+That's the whole setup for reading. The clients find the credential automatically — no env file, no
+`source`, no per-repository secret. Verify with:
+
+```bash
+python3 .agents/skills/mimisbrunnr-odin-context-memory/scripts/context_memory_client.py probe
+```
+
+**Writing costs one deliberate step**, because a write credential is deliberately never ambient:
+
+```bash
+set -a && source ~/.mimisbrunnr/credentials && set +a
+```
+
+Without it, writes fail closed with `missing-credential: CONTEXT_MEMORY_WRITE_TOKEN is required`; reads
+keep working. That asymmetry is the design — a credential that grants mutation should cost a deliberate
+act to obtain.
+
+Because the store is shared, so are its tokens: every repository authenticates to the same corpus and
+can read what the others captured. Cross-repo recall is the point, but it also means a repository holding
+a write token can write anywhere. Keep the credential file mode `600` and the store on a private
+interface.
+
 <details>
 <summary>Working on the code? These are the source-mode paths</summary>
 

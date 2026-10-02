@@ -138,6 +138,14 @@ to disk. The token names contain hyphens, so they cannot be exported by a shell 
 Options, the data-root layout, platform differences and the security notes are in
 [`scripts/CONTROLLER_LAUNCHER.md`](../../scripts/CONTROLLER_LAUNCHER.md).
 
+**Using the skills from another repository:** the store is a service started once per machine, and
+`run.sh` also publishes the API credentials to `~/.mimisbrunnr/credentials` — outside every checkout. A
+second repository therefore needs neither `provision-credentials.sh` nor a credential file of its own:
+copy `.agents/skills/mimisbrunnr-*` across, and the clients find the credential on their own. Reads are
+ambient; a write needs `set -a && source ~/.mimisbrunnr/credentials && set +a`, because a write
+credential is deliberately never loaded implicitly. The full sequence, and what sharing one store means
+for repository isolation, is in the README's *Use it in another repository*.
+
 ### Direct Host run
 
 ```bash
