@@ -1,11 +1,39 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
+using SmoothAiProductContextMemory.Application.Abstractions.Snapshot;
+using SmoothAiProductContextMemory.Application.Features.Snapshot;
 
 namespace SmoothAiProductContextMemory.Infrastructure.Persistence.Extensions;
 
 public static class SmoothAiProductContextMemoryMigrationExtensions
 {
+    /// <summary>
+    /// The startup migration posture: how many migrations this image has still to apply, and how old
+    /// the last snapshot is. <c>null</c> when there is nothing to apply, so the caller logs no line
+    /// (HLD-006 LADR-04: visibility, never a scheduled or blocking step). Read-only — it applies
+    /// nothing; the migration itself is a separate call, and the caller orders them.
+    /// </summary>
+    public static async Task<MigrationPosture?> ReadMigrationPostureAsync(
+        this IServiceProvider serviceProvider,
+        CancellationToken cancellationToken = default)
+    {
+        await using var scope = serviceProvider.CreateAsyncScope();
+        await using var db = scope.ServiceProvider.GetRequiredService<SmoothAiProductContextMemoryDbContext>();
+        int pending = (await db.Database.GetPendingMigrationsAsync(cancellationToken)).Count();
+        if (pending == 0)
+        {
+            return null;
+        }
+
+        ISnapshotMetadataStore metadataStore =
+            scope.ServiceProvider.GetRequiredService<ISnapshotMetadataStore>();
+        SnapshotMetadata? metadata = await metadataStore.ReadAsync(cancellationToken);
+        return new MigrationPosture(
+            pending,
+            MigrationPosture.LastSnapshotText(metadata, DateTimeOffset.UtcNow));
+    }
+
     /// <summary>Applies pending migrations to the database behind this provider.</summary>
     public static async Task MigrateSmoothAiProductContextMemoryAsync(
         this IServiceProvider serviceProvider,
