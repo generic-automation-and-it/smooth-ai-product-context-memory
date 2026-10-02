@@ -52,14 +52,15 @@ reads as validation.
 
 ## Consequences
 
-- **No external dataset is adopted.** The self-authored fixtures stay, with their denominators stated
-  (NFR-02) and their axes labelled (`recall_positive` / `precision_negative` / `not_dedup`), which is
-  what makes them auditable even though they are not independent.
+- **No external dataset is adopted.** The self-authored fixtures stay, with their denominators stated at
+  their source (HLD-001 NFR-02: 14 memories / 11 cases; HLD-002 NFR-02: fourteen scenarios) and the
+  dedup fixture's axes labelled (`recall_positive` / `precision_negative` / `not_dedup`), which is what
+  makes them auditable even though they are not independent.
 - **The in-use signal covers what an external fixture cannot.** HLD-004's never-recalled set and
   miss-rate measure *this* store's findability over time, on real queries against the real corpus — the
   evidence for the deferred recall-quality decisions (e.g. `pg_trgm`'s reopening threshold, recorded in
-  the same NFR). That is a different and stronger independence than a third-party fixture: the queries
-  are the practitioner's, not an author's.
+  [HLD-001 NFR-02](./nfrs/NFR-02-recall-tuning-measurements.md)). That is a different and stronger
+  independence than a third-party fixture: the queries are the practitioner's, not an author's.
 - **Reopening threshold.** Reconsider an external set only if it (a) stores distilled labelled claims
   with scope/status, (b) retrieves by label/facet/lexeme, and (c) scores retrieval of the claim rather
   than answer generation. None of LoCoMo / LongMemEval / OmniMemEval is that, and this record exists so
