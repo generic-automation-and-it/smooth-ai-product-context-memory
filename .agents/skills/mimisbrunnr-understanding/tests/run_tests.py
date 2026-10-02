@@ -1075,6 +1075,17 @@ class ImportTests(unittest.TestCase):
             for invented in ("sources", "validFrom", "validUntil"):
                 self.assertNotIn(invented, candidate)
 
+    def test_a_foreign_candidate_gets_a_derived_subject(self):
+        """A foreign fact has no question, so `set_items` must derive a subject.
+
+        A null `description` would create a memory no subject lookup or semantic dedup could find —
+        the subject is what the capture path matches on.
+        """
+        candidates, _ = uc.export_candidates(None, "The graph store was chosen for provenance paths.")
+        items = uc.set_items(candidates, {}, dt.datetime.now(dt.timezone.utc))
+        self.assertTrue(items[0]["description"])
+        self.assertTrue(items[0]["name"])
+
     def test_short_candidates_are_reported_not_silently_dropped(self):
         """Regression: a sub-threshold candidate was filtered inside the splitter, so input vanished
         with nothing said — against the skill's own never-silently-dropped contract."""

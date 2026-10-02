@@ -858,11 +858,12 @@ def set_items(candidates: list[dict], binding: dict, now: dt.datetime) -> list[d
     """
     items = []
     for candidate in candidates:
+        subject = candidate.get("description") or candidate["statement"][:60]
         items.append({
             "uuid": None,
             "createUuid": str(uuid.uuid4()),
-            "name": candidate.get("description") or candidate["statement"][:60],
-            "description": candidate.get("description"),
+            "name": subject,
+            "description": subject,
             "statement": candidate["statement"],
             "contentSummary": candidate.get("contentSummary") or "",
             "kind": KIND_UNDERSTANDING,
