@@ -439,6 +439,35 @@ class StoreImportTests(unittest.TestCase):
         self.assertIn("provider:key", err)
         self.assertEqual(called, [], "a malformed filter must not reach the store")
 
+    def test_import_strips_the_write_token_from_the_read_subprocess(self):
+        """The read client refuses to start with a write token present, so `import` must not inherit one.
+
+        A dual-token shell (the provisioner's env file sets both) would otherwise make every read-only
+        `import` fail at the read client's refuse-token guard, and the recall path's `unset` workaround
+        is exactly the friction this skill exists to remove.
+        """
+        os.environ["CONTEXT_MEMORY_WRITE_TOKEN"] = "secret"
+        os.environ["ApiAccess__WriteToken"] = "secret"
+        captured = {}
+
+        class _Done:
+            returncode, stdout, stderr = 0, "{}", ""
+
+        def fake_run(argv, **kwargs):
+            captured["env"] = kwargs.get("env")
+            return _Done()
+
+        original = uc.subprocess.run
+        uc.subprocess.run = fake_run
+        try:
+            uc._run_capture_client(uc.READ_CLIENT, ["query"], {"kind": "understanding"})
+        finally:
+            uc.subprocess.run = original
+            del os.environ["CONTEXT_MEMORY_WRITE_TOKEN"]
+            del os.environ["ApiAccess__WriteToken"]
+        self.assertNotIn("CONTEXT_MEMORY_WRITE_TOKEN", captured["env"])
+        self.assertNotIn("ApiAccess__WriteToken", captured["env"])
+
     def test_unreachable_timed_out_and_empty_are_three_distinct_outcomes(self):
         """The three never collapse.
 
@@ -1443,6 +1472,12 @@ class DumpRedactionTests(unittest.TestCase):
             binding = uc.dump_metadata_binding(out_dir)
             self.assertEqual(binding["repository"], "org/repo")
             self.assertEqual(binding["initiative"], "Mimisbrunnr-MVP")
+            # `read_material` resolves a dump folder to its `_session.md`, so the sidecar must be found
+            # from the file path too. Testing only the folder masks a regression where the export flow
+            # passes the file and silently drops the binding.
+            binding_from_file = uc.dump_metadata_binding(out_dir / uc.SESSION_FILE)
+            self.assertEqual(binding_from_file["repository"], "org/repo")
+            self.assertEqual(binding_from_file["initiative"], "Mimisbrunnr-MVP")
 
     def test_a_markdown_table_is_never_one_candidate(self):
         """A table is a layout. Flattened into one candidate it becomes a sentence of pipes."""
