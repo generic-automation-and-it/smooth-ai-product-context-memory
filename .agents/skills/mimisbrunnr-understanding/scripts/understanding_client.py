@@ -707,11 +707,13 @@ def cmd_import(args: argparse.Namespace) -> int:
     lines = ["# Recalled from the store — cited grounding context", ""]
     lines += [f"- Filters: {json.dumps(filters, sort_keys=True)}."]
     if args.table:
+        # The notice frames the table before a reader skims it; on the prose path it closes the block.
+        lines += ["", DATA_NOTICE]
         lines += render_table(records, all_kinds, args.asof, args.max_chars)
     else:
         lines += render_store(records, "the store", args.asof, all_kinds=all_kinds,
                               max_chars=args.max_chars)
-    lines += ["", DATA_NOTICE]
+        lines += ["", DATA_NOTICE]
     print("\n".join(lines))
     return 0
 

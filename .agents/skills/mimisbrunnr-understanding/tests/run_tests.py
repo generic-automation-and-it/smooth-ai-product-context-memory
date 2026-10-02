@@ -522,8 +522,10 @@ class StoreImportTests(unittest.TestCase):
         self.assertIn("| Second |", out)
         self.assertIn("11111111 v3", out)
         self.assertIn("2 record(s) (understanding only) from the store.", out)
-        # The notice frames the table too — it is untrusted data either way.
+        # The notice frames the table too — it is untrusted data either way, and it must sit above the
+        # table so a reader sees the warning before skimming the rows (HLD-007).
         self.assertIn(uc.DATA_NOTICE, out)
+        self.assertLess(out.index(uc.DATA_NOTICE), out.index("| Subject | Answer |"))
 
     def test_table_surfaces_the_records_scope_from_dimension_and_identifier(self):
         """The read API returns scope as two fields, not a single `scope`.
