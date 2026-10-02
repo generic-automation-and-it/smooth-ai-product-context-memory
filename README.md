@@ -265,6 +265,19 @@ dotnet run --project src/SmoothAiProductContextMemory.Host       # API on its ow
 docker build -t smooth-ai-product-context-memory:local .        # Host image; run contract in docs/wiki/docker.md
 ```
 
+No .NET toolchain and no checkout? The published release controller image starts the same stack in one
+command — it pulls the image, generates the five release secrets on first run, keeps the corpus in a
+folder under `~/.mimisbrunnr`, and prints the dashboard login URL:
+
+```bash
+scripts/run-controller.sh                   # macOS, Linux
+pwsh ./scripts/run-controller.ps1           # Windows / PowerShell 7
+```
+
+It starts one controller container, which starts the other four. See
+[`scripts/CONTROLLER_LAUNCHER.md`](scripts/CONTROLLER_LAUNCHER.md) for options, the credential
+contract, platform differences and the security notes.
+
 Aspire uses Docker by default. To run the same AppHost on Podman, start the machine and set the runtime:
 
 ```bash
@@ -365,6 +378,7 @@ relying on the well for it.
 | CI/CD pipeline | [`docs/wiki/ci.md`](docs/wiki/ci.md) |
 | Container images & durability (`snapshot`/`verify`/`restore`) | [`docs/wiki/docker.md`](docs/wiki/docker.md) |
 | Setup & credentials (tokens, name mapping, provisioning) | [`docs/wiki/setup.md`](docs/wiki/setup.md) |
+| One-command controller launcher (`run-controller.sh` / `.ps1`) | [`scripts/CONTROLLER_LAUNCHER.md`](scripts/CONTROLLER_LAUNCHER.md) |
 | Architecture decisions & NFRs | [`docs/hlds/`](docs/hlds/) |
 
 ---

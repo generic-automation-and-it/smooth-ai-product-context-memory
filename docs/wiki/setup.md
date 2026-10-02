@@ -118,6 +118,26 @@ Production, where user secrets are not loaded), pass `.context/mimisbrunnr.env.c
 every environment. Without one of those two bridges the controller regenerates its own per-session
 tokens and every skill request returns `403`.
 
+### Controller container (no .NET toolchain)
+
+```bash
+scripts/run-controller.sh                 # macOS, Linux
+pwsh ./scripts/run-controller.ps1         # Windows / PowerShell 7
+```
+
+Pulls the published controller image and starts the whole stack in one command. It generates the five
+release secrets on first run — the three engine values (`PostgresConfiguration__Password`,
+`BlobConfiguration__AccessKey`, `BlobConfiguration__SecretKey`) that `docker.md` asks you to supply by
+hand — plus the two `Parameters__*` tokens, and keeps them in `~/.mimisbrunnr/controller.env` (mode
+600) so restarts do not rotate a token a running Host already holds.
+
+Your environment wins over the stored file, and a value supplied that way is deliberately not written
+to disk. The token names contain hyphens, so they cannot be exported by a shell at all — use
+`env 'Parameters__api-read-token=…' ./run.sh up` or PowerShell's `$env:` provider.
+
+Options, the data-root layout, platform differences and the security notes are in
+[`scripts/CONTROLLER_LAUNCHER.md`](../../scripts/CONTROLLER_LAUNCHER.md).
+
 ### Direct Host run
 
 ```bash
