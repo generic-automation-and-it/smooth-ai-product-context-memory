@@ -66,7 +66,56 @@ Graceful stop removes owned workloads and preserves data volumes. Restart the sa
 
 After removing the stopped controller, `stop` and `reset` can run as commands of a replacement container with the same canonical name, socket, and installation ID. `stop` preserves all data. **`reset` permanently removes the installation's three dependency data volumes.** It does not remove the separately mounted controller-state volume. Never use dev teardown scripts against a release installation.
 
-Back up PostgreSQL/AGE and blob storage together before upgrading. Start the new controller version with the same volumes and credentials; it uses its embedded API digest. Do not change PostgreSQL major as part of this operation. Rolling back an image does not roll back schema or data: restore a compatible cross-store backup if migrations prevent downgrade. See the graph NFR-03 restore and NFR-04 version-pairing documents.
+**An upgrade is a migration.** The new image applies its own migrations at startup, before it reports
+ready, so take a verified backup of the running corpus first. The shipped `snapshot` verb captures the
+relational and graph stores and the referenced blob bodies into one self-verifying archive; verify that
+archive offline before you rely on it, then start the new image:
+
+```bash
+# 1. snapshot the running corpus (storage connection vars; no write token)
+docker run --rm \
+  -v "$(pwd)/.context/snapshots:/snapshots" \
+  -v mimisbrunnr-<installation-id>-host-context:/app/.context \
+  --env-file <installation-credential-file> \
+  ghcr.io/generic-automation-and-it/smooth-ai-product-context-memory:<old-tag> snapshot --output /snapshots
+
+# 2. verify the archive offline — no database, no object store; exit 0 = clean
+docker run --rm -v "$(pwd)/.context/snapshots:/snapshots" \
+  ghcr.io/generic-automation-and-it/smooth-ai-product-context-memory:<old-tag> verify /snapshots/snapshot-<ts>.tar
+
+# 3. start the new image with the same volumes and credentials. When migrations are pending it
+#    logs their count and the last snapshot's age, then applies them before it reports ready; an
+#    ordinary start with nothing to apply logs nothing.
+```
+
+`<old-tag>` is the tag this installation is currently running,
+`<installation-credential-file>` is the env file already carrying its
+`ConnectionStrings__SmoothAiProductContextMemory` and `BlobStorage__*` values, and
+`<installation-id>` is the `InstallationConfiguration__Id` this controller was started with. The
+host-context volume is therefore `mimisbrunnr-<installation-id>-host-context` on a release
+installation (`mimisbrunnr-host-context` is the development AppHost's name); mounting the wrong one
+writes the snapshot record where the Host will never read it. Credentials arrive by file rather than
+inline `-e` for the reason given under [Run standalone (API)](#run-standalone-api): an inline secret
+lands in shell history.
+
+Do not change the PostgreSQL major as part of an upgrade. **Rolling back an image does not roll back
+schema or data**: if the new migrations prevent a downgrade, rebuild both stores from the verified
+archive with the `restore` verb (HLD-006). The target database must already be migrated, and because
+the migrated database is **not empty** the rollback needs **`--force`** — `restore` refuses a non-empty
+target by default, precisely because a silent merge would be data loss:
+
+```bash
+docker run --rm \
+  -v "$(pwd)/.context/snapshots:/snapshots" \
+  -v mimisbrunnr-<installation-id>-host-context:/app/.context \
+  --env-file <installation-credential-file> \
+  ghcr.io/generic-automation-and-it/smooth-ai-product-context-memory:<old-tag> \
+  restore /snapshots/snapshot-<ts>.tar --force
+```
+
+Never start an older image over the migrated database. The graph version-pairing rule is in the
+HLD-003 NFR-04 document, and the full `snapshot`/`verify`/`restore` commands are in
+[Run standalone](#run-standalone-snapshot-verify-restore).
 
 ### Verification Status
 
@@ -222,12 +271,14 @@ selects the verb:
 
 ```bash
 # Both mounts matter. The first is the archive directory you asked for; the second is /app/.context,
-# where the snapshot metadata file lands (Snapshot:Directory defaults to .context). Without it that
-# file is written into the container's ephemeral layer and is gone when the container exits — the
-# archive survives, the record of what the last snapshot captured does not.
+# where the snapshot metadata file lands (Snapshot:Directory defaults to .context). Mount the volume
+# the Host itself mounts, or the record is written where the Host will never read it: the name is
+# `mimisbrunnr-host-context` in the AppHost default and `mimisbrunnr-<installation-id>-host-context`
+# in a release installation. Without it the file is written into the container's ephemeral layer and
+# is gone when the container exits — the archive survives, the record of what it captured does not.
 docker run --rm \
   -v "$(pwd)/.context/snapshots:/snapshots" \
-  -v mimisbrunnr-context:/app/.context \
+  -v mimisbrunnr-host-context:/app/.context \
   -e ConnectionStrings__SmoothAiProductContextMemory='...' \
   -e BlobStorage__Endpoint='http://host.docker.internal:9000' \
   -e BlobStorage__AccessKey='smooth-local' \
@@ -243,7 +294,7 @@ docker run --rm -v "$(pwd)/.context/snapshots:/snapshots" \
 # restore — rebuild both stores into an empty target, print reconciliation; add --force to override
 docker run --rm \
   -v "$(pwd)/.context/snapshots:/snapshots" \
-  -v mimisbrunnr-context:/app/.context \
+  -v mimisbrunnr-host-context:/app/.context \
   -e ConnectionStrings__SmoothAiProductContextMemory='...' \
   -e BlobStorage__Endpoint='http://host.docker.internal:9000' \
   -e BlobStorage__AccessKey='smooth-local' \
