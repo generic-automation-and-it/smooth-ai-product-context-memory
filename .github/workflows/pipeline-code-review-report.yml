@@ -63,8 +63,8 @@
 #               OPENCODE_REVIEW_REPORT_DISABLE_CLAUDE_CODE (default `1`),
 #               OPENCODE_REVIEW_REPORT_DISABLE_AGENTS_MD_CHECK (default `0`),
 #               OPENCODE_REVIEW_REPORT_RUN_ON_DRAFT (default `false` — set truthy
-#                 to review PRs while they are still in DRAFT; the job-level draft
-#                 guard below is conditional on it).
+#                 to review PRs while they are still in DRAFT; the live_draft
+#                 step's draft check is conditional on it).
 #
 # Optional autonomous low/medium fixing: copy .github/workflows/pipeline-ai-analyse.yml
 # into the consuming repo too. It cannot be a reusable workflow caller because
@@ -199,11 +199,15 @@ env:
 
 jobs:
   review:
+    # pull_request events always start the job. The payload's draft flag is a
+    # snapshot at event-fire time, so a synchronize event that races with
+    # ready_for_review carries a stale draft=true — gating here would let that
+    # run cancel the good ready_for_review run (same concurrency group) and then
+    # skip itself, leaving a ready PR unreviewed. The live_draft step below is
+    # the authority: it queries the PR's current state and gates the review
+    # steps on the result.
     if: |
-      (github.event_name == 'pull_request' && (
-        github.event.pull_request.draft == false ||
-        contains('|1|true|yes|on|', format('|{0}|', inputs.run_on_draft || vars.OPENCODE_REVIEW_REPORT_RUN_ON_DRAFT || 'false'))
-      )) ||
+      (github.event_name == 'pull_request') ||
       (
         github.event_name == 'issue_comment' &&
         github.event.issue.pull_request &&
@@ -217,7 +221,49 @@ jobs:
       (github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     steps:
+      # Live draft-state check — the authority for pull_request events. The
+      # webhook payload's .pull_request.draft is captured at event-fire time
+      # and goes stale when a synchronize event races with ready_for_review;
+      # this step queries the PR's current state and gates the review steps on
+      # the result, so a ready PR is never skipped because a concurrent event's
+      # payload was stale. issue_comment and workflow_dispatch paths review
+      # regardless of draft state (unchanged behaviour). Fails the run if the
+      # lookup errors, so a wrong draft state is loud, not silent.
+      - name: Check live draft state
+        id: live_draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ON_DRAFT: ${{ inputs.run_on_draft || vars.OPENCODE_REVIEW_REPORT_RUN_ON_DRAFT || 'false' }}
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_EVENT_NAME:-}" != "pull_request" ]; then
+            echo "is_draft=false" >> "$GITHUB_OUTPUT"
+            echo "should_review=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          pr_number="$(jq -r '.pull_request.number // ""' "$GITHUB_EVENT_PATH")"
+          if [ -z "$pr_number" ]; then
+            echo "::error::pull_request event without a PR number; cannot check live draft state." >&2
+            echo "is_draft=false" >> "$GITHUB_OUTPUT"
+            echo "should_review=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          is_draft="$(gh pr view "$pr_number" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)"
+          echo "is_draft=$is_draft" >> "$GITHUB_OUTPUT"
+          if [ "$is_draft" = "true" ]; then
+            if printf '%s' "${RUN_ON_DRAFT,,}" | tr -cs '[:alnum:]' '\n' | grep -qxE '1|true|yes|on'; then
+              echo "Draft PR: reviewing anyway (OPENCODE_REVIEW_REPORT_RUN_ON_DRAFT is enabled)"
+              echo "should_review=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "Draft PR: skipping review (live draft state)"
+              echo "should_review=false" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "should_review=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout PR head (or default branch for non-PR events; script re-fetches)
+        if: steps.live_draft.outputs.should_review == 'true'
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           # `pull_request` events: head.ref resolves the PR head.
@@ -233,6 +279,7 @@ jobs:
           persist-credentials: false
 
       - name: Checkout smooth-ai-report-review
+        if: steps.live_draft.outputs.should_review == 'true'
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           # The consumer owns the upstream repo, so `ref` tracks `main` rather
@@ -273,6 +320,7 @@ jobs:
       # The working tree is the PR head. Never run its copy of our credential
       # guard or load its provider config with CI secrets.
       - name: Checkout trusted CI helpers and review config
+        if: steps.live_draft.outputs.should_review == 'true'
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           repository: ${{ github.repository }}
@@ -281,6 +329,7 @@ jobs:
           persist-credentials: false
 
       - name: Install guarded OpenCode
+        if: steps.live_draft.outputs.should_review == 'true'
         env:
           OPENCODE_CLI_VERSION: ${{ vars.OPENCODE_CLI_VERSION || '' }}
         run: |
@@ -295,7 +344,7 @@ jobs:
       # by run-review.sh (1|true|yes|on). Note: contains() is case-insensitive,
       # so any case works for `1`/`true`/`yes`/`on`.
       - name: Cache code knowledge graph
-        if: contains('1 true yes on', vars.OPENCODE_REVIEW_REPORT_ENABLE_GRAPH_ANALYSIS || '1')
+        if: contains('1 true yes on', vars.OPENCODE_REVIEW_REPORT_ENABLE_GRAPH_ANALYSIS || '1') && steps.live_draft.outputs.should_review == 'true'
         uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
         with:
           path: .code-review-graph
@@ -314,11 +363,11 @@ jobs:
       # which is exactly the pre-cache behaviour.
       - name: Resolve Python version for tool cache key
         id: crg_py
-        if: contains('1 true yes on', vars.OPENCODE_REVIEW_REPORT_ENABLE_GRAPH_ANALYSIS || '1') && vars.OPENCODE_TOOL_CODE_REVIEW_GRAPH_VERSION != ''
+        if: contains('1 true yes on', vars.OPENCODE_REVIEW_REPORT_ENABLE_GRAPH_ANALYSIS || '1') && vars.OPENCODE_TOOL_CODE_REVIEW_GRAPH_VERSION != '' && steps.live_draft.outputs.should_review == 'true'
         run: echo "version=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')" >> "$GITHUB_OUTPUT"
 
       - name: Cache code-review-graph tool install
-        if: contains('1 true yes on', vars.OPENCODE_REVIEW_REPORT_ENABLE_GRAPH_ANALYSIS || '1') && vars.OPENCODE_TOOL_CODE_REVIEW_GRAPH_VERSION != ''
+        if: contains('1 true yes on', vars.OPENCODE_REVIEW_REPORT_ENABLE_GRAPH_ANALYSIS || '1') && vars.OPENCODE_TOOL_CODE_REVIEW_GRAPH_VERSION != '' && steps.live_draft.outputs.should_review == 'true'
         uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
         with:
           # ~/.local/share/pipx is modern pipx's XDG layout (what `pip install
@@ -357,7 +406,8 @@ jobs:
           inputs.model_preset == 'Anthropic Claude Sonnet 4.6' ||
           inputs.model_preset == 'Anthropic Claude Haiku 4.5' ||
           ((inputs.model_preset == '' || inputs.model_preset == '(repository default)') &&
-          (vars.OPENCODE_REVIEW_REPORT_PROVIDER || 'OPENCODE-GO-OPENAI') == 'ANTHROPIC')
+          (vars.OPENCODE_REVIEW_REPORT_PROVIDER || 'OPENCODE-GO-OPENAI') == 'ANTHROPIC') &&
+          steps.live_draft.outputs.should_review == 'true'
         env:
           VLLM_PROFILE_B64: ${{ secrets.OPENCODE_VLLM_PROFILE_B64 }}
         run: |
@@ -403,7 +453,11 @@ jobs:
           exit 1
 
       - name: Run review gate
+        if: steps.live_draft.outputs.should_review == 'true'
         env:
+          # Live draft state from the live_draft step. run-review.sh's
+          # should_run() honours this over the (possibly stale) payload flag.
+          LIVE_DRAFT_STATE: ${{ steps.live_draft.outputs.is_draft }}
           # run-review.sh posts reviews via `gh pr review` / `gh pr comment` /
           # `gh api`, all of which require GITHUB_TOKEN. Forward it explicitly;
           # the runner does not auto-inject into bare `run:` shells.
@@ -562,8 +616,9 @@ jobs:
           OPENCODE_CLI_VERSION: ${{ vars.OPENCODE_CLI_VERSION || '' }}
           OPENCODE_REVIEW_REPORT_MAX_FILE_COUNT: ${{ inputs.file_limit || vars.OPENCODE_REVIEW_REPORT_MAX_FILE_COUNT || '100' }}
           OPENCODE_REVIEW_REPORT_EXCLUDE_DELETED: ${{ inputs.exclude_deleted || vars.OPENCODE_REVIEW_REPORT_EXCLUDE_DELETED || '0' }}
-          # Read by run-review.sh's should_run(), which mirrors the job-level draft
-          # guard above. Both must resolve identically or an opted-in draft PR
+          # Read by run-review.sh's should_run(), which applies the same
+          # run-on-draft opt-in to the live draft state from the live_draft
+          # step (LIVE_DRAFT_STATE) — both layers must agree or a draft PR
           # starts a job that then declines to review it.
           OPENCODE_REVIEW_REPORT_RUN_ON_DRAFT: ${{ inputs.run_on_draft || vars.OPENCODE_REVIEW_REPORT_RUN_ON_DRAFT || 'false' }}
           OPENCODE_REVIEW_REPORT_EXCLUDE_GENERATED_PATHS: ${{ inputs.exclude_generated_paths || vars.OPENCODE_REVIEW_REPORT_EXCLUDE_GENERATED_PATHS || '' }}
