@@ -66,7 +66,34 @@ Graceful stop removes owned workloads and preserves data volumes. Restart the sa
 
 After removing the stopped controller, `stop` and `reset` can run as commands of a replacement container with the same canonical name, socket, and installation ID. `stop` preserves all data. **`reset` permanently removes the installation's three dependency data volumes.** It does not remove the separately mounted controller-state volume. Never use dev teardown scripts against a release installation.
 
-Back up PostgreSQL/AGE and blob storage together before upgrading. Start the new controller version with the same volumes and credentials; it uses its embedded API digest. Do not change PostgreSQL major as part of this operation. Rolling back an image does not roll back schema or data: restore a compatible cross-store backup if migrations prevent downgrade. See the graph NFR-03 restore and NFR-04 version-pairing documents.
+**An upgrade is a migration.** The new image applies its own migrations at startup, before it reports
+ready, so take a verified backup of the running corpus first. The shipped `snapshot` verb captures the
+relational and graph stores and the referenced blob bodies into one self-verifying archive; verify that
+archive offline before you rely on it, then start the new image:
+
+```bash
+# 1. snapshot the running corpus (storage connection vars; no write token)
+docker run --rm \
+  -v "$(pwd)/.context/snapshots:/snapshots" -v mimisbrunnr-context:/app/.context \
+  -e ConnectionStrings__SmoothAiProductContextMemory='...' \
+  -e BlobStorage__Endpoint='http://host.docker.internal:9000' \
+  -e BlobStorage__AccessKey='smooth-local' -e BlobStorage__SecretKey='...' \
+  -e BlobStorage__Bucket='smooth-mimisbrunnr-memory-well' \
+  smooth-ai-product-context-memory:<old-tag> snapshot --output /snapshots
+
+# 2. verify the archive offline — no database, no object store; exit 0 = clean
+docker run --rm -v "$(pwd)/.context/snapshots:/snapshots" \
+  smooth-ai-product-context-memory:<old-tag> verify /snapshots/snapshot-<ts>.tar
+
+# 3. start the new image with the same volumes and credentials. It logs the pending-migration count and
+#    the last snapshot's age, then applies the migrations before it reports ready.
+```
+
+Do not change the PostgreSQL major as part of an upgrade. **Rolling back an image does not roll back
+schema or data**: if the new migrations prevent a downgrade, rebuild both stores from the verified
+archive with the `restore` verb (HLD-006) — never by starting an older image over the migrated
+database. The graph version-pairing rule is in the HLD-003 NFR-04 document, and the full
+`snapshot`/`verify`/`restore` commands are in [Run standalone](#run-standalone-snapshot-verify-restore).
 
 ### Verification Status
 
