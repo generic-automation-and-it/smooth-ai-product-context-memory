@@ -1,0 +1,4 @@
+interface:
+  display_name: "Heimdallr Find Session Metadata"
+  short_description: "Report this session's tickets, repository and initiative"
+  default_prompt: "Use $mimisbrunnr-heimdallr-find-session-metadata to print what ticket, repo and initiative this session belongs to."
