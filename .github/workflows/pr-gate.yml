@@ -174,6 +174,9 @@ jobs:
       - name: Test credential provisioner
         run: bash scripts/test-provision-credentials.sh
 
+      - name: Test controller launcher
+        run: bash scripts/test-run-launcher.sh
+
       - name: Test Aspire test runner
         run: bash .github/actions/aspire-test-with-coverage/test-run.sh
 

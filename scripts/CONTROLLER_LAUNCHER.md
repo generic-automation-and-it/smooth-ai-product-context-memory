@@ -247,12 +247,59 @@ the installation and re-provision. Adopting a data root is a fresh start, not a 
 - **Context API bearer tokens are not multi-user authorization.** They separate read from write
   capability only. Keep the API and Seq on private interfaces.
 
+## Using the credentials from your shell
+
+The clients read `~/.mimisbrunnr/credentials` on their own, so nothing needs sourcing. To put the
+credentials in your shell profile instead — so every terminal and every agent session has them without
+reaching for the file — print them in a form your shell accepts:
+
+```bash
+scripts/run.sh env-export                    # macOS / Linux:  export KEY='value'
+scripts/run.sh env-export powershell         # Windows:          $env:KEY = 'value'
+```
+
+Then either paste the output, or append it:
+
+```bash
+scripts/run.sh env-export >> ~/.zshrc        # or ~/.bashrc
+```
+
+**A real environment variable always wins over the file.** Verified by exporting a deliberately wrong
+token and watching an authenticated call be rejected with `403` rather than silently falling back — so
+exporting changes where the value is read from, not which value it is. One credential, two sources.
+
+Three things to know before you write a token into a profile:
+
+- **The file is mode 600; your profile usually is not.** Anything that can read your `~/.zshrc` can read
+  the write token, and every shell you open inherits it. On a shared or backed-up machine, prefer the
+  file and leave the profile alone.
+- **It lands in your shell history.** `eval "$(scripts/run.sh env-export)"` is the shape to avoid;
+  appending to the profile is the safer of the two.
+- **Only `CONTEXT_MEMORY_*` names are printed.** The controller's own `Parameters__*` names contain
+  hyphens and cannot be assigned by any shell — which is why they only ever travel by `--env-file`.
+
+`env-export` is deliberately its own verb: `up` never prints a token to a terminal that may be
+scrolled back, recorded, or read over someone's shoulder. You choose to run it, and choose where it
+goes.
+
+## Harness
+
+`scripts/test-run-launcher.sh` covers the credential and validation paths against a scratch
+`MIMIS_HOME` — no container engine, no network, and it never reads or writes the operator's real
+credentials. It runs in the PR gate ("Test controller launcher").
+
+Every case redirects both `MIMIS_HOME` and the machine-credential path, because the launcher derives
+the second from the first; an earlier version redirected only the home and the harness overwrote live
+credentials. `run.ps1` has no equivalent — its Windows-specific paths cannot be executed on a Linux or
+macOS runner at all, and remain parse-verified only.
+
 ## Limitations
 
-- These scripts have **no automated harness yet**, so a change to them is reviewed rather than tested.
-  Being under `scripts/` at least means a change to them triggers the PR gate (see the `scripts/**`
-  path filter), unlike a home under `docs/`. A harness against a scratch `MIMIS_HOME` is the next
-  step, and would have caught the credential-clobbering defect found while writing them.
+- **Coverage is uneven.** `scripts/test-run-launcher.sh` now covers the bash launcher's credential,
+  validation and export paths in the PR gate. What remains untested is the part that needs a container
+  engine — the start/restart/stop lifecycle, the orphan cleanup, the readiness gate against a
+  deliberately broken database — and `run.ps1` in full, since its Windows paths cannot execute on a
+  Linux or macOS runner at all.
 - Neither script verified that the container reached a healthy state in its first release: it printed the
   login URL and returned while the API container was crash-looping. Both now wait for `/health` and exit
   non-zero with the cause ranked. (Corrected — an earlier version of this file said neither script had

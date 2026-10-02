@@ -48,7 +48,11 @@ controller_image="${CONTROLLER_IMAGE:-ghcr.io/generic-automation-and-it/smooth-a
 data_home="${MIMIS_HOME:-$HOME/.mimisbrunnr}"
 data_root="$data_home/volumes"
 env_file="$data_home/controller.env"
-machine_credentials="${MIMIS_MACHINE_CREDENTIALS:-$HOME/.mimisbrunnr/credentials}"
+# Derived from data_home, not $HOME. Anchoring it to $HOME meant a run with a custom MIMIS_HOME
+# published machine credentials into the operator's real ~/.mimisbrunnr anyway — so a harness pointed at
+# a scratch home still overwrote live credentials, which is the one thing an operator-launcher test must
+# never do. The default is unchanged for normal use, because data_home defaults to ~/.mimisbrunnr.
+machine_credentials="${MIMIS_MACHINE_CREDENTIALS:-$data_home/credentials}"
 machine_credentials_read_only="${machine_credentials%.env}-read-only"
 data_root_setting="${MIMIS_DATA_ROOT:-}"
 
@@ -94,7 +98,10 @@ dashboard_host="http://localhost:${p_dashboard}"
 container_data_root="/var/lib/mimisbrunnr-data"
 
 die() { echo "run.sh: $*" >&2; exit 1; }
-log() { echo "run.sh: $*"; }
+# Diagnostics go to stderr, never stdout. stdout is a data channel here - `env-export` is captured with
+# $(...) and eval'd into a shell - so a status line written there becomes a command the shell tries to
+# run. Caught by sourcing the export, which failed on "run.sh: ...: command not found".
+log() { echo "run.sh: $*" >&2; }
 
 # The entrypoint validates this too, but it does so after the image has started. Validating here keeps
 # the id out of resource names, labels and paths until it is known to be a plain lowercase slug.
@@ -237,6 +244,41 @@ write_machine_credentials() {
     mv "$tmp" "$machine_credentials_read_only"
   )
   log "machine credentials written: $machine_credentials"
+}
+
+# Print the credentials in the form a shell can consume, for operators who want them in their profile
+# rather than relying on the machine file. Deliberately a separate verb: `up` must never print a token
+# to a terminal that may be scrolled back, captured by a screen recording, or read over someone's
+# shoulder. The caller chooses to run this and to redirect it.
+#
+# Only CONTEXT_MEMORY_* names are printed. They are valid shell identifiers, so `export` accepts them;
+# the container's Parameters__* names contain hyphens and cannot be assigned by any shell at all.
+#
+# A real environment variable always wins over the machine file in the clients, so exporting these
+# changes nothing except where the value is read from — it does not fork the credential.
+env_export() {
+  local format="${1:-posix}"
+  local read_token write_token
+  read_token="$(file_value Parameters__api-read-token || true)"
+  write_token="$(file_value Parameters__api-write-token || true)"
+  [ -n "$read_token" ] && [ -n "$write_token" ] ||
+    die "no credentials in $env_file yet — run this script first (or its 'env' verb)"
+
+  case "$format" in
+    posix | sh | bash | zsh)
+      echo "export CONTEXT_MEMORY_BASE_URL='$api_base_url'"
+      echo "export CONTEXT_MEMORY_READ_TOKEN='$read_token'"
+      echo "export CONTEXT_MEMORY_WRITE_TOKEN='$write_token'"
+      ;;
+    powershell | ps1 | pwsh)
+      echo "\$env:CONTEXT_MEMORY_BASE_URL = '$api_base_url'"
+      echo "\$env:CONTEXT_MEMORY_READ_TOKEN = '$read_token'"
+      echo "\$env:CONTEXT_MEMORY_WRITE_TOKEN = '$write_token'"
+      ;;
+    *)
+      die "format must be posix or powershell, not '$format'"
+      ;;
+  esac
 }
 
 write_credentials() {
@@ -675,5 +717,6 @@ case "${1:-up}" in
   status) resolve_running_controller; status ;;
   stop) resolve_running_controller; stop ;;
   logs) resolve_running_controller; docker logs --tail 200 "$controller_name" ;;
-  *) die "unknown verb '${1}'; use up | env | status | stop | logs" ;;
+  env-export | export-env) mkdir -p "$data_home"; write_credentials; env_export "${2:-posix}" ;;
+  *) die "unknown verb '${1}'; use up | env | env-export | status | stop | logs" ;;
 esac
