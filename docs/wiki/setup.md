@@ -121,8 +121,8 @@ tokens and every skill request returns `403`.
 ### Controller container (no .NET toolchain)
 
 ```bash
-scripts/run-controller.sh                 # macOS, Linux
-pwsh ./scripts/run-controller.ps1         # Windows / PowerShell 7
+scripts/run.sh                 # macOS, Linux
+pwsh ./scripts/run.ps1         # Windows / PowerShell 7
 ```
 
 Pulls the published controller image and starts the whole stack in one command. It generates the five

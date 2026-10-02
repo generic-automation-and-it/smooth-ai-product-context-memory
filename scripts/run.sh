@@ -1,6 +1,6 @@
 #!/bin/bash
 # Standalone launcher for the published Mímisbrunnr release controller.
-# Windows/PowerShell 7 equivalent: run-controller.ps1, same contract.
+# Windows/PowerShell 7 equivalent: run.ps1, same contract.
 #
 # Self-contained on purpose: copy this one file out of the repository and run it. It reads nothing
 # from the checkout and needs no .NET SDK — only bash, docker and openssl. The optional version-drift
@@ -50,15 +50,28 @@ data_root="$data_home/volumes"
 env_file="$data_home/controller.env"
 data_root_setting="${MIMIS_DATA_ROOT:-}"
 
-# Documented defaults are 5141/5432/9000/9001/5341/15278. A dev AppHost usually holds those, so the
-# defaults here sit clear of them; nothing collides silently, and both stacks can run side by side.
-p_host="${P_HOST:-25141}"
-p_postgres="${P_POSTGRES:-25432}"
-p_blob="${P_BLOB:-29000}"
-p_blob_console="${P_BLOB_CONSOLE:-29001}"
-p_seq="${P_SEQ:-25341}"
-p_dashboard="${P_DASHBOARD:-15279}"
-p_otlp="${P_OTLP:-19076}"
+# The documented release ports (docker.md): API 5141, PostgreSQL 5432, blob 9000/9001, Seq 5341,
+# dashboard 15278. They are also what provision-credentials.sh writes into CONTEXT_MEMORY_BASE_URL and
+# what the context-memory client defaults to, so moving them here would break every skill and MCP
+# server the moment a controller was started. An earlier draft shifted them all by +20000 to dodge a
+# dev AppHost that may be running; that made the launcher correct in isolation and wrong in use, and it
+# is the reason a provisioned credential file could not reach the stack it was provisioned for.
+# MIMIS_SHIFT_PORTS=1 restores the old offsets for the rare side-by-side case.
+if [ "${MIMIS_SHIFT_PORTS:-0}" = 1 ]; then
+  p_host="${P_HOST:-25141}"
+  p_postgres="${P_POSTGRES:-25432}"
+  p_blob="${P_BLOB:-29000}"
+  p_blob_console="${P_BLOB_CONSOLE:-29001}"
+  p_seq="${P_SEQ:-25351}"
+else
+  p_host="${P_HOST:-5141}"
+  p_postgres="${P_POSTGRES:-5432}"
+  p_blob="${P_BLOB:-9000}"
+  p_blob_console="${P_BLOB_CONSOLE:-9001}"
+  p_seq="${P_SEQ:-5341}"
+fi
+p_dashboard="${P_DASHBOARD:-15278}"
+p_otlp="${P_OTLP:-19075}"
 
 # Docker Desktop on macOS and Windows and native Linux all expose the socket at this path inside the
 # VM; only rootless engines differ, and that is a documented override rather than a guess.
@@ -72,8 +85,8 @@ group_name="smooth-mímisbrunnr-release-${installation_id}"
 dashboard_host="http://localhost:${p_dashboard}"
 container_data_root="/var/lib/mimisbrunnr-data"
 
-die() { echo "run-controller.sh: $*" >&2; exit 1; }
-log() { echo "run-controller.sh: $*"; }
+die() { echo "run.sh: $*" >&2; exit 1; }
+log() { echo "run.sh: $*"; }
 
 # The entrypoint validates this too, but it does so after the image has started. Validating here keeps
 # the id out of resource names, labels and paths until it is known to be a plain lowercase slug.
@@ -155,6 +168,20 @@ file_value() {
   sed -n "s/^$1=//p" "$env_file" | head -1
 }
 
+# scripts/provision-credentials.sh writes the *same* two token values into .context/mimisbrunnr.env
+# (as CONTEXT_MEMORY_*, which skills and MCP servers read) and .context/mimisbrunnr.env.controller (as
+# Parameters__*, which a container reads via --env-file). If this launcher mints its own pair instead,
+# the controller and the skills hold different credentials and every call is a 403 - so a provisioned
+# pair is adopted rather than replaced.
+provisioned_value() {
+  local source_file
+  for source_file in ${MIMIS_TOKEN_FILE:+"$MIMIS_TOKEN_FILE"} "${repo_root:+$repo_root/.context/mimisbrunnr.env.controller}"; do
+    [ -n "$source_file" ] && [ -f "$source_file" ] || continue
+    sed -n "s/^$1=//p" "$source_file" | head -1 | grep . && return 0
+  done
+  return 1
+}
+
 env_value() {
   # printenv takes the name as an argument, so the hyphenated parameter names work unchanged.
   printenv "$1" 2>/dev/null || true
@@ -164,7 +191,7 @@ secret() { openssl rand -hex "${1:-24}"; }
 
 write_credentials() {
   local keys="PostgresConfiguration__Password BlobConfiguration__AccessKey BlobConfiguration__SecretKey Parameters__api-read-token Parameters__api-write-token"
-  local key value from_env stored generated=0 ephemeral=0 missing=0
+  local key value from_env stored adopted generated=0 ephemeral=0 missing=0
   local pg_password blob_key blob_secret read_token write_token
   local -a persisted=()
 
@@ -178,8 +205,14 @@ write_credentials() {
     elif [ -n "$stored" ]; then
       value="$stored"
     else
-      value="$(secret 32)"
-      generated=$((generated + 1))
+      # Only the two token parameters have a provisioned counterpart; the engine secrets never do.
+      value="$(provisioned_value "$key" || true)"
+      if [ -n "$value" ]; then
+        adopted=$((adopted + 1))
+      else
+        value="$(secret 32)"
+        generated=$((generated + 1))
+      fi
     fi
 
     # The file is rewritten only to fill gaps, and never loses a key it already had. An earlier draft
@@ -209,12 +242,13 @@ write_credentials() {
     {
       echo "# Release-controller secrets for installation '$installation_id'."
       echo "# 600, outside any checkout. Values already present here are reused verbatim."
-      echo "# Generated by run-controller.sh; anything supplied through the environment is deliberately absent."
+      echo "# Generated by run.sh; anything supplied through the environment is deliberately absent."
       for pair in ${persisted[@]+"${persisted[@]}"}; do echo "$pair"; done
     } >"$temp_env"
     mv "$temp_env" "$env_file"
     temp_env=""
-    log "wrote $env_file (mode 600) — $generated generated, $missing new"
+    log "wrote $env_file (mode 600) — $generated generated, $adopted adopted from provision-credentials.sh, $missing new"
+    [ "$adopted" -gt 0 ] && log "  tokens match the CONTEXT_MEMORY_* values your skills hold, so they will not 403"
   fi
 
   # Re-assert the mode on every run, not only when writing. A file widened by a backup restore or a
@@ -271,7 +305,7 @@ check_volume_backing() {
     esac
     if [ "$device" != "$expected" ]; then
       cat >&2 <<EOF
-run-controller.sh: '$volume' is bound to '$device', not '$expected'.
+run.sh: '$volume' is bound to '$device', not '$expected'.
   Adopting a data root is a fresh start, not a move — the controller will refuse before changing
   anything. Pick one:
 
@@ -300,7 +334,7 @@ preflight() {
   local others
   others="$(docker ps --format '{{.Names}}' | grep -E '^mimisbrunnr-.*-controller$' || true)"
   if [ -n "$others" ]; then
-    printf 'run-controller.sh: another controller is running:\n%s\n' "$others" >&2
+    printf 'run.sh: another controller is running:\n%s\n' "$others" >&2
     die "stop it first: docker stop <name> && docker rm <name>   (or run that installation's own launcher with its MIMIS_ID)"
   fi
 
@@ -491,6 +525,36 @@ up() {
     printf '    not printed yet — read it with: %s logs\n' "$0"
   fi
   printf '\n  run it again to pull a newer release and restart. stop with: %s stop\n' "$0"
+
+  wait_for_api || exit 1
+  printf '  API         healthy at http://localhost:%s\n' "$p_host"
+}
+
+# An earlier draft returned here immediately, so `up` printed the API URL and exited 0 while the API
+# container was crash-looping on a database it could not authenticate to. "The script ran" and "the app
+# started" looked identical, which is exactly the failure it took three session restarts to diagnose.
+# Wait for real health, and on failure print the one line that identifies the cause.
+wait_for_api() {
+  local waited=0 code
+  log "waiting for the API to answer on 127.0.0.1:$p_host"
+  while [ "$waited" -lt "${P_WAIT_SECONDS:-180}" ]; do
+    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 4 "http://127.0.0.1:$p_host/health" 2>/dev/null || true)"
+    [ "$code" = "200" ] && return 0
+    sleep 3
+    waited=$((waited + 3))
+  done
+
+  echo
+  log "the API did not become healthy within ${P_WAIT_SECONDS:-180}s (last status '${code:-no response}')."
+  printf '  the containers are up, so the fault is inside one of them. Most likely, in order:\n\n'
+  printf '    1. postgres rejected the password — this data root was initialised under a different one.\n'
+  printf '       PostgreSQL fixes its password on first init and ignores it forever after, so a\n'
+  printf '       freshly generated one can never match. Check: docker logs %s 2>&1 | grep -i auth | tail -3\n' \
+    "mimisbrunnr-${installation_id}-postgres"
+  printf '    2. the token pair drifted — %s logs, then look for 403.\n' "$0"
+  printf '    3. migrations are pending — %s logs, look for "Migration".\n\n' "$0"
+  printf '  full stack state: %s status\n' "$0"
+  return 1
 }
 
 # Every verb needs the same installation id, and MIMIS_ID is per-invocation. If it was not passed,

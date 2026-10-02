@@ -5,8 +5,8 @@ AppHost, DCP and dashboard and starts the API plus PostgreSQL, blob storage and 
 
 | Script | Platform | Interpreter |
 |---|---|---|
-| [`run-controller.sh`](run-controller.sh) | macOS, Linux | bash 3.2 or later (the macOS default qualifies) |
-| [`run-controller.ps1`](run-controller.ps1) | Windows, or anywhere `pwsh` 7 runs | PowerShell 7.0 or later |
+| [`run.sh`](run.sh) | macOS, Linux | bash 3.2 or later (the macOS default qualifies) |
+| [`run.ps1`](run.ps1) | Windows, or anywhere `pwsh` 7 runs | PowerShell 7.0 or later |
 
 These exist because the manual `docker run` in [`docker.md`](../docs/wiki/docker.md) is eleven flags long and
 several of them are load-bearing in ways a mistyped flag does not report. See
@@ -18,16 +18,16 @@ optional version-drift report is the only thing that looks for a git checkout, a
 plain image digest when there is none, so a copy in `~/bin` or on a jump host behaves identically.
 
 ```bash
-scripts/run-controller.sh                              # pull, start, print the dashboard login URL
-scripts/run-controller.sh status                       # containers, ports, data root
-scripts/run-controller.sh logs                         # controller log
-scripts/run-controller.sh stop                         # graceful; keeps the corpus
+scripts/run.sh                              # pull, start, print the dashboard login URL
+scripts/run.sh status                       # containers, ports, data root
+scripts/run.sh logs                         # controller log
+scripts/run.sh stop                         # graceful; keeps the corpus
 ```
 
 ```powershell
-./scripts/run-controller.ps1
-./scripts/run-controller.ps1 -Verb status
-./scripts/run-controller.ps1 -Verb stop
+./scripts/run.ps1
+./scripts/run.ps1 -Verb status
+./scripts/run.ps1 -Verb stop
 ```
 
 ## Running it again is a restart
@@ -97,7 +97,7 @@ Three failure modes it prevents, each of which the documentation warns about but
 ```
 
 The corpus is a folder you can see, back up and delete. Point it elsewhere with `MIMIS_HOME`
-(`run-controller.sh`) or `-DataRoot` (`run-controller.ps1`), or pass `MIMIS_DATA_ROOT=off` / omit `-DataRoot` to fall back
+(`run.sh`) or `-DataRoot` (`run.ps1`), or pass `MIMIS_DATA_ROOT=off` / omit `-DataRoot` to fall back
 to engine-managed named volumes.
 
 **Adopting a data root is a fresh start, not a move.** A volume that is not bound to the folder the
@@ -128,12 +128,12 @@ export Parameters__api-read-token=…   # syntax error, in bash and in zsh alike
 Use `env`, which takes the name as a string:
 
 ```bash
-/usr/bin/env 'Parameters__api-read-token=…' 'Parameters__api-write-token=…' scripts/run-controller.sh up
+/usr/bin/env 'Parameters__api-read-token=…' 'Parameters__api-write-token=…' scripts/run.sh up
 ```
 
 ```powershell
 $env:'Parameters__api-read-token' = '…'   # or [Environment]::GetEnvironmentVariable('Parameters__api-read-token')
-./scripts/run-controller.ps1
+./scripts/run.ps1
 ```
 
 A value supplied this way is used for that run and deliberately **not** written to the file; the
@@ -146,7 +146,7 @@ not identifiers. See [`scripts/AGENTS.md`](AGENTS.md).
 
 ## Options
 
-| `run-controller.sh` | `run-controller.ps1` | Default | Meaning |
+| `run.sh` | `run.ps1` | Default | Meaning |
 |---|---|---|---|
 | `MIMIS_ID` | `-Id` | `default` | Installation id; names every resource |
 | `MIMIS_HOME` / `MIMIS_DATA_ROOT` | `-DataRoot` | `~/.mimisbrunnr` | Host folder for data and secrets |
@@ -157,12 +157,17 @@ not identifiers. See [`scripts/AGENTS.md`](AGENTS.md).
 | `MIMIS_SELINUX` | *(auto)* | auto | Force the `:z` bind label on or off |
 | `P_HOST`, `P_POSTGRES`, `P_BLOB`, `P_BLOB_CONSOLE`, `P_SEQ`, `P_DASHBOARD`, `P_OTLP` | `-HostPort`, `-PostgresPort`, … | see below | Host ports |
 
-Defaults are `25141 / 25432 / 29000 / 29001 / 25341 / 15279 / 19076`, deliberately clear of the
-documented `5141 / 5432 / 9000 / 9001 / 5341 / 15278` so a development AppHost and a release
-installation can run side by side on one machine. The launcher refuses to start on a port already in
-use rather than letting the engine report it later.
+Defaults are the documented release ports — `5141 / 5432 / 9000 / 9001 / 5341 / 15278 / 19075`. They
+are also what `provision-credentials.sh` writes into `CONTEXT_MEMORY_BASE_URL` and what the
+context-memory client defaults to, so moving them here would break every skill and MCP server the moment
+a controller started. `MIMIS_SHIFT_PORTS=1` restores a set of shifted ports (`25141 / 25432 / …`) for the
+rare case of running a controller and the development AppHost side by side. The launcher refuses to start
+on a port already in use rather than letting the engine report it later.
 
 ## Platform differences
+
+Both `run.sh` paths — macOS and Linux — need only `bash` (3.2 or later), `docker`, `curl` and
+`openssl`, and behave identically. The differences below are the ones that actually bite.
 
 |  | macOS | Linux (native) | Windows |
 |---|---|---|---|
@@ -171,19 +176,54 @@ use rather than letting the engine report it later.
 | SELinux | n/a | **`:z` required** on Fedora/RHEL — `--mount` cannot carry a label, so the launcher emits `-v … :z` | n/a |
 | `host.docker.internal` | not needed | `--add-host host.docker.internal:host-gateway` | not needed |
 | Data root | `/Users` shared by default | native | **off by default** |
+| Credential file mode | `chmod 600` enforced | `chmod 600` enforced | **no-op** — inherits the profile folder's ACL |
 
-Nothing extra is needed for Docker Desktop on macOS or Linux. Two things are genuinely required on
-native Linux: the SELinux label (auto-detected from `/sys/fs/selinux/enforce`) and a bridge-gateway
-`BindAddress` when containers must reach the controller.
+### macOS
 
-**The data root defaults off on Windows** because Docker Desktop there reports a bind's host path as
-`/run/desktop/mnt/host/c/Users/…`, and the controller's entrypoint only normalises the `/host_mnt`
-prefix that macOS and Linux Desktop report — a data root would fail its backing check. `-DataRoot`
-opts in and warns; that path is unverified on Windows.
+Works as-is on Docker Desktop. The default data root lives under `/Users`, which Desktop shares by
+default; if you relocate `MIMIS_HOME` outside a shared path, Desktop mounts it as an empty folder, which
+is indistinguishable from a fresh install and silently orphans the previous corpus. The launcher warns
+when it sees a root outside `/Users` or `/home`.
 
-Rootless Docker and Podman are a third case: point `MIMIS_SOCKET` at the rootless socket and set
-`EngineConfiguration__Kind=podman` in the environment. Not wired into the launcher, so those remain a
-manual path.
+### Linux
+
+Nothing extra on Docker Desktop. Two things are genuinely required on a **native** engine:
+
+- **SELinux.** On Fedora/RHEL an enforcing host refuses a bind without a label. Detected from
+  `/sys/fs/selinux/enforce`; override with `MIMIS_SELINUX=1` / `=0`.
+- **`BindAddress`.** `127.0.0.1` is enough for host access. If other *containers* must reach the
+  controller, set it to the bridge gateway (`docker network inspect bridge`) and add
+  `--add-host host.docker.internal:host-gateway` — Docker Desktop's VM gateway is not the same address
+  and must not be copied across.
+
+### Windows
+
+`pwsh ./scripts/run.ps1`. The data root defaults **off** because Docker Desktop there reports a bind's
+host path as `/run/desktop/mnt/host/c/Users/…`, and the controller's entrypoint only normalises the
+`/host_mnt` prefix that macOS and Linux Desktop report — a data root would fail its backing check.
+`-DataRoot` opts in and warns; that path is unverified. `chmod` is a no-op, so restrict the folder's ACL
+on a shared machine.
+
+### Rootless Docker and Podman
+
+Not wired up. Point `MIMIS_SOCKET` at the rootless socket and set `EngineConfiguration__Kind=podman` in
+the environment; that remains a manual path.
+
+## When `up` fails
+
+`up` waits for `/health` and exits non-zero if the API never answers, because an earlier draft returned
+immediately and printed the API URL while the container was crash-looping — "the script ran" and "the
+app started" looked identical. When it fails, the containers are up and the fault is inside one of them.
+In order of likelihood:
+
+1. **Postgres rejected the password.** The data root was initialised under a different one, and
+   PostgreSQL fixes its password on first init and ignores it forever after, so a regenerated one can
+   never match. `docker logs mimisbrunnr-<id>-postgres 2>&1 | grep -i auth | tail -3`
+2. **The token pair drifted** between the controller and `CONTEXT_MEMORY_*`. `run.sh logs`, look for 403.
+3. **Migrations pending.** `run.sh logs`, look for `Migration`.
+
+Recovery for (1) is either the credential file the data root was built with, or a clean start: `reset`
+the installation and re-provision. Adopting a data root is a fresh start, not a move.
 
 ## Security
 
@@ -207,7 +247,7 @@ manual path.
   path filter), unlike a home under `docs/`. A harness against a scratch `MIMIS_HOME` is the next
   step, and would have caught the credential-clobbering defect found while writing them.
 - Neither script verifies that the container reached a healthy state; it prints the login URL and
-  leaves readiness to you. `scripts/run-controller.sh status` and
+  leaves readiness to you. `scripts/run.sh status` and
   `curl localhost:<P_HOST>/health` answer that.
 - The Windows data root is unverified, as above.
 

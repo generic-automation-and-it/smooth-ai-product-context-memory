@@ -257,26 +257,41 @@ Target a single test project directly when iterating, e.g. `dotnet test tests/Sm
 
 ### Run locally
 
+**No .NET toolchain required.** Two commands, on macOS and Linux:
+
 ```bash
-dotnet run --project src/SmoothAiProductContextMemory.AppHost   # Aspire stack; tokens: run scripts/provision-credentials.sh first (docs/wiki/setup.md)
-HostConfiguration__UseProject=false \
-  dotnet run --project src/SmoothAiProductContextMemory.AppHost # same stack, pull published Host image (tag may lag)
+scripts/provision-credentials.sh   # 1. write the tokens (mode 600) and the AppHost's share of them
+scripts/run.sh                     # 2. pull the controller image and start the whole stack
+```
+
+`run.sh` starts one controller container, which starts the API, PostgreSQL, blob storage and Seq. It
+waits for the API to answer and exits non-zero if it does not, so a green run means a running API:
+
+| | |
+|---|---|
+| API | http://localhost:5141 |
+| Dashboard | http://localhost:15278 — use the `/login?t=…` URL it prints |
+| PostgreSQL | `127.0.0.1:5432` · blob `9000`/`9001` · Seq `5341` |
+
+Run it again to pull a newer release and restart; data is preserved. `scripts/run.sh stop` stops it,
+`status` and `logs` report on it.
+
+**Windows (PowerShell 7):** `scripts/provision-credentials.sh`, then `pwsh ./scripts/run.ps1`.
+
+<details>
+<summary>Working on the code? These are the source-mode paths</summary>
+
+```bash
+dotnet run --project src/SmoothAiProductContextMemory.AppHost   # Aspire dev stack, Host from the working tree
 dotnet run --project src/SmoothAiProductContextMemory.Host       # API on its own; tokens: see API credentials above
 docker build -t smooth-ai-product-context-memory:local .        # Host image; run contract in docs/wiki/docker.md
 ```
 
-No .NET toolchain and no checkout? The published release controller image starts the same stack in one
-command — it pulls the image, generates the five release secrets on first run, keeps the corpus in a
-folder under `~/.mimisbrunnr`, and prints the dashboard login URL:
+The dev AppHost and the controller both want ports `5141`, `5432`, `9000`, `9001`, `5341` and `15278`,
+so stop one before starting the other. `MIMIS_SHIFT_PORTS=1 scripts/run.sh` moves the controller's
+ports clear if you need them side by side.
 
-```bash
-scripts/run-controller.sh                   # macOS, Linux
-pwsh ./scripts/run-controller.ps1           # Windows / PowerShell 7
-```
-
-It starts one controller container, which starts the other four. See
-[`scripts/CONTROLLER_LAUNCHER.md`](scripts/CONTROLLER_LAUNCHER.md) for options, the credential
-contract, platform differences and the security notes.
+</details>
 
 Aspire uses Docker by default. To run the same AppHost on Podman, start the machine and set the runtime:
 
@@ -378,7 +393,7 @@ relying on the well for it.
 | CI/CD pipeline | [`docs/wiki/ci.md`](docs/wiki/ci.md) |
 | Container images & durability (`snapshot`/`verify`/`restore`) | [`docs/wiki/docker.md`](docs/wiki/docker.md) |
 | Setup & credentials (tokens, name mapping, provisioning) | [`docs/wiki/setup.md`](docs/wiki/setup.md) |
-| One-command controller launcher (`run-controller.sh` / `.ps1`) | [`scripts/CONTROLLER_LAUNCHER.md`](scripts/CONTROLLER_LAUNCHER.md) |
+| One-command controller launcher (`run.sh` / `.ps1`) | [`scripts/CONTROLLER_LAUNCHER.md`](scripts/CONTROLLER_LAUNCHER.md) |
 | Architecture decisions & NFRs | [`docs/hlds/`](docs/hlds/) |
 
 ---
