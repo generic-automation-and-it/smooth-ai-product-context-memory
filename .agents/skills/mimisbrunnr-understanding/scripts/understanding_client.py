@@ -136,10 +136,56 @@ def in_window(parts: dict, asof: dt.date | None) -> bool:
     return True
 
 
+def _record_identity(parts: dict) -> str:
+    """A record named the way its citation names it: uuid/version, else origin, else subject."""
+    ident = parts["uuid"] or parts["origin"] or parts["subject"]
+    if parts["version"]:
+        return f"{ident} v{parts['version']}"
+    return str(ident)
+
+
+def _render_record(parts: dict) -> list[str]:
+    block = [f"\n## {parts['subject']}"]
+    cite = [p for p in (parts["uuid"] or parts["origin"],
+                        f"v{parts['version']}" if parts["version"] else "",
+                        parts["createdOn"] or parts["validFrom"]) if p]
+    if cite:
+        block.append(f"- Source: {' · '.join(str(c) for c in cite)}")
+    for label, key in (("Question", "question"), ("Answer", "answer"),
+                       ("Why", "why"), ("Boundaries", "boundaries")):
+        if parts[key]:
+            block.append(f"- {label}: {parts[key]}")
+    flags = []
+    if parts["status"] and parts["status"] != "approved":
+        flags.append(f"status: {parts['status']}")
+    if parts["scope"] in ("program", "self"):
+        flags.append(f"{parts['scope']} scope, not shipped product fact")
+    if parts["confidence"] and parts["confidence"] != "verified":
+        flags.append(f"confidence: {parts['confidence']}")
+    if parts["portability"] == "repo-specific":
+        flags.append("repo-specific, may not hold in another repository")
+    if flags:
+        block.append(f"- **{'; '.join(flags)}**")
+    if parts["sources"]:
+        block.append(f"- Provenance: {json.dumps(parts['sources'], ensure_ascii=False)}")
+    return block
+
+
 def render_store(records: list[dict], src: str, asof: dt.date | None,
-                 all_kinds: bool = False) -> list[str]:
-    out: list[str] = []
-    shown = non_kind = out_of_window = 0
+                 all_kinds: bool = False, max_chars: int | None = None) -> list[str]:
+    """Render store records as cited context, cutting whole records to fit `max_chars`.
+
+    The budget bounds the **rendered records**, not the header or the closing notice. Records render in
+    the source's own order — a store export's array order, or the newest-version-per-slug order a folder
+    resolves to — and the first record that would exceed the budget ends the render: it and every later
+    record are cut, never partially rendered. The cut is deterministic because that order is, and each
+    cut record is named by identity under the breadth line. `max_chars=None` means no cap, which is
+    byte-identical to the pre-cap output.
+
+    A cut is a **narrowing**, never a compression: no record is ever truncated or summarised to fit.
+    """
+    blocks: list[tuple[dict, list[str]]] = []
+    non_kind = out_of_window = 0
     for record in records:
         parts = five_parts(record)
         if not all_kinds and parts["kind"] != KIND_UNDERSTANDING:
@@ -148,33 +194,25 @@ def render_store(records: list[dict], src: str, asof: dt.date | None,
         if not in_window(parts, asof):
             out_of_window += 1
             continue
-        shown += 1
-        out.append(f"\n## {parts['subject']}")
-        cite = [p for p in (parts["uuid"] or parts["origin"],
-                            f"v{parts['version']}" if parts["version"] else "",
-                            parts["createdOn"] or parts["validFrom"]) if p]
-        if cite:
-            out.append(f"- Source: {' · '.join(str(c) for c in cite)}")
-        for label, key in (("Question", "question"), ("Answer", "answer"),
-                           ("Why", "why"), ("Boundaries", "boundaries")):
-            if parts[key]:
-                out.append(f"- {label}: {parts[key]}")
-        flags = []
-        if parts["status"] and parts["status"] != "approved":
-            flags.append(f"status: {parts['status']}")
-        if parts["scope"] in ("program", "self"):
-            flags.append(f"{parts['scope']} scope, not shipped product fact")
-        if parts["confidence"] and parts["confidence"] != "verified":
-            flags.append(f"confidence: {parts['confidence']}")
-        if parts["portability"] == "repo-specific":
-            flags.append("repo-specific, may not hold in another repository")
-        if flags:
-            out.append(f"- **{'; '.join(flags)}**")
-        if parts["sources"]:
-            out.append(f"- Provenance: {json.dumps(parts['sources'], ensure_ascii=False)}")
-    skipped = non_kind + out_of_window
-    header = [f"- Rendered {shown} record(s) from {src}."
+        blocks.append((parts, _render_record(parts)))
+
+    rendered: list[list[str]] = []
+    cut: list[dict] = []
+    used = 0
+    stopped = False
+    for parts, block in blocks:
+        cost = len("\n".join(block)) + (1 if rendered else 0)
+        if stopped or (max_chars is not None and used + cost > max_chars):
+            stopped = True
+            cut.append(parts)
+            continue
+        rendered.append(block)
+        used += cost
+
+    out = [line for block in rendered for line in block]
+    header = [f"- Rendered {len(rendered)} record(s) from {src}."
               f" Breadth: {'all (memory + understanding)' if all_kinds else 'understanding only'}."]
+    skipped = non_kind + out_of_window
     if skipped:
         reasons = []
         if non_kind > 0:
@@ -184,6 +222,11 @@ def render_store(records: list[dict], src: str, asof: dt.date | None,
         header.append(f"- {skipped} record(s) omitted: {', '.join(reasons)}.")
         if non_kind > 0:
             header.append("- Pass `--all` to also include scoped memory records.")
+    if max_chars is not None and (cut or max_chars != DEFAULT_MAX_CHARS):
+        header.append(f"- Budget: {max_chars} characters; rendered {used}; {len(cut)} record(s) cut.")
+    if cut:
+        header.append("- Cut for budget: "
+                      + "; ".join(_record_identity(parts) for parts in cut) + ".")
     return header + out
 
 
@@ -364,9 +407,8 @@ def cmd_load(args: argparse.Namespace) -> int:
     lines = ["# Loaded material — cited grounding context", ""]
     lines += [f"- {note}" for note in notes]
     if records is not None:
-        lines += render_store(records, src, args.asof, all_kinds=args.all_kinds)
-        if args.max_chars != DEFAULT_MAX_CHARS:
-            lines.append("- `--max-chars` does not apply to a store export; it was not used.")
+        lines += render_store(records, src, args.asof, all_kinds=args.all_kinds,
+                              max_chars=args.max_chars)
     else:
         lines += render_foreign(body, src, args.max_chars)
         if args.asof is not None:
@@ -706,7 +748,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     load.add_argument("--asof", type=dt.date.fromisoformat,
                       help="Only render records valid at this date (store exports).")
     load.add_argument("--max-chars", type=int, default=DEFAULT_MAX_CHARS,
-                      help=f"Foreign-material render cap (default {DEFAULT_MAX_CHARS}).")
+                      help=f"Render cap (default {DEFAULT_MAX_CHARS}): a store export cuts whole "
+                           "records and lists them; foreign material truncates.")
 
     imp = sub.add_parser("import", help="Prepare a capture payload (requires --store).")
     imp.add_argument("input", help="Same inputs as load.")
