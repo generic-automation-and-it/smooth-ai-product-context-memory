@@ -374,6 +374,52 @@ class RecallFramingTests(unittest.TestCase):
         self.assertIn("uuid/version", contract,
                       "the contract must say how to report a suspicious record — quoted, with identity")
 
+    def test_every_read_tool_is_framed_by_the_mcp_server(self):
+        """The read worker's only path to the store is the MCP server, so its *output* must be framed.
+
+        The CLI framing is unreachable from the `memory-read` worker, whose grant is
+        `mcp__mimisbrunnr-read__*` only. Driving `handle` proves the response the worker actually
+        receives carries the notice — the CLI's own enumeration test never sees this surface, and a
+        contract that promises a field the server does not send is worse than no contract.
+        """
+        uuid = "11111111-1111-1111-1111-111111111111"
+        invocations = {
+            "query": {"payload": {}},
+            "deepsearch": {"payload": {}},
+            "get_versions": {"uuid": uuid},
+            "get_blob": {"uuid": uuid, "version": 1},
+            "labels": {},
+            "initiatives": {},
+            "paths": {"payload": {"sourceUuid": uuid, "maxDepth": 2}},
+            "ticket_paths": {"payload": {"anchor": {"provider": "github", "key": "1"}, "maxDepth": 2}},
+        }
+        for name in sorted(read_mcp.FRAMED_TOOLS):
+            with self.subTest(tool=name), \
+                    patch.dict(os.environ, {client.ENV_READ_TOKEN: "test-token"}), \
+                    patch.object(client, "_request", return_value=self._hostile_result()), \
+                    patch.object(client, "_open", return_value=_FakeResponse(
+                        json.dumps(self._hostile_result()))), \
+                    patch.object(read_mcp.deepsearch, "execute",
+                                 return_value=self._hostile_result()):
+                response = read_mcp.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                                            "params": {"name": name,
+                                                       "arguments": invocations[name]}})
+            parsed = json.loads(response["result"]["content"][0]["text"])
+            self.assertEqual(parsed.get(client.RECALL_NOTICE_KEY), client.RECALL_NOTICE,
+                             f"MCP tool {name} returned recalled memory without the shared notice")
+
+    def test_the_mcp_probe_opts_out_and_the_surfaces_agree(self):
+        """`probe` returns no recalled content and opts out; the MCP and CLI declare the same surface."""
+        with patch.object(client, "_probe", return_value=True):
+            response = read_mcp.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                                        "params": {"name": "probe", "arguments": {}}})
+        self.assertNotIn(client.RECALL_NOTICE_KEY, response["result"]["content"][0]["text"])
+        self.assertEqual(read_mcp.FRAMED_TOOLS, read_mcp.TOOL_NAMES - read_mcp.UNFRAMED_TOOLS)
+        self.assertFalse(read_mcp.FRAMED_TOOLS & read_mcp.UNFRAMED_TOOLS)
+        self.assertEqual({name.replace("_", "-") for name in read_mcp.TOOL_NAMES},
+                         set(read_client.READ_COMMANDS),
+                         "the MCP server and the read CLI declare different read surfaces")
+
 
 class TransportFailureTests(unittest.TestCase):
     """A hung store must be a classified error, never a traceback.
@@ -427,15 +473,23 @@ class TransportFailureTests(unittest.TestCase):
         return srv.getsockname()[1], accepted
 
     def test_a_hung_store_is_classified_as_timed_out(self):
+        import time
+
         port, accepted = self._stalled_server()
         client.base_url = lambda: f"http://127.0.0.1:{port}"
+        started = time.perf_counter()
         with self.assertRaises(client.ClientError) as caught:
             client._request("GET", "/api/context/query")
+        elapsed = time.perf_counter() - started
         accepted.wait(5)
         self.assertEqual(
             caught.exception.status_text, "timed-out",
             f"a stalled store must not be reported as anything but timed-out: {caught.exception}",
         )
+        # Acceptance criterion: the call returns within the budget, not merely "eventually" — a
+        # classifier that waits far past the timeout still produces the right status_text.
+        self.assertLess(elapsed, client.HTTP_TIMEOUT + 2,
+                        f"a hung store took {elapsed:.1f}s, over the {client.HTTP_TIMEOUT}s budget")
 
     def test_a_refused_connection_stays_unreachable(self):
         """The negative control, and the reason the two are kept apart.
@@ -513,6 +567,20 @@ class TransportFailureTests(unittest.TestCase):
         args = SimpleNamespace(uuid="11111111-1111-1111-1111-111111111111", version=1, scope=None)
         with self.assertRaises(client.ClientError) as caught:
             client.cmd_get_blob(args)
+        self.assertEqual(caught.exception.status_text, "timed-out")
+
+    def test_the_mcp_blob_fetch_is_classified_and_bounded(self):
+        """The MCP blob fetch goes through the shared classified path, not `_open` directly.
+
+        Before the fix it took the default socket timeout and skipped classification, so a hung store
+        surfaced to the read worker as a bare `timed out` after 30 s — the unclassified shape the
+        classifier exists to remove, on the surface the worker actually uses.
+        """
+        port, _ = self._stalled_server()
+        client.base_url = lambda: f"http://127.0.0.1:{port}"
+        with self.assertRaises(client.ClientError) as caught:
+            read_mcp.call_tool("get_blob", {"uuid": "11111111-1111-1111-1111-111111111111",
+                                            "version": 1})
         self.assertEqual(caught.exception.status_text, "timed-out")
 
 
@@ -1729,10 +1797,33 @@ class RecallDeadlineTests(unittest.TestCase):
         self.assertEqual(statuses["alpha"], "completed")
         self.assertEqual(statuses["beta"], "timed-out")
         self.assertEqual(statuses["gamma"], "not-run")
-        self.assertEqual({item["value"] for item in result["disclosure"]["passesNotRun"]},
+        self.assertEqual({item["value"] for item in result["disclosure"]["passesIncomplete"]},
                          {"beta", "gamma"})
-        self.assertTrue(result["disclosure"]["deadlineReached"])
+        # A hung pass stops the chain but does not exhaust the budget — different facts, different
+        # responses: investigate a slow store vs wait for the budget.
+        self.assertTrue(result["disclosure"]["stoppedEarly"])
+        self.assertFalse(result["disclosure"]["budgetExhausted"])
         self.assertTrue(result["disclosure"]["possiblyOmitted"])
+
+    def test_a_baseline_timeout_reports_unknown_anchors_not_a_clean_zero(self):
+        """When the baseline never answered, the traversal set was never enumerated.
+
+        `anchorsEligible: 0, anchorsOmittedByCap: 0` reads as "nothing to traverse"; `null` reads as
+        "unknown", which is the truth. `passesIncomplete` and `stoppedEarly` carry it too.
+        """
+        def request(method, path, payload, **kwargs):
+            raise client.ClientError(0, "timed-out", "no response within 1s")
+
+        result = deepsearch.execute({"baseline": {"facets": ["storage"]}, "keywords": ["alpha"]},
+                                    request=request)
+        disclosure = result["disclosure"]
+        self.assertIsNone(disclosure["anchorsEligible"])
+        self.assertIsNone(disclosure["anchorsOmittedByCap"])
+        self.assertEqual(disclosure["anchorsExecuted"], 0)
+        self.assertTrue(disclosure["stoppedEarly"])
+        self.assertFalse(disclosure["budgetExhausted"])
+        self.assertEqual({item["value"] for item in disclosure["passesIncomplete"]},
+                         {None, "alpha"})
 
     def test_the_wall_clock_deadline_stops_the_chain_between_passes(self):
         """A chain of slow-but-successful passes is bounded too, not only a pass that times out."""
@@ -1755,7 +1846,9 @@ class RecallDeadlineTests(unittest.TestCase):
         self.assertEqual(statuses["alpha"], "not-run")
         self.assertEqual(statuses["beta"], "not-run")
         self.assertEqual(result["disclosure"]["deadlineSeconds"], 5)
-        self.assertTrue(result["disclosure"]["deadlineReached"])
+        self.assertTrue(result["disclosure"]["stoppedEarly"])
+        # Here the wall clock really was spent, so `budgetExhausted` is the distinguishing flag.
+        self.assertTrue(result["disclosure"]["budgetExhausted"])
 
     @staticmethod
     def row(index):

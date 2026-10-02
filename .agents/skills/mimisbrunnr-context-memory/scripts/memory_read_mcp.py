@@ -23,6 +23,16 @@ TOOLS = [
 ]
 
 
+# Framing is the default; only a tool that returns no recalled content opts out. `probe` reports whether
+# a TCP connection succeeds and returns no record, statement or body. Derived from TOOLS, so a tool added
+# without a framing decision is a test failure rather than a silently unframed surface — the same shape as
+# the read CLI's `READ_COMMANDS`/`UNFRAMED_COMMANDS` split. The framing itself is the one shared notice in
+# `context_memory_client.framed_recall`, so the MCP server and the CLI cannot drift into two wordings.
+UNFRAMED_TOOLS = frozenset({"probe"})
+TOOL_NAMES = frozenset(name for name, _description, _schema in TOOLS)
+FRAMED_TOOLS = frozenset(TOOL_NAMES - UNFRAMED_TOOLS)
+
+
 def tool_definitions():
     definitions = []
     for name, description, properties in TOOLS:
@@ -80,8 +90,10 @@ def _get_blob(arguments):
     if not token:
         raise client.ClientError(0, "missing-credential", f"{client.ENV_READ_TOKEN} is required")
     request = client.urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"}, method="GET")
-    with client._open(request) as response:
-        return {"content": response.read().decode("utf-8")}
+    # The shared classified path, not `_open` directly: it applies the recall deadline and turns a hang
+    # into a `timed-out` ClientError, so the blob fetch is bounded and classified like every other read
+    # instead of surfacing a bare `timed out` after the socket timeout.
+    return {"content": client._read_response(request)}
 
 
 def handle(message):
@@ -99,7 +111,13 @@ def handle(message):
         result = {}
     elif method == "tools/call":
         params = message.get("params", {})
-        value = call_tool(params.get("name"), params.get("arguments", {}))
+        name = params.get("name")
+        value = call_tool(name, params.get("arguments", {}))
+        # Every content-returning tool is framed as untrusted data, from the one shared notice, because
+        # the read worker's only path to the store is this server — the CLI it cannot reach is not the
+        # surface that matters. `probe` returns no record and opts out.
+        if name in FRAMED_TOOLS:
+            value = client.framed_recall(value)
         result = {"content": [{"type": "text", "text": json.dumps(value)}]}
     elif request_id is None:
         return None

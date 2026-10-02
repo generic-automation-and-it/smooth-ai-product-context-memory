@@ -38,6 +38,12 @@ server reads its tokens from the `ApiAccess` section, the skills read theirs fro
 and both must carry the **same values**. The provisioner below writes both name forms into two gitignored
 env files — one per parser grammar, described next — so they can never drift.
 
+One skill-only knob is **not** a credential and has no server counterpart:
+`CONTEXT_MEMORY_RECALL_DEADLINE` (seconds, `1`–`60`, default `60`) shortens a recall's one foreground
+deadline. It bounds a single read and the whole `deepsearch` chain; an out-of-range or non-integer value
+is **refused with `bad-deadline`, never clamped**, because a budget that silently becomes something else
+is one the operator trusts and the system does not honour. The provisioner does not set it.
+
 ## One-command provisioning
 
 For a local deployment, run the provisioner once:

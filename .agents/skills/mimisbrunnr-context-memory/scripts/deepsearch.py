@@ -47,20 +47,28 @@ def execute(payload, request=client._request, clock=time.monotonic):
     def remaining():
         return deadline - (clock() - started)
 
-    deadline_reached = False
+    # Two distinct facts that were once one flag. `stopped_early` is "a pass did not complete"; a pass
+    # that hung (`timed-out`) and a pass that never started because the wall clock was spent
+    # (`budget_exhausted`) are different — reporting the first as "the budget ran out" tells the agent to
+    # wait when the store is simply slow.
+    stopped_early = False
+    budget_exhausted = False
 
     def run_pass(kind, value, limit, method, path, body):
         """Run one pass under the deadline. Returns `(response, status)`.
 
         `status` is `completed`, `timed-out` (the store accepted the connection and did not answer
-        within the budget) or `not-run` (the deadline was already spent). A timeout stops the chain
+        within the budget) or `not-run` (the wall clock was already spent). A timeout stops the chain
         rather than aborting it: the passes already completed are kept and the rest are disclosed,
         because a hang that discards every completed pass is the outcome the deadline exists to
         prevent. Whole passes only — a pass contributes all of its records or none.
         """
-        nonlocal deadline_reached
-        if deadline_reached or remaining() <= 0:
-            deadline_reached = True
+        nonlocal stopped_early, budget_exhausted
+        if stopped_early:
+            return None, "not-run"
+        if remaining() <= 0:
+            stopped_early = True
+            budget_exhausted = True
             return None, "not-run"
         budget = max(0.001, min(client.HTTP_TIMEOUT, remaining()))
         try:
@@ -68,7 +76,7 @@ def execute(payload, request=client._request, clock=time.monotonic):
         except client.ClientError as error:
             if error.status_text != "timed-out":
                 raise
-            deadline_reached = True
+            stopped_early = True
             return None, "timed-out"
 
     baseline = dict(payload["baseline"])
@@ -101,13 +109,14 @@ def execute(payload, request=client._request, clock=time.monotonic):
 
     response, status = run_pass("baseline", None, BASELINE_LIMIT, "POST",
                                 "/api/context/query", baseline)
+    baseline_completed = status == "completed"
     baseline_rows = response.get("items", []) if response is not None else []
     added = _add(baseline_rows, merged, seen, AGGREGATE_LIMIT)
     passes.append(_disclosure("baseline", None, BASELINE_LIMIT, baseline_rows, added, status))
 
     eligible_anchors = [row.get("uuid") for row in baseline_rows if row.get("uuid")]
 
-    if status != "completed":
+    if not baseline_completed:
         # Traversal anchors come from the baseline rows, so none can be named when the baseline itself
         # did not answer; the keyword plan is known without it and is named instead.
         mark_not_run("keyword", keyword_plan, KEYWORD_LIMIT)
@@ -154,8 +163,8 @@ def execute(payload, request=client._request, clock=time.monotonic):
     anchors_executed = sum(1 for item in passes if item["kind"] == "traversal"
                            and item["status"] == "completed")
     anchors_omitted = len(eligible_anchors) - anchors_executed
-    passes_not_run = [{"kind": item["kind"], "value": item["value"]}
-                      for item in passes if item["status"] != "completed"]
+    passes_incomplete = [{"kind": item["kind"], "value": item["value"]}
+                         for item in passes if item["status"] != "completed"]
 
     return {
         "items": merged,
@@ -165,20 +174,26 @@ def execute(payload, request=client._request, clock=time.monotonic):
             "aggregateLimit": AGGREGATE_LIMIT,
             "aggregateLimitReached": len(merged) >= AGGREGATE_LIMIT,
             "deadlineSeconds": deadline,
-            "deadlineReached": deadline_reached,
+            # `stoppedEarly` is any early stop; `budgetExhausted` narrows it to the wall clock. A pass
+            # that hung reports `stoppedEarly` without `budgetExhausted`, so a slow store is not
+            # mislabelled as an exhausted budget — the two call for different responses.
+            "stoppedEarly": stopped_early,
+            "budgetExhausted": budget_exhausted,
             "keywordsRequested": len(keywords),
             "keywordsExecuted": keywords_executed,
             "keywordsOmittedByCap": keywords_omitted,
-            "anchorsEligible": len(eligible_anchors),
+            # `null` when the baseline never answered: the traversal set was never enumerated, so a `0`
+            # would read as "nothing to traverse" rather than "unknown".
+            "anchorsEligible": len(eligible_anchors) if baseline_completed else None,
             "anchorsExecuted": anchors_executed,
-            "anchorsOmittedByCap": anchors_omitted,
+            "anchorsOmittedByCap": anchors_omitted if baseline_completed else None,
             "traversalSkippedForContextSelector": traversal_skipped_for_context,
             "passes": passes,
-            "passesNotRun": passes_not_run,
+            "passesIncomplete": passes_incomplete,
             "possiblyOmitted": len(merged) >= AGGREGATE_LIMIT
                 or keywords_omitted > 0 or anchors_omitted > 0 or traversal_skipped_for_context
                 or any(item["limitReached"] for item in passes)
-                or deadline_reached,
+                or stopped_early,
         },
     }
 
