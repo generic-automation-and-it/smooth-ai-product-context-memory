@@ -38,6 +38,7 @@ DB and wire are unchanged.
 - **LADR-03** — import funnels through the capture path, never a direct write.
 - **LADR-07** — `--currentsession` dumps to a local folder; an export, not a write, redacted before it is written.
 - **LADR-09** — load/import read the `ai-understanding` `.understanding.md` format and store folders as structured input.
+- **LADR-10** — a store load is a reported budget of whole records (`--max-chars`, default 12000, cuts whole records in source order, lists each cut by identity, never compresses; under budget it is byte-identical).
 
 ## Key Behaviors
 
@@ -66,8 +67,19 @@ DB and wire are unchanged.
   none of those keys rather than fabricated ones (NFR-03).
 - **A dump refuses the filesystem root and a repository root**, matching the forensic export's reason
   (EXPORT_AGENTS LADR-103): a generated projection must not be written over a maintained tree.
-- **An inapplicable flag is reported, never silently ignored** — `--asof` on foreign material,
-  `--max-chars` on a store export.
+- **An inapplicable flag is reported, never silently ignored** — `--asof` on foreign material, `--all`
+  on foreign material. (`--max-chars` is no longer in this set: it applies to a store export too.)
+- **`--max-chars` is one render budget for both surfaces, and a store export cuts whole records.** The
+  default is `DEFAULT_MAX_CHARS` (12000) for a store export and for foreign material alike — one number
+  to reason about, not two. On a store export the budget bounds the **rendered records** (not the header
+  or notice), records render in the source's own order, and the first record that would exceed the budget
+  **ends the render**: it and every later record are cut, never partially rendered, and each is listed by
+  identity (`uuid vN`, else origin) under the breadth line with the cap, rendered size and count cut. A
+  cut is a **narrowing, never a compression** — no record is truncated or summarised to fit (the dossier
+  rule). `max_chars=None` is the pre-cap render and is byte-identical to an under-budget render, which is
+  the acceptance property: the cap adds no line and cuts nothing for material that fits. The default is
+  justified by the walk harness (a representative load is 1682/2006 chars, ~6× under it), not borrowed
+  from MemOS's 6000 — the cap bounds the pathological corpus, not the normal one.
 - **Import of a store export is understanding-only.** A mixed export may carry a scoped memory fact next to
   an understanding; only `kind = understanding` records become candidates, and the skipped scoped records are
   reported. Stamping a scoped memory as an understanding would collapse a category — the exact defect the
@@ -93,10 +105,14 @@ DB and wire are unchanged.
 
 ## Test References
 
-- **Committed L0 harness (CI-gated):** `tests/run_tests.py` — stdlib `unittest`, 50 tests, no external
+- **Committed L0 harness (CI-gated):** `tests/run_tests.py` — stdlib `unittest`, 53 tests, no external
   runner. A default load creates no files (NFR-01); store-export five-part rendering keeps uuid/version
   attribution; `proposed`/`program` scope flagged, never promoted (NFR-03); `--asof` filters the validity
-  window and states the omission; foreign material cited as data with truncation disclosed; import refused
+  window and states the omission; the store-load cap — an under-budget render is byte-identical to
+  `max_chars=None` and emits no `Budget:` line, an over-budget render cuts whole records, names each by
+  identity with the budget as the reason, never partially renders the oversized record, and is identical
+  across runs, and a budget below the smallest record narrows to zero rather than truncating; foreign
+  material cited as data with truncation disclosed; import refused
   without `--store` and emitting nothing (NFR-02); the `--store` payload carrying selectors and bundle
   flags while writing nothing; "no selectors ⇒ no association"; the dump → load round trip (LADR-07); `.understanding.md` units and store folders read as structured
   input with newest-version-per-slug, including import from a dump folder (LADR-09); the dump's
@@ -126,6 +142,7 @@ DB and wire are unchanged.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-01 | **A store load is now a reported budget of whole records (`--max-chars`).** A load's breadth was controlled but its size was not: a real `--all` corpus rendered in full. `--max-chars` (default 12000) now applies to **both** surfaces — on a store export it cuts whole records in source order (the first record that would exceed the budget ends the render; it and every later record are cut), lists each cut record by identity with the budget as the reason, and states the cap, rendered size and count cut beside breadth. No record is ever truncated or summarised to fit. `max_chars=None` is byte-identical to an under-budget render, which is the acceptance property; the CLI emits no `Budget:` line when nothing is cut. The walk harness re-run at the default is unchanged (1682 / 2006 / 2238 chars), so the cap bounds the pathological corpus, not a representative one. `--max-chars` is no longer an "inapplicable flag" for a store export. Harness 50 -> 53; the byte-identity, whole-record-cut, determinism and narrow-to-zero cases are each pinned. Decision recorded as HLD-007 LADR-10. | LADR-10; BRD-003 BR-42 |
 | 2026-10-01 | **The recorded walk is now gated on its scores, not just its question count.** `test_recorded_walk_scores_and_reports` asserted only that every question was asked, so replacing the whole recorded walk with an agent that confabulates every answer still passed: it printed `correct 0/2 … confabulations 3` and exited **OK**. That is the one failure this instrument exists to catch, and those numbers are what BRD-003 §8 assumption 2 rests on — the evidence was unfalsifiable. Each surface now asserts every present question answered, every absent one declined, and zero confabulations; a second test proves the gate by scoring a deliberately confabulating walk and requiring it to be caught. Verified by mutation: the confabulating record fails with `0 != 2`. The measured numbers are unchanged. | BRD-003 §8 assumption 2 |
 | 2026-10-01 | Walk scorer: a decline is now only the instructed phrase `not in context`. The previous fix removed two words from a decline-word list, but the list was the defect — `not present`, `no record` and `does not mention` matched inside confabulated content too, so every probe confabulation still scored as a refusal. Measured results unchanged; mutation-verified. | BRD-003 §8 assumption 2 |
 | 2026-10-01 | Walk scorer: a decline must be a decline phrase — bare `unavailable`/`absent` matched inside confabulated content and scored it as a correct refusal; regression test added. The harness is model-free, so the PR gate now runs it (the docs already claimed its degenerate assertions ran unconditionally, but no CI step ran the file). Measured results unchanged. | BRD-003 §8 assumption 2 |

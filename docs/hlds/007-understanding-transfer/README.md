@@ -132,6 +132,7 @@ See [`./ladrs/`](./ladrs/). Status legend matches HLD-005: `Draft → Prototype 
 | [LADR-07](./ladrs/LADR-07-session-export-to-local-folder.md) | `--currentsession` dumps the session to a local folder for cross-session reuse; an export | Accepted |
 | [LADR-08](./ladrs/LADR-08-load-breadth-is-a-filter.md) | Load breadth is a filter (`--all` union vs understanding-only); not two products | Accepted |
 | [LADR-09](./ladrs/LADR-09-load-reads-ai-understanding-files.md) | Load and import read the ai-understanding `.understanding.md` format (and store folders, newest version per slug) as structured input | Accepted |
+| [LADR-10](./ladrs/LADR-10-store-load-is-a-reported-budget.md) | A store load is a reported budget of whole records: `--max-chars` cuts whole records in source order, lists each cut by identity, never compresses; under budget it is byte-identical | Accepted |
 
 ## Non-Functional Requirements
 
