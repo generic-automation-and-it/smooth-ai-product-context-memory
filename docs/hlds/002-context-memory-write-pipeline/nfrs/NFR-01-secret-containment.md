@@ -26,7 +26,7 @@ before the request is built, and the Host stores what it is sent.
 
 | Check | Where it is verified | Passes |
 |---|---|---|
-| Planted secret of each shape absent from what is sent for storage | Skill harness `.agents/skills/mimisbrunnr-odin-context-memory/tests/run_tests.py` — `RedactTests`, `SecretShapeCoverageTests`, `SetRedactionGateTests` (planted value in every declared text field, CLI and MCP) | Yes |
+| Planted secret of each shape absent from what is sent for storage | Skill harness `.agents/skills/mimisbrunnr-odin-context-memory/tests/run_tests.py` — `RedactTests`, `SecretShapeCoverageTests`, `SetRedactionGateTests` (planted value in every declared text field) | Yes |
 | Detection failure blocks the write | Same harness — `SetRedactionGateTests.test_unavailable_redactor_refuses_the_write`, `test_redactor_refusal_carries_no_content` | Yes |
 | Digest names rule and location, never the matched span | Same harness — `SetRedactionGateTests.test_digest_reports_rule_names_counts_and_locations_only`, `RedactionPrecisionTests.test_set_digest_names_the_field_and_offsets_of_every_scrub` | Yes |
 | Non-secret content byte-identical | Same harness — `RedactionPrecisionTests.test_ordinary_prose_passes_byte_identical` | Yes |

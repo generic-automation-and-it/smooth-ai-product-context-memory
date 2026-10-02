@@ -50,7 +50,7 @@ second writer.
   hash stable. A leaked secret cannot be edited out afterwards, only orphaned. This ordering is
   non-negotiable.
 - **The redaction gate is a gate on *recognition*, not on secrets.** Every persisting write (`set` and
-  the seven group/link/label/initiative/ticket writes, CLI and MCP) scrubs automatically through
+  the seven group/link/label/initiative/ticket writes) scrubs automatically through
   `scrubbed_write` and refuses to write when the scrubber cannot run, so it can never fail open — but `redact.py` matches
   fixed-shape fingerprints (cloud/vendor key prefixes, JWTs, PEM private-key blocks, URL userinfo,
   `Authorization`/`Bearer` credentials, assignments to a key whose name says secret, and assignments to
@@ -290,23 +290,22 @@ flowchart LR
    `unittest` (no external runner). Unit-tests `redact.py` secret containment (`SecretShapeCoverageTests`: a 36-shape positive corpus,
    PEM and repeated-prefix linear-time guards; `RedactionPrecisionTests`: an ordinary-prose corpus that
    must pass byte-identical and located digests; case-insensitive keys; `OtherWriteRedactionTests`:
-   every persisting write tool, CLI and MCP); `atomicity.py` bundle
+   every persisting write tool); `atomicity.py` bundle
    detection; `context_memory_client.py` path-segment, exact-route credential, loopback, unparseable-base-URL
    and redirect guards — the last two through the client's real opener, not the handler in isolation; `deepsearch.py`
    caps, deduplication and omission disclosure; `divergence.py` composition, pair idempotency and
-   recursion rejection; `authority.py` ordered version composition; read-client/MCP fail-closed
-   capability boundaries; project/Copilot agent registrations; ticket transport/guards/dry-run/lossless
+   recursion rejection; `authority.py` ordered version composition; read-client fail-closed
+   capability boundaries; project agent registrations; ticket transport/guards/dry-run/lossless
    disclosure; blinded semantic-fixture emission/scoring; `TransportFailureTests`, which drives a **real
    stalled socket** to prove a hung store is classified `timed-out` rather than escaping as a
    `TimeoutError` traceback, returns within the budget (elapsed ≤ `HTTP_TIMEOUT` + tolerance), and that a
    refused connection stays `unreachable` (the control that makes the first assertion meaningful — a fix
-   classifying every transport error as `timed-out` passes one and fails the other) — including the MCP
+   classifying every transport error as `timed-out` passes one and fails the other) — including the
    blob fetch, which is driven through the same classified path; `RecallFramingTests`, which recalls a
    record whose statement is a verbatim prompt injection through every registered read subcommand **via
-   the client's real `main()`** and through every MCP tool **via `read_mcp.handle`**, requiring the shared
-   notice plus intact attribution on each — driving the real entry points rather than the framing helper,
-   because an earlier version passed with the whole fix reverted and the MCP surface is the only one the
-   `memory-read` worker can reach; `RecallDeadlineTests`,
+   the client's real `main()`**, requiring the shared
+   notice plus intact attribution on each — driving the real entry point rather than the framing helper,
+   because an earlier version passed with the whole fix reverted; `RecallDeadlineTests`,
    which pins the deadline config (defaults to the cap, shortens, refuses out-of-range/non-integer with
    `bad-deadline` rather than clamping, refuses before transport), the single-call bound (a shortened
    deadline reaches `_open` as the socket timeout), and deepsearch's degradation (a timed-out pass keeps
