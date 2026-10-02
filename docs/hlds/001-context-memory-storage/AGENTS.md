@@ -69,6 +69,7 @@ Targets and verification live in [./nfrs/](./nfrs/). Two shape how code is writt
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-02 | LADR-08's **Related** section no longer credits this HLD's NFR-02 with the wrong-metric scorer defect. That fixture has no scorer and reports honest micro precision/recall; the defect — accuracy printed under the name recall, plus a precision denominator that counted scenarios the matcher could not over-merge — belongs to HLD-002 NFR-02, as LADR-08's own Context and Alternatives already stated. The unqualified "NFR-02" in the Decision section carried the same drift and is now qualified too, because an agent following the citation otherwise lands on a document that never records the defect and concludes the recall-tuning fixture mislabelled its metric. No decision or figure changed. | LADR-08 |
 | 2026-10-02 | LADR-08 added: recall evidence stays self-authored — LoCoMo/LongMemEval/OmniMemEval measure dialogue turns, not distilled labelled claims; HLD-004's in-use signal is the complement. | LADR-08 |
 | 2026-10-01 | README gained a *Business Requirements Traced* table for BR-04/06/07, each split into what this design delivers and what it does not. | BR-04, BR-06, BR-07 |
 | 2026-10-01 | NFR-03's supersession direction corrected (superseded by HLD-006 NFR-02, not the reverse). No status change. | NFR-03 |

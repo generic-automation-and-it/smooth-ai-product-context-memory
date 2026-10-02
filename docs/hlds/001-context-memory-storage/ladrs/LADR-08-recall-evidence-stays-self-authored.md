@@ -30,7 +30,7 @@ self-authored and is complemented by the in-use recall-feedback signal (HLD-004)
 
 A score on any of them would measure a population this system does not store, retrieved by a mechanism
 it does not use, scored by a metric its NFRs do not state. A perfect score there is the
-"wrong-metric" defect NFR-02 already records, at a larger scale — **worse than no score**, because it
+"wrong-metric" defect HLD-002 NFR-02 already records, at a larger scale — **worse than no score**, because it
 reads as validation.
 
 ## Alternatives Considered
@@ -67,9 +67,10 @@ reads as validation.
 
 ## Related
 
-- **NFR-02 recall-tuning measurements** — the self-authored fixture this evaluates; its wrong-metric
-  scorer defect is why independence was asked for.
-- **HLD-002 NFR-02** — the semantic-dedup fixture and its denominator correction.
+- **NFR-02 recall-tuning measurements** — the other self-authored fixture, whose denominators are stated
+  (14 memories / 11 cases); it is not the wrong-metric scorer, which is HLD-002's below.
+- **HLD-002 NFR-02** — the semantic-dedup fixture whose scorer reported accuracy under the name recall;
+  its denominator correction is why independence was asked for.
 - **HLD-004** — the in-use recall-feedback signal (never-recalled, miss-rate), the complement adopted
   here.
 - **BRD-001** — recall quality is a findability concern, not a conversational-memory one.
