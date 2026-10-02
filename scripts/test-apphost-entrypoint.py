@@ -35,13 +35,19 @@ def mock_engine():
         if name.endswith("-controller"):
             if state.get("missing_controller"):
                 return 1
+            if "Mounts" in args[args.index("--format") + 1]:
+                print(state.get("data_root_mount", ""))
+                return 0
             print(state.get("controller_id", "a" * 64), "true")
         elif name == state.get("inspect_failure"):
             return 1
         else:
             print("id-" + name, state["containers"][name])
     elif args[:2] == ["volume", "inspect"]:
-        print(state["volumes"].get(args[-1], "test true"))
+        if "device" in args[args.index("--format") + 1]:
+            print(state.get("devices", {}).get(args[-1], ""))
+        else:
+            print(state["volumes"].get(args[-1], "test true"))
     elif args[0] in ("stop", "rm") or args[:2] in (
         ["volume", "rm"], ["volume", "create"]
     ):
@@ -75,6 +81,10 @@ def mock_apphost():
         time.sleep(0.05)
 
 
+VOLUME_SUFFIXES = ("postgres-data", "blob-well-data", "seq-data", "host-context")
+DATA_ROOT_HOST = "/Users/someone/.mimisbrunnr/volumes"
+
+
 class EntrypointTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -106,8 +116,8 @@ class EntrypointTests(unittest.TestCase):
                 for suffix in ("host", "postgres", "blob-well", "seq")
             },
             "volumes": {
-                "mimisbrunnr-test-" + suffix + "-data": "test true"
-                for suffix in ("postgres", "blob-well", "seq")
+                "mimisbrunnr-test-" + suffix: "test true"
+                for suffix in VOLUME_SUFFIXES
             },
         }
         self.env = {
@@ -124,6 +134,7 @@ class EntrypointTests(unittest.TestCase):
             "BlobConfiguration__SecretKey": "test-secret",
             "HostConfiguration__Image": "registry.example/api@sha256:" + "a" * 64,
             "EngineConfiguration__BindAddress": "172.17.0.1",
+            "ControllerConfiguration__DataRootMount": str(self.directory / "data-root"),
         }
         self.process = None
         self.addCleanup(self.stop_process)
@@ -263,7 +274,7 @@ class EntrypointTests(unittest.TestCase):
         process = self.start("reset")
         stdout, stderr = process.communicate(timeout=10)
         self.assertEqual(process.returncode, 0, stdout + stderr)
-        self.assertEqual(self.mutations()[-3:], [
+        self.assertEqual(self.mutations()[-4:], [
             ["volume", "rm", name] for name in self.state["volumes"]
         ])
 
@@ -311,23 +322,122 @@ class EntrypointTests(unittest.TestCase):
         self.assertEqual(process.returncode, 0, stdout + stderr)
         self.assertIn(["child-parameters", names], self.events())
 
-    def test_start_creates_missing_volumes_after_preflight(self):
-        self.state["volumes"] = {}
+    def run_until_child_starts(self):
         process = self.start("run")
         deadline = time.monotonic() + 15
         while ["child-start"] not in self.events():
             if process.poll() is not None or time.monotonic() >= deadline:
-                self.fail("Child did not start")
+                stdout, stderr = process.communicate(timeout=10)
+                self.fail("Child did not start: " + stdout + stderr)
             time.sleep(0.05)
         process.send_signal(signal.SIGINT)
         stdout, stderr = process.communicate(timeout=10)
         self.assertEqual(process.returncode, 0, stdout + stderr)
-        creations = [event for event in self.events() if event[:2] == ["volume", "create"]]
-        self.assertEqual([event[-1] for event in creations], [
-            "mimisbrunnr-test-" + suffix + "-data"
-            for suffix in ("postgres", "blob-well", "seq")
+
+    def creations(self):
+        return [event for event in self.events() if event[:2] == ["volume", "create"]]
+
+    def mount_data_root(self):
+        local = Path(self.env["ControllerConfiguration__DataRootMount"])
+        local.mkdir()
+        self.state["data_root_mount"] = "bind " + DATA_ROOT_HOST
+        return local / "test"
+
+    def bind_existing_volumes(self):
+        self.state["devices"] = {
+            "mimisbrunnr-test-" + suffix: DATA_ROOT_HOST + "/test/" + suffix
+            for suffix in VOLUME_SUFFIXES
+        }
+
+    def test_start_creates_missing_volumes_after_preflight(self):
+        self.state["volumes"] = {}
+        self.run_until_child_starts()
+        self.assertEqual([event[-1] for event in self.creations()], [
+            "mimisbrunnr-test-" + suffix for suffix in VOLUME_SUFFIXES
         ])
+        self.assertTrue(all("--driver" not in event for event in self.creations()))
         self.assertNotIn(["volume", "rm"], [event[:2] for event in self.events()])
+
+    def test_unlabelled_legacy_host_context_is_adopted_and_reset(self):
+        self.state["volumes"]["mimisbrunnr-test-host-context"] = " "
+        self.run_until_child_starts()
+        self.assertEqual(self.creations(), [])
+        self.log.unlink()
+        process = self.start("reset")
+        stdout, stderr = process.communicate(timeout=10)
+        self.assertEqual(process.returncode, 0, stdout + stderr)
+        self.assertIn(["volume", "rm", "mimisbrunnr-test-host-context"], self.mutations())
+
+    def test_only_host_context_may_be_unlabelled(self):
+        self.state["volumes"]["mimisbrunnr-test-postgres-data"] = " "
+        for command in ("run", "stop", "reset"):
+            with self.subTest(command=command):
+                self.assert_rejected_without_mutation(command)
+
+    def test_data_root_binds_missing_volumes_under_the_installation(self):
+        local = self.mount_data_root()
+        self.state["volumes"] = {}
+        self.run_until_child_starts()
+        self.assertEqual(len(self.creations()), len(VOLUME_SUFFIXES))
+        for event, suffix in zip(self.creations(), VOLUME_SUFFIXES):
+            self.assertIn("device=" + DATA_ROOT_HOST + "/test/" + suffix, event)
+            self.assertEqual(event[-1], "mimisbrunnr-test-" + suffix)
+            self.assertTrue((local / suffix).is_dir())
+
+    def test_data_root_mount_must_be_a_bind(self):
+        self.mount_data_root()
+        self.state["data_root_mount"] = "volume /var/lib/docker/volumes/x/_data"
+        for command in ("run", "reset"):
+            with self.subTest(command=command):
+                self.assert_rejected_without_mutation(command)
+
+    def test_existing_volume_not_bound_to_the_data_root_is_rejected(self):
+        self.mount_data_root()
+        for command in ("run", "reset"):
+            with self.subTest(command=command):
+                self.assert_rejected_without_mutation(command)
+        self.bind_existing_volumes()
+        self.state["devices"]["mimisbrunnr-test-seq-data"] = "/elsewhere/seq-data"
+        self.assert_rejected_without_mutation("run")
+
+    def test_docker_desktop_host_mnt_prefix_names_the_same_directory(self):
+        self.mount_data_root()
+        self.state["data_root_mount"] = "bind /host_mnt" + DATA_ROOT_HOST
+        self.bind_existing_volumes()
+        self.run_until_child_starts()
+        self.state["data_root_mount"] = "bind " + DATA_ROOT_HOST
+        for name in self.state["devices"]:
+            self.state["devices"][name] = "/host_mnt" + self.state["devices"][name]
+        self.log.unlink()
+        self.run_until_child_starts()
+
+    def test_stop_ignores_backing_so_a_mismatched_installation_can_still_stop(self):
+        self.mount_data_root()
+        process = self.start("stop")
+        stdout, stderr = process.communicate(timeout=10)
+        self.assertEqual(process.returncode, 0, stdout + stderr)
+
+    def test_reset_clears_bound_directories_but_keeps_them(self):
+        local = self.mount_data_root()
+        self.bind_existing_volumes()
+        for suffix in VOLUME_SUFFIXES:
+            (local / suffix / "nested").mkdir(parents=True)
+            (local / suffix / "nested" / "file").write_text("data")
+            (local / suffix / ".hidden").write_text("data")
+        sibling = local.parent / "other-installation"
+        sibling.mkdir()
+        (sibling / "keep").write_text("data")
+        process = self.start("reset")
+        stdout, stderr = process.communicate(timeout=10)
+        self.assertEqual(process.returncode, 0, stdout + stderr)
+        for suffix in VOLUME_SUFFIXES:
+            self.assertTrue((local / suffix).is_dir())
+            self.assertEqual(list((local / suffix).iterdir()), [])
+        self.assertTrue((sibling / "keep").exists())
+
+    def test_reset_refuses_bound_volumes_without_the_data_root_mount(self):
+        self.bind_existing_volumes()
+        self.assert_rejected_without_mutation("reset")
 
 
 if __name__ == "__main__":

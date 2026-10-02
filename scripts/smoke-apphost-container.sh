@@ -16,6 +16,7 @@ postgres_port="${POSTGRES_PORT:-35432}"
 blob_port="${BLOB_PORT:-39000}"
 blob_console_port="${BLOB_CONSOLE_PORT:-39001}"
 seq_port="${SEQ_PORT:-35341}"
+data_root="${DATA_ROOT:-}"
 controller_name="mimisbrunnr-${installation_id}-controller"
 state_volume="mimisbrunnr-${installation_id}-smoke-state"
 controller_id=""
@@ -28,6 +29,11 @@ blob_access_key="$(openssl rand -hex 12)"
 blob_secret_key="$(openssl rand -hex 24)"
 api_read_token="$(openssl rand -hex 24)"
 api_write_token="$(openssl rand -hex 24)"
+
+case "$data_root" in
+  ""|/*) ;;
+  *) echo "DATA_ROOT must be an absolute host directory." >&2; exit 1 ;;
+esac
 
 if [ -z "$engine_host_address" ]; then
   if [ "$engine_kind" = "podman" ]; then
@@ -102,6 +108,12 @@ if [ -d "$engine_config_directory" ]; then
   controller_args+=(-v "$engine_config_directory:/root/.docker:ro")
 fi
 
+data_root_args=()
+if [ -n "$data_root" ]; then
+  data_root_args=(-v "$data_root:/var/lib/mimisbrunnr-data")
+  controller_args+=("${data_root_args[@]}")
+fi
+
 controller_args+=("$controller_image")
 
 start_controller() {
@@ -125,6 +137,7 @@ reset_installation() {
   engine run --rm \
     --name "$controller_name" \
     -v "$engine_socket:/var/run/docker.sock" \
+    ${data_root_args[@]+"${data_root_args[@]}"} \
     -e "InstallationConfiguration__Id=$installation_id" \
     "$controller_image" reset >/dev/null 2>&1 || true
 }
@@ -232,16 +245,36 @@ assert_owned_resources() {
   done
 }
 
+volume_suffixes=(postgres-data blob-well-data seq-data host-context)
+
+# Listed through the engine: PostgreSQL leaves its directory mode 700 for its own uid, which a Linux
+# runner's user cannot read.
+data_root_entries() {
+  engine run --rm -v "$data_root/$installation_id/$1:/entries:ro" docker.io/library/alpine:3.22 ls -A /entries
+}
+
 assert_volumes_exist() {
-  for suffix in postgres-data blob-well-data seq-data; do
-    engine volume inspect "mimisbrunnr-${installation_id}-${suffix}" >/dev/null
+  for suffix in "${volume_suffixes[@]}"; do
+    device="$(engine volume inspect --format '{{ index .Options "device" }}' "mimisbrunnr-${installation_id}-${suffix}")"
+    if [ -n "$data_root" ] && [ "${device#/host_mnt}" != "$data_root/$installation_id/$suffix" ]; then
+      echo "volume mimisbrunnr-${installation_id}-${suffix} is not bound under DATA_ROOT ($device)" >&2
+      return 1
+    fi
   done
+  if [ -n "$data_root" ] && [ -z "$(data_root_entries postgres-data)" ]; then
+    echo "PostgreSQL wrote nothing under DATA_ROOT" >&2
+    return 1
+  fi
 }
 
 assert_volumes_absent() {
-  for suffix in postgres-data blob-well-data seq-data; do
+  for suffix in "${volume_suffixes[@]}"; do
     if engine volume inspect "mimisbrunnr-${installation_id}-${suffix}" >/dev/null 2>&1; then
       echo "volume mimisbrunnr-${installation_id}-${suffix} survived reset" >&2
+      return 1
+    fi
+    if [ -n "$data_root" ] && [ -n "$(data_root_entries "$suffix")" ]; then
+      echo "reset left files in $data_root/$installation_id/$suffix" >&2
       return 1
     fi
   done

@@ -8,6 +8,8 @@ managed_label="io.smooth-mimisbrunnr.managed"
 installation_id="${InstallationConfiguration__Id:-default}"
 command_name="${1:-run}"
 stop_timeout="${ControllerConfiguration__StopTimeoutSeconds:-30}"
+data_root_mount="${ControllerConfiguration__DataRootMount:-/var/lib/mimisbrunnr-data}"
+data_root_host=""
 PATH="/app:$PATH"
 export PATH
 
@@ -34,11 +36,8 @@ container_names() {
     "mimisbrunnr-${installation_id}-seq"
 }
 
-volume_names() {
-  printf '%s\n' \
-    "mimisbrunnr-${installation_id}-postgres-data" \
-    "mimisbrunnr-${installation_id}-blob-well-data" \
-    "mimisbrunnr-${installation_id}-seq-data"
+volume_suffixes() {
+  printf '%s\n' postgres-data blob-well-data seq-data host-context
 }
 
 check_engine() {
@@ -62,6 +61,27 @@ verify_controller_identity() {
   case "$controller_identity" in
     "$controller_hostname"*" true") ;;
     *) fail "this process does not own canonical controller '$controller_name'; do not run a second controller or override its hostname" ;;
+  esac
+}
+
+# Docker Desktop reports one host directory as /Users/... or /host_mnt/Users/... depending on which
+# client asks, so both sides of every comparison drop that prefix.
+host_path() {
+  case "$1" in
+    /host_mnt/*) printf '%s' "${1#/host_mnt}" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+# The engine resolves a bind volume's device on the host, so the host path is read from the
+# controller's own mount rather than configured a second time where the two could disagree.
+resolve_data_root() {
+  [ -d "$data_root_mount" ] || return 0
+  data_root_source="$(docker container inspect --format "{{range .Mounts}}{{if eq .Destination \"$data_root_mount\"}}{{.Type}} {{.Source}}{{end}}{{end}}" "$controller_name")" ||
+    fail "cannot inspect the controller's data-root mount"
+  case "$data_root_source" in
+    "bind /"*) data_root_host="$(host_path "${data_root_source#bind }")/$installation_id" ;;
+    *) fail "data root '$data_root_mount' must be a bind mount of an absolute host directory" ;;
   esac
 }
 
@@ -90,7 +110,8 @@ $container_name
     esac
   done
 
-  for volume_name in $(volume_names); do
+  for suffix in $(volume_suffixes); do
+    volume_name="mimisbrunnr-${installation_id}-${suffix}"
     case "
 $existing_volumes
 " in
@@ -98,20 +119,57 @@ $existing_volumes
 $volume_name
 "*)
         verify_volume_ownership "$volume_name"
-        owned_volumes="${owned_volumes}${volume_name}
+        [ "$command_name" = stop ] || verify_volume_backing "$volume_name" "$suffix"
+        owned_volumes="${owned_volumes}${volume_name} ${suffix}
 "
         ;;
-      *) missing_volumes="${missing_volumes}${volume_name}
+      *) missing_volumes="${missing_volumes}${volume_name} ${suffix}
 " ;;
     esac
   done
 }
 
+# Releases before the controller created host-context left its creation to DCP, which labels nothing;
+# that one canonical name is adopted unlabeled, while a volume labelled for anyone else still fails.
 verify_volume_ownership() {
   identity="$(docker volume inspect --format "{{ index .Labels \"$ownership_label\" }} {{ index .Labels \"$managed_label\" }}" "$1")" ||
     fail "cannot inspect volume '$1'"
-  [ "$identity" = "$installation_id true" ] ||
-    fail "volume '$1' exists but is not owned by installation '$installation_id'"
+  case "$identity" in
+    "$installation_id true") ;;
+    " ") [ "$1" = "mimisbrunnr-${installation_id}-host-context" ] ||
+      fail "volume '$1' exists but is not owned by installation '$installation_id'" ;;
+    *) fail "volume '$1' exists but is not owned by installation '$installation_id'" ;;
+  esac
+}
+
+verify_volume_backing() {
+  device="$(docker volume inspect --format '{{ index .Options "device" }}' "$1")" ||
+    fail "cannot inspect volume '$1'"
+  if [ -n "$data_root_host" ]; then
+    [ "$(host_path "$device")" = "$data_root_host/$2" ] ||
+      fail "volume '$1' is not bound to '$data_root_host/$2'; snapshot it, reset the installation, then start with the data root"
+  elif [ -n "$device" ] && [ "$command_name" = reset ]; then
+    fail "volume '$1' is bound to host directory '$device'; mount the data root at '$data_root_mount' so reset can remove its contents"
+  fi
+}
+
+create_missing_volumes() {
+  printf '%s' "$missing_volumes" | while read -r volume_name suffix; do
+    if [ -n "$data_root_host" ]; then
+      mkdir -p "$data_root_mount/$installation_id/$suffix"
+      docker volume create \
+        --driver local --opt type=none --opt o=bind --opt "device=$data_root_host/$suffix" \
+        --label "$ownership_label=$installation_id" \
+        --label "$managed_label=true" \
+        "$volume_name" >/dev/null
+    else
+      docker volume create \
+        --label "$ownership_label=$installation_id" \
+        --label "$managed_label=true" \
+        "$volume_name" >/dev/null
+    fi
+    verify_volume_ownership "$volume_name"
+  done
 }
 
 configure_engine() {
@@ -145,11 +203,17 @@ stop_owned_containers() {
   done
 }
 
+# Removing a bind volume leaves its host directory untouched, so reset clears the contents itself to
+# keep its promise that the installation's data is gone; the directory and the root stay.
 reset_owned_volumes() {
-  printf '%s' "$owned_volumes" | while IFS= read -r volume_name; do
+  printf '%s' "$owned_volumes" | while read -r volume_name suffix; do
     verify_volume_ownership "$volume_name"
     docker volume rm "$volume_name" >/dev/null
     echo "Removed owned volume $volume_name"
+    if [ -n "$data_root_host" ]; then
+      find "$data_root_mount/$installation_id/$suffix" -mindepth 1 -delete
+      echo "Removed contents of $data_root_host/$suffix"
+    fi
   done
 }
 
@@ -166,15 +230,10 @@ run_controller() {
   SmoothAiProductContextMemory.AppHost --validate-configuration || fail "release configuration validation failed; no workloads changed"
   check_engine
   verify_controller_identity
+  resolve_data_root
   preflight_resources
   stop_owned_containers
-  printf '%s' "$missing_volumes" | while IFS= read -r volume_name; do
-    docker volume create \
-      --label "$ownership_label=$installation_id" \
-      --label "$managed_label=true" \
-      "$volume_name" >/dev/null
-    verify_volume_ownership "$volume_name"
-  done
+  create_missing_volumes
 
   echo "Starting Mimisbrunnr controller version ${ReleaseConfiguration__Version:-development}; installation=$installation_id; engine=$engine_kind"
 
@@ -235,6 +294,7 @@ case "$command_name" in
     configure_engine
     check_engine
     verify_controller_identity
+    resolve_data_root
     preflight_resources
     stop_owned_containers
     reset_owned_volumes
