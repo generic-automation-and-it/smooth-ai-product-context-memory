@@ -1,16 +1,12 @@
 {
   "mcpServers": {
     "mimisbrunnr-read": {
-      "command": "python3",
-      "args": [
-        ".agents/skills/mimisbrunnr-odin-context-memory/scripts/memory_read_mcp.py"
-      ]
+      "command": "scripts/launch-mcp.sh",
+      "args": ["read"]
     },
     "mimisbrunnr-write": {
-      "command": "python3",
-      "args": [
-        ".agents/skills/mimisbrunnr-odin-context-memory/scripts/memory_write_mcp.py"
-      ]
+      "command": "scripts/launch-mcp.sh",
+      "args": ["write"]
     }
   }
 }
