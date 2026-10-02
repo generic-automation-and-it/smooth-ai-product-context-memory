@@ -189,17 +189,85 @@ class LoadTests(unittest.TestCase):
             self.assertIn("400 characters were not rendered", out)
 
     def test_inapplicable_flags_are_reported_not_silently_ignored(self):
+        """`--asof` and `--all` on foreign material are reported, not ignored.
+
+        `--max-chars` is deliberately no longer in this set: it now applies to a store export too
+        (see the cap tests below), so it is not an inapplicable flag.
+        """
         with tempfile.TemporaryDirectory() as tmp:
             foreign = write(tmp, "notes.md", "A note about the graph store.")
             _, out, _ = run(["load", foreign, "--asof", "2026-09-05"])
             self.assertIn("`--asof` does not apply to foreign material", out)
 
-            store = write(tmp, "export.json", json.dumps(STORE_EXPORT))
-            _, out2, _ = run(["load", store, "--format", "store", "--max-chars", "50"])
-            self.assertIn("`--max-chars` does not apply", out2)
-
             _, out3, _ = run(["load", foreign, "--all"])
             self.assertIn("`--all` does not apply", out3)
+
+    def test_store_export_under_the_cap_is_byte_identical(self):
+        """The acceptance criterion: at the default, an under-cap store export is unchanged.
+
+        `max_chars=None` is the pre-cap render, so comparing the two proves the cap added no line and
+        cut nothing for material that fits. The CLI default then emits no `Budget:` line at all.
+        """
+        records = uc.parse_store_export(json.dumps(STORE_EXPORT))
+        uncapped = uc.render_store(records, "export.json", None, max_chars=None)
+        capped = uc.render_store(records, "export.json", None, max_chars=uc.DEFAULT_MAX_CHARS)
+        self.assertEqual(capped, uncapped)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "export.json", json.dumps(STORE_EXPORT))
+            _, out, _ = run(["load", src, "--format", "store"])
+        self.assertNotIn("Budget:", out)
+        self.assertIn("Stale-image trap", out)
+        self.assertIn("Proposed retry policy", out)
+
+    def test_store_export_over_the_cap_cuts_whole_records_and_lists_them(self):
+        """Whole records only, deterministic, and every cut record named by identity.
+
+        The third record is far larger than the budget, so the first two render whole and the third is
+        cut; the fourth, small record after it is cut too, because the first record that does not fit
+        ends the render. That is what makes the cut deterministic and the tail explicit.
+        """
+        records = [
+            {"uuid": "11111111-1111-1111-1111-111111111111", "version": 1,
+             "subject": "First kept", "statement": "short a", "kind": "understanding",
+             "status": "approved"},
+            {"uuid": "22222222-2222-2222-2222-222222222222", "version": 2,
+             "subject": "Second kept", "statement": "short b", "kind": "understanding",
+             "status": "approved"},
+            {"uuid": "33333333-3333-3333-3333-333333333333", "version": 3,
+             "subject": "Third cut", "statement": "z" * 5000, "kind": "understanding",
+             "status": "approved"},
+            {"uuid": "44444444-4444-4444-4444-444444444444", "version": 1,
+             "subject": "Fourth cut", "statement": "short d", "kind": "understanding",
+             "status": "approved"},
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "big.json", json.dumps({"understandings": records}))
+            _, out, _ = run(["load", src, "--format", "store", "--max-chars", "1000"])
+            _, again, _ = run(["load", src, "--format", "store", "--max-chars", "1000"])
+
+        # The records that fit render whole; the oversized one is never partially rendered.
+        self.assertIn("First kept", out)
+        self.assertIn("Second kept", out)
+        self.assertNotIn("Third cut", out)
+        self.assertNotIn("z" * 100, out)
+        # Deterministic across runs, and the cut is named by identity with the budget as the reason.
+        self.assertEqual(out, again)
+        self.assertIn("Budget: 1000 characters", out)
+        self.assertIn("2 record(s) cut", out)
+        self.assertIn("Cut for budget:", out)
+        self.assertIn("33333333-3333-3333-3333-333333333333 v3", out)
+        self.assertIn("44444444-4444-4444-4444-444444444444 v1", out)
+
+    def test_store_export_cap_that_fits_no_record_renders_none_and_says_so(self):
+        """A budget below the smallest record narrows to zero rather than truncating a record."""
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "export.json", json.dumps(STORE_EXPORT))
+            _, out, _ = run(["load", src, "--format", "store", "--max-chars", "10"])
+        self.assertNotIn("Stale-image trap", out)
+        self.assertIn("Rendered 0 record(s)", out)
+        self.assertIn("2 record(s) cut", out)
+        self.assertIn("Cut for budget:", out)
 
     def test_missing_input_is_an_error_not_an_empty_render(self):
         rc, _, err = run(["load", "/nonexistent/path.md"])

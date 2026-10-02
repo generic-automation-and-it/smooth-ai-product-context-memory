@@ -47,7 +47,7 @@ flowchart LR
 
 ## Architecture Decisions
 
-See [./ladrs/](./ladrs/). Accepted: LADR-01, 02, 03, 04, 06, 07, 08, 09. Draft: none — NFR-02 accepted 2026-09-26, releasing LADR-03.
+See [./ladrs/](./ladrs/). Accepted: LADR-01, 02, 03, 04, 06, 07, 08, 09, 10. Draft: none — NFR-02 accepted 2026-09-26, releasing LADR-03.
 
 ## Key Behaviors
 
@@ -117,6 +117,7 @@ See [./ladrs/](./ladrs/). Accepted: LADR-01, 02, 03, 04, 06, 07, 08, 09. Draft: 
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-01 | **LADR-10 added: a store load is a reported budget of whole records.** A load's breadth was controlled (LADR-08) but its size was not — a real `--all` corpus rendered in full. One `--max-chars` (default 12000) now applies to both surfaces; on a store export it cuts whole records in source order, lists each cut record by identity with the budget as the reason, and states the cap, rendered size and count cut beside breadth. No record is ever truncated or summarised to fit. `max_chars=None` is byte-identical to an under-budget render, which is the acceptance property; the walk harness re-run at the default is unchanged (1682 / 2006 / 2238 chars), so the cap bounds the pathological corpus, not a representative one. The dossier is out of scope (its omission reasons are a fixed bounded set). | LADR-10; BRD-003 BR-42 |
 | 2026-09-26 | README status row corrected to match the row below and the BRD-003 README: it read "value assumptions 1–2 carried open pending usage evidence", which contradicted the recorded outcome and led an agent orienting here to treat assumption 2 as still open. Now reads assumption 1 carried open, assumption 2 validated with a stated boundary. | BRD-003 §8 |
 | 2026-09-26 | Corrected the row below: BRD-003 §8 value assumption 2 is now **Validated, with a stated boundary** (a single observed `load`), and only assumption 1 remains `Carried open`. | BRD-003 §8 |
 | 2026-09-26 | HLD status promoted `Draft` → `Accepted — implemented`. Closed by L1 `UnderstandingTransferStoreTests` (store side) and the NFR-02/LADR-03 Path A decision (skill-level evidence for the agent-mediated import chain); every LADR (01–04, 06–09) and NFR (01–03) is `Accepted`. BRD-003 §8 value assumptions 1–2 are carried open, not dropped: they need recall-feedback usage evidence on captured understanding-kind memories (HLD-004), which cannot exist before the capability is used, so they do not gate design closure. | NFR-02, LADR-03; BRD-003 §8 |

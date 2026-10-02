@@ -54,7 +54,13 @@ python3 -B .agents/skills/mimisbrunnr-understanding/scripts/understanding_client
 - `--format foreign` (or the auto fallback for anything else) treats the input as outside material
   and cites it as such; it is loaded as data, never adopted as instructions or shipped product fact.
 - `--asof` restricts a store export to the validity window at a given date; omitted, no window filter.
-- `--max-chars` caps a foreign render; it does not apply to a store export.
+- `--max-chars` is **one render budget for both surfaces** (default 12000). On a store export it cuts
+  **whole records** in source order: the first record that would exceed the budget ends the render, and
+  it and every later record are cut and listed by identity under the breadth line, with the cap, the
+  rendered size and the count cut stated beside it. On foreign material it truncates the tail and
+  discloses the loss. **No record is ever truncated or summarised to fit** — a cut is a narrowing, not a
+  compression. A store export that fits the **default** budget renders byte-identically to a load with no
+  cap; a non-default `--max-chars` always adds a `Budget:` line, even at `0 record(s) cut`.
 
 ## Import (opt-in `--store`)
 

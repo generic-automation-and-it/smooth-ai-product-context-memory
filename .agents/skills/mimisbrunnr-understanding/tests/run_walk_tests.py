@@ -31,7 +31,13 @@ Measured run (recorded 2026-09-30, a cold agent per surface, 0 tools used, score
   load_default  : present 2/2 correct · absent 3/3 declined · 0 confabulations · 1682 chars (~420 est tokens)
   load_all      : present 4/4 correct · absent 1/1 declined · 0 confabulations · 2006 chars (~502 est tokens)
   dossier_slice : present 4/4 correct · absent 1/1 declined · 0 confabulations · 2238 chars (~560 est tokens)
-  Every surface is well under the ICM 8k-token band, so no band finding; no cap is added.
+
+Re-measured 2026-10-01, after the store-load cap (`--max-chars`, default 12000 chars) was added: the
+sizes are unchanged — 1682 / 2006 / 2238 chars — because every surface is far under the cap, so the cap
+does not fire on a representative load. Both runs are recorded here; the cap bounds the pathological
+corpus (and cuts whole records, reported by identity), not this one. Every surface is also well under
+the ICM 8k-token band, so there is no band finding either. The two are independent: the ICM band is a
+finding threshold, the cap is a store-load budget.
 """
 
 from __future__ import annotations
@@ -266,10 +272,16 @@ class WalkFixtureTests(unittest.TestCase):
 
     def test_sizes_stay_under_the_icm_band_and_are_recorded(self):
         """Measure each surface. A load above the 8k-token band is a finding, never a cap — recorded
-        here so the evidence is auditable. This fixture is small by design; no finding is expected."""
+        here so the evidence is auditable. This fixture is small by design; no finding is expected.
+
+        The surfaces are also asserted under the store-load cap, which is what makes the recorded
+        before/after sizes identical: the cap narrows a pathological corpus, it does not touch a
+        representative one."""
         for name, text in self.texts.items():
             chars, est_tokens = measure(text)
             self.assertGreater(chars, 0, name)
+            self.assertLess(len(text), uc.DEFAULT_MAX_CHARS,
+                            f"{name} exceeds the {uc.DEFAULT_MAX_CHARS}-char store-load cap")
             self.assertLessEqual(
                 est_tokens, ICM_TOKEN_BAND_HIGH,
                 f"{name} renders ~{est_tokens} est. tokens, above the ICM {ICM_TOKEN_BAND_HIGH}-token "
