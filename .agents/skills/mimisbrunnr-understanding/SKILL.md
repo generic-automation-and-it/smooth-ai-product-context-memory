@@ -15,6 +15,10 @@ a dump is an export. All switches are **off by default**.
 | **Import** (`--store`) | opt-in | yes, only with `--store` | yes |
 | **Dump** (`--currentsession`) | export to local folder | no | n/a |
 
+`--dontask` skips interactive questions (e.g. "Export split") and takes the recommended option as
+analysed by the AI. Currently no interactive questions exist in this skill, but the switch is
+accepted for forward compatibility.
+
 # mimisbrunnr-understanding
 
 Load a Mímisbrunnr **Understanding** export — or **any** prior material (a session, meeting notes, a

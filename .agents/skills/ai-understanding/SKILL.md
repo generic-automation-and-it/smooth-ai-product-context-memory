@@ -38,8 +38,12 @@ the old design overloading `--all` for both.
 `--all` does **not** turn proposals into commitments, and it does **not** override the qualifying
 test. An unbuilt recommendation is still a proposal: label it as proposed and record that it was
 not approved or implemented. Toolchain knowledge still goes to its `*AGENTS.md` home, even when
-the user asks for every candidate. Breadth means “show the marginal qualifying residue”, not
-“store everything mentioned in the session”.
+the user asks for every candidate. Breadth means "show the marginal qualifying residue", not
+"store everything mentioned in the session".
+
+`--dontask` applies only to `--export`, where it skips the "Export split" `AskUserQuestion` and
+takes the recommended option (write every candidate) as analysed by the AI. Unlike `--all`, it
+does **not** widen the qualifying bar — it only skips the ask.
 
 `--path` is always the **target** a mode writes to, overriding its default — never a source.
 `--consume`'s source stays positional.
@@ -497,7 +501,7 @@ Propose the promotion; the user decides. Once promoted, the Understanding record
 ## Guardrails
 
 - Writing to a mode's default location, or to an explicit `--path`, needs no approval — the location was already chosen, by default or by the user typing it. Report what was written and where, every time; removing the prompt must not remove the user's chance to notice.
-- Ask before promoting, and before a `--consume` makes an incoming copy the current version of a slug this workspace already holds — both change durable state someone already chose to keep or rely on. A local `--export` writing an `improved` version does **not** ask: it adds a copy and destroys nothing, and the five outcomes are reported. On `--export`, propose the split with `AskUserQuestion` (recommending "write every candidate" first) before writing, unless `--all` was passed — the user's own instruction to skip that ask *and* to hold the qualifying bar loosely, writing a marginal candidate rather than dropping it.
+- Ask before promoting, and before a `--consume` makes an incoming copy the current version of a slug this workspace already holds — both change durable state someone already chose to keep or rely on. A local `--export` writing an `improved` version does **not** ask: it adds a copy and destroys nothing, and the five outcomes are reported. On `--export`, propose the split with `AskUserQuestion` (recommending "write every candidate" first) before writing, unless `--all` was passed — the user's own instruction to skip that ask *and* to hold the qualifying bar loosely, writing a marginal candidate rather than dropping it. With `--dontask`, skip the ask and take the recommended option (write every candidate) as analysed by the AI.
 - Never edit, overwrite or delete an existing copy of a slug. An improvement is a new complete copy in this run's folder; history is immutable. The **one** exception is striking a credential value that should never have been written — see *Redact before you write*; that is a repair, not a revision.
 - Never write an Understanding in must/never language.
 - Never let an Understanding contradict a rule without flagging it.

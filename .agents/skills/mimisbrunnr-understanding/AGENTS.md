@@ -102,6 +102,7 @@ DB and wire are unchanged.
   `../mimisbrunnr-context-memory/scripts/redact.py` over stdin (never argv). Both script folders ship
   together in the npm package, so the relative path holds there too.
 - **The vocabulary is question/answer.** The old `trigger` key is still read from a store export.
+- **`--dontask` is accepted for forward compatibility.** It skips interactive questions (e.g. "Export split") and takes the recommended option as analysed by the AI. No interactive questions exist in this skill today.
 - **The dump derives its folder name** from `--session-name`, else the content's first heading, else a
   timestamp — and always prints the name so another session can discover it.
 
