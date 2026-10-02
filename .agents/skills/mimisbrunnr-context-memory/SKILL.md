@@ -76,8 +76,10 @@ When the user starts a mimisbrunnr-context-memory session, resolve the target gr
   empty-ticket group.
 - If the group does not exist, create it with the initiative defaulting to the seeded `to-be-decided`
   sentinel unless the caller names one.
-- **Fresh-store precondition: an initiative must exist before `resolve-group`.** `resolve-group` answers
-  `404` for an initiative that is not in the store, so the initiative is upserted first when it is absent.
+- **Fresh-store precondition: on the create path, an initiative must exist before `resolve-group`.**
+  `resolve-group` answers `404` for an initiative that is not in the store **when it has to create the
+  group**; when the supplied tickets already resolve to an existing group it never looks the initiative
+  up, so no upsert is needed. Upsert it first only on the create path.
 - **`resolve-group` is not dry-runnable.** Its handler commits unconditionally — calling it to "look up"
   a group creates one. A dry run must resolve nothing and report the group and initiative as *would
   create*, exactly as `mimisbrunnr-understanding --export` does.

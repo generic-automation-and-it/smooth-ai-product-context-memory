@@ -21,6 +21,7 @@ Export and import are about **this session's memory**: export writes what the se
 |--------|--------|
 | `--export [--path <dir>]` _(default)_ | **Reconcile against `INDEX.md`**, then write this run's new and improved units to a new `.context/understandings/<subject>-<yyyyMMdd-HHmm>/`, or under `--path` when given. Proposes the split first; writes nothing and creates no folder when nothing changed |
 | `--export --all [--path <dir>]` | Same, but breadth-first: write every candidate without pausing for the user to cut the list, **and hold the qualifying bar loosely** — a marginal candidate is written, not dropped, because the user prunes afterwards |
+| `--export --dontask [--path <dir>]` | Same, but skips the "Export split" ask and takes the recommended option as analysed by the AI. **Does not** widen the qualifying bar — a marginal candidate is still dropped if it does not qualify, unlike `--all` |
 | `--import` | Load Understandings whose question matches one the task will make you ask |
 | `--publish [--portable-only] [--path <target>]` | Write every unit to a zip under `.context/understandings-publish/`, or to `--path` when given; `--portable-only` restricts the archive to `scope: portable` units |
 | `--consume <zip> [--path <dir>]` | Unpack a published archive into the working store — `.context/understandings/` by default, or `--path` when given |

@@ -611,8 +611,8 @@ def render_table(records: list[dict], all_kinds: bool, asof: dt.date | None,
         if len(answer) > TABLE_ANSWER_CHARS:
             answer = answer[:TABLE_ANSWER_CHARS - 1] + "…"
         scope = "/".join(x for x in (parts["scope"],) if x) or "-"
-        row = (f"| {parts['subject']} | {_cell(answer)} | {parts['kind'] or '-'} | "
-               f"{parts['status'] or '-'} | {parts['confidence'] or '-'} | {scope} | "
+        row = (f"| {_cell(parts['subject'])} | {_cell(answer)} | {_cell(parts['kind'])} | "
+               f"{_cell(parts['status'])} | {_cell(parts['confidence'])} | {_cell(scope)} | "
                f"{_short(parts['uuid'])} v{parts['version'] or '-'} | "
                f"{(parts['createdOn'] or '-')[:10]} |")
         cost = len(row) + 1
@@ -647,7 +647,7 @@ def render_table(records: list[dict], all_kinds: bool, asof: dt.date | None,
 
 def _cell(text: str) -> str:
     """A pipe-safe, newline-free table cell. A raw pipe would silently add a column."""
-    return text.replace("|", "/").replace("\n", " ").strip() or "-"
+    return str(text or "").replace("|", "/").replace("\n", " ").strip() or "-"
 
 
 def _short(uuid: str) -> str:
@@ -801,8 +801,8 @@ def _group_body(binding: dict, name: str | None, body: str | None) -> dict:
         "name": name,
         "body": body,
     }
-    # The wire contract: `url` may be "" but never omitted, and every key is sent explicitly so a
-    # missing one is a stated null rather than an absent field the server defaults differently.
+    # Every key is optional on ResolveGroup.Request, so a `None` value is dropped rather than sent as
+    # an explicit null; `url` may be "" but is never omitted (the caller fills it for a github ticket).
     return {k: v for k, v in payload.items() if v is not None}
 
 
@@ -836,7 +836,9 @@ def initiative_exists(name: str) -> tuple[bool, str]:
         return True, "the seeded default sentinel needs no upsert"
     rc, out, err = _run_capture_client(READ_CLIENT, ["initiatives"], None)
     if rc != 0:
-        return False, err.strip() or "initiatives read failed"
+        # `None` (not `False`) is "the read failed" — distinct from "the initiative is absent", so a
+        # down store or an auth refusal is never reported as a missing initiative with a write remedy.
+        return None, err.strip() or "initiatives read failed"
     document = _first_json_object(out)
     items: object = None
     if isinstance(document, list):
@@ -869,8 +871,8 @@ def set_items(candidates: list[dict], binding: dict, now: dt.datetime) -> list[d
             "kind": KIND_UNDERSTANDING,
             "facets": ["understanding"],
             "tags": split_list(binding.get("tags")),
-            "status": "approved",
-            "confidence": 70,
+            "status": candidate.get("status") or "approved",
+            "confidence": candidate.get("confidence") or 70,
             "content": candidate["statement"],
             "sources": candidate.get("sources") or [],
             "validFrom": candidate.get("validFrom") or now.strftime("%Y-%m-%dT00:00:00Z"),
@@ -922,15 +924,20 @@ def cmd_export(args: argparse.Namespace) -> int:
         return 1
 
     # Gate 2 (redaction) before anything is built or sent, so the digest can report what would be
-    # scrubbed. Fail closed: content that cannot be inspected is content that must not be sent.
-    scrubbed = gate_redaction([c["statement"] for c in candidates])
+    # scrubbed. Every free-text field set_items will send is gated — not just the statement — so a
+    # secret in the description or contentSummary is reported here rather than scrubbed downstream and
+    # missing from the digest. Fail closed: content that cannot be inspected is content that must not
+    # be sent.
+    targets = [(c, f) for c in candidates for f in ("statement", "description", "contentSummary")
+               if c.get(f)]
+    scrubbed = gate_redaction([c.get(f) for c, f in targets])
     if scrubbed is None:
         print(f"REFUSED: the redactor ({REDACTOR}) could not run, so the candidates cannot be "
               "inspected before sending. Nothing was written.", file=sys.stderr)
         return 1
     texts, redaction = scrubbed
-    for candidate, text in zip(candidates, texts):
-        candidate["statement"] = text
+    for (candidate, field), text in zip(targets, texts):
+        candidate[field] = text
 
     # Gate 4 (atomicity). A flagged candidate is held back and listed, never written past the flag —
     # the split-vs-skip judgement stays with the capture path and the human.
@@ -955,6 +962,10 @@ def cmd_export(args: argparse.Namespace) -> int:
     # Fresh-store precondition: `resolve-group` answers 404 for an initiative that does not exist.
     initiative = binding["initiative"] or "to-be-decided"
     exists, why = initiative_exists(initiative)
+    if exists is None:
+        print(f"REFUSED: the initiative read failed ({why}); this is not evidence that "
+              f"'{initiative}' is absent. Nothing was written.", file=sys.stderr)
+        return 1 if args.write else 0
     initiative_note = (f"initiative '{initiative}' exists" if exists else
                       f"initiative '{initiative}' is absent — would create: "
                       f"context_memory_client.py upsert-initiative "
@@ -1000,8 +1011,13 @@ def cmd_export(args: argparse.Namespace) -> int:
         WRITE_CLIENT, ["preflight"],
         {"candidates": [{"description": item["description"], "kind": KIND_UNDERSTANDING,
                          "facets": item["facets"], "groupUuid": group_uuid} for item in items]})
-    print("Preflight: " + (out.strip()[:400] if rc == 0
-                           else f"unavailable ({err.strip()[:200] or f'exit {rc}'})"))
+    if rc == 0:
+        preflight = out.strip()
+        print("Preflight: " + (preflight if len(preflight) <= 1200
+                               else preflight[:1200] + f"\n  … {len(preflight) - 1200} more "
+                                                       f"character(s) not shown"))
+    else:
+        print(f"Preflight: unavailable ({err.strip()[:200] or f'exit {rc}'})")
 
     if not args.write:
         # `set --dryrun` is the veto point, and it needs a resolved `groupUuid` — which a dry run
@@ -1024,8 +1040,8 @@ def cmd_export(args: argparse.Namespace) -> int:
         WRITE_CLIENT, ["set", "--dryrun"], {"groupUuid": group_uuid, "items": items,
                                             "links": [], "labelsProposed": []})
     if rc != 0:
-        print(f"REFUSED at the dry-run veto: {err.strip() or out.strip()}. Nothing was written.",
-              file=sys.stderr)
+        print(f"REFUSED at the dry-run veto: {err.strip() or out.strip()}. No memory was written; "
+              f"the group {group_uuid} was already resolved or created and remains.", file=sys.stderr)
         return 1
     print(f"\nset --dryrun (the veto point):\n{out.strip()[:1200]}")
 
