@@ -59,7 +59,7 @@ Run this when **authoring or reviewing** a skill that touches a secret or launch
 
 ## Current Status
 
-**Several local skills handle runtime tokens:** `mimisbrunnr-context-memory` (read/write API tokens), `mimisbrunnr-dossier` (read token), and their supporting MCP/client processes. `ai-template-sync` reads no secret but refuses a `--template-url` with embedded credentials. `mimisbrunnr-ymir-bootstrap` reads no secret either: store access is delegated to the context-memory workers, it refuses credential-bearing evidence URLs, and it redacts secrets met in evidence to `<REDACTED>` in its preview. This repository does not include the template's `ai-asset-sync` skill or SkillSpector gate. The model-process checklist applies whenever a skill launches a tool-using model; it is not a claim that these clients do so.
+**Several local skills handle runtime tokens:** `mimisbrunnr-odin-context-memory` (read/write API tokens), `mimisbrunnr-saga-dossier` (read token), and their supporting MCP/client processes. `ai-template-sync` reads no secret but refuses a `--template-url` with embedded credentials. `mimisbrunnr-ymir-bootstrap` reads no secret either: store access is delegated to the context-memory workers, it refuses credential-bearing evidence URLs, and it redacts secrets met in evidence to `<REDACTED>` in its preview. This repository does not include the template's `ai-asset-sync` skill or SkillSpector gate. The model-process checklist applies whenever a skill launches a tool-using model; it is not a claim that these clients do so.
 
 ## Changelog
 

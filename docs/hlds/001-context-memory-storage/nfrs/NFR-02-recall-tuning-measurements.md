@@ -70,6 +70,6 @@ regression of the selected option. The single-table branch is index-served; the 
   implemented) showing repeated misses on misspelled or surface-variant queries that stemming cannot
   serve; re-run this harness with those observed cases added to the fixture before adopting.
 
-Semantic equivalence judgement remains in the `mimisbrunnr-context-memory` skill; the server-side
+Semantic equivalence judgement remains in the `mimisbrunnr-odin-context-memory` skill; the server-side
 change widens candidate recall only and preserves every scope, status, temporal, facet and limit
 semantic (pinned by `FreeTextRecallTests` and the existing query component tests).

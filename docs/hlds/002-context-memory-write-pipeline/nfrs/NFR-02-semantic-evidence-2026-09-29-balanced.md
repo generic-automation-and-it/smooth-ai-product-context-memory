@@ -62,7 +62,7 @@ and a fixture declaring no positive pair is refused as unmeasurable rather than 
 The model received only the blinded emitter output:
 
 ```bash
-python3 -B .agents/skills/mimisbrunnr-context-memory/tests/fixtures/score_fixtures.py --emit-model-input
+python3 -B .agents/skills/mimisbrunnr-odin-context-memory/tests/fixtures/score_fixtures.py --emit-model-input
 ```
 
 It did not read `scenarios.json`, which holds the expected verdicts, author notes and the `axis` label.
@@ -77,8 +77,8 @@ recorded rather than glossed: this is one blinded judgement by one model, which 
 ## Result
 
 ```bash
-python3 -B .agents/skills/mimisbrunnr-context-memory/tests/fixtures/score_fixtures.py \
-  --model-verdicts .agents/skills/mimisbrunnr-context-memory/tests/fixtures/model-verdicts-2026-09-29-balanced.json
+python3 -B .agents/skills/mimisbrunnr-odin-context-memory/tests/fixtures/score_fixtures.py \
+  --model-verdicts .agents/skills/mimisbrunnr-odin-context-memory/tests/fixtures/model-verdicts-2026-09-29-balanced.json
 ```
 
 | | |
@@ -114,7 +114,7 @@ fixture that run actually saw. `scenarios-2026-09-29.json` freezes the ten-scena
 earlier runs can be re-scored exactly:
 
 ```bash
-cd .agents/skills/mimisbrunnr-context-memory/tests/fixtures
+cd .agents/skills/mimisbrunnr-odin-context-memory/tests/fixtures
 for run in 2026-09-17 2026-09-29; do
   python3 score_fixtures.py --fixtures scenarios-2026-09-29.json \
     --model-verdicts model-verdicts-$run.json --allow-legacy-positional

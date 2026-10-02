@@ -5,8 +5,8 @@
 Run from repository root:
 
 ```bash
-python3 -B .agents/skills/mimisbrunnr-context-memory/tests/measure_cost.py
-python3 -B .agents/skills/mimisbrunnr-context-memory/tests/run_tests.py
+python3 -B .agents/skills/mimisbrunnr-odin-context-memory/tests/measure_cost.py
+python3 -B .agents/skills/mimisbrunnr-odin-context-memory/tests/run_tests.py
 ```
 
 The deterministic fixture models one checkpoint containing ten atomic facts and a saturated baseline

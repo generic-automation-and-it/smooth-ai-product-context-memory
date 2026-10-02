@@ -44,14 +44,14 @@ material is surfaced, not silently resolved.
 ## Evidence (2026-09-26)
 
 Accepted on Path A — skill-level evidence. The import→capture chain is **agent-mediated**: the
-`--store` path in the load skill hands material to the capture skill (`mimisbrunnr-context-memory`),
+`--store` path in the load skill hands material to the capture skill (`mimisbrunnr-odin-context-memory`),
 which runs the judgement stages. An agent sits between the two skills and the store, so no C# L1 test
 can assert those stages end to end — that is an architectural boundary, not a test gap, and the
 resolution is to accept the evidence that exists rather than build a harness bridging the agent
 boundary.
 
 - The capture path's judgement stages are exercised by the capture skill's own harness:
-  `.agents/skills/mimisbrunnr-context-memory/tests/run_tests.py` (75 tests, all green) — redaction
+  `.agents/skills/mimisbrunnr-odin-context-memory/tests/run_tests.py` (75 tests, all green) — redaction
   (`test_redact_and_flag_never_rejects`), atomicity/bundling
   (`test_bundled_tally_is_flagged`, `test_bundled_compound_is_flagged`,
   `test_semicolon_between_clauses_is_bundled`, `test_single_contrastive_junction_is_bundled`,

@@ -21,6 +21,7 @@ Export and import are about **this session's memory**: export writes what the se
 |--------|--------|
 | `--export [--path <dir>]` _(default)_ | **Reconcile against `INDEX.md`**, then write this run's new and improved units to a new `.context/understandings/<subject>-<yyyyMMdd-HHmm>/`, or under `--path` when given. Proposes the split first; writes nothing and creates no folder when nothing changed |
 | `--export --all [--path <dir>]` | Same, but breadth-first: write every candidate without pausing for the user to cut the list, **and hold the qualifying bar loosely** — a marginal candidate is written, not dropped, because the user prunes afterwards |
+| `--export --dontask [--path <dir>]` | Same, but skips the "Export split" ask and takes the recommended option as analysed by the AI. **Does not** widen the qualifying bar — a marginal candidate is still dropped if it does not qualify, unlike `--all` |
 | `--import` | Load Understandings whose question matches one the task will make you ask |
 | `--publish [--portable-only] [--path <target>]` | Write every unit to a zip under `.context/understandings-publish/`, or to `--path` when given; `--portable-only` restricts the archive to `scope: portable` units |
 | `--consume <zip> [--path <dir>]` | Unpack a published archive into the working store — `.context/understandings/` by default, or `--path` when given |
@@ -38,8 +39,12 @@ the old design overloading `--all` for both.
 `--all` does **not** turn proposals into commitments, and it does **not** override the qualifying
 test. An unbuilt recommendation is still a proposal: label it as proposed and record that it was
 not approved or implemented. Toolchain knowledge still goes to its `*AGENTS.md` home, even when
-the user asks for every candidate. Breadth means “show the marginal qualifying residue”, not
-“store everything mentioned in the session”.
+the user asks for every candidate. Breadth means "show the marginal qualifying residue", not
+"store everything mentioned in the session".
+
+`--dontask` applies only to `--export`, where it skips the "Export split" `AskUserQuestion` and
+takes the recommended option (write every candidate) as analysed by the AI. Unlike `--all`, it
+does **not** widen the qualifying bar — it only skips the ask.
 
 `--path` is always the **target** a mode writes to, overriding its default — never a source.
 `--consume`'s source stays positional.
@@ -485,7 +490,7 @@ is the complementary signal, so the count is read by hand: open every unit whose
 names this slug and count the distinct `provenance.session` values on them. Below three, propose anyway
 only if you **state why** — name what makes this the exception (a cost that repeats, a decision already
 taken, a rule that is currently unwritten). The same arithmetic governs `propose-label` in
-`mimisbrunnr-context-memory`: a label seen once is a word, three
+`mimisbrunnr-odin-context-memory`: a label seen once is a word, three
 times is vocabulary, and proposing below that is how the registry fills with near-synonyms nothing queries.
 
 `--review` reports the other half of this signal as `never inherited`. A unit nothing ever inherited is not
@@ -497,7 +502,7 @@ Propose the promotion; the user decides. Once promoted, the Understanding record
 ## Guardrails
 
 - Writing to a mode's default location, or to an explicit `--path`, needs no approval — the location was already chosen, by default or by the user typing it. Report what was written and where, every time; removing the prompt must not remove the user's chance to notice.
-- Ask before promoting, and before a `--consume` makes an incoming copy the current version of a slug this workspace already holds — both change durable state someone already chose to keep or rely on. A local `--export` writing an `improved` version does **not** ask: it adds a copy and destroys nothing, and the five outcomes are reported. On `--export`, propose the split with `AskUserQuestion` (recommending "write every candidate" first) before writing, unless `--all` was passed — the user's own instruction to skip that ask *and* to hold the qualifying bar loosely, writing a marginal candidate rather than dropping it.
+- Ask before promoting, and before a `--consume` makes an incoming copy the current version of a slug this workspace already holds — both change durable state someone already chose to keep or rely on. A local `--export` writing an `improved` version does **not** ask: it adds a copy and destroys nothing, and the five outcomes are reported. On `--export`, propose the split with `AskUserQuestion` (recommending "write every candidate" first) before writing, unless `--all` was passed — the user's own instruction to skip that ask *and* to hold the qualifying bar loosely, writing a marginal candidate rather than dropping it. With `--dontask`, skip the ask and take the recommended option (write every candidate) as analysed by the AI.
 - Never edit, overwrite or delete an existing copy of a slug. An improvement is a new complete copy in this run's folder; history is immutable. The **one** exception is striking a credential value that should never have been written — see *Redact before you write*; that is a repair, not a revision.
 - Never write an Understanding in must/never language.
 - Never let an Understanding contradict a rule without flagging it.
@@ -507,7 +512,7 @@ Propose the promotion; the user decides. Once promoted, the Understanding record
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
-| 2026-10-01 | **Promotion gained a threshold, and the evidence for it.** `--promote` proposed on any judgement call; it now proposes after the unit has been **inherited in three independent sessions** (`provenance.inherited` on the units a later session exported), or states why it is proposing earlier. Evidence-based, so the user still decides — the threshold gates the *proposal*, not the decision. The same arithmetic was added as guidance for `propose-label` in `mimisbrunnr-context-memory` (a label seen once is a word, three times is vocabulary), and `--review`'s existing `never inherited` flag is named as the other half of the signal. Wording only; no script change and no test tier. **Divergence from the devex template** — this skill is template-owned, so `ai-template-sync` would revert it; upstream it or keep this row. | ICM adoption |
+| 2026-10-01 | **Promotion gained a threshold, and the evidence for it.** `--promote` proposed on any judgement call; it now proposes after the unit has been **inherited in three independent sessions** (`provenance.inherited` on the units a later session exported), or states why it is proposing earlier. Evidence-based, so the user still decides — the threshold gates the *proposal*, not the decision. The same arithmetic was added as guidance for `propose-label` in `mimisbrunnr-odin-context-memory` (a label seen once is a word, three times is vocabulary), and `--review`'s existing `never inherited` flag is named as the other half of the signal. Wording only; no script change and no test tier. **Divergence from the devex template** — this skill is template-owned, so `ai-template-sync` would revert it; upstream it or keep this row. | ICM adoption |
 | 2026-09-19 | Initial version. | |
 | 2026-09-19 | `--export`/`--import` are session↔disk; cross-repo moves became `--publish`/`--consume`. | |
 | 2026-09-19 | Definition restated from its purpose — input and outcome of a session's memory, for another agent to act on — with a single "no other home" test replacing two separate qualifying rules. | |

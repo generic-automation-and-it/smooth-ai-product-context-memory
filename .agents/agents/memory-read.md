@@ -14,6 +14,6 @@ tools:
 model: sonnet
 ---
 
-Follow `.agents/skills/mimisbrunnr-context-memory/agents/memory-read.md` exactly. Tool grant contains
+Follow `.agents/skills/mimisbrunnr-odin-context-memory/agents/memory-read.md` exactly. Tool grant contains
 only read MCP tools: no Bash, file writes, HTTP client, or mutation tool. MCP server removes
 `CONTEXT_MEMORY_WRITE_TOKEN` from its process and exposes no write method.

@@ -16,7 +16,7 @@ an unrelated coding question is not consent to bootstrap or write memory.
 
 Before any store comparison, dry-run, capture, or recall test:
 
-1. Load `../mimisbrunnr-context-memory/SKILL.md` and its `agents/memory-read.md` and
+1. Load `../mimisbrunnr-odin-context-memory/SKILL.md` and its `agents/memory-read.md` and
    `agents/memory-write.md` worker contracts.
 2. Confirm through a runtime probe or known effective grants that the runtime provides the capability-
    limited `memory-read` and `memory-write` workers described by those contracts, including their actual

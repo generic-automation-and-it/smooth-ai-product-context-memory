@@ -16,10 +16,11 @@ Skills live **flat**, one directory per skill directly under `.agents/skills/`. 
 | **ai-template-sync** | UPSERT smooth-devex-template scaffold into an existing repo | `/ai-template-sync` |
 | **context-load-agents-context** | Load ancestor AGENTS.md context for a file | `/context-load-agents-context` |
 | **context-load-context** | Load domain context before implementation | `/context-load-context auth` |
-| **mimisbrunnr-context-memory** | Get/set persistent context-memory records; sole authority on the write path to the store | `/mimisbrunnr-context-memory [--dryrun] [--approve]` |
-| **mimisbrunnr-dossier** | Compose a read-only, cited context dossier for a slice of the store — document plus findings, no write capability | `/mimisbrunnr-dossier` |
+| **mimisbrunnr-odin-context-memory** | Get/set persistent context-memory records; sole authority on the write path to the store | `/mimisbrunnr-odin-context-memory [--dryrun] [--approve]` |
+| **mimisbrunnr-saga-dossier** | Compose a read-only, cited context dossier for a slice of the store — document plus findings, no write capability | `/mimisbrunnr-saga-dossier` |
 | **mimisbrunnr-understanding** | Load an Understanding export (or prior material) into agent context; `--store` funnels an import back through the capture path | `/mimisbrunnr-understanding [--store] [--currentsession] [--all]` |
-| **mimisbrunnr-recall-feedback** | Run the three recall-feedback tuning queries — never-recalled list, miss rate over a window, baseline reset | `/mimisbrunnr-recall-feedback` |
+| **mimisbrunnr-heimdallr-find-session-metadata** | Scan the current session for tickets, repository and initiative; print to console — Heimdallr watches, the operator binds | `/mimisbrunnr-heimdallr-find-session-metadata [--json] [--initiative NAME]` |
+| **mimisbrunnr-muninn-recall-feedback** | Run the three recall-feedback tuning queries — never-recalled list, miss rate over a window, baseline reset | `/mimisbrunnr-muninn-recall-feedback` |
 | **ai-understanding** | Export this session's hard-won knowledge as Understandings; import, publish and consume the store | `/ai-understanding [--export] [--import] [--publish] [--consume <zip>]` |
 | **mimisbrunnr-ymir-bootstrap** | Build a cited, reviewable durable-context baseline for one existing project, optionally focused on its next feature. Ymir is the first being of Norse myth, from whose body the gods shaped the world — as this baseline is shaped from the repository that already exists. | `/mimisbrunnr-ymir-bootstrap <repository> [next-feature focus]` |
 | **create-hld** | Author a design-only High-Level Design under `docs/hlds/NNN-<slug>/` | `/create-hld <kebab-slug>` |
@@ -47,10 +48,10 @@ Opt-in switches relax that, at different token costs (see `mimisbrunnr-vitsmunir
 The tool switches (`--oktoreaddocs`, `--oktowebsearch`) re-enable the file/web payload bloat the
 listen-first default avoids — use deliberately.
 
-### mimisbrunnr-context-memory switches
+### mimisbrunnr-odin-context-memory switches
 
 Default (no switch) accumulates candidate facts silently during work and writes them in one transaction at
-an explicit end-of-task `set`. See `mimisbrunnr-context-memory/README.md` for the cost model — **every write is an LLM
+an explicit end-of-task `set`. See `mimisbrunnr-odin-context-memory/README.md` for the cost model — **every write is an LLM
 call** (R13), so the switches trade inspection against irreversibility, not against speed:
 
 | Switch | Effect | Cost |
@@ -119,15 +120,15 @@ Two parents own most skills here, and their SKILL.md files are kept byte-identic
 | **manage-rule-system** | medium | Cross-tool frontmatter authoring |
 | **ai-template-sync** | medium | `sync.sh` does the copy/compare; the agent only picks flags, runs the rules-layout pre-flight and builds the conflict table |
 | **mimisbrunnr-vitsmunir-dump** | medium | Listen-first capture — `high` would be re-paid on every turn of a long session. Deep reasoning happens downstream, in the skills its output feeds (`ai-understanding`, `agile-github-breakdown`, `create-hld`) |
-| **mimisbrunnr-recall-feedback** | medium | Three fixed recall-feedback API queries plus interpretation |
+| **mimisbrunnr-muninn-recall-feedback** | medium | Three fixed recall-feedback API queries plus interpretation |
 | **ai-review** | high | Review analysis, fix/skip judgment + multi-file code fixes (`smooth-ai-report-review`) |
 | **ai-understanding** | high | Judging what qualifies as transferable knowledge + merge/promotion decisions |
-| **mimisbrunnr-dossier** | high | Equivalence, contradiction and gap judgement across a whole store slice |
+| **mimisbrunnr-saga-dossier** | high | Equivalence, contradiction and gap judgement across a whole store slice |
 | **mimisbrunnr-understanding** | high | Judgement on understanding vs scoped fact, and capture-path funneling |
 | **agile-github-breakdown** | xhigh | Multi-turn FR/NFR → Task graph + GitHub writes |
 | **create-hld** | xhigh | Multi-turn clarification gates + architectural judgment (LADRs, NFRs, diagrams) |
 | **mimisbrunnr-ymir-bootstrap** | xhigh | Source-backed baseline the store's later sessions build on: consequential questioning, conflict preservation and reviewed candidate selection require product judgement |
-| **mimisbrunnr-context-memory** | xhigh | Sole write path to the store every later session builds on: group-scoped semantic versioning, cross-group twin linking, atomicity splitting and summary/keyword generation |
+| **mimisbrunnr-odin-context-memory** | xhigh | Sole write path to the store every later session builds on: group-scoped semantic versioning, cross-group twin linking, atomicity splitting and summary/keyword generation |
 
 ### Sub-skill invocation
 
@@ -160,7 +161,7 @@ Skills are flat under `.agents/skills/`; the category lives in the folder-name p
 | `agile-` | `agile-github-breakdown`, `agile-github-task-from-diff` |
 | `ai-` | `ai-review`, `ai-terse`, `ai-template-sync`, `ai-understanding` |
 | `context-` | `context-load-agents-context`, `context-load-context` |
-| `mimisbrunnr-` | `mimisbrunnr-vitsmunir-dump`, `mimisbrunnr-ymir-bootstrap`, `mimisbrunnr-context-memory`, `mimisbrunnr-dossier`, `mimisbrunnr-recall-feedback`, `mimisbrunnr-understanding` |
+| `mimisbrunnr-` | `mimisbrunnr-vitsmunir-dump`, `mimisbrunnr-ymir-bootstrap`, `mimisbrunnr-odin-context-memory`, `mimisbrunnr-saga-dossier`, `mimisbrunnr-muninn-recall-feedback`, `mimisbrunnr-understanding` |
 | `git-` | `git-commit`, `git-commit-push`, `git-commit-push-pr`, `git-commit-review-push`, `git-sync` |
 | _(none)_ | `create-hld`, `manage-rule-system` |
 

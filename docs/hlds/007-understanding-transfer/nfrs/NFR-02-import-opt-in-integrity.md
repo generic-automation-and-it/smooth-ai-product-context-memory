@@ -42,14 +42,14 @@ Goal 3 (import is opt-in and goes through the capture path), LADR-02, LADR-03. `
 Accepted on Path A — skill-level evidence for the judgement stages, L1 for the store side.
 
 The redaction, atomicity-split and conflict-surfacing criteria are **judgement stages in the capture
-skill** (`mimisbrunnr-context-memory`), which the load skill's `--store` path hands material to. The
+skill** (`mimisbrunnr-odin-context-memory`), which the load skill's `--store` path hands material to. The
 import → capture chain is **agent-mediated**: an agent sits between the load skill, the capture skill
 and the store, so no C# L1 test can reach those stages end to end without a cross-language harness.
 That is an architectural boundary, not a test gap; the resolution here is to accept the skill-level
 evidence that exists rather than build a harness bridging the agent boundary (the rejected Path B).
 
 - **Met — skill level (judgement stages):** the capture skill's harness
-  `.agents/skills/mimisbrunnr-context-memory/tests/run_tests.py` (75 tests, all green) exercises the
+  `.agents/skills/mimisbrunnr-odin-context-memory/tests/run_tests.py` (75 tests, all green) exercises the
   stages this NFR asserts. Redaction: `test_redact_and_flag_never_rejects`. Atomicity split is a
   *propose, not decide* stage — `test_bundled_tally_is_flagged`, `test_bundled_compound_is_flagged`,
   `test_semicolon_between_clauses_is_bundled`, `test_single_contrastive_junction_is_bundled`,

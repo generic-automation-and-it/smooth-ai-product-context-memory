@@ -14,7 +14,7 @@ tools:
   - mimisbrunnr-read/initiatives
 ---
 
-Follow `.agents/skills/mimisbrunnr-context-memory/agents/memory-read.md` exactly. Tool grant contains
+Follow `.agents/skills/mimisbrunnr-odin-context-memory/agents/memory-read.md` exactly. Tool grant contains
 only read MCP tools: no shell, file writes, HTTP client, or mutation tool. MCP server removes
 `CONTEXT_MEMORY_WRITE_TOKEN` from its process and exposes no write method. Local runtime loads server
 from repository `.mcp.json` and supplies `CONTEXT_MEMORY_READ_TOKEN` through process environment.

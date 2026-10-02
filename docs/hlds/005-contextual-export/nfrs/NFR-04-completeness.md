@@ -37,7 +37,7 @@ records failing the exact tag predicate, preserves selected references/disclosur
 The skill harness includes fixtures, stdin/stdout execution, bounds and no-extra-I/O checks.
 The [dated review revalidation](../../003-graph-edges-on-age/nfrs/NFR-02-ticket-traversal-measurements.md#2026-09-15-review-revalidation)
 records the post-schema-fix harness run; the earlier 34-test checkpoint is historical. Run
-`python3 .agents/skills/mimisbrunnr-context-memory/tests/run_tests.py` for the current harness,
+`python3 .agents/skills/mimisbrunnr-odin-context-memory/tests/run_tests.py` for the current harness,
 whose count also includes unrelated skill tests. This does not evaluate LLM relevance judgement or prove the full dossier NFR;
 the tests below for full composition remain required, not claimed passed.
 

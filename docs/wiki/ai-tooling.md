@@ -23,7 +23,7 @@ All three tools share a common context through the `.agents/` folder — rules, 
 
 ## ChatHost (reserved, not in the tree)
 
-ChatHost is a **reserved slot**, not scheduled work: the name is kept for a standalone LLM microservice that would own the Anthropic SDK and talk to the Host API over HTTP only, keeping conversational AI out of the data API. There is no project, no build output and no run command — the root `AGENTS.md` repository-layout row is a placeholder so the slot is not re-proposed from scratch. Agents work with the store through the mimisbrunnr-context-memory skill against the HTTP API.
+ChatHost is a **reserved slot**, not scheduled work: the name is kept for a standalone LLM microservice that would own the Anthropic SDK and talk to the Host API over HTTP only, keeping conversational AI out of the data API. There is no project, no build output and no run command — the root `AGENTS.md` repository-layout row is a placeholder so the slot is not re-proposed from scratch. Agents work with the store through the mimisbrunnr-odin-context-memory skill against the HTTP API.
 
 ## Recommendations (for teams adopting this approach)
 

@@ -68,7 +68,7 @@ the full dossier implementation.
 
 ## Consequences
 
-The executable [near_miss_tags.py](../../../../.agents/skills/mimisbrunnr-context-memory/scripts/near_miss_tags.py)
+The executable [near_miss_tags.py](../../../../.agents/skills/mimisbrunnr-odin-context-memory/scripts/near_miss_tags.py)
 is an offline stdin/stdout validator and reporter, not a semantic detector. Its strict input contains
 approved UUID/version references with per-record `scopeDimension`/`scopeIdentifier`, the unchanged
 `originalQuery` using API field `facetMatchMode` (`any` when absent), examined records carrying

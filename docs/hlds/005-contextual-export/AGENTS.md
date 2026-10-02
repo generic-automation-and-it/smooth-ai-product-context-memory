@@ -107,7 +107,7 @@ Targets and verification live in [./nfrs/](./nfrs/). Three shape how code is wri
 
 ## Migration Plans
 
-- **`mimisbrunnr-context-memory` documentation must be amended in the same change** that introduces the dossier skill: its stated invariant narrows from sole *interface* to sole **writer** (LADR-08). Unamended, the two skills' documentation contradicts each other — the exact defect this design reports on elsewhere.
+- **`mimisbrunnr-odin-context-memory` documentation must be amended in the same change** that introduces the dossier skill: its stated invariant narrows from sole *interface* to sole **writer** (LADR-08). Unamended, the two skills' documentation contradicts each other — the exact defect this design reports on elsewhere.
 - **Ticket prerequisites were resolved in their owning HLDs before migration.** HLD-003 LADR-08 superseded LADR-02; HLD-002 LADR-08 owns the accepted declared-only writer. Final evidence verifies ticket migration/API and the deterministic near-miss helper. LADR-10 and the tag half of LADR-11 still require tag identity/synonym and writer decisions; full dossier implementation is not implied by this acceptance.
 - **LADR-06's Open question belongs to HLD-004.** Whether an export counts as a recall event — and whether "findings already dismissed" is recorded anywhere — must be settled with recall feedback, not ahead of it.
 - **The five focuses are unvalidated** (LADR-12 Open). They were named from how the practitioner works, not derived. Whether `specification` survives beside `architecture`, and whether `review` is a focus at all, is answerable only by use. Do not add a sixth before the five have been used, and do not build a focus-registry abstraction for five enum values.

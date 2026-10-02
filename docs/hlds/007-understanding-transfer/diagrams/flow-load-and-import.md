@@ -5,7 +5,7 @@ sequenceDiagram
     participant Practitioner
     participant LoadSkill as mimisbrunnr-understanding
     participant Agent as Agent session
-    participant Capture as mimisbrunnr-context-memory (capture path)
+    participant Capture as mimisbrunnr-odin-context-memory (capture path)
     participant Store as Mímisbrunnr store
 
     Practitioner->>LoadSkill: load material (Understanding export / foreign doc)
