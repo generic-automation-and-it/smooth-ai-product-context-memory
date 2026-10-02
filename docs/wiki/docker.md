@@ -74,7 +74,8 @@ archive offline before you rely on it, then start the new image:
 ```bash
 # 1. snapshot the running corpus (storage connection vars; no write token)
 docker run --rm \
-  -v "$(pwd)/.context/snapshots:/snapshots" -v mimisbrunnr-host-context:/app/.context \
+  -v "$(pwd)/.context/snapshots:/snapshots" \
+  -v mimisbrunnr-<installation-id>-host-context:/app/.context \
   --env-file <installation-credential-file> \
   ghcr.io/generic-automation-and-it/smooth-ai-product-context-memory:<old-tag> snapshot --output /snapshots
 
@@ -82,18 +83,20 @@ docker run --rm \
 docker run --rm -v "$(pwd)/.context/snapshots:/snapshots" \
   ghcr.io/generic-automation-and-it/smooth-ai-product-context-memory:<old-tag> verify /snapshots/snapshot-<ts>.tar
 
-# 3. start the new image with the same volumes and credentials. It logs the pending-migration count and
-#    the last snapshot's age, then applies the migrations before it reports ready.
+# 3. start the new image with the same volumes and credentials. When migrations are pending it
+#    logs their count and the last snapshot's age, then applies them before it reports ready; an
+#    ordinary start with nothing to apply logs nothing.
 ```
 
-`<old-tag>` is the tag this installation is currently running, and
+`<old-tag>` is the tag this installation is currently running,
 `<installation-credential-file>` is the env file already carrying its
-`ConnectionStrings__SmoothAiProductContextMemory` and `BlobStorage__*` values. The host-context
-volume is `mimisbrunnr-<installation-id>-host-context` on a release installation
-(`mimisbrunnr-host-context` is the development AppHost's name); mounting the wrong one writes the
-snapshot record where the Host will never read it. Credentials arrive by file rather than inline
-`-e` for the reason given under [Run standalone (API)](#run-standalone-api): an inline secret lands
-in shell history.
+`ConnectionStrings__SmoothAiProductContextMemory` and `BlobStorage__*` values, and
+`<installation-id>` is the `InstallationConfiguration__Id` this controller was started with. The
+host-context volume is therefore `mimisbrunnr-<installation-id>-host-context` on a release
+installation (`mimisbrunnr-host-context` is the development AppHost's name); mounting the wrong one
+writes the snapshot record where the Host will never read it. Credentials arrive by file rather than
+inline `-e` for the reason given under [Run standalone (API)](#run-standalone-api): an inline secret
+lands in shell history.
 
 Do not change the PostgreSQL major as part of an upgrade. **Rolling back an image does not roll back
 schema or data**: if the new migrations prevent a downgrade, rebuild both stores from the verified
@@ -103,7 +106,8 @@ target by default, precisely because a silent merge would be data loss:
 
 ```bash
 docker run --rm \
-  -v "$(pwd)/.context/snapshots:/snapshots" -v mimisbrunnr-host-context:/app/.context \
+  -v "$(pwd)/.context/snapshots:/snapshots" \
+  -v mimisbrunnr-<installation-id>-host-context:/app/.context \
   --env-file <installation-credential-file> \
   ghcr.io/generic-automation-and-it/smooth-ai-product-context-memory:<old-tag> \
   restore /snapshots/snapshot-<ts>.tar --force
