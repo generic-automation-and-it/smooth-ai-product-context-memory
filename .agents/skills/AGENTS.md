@@ -30,6 +30,7 @@ First-party AI agent skills. They legitimately run shell, `gh`/`git`, and templa
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-02 | The parent-ownership paragraph in `README.md` no longer lists `ai-understanding` among the skills "kept byte-identical" to `smooth-devex-template`. It was the last file still asserting the claim the marketplace Non-Negotiable had just been rewritten to deny — the skill carries four accepted local divergences (case-folded collision check, `context_root()`, the `--promote` threshold, the durability guard), so an agent running `/ai-template-sync` read the catalogue first and would have reverted them. The exception now names the divergences' changelog and the `ai-template-sync` consequence. Documentation only. | PR review |
 | 2026-09-27 | `mimisbrunnr-ymir-bootstrap` added at `effort: xhigh` in `README.md` → Effort. The Naming & Ordering table gained the two skills it was missing (`ai-understanding`, `mimisbrunnr-saga-dossier`), and the Quick Reference bootstrap row dropped its one-off link to match its siblings. | skill effort migration |
 | 2026-09-27 | Synced template PR #85's secret-handling checklist, marked the removed SkillSpector gate historical, and documented the local runtime-token consumers. | template PR #85 |
 | 2026-06-21 | Initial version — documents the SkillSpector baseline gate contract and the secret-handling guardrail for skills. | #52 |
