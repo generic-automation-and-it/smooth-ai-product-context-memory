@@ -155,8 +155,10 @@ flowchart LR
   refused with `bad-deadline`, never clamped. Each read's socket timeout is `min(HTTP_TIMEOUT, deadline)`;
   a write keeps `HTTP_TIMEOUT`, because a write is not a recall. deepsearch checks the deadline before
   each pass, uses the remaining budget as that pass's socket timeout, and on a timeout stops the chain
-  while keeping the completed passes — whole records only — disclosing `deadlineSeconds`,
-  `deadlineReached` and `passesNotRun`. *Consequence:* a recall is bounded and its shortfall is reported,
+  while keeping the completed passes — whole records only — disclosing `deadlineSeconds`, `stoppedEarly`
+  (any pass incomplete), `budgetExhausted` (the wall clock was spent — distinct from a pass hanging) and
+  `passesIncomplete`; `anchorsEligible`/`anchorsOmittedByCap` are `null` when the baseline never
+  answered, because the traversal set is then unknown, not empty. *Consequence:* a recall is bounded and its shortfall is reported,
   so a partial result can never read as the whole store. The deadline is a client-side rendering/handling
   concern only: no Host change, no new network dependency (BR-16), and recall feedback stays server-side
   (HLD-004 LADR-01), so the contract states that a client giving up can leave a server-recorded outcome
@@ -224,8 +226,10 @@ flowchart LR
   may take*. deepsearch checks the deadline before each pass and uses the remaining budget as that
   pass's socket timeout, so a hung store cannot stretch a ten-call chain into ten separate timeouts. On a
   timed-out pass, or once the deadline is spent, it **stops the chain and keeps the passes already
-  completed** — never a partial record — disclosing `deadlineSeconds`, `deadlineReached` and
-  `passesNotRun`, with every pass carrying a `status` of `completed` / `timed-out` / `not-run`. Recall
+  completed** — never a partial record — disclosing `deadlineSeconds`, `stoppedEarly` (any pass
+  incomplete) and `budgetExhausted` (the wall clock was spent — *not* the same as a pass hanging) and
+  `passesIncomplete`, with every pass carrying a `status` of `completed` / `timed-out` / `not-run`; the
+  anchor counters are `null` when the baseline never answered. Recall
   feedback stays server-side (HLD-004 LADR-01), so a client that gives up can leave a server-recorded
   outcome the agent never received; that is a stated boundary, not a client-side fix.
 - **Approval gating governs `status`, not persistence.** `kind ∈ {rule, nfr, decision}` are **written**
@@ -286,17 +290,22 @@ flowchart LR
    capability boundaries; project/Copilot agent registrations; ticket transport/guards/dry-run/lossless
    disclosure; blinded semantic-fixture emission/scoring; `TransportFailureTests`, which drives a **real
    stalled socket** to prove a hung store is classified `timed-out` rather than escaping as a
-   `TimeoutError` traceback, and that a refused connection stays `unreachable` (the control that makes
-   the first assertion meaningful — a fix classifying every transport error as `timed-out` passes one
-   and fails the other); `RecallFramingTests`, which recalls a record whose statement is a verbatim
-   prompt injection through every registered read subcommand **via the client's real `main()`** and
-   requires the shared notice plus intact attribution on each — driving the entry point rather than the
-   framing helper, because an earlier version passed with the whole fix reverted; `RecallDeadlineTests`,
+   `TimeoutError` traceback, returns within the budget (elapsed ≤ `HTTP_TIMEOUT` + tolerance), and that a
+   refused connection stays `unreachable` (the control that makes the first assertion meaningful — a fix
+   classifying every transport error as `timed-out` passes one and fails the other) — including the MCP
+   blob fetch, which is driven through the same classified path; `RecallFramingTests`, which recalls a
+   record whose statement is a verbatim prompt injection through every registered read subcommand **via
+   the client's real `main()`** and through every MCP tool **via `read_mcp.handle`**, requiring the shared
+   notice plus intact attribution on each — driving the real entry points rather than the framing helper,
+   because an earlier version passed with the whole fix reverted and the MCP surface is the only one the
+   `memory-read` worker can reach; `RecallDeadlineTests`,
    which pins the deadline config (defaults to the cap, shortens, refuses out-of-range/non-integer with
    `bad-deadline` rather than clamping, refuses before transport), the single-call bound (a shortened
    deadline reaches `_open` as the socket timeout), and deepsearch's degradation (a timed-out pass keeps
-   the completed passes, names the rest in `passesNotRun`, and a chain of slow passes stops at the wall
-   clock between passes); and
+   the completed passes and reports `stoppedEarly` without `budgetExhausted`, names the rest in
+   `passesIncomplete`, a chain of slow passes stops at the wall clock between passes and reports
+   `budgetExhausted`, and a baseline timeout reports `anchorsEligible`/`anchorsOmittedByCap` as `null`
+   rather than a clean zero); and
    `near_miss_tags.py` schema/scope/basis/
    bounds/output/no-I/O guarantees.
    Run: `python3 -B .agents/skills/mimisbrunnr-context-memory/tests/run_tests.py`. The PR gate runs it and
@@ -368,6 +377,7 @@ redaction detector is a stdin→stdout fingerprint script reporting rule names o
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-02 | **The MCP read server now frames its output, classifies its blob fetch, and its deepsearch disclosure stops overstating.** A review of the shipped work found five gaps. (1) `memory_read_mcp.py` returned raw values with no framing — the read worker's *only* path to the store is this server (its grant is `mcp__mimisbrunnr-read__*`), so the CLI framing the contract promised was unreachable from it; `handle` now frames every content-returning tool through `context_memory_client.framed_recall` (extracted from `print_recall`, so there is still one wording and one shape), with `probe` the derived opt-out and a test that drives `read_mcp.handle` for every tool. (2) `_get_blob` called `client._open` directly, taking the default socket timeout and skipping classification — a hung store surfaced as a bare `timed out` after 30 s; it now routes through `_read_response`, so it is deadline-bounded and classified `timed-out`. (3) A baseline timeout left `anchorsEligible`/`anchorsOmittedByCap` at `0`, which reads as "nothing to traverse"; they are now `null` when the baseline never answered. (4) `deadlineReached` set on a *pass* timeout (wall clock nowhere near the cap) is renamed `stoppedEarly`, with a separate `budgetExhausted` for the wall clock; `passesNotRun` (which named the pass that did run) is renamed `passesIncomplete`. (5) `TransportFailureTests` now asserts elapsed ≤ budget (the acceptance criterion), and `CONTEXT_MEMORY_RECALL_DEADLINE` is documented in `docs/wiki/setup.md`. Harness 161 -> 166. | review of #149; HLD-004 LADR-01 |
 | 2026-10-01 | **A recall now has one foreground deadline, and deepsearch degrades by whole passes at it.** The read path already told `timed-out` apart from `unreachable` (#146), but nothing bounded a *command*: deepsearch could chain a baseline, four keyword and five traversal calls with no overall limit, and a single timed-out pass aborted the run and discarded every pass already completed — so a five-minute hang returned nothing. `RECALL_DEADLINE_SECONDS` (60 s) is the cap; `CONTEXT_MEMORY_RECALL_DEADLINE` may shorten it and any other value is refused with `bad-deadline`, never clamped. Each read's socket timeout is `min(HTTP_TIMEOUT, deadline)`, so a shortened deadline bounds a single `query`; a write keeps `HTTP_TIMEOUT`, so a malformed read-path setting cannot refuse a capture. deepsearch checks the deadline before each pass, uses the remaining budget as that pass's socket timeout, and on a timeout stops the chain while keeping the completed passes — whole records only — disclosing `deadlineSeconds`, `deadlineReached` and `passesNotRun`, with each pass carrying a `status`. Recall feedback stays server-side (HLD-004 LADR-01), so the contract states that a client giving up can leave a server-recorded outcome the agent never received. **The harness found a second-module trap while writing the tests:** `deepsearch` was loaded before `sys.modules["context_memory_client"]` was aliased, so it held its own `ClientError` and a raised timeout was invisible to its handler — `_load` now registers each module before exec, which fixes the class for every sibling import rather than patching one. Harness 153 -> 161; both the deadline refusal and the partial-return path mutation-checked. | MemOS adoption; HLD-004 LADR-01; BR-16 |
 | 2026-10-01 | **The proxy and redirect guards are tested where they are installed.** `test_redirects_are_refused` exercised `_NoRedirect` in isolation, so dropping it — or the `ProxyHandler({})` — from `_open`'s `build_opener` call left every test green while a 302 forwarded `Authorization` and an environment proxy saw it. Two tests now pin the real opener: one spies on `build_opener` and asserts both handlers reach it with an empty proxy map and the HTTP timeout, and one drives a loopback server answering 302 through `_request` and asserts `redirect-refused` with exactly one request served. Test References updated for the redaction and path-guard classes added today. Harness 151 -> 153; both handler removals mutation-checked. | HLD-002 NFR-01 |
 | 2026-10-01 | **An unparseable base URL is a classified `bad-base-url` refusal, not a traceback that prints its userinfo.** `urlsplit` rejects an NFKC-confusable character in the netloc (`http://user:s3cret@local＃host:5141`) with a `ValueError` that quotes the whole netloc, and only `ClientError` was caught, so the credential in the URL reached stderr in a traceback. `base_url()` and `_probe` now parse through `_parse_base`, which also forces the port parse and raises fixed text outside the handler so nothing chains the original message. Covered for both CLIs end to end (exit 1, no traceback, no userinfo) and for the rendered exception chain. The dossier composer's loopback guard carries the same fix. | HLD-002 NFR-01; `.agents/rules/skills/skill-secret-handling.instructions.md` |

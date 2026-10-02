@@ -440,6 +440,22 @@ RECALL_NOTICE_KEY = "recallNotice"
 BANNER_PREFIX = "> "
 
 
+def framed_recall(payload):
+    """Attach the shared notice to a recall result and return it **as a value** (no printing).
+
+    The one place the framing is built, so the two surfaces that render a recall — the CLI
+    (`print_recall`, below) and the MCP read server — cannot drift into two wordings or two shapes. The
+    MCP server returns its result as JSON-RPC content, so it needs the framed *value* rather than a
+    stdout banner; building it here is what makes "one notice" true rather than aspirational.
+    """
+    if isinstance(payload, dict):
+        return {RECALL_NOTICE_KEY: RECALL_NOTICE, **payload}
+    # A list or scalar result has nowhere to put a top-level field, so it is wrapped in an envelope
+    # rather than dropped — silently losing the framing on an unexpected shape is the one outcome this
+    # cannot have.
+    return {RECALL_NOTICE_KEY: RECALL_NOTICE, "result": payload}
+
+
 def print_recall(payload, *, banner=True):
     """Print a recall result with the notice attached, as prose and as a machine-readable field.
 
@@ -457,13 +473,7 @@ def print_recall(payload, *, banner=True):
     Attribution is untouched: uuid, version and capture time are carried through exactly as the API
     returned them. The notice adds framing; it never replaces provenance.
     """
-    if isinstance(payload, dict):
-        framed = {RECALL_NOTICE_KEY: RECALL_NOTICE, **payload}
-    else:
-        # A list or scalar result has nowhere to put a top-level field, so it is printed inside an
-        # envelope rather than dropped — silently losing the framing on an unexpected shape is the one
-        # outcome this cannot have.
-        framed = {RECALL_NOTICE_KEY: RECALL_NOTICE, "result": payload}
+    framed = framed_recall(payload)
     if banner:
         print(BANNER_PREFIX + RECALL_NOTICE)
     print(json.dumps(framed, indent=2))

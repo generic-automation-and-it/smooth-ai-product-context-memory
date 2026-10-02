@@ -177,7 +177,7 @@ NOT-AVAILABLE, never a silent miss.
 | `context_memory_read_client.py` | `python3 .../context_memory_read_client.py <subcommand>` | Read delegation | Read-only CLI surface: `probe`, `query`, `deepsearch`, `get-versions`, `get-blob`, `paths`, `ticket-paths`, `labels`, `initiatives`. Requires only `CONTEXT_MEMORY_READ_TOKEN`. |
 | `redact.py` | `echo '<json array of content strings>' \| python3 .../redact.py` | 2 (redact) | Fingerprint secret detection, stdin→stdout. Emits redacted content plus per-candidate findings `{rule_name, hit_count, spans: [{start, end}]}`. **Reports rule names and character offsets only** — never the matched text, never the content around it. A key whose name says secret (`password`, `secret`, `api_key`, `access_key`, a qualified `*_TOKEN`) is redacted on any value of 8+ characters; a neutral key (`key`, `sort_key`, bare `token`, `credential`) only when the value itself is secret-shaped (an unbroken 16+ character run mixing letters and digits), so `sort key = created_on` passes untouched. Redact-and-flag (LADR-003): a **found** secret is flagged, never a rejection of the record. An **unavailable scrubber** is the opposite case — every persisting write calls it automatically and refuses if it cannot run, so the gate never fails open. That refusal arrives as `redactor-unavailable` and is **terminal: do not retry it.** It names the failure, never the content, so it is safe to surface. |
 | `atomicity.py` | `echo '<json array of {description,statement}>' \| python3 .../atomicity.py` | 4 (atomicity) | Conservative bundle detector, stdin→stdout. Flags `simple` / `bundled` per candidate. It is a detector only — the split-vs-skip decision and the routing of the unprocessable remainder stay here, in the agent's judgement (LADR-002). |
-| `deepsearch.py` | `python3 .../deepsearch.py` | 3 (opt-in recall) | Baseline 200 plus bounded keyword/traversal passes, stable UUID/version dedupe, 400 aggregate cap and saturation disclosure. Bounded by the one recall deadline: a timed-out or deadline-stopped pass ends the chain but keeps the completed passes, disclosing `deadlineReached` and `passesNotRun`. |
+| `deepsearch.py` | `python3 .../deepsearch.py` | 3 (opt-in recall) | Baseline 200 plus bounded keyword/traversal passes, stable UUID/version dedupe, 400 aggregate cap and saturation disclosure. Bounded by the one recall deadline: a timed-out or deadline-stopped pass ends the chain but keeps the completed passes, disclosing `stoppedEarly`, `budgetExhausted` and `passesIncomplete`. |
 | `authority.py` | `python3 .../authority.py` | 3 (authority resolution) | Converts a stated-authority judgement into one or two ordered version writes. Existing-winner cases record the losing candidate as history, then restore the winner as current in the same transaction. |
 | `divergence.py` | `python3 .../divergence.py` | 3 (conflict composition) | Converts an explicit same-subject genuine-conflict judgement into a separately identified claim, proposed divergence memory and two contradiction links; rejects cross-scope and recursive evidence and deduplicates exact claim pairs. |
 | `near_miss_tags.py` | `python3 .../near_miss_tags.py < approved-evidence.json` | Read-only reporting | Bounded stdin JSON validation, exact tag comparison, scoped `near-miss-tag` output. No network, file output, vocabulary lookup or semantic heuristic. See Evidence-only Near Misses below. |
@@ -355,10 +355,13 @@ budget, because the operator then trusts a bound the recall does not have. Each 
 
 **Deepsearch degrades by whole passes at the deadline.** On a pass that times out, or once the deadline
 is spent, deepsearch **stops the chain and returns the passes already completed** — never a partial
-record, and never an abort that discards them. Its disclosure gains `deadlineSeconds`,
-`deadlineReached` and `passesNotRun` (each named by `kind` and `value`), in the same shape as the
+record, and never an abort that discards them. Its disclosure gains `deadlineSeconds`, `stoppedEarly`
+(any pass did not complete), `budgetExhausted` (the wall clock was spent, which is *not* the same as a
+pass hanging) and `passesIncomplete` (each named by `kind` and `value`), in the same shape as the
 existing cap disclosures, and every pass carries a `status` of `completed`, `timed-out` or `not-run`.
-A timeout is a **bounded, reported** result, not a silent one.
+`anchorsEligible` and `anchorsOmittedByCap` are `null` when the baseline never answered — the traversal
+set was never enumerated, so a `0` would read as "nothing to traverse" rather than "unknown". A timeout
+is a **bounded, reported** result, not a silent one.
 
 **A recall the client gives up on may still be recorded.** Recall feedback is written **server-side** by
 the query handler (HLD-004 LADR-01), so a client that hits the deadline can leave a server-recorded
