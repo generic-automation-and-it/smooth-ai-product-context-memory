@@ -19,7 +19,7 @@ preview and writes nothing.
 
 Store comparison, capture, and recall verification additionally need the sibling capture skill plus its
 configured and verified capability-limited memory read and write workers, described by
-[the canonical capture skill](../mimisbrunnr-context-memory/README.md). In the packaged/runtime check for
+[the canonical capture skill](../mimisbrunnr-odin-context-memory/README.md). In the packaged/runtime check for
 this contribution, those protected Codex workers were not verified: preview behavior was tested, while live
 capture and recall remain untested. This is a statement about the checked environment, not a claim that all
 Codex versions lack worker support. Without verified workers, the skill stops after preview; it does not use
@@ -91,7 +91,7 @@ files git would track plus sources you name, and never opens `.context/` or `.en
 where provisioned API tokens live.
 
 For exact capture semantics and supported payload fields, use the
-[context-memory documentation](../mimisbrunnr-context-memory/README.md) rather than copying its wire
+[context-memory documentation](../mimisbrunnr-odin-context-memory/README.md) rather than copying its wire
 contract here. Permission to capture a reviewed batch is not permission to mark gated rules, NFRs, or
 decisions as approved canon; canon approval remains a separate explicit choice.
 

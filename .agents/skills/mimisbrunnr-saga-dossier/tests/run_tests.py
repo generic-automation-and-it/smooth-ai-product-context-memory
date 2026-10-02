@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Committed L0 harness for mimisbrunnr-dossier (HLD-005 NFR-01..07).
+"""Committed L0 harness for mimisbrunnr-saga-dossier (HLD-005 NFR-01..07).
 
-Run: python3 -B .agents/skills/mimisbrunnr-dossier/tests/run_tests.py
+Run: python3 -B .agents/skills/mimisbrunnr-saga-dossier/tests/run_tests.py
 
 Covers the guarantees the dossier skill must satisfy from the HLD-005 Verification lists:
   NFR-04 completeness — reconciliation closes exactly; bounded omission reasons & finding taxonomy

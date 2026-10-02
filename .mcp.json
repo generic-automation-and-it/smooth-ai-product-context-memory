@@ -3,13 +3,13 @@
     "mimisbrunnr-read": {
       "command": "python3",
       "args": [
-        ".agents/skills/mimisbrunnr-context-memory/scripts/memory_read_mcp.py"
+        ".agents/skills/mimisbrunnr-odin-context-memory/scripts/memory_read_mcp.py"
       ]
     },
     "mimisbrunnr-write": {
       "command": "python3",
       "args": [
-        ".agents/skills/mimisbrunnr-context-memory/scripts/memory_write_mcp.py"
+        ".agents/skills/mimisbrunnr-odin-context-memory/scripts/memory_write_mcp.py"
       ]
     }
   }

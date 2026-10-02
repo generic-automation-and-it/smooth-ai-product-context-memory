@@ -490,7 +490,7 @@ is the complementary signal, so the count is read by hand: open every unit whose
 names this slug and count the distinct `provenance.session` values on them. Below three, propose anyway
 only if you **state why** — name what makes this the exception (a cost that repeats, a decision already
 taken, a rule that is currently unwritten). The same arithmetic governs `propose-label` in
-`mimisbrunnr-context-memory`: a label seen once is a word, three
+`mimisbrunnr-odin-context-memory`: a label seen once is a word, three
 times is vocabulary, and proposing below that is how the registry fills with near-synonyms nothing queries.
 
 `--review` reports the other half of this signal as `never inherited`. A unit nothing ever inherited is not
@@ -512,7 +512,7 @@ Propose the promotion; the user decides. Once promoted, the Understanding record
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
-| 2026-10-01 | **Promotion gained a threshold, and the evidence for it.** `--promote` proposed on any judgement call; it now proposes after the unit has been **inherited in three independent sessions** (`provenance.inherited` on the units a later session exported), or states why it is proposing earlier. Evidence-based, so the user still decides — the threshold gates the *proposal*, not the decision. The same arithmetic was added as guidance for `propose-label` in `mimisbrunnr-context-memory` (a label seen once is a word, three times is vocabulary), and `--review`'s existing `never inherited` flag is named as the other half of the signal. Wording only; no script change and no test tier. **Divergence from the devex template** — this skill is template-owned, so `ai-template-sync` would revert it; upstream it or keep this row. | ICM adoption |
+| 2026-10-01 | **Promotion gained a threshold, and the evidence for it.** `--promote` proposed on any judgement call; it now proposes after the unit has been **inherited in three independent sessions** (`provenance.inherited` on the units a later session exported), or states why it is proposing earlier. Evidence-based, so the user still decides — the threshold gates the *proposal*, not the decision. The same arithmetic was added as guidance for `propose-label` in `mimisbrunnr-odin-context-memory` (a label seen once is a word, three times is vocabulary), and `--review`'s existing `never inherited` flag is named as the other half of the signal. Wording only; no script change and no test tier. **Divergence from the devex template** — this skill is template-owned, so `ai-template-sync` would revert it; upstream it or keep this row. | ICM adoption |
 | 2026-09-19 | Initial version. | |
 | 2026-09-19 | `--export`/`--import` are session↔disk; cross-repo moves became `--publish`/`--consume`. | |
 | 2026-09-19 | Definition restated from its purpose — input and outcome of a session's memory, for another agent to act on — with a single "no other home" test replacing two separate qualifying rules. | |

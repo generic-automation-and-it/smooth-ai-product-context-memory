@@ -1,14 +1,14 @@
 ---
-name: mimisbrunnr-dossier
+name: mimisbrunnr-saga-dossier
 description: Compose a read-only, cited context dossier — one ordered document plus a findings report (gaps, contradictions, stale claims) — for a slice of the Mímisbrunnr store (repository, initiative, ticket, tags). Use when re-entering a repo or ticket, handing reasoning to a colleague, grounding a design document, or auditing the store. Fetches a deterministic bundle from the Host API and writes only a local gitignored artefact; never writes to the store. Triggers on "dossier", "catch me up on", "everything the store knows about".
 allowed-tools:
-  - Bash(python3 -B .agents/skills/mimisbrunnr-dossier/scripts/dossier_composer.py:*)
+  - Bash(python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py:*)
   - Read
   - Write
 effort: high  # equivalence, contradiction and gap judgement across a whole store slice
 ---
 
-# mimisbrunnr-dossier
+# mimisbrunnr-saga-dossier
 
 Compose a **context dossier** — a read-only, focused, cited document plus its findings — for a slice of
 the Mímisbrunnr store. **This skill is read-only (LADR-08 / NFR-06): it has no write capability at
@@ -44,13 +44,13 @@ selection the practitioner approved in the preview, the difference is reported (
 #    the NFR-03 preview (prices the selection without bodies) and the LADR-14 preview-vs-bundle
 #    difference check are performed by the agent directly against the Host API —
 #    POST /api/context/dossier/preview and POST /api/context/dossier/bundle. Read-only.
-python3 -B .agents/skills/mimisbrunnr-dossier/scripts/dossier_composer.py \
+python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py \
   bundle --body '{"repo":"kingstown","widenDepth":3}' | head
 
 # 2. Compose from a saved bundle, apply an optional focus, write the artefact (gitignored).
-python3 -B .agents/skills/mimisbrunnr-dossier/scripts/dossier_composer.py \
+python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py \
   compose --bundle bundle.json --focus architecture \
-  --out .context/mimisbrunnr-dossier/architecture.md
+  --out .context/mimisbrunnr-saga-dossier/architecture.md
 ```
 
 `--focus` is a **single-valued bounded enum** — `requirements`, `architecture`, `specification`,
@@ -115,7 +115,7 @@ and its memories by identity + version (LADR-13). Findings are focus-invariant i
   focus and confidentiality (LADR-15). Its load/import is a separate capability owned by
   `mimisbrunnr-understanding`, not this skill.
 - **`near-miss-tag` is evidence-only** (LADR-10). Use the shared
-  `mimisbrunnr-context-memory/scripts/near_miss_tags.py` helper via `near_miss_findings()`. No evidence
+  `mimisbrunnr-odin-context-memory/scripts/near_miss_tags.py` helper via `near_miss_findings()`. No evidence
   means no finding; no tag-graph or full-dossier completeness claim is made.
 
 ## Base URL / token
@@ -134,12 +134,12 @@ or `::1`) — userinfo, a path, a query or a fragment is refused, and a trailing
 
 ## Test
 
-Committed harness: `python3 -B .agents/skills/mimisbrunnr-dossier/tests/run_tests.py` (39 tests).
+Committed harness: `python3 -B .agents/skills/mimisbrunnr-saga-dossier/tests/run_tests.py` (39 tests).
 
 ## Related
 
 - `docs/hlds/005-contextual-export/` — design (LADRs, NFRs), the determinism boundary, the contract.
-- `.agents/skills/mimisbrunnr-context-memory/` — the capture skill (sole **writer**). This dossier
+- `.agents/skills/mimisbrunnr-odin-context-memory/` — the capture skill (sole **writer**). This dossier
   skill is a reader; do not conflate the two. Reuses its `near_miss_tags.py` helper.
 - `.agents/skills/mimisbrunnr-understanding/` — the load/transfer sibling (HLD-007); owns the
   Understanding kind's load/import, which this read-only skill does not.

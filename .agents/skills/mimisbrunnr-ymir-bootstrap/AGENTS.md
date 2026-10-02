@@ -3,7 +3,7 @@
 ## TL;DR
 
 Turns a bounded repository inspection into reviewed, source-backed memory candidates by composing the
-existing `mimisbrunnr-context-memory` contracts. It is not another store client or writer.
+existing `mimisbrunnr-odin-context-memory` contracts. It is not another store client or writer.
 
 ## Non-Negotiables
 
@@ -79,7 +79,7 @@ none is written.
 ## Key Behaviors
 
 Before changing store-facing behavior, re-read sibling
-`mimisbrunnr-context-memory/{SKILL.md,agents/memory-read.md,agents/memory-write.md}`. In particular, verify
+`mimisbrunnr-odin-context-memory/{SKILL.md,agents/memory-read.md,agents/memory-write.md}`. In particular, verify
 worker registration support, group-resolution behavior, lifecycle filtering, dry-run semantics, and the
 candidate cap. Changes to those contracts can invalidate this skill even when no file here changes.
 

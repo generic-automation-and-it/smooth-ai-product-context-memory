@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# Sourced, not executed: `source .agents/skills/mimisbrunnr-recall-feedback/scripts/recall_feedback.sh`.
+# Sourced, not executed: `source .agents/skills/mimisbrunnr-muninn-recall-feedback/scripts/recall_feedback.sh`.
 # Defines `recall_feedback_guard`, the origin check, and `recall_feedback_curl`, the only function that
 # sends a token. Runs on bash 3.2 (macOS) and GNU bash. Harness: tests/run_tests.py beside this skill.
 

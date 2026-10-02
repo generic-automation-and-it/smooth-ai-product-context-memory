@@ -1,4 +1,4 @@
-# mimisbrunnr-dossier — AGENTS.md
+# mimisbrunnr-saga-dossier — AGENTS.md
 
 ## TL;DR
 
@@ -90,7 +90,7 @@ Bounded taxonomy, fixed before first export: `gap`, `contradiction`, `equivalenc
   specific unwired decision may still be a basis-carrying `gap`; never infer it from a missing edge.
 - `near-miss-tag` is evidence-only (LADR-10): supporting UUID/version, concrete basis, examined scope,
   observation/analysis classification. No extra search, no hidden IDs/counts, no claim about unseen
-  exclusions. **No evidence means no finding.** Reuse `mimisbrunnr-context-memory/scripts/near_miss_tags.py`.
+  exclusions. **No evidence means no finding.** Reuse `mimisbrunnr-odin-context-memory/scripts/near_miss_tags.py`.
 - Every finding names its memories by identity + version, carries basis + scope. `None detected` is
   always qualified by examined scope.
 
@@ -131,7 +131,7 @@ reader. The manifest's own count is the trustworthy left-hand side.
   `diagrams/flow-selection-and-composition.md` — the boundary and the contract.
 - `docs/hlds/005-contextual-export/ladrs/LADR-02,04,05,07,08,12,13,14,15`.
 - `docs/hlds/005-contextual-export/nfrs/NFR-01..07`.
-- `.agents/skills/mimisbrunnr-context-memory/AGENTS.md` — sole authority on the write path (the sibling);
+- `.agents/skills/mimisbrunnr-odin-context-memory/AGENTS.md` — sole authority on the write path (the sibling);
   this skill is a reader and must not be conflated with it.
 - `.agents/skills/mimisbrunnr-understanding/` — the read/load sibling (HLD-007); the Understanding kind's
   load/import lives there.
@@ -151,6 +151,7 @@ the only file it writes is the local dossier artefact. Tests: `tests/run_tests.p
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-02 | Renamed `mimisbrunnr-dossier` → `mimisbrunnr-saga-dossier` (folder, `name:`, CI paths, every cross-reference). Saga, goddess of history — she recounts what was. Behaviour unchanged; harness green. | session request |
 | 2026-10-01 | The loopback guard refuses a base URL that `urlparse` cannot parse (an NFKC-confusable netloc character, a non-numeric port) with its fixed loopback message. The parser's own `ValueError` quoted the netloc — userinfo included — and `main` prints exception text, so `--base-url http://user:pass@local＃host` printed the password. `CredentialTransportTests` 5 -> 6, mutation-checked. | HLD-005 NFR-01 |
 | 2026-10-01 | Findings section records that no `ghost` ("specified but not wired") category exists, per HLD-005 LADR-16, and that a missing `implements` edge is never a finding basis. Taxonomy unchanged. | HLD-005 LADR-16 |
 | 2026-09-27 | `SKILL.md` gained the YAML frontmatter every other skill carries (`name`, one-line `description`, block-list `allowed-tools`, `effort` — the `smooth-devex-template` shape; switches stay documented in the body). Without it the skill listed with its bare name as description and no trigger text. No behavioural change. | skill frontmatter alignment |
@@ -159,7 +160,7 @@ the only file it writes is the local dossier artefact. Tests: `tests/run_tests.p
 | 2026-09-24 | Added the "Never consolidate on wording alone" Non-Negotiable (equivalence = meaning + applicability + lifecycle) and enforced it in the composer's equivalence-group validation. | HLD-005 LADR-05; PR #99 review |
 | 2026-09-24 | Post-merge review follow-up: removed the dead `_origin_line` helper and `derive_findings`' unread parameters; the NFR-05 attribution test can no longer pass vacuously (surfaced claims must render statements, and at least one focus must examine some); README relabels `bundle` as the deterministic bundle, not the priced preview. | PR #99 review |
 | 2026-09-26 | `README.md` rewritten for a human audience: what a dossier is and when to reach for it, a "what it is not" table, the bundle-vs-dossier trust distinction, a plain-language focus table, and the read-only/no-silent-drop guarantees restated without jargon. No behavioural or contract change — `SKILL.md`/`AGENTS.md` remain the authoritative contract. | README readability pass |
-| 2026-09-26 | `README.md` quickstart now runs `mkdir -p .context/mimisbrunnr-dossier` before step 1: `.context/` is gitignored, so on a clean checkout the shell redirection in step 1 and the `--out` write in step 2 both aborted on a missing parent directory. Documentation only — no script, contract or behavioural change. | PR review (Medium) |
+| 2026-09-26 | `README.md` quickstart now runs `mkdir -p .context/mimisbrunnr-saga-dossier` before step 1: `.context/` is gitignored, so on a clean checkout the shell redirection in step 1 and the `--out` write in step 2 both aborted on a missing parent directory. Documentation only — no script, contract or behavioural change. | PR review (Medium) |
 | 2026-09-26 | README rewrite accuracy fixes: the focus bullet now states out-of-focus material is omitted with reason `outside-focus` rather than "just later" (the renderer does not reorder); the reconciliation bucket is `consolidated`, not `merged`, matching `SKILL.md`/`AGENTS.md`; and the sibling reference reads "the only path in this skill set that can write" rather than "the only thing in this system". Docs only. | PR #108 review |
 | 2026-09-26 | The composer now refuses to send the read token off loopback and refuses redirects on credential-bearing requests, matching the guard the context-memory client already had: CPython's default redirect handler rebuilds the request with the original headers, so a 302 from a configured base forwarded `Authorization` to whatever host it named. Also builds the opener with proxies disabled so no proxy sees the header. | HLD-005 NFR-01 |
 | 2026-09-27 | The two credential-transport guards are now covered by the committed harness (`CredentialTransportTests`, 5 tests): non-loopback origins refused including the suffix/prefix lookalikes (`localhost.evil.example`, `127.0.0.1.evil.example`) and non-HTTP schemes; the loopback forms accepted including uppercase and bracketed; a non-loopback base refused *before* any request is built; the opener composition pinned so dropping the redirect handler or re-enabling a proxy fails; and the handler raising rather than rewriting the request. Harness 34 -> 39. | PR review |

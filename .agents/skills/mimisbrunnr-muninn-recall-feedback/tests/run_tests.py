@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Committed L0 harness for the mimisbrunnr-recall-feedback request guard.
+"""Committed L0 harness for the mimisbrunnr-muninn-recall-feedback request guard.
 
-Run: python3 -B .agents/skills/mimisbrunnr-recall-feedback/tests/run_tests.py
+Run: python3 -B .agents/skills/mimisbrunnr-muninn-recall-feedback/tests/run_tests.py
 
 Sources scripts/recall_feedback.sh in bash with a fake `curl` (and a recording `python3` shim) first on
 PATH, so no request leaves the machine. Covers:

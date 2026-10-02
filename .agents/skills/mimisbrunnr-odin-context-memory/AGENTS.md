@@ -1,4 +1,4 @@
-# mimisbrunnr-context-memory — AGENTS.md
+# mimisbrunnr-odin-context-memory — AGENTS.md
 
 ## TL;DR
 
@@ -98,7 +98,7 @@ under the shared transaction advisory lock, without a normalized ownership table
 
 ```mermaid
 flowchart LR
-    A[Agent / Human] -->|capture candidates| B[mimisbrunnr-context-memory skill]
+    A[Agent / Human] -->|capture candidates| B[mimisbrunnr-odin-context-memory skill]
     B -->|"set (preflight + one transaction)"| C[HTTP API]
     C --> D[(PostgreSQL)]
     C --> E[(MinIO blob)]
@@ -288,7 +288,7 @@ flowchart LR
 
 ## Test References
 
-- **Committed L0 harness (CI-gatable):** `.agents/skills/mimisbrunnr-context-memory/tests/run_tests.py` — stdlib
+- **Committed L0 harness (CI-gatable):** `.agents/skills/mimisbrunnr-odin-context-memory/tests/run_tests.py` — stdlib
    `unittest` (no external runner). Unit-tests `redact.py` secret containment (`SecretShapeCoverageTests`: a 36-shape positive corpus,
    PEM and repeated-prefix linear-time guards; `RedactionPrecisionTests`: an ordinary-prose corpus that
    must pass byte-identical and located digests; case-insensitive keys; `OtherWriteRedactionTests`:
@@ -318,7 +318,7 @@ flowchart LR
    rather than a clean zero); and
    `near_miss_tags.py` schema/scope/basis/
    bounds/output/no-I/O guarantees.
-   Run: `python3 -B .agents/skills/mimisbrunnr-context-memory/tests/run_tests.py`. The PR gate runs it and
+   Run: `python3 -B .agents/skills/mimisbrunnr-odin-context-memory/tests/run_tests.py`. The PR gate runs it and
    `tests/measure_cost.py` (reproducible structural cost evidence) in the same step.
 - **Deterministic near-miss fixtures:** `tests/fixtures/near_miss_tags.json` exercises grounded mismatch,
   exact match, ANY overlap, irrelevant evidence, unsupported plausible synonym and empty tags. Its evidence
@@ -330,7 +330,7 @@ flowchart LR
   NUL/Unicode rejection and timestamp wire/calendar/offset guards in transport and dry-run. These tests
   validate plumbing, not LLM judgement or live API behavior.
 - **On-demand LLM-eval fixtures, scored in CI but model-judged only on demand:**
-  `.agents/skills/mimisbrunnr-context-memory/tests/fixtures/scenarios.json` plus `score_fixtures.py`. Authored
+  `.agents/skills/mimisbrunnr-odin-context-memory/tests/fixtures/scenarios.json` plus `score_fixtures.py`. Authored
   positive/negative scenarios for the semantic-dedup, atomicity, link and divergence stages, scored
   for recall AND precision against a countable expected-verdict set. Give the model only
   `score_fixtures.py --emit-model-input` output; the source fixture contains expected answers and is
@@ -387,6 +387,7 @@ redaction detector is a stdin→stdout fingerprint script reporting rule names o
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-02 | Renamed `mimisbrunnr-context-memory` → `mimisbrunnr-odin-context-memory` (folder, `name:`, npm launcher, CI paths, every cross-reference). Odin gave his eye at Mímir's well and carved the runes — the writer who pays for clean facts. Behaviour unchanged; harnesses green. | session request |
 | 2026-10-02 | **Recorded the fresh-store preconditions and the read surface's token refusal.** `resolve-group` has no dry-run mode and commits unconditionally, so a dry run must resolve nothing and report the group and initiative as *would create*; a missing initiative is a `404`, so `upsert-initiative` runs first. The read client refuses to start with `CONTEXT_MEMORY_WRITE_TOKEN` present, and an orchestrating skill that shells out to it strips the write token from the subprocess environment. Docs only — no behaviour change. | mimisbrunnr-understanding export/import |
 | 2026-10-02 | **The MCP read server now frames its output, classifies its blob fetch, and its deepsearch disclosure stops overstating.** A review of the shipped work found five gaps. (1) `memory_read_mcp.py` returned raw values with no framing — the read worker's *only* path to the store is this server (its grant is `mcp__mimisbrunnr-read__*`), so the CLI framing the contract promised was unreachable from it; `handle` now frames every content-returning tool through `context_memory_client.framed_recall` (extracted from `print_recall`, so there is still one wording and one shape), with `probe` the derived opt-out and a test that drives `read_mcp.handle` for every tool. (2) `_get_blob` called `client._open` directly, taking the default socket timeout and skipping classification — a hung store surfaced as a bare `timed out` after 30 s; it now routes through `_read_response`, so it is deadline-bounded and classified `timed-out`. (3) A baseline timeout left `anchorsEligible`/`anchorsOmittedByCap` at `0`, which reads as "nothing to traverse"; they are now `null` when the baseline never answered. (4) `deadlineReached` set on a *pass* timeout (wall clock nowhere near the cap) is renamed `stoppedEarly`, with a separate `budgetExhausted` for the wall clock; `passesNotRun` (which named the pass that did run) is renamed `passesIncomplete`. (5) `TransportFailureTests` now asserts elapsed ≤ budget (the acceptance criterion), and `CONTEXT_MEMORY_RECALL_DEADLINE` is documented in `docs/wiki/setup.md`. Harness 161 -> 165. | review of #149; HLD-004 LADR-01 |
 | 2026-10-01 | **A recall now has one foreground deadline, and deepsearch degrades by whole passes at it.** The read path already told `timed-out` apart from `unreachable` (#146), but nothing bounded a *command*: deepsearch could chain a baseline, four keyword and five traversal calls with no overall limit, and a single timed-out pass aborted the run and discarded every pass already completed — so a five-minute hang returned nothing. `RECALL_DEADLINE_SECONDS` (60 s) is the cap; `CONTEXT_MEMORY_RECALL_DEADLINE` may shorten it and any other value is refused with `bad-deadline`, never clamped. Each read's socket timeout is `min(HTTP_TIMEOUT, deadline)`, so a shortened deadline bounds a single `query`; a write keeps `HTTP_TIMEOUT`, so a malformed read-path setting cannot refuse a capture. deepsearch checks the deadline before each pass, uses the remaining budget as that pass's socket timeout, and on a timeout stops the chain while keeping the completed passes — whole records only — disclosing `deadlineSeconds`, `deadlineReached` and `passesNotRun`, with each pass carrying a `status`. Recall feedback stays server-side (HLD-004 LADR-01), so the contract states that a client giving up can leave a server-recorded outcome the agent never received. **The harness found a second-module trap while writing the tests:** `deepsearch` was loaded before `sys.modules["context_memory_client"]` was aliased, so it held its own `ClientError` and a raised timeout was invisible to its handler — `_load` now registers each module before exec, which fixes the class for every sibling import rather than patching one. Harness 153 -> 161; both the deadline refusal and the partial-return path mutation-checked. | MemOS adoption; HLD-004 LADR-01; BR-16 |

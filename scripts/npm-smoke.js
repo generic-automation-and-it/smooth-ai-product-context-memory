@@ -17,7 +17,7 @@ mkdirSync(packDir);
 
 const commands = [
   ["mimisbrunnr", ["context-memory", "--help"]],
-  ["mimisbrunnr-context-memory", ["--help"]],
+  ["mimisbrunnr-odin-context-memory", ["--help"]],
   ["mimisbrunnr-understanding", ["--help"]],
 ];
 

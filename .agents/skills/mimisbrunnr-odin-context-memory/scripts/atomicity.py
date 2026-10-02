@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deterministic bundle detector for the atomicity stage of the mimisbrunnr-context-memory skill.
+"""Deterministic bundle detector for the atomicity stage of the mimisbrunnr-odin-context-memory skill.
 
 One memory is one atomic fact. This helper scores a candidate's statement for signals that it bundles
 several independent claims (clause junctions, list/tally patterns), returning a SIMPLE / BUNDLED

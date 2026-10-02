@@ -1,4 +1,4 @@
-# mimisbrunnr-dossier
+# mimisbrunnr-saga-dossier
 
 ## What this is
 
@@ -27,7 +27,7 @@ memories yourself.
 
 | Not this | Why |
 |---|---|
-| A live query / `get` | That's `mimisbrunnr-context-memory`'s job — one question, a cited answer. This skill produces a standing document over a whole slice |
+| A live query / `get` | That's `mimisbrunnr-odin-context-memory`'s job — one question, a cited answer. This skill produces a standing document over a whole slice |
 | A write path | This skill cannot write to the store, full stop — no version, no edge, no label, no blob. See *Guarantees* below |
 | The whole-store forensic dump (`export` CLI) | That's a complete, unordered, unjudged data dump that deliberately bypasses retrieval scope. This skill is scoped, ordered and judged — a different artefact for a different question |
 | A summary you can't check | Every substantive line cites the memory it came from (identity, version, capture time) — nothing here is take-my-word-for-it |
@@ -46,14 +46,14 @@ from that — nothing added, nothing quietly dropped.
 
 ```bash
 # 1. Ask the store for everything about this repo, following recorded links up to 3 hops out.
-mkdir -p .context/mimisbrunnr-dossier
-python3 -B .agents/skills/mimisbrunnr-dossier/scripts/dossier_composer.py \
-  bundle --body '{"repo":"kingstown","widenDepth":3}' > .context/mimisbrunnr-dossier/bundle.json
+mkdir -p .context/mimisbrunnr-saga-dossier
+python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py \
+  bundle --body '{"repo":"kingstown","widenDepth":3}' > .context/mimisbrunnr-saga-dossier/bundle.json
 
 # 2. Turn that bundle into a readable document, angled for an architecture write-up.
-python3 -B .agents/skills/mimisbrunnr-dossier/scripts/dossier_composer.py \
-  compose --bundle .context/mimisbrunnr-dossier/bundle.json --focus architecture \
-  --out .context/mimisbrunnr-dossier/architecture.md
+python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py \
+  compose --bundle .context/mimisbrunnr-saga-dossier/bundle.json --focus architecture \
+  --out .context/mimisbrunnr-saga-dossier/architecture.md
 ```
 
 Step 1 costs a request against the store; step 2 is free to re-run as many times as you like against
@@ -101,7 +101,7 @@ reason `outside-focus`.
 ## Test
 
 ```bash
-python3 -B .agents/skills/mimisbrunnr-dossier/tests/run_tests.py
+python3 -B .agents/skills/mimisbrunnr-saga-dossier/tests/run_tests.py
 ```
 
 ## The rest
@@ -111,7 +111,7 @@ python3 -B .agents/skills/mimisbrunnr-dossier/tests/run_tests.py
   you're changing the skill itself.
 - **`docs/hlds/005-contextual-export/`** — the design: why a dossier exists, the determinism boundary
   between bundle and dossier, the full findings taxonomy.
-- **`.agents/skills/mimisbrunnr-context-memory/`** — the capture skill and the only path in this skill
+- **`.agents/skills/mimisbrunnr-odin-context-memory/`** — the capture skill and the only path in this skill
   set that can write. This skill only ever reads.
 - **`.agents/skills/mimisbrunnr-understanding/`** — the sibling that loads and imports Understandings;
   this skill selects and composes them alongside every other kind of memory, but doesn't load or write

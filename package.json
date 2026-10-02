@@ -13,12 +13,12 @@
   "type": "module",
   "bin": {
     "mimisbrunnr": "./npm/cli/mimisbrunnr.js",
-    "mimisbrunnr-context-memory": "./npm/cli/mimisbrunnr-context-memory.js",
+    "mimisbrunnr-odin-context-memory": "./npm/cli/mimisbrunnr-odin-context-memory.js",
     "mimisbrunnr-understanding": "./npm/cli/mimisbrunnr-understanding.js"
   },
   "files": [
     "npm/cli/",
-    ".agents/skills/mimisbrunnr-context-memory/scripts/",
+    ".agents/skills/mimisbrunnr-odin-context-memory/scripts/",
     ".agents/skills/mimisbrunnr-understanding/scripts/",
     "README.md"
   ],

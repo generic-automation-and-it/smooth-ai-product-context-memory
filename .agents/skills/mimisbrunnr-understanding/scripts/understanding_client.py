@@ -53,7 +53,7 @@ SESSION_FILE = "_session.md"
 METADATA_FILE = "_dump.json"
 UNIT_SUFFIX = ".understanding.md"
 _SKILL_SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
-_CAPTURE_SCRIPTS = Path(__file__).resolve().parents[2] / "mimisbrunnr-context-memory" / "scripts"
+_CAPTURE_SCRIPTS = Path(__file__).resolve().parents[2] / "mimisbrunnr-odin-context-memory" / "scripts"
 REDACTOR = _CAPTURE_SCRIPTS / "redact.py"
 ATOMICITY = _CAPTURE_SCRIPTS / "atomicity.py"
 READ_CLIENT = _CAPTURE_SCRIPTS / "context_memory_read_client.py"
@@ -914,7 +914,7 @@ def cmd_export(args: argparse.Namespace) -> int:
               + json.dumps({k: v for k, v in recorded.items() if v}, ensure_ascii=False)
               + "; an explicit flag overrides it.")
 
-    print(f"EXPORT PREPARED from {src} ({source_kind}) — via mimisbrunnr-context-memory, the sole writer.")
+    print(f"EXPORT PREPARED from {src} ({source_kind}) — via mimisbrunnr-odin-context-memory, the sole writer.")
     for note in notes:
         print(note)
     for note in skips:

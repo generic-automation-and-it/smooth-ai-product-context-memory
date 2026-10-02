@@ -36,7 +36,7 @@
 Model received only blinded fixture output from:
 
 ```bash
-python3 -B .agents/skills/mimisbrunnr-context-memory/tests/fixtures/score_fixtures.py --emit-model-input
+python3 -B .agents/skills/mimisbrunnr-odin-context-memory/tests/fixtures/score_fixtures.py --emit-model-input
 ```
 
 It did not read `scenarios.json`, which contains scorer-only identifiers, expected verdicts and author
@@ -47,7 +47,7 @@ notes. The blinded emitter strips all three fields. One same-session normalizati
 ## Result
 
 ```bash
-cd .agents/skills/mimisbrunnr-context-memory/tests/fixtures
+cd .agents/skills/mimisbrunnr-odin-context-memory/tests/fixtures
 python3 score_fixtures.py \
   --fixtures scenarios-2026-09-29.json \
   --model-verdicts model-verdicts-2026-09-17.json \

@@ -1,6 +1,6 @@
 ---
 name: mimisbrunnr-understanding
-description: Load a Mímisbrunnr Understanding export — or any prior material (session, meeting notes, transcript) — into a new or running agent's session context, and share context across sessions and repositories. The load/transfer counterpart to mimisbrunnr-context-memory.
+description: Load a Mímisbrunnr Understanding export — or any prior material (session, meeting notes, transcript) — into a new or running agent's session context, and share context across sessions and repositories. The load/transfer counterpart to mimisbrunnr-odin-context-memory.
 effort: high  # judgement on understanding vs scoped fact, and capture-path funneling
 ---
 
@@ -31,13 +31,13 @@ direct write, and dry-runs by default so a dry run creates nothing. **`dump`** w
 understanding to a local folder for offline transfer.
 
 Requires **Python 3.9 or newer**; the npm launcher (`npm/cli/_run.js`) checks the floor and refuses
-below it. The sibling `mimisbrunnr-context-memory` client normalises a sub-second fraction before
+below it. The sibling `mimisbrunnr-odin-context-memory` client normalises a sub-second fraction before
 parsing for the same reason — `fromisoformat` only accepts an arbitrary number of fractional digits
 from 3.11, and `System.Text.Json` emits a 7-digit tick count.
 
 Use this skill when a practitioner wants to seed an agent with prior knowledge, or to bring material
 already written somewhere into the store so it compounds. It is the **load/transfer** counterpart to
-`mimisbrunnr-context-memory` (the sole writer of clean facts).
+`mimisbrunnr-odin-context-memory` (the sole writer of clean facts).
 
 ## Load (default)
 
@@ -150,7 +150,7 @@ python3 -B .agents/skills/mimisbrunnr-understanding/scripts/understanding_client
   repository (even a different repo) can then load that folder.
 - **This is an export, not a write.** It changes nothing in the store.
 - The dump is written to the gitignored `.context/` tree, so it is not committed.
-- **The content is redacted before the file is written**, by `mimisbrunnr-context-memory`'s
+- **The content is redacted before the file is written**, by `mimisbrunnr-odin-context-memory`'s
   `redact.py`, and the rule names hit are reported. If the redactor cannot run, the dump is refused and
   nothing is written. This is the second net; the first is never pasting a credential into a dump.
 - **Re-dumping replaces `_session.md`; it does not append.** The dump is a regenerable projection, so
@@ -206,4 +206,4 @@ Committed harness: `python3 -B .agents/skills/mimisbrunnr-understanding/tests/ru
 - `docs/hlds/007-understanding-transfer/` — design (LADR-01…09), NFRs.
 - `.agents/skills/ai-understanding/` — writes the `.understanding.md` files and stores this skill loads.
 - `docs/brd/003-understanding-transfer/` — business requirements (BR-38…BR-45).
-- `.agents/skills/mimisbrunnr-context-memory/` — the capture skill (sole writer) an import funnels through.
+- `.agents/skills/mimisbrunnr-odin-context-memory/` — the capture skill (sole writer) an import funnels through.

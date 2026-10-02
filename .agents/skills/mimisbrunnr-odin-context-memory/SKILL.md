@@ -1,5 +1,5 @@
 ---
-name: mimisbrunnr-context-memory
+name: mimisbrunnr-odin-context-memory
 description: Get and set persistent context-memory records — the sole authority on the write path to the SmoothAiProductContextMemory store. Use when you need to record a durable fact, decision, preference, or constraint for later retrieval across sessions, or when you need to recall what was previously captured about a subject, ticket, repository, or scope. Captures byproduct facts during work and writes them at an explicit end-of-task checkpoint.
 effort: xhigh  # sole write path to the store every later session builds on: semantic dedup, link derivation, atomicity, summary generation
 ---
@@ -66,7 +66,7 @@ Spawn project agents `memory-read` and `memory-write`. Both use typed MCP tools,
 
 ### 1. Initialize (Resolve Group)
 
-When the user starts a mimisbrunnr-context-memory session, resolve the target group from what the caller provides
+When the user starts a mimisbrunnr-odin-context-memory session, resolve the target group from what the caller provides
 — ticket, repository, initiative, or scope — or create it if it does not exist.
 
 - If the caller supplies a ticket, look up the group that owns it. **A ticket belongs to at most one
@@ -171,7 +171,7 @@ stale, not an alternative reading.
 
 ## Deterministic Components
 
-The judgement below uses thin scripts under `.agents/skills/mimisbrunnr-context-memory/scripts/`.
+The judgement below uses thin scripts under `.agents/skills/mimisbrunnr-odin-context-memory/scripts/`.
 They carry no secrets and never access database or blob storage directly. Only the client moves JSON
 over the HTTP API; the other scripts are offline. The agent assembles payloads and interprets results;
 the scripts do not decide semantic relevance. Root the base URL via

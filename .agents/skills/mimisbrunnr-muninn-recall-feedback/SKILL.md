@@ -1,5 +1,5 @@
 ---
-name: mimisbrunnr-recall-feedback
+name: mimisbrunnr-muninn-recall-feedback
 description: Run the three recall-feedback tuning queries against the context-memory store — never-recalled list, miss rate over a window, and baseline reset. Use when a practitioner needs to see which memories are never recalled, measure how often retrieval returns nothing, or reset the feedback baseline before a tuning experiment. Read-only insight into retrieval health. Triggers on "never recalled", "miss rate", "recall feedback", "which memories are never returned".
 effort: medium  # three fixed API queries plus interpreting the result
 ---
@@ -75,7 +75,7 @@ defines `recall_feedback_curl`, the only function that sends a token, and `recal
 origin check both it and the operator can call directly. From the repository root:
 
 ```bash
-source .agents/skills/mimisbrunnr-recall-feedback/scripts/recall_feedback.sh
+source .agents/skills/mimisbrunnr-muninn-recall-feedback/scripts/recall_feedback.sh
 recall_feedback_guard && echo "origin approved"
 ```
 

@@ -12,7 +12,7 @@ is not that it is cheap — it is that it is the *only* way to make real, long-l
 retrieval cheap. Reach for `--dryrun` when a batch is large or unfamiliar — paying the pipeline twice is
 cheaper than untangling a wrong dedup decision. Skip `--approve` unless the human has explicitly confirmed.
 
-# mimisbrunnr-context-memory — Intent & Token-Usage Review
+# mimisbrunnr-odin-context-memory — Intent & Token-Usage Review
 
 > Companion notes to [`SKILL.md`](./SKILL.md). Explains what this skill is for and — because
 > **R13 makes every write an LLM call** — where it genuinely costs tokens and where it saves

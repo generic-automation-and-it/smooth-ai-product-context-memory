@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""mimisbrunnr-dossier — read-only dossier composer (HLD-005 LADR-02 / LADR-08).
+"""mimisbrunnr-saga-dossier — read-only dossier composer (HLD-005 LADR-02 / LADR-08).
 
 The judgement half of the contextual-knowledge-export design. The Host API assembles the **bundle**
 (deterministic, NFR-02); this skill composes the **dossier** (judgement): ordering, consolidation,
@@ -1054,7 +1054,7 @@ def _same_source(origins):
 def near_miss_findings(payload):
     """Evidence-only near-miss-tag reporting, delegated to the shared helper (LADR-10).
 
-    Reuses ``mimisbrunnr-context-memory/scripts/near_miss_tags.py``. The helper validates approved
+    Reuses ``mimisbrunnr-odin-context-memory/scripts/near_miss_tags.py``. The helper validates approved
     examined evidence and exact tag mismatch; it performs no search, widens no scope and makes no
     store-wide claim. No evidence means no finding. This module never extends into a tag graph.
     """
@@ -1083,7 +1083,7 @@ def _near_miss_helper_path():
     # The shared evidence-only helper lives in the sibling skill's scripts dir. This skill's own
     # directory never contains a nested copy, so there is no usable fallback — a missing helper must
     # fail loudly in the caller rather than point at a path that can never resolve (R3).
-    return Path(__file__).resolve().parents[2] / "mimisbrunnr-context-memory" / "scripts" / "near_miss_tags.py"
+    return Path(__file__).resolve().parents[2] / "mimisbrunnr-odin-context-memory" / "scripts" / "near_miss_tags.py"
 
 
 # ---------------------------------------------------------------------------- CLI (read-only)

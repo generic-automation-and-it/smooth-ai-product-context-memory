@@ -1030,7 +1030,7 @@ class ImportTests(unittest.TestCase):
                               "--scope", "product:memory"])
             self.assertEqual(rc, 0)
             self.assertEqual(set(os.listdir(tmp)), before)  # nothing written
-            self.assertIn("mimisbrunnr-context-memory", out)
+            self.assertIn("mimisbrunnr-odin-context-memory", out)
 
     def test_export_without_selectors_states_no_association(self):
         with tempfile.TemporaryDirectory() as tmp:

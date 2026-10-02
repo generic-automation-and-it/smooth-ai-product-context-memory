@@ -115,7 +115,7 @@ The `mimisbrunnr-understanding` skill makes it portable:
   inherits distilled learnings without the scoped record. Load and import are separate operations: a
   load writes nothing.
 - **Import (via `--store`)** prepares the material for capture through the normal capture path — it
-  emits the candidate payload and hands it to `mimisbrunnr-context-memory`, the sole writer, which
+  emits the candidate payload and hands it to `mimisbrunnr-odin-context-memory`, the sole writer, which
   performs the write. The client itself never writes, so the round trip takes both skills.
 - **`--currentsession`** dumps the current session's context to `.context/mimisbrunnr-understandings/<folder>/`,
   discoverable by name, for cross-session / cross-repo sharing.

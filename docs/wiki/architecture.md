@@ -25,7 +25,7 @@ upstream, and a copy would need syncing. The authoritative persistence model is
 [HLD 001](../hlds/001-context-memory-storage/). The write-path pipeline and the
 agent-facing skill contract (the **sole authority** on the write path) are specified in
 [HLD 002](../hlds/002-context-memory-write-pipeline/); the skill lives at
-`.agents/skills/mimisbrunnr-context-memory/`.
+`.agents/skills/mimisbrunnr-odin-context-memory/`.
 
 ### Three-level hierarchy
 

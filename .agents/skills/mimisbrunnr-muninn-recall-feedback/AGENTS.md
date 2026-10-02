@@ -1,4 +1,4 @@
-# mimisbrunnr-recall-feedback — AGENTS.md
+# mimisbrunnr-muninn-recall-feedback — AGENTS.md
 
 ## TL;DR
 
@@ -58,7 +58,7 @@ records. Output is identity, count and time only.
 
 ## Test References
 
-- `python3 -B .agents/skills/mimisbrunnr-recall-feedback/tests/run_tests.py` — stdlib unittest, no
+- `python3 -B .agents/skills/mimisbrunnr-muninn-recall-feedback/tests/run_tests.py` — stdlib unittest, no
   network. Sources `scripts/recall_feedback.sh` under bash with a recording fake `curl` and a `python3`
   shim on `PATH`, and asserts: non-loopback, userinfo and path-bearing origins are refused before any
   request (and the userinfo is not echoed); host-moving paths (`@host/…`, `//host`, a scheme, whitespace,
@@ -74,6 +74,7 @@ records. Output is identity, count and time only.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-02 | Renamed `mimisbrunnr-recall-feedback` → `mimisbrunnr-muninn-recall-feedback` (folder, `name:`, CI paths, every cross-reference). Muninn is Odin's raven Memory — reports what was never seen. Behaviour unchanged; harness green. | session request |
 | 2026-10-01 | The guard refuses a base URL the parser cannot read (NFKC-confusable netloc character, non-numeric port, unbalanced IPv6 bracket) with a fixed message, and hoists `parsed.hostname` inside the same `try`. `urlsplit`'s `ValueError` quotes the netloc, userinfo included, and the guard's stderr is the caller's — so the uncaught traceback echoed the credential this script exists to withhold, the same leak closed in the sibling composer. The existing userinfo test covers only a well-formed origin, so it passed throughout. | HLD-004 NFR-03 |
 | 2026-10-01 | The stale hedge that this harness is "not yet in CI" is gone: `pr-gate.yml`'s `python-harnesses` job already runs it on the 3.9 and 3.12 legs, and the bullet now names that job rather than inviting a maintainer to weaken a step that is load-bearing. | PR review (Low) |
 | 2026-10-01 | **Guard extracted to `scripts/recall_feedback.sh` with a committed harness (`tests/run_tests.py`).** Two residual exfiltration paths closed: the request path was concatenated unvalidated after the approved origin, so `@evil.example/x` sent the bearer token off-box — it must now be absolute with no `@`, `\`, whitespace, control character or leading `//`; and the base URL reached python as argv (readable in `ps`, may carry userinfo) — it now travels in an environment variable. The header file is unlinked by an `EXIT` trap that also fires on `HUP`/`INT`/`TERM`. | HLD-004 NFR-03 |

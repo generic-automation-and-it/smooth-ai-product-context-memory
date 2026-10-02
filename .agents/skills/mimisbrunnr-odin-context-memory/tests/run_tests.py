@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""L0 committed harness for the mimisbrunnr-context-memory skill plumbing.
+"""L0 committed harness for the mimisbrunnr-odin-context-memory skill plumbing.
 
 Standard-library unittest only — no external test runner dependency. Exercises the deterministic
 artefacts (redact.py, atomicity.py) over explicit positive and negative fixtures, asserting real
@@ -2291,7 +2291,7 @@ class AgentContractTests(unittest.TestCase):
         command = config["mcpServers"]["mimisbrunnr-read"]
         self.assertEqual(command["command"], "python3")
         self.assertEqual(command["args"], [
-            ".agents/skills/mimisbrunnr-context-memory/scripts/memory_read_mcp.py"
+            ".agents/skills/mimisbrunnr-odin-context-memory/scripts/memory_read_mcp.py"
         ])
 
     def test_read_mcp_lifecycle_initialize_ping_and_list(self):

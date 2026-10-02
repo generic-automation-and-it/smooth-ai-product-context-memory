@@ -55,7 +55,7 @@ HERE = Path(__file__).resolve().parent
 FIXTURES = HERE / "fixtures"
 UND_ROOT = HERE.parent  # .agents/skills/mimisbrunnr-understanding
 sys.path.insert(0, str(UND_ROOT / "scripts"))
-sys.path.insert(0, str(UND_ROOT.parent / "mimisbrunnr-dossier" / "scripts"))
+sys.path.insert(0, str(UND_ROOT.parent / "mimisbrunnr-saga-dossier" / "scripts"))
 
 import understanding_client as uc  # noqa: E402
 import dossier_composer as dc     # noqa: E402

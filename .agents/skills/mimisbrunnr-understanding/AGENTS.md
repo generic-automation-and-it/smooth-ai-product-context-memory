@@ -6,7 +6,7 @@ A **session/store bridge** for a Mímisbrunnr **Understanding**. `load` injects 
 agent's context with **no store write**; `import` queries the store itself (`kind = understanding`) back
 into the session, read token only; `export` orchestrates the capture path (dry run by default, and a dry
 run creates nothing); `dump --currentsession` writes the session to a local folder for
-cross-session/cross-repo reuse. It is the load/transfer counterpart to `mimisbrunnr-context-memory` (the
+cross-session/cross-repo reuse. It is the load/transfer counterpart to `mimisbrunnr-odin-context-memory` (the
 sole writer of clean facts).
 
 ## Non-Negotiables
@@ -105,7 +105,7 @@ DB and wire are unchanged.
   exit code is unchanged — and it asks the repo holding the folder (`git check-ignore`, never a text
   search, since the same folder may be tracked in another repo) rather than assuming.
 - **The dump redacts before writing and fails closed.** It shells out to
-  `../mimisbrunnr-context-memory/scripts/redact.py` over stdin (never argv). Both script folders ship
+  `../mimisbrunnr-odin-context-memory/scripts/redact.py` over stdin (never argv). Both script folders ship
   together in the npm package, so the relative path holds there too.
 - **The vocabulary is question/answer.** The old `trigger` key is still read from a store export.
 - **`--dontask` is accepted for forward compatibility.** It skips interactive questions (e.g. "Export split") and takes the recommended option as analysed by the AI. No interactive questions exist in this skill today.

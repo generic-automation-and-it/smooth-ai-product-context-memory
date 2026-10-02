@@ -55,7 +55,7 @@ and the endpoint memory's cheap descriptive fields. Exposed as `POST /api/contex
 - **Filterable by relation type and direction.** A single relation goes into the variable-length edge's property map so the predicate is applied during expansion. Direction is `Outbound` / `Inbound` / `Either`.
 - **Descriptive fields come from the relational rows in the same statement.** The Cypher call is composed with `JOIN memory / memory_version / memory_group` in one SQL statement, never an application-side join — that single-session composition is LADR-01's stated justification, so forfeiting it forfeits the reason for choosing an in-database extension.
 - **The scope rule applies.** A traversal returning `description` / `statement` is a read path, so `MemoryScopeFilter.Plan` is pushed into the composed SQL exactly as `MemorySearchCriteria` does. Omitting it reopens the hole LADR-003 (HLD 001 API) was written to close.
-- Exposed as `POST /api/context/paths`; the mimisbrunnr-context-memory skill exposes it as the `paths` subcommand (bounded traversal, `maxDepth` required).
+- Exposed as `POST /api/context/paths`; the mimisbrunnr-odin-context-memory skill exposes it as the `paths` subcommand (bounded traversal, `maxDepth` required).
 
 ### Ticket traversal contract - implemented and accepted
 
