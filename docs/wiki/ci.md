@@ -36,13 +36,14 @@ Three jobs run in parallel.
 3. **Test release policy** — `python3 -B -m unittest discover -s scripts -p 'test_release_policy.py' -v`; fails closed before installing the SDK.
 4. **Test credential guard** — `bash .github/scripts/test-opencode-credential-guard.sh`; exercises the trusted-`main` credential-isolation guard the AI review and auto-fix jobs run through, rather than trusting it as prose.
 5. **Test credential provisioner** — `bash scripts/test-provision-credentials.sh`; drives the real provisioner into a scratch `--env-file` and asserts neither parser grammar leaks a token.
-6. **Test Aspire test runner** — `bash .github/actions/aspire-test-with-coverage/test-run.sh`; runs the action's real `run.sh` with `dotnet`, `nc` and `curl` stubbed, asserting tier order, project discovery and the coverage floor without an SDK or Docker.
-7. **Install .NET SDK** — `actions/setup-dotnet@v4` (version from the `DOTNET_VERSION` env, currently `10.0.x`).
-8. **Restore** — `dotnet restore`.
-9. **Build** — `dotnet build --no-restore --configuration Release`.
-10. **Verify formatting** — `dotnet format SmoothAiProductContextMemory.slnx --verify-no-changes --no-restore`. With no subcommand `dotnet format` runs all three of its fixers — whitespace, code style and analyzers — at the default `warn` severity, so any `.editorconfig` style or analyzer rule at warning or above is gated, not only whitespace.
-11. **Test controller preflight and lifecycle** — `python3 scripts/test-apphost-entrypoint.py`; engine-free tests against the built AppHost output.
-12. **Aspire test with coverage** — local action `.github/actions/aspire-test-with-coverage` (`run.sh`):
+6. **Test controller launcher** — `bash scripts/test-run-launcher.sh`; the operator launcher's credential resolution, file-safety and diagnostic-stream cases, engine-free. `run.ps1` is parse-verified only and has no lifecycle coverage.
+7. **Test Aspire test runner** — `bash .github/actions/aspire-test-with-coverage/test-run.sh`; runs the action's real `run.sh` with `dotnet`, `nc` and `curl` stubbed, asserting tier order, project discovery and the coverage floor without an SDK or Docker.
+8. **Install .NET SDK** — `actions/setup-dotnet@v4` (version from the `DOTNET_VERSION` env, currently `10.0.x`).
+9. **Restore** — `dotnet restore`.
+10. **Build** — `dotnet build --no-restore --configuration Release`.
+11. **Verify formatting** — `dotnet format SmoothAiProductContextMemory.slnx --verify-no-changes --no-restore`. With no subcommand `dotnet format` runs all three of its fixers — whitespace, code style and analyzers — at the default `warn` severity, so any `.editorconfig` style or analyzer rule at warning or above is gated, not only whitespace.
+12. **Test controller preflight and lifecycle** — `python3 scripts/test-apphost-entrypoint.py`; engine-free tests against the built AppHost output.
+13. **Aspire test with coverage** — local action `.github/actions/aspire-test-with-coverage` (`run.sh`):
     - Discovers test projects by tier suffix — `tests/*.UnitTest`, `tests/*.ComponentTest`, `tests/*.IntegrationTest`, excluding `TestFramework*` fixtures — so a new test project joins the gate without editing the script. A tier with no projects fails before anything starts.
     - Starts `tests/SmoothAiProductContextMemory.TestFramework.Aspire`, keeps its PID inside the action script, and waits for PostgreSQL (`127.0.0.1:15432`, image `docker.io/apache/age:release_PG17_1.7.0`), MinIO TCP (`127.0.0.1:9002`), then MinIO HTTP (`http://127.0.0.1:9002/minio/health/live`). On MinIO timeout the action dumps `docker logs mimisbrunnr-testcontainer-blob`. MinIO image is pinned by digest to `cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1` (Chainguard; upstream MinIO images are no longer served by Docker Hub or quay.io). The test dependency set is PostgreSQL + MinIO only.
     - Restores .NET tools (`dotnet tool restore`) after the dependency pre-warm, then prepares `artifacts/testresults/` and `artifacts/coverage/`.
@@ -50,8 +51,8 @@ Three jobs run in parallel.
     - Generates coverage reports with `dotnet tool run reportgenerator`, over the four product assemblies only (Domain, Application, Infrastructure, Host).
     - **Enforces a line-coverage floor** (`COVERAGE_THRESHOLD`, default `85`). This is a regression guard, not a target: it sits about ten points under the measured full-suite aggregate (94.6 % line on 2026-09-30), so a real regression trips it and ordinary churn does not. It fails closed — an unparseable or missing coverage summary records a failure and exits non-zero rather than passing the gate silently.
     - Stops the Aspire host from the action script's teardown trap once tests and coverage have finished or failed.
-13. **Publish coverage summary** (`if: always()`) — appends `artifacts/coverage/SummaryGithub.md` to the GitHub step summary.
-14. **Upload coverage artifacts** — uploads `artifacts/coverage/` as `coverage-report` only for main pushes (including failed main runs). PR and manual CI skip upload.
+14. **Publish coverage summary** (`if: always()`) — appends `artifacts/coverage/SummaryGithub.md` to the GitHub step summary.
+15. **Upload coverage artifacts** — uploads `artifacts/coverage/` as `coverage-report` only for main pushes (including failed main runs). PR and manual CI skip upload.
 
 ### Job `container-build` — matrix amd64 / arm64 on native runners
 

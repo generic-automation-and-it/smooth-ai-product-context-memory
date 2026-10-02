@@ -15,12 +15,14 @@ scripts/provision-credentials.sh   # 1. write the API tokens
 scripts/run.sh                     # 2. pull the controller image and start the whole stack
 ```
 
-**Step 1 is not optional if you use the skills.** They authenticate with
-`CONTEXT_MEMORY_READ_TOKEN` / `CONTEXT_MEMORY_WRITE_TOKEN`, and `provision-credentials.sh` is the only
-thing that writes those names — both launchers adopt the pair from it rather than minting their own.
-Skip it and the stack starts fine, but the skills return `missing-credential` and the read clients
-refuse to start, naming the credential file they could not find. Run `run.sh` alone only if you want
-the API and nothing is going to talk to it.
+**Step 1 is what puts `CONTEXT_MEMORY_READ_TOKEN` / `CONTEXT_MEMORY_WRITE_TOKEN` in a checkout.**
+They are the names the skills authenticate with, and `provision-credentials.sh` is the only thing that
+writes them inside a repository — both launchers adopt the pair from it rather than minting their own.
+Skip it and the stack starts fine: `scripts/run.sh` publishes the read half to
+`~/.mimisbrunnr/credentials`, which the clients load at startup, so **reads keep working** and only
+writes fail, with `missing-credential: CONTEXT_MEMORY_WRITE_TOKEN is required` until you take the
+deliberate write step below. `scripts/run.ps1` publishes no machine file, so on Windows step 1 is
+required for reads too. Run `run.sh` alone only if you want the API and nothing is going to write to it.
 
 Step 1 is idempotent: re-running reuses the existing tokens rather than rotating them, because the
 running Host holds them and a rotation 403s every client until each one is re-pointed.

@@ -111,12 +111,14 @@ distinct read and write API tokens. Resolution order is **environment → stored
 and the file is only ever *added to* — a stored value is never rewritten or dropped, because release
 mode binds the tokens into the running Host and rotating one 403s every client that holds it.
 
-**This file alone is not enough for the skills.** It carries the container's `Parameters__*` names; the
-skills read `CONTEXT_MEMORY_*`, which `scripts/provision-credentials.sh` writes to
+**This file alone is not enough for a checkout's skills.** It carries the container's `Parameters__*`
+names; the skills read `CONTEXT_MEMORY_*`, which `scripts/provision-credentials.sh` writes to
 `.context/mimisbrunnr.env`. When that file exists the launcher **adopts** its token values rather than
-minting its own, so the two halves are the same values and cannot drift into a 403. Starting the stack
-with this launcher and no provisioner therefore yields a working API and **no working skills** — run
-`scripts/provision-credentials.sh` first unless nothing but the API will talk to it.
+minting its own, so the two halves are the same values and cannot drift into a 403. `run.sh` also
+publishes `CONTEXT_MEMORY_BASE_URL` and `CONTEXT_MEMORY_READ_TOKEN` to `~/.mimisbrunnr/credentials`,
+which the clients read on their own — so on macOS and Linux **reads need no provisioner at all**, and
+only writes do, because the client never seeds a write token by itself. `run.ps1` writes no such file,
+so on Windows run `scripts/provision-credentials.sh` first unless nothing but the API will talk to it.
 
 They are generated once and reused. Deleting the file re-provisions from scratch; there is no
 `--rotate`, deliberately, because a rotation is an operational decision rather than a side effect of

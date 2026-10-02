@@ -9,7 +9,7 @@ alwaysApply: false
 
 # Skill Secret Handling
 
-How any skill under `.agents/skills/` must handle a secret (API key, token, password, connection string). Updated: 2026-09-27
+How any skill under `.agents/skills/` must handle a secret (API key, token, password, connection string). Updated: 2026-10-02
 
 ## The Rule
 
@@ -67,6 +67,7 @@ Run this when **authoring or reviewing** a skill that touches a secret or launch
 
 | Date | Change |
 |:-----|:-------|
+| 2026-10-02 | Reference Pattern and Current Status rewritten for the MCP removal: the read-only client's startup refusal to `CONTEXT_MEMORY_WRITE_TOKEN` is now the read/write guarantee, alongside the credential split — there is no MCP process boundary left to bound it. |
 | 2026-09-27 | Current Status names `mimisbrunnr-ymir-bootstrap` as a no-secret skill that delegates store access and refuses credential-bearing evidence URLs. |
 | 2026-09-27 | Named the tested one-shot Git helper for exact-token pushes after a local `gh auth git-credential` precedence probe. |
 | 2026-09-27 | Synced the template PR #85 checklist into the `skills/` category and adapted examples, status, and scan instructions to this repository's actual token consumers and tooling. |
