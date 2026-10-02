@@ -111,6 +111,13 @@ distinct read and write API tokens. Resolution order is **environment → stored
 and the file is only ever *added to* — a stored value is never rewritten or dropped, because release
 mode binds the tokens into the running Host and rotating one 403s every client that holds it.
 
+**This file alone is not enough for the skills.** It carries the container's `Parameters__*` names; the
+skills and MCP servers read `CONTEXT_MEMORY_*`, which `scripts/provision-credentials.sh` writes to
+`.context/mimisbrunnr.env`. When that file exists the launcher **adopts** its token values rather than
+minting its own, so the two halves are the same values and cannot drift into a 403. Starting the stack
+with this launcher and no provisioner therefore yields a working API and **no working skills** — run
+`scripts/provision-credentials.sh` first unless nothing but the API will talk to it.
+
 They are generated once and reused. Deleting the file re-provisions from scratch; there is no
 `--rotate`, deliberately, because a rotation is an operational decision rather than a side effect of
 running a launcher.

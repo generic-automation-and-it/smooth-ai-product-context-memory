@@ -260,9 +260,18 @@ Target a single test project directly when iterating, e.g. `dotnet test tests/Sm
 **No .NET toolchain required.** Two commands, on macOS and Linux:
 
 ```bash
-scripts/provision-credentials.sh   # 1. write the tokens (mode 600) and the AppHost's share of them
+scripts/provision-credentials.sh   # 1. write the API tokens
 scripts/run.sh                     # 2. pull the controller image and start the whole stack
 ```
+
+**Step 1 is not optional if you use the skills or the MCP servers.** They authenticate with
+`CONTEXT_MEMORY_READ_TOKEN` / `CONTEXT_MEMORY_WRITE_TOKEN`, and `provision-credentials.sh` is the only
+thing that writes those names — `run.sh` generates the controller's own token pair instead. Skip it and
+the stack starts fine but every skill call returns `missing-credential`. Run `run.sh` alone only if you
+want the API and nothing is going to talk to it.
+
+Step 1 is idempotent: re-running reuses the existing tokens rather than rotating them, because the
+running Host holds them and a rotation 403s every client until each one is re-pointed.
 
 `run.sh` starts one controller container, which starts the API, PostgreSQL, blob storage and Seq. It
 waits for the API to answer and exits non-zero if it does not, so a green run means a running API:
@@ -272,6 +281,12 @@ waits for the API to answer and exits non-zero if it does not, so a green run me
 | API | http://localhost:5141 |
 | Dashboard | http://localhost:15278 — use the `/login?t=…` URL it prints |
 | PostgreSQL | `127.0.0.1:5432` · blob `9000`/`9001` · Seq `5341` |
+
+To use the skills from a shell, export their half of the pair:
+
+```bash
+set -a && source .context/mimisbrunnr.env && set +a
+```
 
 Run it again to pull a newer release and restart; data is preserved. `scripts/run.sh stop` stops it,
 `status` and `logs` report on it.
