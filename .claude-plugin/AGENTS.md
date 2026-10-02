@@ -7,8 +7,8 @@
 ## Non-Negotiables
 
 - Every name in a `skills` array MUST be a skill folder that exists under `.claude/skills/` (mirrored from `.agents/skills/`). Never list a skill that is not on disk.
-- `ai-understanding` is owned by upstream `smooth-devex-template` and kept byte-identical to it. The marketplace distributes it; it does not own it. Never edit the skill to match the manifest — edit the manifest to match the skill.
-- The `mimisbrunnr` plugin owns only the `mimisbrunnr-*` skills. A non-prefixed skill gets its own plugin entry.
+- `ai-understanding` is upstream-owned from `smooth-devex-template`, but this repo carries accepted local divergences recorded in `.agents/skills/ai-understanding/AGENTS.md`'s changelog — the case-folded collision check, `context_root()` root derivation, the `--promote` evidence threshold, and the index generator's durability guard. `ai-template-sync` would revert them. The marketplace distributes it; it does not own it. Never edit the skill to match the manifest — edit the manifest to match the skill, and never revert a local fix to restore byte-identity with the template.
+- The `mimisbrunnr` plugin owns only the `mimisbrunnr-*` skills. The marketplace distributes exactly one non-prefixed skill — `ai-understanding`, as its own plugin — so a non-prefixed name does not entitle a skill to a plugin entry; whether a new non-prefixed skill is distributed is the owner's decision.
 
 ## Key Behaviors
 
@@ -23,4 +23,5 @@
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-02 | Two Non-Negotiables asserted more than the manifest does, and both were false as written. "Kept byte-identical to" upstream contradicted the divergence record in `.agents/skills/ai-understanding/AGENTS.md` (case-folded collision check, `context_root()`, `--promote` threshold, durability guard) — an agent reading that clause had no sanctioned way to fix a genuine skill defect and the natural reading ("never edit the skill") licensed reverting those fixes; the clause now states the divergences and the `ai-template-sync` consequence, and forbids restoring byte-identity. "A non-prefixed skill gets its own plugin entry" was broader than the manifest, which distributes exactly one non-prefixed skill out of the 15 present; it now names that boundary and leaves whether a new non-prefixed skill is distributed to the owner rather than asserting a taxonomy this repo never declared. The `ai-understanding` plugin `description` said "across sessions" where the skill's own contract separates the pairs (export/import are session↔disk, publish/consume are workspace↔workspace) and dropped the byte-identity claim. | issue 164, PR 165 |
 | 2026-10-02 | Expanded the `mimisbrunnr` plugin from 4 to all 7 `mimisbrunnr-*` skills and added an `ai-understanding` plugin entry; created this file so the manifest has local owner context. | issue 164, PR 165 |

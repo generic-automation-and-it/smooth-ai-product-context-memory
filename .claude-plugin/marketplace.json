@@ -27,7 +27,7 @@
     {
       "name": "ai-understanding",
       "source": "https://github.com/generic-automation-and-it/smooth-ai-product-context-memory",
-      "description": "Export session knowledge as transferable Understandings; import, publish and consume them across sessions (upstream smooth-devex-template skill, kept byte-identical).",
+      "description": "Export session knowledge as transferable Understandings; import, publish and consume them across workspaces (upstream smooth-devex-template skill with accepted local divergences).",
       "version": "1.0.0",
       "category": "data-analysis",
       "skills": [
