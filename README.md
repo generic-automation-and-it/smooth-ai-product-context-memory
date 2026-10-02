@@ -42,7 +42,9 @@ set -a && source .context/mimisbrunnr.env && set +a
 Run it again to pull a newer release and restart; data is preserved. `scripts/run.sh stop` stops it,
 `status` and `logs` report on it.
 
-**Windows (PowerShell 7):** `scripts/provision-credentials.sh`, then `pwsh ./scripts/run.ps1`.
+**Windows (PowerShell 7):** the same two steps — `scripts/provision-credentials.sh`, then
+`pwsh ./scripts/run.ps1`. Both launchers **adopt** the provisioned token pair rather than minting their
+own, so the controller and the skills hold the same credentials on either platform.
 
 <details>
 <summary>Working on the code? These are the source-mode paths</summary>

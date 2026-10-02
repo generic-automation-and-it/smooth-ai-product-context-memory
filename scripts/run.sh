@@ -65,15 +65,20 @@ if [ "${MIMIS_SHIFT_PORTS:-0}" = 1 ]; then
   p_blob="${P_BLOB:-29000}"
   p_blob_console="${P_BLOB_CONSOLE:-29001}"
   p_seq="${P_SEQ:-25351}"
+  # Inside the branch: the dev AppHost holds 15278 and 19075 too, so shifting only the workload ports
+  # would leave the two stacks contending for the dashboard and OTLP and preflight would refuse with
+  # "Dashboard port 15278 is already in use" - the side-by-side case could never start.
+  p_dashboard="${P_DASHBOARD:-25278}"
+  p_otlp="${P_OTLP:-29075}"
 else
   p_host="${P_HOST:-5141}"
   p_postgres="${P_POSTGRES:-5432}"
   p_blob="${P_BLOB:-9000}"
   p_blob_console="${P_BLOB_CONSOLE:-9001}"
   p_seq="${P_SEQ:-5341}"
+  p_dashboard="${P_DASHBOARD:-15278}"
+  p_otlp="${P_OTLP:-19075}"
 fi
-p_dashboard="${P_DASHBOARD:-15278}"
-p_otlp="${P_OTLP:-19075}"
 api_base_url="http://localhost:${p_host}"
 
 # Docker Desktop on macOS and Windows and native Linux all expose the socket at this path inside the
@@ -176,11 +181,19 @@ file_value() {
 # Parameters__*, which a container reads via --env-file). If this launcher mints its own pair instead,
 # the controller and the skills hold different credentials and every call is a 403 - so a provisioned
 # pair is adopted rather than replaced.
-provisioned_value() {
-  local source_file
+provisioned_tokens() {
+  # Emits "read=<value>" and "write=<value>" for a matched pair, or nothing. All-or-nothing on purpose:
+  # resolving each key against its own source could adopt one token and mint the other, producing exactly
+  # the split pair the adoption exists to prevent - reached through a plausible-looking knob.
+  local source_file read_token write_token
   for source_file in ${MIMIS_TOKEN_FILE:+"$MIMIS_TOKEN_FILE"} "${repo_root:+$repo_root/.context/mimisbrunnr.env.controller}"; do
     [ -n "$source_file" ] && [ -f "$source_file" ] || continue
-    sed -n "s/^$1=//p" "$source_file" | head -1 | grep . && return 0
+    read_token="$(sed -n 's/^Parameters__api-read-token=//p' "$source_file" | head -1)"
+    write_token="$(sed -n 's/^Parameters__api-write-token=//p' "$source_file" | head -1)"
+    if [ -n "$read_token" ] && [ -n "$write_token" ] && [ "$read_token" != "$write_token" ]; then
+      printf 'read=%s\nwrite=%s\n' "$read_token" "$write_token"
+      return 0
+    fi
   done
   return 1
 }
@@ -231,6 +244,9 @@ write_credentials() {
   local key value from_env stored adopted generated=0 ephemeral=0 missing=0
   local pg_password blob_key blob_secret read_token write_token
   local -a persisted=()
+  # Resolved once, before the loop, and only as a matched pair - see provisioned_tokens.
+  local provisioned_pair
+  provisioned_pair="$(provisioned_tokens || true)"
 
   for key in $keys; do
     from_env="$(env_value "$key")"
@@ -243,7 +259,11 @@ write_credentials() {
       value="$stored"
     else
       # Only the two token parameters have a provisioned counterpart; the engine secrets never do.
-      value="$(provisioned_value "$key" || true)"
+      case "$key" in
+        Parameters__api-read-token) value="${provisioned_pair%%$'\n'*}" | cut -d= -f2- ;;
+        Parameters__api-write-token) value="$(printf '%s' "$provisioned_pair" | sed -n 's/^write=//p')" ;;
+        *) value="" ;;
+      esac
       if [ -n "$value" ]; then
         adopted=$((adopted + 1))
       else
@@ -607,7 +627,12 @@ resolve_running_controller() {
   found="$(docker ps --format '{{.Names}}' | grep -E '^mimisbrunnr-.*-controller$' || true)"
   [ "$(printf '%s\n' "$found" | grep -c . || true)" -eq 1 ] || return 0
   controller_name="$found"
-  log "no MIMIS_ID given; using the running $controller_name"
+  # The id travels with the name. Rewriting only the name left installation_id at its default, so the
+  # restart hint printed MIMIS_ID=default and the operator following it started a second, empty
+  # installation on the same ports instead of restarting theirs.
+  installation_id="${found#mimisbrunnr-}"
+  installation_id="${installation_id%-controller}"
+  log "no MIMIS_ID given; using the running $controller_name (installation '$installation_id')"
 }
 
 status() {

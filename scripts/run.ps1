@@ -86,7 +86,16 @@ $script:ControllerName = "mimisbrunnr-$Id-controller"
 $script:StateVolume = "mimisbrunnr-$Id-controller-state"
 $script:GroupName = "smooth-mímisbrunnr-release-$Id"
 $script:UseDataRoot = $null -ne $DataRoot
-$script:DataHome = if ($script:UseDataRoot) { Split-Path -Parent $DataRoot } else { Join-Path $HOME '.mimisbrunnr' }
+# The credential file sits in the data *home*, one level above the volumes folder - the same place
+# run.sh puts it. Deriving the home as the parent of an explicitly-given -DataRoot wrote controller.env
+# to $HOME\controller.env instead, so an operator moving an installation between the two launchers did
+# not find the secrets where the shared documentation says they are.
+$script:DataHome = if ($script:UseDataRoot) {
+    # -DataRoot may be the volumes folder itself, or a home containing one. Take the parent unless the
+    # folder is not itself named "volumes", which is how run.sh's default reads.
+    if ((Split-Path -Leaf $DataRoot) -eq 'volumes') { Split-Path -Parent $DataRoot } else { $DataRoot }
+}
+else { Join-Path $HOME '.mimisbrunnr' }
 $script:VolumesRoot = if ($script:UseDataRoot) { $DataRoot } else { Join-Path $script:DataHome 'volumes' }
 $script:EnvFile = Join-Path $script:DataHome 'controller.env'
 $script:ContainerDataRoot = '/var/lib/mimisbrunnr-data'
@@ -158,6 +167,30 @@ function Get-StoredSecret {
     return $null
 }
 
+function Get-ProvisionedTokenPair {
+    # Returns both Parameters__api-*-token values as a hashtable, or $null when the provisioned file is
+    # absent or carries only one of them. All-or-nothing on purpose: a file holding a single token
+    # cannot yield a matched pair, so it is treated as no pair at all rather than adopted half of.
+    $candidates = @()
+    if ($env:MIMIS_TOKEN_FILE) { $candidates += $env:MIMIS_TOKEN_FILE }
+    $candidates += (Join-Path $PSScriptRoot '..\.context\mimisbrunnr.env.controller')
+
+    foreach ($candidate in $candidates) {
+        if (-not $candidate -or -not (Test-Path -LiteralPath $candidate)) { continue }
+        $pair = @{}
+        foreach ($line in [System.IO.File]::ReadAllLines($candidate)) {
+            if ($line -match '^Parameters__api-(read|write)-token=(.+)$') { $pair[$Matches[1]] = $Matches[2].Trim() }
+        }
+        if ($pair.Count -eq 2 -and $pair['read'] -and $pair['write'] -and $pair['read'] -ne $pair['write']) {
+            return @{
+                'Parameters__api-read-token'  = $pair['read']
+                'Parameters__api-write-token' = $pair['write']
+            }
+        }
+    }
+    return $null
+}
+
 function Initialize-Credentials {
     # A symlink here would send this run's credentials wherever the link points, and a directory would
     # fail the write after the values were already chosen. Checked here rather than at the top of the
@@ -182,6 +215,14 @@ function Initialize-Credentials {
     $generated = 0
     $fromEnvironment = 0
     $missing = 0
+    $adoptedCount = 0
+
+    # scripts/provision-credentials.sh writes the *same* two token values into
+    # .context/mimisbrunnr.env (as CONTEXT_MEMORY_*, which skills and MCP servers read) and
+    # .context/mimisbrunnr.env.controller (as Parameters__*, which a container reads via --env-file).
+    # Minting this launcher's own pair instead leaves the controller and the skills holding different
+    # credentials, and every call is a 403. Read as a pair or not at all.
+    $adopted = Get-ProvisionedTokenPair
 
     foreach ($key in $keys) {
         # [Environment]::GetEnvironmentVariable takes the name as a string, so the hyphenated
@@ -195,6 +236,13 @@ function Initialize-Credentials {
         }
         elseif ($stored) {
             $effective[$key] = $stored
+        }
+        elseif ($null -ne $adopted -and $adopted.ContainsKey($key)) {
+            # Adopted from the provisioner's controller env file. Adopting the *pair* as a unit is the
+            # point: resolving each key against its own source could adopt one token and mint the other,
+            # producing exactly the split pair the adoption exists to prevent.
+            $effective[$key] = $adopted[$key]
+            $adoptedCount++
         }
         else {
             $effective[$key] = New-Secret
@@ -226,7 +274,10 @@ function Initialize-Credentials {
         [System.IO.File]::WriteAllLines($temp, $lines, [System.Text.UTF8Encoding]::new($false))
         Move-Item -LiteralPath $temp -Destination $script:EnvFile -Force
         $script:TempEnvFile = $null
-        Write-Info "wrote $($script:EnvFile) - $generated generated, $missing new"
+        Write-Info "wrote $($script:EnvFile) - $generated generated, $adoptedCount adopted from provision-credentials.sh, $missing new"
+        if ($adoptedCount -gt 0) {
+            Write-Info '  tokens match the CONTEXT_MEMORY_* values your skills hold, so they will not 403'
+        }
     }
 
     # Re-assert the mode on every run, not only when writing. A file widened by a backup restore or a
@@ -485,6 +536,43 @@ function Start-Controller {
     }
     Write-Host ''
     Write-Host '  Run it again to pull a newer release and restart. Stop with: -Verb stop'
+
+    if (-not (Wait-ForApi)) { exit 1 }
+    Write-Host "  API         healthy at http://localhost:$HostPort"
+}
+
+# An earlier draft returned immediately, so `up` printed the API URL and exited 0 while the API
+# container was crash-looping on a database it could not authenticate to. "The script ran" and "the app
+# started" looked identical, which is what turned one bad password into three session restarts.
+function Wait-ForApi {
+    $waitSeconds = if ($env:P_WAIT_SECONDS) { [int]$env:P_WAIT_SECONDS } else { 180 }
+    Write-Info "waiting for the API to answer on 127.0.0.1:$HostPort"
+    $waited = 0
+    $code = 'no response'
+    while ($waited -lt $waitSeconds) {
+        try {
+            $response = Invoke-WebRequest -Uri "http://127.0.0.1:$HostPort/health" -TimeoutSec 4 -UseBasicParsing
+            $code = $response.StatusCode
+        }
+        catch { $code = 'no response' }
+        if ($code -eq 200) { return $true }
+        Start-Sleep -Seconds 3
+        $waited += 3
+    }
+
+    Write-Host ''
+    Write-Info "the API did not become healthy within ${waitSeconds}s (last status '$code')."
+    Write-Host '  the containers are up, so the fault is inside one of them. Most likely, in order:'
+    Write-Host ''
+    Write-Host '    1. postgres rejected the password - this data root was initialised under a different one.'
+    Write-Host '       PostgreSQL fixes its password on first init and ignores it forever after, so a'
+    Write-Host '       freshly generated one can never match. Check:'
+    Write-Host "         docker logs mimisbrunnr-$Id-postgres 2>&1 | Select-String -Pattern auth | Select-Object -Last 3"
+    Write-Host "    2. the token pair drifted - ./run.ps1 -Verb logs, then look for 403."
+    Write-Host "    3. migrations are pending - ./run.ps1 -Verb logs, look for 'Migration'."
+    Write-Host ''
+    Write-Host "  full stack state: ./run.ps1 -Verb status"
+    return $false
 }
 
 function Show-Status {

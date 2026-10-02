@@ -156,7 +156,7 @@ not identifiers. See [`scripts/AGENTS.md`](AGENTS.md).
 | `run.sh` | `run.ps1` | Default | Meaning |
 |---|---|---|---|
 | `MIMIS_ID` | `-Id` | `default` | Installation id; names every resource |
-| `MIMIS_HOME` / `MIMIS_DATA_ROOT` | `-DataRoot` | `~/.mimisbrunnr` | Host folder for data and secrets |
+| `MIMIS_HOME` / `MIMIS_DATA_ROOT` | `-DataRoot` | `~/.mimisbrunnr` | Host folder for data and secrets. Either launcher puts `controller.env` in this home, never inside the volumes folder, so moving an installation between them finds the secrets in the same place. Pass `-DataRoot` the volumes folder (`…\.mimisbrunnr\volumes`) or the home itself; both resolve to the same home. |
 | `MIMIS_DATA_ROOT=off` | *(omit `-DataRoot`)* | — | Engine-managed named volumes |
 | `CONTROLLER_IMAGE` | `-Image` | `…-apphost:latest` | Digest-pinned references are honoured as given |
 | `MIMIS_SOCKET` | `-EngineSocket` | per platform | Engine socket or named pipe |
@@ -253,9 +253,10 @@ the installation and re-provision. Adopting a data root is a fresh start, not a 
   Being under `scripts/` at least means a change to them triggers the PR gate (see the `scripts/**`
   path filter), unlike a home under `docs/`. A harness against a scratch `MIMIS_HOME` is the next
   step, and would have caught the credential-clobbering defect found while writing them.
-- Neither script verifies that the container reached a healthy state; it prints the login URL and
-  leaves readiness to you. `scripts/run.sh status` and
-  `curl localhost:<P_HOST>/health` answer that.
+- Neither script verified that the container reached a healthy state in its first release: it printed the
+  login URL and returned while the API container was crash-looping. Both now wait for `/health` and exit
+  non-zero with the cause ranked. (Corrected — an earlier version of this file said neither script had
+  the gate, which was true of `run.ps1` at the time and false of the pair.)
 - The Windows data root is unverified, as above.
 
 ## See also
