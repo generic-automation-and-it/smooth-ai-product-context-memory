@@ -210,7 +210,19 @@ env_value() {
   printenv "$1" 2>/dev/null || true
 }
 
-secret() { openssl rand -hex "${1:-24}"; }
+# Hex from the kernel CSPRNG, with openssl as the preferred path where it exists. `/dev/urandom` is
+# POSIX and present everywhere the script runs; openssl is declared by neither Dockerfile, so relying on
+# it alone made credential generation fail on a minimal image with nothing but bash. This was found by
+# the harness on a stock `bash:5.2` container, where the failure surfaced as an empty credential file
+# rather than as a missing command.
+secret() {
+  local bytes="${1:-24}"
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -hex "$bytes"
+  else
+    od -An -tx1 -N "$bytes" /dev/urandom | tr -d ' \n'
+  fi
+}
 
 # Publish the tokens at machine level, outside every repository, so the skills work in any checkout
 # without that repository's provisioner. Written here rather than read from a per-repo file because a
@@ -283,7 +295,11 @@ env_export() {
 
 write_credentials() {
   local keys="PostgresConfiguration__Password BlobConfiguration__AccessKey BlobConfiguration__SecretKey Parameters__api-read-token Parameters__api-write-token"
-  local key value from_env stored adopted generated=0 ephemeral=0 missing=0
+  # `adopted` is initialised rather than only declared: it is incremented only when a provisioned pair
+# exists, so on a machine with no provision file — a fresh clone, a CI container — it is never assigned,
+# and `set -u` aborts on the log line that reads it. A checkout that has run the provisioner hides this,
+# which is why it survived until the harness ran without one.
+local key value from_env stored generated=0 ephemeral=0 missing=0 adopted=0
   local pg_password blob_key blob_secret read_token write_token
   local -a persisted=()
   # Resolved once, before the loop, and only as a matched pair - see provisioned_tokens.
