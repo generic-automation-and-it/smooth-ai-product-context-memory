@@ -28,6 +28,57 @@ ENV_WRITE_TOKEN = "CONTEXT_MEMORY_WRITE_TOKEN"
 # preflight batch without touching pipeline logic. Mirrors Preflight.MaxCandidates.
 MAX_CANDIDATES = 20
 
+# Machine-level credential file, outside every repository. scripts/run.sh writes it when the stack
+# starts, so the skills work in any checkout with nothing to provision per repo — which is the point:
+# a credential that lives inside a gitignored `.context/` needs that repository's provisioner, and a
+# repository is exactly what a cross-repo skill cannot assume it has.
+#
+# Only the requested names are loaded, and a name already in the environment always wins. That matters
+# for the read-only client, which refuses to start when a write token is present: loading the whole file
+# into os.environ would hand it a write token and break the very check that keeps the read surface
+# read-only. Parse-and-select rather than source — these are KEY=value lines, and `source` on a file
+# holding unquoted values would re-split anything with a space in it.
+MACHINE_CREDENTIAL_FILE = os.environ.get(
+    "CONTEXT_MEMORY_CREDENTIAL_FILE",
+    os.path.join(os.path.expanduser("~"), ".mimisbrunnr", "credentials"))
+
+
+def load_machine_credentials(*names):
+    """Seed the named variables from the machine credential file when they are not already set.
+
+    Returns the file it read, or None. A malformed line is skipped rather than raised: a partial file
+    must not turn one working variable into an import-time crash, and the missing variable still fails
+    closed at the point of use with the error that names it.
+    """
+    path = MACHINE_CREDENTIAL_FILE
+    try:
+        with open(path, encoding="utf-8") as handle:
+            lines = handle.readlines()
+    except OSError:
+        return None
+    wanted = set(names)
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        if key in wanted and value and not os.environ.get(key):
+            os.environ[key] = value.strip()
+    return path
+
+
+# Seeded once at import, never per call. A per-call fallback would defeat the fail-closed behaviour the
+# read-only contract depends on: a caller that deliberately clears the token to prove the client refuses
+# without it would be handed one from this file anyway, so the absence could never be established. Loaded
+# at start-up like any dotenv, so a cleared environment afterwards means what it says.
+#
+# The read token and the base URL only. The write token is deliberately **not** ambient: this module is
+# imported by the read client, which refuses to start when a write token is present, so seeding one here
+# would trip that check in every read worker — and ambient write capability is the wrong default anyway.
+# To write, source the credential file.
+load_machine_credentials(ENV_READ_TOKEN, ENV_BASE_URL)
+
 # Query recall limit for the semantic-dedup surface (decision 1). Mirrors MemorySearchDefaults.MaxLimit.
 MAX_QUERY_LIMIT = 200
 

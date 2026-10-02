@@ -48,6 +48,8 @@ controller_image="${CONTROLLER_IMAGE:-ghcr.io/generic-automation-and-it/smooth-a
 data_home="${MIMIS_HOME:-$HOME/.mimisbrunnr}"
 data_root="$data_home/volumes"
 env_file="$data_home/controller.env"
+machine_credentials="${MIMIS_MACHINE_CREDENTIALS:-$HOME/.mimisbrunnr/credentials}"
+machine_credentials_read_only="${machine_credentials%.env}-read-only"
 data_root_setting="${MIMIS_DATA_ROOT:-}"
 
 # The documented release ports (docker.md): API 5141, PostgreSQL 5432, blob 9000/9001, Seq 5341,
@@ -72,6 +74,7 @@ else
 fi
 p_dashboard="${P_DASHBOARD:-15278}"
 p_otlp="${P_OTLP:-19075}"
+api_base_url="http://localhost:${p_host}"
 
 # Docker Desktop on macOS and Windows and native Linux all expose the socket at this path inside the
 # VM; only rootless engines differ, and that is a documented override rather than a guess.
@@ -189,6 +192,40 @@ env_value() {
 
 secret() { openssl rand -hex "${1:-24}"; }
 
+# Publish the tokens at machine level, outside every repository, so the skills work in any checkout
+# without that repository's provisioner. Written here rather than read from a per-repo file because a
+# gitignored .context/ cannot exist in a repo the skill has never been installed into — which is the
+# whole cross-repo case. Two files, not one: a read-only worker that sources both would hold a write
+# token, and the read client refuses to start in that state by design.
+write_machine_credentials() {
+  local read_token write_token
+  read_token="$(file_value Parameters__api-read-token || true)"
+  write_token="$(file_value Parameters__api-write-token || true)"
+  [ -n "$read_token" ] && [ -n "$write_token" ] || return 0
+
+  local tmp
+  ( umask 077
+    tmp="$(mktemp "$machine_credentials.XXXXXX")"
+    {
+      echo "# Mímisbrunnr API credentials — machine level, outside any repository."
+      echo "# Written by scripts/run.sh. Read by the context-memory clients automatically."
+      echo "CONTEXT_MEMORY_BASE_URL=$api_base_url"
+      echo "CONTEXT_MEMORY_READ_TOKEN=$read_token"
+      echo "CONTEXT_MEMORY_WRITE_TOKEN=$write_token"
+    } >"$tmp"
+    mv "$tmp" "$machine_credentials"
+    tmp="$(mktemp "$machine_credentials_read_only.XXXXXX")"
+    {
+      echo "# Read-only half. Source this for a worker that must not mutate; the read client refuses to"
+      echo "# start when a write token is present, so it reads only what it needs from the file above."
+      echo "CONTEXT_MEMORY_BASE_URL=$api_base_url"
+      echo "CONTEXT_MEMORY_READ_TOKEN=$read_token"
+    } >"$tmp"
+    mv "$tmp" "$machine_credentials_read_only"
+  )
+  log "machine credentials written: $machine_credentials"
+}
+
 write_credentials() {
   local keys="PostgresConfiguration__Password BlobConfiguration__AccessKey BlobConfiguration__SecretKey Parameters__api-read-token Parameters__api-write-token"
   local key value from_env stored adopted generated=0 ephemeral=0 missing=0
@@ -250,6 +287,11 @@ write_credentials() {
     log "wrote $env_file (mode 600) — $generated generated, $adopted adopted from provision-credentials.sh, $missing new"
     [ "$adopted" -gt 0 ] && log "  tokens match the CONTEXT_MEMORY_* values your skills hold, so they will not 403"
   fi
+
+  # Every run, not only one that wrote the file: the machine credential file is what makes the skills
+  # work in a checkout that has never run this repository's provisioner, so a stack that started before
+  # that file existed would leave every other repo unable to authenticate.
+  write_machine_credentials
 
   # Re-assert the mode on every run, not only when writing. A file widened by a backup restore or a
   # careless copy would otherwise stay group-readable for the life of the installation, and no test

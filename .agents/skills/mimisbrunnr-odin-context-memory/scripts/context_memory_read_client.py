@@ -35,6 +35,10 @@ RAW_BODY_COMMANDS = frozenset({"get-blob"})
 
 
 def main():
+    # Load only the read token from the machine credential file. Loading the whole file would put the
+    # write token in this process and trip the check immediately below, which is the read surface's
+    # guarantee that it cannot mutate — so the selection is load-by-name, never load-everything.
+    client.load_machine_credentials(client.ENV_READ_TOKEN, client.ENV_BASE_URL)
     if os.environ.get(client.ENV_WRITE_TOKEN):
         print(f"{client.ENV_WRITE_TOKEN} must not be present in the read worker environment", file=sys.stderr)
         return 2

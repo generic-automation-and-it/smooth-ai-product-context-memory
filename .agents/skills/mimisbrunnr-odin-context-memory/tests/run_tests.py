@@ -2287,12 +2287,28 @@ class AgentContractTests(unittest.TestCase):
         self.assertEqual(len(response["result"]["tools"]), 9)
 
     def test_read_mcp_configuration_exists(self):
+        """The server is launched through a wrapper that injects the credential, not straight at python3.
+
+        A token on disk is not a token in a process. `.mcp.json` pointing `command` at `python3` launched
+        the server with an empty environment, so every call failed closed with `missing-credential` — an
+        accurate symptom that named the process rather than the missing launch environment, and cost four
+        session restarts to trace back to this file. Asserting `command == "python3"` would have pinned
+        the broken configuration, so the assertion is the wrapper, and the wrapper's own contract.
+        """
         config = json.loads((HERE.parents[3] / ".mcp.json").read_text(encoding="utf-8"))
         command = config["mcpServers"]["mimisbrunnr-read"]
-        self.assertEqual(command["command"], "python3")
-        self.assertEqual(command["args"], [
-            ".agents/skills/mimisbrunnr-odin-context-memory/scripts/memory_read_mcp.py"
-        ])
+        self.assertEqual(command["command"], "scripts/launch-mcp.sh")
+        self.assertEqual(command["args"], ["read"])
+
+        launcher = (HERE.parents[3] / "scripts" / "launch-mcp.sh").read_text(encoding="utf-8")
+        self.assertIn("mimisbrunnr.env", launcher,
+                      "the launcher must source the provisioned credential file, not invent a token")
+        self.assertNotRegex(launcher, r"TOKEN=[A-Za-z0-9]{16,}",
+                            "the launcher must not carry a literal token")
+
+        write = config["mcpServers"]["mimisbrunnr-write"]
+        self.assertEqual(write["command"], "scripts/launch-mcp.sh")
+        self.assertEqual(write["args"], ["write"])
 
     def test_read_mcp_lifecycle_initialize_ping_and_list(self):
         initialized = read_mcp.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize"})
