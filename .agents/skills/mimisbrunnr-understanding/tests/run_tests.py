@@ -525,6 +525,39 @@ class StoreImportTests(unittest.TestCase):
         # The notice frames the table too — it is untrusted data either way.
         self.assertIn(uc.DATA_NOTICE, out)
 
+    def test_table_surfaces_the_records_scope_from_dimension_and_identifier(self):
+        """The read API returns scope as two fields, not a single `scope`.
+
+        Reading only `scope` would show an empty Scope column for every live record, and the
+        program/self flag would never fire — the exact kind of metadata loss this round trip exists to
+        avoid.
+        """
+        original = uc.store_query
+        uc.store_query = lambda f: ([
+            {"uuid": "u1", "version": 1, "kind": "understanding", "subject": "Scope check",
+             "statement": "A claim.", "status": "approved", "confidence": 80,
+             "scopeDimension": "product", "scopeIdentifier": "context-memory",
+             "createdOn": "2026-10-02T09:00:00Z"}], "ok")
+        try:
+            _, out, _ = run(["import", "--table"])
+        finally:
+            uc.store_query = original
+        self.assertIn("product:context-memory", out)
+
+    def test_a_program_scoped_record_is_flagged_not_shipped_fact(self):
+        """A programme-scope record must be flagged even when scope arrives as dimension+identifier."""
+        original = uc.store_query
+        uc.store_query = lambda f: ([
+            {"uuid": "u1", "version": 1, "kind": "understanding", "subject": "Prog",
+             "statement": "Internal only.", "status": "approved", "confidence": "verified",
+             "scopeDimension": "program", "scopeIdentifier": "roadmap",
+             "createdOn": "2026-10-02T09:00:00Z"}], "ok")
+        try:
+            _, out, _ = run(["import"])
+        finally:
+            uc.store_query = original
+        self.assertIn("program scope, not shipped product fact", out)
+
     def test_a_pipe_in_a_claim_does_not_add_a_column(self):
         original = uc.store_query
         uc.store_query = lambda f: ([{"uuid": "u1", "version": 1, "kind": "understanding",

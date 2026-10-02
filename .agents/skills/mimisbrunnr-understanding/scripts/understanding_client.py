@@ -143,6 +143,11 @@ def parse_store_export(body: str) -> list[dict] | None:
 
 def five_parts(record: dict) -> dict:
     """Project a stored record onto the five parts (HLD 007 LADR-04)."""
+    dim = record.get("scopeDimension") or ""
+    ident = record.get("scopeIdentifier") or ""
+    # The read API returns scope as two fields, not a single `scope`. Combining them keeps the display
+    # and the flag working for both shapes; `scopeDimension` drives the program/self warning.
+    scope = record.get("scope") or (f"{dim}:{ident}" if dim else ident)
     return {
         "subject": record.get("subject") or record.get("name") or "(untitled)",
         "question": (record.get("description") or record.get("question")
@@ -151,7 +156,8 @@ def five_parts(record: dict) -> dict:
         "why": record.get("contentSummary") or record.get("why") or "",
         "boundaries": record.get("validUntil") or record.get("boundaries") or "",
         "validUntil": record.get("validUntil") or "",
-        "scope": record.get("scope") or "",
+        "scope": scope,
+        "scopeDimension": dim or (scope.split(":")[0] if scope else ""),
         "status": record.get("status") or "",
         "uuid": record.get("uuid") or "",
         "version": record.get("version"),
@@ -206,8 +212,8 @@ def _render_record(parts: dict) -> list[str]:
     flags = []
     if parts["status"] and parts["status"] != "approved":
         flags.append(f"status: {parts['status']}")
-    if parts["scope"] in ("program", "self"):
-        flags.append(f"{parts['scope']} scope, not shipped product fact")
+    if parts["scopeDimension"] in ("program", "self"):
+        flags.append(f"{parts['scopeDimension']} scope, not shipped product fact")
     if parts["confidence"] and parts["confidence"] != "verified":
         flags.append(f"confidence: {parts['confidence']}")
     if parts["portability"] == "repo-specific":
