@@ -1293,9 +1293,15 @@ def cmd_dump(args: argparse.Namespace) -> int:
         print("REFUSED: dump requires --currentsession.", file=sys.stderr)
         return 1
 
-    if args.from_file and args.from_file != "-" and not Path(args.from_file).exists():
-        print(f"NOT FOUND: {args.from_file}", file=sys.stderr)
-        return 2
+    if args.from_file and args.from_file != "-":
+        path = Path(args.from_file)
+        if path.is_dir():
+            print(f"REFUSED: --from wants a file or '-', got a directory: {args.from_file}",
+                  file=sys.stderr)
+            return 1
+        if not path.exists():
+            print(f"NOT FOUND: {args.from_file}", file=sys.stderr)
+            return 2
 
     content = read_input(args.from_file) if args.from_file else ""
     findings: dict[str, int] = {}

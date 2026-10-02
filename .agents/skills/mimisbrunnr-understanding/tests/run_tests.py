@@ -1147,6 +1147,17 @@ class DumpTests(unittest.TestCase):
             self.assertEqual(rc, 2)
             self.assertIn("NOT FOUND", err)
 
+    def test_dump_refuses_a_directory_for_from(self):
+        """`--from` is a file or '-'; a directory is user error and must refuse cleanly, not crash.
+
+        Passing a directory used to raise IsADirectoryError out of read_input with no message.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, _, err = run(["dump", "--currentsession", "--from", str(tmp)], expect=1)
+            self.assertEqual(rc, 1)
+            self.assertIn("REFUSED", err)
+            self.assertIn("directory", err)
+
     def test_dump_writes_discoverable_folder_and_marker(self):
         with tempfile.TemporaryDirectory() as tmp:
             out_dir = Path(tmp) / "understanding-transfer"
