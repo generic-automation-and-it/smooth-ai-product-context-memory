@@ -40,6 +40,7 @@ See [./ladrs/](./ladrs/).
 | [LADR-05](./ladrs/LADR-05-bitemporal-separation.md) | Two independent time axes | Neither may be derived from the other |
 | [LADR-06](./ladrs/LADR-06-content-addressed-blob-storage.md) | Content-addressed bodies, database holds the reference | Objects are immutable; a bad write can only be orphaned |
 | [LADR-07](./ladrs/LADR-07-enforcement-tiers.md) | Constraint / mechanism / verified-soft | Tells you whether a guarantee is structural or behavioural before you rely on it |
+| [LADR-08](./ladrs/LADR-08-recall-evidence-stays-self-authored.md) | Recall evidence stays self-authored; conversational benchmarks are the wrong population | LoCoMo / LongMemEval / OmniMemEval measure dialogue turns, not distilled labelled claims — a score there is the wrong-metric defect at scale. The in-use recall-feedback signal (HLD-004) is the independence that matters |
 
 ## Key Behaviors
 
@@ -68,6 +69,7 @@ Targets and verification live in [./nfrs/](./nfrs/). Two shape how code is writt
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-02 | **LADR-08 added: recall evidence stays self-authored; conversational benchmarks are the wrong population.** Every recall figure here comes from a fixture its own authors wrote, and the dedup scorer already reported accuracy as recall — so an independent fixture was considered. **Rejected:** LoCoMo / LongMemEval / OmniMemEval measure recall over dialogue turns (conversational relevance, answer-generation metric), not curated distilled labelled claims retrieved by label/facet/lexeme. A score there measures a population this system does not store, so it is the wrong-metric defect at scale. The complement is the in-use recall-feedback signal (HLD-004: never-recalled, miss-rate) — real queries against the real store. An external *authoring process* is deferred, not rejected on the merits, with a stated reopening threshold. | LADR-08; HLD-004; HLD-002 NFR-02 |
 | 2026-10-01 | README gained a *Business Requirements Traced* table: BR-04, BR-06 and BR-07 previously traced to no HLD. Each is mapped to the part this design delivers (indexed filter dimensions; cheap fields and a capped result count; per-version confidence, sources and `created_on` returned with every item) and the part it does not (hierarchy traversal is HLD-003; no semantic ranking; `sources` is optional on write). | BR-04, BR-06, BR-07 |
 | 2026-10-01 | NFR-03's status line had the supersession reversed (it said it *supersedes* HLD-006 NFR-02); it now says it is superseded by HLD-006 NFR-02, and records that the closure rests on an NFR still in Draft. No status change. | NFR-03, HLD-006 NFR-02 |
 | 2026-09-16 | Recall deferral closed by measurement: FTS configuration `simple` → `english` (recall 0.44 → 0.78, precision 0.88); `pg_trgm` measured and rejected with a recorded reopening threshold. | [NFR-02 recall-tuning measurements](./nfrs/NFR-02-recall-tuning-measurements.md) |
