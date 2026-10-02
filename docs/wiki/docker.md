@@ -88,9 +88,12 @@ docker run --rm -v "$(pwd)/.context/snapshots:/snapshots" \
 
 `<old-tag>` is the tag this installation is currently running, and
 `<installation-credential-file>` is the env file already carrying its
-`ConnectionStrings__SmoothAiProductContextMemory` and `BlobStorage__*` values. Credentials arrive by
-file rather than inline `-e` for the reason given under
-[Run standalone (API)](#run-standalone-api): an inline secret lands in shell history.
+`ConnectionStrings__SmoothAiProductContextMemory` and `BlobStorage__*` values. The host-context
+volume is `mimisbrunnr-<installation-id>-host-context` on a release installation
+(`mimisbrunnr-host-context` is the development AppHost's name); mounting the wrong one writes the
+snapshot record where the Host will never read it. Credentials arrive by file rather than inline
+`-e` for the reason given under [Run standalone (API)](#run-standalone-api): an inline secret lands
+in shell history.
 
 Do not change the PostgreSQL major as part of an upgrade. **Rolling back an image does not roll back
 schema or data**: if the new migrations prevent a downgrade, rebuild both stores from the verified
