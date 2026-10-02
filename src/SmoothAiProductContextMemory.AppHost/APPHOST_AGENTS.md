@@ -259,6 +259,7 @@ Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgr
   `creatorProcessStartTime` from inside each controller's own PID namespace, so a new controller's
   orphan cleanup sees every other controller's creator as dead. Until fixed, run one controller per
   engine — the smoke script included, which is why it must not run beside a live installation.
+  Tracked in issue #159.
 - Docker Desktop ARM64 lifecycle/data smoke passed locally. Podman, secured TCP, native Linux matrix, dashboard commands/all telemetry signals, and cross-version upgrades remain release acceptance gaps. Do not claim full production readiness from build/unit tests.
 
 ## Changelog

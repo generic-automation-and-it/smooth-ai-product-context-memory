@@ -53,7 +53,7 @@ match `smooth-mímisbrunnr-release-<installation-id>` exactly.
 > **Run one controller per engine.** Starting a controller currently removes every other
 > installation's running workloads (their data volumes survive). This includes
 > `scripts/smoke-apphost-container.sh`, so do not smoke-test beside a live installation. Tracked as an
-> open defect in `APPHOST_AGENTS.md` → Release Controller Contract.
+> open defect in `APPHOST_AGENTS.md` → Release Controller Contract and in issue #159.
 
 Use `InstallationConfiguration__Id` for another installation and name its controller `mimisbrunnr-<id>-controller`. Preserve the engine-generated hostname. Container-name uniqueness prevents a second controller taking over a live installation; maintenance commands must run in a replacement canonical container, never via `docker exec` on the live controller.
 
