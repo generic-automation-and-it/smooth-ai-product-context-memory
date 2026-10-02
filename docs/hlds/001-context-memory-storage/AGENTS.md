@@ -69,7 +69,7 @@ Targets and verification live in [./nfrs/](./nfrs/). Two shape how code is writt
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
-| 2026-10-02 | LADR-08's `Related` and Decision sections re-attribute the wrong-metric scorer defect to HLD-002 NFR-02; this HLD's NFR-02 has no scorer. No decision or figure changed. | LADR-08 |
+| 2026-10-02 | LADR-08's Consequences now cite each fixture's denominator at its own source (HLD-001 NFR-02: 14 memories / 11 cases; HLD-002 NFR-02: fourteen scenarios) and link the `pg_trgm` reopening threshold to the NFR that records it. No decision or figure changed. | LADR-08 |
 | 2026-10-02 | LADR-08 added: recall evidence stays self-authored — LoCoMo/LongMemEval/OmniMemEval measure dialogue turns, not distilled labelled claims; HLD-004's in-use signal is the complement. | LADR-08 |
 | 2026-10-01 | README gained a *Business Requirements Traced* table for BR-04/06/07, each split into what this design delivers and what it does not. | BR-04, BR-06, BR-07 |
 | 2026-10-01 | NFR-03's supersession direction corrected (superseded by HLD-006 NFR-02, not the reverse). No status change. | NFR-03 |
