@@ -260,7 +260,7 @@ write_credentials() {
     else
       # Only the two token parameters have a provisioned counterpart; the engine secrets never do.
       case "$key" in
-        Parameters__api-read-token) value="${provisioned_pair%%$'\n'*}" | cut -d= -f2- ;;
+        Parameters__api-read-token) value="$(printf '%s' "$provisioned_pair" | sed -n 's/^read=//p')" ;;
         Parameters__api-write-token) value="$(printf '%s' "$provisioned_pair" | sed -n 's/^write=//p')" ;;
         *) value="" ;;
       esac
