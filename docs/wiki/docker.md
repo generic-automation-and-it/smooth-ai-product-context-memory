@@ -75,19 +75,22 @@ archive offline before you rely on it, then start the new image:
 # 1. snapshot the running corpus (storage connection vars; no write token)
 docker run --rm \
   -v "$(pwd)/.context/snapshots:/snapshots" -v mimisbrunnr-host-context:/app/.context \
-  -e ConnectionStrings__SmoothAiProductContextMemory='...' \
-  -e BlobStorage__Endpoint='http://host.docker.internal:9000' \
-  -e BlobStorage__AccessKey='smooth-local' -e BlobStorage__SecretKey='...' \
-  -e BlobStorage__Bucket='smooth-mimisbrunnr-memory-well' \
-  smooth-ai-product-context-memory:<old-tag> snapshot --output /snapshots
+  --env-file <installation-credential-file> \
+  ghcr.io/generic-automation-and-it/smooth-ai-product-context-memory:<old-tag> snapshot --output /snapshots
 
 # 2. verify the archive offline — no database, no object store; exit 0 = clean
 docker run --rm -v "$(pwd)/.context/snapshots:/snapshots" \
-  smooth-ai-product-context-memory:<old-tag> verify /snapshots/snapshot-<ts>.tar
+  ghcr.io/generic-automation-and-it/smooth-ai-product-context-memory:<old-tag> verify /snapshots/snapshot-<ts>.tar
 
 # 3. start the new image with the same volumes and credentials. It logs the pending-migration count and
 #    the last snapshot's age, then applies the migrations before it reports ready.
 ```
+
+`<old-tag>` is the tag this installation is currently running, and
+`<installation-credential-file>` is the env file already carrying its
+`ConnectionStrings__SmoothAiProductContextMemory` and `BlobStorage__*` values. Credentials arrive by
+file rather than inline `-e` for the reason given under
+[Run standalone (API)](#run-standalone-api): an inline secret lands in shell history.
 
 Do not change the PostgreSQL major as part of an upgrade. **Rolling back an image does not roll back
 schema or data**: if the new migrations prevent a downgrade, rebuild both stores from the verified
@@ -98,8 +101,9 @@ target by default, precisely because a silent merge would be data loss:
 ```bash
 docker run --rm \
   -v "$(pwd)/.context/snapshots:/snapshots" -v mimisbrunnr-host-context:/app/.context \
-  --env-file .context/docker-local.env \
-  smooth-ai-product-context-memory:<old-tag> restore /snapshots/snapshot-<ts>.tar --force
+  --env-file <installation-credential-file> \
+  ghcr.io/generic-automation-and-it/smooth-ai-product-context-memory:<old-tag> \
+  restore /snapshots/snapshot-<ts>.tar --force
 ```
 
 Never start an older image over the migrated database. The graph version-pairing rule is in the
