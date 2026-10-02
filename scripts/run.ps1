@@ -62,7 +62,7 @@ param(
 
     # The documented release ports (docker.md). These are also what provision-credentials.sh writes
     # into CONTEXT_MEMORY_BASE_URL and what the context-memory client defaults to, so overriding them
-    # here would break every skill and MCP server the moment a controller was started.
+    # here would break every skill and client the moment a controller was started.
     [int] $HostPort = 5141,
     [int] $PostgresPort = 5432,
     [int] $BlobPort = 9000,
@@ -218,7 +218,7 @@ function Initialize-Credentials {
     $adoptedCount = 0
 
     # scripts/provision-credentials.sh writes the *same* two token values into
-    # .context/mimisbrunnr.env (as CONTEXT_MEMORY_*, which skills and MCP servers read) and
+    # .context/mimisbrunnr.env (as CONTEXT_MEMORY_*, which skills read) and
     # .context/mimisbrunnr.env.controller (as Parameters__*, which a container reads via --env-file).
     # Minting this launcher's own pair instead leaves the controller and the skills holding different
     # credentials, and every call is a 403. Read as a pair or not at all.

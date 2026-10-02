@@ -60,8 +60,6 @@ sys.modules["deepsearch"] = deepsearch
 read_client = _load("context_memory_read_client")
 divergence = _load("divergence")
 authority = _load("authority")
-read_mcp = _load("memory_read_mcp")
-write_mcp = _load("memory_write_mcp")
 
 
 def _run_atomicity(batch):
@@ -320,25 +318,13 @@ class RecallFramingTests(unittest.TestCase):
         self.assertIn(raw, out, "non-JSON output must be passed through, not dropped")
 
     def test_every_read_subcommand_is_framed_by_default(self):
-        """The drift guard, and the acceptance criterion that matters most.
+        """Every content-returning subcommand is framed; only `probe` opts out.
 
-        The subject list is cross-checked against `read_mcp.TOOLS` — an **independent** declaration of
-        the read surface — rather than against the read client's own `READ_COMMANDS`. Checking the
-        client's list against itself is circular: `FRAMED_COMMANDS` is *defined* as
-        `READ_COMMANDS - UNFRAMED_COMMANDS`, so the union is every value either set could take and the
-        assertion held no matter what they were. It would have stayed green with the entire MCP surface
-        unframed, which is the exact silent pass the code comment claims to prevent.
-
-        The two declarations are one-to-one: MCP names are snake_case, CLI names kebab-case.
+        The framed set is derived from the read surface, so a new subcommand is covered the day it is
+        added; the only judgement is whether it belongs in the opt-out set, and `probe` is the sole
+        member because it reports reachability and returns no recalled content.
         """
-        mcp_names = {name for name, _description, _schema in read_mcp.TOOLS}
         cli_names = set(read_client.READ_COMMANDS)
-        self.assertEqual(
-            {name.replace("_", "-") for name in mcp_names},
-            cli_names,
-            "the MCP server and the read CLI declare different read surfaces; a tool offered on one "
-            "and not the other is a surface nothing here is checking",
-        )
         overlap = read_client.FRAMED_COMMANDS & read_client.UNFRAMED_COMMANDS
         self.assertFalse(overlap, f"a subcommand cannot be both framed and opted out: {sorted(overlap)}")
         self.assertEqual(
@@ -373,52 +359,6 @@ class RecallFramingTests(unittest.TestCase):
                       "the read worker is not told to read the framing its own responses carry")
         self.assertIn("uuid/version", contract,
                       "the contract must say how to report a suspicious record — quoted, with identity")
-
-    def test_every_read_tool_is_framed_by_the_mcp_server(self):
-        """The read worker's only path to the store is the MCP server, so its *output* must be framed.
-
-        The CLI framing is unreachable from the `memory-read` worker, whose grant is
-        `mcp__mimisbrunnr-read__*` only. Driving `handle` proves the response the worker actually
-        receives carries the notice — the CLI's own enumeration test never sees this surface, and a
-        contract that promises a field the server does not send is worse than no contract.
-        """
-        uuid = "11111111-1111-1111-1111-111111111111"
-        invocations = {
-            "query": {"payload": {}},
-            "deepsearch": {"payload": {}},
-            "get_versions": {"uuid": uuid},
-            "get_blob": {"uuid": uuid, "version": 1},
-            "labels": {},
-            "initiatives": {},
-            "paths": {"payload": {"sourceUuid": uuid, "maxDepth": 2}},
-            "ticket_paths": {"payload": {"anchor": {"provider": "github", "key": "1"}, "maxDepth": 2}},
-        }
-        for name in sorted(read_mcp.FRAMED_TOOLS):
-            with self.subTest(tool=name), \
-                    patch.dict(os.environ, {client.ENV_READ_TOKEN: "test-token"}), \
-                    patch.object(client, "_request", return_value=self._hostile_result()), \
-                    patch.object(client, "_open", return_value=_FakeResponse(
-                        json.dumps(self._hostile_result()))), \
-                    patch.object(read_mcp.deepsearch, "execute",
-                                 return_value=self._hostile_result()):
-                response = read_mcp.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
-                                            "params": {"name": name,
-                                                       "arguments": invocations[name]}})
-            parsed = json.loads(response["result"]["content"][0]["text"])
-            self.assertEqual(parsed.get(client.RECALL_NOTICE_KEY), client.RECALL_NOTICE,
-                             f"MCP tool {name} returned recalled memory without the shared notice")
-
-    def test_the_mcp_probe_opts_out_and_the_surfaces_agree(self):
-        """`probe` returns no recalled content and opts out; the MCP and CLI declare the same surface."""
-        with patch.object(client, "_probe", return_value=True):
-            response = read_mcp.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
-                                        "params": {"name": "probe", "arguments": {}}})
-        self.assertNotIn(client.RECALL_NOTICE_KEY, response["result"]["content"][0]["text"])
-        self.assertEqual(read_mcp.FRAMED_TOOLS, read_mcp.TOOL_NAMES - read_mcp.UNFRAMED_TOOLS)
-        self.assertFalse(read_mcp.FRAMED_TOOLS & read_mcp.UNFRAMED_TOOLS)
-        self.assertEqual({name.replace("_", "-") for name in read_mcp.TOOL_NAMES},
-                         set(read_client.READ_COMMANDS),
-                         "the MCP server and the read CLI declare different read surfaces")
 
 
 class TransportFailureTests(unittest.TestCase):
@@ -569,20 +509,6 @@ class TransportFailureTests(unittest.TestCase):
             client.cmd_get_blob(args)
         self.assertEqual(caught.exception.status_text, "timed-out")
 
-    def test_the_mcp_blob_fetch_is_classified_and_bounded(self):
-        """The MCP blob fetch goes through the shared classified path, not `_open` directly.
-
-        Before the fix it took the default socket timeout and skipped classification, so a hung store
-        surfaced to the read worker as a bare `timed out` after 30 s — the unclassified shape the
-        classifier exists to remove, on the surface the worker actually uses.
-        """
-        port, _ = self._stalled_server()
-        client.base_url = lambda: f"http://127.0.0.1:{port}"
-        with self.assertRaises(client.ClientError) as caught:
-            read_mcp.call_tool("get_blob", {"uuid": "11111111-1111-1111-1111-111111111111",
-                                            "version": 1})
-        self.assertEqual(caught.exception.status_text, "timed-out")
-
 
 class RedactTests(unittest.TestCase):
     def test_planted_aws_key_never_leaks(self):
@@ -727,12 +653,6 @@ class RedactionPrecisionTests(unittest.TestCase):
                                 f"location does not cover a planted secret in {location['field']}")
         # Offsets are reported; the replaced text is not.
         _assert_no_secret(self, response["redaction"])
-
-    def test_mcp_set_digest_carries_locations_too(self):
-        with patch.object(write_mcp.client, "_request", return_value={"created": 1}):
-            result = write_mcp.call_tool("set", {"payload": copy.deepcopy(PLANTED)})
-        self.assertTrue(all(entry["locations"] for entry in result["redaction"]))
-        _assert_no_secret(self, result["redaction"])
 
 
 def _resolve(document, path):
@@ -1019,11 +939,12 @@ class WritePayloadTests(unittest.TestCase):
         self.assertEqual(request.call_args.args[2]["items"][0]["createUuid"], create_uuid)
         self.assertEqual(request.call_args.kwargs["query"], {"dryRun": "true"})
 
-    def test_write_mcp_enforces_checkpoint_cap_before_transport(self):
+    def test_set_enforces_checkpoint_cap_before_transport(self):
         payload = {"items": [{}] * (client.MAX_CANDIDATES + 1)}
-        with patch.object(write_mcp.client, "_request") as request, \
-                self.assertRaises(write_mcp.client.ClientError):
-            write_mcp.call_tool("set", {"payload": payload})
+        with patch.object(client, "read_payload", return_value=copy.deepcopy(payload)), \
+                patch.object(client, "_request") as request, \
+                self.assertRaises(client.ClientError):
+            client.cmd_set(SimpleNamespace(payload=None, dryrun=False))
         request.assert_not_called()
 
     def test_missing_capability_fails_before_transport(self):
@@ -1180,14 +1101,6 @@ class PathSegmentTests(unittest.TestCase):
                 SimpleNamespace(uuid=uuid, payload=None)),
             "cli append-description": lambda: client.cmd_append_description(
                 SimpleNamespace(uuid=uuid, payload=None)),
-            "read mcp get_versions": lambda: read_mcp.call_tool(
-                "get_versions", {"uuid": uuid}),
-            "read mcp get_blob": lambda: read_mcp.call_tool(
-                "get_blob", {"uuid": uuid, "version": version}),
-            "write mcp update_group": lambda: write_mcp.call_tool(
-                "update_group", {"uuid": uuid, "payload": {"repo": "r"}}),
-            "write mcp append_description": lambda: write_mcp.call_tool(
-                "append_description", {"uuid": uuid, "payload": {"name": "n", "body": "b"}}),
         }
 
     def test_hostile_uuid_segments_are_refused_before_any_request(self):
@@ -1210,25 +1123,20 @@ class PathSegmentTests(unittest.TestCase):
         with patch.dict(os.environ, {client.ENV_WRITE_TOKEN: "write-only",
                                      client.ENV_READ_TOKEN: "read-only"}), \
                 patch.object(client, "_open", side_effect=lambda request, **kwargs: seen.append(request.full_url)):
-            for call in (lambda: write_mcp.call_tool(
-                            "append_description",
-                            {"uuid": "../../snapshot?x=", "payload": {"name": "n", "body": "b"}}),
-                         lambda: client.cmd_append_description(
-                            SimpleNamespace(uuid="../../snapshot?x=", payload=None))):
-                with patch.object(client, "read_payload", return_value={"name": "n", "body": "b"}), \
-                        self.assertRaises(client.ClientError):
-                    call()
+            with patch.object(client, "read_payload", return_value={"name": "n", "body": "b"}), \
+                    self.assertRaises(client.ClientError):
+                client.cmd_append_description(
+                    SimpleNamespace(uuid="../../snapshot?x=", payload=None))
         self.assertEqual(seen, [])
 
     def test_bad_versions_are_refused(self):
         for version in (0, -1, True, "1", "1/../../x", 1.0, None):
-            for name in ("cli get-blob", "read mcp get_blob"):
-                with self.subTest(surface=name, version=version), \
-                        patch.dict(os.environ, {client.ENV_READ_TOKEN: "read-only"}), \
-                        patch.object(client, "_open") as transport:
-                    with self.assertRaises(client.ClientError):
-                        self._surfaces(GOOD_UUID, version)[name]()
-                    transport.assert_not_called()
+            with self.subTest(version=version), \
+                    patch.dict(os.environ, {client.ENV_READ_TOKEN: "read-only"}), \
+                    patch.object(client, "_open") as transport:
+                with self.assertRaises(client.ClientError):
+                    self._surfaces(GOOD_UUID, version)["cli get-blob"]()
+                transport.assert_not_called()
 
     def test_a_canonical_uuid_builds_the_exact_route(self):
         self.assertEqual(client.group_descriptions_path(GOOD_UUID),
@@ -1424,17 +1332,14 @@ class SetRedactionGateTests(unittest.TestCase):
         posted = request.call_args.args[2]
         _assert_no_secret(self, posted)
 
-    def test_mcp_set_posts_no_planted_secret(self):
-        with patch.object(write_mcp.client, "_request", return_value={"created": 1}) as request:
-            write_mcp.call_tool("set", {"payload": copy.deepcopy(PLANTED)})
-        _assert_no_secret(self, request.call_args.args[2])
-
     def test_dry_run_is_scrubbed_too(self):
         # A dry run is a preview of what would be stored, so an unscubbed dry run is a preview of
         # a blob that cannot later be repaired. Gating only the persisting call would let the
         # secret be reviewed, approved and then stored verbatim.
-        with patch.object(write_mcp.client, "_request", return_value={"dryRun": True}) as request:
-            write_mcp.call_tool("set", {"payload": copy.deepcopy(PLANTED), "dryRun": True})
+        with patch.object(client, "read_payload", return_value=copy.deepcopy(PLANTED)), \
+                patch.object(client, "_request", return_value={"dryRun": True}) as request, \
+                redirect_stdout(io.StringIO()):
+            client.cmd_set(SimpleNamespace(payload=None, dryrun=True))
         _assert_no_secret(self, request.call_args.args[2])
 
     def test_digest_reports_rule_names_counts_and_locations_only(self):
@@ -1467,8 +1372,10 @@ class SetRedactionGateTests(unittest.TestCase):
         # caller still holds — including the test's own fixture, which is how this gate could
         # look like it passed while a retry posted the original.
         original = copy.deepcopy(PLANTED)
-        with patch.object(write_mcp.client, "_request", return_value={"created": 1}) as request:
-            write_mcp.call_tool("set", {"payload": PLANTED})
+        with patch.object(client, "read_payload", return_value=copy.deepcopy(PLANTED)), \
+                patch.object(client, "_request", return_value={"created": 1}) as request, \
+                redirect_stdout(io.StringIO()):
+            client.cmd_set(SimpleNamespace(payload=None, dryrun=False))
         _assert_no_secret(self, request.call_args.args[2])
         self.assertEqual(original, PLANTED)
 
@@ -1490,17 +1397,6 @@ class SetRedactionGateTests(unittest.TestCase):
             with self.assertRaises(client.ClientError) as error:
                 client.cmd_set(SimpleNamespace(payload=None, dryrun=False))
         self.assertNotIn("boom", str(error.exception))
-
-    def test_mcp_refusal_is_a_jsonrpc_error_not_a_crash(self):
-        with patch.object(client.redact, "scrub_set_payload", side_effect=RuntimeError("boom")):
-            response = read_mcp.respond(
-                json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
-                            "params": {"name": "set", "arguments": {"payload": copy.deepcopy(PLANTED)}}}),
-                write_mcp.handle)
-        self.assertEqual(response["error"]["code"], -32000)
-        self.assertIn("redactor-unavailable", response["error"]["message"])
-        for secret in PLANTED_SECRETS:
-            self.assertNotIn(secret, response["error"]["message"])
 
     def test_scrub_covers_every_declared_content_field(self):
         scrubbed, hits = redact.scrub_set_payload(copy.deepcopy(PLANTED))
@@ -1589,20 +1485,6 @@ class OtherWriteRedactionTests(unittest.TestCase):
                 self.assertEqual(len(self._planted(payload)),
                                  len(text_fields) + len(payload.get("tickets", [])))
 
-    def test_every_mcp_write_posts_no_planted_secret(self):
-        for tool, (method, path, needs_uuid, payload) in OTHER_WRITES.items():
-            arguments = {"payload": copy.deepcopy(payload)}
-            if needs_uuid:
-                arguments["uuid"] = GOOD_UUID
-            with self.subTest(tool=tool), \
-                    patch.object(write_mcp.client, "_request", return_value={"ok": True}) as request:
-                result = write_mcp.call_tool(tool, arguments)
-                self.assertEqual(request.call_args.args[:2], (method, path))
-                posted = request.call_args.args[2]
-                self.assertEqual(self._planted(posted), [], f"{tool} posted a planted secret")
-                self.assertTrue(result["redaction"], f"{tool} scrubbed silently")
-                self.assertEqual(self._planted(result["redaction"]), [])
-
     def test_every_cli_write_posts_no_planted_secret(self):
         for tool, (method, path, needs_uuid, payload) in OTHER_WRITES.items():
             args = SimpleNamespace(payload=None, dryrun=False, uuid=GOOD_UUID if needs_uuid else None)
@@ -1627,16 +1509,14 @@ class OtherWriteRedactionTests(unittest.TestCase):
 
     def test_an_unavailable_redactor_refuses_every_write(self):
         for tool, (_method, _path, needs_uuid, payload) in OTHER_WRITES.items():
-            arguments = {"payload": copy.deepcopy(payload), "uuid": GOOD_UUID}
             args = SimpleNamespace(payload=None, dryrun=False, uuid=GOOD_UUID if needs_uuid else None)
             with self.subTest(tool=tool), \
                     patch.object(client.redact, "scrub_payload", side_effect=RuntimeError("boom")), \
                     patch.object(client, "read_payload", return_value=copy.deepcopy(payload)), \
                     patch.object(client, "_request") as request:
-                for call in (lambda: write_mcp.call_tool(tool, arguments), lambda: CLI_WRITES[tool](args)):
-                    with self.assertRaises(client.ClientError) as error:
-                        call()
-                    self.assertIn("redactor-unavailable", str(error.exception))
+                with self.assertRaises(client.ClientError) as error:
+                    CLI_WRITES[tool](args)
+                self.assertIn("redactor-unavailable", str(error.exception))
                 request.assert_not_called()
 
     def test_an_undeclared_write_operation_fails_closed(self):
@@ -2236,17 +2116,16 @@ class AgentContractTests(unittest.TestCase):
 
     def test_read_agent_grants_only_read_client(self):
         text = (self.AGENTS / "memory-read.md").read_text(encoding="utf-8")
-        grant = text.split("---", 2)[1]
-        self.assertIn("mcp__mimisbrunnr-read__query", grant)
-        self.assertNotIn("Bash", grant)
-        self.assertNotIn("context_memory_client.py:*", grant)
+        self.assertIn("context_memory_read_client.py", text)
+        self.assertNotIn("context_memory_client.py", text)
         for mutation in self.MUTATIONS:
-            self.assertNotIn(mutation, grant)
+            self.assertNotIn(mutation, text)
+        self.assertIn(client.ENV_WRITE_TOKEN, text)
 
         registration = (HERE.parents[2] / "agents" / "memory-read.md").read_text(encoding="utf-8")
-        self.assertIn("mcp__mimisbrunnr-read__query", registration)
-        self.assertNotIn("Bash", registration.split("---", 2)[1])
-        self.assertIn("CONTEXT_MEMORY_WRITE_TOKEN", registration)
+        self.assertIn("context_memory_read_client.py", registration)
+        self.assertNotIn("context_memory_client.py", registration)
+        self.assertIn(client.ENV_WRITE_TOKEN, registration)
 
     def test_read_client_refuses_environment_with_write_credential(self):
         completed = subprocess.run(
@@ -2259,65 +2138,6 @@ class AgentContractTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 2)
         self.assertIn(client.ENV_WRITE_TOKEN, completed.stderr)
 
-    def test_read_mcp_lists_no_mutation_tools(self):
-        names = {tool["name"] for tool in read_mcp.tool_definitions()}
-        self.assertEqual(names, {"probe", "query", "deepsearch", "get_versions", "get_blob",
-                                 "paths", "ticket_paths", "labels", "initiatives"})
-        for mutation in self.MUTATIONS:
-            self.assertNotIn(mutation.replace("-", "_"), names)
-
-    def test_read_mcp_removes_write_credential_at_startup(self):
-        observed = []
-        original_handle = read_mcp.handle
-
-        def inspect_environment(message):
-            observed.append(client.ENV_WRITE_TOKEN not in os.environ)
-            return original_handle(message)
-
-        request = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}) + "\n"
-        with patch.dict(os.environ, {client.ENV_READ_TOKEN: "read", client.ENV_WRITE_TOKEN: "write"}), \
-                patch.object(sys, "stdin", io.StringIO(request)), \
-                patch.object(read_mcp, "handle", side_effect=inspect_environment), \
-                redirect_stdout(io.StringIO()) as stdout:
-            self.assertEqual(read_mcp.main(), 0)
-
-        self.assertEqual(observed, [True])
-        response = json.loads(stdout.getvalue())
-        self.assertEqual(response["id"], 1)
-        self.assertEqual(len(response["result"]["tools"]), 9)
-
-    def test_read_mcp_configuration_exists(self):
-        """The server is launched through a wrapper that injects the credential, not straight at python3.
-
-        A token on disk is not a token in a process. `.mcp.json` pointing `command` at `python3` launched
-        the server with an empty environment, so every call failed closed with `missing-credential` — an
-        accurate symptom that named the process rather than the missing launch environment, and cost four
-        session restarts to trace back to this file. Asserting `command == "python3"` would have pinned
-        the broken configuration, so the assertion is the wrapper, and the wrapper's own contract.
-        """
-        config = json.loads((HERE.parents[3] / ".mcp.json").read_text(encoding="utf-8"))
-        command = config["mcpServers"]["mimisbrunnr-read"]
-        self.assertEqual(command["command"], "scripts/launch-mcp.sh")
-        self.assertEqual(command["args"], ["read"])
-
-        launcher = (HERE.parents[3] / "scripts" / "launch-mcp.sh").read_text(encoding="utf-8")
-        self.assertIn("mimisbrunnr.env", launcher,
-                      "the launcher must source the provisioned credential file, not invent a token")
-        self.assertNotRegex(launcher, r"TOKEN=[A-Za-z0-9]{16,}",
-                            "the launcher must not carry a literal token")
-
-        write = config["mcpServers"]["mimisbrunnr-write"]
-        self.assertEqual(write["command"], "scripts/launch-mcp.sh")
-        self.assertEqual(write["args"], ["write"])
-
-    def test_read_mcp_lifecycle_initialize_ping_and_list(self):
-        initialized = read_mcp.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize"})
-        pinged = read_mcp.handle({"jsonrpc": "2.0", "id": 2, "method": "ping"})
-        listed = read_mcp.handle({"jsonrpc": "2.0", "id": 3, "method": "tools/list"})
-        self.assertEqual(initialized["result"]["serverInfo"]["name"], "mimisbrunnr-read")
-        self.assertEqual(pinged["result"], {})
-        self.assertEqual(len(listed["result"]["tools"]), 9)
-
     def test_agents_and_orchestration_contract_exist(self):
         read = (self.AGENTS / "memory-read.md").read_text(encoding="utf-8")
         write = (self.AGENTS / "memory-write.md").read_text(encoding="utf-8")
@@ -2329,19 +2149,8 @@ class AgentContractTests(unittest.TestCase):
         self.assertIn("Where Each Step Runs", skill)
         self.assertIn("Never call the store client", skill)
         registration = (HERE.parents[2] / "agents" / "memory-write.md").read_text(encoding="utf-8")
-        self.assertIn("mcp__mimisbrunnr-write__set", registration)
-        self.assertNotIn("Bash", registration.split("---", 2)[1])
-        declared = {line.strip()[2:] for line in registration.split("---", 2)[1].splitlines()
-                    if line.strip().startswith("- mcp__mimisbrunnr-write__")}
-        exposed = {f"mcp__mimisbrunnr-write__{tool['name']}" for tool in write_mcp.tool_definitions()}
-        self.assertEqual(declared, exposed)
-
-        copilot_agents = HERE.parents[3] / ".github" / "agents"
-        copilot_read = (copilot_agents / "memory-read.agent.md").read_text(encoding="utf-8")
-        copilot_write = (copilot_agents / "memory-write.agent.md").read_text(encoding="utf-8")
-        self.assertIn("mimisbrunnr-read/query", copilot_read)
-        self.assertNotIn("execute", copilot_read.split("---", 2)[1])
-        self.assertIn("mimisbrunnr-write/*", copilot_write)
+        self.assertIn("context_memory_client.py", registration)
+        self.assertNotIn("context_memory_read_client.py", registration)
 
 
 class TicketClientTests(unittest.TestCase):

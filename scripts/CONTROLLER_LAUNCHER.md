@@ -112,7 +112,7 @@ and the file is only ever *added to* — a stored value is never rewritten or dr
 mode binds the tokens into the running Host and rotating one 403s every client that holds it.
 
 **This file alone is not enough for the skills.** It carries the container's `Parameters__*` names; the
-skills and MCP servers read `CONTEXT_MEMORY_*`, which `scripts/provision-credentials.sh` writes to
+skills read `CONTEXT_MEMORY_*`, which `scripts/provision-credentials.sh` writes to
 `.context/mimisbrunnr.env`. When that file exists the launcher **adopts** its token values rather than
 minting its own, so the two halves are the same values and cannot drift into a 403. Starting the stack
 with this launcher and no provisioner therefore yields a working API and **no working skills** — run
@@ -166,7 +166,7 @@ not identifiers. See [`scripts/AGENTS.md`](AGENTS.md).
 
 Defaults are the documented release ports — `5141 / 5432 / 9000 / 9001 / 5341 / 15278 / 19075`. They
 are also what `provision-credentials.sh` writes into `CONTEXT_MEMORY_BASE_URL` and what the
-context-memory client defaults to, so moving them here would break every skill and MCP server the moment
+context-memory client defaults to, so moving them here would break every skill and client the moment
 a controller started. `MIMIS_SHIFT_PORTS=1` restores a set of shifted ports (`25141 / 25432 / …`) for the
 rare case of running a controller and the development AppHost side by side. The launcher refuses to start
 on a port already in use rather than letting the engine report it later.

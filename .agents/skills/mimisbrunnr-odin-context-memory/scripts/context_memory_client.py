@@ -434,7 +434,7 @@ def attach_redaction(resp, hits):
 def scrubbed_write(operation, method, path, payload, query=None):
     """Scrub `payload` for `operation`, send it, and attach the redaction digest to the response.
 
-    The single route every persisting write takes, so a new write subcommand or MCP tool is gated by
+    The single route every persisting write takes, so a new write subcommand is gated by
     calling this rather than by remembering to call the scrubber.
     """
     payload, hits = scrub_or_refuse(payload, operation)
@@ -495,9 +495,9 @@ def framed_recall(payload):
     """Attach the shared notice to a recall result and return it **as a value** (no printing).
 
     The one place the framing is built, so the two surfaces that render a recall — the CLI
-    (`print_recall`, below) and the MCP read server — cannot drift into two wordings or two shapes. The
-    MCP server returns its result as JSON-RPC content, so it needs the framed *value* rather than a
-    stdout banner; building it here is what makes "one notice" true rather than aspirational.
+    (`print_recall`, below) and the read-only client path — cannot drift into two wordings or two shapes.
+    A caller that needs it as a value rather than a stdout banner (the read client's dispatch) can use it
+    directly; building it here is what makes "one notice" true rather than aspirational.
     """
     if isinstance(payload, dict):
         return {RECALL_NOTICE_KEY: RECALL_NOTICE, **payload}

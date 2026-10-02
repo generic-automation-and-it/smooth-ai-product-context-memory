@@ -15,10 +15,10 @@ scripts/provision-credentials.sh   # 1. write the API tokens
 scripts/run.sh                     # 2. pull the controller image and start the whole stack
 ```
 
-**Step 1 is not optional if you use the skills or the MCP servers.** They authenticate with
+**Step 1 is not optional if you use the skills.** They authenticate with
 `CONTEXT_MEMORY_READ_TOKEN` / `CONTEXT_MEMORY_WRITE_TOKEN`, and `provision-credentials.sh` is the only
 thing that writes those names — both launchers adopt the pair from it rather than minting their own.
-Skip it and the stack starts fine, but the skills return `missing-credential` and the MCP servers
+Skip it and the stack starts fine, but the skills return `missing-credential` and the read clients
 refuse to start, naming the credential file they could not find. Run `run.sh` alone only if you want
 the API and nothing is going to talk to it.
 

@@ -25,7 +25,7 @@ The secret value flows: **runtime environment → script → tool**. It is never
 
 ## Reference Pattern
 
-The context-memory clients read `CONTEXT_MEMORY_READ_TOKEN` or `CONTEXT_MEMORY_WRITE_TOKEN` inside their Python process and attach the selected value to an HTTP authorization header. The read-only MCP process removes the write token at startup. Mirror this shape for any skill needing a secret: declare the env var name, read it in a script, limit which process receives it, and never persist the value.
+The context-memory clients read `CONTEXT_MEMORY_READ_TOKEN` or `CONTEXT_MEMORY_WRITE_TOKEN` inside their Python process and attach the selected value to an HTTP authorization header. The read-only client refuses to start with the write token present. Mirror this shape for any skill needing a secret: declare the env var name, read it in a script, limit which process receives it, and never persist the value.
 
 ## Checklist
 
@@ -59,7 +59,7 @@ Run this when **authoring or reviewing** a skill that touches a secret or launch
 
 ## Current Status
 
-**Several local skills handle runtime tokens:** `mimisbrunnr-odin-context-memory` (read/write API tokens), `mimisbrunnr-saga-dossier` (read token), and their supporting MCP/client processes. `ai-template-sync` reads no secret but refuses a `--template-url` with embedded credentials. `mimisbrunnr-ymir-bootstrap` reads no secret either: store access is delegated to the context-memory workers, it refuses credential-bearing evidence URLs, and it redacts secrets met in evidence to `<REDACTED>` in its preview. This repository does not include the template's `ai-asset-sync` skill or SkillSpector gate. The model-process checklist applies whenever a skill launches a tool-using model; it is not a claim that these clients do so.
+**Several local skills handle runtime tokens:** `mimisbrunnr-odin-context-memory` (read/write API tokens), `mimisbrunnr-saga-dossier` (read token), and their supporting client processes. `ai-template-sync` reads no secret but refuses a `--template-url` with embedded credentials. `mimisbrunnr-ymir-bootstrap` reads no secret either: store access is delegated to the context-memory workers, it refuses credential-bearing evidence URLs, and it redacts secrets met in evidence to `<REDACTED>` in its preview. This repository does not include the template's `ai-asset-sync` skill or SkillSpector gate. The model-process checklist applies whenever a skill launches a tool-using model; it is not a claim that these clients do so.
 
 ## Changelog
 

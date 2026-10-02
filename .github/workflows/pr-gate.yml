@@ -28,9 +28,6 @@ on:
       - .agents/skills/agile-github-*/**
       - .agents/agents/memory-read.md
       - .agents/agents/memory-write.md
-      - .github/agents/memory-read.agent.md
-      - .github/agents/memory-write.agent.md
-      - .mcp.json
       - .github/actions/**
       - .github/scripts/**
       - .github/workflows/pr-gate.yml
@@ -62,9 +59,6 @@ on:
       - .agents/skills/agile-github-*/**
       - .agents/agents/memory-read.md
       - .agents/agents/memory-write.md
-      - .github/agents/memory-read.agent.md
-      - .github/agents/memory-write.agent.md
-      - .mcp.json
       - .github/actions/**
       - .github/scripts/**
       - .github/workflows/pr-gate.yml

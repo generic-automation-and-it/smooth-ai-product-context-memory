@@ -24,8 +24,7 @@ This is a unified AI development experience folder that centralizes skills, prom
 | `.agents/` | Root folder for all AI development tooling |
 | `.agents/prompts/` | Reusable prompt templates (code review, architecture analysis) |
 | `.agents/roles/` | Multi-agent role instructions (PO, Architect, QA, Backend/Frontend Engineer, Heimdall Reviewer) |
-| `.agents/agents/` | Claude/compatible project subagent registrations; context-memory read/write workers delegate to skill-local contracts and expose typed MCP tools instead of Bash |
-| `.github/agents/` | Copilot local/VS Code custom-agent registrations for the same context-memory workers and MCP capability split; cloud agent cannot reach loopback store |
+| `.agents/agents/` | Claude/compatible project subagent registrations; context-memory read/write workers delegate to skill-local contracts and run the bash clients (`context_memory_read_client.py` / `context_memory_client.py`) |
 | `.agents/rules/` | Enforced AI development rules (workflow rules, coding standards) |
 | `.agents/settings.json` | Claude Code config — tool permissions, compile/test commands, hook registrations; every script in `.agents/hooks/` MUST be registered here or it silently never fires (#32) |
 | `.agents/config.toml` | OpenAI Codex config (read via the `.codex` symlink) — the Codex counterpart of `settings.json`. Mirrors what Codex's TOML schema supports: `approval_policy`/`sandbox_mode` (Codex has no per-command ACLs or hooks), root-doc fallback, web search |
