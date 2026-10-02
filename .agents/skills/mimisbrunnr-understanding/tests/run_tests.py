@@ -1158,6 +1158,19 @@ class DumpTests(unittest.TestCase):
             self.assertIn("REFUSED", err)
             self.assertIn("directory", err)
 
+    def test_dump_refuses_a_non_directory_target(self):
+        """`--out` must be a directory; an existing file is user error and must refuse, not crash.
+
+        `mkdir(parents=True, exist_ok=True)` raises FileExistsError on a file target with no message.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            file_target = Path(tmp) / "a-file"
+            file_target.write_text("occupied", encoding="utf-8")
+            rc, _, err = run(["dump", "--currentsession", "--out", str(file_target)], expect=1)
+            self.assertEqual(rc, 1)
+            self.assertIn("REFUSED", err)
+            self.assertIn("not a directory", err)
+
     def test_dump_writes_discoverable_folder_and_marker(self):
         with tempfile.TemporaryDirectory() as tmp:
             out_dir = Path(tmp) / "understanding-transfer"

@@ -1178,6 +1178,8 @@ def refuse_unsafe_target(folder: Path) -> str | None:
     resolved = folder.resolve()
     if resolved.parent == resolved:
         return "refusing to dump to the filesystem root"
+    if resolved.exists() and not resolved.is_dir():
+        return f"refusing to dump to a path that is not a directory ({resolved})"
     if (resolved / ".git").exists():
         return f"refusing to dump into a repository root ({resolved})"
     return None
