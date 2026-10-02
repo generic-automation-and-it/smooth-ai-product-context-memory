@@ -27,8 +27,10 @@ store export and foreign material. On a store export:
   the reason, beside the cap, the rendered size and the count cut — in the same header that already
   states breadth.
 
-`max_chars=None` is the pre-cap render and is **byte-identical** to an under-budget render: the cap adds
-no line and cuts nothing for material that fits.
+`max_chars=None` is the pre-cap render and is **byte-identical** to an under-budget render **at the
+default cap**: at the default the cap adds no line and cuts nothing for material that fits. An explicit
+non-default cap always states itself in a `Budget:` line, `0 record(s) cut` included, so an agent can tell
+"capped, nothing lost" from "no cap".
 
 ## Alternatives Considered
 

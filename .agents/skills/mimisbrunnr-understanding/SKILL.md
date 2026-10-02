@@ -59,7 +59,8 @@ python3 -B .agents/skills/mimisbrunnr-understanding/scripts/understanding_client
   it and every later record are cut and listed by identity under the breadth line, with the cap, the
   rendered size and the count cut stated beside it. On foreign material it truncates the tail and
   discloses the loss. **No record is ever truncated or summarised to fit** — a cut is a narrowing, not a
-  compression. A store export under the budget renders byte-identically to a load with no cap.
+  compression. A store export that fits the **default** budget renders byte-identically to a load with no
+  cap; a non-default `--max-chars` always adds a `Budget:` line, even at `0 record(s) cut`.
 
 ## Import (opt-in `--store`)
 

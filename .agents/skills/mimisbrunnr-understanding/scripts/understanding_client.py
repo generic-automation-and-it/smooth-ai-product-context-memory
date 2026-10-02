@@ -172,15 +172,19 @@ def _render_record(parts: dict) -> list[str]:
 
 
 def render_store(records: list[dict], src: str, asof: dt.date | None,
-                 all_kinds: bool = False, max_chars: int | None = None) -> list[str]:
+                 all_kinds: bool = False,
+                 max_chars: int | None = DEFAULT_MAX_CHARS) -> list[str]:
     """Render store records as cited context, cutting whole records to fit `max_chars`.
 
     The budget bounds the **rendered records**, not the header or the closing notice. Records render in
     the source's own order — a store export's array order, or the newest-version-per-slug order a folder
     resolves to — and the first record that would exceed the budget ends the render: it and every later
     record are cut, never partially rendered. The cut is deterministic because that order is, and each
-    cut record is named by identity under the breadth line. `max_chars=None` means no cap, which is
-    byte-identical to the pre-cap output.
+    cut record is named by identity under the breadth line. `max_chars=None` is the pre-cap render: it
+    cuts nothing and adds no line.
+
+    The parameter defaults to `DEFAULT_MAX_CHARS`, the same budget the CLI applies, so a caller that
+    omits it gets a bounded, reported render rather than an unbounded one nobody is told about.
 
     A cut is a **narrowing**, never a compression: no record is ever truncated or summarised to fit.
     """
