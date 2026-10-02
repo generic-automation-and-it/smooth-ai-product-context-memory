@@ -31,6 +31,8 @@ reach a published controller.
 
 ```bash
 docker run -d --name mimisbrunnr-default-controller \
+  --label com.docker.compose.project=smooth-mímisbrunnr-release-default \
+  --label com.docker.compose.service=mimisbrunnr-default-controller \
   --stop-timeout 180 \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v mimisbrunnr-default-controller-state:/var/lib/mimisbrunnr \
@@ -43,7 +45,65 @@ docker run -d --name mimisbrunnr-default-controller \
 
 Dashboard: `http://localhost:15278`, using the login URL printed by the controller. API: `http://localhost:5141`. The controller starts PostgreSQL 5432, MinIO 9000/9001, and Seq 5341. Those workload ports bind to the explicitly supplied address, not via `-p` on the controller. Change conflicting ports through `HostConfiguration__Port`, `PostgresConfiguration__Port`, `BlobConfiguration__Port`, `BlobConfiguration__ConsolePort`, and `SeqConfiguration__Port`.
 
+The two `--label` flags put the controller — and with it the Aspire dashboard — in the same Docker
+Desktop group as the workloads it starts. The controller cannot label itself, so without them the
+dashboard's container sits ungrouped beside `smooth-mímisbrunnr-release-<id>`. The project value must
+match `smooth-mímisbrunnr-release-<installation-id>` exactly.
+
+> **Run one controller per engine.** Starting a controller currently removes every other
+> installation's running workloads (their data volumes survive). This includes
+> `scripts/smoke-apphost-container.sh`, so do not smoke-test beside a live installation. Tracked as an
+> open defect in `APPHOST_AGENTS.md` → Release Controller Contract.
+
 Use `InstallationConfiguration__Id` for another installation and name its controller `mimisbrunnr-<id>-controller`. Preserve the engine-generated hostname. Container-name uniqueness prevents a second controller taking over a live installation; maintenance commands must run in a replacement canonical container, never via `docker exec` on the live controller.
+
+### Data root: persistence in a host folder
+
+By default the controller creates engine-managed named volumes. To keep the installation's data in a
+folder you can see — `~/.mimisbrunnr/volumes` is the conventional choice — bind-mount that folder at
+`/var/lib/mimisbrunnr-data` (override the path with `ControllerConfiguration__DataRootMount`):
+
+```bash
+mkdir -p ~/.mimisbrunnr/volumes/default/controller-state && chmod 700 ~/.mimisbrunnr
+docker run -d --name mimisbrunnr-default-controller \
+  --label com.docker.compose.project=smooth-mímisbrunnr-release-default \
+  --label com.docker.compose.service=mimisbrunnr-default-controller \
+  --stop-timeout 180 \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v "$HOME/.mimisbrunnr/volumes:/var/lib/mimisbrunnr-data" \
+  -v "$HOME/.mimisbrunnr/volumes/default/controller-state:/var/lib/mimisbrunnr" \
+  --env-file "$HOME/.mimisbrunnr/controller.env" \
+  -e EngineConfiguration__BindAddress=127.0.0.1 \
+  -p 127.0.0.1:15278:15278 \
+  -p 127.0.0.1:19075:19075 \
+  ghcr.io/generic-automation-and-it/smooth-ai-product-context-memory-apphost:VERSION
+```
+
+The entrypoint reads the folder's **host** path from its own mount — the engine resolves a bind
+volume's device on the host, not inside the controller — and creates each missing volume as a bind
+onto `<root>/<installation-id>/<volume>`:
+
+```
+~/.mimisbrunnr/volumes/default/
+├── postgres-data     mimisbrunnr-default-postgres-data
+├── blob-well-data    mimisbrunnr-default-blob-well-data
+├── seq-data          mimisbrunnr-default-seq-data
+├── host-context      mimisbrunnr-default-host-context
+└── controller-state  (mounted directly; not an engine volume)
+```
+
+- **Adopting a data root is a fresh start, not a move.** An existing volume that is not bound to its
+  expected folder fails `run` and `reset` before anything changes. To carry a corpus over, `snapshot`
+  and `verify` it, `reset` the installation, start with the data root, then `restore --force`.
+- **`stop` ignores the backing check**, so a mismatched installation can always be stopped.
+- **`reset` keeps its promise.** Removing a bind volume leaves its folder untouched, so reset clears each
+  `<root>/<installation-id>/<volume>` folder's contents after removing the volume; the folders, the
+  root and other installations' folders stay. A bind-backed installation therefore needs the same
+  data-root mount on the `reset` container — without it reset refuses before mutation rather than
+  leave the data behind.
+- On Docker Desktop the folder must be under a shared path (`/Users` is shared by default). Desktop
+  reports one folder as `/Users/…` or `/host_mnt/Users/…` depending on the client; the entrypoint
+  treats both as the same path.
 
 ### Linux, Podman, and TCP
 
@@ -64,7 +124,11 @@ docker rm mimisbrunnr-default-controller
 
 Graceful stop removes owned workloads and preserves data volumes. Restart the same version with the same installation ID, secrets, and state volume. After forced termination, the next startup checks ownership of all resources, then replaces owned workloads; foreign resources are never adopted. Controller state and dependency data volumes are distinct.
 
-After removing the stopped controller, `stop` and `reset` can run as commands of a replacement container with the same canonical name, socket, and installation ID. `stop` preserves all data. **`reset` permanently removes the installation's three dependency data volumes.** It does not remove the separately mounted controller-state volume. Never use dev teardown scripts against a release installation.
+After removing the stopped controller, `stop` and `reset` can run as commands of a replacement container with the same canonical name, socket, and installation ID. `stop` preserves all data. **`reset` permanently removes the installation's four data volumes** —
+PostgreSQL, blob, Seq and host-context — and, with a [data root](#data-root-persistence-in-a-host-folder),
+the contents of their folders. It does not remove the separately mounted controller-state volume.
+A `host-context` volume created by a release before the controller labelled it is adopted unlabelled,
+since DCP created it without labels; any other unlabelled or foreign-labelled volume is still refused. Never use dev teardown scripts against a release installation.
 
 **An upgrade is a migration.** The new image applies its own migrations at startup, before it reports
 ready, so take a verified backup of the running corpus first. The shipped `snapshot` verb captures the

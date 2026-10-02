@@ -207,6 +207,27 @@ Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgr
   is privileged, runtime networking and recovery require end-to-end proof, and public aliases must not
   be promoted until the exact API/controller candidates pass smoke tests.
 
+### LADR-006 — A release installation may keep its data in a host folder
+
+- **Date:** 2026-10-02 · **Status:** Accepted
+- **Context:** Practitioners want the corpus in a folder they can see and back up
+  (`~/.mimisbrunnr/volumes`), not inside the engine's volume store. The controller runs in a container
+  but creates volumes through the host engine, which resolves a bind volume's device on the host, so a
+  path visible inside the controller is not a valid device. Removing a bind volume leaves its folder
+  untouched, which would silently break reset's "permanently removes" promise.
+- **Decision:** Opt-in by bind-mounting the folder at `/var/lib/mimisbrunnr-data`
+  (`ControllerConfiguration__DataRootMount`). The entrypoint reads the host path from its own mount —
+  one setting, no second copy to disagree — and binds each missing volume onto
+  `<root>/<installation-id>/<volume>`. An existing volume not bound there fails `run`/`reset` before
+  mutation (`stop` is exempt so a mismatched installation can always stop). Reset clears each folder's
+  contents after removing its volume and refuses a bind-backed installation whose reset container lacks
+  the mount. Docker Desktop's `/host_mnt` prefix is dropped on both sides of every comparison, because
+  Desktop reports one folder in either form depending on the asking client. Development installations
+  keep engine-managed volumes; their identity stays distinct (Non-Negotiables).
+- **Consequences:** Adopting a data root is a fresh start — carrying a corpus over is
+  snapshot → reset → start → `restore --force`. Reset now deletes host files, bounded to the
+  installation's own subfolders. Podman and native-Linux data-root runs are unproven.
+
 ## Test References
 
 - L0: `tests/SmoothAiProductContextMemory.AppHost.UnitTest/` — default resolves to working-tree mode;
@@ -223,12 +244,28 @@ Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgr
 - Workload shutdown is graceful and API-first for entrypoint cleanup; allow 180 seconds for controller stop. Aspire performs its own session cleanup before fallback cleanup. Forced termination can leave workloads; next start reconciles them without dropping volumes.
 - `EngineConfiguration__BindAddress` is mandatory for release: explicit non-wildcard engine interface IP. Docker Desktop can use `127.0.0.1`; Linux bridge deployment requires a reachable engine-side interface (for example bridge gateway). `EngineConfiguration__HostAddress` is independently advertised to the controller. Do not expose unauthenticated API/Seq on public interfaces.
 - Engine access defaults to Unix socket. TCP requires `DOCKER_TLS_VERIFY=1` and appropriate mutual-TLS credentials; transport support is not equivalent to end-to-end platform validation.
+- `mimisbrunnr-<id>-host-context` is one of the installation's four owned volumes: ownership-checked,
+  created labelled when missing, and removed by reset. A legacy unlabelled `host-context` (created by DCP
+  before the controller owned it) is adopted; no other volume may be unlabelled.
+- Data root (LADR-006): a bind mount at `/var/lib/mimisbrunnr-data` moves the four volumes into
+  `<root>/<id>/<volume>`; reset clears those folders' contents.
+- The controller cannot label itself: its Docker Desktop group comes from the operator's
+  `--label com.docker.compose.project=smooth-mímisbrunnr-release-<id>` on `docker run`.
+- **Open defect — installations on one engine are not isolated at start.** Starting any controller
+  removes every *other* installation's running workloads within a second (data volumes survive; the
+  victim's controller stays up with no workloads until it is restarted). Reproduced 2026-10-02 against
+  the published `main-fae2246` controller as well as this branch's, so it predates the data root.
+  Likely cause, unconfirmed: DCP stamps `com.microsoft.developer.usvc-dev.creatorProcessId` /
+  `creatorProcessStartTime` from inside each controller's own PID namespace, so a new controller's
+  orphan cleanup sees every other controller's creator as dead. Until fixed, run one controller per
+  engine — the smoke script included, which is why it must not run beside a live installation.
 - Docker Desktop ARM64 lifecycle/data smoke passed locally. Podman, secured TCP, native Linux matrix, dashboard commands/all telemetry signals, and cross-version upgrades remain release acceptance gaps. Do not claim full production readiness from build/unit tests.
 
 ## Changelog
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-02 | **Release controller: `host-context` became an owned volume, and an opt-in host-folder data root was added (LADR-006).** Release `reset` removed only three volumes, so `mimisbrunnr-<id>-host-context` — and the snapshot record in it — survived, and a fresh installation inherited the old "last snapshot" age; its ownership was never checked either. It is now created labelled, checked and reset, with DCP-created unlabelled copies adopted so existing installations still start. A bind mount at `/var/lib/mimisbrunnr-data` puts all four volumes under `<root>/<id>/`; reset wipes their contents. Found live: Docker Desktop names one folder `/Users/…` or `/host_mnt/Users/…` depending on the client, which made reset refuse and strand a smoke installation's workloads until the prefix was normalised. `docker.md` gained the data-root section and the controller's group labels (without them the dashboard container is ungrouped). | this PR |
 | 2026-10-02 | **`docker.md`'s `host-context` volume name corrected to the AppHost constant.** The standalone `snapshot`/`restore` commands — and the new upgrade step — mounted `mimisbrunnr-context`, a volume this repo never creates. The Host mounts `HostContextVolume` = `mimisbrunnr-host-context` (dev) / `mimisbrunnr-{installation-id}-host-context` (release). Docker auto-creates a named volume, so the command *succeeded* while writing `snapshot-metadata.json` where the Host never reads it — and the new startup migration line then reported `no snapshot recorded` for a backup just taken. All three occurrences now name the real volume, and the standalone section states both forms. LADR-003 keeps these names in sync with the C# constants; this was the docs drifting from them, not the constants. | HLD-006 |
 | 2026-10-01 | Controller entrypoint switched from `sh` to `bash` so the hyphenated `Parameters__api-*-token` env names reach the AppHost; without them the token parameters never resolve and the host container is never created. Detail in `scripts/AGENTS.md`. | publish smoke failures since 2026-09-17 |
 | 2026-09-27 | Test-fixture port-collision note narrowed to Postgres + MinIO; Redis (`16379`) and WireMock (`19091`) removed from the test dependency set alongside their unused containers. | PR #130 |
