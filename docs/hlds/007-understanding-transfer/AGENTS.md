@@ -36,7 +36,7 @@ writer" invariant. An Understanding is a memory; the store, DB and wire are unch
 
 ```mermaid
 flowchart LR
-    A[Practitioner] -->|load material| B[mimisbrunnr-understanding skill]
+    A[Practitioner] -->|load material| B[mimisbrunnr-kvasir-understanding skill]
     B -->|default: inject context (breadth split)| C[Agent session]
     B -->|"--store": hand to capture path| D[mimisbrunnr-odin-context-memory skill]
     D -->|"set"| E[HTTP API]
@@ -74,7 +74,7 @@ See [./ladrs/](./ladrs/). Accepted: LADR-01, 02, 03, 04, 06, 07, 08, 09, 10. Dra
 
 ## Test References
 
-- **Skill L0 (CI-gated):** `.agents/skills/mimisbrunnr-understanding/tests/run_tests.py` — stdlib
+- **Skill L0 (CI-gated):** `.agents/skills/mimisbrunnr-kvasir-understanding/tests/run_tests.py` — stdlib
   `unittest`, 48 tests. A default load creates no files (NFR-01); store-export five-part rendering keeps
   uuid/version attribution; `proposed` and `program` scope are flagged, never promoted (NFR-03); `--asof`
   filters the validity window and states the omission; foreign material is cited as data with truncation
@@ -83,7 +83,7 @@ See [./ladrs/](./ladrs/). Accepted: LADR-01, 02, 03, 04, 06, 07, 08, 09, 10. Dra
   round trip that makes cross-session sharing real (LADR-07); `.understanding.md` units and store folders
   read as structured input with newest-version-per-slug, import from a dump folder (LADR-09); and the
   dump's redaction, failing closed on a missing, failing or malformed redactor (LADR-07). Run:
-  `python3 -B .agents/skills/mimisbrunnr-understanding/tests/run_tests.py`. Wired into
+  `python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/tests/run_tests.py`. Wired into
   `.github/workflows/pr-gate.yml`.
 - **L0:** `tests/SmoothAiProductContextMemory.Application.UnitTest/Features/Export/ExportRendererTests.cs`
   — `Understanding_kind_renders_with_all_five_parts` locks in that an `understanding`-kind memory exports its

@@ -133,7 +133,7 @@ reader. The manifest's own count is the trustworthy left-hand side.
 - `docs/hlds/005-contextual-export/nfrs/NFR-01..07`.
 - `.agents/skills/mimisbrunnr-odin-context-memory/AGENTS.md` — sole authority on the write path (the sibling);
   this skill is a reader and must not be conflated with it.
-- `.agents/skills/mimisbrunnr-understanding/` — the read/load sibling (HLD-007); the Understanding kind's
+- `.agents/skills/mimisbrunnr-kvasir-understanding/` — the read/load sibling (HLD-007); the Understanding kind's
   load/import lives there.
 
 ## Implementation
@@ -151,6 +151,9 @@ the only file it writes is the local dossier artefact. Tests: `tests/run_tests.p
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-03 | Two LADR-04/LADR-12 correctness fixes in `dossier_composer.py`. (1) `_validate_contradiction` now also rejects an expired (`no-longer-true`) origin as lifecycle-mismatched, matching its own docstring — a current-versus-expired claim is not incompatible for the same circumstances. (2) The focus lens (`compose`) surfaces a consolidated claim when **any** origin's kind is in the focus affinity, not only the primary's — consolidation groups by meaning+applicability+lifecycle, never kind, so a claim's origins can differ in kind, and using only the primary hid a focus-relevant secondary origin and mislabelled it `outside-focus`. Each pinned by a new harness test. | LADR-04, LADR-12 |
+| 2026-10-03 | **Heimdallr scan skipped when anchors are fully bound.** `bundle` gates the reporter like kvasir `import` already did, so supplied `--repo`/`--tickets`/`--initiative` (or `--body` keys) mean no subprocess runs; per-field precedence restated in SKILL.md. Harness still 60. | session report |
+| 2026-10-03 | **`bundle` gains anchor flags plus Heimdallr autofill (`--heimdallr true`, default on).** `--repo`/`--ticket`/`--tickets`/`--tags`/`--initiative` merge into `--body` (explicit keys win); missing repo/tickets fill from the sibling Heimdallr reporter via a skills-root-relative lookup (branch tickets else newest commit one, never tags). Autofill notes go to stderr so the stdout bundle JSON stays parseable. Harness 57 -> 60. | session request |
 | 2026-10-02 | Renamed `mimisbrunnr-dossier` → `mimisbrunnr-saga-dossier` (folder, `name:`, CI paths, every cross-reference). Saga, goddess of history — she recounts what was. Behaviour unchanged; harness green. | session request |
 | 2026-10-01 | The loopback guard refuses a base URL that `urlparse` cannot parse (an NFKC-confusable netloc character, a non-numeric port) with its fixed loopback message. The parser's own `ValueError` quoted the netloc — userinfo included — and `main` prints exception text, so `--base-url http://user:pass@local＃host` printed the password. `CredentialTransportTests` 5 -> 6, mutation-checked. | HLD-005 NFR-01 |
 | 2026-10-01 | Findings section records that no `ghost` ("specified but not wired") category exists, per HLD-005 LADR-16, and that a missing `implements` edge is never a finding basis. Taxonomy unchanged. | HLD-005 LADR-16 |

@@ -58,7 +58,7 @@ evidence that exists rather than build a harness bridging the agent boundary (th
   `test_genuine_conflict_composes_proposed_record_and_two_links`,
   `test_scope_mismatch_is_not_a_conflict`.
 - **Met — skill level (import routes through the capture path):** the load skill's harness
-  `.agents/skills/mimisbrunnr-understanding/tests/run_tests.py` (48 tests, all green) asserts the
+  `.agents/skills/mimisbrunnr-kvasir-understanding/tests/run_tests.py` (48 tests, all green) asserts the
   import path refuses without `--store`, and hands material to the capture path rather than writing
   directly.
 - **Met — store side (L1):**

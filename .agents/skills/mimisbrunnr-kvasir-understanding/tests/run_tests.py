@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Committed L0 harness for mimisbrunnr-understanding. stdlib unittest; no external runner.
+"""Committed L0 harness for mimisbrunnr-kvasir-understanding. stdlib unittest; no external runner.
 
-Run: python3 -B .agents/skills/mimisbrunnr-understanding/tests/run_tests.py
+Run: python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/tests/run_tests.py
 
 Covers the guarantees that matter: a default load writes nothing (NFR-01), `import` reads the live store
 under the read token and writes nothing (NFR-02), loaded material is cited as data (NFR-03), `export`
@@ -494,7 +494,7 @@ class StoreImportTests(unittest.TestCase):
                 original = uc.store_query
                 uc.store_query = lambda f, o=outcome: (None, o)
                 try:
-                    rc, out, err = run(["import"])
+                    rc, out, err = run(["import", "--heimdallr", "false"])
                 finally:
                     uc.store_query = original
                 self.assertEqual(rc, expected_code)
@@ -505,7 +505,7 @@ class StoreImportTests(unittest.TestCase):
         original = uc.store_query
         uc.store_query = lambda f: ([], "ok")
         try:
-            rc, out, err = run(["import"])
+            rc, out, err = run(["import", "--heimdallr", "false"])
         finally:
             uc.store_query = original
         self.assertEqual(rc, 0, "an empty result is a real answer, not a failure")
@@ -872,6 +872,26 @@ class ExportOrchestrationTests(unittest.TestCase):
             self.assertIn("initiative read failed", err)
             self.assertIn("not evidence that", err)
 
+    def test_dry_run_export_also_refuses_when_the_initiative_read_fails(self):
+        """A dry run that cannot read the initiative aborts before the preview, so it must report the
+        same refusal as `--write` rather than a silent success exit 0."""
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
+            originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                         uc.resolve_group, uc._run_capture_client)
+            uc.gate_redaction = lambda texts: (list(texts), {})
+            uc.gate_atomicity = lambda c: [{"verdict": "simple", "signals": []} for _ in c]
+            uc.initiative_exists = lambda name: (None, "initiatives read failed")
+            uc.resolve_group = lambda b, n, d, dryrun: (None, "dry-run")
+            uc._run_capture_client = lambda s, a, p: (0, "{}", "")
+            try:
+                rc, _, err = run(["export", src, "--initiative", "X"])
+            finally:
+                (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                 uc.resolve_group, uc._run_capture_client) = originals
+            self.assertEqual(rc, 1)
+            self.assertIn("initiative read failed", err)
+
     def test_set_items_carries_the_source_status_and_confidence(self):
         """A store-export round trip must not promote a proposed record to approved canon."""
         candidates = [{"statement": "A claim.", "description": "Subj", "contentSummary": "",
@@ -879,6 +899,78 @@ class ExportOrchestrationTests(unittest.TestCase):
         items = uc.set_items(candidates, {}, dt.datetime.now(dt.timezone.utc))
         self.assertEqual(items[0]["status"], "proposed")
         self.assertEqual(items[0]["confidence"], 30)
+
+    def test_set_items_translates_a_qualitative_confidence_label(self):
+        """`ai-understanding` writes confidence as observed/verified/contested; the store holds 0-100.
+
+        Passing the label straight through sent the string "verified" to the API, which answered 400
+        with an empty detail body — so the veto reported a bare "HTTP 400 Bad Request:" and every
+        canonical `.understanding.md` failed to export with no diagnosable candidate.
+        """
+        now = dt.datetime.now(dt.timezone.utc)
+        for label, expected in (("verified", 70), ("observed", 60), ("contested", 40)):
+            items = uc.set_items([{"statement": "A claim.", "description": "S",
+                                   "confidence": label}], {}, now)
+            self.assertIsInstance(items[0]["confidence"], int, f"{label} must not stay a string")
+            self.assertEqual(items[0]["confidence"], expected)
+
+    def test_verified_confidence_equals_the_previous_absence_default(self):
+        """The mapping must translate, not re-score: `verified` is what an absent field defaulted to."""
+        now = dt.datetime.now(dt.timezone.utc)
+        labelled = uc.set_items([{"statement": "A.", "description": "S", "confidence": "verified"}], {}, now)
+        absent = uc.set_items([{"statement": "A.", "description": "S"}], {}, now)
+        self.assertEqual(labelled[0]["confidence"], absent[0]["confidence"])
+
+    def test_confidence_value_accepts_numbers_and_falls_back_safely(self):
+        self.assertEqual(uc.confidence_value(30), 30)
+        self.assertEqual(uc.confidence_value("45"), 45)
+        self.assertEqual(uc.confidence_value("VERIFIED"), 70)
+        self.assertEqual(uc.confidence_value("something-else"), 70)
+        self.assertEqual(uc.confidence_value(None), 70)
+        self.assertEqual(uc.confidence_value(True), 70, "a bool is not a confidence")
+
+    def test_verified_confidence_is_not_flagged_when_it_arrives_as_the_stored_integer(self):
+        """The round trip: `export` stores the integer 70 for verified, and recall must not flag it.
+
+        `import` flags any confidence that is not the label "verified". Once the write path translates
+        the label to the store's integer, a record it just wrote comes back as 70 and was flagged as
+        though it were *below* verified — the opposite of what the flag means. Both spellings must agree.
+        """
+        # Rendered through `five_parts`, the route a real store record takes, so the test exercises the
+        # same projection the recall path uses rather than a hand-built dict.
+        def render(conf):
+            record = {"name": "Subj", "statement": "A claim.", "confidence": conf,
+                      "status": "approved", "uuid": "u1", "version": 1}
+            return "\n".join(uc._render_record(uc.five_parts(record)))
+
+        self.assertNotIn("confidence:", render("verified"),
+                         "the verified label must not be flagged as low confidence")
+        self.assertNotIn("confidence:", render(70),
+                         "the stored integer for verified must not be flagged as low confidence")
+
+    def test_a_confidence_below_verified_is_still_flagged(self):
+        """The flag must survive the translation: contested and low numbers are still surfaced."""
+        def render(conf):
+            record = {"name": "S", "statement": "A.", "confidence": conf,
+                      "status": "approved", "uuid": "u", "version": 1}
+            return "\n".join(uc._render_record(uc.five_parts(record)))
+
+        for conf in ("contested", 30, "observed", 40):
+            self.assertIn("confidence:", render(conf), f"{conf} must be flagged")
+
+    def test_an_unrecognised_confidence_is_flagged_not_assumed_verified(self):
+        """Fail loud: a label this client does not know is surfaced, not silently cleared.
+
+        `confidence_value` defaults an unknown label to the baseline on the *write* path, because a
+        store needs a number. Recall is the opposite: an unknown value is not evidence that a record
+        is trustworthy, so it is shown to the reader rather than presented as verified.
+        """
+        self.assertEqual(uc.confidence_value("some-new-label"), uc.DEFAULT_CONFIDENCE,
+                         "the write path must still produce a number")
+        self.assertTrue(uc.confidence_flagged("some-new-label"),
+                        "the read path must surface a label it does not recognise")
+        for empty in (None, "", "   "):
+            self.assertFalse(uc.confidence_flagged(empty), f"{empty!r} means absent, not unknown")
 
     def test_write_runs_the_server_dry_run_before_the_write(self):
         """`set --dryrun` is the only pre-write veto point, so it precedes the write on the wire."""
@@ -1035,7 +1127,7 @@ class ImportTests(unittest.TestCase):
     def test_export_without_selectors_states_no_association(self):
         with tempfile.TemporaryDirectory() as tmp:
             src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
-            _, out, _ = run(["export", src])
+            _, out, _ = run(["export", src, "--heimdallr", "false"])
             self.assertIn("no selectors supplied", out)
 
     def test_store_export_import_uses_the_stored_statements(self):
@@ -1564,7 +1656,7 @@ class DumpRedactionTests(unittest.TestCase):
         """An absent binding must read as absent, not as a deliberate bind-to-nothing."""
         with tempfile.TemporaryDirectory() as tmp:
             out_dir = Path(tmp) / "unbound"
-            _, out, _ = run(["dump", "--currentsession", "--out", str(out_dir)])
+            _, out, _ = run(["dump", "--currentsession", "--out", str(out_dir), "--heimdallr", "false"])
             metadata = json.loads((out_dir / uc.METADATA_FILE).read_text(encoding="utf-8"))
             self.assertEqual(metadata["binding"], {})
             self.assertIn("tickets", metadata["bindingAbsent"])
@@ -1599,6 +1691,99 @@ class DumpRedactionTests(unittest.TestCase):
             candidates, skips = uc.export_candidates(None, Path(source).read_text(encoding="utf-8"))
             self.assertEqual(candidates, [])
             self.assertTrue(any("markdown table" in note for note in skips), skips)
+
+class HeimdallrAutofillTests(unittest.TestCase):
+    # `--heimdallr true` (default) fills repo/tickets, never tags; explicit wins.
+    def setUp(self):
+        self.original = uc.heimdallr_scan
+        uc.heimdallr_scan = lambda: {
+            "repository": "org/repo",
+            "tickets": [{"provider": "github", "key": "160", "seenIn": "branch"},
+                        {"provider": "github", "key": "159", "seenIn": "commit"}],
+            "initiative": "unknown",
+        }
+        # These tests are about the autofill precedence, not the store. `initiative_exists` hits the
+        # read client, which fails when no store is reachable and returns `None` (read-failed) — that
+        # makes the export refuse instead of testing the supplied-initiative survival. Stub it to a
+        # definite "absent" so the dry run proceeds deterministically.
+        self.original_initiative_exists = uc.initiative_exists
+        uc.initiative_exists = lambda name: (False, "absent")
+
+    def tearDown(self):
+        uc.heimdallr_scan = self.original
+        uc.initiative_exists = self.original_initiative_exists
+
+    def test_export_default_fills_repo_and_branch_ticket_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
+            _, out, _ = run(["export", src])
+            self.assertIn("Heimdallr autofill", out)
+            self.assertIn("repository org/repo", out)
+            # Branch ticket only: the stale commit ticket must not bind.
+            self.assertIn("tickets github:160", out)
+            self.assertNotIn("github:159", out)
+
+    def test_export_explicit_flags_win_over_heimdallr(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
+            _, out, _ = run(["export", src, "--repository", "other/repo",
+                             "--tickets", "github:1"])
+            self.assertNotIn("Heimdallr autofill", out)
+            self.assertIn('"repo": "other/repo"', out)
+
+    def test_export_supplied_initiative_survives_unknown_heimdallr(self):
+        # The reported defect: `--initiative X` with no `--tickets` must keep X
+        # verbatim and autofill only the ticket. Heimdallr reporting `unknown`
+        # initiative is the normal case and never a reason to touch the
+        # caller's value.
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
+            _, out, _ = run(["export", src, "--initiative", "Mímisbrunnr-MVP",
+                             "--repository", "other/repo"])
+            self.assertIn("tickets github:160", out)
+            autofill_line = out.splitlines()[0]
+            self.assertIn("Heimdallr autofill", autofill_line)
+            self.assertNotIn("initiative", autofill_line)
+            self.assertIn('"initiativeName": "M\\u00edmisbrunnr-MVP"', out)
+
+    def test_dump_supplied_initiative_survives_unknown_heimdallr(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "bound"
+            run(["dump", "--currentsession", "--out", str(out_dir),
+                 "--initiative", "Mímisbrunnr-MVP"])
+            metadata = json.loads((out_dir / uc.METADATA_FILE).read_text(encoding="utf-8"))
+            self.assertEqual(metadata["binding"]["initiative"], "Mímisbrunnr-MVP")
+            self.assertEqual(metadata["binding"]["tickets"], ["github:160"])
+
+    def test_export_opt_out_disables_autofill(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
+            _, out, _ = run(["export", src, "--heimdallr", "false"])
+            self.assertNotIn("Heimdallr autofill", out)
+            self.assertIn("no selectors supplied", out)
+
+    def test_tags_are_never_autofilled(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "bound"
+            run(["dump", "--currentsession", "--out", str(out_dir)])
+            metadata = json.loads((out_dir / uc.METADATA_FILE).read_text(encoding="utf-8"))
+            self.assertEqual(metadata["binding"]["repository"], "org/repo")
+            self.assertNotIn("tags", metadata["binding"])
+
+    def test_import_default_fills_first_ticket(self):
+        seen = {}
+        original = uc.store_query
+        def fake_query(f):
+            seen["filters"] = f
+            return ([], "ok")
+        uc.store_query = fake_query
+        try:
+            run(["import"])
+        finally:
+            uc.store_query = original
+        self.assertEqual(seen["filters"].get("ticketKey"), "160")
+        self.assertEqual(seen["filters"].get("repo"), "org/repo")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

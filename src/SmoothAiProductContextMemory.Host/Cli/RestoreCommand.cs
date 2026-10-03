@@ -55,6 +55,15 @@ internal static class RestoreCommand
                     Console.WriteLine($"Restore refused: {ex.Message}");
                     return 2;
                 }
+                catch (InvalidOperationException ex)
+                {
+                    // Operational refusal (unreadable archive, missing referenced blobs, non-empty
+                    // target without --force). The message is already shape-only, so print it as one
+                    // line instead of letting it escape as a stack trace — and exit 1, distinct from
+                    // the integrity exit 2 above.
+                    Console.WriteLine($"Restore refused: {ex.Message}");
+                    return 1;
+                }
 
                 foreach (RestoreArchive.ReconciliationLine line in response.Lines)
                 {

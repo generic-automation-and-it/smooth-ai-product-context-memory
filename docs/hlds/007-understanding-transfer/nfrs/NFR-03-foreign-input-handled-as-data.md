@@ -34,4 +34,4 @@ instruction) inheritance.
 
 ## Evidence (2026-09-26)
 
-Skill L0 `.agents/skills/mimisbrunnr-understanding/tests/run_tests.py`: directive and proposed-status foreign material rendered as cited data. L1 `tests/SmoothAiProductContextMemory.Application.ComponentTest/Features/UnderstandingTransferStoreTests.cs` `Query_keeps_understanding_attribution`: an understanding retrieved for loading keeps its uuid, current version and `CreatedOn`.
+Skill L0 `.agents/skills/mimisbrunnr-kvasir-understanding/tests/run_tests.py`: directive and proposed-status foreign material rendered as cited data. L1 `tests/SmoothAiProductContextMemory.Application.ComponentTest/Features/UnderstandingTransferStoreTests.cs` `Query_keeps_understanding_attribution`: an understanding retrieved for loading keeps its uuid, current version and `CreatedOn`.

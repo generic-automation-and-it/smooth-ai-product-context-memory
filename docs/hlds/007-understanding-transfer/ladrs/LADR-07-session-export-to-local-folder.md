@@ -59,4 +59,4 @@ the originating repo is the same.
 
 ## Evidence (2026-09-26)
 
-Skill L0 `.agents/skills/mimisbrunnr-understanding/tests/run_tests.py`: the dump → load round trip, the discoverable folder name, refusal of the filesystem and repository roots, and fail-closed redaction.
+Skill L0 `.agents/skills/mimisbrunnr-kvasir-understanding/tests/run_tests.py`: the dump → load round trip, the discoverable folder name, refusal of the filesystem and repository roots, and fail-closed redaction.

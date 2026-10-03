@@ -5,7 +5,7 @@ C4Context
     title Understanding transfer — system context
     Person(practitioner, "Practitioner", "Requests an understanding export; loads material into a fresh or running agent; optionally captures it back")
     System(store, "Mímisbrunnr store", "Persistent context memory — PostgreSQL+AGE, blob storage, HTTP API")
-    System(loadSkill, "mimisbrunnr-understanding skill", "Loads Understanding exports and foreign material into agent context; `--store` imports via the capture path")
+    System(loadSkill, "mimisbrunnr-kvasir-understanding skill", "Loads Understanding exports and foreign material into agent context; `--store` imports via the capture path")
     System_Ext(captureSkill, "mimisbrunnr-odin-context-memory skill", "Sole writer — the capture path an import funnels through")
     System_Ext(agent, "New or running agent session", "Consumes loaded material as grounding context")
     System_Ext(foreign, "Foreign material", "Sessions, meeting notes, transcripts")

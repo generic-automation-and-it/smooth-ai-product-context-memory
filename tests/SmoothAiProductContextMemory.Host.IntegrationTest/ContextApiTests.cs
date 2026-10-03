@@ -703,7 +703,9 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
         response.Content.Headers.ContentType!.MediaType.ShouldBe("application/problem+json");
         JsonElement body = await response.Content.ReadFromJsonAsync<JsonElement>(Json, Ct);
         body.GetProperty("title").GetString().ShouldBe("Invalid request body");
-        body.GetProperty("detail").GetString()!.ShouldContain("statement");
+        // The detail is a fixed string (no exception text, so no value or property name leaks); the
+        // rejected member is identified by the `path` extension below, not by prose in the detail.
+        body.GetProperty("detail").GetString()!.ShouldNotContain("statement");
         // The path is a problem extension, not prose spliced into the detail: it says which element
         // of the batch carried the rejected member, and a caller can read it without parsing English.
         body.GetProperty("path").GetString().ShouldBe("$.candidates[0].statement");

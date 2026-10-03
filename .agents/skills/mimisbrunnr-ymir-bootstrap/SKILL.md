@@ -36,7 +36,10 @@ supported runtime; do not automatically export a file, install anything, or chan
 
 At the start, establish:
 
-- the chosen repository root and verified repository identity;
+- the chosen repository root and verified repository identity (default the Heimdallr
+  reporter's `owner/repo` from the same skills root when the caller names none —
+  `.agents/skills`, `.claude/skills` or `.codex/skills`, never a hardcoded prefix —
+  plus branch-seen tickets for a next-feature scope; tags stay agent-derived keywords);
 - whether the task is baseline-only or includes deeper inspection for one named next feature;
 - any user-approved external evidence sources.
 

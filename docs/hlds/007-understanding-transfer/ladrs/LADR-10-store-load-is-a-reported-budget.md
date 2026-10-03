@@ -65,7 +65,7 @@ non-default cap always states itself in a `Budget:` line, `0 record(s) cut` incl
 
 ## Evidence (2026-10-01)
 
-Skill L0 `.agents/skills/mimisbrunnr-understanding/tests/run_tests.py`: an under-budget render is
+Skill L0 `.agents/skills/mimisbrunnr-kvasir-understanding/tests/run_tests.py`: an under-budget render is
 byte-identical to `max_chars=None` and emits no `Budget:` line; an over-budget render cuts whole records,
 names each by identity with the budget as the reason, never partially renders the oversized record, and
 is identical across runs; a budget below the smallest record narrows to zero. Walk harness re-run at the

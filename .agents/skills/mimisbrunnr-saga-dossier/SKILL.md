@@ -44,8 +44,13 @@ selection the practitioner approved in the preview, the difference is reported (
 #    the NFR-03 preview (prices the selection without bodies) and the LADR-14 preview-vs-bundle
 #    difference check are performed by the agent directly against the Host API —
 #    POST /api/context/dossier/preview and POST /api/context/dossier/bundle. Read-only.
+#    Anchor flags (--repo/--ticket(s)/--tags/--initiative) merge into --body; only a
+#    missing repo/ticket anchor autofills from the offline Heimdallr git scan (--heimdallr true,
+#    default on; a supplied flag or --body key is never overwritten for that field; tags are never autofilled).
 python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py \
-  bundle --body '{"repo":"kingstown","widenDepth":3}' | head
+  bundle --repo owner/repo --ticket github:160 | head
+# (the script path above is relative to the skills root, so it holds under
+# .agents/skills, .claude/skills or .codex/skills; --heimdallr false disables autofill)
 
 # 2. Compose from a saved bundle, apply an optional focus, write the artefact (gitignored).
 python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py \
@@ -113,7 +118,7 @@ and its memories by identity + version (LADR-13). Findings are focus-invariant i
   exception is false.
 - **`kind = understanding` is a kind like any other** — same selection, citation, reconciliation,
   focus and confidentiality (LADR-15). Its load/import is a separate capability owned by
-  `mimisbrunnr-understanding`, not this skill.
+  `mimisbrunnr-kvasir-understanding`, not this skill.
 - **`near-miss-tag` is evidence-only** (LADR-10). Use the shared
   `mimisbrunnr-odin-context-memory/scripts/near_miss_tags.py` helper via `near_miss_findings()`. No evidence
   means no finding; no tag-graph or full-dossier completeness claim is made.
@@ -141,5 +146,5 @@ Committed harness: `python3 -B .agents/skills/mimisbrunnr-saga-dossier/tests/run
 - `docs/hlds/005-contextual-export/` — design (LADRs, NFRs), the determinism boundary, the contract.
 - `.agents/skills/mimisbrunnr-odin-context-memory/` — the capture skill (sole **writer**). This dossier
   skill is a reader; do not conflate the two. Reuses its `near_miss_tags.py` helper.
-- `.agents/skills/mimisbrunnr-understanding/` — the load/transfer sibling (HLD-007); owns the
+- `.agents/skills/mimisbrunnr-kvasir-understanding/` — the load/transfer sibling (HLD-007); owns the
   Understanding kind's load/import, which this read-only skill does not.

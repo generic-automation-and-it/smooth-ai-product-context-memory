@@ -25,6 +25,39 @@ if [ "$TARGET_DB" = "$TEMPLATE_DB" ]; then
     exit 1
 fi
 
+# The drop below is irreversible, and the guard above stops only target == template. A mis-typed
+# target can still name a live database (e.g. `app` with a different template, or `postgres`), and
+# both names are interpolated into quoted SQL identifiers, so a `"` or `;` breaks out. The target is
+# held to a scratch prefix and both names to a safe identifier shape.
+case "$TARGET_DB" in
+    nfr* | sample*) ;;
+    *)
+        echo "FAIL: target-db '$TARGET_DB' is not a scratch database (nfr* or sample*); refusing to drop it" >&2
+        exit 1
+        ;;
+esac
+if ! printf '%s' "$TARGET_DB" | grep -Eq '^[A-Za-z_][A-Za-z0-9_]*$'; then
+    echo "FAIL: target-db '$TARGET_DB' is not a valid database identifier; refusing" >&2
+    exit 1
+fi
+if ! printf '%s' "$TEMPLATE_DB" | grep -Eq '^[A-Za-z_][A-Za-z0-9_]*$'; then
+    echo "FAIL: template-db '$TEMPLATE_DB' is not a valid database identifier; refusing" >&2
+    exit 1
+fi
+
+# The two counts are interpolated straight into generate_series() below rather than bound, so a
+# non-numeric value either aborts inside psql with a parse error or, carrying a quote or a semicolon,
+# breaks out of the call — as the postgres user, in a script whose whole job is to be re-run. Checked
+# here, before the DROP, so a typo cannot destroy a scratch database and only then fail.
+for count in "$MEMORIES" "$EDGES"; do
+    case "$count" in
+        "" | *[!0-9]*)
+            echo "FAIL: memories/edges '$count' is not a non-negative integer; refusing" >&2
+            exit 1
+            ;;
+    esac
+done
+
 if ! docker inspect "$CONTAINER" >/dev/null 2>&1; then
     echo "FAIL: container '$CONTAINER' not found" >&2
     exit 1

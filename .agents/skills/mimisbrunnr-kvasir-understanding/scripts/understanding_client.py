@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""mimisbrunnr-understanding — the session/store bridge.
+"""mimisbrunnr-kvasir-understanding — the session/store bridge.
 
 Four operations in two pairs. The two store-facing directions are named to match `ai-understanding`,
 so the same word means the same direction in both skills (LADR-11) — the previous pair inverted them.
@@ -48,7 +48,7 @@ import uuid
 from pathlib import Path
 
 KIND_UNDERSTANDING = "understanding"
-DUMP_MARKER = ".mimisbrunnr-understanding-dump"
+DUMP_MARKER = ".mimisbrunnr-kvasir-understanding-dump"
 SESSION_FILE = "_session.md"
 METADATA_FILE = "_dump.json"
 UNIT_SUFFIX = ".understanding.md"
@@ -58,11 +58,141 @@ REDACTOR = _CAPTURE_SCRIPTS / "redact.py"
 ATOMICITY = _CAPTURE_SCRIPTS / "atomicity.py"
 READ_CLIENT = _CAPTURE_SCRIPTS / "context_memory_read_client.py"
 WRITE_CLIENT = _CAPTURE_SCRIPTS / "context_memory_client.py"
+# Heimdallr session-metadata reporter, resolved relative to this file so the lookup
+# holds under any skills root (.agents/skills, .claude/skills, .codex/skills, npm
+# layout): two levels up is the skills root, never a hardcoded prefix.
+HEIMDALLR_SCRIPT = (Path(__file__).resolve().parents[2]
+                    / "mimisbrunnr-heimdallr-find-session-metadata"
+                    / "scripts" / "find_session_metadata.py")
 # The capture skill's static batch cap. Mirrored rather than imported: the two script folders ship as
 # separate packages, so this client cannot acquire a cross-skill import (the same reason the recall
 # notice is duplicated verbatim and asserted equal by a test).
 MAX_CANDIDATES = 20
+# `ai-understanding` records confidence as a qualitative label — `observed`, `verified`, `contested`
+# (VALID_CONFIDENCE in its index script) — while the store holds a 0-100 integer. Passing the label
+# through reached the API as the string "verified", which the server rejected with a 400 whose detail
+# body was empty, so the dry-run veto could only report `HTTP 400 Bad Request:` and no candidate was
+# diagnosable from it. Every canonical `.understanding.md` carries one of these labels, so `export` had
+# never succeeded for the format it was written to read.
+#
+# `verified` maps to the same 70 the previous default already used, so a verified unit is stored exactly
+# as it would have been had it carried no confidence field at all — this is a translation, not a
+# re-scoring. The other two sit either side because `verified` is the baseline the renderer treats as
+# unremarkable: anything else is surfaced as a flag, so an unrecognised label falls back to the baseline
+# rather than inventing a score.
+_CONFIDENCE_NUMERIC = {"verified": 70, "observed": 60, "contested": 40}
+DEFAULT_CONFIDENCE = 70
+
+
+def confidence_value(raw) -> int:
+    """The store's 0-100 integer for a confidence that may arrive as a number or as a label.
+
+    A numeric *string* is honoured rather than defaulted: the frontmatter parser is a flat subset
+    reader, so a hand-authored `confidence: 45` can arrive as `"45"`, and quietly scoring it 70 would
+    mis-state a value the author set on purpose.
+    """
+    if isinstance(raw, bool):
+        return DEFAULT_CONFIDENCE
+    if isinstance(raw, (int, float)):
+        return int(raw)
+    text = str(raw or "").strip()
+    if text.lstrip("-").isdigit():
+        return int(text)
+    return _CONFIDENCE_NUMERIC.get(text.lower(), DEFAULT_CONFIDENCE)
+
+
+def confidence_flagged(raw) -> bool:
+    """Whether recall must surface a record's confidence to the reader.
+
+    `verified` is the baseline, so anything else is surfaced — **including a value this client does not
+    recognise**. An unknown value is not evidence of trustworthiness: a typo, or a label added to
+    `ai-understanding` before this client learns it, would otherwise reach the reader as though it were
+    verified, which is the single outcome the flag exists to prevent. `confidence_value` is the write
+    path's translate-or-default; this is the read path's surface-or-not, and the two deliberately
+    disagree about unknowns.
+    """
+    if raw is None or isinstance(raw, bool) or str(raw).strip() == "":
+        return False
+    text = str(raw).strip()
+    if text.lstrip("-").isdigit():
+        return int(text) != DEFAULT_CONFIDENCE
+    return text.lower() != "verified"
+
+
 DEFAULT_QUERY_LIMIT = 200
+_HEIMDALLR_CHOICES = ("true", "false")
+
+
+def heimdallr_enabled(args: argparse.Namespace) -> bool:
+    """Whether Heimdallr autofill applies. `--heimdallr true` (the default)."""
+    return str(getattr(args, "heimdallr", "true")).lower() != "false"
+
+
+def heimdallr_scan() -> dict:
+    """Offline git scan via the Heimdallr reporter; {} when unavailable.
+
+    Never fails the caller: a missing script, a non-git checkout or malformed
+    output means no autofill, not a refusal. Heimdallr reports repository,
+    tickets and initiative only — never tags, which stay agent-derived
+    keywords from the material itself.
+    """
+    if not HEIMDALLR_SCRIPT.is_file():
+        return {}
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-B", str(HEIMDALLR_SCRIPT), "--json"],
+            capture_output=True, text=True, encoding="utf-8", timeout=30)
+    except (OSError, ValueError):
+        return {}
+    if proc.returncode != 0:
+        return {}
+    try:
+        result = json.loads(proc.stdout)
+    except ValueError:
+        return {}
+    return result if isinstance(result, dict) else {}
+
+
+def heimdallr_autofill_tickets(scan: dict) -> list[str]:
+    """Tickets to autofill: branch-seen tickets when any, else the newest commit one.
+
+    The scan lists branch hits before commit subjects, but a 10-commit window can
+    carry stale work. Binding a group to all of them over-binds; the branch names
+    the current work, and a single newest commit ticket is the conservative fallback.
+    """
+    tickets = scan.get("tickets") or []
+    branch = [f"{e['provider']}:{e['key']}" for e in tickets
+              if isinstance(e, dict) and e.get("seenIn") == "branch"
+              and e.get("provider") and e.get("key")]
+    if branch:
+        return branch
+    for entry in tickets:
+        if isinstance(entry, dict) and entry.get("provider") and entry.get("key"):
+            return [f"{entry['provider']}:{entry['key']}"]
+    return []
+
+
+def heimdallr_tickets(scan: dict) -> list[str]:
+    """Heimdallr ticket dicts into `--tickets` spellings (`provider:key`)."""
+    out = []
+    tickets = scan.get("tickets") or []
+    if isinstance(tickets, list):
+        for entry in tickets:
+            if isinstance(entry, dict) and entry.get("provider") and entry.get("key"):
+                out.append(f"{entry['provider']}:{entry['key']}")
+    return out
+
+
+def heimdallr_repository(scan: dict) -> str | None:
+    repo = scan.get("repository")
+    return repo if isinstance(repo, str) and repo else None
+
+
+def heimdallr_initiative(scan: dict) -> str | None:
+    initiative = scan.get("initiative")
+    if isinstance(initiative, str) and initiative and initiative != "unknown":
+        return initiative
+    return None
 _STAMP = re.compile(r"-(\d{8}-\d{4})$")
 DEFAULT_MAX_CHARS = 12000
 # A candidate below this is punctuation, a stray word, or a table rule — never a fact. Short
@@ -214,7 +344,11 @@ def _render_record(parts: dict) -> list[str]:
         flags.append(f"status: {parts['status']}")
     if parts["scopeDimension"] in ("program", "self"):
         flags.append(f"{parts['scopeDimension']} scope, not shipped product fact")
-    if parts["confidence"] and parts["confidence"] != "verified":
+    # Compared through `confidence_flagged`, not against the literal "verified". A store record carries
+    # the integer this write path now sends — 70 *is* the encoding of verified — so comparing the raw
+    # value against the label flagged every record exported through `export` as though it were below
+    # verified, which is the opposite of what a flagged confidence is for.
+    if parts["confidence"] and confidence_flagged(parts["confidence"]):
         flags.append(f"confidence: {parts['confidence']}")
     if parts["portability"] == "repo-specific":
         flags.append("repo-specific, may not hold in another repository")
@@ -549,10 +683,15 @@ def store_query(filters: dict) -> tuple[list[dict] | None, str]:
             return None, "unreachable"
         return None, f"error: {(err or out).strip()[:200]}"
     document = _first_json_object(out)
-    if document is None:
-        return None, "error"
-    items = document.get("items")
-    return (items if isinstance(items, list) else []), "ok"
+    # Anything that is not the expected envelope is a failed read, and both ways this went wrong were
+    # the expensive kind: a dict without `items` reported "nothing matched" for a store that never
+    # answered the question, and a bare list raised AttributeError on `.get` and took the whole recall
+    # down. Neither may reach the empty branch — it is the only one of the three outcomes the agent
+    # reads as a fact about its own context, so anything unrecognised is quoted back as an error
+    # instead of being flattened into it.
+    if not isinstance(document, dict) or not isinstance(document.get("items"), list):
+        return None, f"error: unexpected store reply: {out[:500]}"
+    return document["items"], "ok"
 
 
 def query_filters(args: argparse.Namespace, all_kinds: bool) -> dict:
@@ -674,6 +813,28 @@ def cmd_import(args: argparse.Namespace) -> int:
               "file in, use `load`; to send session material to the store, use `export <input>`.",
               file=sys.stderr)
         return 1
+
+    if heimdallr_enabled(args) and (not args.ticket or not args.repository or not args.initiative):
+        scan = heimdallr_scan()
+        filled = []
+        if not args.ticket:
+            found = heimdallr_autofill_tickets(scan)
+            if found:
+                args.ticket = found[0]
+                filled.append(f"ticket {found[0]}")
+        if not args.repository:
+            repo = heimdallr_repository(scan)
+            if repo:
+                args.repository = repo
+                filled.append(f"repository {repo}")
+        if not args.initiative:
+            initiative = heimdallr_initiative(scan)
+            if initiative:
+                args.initiative = initiative
+                filled.append(f"initiative {initiative}")
+        if filled:
+            print(f"Heimdallr autofill ({', '.join(filled)}); an explicit flag always wins. "
+                  f"Pass --heimdallr false to disable.")
 
     all_kinds = args.all_kinds
     try:
@@ -872,12 +1033,12 @@ def set_items(candidates: list[dict], binding: dict, now: dt.datetime) -> list[d
             "facets": ["understanding"],
             "tags": split_list(binding.get("tags")),
             "status": candidate.get("status") or "approved",
-            "confidence": candidate.get("confidence") or 70,
+            "confidence": confidence_value(candidate.get("confidence")),
             "content": candidate["statement"],
             "sources": candidate.get("sources") or [],
             "validFrom": candidate.get("validFrom") or now.strftime("%Y-%m-%dT00:00:00Z"),
             "validUntil": candidate.get("validUntil"),
-            "summaryModel": "mimisbrunnr-understanding export",
+            "summaryModel": "mimisbrunnr-kvasir-understanding export",
             "summaryPromptVersion": "export-1",
         })
     return items
@@ -909,6 +1070,30 @@ def cmd_export(args: argparse.Namespace) -> int:
         "scope": args.scope or recorded.get("scope"),
         "initiative": args.initiative or recorded.get("initiative"),
     }
+    if heimdallr_enabled(args) and (not binding["tickets"] or not binding["repository"]
+                                    or not binding["initiative"]):
+        scan = heimdallr_scan()
+        filled = []
+        if not binding["tickets"]:
+            found = heimdallr_autofill_tickets(scan)
+            if found:
+                binding["tickets"] = found
+                filled.append(f"tickets {','.join(found)}")
+        if not binding["repository"]:
+            repo = heimdallr_repository(scan)
+            if repo:
+                binding["repository"] = repo
+                filled.append(f"repository {repo}")
+        if not binding["initiative"]:
+            initiative = heimdallr_initiative(scan)
+            if initiative:
+                binding["initiative"] = initiative
+                filled.append(f"initiative {initiative}")
+        if filled:
+            print(f"Heimdallr autofill ({', '.join(filled)}); explicit flags and the dump's "
+                  f"structured metadata always win. Pass --heimdallr false to disable.")
+        # Tags are never autofilled by Heimdallr: it reports git-provable repo/tickets/
+        # initiative only. Derive tags from the material's own keywords, or pass --tags.
     if recorded:
         print("Binding read from the dump's structured metadata: "
               + json.dumps({k: v for k, v in recorded.items() if v}, ensure_ascii=False)
@@ -965,7 +1150,7 @@ def cmd_export(args: argparse.Namespace) -> int:
     if exists is None:
         print(f"REFUSED: the initiative read failed ({why}); this is not evidence that "
               f"'{initiative}' is absent. Nothing was written.", file=sys.stderr)
-        return 1 if args.write else 0
+        return 1
     initiative_note = (f"initiative '{initiative}' exists" if exists else
                       f"initiative '{initiative}' is absent — would create: "
                       f"context_memory_client.py upsert-initiative "
@@ -1374,6 +1559,28 @@ def cmd_dump(args: argparse.Namespace) -> int:
     # re-deriving it from prose. A dump with no binding says so explicitly rather than writing an
     # empty object that reads as "bound to nothing on purpose".
     binding = dump_binding(args)
+    if heimdallr_enabled(args) and (not binding["tickets"] or not binding["repository"]
+                                    or not binding["initiative"]):
+        scan = heimdallr_scan()
+        filled = []
+        if not binding["tickets"]:
+            found = heimdallr_autofill_tickets(scan)
+            if found:
+                binding["tickets"] = found
+                filled.append(f"tickets {','.join(found)}")
+        if not binding["repository"]:
+            repo = heimdallr_repository(scan)
+            if repo:
+                binding["repository"] = repo
+                filled.append(f"repository {repo}")
+        if not binding["initiative"]:
+            initiative = heimdallr_initiative(scan)
+            if initiative:
+                binding["initiative"] = initiative
+                filled.append(f"initiative {initiative}")
+        if filled:
+            print(f"Heimdallr autofill ({', '.join(filled)}); an explicit flag always wins. "
+                  f"Pass --heimdallr false to disable.")
     metadata = {
         "generated": generated,
         "folder": folder.name,
@@ -1454,6 +1661,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                      help=f"Render budget (default {DEFAULT_MAX_CHARS}); cuts whole records.")
     imp.add_argument("--all", action="store_true", dest="all_kinds",
                      help="Breadth: memory AND understanding, not just understanding-kind.")
+    imp.add_argument("--heimdallr", choices=_HEIMDALLR_CHOICES, default="true",
+                     help="Autofill missing --ticket/--repository/--initiative from the offline "
+                          "Heimdallr git scan (default true; explicit flags always win).")
 
     exp = sub.add_parser("export", help="SESSION -> STORE: orchestrate the capture path "
                                         "(dry run unless --write).")
@@ -1467,6 +1677,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     exp.add_argument("--initiative", help="Initiative the group belongs to; must already exist.")
     exp.add_argument("--name", help="Group name, written only when the group is created.")
     exp.add_argument("--body", help="Group description, written only when the group is created.")
+    exp.add_argument("--heimdallr", choices=_HEIMDALLR_CHOICES, default="true",
+                     help="Autofill missing --tickets/--repository/--initiative from the offline "
+                          "Heimdallr git scan (default true; explicit flags and the dump metadata "
+                          "always win; tags are never autofilled).")
 
     dump = sub.add_parser("dump", help="Dump this session's context to a local folder (export).")
     dump.add_argument("--currentsession", action="store_true")
@@ -1480,6 +1694,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                             ("scope", "scope:identifier."),
                             ("initiative", "Recorded as structured metadata for a later export.")):
         dump.add_argument(f"--{flag}", help=help_text)
+    dump.add_argument("--heimdallr", choices=_HEIMDALLR_CHOICES, default="true",
+                      help="Autofill missing --tickets/--repository/--initiative from the offline "
+                           "Heimdallr git scan (default true; explicit flags always win).")
 
     return parser.parse_args(argv)
 

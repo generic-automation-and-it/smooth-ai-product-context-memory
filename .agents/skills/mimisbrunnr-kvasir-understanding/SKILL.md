@@ -1,5 +1,5 @@
 ---
-name: mimisbrunnr-understanding
+name: mimisbrunnr-kvasir-understanding
 description: Load a Mímisbrunnr Understanding export — or any prior material (session, meeting notes, transcript) — into a new or running agent's session context, and share context across sessions and repositories. The load/transfer counterpart to mimisbrunnr-odin-context-memory.
 effort: high  # judgement on understanding vs scoped fact, and capture-path funneling
 ---
@@ -21,7 +21,7 @@ into the session, `--export` sends the session's material to the store. All swit
 analysed by the AI. Currently no interactive questions exist in this skill, but the switch is
 accepted for forward compatibility.
 
-# mimisbrunnr-understanding
+# mimisbrunnr-kvasir-understanding
 
 Move Mímisbrunnr **Understanding** knowledge between a session and the store. **`load`** brings a file,
 folder or transcript into the session's context, writing nothing. **`import`** queries the store itself
@@ -42,7 +42,7 @@ already written somewhere into the store so it compounds. It is the **load/trans
 ## Load (default)
 
 ```bash
-python3 -B .agents/skills/mimisbrunnr-understanding/scripts/understanding_client.py \
+python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding_client.py \
   load <input> [--format store|understanding|foreign|auto] [--all] [--asof YYYY-MM-DD] [--max-chars N]
 ```
 
@@ -77,10 +77,10 @@ python3 -B .agents/skills/mimisbrunnr-understanding/scripts/understanding_client
 ## Import (store → session)
 
 ```bash
-python3 -B .agents/skills/mimisbrunnr-understanding/scripts/understanding_client.py \
+python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding_client.py \
   import [--ticket provider:key] [--repository REPO] [--initiative NAME] [--scope scope:id] \
   [--tags TAG,...] [--query WORD] [--status STATUS] [--limit N] [--asof YYYY-MM-DD] \
-  [--all] [--table] [--max-chars N]
+  [--all] [--table] [--max-chars N] [--heimdallr true]
 ```
 
 - `import` queries the store for `kind = understanding` through the capture skill's **read client**, so
@@ -106,10 +106,10 @@ python3 -B .agents/skills/mimisbrunnr-understanding/scripts/understanding_client
 ## Export (session → store)
 
 ```bash
-python3 -B .agents/skills/mimisbrunnr-understanding/scripts/understanding_client.py \
+python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding_client.py \
   export <input> [--write] \
   [--tickets TICKET,...] [--tags TAG,...] [--repository REPO] [--scope scope:id] \
-  [--initiative NAME] [--name NAME] [--body TEXT]
+  [--initiative NAME] [--name NAME] [--body TEXT] [--heimdallr true]
 ```
 
 - `export` orchestrates the capture skill end to end — redaction gate, atomicity gate, the 20-candidate
@@ -130,13 +130,45 @@ python3 -B .agents/skills/mimisbrunnr-understanding/scripts/understanding_client
 - **The digest states the gated-kind limit.** A decision or rule captured this way is written as
   `kind = understanding`, which does **not** pass the gated-kind approval.
 
+## Heimdallr autofill (`--heimdallr true`, default on)
+
+`import`, `export` and `dump --currentsession` all accept `--heimdallr true|false`
+(default `true`). When on, only a field the caller did **not** bind is even
+considered for autofill, per field, from an offline run of the sibling
+`mimisbrunnr-heimdallr-find-session-metadata` reporter (git remote + branch +
+recent subjects — the tickets already made in this session, and the current
+repo when the flag is absent). A supplied flag is never compared against,
+replaced by, or "confirmed" with Heimdallr output for that field; the scan is
+skipped entirely when nothing is missing. Precedence, highest first, per field:
+explicit flag → dump structured metadata (`_dump.json`, export only) → Heimdallr →
+unbound. `--heimdallr false` disables the scan entirely. Example: `--initiative
+"Mímisbrunnr-MVP"` with no `--tickets` keeps the caller's initiative verbatim
+and autofills only the ticket — Heimdallr reporting `unknown` initiative is the
+normal case and never a reason to ask for, invent, or re-supply one. Never
+forward caller flags into the reporter; its own `--initiative` flag is for
+manual runs only.
+
+- `import` fills singular `--ticket` with the first Heimdallr hit (branch hits before
+  commits); `export`/`dump` bind branch-seen tickets when any exist, else the single
+  newest commit ticket — a 10-commit window can carry stale work, so all of it is never
+  bound at once.
+- Heimdallr reports `unknown` initiative when nothing proves one; that fills nothing.
+  It never supplies `--tags`: derive tags from the material's own keywords, or pass
+  `--tags` explicitly.
+- The reporter is located relative to the calling script (two levels up from
+  `scripts/understanding_client.py` is the skills root), so the lookup holds under
+  `.agents/skills`, `.claude/skills`, `.codex/skills` or the npm layout with no
+  hardcoded prefix. A missing script or a non-git checkout means no autofill, never
+  a refusal.
+
 ## Session export (`--currentsession`)
 
 ```bash
-python3 -B .agents/skills/mimisbrunnr-understanding/scripts/understanding_client.py \
+python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding_client.py \
   dump --currentsession [--from FILE|-] [--out .context/mimisbrunnr-understandings/<session-folder>] \
   [--session-name NAME] \
-  [--tickets TICKET,...] [--tags TAG,...] [--repository REPO] [--scope scope:id] [--initiative NAME]
+  [--tickets TICKET,...] [--tags TAG,...] [--repository REPO] [--scope scope:id] [--initiative NAME] \
+  [--heimdallr true]
 ```
 
 - `dump --currentsession` writes the current session's understanding (its Understandings, decisions
@@ -199,7 +231,7 @@ shape of the problem and never the value.
 
 ## Test
 
-Committed harness: `python3 -B .agents/skills/mimisbrunnr-understanding/tests/run_tests.py`.
+Committed harness: `python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/tests/run_tests.py`.
 
 ## Related
 

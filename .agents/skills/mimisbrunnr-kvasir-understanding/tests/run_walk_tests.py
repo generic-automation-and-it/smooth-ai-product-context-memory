@@ -2,10 +2,10 @@
 """Cold-agent walk harness (BRD-003 assumption 2).
 
 Run (model-free degenerate assertions; the PR gate runs this):
-    python3 -B .agents/skills/mimisbrunnr-understanding/tests/run_walk_tests.py
+    python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/tests/run_walk_tests.py
 
 Run (also score the recorded cold-agent walk):
-    SMOOTH_WALK_BENCH=1 python3 -B .agents/skills/mimisbrunnr-understanding/tests/run_walk_tests.py
+    SMOOTH_WALK_BENCH=1 python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/tests/run_walk_tests.py
 
 What this proves
 ----------------
@@ -53,7 +53,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 FIXTURES = HERE / "fixtures"
-UND_ROOT = HERE.parent  # .agents/skills/mimisbrunnr-understanding
+UND_ROOT = HERE.parent  # .agents/skills/mimisbrunnr-kvasir-understanding
 sys.path.insert(0, str(UND_ROOT / "scripts"))
 sys.path.insert(0, str(UND_ROOT.parent / "mimisbrunnr-saga-dossier" / "scripts"))
 

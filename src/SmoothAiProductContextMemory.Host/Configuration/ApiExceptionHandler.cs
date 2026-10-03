@@ -59,7 +59,11 @@ internal sealed class ApiExceptionHandler(IDbErrorMapper errorMapper) : IExcepti
             {
                 Status = badRequestStatus,
                 Title = "Invalid request body",
-                Detail = "The request body could not be read: " + (json?.Message ?? effective.Message),
+                // Fixed detail, never the exception message: a custom converter or future exception
+                // could embed the offending value (i.e. memory content) in its message, and the
+                // request body on POST /memories is exactly that. The structural location instead
+                // rides the `path` extension below, which is JSON path, never the value.
+                Detail = "The request body could not be read.",
             };
 
             if (json is { Path.Length: > 0 } located)

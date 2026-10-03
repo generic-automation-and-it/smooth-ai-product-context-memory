@@ -42,4 +42,4 @@ Both are non-destructive (NFR-01): they read the store and write nothing.
 
 ## Evidence (2026-09-26)
 
-L1 `tests/SmoothAiProductContextMemory.Application.ComponentTest/Features/UnderstandingTransferStoreTests.cs`: `Kind = understanding` returns only the understanding and the un-filtered query returns both kinds, with zero writes on either; skill L0 `.agents/skills/mimisbrunnr-understanding/tests/run_tests.py` pins `--all` vs understanding-only rendering.
+L1 `tests/SmoothAiProductContextMemory.Application.ComponentTest/Features/UnderstandingTransferStoreTests.cs`: `Kind = understanding` returns only the understanding and the un-filtered query returns both kinds, with zero writes on either; skill L0 `.agents/skills/mimisbrunnr-kvasir-understanding/tests/run_tests.py` pins `--all` vs understanding-only rendering.

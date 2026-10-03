@@ -295,6 +295,32 @@ the second from the first; an earlier version redirected only the home and the h
 credentials. `run.ps1` has no equivalent — its Windows-specific paths cannot be executed on a Linux or
 macOS runner at all, and remain parse-verified only.
 
+## Writing the credentials into a shell profile
+
+Use the flag, not a redirect:
+
+```bash
+scripts/run.sh env-export --profile ~/.zshrc    # or ~/.zprofile, or any file; defaults to ~/.zshrc
+scripts/run.sh env-export --profile $PROFILE powershell
+```
+
+`>` and `>>` differ by one character and do opposite things to a profile: one empties it, the other grows
+it without bound. That is the wrong thing to leave to a habit, so the flag writes a bounded, marked block:
+
+```
+# >>> mimisbrunnr — managed by scripts/run.sh env-export --profile >>>
+export CONTEXT_MEMORY_BASE_URL='…'
+export CONTEXT_MEMORY_READ_TOKEN='…'
+export CONTEXT_MEMORY_WRITE_TOKEN='…'
+# <<< mimisbrunnr <<<
+```
+
+Only the region between the markers is ever written. Everything else in the file is preserved byte for
+byte, including on a first write, so a populated profile is never emptied. Re-running rewrites the three
+lines in place: no duplicates, and a rotated token replaces the old one instead of outliving it in a
+world-readable file. A target with no managed block is backed up to `<file>.mimis-backup-<timestamp>`
+before anything is appended, and a symlinked target is refused.
+
 ## Limitations
 
 - **Coverage is uneven.** `scripts/test-run-launcher.sh` now covers the bash launcher's credential,

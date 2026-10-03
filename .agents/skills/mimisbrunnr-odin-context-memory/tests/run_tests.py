@@ -191,7 +191,7 @@ class RecallFramingTests(unittest.TestCase):
         identical and one gets edited. Asserted against the sibling's *rendered* banner, prefix
         included, because that is what a reader of either output actually sees.
         """
-        understanding = _load_sibling("mimisbrunnr-understanding", "understanding_client")
+        understanding = _load_sibling("mimisbrunnr-kvasir-understanding", "understanding_client")
         self.assertEqual(
             client.BANNER_PREFIX + client.RECALL_NOTICE, understanding.DATA_NOTICE,
             "the notice must be the understanding client's wording verbatim, not a paraphrase",
@@ -486,6 +486,22 @@ class TransportFailureTests(unittest.TestCase):
         # A reset is not a hang: classifying it as `timed-out` would send the caller to investigate a
         # store that is answering, when the connection was simply dropped.
         self.assertEqual(caught.exception.status_text, "unreachable")
+
+    def test_an_empty_error_body_is_stated_not_left_as_a_trailing_colon(self):
+        """A bodyless 400 must not read as though this client discarded a detail it received.
+
+        A malformed request field fails JSON binding before validation runs, and the Host answers that
+        with an empty 400. Rendering that as `HTTP 400 Bad Request: ` sends the reader to look for a
+        dropped detail here rather than at the payload's type — which is where the fault actually is.
+        """
+        self.assertIn("no detail body", str(client.ClientError(400, "Bad Request", "")))
+        self.assertIn("no detail body", str(client.ClientError(400, "Bad Request", "   ")))
+        self.assertIn("no detail body", str(client.ClientError(400, "Bad Request", None)))
+        # A body that *is* present must still be rendered verbatim, unaltered.
+        self.assertEqual(str(client.ClientError(400, "Bad Request", '{"errors":{"x":["y"]}}')),
+                         'HTTP 400 Bad Request: {"errors":{"x":["y"]}}')
+        # The raw body attribute is the wire value either way; only the message is decorated.
+        self.assertEqual(client.ClientError(400, "Bad Request", "").body, "")
 
     def test_the_timeout_message_names_the_budget(self):
         """The error has to say what was waited, or the agent cannot tell a hang from a slow answer."""
@@ -1280,6 +1296,15 @@ class SetRedactionGateTests(unittest.TestCase):
         scrubbed, hits = redact.scrub_set_payload(payload)
         self.assertEqual(scrubbed, payload)
         self.assertEqual(hits, [])
+
+    def test_non_dict_write_payload_is_refused_not_sent_unscrubbed(self):
+        # The gate's contract is "never returns unscrubbed content". Only `set` validates shape first;
+        # a non-set write command can hand a list/string body straight to the gate, so the gate itself
+        # must refuse it rather than let the scrubber's unchanged-non-dict-return path send it.
+        with self.assertRaises(client.ClientError):
+            client.scrub_or_refuse(["not", "an", "object"])
+        with self.assertRaises(client.ClientError):
+            client.scrub_or_refuse("a bare string")
 
     def test_every_declared_text_field_is_independently_planted_and_scrubbed(self):
         # Guards SET_TEXT_FIELDS in both directions, which the payload-level assertions cannot.

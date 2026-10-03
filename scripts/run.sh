@@ -293,6 +293,77 @@ env_export() {
   esac
 }
 
+PROFILE_BEGIN="# >>> mimisbrunnr — managed by scripts/run.sh env-export --profile >>>"
+PROFILE_END="# <<< mimisbrunnr <<<"
+
+# Write the credentials into a shell profile as a marked, replaceable block.
+#
+# This exists because the operator-facing alternative is a shell redirect, and the two operators differ
+# by one character: `>` truncates the whole profile and `>>` appends, so a habit formed on one is a
+# destroyed .zshrc on the other. A profile is replaced wholesale by anyone typing at it. The block is
+# bounded by markers so a rotation rewrites three lines instead of adding three more, which is the other
+# half of the same hazard: an appended stale token sits in a world-readable profile forever and, because a
+# real environment variable beats the credential file, overrides the fresh one.
+#
+# Only the region between the markers is ever touched. Anything else in the file is preserved byte for
+# byte, including on the first write, so a target that already has content is never emptied.
+write_profile() {
+  local target="$1" format="${2:-posix}"
+  case "$target" in
+    "" | -) target="$HOME/.zshrc" ;;
+  esac
+  [ -L "$target" ] && die "$target is a symlink; refusing to write a credential through it"
+
+  local dir
+  dir="$(dirname -- "$target")"
+  [ -d "$dir" ] || die "the directory for $target does not exist"
+
+  local body
+  body="$(env_export "$format")"
+
+  local temp
+  temp="$(mktemp "$dir/.mimis-profile.XXXXXX")" || die "could not create a temporary file in $dir"
+
+  if [ -f "$target" ]; then
+    if grep -qF "$PROFILE_BEGIN" "$target" && grep -qF "$PROFILE_END" "$target"; then
+      # Replace the marked region in place. awk, not a read-modify-write of the whole file, so the
+      # bytes outside the markers survive untouched even if the file has no trailing newline.
+      # `body` is passed through the environment, not `-v`: a multiline value in an awk `-v`
+      # assignment is parsed as program text by some awks and aborts with "newline in string",
+      # which is what a second `env-export --profile` on an existing block hit.
+      body="$body" awk -v b="$PROFILE_BEGIN" -v e="$PROFILE_END" '
+        $0 == b { print b; print ENVIRON["body"]; print e; skip = 1; next }
+        $0 == e { skip = 0; next }
+        skip != 1 { print }
+      ' "$target" >"$temp"
+    else
+      # No managed block. Refuse rather than append blindly: the caller may have meant a different file,
+      # and the fix for that is a clearer message, not a second copy of the same three lines.
+      local backup="$target.mimis-backup-$(date +%Y%m%d%H%M%S)"
+      cp -p -- "$target" "$backup" ||
+        die "could not back up $target; refusing to write"
+      {
+        cat -- "$target"
+        [ -s "$target" ] && [ "$(tail -c1 -- "$target" | wc -l)" -eq 0 ] && echo
+        echo "$PROFILE_BEGIN"
+        echo "$body"
+        echo "$PROFILE_END"
+      } >"$temp"
+      log "$target had no managed block — appended one and backed the original up to $backup"
+    fi
+  else
+    {
+      echo "$PROFILE_BEGIN"
+      echo "$body"
+      echo "$PROFILE_END"
+    } >"$temp"
+  fi
+
+  chmod 600 "$temp"
+  mv -- "$temp" "$target"
+  log "wrote the managed block to $target (mode 600); re-run to rotate it in place"
+}
+
 write_credentials() {
   local keys="PostgresConfiguration__Password BlobConfiguration__AccessKey BlobConfiguration__SecretKey Parameters__api-read-token Parameters__api-write-token"
   # `adopted` is initialised rather than only declared: it is incremented only when a provisioned pair
@@ -660,6 +731,10 @@ up() {
 # Wait for real health, and on failure print the one line that identifies the cause.
 wait_for_api() {
   local waited=0 code
+  command -v curl >/dev/null 2>&1 || {
+    log "curl is required to wait for the API but is not installed."
+    return 1
+  }
   log "waiting for the API to answer on 127.0.0.1:$p_host"
   while [ "$waited" -lt "${P_WAIT_SECONDS:-180}" ]; do
     code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 4 "http://127.0.0.1:$p_host/health" 2>/dev/null || true)"
@@ -733,6 +808,21 @@ case "${1:-up}" in
   status) resolve_running_controller; status ;;
   stop) resolve_running_controller; stop ;;
   logs) resolve_running_controller; docker logs --tail 200 "$controller_name" ;;
-  env-export | export-env) mkdir -p "$data_home"; write_credentials; env_export "${2:-posix}" ;;
+  env-export | export-env)
+    mkdir -p "$data_home"
+    write_credentials
+    # `--profile [FILE]` writes the block into a shell profile instead of printing it. The flag has to
+    # come first so `env-export --profile ~/.zshrc` cannot be read as a format named "--profile".
+    shift || true
+    if [ "${1:-}" = "--profile" ]; then
+      shift
+      case "${1:-}" in
+        posix | powershell | sh | bash | zsh | ps1 | pwsh) write_profile "$HOME/.zshrc" "$1" ;;
+        *) write_profile "${1:-$HOME/.zshrc}" "${2:-posix}" ;;
+      esac
+    else
+      env_export "${1:-posix}"
+    fi
+    ;;
   *) die "unknown verb '${1}'; use up | env | env-export | status | stop | logs" ;;
 esac

@@ -14,12 +14,14 @@
   "bin": {
     "mimisbrunnr": "./npm/cli/mimisbrunnr.js",
     "mimisbrunnr-odin-context-memory": "./npm/cli/mimisbrunnr-odin-context-memory.js",
-    "mimisbrunnr-understanding": "./npm/cli/mimisbrunnr-understanding.js"
+    "mimisbrunnr-kvasir-understanding": "./npm/cli/mimisbrunnr-kvasir-understanding.js",
+    "mimisbrunnr-understanding": "./npm/cli/mimisbrunnr-kvasir-understanding.js"
   },
   "files": [
     "npm/cli/",
     ".agents/skills/mimisbrunnr-odin-context-memory/scripts/",
-    ".agents/skills/mimisbrunnr-understanding/scripts/",
+    ".agents/skills/mimisbrunnr-kvasir-understanding/scripts/",
+    ".agents/skills/mimisbrunnr-heimdallr-find-session-metadata/scripts/",
     "README.md"
   ],
   "engines": {

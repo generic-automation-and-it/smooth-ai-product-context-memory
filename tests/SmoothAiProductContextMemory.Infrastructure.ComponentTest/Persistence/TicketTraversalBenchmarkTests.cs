@@ -105,9 +105,16 @@ public sealed class TicketTraversalBenchmarkTests(AspireFixture aspire) : Persis
             report.AppendLine("Actual provider command:").AppendLine(command.CommandText);
             report.AppendLine("EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT):");
             command.CommandText = "EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) " + command.CommandText;
+            var plan = new StringBuilder();
             await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(Ct);
-            while (await reader.ReadAsync(Ct)) report.AppendLine(reader.GetString(0));
+            while (await reader.ReadAsync(Ct)) { string row = reader.GetString(0); report.AppendLine(row); plan.AppendLine(row); }
             TestContext.Current.TestOutputHelper?.WriteLine(report.ToString());
+            // Access path, not just wall clock. At this seed volume almost anything meets p95, so a
+            // regression to a sequential scan of the ticket adjacency would pass a wall-clock-only
+            // check — the same false pass the NFR-02 comment warns about. The recursive TICKET_PARENT
+            // adjacency must be index-served, and LINKS (if the query reaches it) must be too.
+            plan.ToString().ShouldNotContain("Seq Scan on \"TICKET_PARENT\"");
+            plan.ToString().ShouldNotContain("Seq Scan on \"LINKS\"");
             report.Clear();
         }
 
