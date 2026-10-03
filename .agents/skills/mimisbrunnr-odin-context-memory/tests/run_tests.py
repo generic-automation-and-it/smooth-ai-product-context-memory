@@ -1297,6 +1297,15 @@ class SetRedactionGateTests(unittest.TestCase):
         self.assertEqual(scrubbed, payload)
         self.assertEqual(hits, [])
 
+    def test_non_dict_write_payload_is_refused_not_sent_unscrubbed(self):
+        # The gate's contract is "never returns unscrubbed content". Only `set` validates shape first;
+        # a non-set write command can hand a list/string body straight to the gate, so the gate itself
+        # must refuse it rather than let the scrubber's unchanged-non-dict-return path send it.
+        with self.assertRaises(client.ClientError):
+            client.scrub_or_refuse(["not", "an", "object"])
+        with self.assertRaises(client.ClientError):
+            client.scrub_or_refuse("a bare string")
+
     def test_every_declared_text_field_is_independently_planted_and_scrubbed(self):
         # Guards SET_TEXT_FIELDS in both directions, which the payload-level assertions cannot.
         #

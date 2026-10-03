@@ -455,7 +455,17 @@ def scrub_or_refuse(payload, operation="set"):
     edited out. "The scrubber was unavailable" is therefore not a reason to proceed — it is the
     condition under which proceeding is most likely to be wrong. The exception text names the
     failure, never the content, so the refusal is safe to print into a transcript.
+
+    A non-object body is refused here too, not left to the scrubber's unchanged return: every
+    persisting write sends an object, so a list/string body means the shape guard was skipped and
+    the bytes would be sent unscrubbed.
     """
+    if not isinstance(payload, dict):
+        raise ClientError(
+            0,
+            "bad-input",
+            f"'{operation}' payload must be an object; refusing to send an unscrubbed body.",
+        )
     try:
         return redact.scrub_write_payload(operation, payload)
     except Exception as exc:  # noqa: BLE001 — the point is that no exception escapes as a write

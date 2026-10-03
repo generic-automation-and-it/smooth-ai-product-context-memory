@@ -80,7 +80,7 @@ def main():
             args.func(args)
         else:
             _run_framed(args)
-    except client.ClientError as error:
+    except (client.ClientError, ValueError) as error:
         print(str(error), file=sys.stderr)
         return 1
     return 0
