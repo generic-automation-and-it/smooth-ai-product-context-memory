@@ -728,6 +728,10 @@ up() {
 # Wait for real health, and on failure print the one line that identifies the cause.
 wait_for_api() {
   local waited=0 code
+  command -v curl >/dev/null 2>&1 || {
+    log "curl is required to wait for the API but is not installed."
+    return 1
+  }
   log "waiting for the API to answer on 127.0.0.1:$p_host"
   while [ "$waited" -lt "${P_WAIT_SECONDS:-180}" ]; do
     code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 4 "http://127.0.0.1:$p_host/health" 2>/dev/null || true)"
