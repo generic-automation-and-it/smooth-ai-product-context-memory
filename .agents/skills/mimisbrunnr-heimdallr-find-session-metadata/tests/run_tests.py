@@ -34,6 +34,12 @@ def run_with_git(responses: dict, *argv: str) -> subprocess.CompletedProcess:
         "key = ' '.join(sys.argv[1:])\n"
         "open(%r, 'a').write(key + chr(10))\n"
         "data = json.load(open(%r))\n"
+        "if key == 'rev-parse --is-inside-work-tree':\n"
+        "    if data.get('_no_work_tree'):\n"
+        "        sys.stderr.write('fatal: not a git repository\\n')\n"
+        "        sys.exit(128)\n"
+        "    sys.stdout.write('true\\n')\n"
+        "    sys.exit(0)\n"
         "if key in data:\n"
         "    sys.stdout.write(data[key])\n"
         "    sys.exit(0)\n"
@@ -78,6 +84,20 @@ class RepoTests(unittest.TestCase):
 
     def test_unprovable(self):
         self.assertIsNone(self._repo(""))
+
+    def test_nested_group_path_is_kept_whole(self):
+        # A GitLab-style remote is one repository `group/subgroup/repo`, not just the last pair; the
+        # last-pair form silently dropped the parent group and returned a wrong id.
+        self.assertEqual(
+            self._repo("https://gitlab.com/group/subgroup/repo.git"), "group/subgroup/repo"
+        )
+
+    def test_not_a_git_repo_reports_unavailable_not_empty(self):
+        # A non-git checkout must signal "autofill unavailable" (exit 2) rather than masquerade as a
+        # genuine empty recall (exit 0 with no tickets), which a caller cannot distinguish.
+        proc = run_with_git({"_no_work_tree": "1"}, "--json")
+        self.assertEqual(proc.returncode, 2, proc.stderr)
+        self.assertIn("git unavailable", proc.stderr)
 
 
 class TicketTests(unittest.TestCase):
