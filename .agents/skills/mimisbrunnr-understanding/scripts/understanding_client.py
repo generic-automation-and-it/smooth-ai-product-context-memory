@@ -62,6 +62,57 @@ WRITE_CLIENT = _CAPTURE_SCRIPTS / "context_memory_client.py"
 # separate packages, so this client cannot acquire a cross-skill import (the same reason the recall
 # notice is duplicated verbatim and asserted equal by a test).
 MAX_CANDIDATES = 20
+# `ai-understanding` records confidence as a qualitative label — `observed`, `verified`, `contested`
+# (VALID_CONFIDENCE in its index script) — while the store holds a 0-100 integer. Passing the label
+# through reached the API as the string "verified", which the server rejected with a 400 whose detail
+# body was empty, so the dry-run veto could only report `HTTP 400 Bad Request:` and no candidate was
+# diagnosable from it. Every canonical `.understanding.md` carries one of these labels, so `export` had
+# never succeeded for the format it was written to read.
+#
+# `verified` maps to the same 70 the previous default already used, so a verified unit is stored exactly
+# as it would have been had it carried no confidence field at all — this is a translation, not a
+# re-scoring. The other two sit either side because `verified` is the baseline the renderer treats as
+# unremarkable: anything else is surfaced as a flag, so an unrecognised label falls back to the baseline
+# rather than inventing a score.
+_CONFIDENCE_NUMERIC = {"verified": 70, "observed": 60, "contested": 40}
+DEFAULT_CONFIDENCE = 70
+
+
+def confidence_value(raw) -> int:
+    """The store's 0-100 integer for a confidence that may arrive as a number or as a label.
+
+    A numeric *string* is honoured rather than defaulted: the frontmatter parser is a flat subset
+    reader, so a hand-authored `confidence: 45` can arrive as `"45"`, and quietly scoring it 70 would
+    mis-state a value the author set on purpose.
+    """
+    if isinstance(raw, bool):
+        return DEFAULT_CONFIDENCE
+    if isinstance(raw, (int, float)):
+        return int(raw)
+    text = str(raw or "").strip()
+    if text.lstrip("-").isdigit():
+        return int(text)
+    return _CONFIDENCE_NUMERIC.get(text.lower(), DEFAULT_CONFIDENCE)
+
+
+def confidence_flagged(raw) -> bool:
+    """Whether recall must surface a record's confidence to the reader.
+
+    `verified` is the baseline, so anything else is surfaced — **including a value this client does not
+    recognise**. An unknown value is not evidence of trustworthiness: a typo, or a label added to
+    `ai-understanding` before this client learns it, would otherwise reach the reader as though it were
+    verified, which is the single outcome the flag exists to prevent. `confidence_value` is the write
+    path's translate-or-default; this is the read path's surface-or-not, and the two deliberately
+    disagree about unknowns.
+    """
+    if raw is None or isinstance(raw, bool) or str(raw).strip() == "":
+        return False
+    text = str(raw).strip()
+    if text.lstrip("-").isdigit():
+        return int(text) != DEFAULT_CONFIDENCE
+    return text.lower() != "verified"
+
+
 DEFAULT_QUERY_LIMIT = 200
 _STAMP = re.compile(r"-(\d{8}-\d{4})$")
 DEFAULT_MAX_CHARS = 12000
@@ -214,7 +265,11 @@ def _render_record(parts: dict) -> list[str]:
         flags.append(f"status: {parts['status']}")
     if parts["scopeDimension"] in ("program", "self"):
         flags.append(f"{parts['scopeDimension']} scope, not shipped product fact")
-    if parts["confidence"] and parts["confidence"] != "verified":
+    # Compared through `confidence_flagged`, not against the literal "verified". A store record carries
+    # the integer this write path now sends — 70 *is* the encoding of verified — so comparing the raw
+    # value against the label flagged every record exported through `export` as though it were below
+    # verified, which is the opposite of what a flagged confidence is for.
+    if parts["confidence"] and confidence_flagged(parts["confidence"]):
         flags.append(f"confidence: {parts['confidence']}")
     if parts["portability"] == "repo-specific":
         flags.append("repo-specific, may not hold in another repository")
@@ -872,7 +927,7 @@ def set_items(candidates: list[dict], binding: dict, now: dt.datetime) -> list[d
             "facets": ["understanding"],
             "tags": split_list(binding.get("tags")),
             "status": candidate.get("status") or "approved",
-            "confidence": candidate.get("confidence") or 70,
+            "confidence": confidence_value(candidate.get("confidence")),
             "content": candidate["statement"],
             "sources": candidate.get("sources") or [],
             "validFrom": candidate.get("validFrom") or now.strftime("%Y-%m-%dT00:00:00Z"),

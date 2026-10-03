@@ -880,6 +880,78 @@ class ExportOrchestrationTests(unittest.TestCase):
         self.assertEqual(items[0]["status"], "proposed")
         self.assertEqual(items[0]["confidence"], 30)
 
+    def test_set_items_translates_a_qualitative_confidence_label(self):
+        """`ai-understanding` writes confidence as observed/verified/contested; the store holds 0-100.
+
+        Passing the label straight through sent the string "verified" to the API, which answered 400
+        with an empty detail body — so the veto reported a bare "HTTP 400 Bad Request:" and every
+        canonical `.understanding.md` failed to export with no diagnosable candidate.
+        """
+        now = dt.datetime.now(dt.timezone.utc)
+        for label, expected in (("verified", 70), ("observed", 60), ("contested", 40)):
+            items = uc.set_items([{"statement": "A claim.", "description": "S",
+                                   "confidence": label}], {}, now)
+            self.assertIsInstance(items[0]["confidence"], int, f"{label} must not stay a string")
+            self.assertEqual(items[0]["confidence"], expected)
+
+    def test_verified_confidence_equals_the_previous_absence_default(self):
+        """The mapping must translate, not re-score: `verified` is what an absent field defaulted to."""
+        now = dt.datetime.now(dt.timezone.utc)
+        labelled = uc.set_items([{"statement": "A.", "description": "S", "confidence": "verified"}], {}, now)
+        absent = uc.set_items([{"statement": "A.", "description": "S"}], {}, now)
+        self.assertEqual(labelled[0]["confidence"], absent[0]["confidence"])
+
+    def test_confidence_value_accepts_numbers_and_falls_back_safely(self):
+        self.assertEqual(uc.confidence_value(30), 30)
+        self.assertEqual(uc.confidence_value("45"), 45)
+        self.assertEqual(uc.confidence_value("VERIFIED"), 70)
+        self.assertEqual(uc.confidence_value("something-else"), 70)
+        self.assertEqual(uc.confidence_value(None), 70)
+        self.assertEqual(uc.confidence_value(True), 70, "a bool is not a confidence")
+
+    def test_verified_confidence_is_not_flagged_when_it_arrives_as_the_stored_integer(self):
+        """The round trip: `export` stores the integer 70 for verified, and recall must not flag it.
+
+        `import` flags any confidence that is not the label "verified". Once the write path translates
+        the label to the store's integer, a record it just wrote comes back as 70 and was flagged as
+        though it were *below* verified — the opposite of what the flag means. Both spellings must agree.
+        """
+        # Rendered through `five_parts`, the route a real store record takes, so the test exercises the
+        # same projection the recall path uses rather than a hand-built dict.
+        def render(conf):
+            record = {"name": "Subj", "statement": "A claim.", "confidence": conf,
+                      "status": "approved", "uuid": "u1", "version": 1}
+            return "\n".join(uc._render_record(uc.five_parts(record)))
+
+        self.assertNotIn("confidence:", render("verified"),
+                         "the verified label must not be flagged as low confidence")
+        self.assertNotIn("confidence:", render(70),
+                         "the stored integer for verified must not be flagged as low confidence")
+
+    def test_a_confidence_below_verified_is_still_flagged(self):
+        """The flag must survive the translation: contested and low numbers are still surfaced."""
+        def render(conf):
+            record = {"name": "S", "statement": "A.", "confidence": conf,
+                      "status": "approved", "uuid": "u", "version": 1}
+            return "\n".join(uc._render_record(uc.five_parts(record)))
+
+        for conf in ("contested", 30, "observed", 40):
+            self.assertIn("confidence:", render(conf), f"{conf} must be flagged")
+
+    def test_an_unrecognised_confidence_is_flagged_not_assumed_verified(self):
+        """Fail loud: a label this client does not know is surfaced, not silently cleared.
+
+        `confidence_value` defaults an unknown label to the baseline on the *write* path, because a
+        store needs a number. Recall is the opposite: an unknown value is not evidence that a record
+        is trustworthy, so it is shown to the reader rather than presented as verified.
+        """
+        self.assertEqual(uc.confidence_value("some-new-label"), uc.DEFAULT_CONFIDENCE,
+                         "the write path must still produce a number")
+        self.assertTrue(uc.confidence_flagged("some-new-label"),
+                        "the read path must surface a label it does not recognise")
+        for empty in (None, "", "   "):
+            self.assertFalse(uc.confidence_flagged(empty), f"{empty!r} means absent, not unknown")
+
     def test_write_runs_the_server_dry_run_before_the_write(self):
         """`set --dryrun` is the only pre-write veto point, so it precedes the write on the wire."""
         with tempfile.TemporaryDirectory() as tmp:
