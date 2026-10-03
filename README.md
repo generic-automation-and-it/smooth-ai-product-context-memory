@@ -42,36 +42,44 @@ The skills need no setup — they read `~/.mimisbrunnr/credentials` themselves. 
 something else needs them (a script, an editor, a tool that is not a skill):
 
 ```bash
+scripts/run.sh env-export --profile ~/.zshrc
+```
+
+That writes the API URL and both tokens into `~/.zshrc` as one managed block:
+
+```bash
+# >>> mimisbrunnr — managed by scripts/run.sh env-export --profile >>>
+export CONTEXT_MEMORY_BASE_URL='http://localhost:5141'
+export CONTEXT_MEMORY_READ_TOKEN='…'
+export CONTEXT_MEMORY_WRITE_TOKEN='…'
+# <<< mimisbrunnr <<<
+```
+
+Re-run it whenever you want to rotate: it rewrites those three lines **in place**, so it never
+duplicates and never leaves an old token behind in a file that is typically world-readable. Nothing
+outside the markers is touched, and a profile it has not written before is backed up first.
+
+**Use `~/.zshrc`, not `~/.zprofile`.** `.zshrc` is read by every interactive shell; `.zprofile` is read
+only by *login* shells, so values put there are invisible to a plain `zsh` session and to most
+non-shell tooling. Pass a different path if you want one — `~/.zprofile`, `$PROFILE` on Windows, or any
+file — but `~/.zshrc` is the default because it is the one that works everywhere.
+
+> **Never use a shell redirect.** `scripts/run.sh env-export > ~/.zshrc` differs from the safe form by
+> one character and silently **empties the file**. There is no recovery path — no Time Machine snapshot,
+> no dotfiles repo, no editor history, no shell-tool backup — and the loss is whatever you had not backed
+> up. This is not hypothetical: it happened to the author of this file while writing it, and the
+> recovery rebuilt a three-month-old copy. `--profile` cannot truncate, because it never rewrites the
+> whole file.
+
+To print instead of writing — to paste somewhere, or to capture in a script:
+
+```bash
 scripts/run.sh env-export              # macOS / Linux
 scripts/run.sh env-export powershell   # Windows PowerShell
 ```
 
-It prints three lines — **the API URL and both tokens**:
-
-```bash
-export CONTEXT_MEMORY_BASE_URL='http://localhost:5141'
-export CONTEXT_MEMORY_READ_TOKEN='…'
-export CONTEXT_MEMORY_WRITE_TOKEN='…'
-```
-
-Only `CONTEXT_MEMORY_*` names are printed: the controller's own `Parameters__*` names contain hyphens
+Only `CONTEXT_MEMORY_*` names are ever emitted: the controller's own `Parameters__*` names contain hyphens
 and no shell can assign them, which is why those travel by `--env-file` and never by export.
-
-**To write them into a shell profile, use `--profile`** — never a shell redirect:
-
-```bash
-scripts/run.sh env-export --profile ~/.zshrc              # or ~/.zprofile; defaults to ~/.zshrc
-scripts/run.sh env-export --profile $PROFILE powershell   # Windows
-```
-
-It writes one marked block and touches nothing else in the file. Re-running rewrites those three lines in
-place, so it never duplicates and never leaves a rotated token behind — and it never truncates, so it
-cannot empty a profile the way `>` does. A target it has not written before is backed up first.
-
-> **`>` will empty your profile.** `scripts/run.sh env-export > ~/.zshrc` looks identical to the safe
-> form and silently destroys the file — it is one character away from `>>`, which is all it takes to form
-> the habit on one and lose the file on the other. There is no recovery path: no Time Machine snapshot,
-> no editor history, no dotfiles repo. Use `--profile`.
 
 `env-export` is its own verb on purpose. `scripts/run.sh` prints ports and the dashboard URL but **never
 a token** — a credential written to a terminal that gets scrolled back, recorded, or read over a
