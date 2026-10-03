@@ -36,11 +36,39 @@ waits for the API to answer and exits non-zero if it does not, so a green run me
 | Dashboard | http://localhost:15278 — use the `/login?t=…` URL it prints |
 | PostgreSQL | `127.0.0.1:5432` · blob `9000`/`9001` · Seq `5341` |
 
-To use the skills from a shell, export their half of the pair:
+### Put the credentials in your shell
+
+The skills need no setup — they read `~/.mimisbrunnr/credentials` themselves. Export them anyway when
+something else needs them (a script, an editor, a tool that is not a skill):
 
 ```bash
-set -a && source .context/mimisbrunnr.env && set +a
+scripts/run.sh env-export              # macOS / Linux
+scripts/run.sh env-export powershell   # Windows PowerShell
 ```
+
+It prints three lines — **the API URL and both tokens**:
+
+```bash
+export CONTEXT_MEMORY_BASE_URL='http://localhost:5141'
+export CONTEXT_MEMORY_READ_TOKEN='…'
+export CONTEXT_MEMORY_WRITE_TOKEN='…'
+```
+
+Only `CONTEXT_MEMORY_*` names are printed: the controller's own `Parameters__*` names contain hyphens
+and no shell can assign them, which is why those travel by `--env-file` and never by export.
+
+**Appending grows the file.** `>> ~/.zshrc` appends three more lines every time you run it, and a
+rotated token leaves the old one behind in plain text in a file that is typically world-readable. A real
+environment variable also *beats* the credential file, so a stale line overrides a freshly-issued token —
+leaking it and causing `403`s at once. Append once, or point a line at a file you can rewrite whole:
+
+```bash
+scripts/run.sh env-export >> ~/.zprofile    # once; not on every start
+```
+
+`env-export` is its own verb on purpose. `scripts/run.sh` prints ports and the dashboard URL but **never
+a token** — a credential written to a terminal that gets scrolled back, recorded, or read over a
+shoulder is disclosed. You choose to print one and choose where it goes.
 
 Run it again to pull a newer release and restart; data is preserved. `scripts/run.sh stop` stops it,
 `status` and `logs` report on it.
