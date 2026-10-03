@@ -494,7 +494,7 @@ class StoreImportTests(unittest.TestCase):
                 original = uc.store_query
                 uc.store_query = lambda f, o=outcome: (None, o)
                 try:
-                    rc, out, err = run(["import", "--heimdallr", "false"])
+                    rc, out, err = run(["import"])
                 finally:
                     uc.store_query = original
                 self.assertEqual(rc, expected_code)
@@ -505,7 +505,7 @@ class StoreImportTests(unittest.TestCase):
         original = uc.store_query
         uc.store_query = lambda f: ([], "ok")
         try:
-            rc, out, err = run(["import", "--heimdallr", "false"])
+            rc, out, err = run(["import"])
         finally:
             uc.store_query = original
         self.assertEqual(rc, 0, "an empty result is a real answer, not a failure")
@@ -1693,7 +1693,7 @@ class DumpRedactionTests(unittest.TestCase):
             self.assertTrue(any("markdown table" in note for note in skips), skips)
 
 class HeimdallrAutofillTests(unittest.TestCase):
-    # `--heimdallr true` (default) fills repo/tickets, never tags; explicit wins.
+    # `--heimdallr true` (default, export/dump only) fills repo/tickets, never tags; explicit wins.
     def setUp(self):
         self.original = uc.heimdallr_scan
         uc.heimdallr_scan = lambda: {
@@ -1770,7 +1770,7 @@ class HeimdallrAutofillTests(unittest.TestCase):
             self.assertEqual(metadata["binding"]["repository"], "org/repo")
             self.assertNotIn("tags", metadata["binding"])
 
-    def test_import_default_fills_first_ticket(self):
+    def test_import_binds_nothing_on_its_own(self):
         seen = {}
         original = uc.store_query
         def fake_query(f):
@@ -1781,8 +1781,8 @@ class HeimdallrAutofillTests(unittest.TestCase):
             run(["import"])
         finally:
             uc.store_query = original
-        self.assertEqual(seen["filters"].get("ticketKey"), "160")
-        self.assertEqual(seen["filters"].get("repo"), "org/repo")
+        self.assertNotIn("ticketKey", seen["filters"])
+        self.assertNotIn("repo", seen["filters"])
 
 
 if __name__ == "__main__":

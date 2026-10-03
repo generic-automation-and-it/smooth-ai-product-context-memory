@@ -114,7 +114,11 @@ recalls the live store via `import` (read token only) and orchestrates the captu
   answer — a hung store never reads as "nothing matched". Filters map one-for-one onto the read API's
   declared fields (`--ticket provider:key`, `--repository`, `--initiative`, `--scope`, `--tags`,
   `--query`, `--status`, `--limit` default 200, `--asof`), and `--all` unions memory and understanding by
-  omitting `kind` rather than sending `null`.
+  omitting `kind` rather than sending `null`. `import` never runs Heimdallr: inbound takes only
+  what the caller binds, so `--initiative X` recalls X even from a ticketed branch. A stale
+  `import --heimdallr` is therefore **parsed and refused with a pointer to `export`/`dump`**, exactly
+  as `--store` is — do not "clean up" the accepted flag, it is what turns a dead argparse error into
+  a reason the caller can act on.
 - **`--import --table` is an overview, and it does not resolve the group's tickets or repo.** One row per
   record (Subject, Answer, Kind, Status, Confidence, Scope, Memory · version, Captured); the answer cell
   is truncated and that is stated. An item carries only `groupUuid`, so tickets and repo filter but are
@@ -183,6 +187,8 @@ recalls the live store via `import` (read token only) and orchestrates the captu
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-03 | **A stale `import --heimdallr` is refused with a pointer instead of an argparse error.** The flag was removed from `import` with the rest of the inbound autofill, so a stale `--heimdallr true` (or the bare flag) died on `unrecognized arguments` — a message naming a switch the caller believed in and this verb never had. It is now parsed (`nargs="?"`, so both the bare flag and the `true`/`false` value reach the refusal) and refused with the `--store` deprecation's shape, naming `export`/`dump` and writing nothing. That is the same rule the skill already states — an inapplicable flag is reported, never silently ignored — and the same handling `--store` already had. | review fix |
+| 2026-10-03 | **Heimdallr removed from `import`: inbound takes only what the caller binds, outbound keeps autofill.** `import` lost its `--heimdallr` flag and its autofill block — a session on a ticketed branch recalling `--initiative X` no longer narrows to that ticket. `export`/`dump` keep `--heimdallr true` default. | session request |
 | 2026-10-03 | `HeimdallrAutofillTests.setUp` now stubs `initiative_exists` to a definite `(False, "absent")`. The class stubs `heimdallr_scan` but not the store-backed `initiative_exists`, so without a reachable store the read fails and the export refuses before the dry-run body is printed — `test_export_supplied_initiative_survives_unknown_heimdallr` asserted against a body that never appeared. CI (no store) failed it; local runs masked it. The autofill-precedence tests now run hermetically. | harness determinism |
 | 2026-10-03 | Two distribution fixes. (1) `package.json` `files` now ships the Heimdallr reporter's `scripts/`, which the shipped `understanding_client.py` resolves by path — a published npm install omitted it, so `heimdallr_scan()` silently returned `{}` and `--heimdallr` autofill no-oped. (2) `cmd_export` now returns 1 (not 0) when a dry run cannot read the initiative; the refusal was previously success-signalled for a run that produced no preview. Pinned by a new dry-run refusal test. | npm distribution, dry-run exit code |
 | 2026-10-03 | **Heimdallr precedence hardened: supplied fields are never touched.** A caller-supplied flag is final per field — never compared, replaced, or "confirmed" with Heimdallr output; the scan is skipped when nothing is missing (`export`/`dump` now gate like `import` already did). SKILL.md states the reported case explicitly (`--initiative X` + missing `--tickets` keeps X, autofills only the ticket; Heimdallr `unknown` is normal, never a reason to ask/invent/re-supply) and that caller flags are never forwarded into the reporter's own `--initiative`. Harness 114 -> 116 (supplied-initiative export/dump regression). | session report |

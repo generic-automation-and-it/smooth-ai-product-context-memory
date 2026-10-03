@@ -73,7 +73,7 @@ When the caller provides none of these, run the sibling
 `mimisbrunnr-heimdallr-find-session-metadata` reporter (offline git scan, same skills root,
 no hardcoded `.agents/` prefix) and use its repository plus branch-seen tickets (else the
 single newest commit ticket) as the proposed binding — `unknown` initiative fills nothing.
-An explicit caller value always wins; `--heimdallr false` on the kvasir verbs disables the
+An explicit caller value always wins; `--heimdallr false` on the kvasir export/dump verbs disables the
 automatic form of this. Tags are never autofilled: derive them from the material's keywords.
 
 - If the caller supplies a ticket, look up the group that owns it. **A ticket belongs to at most one
