@@ -206,7 +206,108 @@ else
 fi
 
 # ---------------------------------------------------------------------------------------------
-# env-export
+# env-export --profile
+# ---------------------------------------------------------------------------------------------
+
+# The redirect this replaces differs by one character: `>` empties the profile, `>>` grows it. These
+# cases exist so a regression there is a test failure rather than somebody's shell profile.
+profile_dir="$scratch/profile"
+mkdir -p "$profile_dir"
+profile="$profile_dir/.zshrc"
+printf '# my profile\nalias ll="ls -l"\nexport FOO=bar' >"$profile"   # no trailing newline
+
+run_launcher env-export --profile "$profile" >/dev/null 2>&1
+
+if grep -q '^alias ll=' "$profile" && grep -q '^export FOO=bar' "$profile"; then
+  ok "--profile preserves the target's existing content"
+else
+  no "--profile preserves the target's existing content" "existing lines lost"
+fi
+
+if [ "$(grep -c 'CONTEXT_MEMORY_BASE_URL' "$profile")" = "1" ]; then
+  ok "--profile writes exactly one credential block"
+else
+  no "--profile writes exactly one credential block" "count $(grep -c 'CONTEXT_MEMORY_BASE_URL' "$profile")"
+fi
+
+# Idempotence is the whole reason the flag exists: an appended block duplicates on every run, and the
+# stale copy of a rotated token survives in a world-readable file while overriding the fresh one.
+before="$(cksum <"$profile")"
+run_launcher env-export --profile "$profile" >/dev/null 2>&1
+run_launcher env-export --profile "$profile" >/dev/null 2>&1
+if [ "$before" = "$(cksum <"$profile")" ]; then
+  ok "--profile is idempotent across repeated runs"
+else
+  no "--profile is idempotent across repeated runs" "the file changed on a re-run"
+fi
+
+if [ "$(grep -c 'CONTEXT_MEMORY_READ_TOKEN' "$profile")" = "1" ]; then
+  ok "a re-run rotates in place rather than appending a second token"
+else
+  no "a re-run rotates in place rather than appending a second token" "count $(grep -c 'CONTEXT_MEMORY_READ_TOKEN' "$profile")"
+fi
+
+# A first write must not empty a file that has content — the `>` failure mode, reached through the
+# script rather than a redirect.
+if [ -s "$profile" ]; then
+  ok "--profile never truncates a populated target"
+else
+  no "--profile never truncates a populated target" "the file is empty"
+fi
+
+if [ "$(file_mode "$profile")" = "600" ]; then
+  ok "--profile writes mode 600"
+else
+  no "--profile writes mode 600" "mode is $(file_mode "$profile")"
+fi
+
+# An unmanaged file is backed up rather than rewritten blind.
+if [ -n "$(ls "$profile_dir"/.zshrc.mimis-backup-* 2>/dev/null | head -1)" ]; then
+  ok "--profile backs up a target that had no managed block"
+else
+  no "--profile backs up a target that had no managed block" "no backup file"
+fi
+
+link_target="$scratch/profile-link-target"
+printf 'x\n' >"$link_target"
+ln -s "$link_target" "$scratch/profile-link"
+if run_launcher env-export --profile "$scratch/profile-link" >"$scratch/out" 2>"$scratch/err"; then
+  no "--profile refuses a symlinked target" "it wrote through the link"
+elif grep -qi "symlink" "$scratch/err"; then
+  ok "--profile refuses a symlinked target"
+else
+  no "--profile refuses a symlinked target" "$(tail -1 "$scratch/err")"
+fi
+if [ "$(cat "$link_target")" = "x" ]; then
+  ok "--profile did not write through the symlink"
+else
+  no "--profile did not write through the symlink" "the target was modified"
+fi
+
+run_launcher env-export --profile "$profile_dir/created" >/dev/null 2>&1
+if [ -f "$profile_dir/created" ] && [ "$(grep -c 'CONTEXT_MEMORY_BASE_URL' "$profile_dir/created")" = "1" ]; then
+  ok "--profile creates a target that does not exist"
+else
+  no "--profile creates a target that does not exist" "absent or empty"
+fi
+
+run_launcher env-export --profile "$profile_dir/p.ps1" powershell >/dev/null 2>&1
+if grep -q '^\$env:CONTEXT_MEMORY_READ_TOKEN' "$profile_dir/p.ps1"; then
+  ok "--profile honours the powershell format"
+else
+  no "--profile honours the powershell format" "no \$env: assignment"
+fi
+
+# The flag must win over the format slot, or `env-export --profile <file>` reads as a format.
+if run_launcher env-export --profile "$profile_dir/ambiguous" >"$scratch/out" 2>"$scratch/err" &&
+  [ -f "$profile_dir/ambiguous" ]; then
+  ok "--profile is parsed as the flag, not as a format name"
+else
+  no "--profile is parsed as the flag, not as a format name" "$(tail -1 "$scratch/err")"
+fi
+
+# ---------------------------------------------------------------------------------------------
+# env-export (stdout)
 # ---------------------------------------------------------------------------------------------
 
 # stdout is a data channel: the export is captured with $(...) and eval'd, so a status line written

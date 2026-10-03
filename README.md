@@ -57,14 +57,21 @@ export CONTEXT_MEMORY_WRITE_TOKEN='…'
 Only `CONTEXT_MEMORY_*` names are printed: the controller's own `Parameters__*` names contain hyphens
 and no shell can assign them, which is why those travel by `--env-file` and never by export.
 
-**Appending grows the file.** `>> ~/.zshrc` appends three more lines every time you run it, and a
-rotated token leaves the old one behind in plain text in a file that is typically world-readable. A real
-environment variable also *beats* the credential file, so a stale line overrides a freshly-issued token —
-leaking it and causing `403`s at once. Append once, or point a line at a file you can rewrite whole:
+**To write them into a shell profile, use `--profile`** — never a shell redirect:
 
 ```bash
-scripts/run.sh env-export >> ~/.zprofile    # once; not on every start
+scripts/run.sh env-export --profile ~/.zshrc              # or ~/.zprofile; defaults to ~/.zshrc
+scripts/run.sh env-export --profile $PROFILE powershell   # Windows
 ```
+
+It writes one marked block and touches nothing else in the file. Re-running rewrites those three lines in
+place, so it never duplicates and never leaves a rotated token behind — and it never truncates, so it
+cannot empty a profile the way `>` does. A target it has not written before is backed up first.
+
+> **`>` will empty your profile.** `scripts/run.sh env-export > ~/.zshrc` looks identical to the safe
+> form and silently destroys the file — it is one character away from `>>`, which is all it takes to form
+> the habit on one and lose the file on the other. There is no recovery path: no Time Machine snapshot,
+> no editor history, no dotfiles repo. Use `--profile`.
 
 `env-export` is its own verb on purpose. `scripts/run.sh` prints ports and the dashboard URL but **never
 a token** — a credential written to a terminal that gets scrolled back, recorded, or read over a
