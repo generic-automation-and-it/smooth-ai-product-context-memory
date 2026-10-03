@@ -100,7 +100,13 @@ class ClientError(RuntimeError):
     """A non-success HTTP response, surfaced as a machine-readable error."""
 
     def __init__(self, status, status_text, body):
-        super().__init__(f"HTTP {status} {status_text}: {body}")
+        # An empty body is stated rather than left as a bare trailing colon. A malformed request field
+        # fails JSON *binding* before validation runs, and the Host answers that with an empty 400 — so
+        # `HTTP 400 Bad Request: ` reads like this client dropped a detail it received, and sends the
+        # next reader hunting in the wrong place instead of at the payload's type.
+        detail = (body or "").strip()
+        shown = detail or "(the server returned no detail body for this status)"
+        super().__init__(f"HTTP {status} {status_text}: {shown}")
         self.status = status
         self.status_text = status_text
         self.body = body

@@ -487,6 +487,22 @@ class TransportFailureTests(unittest.TestCase):
         # store that is answering, when the connection was simply dropped.
         self.assertEqual(caught.exception.status_text, "unreachable")
 
+    def test_an_empty_error_body_is_stated_not_left_as_a_trailing_colon(self):
+        """A bodyless 400 must not read as though this client discarded a detail it received.
+
+        A malformed request field fails JSON binding before validation runs, and the Host answers that
+        with an empty 400. Rendering that as `HTTP 400 Bad Request: ` sends the reader to look for a
+        dropped detail here rather than at the payload's type — which is where the fault actually is.
+        """
+        self.assertIn("no detail body", str(client.ClientError(400, "Bad Request", "")))
+        self.assertIn("no detail body", str(client.ClientError(400, "Bad Request", "   ")))
+        self.assertIn("no detail body", str(client.ClientError(400, "Bad Request", None)))
+        # A body that *is* present must still be rendered verbatim, unaltered.
+        self.assertEqual(str(client.ClientError(400, "Bad Request", '{"errors":{"x":["y"]}}')),
+                         'HTTP 400 Bad Request: {"errors":{"x":["y"]}}')
+        # The raw body attribute is the wire value either way; only the message is decorated.
+        self.assertEqual(client.ClientError(400, "Bad Request", "").body, "")
+
     def test_the_timeout_message_names_the_budget(self):
         """The error has to say what was waited, or the agent cannot tell a hang from a slow answer."""
         port, _ = self._stalled_server()
