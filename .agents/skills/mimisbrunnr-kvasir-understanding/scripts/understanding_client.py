@@ -801,6 +801,10 @@ def cmd_import(args: argparse.Namespace) -> int:
     repurposed: an invocation that used to prepare a capture must not start querying the store
     instead, and one that used to be refused without `--store` must not start writing.
 
+    `--heimdallr` is refused the same way rather than left to argparse. Both stale spellings are
+    accepted by the parser so the caller gets the same actionable pointer instead of an
+    `unrecognized arguments` line naming a switch this verb never had.
+
     `import` never runs Heimdallr autofill: inbound (store -> session) takes only what the
     caller binds, so a session on a ticketed branch still recalls the whole initiative
     instead of narrowing to that ticket. Outbound (`export`, `dump`) keeps it.
@@ -810,6 +814,15 @@ def cmd_import(args: argparse.Namespace) -> int:
               "now `export`; `import` reads the store INTO the session. Nothing was written.\n"
               "  to review:  understanding_client.py export <input>\n"
               "  to capture: understanding_client.py export <input> --write",
+              file=sys.stderr)
+        return 1
+    if args.heimdallr is not None:
+        print("DEPRECATED: `--heimdallr` autofill was never an inbound step; `import` binds only "
+              "what the caller passes, so a session on a ticketed branch recalls the whole "
+              "initiative. It is an `export`/`dump` switch. Nothing was written.\n"
+              "  to review:  understanding_client.py export <input>\n"
+              "  to capture: understanding_client.py export <input> --write\n"
+              "  to dump:    understanding_client.py dump --currentsession",
               file=sys.stderr)
         return 1
     if args.input:
@@ -1625,6 +1638,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                                               "for a file or `export` to send material to the store.")
     imp.add_argument("--store", action="store_true",
                      help="DEPRECATED. The old capture-payload spelling; now `export`.")
+    # `nargs="?"` + `const` so both stale spellings reach `cmd_import`'s refusal — the bare flag and
+    # the `true`/`false` value this verb used to take — rather than half of them dying in argparse.
+    imp.add_argument("--heimdallr", nargs="?", choices=_HEIMDALLR_CHOICES, const="true",
+                     default=None,
+                     help="DEPRECATED. Heimdallr autofill was never an inbound step; it is an "
+                          "`export`/`dump` switch. `import` binds only what the caller passes.")
     imp.add_argument("--ticket", help="provider:key, e.g. github:157. Narrows by the memory's group.")
     imp.add_argument("--repository", help="Narrow by the group's repository.")
     imp.add_argument("--initiative", help="Narrow by the group's initiative.")

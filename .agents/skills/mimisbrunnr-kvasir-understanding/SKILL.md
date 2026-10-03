@@ -104,6 +104,9 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
 - **The old spelling is deprecated, not repurposed.** `import <input> --store` used to prepare a capture
   payload; that direction is now `export`. The old spelling prints a deprecation and exits `1`, so an
   invocation that used to write never starts reading.
+- **`--heimdallr` is refused the same way, not by argparse.** `import` never autofilled inbound, so a
+  stale `--heimdallr true|false` (or the bare flag) prints a deprecation pointing at `export`/`dump`
+  and exits `1`, rather than an `unrecognized arguments` line naming a switch this verb never had.
 
 ## Export (session → store)
 
