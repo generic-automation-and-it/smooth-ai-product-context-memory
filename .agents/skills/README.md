@@ -102,7 +102,7 @@ Skills never pick a model, and never differ per provider — every skill runs on
 
 A harness that honours skill `effort` applies it on invocation; a harness with a coarser scale uses its nearest supported level. When a skill invokes another skill as a sub-agent, run it at the **callee's** `effort` on the session's model. `effort` governs the agent that *drives* a skill — the models the review gate itself calls are chosen separately by its GitHub Variables (`OPENCODE_REVIEW_REPORT_MODEL_*`, see `docs/wiki/ci.md`).
 
-Two parents own most skills here, and their SKILL.md files are kept byte-identical to them: `smooth-devex-template` (the `agile-`, `context-`, `git-commit`/`git-commit-push`/`git-commit-push-pr`/`git-sync`, `ai-terse`/`ai-template-sync`/`ai-understanding`, `create-hld`, `manage-rule-system` and `mimisbrunnr-vitsmunir-dump` ← `ai-brain-dump` skills) and `smooth-ai-report-review` (`ai-review`, `git-commit-review-push`). The `mimisbrunnr-` context-memory skills are owned by this repo.
+Two parents own most skills here, and their SKILL.md files are kept byte-identical to them: `smooth-devex-template` (the `agile-`, `context-`, `git-commit`/`git-commit-push`/`git-commit-push-pr`/`git-sync`, `ai-terse`/`ai-template-sync`, `create-hld`, `manage-rule-system` and `mimisbrunnr-vitsmunir-dump` ← `ai-brain-dump` skills) and `smooth-ai-report-review` (`ai-review`, `git-commit-review-push`). `ai-understanding` is template-owned but carries accepted local divergences recorded in `.agents/skills/ai-understanding/AGENTS.md`'s changelog, so `ai-template-sync` would revert them. The `mimisbrunnr-` context-memory skills are owned by this repo.
 
 ### Skill effort levels
 

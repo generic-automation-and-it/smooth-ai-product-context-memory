@@ -5,19 +5,33 @@
     "email": "generic-automation-and-it@users.noreply.github.com"
   },
   "version": "1.0.0",
-  "description": "Mímisbrunnr — persistent AI context-memory skills. Get/set durability for agent knowledge, braindump capture, recall-feedback tuning, and Understanding transfer.",
+  "description": "Mímisbrunnr — persistent AI context-memory skills. Get/set durability for agent knowledge, braindump capture, recall-feedback tuning, dossier composition, baseline bootstrapping, session binding, and Understanding transfer.",
   "plugins": [
     {
       "name": "mimisbrunnr",
       "source": "https://github.com/generic-automation-and-it/smooth-ai-product-context-memory",
-      "description": "The four Mímisbrunnr skills: context-memory (get/set write authority), vitsmunir-dump (braindump capture), recall-feedback (retrieval health queries), and understanding (load/import/session-dump).",
+      "description": "The seven Mímisbrunnr skills: odin-context-memory (get/set write authority), vitsmunir-dump (braindump capture), muninn-recall-feedback (retrieval health queries), understanding (load/import/export/session-dump), saga-dossier (read-only cited dossier), ymir-bootstrap (baseline bootstrap), and heimdallr-find-session-metadata (session binding).",
       "version": "1.0.0",
       "category": "data-analysis",
       "skills": [
         "mimisbrunnr-odin-context-memory",
         "mimisbrunnr-vitsmunir-dump",
         "mimisbrunnr-muninn-recall-feedback",
-        "mimisbrunnr-understanding"
+        "mimisbrunnr-understanding",
+        "mimisbrunnr-saga-dossier",
+        "mimisbrunnr-ymir-bootstrap",
+        "mimisbrunnr-heimdallr-find-session-metadata"
+      ],
+      "commands": []
+    },
+    {
+      "name": "ai-understanding",
+      "source": "https://github.com/generic-automation-and-it/smooth-ai-product-context-memory",
+      "description": "Export session knowledge as transferable Understandings; import them back into a session, and publish or consume the store across workspaces (upstream smooth-devex-template skill with accepted local divergences).",
+      "version": "1.0.0",
+      "category": "data-analysis",
+      "skills": [
+        "ai-understanding"
       ],
       "commands": []
     }
