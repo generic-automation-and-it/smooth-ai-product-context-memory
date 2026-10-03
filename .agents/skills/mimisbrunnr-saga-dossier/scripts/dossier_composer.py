@@ -1235,7 +1235,7 @@ def _problem_summary(exc):
     """
     try:
         data = json.loads(exc.read().decode("utf-8"))
-    except (ValueError, AttributeError, UnicodeDecodeError):
+    except Exception:  # noqa: BLE001 — a summary helper must never raise past main()
         return exc.reason or "the server returned an error"
     if isinstance(data, dict):
         shown = data.get("detail") or data.get("title")
@@ -1391,7 +1391,8 @@ def build_bundle_body(args, body):
     # repair it, because any one `--body` member suppresses the flag fill.
     if ("ticketProvider" in body) != ("ticketKey" in body):
         raise ValueError("a half-specified --body ticket is refused: --body must carry both "
-                         "ticketProvider and ticketKey, or neither (use --ticket provider:key alone).")
+                         "ticketProvider and ticketKey, or neither — drop the partial --body fields "
+                         "and pass --ticket provider:key alone.")
     return body
 
 

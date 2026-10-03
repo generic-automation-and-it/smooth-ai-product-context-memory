@@ -1367,6 +1367,39 @@ class ExportVersionBumpTests(unittest.TestCase):
             self.assertIn("would write: memory (1)", out)
             self.assertIn("1 candidate(s) matched an existing same-subject memory", out)
 
+    def test_intra_batch_collision_subject_reads_slug_collisions(self):
+        preflight = json.dumps({"intra_batch_collisions": [
+            {"leftIndex": 0, "rightIndex": 1, "subjectSlug": "graph-store"}]})
+        self.assertEqual(uc._intra_batch_collision_subject(preflight), "graph-store")
+        self.assertIsNone(uc._intra_batch_collision_subject(
+            json.dumps({"intra_batch_collisions": []})))
+        self.assertIsNone(uc._intra_batch_collision_subject("not json"))
+
+    def test_a_slug_equivalent_pair_in_one_chunk_is_refused(self):
+        """The intra-chunk refusal uses the server's slug-normalised collision, so a case-equivalent
+        pair that the server would double-version one memory is caught even though the exact subject
+        strings differ."""
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "dup.md",
+                        "- Graph store chosen for provenance paths.\n\n"
+                        "- graph store chosen for provenance paths.\n")
+            originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                         uc.resolve_group, uc._run_capture_client)
+            uc.gate_redaction = lambda texts: (list(texts), {})
+            uc.gate_atomicity = lambda c: [{"verdict": "simple", "signals": []} for _ in c]
+            uc.initiative_exists = lambda name: (True, "ok")
+            uc.resolve_group = lambda b, n, d, dryrun: ({"groupUuid": "g", "created": False}, "ok")
+            uc._run_capture_client = lambda s, a, p: (
+                0, json.dumps({"candidates": [], "intra_batch_collisions": [
+                    {"leftIndex": 0, "rightIndex": 1, "subjectSlug": "graph-store"}]}), "")
+            try:
+                rc, _, err = run(["export", src, "--write"])
+            finally:
+                (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                 uc.resolve_group, uc._run_capture_client) = originals
+            self.assertEqual(rc, 1)
+            self.assertIn("share a subject", err)
+
 
 class ImportTests(unittest.TestCase):
     def test_import_refused_with_an_input_path(self):

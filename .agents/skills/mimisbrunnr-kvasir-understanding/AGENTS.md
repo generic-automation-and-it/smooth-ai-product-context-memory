@@ -166,7 +166,7 @@ recalls the live store via `import` (read token only) and orchestrates the captu
 
 ## Test References
 
-- **Committed L0 harness (CI-gated):** `tests/run_tests.py` — stdlib `unittest`, 128 tests, no external
+- **Committed L0 harness (CI-gated):** `tests/run_tests.py` — stdlib `unittest`, 130 tests, no external
   runner. A default load creates no files (NFR-01); store-export five-part rendering keeps uuid/version
   attribution; `proposed`/`program` scope flagged, never promoted (NFR-03); `--asof` filters the validity
   window and states the omission; the store-load cap — an under-budget render is byte-identical to
@@ -214,7 +214,10 @@ recalls the live store via `import` (read token only) and orchestrates the captu
 |:-----|:-------|:----|
 | 2026-10-03 | **`export` auto-splits an over-cap batch and auto-versions a duplicate subject.** The 20-candidate cap no longer refuses: an over-cap batch splits into consecutive ≤20 chunks, each processed end to end (its own preflight, its own `set --dryrun` veto, its own write), reported as `Batch k/N: n candidate(s)`, with a multi-batch `--write` disclosed as non-atomic across chunks. The former "never chunks silently because indices are request-relative" refusal is honoured by assigning each clean candidate an export index and keying the version map by that identity, never a chunk-local position. A candidate whose subject already exists in the export's group is now a version bump (the preflight match's `uuid` feeds the item's `uuid`, XOR `createUuid`); a same-subject memory in another group is not versioned into it (group-scoped identity). A `--write` with every candidate held back by the atomicity gate stops before creating a group; a transient preflight failure degrades to creates (fail-safe, since the `set --dryrun` veto still catches a duplicate), and two same-subject candidates in one chunk are refused rather than double-versioning. The dry-run receipt now
 discloses how many candidates matched an existing same-subject memory (a `--write` would version those
-whose match is in the export's group). Harness 117 -> 128. | session request |
+whose match is in the export's group). Each chunk also gets its own capture timestamp, and the
+intra-chunk same-subject refusal uses the preflight's slug-normalised collision (case/punctuation
+equivalent pairs are caught) with an exact-string fallback when the preflight did not run.
+Harness 117 -> 130. | session request |
 | 2026-10-03 | **A stale `import --heimdallr` is refused with a pointer instead of an argparse error.** The flag was removed from `import` with the rest of the inbound autofill, so a stale `--heimdallr true` (or the bare flag) died on `unrecognized arguments` — a message naming a switch the caller believed in and this verb never had. It is now parsed (`nargs="?"`, so both the bare flag and the `true`/`false` value reach the refusal) and refused with the `--store` deprecation's shape, naming `export`/`dump` and writing nothing. That is the same rule the skill already states — an inapplicable flag is reported, never silently ignored — and the same handling `--store` already had. | review fix |
 | 2026-10-03 | **Heimdallr removed from `import`: inbound takes only what the caller binds, outbound keeps autofill.** `import` lost its `--heimdallr` flag and its autofill block — a session on a ticketed branch recalling `--initiative X` no longer narrows to that ticket. `export`/`dump` keep `--heimdallr true` default. | session request |
 | 2026-10-03 | `HeimdallrAutofillTests.setUp` now stubs `initiative_exists` to a definite `(False, "absent")`. The class stubs `heimdallr_scan` but not the store-backed `initiative_exists`, so without a reachable store the read fails and the export refuses before the dry-run body is printed — `test_export_supplied_initiative_survives_unknown_heimdallr` asserted against a body that never appeared. CI (no store) failed it; local runs masked it. The autofill-precedence tests now run hermetically. | harness determinism |

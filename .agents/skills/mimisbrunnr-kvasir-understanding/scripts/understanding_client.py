@@ -1061,6 +1061,24 @@ def preflight_match_count(preflight_output: str) -> int:
     return sum(1 for r in results if isinstance(r, dict) and r.get("matches"))
 
 
+def _intra_batch_collision_subject(preflight_output: str) -> str | None:
+    """The ``subjectSlug`` of the first intra-batch collision, or None.
+
+    The server computes collisions with the same slug normalisation it uses for memory identity, so this
+    is the authoritative same-subject-within-a-chunk detector — an exact-string compare would miss a
+    case/punctuation-equivalent pair, which the server would then double-version.
+    """
+    try:
+        data = json.loads(preflight_output)
+        collisions = (data or {}).get("intra_batch_collisions") or []
+    except (ValueError, AttributeError):
+        return None
+    for collision in collisions:
+        if isinstance(collision, dict) and collision.get("subjectSlug"):
+            return collision["subjectSlug"]
+    return None
+
+
 def set_items(candidates: list[dict], binding: dict, now: dt.datetime) -> list[dict]:
     """Project candidates onto the write payload's item shape.
 
@@ -1249,7 +1267,6 @@ def cmd_export(args: argparse.Namespace) -> int:
               f"{json.dumps(_group_body(binding, args.name, args.body))}")
         print(f"Initiative: {initiative_note}")
 
-    now = dt.datetime.now(dt.timezone.utc)
     total_candidates = 0
     matched = 0
     for batch_no, chunk in enumerate(chunks, start=1):
@@ -1282,15 +1299,23 @@ def cmd_export(args: argparse.Namespace) -> int:
             candidate["_versionUuid"] = version_map.get(local_index)
         # Two candidates in one chunk sharing a subject is ambiguous input: the capture path refuses two
         # same-subject creates in one batch, and sending both as version targets would double-version the
-        # same memory. Refuse before building the write payload, for dry run and write alike.
-        subjects = [_subject(c) for c in chunk]
-        if len(set(subjects)) != len(subjects):
-            dup = next(s for s in subjects if subjects.count(s) > 1)
+        # same memory. The preflight's intra-batch collision list is the authoritative detector (it uses
+        # the server's slug normalisation, so a case/punctuation-equivalent pair is caught); fall back to
+        # an exact-string check when the preflight did not run.
+        collision_subject = _intra_batch_collision_subject(preflight) if rc == 0 else None
+        if collision_subject is None:
+            subjects = [_subject(c) for c in chunk]
+            if len(set(subjects)) != len(subjects):
+                collision_subject = next(s for s in subjects if subjects.count(s) > 1)
+        if collision_subject:
             early = ("Earlier batch(es) were already written and remain; " if args.write and batch_no > 1 else "")
-            print(f"REFUSED: two candidates in batch {batch_no} share a subject ('{dup}'); "
+            print(f"REFUSED: two candidates in batch {batch_no} share a subject ('{collision_subject}'); "
                   f"merge them before exporting. {early}Nothing from this batch was written.",
                   file=sys.stderr)
             return 1
+        # Each chunk gets its own capture timestamp so a slow multi-batch write does not stamp every
+        # later batch's memories with the export-start time.
+        now = dt.datetime.now(dt.timezone.utc)
         items = set_items(chunk, binding, now)
         if multi:
             line = f"Batch {batch_no}/{total_chunks}: {len(chunk)} candidate(s)"
