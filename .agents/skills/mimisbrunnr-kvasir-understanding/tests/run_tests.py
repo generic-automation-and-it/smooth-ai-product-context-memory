@@ -494,7 +494,7 @@ class StoreImportTests(unittest.TestCase):
                 original = uc.store_query
                 uc.store_query = lambda f, o=outcome: (None, o)
                 try:
-                    rc, out, err = run(["import", "--heimdallr", "false"])
+                    rc, out, err = run(["import"])
                 finally:
                     uc.store_query = original
                 self.assertEqual(rc, expected_code)
@@ -505,31 +505,12 @@ class StoreImportTests(unittest.TestCase):
         original = uc.store_query
         uc.store_query = lambda f: ([], "ok")
         try:
-            rc, out, err = run(["import", "--heimdallr", "false"])
+            rc, out, err = run(["import"])
         finally:
             uc.store_query = original
         self.assertEqual(rc, 0, "an empty result is a real answer, not a failure")
         self.assertIn("NO RECORDS MATCHED", out)
         self.assertEqual(err, "")
-
-    def test_empty_result_discloses_the_filters_used(self):
-        """'nothing matches' must render the filters it actually used, not only claim emptiness.
-
-        The autofill defect made an empty result indistinguishable from 'nothing was asked' because
-        the Filters line was printed only on the non-empty path (and there, after the outcome).
-        """
-        original = uc.store_query
-        uc.store_query = lambda f: ([], "ok")
-        try:
-            rc, out, _ = run(["import", "--heimdallr", "false", "--query", "stale"])
-        finally:
-            uc.store_query = original
-        self.assertEqual(rc, 0)
-        self.assertIn("NO RECORDS MATCHED", out)
-        self.assertIn("filters used", out)
-        self.assertIn('"currentOnly": true', out)
-        self.assertIn('"kind": "understanding"', out)
-        self.assertIn('"query": "stale"', out)
 
     def test_table_renders_one_row_per_record_under_the_framing_notice(self):
         original = uc.store_query
@@ -1712,7 +1693,7 @@ class DumpRedactionTests(unittest.TestCase):
             self.assertTrue(any("markdown table" in note for note in skips), skips)
 
 class HeimdallrAutofillTests(unittest.TestCase):
-    # `--heimdallr true` (default) fills repo/tickets, never tags; explicit wins.
+    # `--heimdallr true` (default, export/dump only) fills repo/tickets, never tags; explicit wins.
     def setUp(self):
         self.original = uc.heimdallr_scan
         uc.heimdallr_scan = lambda: {
@@ -1789,8 +1770,7 @@ class HeimdallrAutofillTests(unittest.TestCase):
             self.assertEqual(metadata["binding"]["repository"], "org/repo")
             self.assertNotIn("tags", metadata["binding"])
 
-    def test_import_default_sends_no_autofilled_filters(self):
-        """A query invents no filter: bare `import` (default --heimdallr false) autofills nothing."""
+    def test_import_binds_nothing_on_its_own(self):
         seen = {}
         original = uc.store_query
         def fake_query(f):
@@ -1802,52 +1782,7 @@ class HeimdallrAutofillTests(unittest.TestCase):
         finally:
             uc.store_query = original
         self.assertNotIn("ticketKey", seen["filters"])
-        self.assertNotIn("ticketProvider", seen["filters"])
         self.assertNotIn("repo", seen["filters"])
-        self.assertNotIn("initiativeName", seen["filters"])
-
-    def test_import_explicit_heimdallr_true_autofills(self):
-        """Opting in (`--heimdallr true`) restores the autofill for import."""
-        seen = {}
-        original = uc.store_query
-        def fake_query(f):
-            seen["filters"] = f
-            return ([{"uuid": "u1", "version": 1, "kind": "understanding", "subject": "S",
-                      "statement": "A claim.", "createdOn": "2026-10-02"}], "ok")
-        uc.store_query = fake_query
-        try:
-            run(["import", "--heimdallr", "true"])
-        finally:
-            uc.store_query = original
-        self.assertEqual(seen["filters"].get("ticketKey"), "160")
-        self.assertEqual(seen["filters"].get("repo"), "org/repo")
-
-    def test_import_empty_under_autofilled_ticket_retries_without_it(self):
-        """A ticket autofilled by Heimdallr that matches nothing must not answer 'nothing matched'.
-
-        The narrow query is re-run without the autofilled ticket; the empty result is disclosed as a
-        narrowing and the widened result reported — never a bare 'nothing matched'.
-        """
-        calls = []
-        def fake_query(f):
-            calls.append(f)
-            if "ticketKey" in f:
-                return ([], "ok")
-            return ([{"uuid": "u1", "version": 1, "kind": "understanding", "subject": "S",
-                      "statement": "The graph is a path.", "createdOn": "2026-10-02"}], "ok")
-        original = uc.store_query
-        uc.store_query = fake_query
-        try:
-            rc, out, _ = run(["import", "--heimdallr", "true"])
-        finally:
-            uc.store_query = original
-        self.assertEqual(rc, 0)
-        self.assertEqual(len(calls), 2, "narrowed then retried without the ticket")
-        self.assertIn("NO RECORDS MATCHED", out)
-        self.assertIn("github:160", out)
-        self.assertIn("autofilled", out)
-        self.assertIn("The graph is a path.", out)
-        self.assertIn('"ticketKey": "160"', out)
 
 
 if __name__ == "__main__":
