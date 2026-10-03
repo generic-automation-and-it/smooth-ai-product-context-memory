@@ -1278,9 +1278,10 @@ class ExportVersionBumpTests(unittest.TestCase):
             self.assertEqual(set_payloads[1]["items"][0]["uuid"], "u-first")
             self.assertIsNone(set_payloads[1]["items"][0]["createUuid"])
 
-    def test_preflight_failure_on_write_fails_closed(self):
-        """Without the version map a duplicate subject would degrade to a create that 409s, defeating
-        the auto-version guarantee — so a `--write` fails closed when its preflight cannot run."""
+    def test_preflight_failure_on_write_degrades_safely(self):
+        """A transient preflight-side error must not abort a capture that needs no version resolution;
+        the `set --dryrun` veto is the safety net for a duplicate subject, so degrading to creates is
+        fail-safe rather than a regression."""
         with tempfile.TemporaryDirectory() as tmp:
             src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
             originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
@@ -1299,15 +1300,39 @@ class ExportVersionBumpTests(unittest.TestCase):
 
             uc._run_capture_client = record
             try:
+                rc, out, _ = run(["export", src, "--write"])
+            finally:
+                (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                 uc.resolve_group, uc._run_capture_client) = originals
+            # No duplicate subject, so the capture proceeds past the preflight failure; the veto and
+            # write still run. (A duplicate would be refused at the veto instead.)
+            self.assertEqual(rc, 0)
+            self.assertIn("Preflight: unavailable", out)
+            self.assertIn(("set", "--dryrun"), called)
+            self.assertIn(("set",), called)
+
+    def test_two_same_subject_candidates_in_one_chunk_are_refused(self):
+        """Two candidates sharing a subject in one chunk is ambiguous: the capture path refuses two
+        same-subject creates in one batch, and sending both as version targets would double-version the
+        same memory. Refuse rather than double-version or 409."""
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "dup.md",
+                        "- The graph store was chosen for provenance paths.\n\n"
+                        "- The graph store was chosen for provenance paths.\n")
+            originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                         uc.resolve_group, uc._run_capture_client)
+            uc.gate_redaction = lambda texts: (list(texts), {})
+            uc.gate_atomicity = lambda c: [{"verdict": "simple", "signals": []} for _ in c]
+            uc.initiative_exists = lambda name: (True, "ok")
+            uc.resolve_group = lambda b, n, d, dryrun: ({"groupUuid": "g", "created": False}, "ok")
+            uc._run_capture_client = lambda s, a, p: (0, json.dumps({"candidates": []}), "")
+            try:
                 rc, _, err = run(["export", src, "--write"])
             finally:
                 (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
                  uc.resolve_group, uc._run_capture_client) = originals
             self.assertEqual(rc, 1)
-            self.assertIn("REFUSED", err)
-            self.assertIn("preflight failed", err)
-            # `set` must never be reached after the fail-closed refusal.
-            self.assertNotIn(("set",), called)
+            self.assertIn("share a subject", err)
 
 
 class ImportTests(unittest.TestCase):

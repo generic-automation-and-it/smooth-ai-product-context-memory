@@ -1387,10 +1387,11 @@ def build_bundle_body(args, body):
         body["initiativeName"] = args.initiative
 
     # The contract's ticket pair is both-or-neither. A half-specified `--body` ticket (exactly one of
-    # ticketProvider / ticketKey) would reach the server and 400; refuse client-side instead.
+    # ticketProvider / ticketKey) would reach the server and 400; refuse client-side. A flag cannot
+    # repair it, because any one `--body` member suppresses the flag fill.
     if ("ticketProvider" in body) != ("ticketKey" in body):
-        raise ValueError("--body must carry both ticketProvider and ticketKey, or neither; "
-                         "pass --ticket provider:key to set both.")
+        raise ValueError("a half-specified --body ticket is refused: --body must carry both "
+                         "ticketProvider and ticketKey, or neither (use --ticket provider:key alone).")
     return body
 
 

@@ -1253,19 +1253,27 @@ def cmd_export(args: argparse.Namespace) -> int:
                      else preflight[:1200] + f"\n  … {len(preflight) - 1200} more character(s) not shown")
             print((f"Batch {batch_no}/{total_chunks} " if multi else "") + f"Preflight: {shown}")
         else:
+            # A preflight failure leaves no version map, so a duplicate subject would degrade to a
+            # create. That is fail-safe: the `set --dryrun` veto still catches a subject already in the
+            # group before any write, so a transient preflight-side error must not abort a capture that
+            # needs no version resolution (and one that does refuses at the veto, not silently).
             print(f"Preflight: unavailable ({err.strip()[:200] or f'exit {rc}'})")
-            if args.write:
-                # Without the version map a duplicate subject would be sent as a create and 409, which
-                # the auto-version guarantee exists to remove. Fail closed rather than degrade.
-                early = ("Earlier batch(es) were already written and remain; " if batch_no > 1 else "")
-                print(f"REFUSED: preflight failed, so a duplicate subject cannot be resolved to a "
-                      f"version bump. {early}Nothing from this batch was written.", file=sys.stderr)
-                return 1
             version_map = {}
         # Each chunk preflights its own request, so the preflight indices are request-relative within
         # this chunk; map by the candidate's position in the chunk, never a global clean-list index.
         for local_index, candidate in enumerate(chunk):
             candidate["_versionUuid"] = version_map.get(local_index)
+        # Two candidates in one chunk sharing a subject is ambiguous input: the capture path refuses two
+        # same-subject creates in one batch, and sending both as version targets would double-version the
+        # same memory. Refuse before building the write payload, for dry run and write alike.
+        subjects = [_subject(c) for c in chunk]
+        if len(set(subjects)) != len(subjects):
+            dup = next(s for s in subjects if subjects.count(s) > 1)
+            early = ("Earlier batch(es) were already written and remain; " if args.write and batch_no > 1 else "")
+            print(f"REFUSED: two candidates in batch {batch_no} share a subject ('{dup}'); "
+                  f"merge them before exporting. {early}Nothing from this batch was written.",
+                  file=sys.stderr)
+            return 1
         items = set_items(chunk, binding, now)
         if multi:
             count = (sum(1 for i in items if i["uuid"]), sum(1 for i in items if not i["uuid"]))
