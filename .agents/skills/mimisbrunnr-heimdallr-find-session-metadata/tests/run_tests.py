@@ -38,7 +38,7 @@ def run_with_git(responses: dict, *argv: str) -> subprocess.CompletedProcess:
         "    if data.get('_no_work_tree'):\n"
         "        sys.stderr.write('fatal: not a git repository\\n')\n"
         "        sys.exit(128)\n"
-        "    sys.stdout.write('true\\n')\n"
+        "    sys.stdout.write('false\\n' if data.get('_bare') else 'true\\n')\n"
         "    sys.exit(0)\n"
         "if key in data:\n"
         "    sys.stdout.write(data[key])\n"
@@ -96,6 +96,14 @@ class RepoTests(unittest.TestCase):
         # A non-git checkout must signal "autofill unavailable" (exit 2) rather than masquerade as a
         # genuine empty recall (exit 0 with no tickets), which a caller cannot distinguish.
         proc = run_with_git({"_no_work_tree": "1"}, "--json")
+        self.assertEqual(proc.returncode, 2, proc.stderr)
+        self.assertIn("git unavailable", proc.stderr)
+
+    def test_a_bare_or_inside_git_dir_reports_unavailable_not_empty(self):
+        # `git rev-parse --is-inside-work-tree` answers "false" (exit 0) in a bare clone or inside
+        # `.git/`; that is not an error, so a probe keyed on `is None` would let it through as "no
+        # tickets". The guard checks for the literal "true", so this is also unavailable.
+        proc = run_with_git({"_bare": "1"}, "--json")
         self.assertEqual(proc.returncode, 2, proc.stderr)
         self.assertIn("git unavailable", proc.stderr)
 

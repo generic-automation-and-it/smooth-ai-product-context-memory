@@ -100,7 +100,10 @@ def scan(initiative: str | None = None) -> dict:
     # Distinguish "no metadata in this repo" from "git cannot run here". A repo with no ticket
     # commits is a legitimate empty `tickets: []`; a non-git checkout or a missing git binary must
     # not masquerade as "no tickets", so the consumer reports autofill unavailable.
-    if _git("rev-parse", "--is-inside-work-tree") is None:
+    # A `git` inside a work tree answers "true"; any other answer — a non-work-tree ("false", e.g.
+    # a bare clone or `.git/`), a non-repo error (None), or a missing git binary (GitUnavailable) —
+    # means the autofill cannot run and must not masquerade as "no tickets".
+    if _git("rev-parse", "--is-inside-work-tree") != "true":
         raise GitUnavailable("not a git repository or git is unavailable")
     remote = _git("remote", "get-url", "origin")
     branch = _git("branch", "--show-current")
