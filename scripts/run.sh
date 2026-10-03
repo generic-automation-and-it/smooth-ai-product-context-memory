@@ -324,6 +324,16 @@ write_profile() {
   local temp
   temp="$(mktemp "$dir/.mimis-profile.XXXXXX")" || die "could not create a temporary file in $dir"
 
+  # Back up the original before any modification, so a first write, a re-rotate, or a replacement
+  # that goes wrong never destroys the profile the operator was editing — the loss an earlier
+  # release shipped. Named with the timestamp (plus a random guard) so a rotation chain stays
+  # recoverable even across rapid re-writes within the same second.
+  local backup=""
+  if [ -f "$target" ]; then
+    backup="$target-mimisbrunnr-$(date +%Y%m%d%H%M%S)-$RANDOM"
+    cp -p -- "$target" "$backup" || die "could not back up $target; refusing to write"
+  fi
+
   if [ -f "$target" ]; then
     if grep -qF "$PROFILE_BEGIN" "$target" && grep -qF "$PROFILE_END" "$target"; then
       # Replace the marked region in place. awk, not a read-modify-write of the whole file, so the
@@ -337,11 +347,8 @@ write_profile() {
         skip != 1 { print }
       ' "$target" >"$temp"
     else
-      # No managed block. Refuse rather than append blindly: the caller may have meant a different file,
-      # and the fix for that is a clearer message, not a second copy of the same three lines.
-      local backup="$target.mimis-backup-$(date +%Y%m%d%H%M%S)"
-      cp -p -- "$target" "$backup" ||
-        die "could not back up $target; refusing to write"
+      # No managed block. Append the block after the target's own content — the first write — keeping
+      # every byte the operator already had.
       {
         cat -- "$target"
         [ -s "$target" ] && [ "$(tail -c1 -- "$target" | wc -l)" -eq 0 ] && echo
@@ -349,7 +356,6 @@ write_profile() {
         echo "$body"
         echo "$PROFILE_END"
       } >"$temp"
-      log "$target had no managed block — appended one and backed the original up to $backup"
     fi
   else
     {
@@ -361,6 +367,7 @@ write_profile() {
 
   chmod 600 "$temp"
   mv -- "$temp" "$target"
+  [ -n "$backup" ] && log "backed up the original profile to $backup"
   log "wrote the managed block to $target (mode 600); re-run to rotate it in place"
 }
 

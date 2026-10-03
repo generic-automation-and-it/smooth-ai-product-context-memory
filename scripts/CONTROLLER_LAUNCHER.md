@@ -318,8 +318,9 @@ export CONTEXT_MEMORY_WRITE_TOKEN='…'
 Only the region between the markers is ever written. Everything else in the file is preserved byte for
 byte, including on a first write, so a populated profile is never emptied. Re-running rewrites the three
 lines in place: no duplicates, and a rotated token replaces the old one instead of outliving it in a
-world-readable file. A target with no managed block is backed up to `<file>.mimis-backup-<timestamp>`
-before anything is appended, and a symlinked target is refused.
+world-readable file. A profile is always backed up before any modification to
+`<file>-mimisbrunnr-<timestamp>(-<random>)` — both the first append and a later in-place rotation — so
+the operator never loses the version they were editing, and a symlinked target is refused.
 
 ## Limitations
 
