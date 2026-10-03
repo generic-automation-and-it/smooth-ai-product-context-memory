@@ -44,7 +44,9 @@ python3 .../understanding_client.py dump --currentsession [--out .context/mimisb
   no write capability — and renders the recalled records as cited grounding context (HLD-007 LADR-11).
 - **Export funnels through the capture path.** `export <input>` hands material to the existing capture
   path — atomicity, redaction, dedup/link — never a direct write, and it dry-runs unless `--write` is
-  passed (HLD-007 LADR-03).
+  passed (HLD-007 LADR-03). An over-20-candidate batch auto-splits into consecutive ≤20 chunks, each
+  processed end to end, and a candidate whose subject already exists in the target group is sent as a
+  version bump rather than a create that 409s.
 - **The session dump is an export.** `--currentsession` writes to
   `.context/mimisbrunnr-understandings/<session-folder>/`, with a fitting folder name reported on output so another
   agent can discover it (HLD-007 LADR-07). It changes nothing in the store, and its content is redacted

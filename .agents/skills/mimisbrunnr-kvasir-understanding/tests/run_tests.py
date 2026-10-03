@@ -1012,8 +1012,9 @@ class ExportOrchestrationTests(unittest.TestCase):
 
             self._with_gates(body)
 
-    def test_the_cap_refuses_rather_than_chunking(self):
-        """Indices are request-relative, so a silent split loses cross-batch collisions."""
+    def test_an_over_cap_batch_auto_splits_into_consecutive_batches(self):
+        """The 20-candidate cap no longer refuses; it splits into consecutive ≤20 chunks, each
+        processed end to end, and reports the boundary so a reader sees it."""
         with tempfile.TemporaryDirectory() as tmp:
             src = write(tmp, "many.md", "\n\n".join(
                 f"- Candidate number {n} carries a distinct fact worth storing."
@@ -1022,11 +1023,34 @@ class ExportOrchestrationTests(unittest.TestCase):
             def body(calls, verdicts, created):
                 verdicts[:] = [{"verdict": "simple", "signals": []}
                                for _ in range(uc.MAX_CANDIDATES + 5)]
-                rc, _, err = run(["export", src])
-                self.assertEqual(rc, 1)
-                self.assertIn("cap", err)
-                self.assertIn("Split into explicit batches", err)
-                self.assertEqual([a for _, a, _ in calls], [], "nothing may be sent")
+                rc, out, _ = run(["export", src])
+                self.assertEqual(rc, 0)
+                self.assertIn("Split into 2 batch(es)", out)
+                self.assertIn("Batch 1/2: 20 candidate(s)", out)
+                self.assertIn("Batch 2/2: 5 candidate(s)", out)
+                self.assertNotIn("REFUSED", out)
+                preflights = [p for _, argv, p in calls if argv and argv[0] == "preflight"]
+                self.assertEqual(len(preflights), 2)
+                self.assertEqual([len(p["candidates"]) for p in preflights], [20, 5])
+
+            self._with_gates(body)
+
+    def test_over_cap_write_writes_every_chunk(self):
+        """A `--write` writes every chunk, each with its own item batch; the cap is never a refusal."""
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "many.md", "\n\n".join(
+                f"- Candidate number {n} carries a distinct fact worth storing."
+                for n in range(uc.MAX_CANDIDATES + 5)))
+
+            def body(calls, verdicts, created):
+                verdicts[:] = [{"verdict": "simple", "signals": []}
+                               for _ in range(uc.MAX_CANDIDATES + 5)]
+                rc, _, err = run(["export", src, "--write"])
+                self.assertEqual(rc, 0, err)
+                set_calls = [p for _, argv, p in calls
+                             if argv and argv[0] == "set" and len(argv) == 1]
+                self.assertEqual(len(set_calls), 2)
+                self.assertEqual([len(p["items"]) for p in set_calls], [20, 5])
 
             self._with_gates(body)
 
@@ -1101,6 +1125,158 @@ class ExportOrchestrationTests(unittest.TestCase):
                          [{"provider": "github", "key": "9", "url": ""}])
         self.assertEqual(uc.ticket_inputs(["roadmap"], None),
                          [{"provider": "local", "key": "roadmap", "url": ""}])
+
+
+class ExportVersionBumpTests(unittest.TestCase):
+    """A candidate whose subject already exists in the export's group is a version bump, not a create
+    (the preflight match's uuid is fed back as the item's `uuid`, XOR `createUuid`). A same-subject
+    memory in another group is never a version target — memory identity is group-scoped."""
+
+    def test_build_version_map_versions_only_a_same_group_match(self):
+        preflight = json.dumps({"candidates": [
+            {"index": 0, "matches": [{"uuid": "u1", "groupUuid": "g-target",
+                                      "description": "S", "subjectSlug": "s",
+                                      "kind": "understanding", "facets": []}], "ticketConflict": None},
+            {"index": 1, "matches": [{"uuid": "u2", "groupUuid": "g-other",
+                                      "description": "T", "subjectSlug": "t",
+                                      "kind": "understanding", "facets": []}], "ticketConflict": None},
+        ]})
+        mapping = uc.build_version_map(preflight, "g-target")
+        # index 1 exists only in another group: a separate memory to link, never a version target.
+        self.assertEqual(mapping, {0: "u1"})
+
+    def test_build_version_map_returns_empty_when_preflight_is_unparseable(self):
+        self.assertEqual(uc.build_version_map("not json", "g"), {})
+        self.assertEqual(uc.build_version_map("{}", "g"), {})
+
+    def test_set_items_versions_a_matched_subject_and_creates_an_unmatched(self):
+        now = dt.datetime.now(dt.timezone.utc)
+        matched = {"statement": "A changed claim.", "description": "S", "_versionUuid": "u1"}
+        unmatched = {"statement": "A new claim.", "description": "T"}
+        items = uc.set_items([matched, unmatched], {}, now)
+        self.assertEqual(items[0]["uuid"], "u1")
+        self.assertIsNone(items[0]["createUuid"])
+        self.assertIsNone(items[1]["uuid"])
+        self.assertTrue(items[1]["createUuid"])
+        # The version target and the create identity are never both set.
+        for item in items:
+            self.assertFalse(item["uuid"] and item["createUuid"])
+
+    def test_write_sends_a_version_bump_for_a_matched_subject(self):
+        """AC2: the preflight match's uuid is fed into the item as a version target, so the write is a
+        `versioned`, never a 409, and an unchanged claim is skipped by the capture path's dedup."""
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
+            originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                         uc.resolve_group, uc._run_capture_client)
+            uc.gate_redaction = lambda texts: (list(texts), {})
+            uc.gate_atomicity = lambda c: [{"verdict": "simple", "signals": []} for _ in c]
+            uc.initiative_exists = lambda name: (True, "ok")
+            uc.resolve_group = lambda b, n, d, dryrun: ({"groupUuid": "g-target", "created": False}, "ok")
+            calls = []
+
+            def record(script, argv, payload):
+                calls.append((tuple(argv), payload))
+                if argv[0] == "preflight":
+                    return 0, json.dumps({"candidates": [
+                        {"index": 0, "matches": [{"uuid": "u-existing", "groupUuid": "g-target"}],
+                         "ticketConflict": None}]}), ""
+                return 0, json.dumps({"created": 0, "versioned": 1, "linked": 0, "skipped": 0}), ""
+
+            uc._run_capture_client = record
+            try:
+                rc, _, err = run(["export", src, "--write"])
+            finally:
+                (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                 uc.resolve_group, uc._run_capture_client) = originals
+            self.assertEqual(rc, 0, err)
+            set_payloads = [p for argv, p in calls if argv == ("set",)]
+            self.assertEqual(len(set_payloads), 1)
+            self.assertEqual(set_payloads[0]["items"][0]["uuid"], "u-existing")
+            self.assertIsNone(set_payloads[0]["items"][0]["createUuid"])
+
+    def test_a_cross_group_match_is_not_versioned_into_the_export_group(self):
+        """AC3: a subject whose only match is in another group is a create in the export's group, never
+        a version bounce into it."""
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
+            originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                         uc.resolve_group, uc._run_capture_client)
+            uc.gate_redaction = lambda texts: (list(texts), {})
+            uc.gate_atomicity = lambda c: [{"verdict": "simple", "signals": []} for _ in c]
+            uc.initiative_exists = lambda name: (True, "ok")
+            uc.resolve_group = lambda b, n, d, dryrun: ({"groupUuid": "g-target", "created": False}, "ok")
+            calls = []
+
+            def record(script, argv, payload):
+                calls.append((tuple(argv), payload))
+                if argv[0] == "preflight":
+                    return 0, json.dumps({"candidates": [
+                        {"index": 0, "matches": [{"uuid": "u-other", "groupUuid": "g-other"}],
+                         "ticketConflict": None}]}), ""
+                return 0, json.dumps({"created": 1, "versioned": 0, "linked": 0, "skipped": 0}), ""
+
+            uc._run_capture_client = record
+            try:
+                rc, _, err = run(["export", src, "--write"])
+            finally:
+                (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                 uc.resolve_group, uc._run_capture_client) = originals
+            self.assertEqual(rc, 0, err)
+            set_payloads = [p for argv, p in calls if argv == ("set",)]
+            item = set_payloads[0]["items"][0]
+            self.assertIsNone(item["uuid"])
+            self.assertTrue(item["createUuid"])
+
+    def test_a_duplicate_subject_split_across_chunks_is_versioned(self):
+        """A duplicate subject split into a later chunk is surfaced by that chunk's preflight (which
+        runs after the earlier chunk's write, so the earlier memory exists) and sent as a version bump
+        — the chunk-local index mapping, not a global clean-list index. This pins the bug where a
+        chunk-≥2 candidate's version target was looked up by the wrong index and silently became a
+        create, defeating the auto-version-on-split."""
+        shared = ("The graph storage engine was chosen for provenance paths because a path is not a "
+                  "join and edges must remain traversable end to end.")
+        with tempfile.TemporaryDirectory() as tmp:
+            lines = ["- " + shared]
+            for n in range(2, 21):
+                lines.append(f"- Candidate number {n} carries a distinct fact worth storing and detail.")
+            lines.append("- " + shared)  # the 21st candidate, duplicate subject of the first
+            src = write(tmp, "dup.md", "\n\n".join(lines))
+            originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                         uc.resolve_group, uc._run_capture_client)
+            uc.gate_redaction = lambda texts: (list(texts), {})
+            uc.gate_atomicity = lambda c: [{"verdict": "simple", "signals": []} for _ in c]
+            uc.initiative_exists = lambda name: (True, "ok")
+            uc.resolve_group = lambda b, n, d, dryrun: ({"groupUuid": "g-target", "created": False}, "ok")
+            calls = []
+
+            def record(script, argv, payload):
+                calls.append((tuple(argv), payload))
+                if argv[0] == "preflight":
+                    # The per-chunk preflight: chunk 1 is 20 candidates (written first), chunk 2 is the
+                    # one duplicate candidate, whose subject now matches the chunk-1 memory.
+                    if len(payload["candidates"]) == 1 and \
+                            payload["candidates"][0]["description"] == shared[:60]:
+                        return 0, json.dumps({"candidates": [
+                            {"index": 0, "matches": [{"uuid": "u-first", "groupUuid": "g-target"}],
+                             "ticketConflict": None}]}), ""
+                    return 0, json.dumps({"candidates": []}), ""
+                return 0, json.dumps({"created": 1, "versioned": 1, "linked": 0, "skipped": 0}), ""
+
+            uc._run_capture_client = record
+            try:
+                rc, _, err = run(["export", src, "--write"])
+            finally:
+                (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                 uc.resolve_group, uc._run_capture_client) = originals
+            self.assertEqual(rc, 0, err)
+            set_payloads = [p for argv, p in calls if argv == ("set",)]
+            self.assertEqual(len(set_payloads), 2)
+            # Chunk 1 is all creates; chunk 2's duplicate is a version bump of the chunk-1 memory.
+            self.assertIsNone(set_payloads[0]["items"][0]["uuid"])
+            self.assertTrue(set_payloads[0]["items"][0]["createUuid"])
+            self.assertEqual(set_payloads[1]["items"][0]["uuid"], "u-first")
+            self.assertIsNone(set_payloads[1]["items"][0]["createUuid"])
 
 
 class ImportTests(unittest.TestCase):
