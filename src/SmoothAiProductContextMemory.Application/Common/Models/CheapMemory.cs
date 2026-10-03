@@ -21,4 +21,5 @@ public sealed record CheapMemory(
     int Version,
     bool IsCurrent,
     IReadOnlyList<SourceDocument> Sources,
-    DateTimeOffset CreatedOn);
+    DateTimeOffset CreatedOn,
+    bool? HasBody = null);

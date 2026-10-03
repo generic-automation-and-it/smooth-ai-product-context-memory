@@ -22,5 +22,7 @@ public interface IApplicationDbContext
 
     IQueryable<LabelUsageRow> QueryLabelUsage();
 
+    void DiscardTrackedState();
+
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

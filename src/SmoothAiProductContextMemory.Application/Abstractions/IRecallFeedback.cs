@@ -21,15 +21,30 @@ public static class RetrievalShape
 }
 
 /// <summary>
-/// One retrieval outcome. A single retrieval returning N memories writes N records sharing
-/// <see cref="RetrievalId"/>; a retrieval that returned nothing writes one record with a null
-/// <see cref="MemoryUuid"/>.
+/// Content-free bounded attribution. AllPurposes is a tuning filter only, never a stored purpose.
+/// </summary>
+public static class RecallPurpose
+{
+    public const string DirectRetrieval = "direct_retrieval";
+    public const string ServiceRetrieval = "service_retrieval";
+    public const string CaptureComparison = "capture_comparison";
+    public const string AllPurposes = "all";
+    public static readonly string[] All = [DirectRetrieval, ServiceRetrieval, CaptureComparison];
+    public static bool IsKnown(string purpose) => All.Contains(purpose, StringComparer.Ordinal);
+    public static bool IsFilter(string purpose) => purpose == AllPurposes || IsKnown(purpose);
+}
+
+/// <summary>
+/// One core pass outcome: N hits share RetrievalId, a miss has a null MemoryUuid.
+/// CallerRequestId groups observed internal passes without storing content or query text.
 /// </summary>
 public sealed record RecallFeedbackRecord(
     Guid RetrievalId,
     Guid? MemoryUuid,
     string Shape,
-    DateTimeOffset OccurredOn);
+    DateTimeOffset OccurredOn,
+    string Purpose = RecallPurpose.DirectRetrieval,
+    Guid? CallerRequestId = null);
 
 /// <summary>
 /// Guarded synchronous write of one retrieval's outcome. Failure must never propagate — losing a tuning

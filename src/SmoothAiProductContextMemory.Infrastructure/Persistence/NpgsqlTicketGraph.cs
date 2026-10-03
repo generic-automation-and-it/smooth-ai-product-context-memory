@@ -14,6 +14,7 @@ public sealed partial class NpgsqlTicketGraph(SmoothAiProductContextMemoryDbCont
     public async Task LockAsync(CancellationToken cancellationToken)
     {
         MutationRequireTransaction();
+        await new NpgsqlCorpusCommitStore(db).LockAsync(cancellationToken);
         await using NpgsqlCommand command = await MutationCommandAsync(
             "SELECT pg_advisory_xact_lock(734921, 1);", cancellationToken);
         await command.ExecuteNonQueryAsync(cancellationToken);
@@ -102,6 +103,7 @@ public sealed partial class NpgsqlTicketGraph(SmoothAiProductContextMemoryDbCont
                 }
 
                 await MutationExecuteAsync(cypher, cancellationToken);
+                await new NpgsqlCorpusCommitStore(db).AdvanceRevisionAsync(cancellationToken);
             }
 
             if (transaction is not null) await transaction.CommitAsync(cancellationToken);

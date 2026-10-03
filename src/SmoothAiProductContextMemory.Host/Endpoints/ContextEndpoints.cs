@@ -1,6 +1,7 @@
 using Mediator;
 using Microsoft.AspNetCore.Mvc;
 using SmoothAiProductContextMemory.Application.Features.ContextDossier;
+using SmoothAiProductContextMemory.Application.Features.Commits;
 using SmoothAiProductContextMemory.Application.Features.Groups;
 using SmoothAiProductContextMemory.Application.Features.Initiatives;
 using SmoothAiProductContextMemory.Application.Features.Labels;
@@ -20,6 +21,13 @@ internal static class ContextEndpoints
     public static void Map(WebApplication app)
     {
         RouteGroupBuilder group = app.MapGroup("/api/context");
+
+        group.MapGet("/corpus-state", (IMediator mediator, CancellationToken ct) =>
+            mediator.Send(new GetCorpusState.Request(), ct)).RequireCapability(ApiCapability.Read);
+        group.MapGet("/operations/{operationKey}", (string operationKey, IMediator mediator, CancellationToken ct) =>
+            mediator.Send(new GetOperationReceipt.Request(operationKey), ct)).RequireCapability(ApiCapability.Read);
+        group.MapPost("/groups/lookup", (LookupGroups.Request body, IMediator mediator, CancellationToken ct) =>
+            mediator.Send(body, ct)).RequireCapability(ApiCapability.Read);
 
         group.MapPost("/preflight", (Preflight.Request body, IMediator mediator, CancellationToken ct) =>
             mediator.Send(body, ct))
@@ -168,16 +176,18 @@ internal static class ContextEndpoints
             IMediator mediator,
             CancellationToken ct,
             [FromQuery] DateTimeOffset asOf,
-            [FromQuery] int? limit = null) =>
-            mediator.Send(new GetNeverRecalledMemories.Request(asOf, limit ?? 500), ct))
+            [FromQuery] int? limit = null,
+            [FromQuery] string? recallPurpose = null) =>
+            mediator.Send(new GetNeverRecalledMemories.Request(asOf, limit ?? 500, recallPurpose), ct))
             .RequireCapability(ApiCapability.Read);
 
         group.MapGet("/recall-feedback/miss-rate", (
             IMediator mediator,
             CancellationToken ct,
             [FromQuery] DateTimeOffset from,
-            [FromQuery] DateTimeOffset to) =>
-            mediator.Send(new GetMissRate.Request(from, to), ct))
+            [FromQuery] DateTimeOffset to,
+            [FromQuery] string? recallPurpose = null) =>
+            mediator.Send(new GetMissRate.Request(from, to, recallPurpose), ct))
             .RequireCapability(ApiCapability.Read);
 
         // Resettable baseline (LADR-04): feedback is disposable, so this is legitimate, not destructive.

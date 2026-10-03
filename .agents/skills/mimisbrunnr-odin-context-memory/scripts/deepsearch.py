@@ -4,6 +4,7 @@
 import json
 import sys
 import time
+import uuid
 
 import context_memory_client as client
 
@@ -83,6 +84,8 @@ def execute(payload, request=client._request, clock=time.monotonic):
     baseline["limit"] = BASELINE_LIMIT
     baseline.setdefault("includeProposed", True)
     baseline.setdefault("currentOnly", True)
+    baseline.setdefault("recallPurpose", "direct_retrieval")
+    baseline.setdefault("callerRequestId", str(uuid.uuid4()))
 
     keywords = payload.get("keywords", [])
     if not isinstance(keywords, list):

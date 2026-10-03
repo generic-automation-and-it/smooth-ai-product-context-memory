@@ -803,6 +803,15 @@ class SecretShapeCoverageTests(unittest.TestCase):
                 self.assertLess(time.perf_counter() - started, 0.5)
 
 class AtomicityTests(unittest.TestCase):
+    def test_shared_condition_exception_and_independent_claim_fixtures(self):
+        fixture_path = Path(__file__).resolve().parents[4] / "scripts" / "knowledge-evaluation" / "atomicity-fixtures.json"
+        fixtures = json.loads(fixture_path.read_text(encoding="utf-8"))
+        for case in fixtures["cases"]:
+            with self.subTest(case=case["id"]):
+                self.assertEqual(atomicity.classify(case["statement"])["verdict"], case["verdict"])
+        self.assertEqual(sum(case["verdict"] == "simple" for case in fixtures["cases"]), 8)
+        self.assertEqual(sum(case["verdict"] == "bundled" for case in fixtures["cases"]), 8)
+
     def test_single_atomic_fact_is_simple(self):
         verdict = atomicity.classify("PostgreSQL stores our search index.")
         self.assertEqual(verdict["verdict"], "simple")
@@ -1553,6 +1562,20 @@ class OtherWriteRedactionTests(unittest.TestCase):
 
 
 class DeepSearchTests(unittest.TestCase):
+    def test_search_passes_share_one_attributed_caller_request(self):
+        calls = []
+        def request(method, path, body, **kwargs):
+            calls.append((path, body))
+            return {"items": []}
+        deepsearch.execute({"baseline": {}, "keywords": ["refund", "export"]}, request=request)
+        query_bodies = [body for path, body in calls if path == "/api/context/query"]
+        self.assertEqual(len(query_bodies), 3)
+        self.assertEqual(len({body["callerRequestId"] for body in query_bodies}), 1)
+        self.assertTrue(all(body["recallPurpose"] == "direct_retrieval" for body in query_bodies))
+        calls.clear()
+        deepsearch.execute({"baseline": {"recallPurpose": "capture_comparison", "callerRequestId": GOOD_UUID}, "keywords": ["refund"]}, request=request)
+        self.assertTrue(all(body["recallPurpose"] == "capture_comparison" and body["callerRequestId"] == GOOD_UUID for path, body in calls if path == "/api/context/query"))
+
     def test_default_client_query_has_no_deepsearch_pass(self):
         with patch.object(client, "read_payload", return_value={}), \
                 patch.object(client, "_request", return_value={"items": []}) as request, \

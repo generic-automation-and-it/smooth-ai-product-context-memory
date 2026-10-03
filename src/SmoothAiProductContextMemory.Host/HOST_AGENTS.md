@@ -1,8 +1,14 @@
 # HOST_AGENTS.md
 
+`POST /api/context/query` accepts optional bounded `recallPurpose` and UUID `callerRequestId`. The read-only recall-feedback queries accept `recallPurpose` as an optional filter, defaulting to `direct_retrieval`; `all` must be explicit to include service and comparison activity. Miss-rate retains original `retrievals`, `misses`, `missRate` per-pass meaning and adds `callerRequests`, `callerMisses`, `callerMissRate` for observed grouped callers.
+
 ## TL;DR
 
 ASP.NET Core composition root (Minimal API). Wires the application together and exposes endpoints — it holds no business logic.
+
+## Optional commit support — October 3, 2026
+
+The existing memory and group-resolution routes accept optional idempotency and corpus preconditions without changing direct-agent defaults. Authenticated read routes expose corpus epoch/revision, committed operation receipts, and non-mutating group lookup. All route handlers dispatch through Mediator and validators; the API contains no model calls. The capability policy in `ContextApiTests` includes the new routes.
 
 ## Non-Negotiables
 
@@ -70,6 +76,7 @@ Approved release-image plan (2026-09-13):
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-03 | Documented optional knowledge-service commit, evidence, and recovery support implemented in this branch. | optional knowledge service |
 | 2026-10-03 | L2 `Unknown_body_property_returns_400_naming_the_property` updated to the fixed-detail contract: it asserted the `Detail` splices the property name, which the ApiExceptionHandler fix removed. The assertion is inverted (detail no longer contains the member) and the member is still pinned by the `path` extension (`$.candidates[0].statement`), matching the "path is an extension, not prose in the detail" intent the test already documented. | RFC 7807 |
 | 2026-10-03 | Two operator-facing error contracts hardened. (1) The `restore` CLI now also catches `InvalidOperationException` — the operational refusals for an unreadable archive, missing referenced blobs and a non-empty target without `--force` — and prints the shape-only message as one line, returning 1, instead of letting it escape as a stack trace (which could embed a malformed connection string). Integrity failures still exit 2. (2) `ApiExceptionHandler` no longer splices the raw `JsonException`/`BadHttpRequestException` message into the 400 body `Detail`; the detail is a fixed string and the structural JSON path is the only per-request signal, so request body content cannot echo back to the caller through a custom converter. | CLI error contract, RFC 7807 |
 | 2026-10-02 | **An upgrade is visible as a migration.** `DatabaseMigrationHostedService` logs one structured line before applying pending migrations — `PendingMigrationCount` and the last snapshot's age, or `no snapshot recorded` — emitted **only when migrations are pending**, so an ordinary start is silent. Read-only and non-blocking: the migration runs either way. The posture is assembled by `ReadMigrationPostureAsync` (Infrastructure) and the age text by `MigrationPosture`/`SnapshotRecency` (Application, shared with the preflight's recency so there is one wording). L1 `MigrationPostureTests` drives a real *unmigrated* database over the three cases. | HLD-006 LADR-04 |

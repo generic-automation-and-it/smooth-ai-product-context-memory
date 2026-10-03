@@ -17,8 +17,10 @@ Run exactly once in fixed order:
 1. **Preflight**: batched cross-group read-before-write; facts only, no API judgement.
 2. **Redact**: scrub detected secrets before any content reaches storage; report rule names, field paths and replaced offsets only — never the replaced text. If a location covers prose rather than a secret, reword it and re-run.
 3. **Dedupe / derive links**: judge subject matches and links from bounded recall.
-4. **Atomicity check**: one memory per fact; split or skip bundled claims.
+4. **Atomicity check**: one memory per independently meaningful claim, keeping necessary conditions and exceptions; split or skip independent bundled claims.
 5. **Write**: one transactional `set`; API owns version ordering, identities, and graph writes.
+
+Attribute pre-write recall as `recallPurpose: "capture_comparison"` and reuse one UUID `callerRequestId` across this checkpoint's query passes (including deepsearch's baseline). Comparison activity must not inflate the default direct-retrieval tuning metrics.
 
 Assign `createUuid` to every create before dry-run. Reuse identical UUIDs and payload for real write.
 Never use follow-up `create-link` for a link known at capture time.

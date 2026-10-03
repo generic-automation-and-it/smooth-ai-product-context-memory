@@ -23,6 +23,10 @@ public abstract class HandlerTestBase(AspireFixture aspire) : IAsyncLifetime
 
     protected IApplicationDbContext AppDb => Db;
 
+    protected string ConnectionString => _database!.ConnectionString;
+
+    protected NpgsqlDataSource TestDataSource => _dataSource!;
+
     /// <summary>Counts every <c>SaveChanges</c> on <see cref="Db"/>, so a read path can assert it issued none.</summary>
     protected SaveChangesCounter SaveChanges { get; } = new();
 

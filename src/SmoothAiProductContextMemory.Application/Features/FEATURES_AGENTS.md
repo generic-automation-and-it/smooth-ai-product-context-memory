@@ -1,10 +1,18 @@
 # FEATURES_AGENTS.md
 
+Recall feedback attribution is bounded metadata: `QueryMemories` defaults to `direct_retrieval`, with optional `service_retrieval` / `capture_comparison` and UUID caller identity. Tuning defaults to direct retrieval to preserve existing metric meaning; `recallPurpose=all` explicitly combines purposes. Preserve existing per-query pass counts and separately count observed caller requests; a caller miss means all its observed passes in the window returned no memory. Requests failing before any core pass are not observed here.
+
 ## TL;DR
 
 HTTP API the mimisbrunnr-odin-context-memory skill consumes: memory/group UUIDs, exact ticket provider/key,
 Mediator slices and lookup/mechanics only; skill owns judgement. Retrieval runs in PostgreSQL.
 Memory-set dry-run runs the real plan; ticket-parent local dry-run validates shape only.
+
+## Optional knowledge-service commit boundary
+
+Implemented October 3, 2026: existing memory and group-resolution requests accept optional `operationKey`, `expectedCorpusEpoch`, and `expectedCorpusRevision`; version items accept `expectedVersion`. A typed JSON SHA-256 payload hash and original result are stored with accepted changes in one PostgreSQL transaction. Same key and payload replays the original result, while changed payload, stale epoch, or stale comparison revision conflicts. Direct memory writes acquire the same corpus lock and replan under it. A short read transaction checks replay and validates the initial plan before storing bodies; no object-storage call runs with a database transaction open. Dry-run remains read-only and checks stated preconditions. Group resolution with no external ticket replays its original generated identity.
+
+`GET /corpus-state`, `GET /operations/{operationKey}`, and `POST /groups/lookup` are authenticated read surfaces. Group lookup creates nothing and applies existing scope visibility. `CheapMemory.hasBody` distinguishes an intentionally absent body from a missing referenced blob. `CorpusCommitBoundaryTests` covers replay, conflicts, stale comparisons, direct concurrency, evidence, and restore against isolated PostgreSQL/AGE and MinIO.
 
 ## Non-Negotiables
 
@@ -225,6 +233,7 @@ sequenceDiagram
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-03 | Documented optional knowledge-service commit, evidence, and recovery support implemented in this branch. | optional knowledge service |
 | 2026-09-28 | **Corrected the preflight description this file added earlier the same day.** The rows below described preflight's group-unfiltered subject query as an *outstanding half* that "should carry the same group filter", and called the preflight/`SetMemories` disagreement a live seam. Both claims are wrong, and the first was an instruction to break something. `Preflight` judges nothing — it returns `Match` rows carrying both `Uuid` and `GroupUuid`, so the caller holds everything needed to classify; the only site that emits a `version_bump` target is the skill's semantic-dedup Judge, which already qualifies it by the request's `groupUuid`. The asymmetric recall is therefore the **design**: a same-subject memory in another group is what the caller needs to see in order to link the twin, and the group constraint lives on the versioning target, one step downstream. Group-filtering the subject query would remove cross-group link derivation and push that work onto `/query` for no correctness gain. Residual risk is a model misjudging group membership, and that fails safe — `BuildPlanAsync` throws before `PersistAsync`, so the batch aborts with no blob and no row touched, and `--dryrun` is the pre-write veto. Both bullets now carry a do-not-narrow it clause for the same reason the skill's stage-3 wording does. No behaviour changed. | PR #135 |
 | 2026-09-28 | Memory identity **decided: group-scoped**, making the shipped code authoritative over HLD-002 rather than the reverse. Goal 2, LADR-01 and LADR-04 are amended to state `(group, uuid)` identity, and NFR-02's cross-group evidence is **withdrawn** (unproducible by the shipped path) with its status line saying so. The accepted cost is recorded: a cross-group duplicate is invisible to the store. **Still open and now the operationally significant half:** `Preflight` matches subjects across all groups while `SetMemories` refuses a cross-group uuid, so the pre-write veto point can recommend a versioning candidate the write then `404`s. No behaviour changed. | HLD-002 LADR-01, LADR-04, NFR-02 |
 | 2026-09-28 | Recorded — as **unresolved**, not settled — that a memory's identity is `(group, uuid)` in the code while HLD-002, LADR-01, the README and **Accepted** NFR-02 all specify cross-group identity. The two halves actively disagree today: `Preflight` matches subjects across all groups and reports a versioning candidate, and `SetMemories` then raises `NotFoundException` for that same uuid because its version-target lookup is group-scoped, so an agent following the preflight verdict faithfully gets a 404. Also records that NFR-02's cross-group evidence is no longer producible by the shipped write path, and that identity must be decided before any validity-window model, since an as-of change built on the current rule was reverted when it collided with the append-only trigger. No behaviour changed. | PR #135 |

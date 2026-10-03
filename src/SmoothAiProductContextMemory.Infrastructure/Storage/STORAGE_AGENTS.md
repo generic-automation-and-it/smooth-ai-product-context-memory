@@ -6,6 +6,10 @@ Blob (object) storage for context-memory **documents and attachments**, keeping 
 PostgreSQL so the database stays an index rather than a content store. The `IBlobStorage` abstraction
 lives in Application; the S3-compatible implementation lives here in Infrastructure.
 
+## Snapshot receipt compatibility — October 3, 2026
+
+Snapshot format 4 adds mandatory `relational/operation_receipt.json`, its manifest hash, a receipt count, and duplicate/metadata/result validation. Verify rejects a removed receipt member even if its manifest entry and count are removed. Existing format 3 remains readable with an empty receipt set; formats 1 and 2 remain refused under their existing integrity/content-type rules. The restore epoch always changes, including for a format 3 restore, so service journals cannot silently replay newer work into restored state. `OperationReceiptArchiveTests` exercises receipt round-trip, tampering, duplicate identities, and format 3 compatibility.
+
 ## Non-Negotiables
 
 - **Content-addressed.** The address is the SHA-256 of the raw (uncompressed) content. Identical content
@@ -57,6 +61,7 @@ abstraction only, so the S3 implementation can be replaced without touching Appl
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-03 | Documented optional knowledge-service commit, evidence, and recovery support implemented in this branch. | optional knowledge service |
 | 2026-10-01 | Four verify guards that no test reached are now pinned, each asserting the single expected finding: a repeated tar member (identical copies, so only the repeat check can see it), a repeated manifest entry, a tampered object count and a tampered ticket-edge count. Test-only; disabling each guard fails its test. | HLD-006 NFR-01 |
 | 2026-10-01 | `TarSnapshotArchive.WriteAsync` honours its `CancellationToken`: the blob reader delegate now takes it (`Func<string, CancellationToken, Task<...>>`, threaded by `SnapshotStore` into `IBlobStorage.GetAsync` and the body copy), members are written with `WriteEntryAsync(entry, token)`, and the loop checks it per blob and once more before the move. A cancelled write leaves neither the archive nor its temp file. L0: `Write_StopsWhenCancelledMidWrite_AndLeavesNoArchiveOrTempFile`, `Write_WithAnAlreadyCancelledToken_ReadsNothing_AndCreatesNoFile`. | HLD-006 NFR-04 |
 | 2026-10-01 | Blob `ContentType` is validated on **verify and restore** (`SnapshotContentTypes.IsAllowed`): it lives only in the unhashed manifest and restore writes it verbatim as the object's `Content-Type`. Accepted: absent, or `text/plain` / `application/octet-stream` (what `SetMemories` and the S3 adapter's default write) with at most `charset=utf-8`; anything malformed or else is a `Corruption` finding, and restore refuses it (exit 2) before any body is stored. The value is never echoed into the finding. L0: `TarSnapshotArchiveTests` content-type theories, `RestoreArchiveHandlerTests`. | HLD-006 LADR-02, NFR-01 |

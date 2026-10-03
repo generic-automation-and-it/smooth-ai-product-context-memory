@@ -2,7 +2,7 @@
 
 ## TL;DR
 
-The sole authority on the write path. Runs a fixed
+The capture authority in direct-agent mode. The optional knowledge-service skill may instead own a task's capture; never use both for the same learning or switch with unaccounted pending receipts. Runs a fixed
 five-stage pipeline (**preflight → redact → dedupe/derive-links → atomicity → write**), the last stage
 being a single server-side transactional `set`; the skill performs the semantic deduplication, link
 derivation, redaction and atomicity checks the database cannot express as constraints. The read/load
@@ -168,7 +168,7 @@ flowchart LR
 
 ## Key Behaviors
 
-- **The bundle detector scores claims, not prose.** `atomicity.py` reads the **statement**; a description is a subject label and coordination inside it is not a second claim. A reason clause (`because`, `so that`) and a noun-phrase `and` are one fact, so neither counts as a junction — scoring them made the signal fire on 12/12 candidates of a real batch, including every candidate the detector then called simple. A contrastive junction or a semicolon cannot join anything but two finite clauses, so one is decisive; additive adverbs take two.
+- **The bundle detector scores claims, not prose.** `atomicity.py` reads the **statement**; a description is a subject label and coordination inside it is not a second claim. Necessary conditions, exceptions and reason clauses stay with their claim. “But only for unused products” and temporal “while approval is pending” are bound qualifiers, not independent facts. An unrelated second predicate remains a bundle even when it starts with “but only” or “only ... qualify”. Shared acceptance fixtures in `scripts/knowledge-evaluation/atomicity-fixtures.json` cover both sides; deterministic syntax checks support the mandatory semantic judgement rather than replacing it.
 - **Atomicity checked three times.** Restated at accumulation (Listen), at the pre-write round, and as
   the `skipped` count in the digest. The check is: one memory = one atomic fact. Bundles split; the
   unprocessable remainder goes to `skipped`.
@@ -384,6 +384,7 @@ redaction detector is a stdin→stdout fingerprint script reporting rule names o
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-03 | Scoped sole-capture ownership to direct mode; optional service tasks must account for pending receipts before switching writers. | KS-03 |
 | 2026-10-03 | **SKILL.md wording narrowed to the kvasir `export`/`dump` verbs.** Kvasir `import` lost Heimdallr (inbound takes only what the caller binds), so the `--heimdallr false` opt-out note no longer names all kvasir verbs. Initialize guidance unchanged: still Heimdallr-backed when the caller binds nothing. | session request |
 | 2026-10-03 | Two client hardening fixes. (1) `context_memory_read_client` `main` now catches `ValueError` alongside `ClientError`, so a malformed `--payload` or a `deepsearch` payload without a `baseline` reports a clean one-line message instead of a raw traceback — matching the standalone `deepsearch.py` entry point, which already caught `(ValueError, ClientError)`. (2) `scrub_or_refuse` refuses a non-object write payload with a `bad-input` `ClientError` instead of letting the scrubber's unchanged-non-dict-return path send it unscrubbed — only `set` validated shape first, so the other persisting write commands could bypass the fail-closed gate. Pinned by a new harness test. | redaction gate, fail-closed |
 | 2026-10-03 | **Initialize defaults to Heimdallr when the caller binds nothing.** SKILL.md directs the agent to run the sibling Heimdallr reporter (same skills root, no hardcoded path) for repository + branch-seen tickets (else newest commit ticket); `unknown` initiative fills nothing, tags stay agent-derived. No client change (payload-based verbs). | session request |

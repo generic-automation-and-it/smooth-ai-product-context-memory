@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><IsPackable>false</IsPackable><IsTestProject>true</IsTestProject><OutputType>Exe</OutputType></PropertyGroup>
+  <ItemGroup><ProjectReference Include="../../src/SmoothAiProductContextMemory.KnowledgeHost/SmoothAiProductContextMemory.KnowledgeHost.csproj" /></ItemGroup>
+  <ItemGroup><PackageReference Include="Microsoft.NET.Test.Sdk" /><PackageReference Include="Shouldly" /><PackageReference Include="xunit.v3" /><PackageReference Include="xunit.runner.visualstudio" /></ItemGroup>
+</Project>

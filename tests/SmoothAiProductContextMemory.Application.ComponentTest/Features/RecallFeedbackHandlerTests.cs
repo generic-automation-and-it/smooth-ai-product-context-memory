@@ -16,6 +16,28 @@ namespace SmoothAiProductContextMemory.Application.ComponentTest.Features;
 public sealed class RecallFeedbackHandlerTests(AspireFixture aspire) : HandlerTestBase(aspire)
 {
     [Fact]
+    public async Task Attribution_survives_hit_empty_and_missing_ticket_paths_without_changing_results()
+    {
+        var group = TestEntities.NewGroup();
+        Db.MemoryGroups.Add(group);
+        await Db.SaveChangesAsync(Ct);
+        await NewSet().Handle(Approved(group.Uuid, "Attributed fact"), Ct);
+        Guid caller = Guid.NewGuid();
+        var spy = new SpyRecallFeedback();
+        var attributed = Query() with { RecallPurpose = RecallPurpose.ServiceRetrieval, CallerRequestId = caller };
+        var hit = await NewQuery(spy).Handle(attributed, Ct);
+        hit.Items.Count.ShouldBe(1);
+        spy.Records.Single().Purpose.ShouldBe(RecallPurpose.ServiceRetrieval);
+        spy.Records.Single().CallerRequestId.ShouldBe(caller);
+        var missSpy = new SpyRecallFeedback();
+        await NewQuery(missSpy).Handle(attributed with { Query = "nonexistentphrase987654" }, Ct);
+        await NewQuery(missSpy).Handle(attributed with { TicketProvider = "jira", TicketKey = "ABSENT-3" }, Ct);
+        missSpy.Records.Count.ShouldBe(2);
+        missSpy.Records.ShouldAllBe(row => row.MemoryUuid == null && row.Purpose == RecallPurpose.ServiceRetrieval && row.CallerRequestId == caller);
+        missSpy.Records.Select(row => row.RetrievalId).Distinct().Count().ShouldBe(2);
+    }
+
+    [Fact]
     public async Task Hit_emits_one_record_per_memory_sharing_a_retrieval_id()
     {
         var group = TestEntities.NewGroup();
@@ -88,7 +110,7 @@ public sealed class RecallFeedbackHandlerTests(AspireFixture aspire) : HandlerTe
         new(AppDb, Search, feedback, Loggers.CreateLogger<QueryMemories.Handler>());
 
     private SetMemories.Handler NewSet() =>
-        new(AppDb, Graph, Blob, ErrorMapper, Loggers.CreateLogger<SetMemories.Handler>());
+        new(AppDb, Graph, Blob, ErrorMapper, Loggers.CreateLogger<SetMemories.Handler>(), new SmoothAiProductContextMemory.Infrastructure.Persistence.NpgsqlCorpusCommitStore(Db));
 
     private static QueryMemories.Request Query() =>
         new(null, null, null, null, null, null, null, null, null, null, null);

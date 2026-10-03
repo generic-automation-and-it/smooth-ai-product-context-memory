@@ -9,6 +9,15 @@ public class QueryMemoriesValidatorTests
     private readonly QueryMemories.Validator _validator = new();
 
     [Fact]
+    public void Attribution_is_bounded_and_rejects_empty_caller_identity()
+    {
+        foreach (string purpose in RecallPurpose.All)
+            _validator.TestValidate(Request() with { RecallPurpose = purpose, CallerRequestId = Guid.NewGuid() }).ShouldNotHaveAnyValidationErrors();
+        _validator.TestValidate(Request() with { RecallPurpose = "sensitive free text" }).ShouldHaveValidationErrorFor(x => x.RecallPurpose);
+        _validator.TestValidate(Request() with { CallerRequestId = Guid.Empty }).ShouldHaveValidationErrorFor(x => x.CallerRequestId);
+    }
+
+    [Fact]
     public void Rejects_limit_outside_the_allowed_range()
     {
         _validator.TestValidate(Request() with { Limit = 0 })

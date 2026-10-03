@@ -36,7 +36,8 @@ public sealed class NpgsqlRecallFeedbackQuery(
              FROM memory m
              JOIN memory_version mv ON mv.memory_id = m.id
              WHERE NOT EXISTS (
-                 SELECT 1 FROM {Table} rf WHERE rf.memory_uuid = m.uuid)
+                 SELECT 1 FROM {Table} rf WHERE rf.memory_uuid = m.uuid
+                     AND (@purpose = 'all' OR rf.purpose = @purpose))
              GROUP BY m.uuid
              HAVING min(mv.created_on) < @grace_cutoff
              ORDER BY min(mv.created_on)
@@ -46,6 +47,7 @@ public sealed class NpgsqlRecallFeedbackQuery(
 
         command.Parameters.AddWithValue(
             "grace_cutoff", PostgresInstant.ToUtc(request.AsOf.AddDays(-RecentlyCapturedGraceDays)));
+        command.Parameters.AddWithValue("purpose", request.RecallPurpose ?? RecallPurpose.DirectRetrieval);
 
         var rows = new List<NeverRecalledRow>();
         await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -64,15 +66,26 @@ public sealed class NpgsqlRecallFeedbackQuery(
 
         await using var command = new NpgsqlCommand(
             $"""
+             WITH outcomes AS (
+                 SELECT retrieval_id, memory_uuid, purpose, coalesce(caller_request_id, retrieval_id) AS caller_id
+                 FROM {Table}
+                 WHERE occurred_on >= @from AND occurred_on <= @to
+                     AND (@purpose = 'all' OR purpose = @purpose)
+             ), callers AS (
+                 SELECT purpose, caller_id, bool_or(memory_uuid IS NOT NULL) AS hit
+                 FROM outcomes GROUP BY purpose, caller_id
+             )
              SELECT count(DISTINCT retrieval_id) AS retrievals,
-                    count(DISTINCT retrieval_id) FILTER (WHERE memory_uuid IS NULL) AS misses
-             FROM {Table}
-             WHERE occurred_on >= @from AND occurred_on <= @to
+                    count(DISTINCT retrieval_id) FILTER (WHERE memory_uuid IS NULL) AS misses,
+                    (SELECT count(*) FROM callers) AS caller_requests,
+                    (SELECT count(*) FROM callers WHERE NOT hit) AS caller_misses
+             FROM outcomes
              """,
             connection);
 
         command.Parameters.AddWithValue("from", PostgresInstant.ToUtc(request.From));
         command.Parameters.AddWithValue("to", PostgresInstant.ToUtc(request.To));
+        command.Parameters.AddWithValue("purpose", request.RecallPurpose ?? RecallPurpose.DirectRetrieval);
 
         await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
         await reader.ReadAsync(cancellationToken);
@@ -80,12 +93,15 @@ public sealed class NpgsqlRecallFeedbackQuery(
         int retrievals = reader.GetInt32(0);
         int misses = reader.GetInt32(1);
         double missRate = retrievals == 0 ? 0.0 : (double)misses / retrievals;
+        int callerRequests = reader.GetInt32(2);
+        int callerMisses = reader.GetInt32(3);
+        double callerMissRate = callerRequests == 0 ? 0.0 : (double)callerMisses / callerRequests;
 
         logger.LogDebug(
             "Recall feedback miss rate. Retrievals: {Retrievals} Misses: {Misses}",
             retrievals, misses);
 
-        return new MissRateResult(retrievals, misses, missRate);
+        return new MissRateResult(retrievals, misses, missRate, callerRequests, callerMisses, callerMissRate);
     }
 
     public async Task<int> ResetAsync(CancellationToken cancellationToken)

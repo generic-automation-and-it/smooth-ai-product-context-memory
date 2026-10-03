@@ -13,11 +13,14 @@ public sealed class SourceDocument : JsonShapeDocument
 
     public DateTimeOffset? CapturedAt { get; set; }
 
-    public static SourceDocument Create(string kind, string reference, DateTimeOffset? capturedAt = null) => new()
+    public EvidenceDocument? Evidence { get; set; }
+
+    public static SourceDocument Create(string kind, string reference, DateTimeOffset? capturedAt = null, EvidenceDocument? evidence = null) => new()
     {
         V = CurrentShapeVersion,
         Kind = kind,
         Reference = reference,
         CapturedAt = capturedAt,
+        Evidence = evidence,
     };
 }

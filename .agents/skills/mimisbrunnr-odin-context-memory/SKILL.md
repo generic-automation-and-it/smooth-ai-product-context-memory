@@ -1,6 +1,6 @@
 ---
 name: mimisbrunnr-odin-context-memory
-description: Get and set persistent context-memory records — the sole authority on the write path to the SmoothAiProductContextMemory store. Use when you need to record a durable fact, decision, preference, or constraint for later retrieval across sessions, or when you need to recall what was previously captured about a subject, ticket, repository, or scope. Captures byproduct facts during work and writes them at an explicit end-of-task checkpoint.
+description: Get and set persistent context-memory records in direct-agent mode — the capture authority when the optional knowledge service is not the task's capture owner. Use when you need to record a durable fact, decision, preference, or constraint for later retrieval across sessions, or recall a subject, ticket, repository, or scope. Captures byproduct facts at an explicit end-of-task checkpoint.
 effort: xhigh  # sole write path to the store every later session builds on: semantic dedup, link derivation, atomicity, summary generation
 ---
 
@@ -35,13 +35,15 @@ structural read boundary. `--dryrun` performs the same judgement work as write b
 
 # Context Memory
 
-Get and set persistent, summarised, labelled context. The skill is the **sole authority** on the write path to the
+Get and set persistent, summarised, labelled context. In direct-agent mode, the skill is the **sole capture authority** on the write path to the
 context-memory store. It performs the semantic work
 the database cannot express as constraints.
 
 ## Core Posture
 
-The skill is the **only** writer to the store. It does not just record — it decides, for each candidate
+For tasks that select direct-agent capture, this skill is the **only capture owner**. If the optional `mimisbrunnr-knowledge-service` skill owns the task, do not also capture the same learning here. Account for all pending service receipts before explicitly switching ownership. The direct workflow remains independently usable.
+
+It does not just record — it decides, for each candidate
 fact, whether this is a new memory, a version bump, a divergent claim, or a skip, and it derives the
 classification metadata. The pipeline is fixed; the skill does not invent its own write sequence.
 
@@ -101,7 +103,7 @@ For each fact captured during work:
 - Treat later user corrections as authoritative.
 - Do not expose the full accumulation every turn; hold it until `set`.
 
-**Atomicity discipline — restated:** one memory is **one atomic fact**. Bundle-skew is the single
+**Atomicity discipline — restated:** one memory is **one independently meaningful claim, including its necessary conditions and exceptions**. Bundle-skew is the single
 most demonstrated failure of this write path (three trials all showed the model merging several facts
 into one record under pressure and stopping self-policing). At accumulation, keep each fact separate.
 If you cannot tell whether an item is one fact or several, keep it as **candidates to split at the
@@ -132,8 +134,8 @@ Before writing, delegate **one bounded clarification round** to `memory-write` �
    written yet, so no cross-group lookup against the store will find them; only the batched preflight
    can. Resolve them into one memory (or one memory plus a version) before writing, never two.
 
-**Atomicity discipline — restated:** the same round must also check each candidate is a single atomic
-fact. If a candidate bundles multiple facts, split it now (before writing), or schedule the
+**Atomicity discipline — restated:** the same round must also check each candidate is one independently meaningful
+claim with its necessary conditions and exceptions intact. If a candidate bundles independent facts, split it now (before writing), or schedule the
 unprocessable remainder to `skipped`. Do not write a compound record.
 
 Surface the plan as a small set of questions only where a genuine blocker or choice exists (e.g. a
@@ -173,7 +175,7 @@ stale, not an alternative reading.
 | 1 | **Preflight** | Batched exact cross-group subject/ticket backstops plus intra-batch collision detection. Array-in/array-out; writes and judges nothing. |
 | 2 | **Redact** | Detect secrets/tokens/connection strings in the captured content and scrub them **before** the blob write. Content addressing makes a blob immutable — a leaked secret cannot be edited out later, only orphaned. Redaction must precede the blob write. Every persisting write — `set`, `resolve-group`, `update-group`, `append-description`, `create-link`, `ticket-parent`, `propose-label`, `upsert-initiative`, CLI and worker alike — scrubs its free-text fields automatically (keys matched case-insensitively, as the Host binds them; ticket identities are never rewritten), so this is a gate, not a step you may skip. The record of what was scrubbed goes to the digest as `redaction: [{rule_name, hit_count, locations: [{field, start, end}]}]` — `field` is the request path (`items[0].statement`), `start`/`end` the replaced code-point offsets in your own text — so no scrub is silent; if a location covers prose rather than a secret, fix the wording and re-run. Offsets only: content is never logged. |
 | 3 | **Dedupe / derive links** | The cross-group subject match and link derivation, applied to the write decision from the preflight. Locate existing subjects; the result decides version-bump vs new-memory vs skip **qualified by group**: a match inside this group is a version bump, a match in another group is a new memory here plus a typed link (a foreign `uuid` target is a `404`, never a bump). |
-| 4 | **Atomicity check** | Confirm each record is one atomic fact. Split bundled candidates; route the unprocessable remainder to `skipped`. |
+| 4 | **Atomicity check** | Confirm each record is one independently meaningful claim with necessary conditions and exceptions. Split independent bundled claims; route the unprocessable remainder to `skipped`. |
 | 5 | **Write** | Single transactional `set`. Version bump ordering: flip the old `is_current` to `false` *before* inserting the new current, both **in one transaction**, or a failure between them strands zero current versions. |
 
 ## Deterministic Components
@@ -196,9 +198,11 @@ NOT-AVAILABLE, never a silent miss.
 | `divergence.py` | `python3 .../divergence.py` | 3 (conflict composition) | Converts an explicit same-subject genuine-conflict judgement into a separately identified claim, proposed divergence memory and two contradiction links; rejects cross-scope and recursive evidence and deduplicates exact claim pairs. |
 | `near_miss_tags.py` | `python3 .../near_miss_tags.py < approved-evidence.json` | Read-only reporting | Bounded stdin JSON validation, exact tag comparison, scoped `near-miss-tag` output. No network, file output, vocabulary lookup or semantic heuristic. See Evidence-only Near Misses below. |
 
+“Refunds are allowed within 30 days, but only for unused products” is one claim: removing the unused-product condition broadens the policy. Punctuation and the word “but” do not justify that split. “Refunds are allowed within 30 days; exports run nightly” contains two independent claims and must split. Shared direct/service acceptance cases live in `scripts/knowledge-evaluation/atomicity-fixtures.json`. Run the detector, preserve those qualifiers when producing final records, and retain semantic judgement for language the deterministic signals cannot decide.
+
 The **semantic dedup** decision is a two-call composition, never a single preflight:
 
-1. **Recall inside `memory-write`** — `context_memory_client.py query` with `{"facets": [...], "kind": ..., "includeProposed": true, "currentOnly": true, "limit": 200}`. Do **not** pass the candidate description as free-text: `/query` free-text is AND-of-all-lexemes (stemmed, `english` configuration), so a natural-language candidate still defeats recall — stemming forgives inflections, not sentence structure. Raw result rows never return to the main thread.
+1. **Recall inside `memory-write`** — `context_memory_client.py query` with `{"facets": [...], "kind": ..., "includeProposed": true, "currentOnly": true, "limit": 200, "recallPurpose": "capture_comparison", "callerRequestId": "ONE-UUID-FOR-THIS-CAPTURE-CHECKPOINT"}`. Reuse that caller UUID across comparison passes. Ordinary direct retrieval defaults to `direct_retrieval`; deepsearch assigns one caller UUID across its core search passes, so internal searches remain distinguishable from the caller request. Do **not** pass the candidate description as free-text: `/query` free-text is AND-of-all-lexemes (stemmed, `english` configuration), so a natural-language candidate still defeats recall — stemming forgives inflections, not sentence structure. Raw result rows never return to the main thread.
    - **Facet/tag match is ANY by default** — a query returns rows carrying *any* of the requested facets, so a batch's facet set unifies disjoint rows (the recall union rather than an empty set). Containment (only rows carrying *every* requested facet) is opt-in via `"facetMatchMode": "all"`; do not use it for recall, it is the deliberate-narrowing form.
 2. **Judge** — compare each recalled row's cheap fields to the candidate and decide, per pair, `version_bump` (send the matched row's `uuid` in `set` **— only if that row is in the request's `groupUuid`; a cross-group match is `new_memory` plus a typed link, because a foreign `uuid` target is a `404`**) / `new_memory` / `skip`. This LLM judgement is where the semantic equivalence (e.g. *"we store in Postgres"* vs *"PostgreSQL is the storage engine"*) is resolved.
 3. `/preflight` contributes only the **exact-match backstop**, **intra-batch collisions**, and **ticket-uniqueness conflicts**. It judges nothing. Candidate recall for the semantic step comes from `/query`, not `/preflight`.

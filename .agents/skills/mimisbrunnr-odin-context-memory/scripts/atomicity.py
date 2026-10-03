@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """Deterministic bundle detector for the atomicity stage of the mimisbrunnr-odin-context-memory skill.
 
-One memory is one atomic fact. This helper scores a candidate's statement for signals that it bundles
+One memory is one independently meaningful claim, including its conditions and exceptions. This helper scores a candidate's statement for signals that it bundles
 several independent claims (clause junctions, list/tally patterns), returning a SIMPLE / BUNDLED
 verdict. Reason clauses and noun-phrase coordination are not such signals. It is the machine-testable
 core of the atomicity stage; the final decision to split vs skip, and the routing of the
 unprocessable remainder, stays in SKILL.md (LADR-002).
 
-Conservative on purpose: a candidate is only flagged BUNDLED on strong signals, so it over-splits
-a genuinely single fact only in the accepted cases noted below.
+Conservative on purpose: a candidate is only flagged BUNDLED on strong signals. Qualifying clauses
+must stay with their claim, because splitting them can broaden a rule incorrectly. This deterministic
+syntax check supports, and cannot replace, the agent's semantic atomicity judgement.
 """
 
 import argparse
@@ -26,9 +27,9 @@ import sys
 # detector then called simple: a signal that never discriminates cannot support a verdict.
 # "and" counts only after a comma, the cheapest deterministic proxy for clause coordination.
 #
-# Two tiers, because the markers are not equally strong. A semicolon or whereas/however
-# cannot join anything but two finite clauses, so one occurrence already means two claims;
-# "but"/"while" usually do too (temporal "while" and "not X but Y" are accepted over-splits);
+# Two tiers, because the markers are not equally strong. Contrastive clauses often join independent
+# claims, but punctuation or "but" alone cannot decide that: "but only for unused products" is a
+# necessary restriction on the same rule. Bound qualifiers are removed from the junction count.
 # an additive adverb can sit inside a single clause, so it takes two.
 _CONTRASTIVE = [
     r"\b(?:but|however|whereas|while)\b",
@@ -46,7 +47,7 @@ _TALLY = [
     # Leading negative lookbehind (not \b) so "local-first" or "v1-first" does not count "first"
     # as an enumerator — a common false positive in product phrasing.
     r"(?<![-\w])(?:first|second|third|fourth|fifth|finally|lastly)\b",
-    r"(?:\b\d+\b|\b(?:two|three|four|five|several|many))\s+(?:things?|points?|reasons?|facts?)\b",
+    r"(?:\b\d+\b|\b(?:two|three|four|five|several|many))\s+(?:things?|points?|reasons?|facts?|claims?|rules?)\b",
     r"\b(?:all of|each of)\b",
 ]
 _SPLIT = [
@@ -58,6 +59,24 @@ _COMPILED_CONTRASTIVE = [re.compile(p, re.IGNORECASE) for p in _CONTRASTIVE]
 _COMPILED_ADDITIVE = [re.compile(p, re.IGNORECASE) for p in _ADDITIVE]
 _COMPILED_TALLY = [re.compile(p, re.IGNORECASE) for p in _TALLY]
 _COMPILED_SPLIT = [re.compile(p, re.IGNORECASE) for p in _SPLIT]
+
+_BOUND_RESTRICTION = re.compile(
+    r"^(?:(?:only|solely)\s+(?:for|if|when|on|within|after|before|with|until|where)\b"
+    r"|only\s+[^;,.]+?\s+(?:qualify|are eligible)\s*[.!?]?$|(?:except|unless|provided|if|when)\b)", re.IGNORECASE)
+_BOUND_TEMPORAL = re.compile(r"^(?:pending|awaiting|processing|paused|[\w -]+?\s+(?:is|are)\s+(?:pending|paused|in progress))\b", re.IGNORECASE)
+
+
+def _independent_junctions(text):
+    count = 0
+    for pattern in _COMPILED_CONTRASTIVE:
+        for match in pattern.finditer(text):
+            following = text[match.end():].lstrip(" ,:")
+            if _BOUND_RESTRICTION.match(following):
+                continue
+            if match.group().lower() == "while" and _BOUND_TEMPORAL.match(following):
+                continue
+            count += 1
+    return count
 
 # Count occurrence-based signals. Junctions are counted by match, not just by which pattern group
 # fired — ", and ... also ... but" is three independent claim junctions.
@@ -82,7 +101,7 @@ def classify(text):
     """
     text = text or ""
     tally = _count_matches(_COMPILED_TALLY, text)
-    discourse = (CONTRASTIVE_WEIGHT * _count_matches(_COMPILED_CONTRASTIVE, text)
+    discourse = (CONTRASTIVE_WEIGHT * _independent_junctions(text)
                  + _count_matches(_COMPILED_ADDITIVE, text))
     split_ref = _count_matches(_COMPILED_SPLIT, text)
 

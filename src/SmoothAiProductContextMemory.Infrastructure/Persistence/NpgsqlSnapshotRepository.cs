@@ -85,6 +85,9 @@ public sealed class NpgsqlSnapshotRepository(
         Memory[] memories = await db.Memories.AsNoTracking().ToArrayAsync(cancellationToken);
         MemoryVersion[] memoryVersions = await db.MemoryVersions.AsNoTracking().ToArrayAsync(cancellationToken);
 
+        OperationReceipt[] receipts = await db.Database.SqlQueryRaw<OperationReceipt>(
+            "SELECT operation_key AS \"OperationKey\", payload_hash AS \"PayloadHash\", operation_type AS \"OperationType\", result::text AS \"ResultJson\", committed_at AS \"CommittedAt\" FROM public.operation_receipt ORDER BY operation_key").ToArrayAsync(cancellationToken);
+
         SnapshotVertex[] vertices = await ReadMemoryVerticesAsync(db, cancellationToken);
         SnapshotEdge[] edges = await ReadMemoryEdgesAsync(db, cancellationToken);
         SnapshotTicketVertex[] ticketVertices = await ReadTicketVerticesAsync(db, cancellationToken);
@@ -107,7 +110,8 @@ public sealed class NpgsqlSnapshotRepository(
             vertices,
             edges,
             ticketVertices,
-            ticketEdges);
+            ticketEdges,
+            receipts);
 
         return new SnapshotCaptureResult(
             capture,
@@ -119,7 +123,8 @@ public sealed class NpgsqlSnapshotRepository(
                 edges.Length,
                 walk.Blobs.Count,
                 ticketVertices.Length,
-                ticketEdges.Length));
+                ticketEdges.Length,
+                receipts.Length));
     }
 
     public async Task<bool> IsTargetEmptyAsync(string connectionString, CancellationToken cancellationToken)
@@ -160,6 +165,8 @@ public sealed class NpgsqlSnapshotRepository(
             $"SET LOCAL statement_timeout = '{RestoreStatementTimeoutSeconds().ToString(CultureInfo.InvariantCulture)}s'",
             cancellationToken);
 
+        var commitStore = new NpgsqlCorpusCommitStore(db);
+        await commitStore.LockAsync(cancellationToken);
         if (!await IsEmptyAsync(db, cancellationToken) && !overrideNonEmpty)
         {
             throw new InvalidOperationException(
@@ -173,6 +180,18 @@ public sealed class NpgsqlSnapshotRepository(
         await RestoreTicketVerticesAsync(db, capture, cancellationToken);
         await RestoreTicketEdgesAsync(db, capture, cancellationToken);
         await ResetSequencesAsync(db, cancellationToken);
+        foreach (OperationReceipt receipt in capture.OperationReceipts ?? [])
+        {
+            await commitStore.RecordAsync(receipt, cancellationToken);
+        }
+
+        int restoredReceipts = await CountAsync(db, "operation_receipt", cancellationToken);
+        if (restoredReceipts != expected.OperationReceipts)
+        {
+            throw new InvalidDataException("Restored operation receipt count does not match the snapshot.");
+        }
+
+        await db.Database.ExecuteSqlInterpolatedAsync($"UPDATE public.corpus_state SET epoch = {Guid.NewGuid()}, revision = revision + 1 WHERE singleton", cancellationToken);
 
         // Counts are read back from the restored stores, never echoed from the capture: a Cypher
         // MATCH that finds no endpoint makes its CREATE a silent no-op, so only a read-back can see
@@ -442,7 +461,7 @@ public sealed class NpgsqlSnapshotRepository(
         // recall_feedback: it is telemetry about a corpus, not corpus content, and a target whose
         // only rows are feedback has no memory those rows could still describe. Counting it would
         // refuse a first restore into a database that has merely answered one query (a miss row).
-        string[] relational = ["memory", "memory_version", "group_description", "memory_group"];
+        string[] relational = ["memory", "memory_version", "group_description", "memory_group", "operation_receipt"];
         foreach (string table in relational)
         {
             if (await ExecuteScalarLongAsync(db, $"SELECT count(*) FROM {table}", cancellationToken) > 0)
@@ -516,6 +535,7 @@ public sealed class NpgsqlSnapshotRepository(
         // would cite memories of the corpus being replaced and skew never-recalled and miss-rate
         // against the restored one. Cleared inside the same transaction, so a rollback keeps them.
         await ExecuteNonQueryAsync(db, "DELETE FROM recall_feedback", cancellationToken);
+        await ExecuteNonQueryAsync(db, "DELETE FROM operation_receipt", cancellationToken);
     }
 
     private static async Task ResetSequencesAsync(

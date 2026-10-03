@@ -65,6 +65,7 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
             await writeEntry(SnapshotEntryNames.Edges, Serialize(capture.Edges));
             await writeEntry(SnapshotEntryNames.TicketVertices, Serialize(capture.TicketVertices));
             await writeEntry(SnapshotEntryNames.TicketEdges, Serialize(capture.TicketEdges));
+            await writeEntry(SnapshotEntryNames.OperationReceipts, Serialize(capture.OperationReceipts ?? []));
 
             int objects = 0;
             int mismatched = 0;
@@ -100,9 +101,10 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
                 capture.Edges.Count,
                 objects,
                 capture.TicketVertices.Count,
-                capture.TicketEdges.Count);
+                capture.TicketEdges.Count,
+                capture.OperationReceipts?.Count ?? 0);
 
-            var exclusions = new SnapshotExclusions(["recall_feedback"]);
+            var exclusions = new SnapshotExclusions(["recall_feedback", "corpus_state"]);
 
             SnapshotManifest manifest = new(SnapshotFormat.Version, entries, counts, exclusions, dangling, mismatched);
             await writeEntry(SnapshotEntryNames.Manifest, Serialize(manifest));
@@ -157,7 +159,7 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
         (var entries, _) = ReadEntries(archivePath);
 
         SnapshotManifest manifest = ReadAndGateManifest(entries);
-        SnapshotCapture capture = ReadCapture(entries);
+        SnapshotCapture capture = ReadCapture(entries, manifest.FormatVersion);
 
         string[] names = entries.Keys.ToArray();
 
@@ -232,7 +234,7 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
             return Task.FromResult(new SnapshotVerification(false, findings));
         }
 
-        if (manifest.FormatVersion != SnapshotFormat.Version)
+        if (!SnapshotFormat.IsSupported(manifest.FormatVersion))
         {
             findings.Add(new SnapshotFinding(SnapshotFindingKind.Corruption, SnapshotEntryNames.Manifest,
                 $"Archive format version {manifest.FormatVersion} is not supported (expected {SnapshotFormat.Version}); the member layout cannot be interpreted safely."));
@@ -334,6 +336,17 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
         }
 
         ReconcileCounts(manifest, entries, findings);
+        if (manifest.FormatVersion == 3 && (manifest.Counts.OperationReceipts != 0 || entries.ContainsKey(SnapshotEntryNames.OperationReceipts)))
+        {
+            findings.Add(new SnapshotFinding(SnapshotFindingKind.Corruption, SnapshotEntryNames.OperationReceipts,
+                "Legacy archive format cannot declare operation receipts."));
+        }
+
+        if (manifest.FormatVersion >= 4)
+        {
+            CheckCount(entries, SnapshotEntryNames.OperationReceipts, manifest.Counts.OperationReceipts, "operation receipt", findings);
+            ValidateReceipts(entries, findings);
+        }
         CheckCitedBodiesPresent(entries, findings);
 
         if (manifest.DanglingReferences > 0)
@@ -351,7 +364,35 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
         return Task.FromResult(new SnapshotVerification(findings.Count == 0, findings));
     }
 
-    private static SnapshotCapture ReadCapture(IReadOnlyDictionary<string, byte[]> entries) =>
+    private static void ValidateReceipts(IReadOnlyDictionary<string, byte[]> entries, List<SnapshotFinding> findings)
+    {
+        if (!entries.TryGetValue(SnapshotEntryNames.OperationReceipts, out byte[]? content)) { return; }
+        try
+        {
+            OperationReceipt[] receipts = Deserialize<OperationReceipt[]>(content);
+            var keys = new HashSet<string>(StringComparer.Ordinal);
+            foreach (OperationReceipt receipt in receipts)
+            {
+                if (receipt is null || string.IsNullOrWhiteSpace(receipt.OperationKey) || receipt.OperationKey.Length > 200
+                    || !keys.Add(receipt.OperationKey) || receipt.PayloadHash is not { Length: 64 }
+                    || receipt.PayloadHash.Any(c => !char.IsAsciiHexDigitLower(c))
+                    || receipt.OperationType is not ("memories" or "group_resolve"))
+                {
+                    throw new InvalidDataException("Invalid receipt metadata.");
+                }
+
+                using JsonDocument result = JsonDocument.Parse(receipt.ResultJson);
+                if (result.RootElement.ValueKind != JsonValueKind.Object) { throw new InvalidDataException("Invalid receipt result."); }
+            }
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidDataException or ArgumentException)
+        {
+            findings.Add(new SnapshotFinding(SnapshotFindingKind.Corruption, SnapshotEntryNames.OperationReceipts,
+                "Operation receipts contain invalid or duplicate identities or results."));
+        }
+    }
+
+    private static SnapshotCapture ReadCapture(IReadOnlyDictionary<string, byte[]> entries, int formatVersion) =>
         new(
             Deserialize<Initiative[]>(Require(entries, SnapshotEntryNames.Initiatives)),
             Deserialize<Label[]>(Require(entries, SnapshotEntryNames.Labels)),
@@ -362,7 +403,8 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
             Deserialize<SnapshotVertex[]>(Require(entries, SnapshotEntryNames.Vertices)),
             Deserialize<SnapshotEdge[]>(Require(entries, SnapshotEntryNames.Edges)),
             Deserialize<SnapshotTicketVertex[]>(Require(entries, SnapshotEntryNames.TicketVertices)),
-            Deserialize<SnapshotTicketEdge[]>(Require(entries, SnapshotEntryNames.TicketEdges)));
+            Deserialize<SnapshotTicketEdge[]>(Require(entries, SnapshotEntryNames.TicketEdges)),
+            formatVersion >= 4 ? Deserialize<OperationReceipt[]>(Require(entries, SnapshotEntryNames.OperationReceipts)) : []);
 
     private static SnapshotManifest ReadAndGateManifest(IReadOnlyDictionary<string, byte[]> entries)
     {
@@ -372,7 +414,7 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
         }
 
         SnapshotManifest manifest = Deserialize<SnapshotManifest>(manifestBytes);
-        if (manifest.FormatVersion != SnapshotFormat.Version)
+        if (!SnapshotFormat.IsSupported(manifest.FormatVersion))
         {
             throw new InvalidDataException(
                 $"Archive format version {manifest.FormatVersion} is not supported (expected {SnapshotFormat.Version}); restore is refused because a newer/older member layout cannot be interpreted safely.");

@@ -20,7 +20,10 @@ public static class ResolveGroup
         string? ScopeDimension,
         string? ScopeIdentifier,
         string? Name,
-        string? Body) : IRequest<Response>;
+        string? Body,
+        string? OperationKey = null,
+        Guid? ExpectedCorpusEpoch = null,
+        long? ExpectedCorpusRevision = null) : IRequest<Response>;
 
     public sealed record Response(
         Guid Uuid,
@@ -35,6 +38,9 @@ public static class ResolveGroup
     {
         public Validator()
         {
+            RuleFor(x => x.OperationKey).NotEmpty().MaximumLength(200).When(x => x.OperationKey is not null);
+            RuleFor(x => x.ExpectedCorpusEpoch).NotNull().NotEqual(Guid.Empty).When(x => x.OperationKey is not null);
+            RuleFor(x => x.ExpectedCorpusRevision).GreaterThanOrEqualTo(0).When(x => x.ExpectedCorpusRevision is not null);
             RuleForEach(x => x.Tickets).SetValidator(new TicketInputValidator());
 
             RuleFor(x => x.ScopeDimension)
@@ -56,13 +62,25 @@ public static class ResolveGroup
         IApplicationDbContext db,
         IDbErrorMapper errorMapper,
         ITicketGraph ticketGraph,
-        ILogger<Handler> logger) : IRequestHandler<Request, Response>
+        ILogger<Handler> logger,
+        ICorpusCommitStore commitStore) : IRequestHandler<Request, Response>
     {
         public async ValueTask<Response> Handle(Request request, CancellationToken cancellationToken)
         {
             logger.LogInformation("Group resolve started");
 
             await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+            CorpusState state = await commitStore.LockAsync(cancellationToken);
+            CorpusCommit.CheckEpoch(state, request.ExpectedCorpusEpoch);
+            string hash = CorpusCommit.Hash(request with { OperationKey = null });
+            if (request.OperationKey is { } operationKey
+                && await commitStore.FindAsync(operationKey, cancellationToken) is { } prior)
+            {
+                return CorpusCommit.Replay<Response>(prior, hash, "group_resolve");
+            }
+
+            CorpusCommit.CheckRevision(state, request.ExpectedCorpusRevision);
+            db.DiscardTrackedState();
             await ticketGraph.LockAsync(cancellationToken);
 
             MemoryGroup? existing = null;
@@ -89,9 +107,11 @@ public static class ResolveGroup
                 Initiative? existingInitiative = await db.Initiatives
                     .AsNoTracking()
                     .SingleOrDefaultAsync(i => i.Id == existing.InitiativeId, cancellationToken);
+                Response response = ToResponse(existing, existingInitiative?.Name ?? "to-be-decided", created: false);
+                await RecordAsync(request, hash, response, cancellationToken);
                 await transaction.CommitAsync(cancellationToken);
                 logger.LogInformation("Group resolve completed. Created: {Created}", false);
-                return ToResponse(existing, existingInitiative?.Name ?? "to-be-decided", created: false);
+                return response;
             }
 
             string initiativeName = string.IsNullOrWhiteSpace(request.InitiativeName)
@@ -133,10 +153,20 @@ public static class ResolveGroup
             }
 
             await errorMapper.SaveOrMapAsync(() => db.SaveChangesAsync(cancellationToken));
+            Response createdResponse = ToResponse(group, initiative.Name, created: true);
+            await RecordAsync(request, hash, createdResponse, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
 
             logger.LogInformation("Group resolve completed. Created: {Created}", true);
-            return ToResponse(group, initiative.Name, created: true);
+            return createdResponse;
+        }
+
+        private async Task RecordAsync(Request request, string hash, Response response, CancellationToken cancellationToken)
+        {
+            if (request.OperationKey is { } key)
+            {
+                await commitStore.RecordAsync(CorpusCommit.Receipt(key, hash, "group_resolve", response), cancellationToken);
+            }
         }
 
         private static Response ToResponse(MemoryGroup group, string initiativeName, bool created) =>

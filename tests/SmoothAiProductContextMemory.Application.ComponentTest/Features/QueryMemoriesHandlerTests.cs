@@ -266,7 +266,7 @@ public sealed class QueryMemoriesHandlerTests(AspireFixture aspire) : HandlerTes
     }
 
     private SetMemories.Handler NewSet() =>
-        new(AppDb, Graph, Blob, ErrorMapper, Loggers.CreateLogger<SetMemories.Handler>());
+        new(AppDb, Graph, Blob, ErrorMapper, Loggers.CreateLogger<SetMemories.Handler>(), new SmoothAiProductContextMemory.Infrastructure.Persistence.NpgsqlCorpusCommitStore(Db));
 
     private QueryMemories.Handler NewQuery() =>
         new(AppDb, Search, new NoopRecallFeedback(), Loggers.CreateLogger<QueryMemories.Handler>());

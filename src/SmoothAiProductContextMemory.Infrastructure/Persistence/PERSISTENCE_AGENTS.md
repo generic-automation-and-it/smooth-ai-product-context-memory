@@ -1,8 +1,16 @@
 # PERSISTENCE_AGENTS.md
 
+Recall feedback remains disposable outside the EF entity model and corpus revision. Attribution adds only a constrained purpose and optional caller UUID, never content/query text/hash. Grouped caller counts use purpose plus caller UUID (or the existing retrieval UUID for legacy/direct calls). Original retrieval counts remain per pass. Default tuning filters direct retrieval, preserving its historical meaning; combining service and comparison requires explicit `recallPurpose=all`.
+
 ## TL;DR
 
 EF Core + PostgreSQL index over blob-stored content. **Six** entities: `Initiative`, `Label`, `MemoryGroup`, `GroupDescription`, `Memory`, `MemoryVersion`. Relationships are Apache AGE edges in `memory_graph` (HLD 003 cutover) — not an EF entity. Authoritative model is `docs/hlds/001-context-memory-storage/`; graph rules live in `docs/hlds/003-graph-edges-on-age/`.
+
+## Corpus commit state — October 3, 2026
+
+`corpus_state` and `operation_receipt` are operational tables outside the six-entity EF model, added by `20261003120000_AddCorpusCommitBoundary`. Relational BEFORE STATEMENT triggers take the state row lock and advance its revision on corpus mutations. AGE Cypher uses a custom executor that bypasses statement triggers: memory-link and ticket-parent adapters therefore advance revision explicitly after changes, in their existing transaction. Both acquire the corpus state lock before their advisory lock. This shared order prevents service comparison/read-set races with direct writers.
+
+Snapshots capture operation receipts with the corpus. Restore locks the state before checking emptiness, clears/reinstates receipts, reconciles their count, and rotates the epoch even when restoring identical data. The epoch is regenerated operational lineage, not copied from a snapshot. Old service journals must reconcile before replaying after restore.
 
 ## Non-Negotiables
 
@@ -181,6 +189,7 @@ is the current design authority, superseding HLD-003 LADR-02 before any ticket m
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-03 | Documented optional knowledge-service commit, evidence, and recovery support implemented in this branch. | optional knowledge service |
 | 2026-10-01 | `TheConfiguredBudget_BoundsTheRestoreTransactionItself` (L1) pins that `Snapshot:RestoreStatementTimeoutSeconds` governs `RestoreAsync`, not only the pre-flight check: with a 1 s budget and `memory` held under `ACCESS EXCLUSIVE`, the restore fails well inside 30 s and leaves the target empty. Test-only; removing both the budgeted data source and the `SET LOCAL statement_timeout` makes it wait past 30 s and fail. | HLD-006 LADR-07, `HOST_AGENTS.md` config table |
 | 2026-10-01 | `NpgsqlSnapshotRepository.ClearStoresAsync` deletes `recall_feedback` in the restore transaction (rolled back with it); `IsEmptyAsync` still does not count the table. Rationale in HLD-006 `AGENTS.md`. L1: `ForcedRestore_ClearsRecallFeedback_ThatCitesTheReplacedCorpus`, `ATargetHoldingOnlyRecallFeedback_IsEmpty_AndTheRestoreClearsIt`. | HLD-006 NFR-02 |
 | 2026-09-28 | **The scalar `agtype` read is now the identity, and the unquote step is gone.** The premise it rested on — that AGE renders a string as a quoted JSON literal — does not hold: a `::text` cast of a string property returns it unquoted with interior quotes intact, which the `NpgsqlTicketGraph` reader has always assumed by reading the cast raw. Measured on the pinned AGE 1.7: `rel with "quotes" inside` and `Cited from "ADR-3" verbatim` both arrive unquoted, and a genuinely quote-led value arrives *also* unquoted in the sense that its own leading quote is data. So `ReadScalar(string)` stripped content: `"Cited" from ADR-3, not paraphrased` (35 characters) was reduced to `Cited`, and a value with a second quoted run raised `JsonException`. `ReadAgtypeString` is now `reader.GetString(ordinal)` directly, so the two readers of one column are the same read. **This supersedes the 2026-09-27 row below, which corrected that row's doc to describe the strip behaviour more precisely** — the consolidation was right and the documented semantics were wrong. Pinned by five L1 `LinkTests` cases over quote-led, interior-quoted, two-quoted-run and plain reasons, and by a snapshot round trip that asserts the reason's *value* at capture and after restore into a scratch database — the existing reconciliation asserts counts and hashes, all of which a truncated reason satisfies, which is why the corruption verified clean. Both are mutation-verified: re-introducing the strip fails them. The L0 tests that locked the wrong semantics are replaced with `ToJson` coverage of this class's remaining method, including the same reason values through the array path. | pre-MVP review |

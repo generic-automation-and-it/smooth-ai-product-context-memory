@@ -75,11 +75,13 @@ public sealed class NpgsqlMemoryGraph(SmoothAiProductContextMemoryDbContext db) 
             RETURN 1
             """;
         await ExecuteScalarAsync(cypher, cancellationToken);
+        await new NpgsqlCorpusCommitStore(db).AdvanceRevisionAsync(cancellationToken);
         return true;
     }
 
     private async Task AcquireLinkWriteLockAsync(CancellationToken cancellationToken)
     {
+        await new NpgsqlCorpusCommitStore(db).LockAsync(cancellationToken);
         await using NpgsqlCommand command = await CreateRelationalCommandAsync(
             "SELECT pg_advisory_xact_lock(734921, 2);",
             cancellationToken);

@@ -22,6 +22,64 @@ public sealed class RecallFeedbackPersistenceTests(AspireFixture aspire) : Persi
     private NpgsqlRecallFeedbackQuery Reader => new(DataSource, _loggers.CreateLogger<NpgsqlRecallFeedbackQuery>());
 
     [Fact]
+    public async Task Attributed_passes_preserve_legacy_counts_and_group_caller_outcomes()
+    {
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        Guid caller = Guid.NewGuid();
+        Writer.Record([new RecallFeedbackRecord(Guid.NewGuid(), null, RetrievalShape.FreeText, now, RecallPurpose.ServiceRetrieval, caller)]);
+        Writer.Record([new RecallFeedbackRecord(Guid.NewGuid(), Guid.NewGuid(), RetrievalShape.FreeText, now, RecallPurpose.ServiceRetrieval, caller)]);
+        Writer.Record([new RecallFeedbackRecord(Guid.NewGuid(), null, RetrievalShape.FreeText, now, RecallPurpose.ServiceRetrieval, Guid.NewGuid())]);
+        Writer.Record([new RecallFeedbackRecord(Guid.NewGuid(), null, RetrievalShape.FreeText, now, RecallPurpose.CaptureComparison, caller)]);
+        Writer.Record([new RecallFeedbackRecord(Guid.NewGuid(), Guid.NewGuid(), RetrievalShape.FreeText, now)]);
+
+        MissRateResult all = await Reader.MissRateAsync(new MissRateRequest(now.AddMinutes(-1), now.AddMinutes(1), RecallPurpose.AllPurposes), Ct);
+        all.Retrievals.ShouldBe(5);
+        all.Misses.ShouldBe(3);
+        all.MissRate.ShouldBe(0.6);
+        all.CallerRequests.ShouldBe(4); // attribution separates a caller's retrieval and capture purposes
+        all.CallerMisses.ShouldBe(2);
+
+        MissRateResult service = await Reader.MissRateAsync(new MissRateRequest(now.AddMinutes(-1), now.AddMinutes(1), RecallPurpose.ServiceRetrieval), Ct);
+        service.Retrievals.ShouldBe(3);
+        service.Misses.ShouldBe(2);
+        service.CallerRequests.ShouldBe(2);
+        service.CallerMisses.ShouldBe(1);
+        service.CallerMissRate.ShouldBe(0.5);
+        MissRateResult direct = await Reader.MissRateAsync(new MissRateRequest(now.AddMinutes(-1), now.AddMinutes(1), RecallPurpose.DirectRetrieval), Ct);
+        direct.Retrievals.ShouldBe(1);
+        direct.CallerRequests.ShouldBe(1);
+        direct.CallerMisses.ShouldBe(0);
+        var defaultResult = await Reader.MissRateAsync(new MissRateRequest(now.AddMinutes(-1), now.AddMinutes(1)), Ct);
+        defaultResult.ShouldBe(direct);
+    }
+
+    [Fact]
+    public async Task Capture_comparison_does_not_hide_never_recalled_in_a_retrieval_purpose_filter()
+    {
+        (_, Memory never, Memory compared, _) = await SeedMemoriesAsync();
+        Writer.Record([new RecallFeedbackRecord(Guid.NewGuid(), compared.Uuid, RetrievalShape.FreeText, DateTimeOffset.UtcNow, RecallPurpose.CaptureComparison, Guid.NewGuid())]);
+        var legacy = await Reader.NeverRecalledAsync(new NeverRecalledRequest(DateTimeOffset.UtcNow, RecallPurpose: RecallPurpose.AllPurposes), Ct);
+        legacy.Select(row => row.MemoryUuid).ShouldBe([never.Uuid]);
+        var direct = await Reader.NeverRecalledAsync(new NeverRecalledRequest(DateTimeOffset.UtcNow, RecallPurpose: RecallPurpose.DirectRetrieval), Ct);
+        direct.Select(row => row.MemoryUuid).ShouldBe([never.Uuid, compared.Uuid], ignoreOrder: true);
+        var service = await Reader.NeverRecalledAsync(new NeverRecalledRequest(DateTimeOffset.UtcNow, RecallPurpose: RecallPurpose.ServiceRetrieval), Ct);
+        service.Select(row => row.MemoryUuid).ShouldBe([never.Uuid, compared.Uuid], ignoreOrder: true);
+        var defaultResult = await Reader.NeverRecalledAsync(new NeverRecalledRequest(DateTimeOffset.UtcNow), Ct);
+        defaultResult.Select(row => row.MemoryUuid).ShouldBe(direct.Select(row => row.MemoryUuid));
+    }
+
+    [Fact]
+    public async Task Purpose_constraint_rejects_content_in_the_attribution_label()
+    {
+        await using var connection = await DataSource.OpenConnectionAsync(Ct);
+        await using var command = new NpgsqlCommand("INSERT INTO public.recall_feedback (retrieval_id, shape, occurred_on, purpose) VALUES (@id, 'free_text', @now, 'private query text')", connection);
+        command.Parameters.AddWithValue("id", Guid.NewGuid());
+        command.Parameters.AddWithValue("now", DateTimeOffset.UtcNow);
+        var error = await Should.ThrowAsync<NpgsqlException>(() => command.ExecuteNonQueryAsync(Ct));
+        error.SqlState.ShouldBe(PostgresErrorCodes.CheckViolation);
+    }
+
+    [Fact]
     public async Task Write_persists_hit_records_sharing_a_retrieval_id()
     {
         Guid retrievalId = Guid.NewGuid();

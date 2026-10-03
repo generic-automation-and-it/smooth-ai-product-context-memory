@@ -16,7 +16,7 @@ survives the loss of its machine), supported by `BR-13` and `BR-16`; it closes
 HLD 001 NFR-03's Draft recoverability claim for the snapshot path.
 
 **Accepted — implemented** 2026-09-29, matching [README.md](./README.md): the
-`snapshot`/`verify`/`restore` verbs, the archive format (now v3) and the HTTP surface all shipped.
+`snapshot`/`verify`/`restore` verbs, the archive format v3 and the HTTP surface shipped at that baseline. The optional knowledge feature adds v4 operation-receipt recovery and retains v3 reading; its explicit contract and current verification state are in [HLD-008 LADR-02](../008-optional-knowledge-service/ladrs/LADR-02-versioned-snapshots-and-journal-reconciliation.md). That additive feature is not retrospectively accepted by the historical status below.
 **The LADRs and NFRs stay Draft** — accepting the design is not per-LADR acceptance, so each table
 row below is still open to revision on its own evidence; flag deviations rather than silently
 overriding.
@@ -81,6 +81,7 @@ Targets and verification live in [./nfrs/](./nfrs/). Two shape how code is writt
 
 | Date | Change | Ref |
 | :---- | :---- | :---- |
+| 2026-10-03 | Distinguished historical accepted v3 baseline from additive v4 receipt/epoch/reconciliation contract under HLD-008 acceptance. | HLD-008 LADR-02 |
 | 2026-10-02 | **An upgrade is now visible as a migration at startup, and `docker.md` names the actual procedure.** The Host logs one structured line before applying pending migrations — `PendingMigrationCount` and the last snapshot's age (or `no snapshot recorded`) — emitted **only when migrations are pending**, so an ordinary start is silent. It is read-only and non-blocking: the migration runs either way. `docker.md`'s upgrade section now names `snapshot` → offline `verify` → upgrade, and points at `restore` for rollback, replacing the pre-`snapshot` two-store backup wording. **The preflight answer is recorded:** it cannot surface "migrations pending on next start", because the running image has already applied its own migrations and does not carry the next image's migrations assembly; the new image's own startup line is that visibility point. L1 `MigrationPostureTests` drives a real *unmigrated* database over the three cases (pending + no snapshot → `no snapshot recorded`; pending + a recorded snapshot → its age; nothing pending → no line). | LADR-04; HLD-003 NFR-04 |
 | 2026-10-01 | Restore's post-write body-hash check is now pinned: `RestoreArchiveHandlerTests` plants wrong bytes under the correct address (the object store skips an upload when the key exists, so the restore's own write cannot repair it) and asserts the restore refuses before the database is touched. Test-only; making the hash comparison always true fails it. | HLD-006 LADR-05, NFR-02 |
 | 2026-10-01 | A blob's `ContentType` is now an allowlisted value checked by verify and again by restore before any body is written, because it is the one per-blob field outside every hash and restore passes it straight to the object store. Detail in `STORAGE_AGENTS.md`. | HLD-006 LADR-02, NFR-01 |

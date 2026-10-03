@@ -17,7 +17,8 @@ public sealed record SnapshotCapture(
     IReadOnlyList<SnapshotVertex> Vertices,
     IReadOnlyList<SnapshotEdge> Edges,
     IReadOnlyList<SnapshotTicketVertex> TicketVertices,
-    IReadOnlyList<SnapshotTicketEdge> TicketEdges);
+    IReadOnlyList<SnapshotTicketEdge> TicketEdges,
+    IReadOnlyList<OperationReceipt>? OperationReceipts = null);
 
 /// <summary>A <c>Memory</c> graph vertex — carries only its <c>memory_uuid</c> (LADR-02, HLD-003).</summary>
 public sealed record SnapshotVertex(Guid MemoryUuid);

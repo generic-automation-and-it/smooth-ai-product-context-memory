@@ -69,7 +69,8 @@ public static class GetMemoryVersions
                         v.Version,
                         v.IsCurrent,
                         v.Sources,
-                        v.CreatedOn))
+                        v.CreatedOn,
+                        v.BlobAddress != null))
             ];
 
             logger.LogInformation("Get memory versions completed. Count: {Count}", items.Count);

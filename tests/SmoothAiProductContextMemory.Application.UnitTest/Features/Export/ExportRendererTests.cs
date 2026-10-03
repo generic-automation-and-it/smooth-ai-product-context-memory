@@ -215,6 +215,28 @@ public class ExportRendererTests
         markdown.ShouldContain("dogfood-run-3");
     }
 
+    [Fact]
+    public void Evidence_metadata_is_preserved_for_current_and_historical_sources()
+    {
+        ExportMemoryDocument memory = ProductMemory() with
+        {
+            Current = CurrentVersion() with { Sources = [new ExportSource("message", "shipped:2", ValidFrom,
+                new EvidenceDocument { Category = "observed_implementation", AuthorityReference = "deployment:2" })] },
+            HistoricalVersions = [CurrentVersion() with { Version = 1, IsCurrent = false,
+                Sources = [new ExportSource("message", "approved:1", ValidFrom,
+                    new EvidenceDocument { Category = "approved_intent", AuthorityReference = "practitioner:1" })] }],
+        };
+        string current = ExportRenderer.RenderMemory(memory, false);
+        current.ShouldContain("observed_implementation");
+        current.ShouldNotContain("approved_intent");
+        string history = ExportRenderer.RenderMemory(memory, true);
+        string olderVersion = history[history.IndexOf("## Version 1", StringComparison.Ordinal)..];
+        olderVersion.ShouldContain("approved_intent");
+        olderVersion.ShouldContain("practitioner:1");
+        olderVersion.ShouldContain("approved:1");
+        olderVersion.ShouldNotContain("observed_implementation");
+    }
+
     private static ExportMemoryDocument UnderstandingMemory() => new(
         MemoryUuid,
         LineageId,

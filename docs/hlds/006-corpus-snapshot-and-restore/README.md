@@ -1,5 +1,7 @@
 # Corpus snapshot and restore — High-Level Design
 
+> Optional-service feature amendment: writers now emit v4 snapshots including operation receipts, while v3 remains readable. The explicit compatibility/refusal and journal-reconciliation contract is [HLD-008 LADR-02](../008-optional-knowledge-service/ladrs/LADR-02-versioned-snapshots-and-journal-reconciliation.md). Historical acceptance statements below concern the original baseline; the feature acceptance matrix records current verification.
+
 | | |
 |---|---|
 | **Status** | Accepted — implemented; the `snapshot`/`verify`/`restore` verbs, the archive format (now v3) and the HTTP surface all shipped |

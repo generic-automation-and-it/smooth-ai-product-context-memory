@@ -73,7 +73,8 @@ public sealed record SnapshotCounts(
     int Edges,
     int Objects,
     int TicketVertices,
-    int TicketEdges);
+    int TicketEdges,
+    int OperationReceipts = 0);
 
 /// <summary>What is deliberately absent from the archive, stated rather than reported as loss.</summary>
 public sealed record SnapshotExclusions(IReadOnlyList<string> Items);
@@ -88,7 +89,8 @@ public static class SnapshotFormat
     // body's MIME type from content, so the loss begins at capture; archives written before the
     // field existed (v2, field absent→null) would restore bodies as application/octet-stream, so
     // they carry the same refusal semantics as v2.
-    public const int Version = 3;
+    public const int Version = 4;
+    public static bool IsSupported(int version) => version is 3 or Version;
 }
 
 /// <summary>Canonical logical names for archive members that are not blob bodies.</summary>
@@ -105,4 +107,5 @@ public static class SnapshotEntryNames
     public const string Edges = "graph/edges.json";
     public const string TicketVertices = "graph/ticket_vertices.json";
     public const string TicketEdges = "graph/ticket_edges.json";
+    public const string OperationReceipts = "relational/operation_receipt.json";
 }

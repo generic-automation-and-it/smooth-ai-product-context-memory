@@ -630,6 +630,9 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
         ["GET /api/context/recall-feedback/miss-rate"] = ApiCapability.Read,
         ["POST /api/context/snapshot/preflight"] = ApiCapability.Read,
         ["GET /api/context/snapshot/status"] = ApiCapability.Read,
+        ["GET /api/context/corpus-state"] = ApiCapability.Read,
+        ["GET /api/context/operations/{operationKey}"] = ApiCapability.Read,
+        ["POST /api/context/groups/lookup"] = ApiCapability.Read,
 
         // Mutating: create, supersede, link, register, trigger, reset.
         ["POST /api/context/preflight"] = ApiCapability.Write,

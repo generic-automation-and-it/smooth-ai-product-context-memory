@@ -28,6 +28,8 @@ public sealed class SmoothAiProductContextMemoryDbContext(DbContextOptions<Smoot
     public IQueryable<LabelUsageRow> QueryLabelUsage() =>
         Database.SqlQueryRaw<LabelUsageRow>("SELECT name AS \"Name\", uses AS \"Uses\" FROM label_usage");
 
+    public void DiscardTrackedState() => ChangeTracker.Clear();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(SmoothAiProductContextMemoryDbContext).Assembly);

@@ -161,6 +161,7 @@ public static class ExportRenderer
             builder.AppendLineLf($"valid_from: {FormatTimestamp(version.ValidFrom)}");
             builder.AppendLineLf($"valid_until: {(version.ValidUntil is null ? "null" : FormatTimestamp(version.ValidUntil.Value))}");
             builder.AppendLineLf($"created_on: {FormatTimestamp(version.CreatedOn)}");
+            WriteSources(builder, version.Sources);
             builder.AppendLineLf();
         }
 
@@ -255,6 +256,11 @@ public static class ExportRenderer
             builder.Append("    reference: ").AppendLineLf(YamlScalar(source.Reference));
             builder.Append("    captured_at: ").AppendLineLf(
                 source.CapturedAt is null ? "null" : YamlScalar(FormatTimestamp(source.CapturedAt.Value), alreadyLiteral: true));
+            if (source.Evidence is { } evidence)
+            {
+                builder.Append("    evidence: ").AppendLineLf(YamlScalar(System.Text.Json.JsonSerializer.Serialize(
+                    evidence, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))));
+            }
         }
     }
 

@@ -490,6 +490,7 @@ relying on the well for it.
 | Topic | Location |
 |---|---|
 | **Business intent & requirements** | [`docs/brd/001-context-memory/`](docs/brd/001-context-memory/) |
+| **Optional knowledge assistance** | [BRD-004](docs/brd/004-optional-knowledge-service/) · [HLD-008 and additive Host contracts](docs/hlds/008-optional-knowledge-service/) · [implementation and acceptance](docs/optional-knowledge-service/EXECUTION.md) |
 | AI agent context & coding rules | [`AGENTS.md`](AGENTS.md) · [`.agents/`](.agents/) |
 | Architecture & design | [`docs/wiki/architecture.md`](docs/wiki/architecture.md) |
 | AI tooling setup | [`docs/wiki/ai-tooling.md`](docs/wiki/ai-tooling.md) |
