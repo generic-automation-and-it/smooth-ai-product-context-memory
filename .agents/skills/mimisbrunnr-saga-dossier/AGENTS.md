@@ -44,6 +44,13 @@ The skill never re-selects. It takes the bundle (or the approved preview's recor
 composes. If the bundle it receives differs from the approved preview selection, it reports the
 difference (LADR-14) rather than silently composing the new one.
 
+The `bundle` request is the skill's only network call. It seeds the read token and base URL from the
+machine credential file at import (read token + base URL only, never a write token — read-only
+LADR-08/NFR-06), builds the anchor body in the contract's field names (the endpoint rejects unknown
+properties), and always sends `widenDepth`. `--ticket`/`--tickets` map to one `ticketProvider` +
+`ticketKey` pair; more than one ticket is refused, never truncated. Heimdallr autofill uses the same
+builder and fills tickets from the branch only (commit-subject tickets are PR numbers).
+
 ### Ordering (LADR-07)
 
 Topological sort over `supersedes` / `depends_on` / `implements` only. `relates_to` and unknown relations
@@ -151,7 +158,7 @@ the only file it writes is the local dossier artefact. Tests: `tests/run_tests.p
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
-| 2026-10-03 | Two LADR-04/LADR-12 correctness fixes in `dossier_composer.py`. (1) `_validate_contradiction` now also rejects an expired (`no-longer-true`) origin as lifecycle-mismatched, matching its own docstring — a current-versus-expired claim is not incompatible for the same circumstances. (2) The focus lens (`compose`) surfaces a consolidated claim when **any** origin's kind is in the focus affinity, not only the primary's — consolidation groups by meaning+applicability+lifecycle, never kind, so a claim's origins can differ in kind, and using only the primary hid a focus-relevant secondary origin and mislabelled it `outside-focus`. Each pinned by a new harness test. | LADR-04, LADR-12 |
+| 2026-10-03 | **Bundle request fixed from its documented flags and the machine credential.** `bundle` seeds `CONTEXT_MEMORY_READ_TOKEN`/`CONTEXT_MEMORY_BASE_URL` at import from `~/.mimisbrunnr/credentials` via the sibling loader (read token + base URL only — never the write token, read-only LADR-08/NFR-06; a write token present refuses to run; a missing read token is `missing-credential`, not a 403), builds the body in the contract's field names (`--repo`→`repo`, `--initiative`→`initiativeName`, `--ticket provider:key`→`ticketProvider`+`ticketKey`, `--tags`→`tags`, `widenDepth` always sent default 1 via `--widen-depth` 1-5), refuses `--tickets` with >1 value rather than truncating, autofills tickets from the **branch** only (commit-subject tickets are PR numbers), and surfaces the server's problem title/detail on HTTPError instead of discarding the body. Harness 60 -> 74 (`BundleBodyContractTests`, `BundleCredentialTests`, `BundleServerErrorTests`). | session request |
 | 2026-10-03 | **Heimdallr scan skipped when anchors are fully bound.** `bundle` gates the reporter like kvasir `import` already did, so supplied `--repo`/`--tickets`/`--initiative` (or `--body` keys) mean no subprocess runs; per-field precedence restated in SKILL.md. Harness still 60. | session report |
 | 2026-10-03 | **`bundle` gains anchor flags plus Heimdallr autofill (`--heimdallr true`, default on).** `--repo`/`--ticket`/`--tickets`/`--tags`/`--initiative` merge into `--body` (explicit keys win); missing repo/tickets fill from the sibling Heimdallr reporter via a skills-root-relative lookup (branch tickets else newest commit one, never tags). Autofill notes go to stderr so the stdout bundle JSON stays parseable. Harness 57 -> 60. | session request |
 | 2026-10-02 | Renamed `mimisbrunnr-dossier` → `mimisbrunnr-saga-dossier` (folder, `name:`, CI paths, every cross-reference). Saga, goddess of history — she recounts what was. Behaviour unchanged; harness green. | session request |

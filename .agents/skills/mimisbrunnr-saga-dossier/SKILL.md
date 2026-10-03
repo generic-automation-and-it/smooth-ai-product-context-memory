@@ -44,9 +44,13 @@ selection the practitioner approved in the preview, the difference is reported (
 #    the NFR-03 preview (prices the selection without bodies) and the LADR-14 preview-vs-bundle
 #    difference check are performed by the agent directly against the Host API —
 #    POST /api/context/dossier/preview and POST /api/context/dossier/bundle. Read-only.
-#    Anchor flags (--repo/--ticket(s)/--tags/--initiative) merge into --body; only a
+#    Anchor flags (--repo/--ticket/--tickets/--tags/--initiative/--widen-depth) merge into --body,
+#    built in the contract's field names (the endpoint rejects unknown properties); only a
 #    missing repo/ticket anchor autofills from the offline Heimdallr git scan (--heimdallr true,
-#    default on; a supplied flag or --body key is never overwritten for that field; tags are never autofilled).
+#    default on; a supplied flag or --body key is never overwritten for that field; tags are never
+#    autofilled). The contract takes ONE ticket, so --ticket provider:key maps to ticketProvider +
+#    ticketKey, and --tickets with more than one value is refused rather than truncated. widenDepth
+#    is always sent (default 1; --widen-depth sets it, 1-5).
 python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py \
   bundle --repo owner/repo --ticket github:160 | head
 # (the script path above is relative to the skills root, so it holds under
@@ -126,10 +130,14 @@ and its memories by identity + version (LADR-13). Findings are focus-invariant i
 ## Base URL / token
 
 The bundle is requested from the Host API. The base URL is read from `CONTEXT_MEMORY_BASE_URL`
-(default `http://localhost:5141`) and the read token from `CONTEXT_MEMORY_READ_TOKEN`, both by a
-script — the token value never appears in a committed file (skill-secret-handling). `--base-url`
-overrides for a one-off. The base must be a bare http(s) loopback origin (`localhost`, `127.0.0.1`
-or `::1`) — userinfo, a path, a query or a fragment is refused, and a trailing slash is ignored.
+(default `http://localhost:5141`) and the read token from `CONTEXT_MEMORY_READ_TOKEN`, both seeded at
+import from the machine credential file (`~/.mimisbrunnr/credentials`) — read token and base URL only;
+the write token is never loaded, and a write token present in the environment refuses the bundle
+request (read-only, LADR-08 / NFR-06). A missing read token is a `missing-credential` error naming the
+variable and the file, never an unauthenticated request that gets 403. The token value never appears in
+a committed file (skill-secret-handling). `--base-url` overrides for a one-off. The base must be a bare
+http(s) loopback origin (`localhost`, `127.0.0.1` or `::1`) — userinfo, a path, a query or a fragment
+is refused, and a trailing slash is ignored.
 
 ## Scripts
 
@@ -139,7 +147,7 @@ or `::1`) — userinfo, a path, a query or a fragment is refused, and a trailing
 
 ## Test
 
-Committed harness: `python3 -B .agents/skills/mimisbrunnr-saga-dossier/tests/run_tests.py` (39 tests).
+Committed harness: `python3 -B .agents/skills/mimisbrunnr-saga-dossier/tests/run_tests.py` (74 tests).
 
 ## Related
 
