@@ -35,6 +35,11 @@ RAW_BODY_COMMANDS = frozenset({"get-blob"})
 
 
 def main():
+    # The read token and base URL were seeded from the machine credential file when this module was
+    # imported, so there is nothing to load here. Loading again would be a no-op in every normal path
+    # and would restore a deliberately cleared token in the only path where it acts, so a caller could
+    # never establish that this surface fails closed without a credential - which is the guarantee the
+    # check below exists to support.
     if os.environ.get(client.ENV_WRITE_TOKEN):
         print(f"{client.ENV_WRITE_TOKEN} must not be present in the read worker environment", file=sys.stderr)
         return 2

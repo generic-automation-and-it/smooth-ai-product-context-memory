@@ -6,6 +6,107 @@
 
 > Wisdom drawn from **Mímisbrunnr** — not forgotten when the session ends. One eye for a drink; the why stays in the well. Huginn flies the session; Muninn keeps the store. Roots under every product, one well, the reasoning still attached.
 
+## Run it
+
+**No .NET toolchain required.** Two commands, on macOS and Linux:
+
+```bash
+scripts/provision-credentials.sh   # 1. write the API tokens
+scripts/run.sh                     # 2. pull the controller image and start the whole stack
+```
+
+**Step 1 is what puts `CONTEXT_MEMORY_READ_TOKEN` / `CONTEXT_MEMORY_WRITE_TOKEN` in a checkout.**
+They are the names the skills authenticate with, and `provision-credentials.sh` is the only thing that
+writes them inside a repository — both launchers adopt the pair from it rather than minting their own.
+Skip it and the stack starts fine: `scripts/run.sh` publishes the read half to
+`~/.mimisbrunnr/credentials`, which the clients load at startup, so **reads keep working** and only
+writes fail, with `missing-credential: CONTEXT_MEMORY_WRITE_TOKEN is required` until you take the
+deliberate write step below. `scripts/run.ps1` publishes no machine file, so on Windows step 1 is
+required for reads too. Run `run.sh` alone only if you want the API and nothing is going to write to it.
+
+Step 1 is idempotent: re-running reuses the existing tokens rather than rotating them, because the
+running Host holds them and a rotation 403s every client until each one is re-pointed.
+
+`run.sh` starts one controller container, which starts the API, PostgreSQL, blob storage and Seq. It
+waits for the API to answer and exits non-zero if it does not, so a green run means a running API:
+
+| | |
+|---|---|
+| API | http://localhost:5141 |
+| Dashboard | http://localhost:15278 — use the `/login?t=…` URL it prints |
+| PostgreSQL | `127.0.0.1:5432` · blob `9000`/`9001` · Seq `5341` |
+
+To use the skills from a shell, export their half of the pair:
+
+```bash
+set -a && source .context/mimisbrunnr.env && set +a
+```
+
+Run it again to pull a newer release and restart; data is preserved. `scripts/run.sh stop` stops it,
+`status` and `logs` report on it.
+
+**Windows (PowerShell 7):** the launcher is `pwsh ./scripts/run.ps1`. Step 1 is still
+`scripts/provision-credentials.sh`, which is a bash script — there is no `.ps1` equivalent, so run it
+from Git Bash or WSL in this checkout. Both launchers **adopt** the provisioned token pair rather than
+minting their own, so the controller and the skills hold the same credentials on either platform.
+
+### Use it in another repository
+
+The store is a **service**, not a per-repository fixture: start it once on a machine, and every
+repository talks to the same memory. `scripts/run.sh` publishes the credentials to
+`~/.mimisbrunnr/credentials` — outside every checkout — so a repository never has to provision anything.
+
+**Copy the skills in:**
+
+```bash
+mkdir -p .agents/skills
+cp -R <this-repo>/.agents/skills/mimisbrunnr-* .agents/skills/
+```
+
+That's the whole setup for reading. The clients find the credential automatically — no env file, no
+`source`, no per-repository secret. Verify with:
+
+```bash
+python3 .agents/skills/mimisbrunnr-odin-context-memory/scripts/context_memory_client.py probe
+```
+
+**Writing costs one deliberate step**, because a write credential is deliberately never ambient:
+
+```bash
+set -a && source ~/.mimisbrunnr/credentials && set +a
+```
+
+Without it, writes fail closed with `missing-credential: CONTEXT_MEMORY_WRITE_TOKEN is required`; reads
+keep working. That asymmetry is the design — a credential that grants mutation should cost a deliberate
+act to obtain.
+
+Because the store is shared, so are its tokens: every repository authenticates to the same corpus and
+can read what the others captured. Cross-repo recall is the point, but it also means a repository holding
+a write token can write anywhere. Keep the credential file mode `600` and the store on a private
+interface.
+
+<details>
+<summary>Working on the code? These are the source-mode paths</summary>
+
+```bash
+dotnet run --project src/SmoothAiProductContextMemory.AppHost   # Aspire dev stack, Host from the working tree
+dotnet run --project src/SmoothAiProductContextMemory.Host       # API on its own; tokens: see [API credentials](#api-credentials) below
+docker build -t smooth-ai-product-context-memory:local .        # Host image; run contract in docs/wiki/docker.md
+```
+
+The dev AppHost and the controller both want ports `5141`, `5432`, `9000`, `9001`, `5341` and `15278`,
+so stop one before starting the other. `MIMIS_SHIFT_PORTS=1 scripts/run.sh` moves the controller's
+ports clear if you need them side by side.
+
+Aspire uses Docker by default. To run the dev AppHost on Podman, start the machine and set the runtime:
+
+```bash
+podman machine start
+DOTNET_ASPIRE_CONTAINER_RUNTIME=podman dotnet run --project src/SmoothAiProductContextMemory.AppHost
+```
+
+</details>
+
 ## What We're Building
 
 AI language models are stateless — sessions are ephemeral and lost in time, deleted or submerged by chaos. This project is building the connective tissue to bring cohesion to the lifecycle. Context is no longer lost, instead, it gets refined to the latest, most relevant versions while still keeping track of the history and previous thought process, from both humans and agents. The connective tissue is layered tagging: what a session leaves behind is broken into atomic facts, each anchored by initiative, scope, repository, ticket, subject, tags and facets — and the anchors that matter for reachability are edges, so memories link to each other and tickets link into a hierarchy. A session is therefore not a transcript to be found again but a referenced graph to be walked. This project builds **persistent AI memory** so coding agents can recall relevant context over long periods, even after their working memory is gone, the sessions are impossible to find or the human in the loop no longer remembers why something got to be the way it got to be.
@@ -211,9 +312,14 @@ regeneration procedure — rotation invalidates no data, because the tokens are 
 
 ### Prerequisites
 
-- **.NET 10 SDK**
-- A container runtime — Docker Desktop, Rancher Desktop, Colima, or Podman (for PostgreSQL via Aspire)
+To run the stack — enough for [Run it](#run-it) above:
+
+- A container runtime — Docker Desktop, Rancher Desktop or Colima. Rootless Docker and Podman are not wired up; see [`CONTROLLER_LAUNCHER.md`](scripts/CONTROLLER_LAUNCHER.md)
 - **Python 3 runtime** — required for agent skills (stdlib-only scripts). Do not rely on macOS `/usr/bin/python3` (Xcode stub).
+
+To build or modify the code:
+
+- **.NET 10 SDK**
 
   macOS ([Homebrew `python@3.14`](https://formulae.brew.sh/formula/python@3.14)):
 
@@ -254,23 +360,6 @@ dotnet test    SmoothAiProductContextMemory.slnx
 ```
 
 Target a single test project directly when iterating, e.g. `dotnet test tests/SmoothAiProductContextMemory.Domain.UnitTest`.
-
-### Run locally
-
-```bash
-dotnet run --project src/SmoothAiProductContextMemory.AppHost   # Aspire stack; tokens: run scripts/provision-credentials.sh first (docs/wiki/setup.md)
-HostConfiguration__UseProject=false \
-  dotnet run --project src/SmoothAiProductContextMemory.AppHost # same stack, pull published Host image (tag may lag)
-dotnet run --project src/SmoothAiProductContextMemory.Host       # API on its own; tokens: see API credentials above
-docker build -t smooth-ai-product-context-memory:local .        # Host image; run contract in docs/wiki/docker.md
-```
-
-Aspire uses Docker by default. To run the same AppHost on Podman, start the machine and set the runtime:
-
-```bash
-podman machine start
-DOTNET_ASPIRE_CONTAINER_RUNTIME=podman dotnet run --project src/SmoothAiProductContextMemory.AppHost
-```
 
 Once the stack is up:
 
@@ -365,6 +454,7 @@ relying on the well for it.
 | CI/CD pipeline | [`docs/wiki/ci.md`](docs/wiki/ci.md) |
 | Container images & durability (`snapshot`/`verify`/`restore`) | [`docs/wiki/docker.md`](docs/wiki/docker.md) |
 | Setup & credentials (tokens, name mapping, provisioning) | [`docs/wiki/setup.md`](docs/wiki/setup.md) |
+| One-command controller launcher (`run.sh` / `.ps1`) | [`scripts/CONTROLLER_LAUNCHER.md`](scripts/CONTROLLER_LAUNCHER.md) |
 | Architecture decisions & NFRs | [`docs/hlds/`](docs/hlds/) |
 
 ---

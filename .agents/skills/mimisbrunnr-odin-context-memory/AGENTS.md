@@ -16,17 +16,15 @@ second writer.
   read/write contexts. Read execution receives only the read API credential and read-only client;
   write execution receives discrete facts, never a transcript. API credentials enforce capability;
   prompt text alone is not a security boundary.
-- **Project agent registrations live in `.agents/agents/` for Claude-compatible runtimes and
-  `.github/agents/` for Copilot.** Skill-local files hold detailed contracts; project registrations
-  make workers discoverable and point at them. Current Codex supports project custom agents through
-  [`.codex/agents/*.toml`](https://learn.chatgpt.com/docs/agent-configuration/subagents), but this
-  repository ships only Markdown Codex worker profiles, not TOML profiles, and their intended MCP/tool
-  grants were absent from the contribution runtime. Treat a registration file or worker name as
-  insufficient: delegation is supported only when the runtime exposes the capability-limited workers
-  with their intended grants.
-  Read worker has no generic
-  shell/write-client access; its MCP server strips `CONTEXT_MEMORY_WRITE_TOKEN` and exposes only reads.
-  Write worker also has no shell/file tools; typed write MCP methods bound its mutation surface.
+- **Project agent registrations live in `.agents/agents/` for Claude-compatible runtimes.** Skill-local
+  files hold detailed worker contracts; project registrations make workers discoverable and point at
+  them. There is no MCP boundary, so the no-write guarantee is carried by the read-only client and the
+  credential split rather than by a tool grant — treat a registration file or worker name as
+  insufficient: delegation is supported only when the runtime grants both workers and the read worker's
+  environment holds no write credential. The read worker runs only `context_memory_read_client.py` (no
+  write subcommand, refuses to start with `CONTEXT_MEMORY_WRITE_TOKEN` present); the write worker runs
+  `context_memory_client.py`. The write credential is never ambient — sourcing the full credential file
+  is the deliberate write step, so a read worker that never sources it holds no write capability.
 
 - **Never write mid-work.** Accumulate candidates silently during work; write only at the explicit
   end-of-task checkpoint (`set`). This is the manual-trigger design (D29), not a per-fact flush.
@@ -52,7 +50,7 @@ second writer.
   hash stable. A leaked secret cannot be edited out afterwards, only orphaned. This ordering is
   non-negotiable.
 - **The redaction gate is a gate on *recognition*, not on secrets.** Every persisting write (`set` and
-  the seven group/link/label/initiative/ticket writes, CLI and MCP) scrubs automatically through
+  the seven group/link/label/initiative/ticket writes) scrubs automatically through
   `scrubbed_write` and refuses to write when the scrubber cannot run, so it can never fail open — but `redact.py` matches
   fixed-shape fingerprints (cloud/vendor key prefixes, JWTs, PEM private-key blocks, URL userinfo,
   `Authorization`/`Bearer` credentials, assignments to a key whose name says secret, and assignments to
@@ -292,23 +290,22 @@ flowchart LR
    `unittest` (no external runner). Unit-tests `redact.py` secret containment (`SecretShapeCoverageTests`: a 36-shape positive corpus,
    PEM and repeated-prefix linear-time guards; `RedactionPrecisionTests`: an ordinary-prose corpus that
    must pass byte-identical and located digests; case-insensitive keys; `OtherWriteRedactionTests`:
-   every persisting write tool, CLI and MCP); `atomicity.py` bundle
+   every persisting write tool); `atomicity.py` bundle
    detection; `context_memory_client.py` path-segment, exact-route credential, loopback, unparseable-base-URL
    and redirect guards — the last two through the client's real opener, not the handler in isolation; `deepsearch.py`
    caps, deduplication and omission disclosure; `divergence.py` composition, pair idempotency and
-   recursion rejection; `authority.py` ordered version composition; read-client/MCP fail-closed
-   capability boundaries; project/Copilot agent registrations; ticket transport/guards/dry-run/lossless
+   recursion rejection; `authority.py` ordered version composition; read-client fail-closed
+   capability boundaries; project agent registrations; ticket transport/guards/dry-run/lossless
    disclosure; blinded semantic-fixture emission/scoring; `TransportFailureTests`, which drives a **real
    stalled socket** to prove a hung store is classified `timed-out` rather than escaping as a
    `TimeoutError` traceback, returns within the budget (elapsed ≤ `HTTP_TIMEOUT` + tolerance), and that a
    refused connection stays `unreachable` (the control that makes the first assertion meaningful — a fix
-   classifying every transport error as `timed-out` passes one and fails the other) — including the MCP
+   classifying every transport error as `timed-out` passes one and fails the other) — including the
    blob fetch, which is driven through the same classified path; `RecallFramingTests`, which recalls a
    record whose statement is a verbatim prompt injection through every registered read subcommand **via
-   the client's real `main()`** and through every MCP tool **via `read_mcp.handle`**, requiring the shared
-   notice plus intact attribution on each — driving the real entry points rather than the framing helper,
-   because an earlier version passed with the whole fix reverted and the MCP surface is the only one the
-   `memory-read` worker can reach; `RecallDeadlineTests`,
+   the client's real `main()`**, requiring the shared
+   notice plus intact attribution on each — driving the real entry point rather than the framing helper,
+   because an earlier version passed with the whole fix reverted; `RecallDeadlineTests`,
    which pins the deadline config (defaults to the cap, shortens, refuses out-of-range/non-integer with
    `bad-deadline` rather than clamping, refuses before transport), the single-call bound (a shortened
    deadline reaches `_open` as the socket timeout), and deepsearch's degradation (a timed-out pass keeps
@@ -387,7 +384,7 @@ redaction detector is a stdin→stdout fingerprint script reporting rule names o
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
-| 2026-10-02 | Renamed `mimisbrunnr-context-memory` → `mimisbrunnr-odin-context-memory` (folder, `name:`, npm launcher, CI paths, every cross-reference). Odin gave his eye at Mímir's well and carved the runes — the writer who pays for clean facts. Behaviour unchanged; harnesses green. | session request |
+| 2026-10-02 | **Removed the MCP layer; the workers now run the bash clients.** Deleted `.mcp.json`, `scripts/launch-mcp.sh`, `scripts/memory_read_mcp.py`, `scripts/memory_write_mcp.py`, and the `.github/agents/*.agent.md` Copilot registrations. `memory-read` runs `context_memory_read_client.py` and `memory-write` runs `context_memory_client.py`; both project registrations and the skill-local contracts follow. The no-write guarantee moves from the MCP process boundary to three properties that survive without it: the read client exposes no write subcommand, it refuses to start with `CONTEXT_MEMORY_WRITE_TOKEN` present, and the write credential is never ambient (sourcing the full credential file is the deliberate write step). The read worker is instructed never to source that file, and the store still rejects a read credential on a write route. Harness tests: the four MCP-only properties carry over to their CLI equivalents — write-token refusal (`test_read_client_refuses_environment_with_write_credential`), the set cap before transport (`test_set_enforces_checkpoint_cap_before_transport`), blob-fetch classification (`test_the_blob_fetch_path_shares_the_classification`), and set-digest locations (`test_set_digest_names_the_field_and_offsets_of_every_scrub`). | MCP removal |
 | 2026-10-02 | **Recorded the fresh-store preconditions and the read surface's token refusal.** `resolve-group` has no dry-run mode and commits unconditionally, so a dry run must resolve nothing and report the group and initiative as *would create*; a missing initiative is a `404`, so `upsert-initiative` runs first. The read client refuses to start with `CONTEXT_MEMORY_WRITE_TOKEN` present, and an orchestrating skill that shells out to it strips the write token from the subprocess environment. Docs only — no behaviour change. | mimisbrunnr-understanding export/import |
 | 2026-10-02 | **The MCP read server now frames its output, classifies its blob fetch, and its deepsearch disclosure stops overstating.** A review of the shipped work found five gaps. (1) `memory_read_mcp.py` returned raw values with no framing — the read worker's *only* path to the store is this server (its grant is `mcp__mimisbrunnr-read__*`), so the CLI framing the contract promised was unreachable from it; `handle` now frames every content-returning tool through `context_memory_client.framed_recall` (extracted from `print_recall`, so there is still one wording and one shape), with `probe` the derived opt-out and a test that drives `read_mcp.handle` for every tool. (2) `_get_blob` called `client._open` directly, taking the default socket timeout and skipping classification — a hung store surfaced as a bare `timed out` after 30 s; it now routes through `_read_response`, so it is deadline-bounded and classified `timed-out`. (3) A baseline timeout left `anchorsEligible`/`anchorsOmittedByCap` at `0`, which reads as "nothing to traverse"; they are now `null` when the baseline never answered. (4) `deadlineReached` set on a *pass* timeout (wall clock nowhere near the cap) is renamed `stoppedEarly`, with a separate `budgetExhausted` for the wall clock; `passesNotRun` (which named the pass that did run) is renamed `passesIncomplete`. (5) `TransportFailureTests` now asserts elapsed ≤ budget (the acceptance criterion), and `CONTEXT_MEMORY_RECALL_DEADLINE` is documented in `docs/wiki/setup.md`. Harness 161 -> 165. | review of #149; HLD-004 LADR-01 |
 | 2026-10-01 | **A recall now has one foreground deadline, and deepsearch degrades by whole passes at it.** The read path already told `timed-out` apart from `unreachable` (#146), but nothing bounded a *command*: deepsearch could chain a baseline, four keyword and five traversal calls with no overall limit, and a single timed-out pass aborted the run and discarded every pass already completed — so a five-minute hang returned nothing. `RECALL_DEADLINE_SECONDS` (60 s) is the cap; `CONTEXT_MEMORY_RECALL_DEADLINE` may shorten it and any other value is refused with `bad-deadline`, never clamped. Each read's socket timeout is `min(HTTP_TIMEOUT, deadline)`, so a shortened deadline bounds a single `query`; a write keeps `HTTP_TIMEOUT`, so a malformed read-path setting cannot refuse a capture. deepsearch checks the deadline before each pass, uses the remaining budget as that pass's socket timeout, and on a timeout stops the chain while keeping the completed passes — whole records only — disclosing `deadlineSeconds`, `deadlineReached` and `passesNotRun`, with each pass carrying a `status`. Recall feedback stays server-side (HLD-004 LADR-01), so the contract states that a client giving up can leave a server-recorded outcome the agent never received. **The harness found a second-module trap while writing the tests:** `deepsearch` was loaded before `sys.modules["context_memory_client"]` was aliased, so it held its own `ClientError` and a raised timeout was invisible to its handler — `_load` now registers each module before exec, which fixes the class for every sibling import rather than patching one. Harness 153 -> 161; both the deadline refusal and the partial-return path mutation-checked. | MemOS adoption; HLD-004 LADR-01; BR-16 |

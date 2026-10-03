@@ -59,8 +59,9 @@ helper directly from the main thread.** Raw recall arrays stay inside `memory-re
 Main thread receives cited conclusions, omission disclosure, bounded clarification needs, and receipts.
 Read worker receives only `CONTEXT_MEMORY_READ_TOKEN`; write worker also receives
 `CONTEXT_MEMORY_WRITE_TOKEN`. API authorization is the capability boundary.
-Spawn project agents `memory-read` and `memory-write`. Both use typed MCP tools, not Bash.
-`memory-read` MCP process strips `CONTEXT_MEMORY_WRITE_TOKEN` and exposes no mutation operation.
+Spawn project agents `memory-read` and `memory-write`. `memory-read` runs only the read-only client
+`context_memory_read_client.py`, which exposes no write operation and refuses to start with
+`CONTEXT_MEMORY_WRITE_TOKEN` present; `memory-write` runs `context_memory_client.py`.
 
 ## Session Phases
 
@@ -164,7 +165,7 @@ stale, not an alternative reading.
 | Order | Stage | What it does |
 |---|---|---|
 | 1 | **Preflight** | Batched exact cross-group subject/ticket backstops plus intra-batch collision detection. Array-in/array-out; writes and judges nothing. |
-| 2 | **Redact** | Detect secrets/tokens/connection strings in the captured content and scrub them **before** the blob write. Content addressing makes a blob immutable — a leaked secret cannot be edited out later, only orphaned. Redaction must precede the blob write. Every persisting write — `set`, `resolve-group`, `update-group`, `append-description`, `create-link`, `ticket-parent`, `propose-label`, `upsert-initiative`, CLI and MCP alike — scrubs its free-text fields automatically (keys matched case-insensitively, as the Host binds them; ticket identities are never rewritten), so this is a gate, not a step you may skip. The record of what was scrubbed goes to the digest as `redaction: [{rule_name, hit_count, locations: [{field, start, end}]}]` — `field` is the request path (`items[0].statement`), `start`/`end` the replaced code-point offsets in your own text — so no scrub is silent; if a location covers prose rather than a secret, fix the wording and re-run. Offsets only: content is never logged. |
+| 2 | **Redact** | Detect secrets/tokens/connection strings in the captured content and scrub them **before** the blob write. Content addressing makes a blob immutable — a leaked secret cannot be edited out later, only orphaned. Redaction must precede the blob write. Every persisting write — `set`, `resolve-group`, `update-group`, `append-description`, `create-link`, `ticket-parent`, `propose-label`, `upsert-initiative`, CLI and worker alike — scrubs its free-text fields automatically (keys matched case-insensitively, as the Host binds them; ticket identities are never rewritten), so this is a gate, not a step you may skip. The record of what was scrubbed goes to the digest as `redaction: [{rule_name, hit_count, locations: [{field, start, end}]}]` — `field` is the request path (`items[0].statement`), `start`/`end` the replaced code-point offsets in your own text — so no scrub is silent; if a location covers prose rather than a secret, fix the wording and re-run. Offsets only: content is never logged. |
 | 3 | **Dedupe / derive links** | The cross-group subject match and link derivation, applied to the write decision from the preflight. Locate existing subjects; the result decides version-bump vs new-memory vs skip **qualified by group**: a match inside this group is a version bump, a match in another group is a new memory here plus a typed link (a foreign `uuid` target is a `404`, never a bump). |
 | 4 | **Atomicity check** | Confirm each record is one atomic fact. Split bundled candidates; route the unprocessable remainder to `skipped`. |
 | 5 | **Write** | Single transactional `set`. Version bump ordering: flip the old `is_current` to `false` *before* inserting the new current, both **in one transaction**, or a failure between them strands zero current versions. |

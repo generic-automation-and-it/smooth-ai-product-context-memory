@@ -18,14 +18,16 @@ Before any store comparison, dry-run, capture, or recall test:
 
 1. Load `../mimisbrunnr-odin-context-memory/SKILL.md` and its `agents/memory-read.md` and
    `agents/memory-write.md` worker contracts.
-2. Confirm through a runtime probe or known effective grants that the runtime provides the capability-
-   limited `memory-read` and `memory-write` workers described by those contracts, including their actual
-   tool and credential separation. A worker name or registration file alone is not proof. Prompt
-   instructions or ordinary shared subagents do not provide secret or tool isolation.
+2. Confirm through a runtime probe or known effective configuration that the runtime provides the
+   `memory-read` and `memory-write` workers described by those contracts, and that the read path holds no
+   write capability: the read worker runs only `context_memory_read_client.py`, which exposes no write
+   subcommand and refuses to start with `CONTEXT_MEMORY_WRITE_TOKEN` present. A worker name or
+   registration file alone is not proof, and prompt instructions or ordinary shared subagents do not
+   provide secret isolation.
 3. Fail closed if the dependency or either protected worker is unavailable.
 
 In the fail-closed path, perform only offline repository discovery and produce the source-backed preview.
-Do not call HTTP clients, MCP tools, helper scripts, or another workaround to reach the store. Do not
+Do not call HTTP clients, helper scripts, or another workaround to reach the store. Do not
 bring raw store rows into the main context. State that store comparison, writer dry-run, capture, and
 post-capture recall verification are unavailable and that nothing was written. Offer a handoff to a
 supported runtime; do not automatically export a file, install anything, or change configuration.
@@ -178,7 +180,7 @@ canon. Defaulting capture permission to canonical approval is forbidden.
 
 Delegate the exact reviewed candidates and identities to `memory-write`; it is the sole authority on the
 write path. Preserve its fixed pipeline and current read/write contracts. Do not directly call clients,
-scripts, HTTP, or MCP as a substitute. Report the worker's receipt, partial failure, conflict, and skip
+scripts, or HTTP as a substitute. Report the worker's receipt, partial failure, conflict, and skip
 counts accurately; never claim intended operations succeeded.
 
 ### 5. Verify Through Real Recall

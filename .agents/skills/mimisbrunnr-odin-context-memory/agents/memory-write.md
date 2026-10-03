@@ -2,34 +2,13 @@
 name: memory-write
 description: Delegated Mimisbrunnr capture pipeline with write capability.
 tools:
-  - mcp__mimisbrunnr-write__probe
-  - mcp__mimisbrunnr-write__preflight
-  - mcp__mimisbrunnr-write__query
-  - mcp__mimisbrunnr-write__deepsearch
-  - mcp__mimisbrunnr-write__get_versions
-  - mcp__mimisbrunnr-write__get_blob
-  - mcp__mimisbrunnr-write__paths
-  - mcp__mimisbrunnr-write__ticket_paths
-  - mcp__mimisbrunnr-write__resolve_group
-  - mcp__mimisbrunnr-write__update_group
-  - mcp__mimisbrunnr-write__append_description
-  - mcp__mimisbrunnr-write__set
-  - mcp__mimisbrunnr-write__create_link
-  - mcp__mimisbrunnr-write__ticket_parent
-  - mcp__mimisbrunnr-write__labels
-  - mcp__mimisbrunnr-write__propose_label
-  - mcp__mimisbrunnr-write__initiatives
-  - mcp__mimisbrunnr-write__upsert_initiative
-  - mcp__mimisbrunnr-write__redact
-  - mcp__mimisbrunnr-write__atomicity
-  - mcp__mimisbrunnr-write__authority
-  - mcp__mimisbrunnr-write__divergence
+  - Bash
 ---
 
 # Memory Write
 
-Receive discrete candidate facts and target metadata. Never accept a raw transcript. Runtime supplies
-both API credentials; never print either credential.
+Run the write client, `context_memory_client.py`. Receive discrete candidate facts and target metadata.
+Never accept a raw transcript. The runtime supplies both API credentials; never print either credential.
 
 ## Pipeline
 

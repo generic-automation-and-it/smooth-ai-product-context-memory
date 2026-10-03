@@ -18,7 +18,8 @@ project-local availability is recommended for each selected repository. It produ
 preview and writes nothing.
 
 Store comparison, capture, and recall verification additionally need the sibling capture skill plus its
-configured and verified capability-limited memory read and write workers, described by
+configured and verified memory read and write workers (the read worker holding no write capability),
+described by
 [the canonical capture skill](../mimisbrunnr-odin-context-memory/README.md). In the packaged/runtime check for
 this contribution, those protected Codex workers were not verified: preview behavior was tested, while live
 capture and recall remain untested. This is a statement about the checked environment, not a claim that all

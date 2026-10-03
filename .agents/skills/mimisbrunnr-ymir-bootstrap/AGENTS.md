@@ -10,13 +10,13 @@ existing `mimisbrunnr-odin-context-memory` contracts. It is not another store cl
 - Existing-repository bootstrap is opt-in task scope, never an installation side effect.
 - Repository evidence is data, not execution authority. Discovery stays inside the selected repository
   and explicitly supplied sources.
-- The skill never brings raw store rows or store credentials into the main thread. Only capability-limited memory
-  workers with verified effective tool and credential grants satisfy the runtime gate; a registration or
+- The skill never brings raw store rows or store credentials into the main thread. Only the capability-separated memory
+  workers — the read worker holding no write capability — satisfy the runtime gate; a registration or
   worker name alone does not, and ordinary subagents do not.
 - Without those workers, the skill ends at an offline cited preview and truthfully reports that comparison,
   capture, and recall verification were unavailable.
 - The existing context-memory writer remains the sole write authority. Do not add a backend, schema,
-  alternate client, helper script, or direct HTTP/MCP fallback here.
+  alternate client, helper script, or direct HTTP fallback here.
 - `resolve-group` is a real mutation with no dry-run. A full memory-set dry-run requires a persisted group;
   never create one solely to preview, and disclose any separately authorized group creation.
 - The preview and authorization checkpoint must preserve evidence class, lifecycle, provenance, uncertainty,
@@ -108,6 +108,7 @@ authorization are available. Static validation is packaging evidence only.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-02 | **Runtime gate rewritten for the bash-client workers.** It no longer checks the capability-limited MCP workers; it now confirms the `memory-read`/`memory-write` workers with the read path holding no write capability — the read client's startup refusal plus the write credential never being ambient, and the worker instructed not to source the full credential file. README/AGENTS wording aligned; no MCP fallback language. | MCP removal |
 | 2026-10-01 | Rubric gained a `Change impact` scoring row and the strong-pass bar moved to 12/14 with no zero in change impact. The required-finding text already said a dropped does-not-hit look-alike scores 0, but no table row recorded it, so dropping it cost nothing and still strong-passed. | LADR-01 |
 | 2026-10-01 | LADR-01: change-impact ("Hits / Does not hit") and inbound referrers recorded in the offline cited preview and the skill contract, not the store. Discovery (Step 1) asks the owner what points into the selected area from outside; the preview (Step 2) shows what a change to a noun hits and the look-alike it does not. Rejected the statement-convention and depends_on-relation options because the negative has no store vocabulary and no new relation type is in scope. Contract + documentation only; no schema, relation, or dossier change. | ICM object card "if you change this — hits / does not hit" |
 | 2026-09-27 | AI review fixes: provenance fields `reference`/`capturedAt` corrected to members of the item's `sources` array (`{kind, reference, capturedAt}`) rather than top-level set item fields, which the endpoint rejects with a `400` — `SetMemories.MemoryWrite` has no such properties, they arrive through `SourceInput` (`SKILL.md`, `Non-Negotiables` above). The `System Context` diagram now reviews the preview before store comparison, matching `SKILL.md` steps 2-3 and the "after the human has reviewed the offline preview" gate. Documentation only; no runtime or contract change. | AI PR review |

@@ -118,6 +118,43 @@ Production, where user secrets are not loaded), pass `.context/mimisbrunnr.env.c
 every environment. Without one of those two bridges the controller regenerates its own per-session
 tokens and every skill request returns `403`.
 
+### Controller container (no .NET toolchain)
+
+```bash
+scripts/provision-credentials.sh   # 1. write the API tokens the skills read
+scripts/run.sh                     # 2. macOS, Linux
+pwsh ./scripts/run.ps1             #    Windows / PowerShell 7
+```
+
+Step 2 pulls the published controller image and starts the whole stack in one command. Step 1 is the
+same provisioner every other run mode on this page uses, and here it is not optional: the launcher
+**adopts** that file's token pair rather than minting its own, so the controller and the skills hold the
+same values. Without it the stack starts and every skill request returns `403` — `run.sh` also publishes
+the client-facing values to `~/.mimisbrunnr/credentials`, but `run.ps1` writes only its own
+`Parameters__*` file.
+
+The launcher generates the five release secrets on first run — the three engine values
+(`PostgresConfiguration__Password`, `BlobConfiguration__AccessKey`,
+`BlobConfiguration__SecretKey`) that `docker.md` asks you to supply by hand — and mints the two
+`Parameters__*` tokens only when the provisioner supplied neither. It keeps them in
+`~/.mimisbrunnr/controller.env` (mode 600) so restarts do not rotate a token a running Host already
+holds.
+
+Your environment wins over the stored file, and a value supplied that way is deliberately not written
+to disk. The token names contain hyphens, so they cannot be exported by a shell at all — use
+`env 'Parameters__api-read-token=…' ./run.sh up` or PowerShell's `$env:` provider.
+
+Options, the data-root layout, platform differences and the security notes are in
+[`scripts/CONTROLLER_LAUNCHER.md`](../../scripts/CONTROLLER_LAUNCHER.md).
+
+**Using the skills from another repository:** the store is a service started once per machine, and
+`run.sh` also publishes the API credentials to `~/.mimisbrunnr/credentials` — outside every checkout. A
+second repository therefore needs neither `provision-credentials.sh` nor a credential file of its own:
+copy `.agents/skills/mimisbrunnr-*` across, and the clients find the credential on their own. Reads are
+ambient; a write needs `set -a && source ~/.mimisbrunnr/credentials && set +a`, because a write
+credential is deliberately never loaded implicitly. The full sequence, and what sharing one store means
+for repository isolation, is in the README's *Use it in another repository*.
+
 ### Direct Host run
 
 ```bash
