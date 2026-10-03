@@ -1702,9 +1702,16 @@ class HeimdallrAutofillTests(unittest.TestCase):
                         {"provider": "github", "key": "159", "seenIn": "commit"}],
             "initiative": "unknown",
         }
+        # These tests are about the autofill precedence, not the store. `initiative_exists` hits the
+        # read client, which fails when no store is reachable and returns `None` (read-failed) — that
+        # makes the export refuse instead of testing the supplied-initiative survival. Stub it to a
+        # definite "absent" so the dry run proceeds deterministically.
+        self.original_initiative_exists = uc.initiative_exists
+        uc.initiative_exists = lambda name: (False, "absent")
 
     def tearDown(self):
         uc.heimdallr_scan = self.original
+        uc.initiative_exists = self.original_initiative_exists
 
     def test_export_default_fills_repo_and_branch_ticket_only(self):
         with tempfile.TemporaryDirectory() as tmp:
