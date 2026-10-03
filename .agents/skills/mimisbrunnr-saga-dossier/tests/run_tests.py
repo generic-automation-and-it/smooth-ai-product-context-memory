@@ -247,6 +247,36 @@ class Nfr04ReconciliationTests(unittest.TestCase):
         self.assertIn("equivalence-uncertain", cats)
         self.assertEqual(doc.lifecycle[dc._item_key(expired)], "no-longer-true")
 
+    def test_contradiction_rejects_an_expired_origin(self):
+        """LADR-04 lifecycle gate: a current claim against an expired (no-longer-true) claim is not
+        incompatible for the same circumstances (they hold over different time windows), so the
+        contradiction is refused like a proposed-versus-shipped pairing. The derived statuses collapse
+        an expired origin here, so the gate must check it — not only the literal 'proposed'."""
+        live = _mk("aaaaaaaa-0000-4000-8000-000000000001", "Live", "The default is A.",
+                   created="2026-02-01T10:00:00Z")
+        expired = _mk("bbbbbbbb-0000-4000-8000-000000000002", "Expired", "The default is B.",
+                      created="2026-01-01T10:00:00Z", valid_until="2020-01-01")
+        judg = {"findings": [
+            {"category": "contradiction", "classification": "analysis",
+             "basis": "A current and an expired claim look contradictory but hold over different windows.",
+             "memories": [{"uuid": live["uuid"], "version": 1}, {"uuid": expired["uuid"], "version": 1}]}]}
+        with self.assertRaises(ValueError):
+            dc.compose(_bundle([live, expired]), focus=None, judgements=judg)
+
+    def test_focus_surfaces_a_claim_when_any_origin_matches(self):
+        """LADR-12 + LADR-05: consolidation groups equivalence by meaning+applicability+lifecycle,
+        never by kind, so a consolidated claim's origins can carry different kinds. A focus must not
+        hide a claim whose secondary origin is in its affinity just because the primary is not —
+        that would mislabel the matching origin 'outside-focus'."""
+        primary = _mk("aaaaaaaa-0000-4000-8000-000000000001", "A", "The default is X.",
+                      kind="implementation")
+        matching = _mk("bbbbbbbb-0000-4000-8000-000000000002", "B", "The default is X.",
+                       kind="decision")
+        judg = {"equivalences": [{"uuids": [primary["uuid"], matching["uuid"]], "meaning": "same"}]}
+        doc = dc.compose(_bundle([primary, matching]), focus="architecture", judgements=judg)
+        self.assertTrue(any(c.get("surfaced") for c in doc.claims))
+        self.assertFalse(any(o.get("reason") == "outside-focus" for o in doc.omitted))
+
     def test_overlapping_equivalence_groups_are_rejected(self):
         """reviewer finding 2: a uuid in two equivalence proposals is rejected fail-loud rather than
         rendered as two claim headers over one memory."""

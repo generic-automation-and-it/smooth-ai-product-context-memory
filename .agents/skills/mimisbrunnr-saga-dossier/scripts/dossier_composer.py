@@ -714,8 +714,13 @@ def _validate_contradiction(f, by_key, edges=None, asof=None):
     apps = [_applicability(i) for i in items]
     statuses = {mark_lifecycle(i, edges, asof) for i in items}
     scoped = len(set(apps)) > 1
-    proposed_ship = (LIFECYCLE_PROPOSED in statuses)
-    if scoped or proposed_ship:
+    # Lifecycle precondition. A proposed claim and an expired (no-longer-true) claim are both
+    # excluded: like proposed-versus-shipped, current-versus-no-longer-true is not incompatible for
+    # the same circumstances (they hold over different time windows). The derived statuses already
+    # collapse "proposed" and an expired origin here, so both must be checked — the docstring above
+    # states it, and only the literal "proposed" was.
+    lifecycle_differs = bool({LIFECYCLE_PROPOSED, LIFECYCLE_NO_LONGER_TRUE} & statuses)
+    if scoped or lifecycle_differs:
         raise ValueError(
             "contradiction: claims differ in applicability or lifecycle, so they are not a conflict "
             "under LADR-04 (scoped exception / proposed-versus-shipped are not contradictions)")
@@ -865,7 +870,13 @@ def compose(bundle, focus=UNFOCUSED, judgements=None, asof=None, store_name=STOR
     claims = []
     for claim in present_claims:
         origin = claim["origins"][0]
-        surfaced, depth = _focus_relevance(origin, focus)
+        # Focus is a lens over a consolidated claim, and consolidation (LADR-05) groups equivalence
+        # by meaning + applicability + lifecycle, never by kind — so a claim's origins can carry
+        # different kinds. Surfaces the claim if ANY origin is in the focus affinity, else the lens
+        # would hide a focus-relevant origin behind an out-of-affinity primary and mislabel it
+        # "outside-focus". Depth still reads from the primary, which is the claim's representant.
+        surfaced = any(_focus_relevance(o, focus)[0] for o in claim["origins"])
+        depth = _focus_relevance(origin, focus)[1]
         rendered = dict(claim)
         rendered["depth"] = depth
         rendered["surfaced"] = surfaced
