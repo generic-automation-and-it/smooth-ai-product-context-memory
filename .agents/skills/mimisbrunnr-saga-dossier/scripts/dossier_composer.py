@@ -1254,7 +1254,8 @@ def cmd_bundle(args):
         body["tags"] = _split_list(args.tags)
     if getattr(args, "initiative", None) and "initiative" not in body:
         body["initiative"] = args.initiative
-    if heimdallr_enabled(args):
+    if heimdallr_enabled(args) and ("repo" not in body or "tickets" not in body
+                                    or "initiative" not in body):
         scan = heimdallr_scan()
         filled = []
         repo = scan.get("repository")

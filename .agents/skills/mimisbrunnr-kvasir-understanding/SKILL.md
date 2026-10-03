@@ -133,12 +133,20 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
 ## Heimdallr autofill (`--heimdallr true`, default on)
 
 `import`, `export` and `dump --currentsession` all accept `--heimdallr true|false`
-(default `true`). When on, any missing `--ticket(s)` / `--repository` / `--initiative`
-is filled from an offline run of the sibling `mimisbrunnr-heimdallr-find-session-metadata`
-reporter (git remote + branch + recent subjects — the tickets already made in this
-session, and the current repo when the flag is absent). Precedence, highest first:
+(default `true`). When on, only a field the caller did **not** bind is even
+considered for autofill, per field, from an offline run of the sibling
+`mimisbrunnr-heimdallr-find-session-metadata` reporter (git remote + branch +
+recent subjects — the tickets already made in this session, and the current
+repo when the flag is absent). A supplied flag is never compared against,
+replaced by, or "confirmed" with Heimdallr output for that field; the scan is
+skipped entirely when nothing is missing. Precedence, highest first, per field:
 explicit flag → dump structured metadata (`_dump.json`, export only) → Heimdallr →
-unbound. `--heimdallr false` disables the scan entirely.
+unbound. `--heimdallr false` disables the scan entirely. Example: `--initiative
+"Mímisbrunnr-MVP"` with no `--tickets` keeps the caller's initiative verbatim
+and autofills only the ticket — Heimdallr reporting `unknown` initiative is the
+normal case and never a reason to ask for, invent, or re-supply one. Never
+forward caller flags into the reporter; its own `--initiative` flag is for
+manual runs only.
 
 - `import` fills singular `--ticket` with the first Heimdallr hit (branch hits before
   commits); `export`/`dump` bind branch-seen tickets when any exist, else the single

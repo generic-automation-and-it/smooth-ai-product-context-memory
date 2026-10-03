@@ -1065,7 +1065,8 @@ def cmd_export(args: argparse.Namespace) -> int:
         "scope": args.scope or recorded.get("scope"),
         "initiative": args.initiative or recorded.get("initiative"),
     }
-    if heimdallr_enabled(args):
+    if heimdallr_enabled(args) and (not binding["tickets"] or not binding["repository"]
+                                    or not binding["initiative"]):
         scan = heimdallr_scan()
         filled = []
         if not binding["tickets"]:
@@ -1553,7 +1554,8 @@ def cmd_dump(args: argparse.Namespace) -> int:
     # re-deriving it from prose. A dump with no binding says so explicitly rather than writing an
     # empty object that reads as "bound to nothing on purpose".
     binding = dump_binding(args)
-    if heimdallr_enabled(args):
+    if heimdallr_enabled(args) and (not binding["tickets"] or not binding["repository"]
+                                    or not binding["initiative"]):
         scan = heimdallr_scan()
         filled = []
         if not binding["tickets"]:

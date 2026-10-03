@@ -44,9 +44,9 @@ selection the practitioner approved in the preview, the difference is reported (
 #    the NFR-03 preview (prices the selection without bodies) and the LADR-14 preview-vs-bundle
 #    difference check are performed by the agent directly against the Host API —
 #    POST /api/context/dossier/preview and POST /api/context/dossier/bundle. Read-only.
-#    Anchor flags (--repo/--ticket(s)/--tags/--initiative) merge into --body; missing
-#    repo/ticket anchors autofill from the offline Heimdallr git scan (--heimdallr true,
-#    default on; explicit flags and --body keys always win; tags are never autofilled).
+#    Anchor flags (--repo/--ticket(s)/--tags/--initiative) merge into --body; only a
+#    missing repo/ticket anchor autofills from the offline Heimdallr git scan (--heimdallr true,
+#    default on; a supplied flag or --body key is never overwritten for that field; tags are never autofilled).
 python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py \
   bundle --repo owner/repo --ticket github:160 | head
 # (the script path above is relative to the skills root, so it holds under

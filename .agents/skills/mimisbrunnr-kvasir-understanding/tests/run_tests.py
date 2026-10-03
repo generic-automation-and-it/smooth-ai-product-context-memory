@@ -1704,6 +1704,30 @@ class HeimdallrAutofillTests(unittest.TestCase):
             self.assertNotIn("Heimdallr autofill", out)
             self.assertIn('"repo": "other/repo"', out)
 
+    def test_export_supplied_initiative_survives_unknown_heimdallr(self):
+        # The reported defect: `--initiative X` with no `--tickets` must keep X
+        # verbatim and autofill only the ticket. Heimdallr reporting `unknown`
+        # initiative is the normal case and never a reason to touch the
+        # caller's value.
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
+            _, out, _ = run(["export", src, "--initiative", "Mímisbrunnr-MVP",
+                             "--repository", "other/repo"])
+            self.assertIn("tickets github:160", out)
+            autofill_line = out.splitlines()[0]
+            self.assertIn("Heimdallr autofill", autofill_line)
+            self.assertNotIn("initiative", autofill_line)
+            self.assertIn('"initiativeName": "M\\u00edmisbrunnr-MVP"', out)
+
+    def test_dump_supplied_initiative_survives_unknown_heimdallr(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "bound"
+            run(["dump", "--currentsession", "--out", str(out_dir),
+                 "--initiative", "Mímisbrunnr-MVP"])
+            metadata = json.loads((out_dir / uc.METADATA_FILE).read_text(encoding="utf-8"))
+            self.assertEqual(metadata["binding"]["initiative"], "Mímisbrunnr-MVP")
+            self.assertEqual(metadata["binding"]["tickets"], ["github:160"])
+
     def test_export_opt_out_disables_autofill(self):
         with tempfile.TemporaryDirectory() as tmp:
             src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
