@@ -92,6 +92,11 @@ class RepoTests(unittest.TestCase):
             self._repo("https://gitlab.com/group/subgroup/repo.git"), "group/subgroup/repo"
         )
 
+    def test_trailing_slash_and_dots_do_not_defeat_the_path(self):
+        # Some remotes append a trailing slash; the repo name may also contain dots/hyphens.
+        self.assertEqual(self._repo("https://github.com/acme/my.repo.git/"), "acme/my.repo")
+        self.assertEqual(self._repo("git@gitlab.com:group/sub.repo.git"), "group/sub.repo")
+
     def test_not_a_git_repo_reports_unavailable_not_empty(self):
         # A non-git checkout must signal "autofill unavailable" (exit 2) rather than masquerade as a
         # genuine empty recall (exit 0 with no tickets), which a caller cannot distinguish.

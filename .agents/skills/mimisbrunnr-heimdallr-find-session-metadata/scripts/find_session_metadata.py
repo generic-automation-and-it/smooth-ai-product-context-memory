@@ -58,7 +58,9 @@ def parse_repo(url: str) -> str | None:
         text = re.sub(r"^(?:ssh://)?git@[^/:]+[:/]", "", text)
     else:
         return None
-    text = re.sub(r"\.git$", "", text)
+    # Also drop a trailing slash some remotes append (`owner/repo.git/`), which would otherwise make
+    # the path unprovable.
+    text = re.sub(r"\.git/?$", "", text)
     # Capture every slash-separated segment, not just the last pair: a GitLab-style remote
     # `group/subgroup/repo.git` is one repository, and the last-pair form silently returned
     # `subgroup/repo`. The `+` after the first segment guarantees at least owner/repo.
