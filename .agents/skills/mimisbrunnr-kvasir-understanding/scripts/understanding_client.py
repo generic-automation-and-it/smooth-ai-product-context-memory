@@ -683,10 +683,15 @@ def store_query(filters: dict) -> tuple[list[dict] | None, str]:
             return None, "unreachable"
         return None, f"error: {(err or out).strip()[:200]}"
     document = _first_json_object(out)
-    if document is None:
-        return None, "error"
-    items = document.get("items")
-    return (items if isinstance(items, list) else []), "ok"
+    # Anything that is not the expected envelope is a failed read, and both ways this went wrong were
+    # the expensive kind: a dict without `items` reported "nothing matched" for a store that never
+    # answered the question, and a bare list raised AttributeError on `.get` and took the whole recall
+    # down. Neither may reach the empty branch — it is the only one of the three outcomes the agent
+    # reads as a fact about its own context, so anything unrecognised is quoted back as an error
+    # instead of being flattened into it.
+    if not isinstance(document, dict) or not isinstance(document.get("items"), list):
+        return None, f"error: unexpected store reply: {out[:500]}"
+    return document["items"], "ok"
 
 
 def query_filters(args: argparse.Namespace, all_kinds: bool) -> dict:

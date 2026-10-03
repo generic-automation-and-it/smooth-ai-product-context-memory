@@ -45,6 +45,19 @@ if ! printf '%s' "$TEMPLATE_DB" | grep -Eq '^[A-Za-z_][A-Za-z0-9_]*$'; then
     exit 1
 fi
 
+# The two counts are interpolated straight into generate_series() below rather than bound, so a
+# non-numeric value either aborts inside psql with a parse error or, carrying a quote or a semicolon,
+# breaks out of the call — as the postgres user, in a script whose whole job is to be re-run. Checked
+# here, before the DROP, so a typo cannot destroy a scratch database and only then fail.
+for count in "$MEMORIES" "$EDGES"; do
+    case "$count" in
+        "" | *[!0-9]*)
+            echo "FAIL: memories/edges '$count' is not a non-negative integer; refusing" >&2
+            exit 1
+            ;;
+    esac
+done
+
 if ! docker inspect "$CONTAINER" >/dev/null 2>&1; then
     echo "FAIL: container '$CONTAINER' not found" >&2
     exit 1

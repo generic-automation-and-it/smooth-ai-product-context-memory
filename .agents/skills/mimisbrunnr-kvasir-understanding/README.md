@@ -1,13 +1,14 @@
 ## Switches
 
-The three operations are **never conflated** — a load is context-injection, an import is an opt-in
-write, a dump is an export. All switches are **off by default**.
+The four operations are **never conflated** — a load is context-injection, an import reads the store, an
+export writes it, and a dump writes the session to a local folder. All switches are **off by default**.
 
-| Operation | Default | Writes to store? |
-|---|---|---|
-| `load` | context-injection | no |
-| `import --store` | opt-in | yes, through the capture path |
-| `dump --currentsession` | export to local folder | no |
+| Operation | Direction | Reads store? | Writes store? |
+|---|---|---|---|
+| `load` | file/folder → session | no | no |
+| `import` | store → session | yes (read token only) | no |
+| `export` | session → store | yes | only with `--write` |
+| `dump --currentsession` | session → local folder | no | no |
 
 # mimisbrunnr-kvasir-understanding
 
@@ -22,8 +23,13 @@ session context, and share context across sessions and repositories.
 python3 .../understanding_client.py load <input> \
   [--format store|understanding|foreign|auto] [--all] [--asof YYYY-MM-DD] [--max-chars N]
 
-# Capture material back into the store (opt-in --store), bound by selectors
-python3 .../understanding_client.py import <input> --store \
+# Recall understanding-kind records from the live store into the session (read token only, no write)
+python3 .../understanding_client.py import \
+  [--ticket provider:key] [--repository repo] [--initiative NAME] [--scope scope:id] \
+  [--tags tag,...] [--query WORD] [--status STATUS] [--limit N] [--all] [--table]
+
+# Capture material into the store through the capture path (dry run unless --write)
+python3 .../understanding_client.py export <input> [--write] \
   [--tickets A,1] [--tags tag] [--repository repo] [--scope product:x]
 
 # Dump the current session's context to a discoverable local folder (export, no write)
@@ -34,8 +40,11 @@ python3 .../understanding_client.py dump --currentsession [--out .context/mimisb
 
 - **Load is non-destructive.** The default load injects material as cited grounding context and writes
   nothing (HLD-007 NFR-01).
-- **Import is opt-in and funnels through the capture path.** `--store` hands material to the existing
-  capture path — atomicity, redaction, dedup/link — never a direct write (HLD-007 LADR-03).
+- **Import is read-only.** It queries the store through the capture skill's read client — read token only,
+  no write capability — and renders the recalled records as cited grounding context (HLD-007 LADR-11).
+- **Export funnels through the capture path.** `export <input>` hands material to the existing capture
+  path — atomicity, redaction, dedup/link — never a direct write, and it dry-runs unless `--write` is
+  passed (HLD-007 LADR-03).
 - **The session dump is an export.** `--currentsession` writes to
   `.context/mimisbrunnr-understandings/<session-folder>/`, with a fitting folder name reported on output so another
   agent can discover it (HLD-007 LADR-07). It changes nothing in the store, and its content is redacted
@@ -55,13 +64,14 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/tests/run_tests.py
 ## How this relates to ai-understanding and to harness compaction
 
 This skill moves knowledge; it does not decide what qualifies. `ai-understanding` writes and curates the
-`.understanding.md` units; this skill loads them into context, imports them into the store with
-`--store`, or dumps the session for another agent.
+`.understanding.md` units; this skill loads them into context, exports them into the store, or dumps the
+session for another agent.
 
 ```
 session ──ai-understanding --export──▶ .context/understandings/<subject>-<stamp>/<slug>.understanding.md
-                                          ├─ load <folder>        → context only, no write
-                                          └─ import --store       → capture path → store (kind = understanding)
+                                          ├─ load <folder>     → context only, no write
+                                          └─ export <folder>   → capture path → store (kind = understanding)
+store   ──import───────────────────▶ session (kind = understanding, read token only)
 session ──dump --currentsession──▶ .context/mimisbrunnr-understandings/<name>/_session.md
 ```
 
@@ -76,16 +86,17 @@ another session or repository can `load` it.
 | Reach | One session, one agent | Other sessions, repositories, and the store |
 | Loading | Whole summary always in context | `load` picks inputs; store exports default to understanding-only (`--all` widens) |
 | Safety | No redaction; summary read as fact | Dump redacted before write; loaded material cited as data, never instructions |
-| Durability | Gone with the session | Local dump or folder; `--store` for the durable store |
+| Durability | Gone with the session | Local dump or folder; `export` for the durable store |
 
 **Pros:** knowledge survives the session and crosses repositories; loading is selective and cited;
-nothing is written unless `--store` is passed; the dump fails closed if redaction cannot run.
+nothing is written unless `export --write` is passed; the dump fails closed if redaction cannot run.
 
-**Cons:** nothing happens automatically — someone must dump, load or import; the dump is a projection
-that re-dumping replaces, so hand edits are lost; importing an `ai-understanding` unit is lossy at the
-edges (prose boundaries ride in `contentSummary`, `scope` becomes an advisory `portability` key); and
-the quality of what is loaded is only as good as what `ai-understanding` curated.
+**Cons:** nothing happens automatically — someone must dump, load, import or export; the dump is a
+projection that re-dumping replaces, so hand edits are lost; loading an `ai-understanding` unit is lossy
+at the edges (prose boundaries ride in `contentSummary`, `scope` becomes an advisory `portability` key);
+and the quality of what is loaded is only as good as what `ai-understanding` curated.
 
 **Using them together:** keep compaction for in-session continuity; before a clear or handoff, export
 with `ai-understanding` (knowledge) or `dump --currentsession` (task continuity); in the next session,
-`load` the folder, and `import --store` only units that have earned a place in the store.
+`load` the folder, `import` what the store already holds, and `export --write` only units that have
+earned a place in the store.

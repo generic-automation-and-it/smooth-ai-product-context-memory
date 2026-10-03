@@ -33,9 +33,9 @@ sole writer of clean facts).
 
 ## System Context
 
-The skill reads store exports and foreign material into an agent's context (default, no write); it
-routes `--store` imports through the capture skill; it dumps the session to a local folder. The store,
-DB and wire are unchanged.
+The skill reads store exports and foreign material into an agent's context (default, no write);
+recalls the live store via `import` (read token only) and orchestrates the capture path via `export`
+(dry run by default); it dumps the session to a local folder. The store, DB and wire are unchanged.
 
 ## Architecture Decisions
 
@@ -48,8 +48,8 @@ DB and wire are unchanged.
 
 ## Key Behaviors
 
-- **Load and import are two acts.** Load = context injection, no write. Import = `--store` opt-in,
-  through the capture path.
+- **Load, import and export are three acts.** Load = context injection, no write. Import = live store →
+  session recall, read token only. Export = session → store orchestration, dry run by default.
 - **`--currentsession` folder name is chosen on output** so another agent can discover it; the dump is
   gitignored (`.context/`) and is an export.
 - **Selectors bind, they don't filter reading.** `--tickets`/`--tags`/`--repository`/`--scope`
