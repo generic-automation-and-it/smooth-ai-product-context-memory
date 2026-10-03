@@ -1386,6 +1386,11 @@ def build_bundle_body(args, body):
     if getattr(args, "initiative", None) and "initiativeName" not in body:
         body["initiativeName"] = args.initiative
 
+    # The contract's ticket pair is both-or-neither. A half-specified `--body` ticket (exactly one of
+    # ticketProvider / ticketKey) would reach the server and 400; refuse client-side instead.
+    if ("ticketProvider" in body) != ("ticketKey" in body):
+        raise ValueError("--body must carry both ticketProvider and ticketKey, or neither; "
+                         "pass --ticket provider:key to set both.")
     return body
 
 
@@ -1397,6 +1402,9 @@ def _heimdallr_autofill(body):
     tracked ticket, so they are never used. A branch carrying more than one ticket is not autofilled —
     the contract takes one, and silently picking the first is forbidden — the ambiguity is reported.
     """
+    if ("repo" in body and "ticketProvider" in body and "ticketKey" in body
+            and "initiativeName" in body):
+        return body, []
     scan = heimdallr_scan()
     filled = []
     repo = scan.get("repository")

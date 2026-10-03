@@ -1254,6 +1254,13 @@ def cmd_export(args: argparse.Namespace) -> int:
             print((f"Batch {batch_no}/{total_chunks} " if multi else "") + f"Preflight: {shown}")
         else:
             print(f"Preflight: unavailable ({err.strip()[:200] or f'exit {rc}'})")
+            if args.write:
+                # Without the version map a duplicate subject would be sent as a create and 409, which
+                # the auto-version guarantee exists to remove. Fail closed rather than degrade.
+                early = ("Earlier batch(es) were already written and remain; " if batch_no > 1 else "")
+                print(f"REFUSED: preflight failed, so a duplicate subject cannot be resolved to a "
+                      f"version bump. {early}Nothing from this batch was written.", file=sys.stderr)
+                return 1
             version_map = {}
         # Each chunk preflights its own request, so the preflight indices are request-relative within
         # this chunk; map by the candidate's position in the chunk, never a global clean-list index.

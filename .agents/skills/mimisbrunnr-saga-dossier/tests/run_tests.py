@@ -1162,6 +1162,30 @@ class BundleBodyContractTests(unittest.TestCase):
         self.assertEqual(body["ticketProvider"], "github")
         self.assertEqual(body["ticketKey"], "1")
 
+    def test_a_half_specified_body_ticket_is_refused(self):
+        """A `--body` carrying exactly one of ticketProvider/ticketKey would reach the server and 400
+        (both-or-neither); refuse client-side rather than leaking a one-sided pair."""
+        args = argparse.Namespace(widen_depth=1, repo=None, ticket="github:160", tickets=None,
+                                  tags=None, initiative=None)
+        with self.assertRaises(ValueError) as caught:
+            dc.build_bundle_body(args, {"ticketProvider": "github"})
+        self.assertIn("ticketProvider and ticketKey", str(caught.exception))
+
+    def test_heimdallr_autofill_skips_the_scan_when_fully_bound(self):
+        """A fully-bound anchor set must run no subprocess — a scan that produces nothing is pure cost."""
+        def boom():
+            raise AssertionError("the Heimdallr scan must not run when every anchor is bound")
+        original = dc.heimdallr_scan
+        dc.heimdallr_scan = boom
+        try:
+            body, filled = dc._heimdallr_autofill(
+                {"repo": "r", "ticketProvider": "github", "ticketKey": "1",
+                 "initiativeName": "i"})
+            self.assertEqual(filled, [])
+            self.assertEqual(body["repo"], "r")
+        finally:
+            dc.heimdallr_scan = original
+
 
 class BundleCredentialTests(unittest.TestCase):
     """The two credential defects: the machine credential file must seed the read token and base URL

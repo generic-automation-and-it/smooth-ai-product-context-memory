@@ -1278,6 +1278,37 @@ class ExportVersionBumpTests(unittest.TestCase):
             self.assertEqual(set_payloads[1]["items"][0]["uuid"], "u-first")
             self.assertIsNone(set_payloads[1]["items"][0]["createUuid"])
 
+    def test_preflight_failure_on_write_fails_closed(self):
+        """Without the version map a duplicate subject would degrade to a create that 409s, defeating
+        the auto-version guarantee — so a `--write` fails closed when its preflight cannot run."""
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
+            originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                         uc.resolve_group, uc._run_capture_client)
+            uc.gate_redaction = lambda texts: (list(texts), {})
+            uc.gate_atomicity = lambda c: [{"verdict": "simple", "signals": []} for _ in c]
+            uc.initiative_exists = lambda name: (True, "ok")
+            uc.resolve_group = lambda b, n, d, dryrun: ({"groupUuid": "g", "created": False}, "ok")
+            called = []
+
+            def record(script, argv, payload):
+                called.append(tuple(argv))
+                if argv[0] == "preflight":
+                    return 1, "", "HTTP 500 internal error"
+                return 0, json.dumps({"created": 1, "versioned": 0, "linked": 0, "skipped": 0}), ""
+
+            uc._run_capture_client = record
+            try:
+                rc, _, err = run(["export", src, "--write"])
+            finally:
+                (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                 uc.resolve_group, uc._run_capture_client) = originals
+            self.assertEqual(rc, 1)
+            self.assertIn("REFUSED", err)
+            self.assertIn("preflight failed", err)
+            # `set` must never be reached after the fail-closed refusal.
+            self.assertNotIn(("set",), called)
+
 
 class ImportTests(unittest.TestCase):
     def test_import_refused_with_an_input_path(self):
