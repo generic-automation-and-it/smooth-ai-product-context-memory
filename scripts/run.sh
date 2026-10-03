@@ -336,7 +336,10 @@ write_profile() {
     # world-readable `~/.zshrc`. From the second run on, the file being copied already holds the
     # managed block, so without this the backup sits in `$HOME` world-readable with the token in it —
     # the very leak the mode 600 on the new profile below exists to prevent.
-    chmod 600 "$backup" || die "cannot restrict permissions on $backup"
+    # A chmod that fails leaves the backup exactly as wide as the profile was, which is the leak this
+    # line exists to close — so it is removed rather than left behind. Deleting it costs nothing: the
+    # target is not written until the final `mv` below, so it still holds the profile verbatim.
+    chmod 600 "$backup" || { rm -f "$backup"; die "cannot restrict permissions on $backup"; }
   fi
 
   if [ -f "$target" ]; then
