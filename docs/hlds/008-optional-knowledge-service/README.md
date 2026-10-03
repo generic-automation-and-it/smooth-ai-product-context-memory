@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Prototype — implementation and independent acceptance in progress |
+| **Status** | Implemented and independently verified on the feature branch; upstream adoption not implied |
 | **Owner** | Feature practitioner / maintainers |
 | **Business authority** | [BRD-004, BR-47–BR-53](../../brd/004-optional-knowledge-service/) |
 | **Last updated** | 2026-10-03 |
@@ -24,9 +24,9 @@ The core changes are explicit additive contracts, not private service implementa
 
 | Decision | Scope | Status |
 |---|---|---|
-| [LADR-01](ladrs/LADR-01-additive-host-commit-and-evidence-contracts.md) | Core state, idempotency, concurrency, evidence attachment and read-only lookup | Implemented; independent review in progress |
-| [LADR-02](ladrs/LADR-02-versioned-snapshots-and-journal-reconciliation.md) | v4 snapshots, v3 compatibility, restore detection and explicit reconciliation | Implemented; extended live reconciliation acceptance pending |
-| [LADR-03](ladrs/LADR-03-shared-semantics-and-attributed-workflows.md) | Shared atomicity/redaction, recall origins, lifecycle and bounded batch accounting | Implementation and verification in progress |
+| [LADR-01](ladrs/LADR-01-additive-host-commit-and-evidence-contracts.md) | Core state, idempotency, concurrency, evidence attachment and read-only lookup | Implemented; independently verified |
+| [LADR-02](ladrs/LADR-02-versioned-snapshots-and-journal-reconciliation.md) | v4 snapshots, v3 compatibility, restore detection and explicit reconciliation | Implemented; seven real recovery checks independently verified |
+| [LADR-03](ladrs/LADR-03-shared-semantics-and-attributed-workflows.md) | Shared atomicity/redaction, recall origins, lifecycle and bounded batch accounting | Implemented; independently verified |
 
 ## Quality requirements
 

@@ -1,6 +1,6 @@
 # NFR-01: Independent evidence before enablement
 
-**Status:** In verification; see execution matrix for remaining gates.
+**Status:** Independent implementation and functional deployment acceptance verified; see execution matrix and deployment artifact record.
 
 | Contract | Required independent evidence |
 |---|---|

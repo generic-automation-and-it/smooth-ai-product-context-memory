@@ -112,4 +112,3 @@ public sealed class OperationReceiptArchiveTests : IDisposable
         if (Directory.Exists(_directory)) { Directory.Delete(_directory, true); }
     }
 }
-
