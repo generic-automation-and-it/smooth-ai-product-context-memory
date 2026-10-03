@@ -494,7 +494,7 @@ class StoreImportTests(unittest.TestCase):
                 original = uc.store_query
                 uc.store_query = lambda f, o=outcome: (None, o)
                 try:
-                    rc, out, err = run(["import"])
+                    rc, out, err = run(["import", "--heimdallr", "false"])
                 finally:
                     uc.store_query = original
                 self.assertEqual(rc, expected_code)
@@ -505,7 +505,7 @@ class StoreImportTests(unittest.TestCase):
         original = uc.store_query
         uc.store_query = lambda f: ([], "ok")
         try:
-            rc, out, err = run(["import"])
+            rc, out, err = run(["import", "--heimdallr", "false"])
         finally:
             uc.store_query = original
         self.assertEqual(rc, 0, "an empty result is a real answer, not a failure")
@@ -1107,7 +1107,7 @@ class ImportTests(unittest.TestCase):
     def test_export_without_selectors_states_no_association(self):
         with tempfile.TemporaryDirectory() as tmp:
             src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
-            _, out, _ = run(["export", src])
+            _, out, _ = run(["export", src, "--heimdallr", "false"])
             self.assertIn("no selectors supplied", out)
 
     def test_store_export_import_uses_the_stored_statements(self):
@@ -1636,7 +1636,7 @@ class DumpRedactionTests(unittest.TestCase):
         """An absent binding must read as absent, not as a deliberate bind-to-nothing."""
         with tempfile.TemporaryDirectory() as tmp:
             out_dir = Path(tmp) / "unbound"
-            _, out, _ = run(["dump", "--currentsession", "--out", str(out_dir)])
+            _, out, _ = run(["dump", "--currentsession", "--out", str(out_dir), "--heimdallr", "false"])
             metadata = json.loads((out_dir / uc.METADATA_FILE).read_text(encoding="utf-8"))
             self.assertEqual(metadata["binding"], {})
             self.assertIn("tickets", metadata["bindingAbsent"])
@@ -1671,6 +1671,68 @@ class DumpRedactionTests(unittest.TestCase):
             candidates, skips = uc.export_candidates(None, Path(source).read_text(encoding="utf-8"))
             self.assertEqual(candidates, [])
             self.assertTrue(any("markdown table" in note for note in skips), skips)
+
+class HeimdallrAutofillTests(unittest.TestCase):
+    # `--heimdallr true` (default) fills repo/tickets, never tags; explicit wins.
+    def setUp(self):
+        self.original = uc.heimdallr_scan
+        uc.heimdallr_scan = lambda: {
+            "repository": "org/repo",
+            "tickets": [{"provider": "github", "key": "160", "seenIn": "branch"},
+                        {"provider": "github", "key": "159", "seenIn": "commit"}],
+            "initiative": "unknown",
+        }
+
+    def tearDown(self):
+        uc.heimdallr_scan = self.original
+
+    def test_export_default_fills_repo_and_branch_ticket_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
+            _, out, _ = run(["export", src])
+            self.assertIn("Heimdallr autofill", out)
+            self.assertIn("repository org/repo", out)
+            # Branch ticket only: the stale commit ticket must not bind.
+            self.assertIn("tickets github:160", out)
+            self.assertNotIn("github:159", out)
+
+    def test_export_explicit_flags_win_over_heimdallr(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
+            _, out, _ = run(["export", src, "--repository", "other/repo",
+                             "--tickets", "github:1"])
+            self.assertNotIn("Heimdallr autofill", out)
+            self.assertIn('"repo": "other/repo"', out)
+
+    def test_export_opt_out_disables_autofill(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
+            _, out, _ = run(["export", src, "--heimdallr", "false"])
+            self.assertNotIn("Heimdallr autofill", out)
+            self.assertIn("no selectors supplied", out)
+
+    def test_tags_are_never_autofilled(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "bound"
+            run(["dump", "--currentsession", "--out", str(out_dir)])
+            metadata = json.loads((out_dir / uc.METADATA_FILE).read_text(encoding="utf-8"))
+            self.assertEqual(metadata["binding"]["repository"], "org/repo")
+            self.assertNotIn("tags", metadata["binding"])
+
+    def test_import_default_fills_first_ticket(self):
+        seen = {}
+        original = uc.store_query
+        def fake_query(f):
+            seen["filters"] = f
+            return ([], "ok")
+        uc.store_query = fake_query
+        try:
+            run(["import"])
+        finally:
+            uc.store_query = original
+        self.assertEqual(seen["filters"].get("ticketKey"), "160")
+        self.assertEqual(seen["filters"].get("repo"), "org/repo")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

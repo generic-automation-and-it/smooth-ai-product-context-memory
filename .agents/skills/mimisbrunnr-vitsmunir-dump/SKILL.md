@@ -56,6 +56,12 @@ I’ll listen and hold the context for [target if known]; I won’t update anyth
 
 If the target artifact is ambiguous, still start listening. Do not block the session unless acting later would be impossible without clarification.
 
+Fill a missing repository / ticket binding from the sibling `mimisbrunnr-heimdallr-find-session-metadata`
+reporter by default (offline git scan under the same skills root — `.agents/skills`, `.claude/skills`
+or `.codex/skills` — never a hardcoded path): the current repo when no repository is given, the
+branch-seen tickets (else the single newest commit ticket) when none are named. Tags stay
+agent-derived from the dump's own keywords. An explicit caller value always wins.
+
 ### 2. Listen
 
 For each braindump message:

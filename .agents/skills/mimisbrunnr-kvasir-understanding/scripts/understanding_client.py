@@ -58,6 +58,12 @@ REDACTOR = _CAPTURE_SCRIPTS / "redact.py"
 ATOMICITY = _CAPTURE_SCRIPTS / "atomicity.py"
 READ_CLIENT = _CAPTURE_SCRIPTS / "context_memory_read_client.py"
 WRITE_CLIENT = _CAPTURE_SCRIPTS / "context_memory_client.py"
+# Heimdallr session-metadata reporter, resolved relative to this file so the lookup
+# holds under any skills root (.agents/skills, .claude/skills, .codex/skills, npm
+# layout): two levels up is the skills root, never a hardcoded prefix.
+HEIMDALLR_SCRIPT = (Path(__file__).resolve().parents[2]
+                    / "mimisbrunnr-heimdallr-find-session-metadata"
+                    / "scripts" / "find_session_metadata.py")
 # The capture skill's static batch cap. Mirrored rather than imported: the two script folders ship as
 # separate packages, so this client cannot acquire a cross-skill import (the same reason the recall
 # notice is duplicated verbatim and asserted equal by a test).
@@ -114,6 +120,79 @@ def confidence_flagged(raw) -> bool:
 
 
 DEFAULT_QUERY_LIMIT = 200
+_HEIMDALLR_CHOICES = ("true", "false")
+
+
+def heimdallr_enabled(args: argparse.Namespace) -> bool:
+    """Whether Heimdallr autofill applies. `--heimdallr true` (the default)."""
+    return str(getattr(args, "heimdallr", "true")).lower() != "false"
+
+
+def heimdallr_scan() -> dict:
+    """Offline git scan via the Heimdallr reporter; {} when unavailable.
+
+    Never fails the caller: a missing script, a non-git checkout or malformed
+    output means no autofill, not a refusal. Heimdallr reports repository,
+    tickets and initiative only — never tags, which stay agent-derived
+    keywords from the material itself.
+    """
+    if not HEIMDALLR_SCRIPT.is_file():
+        return {}
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-B", str(HEIMDALLR_SCRIPT), "--json"],
+            capture_output=True, text=True, encoding="utf-8", timeout=30)
+    except (OSError, ValueError):
+        return {}
+    if proc.returncode != 0:
+        return {}
+    try:
+        result = json.loads(proc.stdout)
+    except ValueError:
+        return {}
+    return result if isinstance(result, dict) else {}
+
+
+def heimdallr_autofill_tickets(scan: dict) -> list[str]:
+    """Tickets to autofill: branch-seen tickets when any, else the newest commit one.
+
+    The scan lists branch hits before commit subjects, but a 10-commit window can
+    carry stale work. Binding a group to all of them over-binds; the branch names
+    the current work, and a single newest commit ticket is the conservative fallback.
+    """
+    tickets = scan.get("tickets") or []
+    branch = [f"{e['provider']}:{e['key']}" for e in tickets
+              if isinstance(e, dict) and e.get("seenIn") == "branch"
+              and e.get("provider") and e.get("key")]
+    if branch:
+        return branch
+    for entry in tickets:
+        if isinstance(entry, dict) and entry.get("provider") and entry.get("key"):
+            return [f"{entry['provider']}:{entry['key']}"]
+    return []
+
+
+def heimdallr_tickets(scan: dict) -> list[str]:
+    """Heimdallr ticket dicts into `--tickets` spellings (`provider:key`)."""
+    out = []
+    tickets = scan.get("tickets") or []
+    if isinstance(tickets, list):
+        for entry in tickets:
+            if isinstance(entry, dict) and entry.get("provider") and entry.get("key"):
+                out.append(f"{entry['provider']}:{entry['key']}")
+    return out
+
+
+def heimdallr_repository(scan: dict) -> str | None:
+    repo = scan.get("repository")
+    return repo if isinstance(repo, str) and repo else None
+
+
+def heimdallr_initiative(scan: dict) -> str | None:
+    initiative = scan.get("initiative")
+    if isinstance(initiative, str) and initiative and initiative != "unknown":
+        return initiative
+    return None
 _STAMP = re.compile(r"-(\d{8}-\d{4})$")
 DEFAULT_MAX_CHARS = 12000
 # A candidate below this is punctuation, a stray word, or a table rule — never a fact. Short
@@ -730,6 +809,28 @@ def cmd_import(args: argparse.Namespace) -> int:
               file=sys.stderr)
         return 1
 
+    if heimdallr_enabled(args) and (not args.ticket or not args.repository or not args.initiative):
+        scan = heimdallr_scan()
+        filled = []
+        if not args.ticket:
+            found = heimdallr_autofill_tickets(scan)
+            if found:
+                args.ticket = found[0]
+                filled.append(f"ticket {found[0]}")
+        if not args.repository:
+            repo = heimdallr_repository(scan)
+            if repo:
+                args.repository = repo
+                filled.append(f"repository {repo}")
+        if not args.initiative:
+            initiative = heimdallr_initiative(scan)
+            if initiative:
+                args.initiative = initiative
+                filled.append(f"initiative {initiative}")
+        if filled:
+            print(f"Heimdallr autofill ({', '.join(filled)}); an explicit flag always wins. "
+                  f"Pass --heimdallr false to disable.")
+
     all_kinds = args.all_kinds
     try:
         filters = query_filters(args, all_kinds)
@@ -964,6 +1065,29 @@ def cmd_export(args: argparse.Namespace) -> int:
         "scope": args.scope or recorded.get("scope"),
         "initiative": args.initiative or recorded.get("initiative"),
     }
+    if heimdallr_enabled(args):
+        scan = heimdallr_scan()
+        filled = []
+        if not binding["tickets"]:
+            found = heimdallr_autofill_tickets(scan)
+            if found:
+                binding["tickets"] = found
+                filled.append(f"tickets {','.join(found)}")
+        if not binding["repository"]:
+            repo = heimdallr_repository(scan)
+            if repo:
+                binding["repository"] = repo
+                filled.append(f"repository {repo}")
+        if not binding["initiative"]:
+            initiative = heimdallr_initiative(scan)
+            if initiative:
+                binding["initiative"] = initiative
+                filled.append(f"initiative {initiative}")
+        if filled:
+            print(f"Heimdallr autofill ({', '.join(filled)}); explicit flags and the dump's "
+                  f"structured metadata always win. Pass --heimdallr false to disable.")
+        # Tags are never autofilled by Heimdallr: it reports git-provable repo/tickets/
+        # initiative only. Derive tags from the material's own keywords, or pass --tags.
     if recorded:
         print("Binding read from the dump's structured metadata: "
               + json.dumps({k: v for k, v in recorded.items() if v}, ensure_ascii=False)
@@ -1429,6 +1553,27 @@ def cmd_dump(args: argparse.Namespace) -> int:
     # re-deriving it from prose. A dump with no binding says so explicitly rather than writing an
     # empty object that reads as "bound to nothing on purpose".
     binding = dump_binding(args)
+    if heimdallr_enabled(args):
+        scan = heimdallr_scan()
+        filled = []
+        if not binding["tickets"]:
+            found = heimdallr_autofill_tickets(scan)
+            if found:
+                binding["tickets"] = found
+                filled.append(f"tickets {','.join(found)}")
+        if not binding["repository"]:
+            repo = heimdallr_repository(scan)
+            if repo:
+                binding["repository"] = repo
+                filled.append(f"repository {repo}")
+        if not binding["initiative"]:
+            initiative = heimdallr_initiative(scan)
+            if initiative:
+                binding["initiative"] = initiative
+                filled.append(f"initiative {initiative}")
+        if filled:
+            print(f"Heimdallr autofill ({', '.join(filled)}); an explicit flag always wins. "
+                  f"Pass --heimdallr false to disable.")
     metadata = {
         "generated": generated,
         "folder": folder.name,
@@ -1509,6 +1654,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                      help=f"Render budget (default {DEFAULT_MAX_CHARS}); cuts whole records.")
     imp.add_argument("--all", action="store_true", dest="all_kinds",
                      help="Breadth: memory AND understanding, not just understanding-kind.")
+    imp.add_argument("--heimdallr", choices=_HEIMDALLR_CHOICES, default="true",
+                     help="Autofill missing --ticket/--repository/--initiative from the offline "
+                          "Heimdallr git scan (default true; explicit flags always win).")
 
     exp = sub.add_parser("export", help="SESSION -> STORE: orchestrate the capture path "
                                         "(dry run unless --write).")
@@ -1522,6 +1670,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     exp.add_argument("--initiative", help="Initiative the group belongs to; must already exist.")
     exp.add_argument("--name", help="Group name, written only when the group is created.")
     exp.add_argument("--body", help="Group description, written only when the group is created.")
+    exp.add_argument("--heimdallr", choices=_HEIMDALLR_CHOICES, default="true",
+                     help="Autofill missing --tickets/--repository/--initiative from the offline "
+                          "Heimdallr git scan (default true; explicit flags and the dump metadata "
+                          "always win; tags are never autofilled).")
 
     dump = sub.add_parser("dump", help="Dump this session's context to a local folder (export).")
     dump.add_argument("--currentsession", action="store_true")
@@ -1535,6 +1687,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                             ("scope", "scope:identifier."),
                             ("initiative", "Recorded as structured metadata for a later export.")):
         dump.add_argument(f"--{flag}", help=help_text)
+    dump.add_argument("--heimdallr", choices=_HEIMDALLR_CHOICES, default="true",
+                      help="Autofill missing --tickets/--repository/--initiative from the offline "
+                           "Heimdallr git scan (default true; explicit flags always win).")
 
     return parser.parse_args(argv)
 

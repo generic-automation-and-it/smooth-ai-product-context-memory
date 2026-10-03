@@ -17,6 +17,7 @@ Pure-prompt behavioral skill (no scripts): a listen-first capture session whose 
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-03 | **Initialize fills a missing repository/ticket binding from Heimdallr by default** (same skills root, no hardcoded path); tags stay agent-derived keywords; explicit caller values always win. Wording only, no script. | session request |
 | 2026-06-12 | Initial version. | |
 | 2026-09-13 | Added `--all` (enables `--oktoask` `--thinking` `--oktoreaddocs` `--oktowebsearch`). | |
 | 2026-09-14 | Renamed `ai-brain-dump` → `mimisbrunnr-vitsmunir-dump`. Vitsmunir is Old Norse for intelligence, wits, and the power of comprehension — this is the AI Brain / Intelligence Dump. | |

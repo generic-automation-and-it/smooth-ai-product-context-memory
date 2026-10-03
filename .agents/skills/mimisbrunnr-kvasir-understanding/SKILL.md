@@ -80,7 +80,7 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
 python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding_client.py \
   import [--ticket provider:key] [--repository REPO] [--initiative NAME] [--scope scope:id] \
   [--tags TAG,...] [--query WORD] [--status STATUS] [--limit N] [--asof YYYY-MM-DD] \
-  [--all] [--table] [--max-chars N]
+  [--all] [--table] [--max-chars N] [--heimdallr true]
 ```
 
 - `import` queries the store for `kind = understanding` through the capture skill's **read client**, so
@@ -109,7 +109,7 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
 python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding_client.py \
   export <input> [--write] \
   [--tickets TICKET,...] [--tags TAG,...] [--repository REPO] [--scope scope:id] \
-  [--initiative NAME] [--name NAME] [--body TEXT]
+  [--initiative NAME] [--name NAME] [--body TEXT] [--heimdallr true]
 ```
 
 - `export` orchestrates the capture skill end to end — redaction gate, atomicity gate, the 20-candidate
@@ -130,13 +130,37 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
 - **The digest states the gated-kind limit.** A decision or rule captured this way is written as
   `kind = understanding`, which does **not** pass the gated-kind approval.
 
+## Heimdallr autofill (`--heimdallr true`, default on)
+
+`import`, `export` and `dump --currentsession` all accept `--heimdallr true|false`
+(default `true`). When on, any missing `--ticket(s)` / `--repository` / `--initiative`
+is filled from an offline run of the sibling `mimisbrunnr-heimdallr-find-session-metadata`
+reporter (git remote + branch + recent subjects — the tickets already made in this
+session, and the current repo when the flag is absent). Precedence, highest first:
+explicit flag → dump structured metadata (`_dump.json`, export only) → Heimdallr →
+unbound. `--heimdallr false` disables the scan entirely.
+
+- `import` fills singular `--ticket` with the first Heimdallr hit (branch hits before
+  commits); `export`/`dump` bind branch-seen tickets when any exist, else the single
+  newest commit ticket — a 10-commit window can carry stale work, so all of it is never
+  bound at once.
+- Heimdallr reports `unknown` initiative when nothing proves one; that fills nothing.
+  It never supplies `--tags`: derive tags from the material's own keywords, or pass
+  `--tags` explicitly.
+- The reporter is located relative to the calling script (two levels up from
+  `scripts/understanding_client.py` is the skills root), so the lookup holds under
+  `.agents/skills`, `.claude/skills`, `.codex/skills` or the npm layout with no
+  hardcoded prefix. A missing script or a non-git checkout means no autofill, never
+  a refusal.
+
 ## Session export (`--currentsession`)
 
 ```bash
 python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding_client.py \
   dump --currentsession [--from FILE|-] [--out .context/mimisbrunnr-understandings/<session-folder>] \
   [--session-name NAME] \
-  [--tickets TICKET,...] [--tags TAG,...] [--repository REPO] [--scope scope:id] [--initiative NAME]
+  [--tickets TICKET,...] [--tags TAG,...] [--repository REPO] [--scope scope:id] [--initiative NAME] \
+  [--heimdallr true]
 ```
 
 - `dump --currentsession` writes the current session's understanding (its Understandings, decisions

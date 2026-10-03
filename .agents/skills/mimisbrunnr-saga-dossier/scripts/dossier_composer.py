@@ -32,6 +32,45 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 from urllib.parse import urlparse
+import subprocess
+
+# Heimdallr session-metadata reporter, resolved relative to this file so the
+# lookup holds under any skills root (.agents/skills, .claude/skills,
+# .codex/skills): two levels up is the skills root, never a hardcoded prefix.
+HEIMDALLR_SCRIPT = (Path(__file__).resolve().parents[2]
+                    / "mimisbrunnr-heimdallr-find-session-metadata"
+                    / "scripts" / "find_session_metadata.py")
+_HEIMDALLR_CHOICES = ("true", "false")
+
+
+def heimdallr_enabled(args) -> bool:
+    """Whether Heimdallr autofill applies. `--heimdallr true` (the default)."""
+    return str(getattr(args, "heimdallr", "true")).lower() != "false"
+
+
+def heimdallr_scan() -> dict:
+    """Offline git scan via the Heimdallr reporter; {} when unavailable.
+
+    Never fails the caller: a missing script, a non-git checkout or malformed
+    output means no autofill, not a refusal. Reports repository, tickets and
+    initiative only \u2014 never tags, which stay agent-derived keywords.
+    """
+    if not HEIMDALLR_SCRIPT.is_file():
+        return {}
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-B", str(HEIMDALLR_SCRIPT), "--json"],
+            capture_output=True, text=True, encoding="utf-8", timeout=30)
+    except (OSError, ValueError):
+        return {}
+    if proc.returncode != 0:
+        return {}
+    try:
+        result = json.loads(proc.stdout)
+    except ValueError:
+        return {}
+    return result if isinstance(result, dict) else {}
+
 
 # ---------------------------------------------------------------------------- public contracts
 
@@ -1165,6 +1204,14 @@ def main(argv=None):
 
     bundle_p = sub.add_parser("bundle")
     bundle_p.add_argument("--body", help="JSON anchor set; defaults to a stub")
+    bundle_p.add_argument("--repo", help="Bundle anchor: repository owner/repo (explicit flag wins).")
+    bundle_p.add_argument("--ticket", help="Bundle anchor: single provider:key ticket.")
+    bundle_p.add_argument("--tickets", help="Bundle anchor: comma-separated provider:key tickets.")
+    bundle_p.add_argument("--tags", help="Bundle anchor: comma-separated tags (never autofilled).")
+    bundle_p.add_argument("--initiative", help="Bundle anchor: initiative name.")
+    bundle_p.add_argument("--heimdallr", choices=_HEIMDALLR_CHOICES, default="true",
+                          help="Autofill missing repo/ticket anchors from the offline Heimdallr git "
+                               "scan (default true; explicit flags and --body keys always win).")
     bundle_p.set_defaults(func=lambda args: cmd_bundle(args))
 
     compose_p = sub.add_parser("compose")
@@ -1183,10 +1230,57 @@ def main(argv=None):
     return 0
 
 
+def _split_list(raw) -> list:
+    if not raw:
+        return []
+    return [part.strip() for part in str(raw).split(",") if part.strip()]
+
+
 def cmd_bundle(args):
     if args.base_url:
         os.environ["CONTEXT_MEMORY_BASE_URL"] = args.base_url
     body = json.loads(args.body) if args.body else {}
+    if not isinstance(body, dict):
+        raise ValueError("--body must be a JSON object of bundle anchors")
+    if getattr(args, "repo", None) and "repo" not in body:
+        body["repo"] = args.repo
+    tickets = _split_list(getattr(args, "tickets", None))
+    single = getattr(args, "ticket", None)
+    if single and single.strip() and single.strip() not in tickets:
+        tickets = [single.strip()] + tickets
+    if tickets and "tickets" not in body:
+        body["tickets"] = tickets
+    if getattr(args, "tags", None) and "tags" not in body:
+        body["tags"] = _split_list(args.tags)
+    if getattr(args, "initiative", None) and "initiative" not in body:
+        body["initiative"] = args.initiative
+    if heimdallr_enabled(args):
+        scan = heimdallr_scan()
+        filled = []
+        repo = scan.get("repository")
+        if "repo" not in body and isinstance(repo, str) and repo:
+            body["repo"] = repo
+            filled.append(f"repo {repo}")
+        if "tickets" not in body and isinstance(scan.get("tickets"), list):
+            branch = [f"{e['provider']}:{e['key']}" for e in scan["tickets"]
+                      if isinstance(e, dict) and e.get("seenIn") == "branch"
+                      and e.get("provider") and e.get("key")]
+            if branch:
+                found = branch
+            else:
+                found = [f"{e['provider']}:{e['key']}" for e in scan["tickets"]
+                         if isinstance(e, dict) and e.get("provider") and e.get("key")][:1]
+            if found:
+                body["tickets"] = found
+                filled.append(f"tickets {','.join(found)}")
+        initiative = scan.get("initiative")
+        if ("initiative" not in body and isinstance(initiative, str) and initiative
+                and initiative != "unknown"):
+            body["initiative"] = initiative
+            filled.append(f"initiative {initiative}")
+        if filled:
+            print(f"Heimdallr autofill ({'; '.join(filled)}); explicit flags and --body keys "
+                  f"always win. Pass --heimdallr false to disable.", file=sys.stderr)
     bundle = fetch_bundle_from_api(args.base_url, body)
     print(json.dumps(bundle, indent=2))
     return 0

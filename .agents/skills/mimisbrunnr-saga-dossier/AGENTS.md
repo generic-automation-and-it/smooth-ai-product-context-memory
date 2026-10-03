@@ -151,6 +151,7 @@ the only file it writes is the local dossier artefact. Tests: `tests/run_tests.p
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-03 | **`bundle` gains anchor flags plus Heimdallr autofill (`--heimdallr true`, default on).** `--repo`/`--ticket`/`--tickets`/`--tags`/`--initiative` merge into `--body` (explicit keys win); missing repo/tickets fill from the sibling Heimdallr reporter via a skills-root-relative lookup (branch tickets else newest commit one, never tags). Autofill notes go to stderr so the stdout bundle JSON stays parseable. Harness 57 -> 60. | session request |
 | 2026-10-02 | Renamed `mimisbrunnr-dossier` → `mimisbrunnr-saga-dossier` (folder, `name:`, CI paths, every cross-reference). Saga, goddess of history — she recounts what was. Behaviour unchanged; harness green. | session request |
 | 2026-10-01 | The loopback guard refuses a base URL that `urlparse` cannot parse (an NFKC-confusable netloc character, a non-numeric port) with its fixed loopback message. The parser's own `ValueError` quoted the netloc — userinfo included — and `main` prints exception text, so `--base-url http://user:pass@local＃host` printed the password. `CredentialTransportTests` 5 -> 6, mutation-checked. | HLD-005 NFR-01 |
 | 2026-10-01 | Findings section records that no `ghost` ("specified but not wired") category exists, per HLD-005 LADR-16, and that a missing `implements` edge is never a finding basis. Taxonomy unchanged. | HLD-005 LADR-16 |

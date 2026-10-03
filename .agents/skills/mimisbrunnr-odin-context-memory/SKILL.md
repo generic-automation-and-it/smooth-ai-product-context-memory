@@ -69,6 +69,12 @@ Spawn project agents `memory-read` and `memory-write`. `memory-read` runs only t
 
 When the user starts a mimisbrunnr-odin-context-memory session, resolve the target group from what the caller provides
 — ticket, repository, initiative, or scope — or create it if it does not exist.
+When the caller provides none of these, run the sibling
+`mimisbrunnr-heimdallr-find-session-metadata` reporter (offline git scan, same skills root,
+no hardcoded `.agents/` prefix) and use its repository plus branch-seen tickets (else the
+single newest commit ticket) as the proposed binding — `unknown` initiative fills nothing.
+An explicit caller value always wins; `--heimdallr false` on the kvasir verbs disables the
+automatic form of this. Tags are never autofilled: derive them from the material's keywords.
 
 - If the caller supplies a ticket, look up the group that owns it. **A ticket belongs to at most one
   group** (soft constraint); if it is already attached elsewhere, do not silently create a second group

@@ -1011,6 +1011,57 @@ class SubsecondToleranceTests(unittest.TestCase):
         self.assertLess(earlier, later)
 
 
+class HeimdallrBundleAnchorTests(unittest.TestCase):
+    # `--heimdallr true` fills missing repo/tickets; explicit flags and --body win.
+    def _bundle(self, argv):
+        import argparse, json
+        seen = {}
+        original_fetch = dc.fetch_bundle_from_api
+        original_scan = dc.heimdallr_scan
+        dc.heimdallr_scan = lambda: {
+            "repository": "org/repo",
+            "tickets": [{"provider": "github", "key": "7", "seenIn": "branch"},
+                        {"provider": "github", "key": "6", "seenIn": "commit"}],
+            "initiative": "unknown",
+        }
+        def fake_fetch(base, body):
+            seen["body"] = body
+            return {"bundle": "ok"}
+        dc.fetch_bundle_from_api = fake_fetch
+        try:
+            parser = argparse.ArgumentParser()
+            parser.add_argument("--body")
+            parser.add_argument("--repo")
+            parser.add_argument("--ticket")
+            parser.add_argument("--tickets")
+            parser.add_argument("--tags")
+            parser.add_argument("--initiative")
+            parser.add_argument("--heimdallr", default="true")
+            parser.add_argument("--base-url", default=None)
+            args = parser.parse_args(argv)
+            dc.cmd_bundle(args)
+        finally:
+            dc.fetch_bundle_from_api = original_fetch
+            dc.heimdallr_scan = original_scan
+        return seen["body"]
+
+    def test_default_fills_repo_and_branch_ticket_only(self):
+        body = self._bundle([])
+        self.assertEqual(body.get("repo"), "org/repo")
+        self.assertEqual(body.get("tickets"), ["github:7"])
+        self.assertNotIn("tags", body)
+
+    def test_explicit_flags_and_body_win(self):
+        body = self._bundle(["--repo", "other/repo", "--tickets", "github:1"])
+        self.assertEqual(body.get("repo"), "other/repo")
+        self.assertEqual(body.get("tickets"), ["github:1"])
+
+    def test_opt_out_disables_autofill(self):
+        body = self._bundle(["--heimdallr", "false"])
+        self.assertNotIn("repo", body)
+        self.assertNotIn("tickets", body)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
 
