@@ -209,7 +209,7 @@ retrieval filter, an un-anchored understanding surfaces under an un-scoped query
 path, not under a single-repo query — it is a distilled learning, not a fact of any one repo
 ([BRD-003](docs/brd/003-understanding-transfer/)). No nullable scope, no new column.
 
-The `mimisbrunnr-understanding` skill makes it portable:
+The `mimisbrunnr-kvasir-understanding` skill makes it portable:
 
 - **Load with `--all`** — recalls **memory + understanding** into a new or running agent's context.
 - **Load understandings only** — the default load returns **only** the understanding-kind, so the agent

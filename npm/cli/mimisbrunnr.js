@@ -5,7 +5,7 @@ import { runClient } from "./_run.js";
 
 const COMMANDS = {
   "context-memory": ".agents/skills/mimisbrunnr-odin-context-memory/scripts/context_memory_client.py",
-  "understanding": ".agents/skills/mimisbrunnr-understanding/scripts/understanding_client.py",
+  "understanding": ".agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding_client.py",
 };
 
 const [cmd, ...rest] = process.argv.slice(2);
@@ -25,6 +25,6 @@ if (cmd && COMMANDS[cmd]) {
   console.log("");
   console.log("Also available as dedicated bins:");
   console.log("  mimisbrunnr-odin-context-memory   (get/set durable context)");
-  console.log("  mimisbrunnr-understanding    (load/import/session-dump)");
+  console.log("  mimisbrunnr-kvasir-understanding    (load/import/session-dump)");
   process.exit(cmd ? 1 : 0);
 }

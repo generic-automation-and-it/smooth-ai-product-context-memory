@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""mimisbrunnr-understanding — the session/store bridge.
+"""mimisbrunnr-kvasir-understanding — the session/store bridge.
 
 Four operations in two pairs. The two store-facing directions are named to match `ai-understanding`,
 so the same word means the same direction in both skills (LADR-11) — the previous pair inverted them.
@@ -48,7 +48,7 @@ import uuid
 from pathlib import Path
 
 KIND_UNDERSTANDING = "understanding"
-DUMP_MARKER = ".mimisbrunnr-understanding-dump"
+DUMP_MARKER = ".mimisbrunnr-kvasir-understanding-dump"
 SESSION_FILE = "_session.md"
 METADATA_FILE = "_dump.json"
 UNIT_SUFFIX = ".understanding.md"
@@ -932,7 +932,7 @@ def set_items(candidates: list[dict], binding: dict, now: dt.datetime) -> list[d
             "sources": candidate.get("sources") or [],
             "validFrom": candidate.get("validFrom") or now.strftime("%Y-%m-%dT00:00:00Z"),
             "validUntil": candidate.get("validUntil"),
-            "summaryModel": "mimisbrunnr-understanding export",
+            "summaryModel": "mimisbrunnr-kvasir-understanding export",
             "summaryPromptVersion": "export-1",
         })
     return items

@@ -191,7 +191,7 @@ class RecallFramingTests(unittest.TestCase):
         identical and one gets edited. Asserted against the sibling's *rendered* banner, prefix
         included, because that is what a reader of either output actually sees.
         """
-        understanding = _load_sibling("mimisbrunnr-understanding", "understanding_client")
+        understanding = _load_sibling("mimisbrunnr-kvasir-understanding", "understanding_client")
         self.assertEqual(
             client.BANNER_PREFIX + client.RECALL_NOTICE, understanding.DATA_NOTICE,
             "the notice must be the understanding client's wording verbatim, not a paraphrase",

@@ -18,7 +18,7 @@ Skills live **flat**, one directory per skill directly under `.agents/skills/`. 
 | **context-load-context** | Load domain context before implementation | `/context-load-context auth` |
 | **mimisbrunnr-odin-context-memory** | Get/set persistent context-memory records; sole authority on the write path to the store | `/mimisbrunnr-odin-context-memory [--dryrun] [--approve]` |
 | **mimisbrunnr-saga-dossier** | Compose a read-only, cited context dossier for a slice of the store — document plus findings, no write capability | `/mimisbrunnr-saga-dossier` |
-| **mimisbrunnr-understanding** | Load an Understanding export (or prior material) into agent context; `--store` funnels an import back through the capture path | `/mimisbrunnr-understanding [--store] [--currentsession] [--all]` |
+| **mimisbrunnr-kvasir-understanding** | Load an Understanding export (or prior material) into agent context; `--store` funnels an import back through the capture path | `/mimisbrunnr-kvasir-understanding [--store] [--currentsession] [--all]` |
 | **mimisbrunnr-heimdallr-find-session-metadata** | Scan the current session for tickets, repository and initiative; print to console — Heimdallr watches, the operator binds | `/mimisbrunnr-heimdallr-find-session-metadata [--json] [--initiative NAME]` |
 | **mimisbrunnr-muninn-recall-feedback** | Run the three recall-feedback tuning queries — never-recalled list, miss rate over a window, baseline reset | `/mimisbrunnr-muninn-recall-feedback` |
 | **ai-understanding** | Export this session's hard-won knowledge as Understandings; import, publish and consume the store | `/ai-understanding [--export] [--import] [--publish] [--consume <zip>]` |
@@ -124,7 +124,7 @@ Two parents own most skills here, and their SKILL.md files are kept byte-identic
 | **ai-review** | high | Review analysis, fix/skip judgment + multi-file code fixes (`smooth-ai-report-review`) |
 | **ai-understanding** | high | Judging what qualifies as transferable knowledge + merge/promotion decisions |
 | **mimisbrunnr-saga-dossier** | high | Equivalence, contradiction and gap judgement across a whole store slice |
-| **mimisbrunnr-understanding** | high | Judgement on understanding vs scoped fact, and capture-path funneling |
+| **mimisbrunnr-kvasir-understanding** | high | Judgement on understanding vs scoped fact, and capture-path funneling |
 | **agile-github-breakdown** | xhigh | Multi-turn FR/NFR → Task graph + GitHub writes |
 | **create-hld** | xhigh | Multi-turn clarification gates + architectural judgment (LADRs, NFRs, diagrams) |
 | **mimisbrunnr-ymir-bootstrap** | xhigh | Source-backed baseline the store's later sessions build on: consequential questioning, conflict preservation and reviewed candidate selection require product judgement |
@@ -161,7 +161,7 @@ Skills are flat under `.agents/skills/`; the category lives in the folder-name p
 | `agile-` | `agile-github-breakdown`, `agile-github-task-from-diff` |
 | `ai-` | `ai-review`, `ai-terse`, `ai-template-sync`, `ai-understanding` |
 | `context-` | `context-load-agents-context`, `context-load-context` |
-| `mimisbrunnr-` | `mimisbrunnr-vitsmunir-dump`, `mimisbrunnr-ymir-bootstrap`, `mimisbrunnr-odin-context-memory`, `mimisbrunnr-saga-dossier`, `mimisbrunnr-muninn-recall-feedback`, `mimisbrunnr-understanding` |
+| `mimisbrunnr-` | `mimisbrunnr-vitsmunir-dump`, `mimisbrunnr-ymir-bootstrap`, `mimisbrunnr-odin-context-memory`, `mimisbrunnr-saga-dossier`, `mimisbrunnr-muninn-recall-feedback`, `mimisbrunnr-kvasir-understanding` |
 | `git-` | `git-commit`, `git-commit-push`, `git-commit-push-pr`, `git-commit-review-push`, `git-sync` |
 | _(none)_ | `create-hld`, `manage-rule-system` |
 

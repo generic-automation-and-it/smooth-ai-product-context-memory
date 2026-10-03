@@ -1,4 +1,4 @@
-# mimisbrunnr-understanding — AGENTS.md
+# mimisbrunnr-kvasir-understanding — AGENTS.md
 
 ## TL;DR
 
@@ -160,7 +160,7 @@ DB and wire are unchanged.
   with the upsert command, the 20-candidate cap and atomicity-holdback are enforced, and a failing
   redactor or atomicity detector is a refusal, not a flag. Dump coverage gained the generated-header
   fence, structured `_dump.json` binding, and UTC-with-offset `Generated:`.
-  Run: `python3 -B .agents/skills/mimisbrunnr-understanding/tests/run_tests.py`. The PR gate runs it.
+  Run: `python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/tests/run_tests.py`. The PR gate runs it.
 - **Cold-agent walk harness:** `tests/run_walk_tests.py` — proves an agent with no memory can **act** on
   what `load`/`--all`/the dossier slice produce (BRD-003 assumption 2), and measures what that costs in
   context. It renders three offline surfaces from committed fixtures, scores each question by **identity
@@ -183,6 +183,7 @@ DB and wire are unchanged.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-03 | **Renamed skill to `mimisbrunnr-kvasir-understanding`.** Kvasir (wisest being, brewed into the Mead of Poetry) matches the distilled-knowledge shape; keeps the `mimisbrunnr-{figure}-{function}` pattern. Folder, `SKILL.md` name, npm bin/launcher, PR-gate paths and all repo references renamed; dump output dir `.context/mimisbrunnr-understandings/` kept stable; dump marker renamed to `.mimisbrunnr-kvasir-understanding-dump`. Harnesses green (kvasir 109, walk 9, odin 155, npm smoke). | rename |
 | 2026-10-02 | **`--dontask` is accepted for forward compatibility.** It skips interactive questions (e.g. "Export split") and takes the recommended option as analysed by the AI. No interactive question exists in this skill today, so it is a no-op until one does. Wording only; no script change. | forward compatibility |
 | 2026-10-02 | **The two store-facing verbs are named to match `ai-understanding` (LADR-11).** `import` was the opt-in `--store` capture-prepare verb; it is now a live store → session recall (`kind = understanding`, read token only, filters mapped to declared fields, `--table`, three distinct outcomes, the framed banner parsed in the shared place that also backs `load`). The capture direction moved to `export` (session → store), which orchestrates the capture path and dry-runs by default — a dry run creates no initiative, group or memory; a missing initiative refuses with the upsert command; the 20-candidate cap and atomicity-holdback are enforced. The old `import <input> --store` spelling prints a deprecation instead of being repurposed. The dump's generated header is fenced and its binding is recorded as structured `_dump.json` metadata (UTC `Generated:` with an offset), so a round trip proposes no boilerplate but binds by default. Harness 53 -> 95. | LADR-11 |
 | 2026-10-02 | **`render_store`'s `max_chars` now defaults to `DEFAULT_MAX_CHARS`, not `None`**, so a future caller that omits the kwarg gets a bounded, reported render instead of an unbounded one no line discloses. Every current caller (`cmd_load`, both harness calls) passes it explicitly, so no output changes. The byte-identity statement was also qualified in `SKILL.md` and `LADR-10` to match the code: it holds **at the default cap**, because an explicit non-default cap always emits a `Budget:` line (`0 record(s) cut` included). | LADR-10 |

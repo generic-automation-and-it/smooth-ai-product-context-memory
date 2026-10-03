@@ -41,4 +41,4 @@ redaction apply only when `--store` is passed, through the capture path (LADR-03
 
 ## Evidence (2026-09-26)
 
-Skill L0 `.agents/skills/mimisbrunnr-understanding/tests/run_tests.py`: foreign material is cited as data with truncation disclosed; `proposed` and `program` scope are flagged, never promoted; foreign input carries no fabricated provenance keys.
+Skill L0 `.agents/skills/mimisbrunnr-kvasir-understanding/tests/run_tests.py`: foreign material is cited as data with truncation disclosed; `proposed` and `program` scope are flagged, never promoted; foreign input carries no fabricated provenance keys.

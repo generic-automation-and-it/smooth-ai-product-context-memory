@@ -113,6 +113,6 @@ python3 -B .agents/skills/mimisbrunnr-saga-dossier/tests/run_tests.py
   between bundle and dossier, the full findings taxonomy.
 - **`.agents/skills/mimisbrunnr-odin-context-memory/`** — the capture skill and the only path in this skill
   set that can write. This skill only ever reads.
-- **`.agents/skills/mimisbrunnr-understanding/`** — the sibling that loads and imports Understandings;
+- **`.agents/skills/mimisbrunnr-kvasir-understanding/`** — the sibling that loads and imports Understandings;
   this skill selects and composes them alongside every other kind of memory, but doesn't load or write
   them.

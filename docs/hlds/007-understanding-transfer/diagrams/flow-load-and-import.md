@@ -3,7 +3,7 @@
 ```mermaid
 sequenceDiagram
     participant Practitioner
-    participant LoadSkill as mimisbrunnr-understanding
+    participant LoadSkill as mimisbrunnr-kvasir-understanding
     participant Agent as Agent session
     participant Capture as mimisbrunnr-odin-context-memory (capture path)
     participant Store as Mímisbrunnr store

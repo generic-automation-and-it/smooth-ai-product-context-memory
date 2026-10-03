@@ -108,7 +108,7 @@ and work best together.
   repository's root `AGENTS.md`.
 
 **Using them together:** let compaction run within a session. Before a clear, compact or handoff, run
-`/ai-understanding` for the knowledge (and `mimisbrunnr-understanding dump --currentsession` if the task
+`/ai-understanding` for the knowledge (and `mimisbrunnr-kvasir-understanding dump --currentsession` if the task
 itself needs to continue elsewhere). In the next session, `--import` here or
-`mimisbrunnr-understanding load <folder>` picks it up. Nothing links compaction to an export today, so
+`mimisbrunnr-kvasir-understanding load <folder>` picks it up. Nothing links compaction to an export today, so
 the hard-won part is lost exactly when compaction fires unless you ask first.

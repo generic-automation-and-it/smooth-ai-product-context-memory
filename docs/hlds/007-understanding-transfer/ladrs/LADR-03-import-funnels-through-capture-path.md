@@ -58,7 +58,7 @@ boundary.
   `test_noun_phrase_list_alone_is_not_bundled`), conflict surfacing
   (`test_genuine_conflict_composes_proposed_record_and_two_links`, `test_scope_mismatch_is_not_a_conflict`).
 - The load skill's import path routes through that capture path rather than a direct write, and refuses
-  without `--store`: `.agents/skills/mimisbrunnr-understanding/tests/run_tests.py` (48 tests, all green).
+  without `--store`: `.agents/skills/mimisbrunnr-kvasir-understanding/tests/run_tests.py` (48 tests, all green).
 - Store side is separately proven at L1:
   `tests/SmoothAiProductContextMemory.Application.ComponentTest/Features/UnderstandingTransferStoreTests.cs`
   `Understanding_is_written_and_version_bumped_by_the_capture_path` — a restatement carrying the uuid

@@ -9,7 +9,7 @@ write, a dump is an export. All switches are **off by default**.
 | `import --store` | opt-in | yes, through the capture path |
 | `dump --currentsession` | export to local folder | no |
 
-# mimisbrunnr-understanding
+# mimisbrunnr-kvasir-understanding
 
 Load a Mímisbrunnr **Understanding** export — or any prior material — into a new or running agent's
 session context, and share context across sessions and repositories.
@@ -49,7 +49,7 @@ Business authority: [BRD-003](../../../docs/brd/003-understanding-transfer/). De
 ## Test
 
 ```bash
-python3 -B .agents/skills/mimisbrunnr-understanding/tests/run_tests.py
+python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/tests/run_tests.py
 ```
 
 ## How this relates to ai-understanding and to harness compaction

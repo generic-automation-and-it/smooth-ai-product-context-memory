@@ -113,7 +113,7 @@ and its memories by identity + version (LADR-13). Findings are focus-invariant i
   exception is false.
 - **`kind = understanding` is a kind like any other** — same selection, citation, reconciliation,
   focus and confidentiality (LADR-15). Its load/import is a separate capability owned by
-  `mimisbrunnr-understanding`, not this skill.
+  `mimisbrunnr-kvasir-understanding`, not this skill.
 - **`near-miss-tag` is evidence-only** (LADR-10). Use the shared
   `mimisbrunnr-odin-context-memory/scripts/near_miss_tags.py` helper via `near_miss_findings()`. No evidence
   means no finding; no tag-graph or full-dossier completeness claim is made.
@@ -141,5 +141,5 @@ Committed harness: `python3 -B .agents/skills/mimisbrunnr-saga-dossier/tests/run
 - `docs/hlds/005-contextual-export/` — design (LADRs, NFRs), the determinism boundary, the contract.
 - `.agents/skills/mimisbrunnr-odin-context-memory/` — the capture skill (sole **writer**). This dossier
   skill is a reader; do not conflate the two. Reuses its `near_miss_tags.py` helper.
-- `.agents/skills/mimisbrunnr-understanding/` — the load/transfer sibling (HLD-007); owns the
+- `.agents/skills/mimisbrunnr-kvasir-understanding/` — the load/transfer sibling (HLD-007); owns the
   Understanding kind's load/import, which this read-only skill does not.

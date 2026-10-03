@@ -133,7 +133,7 @@ reader. The manifest's own count is the trustworthy left-hand side.
 - `docs/hlds/005-contextual-export/nfrs/NFR-01..07`.
 - `.agents/skills/mimisbrunnr-odin-context-memory/AGENTS.md` — sole authority on the write path (the sibling);
   this skill is a reader and must not be conflated with it.
-- `.agents/skills/mimisbrunnr-understanding/` — the read/load sibling (HLD-007); the Understanding kind's
+- `.agents/skills/mimisbrunnr-kvasir-understanding/` — the read/load sibling (HLD-007); the Understanding kind's
   load/import lives there.
 
 ## Implementation

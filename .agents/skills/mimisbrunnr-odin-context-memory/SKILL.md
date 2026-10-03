@@ -83,7 +83,7 @@ When the user starts a mimisbrunnr-odin-context-memory session, resolve the targ
   up, so no upsert is needed. Upsert it first only on the create path.
 - **`resolve-group` is not dry-runnable.** Its handler commits unconditionally — calling it to "look up"
   a group creates one. A dry run must resolve nothing and report the group and initiative as *would
-  create*, exactly as `mimisbrunnr-understanding --export` does.
+  create*, exactly as `mimisbrunnr-kvasir-understanding --export` does.
 - If the target is ambiguous, still begin accumulating; do not block the session.
 
 ### 2. Listen (Accumulate Candidates)

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Committed L0 harness for mimisbrunnr-understanding. stdlib unittest; no external runner.
+"""Committed L0 harness for mimisbrunnr-kvasir-understanding. stdlib unittest; no external runner.
 
-Run: python3 -B .agents/skills/mimisbrunnr-understanding/tests/run_tests.py
+Run: python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/tests/run_tests.py
 
 Covers the guarantees that matter: a default load writes nothing (NFR-01), `import` reads the live store
 under the read token and writes nothing (NFR-02), loaded material is cited as data (NFR-03), `export`

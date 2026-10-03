@@ -39,4 +39,4 @@ capture.
 
 ## Evidence (2026-09-26)
 
-Skill L0 `.agents/skills/mimisbrunnr-understanding/tests/run_tests.py`: a default load creates no files and import is refused without `--store`, emitting nothing. The load client is file-only and never reaches the store; L1 `tests/SmoothAiProductContextMemory.Application.ComponentTest/Features/UnderstandingTransferStoreTests.cs` proves the store read paths a load consumes (query, export, dossier) write nothing.
+Skill L0 `.agents/skills/mimisbrunnr-kvasir-understanding/tests/run_tests.py`: a default load creates no files and import is refused without `--store`, emitting nothing. The load client is file-only and never reaches the store; L1 `tests/SmoothAiProductContextMemory.Application.ComponentTest/Features/UnderstandingTransferStoreTests.cs` proves the store read paths a load consumes (query, export, dossier) write nothing.

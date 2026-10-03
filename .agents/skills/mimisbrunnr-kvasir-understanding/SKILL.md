@@ -1,5 +1,5 @@
 ---
-name: mimisbrunnr-understanding
+name: mimisbrunnr-kvasir-understanding
 description: Load a Mímisbrunnr Understanding export — or any prior material (session, meeting notes, transcript) — into a new or running agent's session context, and share context across sessions and repositories. The load/transfer counterpart to mimisbrunnr-odin-context-memory.
 effort: high  # judgement on understanding vs scoped fact, and capture-path funneling
 ---
@@ -21,7 +21,7 @@ into the session, `--export` sends the session's material to the store. All swit
 analysed by the AI. Currently no interactive questions exist in this skill, but the switch is
 accepted for forward compatibility.
 
-# mimisbrunnr-understanding
+# mimisbrunnr-kvasir-understanding
 
 Move Mímisbrunnr **Understanding** knowledge between a session and the store. **`load`** brings a file,
 folder or transcript into the session's context, writing nothing. **`import`** queries the store itself
@@ -42,7 +42,7 @@ already written somewhere into the store so it compounds. It is the **load/trans
 ## Load (default)
 
 ```bash
-python3 -B .agents/skills/mimisbrunnr-understanding/scripts/understanding_client.py \
+python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding_client.py \
   load <input> [--format store|understanding|foreign|auto] [--all] [--asof YYYY-MM-DD] [--max-chars N]
 ```
 
@@ -77,7 +77,7 @@ python3 -B .agents/skills/mimisbrunnr-understanding/scripts/understanding_client
 ## Import (store → session)
 
 ```bash
-python3 -B .agents/skills/mimisbrunnr-understanding/scripts/understanding_client.py \
+python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding_client.py \
   import [--ticket provider:key] [--repository REPO] [--initiative NAME] [--scope scope:id] \
   [--tags TAG,...] [--query WORD] [--status STATUS] [--limit N] [--asof YYYY-MM-DD] \
   [--all] [--table] [--max-chars N]
@@ -106,7 +106,7 @@ python3 -B .agents/skills/mimisbrunnr-understanding/scripts/understanding_client
 ## Export (session → store)
 
 ```bash
-python3 -B .agents/skills/mimisbrunnr-understanding/scripts/understanding_client.py \
+python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding_client.py \
   export <input> [--write] \
   [--tickets TICKET,...] [--tags TAG,...] [--repository REPO] [--scope scope:id] \
   [--initiative NAME] [--name NAME] [--body TEXT]
@@ -133,7 +133,7 @@ python3 -B .agents/skills/mimisbrunnr-understanding/scripts/understanding_client
 ## Session export (`--currentsession`)
 
 ```bash
-python3 -B .agents/skills/mimisbrunnr-understanding/scripts/understanding_client.py \
+python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding_client.py \
   dump --currentsession [--from FILE|-] [--out .context/mimisbrunnr-understandings/<session-folder>] \
   [--session-name NAME] \
   [--tickets TICKET,...] [--tags TAG,...] [--repository REPO] [--scope scope:id] [--initiative NAME]
@@ -199,7 +199,7 @@ shape of the problem and never the value.
 
 ## Test
 
-Committed harness: `python3 -B .agents/skills/mimisbrunnr-understanding/tests/run_tests.py`.
+Committed harness: `python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/tests/run_tests.py`.
 
 ## Related
 
