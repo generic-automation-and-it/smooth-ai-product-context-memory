@@ -332,6 +332,11 @@ write_profile() {
   if [ -f "$target" ]; then
     backup="$target-mimisbrunnr-$(date +%Y%m%d%H%M%S)-$RANDOM"
     cp -p -- "$target" "$backup" || die "could not back up $target; refusing to write"
+    # `cp -p` carries the profile's own mode across, and a first write starts from a normally
+    # world-readable `~/.zshrc`. From the second run on, the file being copied already holds the
+    # managed block, so without this the backup sits in `$HOME` world-readable with the token in it —
+    # the very leak the mode 600 on the new profile below exists to prevent.
+    chmod 600 "$backup" || die "cannot restrict permissions on $backup"
   fi
 
   if [ -f "$target" ]; then
