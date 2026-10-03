@@ -798,7 +798,7 @@ class CredentialTransportTests(unittest.TestCase):
                 self.assertNotIn("s3cret", rendered)
                 self.assertNotIn("user:", rendered)
                 stderr = io.StringIO()
-                # `cmd_bundle` exports --base-url into the environment; patch.dict restores it.
+                # `--base-url` flows straight into the fetch; patch.dict restores any env the run set.
                 with mock.patch.dict(os.environ), contextlib.redirect_stderr(stderr):
                     self.assertEqual(dc.main(["--base-url", base, "bundle"]), 1)
                 self.assertNotIn("s3cret", stderr.getvalue())

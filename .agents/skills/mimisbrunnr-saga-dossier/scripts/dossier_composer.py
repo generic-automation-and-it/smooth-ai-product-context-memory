@@ -1440,8 +1440,6 @@ def _heimdallr_autofill(body):
 
 
 def cmd_bundle(args):
-    if args.base_url:
-        os.environ[_ENV_BASE_URL] = args.base_url
     body = json.loads(args.body) if args.body else {}
     if not isinstance(body, dict):
         raise ValueError("--body must be a JSON object of bundle anchors")
