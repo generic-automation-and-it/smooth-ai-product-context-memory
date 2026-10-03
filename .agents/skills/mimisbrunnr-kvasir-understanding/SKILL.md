@@ -80,12 +80,14 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
 python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding_client.py \
   import [--ticket provider:key] [--repository REPO] [--initiative NAME] [--scope scope:id] \
   [--tags TAG,...] [--query WORD] [--status STATUS] [--limit N] [--asof YYYY-MM-DD] \
-  [--all] [--table] [--max-chars N] [--heimdallr true]
+  [--all] [--table] [--max-chars N]
 ```
 
 - `import` queries the store for `kind = understanding` through the capture skill's **read client**, so
   it needs only the read token and carries no write capability. It renders the recalled records as cited
   grounding context — the same frames a store export gets — or as **one row per record** with `--table`.
+- `import` never runs Heimdallr autofill: inbound takes only what the caller binds. An explicit
+  `--initiative "Mímisbrunnr-MVP"` recalls the whole initiative even from a ticketed branch.
 - **Filters map one-for-one onto the read API's declared fields**, so the server does the narrowing:
   `--ticket provider:key`, `--repository`, `--initiative`, `--scope`, `--tags`, `--query` (free text,
   stemmed AND-of-lexemes — one or two words, not a sentence), `--status`, `--asof` (validity window),
@@ -130,9 +132,9 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
 - **The digest states the gated-kind limit.** A decision or rule captured this way is written as
   `kind = understanding`, which does **not** pass the gated-kind approval.
 
-## Heimdallr autofill (`--heimdallr true`, default on)
+## Heimdallr autofill (`--heimdallr true`, default on, outbound only)
 
-`import`, `export` and `dump --currentsession` all accept `--heimdallr true|false`
+`export` and `dump --currentsession` accept `--heimdallr true|false`
 (default `true`). When on, only a field the caller did **not** bind is even
 considered for autofill, per field, from an offline run of the sibling
 `mimisbrunnr-heimdallr-find-session-metadata` reporter (git remote + branch +
@@ -148,10 +150,9 @@ normal case and never a reason to ask for, invent, or re-supply one. Never
 forward caller flags into the reporter; its own `--initiative` flag is for
 manual runs only.
 
-- `import` fills singular `--ticket` with the first Heimdallr hit (branch hits before
-  commits); `export`/`dump` bind branch-seen tickets when any exist, else the single
+- `export`/`dump` bind branch-seen tickets when any exist, else the single
   newest commit ticket — a 10-commit window can carry stale work, so all of it is never
-  bound at once.
+  bound at once. `import` binds nothing on its own: every filter it sends was passed explicitly.
 - Heimdallr reports `unknown` initiative when nothing proves one; that fills nothing.
   It never supplies `--tags`: derive tags from the material's own keywords, or pass
   `--tags` explicitly.

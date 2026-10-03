@@ -32,5 +32,6 @@ Heimdallr watches and reports — he does not judge or bind. The operator binds.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-03 | **Heimdallr removed from kvasir `import`; autofill is outbound only.** Kvasir `export`/`dump` and dossier `bundle` call it via a skills-root-relative lookup (`--heimdallr true` default, `false` opts out); odin/vitsmunir/ymir follow it as agent guidance. `import` takes only what the caller binds. Contract unchanged: still git-only repo/tickets/initiative to console, still never tags (keyword-derived by the agent) and never `unknown`-as-binding. | session request |
 | 2026-10-03 | **Heimdallr is now the default autofill source for the five labelling skills.** Kvasir `import`/`export`/`dump` and dossier `bundle` call it via a skills-root-relative lookup (`--heimdallr true` default, `false` opts out); odin/vitsmunir/ymir follow it as agent guidance. Contract unchanged: still git-only repo/tickets/initiative to console, still never tags (keyword-derived by the agent) and never `unknown`-as-binding. | session request |
 | 2026-10-02 | Created — offline git-only session-metadata reporter (tickets, repository, initiative) to console. Heimdallr: the watcher who sees all, fitting a scanner that reports without binding. Draft. | session request |

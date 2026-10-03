@@ -800,6 +800,10 @@ def cmd_import(args: argparse.Namespace) -> int:
     payload". That direction is now `export`. It is refused with a deprecation rather than silently
     repurposed: an invocation that used to prepare a capture must not start querying the store
     instead, and one that used to be refused without `--store` must not start writing.
+
+    `import` never runs Heimdallr autofill: inbound (store -> session) takes only what the
+    caller binds, so a session on a ticketed branch still recalls the whole initiative
+    instead of narrowing to that ticket. Outbound (`export`, `dump`) keeps it.
     """
     if args.store:
         print("DEPRECATED: `import <input> --store` prepared a capture payload. That direction is "
@@ -813,28 +817,6 @@ def cmd_import(args: argparse.Namespace) -> int:
               "file in, use `load`; to send session material to the store, use `export <input>`.",
               file=sys.stderr)
         return 1
-
-    if heimdallr_enabled(args) and (not args.ticket or not args.repository or not args.initiative):
-        scan = heimdallr_scan()
-        filled = []
-        if not args.ticket:
-            found = heimdallr_autofill_tickets(scan)
-            if found:
-                args.ticket = found[0]
-                filled.append(f"ticket {found[0]}")
-        if not args.repository:
-            repo = heimdallr_repository(scan)
-            if repo:
-                args.repository = repo
-                filled.append(f"repository {repo}")
-        if not args.initiative:
-            initiative = heimdallr_initiative(scan)
-            if initiative:
-                args.initiative = initiative
-                filled.append(f"initiative {initiative}")
-        if filled:
-            print(f"Heimdallr autofill ({', '.join(filled)}); an explicit flag always wins. "
-                  f"Pass --heimdallr false to disable.")
 
     all_kinds = args.all_kinds
     try:
@@ -1661,9 +1643,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                      help=f"Render budget (default {DEFAULT_MAX_CHARS}); cuts whole records.")
     imp.add_argument("--all", action="store_true", dest="all_kinds",
                      help="Breadth: memory AND understanding, not just understanding-kind.")
-    imp.add_argument("--heimdallr", choices=_HEIMDALLR_CHOICES, default="true",
-                     help="Autofill missing --ticket/--repository/--initiative from the offline "
-                          "Heimdallr git scan (default true; explicit flags always win).")
 
     exp = sub.add_parser("export", help="SESSION -> STORE: orchestrate the capture path "
                                         "(dry run unless --write).")
