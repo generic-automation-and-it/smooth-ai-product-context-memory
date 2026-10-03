@@ -20,6 +20,7 @@
     "npm/cli/",
     ".agents/skills/mimisbrunnr-odin-context-memory/scripts/",
     ".agents/skills/mimisbrunnr-kvasir-understanding/scripts/",
+    ".agents/skills/mimisbrunnr-heimdallr-find-session-metadata/scripts/",
     "README.md"
   ],
   "engines": {

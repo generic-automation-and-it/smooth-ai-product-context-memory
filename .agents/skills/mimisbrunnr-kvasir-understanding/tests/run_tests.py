@@ -872,6 +872,26 @@ class ExportOrchestrationTests(unittest.TestCase):
             self.assertIn("initiative read failed", err)
             self.assertIn("not evidence that", err)
 
+    def test_dry_run_export_also_refuses_when_the_initiative_read_fails(self):
+        """A dry run that cannot read the initiative aborts before the preview, so it must report the
+        same refusal as `--write` rather than a silent success exit 0."""
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
+            originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                         uc.resolve_group, uc._run_capture_client)
+            uc.gate_redaction = lambda texts: (list(texts), {})
+            uc.gate_atomicity = lambda c: [{"verdict": "simple", "signals": []} for _ in c]
+            uc.initiative_exists = lambda name: (None, "initiatives read failed")
+            uc.resolve_group = lambda b, n, d, dryrun: (None, "dry-run")
+            uc._run_capture_client = lambda s, a, p: (0, "{}", "")
+            try:
+                rc, _, err = run(["export", src, "--initiative", "X"])
+            finally:
+                (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                 uc.resolve_group, uc._run_capture_client) = originals
+            self.assertEqual(rc, 1)
+            self.assertIn("initiative read failed", err)
+
     def test_set_items_carries_the_source_status_and_confidence(self):
         """A store-export round trip must not promote a proposed record to approved canon."""
         candidates = [{"statement": "A claim.", "description": "Subj", "contentSummary": "",

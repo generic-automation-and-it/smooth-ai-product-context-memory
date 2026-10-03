@@ -1145,7 +1145,7 @@ def cmd_export(args: argparse.Namespace) -> int:
     if exists is None:
         print(f"REFUSED: the initiative read failed ({why}); this is not evidence that "
               f"'{initiative}' is absent. Nothing was written.", file=sys.stderr)
-        return 1 if args.write else 0
+        return 1
     initiative_note = (f"initiative '{initiative}' exists" if exists else
                       f"initiative '{initiative}' is absent — would create: "
                       f"context_memory_client.py upsert-initiative "
