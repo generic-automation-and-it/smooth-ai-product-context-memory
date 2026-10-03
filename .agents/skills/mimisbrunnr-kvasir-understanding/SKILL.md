@@ -80,7 +80,7 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
 python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding_client.py \
   import [--ticket provider:key] [--repository REPO] [--initiative NAME] [--scope scope:id] \
   [--tags TAG,...] [--query WORD] [--status STATUS] [--limit N] [--asof YYYY-MM-DD] \
-  [--all] [--table] [--max-chars N] [--heimdallr true]
+  [--all] [--table] [--max-chars N] [--heimdallr false]
 ```
 
 - `import` queries the store for `kind = understanding` through the capture skill's **read client**, so
@@ -94,7 +94,10 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
 - **Three distinct outcomes, never collapsed.** A store that refuses the connection is `unreachable`
   (exit 3, an operator action); a store that hangs past its budget is `timed-out` (exit 4, worth a
   retry); a store that answers with nothing is empty (exit 0, "widen the filters"). A hung store must
-  never read as "nothing matched".
+  never read as "nothing matched". An empty result renders the filters it actually used
+  (`NO RECORDS MATCHED (filters used: …)`), so "nothing matches" is distinguishable from "nothing was
+  asked"; and an empty result under an autofilled ticket is re-run once without it (see the Heimdallr
+  section).
 - **`--table` is an overview, not the rendered records**: one row per record (Subject, Answer, Kind,
   Status, Confidence, Scope, Memory · version, Captured). The answer cell is truncated for readability
   and the truncation is stated; the stored claim is whole. Tickets and repo belong to the group, so an
@@ -130,10 +133,14 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
 - **The digest states the gated-kind limit.** A decision or rule captured this way is written as
   `kind = understanding`, which does **not** pass the gated-kind approval.
 
-## Heimdallr autofill (`--heimdallr true`, default on)
+## Heimdallr autofill (`--heimdallr true`, default on for `export`/`dump`, off for `import`)
 
-`import`, `export` and `dump --currentsession` all accept `--heimdallr true|false`
-(default `true`). When on, only a field the caller did **not** bind is even
+`import`, `export` and `dump --currentsession` all accept `--heimdallr true|false`.
+For `import` the default is **false** — a query invents no filter, so a bare
+`import` never narrows itself to the branch's latest ticket (that autofill read
+"show me one branch's worth" against a full store). For `export` and `dump` the
+default is **true**, where binding to the session's work is the point. When on,
+only a field the caller did **not** bind is even
 considered for autofill, per field, from an offline run of the sibling
 `mimisbrunnr-heimdallr-find-session-metadata` reporter (git remote + branch +
 recent subjects — the tickets already made in this session, and the current
@@ -147,6 +154,11 @@ and autofills only the ticket — Heimdallr reporting `unknown` initiative is th
 normal case and never a reason to ask for, invent, or re-supply one. Never
 forward caller flags into the reporter; its own `--initiative` flag is for
 manual runs only.
+
+- On `import`, an empty result renders the filters actually used
+  (`NO RECORDS MATCHED (filters used: …)`), and an empty result under an
+  autofilled ticket is re-run once without it so the narrowing is reported
+  beside the widened result — never a bare "nothing matched".
 
 - `import` fills singular `--ticket` with the first Heimdallr hit (branch hits before
   commits); `export`/`dump` bind branch-seen tickets when any exist, else the single

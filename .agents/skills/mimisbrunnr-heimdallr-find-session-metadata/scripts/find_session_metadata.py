@@ -82,7 +82,10 @@ def find_tickets(*texts: str) -> list[dict]:
 def scan(initiative: str | None = None) -> dict:
     remote = _git("remote", "get-url", "origin")
     branch = _git("branch", "--show-current")
-    log = _git("log", "--format=%s", "-n", "10")
+    # Pin the window to the branch's own ref (HEAD when detached): an implicit-HEAD `git log` reads
+    # whichever tip the checkout sits on, so the same branch state must always yield the same subjects.
+    ref = branch if branch else "HEAD"
+    log = _git("log", ref, "--format=%s", "-n", "10")
     subjects = (log or "").splitlines()
 
     texts = []

@@ -59,7 +59,7 @@ class RepoTests(unittest.TestCase):
             {
                 "remote get-url origin": remote + "\n",
                 "branch --show-current": branch + "\n",
-                "log --format=%s -n 10": "\n",
+                f"log {branch} --format=%s -n 10": "\n",
             },
             "--json",
         )
@@ -86,7 +86,7 @@ class TicketTests(unittest.TestCase):
             {
                 "remote get-url origin": "https://github.com/acme/widgets.git\n",
                 "branch --show-current": branch + "\n",
-                "log --format=%s -n 10": log,
+                f"log {branch} --format=%s -n 10": log,
             },
             "--json",
             *extra,
@@ -130,7 +130,7 @@ class ContractTests(unittest.TestCase):
                 {
                     "remote get-url origin": "https://github.com/acme/widgets.git\n",
                     "branch --show-current": "feat/160-x\n",
-                    "log --format=%s -n 10": "\n",
+                    "log feat/160-x --format=%s -n 10": "\n",
                 }
             )
             self.assertEqual(proc.returncode, 0, proc.stderr)
@@ -141,6 +141,27 @@ class ContractTests(unittest.TestCase):
             import shutil
 
             shutil.rmtree(tmp, ignore_errors=True)
+
+
+class StabilityTests(unittest.TestCase):
+    def test_two_consecutive_runs_on_the_same_git_state_are_byte_identical(self):
+        """The log window is pinned to the branch ref, so identical git state is reproducible.
+
+        An implicit-HEAD `git log` reads whichever tip the checkout sits on, so the same branch
+        could yield a different ticket between invocations. Pinning the ref makes the output a pure
+        function of the branch state.
+        """
+        responses = {
+            "remote get-url origin": "https://github.com/acme/widgets.git\n",
+            "branch --show-current": "feat/160-x\n",
+            "log feat/160-x --format=%s -n 10": (
+                "feat[160]: do the thing (#160)\nfeat[155]: other\n"
+            ),
+        }
+        first = run_with_git(responses, "--json")
+        second = run_with_git(responses, "--json")
+        self.assertEqual(first.stdout, second.stdout)
+        self.assertEqual(json.loads(first.stdout)["tickets"][0]["key"], "160")
 
 
 if __name__ == "__main__":

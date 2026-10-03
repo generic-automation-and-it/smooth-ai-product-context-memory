@@ -793,6 +793,26 @@ def _short(uuid: str) -> str:
     return uuid[:8] if uuid else "-"
 
 
+def _render_records(filters: dict, records: list[dict], args: argparse.Namespace,
+                    all_kinds: bool) -> list[str]:
+    """The cited-grounding render of a recall: the Filters line, then table or prose records.
+
+    Shared by the normal path and the autofill-withdrawn retry, so a narrowed-then-widened recall
+    renders identically to a direct one — the Filters line is the difference the reader must see.
+    """
+    lines = ["# Recalled from the store — cited grounding context", ""]
+    lines += [f"- Filters: {json.dumps(filters, sort_keys=True)}."]
+    if args.table:
+        # The notice frames the table before a reader skims it; on the prose path it closes the block.
+        lines += ["", DATA_NOTICE]
+        lines += render_table(records, all_kinds, args.asof, args.max_chars)
+    else:
+        lines += render_store(records, "the store", args.asof, all_kinds=all_kinds,
+                              max_chars=args.max_chars)
+        lines += ["", DATA_NOTICE]
+    return lines
+
+
 def cmd_import(args: argparse.Namespace) -> int:
     """STORE -> SESSION. Query `kind = understanding` and render it as cited context or a table.
 
@@ -814,6 +834,7 @@ def cmd_import(args: argparse.Namespace) -> int:
               file=sys.stderr)
         return 1
 
+    autofilled = set()
     if heimdallr_enabled(args) and (not args.ticket or not args.repository or not args.initiative):
         scan = heimdallr_scan()
         filled = []
@@ -821,16 +842,19 @@ def cmd_import(args: argparse.Namespace) -> int:
             found = heimdallr_autofill_tickets(scan)
             if found:
                 args.ticket = found[0]
+                autofilled.add("ticket")
                 filled.append(f"ticket {found[0]}")
         if not args.repository:
             repo = heimdallr_repository(scan)
             if repo:
                 args.repository = repo
+                autofilled.add("repository")
                 filled.append(f"repository {repo}")
         if not args.initiative:
             initiative = heimdallr_initiative(scan)
             if initiative:
                 args.initiative = initiative
+                autofilled.add("initiative")
                 filled.append(f"initiative {initiative}")
         if filled:
             print(f"Heimdallr autofill ({', '.join(filled)}); an explicit flag always wins. "
@@ -857,25 +881,33 @@ def cmd_import(args: argparse.Namespace) -> int:
     if outcome != "ok":
         print(f"STORE READ FAILED: {outcome}. Nothing was written.", file=sys.stderr)
         return 5
+    if not records and "ticket" in autofilled:
+        # An autofilled ticket that matches nothing must not answer "you have nothing" on its own:
+        # it is a narrowing the caller never asked for, so re-run once without it and report both.
+        retry_filters = {k: v for k, v in filters.items()
+                         if k not in ("ticketProvider", "ticketKey")}
+        retry_records, retry_outcome = store_query(retry_filters)
+        if retry_outcome == "ok" and retry_records:
+            print("NO RECORDS MATCHED under the autofilled ticket "
+                  f"{filters['ticketProvider']}:{filters['ticketKey']} "
+                  f"(filters used: {json.dumps(filters, sort_keys=True)}). The autofilled filter was "
+                  "withdrawn and the query re-run without it:")
+            print("\n".join(_render_records(retry_filters, retry_records, args, all_kinds)))
+            return 0
+        if retry_outcome != "ok":
+            print(f"NOTE: the re-run without the autofilled ticket could not be read "
+                  f"({retry_outcome}); only the narrowed result is reported.", file=sys.stderr)
+
     if not records:
         # A real answer, and the only one of the three that is. It is stated as an answer so the
-        # empty case is never mistaken for the two failures above.
-        print("NO RECORDS MATCHED: the store answered, and there is nothing under these filters. "
-              "This is an empty result, not a failure — widen the filters (`--all`, drop `--query`) "
-              "if you expected memory.")
+        # empty case is never mistaken for the two failures above, and the filters actually used are
+        # rendered so "nothing matches" is distinguishable from "nothing was asked".
+        print(f"NO RECORDS MATCHED (filters used: {json.dumps(filters, sort_keys=True)}): the store "
+              "answered, and there is nothing under these filters. This is an empty result, not a "
+              "failure — widen the filters (`--all`, drop `--query`) if you expected memory.")
         return 0
 
-    lines = ["# Recalled from the store — cited grounding context", ""]
-    lines += [f"- Filters: {json.dumps(filters, sort_keys=True)}."]
-    if args.table:
-        # The notice frames the table before a reader skims it; on the prose path it closes the block.
-        lines += ["", DATA_NOTICE]
-        lines += render_table(records, all_kinds, args.asof, args.max_chars)
-    else:
-        lines += render_store(records, "the store", args.asof, all_kinds=all_kinds,
-                              max_chars=args.max_chars)
-        lines += ["", DATA_NOTICE]
-    print("\n".join(lines))
+    print("\n".join(_render_records(filters, records, args, all_kinds)))
     return 0
 
 
@@ -1661,9 +1693,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                      help=f"Render budget (default {DEFAULT_MAX_CHARS}); cuts whole records.")
     imp.add_argument("--all", action="store_true", dest="all_kinds",
                      help="Breadth: memory AND understanding, not just understanding-kind.")
-    imp.add_argument("--heimdallr", choices=_HEIMDALLR_CHOICES, default="true",
+    imp.add_argument("--heimdallr", choices=_HEIMDALLR_CHOICES, default="false",
                      help="Autofill missing --ticket/--repository/--initiative from the offline "
-                          "Heimdallr git scan (default true; explicit flags always win).")
+                          "Heimdallr git scan (default false for import: a query invents no filter; "
+                          "pass --heimdallr true to autofill, and explicit flags always win).")
 
     exp = sub.add_parser("export", help="SESSION -> STORE: orchestrate the capture path "
                                         "(dry run unless --write).")

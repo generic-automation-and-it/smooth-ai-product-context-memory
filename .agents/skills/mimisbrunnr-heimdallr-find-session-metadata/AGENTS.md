@@ -20,6 +20,8 @@ Heimdallr watches and reports — he does not judge or bind. The operator binds.
 
 - `#123` is GitHub by convention (shared with the understanding export); `provider:key` keeps its provider lowercased; bare `ABC-123` is `local`.
 - Tickets deduped in first-seen order, branch before commits.
+- The commit window is pinned to the branch ref (`git log <branch>`), falling back to `HEAD` when
+  detached, so the same branch state always yields the same subjects — the report is reproducible.
 - Unprovable fields read `unknown` with no source, never an empty string dressed as an answer.
 - Python 3.9 compatible, stdlib only.
 
@@ -32,5 +34,6 @@ Heimdallr watches and reports — he does not judge or bind. The operator binds.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-03 | **Commit window pinned to the branch ref** (`git log <branch>`, `HEAD` when detached). The implicit-HEAD log read whichever tip the checkout sat on, so the same branch state could yield a different ticket between invocations. Harness 8 -> 9 (byte-identical stability test). | this PR |
 | 2026-10-03 | **Heimdallr is now the default autofill source for the five labelling skills.** Kvasir `import`/`export`/`dump` and dossier `bundle` call it via a skills-root-relative lookup (`--heimdallr true` default, `false` opts out); odin/vitsmunir/ymir follow it as agent guidance. Contract unchanged: still git-only repo/tickets/initiative to console, still never tags (keyword-derived by the agent) and never `unknown`-as-binding. | session request |
 | 2026-10-02 | Created — offline git-only session-metadata reporter (tickets, repository, initiative) to console. Heimdallr: the watcher who sees all, fitting a scanner that reports without binding. Draft. | session request |
