@@ -802,7 +802,7 @@ class ExportOrchestrationTests(unittest.TestCase):
                 invoked = [argv[0] for _, argv, _ in calls]
                 self.assertNotIn("resolve-group", invoked)
                 self.assertNotIn("set", invoked)
-                self.assertIn("would create", out)
+                self.assertIn("would write", out)
                 return out
 
             out = self._with_gates(body)
@@ -827,7 +827,7 @@ class ExportOrchestrationTests(unittest.TestCase):
                  uc.resolve_group, uc._run_capture_client) = original
             self.assertEqual(rc, 0)
             self.assertNotIn("upsert-initiative", seen)
-            self.assertIn("would create", out)
+            self.assertIn("would write", out)
             self.assertIn("upsert-initiative", out, "the exact command must be named")
 
     def test_write_refuses_when_the_initiative_is_absent_and_names_the_command(self):
@@ -1333,6 +1333,39 @@ class ExportVersionBumpTests(unittest.TestCase):
                  uc.resolve_group, uc._run_capture_client) = originals
             self.assertEqual(rc, 1)
             self.assertIn("share a subject", err)
+
+    def test_preflight_match_count_counts_candidates_with_a_match(self):
+        preflight = json.dumps({"candidates": [
+            {"index": 0, "matches": [{"uuid": "u1"}], "ticketConflict": None},
+            {"index": 1, "matches": [], "ticketConflict": None},
+            {"index": 2, "matches": [{"uuid": "u2"}, {"uuid": "u3"}], "ticketConflict": None},
+        ]})
+        self.assertEqual(uc.preflight_match_count(preflight), 2)
+        self.assertEqual(uc.preflight_match_count("not json"), 0)
+
+    def test_dry_run_discloses_existing_subject_matches(self):
+        """A dry run has no resolved group, so it cannot split new vs version; it must disclose how
+        many candidates matched an existing same-subject memory rather than claiming all are creates."""
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
+            originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                         uc.resolve_group, uc._run_capture_client)
+            uc.gate_redaction = lambda texts: (list(texts), {})
+            uc.gate_atomicity = lambda c: [{"verdict": "simple", "signals": []} for _ in c]
+            uc.initiative_exists = lambda name: (True, "ok")
+            uc.resolve_group = lambda b, n, d, dryrun: (None, "dry-run")
+            uc._run_capture_client = lambda s, a, p: (
+                0, json.dumps({"candidates": [
+                    {"index": 0, "matches": [{"uuid": "u1", "groupUuid": "g-other"}],
+                     "ticketConflict": None}]}), "")
+            try:
+                rc, out, _ = run(["export", src, "--heimdallr", "false"])
+            finally:
+                (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                 uc.resolve_group, uc._run_capture_client) = originals
+            self.assertEqual(rc, 0)
+            self.assertIn("would write: memory (1)", out)
+            self.assertIn("1 candidate(s) matched an existing same-subject memory", out)
 
 
 class ImportTests(unittest.TestCase):

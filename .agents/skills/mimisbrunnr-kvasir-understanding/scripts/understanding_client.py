@@ -1046,6 +1046,21 @@ def build_version_map(preflight_output: str, group_uuid) -> dict:
     return mapping
 
 
+def preflight_match_count(preflight_output: str) -> int:
+    """Number of candidates the preflight matched to an existing memory (across any group).
+
+    A dry run has no resolved group, so it cannot say which matches are in the export's group — hence a
+    count, not a version/new split. The receipt uses it to disclose that a ``--write`` would version
+    those whose match is in the export's group.
+    """
+    try:
+        data = json.loads(preflight_output)
+        results = (data or {}).get("candidates") or []
+    except (ValueError, AttributeError):
+        return 0
+    return sum(1 for r in results if isinstance(r, dict) and r.get("matches"))
+
+
 def set_items(candidates: list[dict], binding: dict, now: dt.datetime) -> list[dict]:
     """Project candidates onto the write payload's item shape.
 
@@ -1236,6 +1251,7 @@ def cmd_export(args: argparse.Namespace) -> int:
 
     now = dt.datetime.now(dt.timezone.utc)
     total_candidates = 0
+    matched = 0
     for batch_no, chunk in enumerate(chunks, start=1):
         multi = total_chunks > 1
         tag = f" [batch {batch_no}/{total_chunks}]" if multi else ""
@@ -1249,6 +1265,7 @@ def cmd_export(args: argparse.Namespace) -> int:
         if rc == 0:
             preflight = out.strip()
             version_map = build_version_map(preflight, group_uuid)
+            matched += preflight_match_count(preflight)
             shown = (preflight if len(preflight) <= 1200
                      else preflight[:1200] + f"\n  … {len(preflight) - 1200} more character(s) not shown")
             print((f"Batch {batch_no}/{total_chunks} " if multi else "") + f"Preflight: {shown}")
@@ -1276,9 +1293,13 @@ def cmd_export(args: argparse.Namespace) -> int:
             return 1
         items = set_items(chunk, binding, now)
         if multi:
-            count = (sum(1 for i in items if i["uuid"]), sum(1 for i in items if not i["uuid"]))
-            print(f"Batch {batch_no}/{total_chunks}: {len(chunk)} candidate(s) "
-                  f"({count[0]} version(s), {count[1]} new).")
+            line = f"Batch {batch_no}/{total_chunks}: {len(chunk)} candidate(s)"
+            if args.write:
+                # The version/new split is accurate only when the group is resolved; in a dry run the
+                # group is not, so the receipt discloses the match count instead.
+                count = (sum(1 for i in items if i["uuid"]), sum(1 for i in items if not i["uuid"]))
+                line += f" ({count[0]} version(s), {count[1]} new)"
+            print(line)
         total_candidates += len(chunk)
 
         if not args.write:
@@ -1310,11 +1331,15 @@ def cmd_export(args: argparse.Namespace) -> int:
         # server-side half runs at the head of `--write`, before anything is persisted. Saying so is
         # better than sending a request that can only fail on a null group.
         print(f"\nDRY RUN — nothing was written, and nothing was created.\n"
-              f"  would create: memory ({total_candidates})"
+              f"  would write: memory ({total_candidates})"
               + (f", group ({group_state})" if group_state == "dry-run" else "")
               + f"\n  would not create: anything under an existing group, because no group was "
                 f"resolved\nThe server-side `set --dryrun` veto runs at the start of `--write`, once "
               f"a group exists. Re-run with `--write` to capture.")
+        if matched:
+            print(f"  {matched} candidate(s) matched an existing same-subject memory; a `--write` would "
+                  f"version those whose match is in the export's group (a match in another group stays "
+                  f"a separate new memory).")
         if total_chunks > 1:
             print("  Note: a multi-batch `--write` is not atomic across batches; a later batch could "
                   "be refused at its veto after an earlier batch was already written.")
