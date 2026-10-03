@@ -27,25 +27,46 @@ TICKET_PATTERNS = (
 )
 
 
+class GitUnavailable(RuntimeError):
+    """git could not determine session metadata (not a repo, or git is not on PATH).
+
+    Raised rather than returning an empty result so a caller can tell "no tickets in this repo"
+    from "git cannot run here" — the consumer treats the non-zero exit as autofill unavailable
+    instead of a genuine empty recall.
+    """
+
+
 def _git(*argv: str) -> str | None:
     try:
         proc = subprocess.run(
             ["git", *argv], capture_output=True, text=True, encoding="utf-8"
         )
     except (FileNotFoundError, OSError):
-        return None
+        raise GitUnavailable("git is not on PATH or could not be run") from None
     if proc.returncode != 0:
         return None
     return proc.stdout.strip()
 
 
 def parse_repo(url: str) -> str | None:
-    """owner/repo from a git remote URL, or None when it is not provable."""
+    """The repo path (all segments) from a git remote URL, or None when unprovable."""
     text = (url or "").strip()
-    text = re.sub(r"^(?:ssh://git@|git@)", "", text)
-    text = re.sub(r"^https?://[^/]+/", "", text)
-    text = text.replace(":", "/", 1) if ":" in text.split("/")[0] else text
-    match = re.search(r"([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?$", text)
+    if re.match(r"^https?://", text):
+        text = re.sub(r"^https?://[^/]+/", "", text)
+    elif re.match(r"^(?:ssh://)?git@", text):
+        # scp-style `git@host:owner/.../repo` or `ssh://git@host[:port]/owner/.../repo`; drop the
+        # host (and any SSH port, which a self-hosted tracker may set).
+        text = re.sub(r"^(?:ssh://)?git@[^:/]+(?::\d+)?[:/]", "", text)
+    else:
+        return None
+    # Drop any query/fragment and a trailing `.git` (with an optional trailing slash some remotes
+    # append), so `owner/repo.git?ref=x` and `owner/repo.git/` still resolve to `owner/repo`.
+    text = re.sub(r"[?#].*$", "", text)
+    text = re.sub(r"\.git/?$", "", text)
+    # Capture every slash-separated segment, not just the last pair: a GitLab-style remote
+    # `group/subgroup/repo.git` is one repository, and the last-pair form silently returned
+    # `subgroup/repo`. The `+` after the first segment guarantees at least owner/repo.
+    match = re.search(r"([A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+)$", text)
     if not match:
         return None
     repo = match.group(1)
@@ -65,8 +86,16 @@ def find_tickets(*texts: str) -> list[dict]:
                         "key": match.group(1),
                         "seenIn": label,
                     }
+        # The bare-key pattern matches ABC-123 inside `jira:ABC-123`, which would re-emit it as a
+        # spurious `local:ABC-123`. Collect the provider:key spans first and suppress bare-key
+        # matches that fall within one — the provider:key already captured that ticket.
+        text = text or ""
+        provider_spans = [m.span() for m in TICKET_PATTERNS[1].finditer(text)]
         for pattern in TICKET_PATTERNS:
-            for match in pattern.finditer(text or ""):
+            for match in pattern.finditer(text):
+                if pattern is TICKET_PATTERNS[2] and any(
+                        match.start() >= s and match.end() <= e for (s, e) in provider_spans):
+                    continue
                 if match.re.pattern.startswith("#"):
                     provider, key = "github", match.group(1)
                 elif ":" in match.group(0) and match.lastindex == 2:
@@ -80,9 +109,20 @@ def find_tickets(*texts: str) -> list[dict]:
 
 
 def scan(initiative: str | None = None) -> dict:
+    # Distinguish "no metadata in this repo" from "git cannot run here". A repo with no ticket
+    # commits is a legitimate empty `tickets: []`; a non-git checkout or a missing git binary must
+    # not masquerade as "no tickets", so the consumer reports autofill unavailable.
+    # A `git` inside a work tree answers "true"; any other answer — a non-work-tree ("false", e.g.
+    # a bare clone or `.git/`), a non-repo error (None), or a missing git binary (GitUnavailable) —
+    # means the autofill cannot run and must not masquerade as "no tickets".
+    if _git("rev-parse", "--is-inside-work-tree") != "true":
+        raise GitUnavailable("not a git repository or git is unavailable")
     remote = _git("remote", "get-url", "origin")
     branch = _git("branch", "--show-current")
-    log = _git("log", "--format=%s", "-n", "10")
+    # Pin the window to the branch's own ref (HEAD when detached): an implicit-HEAD `git log` reads
+    # whichever tip the checkout sits on, so the same branch state must always yield the same subjects.
+    ref = branch if branch else "HEAD"
+    log = _git("log", ref, "--format=%s", "-n", "10")
     subjects = (log or "").splitlines()
 
     texts = []
@@ -124,7 +164,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", action="store_true", help="JSON only to stdout")
     parser.add_argument("--initiative", default=None, help="initiative name (only source)")
     args = parser.parse_args(argv)
-    result = scan(initiative=args.initiative)
+    try:
+        result = scan(initiative=args.initiative)
+    except GitUnavailable as exc:
+        # Exit non-zero (not 0) so the consumer's `heimdallr_scan` treats this as autofill
+        # unavailable, not as a genuine empty recall.
+        print(f"git unavailable: {exc}", file=sys.stderr)
+        return 2
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
     else:

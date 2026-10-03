@@ -21,9 +21,13 @@ SKILL = Path(__file__).resolve().parents[1]
 SCRIPT = SKILL / "scripts" / "find_session_metadata.py"
 
 
-def run_with_git(responses: dict, *argv: str) -> subprocess.CompletedProcess:
+def run_with_git(responses: dict, *argv: str,
+                 cwd: str | None = None) -> subprocess.CompletedProcess:
     """Run the script with a fake git answering from `responses` keyed by argv tail."""
     tmp = tempfile.mkdtemp()
+    # The script runs in `cwd` when given (so a test can observe files it writes there); the fake git
+    # and responses live in their own dir, which is prepended to PATH, not the script's cwd.
+    run_cwd = cwd if cwd is not None else tmp
     calls = Path(tmp) / "git.calls"
     mapping = Path(tmp) / "responses.json"
     mapping.write_text(json.dumps(responses), encoding="utf-8")
@@ -34,6 +38,12 @@ def run_with_git(responses: dict, *argv: str) -> subprocess.CompletedProcess:
         "key = ' '.join(sys.argv[1:])\n"
         "open(%r, 'a').write(key + chr(10))\n"
         "data = json.load(open(%r))\n"
+        "if key == 'rev-parse --is-inside-work-tree':\n"
+        "    if data.get('_no_work_tree'):\n"
+        "        sys.stderr.write('fatal: not a git repository\\n')\n"
+        "        sys.exit(128)\n"
+        "    sys.stdout.write('false\\n' if data.get('_bare') else 'true\\n')\n"
+        "    sys.exit(0)\n"
         "if key in data:\n"
         "    sys.stdout.write(data[key])\n"
         "    sys.exit(0)\n"
@@ -45,7 +55,7 @@ def run_with_git(responses: dict, *argv: str) -> subprocess.CompletedProcess:
     try:
         return subprocess.run(
             [sys.executable, "-B", str(SCRIPT), *argv],
-            capture_output=True, text=True, encoding="utf-8", env=env, cwd=tmp,
+            capture_output=True, text=True, encoding="utf-8", env=env, cwd=run_cwd,
         )
     finally:
         import shutil
@@ -59,7 +69,7 @@ class RepoTests(unittest.TestCase):
             {
                 "remote get-url origin": remote + "\n",
                 "branch --show-current": branch + "\n",
-                "log --format=%s -n 10": "\n",
+                f"log {branch} --format=%s -n 10": "\n",
             },
             "--json",
         )
@@ -79,6 +89,39 @@ class RepoTests(unittest.TestCase):
     def test_unprovable(self):
         self.assertIsNone(self._repo(""))
 
+    def test_nested_group_path_is_kept_whole(self):
+        # A GitLab-style remote is one repository `group/subgroup/repo`, not just the last pair; the
+        # last-pair form silently dropped the parent group and returned a wrong id.
+        self.assertEqual(
+            self._repo("https://gitlab.com/group/subgroup/repo.git"), "group/subgroup/repo"
+        )
+
+    def test_trailing_slash_and_dots_do_not_defeat_the_path(self):
+        # Some remotes append a trailing slash; the repo name may also contain dots/hyphens.
+        self.assertEqual(self._repo("https://github.com/acme/my.repo.git/"), "acme/my.repo")
+        self.assertEqual(self._repo("git@gitlab.com:group/sub.repo.git"), "group/sub.repo")
+
+    def test_ssh_port_and_query_do_not_defeat_the_path(self):
+        # A self-hosted tracker may listen on a non-standard SSH port; the port must not become a
+        # repo path segment. A query/fragment must not defeat the path either.
+        self.assertEqual(self._repo("ssh://git@host:2222/group/sub/repo.git"), "group/sub/repo")
+        self.assertEqual(self._repo("https://gitlab.com/group/sub/repo.git?ref=x"), "group/sub/repo")
+
+    def test_not_a_git_repo_reports_unavailable_not_empty(self):
+        # A non-git checkout must signal "autofill unavailable" (exit 2) rather than masquerade as a
+        # genuine empty recall (exit 0 with no tickets), which a caller cannot distinguish.
+        proc = run_with_git({"_no_work_tree": "1"}, "--json")
+        self.assertEqual(proc.returncode, 2, proc.stderr)
+        self.assertIn("git unavailable", proc.stderr)
+
+    def test_a_bare_or_inside_git_dir_reports_unavailable_not_empty(self):
+        # `git rev-parse --is-inside-work-tree` answers "false" (exit 0) in a bare clone or inside
+        # `.git/`; that is not an error, so a probe keyed on `is None` would let it through as "no
+        # tickets". The guard checks for the literal "true", so this is also unavailable.
+        proc = run_with_git({"_bare": "1"}, "--json")
+        self.assertEqual(proc.returncode, 2, proc.stderr)
+        self.assertIn("git unavailable", proc.stderr)
+
 
 class TicketTests(unittest.TestCase):
     def _scan(self, branch: str, log: str, *extra: str) -> dict:
@@ -86,7 +129,7 @@ class TicketTests(unittest.TestCase):
             {
                 "remote get-url origin": "https://github.com/acme/widgets.git\n",
                 "branch --show-current": branch + "\n",
-                "log --format=%s -n 10": log,
+                f"log {branch} --format=%s -n 10": log,
             },
             "--json",
             *extra,
@@ -106,6 +149,10 @@ class TicketTests(unittest.TestCase):
         providers = {(t["provider"], t["key"]) for t in result["tickets"]}
         self.assertIn(("jira", "ABC-123"), providers)
         self.assertIn(("linear", "XYZ-42"), providers)
+        # The bare-key pattern matches ABC-123 inside `jira:ABC-123`; it must not be re-emitted as a
+        # spurious `local:ABC-123`, which the dedupe (keyed on provider:key) would not collapse.
+        self.assertNotIn(("local", "ABC-123"), providers)
+        self.assertNotIn(("local", "XYZ-42"), providers)
 
     def test_dedupe_keeps_first_source(self):
         result = self._scan("feat/160-x", "revisit #160\n")
@@ -130,8 +177,9 @@ class ContractTests(unittest.TestCase):
                 {
                     "remote get-url origin": "https://github.com/acme/widgets.git\n",
                     "branch --show-current": "feat/160-x\n",
-                    "log --format=%s -n 10": "\n",
-                }
+                    "log feat/160-x --format=%s -n 10": "\n",
+                },
+                cwd=tmp,
             )
             self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertIn("repository: acme/widgets", proc.stdout)
@@ -141,6 +189,27 @@ class ContractTests(unittest.TestCase):
             import shutil
 
             shutil.rmtree(tmp, ignore_errors=True)
+
+
+class StabilityTests(unittest.TestCase):
+    def test_two_consecutive_runs_on_the_same_git_state_are_byte_identical(self):
+        """The log window is pinned to the branch ref, so identical git state is reproducible.
+
+        An implicit-HEAD `git log` reads whichever tip the checkout sits on, so the same branch
+        could yield a different ticket between invocations. Pinning the ref makes the output a pure
+        function of the branch state.
+        """
+        responses = {
+            "remote get-url origin": "https://github.com/acme/widgets.git\n",
+            "branch --show-current": "feat/160-x\n",
+            "log feat/160-x --format=%s -n 10": (
+                "feat[160]: do the thing (#160)\nfeat[155]: other\n"
+            ),
+        }
+        first = run_with_git(responses, "--json")
+        second = run_with_git(responses, "--json")
+        self.assertEqual(first.stdout, second.stdout)
+        self.assertEqual(json.loads(first.stdout)["tickets"][0]["key"], "160")
 
 
 if __name__ == "__main__":

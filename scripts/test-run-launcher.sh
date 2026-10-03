@@ -261,11 +261,20 @@ else
   no "--profile writes mode 600" "mode is $(file_mode "$profile")"
 fi
 
-# An unmanaged file is backed up rather than rewritten blind.
-if [ -n "$(ls "$profile_dir"/.zshrc.mimis-backup-* 2>/dev/null | head -1)" ]; then
+# A profile is backed up before any modification, so the operator never loses the version they were
+# editing — regardless of whether it already carried a managed block.
+if [ -n "$(ls "$profile_dir"/.zshrc-mimisbrunnr-* 2>/dev/null | head -1)" ]; then
   ok "--profile backs up a target that had no managed block"
 else
   no "--profile backs up a target that had no managed block" "no backup file"
+fi
+
+# The re-rotate path (lines above ran two more `--profile` writes) must also leave a pre-rotation
+# copy, not only the first-time append.
+if [ "$(ls "$profile_dir"/.zshrc-mimisbrunnr-* 2>/dev/null | wc -l)" -ge 2 ]; then
+  ok "--profile backs up on a re-rotate too"
+else
+  no "--profile backs up on a re-rotate too" "only $(ls "$profile_dir"/.zshrc-mimisbrunnr-* 2>/dev/null | wc -l) backup(s)"
 fi
 
 link_target="$scratch/profile-link-target"

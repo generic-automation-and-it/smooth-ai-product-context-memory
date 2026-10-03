@@ -20,6 +20,8 @@ Heimdallr watches and reports — he does not judge or bind. The operator binds.
 
 - `#123` is GitHub by convention (shared with the understanding export); `provider:key` keeps its provider lowercased; bare `ABC-123` is `local`.
 - Tickets deduped in first-seen order, branch before commits.
+- The commit window is pinned to the branch ref (`git log <branch>`), falling back to `HEAD` when
+  detached, so the same branch state always yields the same subjects — the report is reproducible.
 - Unprovable fields read `unknown` with no source, never an empty string dressed as an answer.
 - Python 3.9 compatible, stdlib only.
 
@@ -32,6 +34,9 @@ Heimdallr watches and reports — he does not judge or bind. The operator binds.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-03 | Several correctness fixes. `find_tickets` no longer re-emits a bare-key-shaped KEY (`ABC-123`) inside a `provider:key` as a spurious `local:ABC-123` — the dedupe is keyed on `provider:key`, so the two idents never collapsed; a bare key on its own is still `local`. `parse_repo` drops an SSH port (`ssh://git@host:2222/group/repo`) and a trailing query/fragment (`repo.git?ref=x`), so neither becomes a path segment or defeats the match. And the "writes no files" harness test now checks the directory the script actually runs in (it previously inspected an untouched temp dir along the script's own `run_with_git` inner cwd), so it can no longer pass on a regression. | session report |
+| 2026-10-03 | Two correctness fixes. (1) `parse_repo` now captures **all** remote path segments instead of the last pair, so a GitLab `group/subgroup/repo.git` produces `group/subgroup/repo` rather than a silently-wrong `subgroup/repo`; the host is stripped per URL form (https and scp/ssh) and `.git` before matching. (2) `scan` probes `git rev-parse --is-inside-work-tree` and raises `GitUnavailable` (a non-git checkout or a missing git binary), which `main` turns into an exit-2 with a `git unavailable: …` stderr line — a caller now distinguishes "this repo has no tickets" from "git cannot run here", instead of both reading as an empty recall. Both pinned by new harness tests. | git metadata correctness |
 | 2026-10-03 | **Heimdallr removed from kvasir `import`; autofill is outbound only.** Kvasir `export`/`dump` and dossier `bundle` call it via a skills-root-relative lookup (`--heimdallr true` default, `false` opts out); odin/vitsmunir/ymir follow it as agent guidance. `import` takes only what the caller binds. Contract unchanged: still git-only repo/tickets/initiative to console, still never tags (keyword-derived by the agent) and never `unknown`-as-binding. | session request |
+| 2026-10-03 | **Commit window pinned to the branch ref** (`git log <branch>`, `HEAD` when detached). The implicit-HEAD log read whichever tip the checkout sat on, so the same branch state could yield a different ticket between invocations. Harness 8 -> 9 (byte-identical stability test). | this PR |
 | 2026-10-03 | **Heimdallr is now the default autofill source for the five labelling skills.** Kvasir `import`/`export`/`dump` and dossier `bundle` call it via a skills-root-relative lookup (`--heimdallr true` default, `false` opts out); odin/vitsmunir/ymir follow it as agent guidance. Contract unchanged: still git-only repo/tickets/initiative to console, still never tags (keyword-derived by the agent) and never `unknown`-as-binding. | session request |
 | 2026-10-02 | Created — offline git-only session-metadata reporter (tickets, repository, initiative) to console. Heimdallr: the watcher who sees all, fitting a scanner that reports without binding. Draft. | session request |
