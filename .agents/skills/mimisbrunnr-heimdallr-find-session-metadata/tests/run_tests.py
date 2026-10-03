@@ -21,9 +21,13 @@ SKILL = Path(__file__).resolve().parents[1]
 SCRIPT = SKILL / "scripts" / "find_session_metadata.py"
 
 
-def run_with_git(responses: dict, *argv: str) -> subprocess.CompletedProcess:
+def run_with_git(responses: dict, *argv: str,
+                 cwd: str | None = None) -> subprocess.CompletedProcess:
     """Run the script with a fake git answering from `responses` keyed by argv tail."""
     tmp = tempfile.mkdtemp()
+    # The script runs in `cwd` when given (so a test can observe files it writes there); the fake git
+    # and responses live in their own dir, which is prepended to PATH, not the script's cwd.
+    run_cwd = cwd if cwd is not None else tmp
     calls = Path(tmp) / "git.calls"
     mapping = Path(tmp) / "responses.json"
     mapping.write_text(json.dumps(responses), encoding="utf-8")
@@ -51,7 +55,7 @@ def run_with_git(responses: dict, *argv: str) -> subprocess.CompletedProcess:
     try:
         return subprocess.run(
             [sys.executable, "-B", str(SCRIPT), *argv],
-            capture_output=True, text=True, encoding="utf-8", env=env, cwd=tmp,
+            capture_output=True, text=True, encoding="utf-8", env=env, cwd=run_cwd,
         )
     finally:
         import shutil
@@ -97,6 +101,12 @@ class RepoTests(unittest.TestCase):
         self.assertEqual(self._repo("https://github.com/acme/my.repo.git/"), "acme/my.repo")
         self.assertEqual(self._repo("git@gitlab.com:group/sub.repo.git"), "group/sub.repo")
 
+    def test_ssh_port_and_query_do_not_defeat_the_path(self):
+        # A self-hosted tracker may listen on a non-standard SSH port; the port must not become a
+        # repo path segment. A query/fragment must not defeat the path either.
+        self.assertEqual(self._repo("ssh://git@host:2222/group/sub/repo.git"), "group/sub/repo")
+        self.assertEqual(self._repo("https://gitlab.com/group/sub/repo.git?ref=x"), "group/sub/repo")
+
     def test_not_a_git_repo_reports_unavailable_not_empty(self):
         # A non-git checkout must signal "autofill unavailable" (exit 2) rather than masquerade as a
         # genuine empty recall (exit 0 with no tickets), which a caller cannot distinguish.
@@ -139,6 +149,10 @@ class TicketTests(unittest.TestCase):
         providers = {(t["provider"], t["key"]) for t in result["tickets"]}
         self.assertIn(("jira", "ABC-123"), providers)
         self.assertIn(("linear", "XYZ-42"), providers)
+        # The bare-key pattern matches ABC-123 inside `jira:ABC-123`; it must not be re-emitted as a
+        # spurious `local:ABC-123`, which the dedupe (keyed on provider:key) would not collapse.
+        self.assertNotIn(("local", "ABC-123"), providers)
+        self.assertNotIn(("local", "XYZ-42"), providers)
 
     def test_dedupe_keeps_first_source(self):
         result = self._scan("feat/160-x", "revisit #160\n")
@@ -164,7 +178,8 @@ class ContractTests(unittest.TestCase):
                     "remote get-url origin": "https://github.com/acme/widgets.git\n",
                     "branch --show-current": "feat/160-x\n",
                     "log feat/160-x --format=%s -n 10": "\n",
-                }
+                },
+                cwd=tmp,
             )
             self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertIn("repository: acme/widgets", proc.stdout)

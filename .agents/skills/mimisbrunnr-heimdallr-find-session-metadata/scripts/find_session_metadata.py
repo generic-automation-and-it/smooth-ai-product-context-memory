@@ -54,12 +54,14 @@ def parse_repo(url: str) -> str | None:
     if re.match(r"^https?://", text):
         text = re.sub(r"^https?://[^/]+/", "", text)
     elif re.match(r"^(?:ssh://)?git@", text):
-        # scp-style `git@host:owner/.../repo` or `ssh://git@host/owner/.../repo`; drop the host.
-        text = re.sub(r"^(?:ssh://)?git@[^/:]+[:/]", "", text)
+        # scp-style `git@host:owner/.../repo` or `ssh://git@host[:port]/owner/.../repo`; drop the
+        # host (and any SSH port, which a self-hosted tracker may set).
+        text = re.sub(r"^(?:ssh://)?git@[^:/]+(?::\d+)?[:/]", "", text)
     else:
         return None
-    # Also drop a trailing slash some remotes append (`owner/repo.git/`), which would otherwise make
-    # the path unprovable.
+    # Drop any query/fragment and a trailing `.git` (with an optional trailing slash some remotes
+    # append), so `owner/repo.git?ref=x` and `owner/repo.git/` still resolve to `owner/repo`.
+    text = re.sub(r"[?#].*$", "", text)
     text = re.sub(r"\.git/?$", "", text)
     # Capture every slash-separated segment, not just the last pair: a GitLab-style remote
     # `group/subgroup/repo.git` is one repository, and the last-pair form silently returned
@@ -84,8 +86,16 @@ def find_tickets(*texts: str) -> list[dict]:
                         "key": match.group(1),
                         "seenIn": label,
                     }
+        # The bare-key pattern matches ABC-123 inside `jira:ABC-123`, which would re-emit it as a
+        # spurious `local:ABC-123`. Collect the provider:key spans first and suppress bare-key
+        # matches that fall within one — the provider:key already captured that ticket.
+        text = text or ""
+        provider_spans = [m.span() for m in TICKET_PATTERNS[1].finditer(text)]
         for pattern in TICKET_PATTERNS:
-            for match in pattern.finditer(text or ""):
+            for match in pattern.finditer(text):
+                if pattern is TICKET_PATTERNS[2] and any(
+                        match.start() >= s and match.end() <= e for (s, e) in provider_spans):
+                    continue
                 if match.re.pattern.startswith("#"):
                     provider, key = "github", match.group(1)
                 elif ":" in match.group(0) and match.lastindex == 2:
