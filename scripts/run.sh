@@ -328,8 +328,11 @@ write_profile() {
     if grep -qF "$PROFILE_BEGIN" "$target" && grep -qF "$PROFILE_END" "$target"; then
       # Replace the marked region in place. awk, not a read-modify-write of the whole file, so the
       # bytes outside the markers survive untouched even if the file has no trailing newline.
-      awk -v b="$PROFILE_BEGIN" -v e="$PROFILE_END" -v body="$body" '
-        $0 == b { print b; print body; print e; skip = 1; next }
+      # `body` is passed through the environment, not `-v`: a multiline value in an awk `-v`
+      # assignment is parsed as program text by some awks and aborts with "newline in string",
+      # which is what a second `env-export --profile` on an existing block hit.
+      body="$body" awk -v b="$PROFILE_BEGIN" -v e="$PROFILE_END" '
+        $0 == b { print b; print ENVIRON["body"]; print e; skip = 1; next }
         $0 == e { skip = 0; next }
         skip != 1 { print }
       ' "$target" >"$temp"
