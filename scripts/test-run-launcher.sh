@@ -402,6 +402,26 @@ else
   no "machine file carries CONTEXT_MEMORY_READ_TOKEN" "absent or empty"
 fi
 
+# The add-only pattern: a key the operator or a previous feature added must survive a re-run.
+# A full rewrite would silently drop it — the defect this pattern closes.
+operator_key="CONTEXT_MEMORY_DECISIONS_ENABLED=true"
+printf '%s\n' "$operator_key" >>"$scratch/home/credentials"
+run_launcher env >/dev/null 2>&1
+if grep -qF "$operator_key" "$scratch/home/credentials"; then
+  ok "a re-run preserves an operator-added key in the machine credential file"
+else
+  no "a re-run preserves an operator-added key in the machine credential file" "the key was dropped"
+fi
+
+# The three managed keys must still be present after the re-run above.
+for key in CONTEXT_MEMORY_BASE_URL CONTEXT_MEMORY_READ_TOKEN CONTEXT_MEMORY_WRITE_TOKEN; do
+  if grep -q "^$key=.\+" "$scratch/home/credentials"; then
+    ok "machine file still carries $key after a re-run"
+  else
+    no "machine file still carries $key after a re-run" "absent or empty"
+  fi
+done
+
 # ---------------------------------------------------------------------------------------------
 # adoption of a provisioned pair, as a unit
 # ---------------------------------------------------------------------------------------------

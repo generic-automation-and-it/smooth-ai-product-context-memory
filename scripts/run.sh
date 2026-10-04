@@ -179,8 +179,9 @@ bind_args() {
 file_value() {
   # Reads a literal KEY=value line. No sourcing: Parameters__api-*-token are not shell identifiers,
   # and `set -a && source` on a file holding them prints "command not found".
-  [ -f "$env_file" ] || return 1
-  sed -n "s/^$1=//p" "$env_file" | head -1
+  local target="${2:-$env_file}"
+  [ -f "$target" ] || return 1
+  sed -n "s/^$1=//p" "$target" | head -1
 }
 
 # scripts/provision-credentials.sh writes the *same* two token values into .context/mimisbrunnr.env
@@ -235,25 +236,33 @@ write_machine_credentials() {
   write_token="$(file_value Parameters__api-write-token || true)"
   [ -n "$read_token" ] && [ -n "$write_token" ] || return 0
 
-  local tmp
+  # Read-only half. Source this for a worker that must not mutate; the read client refuses to
+  # start when a write token is present, so it reads only what it needs from the file above.
+  # Add-only: every key the file already carries is preserved verbatim; only missing keys are
+  # appended. A full rewrite would silently drop a key the operator or a new feature added —
+  # the defect this pattern closes.
+  local tmp key stored
   ( umask 077
-    tmp="$(mktemp "$machine_credentials.XXXXXX")"
-    {
-      echo "# Mímisbrunnr API credentials — machine level, outside any repository."
-      echo "# Written by scripts/run.sh. Read by the context-memory clients automatically."
-      echo "CONTEXT_MEMORY_BASE_URL=$api_base_url"
-      echo "CONTEXT_MEMORY_READ_TOKEN=$read_token"
-      echo "CONTEXT_MEMORY_WRITE_TOKEN=$write_token"
-    } >"$tmp"
-    mv "$tmp" "$machine_credentials"
-    tmp="$(mktemp "$machine_credentials_read_only.XXXXXX")"
-    {
-      echo "# Read-only half. Source this for a worker that must not mutate; the read client refuses to"
-      echo "# start when a write token is present, so it reads only what it needs from the file above."
-      echo "CONTEXT_MEMORY_BASE_URL=$api_base_url"
-      echo "CONTEXT_MEMORY_READ_TOKEN=$read_token"
-    } >"$tmp"
-    mv "$tmp" "$machine_credentials_read_only"
+    for file in "$machine_credentials" "$machine_credentials_read_only"; do
+      tmp="$(mktemp "$file.XXXXXX")"
+      {
+        [ -f "$file" ] && cat "$file"
+        for key in CONTEXT_MEMORY_BASE_URL CONTEXT_MEMORY_READ_TOKEN CONTEXT_MEMORY_WRITE_TOKEN; do
+          if [ "$file" = "$machine_credentials_read_only" ] && [ "$key" = "CONTEXT_MEMORY_WRITE_TOKEN" ]; then
+            continue
+          fi
+          stored="$(file_value "$key" "$file" || true)"
+          if [ -z "$stored" ]; then
+            case "$key" in
+              CONTEXT_MEMORY_BASE_URL) echo "$key=$api_base_url" ;;
+              CONTEXT_MEMORY_READ_TOKEN) echo "$key=$read_token" ;;
+              CONTEXT_MEMORY_WRITE_TOKEN) echo "$key=$write_token" ;;
+            esac
+          fi
+        done
+      } >"$tmp"
+      mv "$tmp" "$file"
+    done
   )
   log "machine credentials written: $machine_credentials"
 }
