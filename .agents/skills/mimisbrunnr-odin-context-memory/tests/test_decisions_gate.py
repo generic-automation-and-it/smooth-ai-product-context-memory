@@ -1066,6 +1066,124 @@ class RubricValidationTests(GateTestCase):
                          "the two rubric copies have drifted; an edit belongs in both")
 
 
+class CalibrationEvidenceTests(unittest.TestCase):
+    """The rubric and its threshold were argued from impression, and impression produced the claim
+    that the model "saturates toward yes". It does not: on the committed labelled fixture the gate
+    scores precision 1.00 and recall 1.00, and two attempts to tighten the rubric both made it
+    worse. Those numbers live in the fixture so the next argument starts from them.
+
+    **None of this runs the model.** `score_decisions_calibration.py` is on-demand tooling; the CI
+    gate never has a decision model. What CI holds is the *shape* of the recorded run, and above
+    all the pin: a recorded run must never certify a rubric it did not score. This skill has
+    already shipped that defect once, in the semantic-fixture verdicts, where positional pairing
+    made a 1.0/1.0 assertion certify the wrong verdicts with nothing failing.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        path = Path(__file__).resolve().parent / "fixtures" / "decisions_calibration.json"
+        with open(path, encoding="utf-8") as handle:
+            cls.doc = json.load(handle)
+        cls.records = cls.doc["records"]
+        cls.measured = cls.doc["recordedRun"]
+        with open(RUBRIC, encoding="utf-8") as handle:
+            cls.rubric = json.load(handle)
+        cls.roles = {r["key"] for r in cls.rubric["roles"]}
+
+    def test_the_recorded_run_is_pinned_to_the_shipped_rubric(self):
+        """The stale-evidence guard. Editing the rubric without re-measuring fails here, because
+        the committed numbers describe a rubric that no longer exists — which is how a run comes to
+        certify a gate it never scored."""
+        self.assertEqual(self.doc["rubricVersion"], self.rubric["version"],
+                         "the calibration fixture is pinned to rubric version "
+                         f"{self.doc['rubricVersion']} but the shipped rubric is "
+                         f"{self.rubric['version']}. Re-measure with "
+                         "tests/score_decisions_calibration.py and re-record recordedRun, or revert "
+                         "the rubric.")
+
+    def test_the_calibration_fixture_is_pinned_to_a_known_rubric_version(self):
+        """The mirror image: a rubric edit that forgets the fixture must fail loudly rather than
+        leaving both at version 1 and silently agreeing with each other about nothing."""
+        self.assertRegex(str(self.doc["rubricVersion"]), r"^\d+$")
+        self.assertRegex(str(self.rubric["version"]), r"^\d+$")
+
+    def test_every_record_declares_a_tier_a_statement_and_an_expectation(self):
+        for record in self.records:
+            self.assertIn("id", record)
+            self.assertIn(record["tier"], (0, 1, 2, 3), record["id"])
+            self.assertTrue(record["statement"].strip(), record["id"])
+            self.assertIsInstance(record["expect"], list, record["id"])
+
+    def test_a_fixture_id_does_not_name_its_own_verdict(self):
+        """The blinding can be defeated by the identifier, and this skill's own fixture set is the
+        documented example: two ids there name their expected verdicts. Opaque ids are the guard."""
+        for record in self.records:
+            self.assertRegex(record["id"], r"^c\d+$",
+                             f"fixture id {record['id']!r} is not opaque; a descriptive id can "
+                             "reveal the expected verdict to a blinded run")
+
+    def test_every_expectation_names_a_role_the_shipped_rubric_defines(self):
+        for record in self.records:
+            for role in record["expect"]:
+                self.assertIn(role, self.roles,
+                              f"{record['id']} expects role {role!r}, which the rubric does not define")
+
+    def test_only_records_without_a_checkable_fact_expect_a_hold(self):
+        """The gradient is the whole measurement: tier 0-1 is the hold side and tier 2-3 the pass
+        side. A fixture that mixed them could score perfectly while measuring nothing."""
+        for record in self.records:
+            if record["tier"] <= 1:
+                self.assertEqual(record["expect"], [], record["id"])
+            else:
+                self.assertTrue(record["expect"], record["id"])
+
+    def test_the_fixture_has_both_sides_of_the_decision(self):
+        """A gate measured only on records it should pass is a gate with no recall number."""
+        junk = [r for r in self.records if r["tier"] <= 1]
+        good = [r for r in self.records if r["tier"] >= 2]
+        self.assertGreaterEqual(len(junk), 3, "too few hold-side records to measure precision")
+        self.assertGreaterEqual(len(good), 3, "too few pass-side records to measure recall")
+        self.assertGreaterEqual(len({r["domain"] for r in self.records}), 4,
+                                "too few domains; the model's training skews to its own categories")
+
+    def test_the_recorded_confusion_matrix_is_internally_consistent(self):
+        """A committed matrix whose parts disagree would let the scorer's own arithmetic be the
+        only thing checking it."""
+        tp, fp = self.measured["truePositive"], self.measured["falsePositive"]
+        tn, fn = self.measured["trueNegative"], self.measured["falseNegative"]
+        self.assertEqual(tp + fn, sum(1 for r in self.records if r["tier"] >= 2))
+        self.assertEqual(tn + fp, sum(1 for r in self.records if r["tier"] <= 1))
+        self.assertEqual(tp + fp + tn + fn, len(self.records))
+        self.assertAlmostEqual(self.measured["precision"], tp / (tp + fp) if tp + fp else 0.0, places=3)
+        self.assertAlmostEqual(self.measured["recall"], tp / (tp + fn) if tp + fn else 0.0, places=3)
+
+    def test_the_recorded_separation_follows_from_its_own_figures(self):
+        self.assertAlmostEqual(
+            self.measured["separation"],
+            self.measured["tier23MeanBestRole"] - self.measured["tier01MeanBestRole"], places=2)
+
+    def test_the_recorded_bar_sits_inside_the_gap_the_fixture_measured(self):
+        """The reason this threshold is provisional is that the gate is bimodal: a bar anywhere in
+        the empty band between the hold side and the pass side gives the same verdicts. That is a
+        fact about the fixture, so it is checkable rather than a claim."""
+        self.assertGreater(self.measured["tier01MaxBestRole"], 0.0, "no hold-side signal to compare")
+        self.assertLess(self.measured["tier01MaxBestRole"], self.measured["bar"],
+                        "the bar no longer holds every junk record; the recorded run is stale")
+        self.assertGreater(self.measured["tier23MinBestRole"], self.measured["bar"],
+                           "the bar no longer passes every record with a fact; the run is stale")
+
+    def test_the_recorded_run_declines_the_whole_tautology_before_believing_it(self):
+        """The recorded numbers say the shipped rubric separates junk from records-with-a-fact.
+        If a future edit makes the roles fire everywhere, this is the number that will have moved,
+        and it is here to be read rather than rediscovered."""
+        self.assertGreater(self.measured["separation"], 0.5,
+                           "a separation this low would mean the rubric is not separating")
+        self.assertLessEqual(
+            max(self.measured["perRoleClearing"].values()), len(self.records),
+            "a role clearing every record carries no negative information, which is exactly the "
+            "defect the two rejected variants were measured against")
+
+
 class ProbeTests(GateTestCase):
     def test_probe_reports_ok(self):
         self.stub.probabilities = {role: 0.5 for role in

@@ -1,11 +1,11 @@
 {
-  "version": "1",
+  "version": "2",
   "roles": [
     {
       "key": "product-owner",
       "instructions": "Does this record help a product owner understand what the system does, why a decision was made, or what constraints shape the product?",
       "criteria": {
-        "true": "The record states a product behaviour, a user-facing constraint, a business rule, or a decision rationale that a product owner would use to prioritise, plan, or communicate.",
+        "true": "The record states a product behaviour, a user-facing constraint, or a decision rationale that a product owner would use to prioritise, plan, or communicate.",
         "false": "The record is internal implementation detail, tooling knowledge, or operational trivia with no product-level consequence."
       }
     },
@@ -37,7 +37,7 @@
       "key": "business",
       "instructions": "Does this record help a business stakeholder understand the system's capabilities, limitations, or business rules?",
       "criteria": {
-        "true": "The record states a business rule, a user-facing capability, a compliance constraint, or a business process a stakeholder would use.",
+        "true": "The record states a business rule, a commercial term, a compliance constraint, or a business process a stakeholder would use.",
         "false": "The record is technical implementation detail, design rationale, or tooling knowledge with no business-level consequence."
       }
     }

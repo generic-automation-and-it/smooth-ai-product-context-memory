@@ -93,10 +93,37 @@ Reports `disabled`, `unreachable`, `model-missing`, or `ok`, and the endpoint or
 - **The attempt counter is the script's, not yours.** A ledger keyed by record identity bounds the
   rewrite loop, so re-asking cannot buy more attempts.
 
-**The threshold is a starting value, not a calibrated one.** A `noul` probability is not a measure of how
-often the answer is right; the vendor's own guidance is to test any threshold on your own data. Roles
-beyond the five, and exemptions for `self`-scope or agent-facing records, are open decisions — see the
-change row in the capture skill's `AGENTS.md`.
+**The threshold is a starting value, and it is now measured rather than merely asserted.** A labelled
+fixture of 21 records — a junk-to-specific gradient across six domains — is committed with the skill and
+scored against the shipped gate:
+
+```bash
+python3 -B .agents/skills/mimisbrunnr-odin-context-memory/tests/score_decisions_calibration.py
+```
+
+At the default `0.5` the gate scored **precision 1.00, recall 1.00**, mean best-role **0.14** on the six
+hold-side records against **0.99** on the fifteen that state a checkable fact. Re-running prints the
+committed figures beside a fresh run and names anything that moved. Three things that measurement settles,
+each of which had been argued from impression:
+
+- **The threshold is not a sensitive knob here.** The scores are bimodal — nothing between `0.23` and
+  `0.97` — so any bar in that band gives identical verdicts. Raising it tightens the top of the
+  distribution and consults nothing that was previously ignored.
+- **Tightening the rubric does not tighten the gate.** Two rewrites — enumerating concrete nouns, and
+  narrowing the criteria — both dropped precision to `0.94` and lost six expected roles, because the
+  `instructions` carry the framing and a narrower *criteria* block did not narrow the *question*. Both
+  rejected variants are recorded with their numbers in the fixture.
+- **Do not apply the vendor's fitted temperature.** Nimble was fitted at `T=2.179` so probabilities match
+  correctness rates, not so they separate better. For a binary answer the logit gap is exactly recoverable
+  from the returned probability, so the correction is trivial to apply and **it makes the gate worse**:
+  junk rises from `0.14` to `0.31` and separation falls from `0.85` to `0.62`.
+
+Role attribution is the weaker half and the measurement says so: `tester` clears 15 of 21 records and
+carries almost no negative information, and `product-owner`/`business` stay correlated at `r=0.92` even
+after their shared vocabulary was removed. A single `choice` question was measured as an alternative and
+was **not** more accurate (13 of 15 labelled records against 14). Roles beyond the five, and exemptions
+for `self`-scope or agent-facing records, remain open decisions — see the change row in the capture
+skill's `AGENTS.md`.
 
 ## One-command provisioning
 
