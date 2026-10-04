@@ -1117,10 +1117,11 @@ def cmd_export(args: argparse.Namespace) -> int:
     """SESSION -> STORE. Orchestrate the capture path; write nothing unless `--write`.
 
     The order is the capture skill's, and every stage is a gate rather than a step: the redaction and
-    atomicity gates run first and can hold candidates back, the cap refuses rather than chunking, and
-    `set --dryrun` is the veto point. A dry run additionally **creates nothing** — no initiative, no
-    group, no memory — because `resolve-group` has no dry-run mode and would create a group as a side
-    effect of asking.
+    atomicity gates run first and can hold candidates back, an over-cap batch auto-splits into
+    consecutive ≤ MAX_CANDIDATES chunks each with its own preflight/veto/write, and `set --dryrun` is
+    the veto point. A dry run additionally **creates nothing** — no initiative, no group, no
+    memory — because `resolve-group` has no dry-run mode and would create a group as a side effect
+    of asking.
     """
     material = read_material(args.input, "auto")
     if isinstance(material, int):
