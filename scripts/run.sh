@@ -176,9 +176,20 @@ bind_args() {
 # credentials: process environment wins, then the stored file, then generate and persist
 # ---------------------------------------------------------------------------------------------
 
+# file_value KEY [FILE] — the value of a literal KEY=value line, from FILE or from $env_file.
+#
+# No sourcing: Parameters__api-*-token are not shell identifiers, and `set -a && source` on a file
+# holding them prints "command not found". FILE exists because the machine credential files are not
+# $env_file and need the same read; it defaults so every pre-existing call site is unchanged.
+#
+# **A missing KEY is reported by printing nothing and exiting 0** — `sed` succeeds on a non-match, so
+# the exit status says nothing about whether the key was found; only a missing FILE returns non-zero.
+# Every caller therefore writes `$(file_value KEY || true)` and treats empty as absent. That is the
+# contract the callers are written against, and it is not tightened here: this function reads the value
+# a release credential is rebuilt from, so changing its exit semantics would be a change to the
+# credential path rather than to a reader. A missing key must never silently become the caller's
+# fallback value, which would mint a new token against a Host already holding the old one.
 file_value() {
-  # Reads a literal KEY=value line. No sourcing: Parameters__api-*-token are not shell identifiers,
-  # and `set -a && source` on a file holding them prints "command not found".
   local target="${2:-$env_file}"
   [ -f "$target" ] || return 1
   sed -n "s/^$1=//p" "$target" | head -1
@@ -236,11 +247,14 @@ write_machine_credentials() {
   write_token="$(file_value Parameters__api-write-token || true)"
   [ -n "$read_token" ] && [ -n "$write_token" ] || return 0
 
-  # Read-only half. Source this for a worker that must not mutate; the read client refuses to
-  # start when a write token is present, so it reads only what it needs from the file above.
-  # Add-only: every key the file already carries is preserved verbatim; only missing keys are
-  # appended. A full rewrite would silently drop a key the operator or a new feature added —
-  # the defect this pattern closes.
+  # Two files, both add-only: every key the file already carries is preserved verbatim, and only
+  # missing keys are appended. A full rewrite would silently drop a key the operator or a new
+  # feature added — the defect this pattern closes, and one that would reset a feature flag to its
+  # default on every start.
+  #
+  # The read-only half is written the same way and holds the same extra keys, minus the write token:
+  # a read-only worker that sourced both would hold a write capability, and the read client refuses
+  # to start in that state by design.
   local tmp key stored
   ( umask 077
     for file in "$machine_credentials" "$machine_credentials_read_only"; do

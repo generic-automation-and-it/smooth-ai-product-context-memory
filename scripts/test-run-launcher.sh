@@ -524,6 +524,112 @@ else
      "count $(grep -c 'CONTEXT_MEMORY_DECISIONS_ENABLED' "$profile")"
 fi
 
+# The read-only half gets the same add-only treatment, so an operator's key survives there too. On
+# its own scratch home: the write-side cases above mutate `$scratch/home/credentials`, and sharing
+# that state made a failure here indistinguishable from one there.
+ro_dir="$scratch/readonly-preserve"
+mkdir -p "$ro_dir"
+env -u MIMIS_TOKEN_FILE MIMIS_HOME="$ro_dir" MIMIS_MACHINE_CREDENTIALS="$ro_dir/credentials" \
+  "$launcher" env >/dev/null 2>&1
+printf 'CONTEXT_MEMORY_DECISIONS_ENABLED=true\n' >>"$ro_dir/credentials-read-only"
+env -u MIMIS_TOKEN_FILE MIMIS_HOME="$ro_dir" MIMIS_MACHINE_CREDENTIALS="$ro_dir/credentials" \
+  "$launcher" env >/dev/null 2>&1
+if grep -q '^CONTEXT_MEMORY_DECISIONS_ENABLED=true$' "$ro_dir/credentials-read-only"; then
+  ok "a re-run preserves an operator-added key in the read-only file"
+else
+  no "a re-run preserves an operator-added key in the read-only file" "the key was dropped"
+fi
+# The read-only file must still not acquire a write token by the operator's own hand: the read client
+# refuses to start when one is present, so this is a guard on the operator, not on the launcher.
+if grep -q '^CONTEXT_MEMORY_WRITE_TOKEN=' "$ro_dir/credentials-read-only"; then
+  no "the read-only file gains no write token" "one is present"
+else
+  ok "the read-only file gains no write token"
+fi
+
+# ---------------------------------------------------------------------------------------------
+# file_value: the reader every credential path depends on
+# ---------------------------------------------------------------------------------------------
+
+# The function is extracted from the launcher and evaluated here rather than sourcing the whole file:
+# the script executes its verb dispatch on entry, so sourcing it would run a container. Asserting on
+# the launcher's output instead would prove the *result* is right without proving which file was
+# read — a file_value ignoring its second argument still yields a correct credential file whenever
+# $env_file happens to hold the same key.
+file_value_body() {
+  sed -n "/^file_value() {/,/^}/p" "$launcher"
+}
+
+if [ -n "$(file_value_body)" ]; then
+  eval "$(file_value_body)"
+
+  fv_dir="$scratch/file-value"
+  mkdir -p "$fv_dir"
+  printf 'SHARED=from-env-file\nONLY_ENV_FILE=env-only\n' >"$fv_dir/env"
+  printf 'SHARED=from-other-file\nONLY_OTHER=other-only\n' >"$fv_dir/other"
+
+  # Default target is $env_file, which is a launcher global and unset here — declared locally so
+  # the default path is exercised rather than tripping `set -u`.
+  env_file="$fv_dir/env"
+
+  if [ "$(file_value SHARED || true)" = "from-env-file" ]; then
+    ok "file_value defaults to \$env_file"
+  else
+    no "file_value defaults to \$env_file" "got $(file_value SHARED || true)"
+  fi
+
+  # The second argument selects a different file — the property the whole add-only loop rests on.
+  if [ "$(file_value SHARED "$fv_dir/other" || true)" = "from-other-file" ]; then
+    ok "file_value reads the file named by its second argument"
+  else
+    no "file_value reads the file named by its second argument" \
+       "got $(file_value SHARED "$fv_dir/other" || true)"
+  fi
+
+  if [ "$(file_value ONLY_OTHER "$fv_dir/other" || true)" = "other-only" ]; then
+    ok "file_value does not fall back to \$env_file for a key the named file lacks"
+  else
+    no "file_value does not fall back to \$env_file for a key the named file lacks" \
+       "got $(file_value ONLY_OTHER "$fv_dir/other" || true)"
+  fi
+
+  # A missing key prints nothing and still exits 0 — sed succeeds on a non-match. Asserting the real
+  # contract rather than a tidier one: every caller is written `|| true` plus an empty test, so a
+  # reader that "fixed" this to return non-zero would break the callers this documents.
+  if [ -z "$(file_value NO_SUCH_KEY "$fv_dir/other")" ]; then
+    ok "file_value prints nothing for a missing key"
+  else
+    no "file_value prints nothing for a missing key" \
+       "got $(file_value NO_SUCH_KEY "$fv_dir/other")"
+  fi
+
+  # The unguarded form is what a caller must never write: under `set -e` it is fine here (the file
+  # exists) but the pattern exists precisely so nobody writes it.
+  if file_value ONLY_OTHER "$fv_dir/other" >/dev/null; then
+    ok "file_value succeeds on a key the file carries"
+  else
+    no "file_value succeeds on a key the file carries" "unexpected non-zero"
+  fi
+
+  if file_value SHARED "$fv_dir/absent-file"; then
+    no "file_value returns non-zero for a missing file" "it reported success"
+  else
+    ok "file_value returns non-zero for a missing file"
+  fi
+
+  # A value containing '=' must survive whole: sed splits on the first '=' only, so a value that
+  # itself holds one is returned intact rather than truncated at the second.
+  printf 'WITH_EQUALS=a=b=c\n' >"$fv_dir/equals"
+  if [ "$(file_value WITH_EQUALS "$fv_dir/equals" || true)" = "a=b=c" ]; then
+    ok "file_value returns a value containing '=' whole"
+  else
+    no "file_value returns a value containing '=' whole" \
+       "got $(file_value WITH_EQUALS "$fv_dir/equals" || true)"
+  fi
+else
+  no "file_value is defined in run.sh" "no definition found"
+fi
+
 # ---------------------------------------------------------------------------------------------
 # adoption of a provisioned pair, as a unit
 # ---------------------------------------------------------------------------------------------
