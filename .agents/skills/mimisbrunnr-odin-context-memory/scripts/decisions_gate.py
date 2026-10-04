@@ -250,8 +250,7 @@ def redact_records(records):
 
     targets = []
     for record in records:
-        for field in record_state(record):
-            targets.append(record_state(record)[field])
+        targets.extend(record_state(record).values())
     # De-duplicate while keeping order, so the same statement is not scrubbed once per alias. The
     # redactor answers positionally (`candidate_index`), not by echoing the content back, so the
     # mapping is built from the list we sent rather than from anything it returns.
@@ -276,19 +275,37 @@ def redact_records(records):
         raise GateError("redactor-unavailable",
                         "the redactor returned unreadable output; no request was made")
 
+    if not isinstance(results, list) or len(results) != len(unique):
+        # **Both** directions are refusals. An earlier guard caught only a redactor returning *more*
+        # results than candidates, which left the under-reporting case open: a redactor that dropped
+        # the last entry left that field unmapped, so it kept its unscrubbed value and was sent to the
+        # model, and the record was scored as though the gate had inspected it. Verified against a
+        # stub redactor that drops one result — the model received `password=hunter2secretvalue`.
+        # An arity mismatch means the mapping from "what we sent" to "what came back" is not
+        # trustworthy, and an untrustworthy redaction mapping is exactly the condition under which
+        # proceeding is most likely to leak.
+        raise GateError("redactor-unavailable",
+                        f"the redactor returned {len(results) if isinstance(results, list) else 'a non-list'} "
+                        f"result(s) for {len(unique)} candidate(s); no request was made")
+
     scrubbed = {}
     findings = {}
     for position, item in enumerate(results):
         if not isinstance(item, dict):
             raise GateError("redactor-unavailable",
                             "the redactor returned an unexpected shape; no request was made")
-        # Trust the position we sent rather than a returned index: a redactor that dropped or
-        # reordered an entry would otherwise silently leave the wrong field unscrubbed.
-        if position >= len(unique):
+        # Trust the position we sent rather than a returned index: a redactor that reordered an entry
+        # would otherwise silently scrub one field's content into another's slot.
+        if "redacted" not in item:
+            # Absent is not "unchanged". Defaulting to "" would blank the field, and defaulting to
+            # the original would send it; neither is an inspection, so this refuses.
             raise GateError("redactor-unavailable",
-                            "the redactor returned more results than candidates; no request was made")
-        scrubbed[unique[position]] = item.get("redacted", "")
+                            "a redactor result carried no 'redacted' field; no request was made")
+        scrubbed[unique[position]] = item["redacted"]
         for finding in item.get("findings") or []:
+            if not isinstance(finding, dict):
+                raise GateError("redactor-unavailable",
+                                "a redactor finding was not an object; no request was made")
             rule = finding.get("rule_name", "unknown")
             findings[rule] = findings.get(rule, 0) + finding.get("hit_count", 0)
 

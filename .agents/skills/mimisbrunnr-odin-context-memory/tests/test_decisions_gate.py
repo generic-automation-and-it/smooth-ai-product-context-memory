@@ -25,6 +25,7 @@ from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 GATE = SCRIPTS / "decisions_gate.py"
+REDACTOR = SCRIPTS / "redact.py"
 
 RECORD = {
     "subject": "Storage engine decision",
@@ -538,6 +539,82 @@ class RedactorFailClosedTests(GateTestCase):
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("redactor-unavailable", proc.stderr)
         self.assertEqual(self.stub.requests, [], "no request may be made without redaction")
+
+
+class RedactorArityTests(GateTestCase):
+    """The redaction mapping must be trustworthy in **both** directions.
+
+    An earlier guard caught a redactor returning *more* results than candidates and left the
+    under-reporting case open. A redactor that dropped one entry left that field unmapped, so it kept
+    its unscrubbed value, the model received it, and the record was scored as though inspected. Every
+    case here swaps in a stub redactor, because the shipped one is 1:1 and cannot produce the shape.
+    """
+
+    def _run_with_redactor(self, stub_source):
+        backup = REDACTOR.read_text(encoding="utf-8")
+        REDACTOR.write_text(stub_source, encoding="utf-8")
+        try:
+            self.stub.probabilities = {"developer": 0.9}
+            proc = run_gate(["score"], json.dumps([RECORD]), self.gate_env())
+        finally:
+            REDACTOR.write_text(backup, encoding="utf-8")
+        return proc
+
+    def test_a_redactor_that_drops_a_result_is_refused(self):
+        proc = self._run_with_redactor(
+            "import json, sys\n"
+            "data = json.load(sys.stdin)\n"
+            "sys.stdout.write(json.dumps({'results': ["
+            "{'candidate_index': i, 'redacted': t, 'findings': []} for i, t in enumerate(data[:-1])]}))\n"
+        )
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("redactor-unavailable", proc.stderr)
+        self.assertEqual(self.stub.requests, [], "no request may be made on an arity mismatch")
+
+    def test_a_redactor_returning_extra_results_is_refused(self):
+        proc = self._run_with_redactor(
+            "import json, sys\n"
+            "data = json.load(sys.stdin)\n"
+            "rows = [{'candidate_index': i, 'redacted': t, 'findings': []} for i, t in enumerate(data)]\n"
+            "rows.append({'candidate_index': 99, 'redacted': 'spurious', 'findings': []})\n"
+            "sys.stdout.write(json.dumps({'results': rows}))\n"
+        )
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("redactor-unavailable", proc.stderr)
+
+    def test_a_result_missing_the_redacted_field_is_refused(self):
+        """Defaulting to '' would blank the field; defaulting to the original would send it. Neither
+        is an inspection, so this refuses rather than choosing."""
+        proc = self._run_with_redactor(
+            "import json, sys\n"
+            "data = json.load(sys.stdin)\n"
+            "rows = [{'candidate_index': i, 'findings': []} for i, t in enumerate(data)]\n"
+            "sys.stdout.write(json.dumps({'results': rows}))\n"
+        )
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("redactor-unavailable", proc.stderr)
+        self.assertEqual(self.stub.requests, [])
+
+    def test_a_malformed_finding_is_refused(self):
+        proc = self._run_with_redactor(
+            "import json, sys\n"
+            "data = json.load(sys.stdin)\n"
+            "rows = [{'candidate_index': i, 'redacted': t, 'findings': ['not-an-object']}\n"
+            "         for i, t in enumerate(data)]\n"
+            "sys.stdout.write(json.dumps({'results': rows}))\n"
+        )
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("redactor-unavailable", proc.stderr)
+
+    def test_the_arity_mismatch_is_named_in_the_detail(self):
+        proc = self._run_with_redactor(
+            "import json, sys\n"
+            "data = json.load(sys.stdin)\n"
+            "sys.stdout.write(json.dumps({'results': ["
+            "{'candidate_index': 0, 'redacted': data[0], 'findings': []}]}))\n"
+        )
+        combined = proc.stderr + proc.stdout
+        self.assertIn("candidate", combined, "the detail must say what was expected")
 
 
 class ProbeTests(GateTestCase):
