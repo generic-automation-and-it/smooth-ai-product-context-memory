@@ -117,8 +117,8 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
   [--initiative NAME] [--name NAME] [--body TEXT] [--heimdallr true]
 ```
 
-- `export` orchestrates the capture skill end to end — redaction gate, atomicity gate, the 20-candidate
-  cap, group resolution, preflight, and `set --dryrun` as the veto point — and **never writes directly**.
+- `export` orchestrates the capture skill end to end — redaction gate, atomicity gate, the auto-split
+  batch cap, group resolution, preflight, and `set --dryrun` as the veto point — and **never writes directly**.
   It is a **dry run by default**; `--write` performs the capture.
 - **A dry run creates nothing** — no initiative, no group, no memory. `resolve-group` has no dry-run mode
   and its handler commits unconditionally, so a dry run resolves nothing and reports the group and the
@@ -129,9 +129,14 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
 - **The binding comes from the input or the flags.** A dump folder carries its binding as structured
   metadata (`_dump.json`), read as the default; an explicit flag overrides it. Absent both, no
   association is made.
-- **Every gate is a gate.** A redactor that cannot run, an atomicity detector that cannot run, a batch
-  over the 20-candidate cap, or a post-`--write` `set --dryrun` refusal all stop with nothing written
-  rather than bypassing the boundary.
+- **Every gate is a gate.** A redactor that cannot run, an atomicity detector that cannot run, or a
+  post-`--write` `set --dryrun` refusal all stop with nothing written rather than bypassing the boundary.
+  The `MAX_CANDIDATES` (20) cap is not a refusal: an over-cap batch auto-splits into consecutive ≤20
+  chunks, each processed end to end (its own preflight, its own `set --dryrun` veto, its own write) and
+  reported as `Batch k/N: n candidate(s)`; a multi-chunk `--write` is disclosed as non-atomic across
+  chunks. A candidate whose subject already exists in the export's group is sent as a **version bump**
+  (the preflight match's `uuid`, mutually exclusive with `createUuid`) rather than a create that 409s;
+  a same-subject memory in another group is never versioned into it.
 - **The digest states the gated-kind limit.** A decision or rule captured this way is written as
   `kind = understanding`, which does **not** pass the gated-kind approval.
 

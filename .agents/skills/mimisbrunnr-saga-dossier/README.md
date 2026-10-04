@@ -48,7 +48,7 @@ from that — nothing added, nothing quietly dropped.
 # 1. Ask the store for everything about this repo, following recorded links up to 3 hops out.
 mkdir -p .context/mimisbrunnr-saga-dossier
 python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py \
-  bundle --body '{"repo":"kingstown","widenDepth":3}' > .context/mimisbrunnr-saga-dossier/bundle.json
+  bundle --repo kingstown --widen-depth 3 > .context/mimisbrunnr-saga-dossier/bundle.json
 
 # 2. Turn that bundle into a readable document, angled for an architecture write-up.
 python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py \
@@ -58,6 +58,10 @@ python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py \
 
 Step 1 costs a request against the store; step 2 is free to re-run as many times as you like against
 the same saved bundle — try a few focuses on one bundle without re-asking the store.
+
+The read token and base URL are seeded from the machine credential file (`~/.mimisbrunnr/credentials`)
+at import, so the skill works from any checkout with nothing to provision per repo. The bundle stays
+read-only: a write token present refuses to run.
 
 ## Focus: reading the same material for a different purpose
 

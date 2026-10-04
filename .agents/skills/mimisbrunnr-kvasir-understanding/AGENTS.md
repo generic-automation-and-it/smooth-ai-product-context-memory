@@ -128,10 +128,35 @@ recalls the live store via `import` (read token only) and orchestrates the captu
   handler commits unconditionally, so a dry run resolves no group and reports the group and initiative as
   *would create*, printing the exact commands. The initiative must already exist (`resolve-group` answers
   `404` otherwise); a `--write` refuses with the `upsert-initiative` command when it is absent.
-- **Every gate is a gate.** A redactor or atomicity detector that cannot run, a batch over the
-  `MAX_CANDIDATES` (20) cap, or a post-`--write` `set --dryrun` refusal all stop with nothing written
-  rather than bypassing the boundary. A decision or rule captured this way is written as
-  `kind = understanding`, which does not pass the gated-kind approval.
+- **Every gate is a gate.** A redactor or atomicity detector that cannot run, or a post-`--write`
+  `set --dryrun` refusal, stops with nothing written rather than bypassing the boundary. The
+  `MAX_CANDIDATES` (20) cap is **not** a refusal: an over-cap batch auto-splits into consecutive ≤20
+  chunks, each processed end to end (its own preflight, its own `set --dryrun` veto, its own write), so
+  a 25-candidate export becomes `Batch 1/2: 20` + `Batch 2/2: 5`. A multi-chunk `--write` is not atomic
+  across chunks (the capture path has no cross-batch transaction) and is disclosed. A decision or rule
+  captured this way is written as `kind = understanding`, which does not pass the gated-kind approval.
+- **A candidate whose subject already exists in the export's group is a version bump, not a create.**
+  Each chunk preflights its own request (after the previous chunk's write, for a `--write`), and a
+  match in the export's group feeds its `uuid` back as the item's `uuid` (version target, mutually
+  exclusive with `createUuid`); the capture path's semantic dedup skips a byte-identical claim. A
+  same-subject memory in another group is a separate memory to link, never a version target — memory
+  identity is group-scoped `(group, uuid)`. Preflight indices are request-relative within each chunk,
+  so the version map is keyed by the candidate's position in its own chunk; a duplicate subject split
+  across chunks is surfaced by the later chunk's preflight (which runs after the earlier chunk's write)
+  and becomes a version bump — the old "indices are request-relative, so a silent split loses
+  cross-batch collisions" rationale is honoured by splitting *sequentially*, not by refusing to split.
+  Two candidates **within one chunk** sharing a subject are refused (ambiguous input: the capture path
+  refuses two same-subject creates in one batch, and sending both as version targets would
+  double-version the same memory). A transient preflight failure degrades to creates — fail-safe, since
+  the `set --dryrun` veto still catches a same-group duplicate before any write. A dry run has no
+  resolved group, so its receipt shows the write count and discloses how many candidates matched an
+  existing same-subject memory (those whose match is in the export's group would be versioned).
+- **A byte-identical re-export is not deduped.** The capture path (`SetMemories`) versions any item
+  sent with a `uuid` target and compares no content, and the preflight returns no statement to compare
+  against, so re-exporting an unchanged subject writes a new (empty) version rather than skipping it.
+  That is the worktask AC4 gap: content-based dedup would need the current statement in the preflight
+  or a server-side skip on identical content — both out of this client's scope. A *changed* claim is a
+  genuine version bump (AC2); only the byte-identical no-op version is the residue.
 - **The dump's generated header is fenced** and its binding is recorded as structured metadata in
   `_dump.json`, so a dump → import round trip never proposes the header but binds by the dump's own
   context (an explicit flag overrides it).
@@ -141,7 +166,7 @@ recalls the live store via `import` (read token only) and orchestrates the captu
 
 ## Test References
 
-- **Committed L0 harness (CI-gated):** `tests/run_tests.py` — stdlib `unittest`, 95 tests, no external
+- **Committed L0 harness (CI-gated):** `tests/run_tests.py` — stdlib `unittest`, 130 tests, no external
   runner. A default load creates no files (NFR-01); store-export five-part rendering keeps uuid/version
   attribution; `proposed`/`program` scope flagged, never promoted (NFR-03); `--asof` filters the validity
   window and states the omission; the store-load cap — an under-budget render is byte-identical to
@@ -187,6 +212,13 @@ recalls the live store via `import` (read token only) and orchestrates the captu
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-04 | Two pieces of the contract text still described the pre-chunking client, so the first contract a reader met was the opposite of the shipped behaviour. (1) The `2026-10-03` row below said the version map is keyed by an export index "never a chunk-local position", while Key Behaviors and the code both key it by the candidate's position **in its own chunk** (`version_map.get(local_index)` over `enumerate(chunk)`) — a maintainer could not tell which was the contract. The row now states the shipped rule. (2) `cmd_export`'s docstring still read "the cap refuses rather than chunking" against a function that auto-splits into consecutive ≤ `MAX_CANDIDATES` chunks; it now states the split and that each chunk carries its own preflight/veto/write. Documentation only — no logic, output or harness change. | PR review |
+| 2026-10-03 | **`export` auto-splits an over-cap batch and auto-versions a duplicate subject.** The 20-candidate cap no longer refuses: an over-cap batch splits into consecutive ≤20 chunks, each processed end to end (its own preflight, its own `set --dryrun` veto, its own write), reported as `Batch k/N: n candidate(s)`, with a multi-batch `--write` disclosed as non-atomic across chunks. The former "never chunks silently because indices are request-relative" refusal is honoured by assigning each chunk request-relative indices and keying the version map by the candidate's position in its own chunk, processed sequentially, never a global clean-list index. A candidate whose subject already exists in the export's group is now a version bump (the preflight match's `uuid` feeds the item's `uuid`, XOR `createUuid`); a same-subject memory in another group is not versioned into it (group-scoped identity). A `--write` with every candidate held back by the atomicity gate stops before creating a group; a transient preflight failure degrades to creates (fail-safe, since the `set --dryrun` veto still catches a duplicate), and two same-subject candidates in one chunk are refused rather than double-versioning. The dry-run receipt now
+discloses how many candidates matched an existing same-subject memory (a `--write` would version those
+whose match is in the export's group). Each chunk also gets its own capture timestamp, and the
+intra-chunk same-subject refusal uses the preflight's slug-normalised collision (case/punctuation
+equivalent pairs are caught) with an exact-string fallback when the preflight did not run.
+Harness 117 -> 130. | session request |
 | 2026-10-03 | **A stale `import --heimdallr` is refused with a pointer instead of an argparse error.** The flag was removed from `import` with the rest of the inbound autofill, so a stale `--heimdallr true` (or the bare flag) died on `unrecognized arguments` — a message naming a switch the caller believed in and this verb never had. It is now parsed (`nargs="?"`, so both the bare flag and the `true`/`false` value reach the refusal) and refused with the `--store` deprecation's shape, naming `export`/`dump` and writing nothing. That is the same rule the skill already states — an inapplicable flag is reported, never silently ignored — and the same handling `--store` already had. | review fix |
 | 2026-10-03 | **Heimdallr removed from `import`: inbound takes only what the caller binds, outbound keeps autofill.** `import` lost its `--heimdallr` flag and its autofill block — a session on a ticketed branch recalling `--initiative X` no longer narrows to that ticket. `export`/`dump` keep `--heimdallr true` default. | session request |
 | 2026-10-03 | `HeimdallrAutofillTests.setUp` now stubs `initiative_exists` to a definite `(False, "absent")`. The class stubs `heimdallr_scan` but not the store-backed `initiative_exists`, so without a reachable store the read fails and the export refuses before the dry-run body is printed — `test_export_supplied_initiative_survives_unknown_heimdallr` asserted against a body that never appeared. CI (no store) failed it; local runs masked it. The autofill-precedence tests now run hermetically. | harness determinism |

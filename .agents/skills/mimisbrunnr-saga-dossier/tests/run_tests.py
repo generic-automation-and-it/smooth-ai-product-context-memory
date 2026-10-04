@@ -26,6 +26,7 @@ stdlib unittest; no external runner.
 
 from __future__ import annotations
 
+import argparse
 import copy
 import datetime as dt
 import json
@@ -797,7 +798,7 @@ class CredentialTransportTests(unittest.TestCase):
                 self.assertNotIn("s3cret", rendered)
                 self.assertNotIn("user:", rendered)
                 stderr = io.StringIO()
-                # `cmd_bundle` exports --base-url into the environment; patch.dict restores it.
+                # `--base-url` flows straight into the fetch; patch.dict restores any env the run set.
                 with mock.patch.dict(os.environ), contextlib.redirect_stderr(stderr):
                     self.assertEqual(dc.main(["--base-url", base, "bundle"]), 1)
                 self.assertNotIn("s3cret", stderr.getvalue())
@@ -1078,18 +1079,205 @@ class HeimdallrBundleAnchorTests(unittest.TestCase):
     def test_default_fills_repo_and_branch_ticket_only(self):
         body = self._bundle([])
         self.assertEqual(body.get("repo"), "org/repo")
-        self.assertEqual(body.get("tickets"), ["github:7"])
+        # Tickets autofill from branch only; the commit ticket (a PR number) is never used, and the
+        # contract takes one ticket as ticketProvider + ticketKey.
+        self.assertEqual(body.get("ticketProvider"), "github")
+        self.assertEqual(body.get("ticketKey"), "7")
+        self.assertEqual(body.get("widenDepth"), 1)
         self.assertNotIn("tags", body)
 
     def test_explicit_flags_and_body_win(self):
         body = self._bundle(["--repo", "other/repo", "--tickets", "github:1"])
         self.assertEqual(body.get("repo"), "other/repo")
-        self.assertEqual(body.get("tickets"), ["github:1"])
+        self.assertEqual(body.get("ticketProvider"), "github")
+        self.assertEqual(body.get("ticketKey"), "1")
 
     def test_opt_out_disables_autofill(self):
         body = self._bundle(["--heimdallr", "false"])
         self.assertNotIn("repo", body)
-        self.assertNotIn("tickets", body)
+        self.assertNotIn("ticketProvider", body)
+        self.assertNotIn("ticketKey", body)
+
+
+class BundleBodyContractTests(unittest.TestCase):
+    """The endpoint binds CreateDossierBundle.Request (unknown properties rejected), so the flags must
+    build the body in the contract's field names — and finally send the required widenDepth, which the
+    flags never did. A fixture asserts the exact keys so sending `initiative` instead of
+    `initiativeName` fails."""
+
+    def _build(self, argv):
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--body")
+        parser.add_argument("--repo")
+        parser.add_argument("--ticket")
+        parser.add_argument("--tickets")
+        parser.add_argument("--tags")
+        parser.add_argument("--initiative")
+        parser.add_argument("--widen-depth", type=int, default=1)
+        parser.add_argument("--heimdallr", default="true")
+        parser.add_argument("--base-url", default=None)
+        args = parser.parse_args(argv)
+        return dc.build_bundle_body(args, {})
+
+    def test_repo_flag_produces_contract_body(self):
+        self.assertEqual(self._build(["--repo", "owner/repo"]),
+                         {"repo": "owner/repo", "widenDepth": 1})
+
+    def test_ticket_flag_produces_contract_body(self):
+        self.assertEqual(self._build(["--ticket", "github:160"]),
+                         {"ticketProvider": "github", "ticketKey": "160", "widenDepth": 1})
+
+    def test_initiative_flag_produces_contract_body(self):
+        self.assertEqual(self._build(["--initiative", "saga"]),
+                         {"initiativeName": "saga", "widenDepth": 1})
+
+    def test_tags_flag_produces_contract_body(self):
+        self.assertEqual(self._build(["--tags", "a,b"]),
+                         {"tags": ["a", "b"], "widenDepth": 1})
+
+    def test_widen_depth_is_sent_and_bounded(self):
+        self.assertEqual(self._build(["--widen-depth", "3", "--repo", "owner/repo"]).get("widenDepth"), 3)
+        with self.assertRaises(ValueError):
+            self._build(["--widen-depth", "0"])
+        with self.assertRaises(ValueError):
+            self._build(["--widen-depth", "6"])
+
+    def test_body_widen_depth_wins_over_the_flag(self):
+        args = argparse.Namespace(widen_depth=3, repo=None, ticket=None, tickets=None,
+                                  tags=None, initiative=None)
+        body = dc.build_bundle_body(args, {"widenDepth": 5})
+        self.assertEqual(body["widenDepth"], 5)
+
+    def test_tickets_with_multiple_values_are_refused_not_truncated(self):
+        with self.assertRaises(ValueError) as caught:
+            self._build(["--tickets", "github:1,gitlab:2"])
+        self.assertIn("one ticket", str(caught.exception))
+
+    def test_same_ticket_via_both_flags_is_not_refused(self):
+        # The same ticket passed redundantly via --ticket and --tickets is not two tickets; it is
+        # deduplicated, not refused (the refusal is reserved for genuinely different tickets).
+        args = argparse.Namespace(widen_depth=1, repo=None, ticket="github:1",
+                                  tickets="github:1", tags=None, initiative=None)
+        body = dc.build_bundle_body(args, {})
+        self.assertEqual(body["ticketProvider"], "github")
+        self.assertEqual(body["ticketKey"], "1")
+
+    def test_a_half_specified_body_ticket_is_refused(self):
+        """A `--body` carrying exactly one of ticketProvider/ticketKey would reach the server and 400
+        (both-or-neither); refuse client-side rather than leaking a one-sided pair."""
+        args = argparse.Namespace(widen_depth=1, repo=None, ticket="github:160", tickets=None,
+                                  tags=None, initiative=None)
+        with self.assertRaises(ValueError) as caught:
+            dc.build_bundle_body(args, {"ticketProvider": "github"})
+        self.assertIn("ticketProvider and ticketKey", str(caught.exception))
+
+    def test_heimdallr_autofill_skips_the_scan_when_fully_bound(self):
+        """A fully-bound anchor set must run no subprocess — a scan that produces nothing is pure cost."""
+        def boom():
+            raise AssertionError("the Heimdallr scan must not run when every anchor is bound")
+        original = dc.heimdallr_scan
+        dc.heimdallr_scan = boom
+        try:
+            body, filled = dc._heimdallr_autofill(
+                {"repo": "r", "ticketProvider": "github", "ticketKey": "1",
+                 "initiativeName": "i"})
+            self.assertEqual(filled, [])
+            self.assertEqual(body["repo"], "r")
+        finally:
+            dc.heimdallr_scan = original
+
+
+class BundleCredentialTests(unittest.TestCase):
+    """The two credential defects: the machine credential file must seed the read token and base URL
+    (so a clean shell gets 200, not 403), and the write token must never be loaded or reach the bundle
+    request (read-only, LADR-08 / NFR-06)."""
+
+    def test_missing_read_token_is_a_missing_credential_error(self):
+        os.environ.pop(dc._ENV_READ_TOKEN, None)
+        os.environ.pop(dc._ENV_BASE_URL, None)
+        os.environ["CONTEXT_MEMORY_BASE_URL"] = "http://localhost:5141"
+        try:
+            with self.assertRaises(ValueError) as caught:
+                dc._resolve_read_credentials(None)
+            self.assertIn("missing-credential", str(caught.exception))
+            self.assertIn(dc._ENV_READ_TOKEN, str(caught.exception))
+        finally:
+            os.environ.pop(dc._ENV_READ_TOKEN, None)
+            os.environ.pop(dc._ENV_BASE_URL, None)
+            os.environ.pop("CONTEXT_MEMORY_BASE_URL", None)
+
+    def test_machine_credential_file_seeds_only_read_token_and_base_url(self):
+        import tempfile
+        with tempfile.NamedTemporaryFile("w", suffix=".cred", delete=False) as fh:
+            fh.write("CONTEXT_MEMORY_READ_TOKEN=test-read-token\n")
+            fh.write("CONTEXT_MEMORY_BASE_URL=http://localhost:5141\n")
+            fh.write("CONTEXT_MEMORY_WRITE_TOKEN=must-not-load\n")
+            path = fh.name
+        original = dc._store_client.MACHINE_CREDENTIAL_FILE
+        dc._store_client.MACHINE_CREDENTIAL_FILE = path
+        os.environ.pop(dc._ENV_READ_TOKEN, None)
+        os.environ.pop(dc._ENV_BASE_URL, None)
+        os.environ.pop(dc._ENV_WRITE_TOKEN, None)
+        try:
+            dc._store_client.load_machine_credentials(dc._ENV_READ_TOKEN, dc._ENV_BASE_URL)
+            self.assertEqual(os.environ.get(dc._ENV_READ_TOKEN), "test-read-token")
+            self.assertEqual(os.environ.get(dc._ENV_BASE_URL), "http://localhost:5141")
+            # The write token is never loaded, even when the file carries one.
+            self.assertNotIn(dc._ENV_WRITE_TOKEN, os.environ)
+        finally:
+            dc._store_client.MACHINE_CREDENTIAL_FILE = original
+            os.environ.pop(dc._ENV_READ_TOKEN, None)
+            os.environ.pop(dc._ENV_BASE_URL, None)
+            os.environ.pop(dc._ENV_WRITE_TOKEN, None)
+            os.unlink(path)
+
+    def test_a_write_token_present_refuses_the_bundle_request(self):
+        import contextlib
+        import io
+        os.environ[dc._ENV_WRITE_TOKEN] = "test-write-token"
+        stderr = io.StringIO()
+        try:
+            with contextlib.redirect_stderr(stderr):
+                rc = dc.main(["bundle", "--heimdallr", "false"])
+            self.assertEqual(rc, 1)
+            self.assertIn(dc._ENV_WRITE_TOKEN, stderr.getvalue())
+        finally:
+            os.environ.pop(dc._ENV_WRITE_TOKEN, None)
+
+
+class BundleServerErrorTests(unittest.TestCase):
+    """On HTTPError the composer surfaces the server's problem title/detail and fails non-zero, never
+    the raw body — which may echo request content."""
+
+    def test_http_error_surfaces_the_problem_detail_not_the_raw_body(self):
+        import contextlib
+        import io
+        import urllib.error
+
+        problem = json.dumps({
+            "type": "https://tools.ietf.org/html/rfc9110#section-15.5.1",
+            "title": "Bad Request",
+            "detail": "The JSON deserializer rejected property 'initiativeName'.",
+            "status": 400,
+        }).encode("utf-8")
+
+        class _FakeOpener:
+            def open(self, req, timeout=None):
+                raise urllib.error.HTTPError(req.full_url, 400, "Bad Request", {}, io.BytesIO(problem))
+
+        os.environ[dc._ENV_READ_TOKEN] = "test-token"
+        os.environ[dc._ENV_BASE_URL] = "http://localhost:5141"
+        real_build = urllib.request.build_opener
+        urllib.request.build_opener = lambda *handlers: _FakeOpener()
+        try:
+            with self.assertRaises(ValueError) as caught:
+                dc.fetch_bundle_from_api("http://localhost:5141", {"anchor": {}})
+            self.assertIn("The JSON deserializer rejected property 'initiativeName'.", str(caught.exception))
+            self.assertNotIn('"type"', str(caught.exception))
+        finally:
+            urllib.request.build_opener = real_build
+            os.environ.pop(dc._ENV_READ_TOKEN, None)
+            os.environ.pop(dc._ENV_BASE_URL, None)
 
 
 if __name__ == "__main__":

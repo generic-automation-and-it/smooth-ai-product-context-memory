@@ -1008,18 +1008,92 @@ def initiative_exists(name: str) -> tuple[bool, str]:
     return False, "missing"
 
 
+def _subject(candidate: dict) -> str:
+    """The memory's subject: the candidate's description (its question) or a slice of its statement.
+
+    The capture path matches on the subject, so a foreign candidate with no description must derive a
+    stable one. Used for both the item's name/description and the preflight's subject, so the two
+    never drift.
+    """
+    return candidate.get("description") or candidate["statement"][:60]
+
+
+def build_version_map(preflight_output: str, group_uuid) -> dict:
+    """Map each candidate's export index to the uuid it should version-bump to, or omit it to create.
+
+    A candidate is a version target only when a preflight match's ``groupUuid`` equals the export's
+    resolved group; a same-subject memory in another group is a separate memory to link, never a
+    version target (memory identity is group-scoped ``(group, uuid)``).
+    """
+    try:
+        data = json.loads(preflight_output)
+        results = (data or {}).get("candidates") or []
+    except (ValueError, AttributeError):
+        return {}
+    mapping = {}
+    for result in results:
+        if not isinstance(result, dict):
+            continue
+        index = result.get("index")
+        if not isinstance(index, int):
+            continue
+        for match in result.get("matches") or []:
+            if isinstance(match, dict) and match.get("groupUuid") == group_uuid:
+                uuid_value = match.get("uuid")
+                if uuid_value:
+                    mapping[index] = uuid_value
+                break
+    return mapping
+
+
+def preflight_match_count(preflight_output: str) -> int:
+    """Number of candidates the preflight matched to an existing memory (across any group).
+
+    A dry run has no resolved group, so it cannot say which matches are in the export's group — hence a
+    count, not a version/new split. The receipt uses it to disclose that a ``--write`` would version
+    those whose match is in the export's group.
+    """
+    try:
+        data = json.loads(preflight_output)
+        results = (data or {}).get("candidates") or []
+    except (ValueError, AttributeError):
+        return 0
+    return sum(1 for r in results if isinstance(r, dict) and r.get("matches"))
+
+
+def _intra_batch_collision_subject(preflight_output: str) -> str | None:
+    """The ``subjectSlug`` of the first intra-batch collision, or None.
+
+    The server computes collisions with the same slug normalisation it uses for memory identity, so this
+    is the authoritative same-subject-within-a-chunk detector — an exact-string compare would miss a
+    case/punctuation-equivalent pair, which the server would then double-version.
+    """
+    try:
+        data = json.loads(preflight_output)
+        collisions = (data or {}).get("intra_batch_collisions") or []
+    except (ValueError, AttributeError):
+        return None
+    for collision in collisions:
+        if isinstance(collision, dict) and collision.get("subjectSlug"):
+            return collision["subjectSlug"]
+    return None
+
+
 def set_items(candidates: list[dict], binding: dict, now: dt.datetime) -> list[dict]:
     """Project candidates onto the write payload's item shape.
 
-    `createUuid` is assigned here, once, so a dry run and the write it precedes identify the same
-    memories and links can target anything in the batch.
+    ``createUuid`` is assigned here for a create, once, so a dry run and the write it precedes identify
+    the same memories and links can target anything in the batch. A candidate carrying ``_versionUuid``
+    (a preflight match in the export's group) is sent as a version bump instead — the ``set`` contract
+    is ``uuid`` (version target) XOR ``createUuid`` (create identity), never both.
     """
     items = []
     for candidate in candidates:
-        subject = candidate.get("description") or candidate["statement"][:60]
+        subject = _subject(candidate)
+        version_uuid = candidate.get("_versionUuid")
         items.append({
-            "uuid": None,
-            "createUuid": str(uuid.uuid4()),
+            "uuid": version_uuid,
+            "createUuid": None if version_uuid else str(uuid.uuid4()),
             "name": subject,
             "description": subject,
             "statement": candidate["statement"],
@@ -1043,10 +1117,11 @@ def cmd_export(args: argparse.Namespace) -> int:
     """SESSION -> STORE. Orchestrate the capture path; write nothing unless `--write`.
 
     The order is the capture skill's, and every stage is a gate rather than a step: the redaction and
-    atomicity gates run first and can hold candidates back, the cap refuses rather than chunking, and
-    `set --dryrun` is the veto point. A dry run additionally **creates nothing** — no initiative, no
-    group, no memory — because `resolve-group` has no dry-run mode and would create a group as a side
-    effect of asking.
+    atomicity gates run first and can hold candidates back, an over-cap batch auto-splits into
+    consecutive ≤ MAX_CANDIDATES chunks each with its own preflight/veto/write, and `set --dryrun` is
+    the veto point. A dry run additionally **creates nothing** — no initiative, no group, no
+    memory — because `resolve-group` has no dry-run mode and would create a group as a side effect
+    of asking.
     """
     material = read_material(args.input, "auto")
     if isinstance(material, int):
@@ -1131,13 +1206,11 @@ def cmd_export(args: argparse.Namespace) -> int:
         (held if verdict.get("verdict") == "bundled" else clean).append(candidate)
         candidate["atomicity"] = verdict
 
-    # The cap is the capture skill's, enforced here so the refusal names the batch, not a 400 later.
-    if len(clean) > MAX_CANDIDATES:
-        print(f"REFUSED: {len(clean)} candidate(s) is over the {MAX_CANDIDATES}-candidate cap. "
-              "Split into explicit batches the user approves — this client never chunks silently, "
-              "because indices are request-relative and a silent split loses cross-batch collisions. "
-              "Nothing was written.", file=sys.stderr)
-        return 1
+    # The cap is the capture skill's. An over-cap batch is auto-split into consecutive ≤ MAX_CANDIDATES
+    # chunks, each processed end to end (its own preflight, its own `set --dryrun` veto, its own write),
+    # so the capture path never chunks *silently* and a reader sees the boundary.
+    chunks = [clean[i:i + MAX_CANDIDATES] for i in range(0, len(clean), MAX_CANDIDATES)]
+    total_chunks = len(chunks)
 
     # Fresh-store precondition: `resolve-group` answers 404 for an initiative that does not exist.
     initiative = binding["initiative"] or "to-be-decided"
@@ -1164,12 +1237,21 @@ def cmd_export(args: argparse.Namespace) -> int:
             print(f"  HELD BACK (bundled: {', '.join(candidate['atomicity'].get('signals') or ['?'])}): "
                   f"{candidate['statement'][:90]}")
         print("  A held candidate is never written past the flag. Split it, or drop it.")
+    if total_chunks > 1:
+        print(f"Split into {total_chunks} batch(es) of at most {MAX_CANDIDATES} candidates: "
+              + ", ".join(str(len(c)) for c in chunks) + ".")
     if redaction:
         print("Redaction (detected before send): "
               + ", ".join(f"{name} x{count}" for name, count in sorted(redaction.items())))
     if not any(binding.values()):
         print("NOTE: no selectors supplied, so no association is made "
               "(--tickets/--tags/--repository/--scope/--initiative).")
+    if not clean:
+        # Every candidate was held back by the atomicity gate: there is no writable batch. Stopping
+        # here also means a `--write` does not create a group for nothing.
+        print("Nothing to capture: every candidate was held back by the atomicity gate. "
+              "Nothing was written.", file=sys.stderr)
+        return 1
 
     group, group_state = resolve_group(binding, args.name, args.body, dryrun=not args.write)
     if args.write:
@@ -1186,18 +1268,87 @@ def cmd_export(args: argparse.Namespace) -> int:
               f"{json.dumps(_group_body(binding, args.name, args.body))}")
         print(f"Initiative: {initiative_note}")
 
-    items = set_items(clean, binding, dt.datetime.now(dt.timezone.utc))
-    rc, out, err = _run_capture_client(
-        WRITE_CLIENT, ["preflight"],
-        {"candidates": [{"description": item["description"], "kind": KIND_UNDERSTANDING,
-                         "facets": item["facets"], "groupUuid": group_uuid} for item in items]})
-    if rc == 0:
-        preflight = out.strip()
-        print("Preflight: " + (preflight if len(preflight) <= 1200
-                               else preflight[:1200] + f"\n  … {len(preflight) - 1200} more "
-                                                       f"character(s) not shown"))
-    else:
-        print(f"Preflight: unavailable ({err.strip()[:200] or f'exit {rc}'})")
+    total_candidates = 0
+    matched = 0
+    for batch_no, chunk in enumerate(chunks, start=1):
+        multi = total_chunks > 1
+        tag = f" [batch {batch_no}/{total_chunks}]" if multi else ""
+        # Each chunk's preflight runs after the previous chunk's write (for a `--write`), so a
+        # duplicate subject split across chunks is surfaced by the later chunk's preflight and becomes
+        # a version bump; the capture path has no cross-batch transaction, hence the sequential order.
+        rc, out, err = _run_capture_client(
+            WRITE_CLIENT, ["preflight"],
+            {"candidates": [{"description": _subject(c), "kind": KIND_UNDERSTANDING,
+                             "facets": ["understanding"], "groupUuid": group_uuid} for c in chunk]})
+        if rc == 0:
+            preflight = out.strip()
+            version_map = build_version_map(preflight, group_uuid)
+            matched += preflight_match_count(preflight)
+            shown = (preflight if len(preflight) <= 1200
+                     else preflight[:1200] + f"\n  … {len(preflight) - 1200} more character(s) not shown")
+            print((f"Batch {batch_no}/{total_chunks} " if multi else "") + f"Preflight: {shown}")
+        else:
+            # A preflight failure leaves no version map, so a duplicate subject would degrade to a
+            # create. That is fail-safe: the `set --dryrun` veto still catches a subject already in the
+            # group before any write, so a transient preflight-side error must not abort a capture that
+            # needs no version resolution (and one that does refuses at the veto, not silently).
+            print(f"Preflight: unavailable ({err.strip()[:200] or f'exit {rc}'})")
+            version_map = {}
+        # Each chunk preflights its own request, so the preflight indices are request-relative within
+        # this chunk; map by the candidate's position in the chunk, never a global clean-list index.
+        for local_index, candidate in enumerate(chunk):
+            candidate["_versionUuid"] = version_map.get(local_index)
+        # Two candidates in one chunk sharing a subject is ambiguous input: the capture path refuses two
+        # same-subject creates in one batch, and sending both as version targets would double-version the
+        # same memory. The preflight's intra-batch collision list is the authoritative detector (it uses
+        # the server's slug normalisation, so a case/punctuation-equivalent pair is caught); fall back to
+        # an exact-string check when the preflight did not run.
+        collision_subject = _intra_batch_collision_subject(preflight) if rc == 0 else None
+        if collision_subject is None:
+            subjects = [_subject(c) for c in chunk]
+            if len(set(subjects)) != len(subjects):
+                collision_subject = next(s for s in subjects if subjects.count(s) > 1)
+        if collision_subject:
+            early = ("Earlier batch(es) were already written and remain; " if args.write and batch_no > 1 else "")
+            print(f"REFUSED: two candidates in batch {batch_no} share a subject ('{collision_subject}'); "
+                  f"merge them before exporting. {early}Nothing from this batch was written.",
+                  file=sys.stderr)
+            return 1
+        # Each chunk gets its own capture timestamp so a slow multi-batch write does not stamp every
+        # later batch's memories with the export-start time.
+        now = dt.datetime.now(dt.timezone.utc)
+        items = set_items(chunk, binding, now)
+        if multi:
+            line = f"Batch {batch_no}/{total_chunks}: {len(chunk)} candidate(s)"
+            if args.write:
+                # The version/new split is accurate only when the group is resolved; in a dry run the
+                # group is not, so the receipt discloses the match count instead.
+                count = (sum(1 for i in items if i["uuid"]), sum(1 for i in items if not i["uuid"]))
+                line += f" ({count[0]} version(s), {count[1]} new)"
+            print(line)
+        total_candidates += len(chunk)
+
+        if not args.write:
+            continue
+
+        rc, out, err = _run_capture_client(
+            WRITE_CLIENT, ["set", "--dryrun"], {"groupUuid": group_uuid, "items": items,
+                                                "links": [], "labelsProposed": []})
+        if rc != 0:
+            early = ("Earlier batch(es) were already written and remain; " if batch_no > 1 else "")
+            print(f"REFUSED at the dry-run veto: {err.strip() or out.strip()}. {early}No memory from "
+                  f"this batch was written; the group {group_uuid} was already resolved or created and "
+                  f"remains.", file=sys.stderr)
+            return 1
+        print(f"\nset --dryrun (the veto point){tag}:\n{out.strip()[:1200]}")
+
+        rc, out, err = _run_capture_client(
+            WRITE_CLIENT, ["set"], {"groupUuid": group_uuid, "items": items,
+                                    "links": [], "labelsProposed": []})
+        if rc != 0:
+            print(f"WRITE FAILED{tag}: {err.strip() or out.strip()}", file=sys.stderr)
+            return 1
+        print(f"\nWROTE{tag}:\n{out.strip()[:1200]}")
 
     if not args.write:
         # `set --dryrun` is the veto point, and it needs a resolved `groupUuid` — which a dry run
@@ -1206,32 +1357,26 @@ def cmd_export(args: argparse.Namespace) -> int:
         # server-side half runs at the head of `--write`, before anything is persisted. Saying so is
         # better than sending a request that can only fail on a null group.
         print(f"\nDRY RUN — nothing was written, and nothing was created.\n"
-              f"  would create: memory ({len(items)})"
+              f"  would write: memory ({total_candidates})"
               + (f", group ({group_state})" if group_state == "dry-run" else "")
               + f"\n  would not create: anything under an existing group, because no group was "
                 f"resolved\nThe server-side `set --dryrun` veto runs at the start of `--write`, once "
               f"a group exists. Re-run with `--write` to capture.")
+        if matched:
+            print(f"  {matched} candidate(s) matched an existing same-subject memory; a `--write` would "
+                  f"version those whose match is in the export's group (a match in another group stays "
+                  f"a separate new memory).")
+        if total_chunks > 1:
+            print("  Note: a multi-batch `--write` is not atomic across batches; a later batch could "
+                  "be refused at its veto after an earlier batch was already written.")
         print("Decisions and rules captured this way are written as `kind = understanding`, which does "
               "NOT pass the gated-kind approval: a `decision`/`rule`/`nfr` captured through this path "
               "is an understanding of one, not approved canon.")
         return 0
 
-    rc, out, err = _run_capture_client(
-        WRITE_CLIENT, ["set", "--dryrun"], {"groupUuid": group_uuid, "items": items,
-                                            "links": [], "labelsProposed": []})
-    if rc != 0:
-        print(f"REFUSED at the dry-run veto: {err.strip() or out.strip()}. No memory was written; "
-              f"the group {group_uuid} was already resolved or created and remains.", file=sys.stderr)
-        return 1
-    print(f"\nset --dryrun (the veto point):\n{out.strip()[:1200]}")
-
-    rc, out, err = _run_capture_client(
-        WRITE_CLIENT, ["set"], {"groupUuid": group_uuid, "items": items,
-                                "links": [], "labelsProposed": []})
-    if rc != 0:
-        print(f"WRITE FAILED: {err.strip() or out.strip()}", file=sys.stderr)
-        return 1
-    print(f"\nWROTE:\n{out.strip()[:1200]}")
+    if total_chunks > 1:
+        print("\nNon-atomic multi-batch write: each batch was written independently, so a failure in a "
+              "later batch leaves earlier batch(es) committed.")
     print("This is a receipt: the memories are persisted now, so a post-write digest is not an "
           "opportunity to approve. Pre-write review is `--export` without `--write`.")
     print("Records written as `kind = understanding`, which does NOT pass the gated-kind approval: "

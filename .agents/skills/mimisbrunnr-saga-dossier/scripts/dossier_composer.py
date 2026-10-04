@@ -27,12 +27,35 @@ import json
 import os
 import re
 import sys
+import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 from urllib.parse import urlparse
 import subprocess
+
+# The sibling capture client is the authoritative loader of the machine credential file. Importing it
+# runs its own seed (read token + base URL only, at import) and never makes the write token ambient —
+# this skill is read-only (LADR-08 / NFR-06) and refuses a write token, so a write token must never be
+# loaded. Reuse the one loader rather than writing a third.
+_ODIN_SCRIPTS = (Path(__file__).resolve().parents[2]
+                 / "mimisbrunnr-odin-context-memory" / "scripts")
+if str(_ODIN_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_ODIN_SCRIPTS))
+import context_memory_client as _store_client  # noqa: E402
+
+# The credential names and the machine file, re-exported from the sibling client so this module reads
+# and refuses through one place rather than restating the variable names.
+_ENV_BASE_URL = _store_client.ENV_BASE_URL
+_ENV_READ_TOKEN = _store_client.ENV_READ_TOKEN
+_ENV_WRITE_TOKEN = _store_client.ENV_WRITE_TOKEN
+# The write credential under **both** spellings a shell can set: the sibling's skill-facing name and
+# the Host's own `ApiAccess__WriteToken`. They are one credential in two forms — the provisioner writes
+# both beside each other — so a read-only surface has to refuse both. The Host form is not re-exported
+# by the sibling (it is the server's configuration spelling, not a client one), hence the literal.
+_WRITE_TOKEN_NAMES = (_ENV_WRITE_TOKEN, "ApiAccess__WriteToken")
+_MACHINE_CREDENTIAL_FILE = _store_client.MACHINE_CREDENTIAL_FILE
 
 # Heimdallr session-metadata reporter, resolved relative to this file so the
 # lookup holds under any skills root (.agents/skills, .claude/skills,
@@ -1185,26 +1208,72 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         raise OSError("Credential-bearing requests do not follow redirects")
 
 
+def _resolve_read_credentials(base_url):
+    """Return ``(base, token)`` for the read-only bundle request, or fail closed.
+
+    The machine credential file was seeded at import; nothing is reloaded per call, so a caller that
+    deliberately cleared the token to prove a refusal is not handed one back. A write token present is
+    refused before anything else (read-only, LADR-08 / NFR-06) — a read-only worker that sources it
+    gains write capability. Both spellings are checked because the established read path treats them as
+    one credential: the kvasir client strips `CONTEXT_MEMORY_WRITE_TOKEN` *and* `ApiAccess__WriteToken`
+    from a read subprocess, so a single-spelling check here left the Host form ambient past this
+    refusal. Loopback is asserted before the token is read, so a non-loopback base
+    refuses before any request is considered. A missing token is a ``missing-credential`` error naming
+    the variable and the file — never an unauthenticated request that would come back 403.
+    """
+    for name in _WRITE_TOKEN_NAMES:
+        if os.environ.get(name):
+            raise ValueError(f"{name} must not be present in a read-only bundle request")
+    base = (base_url or os.environ.get(_ENV_BASE_URL, "http://localhost:5141")).rstrip("/")
+    _assert_loopback(base)
+    token = os.environ.get(_ENV_READ_TOKEN)
+    if not token:
+        raise ValueError(
+            "missing-credential: "
+            f"{_ENV_READ_TOKEN} is required (seeded from the machine credential file "
+            f"{_MACHINE_CREDENTIAL_FILE})")
+    return base, token
+
+
+def _problem_summary(exc):
+    """Extract the server's problem ``detail``/``title`` without echoing the raw body.
+
+    A validation problem body may echo request content; the title/detail are the actionable part. The
+    raw body is never printed (it may carry the request, and the next pipeline step needs a classified
+    message, not a dump). Falls back to the reason phrase when the body is not a problem object.
+    """
+    try:
+        data = json.loads(exc.read().decode("utf-8"))
+    except Exception:  # noqa: BLE001 — a summary helper must never raise past main()
+        return exc.reason or "the server returned an error"
+    if isinstance(data, dict):
+        shown = data.get("detail") or data.get("title")
+        if shown:
+            return str(shown)
+    return exc.reason or "the server returned an error"
+
+
 def fetch_bundle_from_api(base_url, body):
     """POST the anchor set to /api/context/dossier/bundle (read-only endpoint).
 
     Reads the base URL and read token from the environment (skill-secret-handling): the token value
-    never appears in a committed file. Makes no write and never calls a write endpoint (NFR-06).
+    never appears in a committed file. Makes no write and never calls a write endpoint (NFR-06). A
+    non-success answers with the server's problem title/detail, never the raw body.
     """
-    # Normalise both the --base-url override and the environment default, so a trailing slash cannot
-    # double the path separator below.
-    base = (base_url or os.environ.get("CONTEXT_MEMORY_BASE_URL", "http://localhost:5141")).rstrip("/")
-    _assert_loopback(base)
-    token = os.environ.get("CONTEXT_MEMORY_READ_TOKEN")
+    base, token = _resolve_read_credentials(base_url)
     req = urllib.request.Request(
         base + "/api/context/dossier/bundle",
         data=json.dumps(body).encode("utf-8"),
-        headers={"Content-Type": "application/json", **({"Authorization": f"Bearer {token}"} if token else {})},
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
         method="POST",
     )
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
-    with opener.open(req, timeout=60) as resp:
-        payload = json.loads(resp.read().decode("utf-8"))
+    try:
+        with opener.open(req, timeout=60) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        raise ValueError(
+            f"bundle request failed ({exc.code} {exc.reason}): {_problem_summary(exc)}") from None
     return payload.get("bundle", payload)
 
 
@@ -1220,6 +1289,8 @@ def main(argv=None):
     bundle_p.add_argument("--tickets", help="Bundle anchor: comma-separated provider:key tickets.")
     bundle_p.add_argument("--tags", help="Bundle anchor: comma-separated tags (never autofilled).")
     bundle_p.add_argument("--initiative", help="Bundle anchor: initiative name.")
+    bundle_p.add_argument("--widen-depth", type=int, default=1,
+                          help="Bundle widen depth (1-5; the contract requires it, default 1).")
     bundle_p.add_argument("--heimdallr", choices=_HEIMDALLR_CHOICES, default="true",
                           help="Autofill missing repo/ticket anchors from the offline Heimdallr git "
                                "scan (default true; explicit flags and --body keys always win).")
@@ -1247,49 +1318,143 @@ def _split_list(raw) -> list:
     return [part.strip() for part in str(raw).split(",") if part.strip()]
 
 
+def _validate_widen(widen):
+    """The contract requires ``widenDepth`` to be 1-5; refuse out of range rather than let the server."""
+    if isinstance(widen, bool) or not isinstance(widen, int) or not (1 <= widen <= 5):
+        raise ValueError("widenDepth must be an integer between 1 and 5")
+    return widen
+
+
+def _ticket_pair(value):
+    """Parse ``provider:key`` into ``(provider, key)``; refuse a malformed or empty pair."""
+    if not value or ":" not in value:
+        raise ValueError(f"--ticket must be provider:key, got '{value or ''}'")
+    provider, _, key = value.partition(":")
+    provider = provider.strip()
+    key = key.strip()
+    if not provider or not key:
+        raise ValueError(f"--ticket must be provider:key, got '{value}'")
+    return provider, key
+
+
+def _ticket_from_args(args):
+    """Resolve the single ticket pair from the ``--ticket`` / ``--tickets`` flags.
+
+    The contract takes one ticket (``ticketProvider`` + ``ticketKey``, both-or-neither). ``--tickets``
+    is documented as comma-separated, so more than one value is **refused** with a message — never
+    silently truncated to the first, which is how the second ticket was lost before.
+    """
+    single = getattr(args, "ticket", None)
+    multiple = _split_list(getattr(args, "tickets", None))
+    candidates = []
+    if single and single.strip():
+        candidates.append(single.strip())
+    candidates.extend(multiple)
+    # Deduplicate identical values (the same ticket may be passed via both flags); the refusal is
+    # reserved for genuinely different tickets, never for a redundant repeat of one ticket.
+    unique = list(dict.fromkeys(candidates))
+    if not unique:
+        return None
+    if len(unique) > 1:
+        raise ValueError(
+            "the bundle contract takes one ticket (ticketProvider + ticketKey); "
+            f"got {len(unique)}: {', '.join(unique)}. Use --ticket provider:key.")
+    return _ticket_pair(unique[0])
+
+
+def build_bundle_body(args, body):
+    """Build the bundle anchor body in the wire contract's field names, in one place.
+
+    The endpoint (CreateDossierBundle.Request) rejects unknown properties, so the field names must be
+    the contract's: ``repo``, ``initiativeName``, ``ticketProvider`` + ``ticketKey`` (one ticket),
+    ``tags``, ``kind``, ``status``, ``scopeDimension``, ``includeHistory``, ``asOf`` and ``widenDepth``
+    (required, 1-5). ``--body`` keys always win; flags fill only what they name and ``--body`` did not
+    already carry.
+    """
+    body = dict(body)
+    widen = body.get("widenDepth")
+    if widen is None:
+        widen = getattr(args, "widen_depth", None)
+    if widen is None:
+        widen = 1
+    body["widenDepth"] = _validate_widen(widen)
+
+    if getattr(args, "repo", None) and "repo" not in body:
+        body["repo"] = args.repo
+
+    if "ticketProvider" not in body and "ticketKey" not in body:
+        pair = _ticket_from_args(args)
+        if pair is not None:
+            provider, key = pair
+            body["ticketProvider"] = provider
+            body["ticketKey"] = key
+
+    if getattr(args, "tags", None) and "tags" not in body:
+        body["tags"] = _split_list(args.tags)
+
+    if getattr(args, "initiative", None) and "initiativeName" not in body:
+        body["initiativeName"] = args.initiative
+
+    # The contract's ticket pair is both-or-neither. A half-specified `--body` ticket (exactly one of
+    # ticketProvider / ticketKey) would reach the server and 400; refuse client-side. A flag cannot
+    # repair it, because any one `--body` member suppresses the flag fill.
+    if ("ticketProvider" in body) != ("ticketKey" in body):
+        raise ValueError("a half-specified --body ticket is refused: --body must carry both "
+                         "ticketProvider and ticketKey, or neither — drop the partial --body fields "
+                         "and pass --ticket provider:key alone.")
+    return body
+
+
+def _heimdallr_autofill(body):
+    """Fill missing repo/ticket/initiative anchors from the offline Heimdallr scan.
+
+    Uses the same field names as ``build_bundle_body``. Tickets autofill only from branch tickets;
+    commit-subject tickets are PR numbers (heimdallr-reads-the-checkout-not-the-session), never the
+    tracked ticket, so they are never used. A branch carrying more than one ticket is not autofilled —
+    the contract takes one, and silently picking the first is forbidden — the ambiguity is reported.
+    """
+    if ("repo" in body and "ticketProvider" in body and "ticketKey" in body
+            and "initiativeName" in body):
+        return body, []
+    scan = heimdallr_scan()
+    filled = []
+    repo = scan.get("repository")
+    if "repo" not in body and isinstance(repo, str) and repo:
+        body["repo"] = repo
+        filled.append(f"repo {repo}")
+    if "ticketProvider" not in body and "ticketKey" not in body:
+        raw = scan.get("tickets")
+        branch = []
+        if isinstance(raw, list):
+            branch = [
+                (e.get("provider"), e.get("key"))
+                for e in raw
+                if isinstance(e, dict) and e.get("seenIn") == "branch"
+                and e.get("provider") and e.get("key")
+            ]
+        if len(branch) == 1:
+            provider, key = branch[0]
+            body["ticketProvider"] = provider
+            body["ticketKey"] = key
+            filled.append(f"ticket {provider}:{key}")
+        elif len(branch) > 1:
+            print(f"Heimdallr: {len(branch)} branch ticket(s) found, but the bundle contract takes one; "
+                  f"no ticket autofilled. Pass --ticket provider:key.", file=sys.stderr)
+    initiative = scan.get("initiative")
+    if ("initiativeName" not in body and isinstance(initiative, str) and initiative
+            and initiative != "unknown"):
+        body["initiativeName"] = initiative
+        filled.append(f"initiative {initiative}")
+    return body, filled
+
+
 def cmd_bundle(args):
-    if args.base_url:
-        os.environ["CONTEXT_MEMORY_BASE_URL"] = args.base_url
     body = json.loads(args.body) if args.body else {}
     if not isinstance(body, dict):
         raise ValueError("--body must be a JSON object of bundle anchors")
-    if getattr(args, "repo", None) and "repo" not in body:
-        body["repo"] = args.repo
-    tickets = _split_list(getattr(args, "tickets", None))
-    single = getattr(args, "ticket", None)
-    if single and single.strip() and single.strip() not in tickets:
-        tickets = [single.strip()] + tickets
-    if tickets and "tickets" not in body:
-        body["tickets"] = tickets
-    if getattr(args, "tags", None) and "tags" not in body:
-        body["tags"] = _split_list(args.tags)
-    if getattr(args, "initiative", None) and "initiative" not in body:
-        body["initiative"] = args.initiative
-    if heimdallr_enabled(args) and ("repo" not in body or "tickets" not in body
-                                    or "initiative" not in body):
-        scan = heimdallr_scan()
-        filled = []
-        repo = scan.get("repository")
-        if "repo" not in body and isinstance(repo, str) and repo:
-            body["repo"] = repo
-            filled.append(f"repo {repo}")
-        if "tickets" not in body and isinstance(scan.get("tickets"), list):
-            branch = [f"{e['provider']}:{e['key']}" for e in scan["tickets"]
-                      if isinstance(e, dict) and e.get("seenIn") == "branch"
-                      and e.get("provider") and e.get("key")]
-            if branch:
-                found = branch
-            else:
-                found = [f"{e['provider']}:{e['key']}" for e in scan["tickets"]
-                         if isinstance(e, dict) and e.get("provider") and e.get("key")][:1]
-            if found:
-                body["tickets"] = found
-                filled.append(f"tickets {','.join(found)}")
-        initiative = scan.get("initiative")
-        if ("initiative" not in body and isinstance(initiative, str) and initiative
-                and initiative != "unknown"):
-            body["initiative"] = initiative
-            filled.append(f"initiative {initiative}")
+    body = build_bundle_body(args, body)
+    if heimdallr_enabled(args):
+        body, filled = _heimdallr_autofill(body)
         if filled:
             print(f"Heimdallr autofill ({'; '.join(filled)}); explicit flags and --body keys "
                   f"always win. Pass --heimdallr false to disable.", file=sys.stderr)
