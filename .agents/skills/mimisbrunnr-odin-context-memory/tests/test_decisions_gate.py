@@ -28,6 +28,14 @@ GATE = SCRIPTS / "decisions_gate.py"
 REDACTOR = SCRIPTS / "redact.py"
 RUBRIC = SCRIPTS / "decisions_rubric.json"
 
+sys.path.insert(0, str(SCRIPTS))
+import importlib.util as _ilu
+_spec = _ilu.spec_from_file_location("_decisions_gate_under_test", GATE)
+_gate = _ilu.module_from_spec(_spec)
+_spec.loader.exec_module(_gate)
+MAX_LEDGER_ENTRIES = _gate.MAX_LEDGER_ENTRIES
+cap_ledger = _gate.cap_ledger
+
 RECORD = {
     "subject": "Storage engine decision",
     "description": "Storage engine decision",
@@ -143,7 +151,7 @@ class Stub:
         self.server.server_close()
 
 
-def run_gate(args, stdin_text, env_extra=None, timeout=30):
+def run_gate(args, stdin_text, env_extra=None, timeout=300):
     env = os.environ.copy()
     env.pop("CONTEXT_MEMORY_DECISIONS_ENABLED", None)
     for key in list(env):
@@ -616,6 +624,119 @@ class RedactorArityTests(GateTestCase):
         )
         combined = proc.stderr + proc.stdout
         self.assertIn("candidate", combined, "the detail must say what was expected")
+
+
+class LedgerIntegrityTests(GateTestCase):
+    """The ledger bounds the rewrite loop, so discarding it is a real event and must be disclosed.
+
+    Starting an unreadable ledger empty is the deliberate availability choice — a corrupt file must
+    not make scoring fail permanently — but it was returned *silently*, so a truncated file cleared
+    every record's budget and the next call scored as though it were attempt 1. The bound is only as
+    trustworthy as the disclosure that it was reset.
+    """
+
+    LOW = {role: 0.1 for role in
+           ("product-owner", "designer", "developer", "tester", "business")}
+
+    def test_a_corrupt_ledger_is_reported(self):
+        self.stub.probabilities = dict(self.LOW)
+        state = os.path.join(self.tmp, "ledger.json")
+        with open(state, "w", encoding="utf-8") as handle:
+            handle.write("{ truncated")
+        proc, report = self.score(state_file=state, CONTEXT_MEMORY_DECISIONS_MAX_ATTEMPTS="1")
+        self.assertIn("ledgerReset", report,
+                      "a discarded ledger must be reported, not silently replaced")
+        self.assertIn("begins again", report["ledgerReset"])
+
+    def test_a_spent_budget_is_still_reported_as_a_first_attempt_after_reset(self):
+        """The sequence that made the silence a defect: spend the budget, truncate, and observe the
+        budget start over with the reset disclosed."""
+        self.stub.probabilities = dict(self.LOW)
+        state = os.path.join(self.tmp, "ledger.json")
+        env = {"CONTEXT_MEMORY_DECISIONS_MAX_ATTEMPTS": "1"}
+
+        _, first = self.score(state_file=state, **env)
+        self.assertEqual(first["records"][0]["outcome"], "scored")
+        _, spent = self.score(state_file=state, **env)
+        self.assertEqual(spent["records"][0]["outcome"], "attempts-exhausted")
+
+        with open(state, "w", encoding="utf-8") as handle:
+            handle.write("{ truncated")
+        _, after = self.score(state_file=state, **env)
+        self.assertEqual(after["records"][0]["outcome"], "scored",
+                         "the budget does start again -- that is the deliberate choice")
+        self.assertIn("ledgerReset", after,
+                      "and that restart must be disclosed rather than looking like a first attempt")
+
+    def test_a_fresh_run_does_not_claim_a_reset(self):
+        self.stub.probabilities = dict(self.LOW)
+        _, report = self.score(state_file=os.path.join(self.tmp, "ledger.json"),
+                               CONTEXT_MEMORY_DECISIONS_MAX_ATTEMPTS="1")
+        self.assertNotIn("ledgerReset", report, "a missing ledger is a first run, not a reset")
+
+    def test_a_ledger_holding_a_non_counter_is_discarded_and_reported(self):
+        """A value that is not a small non-negative integer is not something this gate wrote, so the
+        file is not the ledger it claims to be."""
+        self.stub.probabilities = dict(self.LOW)
+        state = os.path.join(self.tmp, "ledger.json")
+        with open(state, "w", encoding="utf-8") as handle:
+            json.dump({"S": "many"}, handle)
+        _, report = self.score(state_file=state, CONTEXT_MEMORY_DECISIONS_MAX_ATTEMPTS="1")
+        self.assertIn("ledgerReset", report)
+
+    def test_the_ledger_is_capped_end_to_end(self):
+        """The cap must hold on the real write path, not only in the helper.
+
+        Sized to exceed `MAX_LEDGER_ENTRIES` deliberately: an earlier version of this case used 30
+        subjects, comfortably under the cap of 5000, so removing the cap entirely left it green. A
+        bound the fixture never crosses is not a bound the fixture tests.
+        """
+        self.stub.probabilities = dict(self.LOW)
+        state = os.path.join(self.tmp, "ledger.json")
+        subjects = [f"subject-{i}" for i in range(MAX_LEDGER_ENTRIES + 25)]
+        records = [{"subject": s, "description": s, "statement": "x"} for s in subjects]
+        proc, _ = self.score(records=records, state_file=state,
+                             CONTEXT_MEMORY_DECISIONS_MAX_ATTEMPTS="1",
+                             CONTEXT_MEMORY_DECISIONS_TIMEOUT="120")
+        with open(state, encoding="utf-8") as handle:
+            ledger = json.load(handle)
+        self.assertLessEqual(len(ledger), MAX_LEDGER_ENTRIES,
+                             "the ledger must stay bounded by its cap")
+        self.assertGreater(len(ledger), 0, "the cap must not empty the ledger")
+
+    def test_the_cap_holds_at_many_times_the_limit(self):
+        """Pure-function check at a size no HTTP round trip could carry, so the bound is exercised
+        well past the cap rather than one entry past it."""
+        ledger = {f"s{i}": (i % 7) + 1 for i in range(MAX_LEDGER_ENTRIES * 4)}
+        capped = cap_ledger(ledger)
+        self.assertEqual(len(capped), MAX_LEDGER_ENTRIES)
+        self.assertEqual(max(capped.values()), 7,
+                         "the highest counts survive the cap")
+
+    def test_the_cap_drops_the_most_spent_entries(self):
+        """Losing the memory of a spent budget is the least harmful entry to lose, so the cap drops
+        the highest counts rather than an arbitrary slice."""
+        ledger = {f"s{i}": (i % 5) + 1 for i in range(20)}
+        capped = cap_ledger(ledger, max_entries=5)
+        self.assertEqual(len(capped), 5)
+        # Four entries tie at the maximum of 5 and all four are kept, so the fifth slot goes to the
+        # highest count below that -- and the tie among those is broken by key, which makes the
+        # eviction deterministic rather than dependent on dict ordering.
+        kept_counts = sorted(capped.values(), reverse=True)
+        self.assertEqual(kept_counts, [5, 5, 5, 5, 4])
+        self.assertTrue(all(v >= 4 for v in capped.values()),
+                        "the cap must drop the least-spent entries, not an arbitrary slice")
+
+    def test_the_cap_leaves_a_small_ledger_alone(self):
+        ledger = {"a": 1, "b": 2}
+        self.assertEqual(cap_ledger(ledger, max_entries=10), ledger)
+
+    def test_a_record_the_cap_evicted_can_be_scored_again(self):
+        """The documented cost of the cap, stated so it is a decision and not a surprise: eviction
+        restores a record's budget. It is bounded and it is disclosed by the cap itself."""
+        ledger = {"a": 3, "b": 1}
+        capped = cap_ledger(ledger, max_entries=1)
+        self.assertNotIn("b", capped, "the least-spent entry is the one evicted")
 
 
 class RubricValidationTests(GateTestCase):

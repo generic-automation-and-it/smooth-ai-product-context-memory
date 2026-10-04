@@ -71,6 +71,11 @@ MAX_CONTEXT_TOKENS = 8192
 MAX_BODY_BYTES = 64 * 1024
 MAX_QUESTIONS = 64
 
+# Most entries the attempt ledger keeps. Nothing else prunes it — an entry is retained precisely to
+# remember that its budget is spent — so without a cap a long session grows one line per distinct
+# subject it has ever scored. See `cap_ledger` for which entries are dropped when it is reached.
+MAX_LEDGER_ENTRIES = 5000
+
 # A token estimate without a tokenizer. Deliberately over-counting: this guard decides whether a
 # record is safe to send, and the expensive error is refusing a record that would have fit, never
 # truncating one that would not. Four characters per token is the usual English approximation; three
@@ -460,14 +465,45 @@ def ledger_path(state_file):
 
 
 def read_ledger(state_file):
+    """The ledger, and whether it had to be discarded.
+
+    A missing or unreadable ledger starts empty rather than refusing: the ledger bounds a convenience
+    loop, and a corrupt file must not be a way to make scoring fail permanently. **That choice is
+    reported, not silent.** An earlier version returned an empty ledger with no signal, so a truncated
+    or corrupted file silently cleared every record's attempt budget — verified by writing a ledger,
+    spending the budget, then truncating the file and watching the next call score again. The bound is
+    only as trustworthy as the disclosure that it was reset.
+    """
     try:
         with open(ledger_path(state_file), encoding="utf-8") as handle:
             data = json.load(handle)
-    except (OSError, ValueError):
-        # A missing or unreadable ledger starts empty rather than refusing: the ledger bounds a
-        # convenience loop, and a corrupt file must not be a way to make scoring permanently fail.
-        return {}
-    return data if isinstance(data, dict) else {}
+    except OSError:
+        return {}, False
+    except ValueError:
+        return {}, True
+    if not isinstance(data, dict):
+        return {}, True
+    # A value that is not a small non-negative integer is not a counter this gate wrote, so the file
+    # is not the ledger it claims to be.
+    for key, value in data.items():
+        if not isinstance(key, str) or not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            return {}, True
+    return data, False
+
+
+def cap_ledger(ledger, max_entries=MAX_LEDGER_ENTRIES):
+    """Bound the ledger by dropping the most-spent entries once it grows past the cap.
+
+    Nothing else prunes it: an entry is kept precisely because it must remember that its budget is
+    spent, so a long session accumulates one entry per distinct subject it has ever scored — a
+    20 000-subject session reaches ~430 KB of `{"subject": 3}` lines and keeps growing. Dropping the
+    **most-spent** entries is the cheapest way to bound it: those are the records most likely to have
+    been written already, and losing the memory of a spent budget is the least harmful entry to lose.
+    """
+    if len(ledger) <= max_entries:
+        return ledger
+    ordered = sorted(ledger.items(), key=lambda pair: (-pair[1], pair[0]))
+    return dict(ordered[:max_entries])
 
 
 def write_ledger(state_file, ledger):
@@ -501,14 +537,17 @@ def next_attempt(state_file, identity, max_attempts):
     The counter lives here rather than in the caller's loop because an agent that is asked to
     "improve until it passes" will otherwise re-ask whenever the answer is inconvenient. Once the
     budget is spent, further attempts are refused rather than silently accepted.
+
+    Returns `(attempt, reset)`; `reset` is True when the ledger had to be discarded, which the caller
+    surfaces so a cleared budget is never mistaken for a first attempt.
     """
-    ledger = read_ledger(state_file)
+    ledger, discarded = read_ledger(state_file)
     used = ledger.get(identity, 0)
     if used >= max_attempts:
-        return None, used
+        return None, discarded
     ledger[identity] = used + 1
-    write_ledger(state_file, ledger)
-    return used + 1, used + 1
+    write_ledger(state_file, cap_ledger(ledger))
+    return used + 1, discarded
 
 
 def best_attempt(previous, candidate):
@@ -551,6 +590,7 @@ def cmd_score(args):
     redacted, findings = redact_records(records)
 
     results = []
+    ledger_reset = False
     for index, (original, state) in enumerate(zip(records, redacted)):
         oversize = size_guard(state, roles)
         if oversize:
@@ -562,9 +602,11 @@ def cmd_score(args):
             continue
 
         if args.state_file:
-            attempt, _used = next_attempt(args.state_file,
-                                          record_identity(original, index),
-                                          settings["max_attempts"])
+            attempt, this_reset = next_attempt(args.state_file,
+                                              record_identity(original, index),
+                                              settings["max_attempts"])
+            # One reset anywhere in the batch is reported, since it is one file and one bound.
+            ledger_reset = ledger_reset or this_reset
             if attempt is None:
                 results.append({
                     "index": index, "identity": record_identity(original, index),
@@ -604,6 +646,16 @@ def cmd_score(args):
         "redaction": findings,
         "records": results,
     }
+    if args.state_file:
+        payload["stateFile"] = str(args.state_file)
+        if ledger_reset:
+            # Said plainly, because a cleared ledger means every record's attempt budget starts again
+            # — so an `attempt: 1` here is not evidence that this record is new.
+            payload["ledgerReset"] = (
+                "the attempt ledger at this path was unreadable or malformed and has been started "
+                "empty; every record's attempt budget begins again. This is reported so a cleared "
+                "bound is never mistaken for a first attempt."
+            )
     print(json.dumps(payload, indent=2))
     return 0
 
