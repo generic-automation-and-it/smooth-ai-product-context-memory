@@ -447,6 +447,30 @@ def _classify(exc, timeout):
     return GateError("unreachable", "nothing accepted a connection")
 
 
+def discrimination(scores):
+    """How decisively the highest-scoring role beat the field. `(margin, tied)`.
+
+    Added because `passingRoles` is consumed downstream as `audience:*` tags, and on its own it
+    cannot distinguish two very different situations. A record three roles scored at exactly
+    `1.00000` yields three tags and reads as though three roles independently cleared the bar,
+    which is indistinguishable from a record where one role led and the rest trailed. The scores
+    are near-saturated at the top — measured mean best-role 0.99 on the calibration fixture — so
+    exact ties are common rather than exceptional.
+
+    `margin` is the gap between the highest score and the highest *other* score, so it is 0.0 for
+    a tie and 1.0 for a unanimous sweep. `tied` names every role within a float epsilon of the
+    top. Neither changes a verdict: `passing` is still computed from the raw scores alone, and
+    this only reports how much to trust the shape of `passing`.
+    """
+    if not scores:
+        return 0.0, []
+    ordered = sorted(scores.values(), reverse=True)
+    top = ordered[0]
+    margin = top - ordered[1] if len(ordered) > 1 else top
+    tied = [role for role, value in scores.items() if top - value <= 1e-9]
+    return margin, sorted(tied)
+
+
 def call_model(state, roles, settings, rubric_version):
     """Score one record. Returns scores, passing roles, and the rubric version recorded with them."""
     payload = build_request(state, roles, settings["model"])
@@ -730,7 +754,7 @@ def cmd_score(args):
             results.append({
                 "index": index, "identity": record_identity(original, index), "attempt": attempt,
                 "outcome": exc.outcome, "detail": exc.detail, "scores": {}, "passingRoles": [],
-                "passed": False, "best": None,
+                "passed": False, "best": None, "discrimination": {"margin": 0.0, "tied": []},
             })
             continue
 
@@ -740,10 +764,16 @@ def cmd_score(args):
         # having spent its attempt above.
         stored = record_attempt(args.state_file, record_identity(original, index),
                                 attempt, scores) if args.state_file else best
+        margin, tied = discrimination(scores)
         results.append({
             "index": index, "identity": record_identity(original, index), "attempt": attempt,
             "outcome": "scored", "rubricVersion": version, "scores": scores,
             "passingRoles": passing, "passed": bool(passing),
+            # How decisively one role beat the field. Disclosed because `passingRoles` alone
+            # cannot distinguish three roles tied at 1.0 from three roles that each cleared the bar
+            # on their own merits — and the top of this distribution is saturated enough that ties
+            # are routine. Never affects `passed`.
+            "discrimination": {"margin": round(margin, 6), "tied": tied},
             # `best` is the best of this round and every earlier one; `bestThisRound` says whether the
             # rewrite actually improved on the source, which is the thing an agent rewriting to pass
             # needs to know and cannot infer from `best` alone.

@@ -100,6 +100,29 @@ def score(doc, report, threshold):
                 unexpectedRolesClearing=bleed)
 
 
+def check_determinism(doc, threshold, endpoint, model, rounds=3):
+    """Score the whole fixture `rounds` times and require byte-identical scores.
+
+    Determinism is the property the whole calibration rests on: without it every figure carries
+    sampling error, a threshold cannot be pinned, and a difference between two runs could not be
+    told apart from a difference between two rubrics. It was measured by hand three times before it
+    was written down, which is exactly the kind of claim that decays into folklore. This makes it
+    re-runnable, and it fails loudly rather than reporting a mean over runs that disagreed.
+    """
+    runs = []
+    for _ in range(rounds):
+        report = run_gate(doc, threshold, endpoint, model)
+        runs.append([r.get("scores") for r in report["records"]])
+    agree = all(r == runs[0] for r in runs)
+    print(f"  determinism over {rounds} full passes: "
+          f"{'identical' if agree else 'DIFFERENT — every figure below is a mean over disagreeing runs'}")
+    if not agree:
+        for i, (a, b) in enumerate(zip(runs[0], runs[1])):
+            if a != b:
+                print(f"    first divergence at record {i}: {a} vs {b}")
+    return agree
+
+
 def compare(recorded, measured, threshold):
     """Say plainly whether this run reproduces the committed numbers."""
     print(f"\n  recorded run vs this run (bar {threshold})")
@@ -130,6 +153,8 @@ def main():
                         help="override the bar (default: the fixture's recorded bar)")
     parser.add_argument("--endpoint", default="http://localhost:11434")
     parser.add_argument("--model", default="nimble")
+    parser.add_argument("--check-determinism", action="store_true",
+                        help="score the fixture three times and require identical scores (slow)")
     args = parser.parse_args()
 
     doc = load()
@@ -141,6 +166,12 @@ def main():
     threshold = args.threshold if args.threshold is not None else recorded["bar"]
     print(f"Calibration fixture {FIXTURE.name}: {len(doc['records'])} labelled records, "
           f"pinned to rubric version {doc['rubricVersion']}\n")
+    if args.check_determinism:
+        if not check_determinism(doc, threshold, args.endpoint, args.model):
+            print("\n  A non-deterministic model makes every threshold and every figure below "
+                  "unreproducible. Re-run before trusting the comparison.")
+            return 1
+        print()
     report = run_gate(doc, threshold, args.endpoint, args.model)
     if report["rubricVersion"] != doc["rubricVersion"]:
         print(f"  WARNING: the shipped rubric is version {report['rubricVersion']} but the fixture "

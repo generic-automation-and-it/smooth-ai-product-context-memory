@@ -21,8 +21,8 @@
     "date": "2026-10-04",
     "model": "nimble",
     "endpoint": "http://localhost:11434",
-    "bar": 0.5,
-    "note": "raw returned probabilities, no temperature scaling. See the temperature row in the skill changelog: the vendor's fitted T=2.179 reduces separation and is a trap for a gate.",
+    "bar": 0.85,
+    "note": "Raw returned probabilities, no temperature scaling, at the SHIPPED default bar of 0.85. 0.85 sits inside the bimodal gap (hold-side max 0.205, pass-side min 0.961), so gate verdicts are identical to those at 0.5 -- 1.00/1.00 -- while role attribution falls from 27/30 to 24/30. That is the measured cost of the stricter bar, stated rather than hidden. See the temperature row in the skill changelog: the vendor's fitted T=2.179 reduces separation and is a trap for a gate.",
     "tier01MeanBestRole": 0.103,
     "tier01MaxBestRole": 0.205,
     "tier23MeanBestRole": 0.991,
@@ -34,17 +34,17 @@
     "falseNegative": 0,
     "precision": 1.0,
     "recall": 1.0,
-    "expectedRolesClearing": 27,
+    "expectedRolesClearing": 24,
     "expectedRolesTotal": 30,
-    "unexpectedRolesClearing": 22,
+    "unexpectedRolesClearing": 17,
     "maxCrossRoleCorrelation": 0.922,
     "maxCrossRolePair": "product-owner/business",
     "perRoleClearing": {
-      "product-owner": 9,
-      "designer": 4,
-      "developer": 13,
-      "tester": 15,
-      "business": 8
+      "product-owner": 7,
+      "designer": 3,
+      "developer": 11,
+      "tester": 14,
+      "business": 6
     },
     "rejectedVariants": [
       {
@@ -65,7 +65,14 @@
         "result": "14/15 vs 14/15 on labelled records; agreed with the noul argmax 11/21",
         "why": "not more accurate, but it is the model's strongest type and can never return two winners"
       }
-    ]
+    ],
+    "atBar05": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "expectedRolesClearing": 27,
+      "unexpectedRolesClearing": 22,
+      "note": "same corpus, same rubric, bar 0.5 -- recorded because it shows the bar changes attribution, not the verdict"
+    }
   },
   "records": [
     {

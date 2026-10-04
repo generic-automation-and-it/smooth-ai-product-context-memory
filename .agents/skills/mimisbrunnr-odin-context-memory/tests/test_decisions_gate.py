@@ -1184,6 +1184,77 @@ class CalibrationEvidenceTests(unittest.TestCase):
             "defect the two rejected variants were measured against")
 
 
+class DiscriminationDisclosureTests(GateTestCase):
+    """`passingRoles` becomes `audience:*` tags downstream, and on its own it cannot tell a tie from
+    a clear win. Measured on the calibration fixture, 3 of 21 records carry roles scoring exactly
+    `1.00000`, and the mean best-role is 0.99 — saturation at the top is the normal case, not the
+    exception, so a tag set of three is usually ambiguous rather than thrice-confirmed.
+    """
+
+    def test_an_exact_tie_reports_a_zero_margin_and_names_every_tied_role(self):
+        self.stub.probabilities = {"product-owner": 1.0, "designer": 0.2, "developer": 1.0,
+                                   "tester": 1.0, "business": 0.05}
+        rec = json.loads(run_gate(["score"], json.dumps([RECORD]), self.gate_env()).stdout)["records"][0]
+        self.assertEqual(rec["discrimination"]["margin"], 0.0)
+        self.assertEqual(rec["discrimination"]["tied"], ["developer", "product-owner", "tester"])
+
+    def test_every_role_at_one_is_a_five_way_tie_not_a_sweep(self):
+        """A unanimous top is still a tie, and reporting it as a margin of 1.0 would claim a
+        discrimination that did not happen. The first version of this test asserted 1.0."""
+        self.stub.probabilities = {role: 1.0 for role in
+                                   ("product-owner", "designer", "developer", "tester", "business")}
+        rec = json.loads(run_gate(["score"], json.dumps([RECORD]), self.gate_env()).stdout)["records"][0]
+        self.assertEqual(rec["discrimination"]["margin"], 0.0)
+        self.assertEqual(len(rec["discrimination"]["tied"]), 5)
+
+    def test_a_clear_winner_reports_the_gap_to_the_runner_up(self):
+        self.stub.probabilities = {"product-owner": 0.9, "designer": 0.1, "developer": 0.2,
+                                   "tester": 0.3, "business": 0.05}
+        rec = json.loads(run_gate(["score"], json.dumps([RECORD]), self.gate_env()).stdout)["records"][0]
+        self.assertAlmostEqual(rec["discrimination"]["margin"], 0.6, places=6)
+        self.assertEqual(rec["discrimination"]["tied"], ["product-owner"])
+
+    def test_the_disclosure_never_changes_a_verdict(self):
+        """The property that makes this safe to add. A tie and a sweep must agree on `passed` and on
+        `passingRoles`, or a reporting field would be deciding something."""
+        for probs in (
+            {"product-owner": 1.0, "designer": 1.0, "developer": 1.0, "tester": 1.0, "business": 1.0},
+            {"product-owner": 0.9, "designer": 0.1, "developer": 0.1, "tester": 0.1, "business": 0.1},
+            {"product-owner": 0.1, "designer": 0.1, "developer": 0.1, "tester": 0.1, "business": 0.1},
+        ):
+            self.stub.probabilities = probs
+            rec = json.loads(run_gate(["score"], json.dumps([RECORD]), self.gate_env()).stdout)["records"][0]
+            # Compared as a set: `passingRoles` arrives in rubric order, which is the order the
+            # operator configured, and asserting sorted() would test the ordering rather than the
+            # membership this case is about.
+            expected = {r for r, v in probs.items() if v > 0.5}
+            self.assertEqual(set(rec["passingRoles"]), expected)
+            self.assertEqual(rec["passed"], bool(expected))
+
+    def test_a_failed_round_discloses_zero_rather_than_omitting_the_field(self):
+        """A consumer reading `discrimination.margin` must not KeyError on exactly the records whose
+        gate outcome is already the thing it most needs to reason about."""
+        env = self.gate_env()
+        sock = socket.socket()
+        sock.bind(("127.0.0.1", 0))
+        dead = sock.getsockname()[1]
+        sock.close()
+        env["CONTEXT_MEMORY_DECISIONS_BASE_URL"] = f"http://127.0.0.1:{dead}"
+        rec = json.loads(run_gate(["score"], json.dumps([RECORD]), env).stdout)["records"][0]
+        self.assertEqual(rec["discrimination"], {"margin": 0.0, "tied": []})
+
+    def test_a_single_role_reports_its_own_score_as_the_margin(self):
+        """Degenerate but reachable via CONTEXT_MEMORY_DECISIONS_ROLES: with one role there is no
+        runner-up, and reporting 0.0 would read as a tie that did not happen."""
+        self.stub.probabilities = {"business": 0.7}
+        env = self.gate_env()
+        env["CONTEXT_MEMORY_DECISIONS_ROLES"] = "business"
+        rec = json.loads(run_gate(["score"], json.dumps([RECORD]), env).stdout)["records"][0]
+        self.assertAlmostEqual(rec["discrimination"]["margin"], 0.7, places=6)
+        # One role is trivially tied with itself; `tied` names it rather than claiming a field.
+        self.assertEqual(rec["discrimination"]["tied"], ["business"])
+
+
 class ProbeTests(GateTestCase):
     def test_probe_reports_ok(self):
         self.stub.probabilities = {role: 0.5 for role in

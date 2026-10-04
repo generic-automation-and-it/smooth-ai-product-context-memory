@@ -61,7 +61,7 @@ no API change. The gate is a quality signal only: a score never changes `status`
 | `CONTEXT_MEMORY_DECISIONS_PATH` | `/v1/systemone` | Endpoint path (Jev-compatible) |
 | `CONTEXT_MEMORY_DECISIONS_MODEL` | `nimble` | Decision model (`ollama pull nimble`) |
 | `CONTEXT_MEMORY_DECISIONS_API_KEY` | *(empty)* | Bearer token, sent **only when non-empty**. Never printed by `env-export` or the profile |
-| `CONTEXT_MEMORY_DECISIONS_MIN_PROBABILITY` | `0.5` | Pass threshold per role — a role must score **strictly above** it |
+| `CONTEXT_MEMORY_DECISIONS_MIN_PROBABILITY` | `0.85` | Pass threshold per role — a role must score **strictly above** it |
 | `CONTEXT_MEMORY_DECISIONS_MAX_ATTEMPTS` | `3` | Scoring rounds per record, counting the first |
 | `CONTEXT_MEMORY_DECISIONS_ROLES` | `product-owner,designer,developer,tester,business` | Rubric roles to ask about |
 | `CONTEXT_MEMORY_DECISIONS_BELOW_THRESHOLD` | `hold` | After the last attempt: `hold` (not exported) or `mark` (exported with `audience:*` tags) |
@@ -92,6 +92,13 @@ Reports `disabled`, `unreachable`, `model-missing`, or `ok`, and the endpoint or
   all**. Sending unscrubbed record content to a model is the one outcome the gate exists to prevent.
 - **The attempt counter is the script's, not yours.** A ledger keyed by record identity bounds the
   rewrite loop, so re-asking cannot buy more attempts.
+- **A saturated score is not a confident one.** Each scored record carries a `discrimination` block
+  reporting the `margin` between the highest-scoring role and the next one, plus every role tied at
+  the top. On the calibration fixture the mean best-role is `0.99` and 3 of 21 records carry roles
+  scoring exactly `1.00000`, so a three-role `passingRoles` set is usually ambiguous rather than
+  thrice-confirmed. It never affects a verdict — it reports how much to trust the shape of the result,
+  because `passingRoles` becomes `audience:*` tags downstream and a tie would otherwise read as a
+  clear win.
 
 **The threshold is a starting value, and it is now measured rather than merely asserted.** A labelled
 fixture of 21 records — a junk-to-specific gradient across six domains — is committed with the skill and
@@ -99,16 +106,19 @@ scored against the shipped gate:
 
 ```bash
 python3 -B .agents/skills/mimisbrunnr-odin-context-memory/tests/score_decisions_calibration.py
+python3 -B .agents/skills/mimisbrunnr-odin-context-memory/tests/score_decisions_calibration.py --check-determinism
 ```
 
-At the default `0.5` the gate scored **precision 1.00, recall 1.00**, mean best-role **0.14** on the six
+At the shipped default the gate scored **precision 1.00, recall 1.00** — mean best-role **0.14** on the six
 hold-side records against **0.99** on the fifteen that state a checkable fact. Re-running prints the
-committed figures beside a fresh run and names anything that moved. Three things that measurement settles,
-each of which had been argued from impression:
+committed figures beside a fresh run and names anything that moved; `--check-determinism` scores the whole
+fixture three times and fails if the runs differ, because determinism is what makes a threshold pinnable at
+all. Three things that measurement settles, each of which had been argued from impression:
 
-- **The threshold is not a sensitive knob here.** The scores are bimodal — nothing between `0.23` and
-  `0.97` — so any bar in that band gives identical verdicts. Raising it tightens the top of the
-  distribution and consults nothing that was previously ignored.
+- **The threshold is not a sensitive knob here.** The scores are bimodal — nothing between `0.21` and
+  `0.96` — so any bar in that band gives identical verdicts, which is why the default moved to `0.85`
+  without changing a single verdict on the fixture. What it does change is attribution: roles clearing
+  the bar fall from 27 of 30 expected to 24 of 30. Both runs are recorded in the fixture.
 - **Tightening the rubric does not tighten the gate.** Two rewrites — enumerating concrete nouns, and
   narrowing the criteria — both dropped precision to `0.94` and lost six expected roles, because the
   `instructions` carry the framing and a narrower *criteria* block did not narrow the *question*. Both
@@ -121,9 +131,14 @@ each of which had been argued from impression:
 Role attribution is the weaker half and the measurement says so: `tester` clears 15 of 21 records and
 carries almost no negative information, and `product-owner`/`business` stay correlated at `r=0.92` even
 after their shared vocabulary was removed. A single `choice` question was measured as an alternative and
-was **not** more accurate (13 of 15 labelled records against 14). Roles beyond the five, and exemptions
-for `self`-scope or agent-facing records, remain open decisions — see the change row in the capture
-skill's `AGENTS.md`.
+was **not** more accurate (13 of 15 labelled records against 14). Neither is fixable by rewording — two
+rewrites both dropped precision to `0.94`, because the `instructions` carry the framing and a narrower
+`criteria` block did not narrow the *question*. Roles beyond the five, and exemptions for `self`-scope or
+agent-facing records, remain open decisions — see the change row in the capture skill's `AGENTS.md`.
+
+The gate has **not** been exercised against a remote Jev-compatible endpoint, which is the configuration
+these settings exist to permit. Its transport guards for that case (https required off-loopback, bearer
+key required, userinfo refused) are unit-tested, but no remote endpoint has answered a request.
 
 ## One-command provisioning
 
