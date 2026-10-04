@@ -980,21 +980,51 @@ def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str]:
     if below not in ("hold", "mark"):
         below = "hold"
 
-    survivors, held, skipped = [], [], 0
-    for result in report.get("records", []):
-        index = result.get("index")
-        if not isinstance(index, int) or not 0 <= index < len(candidates):
+    # **Every candidate survives unless a score says otherwise.** The list is built by walking the
+    # gate's verdicts and marking indices, rather than by appending the candidates the verdicts
+    # mention. An earlier version appended on the way through, so a verdict carrying an
+    # out-of-range, non-integer or missing `index` fell through its own guard and the candidate was
+    # neither held nor appended — silently dropped from the export. A gate output this client cannot
+    # interpret must keep the record, which is the same rule `initiative_exists` and `store_query`
+    # already follow here: anything unrecognised is reported, never flattened into a plausible answer.
+    records = report.get("records")
+    if not isinstance(records, list):
+        print(f"NOTE: the decision gate returned no usable 'records' list "
+              f"({report.get('outcome')!r}); the gate was skipped and the export continued.",
+              file=sys.stderr)
+        return candidates, "decisions: skipped (unrecognised report)"
+
+    held_indices: set[int] = set()
+    marked: dict[int, dict] = {}
+    unscored = 0
+    malformed = 0
+    for result in records:
+        index = result.get("index") if isinstance(result, dict) else None
+        if not isinstance(index, int) or isinstance(index, bool) or not 0 <= index < len(candidates):
+            # Counted and reported, never acted on: we cannot say which record this was about.
+            malformed += 1
             continue
         outcome = result.get("outcome")
         if outcome != "scored":
             # oversize, attempts-exhausted, unreachable, timed-out, http-*, bad-response,
             # model-missing — none of these is a score, so none of them may hold a record.
-            skipped += 1
-            survivors.append(candidates[index])
+            unscored += 1
             continue
         if result.get("passed"):
-            survivors.append(candidates[index])
-        elif below == "mark":
+            # Under `mark`, a passing record is exported and its passing roles are the evidence for
+            # the audience tags, so they are tagged too. Under `hold` nothing is tagged: the gate
+            # never writes metadata of its own on the pass path.
+            if below == "mark":
+                candidate = dict(candidates[index])
+                tags = list(candidate.get("tags") or [])
+                for role in result.get("passingRoles") or []:
+                    tag = f"audience:{role}"
+                    if tag not in tags:
+                        tags.append(tag)
+                candidate["tags"] = tags
+                marked[index] = candidate
+            continue
+        if below == "mark":
             candidate = dict(candidates[index])
             tags = list(candidate.get("tags") or [])
             for role in result.get("passingRoles") or []:
@@ -1002,14 +1032,26 @@ def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str]:
                 if tag not in tags:
                     tags.append(tag)
             candidate["tags"] = tags
-            survivors.append(candidate)
+            marked[index] = candidate
         else:
-            held.append(candidates[index])
+            held_indices.add(index)
+
+    survivors = []
+    held = []
+    for index, candidate in enumerate(candidates):
+        if index in marked:
+            survivors.append(marked[index])
+        elif index in held_indices:
+            held.append(candidate)
+        else:
+            survivors.append(candidate)
 
     note = f"decisions: {report.get('outcome')} " \
-           f"({len(report.get('records', []))} scored, {len(survivors)} kept, {len(held)} held)"
-    if skipped:
-        note += f", {skipped} not scored and kept (a failed gate is never a low score)"
+           f"({len(records)} verdict(s), {len(survivors)} kept, {len(held)} held)"
+    if unscored:
+        note += f", {unscored} not scored and kept (a failed gate is never a low score)"
+    if malformed:
+        note += f", {malformed} unreadable verdict(s) ignored (the affected records were kept)"
     return survivors, note
 
 
