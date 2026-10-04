@@ -26,6 +26,7 @@ from pathlib import Path
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 GATE = SCRIPTS / "decisions_gate.py"
 REDACTOR = SCRIPTS / "redact.py"
+RUBRIC = SCRIPTS / "decisions_rubric.json"
 
 RECORD = {
     "subject": "Storage engine decision",
@@ -615,6 +616,111 @@ class RedactorArityTests(GateTestCase):
         )
         combined = proc.stderr + proc.stdout
         self.assertIn("candidate", combined, "the detail must say what was expected")
+
+
+class RubricValidationTests(GateTestCase):
+    """A malformed rubric is a classified refusal, never a traceback.
+
+    The rubric is a data file an operator edits, so every field it reads is validated before it is
+    used. Before this, a non-object entry raised `AttributeError` and a missing `instructions` or
+    `criteria` branch raised `KeyError` straight out of `load_rubric` — a traceback on stderr, the
+    same defect class the capture client fixed for a base URL that quoted its own userinfo.
+
+    Each case writes a rubric file and restores the shipped one, so the property is the loader's and
+    not the shipped file's.
+    """
+
+    GOOD_ROLE = {"key": "developer", "instructions": "Is this useful to a developer?",
+                 "criteria": {"true": "yes", "false": "no"}}
+
+    def _with_rubric(self, body):
+        backup = RUBRIC.read_text(encoding="utf-8")
+        RUBRIC.write_text(body if isinstance(body, str) else json.dumps(body), encoding="utf-8")
+        try:
+            return run_gate(["probe"], "", self.gate_env())
+        finally:
+            RUBRIC.write_text(backup, encoding="utf-8")
+
+    def _assert_refused(self, body):
+        proc = self._with_rubric(body)
+        combined = proc.stdout + proc.stderr
+        self.assertNotIn("Traceback", combined,
+                         "a malformed rubric must not produce a traceback")
+        self.assertIn("rubric-unavailable", combined)
+        self.assertNotEqual(proc.returncode, 0)
+
+    def test_a_non_object_role_entry_is_refused(self):
+        self._assert_refused({"version": "1", "roles": [self.GOOD_ROLE, "not-an-object"]})
+
+    def test_an_empty_roles_list_is_refused(self):
+        self._assert_refused({"version": "1", "roles": []})
+
+    def test_a_missing_roles_key_is_refused(self):
+        self._assert_refused({"version": "1"})
+
+    def test_a_role_missing_instructions_is_refused(self):
+        self._assert_refused({"version": "1",
+                              "roles": [{"key": "developer",
+                                         "criteria": {"true": "t", "false": "f"}}]})
+
+    def test_a_role_missing_criteria_is_refused(self):
+        self._assert_refused({"version": "1",
+                              "roles": [{"key": "developer", "instructions": "i"}]})
+
+    def test_a_role_missing_the_false_branch_is_refused(self):
+        """A `noul` question with no `false` description is not the question the rubric means to ask,
+        so it is refused rather than sent half-specified."""
+        self._assert_refused({"version": "1",
+                              "roles": [{"key": "developer", "instructions": "i",
+                                         "criteria": {"true": "t"}}]})
+
+    def test_a_role_missing_the_true_branch_is_refused(self):
+        self._assert_refused({"version": "1",
+                              "roles": [{"key": "developer", "instructions": "i",
+                                         "criteria": {"false": "f"}}]})
+
+    def test_a_rubric_that_is_not_an_object_is_refused(self):
+        self._assert_refused(["not", "an", "object"])
+
+    def test_a_role_without_a_key_is_refused(self):
+        self._assert_refused({"version": "1",
+                              "roles": [{"instructions": "i",
+                                         "criteria": {"true": "t", "false": "f"}}]})
+
+    def test_blank_fields_are_refused_not_treated_as_absent(self):
+        for field in ("key", "instructions"):
+            role = dict(self.GOOD_ROLE)
+            role[field] = "   "
+            self._assert_refused({"version": "1", "roles": [role]})
+
+    def test_the_refusal_names_the_offending_role(self):
+        """An operator editing the file has to be able to find the entry, so the key is named when
+        there is one and the position when there is not."""
+        proc = self._with_rubric({"version": "1",
+                                  "roles": [self.GOOD_ROLE,
+                                            {"key": "designer", "instructions": "  "}]})
+        self.assertIn("designer", proc.stdout + proc.stderr)
+
+    def test_the_shipped_rubric_is_itself_valid(self):
+        """The control: a validator that rejects the file we ship is not a validator."""
+        with open(RUBRIC, encoding="utf-8") as handle:
+            rubric = json.load(handle)
+        self.assertIsInstance(rubric.get("roles"), list)
+        self.assertTrue(rubric.get("roles"), "the shipped rubric defines no roles")
+        for entry in rubric["roles"]:
+            self.assertTrue(entry.get("key"))
+            self.assertTrue(entry.get("instructions"))
+            self.assertTrue(entry["criteria"].get("true"))
+            self.assertTrue(entry["criteria"].get("false"))
+
+    def test_both_rubric_copies_are_identical(self):
+        """The kvasir copy exists because the two script folders ship separately, so there is no
+        cross-skill import to keep them in step — a divergence would mean the two skills ask about
+        different roles for the same record."""
+        twin = SCRIPTS.parents[1] / "mimisbrunnr-kvasir-understanding" / "scripts" / "decisions_rubric.json"
+        self.assertTrue(twin.is_file(), f"the kvasir rubric copy is missing at {twin}")
+        self.assertEqual(RUBRIC.read_text(encoding="utf-8"), twin.read_text(encoding="utf-8"),
+                         "the two rubric copies have drifted; an edit belongs in both")
 
 
 class ProbeTests(GateTestCase):

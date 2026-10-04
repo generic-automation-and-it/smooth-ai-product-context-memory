@@ -206,7 +206,39 @@ def load_rubric(roles):
     except ValueError:
         raise GateError("rubric-unavailable", "the rubric is not valid JSON")
 
-    defined = {entry["key"]: entry for entry in rubric.get("roles", []) if entry.get("key")}
+    # **Every field is checked before it is used.** The rubric is a data file an operator edits, and
+    # a malformed one raised `AttributeError`/`KeyError` straight out of this function — a traceback
+    # on stderr rather than a classified refusal, which is the same defect the capture client fixed for
+    # a base URL that quotes its own userinfo. A rubric that does not fully define a role is not a
+    # rubric the gate can ask against, and asking anyway would send a question with no criteria.
+    if not isinstance(rubric, dict):
+        raise GateError("rubric-unavailable", "the rubric is not a JSON object")
+    entries = rubric.get("roles")
+    if not isinstance(entries, list) or not entries:
+        raise GateError("rubric-unavailable", "the rubric declares no 'roles' list")
+
+    defined = {}
+    for position, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            raise GateError("rubric-unavailable",
+                            f"rubric role #{position} is not an object")
+        key = entry.get("key")
+        if not isinstance(key, str) or not key.strip():
+            raise GateError("rubric-unavailable", f"rubric role #{position} has no usable 'key'")
+        instructions = entry.get("instructions")
+        if not isinstance(instructions, str) or not instructions.strip():
+            raise GateError("rubric-unavailable",
+                            f"rubric role {key!r} has no 'instructions'")
+        criteria = entry.get("criteria")
+        if not isinstance(criteria, dict):
+            raise GateError("rubric-unavailable", f"rubric role {key!r} has no 'criteria' object")
+        for branch in ("true", "false"):
+            text = criteria.get(branch)
+            if not isinstance(text, str) or not text.strip():
+                raise GateError("rubric-unavailable",
+                                f"rubric role {key!r} has no criteria.{branch} description")
+        defined[key] = entry
+
     missing = [role for role in roles if role not in defined]
     if missing:
         raise GateError("bad-decisions-config",
