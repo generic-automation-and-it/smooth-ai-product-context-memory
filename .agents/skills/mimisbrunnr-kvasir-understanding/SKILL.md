@@ -130,7 +130,8 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
   `timed-out`, `http-<code>`, `bad-response` and `oversize` all keep the candidate and say why, because a
   decision model that is down must not block an export. Only a real below-threshold score holds a
   candidate. **Redaction runs before any model call**, and an unavailable redactor means no request is
-  made. `BELOW_THRESHOLD=hold` keeps the candidate out of the store; `mark` exports it with
+  made. With `CONTEXT_MEMORY_DECISIONS_ENABLED=true`,
+  `CONTEXT_MEMORY_DECISIONS_BELOW_THRESHOLD=hold` keeps the candidate out of the store; `mark` exports it with
   `audience:<role>` tags. The rubric is `scripts/decisions_rubric.json`, **a copy shared with the capture
   skill** — the two must not drift, so an edit belongs in both. Full contract:
   [`mimisbrunnr-odin-context-memory` → Value Gate](mimisbrunnr-odin-context-memory/SKILL.md).

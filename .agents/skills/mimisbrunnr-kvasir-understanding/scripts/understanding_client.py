@@ -926,6 +926,10 @@ def gate_atomicity(candidates: list[dict]) -> list[dict] | None:
 
 DECISIONS_GATE = _CAPTURE_SCRIPTS / "decisions_gate.py"
 DECISIONS_ENABLED = "CONTEXT_MEMORY_DECISIONS_ENABLED"
+# The one note `gate_decisions` returns for a refusal rather than a skip. It is a named constant because
+# `cmd_export` has to act on it: a refusal says "Nothing was written", so a refusal that only labelled the
+# report and let the export proceed was a message contradicting what the process then did.
+DECISIONS_REFUSED = "decisions: refused"
 
 # Seed **only** the flag, and only so this client knows whether to shell out at all. The other nine
 # settings — including the API key, which is a secret — are loaded by the gate subprocess from the same
@@ -992,11 +996,11 @@ def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str]:
         if '"redactor-unavailable"' in detail:
             print("REFUSED: the decision gate's redactor could not run, so record content would "
                   "have been sent unscrubbed. Nothing was written.", file=sys.stderr)
-            return candidates, "decisions: refused"
+            return candidates, DECISIONS_REFUSED
         if '"bad-decisions-config"' in detail or '"bad-decisions-url"' in detail:
             print(f"REFUSED: the decision gate is misconfigured ({detail}). Nothing was written.",
                   file=sys.stderr)
-            return candidates, "decisions: refused"
+            return candidates, DECISIONS_REFUSED
         print(f"NOTE: the decision gate failed ({detail}); the gate was skipped and the export "
               "continued.", file=sys.stderr)
         return candidates, "decisions: skipped (gate failed)"
@@ -1058,6 +1062,14 @@ def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str]:
                         tags.append(tag)
                 candidate["tags"] = tags
                 marked[index] = candidate
+            continue
+        # Only a verdict that says `passed: false` may hold a record, and it is compared as `is False`
+        # rather than by truthiness. An absent, null or otherwise falsey `passed` is not a score saying
+        # "no": this client cannot interpret it, and the rule it already follows for an unmappable index
+        # and an unrecognised report applies to it unchanged — the record is kept and counted, never
+        # dropped. Truthiness read a malformed verdict as a rejection and silently lost the record.
+        if result.get("passed") is not False:
+            unscored += 1
             continue
         if below == "mark":
             candidate = dict(candidates[index])
@@ -1374,8 +1386,16 @@ def cmd_export(args: argparse.Namespace) -> int:
 
     # Gate 5 (decision value), only when enabled. Scores are a quality signal, never authority: they
     # never change status, kind, or approval, and a disabled or absent model skips the gate and says
-    # so rather than blocking the export.
+    # so rather than blocking the export. A **refusal** is the one outcome that does stop it: the gate
+    # refused because content nobody could inspect would be sent, or because it would judge against
+    # something other than what was configured, and both messages say "Nothing was written" — so
+    # continuing past them wrote records under a refusal the operator had been told had blocked them.
+    # Stopping here is before the group is resolved and before any chunk, so nothing exists to undo.
     clean, decision_note = gate_decisions(clean)
+    if decision_note == DECISIONS_REFUSED:
+        print("REFUSED: the decision gate refused this export (the reason is above). Nothing was "
+              "written; fix the gate or export without it.", file=sys.stderr)
+        return 1
 
     # The cap is the capture skill's. An over-cap batch is auto-split into consecutive ≤ MAX_CANDIDATES
     # chunks, each processed end to end (its own preflight, its own `set --dryrun` veto, its own write),

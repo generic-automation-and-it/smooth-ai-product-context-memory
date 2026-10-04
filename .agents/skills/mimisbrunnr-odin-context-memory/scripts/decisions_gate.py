@@ -721,10 +721,14 @@ def cmd_score(args):
     for index, (original, state) in enumerate(zip(records, redacted)):
         oversize = size_guard(state, roles)
         if oversize:
+            # `discrimination` is disclosed on every record, not only the scored ones: a consumer
+            # reading `margin` must not KeyError on exactly the records whose outcome it most needs to
+            # reason about. There is no score here, so the value is the zero a failed round already
+            # reports rather than a computed margin that would look like a measurement.
             results.append({
                 "index": index, "identity": record_identity(original, index), "attempt": 0,
                 "outcome": "oversize", "detail": oversize, "scores": {}, "passingRoles": [],
-                "passed": False, "best": None,
+                "passed": False, "best": None, "discrimination": {"margin": 0.0, "tied": []},
             })
             continue
 
@@ -740,6 +744,9 @@ def cmd_score(args):
                     "attempt": settings["max_attempts"], "outcome": "attempts-exhausted",
                     "detail": f"the {settings['max_attempts']}-attempt budget is spent for this record",
                     "scores": {}, "passingRoles": [], "passed": False, "best": None,
+                    # Same disclosure as an oversize or a failed round: the field is always present, so
+                    # a consumer reading it never has to special-case the record that was held.
+                    "discrimination": {"margin": 0.0, "tied": []},
                 })
                 continue
         else:
