@@ -324,6 +324,21 @@ CONTEXT_MEMORY_DECISIONS_TIMEOUT=30
 DECISIONS
 }
 
+# The effective value of one decision setting: what the operator actually configured, else the default.
+#
+# `env_export` used to emit the defaults table verbatim, so `env-export --profile` overwrote an
+# operator's own `CONTEXT_MEMORY_DECISIONS_ENABLED=true` in their shell profile with `false` — the one
+# tool meant to publish the setting silently discarded it, and the profile then disagreed with the
+# credential file that everything else reads. The credential file is authoritative: it is what the
+# add-only write maintains, and what any other repository or agent finds without this checkout.
+decision_setting() {
+  local line="$1" key default stored
+  key="${line%%=*}"
+  default="${line#*=}"
+  stored="$(file_value "$key" "$machine_credentials" || true)"
+  printf '%s=%s' "$key" "${stored:-$default}"
+}
+
 env_export() {
   local format="${1:-posix}"
   local read_token write_token
@@ -345,7 +360,7 @@ env_export() {
         case "$setting" in
           CONTEXT_MEMORY_DECISIONS_API_KEY=*) continue ;;
         esac
-        echo "export $setting"
+        echo "export $(decision_setting "$setting")"
       done < <(decision_settings)
       ;;
     powershell | ps1 | pwsh)
@@ -357,9 +372,8 @@ env_export() {
         case "$setting" in
           CONTEXT_MEMORY_DECISIONS_API_KEY=*) continue ;;
         esac
-        name="${setting%%=*}"
-        value="${setting#*=}"
-        echo "\$env:$name = '$value'"
+        effective="$(decision_setting "$setting")"
+        echo "\$env:${effective%%=*} = '${effective#*=}'"
       done < <(decision_settings)
       ;;
     *)

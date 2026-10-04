@@ -505,6 +505,68 @@ for key in CONTEXT_MEMORY_DECISIONS_ENABLED CONTEXT_MEMORY_DECISIONS_BASE_URL \
   fi
 done
 
+# env-export must publish what the operator CONFIGURED, not the built-in default. It used to emit the
+# defaults table verbatim, so `env-export --profile` overwrote a stored ENABLED=true with false — the one
+# tool meant to publish the setting silently discarded it, and the profile then disagreed with the
+# credential file that every other surface reads. Verified against the shipped launcher: with the file
+# set to true, env-export emitted false.
+export_dir="$scratch/export-effective"
+mkdir -p "$export_dir"
+env -u MIMIS_TOKEN_FILE MIMIS_HOME="$export_dir" MIMIS_MACHINE_CREDENTIALS="$export_dir/credentials" \
+  "$launcher" env >/dev/null 2>&1
+sed -i '' 's/^CONTEXT_MEMORY_DECISIONS_ENABLED=false$/CONTEXT_MEMORY_DECISIONS_ENABLED=true/' \
+  "$export_dir/credentials"
+sed -i '' 's|^CONTEXT_MEMORY_DECISIONS_MODEL=nimble$|CONTEXT_MEMORY_DECISIONS_MODEL=some-other-model|' \
+  "$export_dir/credentials"
+env -u MIMIS_TOKEN_FILE MIMIS_HOME="$export_dir" MIMIS_MACHINE_CREDENTIALS="$export_dir/credentials" \
+  "$launcher" env-export >"$export_dir/out.sh" 2>/dev/null
+if grep -q "^export CONTEXT_MEMORY_DECISIONS_ENABLED=true$" "$export_dir/out.sh"; then
+  ok "env-export publishes the operator's stored ENABLED value, not the default"
+else
+  no "env-export publishes the operator's stored ENABLED value, not the default" \
+     "got $(grep 'DECISIONS_ENABLED' "$export_dir/out.sh")"
+fi
+if grep -q "^export CONTEXT_MEMORY_DECISIONS_MODEL=some-other-model$" "$export_dir/out.sh"; then
+  ok "env-export publishes the operator's stored MODEL value"
+else
+  no "env-export publishes the operator's stored MODEL value" \
+     "got $(grep 'DECISIONS_MODEL' "$export_dir/out.sh")"
+fi
+
+# ...and a setting the operator has never touched still gets its default, rather than nothing.
+if grep -q "^export CONTEXT_MEMORY_DECISIONS_BELOW_THRESHOLD=hold$" "$export_dir/out.sh"; then
+  ok "env-export still publishes defaults for untouched settings"
+else
+  no "env-export still publishes defaults for untouched settings" \
+     "got $(grep 'DECISIONS_BELOW_THRESHOLD' "$export_dir/out.sh")"
+fi
+
+# The profile must carry the configured value too, or the shell and the store disagree.
+export_profile="$export_dir/.zshrc"
+env -u MIMIS_TOKEN_FILE MIMIS_HOME="$export_dir" MIMIS_MACHINE_CREDENTIALS="$export_dir/credentials" \
+  "$launcher" env-export --profile "$export_profile" >/dev/null 2>&1
+if grep -q "^export CONTEXT_MEMORY_DECISIONS_ENABLED=true$" "$export_profile"; then
+  ok "--profile writes the operator's stored value, not the default"
+else
+  no "--profile writes the operator's stored value, not the default" \
+     "got $(grep 'DECISIONS_ENABLED' "$export_profile")"
+fi
+
+# The API key stays excluded even though it is now read from the file rather than the defaults table.
+key_dir="$scratch/export-key"
+mkdir -p "$key_dir"
+env -u MIMIS_TOKEN_FILE MIMIS_HOME="$key_dir" MIMIS_MACHINE_CREDENTIALS="$key_dir/credentials" \
+  "$launcher" env >/dev/null 2>&1
+sed -i '' "s|^CONTEXT_MEMORY_DECISIONS_API_KEY=.*|CONTEXT_MEMORY_DECISIONS_API_KEY=sk-planted-export-key|" \
+  "$key_dir/credentials"
+env -u MIMIS_TOKEN_FILE MIMIS_HOME="$key_dir" MIMIS_MACHINE_CREDENTIALS="$key_dir/credentials" \
+  "$launcher" env-export >"$key_dir/out.sh" 2>/dev/null
+if grep -qF 'sk-planted-export-key' "$key_dir/out.sh"; then
+  no "env-export excludes a stored API key" "the stored value reached stdout"
+else
+  ok "env-export excludes a stored API key"
+fi
+
 # The profile block round-trips: the decision settings are written once and rotate in place, exactly
 # like the credentials. An appended block would leave a stale copy of a rotated token behind.
 profile="$scratch/profile/.zshrc"
