@@ -260,6 +260,17 @@ write_machine_credentials() {
             esac
           fi
         done
+        # The decision settings ride the write-side file only. The read-only file stays minimal: a
+        # worker that must not mutate has no use for a decision endpoint, and publishing the API key
+        # there would hand a read-only credential a second secret.
+        if [ "$file" = "$machine_credentials" ]; then
+          while read -r setting; do
+            [ -z "$setting" ] && continue
+            key="${setting%%=*}"
+            [ -n "$(file_value "$key" "$file" || true)" ] && continue
+            echo "$setting"
+          done < <(decision_settings)
+        fi
       } >"$tmp"
       mv "$tmp" "$file"
     done
@@ -277,6 +288,28 @@ write_machine_credentials() {
 #
 # A real environment variable always wins over the machine file in the clients, so exporting these
 # changes nothing except where the value is read from — it does not fork the credential.
+# The decision-gate settings, as "KEY default" pairs. One table, three consumers: the machine
+# credential file, `env-export`, and the profile block all derive from it, so a setting cannot be
+# published to one surface and forgotten on the others.
+#
+# The API key defaults to empty and is only ever *read* from the environment — never a literal here.
+# It is not a generated secret: a local Ollama needs none, and a hosted endpoint's key belongs in the
+# operator's environment, not in a file this script writes.
+decision_settings() {
+  cat <<'DECISIONS'
+CONTEXT_MEMORY_DECISIONS_ENABLED=false
+CONTEXT_MEMORY_DECISIONS_BASE_URL=http://localhost:11434
+CONTEXT_MEMORY_DECISIONS_PATH=/v1/systemone
+CONTEXT_MEMORY_DECISIONS_MODEL=nimble
+CONTEXT_MEMORY_DECISIONS_API_KEY=
+CONTEXT_MEMORY_DECISIONS_MIN_PROBABILITY=0.5
+CONTEXT_MEMORY_DECISIONS_MAX_ATTEMPTS=3
+CONTEXT_MEMORY_DECISIONS_ROLES=product-owner,designer,developer,tester,business
+CONTEXT_MEMORY_DECISIONS_BELOW_THRESHOLD=hold
+CONTEXT_MEMORY_DECISIONS_TIMEOUT=30
+DECISIONS
+}
+
 env_export() {
   local format="${1:-posix}"
   local read_token write_token
@@ -290,11 +323,30 @@ env_export() {
       echo "export CONTEXT_MEMORY_BASE_URL='$api_base_url'"
       echo "export CONTEXT_MEMORY_READ_TOKEN='$read_token'"
       echo "export CONTEXT_MEMORY_WRITE_TOKEN='$write_token'"
+      while read -r setting; do
+        [ -z "$setting" ] && continue
+        # The API key is a secret when non-empty, so it is never printed: a token written to a
+        # terminal that gets scrolled back, recorded, or read over a shoulder is disclosed.
+        # `env-export` is the verb that prints; the key belongs in the environment, sourced.
+        case "$setting" in
+          CONTEXT_MEMORY_DECISIONS_API_KEY=*) continue ;;
+        esac
+        echo "export $setting"
+      done < <(decision_settings)
       ;;
     powershell | ps1 | pwsh)
       echo "\$env:CONTEXT_MEMORY_BASE_URL = '$api_base_url'"
       echo "\$env:CONTEXT_MEMORY_READ_TOKEN = '$read_token'"
       echo "\$env:CONTEXT_MEMORY_WRITE_TOKEN = '$write_token'"
+      while read -r setting; do
+        [ -z "$setting" ] && continue
+        case "$setting" in
+          CONTEXT_MEMORY_DECISIONS_API_KEY=*) continue ;;
+        esac
+        name="${setting%%=*}"
+        value="${setting#*=}"
+        echo "\$env:$name = '$value'"
+      done < <(decision_settings)
       ;;
     *)
       die "format must be posix or powershell, not '$format'"

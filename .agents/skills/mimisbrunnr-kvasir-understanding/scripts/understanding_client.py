@@ -924,6 +924,95 @@ def gate_atomicity(candidates: list[dict]) -> list[dict] | None:
         return None
 
 
+DECISIONS_GATE = _CAPTURE_SCRIPTS / "decisions_gate.py"
+
+
+def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str]:
+    """Score each candidate's role value through the capture skill's decision gate.
+
+    Returns `(survivors, note)`. Every failure mode except `redactor-unavailable` and a bad
+    configuration **skips the gate and says why** — a decision model that is down, missing, or
+    timing out must never block a capture, and must never be reported as a low score. The two
+    refusals are the opposite case: a redactor that cannot run means content nobody could inspect
+    would be sent, and a misconfigured threshold or role list means the gate would judge against
+    something other than what was configured.
+
+    The gate runs its own redaction first, so a candidate's text is scrubbed before any model call.
+    """
+    if os.environ.get("CONTEXT_MEMORY_DECISIONS_ENABLED", "").strip().lower() != "true":
+        return candidates, "decisions: disabled"
+    if not DECISIONS_GATE.is_file():
+        print(f"NOTE: the decision gate is enabled but {DECISIONS_GATE} is missing; the gate was "
+              "skipped and the export continued.", file=sys.stderr)
+        return candidates, "decisions: skipped (gate script missing)"
+
+    state_file = Path(os.environ.get("MIMIS_DECISIONS_STATE",
+                                     ".context/decisions-ledger.json"))
+    proc = subprocess.run(
+        [sys.executable, "-B", str(DECISIONS_GATE), "score", "--state-file", str(state_file)],
+        input=json.dumps(candidates), capture_output=True, text=True, encoding="utf-8",
+    )
+    if proc.returncode != 0:
+        detail = proc.stderr.strip() or "no detail"
+        if '"redactor-unavailable"' in detail:
+            print("REFUSED: the decision gate's redactor could not run, so record content would "
+                  "have been sent unscrubbed. Nothing was written.", file=sys.stderr)
+            return candidates, "decisions: refused"
+        if '"bad-decisions-config"' in detail or '"bad-decisions-url"' in detail:
+            print(f"REFUSED: the decision gate is misconfigured ({detail}). Nothing was written.",
+                  file=sys.stderr)
+            return candidates, "decisions: refused"
+        print(f"NOTE: the decision gate failed ({detail}); the gate was skipped and the export "
+              "continued.", file=sys.stderr)
+        return candidates, "decisions: skipped (gate failed)"
+
+    try:
+        report = json.loads(proc.stdout)
+    except ValueError:
+        print("NOTE: the decision gate returned unreadable output; the gate was skipped and the "
+              "export continued.", file=sys.stderr)
+        return candidates, "decisions: skipped (unreadable output)"
+
+    if report.get("outcome") == "disabled":
+        return candidates, "decisions: disabled"
+
+    below = os.environ.get("CONTEXT_MEMORY_DECISIONS_BELOW_THRESHOLD", "hold").strip().lower()
+    if below not in ("hold", "mark"):
+        below = "hold"
+
+    survivors, held, skipped = [], [], 0
+    for result in report.get("records", []):
+        index = result.get("index")
+        if not isinstance(index, int) or not 0 <= index < len(candidates):
+            continue
+        outcome = result.get("outcome")
+        if outcome != "scored":
+            # oversize, attempts-exhausted, unreachable, timed-out, http-*, bad-response,
+            # model-missing — none of these is a score, so none of them may hold a record.
+            skipped += 1
+            survivors.append(candidates[index])
+            continue
+        if result.get("passed"):
+            survivors.append(candidates[index])
+        elif below == "mark":
+            candidate = dict(candidates[index])
+            tags = list(candidate.get("tags") or [])
+            for role in result.get("passingRoles") or []:
+                tag = f"audience:{role}"
+                if tag not in tags:
+                    tags.append(tag)
+            candidate["tags"] = tags
+            survivors.append(candidate)
+        else:
+            held.append(candidates[index])
+
+    note = f"decisions: {report.get('outcome')} " \
+           f"({len(report.get('records', []))} scored, {len(survivors)} kept, {len(held)} held)"
+    if skipped:
+        note += f", {skipped} not scored and kept (a failed gate is never a low score)"
+    return survivors, note
+
+
 def ticket_inputs(values: list[str], repository: str | None) -> list[dict]:
     """`--tickets` entries into the resolve-group shape: `#12`, `github:12` or `provider:key`.
 
@@ -1206,6 +1295,11 @@ def cmd_export(args: argparse.Namespace) -> int:
         (held if verdict.get("verdict") == "bundled" else clean).append(candidate)
         candidate["atomicity"] = verdict
 
+    # Gate 5 (decision value), only when enabled. Scores are a quality signal, never authority: they
+    # never change status, kind, or approval, and a disabled or absent model skips the gate and says
+    # so rather than blocking the export.
+    clean, decision_note = gate_decisions(clean)
+
     # The cap is the capture skill's. An over-cap batch is auto-split into consecutive ≤ MAX_CANDIDATES
     # chunks, each processed end to end (its own preflight, its own `set --dryrun` veto, its own write),
     # so the capture path never chunks *silently* and a reader sees the boundary.
@@ -1243,6 +1337,7 @@ def cmd_export(args: argparse.Namespace) -> int:
     if redaction:
         print("Redaction (detected before send): "
               + ", ".join(f"{name} x{count}" for name, count in sorted(redaction.items())))
+    print(decision_note)
     if not any(binding.values()):
         print("NOTE: no selectors supplied, so no association is made "
               "(--tickets/--tags/--repository/--scope/--initiative).")

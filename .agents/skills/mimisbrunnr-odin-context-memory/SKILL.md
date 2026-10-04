@@ -195,6 +195,46 @@ NOT-AVAILABLE, never a silent miss.
 | `authority.py` | `python3 .../authority.py` | 3 (authority resolution) | Converts a stated-authority judgement into one or two ordered version writes. Existing-winner cases record the losing candidate as history, then restore the winner as current in the same transaction. |
 | `divergence.py` | `python3 .../divergence.py` | 3 (conflict composition) | Converts an explicit same-subject genuine-conflict judgement into a separately identified claim, proposed divergence memory and two contradiction links; rejects cross-scope and recursive evidence and deduplicates exact claim pairs. |
 | `near_miss_tags.py` | `python3 .../near_miss_tags.py < approved-evidence.json` | Read-only reporting | Bounded stdin JSON validation, exact tag comparison, scoped `near-miss-tag` output. No network, file output, vocabulary lookup or semantic heuristic. See Evidence-only Near Misses below. |
+| `decisions_gate.py` | `echo '<json array>' \| python3 .../decisions_gate.py score [--state-file PATH]` | Optional value gate | Scores each record for value to each target role via a **local decision model**. **Off by default** (`CONTEXT_MEMORY_DECISIONS_ENABLED=false`). Carries no model in the Host or Application — everything here is client-side. Two subcommands: `score` and `probe`. See the Value Gate below. |
+
+### Value Gate (optional, off by default)
+
+With `CONTEXT_MEMORY_DECISIONS_ENABLED=true`, every record about to be exported is scored for **value to
+each target role** — product-owner, designer, developer, tester, business. It passes if any role clears
+`MIN_PROBABILITY`; otherwise the agent may rewrite it and it is re-scored, up to `MAX_ATTEMPTS`.
+
+**One independent `noul` question per role, never a single `choice` across roles.** The questions are
+scored independently, which is what makes "valuable to at least one role" expressible. A `choice` across
+the same roles makes the probabilities **sum to 1**, so a record valuable to *both* Developer and Tester
+scores about 0.45 each and fails at a 0.5 bar — splitting one useful record in half and calling it
+worthless. `decisions_rubric.json` holds one definition per role and is **shared by every skill**.
+
+**Scores are a quality signal, never authority.** They never change `status`, kind, or approval. They
+cannot promote a `proposed` record, and a passing score is not an endorsement.
+
+**A failed gate is never a low score.** `unreachable`, `timed-out`, `http-<code>`, `bad-response` and
+`oversize` all **keep the record and disclose the reason** — a decision model that is down must not block
+a capture. Only an actual score below threshold can hold a record. **Redaction runs before any model
+call**, and a redactor that cannot run means **no request is made at all**.
+
+**The rewrite contract.** Between attempts, the only change permitted is making the record *clearer*, not
+more valuable-sounding:
+
+- **No new claim** that is not in the source material. Generalising is forbidden.
+- **Every condition, exception and boundary is kept.** A claim without its exception is false.
+- **Citations, provenance, `kind` and `scope` are unchanged.**
+- The rewrite re-runs redaction, the atomicity gate and preflight. A rewrite the atomicity gate flags is
+  not a valid attempt.
+
+**The attempt counter is the script's, not yours.** `decisions_gate.py` keeps a ledger keyed by record
+identity in the file passed as `--state-file`, so re-asking after an inconvenient answer buys nothing. After
+the last attempt, `BELOW_THRESHOLD=hold` keeps the record out of the store (listed with its scores);
+`mark` exports it with `audience:<role>` tags.
+
+**Roles and exemptions are a data change.** The five roles are product-facing; ops/platform and
+agent-facing knowledge (credentials, probes, Docker quirks) and `self`-scope records can score low on all
+five without being worthless. Adding a role, or exempting a scope or kind, is an edit to
+`decisions_rubric.json` — not a code change. Both are open decisions, recorded in this skill's `AGENTS.md`.
 
 The **semantic dedup** decision is a two-call composition, never a single preflight:
 

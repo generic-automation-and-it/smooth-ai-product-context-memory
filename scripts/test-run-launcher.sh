@@ -423,6 +423,108 @@ for key in CONTEXT_MEMORY_BASE_URL CONTEXT_MEMORY_READ_TOKEN CONTEXT_MEMORY_WRIT
 done
 
 # ---------------------------------------------------------------------------------------------
+# decision-gate settings
+# ---------------------------------------------------------------------------------------------
+
+# All ten ride the write-side file with their documented default. A missing one means an operator
+# cannot discover the setting exists without reading this repository.
+decision_keys="CONTEXT_MEMORY_DECISIONS_ENABLED CONTEXT_MEMORY_DECISIONS_BASE_URL \
+CONTEXT_MEMORY_DECISIONS_PATH CONTEXT_MEMORY_DECISIONS_MODEL CONTEXT_MEMORY_DECISIONS_API_KEY \
+CONTEXT_MEMORY_DECISIONS_MIN_PROBABILITY CONTEXT_MEMORY_DECISIONS_MAX_ATTEMPTS \
+CONTEXT_MEMORY_DECISIONS_ROLES CONTEXT_MEMORY_DECISIONS_BELOW_THRESHOLD \
+CONTEXT_MEMORY_DECISIONS_TIMEOUT"
+
+for key in $decision_keys; do
+  if grep -q "^$key=" "$scratch/home/credentials"; then
+    ok "machine file carries $key"
+  else
+    no "machine file carries $key" "absent"
+  fi
+done
+
+# The gate is OFF by default, and that default must be the disabled one: a launcher that shipped
+# ENABLED=true would score every export on a machine with no decision model.
+if grep -q '^CONTEXT_MEMORY_DECISIONS_ENABLED=false$' "$scratch/home/credentials"; then
+  ok "the decision gate defaults to disabled"
+else
+  no "the decision gate defaults to disabled" \
+     "got $(sed -n 's/^CONTEXT_MEMORY_DECISIONS_ENABLED=//p' "$scratch/home/credentials")"
+fi
+
+# The read-only file stays minimal. A read-only worker has no use for a decision endpoint, and the
+# API key must never ride a file a read-only consumer can read.
+if grep -q '^CONTEXT_MEMORY_DECISIONS_' "$scratch/home/credentials-read-only"; then
+  no "the read-only file carries no decision settings" "it publishes the endpoint and the key"
+else
+  ok "the read-only file carries no decision settings"
+fi
+
+# An operator who turns the gate on must keep it on. This is the case the add-only pattern exists
+# for: a write-every-time rewrite resets ENABLED to false on every single start, so the gate could
+# never be left enabled between runs.
+sed -i '' 's/^CONTEXT_MEMORY_DECISIONS_ENABLED=false$/CONTEXT_MEMORY_DECISIONS_ENABLED=true/' \
+  "$scratch/home/credentials"
+run_launcher env >/dev/null 2>&1
+if grep -q '^CONTEXT_MEMORY_DECISIONS_ENABLED=true$' "$scratch/home/credentials"; then
+  ok "a re-run preserves an operator's ENABLED=true"
+else
+  no "a re-run preserves an operator's ENABLED=true" \
+     "got $(sed -n 's/^CONTEXT_MEMORY_DECISIONS_ENABLED=//p' "$scratch/home/credentials")"
+fi
+
+# A remote endpoint's API key is a secret and must survive a re-run without ever being printed.
+planted_key="sk-decisions-planted-0123456789abcdef"
+sed -i '' "s|^CONTEXT_MEMORY_DECISIONS_API_KEY=.*|CONTEXT_MEMORY_DECISIONS_API_KEY=$planted_key|" \
+  "$scratch/home/credentials"
+run_launcher env >/dev/null 2>&1
+if grep -q "^CONTEXT_MEMORY_DECISIONS_API_KEY=$planted_key$" "$scratch/home/credentials"; then
+  ok "a re-run preserves a stored decision API key"
+else
+  no "a re-run preserves a stored decision API key" "the stored key was replaced"
+fi
+
+# env-export prints credentials, so it must not print the decision key. The setting is published by
+# name with an empty default; the value belongs in the environment, sourced, never in a terminal.
+run_launcher env-export >"$scratch/decisions-export.sh" 2>/dev/null
+if grep -qF "$planted_key" "$scratch/decisions-export.sh"; then
+  no "env-export never prints the decision API key" "the planted value reached stdout"
+else
+  ok "env-export never prints the decision API key"
+fi
+
+# The other nine settings ARE printed, so `env-export --profile` gives an operator the gate's
+# configuration rather than leaving it discoverable only in this repository.
+for key in CONTEXT_MEMORY_DECISIONS_ENABLED CONTEXT_MEMORY_DECISIONS_BASE_URL \
+  CONTEXT_MEMORY_DECISIONS_MODEL CONTEXT_MEMORY_DECISIONS_MIN_PROBABILITY \
+  CONTEXT_MEMORY_DECISIONS_MAX_ATTEMPTS CONTEXT_MEMORY_DECISIONS_ROLES \
+  CONTEXT_MEMORY_DECISIONS_BELOW_THRESHOLD CONTEXT_MEMORY_DECISIONS_TIMEOUT; do
+  if grep -q "^export $key=" "$scratch/decisions-export.sh"; then
+    ok "env-export publishes $key"
+  else
+    no "env-export publishes $key" "absent from the export"
+  fi
+done
+
+# The profile block round-trips: the decision settings are written once and rotate in place, exactly
+# like the credentials. An appended block would leave a stale copy of a rotated token behind.
+profile="$scratch/profile/.zshrc"
+before="$(cksum <"$profile")"
+run_launcher env-export --profile "$profile" >/dev/null 2>&1
+if [ "$(grep -c 'CONTEXT_MEMORY_DECISIONS_ENABLED' "$profile")" = "1" ]; then
+  ok "--profile writes exactly one decision block"
+else
+  no "--profile writes exactly one decision block" \
+     "count $(grep -c 'CONTEXT_MEMORY_DECISIONS_ENABLED' "$profile")"
+fi
+run_launcher env-export --profile "$profile" >/dev/null 2>&1
+if [ "$(grep -c 'CONTEXT_MEMORY_DECISIONS_ENABLED' "$profile")" = "1" ]; then
+  ok "--profile is idempotent for the decision settings"
+else
+  no "--profile is idempotent for the decision settings" \
+     "count $(grep -c 'CONTEXT_MEMORY_DECISIONS_ENABLED' "$profile")"
+fi
+
+# ---------------------------------------------------------------------------------------------
 # adoption of a provisioned pair, as a unit
 # ---------------------------------------------------------------------------------------------
 

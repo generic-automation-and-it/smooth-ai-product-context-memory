@@ -117,9 +117,23 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
   [--initiative NAME] [--name NAME] [--body TEXT] [--heimdallr true]
 ```
 
-- `export` orchestrates the capture skill end to end — redaction gate, atomicity gate, the auto-split
-  batch cap, group resolution, preflight, and `set --dryrun` as the veto point — and **never writes directly**.
-  It is a **dry run by default**; `--write` performs the capture.
+- `export` orchestrates the capture skill end to end — redaction gate, atomicity gate, the optional value
+  gate, the auto-split batch cap, group resolution, preflight, and `set --dryrun` as the veto point — and
+  **never writes directly**. It is a **dry run by default**; `--write` performs the capture.
+
+- **The value gate is optional and off by default.** With `CONTEXT_MEMORY_DECISIONS_ENABLED=true`, each
+  candidate is scored for value to each target role by a **local decision model** (no model in the Host or
+  Application — it is entirely client-side). It runs **after** redaction and atomicity and **before** the
+  `set --dryrun` veto. One independent `noul` question per role, never a single `choice` across roles:
+  independent scores are what make "valuable to at least one role" expressible, where a `choice` splits a
+  two-role record into two failing halves. **A failed gate is never a low score** — `unreachable`,
+  `timed-out`, `http-<code>`, `bad-response` and `oversize` all keep the candidate and say why, because a
+  decision model that is down must not block an export. Only a real below-threshold score holds a
+  candidate. **Redaction runs before any model call**, and an unavailable redactor means no request is
+  made. `BELOW_THRESHOLD=hold` keeps the candidate out of the store; `mark` exports it with
+  `audience:<role>` tags. The rubric is `scripts/decisions_rubric.json`, **a copy shared with the capture
+  skill** — the two must not drift, so an edit belongs in both. Full contract:
+  [`mimisbrunnr-odin-context-memory` → Value Gate](mimisbrunnr-odin-context-memory/SKILL.md).
 - **A dry run creates nothing** — no initiative, no group, no memory. `resolve-group` has no dry-run mode
   and its handler commits unconditionally, so a dry run resolves nothing and reports the group and the
   initiative as *would create*, printing the exact commands.

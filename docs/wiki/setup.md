@@ -44,6 +44,60 @@ deadline. It bounds a single read and the whole `deepsearch` chain; an out-of-ra
 is **refused with `bad-deadline`, never clamped**, because a budget that silently becomes something else
 is one the operator trusts and the system does not honour. The provisioner does not set it.
 
+## The optional decision gate
+
+`CONTEXT_MEMORY_DECISIONS_ENABLED=true` turns on a value gate: each memory or Understanding about to be
+exported is scored by a **local decision model** for value to each target role, and a record no role
+values is held back rather than written. **Off by default**, and nothing here is required — an operator
+who never sets it runs exactly as before, with no model installed.
+
+Everything is client-side. There is **no model in the Host or Application**, no server-side scoring, and
+no API change. The gate is a quality signal only: a score never changes `status`, kind, or approval.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `CONTEXT_MEMORY_DECISIONS_ENABLED` | `false` | Feature flag. Anything but exactly `true` leaves the gate skipped |
+| `CONTEXT_MEMORY_DECISIONS_BASE_URL` | `http://localhost:11434` | Decision API origin (local Ollama) |
+| `CONTEXT_MEMORY_DECISIONS_PATH` | `/v1/systemone` | Endpoint path (Jev-compatible) |
+| `CONTEXT_MEMORY_DECISIONS_MODEL` | `nimble` | Decision model (`ollama pull nimble`) |
+| `CONTEXT_MEMORY_DECISIONS_API_KEY` | *(empty)* | Bearer token, sent **only when non-empty**. Never printed by `env-export` or the profile |
+| `CONTEXT_MEMORY_DECISIONS_MIN_PROBABILITY` | `0.5` | Pass threshold per role — a role must score **strictly above** it |
+| `CONTEXT_MEMORY_DECISIONS_MAX_ATTEMPTS` | `3` | Scoring rounds per record, counting the first |
+| `CONTEXT_MEMORY_DECISIONS_ROLES` | `product-owner,designer,developer,tester,business` | Rubric roles to ask about |
+| `CONTEXT_MEMORY_DECISIONS_BELOW_THRESHOLD` | `hold` | After the last attempt: `hold` (not exported) or `mark` (exported with `audience:*` tags) |
+| `CONTEXT_MEMORY_DECISIONS_TIMEOUT` | `30` | Seconds per decision request |
+
+**Where the settings live.** `scripts/run.sh` writes all ten with their defaults to
+`~/.mimisbrunnr/credentials` — **add-only**, so turning the gate on survives every restart, which is the
+case a write-every-time rewrite cannot survive. `env-export` publishes the nine non-secret ones to a shell
+profile; the API key is deliberately excluded, because a token written to a terminal that gets scrolled
+back, recorded, or read over a shoulder is disclosed. The read-only credential file stays minimal and
+carries **no** decision settings: a worker that cannot mutate has no use for a decision endpoint, and
+publishing the key there would hand a read-only credential a second secret.
+
+**Check it before enabling it:**
+
+```bash
+python3 -B .agents/skills/mimisbrunnr-odin-context-memory/scripts/context_memory_client.py decisions-probe
+```
+
+Reports `disabled`, `unreachable`, `model-missing`, or `ok`, and the endpoint origin — never the key.
+
+**Three properties worth knowing before you rely on it:**
+
+- **A failed gate is never a low score.** `unreachable`, `timed-out`, `http-<code>`, `bad-response` and
+  `oversize` all **keep** the record and disclose the reason. A decision model that is down must not block
+  a capture, and a hung model must never read as "this record is worthless".
+- **Redaction runs before any model call**, and a redactor that cannot run means **no request is made at
+  all**. Sending unscrubbed record content to a model is the one outcome the gate exists to prevent.
+- **The attempt counter is the script's, not yours.** A ledger keyed by record identity bounds the
+  rewrite loop, so re-asking cannot buy more attempts.
+
+**The threshold is a starting value, not a calibrated one.** A `noul` probability is not a measure of how
+often the answer is right; the vendor's own guidance is to test any threshold on your own data. Roles
+beyond the five, and exemptions for `self`-scope or agent-facing records, are open decisions — see the
+change row in the capture skill's `AGENTS.md`.
+
 ## One-command provisioning
 
 For a local deployment, run the provisioner once:
