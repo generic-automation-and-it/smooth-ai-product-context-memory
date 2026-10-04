@@ -227,8 +227,11 @@ more valuable-sounding:
   not a valid attempt.
 
 **The attempt counter is the script's, not yours.** `decisions_gate.py` keeps a ledger keyed by record
-identity in the file passed as `--state-file`, so re-asking after an inconvenient answer buys nothing. After
-the last attempt, `BELOW_THRESHOLD=hold` keeps the record out of the store (listed with its scores);
+identity in the file passed as `--state-file`, so re-asking after an inconvenient answer buys nothing. It also
+carries the **best** attempt across rounds, so `best` is the highest-scoring version seen and
+`bestThisRound` says whether *this* rewrite actually improved on the source. **A `false` there means the
+rewrite scored lower than what came before** — surface that rather than reporting the round as progress.
+After the last attempt, `BELOW_THRESHOLD=hold` keeps the record out of the store (listed with its scores);
 `mark` exports it with `audience:<role>` tags.
 
 **Roles and exemptions are a data change.** The five roles are product-facing; ops/platform and

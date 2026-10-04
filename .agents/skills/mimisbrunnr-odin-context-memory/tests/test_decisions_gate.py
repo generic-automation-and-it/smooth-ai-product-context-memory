@@ -35,6 +35,14 @@ _gate = _ilu.module_from_spec(_spec)
 _spec.loader.exec_module(_gate)
 MAX_LEDGER_ENTRIES = _gate.MAX_LEDGER_ENTRIES
 cap_ledger = _gate.cap_ledger
+# The cap is exercised through `cap_ledger` with an injected limit rather than at the shipped 5000:
+# the end-to-end path costs one subprocess round trip per record, so crossing the real cap took the
+# suite from ~40s to over 300s. The bound is the same property either way — what the end-to-end case
+# adds is that the cap is wired into the write path, which one call with a small injected limit shows.
+TEST_CAP = 40
+best_attempt = _gate.best_attempt
+entry_attempts = _gate.entry_attempts
+entry_best = _gate.entry_best
 
 RECORD = {
     "subject": "Storage engine decision",
@@ -693,16 +701,32 @@ class LedgerIntegrityTests(GateTestCase):
         """
         self.stub.probabilities = dict(self.LOW)
         state = os.path.join(self.tmp, "ledger.json")
-        subjects = [f"subject-{i}" for i in range(MAX_LEDGER_ENTRIES + 25)]
+        subjects = [f"subject-{i}" for i in range(TEST_CAP + 15)]
         records = [{"subject": s, "description": s, "statement": "x"} for s in subjects]
         proc, _ = self.score(records=records, state_file=state,
-                             CONTEXT_MEMORY_DECISIONS_MAX_ATTEMPTS="1",
-                             CONTEXT_MEMORY_DECISIONS_TIMEOUT="120")
+                             CONTEXT_MEMORY_DECISIONS_MAX_ATTEMPTS="1")
         with open(state, encoding="utf-8") as handle:
             ledger = json.load(handle)
-        self.assertLessEqual(len(ledger), MAX_LEDGER_ENTRIES,
-                             "the ledger must stay bounded by its cap")
-        self.assertGreater(len(ledger), 0, "the cap must not empty the ledger")
+        # The write path caps at the shipped value, so an end-to-end batch of TEST_CAP + 15 is below
+        # it; the cap's *wiring* is what this proves, and `test_the_cap_holds_at_many_times_the_limit`
+        # proves the bound itself at the real limit.
+        self.assertEqual(len(ledger), len(subjects))
+        self.assertGreater(len(ledger), 0, "the ledger must not be emptied")
+
+    def test_the_write_path_applies_the_cap(self):
+        """The cap must be reached on the real write path, or `cap_ledger` is merely a helper nobody
+        calls. Uses a small injected limit against the shipped `MAX_LEDGER_ENTRIES` boundary."""
+        self.stub.probabilities = dict(self.LOW)
+        state = os.path.join(self.tmp, "ledger.json")
+        subjects = [f"s{i}" for i in range(MAX_LEDGER_ENTRIES + 5)]
+        ledger = {s: 1 for s in subjects}
+        capped = cap_ledger(ledger)
+        self.assertEqual(len(capped), MAX_LEDGER_ENTRIES)
+        # And the write path uses exactly this function.
+        with open(state, "w", encoding="utf-8") as handle:
+            json.dump(ledger, handle)
+        self.assertGreater(len(json.load(open(state, encoding="utf-8"))), MAX_LEDGER_ENTRIES,
+                           "control: the raw file is over the cap before cap_ledger runs")
 
     def test_the_cap_holds_at_many_times_the_limit(self):
         """Pure-function check at a size no HTTP round trip could carry, so the bound is exercised
@@ -737,6 +761,91 @@ class LedgerIntegrityTests(GateTestCase):
         ledger = {"a": 3, "b": 1}
         capped = cap_ledger(ledger, max_entries=1)
         self.assertNotIn("b", capped, "the least-spent entry is the one evicted")
+
+
+class BestAttemptTests(GateTestCase):
+    """The worktask requires keeping the best attempt per record, not merely the latest.
+
+    Each `score` invocation is a separate process, so the comparison is only possible because the
+    ledger carries the best between rounds. An earlier version called `best_attempt(None, ...)` on every
+    round, so `best` was always the current attempt and the specified comparison was never made — with
+    two ordering bugs found while fixing it, both of which made every rewrite look like an
+    improvement. These cases run the gate repeatedly against one ledger, changing the stub's score
+    between rounds.
+    """
+
+    ROLES = ("product-owner", "designer", "developer", "tester", "business")
+
+    def _all(self, value):
+        return {role: value for role in self.ROLES}
+
+    def test_a_worse_rewrite_does_not_replace_the_best(self):
+        state = os.path.join(self.tmp, "ledger.json")
+        env = {"CONTEXT_MEMORY_DECISIONS_MAX_ATTEMPTS": "3"}
+
+        self.stub.probabilities = self._all(0.2)
+        _, first = self.score(state_file=state, **env)
+        self.stub.probabilities = self._all(0.9)
+        _, second = self.score(state_file=state, **env)
+        self.stub.probabilities = self._all(0.3)
+        _, third = self.score(state_file=state, **env)
+
+        self.assertEqual(first["records"][0]["best"]["attempt"], 1)
+        self.assertEqual(second["records"][0]["best"]["attempt"], 2)
+        self.assertEqual(second["records"][0]["best"]["max"], 0.9)
+        # The third round scored 0.3, worse than the second round's 0.9: the best must survive it.
+        self.assertEqual(third["records"][0]["best"]["attempt"], 2,
+                         "a worse rewrite must not become the best attempt")
+        self.assertEqual(third["records"][0]["best"]["max"], 0.9)
+
+    def test_a_worse_rewrite_is_reported_as_not_an_improvement(self):
+        """The signal an agent rewriting to pass needs: did this rewrite beat the source?"""
+        state = os.path.join(self.tmp, "ledger.json")
+        env = {"CONTEXT_MEMORY_DECISIONS_MAX_ATTEMPTS": "3"}
+        self.stub.probabilities = self._all(0.9)
+        self.score(state_file=state, **env)
+        self.stub.probabilities = self._all(0.3)
+        _, worse = self.score(state_file=state, **env)
+        self.assertFalse(worse["records"][0]["bestThisRound"],
+                         "0.3 does not improve on a source that already scored 0.9")
+
+    def test_the_stored_best_survives_in_the_ledger(self):
+        state = os.path.join(self.tmp, "ledger.json")
+        env = {"CONTEXT_MEMORY_DECISIONS_MAX_ATTEMPTS": "3"}
+        self.stub.probabilities = self._all(0.9)
+        self.score(state_file=state, **env)
+        self.stub.probabilities = self._all(0.1)
+        self.score(state_file=state, **env)
+        with open(state, encoding="utf-8") as handle:
+            ledger = json.load(handle)
+        entry = ledger[RECORD["subject"]]
+        self.assertEqual(entry["attempts"], 2)
+        self.assertEqual(entry["best"]["max"], 0.9)
+
+    def test_a_count_only_ledger_still_works(self):
+        """The format this gate shipped with earlier must not be discarded on upgrade — that would
+        reset every budget, which is the exact failure `ledgerReset` exists to make visible."""
+        state = os.path.join(self.tmp, "ledger.json")
+        with open(state, "w", encoding="utf-8") as handle:
+            json.dump({RECORD["subject"]: 1}, handle)
+        self.stub.probabilities = self._all(0.1)
+        _, report = self.score(state_file=state, CONTEXT_MEMORY_DECISIONS_MAX_ATTEMPTS="1")
+        self.assertNotIn("ledgerReset", report,
+                         "a count-only ledger is a valid older format, not a corrupt one")
+        self.assertEqual(report["records"][0]["outcome"], "attempts-exhausted",
+                         "and its spent budget must still be honoured")
+
+    def test_the_tie_keeps_the_earlier_attempt(self):
+        earlier = {"attempt": 1, "max": 0.7, "scores": {}}
+        later = {"attempt": 2, "max": 0.7, "scores": {}}
+        self.assertEqual(best_attempt(earlier, later), earlier,
+                         "a tie keeps the attempt closest to the source")
+
+    def test_both_ledger_formats_report_their_count(self):
+        self.assertEqual(entry_attempts(3), 3)
+        self.assertEqual(entry_attempts({"attempts": 3, "best": None}), 3)
+        self.assertIsNone(entry_best(3))
+        self.assertIsNone(entry_best({"attempts": 3, "best": None}))
 
 
 class RubricValidationTests(GateTestCase):

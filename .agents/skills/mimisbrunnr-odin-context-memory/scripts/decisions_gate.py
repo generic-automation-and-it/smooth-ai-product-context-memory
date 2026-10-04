@@ -483,12 +483,34 @@ def read_ledger(state_file):
         return {}, True
     if not isinstance(data, dict):
         return {}, True
-    # A value that is not a small non-negative integer is not a counter this gate wrote, so the file
-    # is not the ledger it claims to be.
+    # An entry is `{"attempts": int, "best": {...} | null}`, because the best attempt has to survive
+    # between invocations for the comparison it exists to make. A **bare integer is also accepted** and
+    # read as a count with no recorded best, so a ledger written by the earlier count-only format
+    # keeps working instead of being discarded — which on upgrade would silently reset every budget,
+    # the exact failure `ledgerReset` exists to make visible.
     for key, value in data.items():
-        if not isinstance(key, str) or not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        if not isinstance(key, str):
+            return {}, True
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            continue
+        if not isinstance(value, dict):
+            return {}, True
+        attempts = value.get("attempts")
+        if not isinstance(attempts, int) or isinstance(attempts, bool) or attempts < 0:
+            return {}, True
+        if value.get("best") is not None and not isinstance(value.get("best"), dict):
             return {}, True
     return data, False
+
+
+def entry_attempts(value):
+    """The attempt count of a ledger entry, in either supported format."""
+    return value.get("attempts", 0) if isinstance(value, dict) else value
+
+
+def entry_best(value):
+    """The recorded best attempt of a ledger entry, or None when there is not one yet."""
+    return value.get("best") if isinstance(value, dict) else None
 
 
 def cap_ledger(ledger, max_entries=MAX_LEDGER_ENTRIES):
@@ -502,7 +524,7 @@ def cap_ledger(ledger, max_entries=MAX_LEDGER_ENTRIES):
     """
     if len(ledger) <= max_entries:
         return ledger
-    ordered = sorted(ledger.items(), key=lambda pair: (-pair[1], pair[0]))
+    ordered = sorted(ledger.items(), key=lambda pair: (-entry_attempts(pair[1]), pair[0]))
     return dict(ordered[:max_entries])
 
 
@@ -542,12 +564,41 @@ def next_attempt(state_file, identity, max_attempts):
     surfaces so a cleared budget is never mistaken for a first attempt.
     """
     ledger, discarded = read_ledger(state_file)
-    used = ledger.get(identity, 0)
+    entry = ledger.get(identity)
+    # Read both parts of the entry BEFORE any write. Two separate writes were the first cut of this,
+    # and the second one read back a file the first had already replaced: writing the bare count
+    # discards the recorded best, so every rewrite looked like an improvement and the stored `best`
+    # was whichever round ran last. One read, then one write that preserves both.
+    prior_best = entry_best(entry)
+    used = entry_attempts(entry) if entry is not None else 0
     if used >= max_attempts:
-        return None, discarded
-    ledger[identity] = used + 1
+        return None, discarded, prior_best
+    # The count is spent whether or not the model answers, so it is written now with the best carried
+    # through untouched; `record_attempt` then raises the best without disturbing the count.
+    ledger[identity] = {"attempts": used + 1, "best": prior_best}
     write_ledger(state_file, cap_ledger(ledger))
-    return used + 1, discarded
+    return used + 1, discarded, prior_best
+
+
+def record_attempt(state_file, identity, attempt, scores):
+    """Remember a scored attempt, keeping the best the ledger has seen for this record.
+
+    Written separately from `next_attempt` because the count is spent whether or not the model
+    answered — an `unreachable` round must still count against the budget, or a down model would
+    grant unlimited attempts for free.
+    """
+    ledger, _discarded = read_ledger(state_file)
+    candidate = {"attempt": attempt, "max": max(scores.values()), "scores": scores}
+    entry = ledger.get(identity)
+    # `next_attempt` may have replaced a dict entry with a bare count, so the best is read from what
+    # survives here rather than from the value passed in. Counting up from the surviving count keeps a
+    # ledger written in the earlier format converging instead of restarting.
+    prior = entry_best(entry)
+    prior_attempts = entry_attempts(entry)
+    ledger[identity] = {"attempts": max(prior_attempts, attempt),
+                        "best": best_attempt(prior, candidate)}
+    write_ledger(state_file, cap_ledger(ledger))
+    return ledger[identity]["best"]
 
 
 def best_attempt(previous, candidate):
@@ -555,6 +606,11 @@ def best_attempt(previous, candidate):
 
     Ties go to the earlier attempt because it is closest to the source material — a rewrite that
     matched the original's score added nothing but drift.
+
+    A rewrite's score is compared against the **stored** best, not only against the current round:
+    each `score` invocation is a separate process, so without the ledger carrying the previous best
+    this function was only ever called with `previous=None` and every record's reported "best" was
+    simply its latest attempt — the comparison the worktask specifies was never actually made.
     """
     if previous is None:
         return candidate
@@ -602,9 +658,9 @@ def cmd_score(args):
             continue
 
         if args.state_file:
-            attempt, this_reset = next_attempt(args.state_file,
-                                              record_identity(original, index),
-                                              settings["max_attempts"])
+            attempt, this_reset, prior_best = next_attempt(args.state_file,
+                                                       record_identity(original, index),
+                                                       settings["max_attempts"])
             # One reset anywhere in the batch is reported, since it is one file and one bound.
             ledger_reset = ledger_reset or this_reset
             if attempt is None:
@@ -616,7 +672,10 @@ def cmd_score(args):
                 })
                 continue
         else:
+            # No ledger, so no budget and no cross-round comparison: every round is a first round,
+            # which is why `prior_best` is None rather than read from anywhere.
             attempt = 1
+            prior_best = None
 
         try:
             scores, passing, version = call_model(state, roles, settings, rubric_version)
@@ -628,11 +687,20 @@ def cmd_score(args):
             })
             continue
 
-        best = best_attempt(None, {"attempt": attempt, "scores": scores, "max": max(scores.values())})
+        best = best_attempt(prior_best,
+                        {"attempt": attempt, "scores": scores, "max": max(scores.values())})
+        # Persist only once a score exists, so a failed round leaves the best untouched while still
+        # having spent its attempt above.
+        stored = record_attempt(args.state_file, record_identity(original, index),
+                                attempt, scores) if args.state_file else best
         results.append({
             "index": index, "identity": record_identity(original, index), "attempt": attempt,
             "outcome": "scored", "rubricVersion": version, "scores": scores,
-            "passingRoles": passing, "passed": bool(passing), "best": best,
+            "passingRoles": passing, "passed": bool(passing),
+            # `best` is the best of this round and every earlier one; `bestThisRound` says whether the
+            # rewrite actually improved on the source, which is the thing an agent rewriting to pass
+            # needs to know and cannot infer from `best` alone.
+            "best": stored, "bestThisRound": best is not prior_best,
         })
 
     payload = {
