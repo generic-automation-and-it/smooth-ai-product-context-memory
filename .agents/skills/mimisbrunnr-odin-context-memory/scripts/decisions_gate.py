@@ -64,6 +64,53 @@ SCRIPTS = Path(__file__).resolve().parent
 REDACTOR = SCRIPTS / "redact.py"
 RUBRIC = SCRIPTS / "decisions_rubric.json"
 
+# These are seeded from the machine credential file at import, so the settings `run.sh` publishes are
+# actually visible to the gate. Without it the gate read only the live process environment, while
+# `CONTEXT_MEMORY_READ_TOKEN` and `CONTEXT_MEMORY_BASE_URL` are auto-loaded from that same file — making
+# the decision settings the only ones in the skill its own operator tooling could not reach.
+#
+# The loader is **duplicated, not imported**, and that is deliberate. `context_memory_client` does
+# `import redact` at module scope, so importing it here would make the redactor a startup dependency of
+# the gate — and any test that substitutes a stub redactor would have that stub execute at import and
+# consume the gate's own stdin. This mirrors the arrangement the two capture clients already use for the
+# recall notice: one wording, kept byte-identical, with a test asserting the two agree rather than one
+# importing the other. `load_machine_credentials_agrees` in the harness is that test.
+#
+# Contract, matching the capture client exactly: named keys only, a value already in the environment
+# always wins, and a malformed line is skipped rather than raised so a partial file cannot turn one
+# working variable into an import-time crash.
+MACHINE_CREDENTIAL_FILE = os.environ.get(
+    "CONTEXT_MEMORY_CREDENTIAL_FILE",
+    os.path.join(os.path.expanduser("~"), ".mimisbrunnr", "credentials"))
+
+
+def load_machine_credentials(*names):
+    """Seed the named variables from the machine credential file when they are not already set.
+
+    Returns the file it read, or None.
+    """
+    try:
+        with open(MACHINE_CREDENTIAL_FILE, encoding="utf-8") as handle:
+            lines = handle.readlines()
+    except OSError:
+        return None
+    wanted = set(names)
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        if key in wanted and value and not os.environ.get(key):
+            os.environ[key] = value.strip()
+    return MACHINE_CREDENTIAL_FILE
+
+
+load_machine_credentials(
+    ENV_ENABLED, ENV_BASE_URL, ENV_PATH, ENV_MODEL, ENV_API_KEY,
+    ENV_MIN_PROBABILITY, ENV_MAX_ATTEMPTS, ENV_ROLES, ENV_BELOW_THRESHOLD, ENV_TIMEOUT,
+)
+
 # Decision-model context limits. The prompt must fit the model's context, and the body must fit the
 # wire. Both are enforced BEFORE the request, and an oversize record is held rather than truncated:
 # silently shortening a record to make it fit would score a claim nobody made.

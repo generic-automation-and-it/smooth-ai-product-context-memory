@@ -925,6 +925,37 @@ def gate_atomicity(candidates: list[dict]) -> list[dict] | None:
 
 
 DECISIONS_GATE = _CAPTURE_SCRIPTS / "decisions_gate.py"
+DECISIONS_ENABLED = "CONTEXT_MEMORY_DECISIONS_ENABLED"
+
+# Seed **only** the flag, and only so this client knows whether to shell out at all. The other nine
+# settings — including the API key, which is a secret — are loaded by the gate subprocess from the same
+# file, so nothing credential-bearing is pulled into this client's environment. This client deliberately
+# carries no credential handling, and loading a token here would defeat that.
+#
+# Parsed rather than imported: `context_memory_client` does `import redact` at module scope, so importing
+# it would make the redactor a startup dependency of this client too. Same contract as the capture
+# client's own loader, asserted equal by the harness.
+def _seed_decisions_enabled() -> None:
+    import os as _os
+    path = _os.environ.get(
+        "CONTEXT_MEMORY_CREDENTIAL_FILE",
+        str(Path(_os.path.expanduser("~")) / ".mimisbrunnr" / "credentials"))
+    try:
+        with open(path, encoding="utf-8") as handle:
+            lines = handle.readlines()
+    except OSError:
+        return
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        if key.strip() == DECISIONS_ENABLED and value and not _os.environ.get(DECISIONS_ENABLED):
+            _os.environ[DECISIONS_ENABLED] = value.strip()
+            return
+
+
+_seed_decisions_enabled()
 
 
 def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str]:
@@ -939,7 +970,11 @@ def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str]:
 
     The gate runs its own redaction first, so a candidate's text is scrubbed before any model call.
     """
-    if os.environ.get("CONTEXT_MEMORY_DECISIONS_ENABLED", "").strip().lower() != "true":
+    # The flag is read the way the gate reads it: seeded from the machine credential file at import,
+    # environment winning. Reading `os.environ` directly here tested only the process environment, so an
+    # operator who set ENABLED=true in `~/.mimisbrunnr/credentials` — the file the launcher maintains — was
+    # told the gate was disabled while the gate itself would have run.
+    if os.environ.get("CONTEXT_MEMORY_DECISIONS_ENABLED", "").lower() != "true":
         return candidates, "decisions: disabled"
     if not DECISIONS_GATE.is_file():
         print(f"NOTE: the decision gate is enabled but {DECISIONS_GATE} is missing; the gate was "

@@ -848,6 +848,119 @@ class BestAttemptTests(GateTestCase):
         self.assertIsNone(entry_best({"attempts": 3, "best": None}))
 
 
+class CredentialLoadingTests(GateTestCase):
+    """The gate must see the settings `run.sh` publishes to the machine credential file.
+
+    They are duplicated rather than imported, because `context_memory_client` imports `redact` at module
+    scope — importing it here would make the redactor a startup dependency of the gate, and a test that
+    substitutes a stub redactor would have the stub execute at import and consume the gate's own stdin.
+    That is not hypothetical: the first version of the fix imported it and broke four redactor tests
+    exactly that way. So the duplication is guarded by an agreement test instead.
+    """
+
+    def _credential_file(self):
+        return os.path.join(self.tmp, "credentials")
+
+    def _write(self, body):
+        with open(self._credential_file(), "w", encoding="utf-8") as handle:
+            handle.write(body)
+
+    def test_the_gate_reads_the_flag_from_the_file(self):
+        """The defect itself: the file says enabled, the process environment is clean, and the gate
+        still skipped."""
+        self._write("CONTEXT_MEMORY_DECISIONS_ENABLED=true\n")
+        proc = run_gate(["probe"], "", {
+            "CONTEXT_MEMORY_CREDENTIAL_FILE": self._credential_file(),
+        })
+        self.assertNotEqual(json.loads(proc.stdout)["outcome"], "disabled",
+                            "the gate ignored the machine credential file")
+
+    def test_a_real_environment_variable_still_wins(self):
+        """Load-only-if-absent, the same precedence the capture client uses."""
+        self._write("CONTEXT_MEMORY_DECISIONS_ENABLED=true\n")
+        proc = run_gate(["probe"], "", {
+            "CONTEXT_MEMORY_CREDENTIAL_FILE": self._credential_file(),
+            "CONTEXT_MEMORY_DECISIONS_ENABLED": "false",
+        })
+        self.assertEqual(json.loads(proc.stdout)["outcome"], "disabled",
+                         "the environment must beat the file")
+
+    def test_the_model_and_endpoint_are_read_from_the_file(self):
+        self._write("CONTEXT_MEMORY_DECISIONS_MODEL=some-other-model\n"
+                    "CONTEXT_MEMORY_DECISIONS_BASE_URL=http://127.0.0.1:9\n")
+        proc = run_gate(["probe"], "", {
+            "CONTEXT_MEMORY_CREDENTIAL_FILE": self._credential_file(),
+        })
+        report = json.loads(proc.stdout)
+        self.assertEqual(report["model"], "some-other-model")
+        self.assertEqual(report["endpoint"], "http://127.0.0.1:9")
+
+    def test_only_the_named_keys_are_seeded(self):
+        """A machine file holding an unrelated secret must not pull it into this process — the read
+        client's refusal to start with a write token present depends on that discipline. The gate's own
+        endpoint comes from the harness's stub, so reaching `ok` here is what shows the file was read and
+        the unlisted key ignored."""
+        self._write("CONTEXT_MEMORY_DECISIONS_ENABLED=true\n"
+                    "SOME_OTHER_SECRET=should-not-be-loaded\n")
+        proc = run_gate(["probe"], "", {"CONTEXT_MEMORY_CREDENTIAL_FILE": self._credential_file()})
+        self.assertEqual(json.loads(proc.stdout)["outcome"], "ok",
+                         "enabled from the file, and the stub answered")
+
+    def test_the_two_loaders_agree(self):
+        """The duplication guard: the gate's loader and the capture client's must produce the same
+        environment from the same file. This is the test that makes the duplication safe."""
+        capture = SCRIPTS / "context_memory_client.py"
+        loader = _ilu.spec_from_file_location("_capture_client_loader", capture)
+        # The capture client imports `redact` at module scope, so the scripts dir must be importable.
+        if str(SCRIPTS) not in sys.path:
+            sys.path.insert(0, str(SCRIPTS))
+        module = _ilu.module_from_spec(loader)
+        try:
+            loader.loader.exec_module(module)
+        except Exception as exc:  # noqa: BLE001 — the agreement test reports, it does not raise
+            self.skipTest(f"the capture client could not be loaded for comparison: {exc}")
+        finally:
+            if sys.path and sys.path[0] == str(SCRIPTS):
+                sys.path.pop(0)
+
+        body = ("# comment\nCONTEXT_MEMORY_DECISIONS_ENABLED=true\n"
+                "malformed line without a delimiter\n"
+                "  SPACED = value  \nCONTEXT_MEMORY_DECISIONS_MODEL=nimble\n")
+        results = {}
+        for name, fn in (("capture", module.load_machine_credentials),
+                         ("gate", _gate.load_machine_credentials)):
+            with self.subTest(loader=name):
+                path = self._credential_file()
+                with open(path, "w", encoding="utf-8") as handle:
+                    handle.write(body)
+                saved = {k: os.environ.get(k) for k in
+                         ("CONTEXT_MEMORY_DECISIONS_ENABLED", "SPACED",
+                          "CONTEXT_MEMORY_DECISIONS_MODEL", "SOME_OTHER_SECRET")}
+                for k in saved:
+                    os.environ.pop(k, None)
+                saved_path = os.environ.get("CONTEXT_MEMORY_CREDENTIAL_FILE")
+                os.environ["CONTEXT_MEMORY_CREDENTIAL_FILE"] = path
+                try:
+                    fn("CONTEXT_MEMORY_DECISIONS_ENABLED", "CONTEXT_MEMORY_DECISIONS_MODEL",
+                       "SPACED", "SOME_OTHER_SECRET")
+                    results[name] = {k: os.environ.get(k) for k in
+                                     ("CONTEXT_MEMORY_DECISIONS_ENABLED", "SPACED",
+                                      "CONTEXT_MEMORY_DECISIONS_MODEL", "SOME_OTHER_SECRET")}
+                finally:
+                    for k, v in saved.items():
+                        if v is None:
+                            os.environ.pop(k, None)
+                        else:
+                            os.environ[k] = v
+                    if saved_path is None:
+                        os.environ.pop("CONTEXT_MEMORY_CREDENTIAL_FILE", None)
+                    else:
+                        os.environ["CONTEXT_MEMORY_CREDENTIAL_FILE"] = saved_path
+
+        self.assertEqual(results["capture"], results["gate"],
+                         "the two loaders diverged; the duplication is only safe while they agree")
+
+
 class RubricValidationTests(GateTestCase):
     """A malformed rubric is a classified refusal, never a traceback.
 
