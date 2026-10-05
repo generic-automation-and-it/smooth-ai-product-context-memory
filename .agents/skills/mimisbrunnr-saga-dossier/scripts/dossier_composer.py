@@ -12,14 +12,17 @@ calls a model — composition judgement that needs a model is supplied by the ca
 skill) as ``judgements``; this module enforces the deterministic rules around that judgement and
 delivers the invariants the NFRs require.
 
-Usage (fetch a bundle from the Host API, read-only; --base-url is a top-level option):
-    python3 -B dossier_composer.py --base-url http://localhost:5141 bundle --body '{"repo":"kingstown","widenDepth":3}'
+Usage (fetch a bundle from the Host API, read-only; --base-url is a top-level option; --out must be a
+gitignored path and is written 0600):
+    python3 -B dossier_composer.py --base-url http://localhost:5141 bundle --repo kingstown --widen-depth 3
+        --out .context/mimisbrunnr-saga-dossier/scratch/bundle.json
 
 Usage (preview the selection first — the consent step, LADR-14 — same anchors as bundle):
     python3 -B dossier_composer.py preview --repo kingstown --widen-depth 3
 
-Usage (offline, compose from a previously saved bundle JSON; --out must be a gitignored path):
-    python3 -B dossier_composer.py compose --bundle bundle.json --focus architecture
+Usage (offline, compose from a saved bundle plus the agent's judgements; --out must be gitignored):
+    python3 -B dossier_composer.py compose --bundle .context/mimisbrunnr-saga-dossier/scratch/bundle.json
+        --judgements .context/mimisbrunnr-saga-dossier/scratch/judgements.json --focus architecture
         --out .context/mimisbrunnr-saga-dossier/architecture.md
 """
 
@@ -1182,22 +1185,57 @@ def _near_miss_helper_path():
 # ---------------------------------------------------------------------------- CLI (read-only)
 
 
-def read_bundle(path_or_url):
-    if path_or_url.startswith("http://") or path_or_url.startswith("https://"):
-        # A saved bundle URL is fetched as JSON — the --bundle argument names a bundle to compose,
-        # not an API base. An API base would be a different mode (fetch a fresh bundle with anchors).
-        import urllib.request
-        with urllib.request.urlopen(path_or_url, timeout=60) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    return json.loads(Path(path_or_url).read_text(encoding="utf-8"))
+def read_bundle(path):
+    """Read a saved bundle file. A URL is refused rather than fetched.
+
+    The URL form fetched store content through a default opener — redirects followed, proxies honoured,
+    any host — beside a transport that otherwise only ever talks to a guarded loopback origin. The only
+    documented way to obtain a bundle is ``bundle --out``, so the URL form was surface without a use
+    (issue 182).
+    """
+    if re.match(r"^[A-Za-z][A-Za-z0-9+.-]*://", path):
+        raise ValueError("--bundle must name a saved bundle file, not a URL; fetch one with "
+                         "`bundle --out .context/mimisbrunnr-saga-dossier/scratch/bundle.json`.")
+    return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+_JUDGEMENT_KEYS = ("equivalences", "findings")
+
+
+def read_judgements(path):
+    """Read the agent's semantic judgements for ``compose`` from a JSON file.
+
+    The shape is the ``judgements`` argument of :func:`compose`: an object with optional
+    ``equivalences`` and ``findings`` lists. Unknown keys are refused, so a misspelt key cannot drop
+    a judgement silently; the entries themselves are validated by the composer's own gates.
+    """
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"--judgements is not valid JSON: {exc.msg} (line {exc.lineno})") from None
+    if not isinstance(data, dict):
+        raise ValueError("--judgements must be a JSON object with 'equivalences' and/or 'findings'")
+    unknown = sorted(set(data) - set(_JUDGEMENT_KEYS))
+    if unknown:
+        raise ValueError(f"--judgements carries unknown key(s) {unknown}; allowed: "
+                         f"{', '.join(_JUDGEMENT_KEYS)}")
+    for key in _JUDGEMENT_KEYS:
+        if key in data and not isinstance(data[key], list):
+            raise ValueError(f"--judgements '{key}' must be a list")
+        for entry in data.get(key, []):
+            if not isinstance(entry, dict):
+                raise ValueError(f"--judgements '{key}' entries must be objects")
+    return data
 
 
 def _assert_loopback(base):
     """The read token is a capability for the whole corpus; send it only to loopback.
 
     The whole first condition of the sibling client's `base_url()` guard, not just the host check:
-    a base carrying credentials, a path, a query or a fragment is not an origin, and accepting one
-    turns a typo into a 404 from a doubled path instead of an actionable refusal.
+    a base carrying credentials, a path, `;params`, a query or a fragment is not an origin, and
+    accepting one turns a typo into a 404 from a doubled path instead of an actionable refusal.
+    `urlparse` splits `;params` off the last path segment, so `http://localhost:5141/;tok=x` has the
+    path `/` and passed the path check while carrying a pasted value into every request URL.
 
     A base `urlparse` cannot parse — an NFKC-confusable character in the netloc, a non-numeric port —
     is refused with the same fixed message. The parser's own error quotes the netloc, userinfo
@@ -1214,6 +1252,7 @@ def _assert_loopback(base):
             or parsed.username
             or parsed.password
             or parsed.path not in ("", "/")
+            or parsed.params
             or parsed.query
             or parsed.fragment):
         raise ValueError(
@@ -1336,10 +1375,16 @@ def main(argv=None):
 
     bundle_p = sub.add_parser("bundle")
     _add_anchor_args(bundle_p)
+    bundle_p.add_argument("--out", help="write the bundle to this gitignored path (mode 0600), e.g. "
+                                        ".context/mimisbrunnr-saga-dossier/scratch/bundle.json; "
+                                        "stdout if omitted")
     bundle_p.set_defaults(func=lambda args: cmd_bundle(args))
 
     compose_p = sub.add_parser("compose")
-    compose_p.add_argument("--bundle", help="path to a saved bundle JSON, or an http(s) URL")
+    compose_p.add_argument("--bundle", help="path to a saved bundle JSON")
+    compose_p.add_argument("--judgements",
+                           help="path to the agent's semantic judgements JSON "
+                                "({\"equivalences\": [...], \"findings\": [...]})")
     compose_p.add_argument("--out", help="write the artefact to this gitignored path, e.g. "
                                          ".context/mimisbrunnr-saga-dossier/<name>.md; "
                                          "stdout if omitted")
@@ -1512,16 +1557,46 @@ def cmd_preview(args):
 
 
 def cmd_bundle(args):
+    out = getattr(args, "out", None)
+    # The destination is checked before the request, so a refused path costs no store read.
+    target = _require_ignored_destination(out) if out else None
     bundle = fetch_bundle_from_api(args.base_url, _anchor_body(args))
-    print(json.dumps(bundle, indent=2))
+    text = json.dumps(bundle, indent=2)
+    if target is not None:
+        _write_private(target, text + "\n")
+        print(f"Wrote bundle to {out}")
+    else:
+        print(text)
     return 0
+
+
+def _write_private(target, text):
+    """Write ``text`` to ``target`` as an owner-only (0600) file, atomically.
+
+    A bundle carries every selected memory's body, which can hold personal data, and a shell
+    redirect left it at the umask's mode (typically 0644). ``mkstemp`` creates the temporary file
+    0600 in the destination directory, and ``os.replace`` keeps that mode even over an existing,
+    wider-mode file (issue 182).
+    """
+    import tempfile
+    fd, tmp = tempfile.mkstemp(dir=str(target.parent), prefix=f".{target.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        os.replace(tmp, target)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def _require_ignored_destination(out):
     """Resolve ``--out`` and refuse it unless git reports the destination as ignored.
 
-    A dossier is a projection of sensitive store content and the contract is a local gitignored
-    artefact, so a tracked file (README.md) or an un-ignored path must never receive it. `git
+    A dossier and a bundle both carry sensitive store content and the contract is a local gitignored
+    artefact, so a tracked file (README.md) or an un-ignored path must never receive either. `git
     check-ignore` does not report tracked files as ignored even when a pattern matches them, so one
     check covers both. The path is resolved first so a symlink in an ignored directory cannot point
     the write at a tracked file. Outside a git work tree nothing can be verified, so it is refused.
@@ -1548,10 +1623,11 @@ def _require_ignored_destination(out):
 def cmd_compose(args):
     target = _require_ignored_destination(args.out) if args.out else None
     bundle = read_bundle(args.bundle)
-    dossier = compose(bundle, focus=args.focus, asof=args.asof)
+    judgements = read_judgements(args.judgements) if args.judgements else None
+    dossier = compose(bundle, focus=args.focus, judgements=judgements, asof=args.asof)
     text = render(dossier)
     if target is not None:
-        target.write_text(text, encoding="utf-8")
+        _write_private(target, text)
         print(f"Wrote dossier to {args.out}")
     else:
         print(text)
