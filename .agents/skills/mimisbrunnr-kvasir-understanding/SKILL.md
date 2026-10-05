@@ -218,6 +218,12 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
 - **The content is redacted before the file is written**, by `mimisbrunnr-odin-context-memory`'s
   `redact.py`, and the rule names hit are reported. If the redactor cannot run, the dump is refused and
   nothing is written. This is the second net; the first is never pasting a credential into a dump.
+- **Personal data is redacted too, but only what has a shape.** A personal-data pass after the secret
+  pass replaces email addresses and UPN-style `user@domain` identifiers (rule `email-address`; an SSH
+  remote's `git@host` matches the same shape) and reports the rule name and count, never the value.
+  **Human names are not detected** — no rule recognises them reliably — so **do not put personal data
+  in a dump**: no names, emails, user IDs or customer details. Describe the role (`the on-call
+  engineer`), not the person.
 - **Re-dumping replaces `_session.md`; it does not append.** The dump is a regenerable projection, so
   regenerating is meant to be cheaper than editing — the same reason the forensic export is generated and
   never maintained. Do not hand-edit a dump and expect the edit to survive the next dump.

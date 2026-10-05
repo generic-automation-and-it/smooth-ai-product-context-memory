@@ -1846,6 +1846,35 @@ class DumpRedactionTests(unittest.TestCase):
             self.assertIn("<redacted-github-token>", written)
             self.assertIn("REDACTED before writing: github-token x1", out)
 
+    def test_personal_data_is_redacted_before_the_dump_is_written(self):
+        # Emails and UPN-style user@domain identifiers are one shape; the report names the rule and the
+        # count, never the value.
+        with tempfile.TemporaryDirectory() as tmp:
+            email, upn = "jane.example@example.com", "j.example@corp.example.co.uk"
+            content = write(tmp, "c.md", f"# Access\n\nAsk {email}; the service runs as {upn}.")
+            out_dir = Path(tmp) / "access"
+            rc, out, err = run(["dump", "--currentsession", "--from", content, "--out", str(out_dir)])
+            self.assertEqual(rc, 0)
+            written = (out_dir / "_session.md").read_text(encoding="utf-8")
+            for value in (email, upn):
+                self.assertNotIn(value, written)
+                self.assertNotIn(value, out + err)
+            self.assertEqual(written.count("<redacted-email>"), 2)
+            self.assertIn("REDACTED before writing: email-address x2", out)
+
+    def test_personal_data_redaction_leaves_package_and_version_specifiers_alone(self):
+        text = "Pinned lodash@4.17.21 and @anthropic-ai/sdk; mailto a@b is not an address."
+        self.assertEqual(uc.redact_personal_data(text), (text, {}))
+
+    def test_secret_and_personal_data_are_reported_together(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            token = "ghp_" + "b" * 36
+            content = write(tmp, "c.md", f"# Deploy\n\nops@example.com pushed with {token}.")
+            out_dir = Path(tmp) / "deploy"
+            rc, out, _ = run(["dump", "--currentsession", "--from", content, "--out", str(out_dir)])
+            self.assertEqual(rc, 0)
+            self.assertIn("REDACTED before writing: email-address x1, github-token x1", out)
+
     def test_dump_is_refused_when_the_redactor_cannot_run(self):
         with tempfile.TemporaryDirectory() as tmp:
             content = write(tmp, "c.md", "# Deploy\n\nNothing secret here at all.")

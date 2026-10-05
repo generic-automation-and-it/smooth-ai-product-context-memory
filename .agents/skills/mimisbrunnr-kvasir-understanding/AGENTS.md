@@ -107,6 +107,15 @@ recalls the live store via `import` (read token only) and orchestrates the captu
 - **The dump redacts before writing and fails closed.** It shells out to
   `../mimisbrunnr-odin-context-memory/scripts/redact.py` over stdin (never argv). Both script folders ship
   together in the npm package, so the relative path holds there too.
+- **The dump also redacts personal data with a fixed shape, after the secret pass.**
+  `redact_personal_data` replaces email addresses and UPN-style `user@domain` identifiers (one rule,
+  `email-address` → `<redacted-email>`) and its findings join the secret findings in the one
+  `REDACTED before writing:` line — rule names and counts, never values. It is in-process and cannot
+  fail, so it has no refusal path. **Human names are deliberately not attempted**: no rule recognises
+  them without rewriting ordinary prose, so keeping names out of a dump is the author's job, and
+  `SKILL.md` and the empty-dump template both say so. Widen `PERSONAL_DATA_RULES` only with a shape that
+  has no false positives in ordinary technical text; it lives here, not in the capture skill's
+  `redact.py`, because that redactor also gates store writes whose content legitimately names people.
 - **The vocabulary is question/answer.** The old `trigger` key is still read from a store export.
 - **`--dontask` is accepted for forward compatibility.** It skips interactive questions (e.g. "Export split") and takes the recommended option as analysed by the AI. No interactive questions exist in this skill today.
 - **`import` queries the live store, read token only, and the three outcomes never collapse.** `unreachable`
@@ -185,6 +194,8 @@ recalls the live store via `import` (read token only) and orchestrates the captu
   flags while writing nothing; "no selectors ⇒ no association"; the dump → load round trip (LADR-07); `.understanding.md` units and store folders read as structured
   input with newest-version-per-slug, including import from a dump folder (LADR-09); the dump's
   redaction and its fail-closed refusal on a missing, non-zero-exit or malformed-output redactor; the
+  dump's personal-data pass (emails and UPNs replaced and reported by rule name and count, package and
+  version specifiers left alone, combined reporting with the secret findings); the
   dump's durability warning — printed for a gitignored destination, silent for a tracked one, decided by
   `git check-ignore` rather than a text search. Advisory: the warning never changes the exit code.
   The store-facing verbs are pinned too: `import` reads the live store through the read client (kind
@@ -228,6 +239,7 @@ recalls the live store via `import` (read token only) and orchestrates the captu
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-05 | **`dump --currentsession` now redacts personal data with a fixed shape before writing `_session.md`.** The dump scrubbed secret fingerprints only, so an email address or UPN (`user@domain`) in the session went to a file built to be carried to other sessions and repositories. A new in-process pass after the secret pass replaces both (rule `email-address`) and reports rule names and counts beside the secret findings, never the values. Human names are not attempted — no rule recognises them reliably — so SKILL.md and the empty-dump template now tell the author to keep personal data out; that is the first net and this is the second. Kept out of the capture skill's `redact.py`, which also gates store writes. Harness 155 → 158. | issue 179 |
 | 2026-10-05 | **The defaulted input was unsafe on the write path and chose the wrong dump; both fixed, from a review of the change.** (1) `export --write` with no input captured whatever dump was newest in the workspace — a live dry run picked another session's — so a defaulted input now refuses `--write` before reading anything and is disclosed on every run. (2) "Newest" was the folder mtime, which a re-dump does not change, so a regenerated dump lost to a stale one; it is now `_session.md` mtime. Also: positional and `--input` that disagree are refused instead of the flag silently winning, an empty `--input` is refused, the dump root is the git top level rather than the working directory (shared with `dump`), and one helper owns the refusal text. Mutation-checked: reverting either (1) or (2) fails its test. Harness 149 -> 155. | PR #178 review |
 | 2026-10-05 | **`load`/`export` default their input to the current session.** `--input` (or the positional) is now optional; when neither is given the skill uses the current session's dump folder (the newest `.context/mimisbrunnr-understandings/*`, materialised by `dump --currentsession --from <session>` first), and refuses with a pointer to `dump --currentsession` when none exists. `current_session_input` + `resolve_input` added. Harness 145 -> 149. | session request |
 | 2026-10-05 | **A whitespace-padded role was tagged with its padding.** `_audience_tags` rejects a blank role through `role.strip()` but then interpolated the **raw** value, so `role=" engineer "` passed the blank check and emitted `audience:engineer ` — a tag that reads as tagged while matching no exact-match consumer of the same role. The stripped role is now the one tagged, which is the same looks-like-evidence-without-being-it outcome the blank role was already refused for. One guard split into two (type, then emptiness of the stripped value) rather than a single `not role.strip()` call, so the strip happens once and the reason each branch skips stays visible. `passingRoles` still only ever removes a tag, never a record: the disposition remains `passed` alone. **No harness case was added** — `OPENCODE_ANALYSE_ALLOW_TEST_SELF_FIX` is off, so the test edit was out of scope; recorded rather than left for a reader to assume the padding is pinned. | audience tag padding |

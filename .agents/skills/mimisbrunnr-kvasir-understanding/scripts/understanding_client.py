@@ -1803,7 +1803,8 @@ SESSION_TEMPLATE = """## Understandings
 
 _(One entry per Understanding, each with: question, answer, why, boundaries, provenance. State
 behaviour, contracts and invariants, not file paths or line numbers, which rot. Never a credential
-value; the dump redacts what it recognises, but that is the second net, not the first.)_
+value and no personal data (names, emails, user IDs); the dump redacts what it recognises, but that is
+the second net, not the first.)_
 
 ## Decisions
 
@@ -1942,6 +1943,35 @@ def redact(content: str) -> tuple[str, dict[str, int]] | None:
         return None
 
 
+# Personal-data rules for the dump: (name, pattern, placeholder). Fixed shapes only, like the secret
+# rules. An email address and a UPN (`user@corp.example`) are one shape, so one rule covers both. The
+# lookbehind starts a match only at the beginning of a local part, which keeps the search linear on a
+# long run of local-part characters with no `@`. Human names have no reliable shape and are not
+# attempted: keeping them out of the dump is the author's job, stated in SKILL.md.
+PERSONAL_DATA_RULES = [
+    (
+        "email-address",
+        re.compile(r"(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*"
+                   r"\.[A-Za-z]{2,}(?![A-Za-z0-9-])"),
+        "<redacted-email>",
+    ),
+]
+
+
+def redact_personal_data(content: str) -> tuple[str, dict[str, int]]:
+    """Replace recognisable personal data; return the text and `{rule_name: hit_count}`.
+
+    In-process and cannot fail, so unlike the secret redactor it has no refusal path. The matched
+    values are never returned — the caller reports rule names and counts only.
+    """
+    findings: dict[str, int] = {}
+    for name, pattern, placeholder in PERSONAL_DATA_RULES:
+        content, count = pattern.subn(placeholder, content)
+        if count:
+            findings[name] = findings.get(name, 0) + count
+    return content, findings
+
+
 def git_ignored(path: Path) -> bool:
     """True when `path` is ignored by the git repo it sits in.
 
@@ -1976,14 +2006,18 @@ def cmd_dump(args: argparse.Namespace) -> int:
     content = read_input(args.from_file) if args.from_file else ""
     findings: dict[str, int] = {}
     if content.strip():
-        # A dump exists to be carried to another session or repository, so a secret must be gone
-        # before the file exists, not caught later on the way out (fail closed).
+        # A dump exists to be carried to another session or repository, so a secret or a recognisable
+        # piece of personal data must be gone before the file exists, not caught later on the way out
+        # (fail closed).
         scrubbed = redact(content)
         if scrubbed is None:
             print(f"REFUSED: the redactor ({REDACTOR}) could not run, so the dump cannot be "
                   "scrubbed. Nothing was written.", file=sys.stderr)
             return 1
         content, findings = scrubbed
+        # Secrets first, so a credential that happens to contain an `@` is reported under its own rule.
+        content, personal = redact_personal_data(content)
+        findings.update(personal)
     folder_name = derive_folder_name(content, args.session_name)
 
     if args.out:
