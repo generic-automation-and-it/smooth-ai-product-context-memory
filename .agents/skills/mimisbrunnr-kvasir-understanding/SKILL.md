@@ -143,7 +143,11 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
   `CONTEXT_MEMORY_DECISIONS_BELOW_THRESHOLD=hold` keeps the candidate out of the store; `mark` exports it with
   `audience:<role>` tags, which are written beside the binding's `--tags`. The setting in force is the
   one the gate reports (`belowThreshold`) — it may come from `~/.mimisbrunnr/credentials` — and a report
-  without a readable value keeps every candidate. The rubric is `scripts/decisions_rubric.json`, **a copy shared with the capture
+  without a readable value keeps every candidate. The gate also reports when its attempt ledger forgot
+  spent budgets — `ledgerReset` (the ledger was unreadable and restarted empty) or `ledgerEvicted: n`
+  (entries dropped past its 5000-entry cap) — and the client prints one stderr line for each
+  (`decisions: attempt ledger evicted N entries past its cap; those records' attempt budgets restart`),
+  because such a record can be scored again. Absent, zero or unreadable values print nothing. The rubric is `scripts/decisions_rubric.json`, **a copy shared with the capture
   skill** — the two must not drift, so an edit belongs in both. Full contract:
   [`mimisbrunnr-odin-context-memory` → Value Gate](mimisbrunnr-odin-context-memory/SKILL.md).
   **A dry run never scores.** Scoring spends each record's attempt budget in the gate's ledger, so a

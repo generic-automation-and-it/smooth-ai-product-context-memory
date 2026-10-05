@@ -1084,6 +1084,28 @@ def probe_decisions(count: int) -> str:
     return f"{not_scored}; gate probe: {outcome or 'unreadable'} — a --write would skip the gate"
 
 
+def _ledger_disclosures(report: dict) -> list[str]:
+    """Stderr lines for the gate's attempt-ledger disclosures; fixed wording and a count only.
+
+    `ledgerReset` (a prose string when the ledger was unreadable and started empty) and
+    `ledgerEvicted` (entries the 5000-entry cap dropped) both mean a spent attempt budget was
+    forgotten, so an exhausted record could be scored again. Reading only the verdicts lost both
+    (issue 182). The gate's reset text is not echoed: the fact is what matters, and a value this
+    client cannot interpret is ignored rather than trusted or crashed on.
+    """
+    lines = []
+    reset = report.get("ledgerReset")
+    if reset is True or (isinstance(reset, str) and reset.strip()):
+        lines.append("decisions: attempt ledger was unreadable and restarted empty; every record's "
+                     "attempt budget restarts")
+    evicted = report.get("ledgerEvicted")
+    if isinstance(evicted, int) and not isinstance(evicted, bool) and evicted > 0:
+        noun = "entry" if evicted == 1 else "entries"
+        lines.append(f"decisions: attempt ledger evicted {evicted} {noun} past its cap; those "
+                     "records' attempt budgets restart")
+    return lines
+
+
 def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str]:
     """Score each candidate's role value through the capture skill's decision gate.
 
@@ -1152,6 +1174,9 @@ def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str]:
         print("NOTE: the decision gate returned an unrecognised report shape; the gate was skipped "
               "and the export continued.", file=sys.stderr)
         return candidates, "decisions: skipped (unrecognised report)"
+
+    for line in _ledger_disclosures(report):
+        print(line, file=sys.stderr)
 
     if report.get("outcome") == "disabled":
         return candidates, "decisions: disabled"

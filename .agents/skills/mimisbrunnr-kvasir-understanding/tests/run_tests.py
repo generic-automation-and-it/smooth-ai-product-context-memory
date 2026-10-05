@@ -2206,6 +2206,45 @@ class DecisionsGateIntegrationTests(unittest.TestCase):
         out = json.dumps({"outcome": outcome, "belowThreshold": below, "records": records})
         return lambda: _Result(0, out)
 
+    def test_ledger_reset_and_eviction_are_disclosed_on_stderr(self):
+        """Issue 182: `ledgerReset` / `ledgerEvicted` mean a spent attempt budget was forgotten, so
+        an exhausted record could be scored again. Only the verdicts were read, so neither reached
+        the operator. Absent, zero, false or malformed values print nothing and never crash."""
+        records = [{"index": i, "outcome": "scored", "passed": True, "passingRoles": ["developer"]}
+                   for i in range(3)]
+        reset_text = "the attempt ledger at this path was unreadable or malformed and has been started empty"
+
+        def gate(**extra):
+            out = json.dumps(dict({"outcome": "ok", "belowThreshold": "hold", "records": records},
+                                  **extra))
+            return lambda: _Result(0, out)
+
+        evicted_line = "decisions: attempt ledger evicted"
+        reset_line = "decisions: attempt ledger was unreadable and restarted empty"
+        cases = [
+            ({"ledgerEvicted": 1}, ["evicted 1 entry past its cap"], [reset_line]),
+            ({"ledgerEvicted": 4}, ["evicted 4 entries past its cap"], [reset_line]),
+            ({"ledgerReset": reset_text, "ledgerEvicted": 0}, [reset_line], [evicted_line]),
+            ({"ledgerReset": reset_text, "ledgerEvicted": 2}, [reset_line, "evicted 2 entries"], []),
+            ({}, [], [evicted_line, reset_line]),
+            ({"ledgerEvicted": 0, "ledgerReset": False}, [], [evicted_line, reset_line]),
+            ({"ledgerEvicted": "7", "ledgerReset": ["x"]}, [], [evicted_line, reset_line]),
+            ({"ledgerEvicted": True, "ledgerReset": "  "}, [], [evicted_line, reset_line]),
+            ({"ledgerEvicted": -3, "ledgerReset": None}, [], [evicted_line, reset_line]),
+        ]
+        for extra, expected, absent in cases:
+            with self.subTest(extra=extra):
+                err = io.StringIO()
+                with redirect_stderr(err):
+                    survivors, note, _ = self._run_gate(gate(**extra))
+                self.assertEqual(len(survivors), 3)
+                self.assertTrue(note.startswith("decisions: ok"), note)
+                for text in expected:
+                    self.assertIn(text, err.getvalue())
+                for text in absent:
+                    self.assertNotIn(text, err.getvalue())
+                self.assertNotIn(reset_text, err.getvalue(), "the gate's prose is never echoed")
+
     def test_disabled_keeps_everything_and_calls_nothing(self):
         def explode():
             raise AssertionError("the gate script was spawned while disabled")
