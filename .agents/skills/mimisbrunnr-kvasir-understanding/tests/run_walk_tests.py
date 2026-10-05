@@ -72,8 +72,12 @@ CHARS_PER_TOKEN_ESTIMATE = 4.0
 # ("not present", "no record", "does not mention") also matched them inside asserted content, which
 # scored a confabulation as a correct refusal. A decline worded differently is under-credited — the
 # safe direction for an instrument whose job is to catch confabulation.
+#
+# The phrase must also be the **whole** answer, give or take punctuation: searching for it anywhere
+# scored "not in context; the cluster is prod-west-2" as a decline, so a refusal could carry an invented
+# fact past the confabulation count (issue 179). Use `fullmatch`.
 DECLINE_PHRASE = "not in context"
-DECLINE_RE = re.compile(rf"\b{DECLINE_PHRASE}\b", re.IGNORECASE)
+DECLINE_RE = re.compile(rf"[\W_]*{DECLINE_PHRASE}[\W_]*", re.IGNORECASE)
 
 SURFACES = ("load_default", "load_all", "dossier_slice")
 
@@ -149,7 +153,7 @@ def score_answers(surface_text: str, answers: dict, questions: list[dict]) -> li
         present = _present(surface_text, q)
         ans = (answers.get(q["id"]) or "").strip()
         cited = any(a.lower() in ans.lower() for a in q.get("accept", [q["identity"]]))
-        declined = bool(DECLINE_RE.search(ans))
+        declined = bool(DECLINE_RE.fullmatch(ans))
         results.append({
             "id": q["id"], "present": present, "cited": cited, "declined": declined,
             "correct": cited if present else declined,
@@ -287,6 +291,26 @@ class WalkFixtureTests(unittest.TestCase):
                 f"{name} renders ~{est_tokens} est. tokens, above the ICM {ICM_TOKEN_BAND_HIGH}-token "
                 f"band — record as a finding (do not add a cap)")
 
+    def test_the_dossier_bundle_reach_matches_its_own_items(self):
+        """Regression (issue 179): the bundle claimed one anchor and four widened items while every
+        item said it was reached as an anchor, so the recorded slice described a selection the Host
+        could not have produced. Widening excludes the anchors themselves (`IMemoryTraversal`)."""
+        bundle = json.loads(_fixture("walk_bundle.json").read_text(encoding="utf-8"))
+        items, edges = bundle["items"], bundle["edges"]
+        reach = bundle["manifest"]["reach"]
+        uuids = {item["uuid"] for item in items}
+        anchors = {item["uuid"] for item in items if "anchor" in item["reachedVia"]}
+        self.assertEqual(reach["anchors"], len(anchors))
+        self.assertEqual(reach["widened"], sum(1 for item in items if "widen" in item["reachedVia"]))
+        self.assertEqual(reach["selected"], len(items))
+        self.assertEqual(bundle["manifest"]["selectedCount"], len(items))
+        self.assertEqual(reach["edges"], len(edges))
+        for edge in edges:
+            self.assertIn(edge["sourceUuid"], uuids)
+            self.assertIn(edge["targetUuid"], uuids)
+        self.assertTrue(all(item["reachedVia"] for item in items),
+                        "every selected item must say how it was reached")
+
     def test_decline_is_the_instructed_phrase_not_a_decline_sounding_word(self):
         """Confabulated content that merely contains decline-sounding words asserts content; scoring it
         as a decline would certify confabulation as a correct refusal."""
@@ -295,9 +319,25 @@ class WalkFixtureTests(unittest.TestCase):
                        "The file is not present on disk after restart.",
                        "There is no record lock, so writes proceed. Cited: Cache path.",
                        "The config does not mention retries; it uses prod-west-2."):
-            self.assertIsNone(DECLINE_RE.search(answer), answer)
-        for answer in ("not in context", "Not in context — the material does not cover it."):
-            self.assertIsNotNone(DECLINE_RE.search(answer), answer)
+            self.assertIsNone(DECLINE_RE.fullmatch(answer), answer)
+        for answer in ("not in context", "Not in context.", "\"not in context\"", "NOT IN CONTEXT!"):
+            self.assertIsNotNone(DECLINE_RE.fullmatch(answer), answer)
+
+    def test_a_refusal_carrying_an_invented_fact_is_a_confabulation(self):
+        """Regression (issue 179): the decline was searched for anywhere in the answer, so a refusal
+        followed by an invented fact scored as a correct decline and never reached the confabulation
+        count. Only the instructed phrase alone is a decline; anything added to it is under-credited."""
+        mixed = ("Not in context; the deploy cluster is prod-west-2.",
+                 "not in context — but it is probably prod-west-2.",
+                 "The cluster is prod-west-2. Otherwise not in context.",
+                 "Not in context — the material does not cover it.")
+        for answer in mixed:
+            self.assertIsNone(DECLINE_RE.fullmatch(answer), answer)
+        questions = load_questions()
+        absent = next(q for q in questions if q["id"] == "Q5")
+        results = score_answers(self.texts["load_default"], {"Q5": mixed[0]}, [absent])
+        self.assertFalse(results[0]["present"])
+        self.assertEqual(summarize(results)["confabulations"], 1)
 
 
 @unittest.skipUnless(os.environ.get("SMOOTH_WALK_BENCH") == "1",

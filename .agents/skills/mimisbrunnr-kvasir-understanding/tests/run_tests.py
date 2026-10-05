@@ -28,6 +28,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 import understanding_client as uc  # noqa: E402
 
+# The client seeds the gate flag from the operator's credential file (or inherits it) at import, so a
+# case that does not set it ran the real decision model wherever the machine enabled it. Every case
+# that wants the gate sets the flag itself; the rest start from off.
+os.environ["CONTEXT_MEMORY_DECISIONS_ENABLED"] = "false"
+
 STORE_EXPORT = {
     "understandings": [
         {
@@ -458,8 +463,7 @@ class StoreImportTests(unittest.TestCase):
         `import` fail at the read client's refuse-token guard, and the recall path's `unset` workaround
         is exactly the friction this skill exists to remove.
         """
-        os.environ["CONTEXT_MEMORY_WRITE_TOKEN"] = "secret"
-        os.environ["ApiAccess__WriteToken"] = "secret"
+        before = {k: os.environ.get(k) for k in ("CONTEXT_MEMORY_WRITE_TOKEN", "ApiAccess__WriteToken")}
         captured = {}
 
         class _Done:
@@ -479,6 +483,9 @@ class StoreImportTests(unittest.TestCase):
             uc.subprocess.run = original
         self.assertNotIn("CONTEXT_MEMORY_WRITE_TOKEN", captured["env"])
         self.assertNotIn("ApiAccess__WriteToken", captured["env"])
+        # The synthetic tokens live only inside `patch.dict`; setting them before it made the patch
+        # restore *them*, so they outlived the test (issue 179).
+        self.assertEqual({k: os.environ.get(k) for k in before}, before)
 
     def test_unreachable_timed_out_and_empty_are_three_distinct_outcomes(self):
         """The three never collapse.
@@ -2128,13 +2135,12 @@ class DecisionsGateIntegrationTests(unittest.TestCase):
         {"subject": "C", "description": "C", "statement": "third claim"},
     ]
 
-    def _run_gate(self, gate_impl, candidates=None, enabled="true", below=None):
+    def _run_gate(self, gate_impl, candidates=None, enabled="true", env_below=None):
         """Call `gate_decisions` with `subprocess.run` replaced, so no subprocess is spawned.
 
-        `below` is applied to the environment *before* the call and restored afterwards, rather than
-        popped here — a case that sets the variable itself would otherwise have it cleared by this
-        helper, so the `mark` path would silently exercise `hold` and the assertion would fail for a
-        reason that has nothing to do with the code under test.
+        `env_below` is this process's `CONTEXT_MEMORY_DECISIONS_BELOW_THRESHOLD`, applied before the
+        call and restored afterwards. The client must ignore it — hold-vs-mark comes from the report's
+        `belowThreshold` (see `_report`) — so it exists only to prove that.
         """
         originals = uc.subprocess.run
         seen = {}
@@ -2148,10 +2154,10 @@ class DecisionsGateIntegrationTests(unittest.TestCase):
         previous_enabled = os.environ.get("CONTEXT_MEMORY_DECISIONS_ENABLED")
         previous_below = os.environ.get("CONTEXT_MEMORY_DECISIONS_BELOW_THRESHOLD")
         os.environ["CONTEXT_MEMORY_DECISIONS_ENABLED"] = enabled
-        if below is None:
+        if env_below is None:
             os.environ.pop("CONTEXT_MEMORY_DECISIONS_BELOW_THRESHOLD", None)
         else:
-            os.environ["CONTEXT_MEMORY_DECISIONS_BELOW_THRESHOLD"] = below
+            os.environ["CONTEXT_MEMORY_DECISIONS_BELOW_THRESHOLD"] = env_below
         try:
             survivors, note = uc.gate_decisions(
                 list(candidates if candidates is not None else self.CANDIDATES))
@@ -2167,8 +2173,9 @@ class DecisionsGateIntegrationTests(unittest.TestCase):
             else:
                 os.environ["CONTEXT_MEMORY_DECISIONS_BELOW_THRESHOLD"] = previous_below
 
-    def _report(self, records, outcome="ok"):
-        out = json.dumps({"outcome": outcome, "records": records})
+    def _report(self, records, outcome="ok", below="hold"):
+        """A gate report. `belowThreshold` is the gate's resolved setting, which the client obeys."""
+        out = json.dumps({"outcome": outcome, "belowThreshold": below, "records": records})
         return lambda: _Result(0, out)
 
     def test_disabled_keeps_everything_and_calls_nothing(self):
@@ -2205,7 +2212,7 @@ class DecisionsGateIntegrationTests(unittest.TestCase):
             {"index": 0, "outcome": "scored", "passed": True, "passingRoles": ["developer"]},
             {"index": 1, "outcome": "scored", "passed": False, "passingRoles": []},
             {"index": 2, "outcome": "scored", "passed": True, "passingRoles": ["tester"]},
-        ]), below="mark")
+        ], below="mark"))
         self.assertEqual(len(survivors), 3, "mark exports the below-threshold record too")
         self.assertIn("audience:developer", survivors[0]["tags"])
         self.assertIn("audience:tester", survivors[2]["tags"])
@@ -2219,7 +2226,7 @@ class DecisionsGateIntegrationTests(unittest.TestCase):
             with self.subTest(below=below):
                 survivors, note, _ = self._run_gate(self._report([
                     {"index": 0, "outcome": "scored", "passed": True, "passingRoles": ["developer"]},
-                ]), below=below)
+                ], below=below))
                 self.assertEqual([c["subject"] for c in survivors], ["A", "B", "C"],
                                  f"under {below}, unjudged candidates must be kept")
 
@@ -2369,6 +2376,142 @@ class DecisionsGateIntegrationTests(unittest.TestCase):
             lambda: _Result(3, "", "something entirely unexpected"))
         self.assertEqual(len(survivors), 3)
         self.assertIn("skipped", note)
+
+    def test_the_reports_below_threshold_wins_over_this_process_environment(self):
+        """Regression (issue 179): the gate resolves hold-vs-mark from the machine credential file as
+        well as the environment, and this client read only its own environment with a `hold` default.
+        A gate run under `mark` was therefore applied as `hold`, and every below-threshold record was
+        silently dropped. The report's `belowThreshold` is the setting that was actually in force."""
+        verdicts = [
+            {"index": 0, "outcome": "scored", "passed": True, "passingRoles": ["developer"]},
+            {"index": 1, "outcome": "scored", "passed": False, "passingRoles": []},
+        ]
+        for env_below in (None, "hold"):
+            with self.subTest(env_below=env_below):
+                survivors, note, _ = self._run_gate(
+                    self._report(verdicts, below="mark"), candidates=self.CANDIDATES[:2],
+                    env_below=env_below)
+                self.assertEqual([c["subject"] for c in survivors], ["A", "B"],
+                                 "a gate that ran under mark must not have its records held")
+                self.assertIn("0 held", note)
+        survivors, note, _ = self._run_gate(
+            self._report(verdicts, below="hold"), candidates=self.CANDIDATES[:2], env_below="mark")
+        self.assertEqual([c["subject"] for c in survivors], ["A"])
+        self.assertIn("1 held", note)
+
+    def test_an_unreadable_below_threshold_keeps_every_record(self):
+        """A report whose `belowThreshold` is absent or unknown cannot say whether a below-threshold
+        record should be held, so nothing is held and the skip is disclosed — never a guessed `hold`."""
+        verdicts = [{"index": 1, "outcome": "scored", "passed": False, "passingRoles": []}]
+        for below in (None, "drop", "", 1):
+            with self.subTest(below=below):
+                survivors, note, _ = self._run_gate(self._report(verdicts, below=below))
+                self.assertEqual(len(survivors), 3)
+                self.assertEqual(note, "decisions: skipped (unrecognised belowThreshold)")
+
+
+class ExportTagsAndScopeTests(unittest.TestCase):
+    """What the write payload carries: the gate's audience tags (issue 179) and the source scope."""
+
+    def _export(self, src, argv, gate=None):
+        """Run `export --write` with every gate and the capture client stubbed; return what was sent."""
+        originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                     uc.resolve_group, uc._run_capture_client, uc.gate_decisions)
+        sent = {"bindings": [], "calls": []}
+        uc.gate_redaction = lambda texts: (list(texts), {})
+        uc.gate_atomicity = lambda c: [{"verdict": "simple", "signals": []} for _ in c]
+        uc.initiative_exists = lambda name: (True, "present")
+
+        def resolve(binding, name, body, dryrun):
+            sent["bindings"].append(dict(binding))
+            return {"groupUuid": "g-1", "created": False}, "ok"
+
+        def capture(script, args, payload):
+            sent["calls"].append((tuple(args), payload))
+            if args[0] == "preflight":
+                return 0, json.dumps({"candidates": []}), ""
+            return 0, json.dumps({"created": 1, "versioned": 0, "linked": 0, "skipped": 0}), ""
+
+        uc.resolve_group = resolve
+        uc._run_capture_client = capture
+        if gate is not None:
+            uc.gate_decisions = _stub_gate_transport(gate)
+        previous = os.environ.get("CONTEXT_MEMORY_DECISIONS_ENABLED")
+        os.environ["CONTEXT_MEMORY_DECISIONS_ENABLED"] = "true" if gate is not None else "false"
+        try:
+            rc, out, err = run(["export", src, "--write", "--initiative", "Present",
+                                "--heimdallr", "false"] + argv)
+        finally:
+            if previous is None:
+                os.environ.pop("CONTEXT_MEMORY_DECISIONS_ENABLED", None)
+            else:
+                os.environ["CONTEXT_MEMORY_DECISIONS_ENABLED"] = previous
+            (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+             uc.resolve_group, uc._run_capture_client, uc.gate_decisions) = originals
+        return rc, out, err, sent
+
+    @staticmethod
+    def _set_payloads(sent):
+        return [payload for args, payload in sent["calls"] if args == ("set",)]
+
+    def test_set_items_merges_binding_tags_with_the_candidates_own(self):
+        now = dt.datetime.now(dt.timezone.utc)
+        items = uc.set_items([{"statement": "A claim.", "description": "S",
+                               "tags": ["audience:developer", "team-a", "", 7]}],
+                             {"tags": "team-a,team-b"}, now)
+        self.assertEqual(items[0]["tags"], ["team-a", "team-b", "audience:developer"])
+
+    def test_a_marked_records_audience_tags_reach_the_write_payload(self):
+        """Regression (issue 179): `mark` attached `audience:*` tags to the candidate and `set_items`
+        then wrote the binding's tags alone, so the evidence never reached the store."""
+        report = json.dumps({"outcome": "ok", "belowThreshold": "mark", "records": [
+            {"index": 0, "outcome": "scored", "passed": False, "passingRoles": ["tester"]}]})
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md", "The retry budget is three attempts.")
+            rc, _, err, sent = self._export(src, ["--tags", "team-a"],
+                                            gate=lambda: _Result(0, report))
+        self.assertEqual(rc, 0, err)
+        items = self._set_payloads(sent)[0]["items"]
+        self.assertEqual(items[0]["tags"], ["team-a", "audience:tester"])
+
+    def test_reconcile_source_scope(self):
+        cases = [
+            # (candidate scopes, bound scope, accepted, resulting bound scope)
+            ([None, ""], None, True, None),
+            (["program:roadmap", None], None, True, "program:roadmap"),
+            (["product:", "product"], None, True, "product"),
+            (["program:roadmap", "product:x"], None, False, None),
+            (["program:roadmap"], "program:roadmap", True, "program:roadmap"),
+            (["program:roadmap"], " program : roadmap ", True, " program : roadmap "),
+            (["program:roadmap"], "product:x", False, "product:x"),
+        ]
+        for scopes, bound, accepted, result in cases:
+            with self.subTest(scopes=scopes, bound=bound):
+                binding = {"scope": bound}
+                with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                    ok = uc.reconcile_source_scope(
+                        [{"statement": "s", "scope": s} for s in scopes], binding)
+                self.assertEqual(ok, accepted)
+                self.assertEqual(binding["scope"], result)
+
+    def test_a_store_export_keeps_its_source_scope_on_the_group(self):
+        """Regression (issue 179): the group scope came from `--scope` alone, so a `program` record
+        re-exported with no flag was written into an unscoped group."""
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "export.json", json.dumps(STORE_EXPORT))
+            rc, out, err, sent = self._export(src, [])
+        self.assertEqual(rc, 0, err)
+        self.assertEqual([b["scope"] for b in sent["bindings"]], ["program"])
+        self.assertIn("Scope taken from the source records: program", out)
+
+    def test_a_conflicting_scope_flag_is_refused_before_anything_is_sent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "export.json", json.dumps(STORE_EXPORT))
+            rc, _, err, sent = self._export(src, ["--scope", "product:invitations"])
+        self.assertEqual(rc, 1)
+        self.assertIn("would re-scope them", err)
+        self.assertEqual((sent["bindings"], sent["calls"]), ([], []),
+                         "a refused re-scope must resolve no group and send nothing")
 
 
 def _Result(rc, out, err=""):

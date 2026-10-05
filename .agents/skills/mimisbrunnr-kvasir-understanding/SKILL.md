@@ -141,7 +141,9 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
   candidate. **Redaction runs before any model call**, and an unavailable redactor means no request is
   made. With `CONTEXT_MEMORY_DECISIONS_ENABLED=true`,
   `CONTEXT_MEMORY_DECISIONS_BELOW_THRESHOLD=hold` keeps the candidate out of the store; `mark` exports it with
-  `audience:<role>` tags. The rubric is `scripts/decisions_rubric.json`, **a copy shared with the capture
+  `audience:<role>` tags, which are written beside the binding's `--tags`. The setting in force is the
+  one the gate reports (`belowThreshold`) — it may come from `~/.mimisbrunnr/credentials` — and a report
+  without a readable value keeps every candidate. The rubric is `scripts/decisions_rubric.json`, **a copy shared with the capture
   skill** — the two must not drift, so an edit belongs in both. Full contract:
   [`mimisbrunnr-odin-context-memory` → Value Gate](mimisbrunnr-odin-context-memory/SKILL.md).
 - **A dry run creates nothing** — no initiative, no group, no memory. `resolve-group` has no dry-run mode
@@ -153,6 +155,10 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
 - **The binding comes from the input or the flags.** A dump folder carries its binding as structured
   metadata (`_dump.json`), read as the default; an explicit flag overrides it. Absent both, no
   association is made.
+- **A store export keeps its records' scope.** With no `--scope`, a single scope shared by the source
+  records becomes the group's scope and is printed. Records in more than one scope, or a `--scope` that
+  differs from theirs, are refused with nothing sent — export each scope separately with a matching
+  `--scope`.
 - **Every gate is a gate.** A redactor that cannot run, an atomicity detector that cannot run, or a
   post-`--write` `set --dryrun` refusal all stop with nothing written rather than bypassing the boundary.
   The `MAX_CANDIDATES` (20) cap is not a refusal: an over-cap batch auto-splits into consecutive ≤20
