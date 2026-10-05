@@ -1011,6 +1011,16 @@ def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str]:
         print("NOTE: the decision gate returned unreadable output; the gate was skipped and the "
               "export continued.", file=sys.stderr)
         return candidates, "decisions: skipped (unreadable output)"
+    if not isinstance(report, dict):
+        # Readable JSON of a shape this client cannot interpret — a list, a string, a number — is
+        # not the same as unreadable output, and it reached the `.get` calls below as an
+        # AttributeError, so a gate that answered with anything but an object killed the export with
+        # a traceback. The `records` guard below handles the same case one level down; this is the
+        # same rule at the top: keep every candidate and say why, never flatten the unknown into a
+        # plausible answer and never stop a capture over it.
+        print("NOTE: the decision gate returned an unrecognised report shape; the gate was skipped "
+              "and the export continued.", file=sys.stderr)
+        return candidates, "decisions: skipped (unrecognised report)"
 
     if report.get("outcome") == "disabled":
         return candidates, "decisions: disabled"
