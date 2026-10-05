@@ -11,6 +11,7 @@ import json
 import os
 import re
 import socket
+import subprocess
 import sys
 import time
 import urllib.error
@@ -357,6 +358,26 @@ def cmd_probe(args):
         return
     print(f"mimisbrunnr-odin-context-memory API unreachable at {base}", file=sys.stderr)
     sys.exit(2)
+
+
+DECISIONS_GATE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "decisions_gate.py")
+
+
+def cmd_decisions_probe(args):
+    """Report whether the optional decision gate can score records.
+
+    The gate is off by default and needs no model to be installed, so this is the honest way to tell
+    "skipped" from "would fail": it reports `disabled`, `unreachable`, `model-missing`, or `ok`, and
+    never the API key's value.
+    """
+    if not os.path.isfile(DECISIONS_GATE):
+        raise ClientError(0, "decisions-unavailable", f"missing {DECISIONS_GATE}")
+    proc = subprocess.run([sys.executable, "-B", DECISIONS_GATE, "probe"],
+                          capture_output=True, text=True, encoding="utf-8")
+    sys.stdout.write(proc.stdout)
+    if proc.returncode != 0:
+        sys.stderr.write(proc.stderr)
+        sys.exit(1)
 
 
 def read_payload(path):
@@ -779,6 +800,10 @@ def main():
 
     p = sub.add_parser("probe", help="honest availability check; exit 2 if unreachable")
     p.set_defaults(func=cmd_probe)
+
+    p = sub.add_parser("decisions-probe",
+                       help="report the optional decision gate's availability (off by default)")
+    p.set_defaults(func=cmd_decisions_probe)
 
     p = sub.add_parser("preflight", help="POST /api/context/preflight (batch, array-in/out)")
     p.add_argument("--payload", help="JSON file; defaults to stdin")

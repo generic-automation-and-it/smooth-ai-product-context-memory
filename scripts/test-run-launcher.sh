@@ -46,6 +46,24 @@ no() {
   return 0
 }
 
+# Portable in-place substitution, because `sed -i` is not one command.
+#
+# BSD sed requires an explicit empty suffix (`-i ''`) and GNU sed attaches the suffix to the flag
+# (`-i.bak`), so on GNU the quoted empty string is taken as the *script* and the real expression is
+# taken as a filename: `sed: can't read s/…/: No such file or directory`. This harness is a PR-gate
+# step and the gate runs on ubuntu, so a BSD-only spelling is red on the platform that actually gates
+# it while green on the developer's machine. Write beside the file and rename, which is atomic and
+# behaves identically on both.
+sed_inplace() {
+  sed_tmp="$(mktemp "${1}.XXXXXX")" || { no "sed_inplace could not create a temp file" ; return 1; }
+  if ! sed "$2" "$1" >"$sed_tmp"; then
+    rm -f "$sed_tmp"
+    no "sed_inplace: sed failed on $1"
+    return 1
+  fi
+  mv "$sed_tmp" "$1"
+}
+
 # Run the launcher against a scratch home. Never inherits the operator's MIMIS_* overrides, and points
 # the machine-credential publication at the scratch tree as well — the launcher derives that path from
 # MIMIS_HOME, and a harness that only redirected the home would still write to the real ~/.mimisbrunnr.
@@ -400,6 +418,296 @@ if grep -q "CONTEXT_MEMORY_READ_TOKEN=.\+" "$scratch/home/credentials"; then
   ok "machine file carries CONTEXT_MEMORY_READ_TOKEN"
 else
   no "machine file carries CONTEXT_MEMORY_READ_TOKEN" "absent or empty"
+fi
+
+# The add-only pattern: a key the operator or a previous feature added must survive a re-run.
+# A full rewrite would silently drop it — the defect this pattern closes.
+operator_key="CONTEXT_MEMORY_DECISIONS_ENABLED=true"
+printf '%s\n' "$operator_key" >>"$scratch/home/credentials"
+run_launcher env >/dev/null 2>&1
+if grep -qF "$operator_key" "$scratch/home/credentials"; then
+  ok "a re-run preserves an operator-added key in the machine credential file"
+else
+  no "a re-run preserves an operator-added key in the machine credential file" "the key was dropped"
+fi
+
+# The three managed keys must still be present after the re-run above.
+for key in CONTEXT_MEMORY_BASE_URL CONTEXT_MEMORY_READ_TOKEN CONTEXT_MEMORY_WRITE_TOKEN; do
+  if grep -q "^$key=.\+" "$scratch/home/credentials"; then
+    ok "machine file still carries $key after a re-run"
+  else
+    no "machine file still carries $key after a re-run" "absent or empty"
+  fi
+done
+
+# ---------------------------------------------------------------------------------------------
+# decision-gate settings
+# ---------------------------------------------------------------------------------------------
+
+# All ten ride the write-side file with their documented default. A missing one means an operator
+# cannot discover the setting exists without reading this repository.
+decision_keys="CONTEXT_MEMORY_DECISIONS_ENABLED CONTEXT_MEMORY_DECISIONS_BASE_URL \
+CONTEXT_MEMORY_DECISIONS_PATH CONTEXT_MEMORY_DECISIONS_MODEL CONTEXT_MEMORY_DECISIONS_API_KEY \
+CONTEXT_MEMORY_DECISIONS_MIN_PROBABILITY CONTEXT_MEMORY_DECISIONS_MAX_ATTEMPTS \
+CONTEXT_MEMORY_DECISIONS_ROLES CONTEXT_MEMORY_DECISIONS_BELOW_THRESHOLD \
+CONTEXT_MEMORY_DECISIONS_TIMEOUT"
+
+for key in $decision_keys; do
+  if grep -q "^$key=" "$scratch/home/credentials"; then
+    ok "machine file carries $key"
+  else
+    no "machine file carries $key" "absent"
+  fi
+done
+
+# The gate is OFF by default, and that default must be the disabled one: a launcher that shipped
+# ENABLED=true would score every export on a machine with no decision model.
+if grep -q '^CONTEXT_MEMORY_DECISIONS_ENABLED=false$' "$scratch/home/credentials"; then
+  ok "the decision gate defaults to disabled"
+else
+  no "the decision gate defaults to disabled" \
+     "got $(sed -n 's/^CONTEXT_MEMORY_DECISIONS_ENABLED=//p' "$scratch/home/credentials")"
+fi
+
+# The read-only file stays minimal. A read-only worker has no use for a decision endpoint, and the
+# API key must never ride a file a read-only consumer can read.
+if grep -q '^CONTEXT_MEMORY_DECISIONS_' "$scratch/home/credentials-read-only"; then
+  no "the read-only file carries no decision settings" "it publishes the endpoint and the key"
+else
+  ok "the read-only file carries no decision settings"
+fi
+
+# An operator who turns the gate on must keep it on. This is the case the add-only pattern exists
+# for: a write-every-time rewrite resets ENABLED to false on every single start, so the gate could
+# never be left enabled between runs.
+sed_inplace "$scratch/home/credentials" \
+  's/^CONTEXT_MEMORY_DECISIONS_ENABLED=false$/CONTEXT_MEMORY_DECISIONS_ENABLED=true/'
+run_launcher env >/dev/null 2>&1
+if grep -q '^CONTEXT_MEMORY_DECISIONS_ENABLED=true$' "$scratch/home/credentials"; then
+  ok "a re-run preserves an operator's ENABLED=true"
+else
+  no "a re-run preserves an operator's ENABLED=true" \
+     "got $(sed -n 's/^CONTEXT_MEMORY_DECISIONS_ENABLED=//p' "$scratch/home/credentials")"
+fi
+
+# A remote endpoint's API key is a secret and must survive a re-run without ever being printed.
+planted_key="sk-decisions-planted-0123456789abcdef"
+sed_inplace "$scratch/home/credentials" \
+  "s|^CONTEXT_MEMORY_DECISIONS_API_KEY=.*|CONTEXT_MEMORY_DECISIONS_API_KEY=$planted_key|"
+run_launcher env >/dev/null 2>&1
+if grep -q "^CONTEXT_MEMORY_DECISIONS_API_KEY=$planted_key$" "$scratch/home/credentials"; then
+  ok "a re-run preserves a stored decision API key"
+else
+  no "a re-run preserves a stored decision API key" "the stored key was replaced"
+fi
+
+# env-export prints credentials, so it must not print the decision key. The setting is published by
+# name with an empty default; the value belongs in the environment, sourced, never in a terminal.
+run_launcher env-export >"$scratch/decisions-export.sh" 2>/dev/null
+if grep -qF "$planted_key" "$scratch/decisions-export.sh"; then
+  no "env-export never prints the decision API key" "the planted value reached stdout"
+else
+  ok "env-export never prints the decision API key"
+fi
+
+# The other nine settings ARE printed, so `env-export --profile` gives an operator the gate's
+# configuration rather than leaving it discoverable only in this repository.
+for key in CONTEXT_MEMORY_DECISIONS_ENABLED CONTEXT_MEMORY_DECISIONS_BASE_URL \
+  CONTEXT_MEMORY_DECISIONS_MODEL CONTEXT_MEMORY_DECISIONS_MIN_PROBABILITY \
+  CONTEXT_MEMORY_DECISIONS_MAX_ATTEMPTS CONTEXT_MEMORY_DECISIONS_ROLES \
+  CONTEXT_MEMORY_DECISIONS_BELOW_THRESHOLD CONTEXT_MEMORY_DECISIONS_TIMEOUT; do
+  if grep -q "^export $key=" "$scratch/decisions-export.sh"; then
+    ok "env-export publishes $key"
+  else
+    no "env-export publishes $key" "absent from the export"
+  fi
+done
+
+# env-export must publish what the operator CONFIGURED, not the built-in default. It used to emit the
+# defaults table verbatim, so `env-export --profile` overwrote a stored ENABLED=true with false — the one
+# tool meant to publish the setting silently discarded it, and the profile then disagreed with the
+# credential file that every other surface reads. Verified against the shipped launcher: with the file
+# set to true, env-export emitted false.
+export_dir="$scratch/export-effective"
+mkdir -p "$export_dir"
+env -u MIMIS_TOKEN_FILE MIMIS_HOME="$export_dir" MIMIS_MACHINE_CREDENTIALS="$export_dir/credentials" \
+  "$launcher" env >/dev/null 2>&1
+sed_inplace "$export_dir/credentials" \
+  's/^CONTEXT_MEMORY_DECISIONS_ENABLED=false$/CONTEXT_MEMORY_DECISIONS_ENABLED=true/'
+sed_inplace "$export_dir/credentials" \
+  's|^CONTEXT_MEMORY_DECISIONS_MODEL=nimble$|CONTEXT_MEMORY_DECISIONS_MODEL=some-other-model|'
+env -u MIMIS_TOKEN_FILE MIMIS_HOME="$export_dir" MIMIS_MACHINE_CREDENTIALS="$export_dir/credentials" \
+  "$launcher" env-export >"$export_dir/out.sh" 2>/dev/null
+if grep -q "^export CONTEXT_MEMORY_DECISIONS_ENABLED=true$" "$export_dir/out.sh"; then
+  ok "env-export publishes the operator's stored ENABLED value, not the default"
+else
+  no "env-export publishes the operator's stored ENABLED value, not the default" \
+     "got $(grep 'DECISIONS_ENABLED' "$export_dir/out.sh")"
+fi
+if grep -q "^export CONTEXT_MEMORY_DECISIONS_MODEL=some-other-model$" "$export_dir/out.sh"; then
+  ok "env-export publishes the operator's stored MODEL value"
+else
+  no "env-export publishes the operator's stored MODEL value" \
+     "got $(grep 'DECISIONS_MODEL' "$export_dir/out.sh")"
+fi
+
+# ...and a setting the operator has never touched still gets its default, rather than nothing.
+if grep -q "^export CONTEXT_MEMORY_DECISIONS_BELOW_THRESHOLD=hold$" "$export_dir/out.sh"; then
+  ok "env-export still publishes defaults for untouched settings"
+else
+  no "env-export still publishes defaults for untouched settings" \
+     "got $(grep 'DECISIONS_BELOW_THRESHOLD' "$export_dir/out.sh")"
+fi
+
+# The profile must carry the configured value too, or the shell and the store disagree.
+export_profile="$export_dir/.zshrc"
+env -u MIMIS_TOKEN_FILE MIMIS_HOME="$export_dir" MIMIS_MACHINE_CREDENTIALS="$export_dir/credentials" \
+  "$launcher" env-export --profile "$export_profile" >/dev/null 2>&1
+if grep -q "^export CONTEXT_MEMORY_DECISIONS_ENABLED=true$" "$export_profile"; then
+  ok "--profile writes the operator's stored value, not the default"
+else
+  no "--profile writes the operator's stored value, not the default" \
+     "got $(grep 'DECISIONS_ENABLED' "$export_profile")"
+fi
+
+# The API key stays excluded even though it is now read from the file rather than the defaults table.
+key_dir="$scratch/export-key"
+mkdir -p "$key_dir"
+env -u MIMIS_TOKEN_FILE MIMIS_HOME="$key_dir" MIMIS_MACHINE_CREDENTIALS="$key_dir/credentials" \
+  "$launcher" env >/dev/null 2>&1
+sed_inplace "$key_dir/credentials" \
+  "s|^CONTEXT_MEMORY_DECISIONS_API_KEY=.*|CONTEXT_MEMORY_DECISIONS_API_KEY=sk-planted-export-key|"
+env -u MIMIS_TOKEN_FILE MIMIS_HOME="$key_dir" MIMIS_MACHINE_CREDENTIALS="$key_dir/credentials" \
+  "$launcher" env-export >"$key_dir/out.sh" 2>/dev/null
+if grep -qF 'sk-planted-export-key' "$key_dir/out.sh"; then
+  no "env-export excludes a stored API key" "the stored value reached stdout"
+else
+  ok "env-export excludes a stored API key"
+fi
+
+# The profile block round-trips: the decision settings are written once and rotate in place, exactly
+# like the credentials. An appended block would leave a stale copy of a rotated token behind.
+profile="$scratch/profile/.zshrc"
+before="$(cksum <"$profile")"
+run_launcher env-export --profile "$profile" >/dev/null 2>&1
+if [ "$(grep -c 'CONTEXT_MEMORY_DECISIONS_ENABLED' "$profile")" = "1" ]; then
+  ok "--profile writes exactly one decision block"
+else
+  no "--profile writes exactly one decision block" \
+     "count $(grep -c 'CONTEXT_MEMORY_DECISIONS_ENABLED' "$profile")"
+fi
+run_launcher env-export --profile "$profile" >/dev/null 2>&1
+if [ "$(grep -c 'CONTEXT_MEMORY_DECISIONS_ENABLED' "$profile")" = "1" ]; then
+  ok "--profile is idempotent for the decision settings"
+else
+  no "--profile is idempotent for the decision settings" \
+     "count $(grep -c 'CONTEXT_MEMORY_DECISIONS_ENABLED' "$profile")"
+fi
+
+# The read-only half gets the same add-only treatment, so an operator's key survives there too. On
+# its own scratch home: the write-side cases above mutate `$scratch/home/credentials`, and sharing
+# that state made a failure here indistinguishable from one there.
+ro_dir="$scratch/readonly-preserve"
+mkdir -p "$ro_dir"
+env -u MIMIS_TOKEN_FILE MIMIS_HOME="$ro_dir" MIMIS_MACHINE_CREDENTIALS="$ro_dir/credentials" \
+  "$launcher" env >/dev/null 2>&1
+printf 'CONTEXT_MEMORY_DECISIONS_ENABLED=true\n' >>"$ro_dir/credentials-read-only"
+env -u MIMIS_TOKEN_FILE MIMIS_HOME="$ro_dir" MIMIS_MACHINE_CREDENTIALS="$ro_dir/credentials" \
+  "$launcher" env >/dev/null 2>&1
+if grep -q '^CONTEXT_MEMORY_DECISIONS_ENABLED=true$' "$ro_dir/credentials-read-only"; then
+  ok "a re-run preserves an operator-added key in the read-only file"
+else
+  no "a re-run preserves an operator-added key in the read-only file" "the key was dropped"
+fi
+# The read-only file must still not acquire a write token by the operator's own hand: the read client
+# refuses to start when one is present, so this is a guard on the operator, not on the launcher.
+if grep -q '^CONTEXT_MEMORY_WRITE_TOKEN=' "$ro_dir/credentials-read-only"; then
+  no "the read-only file gains no write token" "one is present"
+else
+  ok "the read-only file gains no write token"
+fi
+
+# ---------------------------------------------------------------------------------------------
+# file_value: the reader every credential path depends on
+# ---------------------------------------------------------------------------------------------
+
+# The function is extracted from the launcher and evaluated here rather than sourcing the whole file:
+# the script executes its verb dispatch on entry, so sourcing it would run a container. Asserting on
+# the launcher's output instead would prove the *result* is right without proving which file was
+# read — a file_value ignoring its second argument still yields a correct credential file whenever
+# $env_file happens to hold the same key.
+file_value_body() {
+  sed -n "/^file_value() {/,/^}/p" "$launcher"
+}
+
+if [ -n "$(file_value_body)" ]; then
+  eval "$(file_value_body)"
+
+  fv_dir="$scratch/file-value"
+  mkdir -p "$fv_dir"
+  printf 'SHARED=from-env-file\nONLY_ENV_FILE=env-only\n' >"$fv_dir/env"
+  printf 'SHARED=from-other-file\nONLY_OTHER=other-only\n' >"$fv_dir/other"
+
+  # Default target is $env_file, which is a launcher global and unset here — declared locally so
+  # the default path is exercised rather than tripping `set -u`.
+  env_file="$fv_dir/env"
+
+  if [ "$(file_value SHARED || true)" = "from-env-file" ]; then
+    ok "file_value defaults to \$env_file"
+  else
+    no "file_value defaults to \$env_file" "got $(file_value SHARED || true)"
+  fi
+
+  # The second argument selects a different file — the property the whole add-only loop rests on.
+  if [ "$(file_value SHARED "$fv_dir/other" || true)" = "from-other-file" ]; then
+    ok "file_value reads the file named by its second argument"
+  else
+    no "file_value reads the file named by its second argument" \
+       "got $(file_value SHARED "$fv_dir/other" || true)"
+  fi
+
+  if [ "$(file_value ONLY_OTHER "$fv_dir/other" || true)" = "other-only" ]; then
+    ok "file_value does not fall back to \$env_file for a key the named file lacks"
+  else
+    no "file_value does not fall back to \$env_file for a key the named file lacks" \
+       "got $(file_value ONLY_OTHER "$fv_dir/other" || true)"
+  fi
+
+  # A missing key prints nothing and still exits 0 — sed succeeds on a non-match. Asserting the real
+  # contract rather than a tidier one: every caller is written `|| true` plus an empty test, so a
+  # reader that "fixed" this to return non-zero would break the callers this documents.
+  if [ -z "$(file_value NO_SUCH_KEY "$fv_dir/other")" ]; then
+    ok "file_value prints nothing for a missing key"
+  else
+    no "file_value prints nothing for a missing key" \
+       "got $(file_value NO_SUCH_KEY "$fv_dir/other")"
+  fi
+
+  # The unguarded form is what a caller must never write: under `set -e` it is fine here (the file
+  # exists) but the pattern exists precisely so nobody writes it.
+  if file_value ONLY_OTHER "$fv_dir/other" >/dev/null; then
+    ok "file_value succeeds on a key the file carries"
+  else
+    no "file_value succeeds on a key the file carries" "unexpected non-zero"
+  fi
+
+  if file_value SHARED "$fv_dir/absent-file"; then
+    no "file_value returns non-zero for a missing file" "it reported success"
+  else
+    ok "file_value returns non-zero for a missing file"
+  fi
+
+  # A value containing '=' must survive whole: sed splits on the first '=' only, so a value that
+  # itself holds one is returned intact rather than truncated at the second.
+  printf 'WITH_EQUALS=a=b=c\n' >"$fv_dir/equals"
+  if [ "$(file_value WITH_EQUALS "$fv_dir/equals" || true)" = "a=b=c" ]; then
+    ok "file_value returns a value containing '=' whole"
+  else
+    no "file_value returns a value containing '=' whole" \
+       "got $(file_value WITH_EQUALS "$fv_dir/equals" || true)"
+  fi
+else
+  no "file_value is defined in run.sh" "no definition found"
 fi
 
 # ---------------------------------------------------------------------------------------------

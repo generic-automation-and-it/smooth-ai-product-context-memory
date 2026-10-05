@@ -1,0 +1,45 @@
+{
+  "version": "2",
+  "roles": [
+    {
+      "key": "product-owner",
+      "instructions": "Does this record help a product owner understand what the system does, why a decision was made, or what constraints shape the product?",
+      "criteria": {
+        "true": "The record states a product behaviour, a user-facing constraint, or a decision rationale that a product owner would use to prioritise, plan, or communicate.",
+        "false": "The record is internal implementation detail, tooling knowledge, or operational trivia with no product-level consequence."
+      }
+    },
+    {
+      "key": "designer",
+      "instructions": "Does this record help a designer understand the system's structure, contracts, or design constraints?",
+      "criteria": {
+        "true": "The record describes a design decision, an architectural constraint, a data model, an interface contract, or a design rationale a designer would need.",
+        "false": "The record is product behaviour, operational detail, or tooling knowledge with no design-level content."
+      }
+    },
+    {
+      "key": "developer",
+      "instructions": "Does this record help a developer implement, debug, or maintain the system?",
+      "criteria": {
+        "true": "The record states a behaviour, contract, type, invariant, or implementation constraint a developer would use to write or debug code.",
+        "false": "The record is product strategy, design rationale, or operational detail with no implementation-level content."
+      }
+    },
+    {
+      "key": "tester",
+      "instructions": "Does this record help a tester verify the system's behaviour or identify edge cases?",
+      "criteria": {
+        "true": "The record states a testable behaviour, a boundary condition, an expected outcome, or a known limitation a tester would use to design tests.",
+        "false": "The record is internal implementation detail, tooling knowledge, or product strategy with no testable claim."
+      }
+    },
+    {
+      "key": "business",
+      "instructions": "Does this record help a business stakeholder understand the system's capabilities, limitations, or business rules?",
+      "criteria": {
+        "true": "The record states a business rule, a commercial term, a compliance constraint, or a business process a stakeholder would use.",
+        "false": "The record is technical implementation detail, design rationale, or tooling knowledge with no business-level consequence."
+      }
+    }
+  ]
+}

@@ -44,6 +44,102 @@ deadline. It bounds a single read and the whole `deepsearch` chain; an out-of-ra
 is **refused with `bad-deadline`, never clamped**, because a budget that silently becomes something else
 is one the operator trusts and the system does not honour. The provisioner does not set it.
 
+## The optional decision gate
+
+`CONTEXT_MEMORY_DECISIONS_ENABLED=true` turns on a value gate: each memory or Understanding about to be
+exported is scored by a **local decision model** for value to each target role, and a record no role
+values is held back rather than written. **Off by default**, and nothing here is required — an operator
+who never sets it runs exactly as before, with no model installed.
+
+Everything is client-side. There is **no model in the Host or Application**, no server-side scoring, and
+no API change. The gate is a quality signal only: a score never changes `status`, kind, or approval.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `CONTEXT_MEMORY_DECISIONS_ENABLED` | `false` | Feature flag. Anything but exactly `true` leaves the gate skipped |
+| `CONTEXT_MEMORY_DECISIONS_BASE_URL` | `http://localhost:11434` | Decision API origin (local Ollama) |
+| `CONTEXT_MEMORY_DECISIONS_PATH` | `/v1/systemone` | Endpoint path (Jev-compatible) |
+| `CONTEXT_MEMORY_DECISIONS_MODEL` | `nimble` | Decision model (`ollama pull nimble`) |
+| `CONTEXT_MEMORY_DECISIONS_API_KEY` | *(empty)* | Bearer token, sent **only when non-empty**. Never printed by `env-export` or the profile |
+| `CONTEXT_MEMORY_DECISIONS_MIN_PROBABILITY` | `0.85` | Pass threshold per role — a role must score **strictly above** it |
+| `CONTEXT_MEMORY_DECISIONS_MAX_ATTEMPTS` | `3` | Scoring rounds per record, counting the first |
+| `CONTEXT_MEMORY_DECISIONS_ROLES` | `product-owner,designer,developer,tester,business` | Rubric roles to ask about |
+| `CONTEXT_MEMORY_DECISIONS_BELOW_THRESHOLD` | `hold` | After the last attempt: `hold` (not exported) or `mark` (exported with `audience:*` tags) |
+| `CONTEXT_MEMORY_DECISIONS_TIMEOUT` | `30` | Seconds per decision request |
+
+**Where the settings live.** `scripts/run.sh` writes all ten with their defaults to
+`~/.mimisbrunnr/credentials` — **add-only**, so turning the gate on survives every restart, which is the
+case a write-every-time rewrite cannot survive. `env-export` publishes the nine non-secret ones to a shell
+profile; the API key is deliberately excluded, because a token written to a terminal that gets scrolled
+back, recorded, or read over a shoulder is disclosed. The read-only credential file stays minimal and
+carries **no** decision settings: a worker that cannot mutate has no use for a decision endpoint, and
+publishing the key there would hand a read-only credential a second secret.
+
+**Check it before enabling it:**
+
+```bash
+python3 -B .agents/skills/mimisbrunnr-odin-context-memory/scripts/context_memory_client.py decisions-probe
+```
+
+Reports `disabled`, `unreachable`, `model-missing`, or `ok`, and the endpoint origin — never the key.
+
+**Three properties worth knowing before you rely on it:**
+
+- **A failed gate is never a low score.** `unreachable`, `timed-out`, `http-<code>`, `bad-response` and
+  `oversize` all **keep** the record and disclose the reason. A decision model that is down must not block
+  a capture, and a hung model must never read as "this record is worthless".
+- **Redaction runs before any model call**, and a redactor that cannot run means **no request is made at
+  all**. Sending unscrubbed record content to a model is the one outcome the gate exists to prevent.
+- **The attempt counter is the script's, not yours.** A ledger keyed by record identity bounds the
+  rewrite loop, so re-asking cannot buy more attempts.
+- **A saturated score is not a confident one.** Each scored record carries a `discrimination` block
+  reporting the `margin` between the highest-scoring role and the next one, plus every role tied at
+  the top. On the calibration fixture the mean best-role is `0.99` and 3 of 21 records carry roles
+  scoring exactly `1.00000`, so a three-role `passingRoles` set is usually ambiguous rather than
+  thrice-confirmed. It never affects a verdict — it reports how much to trust the shape of the result,
+  because `passingRoles` becomes `audience:*` tags downstream and a tie would otherwise read as a
+  clear win.
+
+**The threshold is a starting value, and it is now measured rather than merely asserted.** A labelled
+fixture of 21 records — a junk-to-specific gradient across six domains — is committed with the skill and
+scored against the shipped gate:
+
+```bash
+python3 -B .agents/skills/mimisbrunnr-odin-context-memory/tests/score_decisions_calibration.py
+python3 -B .agents/skills/mimisbrunnr-odin-context-memory/tests/score_decisions_calibration.py --check-determinism
+```
+
+At the shipped default the gate scored **precision 1.00, recall 1.00** — mean best-role **0.14** on the six
+hold-side records against **0.99** on the fifteen that state a checkable fact. Re-running prints the
+committed figures beside a fresh run and names anything that moved; `--check-determinism` scores the whole
+fixture three times and fails if the runs differ, because determinism is what makes a threshold pinnable at
+all. Three things that measurement settles, each of which had been argued from impression:
+
+- **The threshold is not a sensitive knob here.** The scores are bimodal — nothing between `0.21` and
+  `0.96` — so any bar in that band gives identical verdicts, which is why the default moved to `0.85`
+  without changing a single verdict on the fixture. What it does change is attribution: roles clearing
+  the bar fall from 27 of 30 expected to 24 of 30. Both runs are recorded in the fixture.
+- **Tightening the rubric does not tighten the gate.** Two rewrites — enumerating concrete nouns, and
+  narrowing the criteria — both dropped precision to `0.94` and lost six expected roles, because the
+  `instructions` carry the framing and a narrower *criteria* block did not narrow the *question*. Both
+  rejected variants are recorded with their numbers in the fixture.
+- **Do not apply the vendor's fitted temperature.** Nimble was fitted at `T=2.179` so probabilities match
+  correctness rates, not so they separate better. For a binary answer the logit gap is exactly recoverable
+  from the returned probability, so the correction is trivial to apply and **it makes the gate worse**:
+  junk rises from `0.14` to `0.31` and separation falls from `0.85` to `0.62`.
+
+Role attribution is the weaker half and the measurement says so: `tester` clears 15 of 21 records and
+carries almost no negative information, and `product-owner`/`business` stay correlated at `r=0.92` even
+after their shared vocabulary was removed. A single `choice` question was measured as an alternative and
+was **not** more accurate (13 of 15 labelled records against 14). Neither is fixable by rewording — two
+rewrites both dropped precision to `0.94`, because the `instructions` carry the framing and a narrower
+`criteria` block did not narrow the *question*. Roles beyond the five, and exemptions for `self`-scope or
+agent-facing records, remain open decisions — see the change row in the capture skill's `AGENTS.md`.
+
+The gate has **not** been exercised against a remote Jev-compatible endpoint, which is the configuration
+these settings exist to permit. Its transport guards for that case (https required off-loopback, bearer
+key required, userinfo refused) are unit-tested, but no remote endpoint has answered a request.
+
 ## One-command provisioning
 
 For a local deployment, run the provisioner once:

@@ -1,0 +1,271 @@
+{
+  "comment": [
+    "Labelled fixture for the export value gate, scored against a local decision model.",
+    "Purpose: a threshold or a rubric change must be argued from a measurement, not from a feel.",
+    "The set is a junk -> specific gradient across six domains, because the model's training",
+    "categories are Commerce/Education/Home/Media/Public services/Science/Software/Supply chain/",
+    "Travel/Workplace and Software has 300 training examples but ZERO held-out examples, so",
+    "published accuracy says nothing about the case this gate actually runs on.",
+    "ids are opaque (c01..c21). They are emitted to the blinded model input for pairing, and an id",
+    "that named its own expected verdict would put the answer in the model's input.",
+    "`expect` is the set of roles that SHOULD clear the bar. It is deliberately narrow and is a",
+    "judgement call, not ground truth: a record may be relevant to a role the author did not list.",
+    "tier 0 = no checkable fact, 1 = topic words but no fact, 2 = one concrete fact, 3 = concrete",
+    "fact spanning several roles. tier >= 2 is the PASS side; 0-1 is the HOLD side.",
+    "rubricVersion below is the version of decisions_rubric.json these numbers were measured",
+    "against. Editing the rubric without re-measuring must FAIL CalibrationEvidenceTests, so a",
+    "recorded run can never certify a rubric it did not score."
+  ],
+  "rubricVersion": "2",
+  "recordedRun": {
+    "date": "2026-10-04",
+    "model": "nimble",
+    "endpoint": "http://localhost:11434",
+    "bar": 0.85,
+    "note": "Raw returned probabilities, no temperature scaling, at the SHIPPED default bar of 0.85. 0.85 sits inside the bimodal gap (hold-side max 0.205, pass-side min 0.961), so gate verdicts are identical to those at 0.5 -- 1.00/1.00 -- while role attribution falls from 27/30 to 24/30. That is the measured cost of the stricter bar, stated rather than hidden. See the temperature row in the skill changelog: the vendor's fitted T=2.179 reduces separation and is a trap for a gate.",
+    "tier01MeanBestRole": 0.103,
+    "tier01MaxBestRole": 0.205,
+    "tier23MeanBestRole": 0.991,
+    "tier23MinBestRole": 0.961,
+    "separation": 0.888,
+    "truePositive": 15,
+    "falsePositive": 0,
+    "trueNegative": 6,
+    "falseNegative": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "expectedRolesClearing": 24,
+    "expectedRolesTotal": 30,
+    "unexpectedRolesClearing": 17,
+    "maxCrossRoleCorrelation": 0.922,
+    "maxCrossRolePair": "product-owner/business",
+    "perRoleClearing": {
+      "product-owner": 7,
+      "designer": 3,
+      "developer": 11,
+      "tester": 14,
+      "business": 6
+    },
+    "rejectedVariants": [
+      {
+        "name": "v2a",
+        "change": "every role rewritten as an enumeration of concrete nouns",
+        "result": "precision 0.94, expected roles clearing 23/30",
+        "why": "business scored 0.10 on a non-numeric business rule; a noun list cannot be exhaustive"
+      },
+      {
+        "name": "v2b",
+        "change": "narrower criteria, utility-framed instructions",
+        "result": "precision 0.94, expected roles clearing 22/30",
+        "why": "tester rose 0.22 -> 0.83 on a vague record because the INSTRUCTION asked a more permissive question, not because the criteria widened"
+      },
+      {
+        "name": "choice-question",
+        "change": "a single `choice` over the five roles plus a no-role escape, for attribution",
+        "result": "14/15 vs 14/15 on labelled records; agreed with the noul argmax 11/21",
+        "why": "not more accurate, but it is the model's strongest type and can never return two winners"
+      }
+    ],
+    "atBar05": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "expectedRolesClearing": 27,
+      "unexpectedRolesClearing": 22,
+      "note": "same corpus, same rubric, bar 0.5 -- recorded because it shows the bar changes attribution, not the verdict"
+    }
+  },
+  "records": [
+    {
+      "id": "c01",
+      "tier": 0,
+      "domain": "workplace",
+      "expect": [],
+      "statement": "The team met on Tuesday to discuss the quarter."
+    },
+    {
+      "id": "c02",
+      "tier": 0,
+      "domain": "software",
+      "expect": [],
+      "statement": "See the documentation for more information about this area."
+    },
+    {
+      "id": "c03",
+      "tier": 0,
+      "domain": "software",
+      "expect": [],
+      "statement": "The codebase could be cleaner in places."
+    },
+    {
+      "id": "c04",
+      "tier": 1,
+      "domain": "software",
+      "expect": [],
+      "statement": "Performance needs attention across the service over the coming months."
+    },
+    {
+      "id": "c05",
+      "tier": 1,
+      "domain": "software",
+      "expect": [],
+      "statement": "Testing coverage could be improved as the project grows."
+    },
+    {
+      "id": "c06",
+      "tier": 1,
+      "domain": "commerce",
+      "expect": [],
+      "statement": "Our refund handling has room for improvement for customer satisfaction."
+    },
+    {
+      "id": "c07",
+      "tier": 2,
+      "domain": "software",
+      "expect": [
+        "developer",
+        "tester"
+      ],
+      "statement": "Outbound HTTP calls retry three times with exponential backoff, capped at a 60 second total budget."
+    },
+    {
+      "id": "c08",
+      "tier": 2,
+      "domain": "commerce",
+      "expect": [
+        "product-owner",
+        "business"
+      ],
+      "statement": "Refunds are offered within 30 days of purchase; after 30 days only store credit is issued."
+    },
+    {
+      "id": "c09",
+      "tier": 2,
+      "domain": "commerce",
+      "expect": [
+        "business"
+      ],
+      "statement": "Interest accrues daily at 4.2 percent APR on balances above 5000 EUR."
+    },
+    {
+      "id": "c10",
+      "tier": 2,
+      "domain": "software",
+      "expect": [
+        "developer"
+      ],
+      "statement": "The audit table stores the occurrence column as timestamptz, never as a bare timestamp."
+    },
+    {
+      "id": "c11",
+      "tier": 2,
+      "domain": "public-services",
+      "expect": [
+        "business"
+      ],
+      "statement": "The second dose is administered at least 21 days after the first dose."
+    },
+    {
+      "id": "c12",
+      "tier": 2,
+      "domain": "workplace",
+      "expect": [
+        "business"
+      ],
+      "statement": "Expense claims above 250 EUR require an itemised receipt attached before any approval."
+    },
+    {
+      "id": "c13",
+      "tier": 2,
+      "domain": "supply-chain",
+      "expect": [
+        "business"
+      ],
+      "statement": "Supplier lead times are quoted in working days, never in calendar days."
+    },
+    {
+      "id": "c20",
+      "tier": 2,
+      "domain": "software",
+      "expect": [
+        "tester",
+        "developer"
+      ],
+      "statement": "A surviving mutation test is only trustworthy when the assertion runs before the mutated line, because an assertion placed afterwards cannot observe the mutation."
+    },
+    {
+      "id": "c21",
+      "tier": 2,
+      "domain": "software",
+      "expect": [
+        "developer",
+        "tester"
+      ],
+      "statement": "A transport timeout is reported as a distinct outcome rather than as a score of zero, because a hung dependency is not evidence that the value under test is low."
+    },
+    {
+      "id": "c14",
+      "tier": 3,
+      "domain": "commerce",
+      "expect": [
+        "product-owner",
+        "designer",
+        "business"
+      ],
+      "statement": "Checkout is a single page rather than a three-step wizard, so the customer sees the delivery cost and the total before committing."
+    },
+    {
+      "id": "c15",
+      "tier": 3,
+      "domain": "software",
+      "expect": [
+        "developer",
+        "tester"
+      ],
+      "statement": "The database statement timeout is 30 seconds; a query exceeding it is cancelled and its connection returned to the pool."
+    },
+    {
+      "id": "c16",
+      "tier": 3,
+      "domain": "software",
+      "expect": [
+        "developer",
+        "tester",
+        "business"
+      ],
+      "statement": "API clients are limited to 100 requests per minute per key, and exceeding the limit returns HTTP 429."
+    },
+    {
+      "id": "c17",
+      "tier": 3,
+      "domain": "commerce",
+      "expect": [
+        "developer",
+        "tester",
+        "business"
+      ],
+      "statement": "All monetary amounts are stored as integer minor units, and the currency is carried in a separate ISO 4217 column."
+    },
+    {
+      "id": "c18",
+      "tier": 3,
+      "domain": "software",
+      "expect": [
+        "developer",
+        "tester",
+        "business",
+        "product-owner"
+      ],
+      "statement": "Audit entries are retained for seven years and then deleted by a purge job that runs weekly on Sunday at 02:00 UTC."
+    },
+    {
+      "id": "c19",
+      "tier": 3,
+      "domain": "science",
+      "expect": [
+        "product-owner",
+        "tester"
+      ],
+      "statement": "The centrifuge protocol specifies 400g for ten minutes; a higher force shears the sample and invalidates the run."
+    }
+  ]
+}

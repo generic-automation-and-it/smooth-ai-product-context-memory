@@ -924,6 +924,241 @@ def gate_atomicity(candidates: list[dict]) -> list[dict] | None:
         return None
 
 
+DECISIONS_GATE = _CAPTURE_SCRIPTS / "decisions_gate.py"
+DECISIONS_ENABLED = "CONTEXT_MEMORY_DECISIONS_ENABLED"
+# The one note `gate_decisions` returns for a refusal rather than a skip. It is a named constant because
+# `cmd_export` has to act on it: a refusal says "Nothing was written", so a refusal that only labelled the
+# report and let the export proceed was a message contradicting what the process then did.
+DECISIONS_REFUSED = "decisions: refused"
+
+# Seed **only** the flag, and only so this client knows whether to shell out at all. The other nine
+# settings — including the API key, which is a secret — are loaded by the gate subprocess from the same
+# file, so nothing credential-bearing is pulled into this client's environment. This client deliberately
+# carries no credential handling, and loading a token here would defeat that.
+#
+# Parsed rather than imported: `context_memory_client` does `import redact` at module scope, so importing
+# it would make the redactor a startup dependency of this client too. Same contract as the capture
+# client's own loader, asserted equal by the harness.
+def _seed_decisions_enabled() -> None:
+    import os as _os
+    path = _os.environ.get(
+        "CONTEXT_MEMORY_CREDENTIAL_FILE",
+        str(Path(_os.path.expanduser("~")) / ".mimisbrunnr" / "credentials"))
+    try:
+        with open(path, encoding="utf-8") as handle:
+            lines = handle.readlines()
+    except OSError:
+        return
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        if key.strip() == DECISIONS_ENABLED and value and not _os.environ.get(DECISIONS_ENABLED):
+            _os.environ[DECISIONS_ENABLED] = value.strip()
+            return
+
+
+_seed_decisions_enabled()
+
+# The outer bound on one gate subprocess. Without it a hung gate blocks the export indefinitely,
+# which is the one outcome the note text below promises cannot happen: every failure mode is supposed
+# to skip the gate and keep every candidate. The bound is deliberately generous rather than tight —
+# the gate scores one record per request, sequentially, at its own 30s per request
+# (`DEFAULT_TIMEOUT` in decisions_gate.py), so a full 20-candidate batch can legitimately run for
+# minutes and a tight bound here would cut a healthy scoring run short, which is the same export-killing
+# defect in the other direction. This only converts an indefinite hang into a disclosed skip.
+GATE_TIMEOUT_SECONDS = 600
+
+
+def _audience_tags(candidate: dict, result: dict) -> list[str]:
+    """A candidate's own tags plus one `audience:<role>` tag per role the gate says passed.
+
+    `passingRoles` is read only when it is a list of strings. A string is iterable, so reading one
+    that way yielded a tag per character (`audience:d`, `audience:e`, …) — metadata the record never
+    carried, written into it under `mark` and read back as evidence of anything. A value this client
+    cannot interpret is treated as *no* evidence rather than as garbage; it never changes the
+    disposition, because `passed` alone decides whether the record is kept, tagged or held.
+
+    The same rule covers a blank role: `""` names no role, and interpolating it wrote the bare tag
+    `audience:` — an entry that looks like an audience and asserts nothing, stored on the record under
+    `mark` and read back as evidence of anything.
+
+    The stripped role is the one tagged, not the raw one. A padded role (`" engineer "`) passes a
+    blank check that strips, so the padding used to survive into `audience:engineer ` — a tag that
+    reads as tagged while matching no exact consumer of the same role, which is the same
+    looks-like-evidence-without-being-it outcome the blank role above is refused for.
+    """
+    tags = list(candidate.get("tags") or [])
+    roles = result.get("passingRoles")
+    if isinstance(roles, list):
+        for role in roles:
+            if not isinstance(role, str):
+                continue
+            name = role.strip()
+            if not name:
+                continue
+            tag = f"audience:{name}"
+            if tag not in tags:
+                tags.append(tag)
+    return tags
+
+
+def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str]:
+    """Score each candidate's role value through the capture skill's decision gate.
+
+    Returns `(survivors, note)`. Every failure mode except `redactor-unavailable` and a bad
+    configuration **skips the gate and says why** — a decision model that is down, missing, or
+    timing out must never block a capture, and must never be reported as a low score. The two
+    refusals are the opposite case: a redactor that cannot run means content nobody could inspect
+    would be sent, and a misconfigured threshold or role list means the gate would judge against
+    something other than what was configured.
+
+    The gate runs its own redaction first, so a candidate's text is scrubbed before any model call.
+    """
+    # The flag is read the way the gate reads it: seeded from the machine credential file at import,
+    # environment winning. Reading `os.environ` directly here tested only the process environment, so an
+    # operator who set ENABLED=true in `~/.mimisbrunnr/credentials` — the file the launcher maintains — was
+    # told the gate was disabled while the gate itself would have run.
+    if os.environ.get("CONTEXT_MEMORY_DECISIONS_ENABLED", "").lower() != "true":
+        return candidates, "decisions: disabled"
+    if not DECISIONS_GATE.is_file():
+        print(f"NOTE: the decision gate is enabled but {DECISIONS_GATE} is missing; the gate was "
+              "skipped and the export continued.", file=sys.stderr)
+        return candidates, "decisions: skipped (gate script missing)"
+
+    state_file = Path(os.environ.get("MIMIS_DECISIONS_STATE",
+                                     ".context/decisions-ledger.json"))
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-B", str(DECISIONS_GATE), "score", "--state-file", str(state_file)],
+            input=json.dumps(candidates), capture_output=True, text=True, encoding="utf-8",
+            timeout=GATE_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        # A gate that never answers is a down decision model, which is a skip — the same class as an
+        # unreachable one — so every candidate is kept and the reason is stated. Without this the export
+        # waited on the subprocess forever, contradicting the contract this function's own docstring
+        # states. It is never a refusal: nothing about a timeout means content would go uninspected.
+        print(f"NOTE: the decision gate did not answer within {GATE_TIMEOUT_SECONDS}s; the gate was "
+              "skipped and the export continued.", file=sys.stderr)
+        return candidates, f"decisions: skipped (gate timed out after {GATE_TIMEOUT_SECONDS}s)"
+    if proc.returncode != 0:
+        detail = proc.stderr.strip() or "no detail"
+        if '"redactor-unavailable"' in detail:
+            print("REFUSED: the decision gate's redactor could not run, so record content would "
+                  "have been sent unscrubbed. Nothing was written.", file=sys.stderr)
+            return candidates, DECISIONS_REFUSED
+        if '"bad-decisions-config"' in detail or '"bad-decisions-url"' in detail:
+            print(f"REFUSED: the decision gate is misconfigured ({detail}). Nothing was written.",
+                  file=sys.stderr)
+            return candidates, DECISIONS_REFUSED
+        print(f"NOTE: the decision gate failed ({detail}); the gate was skipped and the export "
+              "continued.", file=sys.stderr)
+        return candidates, "decisions: skipped (gate failed)"
+
+    try:
+        report = json.loads(proc.stdout)
+    except ValueError:
+        print("NOTE: the decision gate returned unreadable output; the gate was skipped and the "
+              "export continued.", file=sys.stderr)
+        return candidates, "decisions: skipped (unreadable output)"
+    if not isinstance(report, dict):
+        # Readable JSON of a shape this client cannot interpret — a list, a string, a number — is
+        # not the same as unreadable output, and it reached the `.get` calls below as an
+        # AttributeError, so a gate that answered with anything but an object killed the export with
+        # a traceback. The `records` guard below handles the same case one level down; this is the
+        # same rule at the top: keep every candidate and say why, never flatten the unknown into a
+        # plausible answer and never stop a capture over it.
+        print("NOTE: the decision gate returned an unrecognised report shape; the gate was skipped "
+              "and the export continued.", file=sys.stderr)
+        return candidates, "decisions: skipped (unrecognised report)"
+
+    if report.get("outcome") == "disabled":
+        return candidates, "decisions: disabled"
+
+    below = os.environ.get("CONTEXT_MEMORY_DECISIONS_BELOW_THRESHOLD", "hold").strip().lower()
+    if below not in ("hold", "mark"):
+        below = "hold"
+
+    # **Every candidate survives unless a score says otherwise.** The list is built by walking the
+    # gate's verdicts and marking indices, rather than by appending the candidates the verdicts
+    # mention. An earlier version appended on the way through, so a verdict carrying an
+    # out-of-range, non-integer or missing `index` fell through its own guard and the candidate was
+    # neither held nor appended — silently dropped from the export. A gate output this client cannot
+    # interpret must keep the record, which is the same rule `initiative_exists` and `store_query`
+    # already follow here: anything unrecognised is reported, never flattened into a plausible answer.
+    records = report.get("records")
+    if not isinstance(records, list):
+        print(f"NOTE: the decision gate returned no usable 'records' list "
+              f"({report.get('outcome')!r}); the gate was skipped and the export continued.",
+              file=sys.stderr)
+        return candidates, "decisions: skipped (unrecognised report)"
+
+    held_indices: set[int] = set()
+    marked: dict[int, dict] = {}
+    unscored = 0
+    malformed = 0
+    for result in records:
+        index = result.get("index") if isinstance(result, dict) else None
+        if not isinstance(index, int) or isinstance(index, bool) or not 0 <= index < len(candidates):
+            # Counted and reported, never acted on: we cannot say which record this was about.
+            malformed += 1
+            continue
+        outcome = result.get("outcome")
+        if outcome != "scored":
+            # oversize, attempts-exhausted, unreachable, timed-out, http-*, bad-response,
+            # model-missing — none of these is a score, so none of them may hold a record.
+            unscored += 1
+            continue
+        if result.get("passed") is True:
+            # Read as `is True`, mirroring the `is False` guard below, so the pass path accepts exactly
+            # what the gate emits (`bool(passing)`). A truthy non-boolean — `"false"`, `1` — is not a
+            # score saying "yes" any more than a falsey one is a score saying "no", and truthiness here
+            # tagged it as passing under `mark`; it now falls through to the same not-scored-and-kept
+            # bucket, which is the rule this client already applies to every value it cannot interpret.
+            # Under `mark`, a passing record is exported and its passing roles are the evidence for
+            # the audience tags, so they are tagged too. Under `hold` nothing is tagged: the gate
+            # never writes metadata of its own on the pass path.
+            if below == "mark":
+                candidate = dict(candidates[index])
+                candidate["tags"] = _audience_tags(candidate, result)
+                marked[index] = candidate
+            continue
+        # Only a verdict that says `passed: false` may hold a record, and it is compared as `is False`
+        # rather than by truthiness. An absent, null or otherwise falsey `passed` is not a score saying
+        # "no": this client cannot interpret it, and the rule it already follows for an unmappable index
+        # and an unrecognised report applies to it unchanged — the record is kept and counted, never
+        # dropped. Truthiness read a malformed verdict as a rejection and silently lost the record.
+        if result.get("passed") is not False:
+            unscored += 1
+            continue
+        if below == "mark":
+            candidate = dict(candidates[index])
+            candidate["tags"] = _audience_tags(candidate, result)
+            marked[index] = candidate
+        else:
+            held_indices.add(index)
+
+    survivors = []
+    held = []
+    for index, candidate in enumerate(candidates):
+        if index in marked:
+            survivors.append(marked[index])
+        elif index in held_indices:
+            held.append(candidate)
+        else:
+            survivors.append(candidate)
+
+    note = f"decisions: {report.get('outcome')} " \
+           f"({len(records)} verdict(s), {len(survivors)} kept, {len(held)} held)"
+    if unscored:
+        note += f", {unscored} not scored and kept (a failed gate is never a low score)"
+    if malformed:
+        note += f", {malformed} unreadable verdict(s) ignored (the affected records were kept)"
+    return survivors, note
+
+
 def ticket_inputs(values: list[str], repository: str | None) -> list[dict]:
     """`--tickets` entries into the resolve-group shape: `#12`, `github:12` or `provider:key`.
 
@@ -1206,6 +1441,19 @@ def cmd_export(args: argparse.Namespace) -> int:
         (held if verdict.get("verdict") == "bundled" else clean).append(candidate)
         candidate["atomicity"] = verdict
 
+    # Gate 5 (decision value), only when enabled. Scores are a quality signal, never authority: they
+    # never change status, kind, or approval, and a disabled or absent model skips the gate and says
+    # so rather than blocking the export. A **refusal** is the one outcome that does stop it: the gate
+    # refused because content nobody could inspect would be sent, or because it would judge against
+    # something other than what was configured, and both messages say "Nothing was written" — so
+    # continuing past them wrote records under a refusal the operator had been told had blocked them.
+    # Stopping here is before the group is resolved and before any chunk, so nothing exists to undo.
+    clean, decision_note = gate_decisions(clean)
+    if decision_note == DECISIONS_REFUSED:
+        print("REFUSED: the decision gate refused this export (the reason is above). Nothing was "
+              "written; fix the gate or export without it.", file=sys.stderr)
+        return 1
+
     # The cap is the capture skill's. An over-cap batch is auto-split into consecutive ≤ MAX_CANDIDATES
     # chunks, each processed end to end (its own preflight, its own `set --dryrun` veto, its own write),
     # so the capture path never chunks *silently* and a reader sees the boundary.
@@ -1243,6 +1491,7 @@ def cmd_export(args: argparse.Namespace) -> int:
     if redaction:
         print("Redaction (detected before send): "
               + ", ".join(f"{name} x{count}" for name, count in sorted(redaction.items())))
+    print(decision_note)
     if not any(binding.values()):
         print("NOTE: no selectors supplied, so no association is made "
               "(--tickets/--tags/--repository/--scope/--initiative).")

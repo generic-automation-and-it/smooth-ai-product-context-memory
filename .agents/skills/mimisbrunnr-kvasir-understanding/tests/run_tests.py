@@ -2083,5 +2083,289 @@ class HeimdallrAutofillTests(unittest.TestCase):
         self.assertNotIn("repo", seen["filters"])
 
 
+class DecisionsGateIntegrationTests(unittest.TestCase):
+    """`export`'s optional value gate.
+
+    One property above all: **a record is only ever dropped on a score that said so.** Every other
+    outcome — the gate disabled, unreachable, malformed, or reporting something this client cannot
+    interpret — keeps the candidate and says why, because an export that silently loses records
+    because a gate output was unreadable is indistinguishable from one that held them.
+    """
+
+    CANDIDATES = [
+        {"subject": "A", "description": "A", "statement": "first claim"},
+        {"subject": "B", "description": "B", "statement": "second claim"},
+        {"subject": "C", "description": "C", "statement": "third claim"},
+    ]
+
+    def _run_gate(self, gate_impl, candidates=None, enabled="true", below=None):
+        """Call `gate_decisions` with `subprocess.run` replaced, so no subprocess is spawned.
+
+        `below` is applied to the environment *before* the call and restored afterwards, rather than
+        popped here — a case that sets the variable itself would otherwise have it cleared by this
+        helper, so the `mark` path would silently exercise `hold` and the assertion would fail for a
+        reason that has nothing to do with the code under test.
+        """
+        originals = uc.subprocess.run
+        seen = {}
+
+        def fake_run(argv, **kwargs):
+            seen["argv"] = argv
+            seen["stdin"] = kwargs.get("input")
+            return gate_impl()
+
+        uc.subprocess.run = fake_run
+        previous_enabled = os.environ.get("CONTEXT_MEMORY_DECISIONS_ENABLED")
+        previous_below = os.environ.get("CONTEXT_MEMORY_DECISIONS_BELOW_THRESHOLD")
+        os.environ["CONTEXT_MEMORY_DECISIONS_ENABLED"] = enabled
+        if below is None:
+            os.environ.pop("CONTEXT_MEMORY_DECISIONS_BELOW_THRESHOLD", None)
+        else:
+            os.environ["CONTEXT_MEMORY_DECISIONS_BELOW_THRESHOLD"] = below
+        try:
+            survivors, note = uc.gate_decisions(
+                list(candidates if candidates is not None else self.CANDIDATES))
+            return survivors, note, seen
+        finally:
+            uc.subprocess.run = originals
+            if previous_enabled is None:
+                os.environ.pop("CONTEXT_MEMORY_DECISIONS_ENABLED", None)
+            else:
+                os.environ["CONTEXT_MEMORY_DECISIONS_ENABLED"] = previous_enabled
+            if previous_below is None:
+                os.environ.pop("CONTEXT_MEMORY_DECISIONS_BELOW_THRESHOLD", None)
+            else:
+                os.environ["CONTEXT_MEMORY_DECISIONS_BELOW_THRESHOLD"] = previous_below
+
+    def _report(self, records, outcome="ok"):
+        out = json.dumps({"outcome": outcome, "records": records})
+        return lambda: _Result(0, out)
+
+    def test_disabled_keeps_everything_and_calls_nothing(self):
+        def explode():
+            raise AssertionError("the gate script was spawned while disabled")
+
+        survivors, note, seen = self._run_gate(explode, enabled="false")
+        self.assertEqual(len(survivors), 3)
+        self.assertEqual(note, "decisions: disabled")
+        self.assertNotIn("argv", seen, "a disabled gate must not spawn the script")
+
+    def test_a_passing_record_is_kept(self):
+        survivors, note, _ = self._run_gate(self._report([
+            {"index": 0, "outcome": "scored", "passed": True, "passingRoles": ["developer"]},
+            {"index": 1, "outcome": "scored", "passed": True, "passingRoles": ["tester"]},
+            {"index": 2, "outcome": "scored", "passed": True, "passingRoles": ["designer"]},
+        ]))
+        self.assertEqual(len(survivors), 3)
+
+    def test_hold_keeps_only_passing_records(self):
+        survivors, note, _ = self._run_gate(self._report([
+            {"index": 0, "outcome": "scored", "passed": True, "passingRoles": ["developer"]},
+            {"index": 1, "outcome": "scored", "passed": False, "passingRoles": []},
+            {"index": 2, "outcome": "scored", "passed": False, "passingRoles": []},
+        ]))
+        self.assertEqual([c["subject"] for c in survivors], ["A"])
+        self.assertIn("2 held", note)
+
+    def test_mark_keeps_every_record_and_tags_passing_roles(self):
+        """Under `mark`, a below-threshold record is exported *and* labelled, so a reader can see the
+        gate judged it rather than missed it. Passing roles are tagged on both kinds of record — they
+        are the evidence, and under `hold` nothing is tagged at all."""
+        survivors, note, _ = self._run_gate(self._report([
+            {"index": 0, "outcome": "scored", "passed": True, "passingRoles": ["developer"]},
+            {"index": 1, "outcome": "scored", "passed": False, "passingRoles": []},
+            {"index": 2, "outcome": "scored", "passed": True, "passingRoles": ["tester"]},
+        ]), below="mark")
+        self.assertEqual(len(survivors), 3, "mark exports the below-threshold record too")
+        self.assertIn("audience:developer", survivors[0]["tags"])
+        self.assertIn("audience:tester", survivors[2]["tags"])
+        self.assertEqual(survivors[0]["statement"], "first claim",
+                         "tagging must not alter the claim")
+
+    def test_a_candidate_the_gate_never_mentioned_is_kept(self):
+        """Keep-by-default is the whole safety property: a verdict list shorter than the candidate
+        list means some records were never judged, and an unjudged record must not be dropped."""
+        for below in ("hold", "mark"):
+            with self.subTest(below=below):
+                survivors, note, _ = self._run_gate(self._report([
+                    {"index": 0, "outcome": "scored", "passed": True, "passingRoles": ["developer"]},
+                ]), below=below)
+                self.assertEqual([c["subject"] for c in survivors], ["A", "B", "C"],
+                                 f"under {below}, unjudged candidates must be kept")
+
+    def test_hold_adds_no_tags_to_a_passing_record(self):
+        """The gate never writes metadata on the pass path: a passing record under `hold` is the
+        caller's record, untouched."""
+        survivors, _, _ = self._run_gate(self._report([
+            {"index": 0, "outcome": "scored", "passed": True, "passingRoles": ["developer"]},
+            {"index": 1, "outcome": "scored", "passed": True, "passingRoles": ["tester"]},
+        ]))
+        self.assertNotIn("tags", survivors[0])
+
+    def test_every_failed_outcome_keeps_the_record(self):
+        """A failed gate is never a low score. Each of these must keep its candidate."""
+        for outcome in ("oversize", "attempts-exhausted", "unreachable", "timed-out",
+                        "http-500", "bad-response", "model-missing", "bad-decisions-url"):
+            with self.subTest(outcome=outcome):
+                survivors, note, _ = self._run_gate(self._report([
+                    {"index": 0, "outcome": outcome, "scores": {}, "passed": False},
+                    {"index": 1, "outcome": outcome, "scores": {}, "passed": False},
+                    {"index": 2, "outcome": outcome, "scores": {}, "passed": False},
+                ]))
+                self.assertEqual(len(survivors), 3, f"{outcome} must not hold a record")
+                self.assertIn("not scored and kept", note)
+
+    def test_an_out_of_range_index_keeps_every_record(self):
+        """The regression: a verdict naming an index this client cannot map was skipped, so its
+        candidate was neither held nor appended and vanished from the export."""
+        survivors, note, _ = self._run_gate(self._report([
+            {"index": 99, "outcome": "scored", "passed": False, "passingRoles": []},
+            {"index": "one", "outcome": "scored", "passed": False, "passingRoles": []},
+            {"index": None, "outcome": "scored", "passed": False, "passingRoles": []},
+            {"index": 0, "outcome": "scored", "passed": True, "passingRoles": ["developer"]},
+        ]))
+        self.assertEqual(len(survivors), 3, "an unmappable verdict must not lose its record")
+        self.assertIn("unreadable verdict", note)
+
+    def test_a_report_without_a_records_list_keeps_everything(self):
+        survivors, note, _ = self._run_gate(
+            self._report(None, outcome="ok"))
+        self.assertEqual(len(survivors), 3)
+        self.assertIn("unrecognised", note)
+
+    def test_unreadable_gate_output_keeps_everything(self):
+        survivors, note, _ = self._run_gate(
+            lambda: _Result(0, "{not json"))
+        self.assertEqual(len(survivors), 3)
+        self.assertIn("unreadable", note)
+
+    def test_a_redactor_refusal_refuses_the_export(self):
+        """The one gate failure that is not a skip: content nobody could inspect would be sent."""
+        survivors, note, _ = self._run_gate(
+            lambda: _Result(1, "", json.dumps({"outcome": "redactor-unavailable"})))
+        self.assertEqual(note, "decisions: refused")
+
+    def test_a_misconfigured_gate_refuses_the_export(self):
+        for detail in ("bad-decisions-config", "bad-decisions-url"):
+            with self.subTest(detail=detail):
+                survivors, note, _ = self._run_gate(
+                    lambda d=detail: _Result(1, "", json.dumps({"outcome": d})))
+                self.assertEqual(note, "decisions: refused")
+
+    def test_a_refusal_actually_stops_the_export(self):
+        """The property the two cases above do not reach.
+
+        They assert the *note label*, so they pass against a `gate_decisions` that labels a refusal
+        and a `cmd_export` that never reads the label — which is exactly what shipped. Both messages
+        say "Nothing was written", so an operator whose gate had refused was told nothing was stored
+        while the records were stored anyway. Driven through the real `export` entry point, and the
+        assertion is on the thing that matters: the capture client is never reached, so nothing is
+        resolved, chunked, prefetched or written.
+        """
+        for outcome in ("redactor-unavailable", "bad-decisions-config", "bad-decisions-url"):
+            with self.subTest(outcome=outcome), tempfile.TemporaryDirectory() as tmp:
+                src = write(tmp, "notes.md", "The retry budget is three attempts.")
+                originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                             uc.resolve_group, uc._run_capture_client, uc.gate_decisions)
+                called = []
+                uc.gate_redaction = lambda texts: (list(texts), {})
+                uc.gate_atomicity = lambda c: [{"verdict": "simple", "signals": []} for _ in c]
+                uc.initiative_exists = lambda name: (True, "present")
+                uc.resolve_group = lambda b, n, d, dryrun: ({"groupUuid": "g-1", "created": False}, "ok")
+                uc._run_capture_client = lambda s, a, p: (called.append(a[0]), (0, "{}", ""))[1]
+                # The refusal is produced by the gate subprocess's own exit and payload, so the whole
+                # of `gate_decisions` runs for real here and only its transport is replaced.
+                uc.gate_decisions = _stub_gate_transport(
+                    lambda: _Result(1, "", json.dumps({"outcome": outcome})))
+                # The flag is set **here**, not left to the machine. `understanding_client` seeds
+                # `DECISIONS_ENABLED` from `~/.mimisbrunnr/credentials` at import, so a case that does
+                # not set it runs only where that file happens to enable the gate — which is why these
+                # two passed locally and failed on the gate with `0 != 1`. A test's result must not
+                # depend on the operator's configuration; see `HarnessIsolationTests`' counterpart in
+                # the capture skill, where the same leak had the same shape.
+                previous = os.environ.get("CONTEXT_MEMORY_DECISIONS_ENABLED")
+                os.environ["CONTEXT_MEMORY_DECISIONS_ENABLED"] = "true"
+                try:
+                    rc, _, err = run(["export", src, "--write", "--initiative", "Present"])
+                finally:
+                    if previous is None:
+                        os.environ.pop("CONTEXT_MEMORY_DECISIONS_ENABLED", None)
+                    else:
+                        os.environ["CONTEXT_MEMORY_DECISIONS_ENABLED"] = previous
+                    (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                     uc.resolve_group, uc._run_capture_client, uc.gate_decisions) = originals
+                self.assertEqual(rc, 1, f"{outcome}: a refusal must exit non-zero")
+                self.assertIn("REFUSED", err)
+                self.assertEqual(called, [],
+                                 f"{outcome}: the export continued past a refusal that said "
+                                 "'Nothing was written'")
+
+    def test_a_skip_does_not_stop_the_export(self):
+        """The control for the case above, and the property the refusals must not break: an
+        unavailable, timing-out or unrecognised gate skips and keeps, because a down decision model
+        must never block a capture. If the stop were applied too widely, this is what would break."""
+        for outcome in ("unreachable", "timed-out", "http-500", "something unexpected"):
+            with self.subTest(outcome=outcome), tempfile.TemporaryDirectory() as tmp:
+                src = write(tmp, "notes.md", "The retry budget is three attempts.")
+                originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                             uc.resolve_group, uc._run_capture_client, uc.gate_decisions)
+                called = []
+                uc.gate_redaction = lambda texts: (list(texts), {})
+                uc.gate_atomicity = lambda c: [{"verdict": "simple", "signals": []} for _ in c]
+                uc.initiative_exists = lambda name: (True, "present")
+                uc.resolve_group = lambda b, n, d, dryrun: ({"groupUuid": "g-1", "created": False}, "ok")
+                uc._run_capture_client = lambda s, a, p: (called.append(a[0]), (0, "{}", ""))[1]
+                uc.gate_decisions = _stub_gate_transport(
+                    lambda o=outcome: _Result(3 if "unexpected" in o else 1, "",
+                                              json.dumps({"outcome": o})))
+                previous = os.environ.get("CONTEXT_MEMORY_DECISIONS_ENABLED")
+                os.environ["CONTEXT_MEMORY_DECISIONS_ENABLED"] = "true"
+                try:
+                    rc, _, err = run(["export", src, "--write", "--initiative", "Present"])
+                finally:
+                    if previous is None:
+                        os.environ.pop("CONTEXT_MEMORY_DECISIONS_ENABLED", None)
+                    else:
+                        os.environ["CONTEXT_MEMORY_DECISIONS_ENABLED"] = previous
+                    (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                     uc.resolve_group, uc._run_capture_client, uc.gate_decisions) = originals
+                self.assertNotIn("REFUSED", err, f"{outcome}: a skip must not be promoted to a refusal")
+                self.assertTrue(called, f"{outcome}: a skipped gate must not block the export")
+
+    def test_an_unknown_gate_failure_skips_rather_than_refusing(self):
+        """An unrecognised non-zero exit is not one of the two known refusals, so it must not be
+        promoted into one — nor silently treated as a pass without saying so."""
+        survivors, note, _ = self._run_gate(
+            lambda: _Result(3, "", "something entirely unexpected"))
+        self.assertEqual(len(survivors), 3)
+        self.assertIn("skipped", note)
+
+
+def _Result(rc, out, err=""):
+    """A stand-in for `subprocess.CompletedProcess`; the gate reads only these three attributes."""
+    return type("_Result", (), {"returncode": rc, "stdout": out, "stderr": err})()
+
+
+def _stub_gate_transport(fake):
+    """`gate_decisions` with only its subprocess call replaced.
+
+    The point of this helper is to leave the refusal logic itself real. Stubbing `gate_decisions`
+    outright — which is what the pre-existing refusal cases do — asserts whatever string the stub was
+    told to return, so a `cmd_export` that never reads the note label still passes. Here the whole
+    function runs and only the transport is faked, so the note the export acts on is produced by the
+    same code that produces it in production.
+    """
+    real = uc.gate_decisions
+
+    def gate_decisions(candidates):
+        original = uc.subprocess.run
+        uc.subprocess.run = lambda *a, **k: fake()
+        try:
+            return real(candidates)
+        finally:
+            uc.subprocess.run = original
+    return gate_decisions
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
