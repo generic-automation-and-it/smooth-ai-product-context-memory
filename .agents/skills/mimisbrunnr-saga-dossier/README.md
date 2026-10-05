@@ -45,19 +45,35 @@ from that — nothing added, nothing quietly dropped.
 ## Try it
 
 ```bash
-# 1. Ask the store for everything about this repo, following recorded links up to 3 hops out.
 mkdir -p .context/mimisbrunnr-saga-dossier
+
+# 1. Preview first. This is blob-free and cheap: it shows the selection the store would hand back —
+#    which memories, how many, how far the links reach, the estimated cost and any limit it hit.
+python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py \
+  preview --repo kingstown --widen-depth 3
+
+# 2. Stop and decide. Approve the scope as shown, narrow it (change the flags and preview again),
+#    or cancel. Nothing past this point runs until the scope is approved.
+
+# 3. Fetch the bundle for exactly the approved anchors — same flags as the approved preview.
 python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py \
   bundle --repo kingstown --widen-depth 3 > .context/mimisbrunnr-saga-dossier/bundle.json
 
-# 2. Turn that bundle into a readable document, angled for an architecture write-up.
+# 4. Turn that bundle into a readable document, angled for an architecture write-up.
 python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py \
   compose --bundle .context/mimisbrunnr-saga-dossier/bundle.json --focus architecture \
   --out .context/mimisbrunnr-saga-dossier/architecture.md
 ```
 
-Step 1 costs a request against the store; step 2 is free to re-run as many times as you like against
-the same saved bundle — try a few focuses on one bundle without re-asking the store.
+Steps 1 and 3 each cost a request against the store; step 4 is free to re-run as many times as you like
+against the same saved bundle — try a few focuses on one bundle without re-asking the store. If the
+store changed between steps 1 and 3, the bundle's `manifest.selection` will not match the approved
+preview's `selection`: preview again and re-approve rather than composing a scope nobody approved.
+
+`--out` must be a gitignored path — the dossier carries store content, so a tracked or un-ignored
+destination (a `README.md`, say) is refused, as is a path outside a git checkout. Leave `--out` off to
+print to stdout instead. `--asof YYYY-MM-DD` composes lifecycle and staleness as of that date; a date
+that does not parse is refused rather than silently read as today.
 
 The read token and base URL are seeded from the machine credential file (`~/.mimisbrunnr/credentials`)
 at import, so the skill works from any checkout with nothing to provision per repo. The bundle stays
