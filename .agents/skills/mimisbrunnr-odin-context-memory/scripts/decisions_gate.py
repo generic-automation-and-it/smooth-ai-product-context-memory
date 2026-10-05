@@ -45,7 +45,7 @@ from urllib.parse import urlparse
 DEFAULT_BASE_URL = "http://localhost:11434"
 DEFAULT_PATH = "/v1/systemone"
 DEFAULT_MODEL = "nimble"
-DEFAULT_MIN_PROBABILITY = 0.5
+DEFAULT_MIN_PROBABILITY = 0.85
 DEFAULT_MAX_ATTEMPTS = 3
 DEFAULT_TIMEOUT = 30
 DEFAULT_ROLES = "product-owner,designer,developer,tester,business"
@@ -582,9 +582,17 @@ def call_model(state, roles, settings, rubric_version):
         if not isinstance(value, (int, float)) or isinstance(value, bool):
             raise GateError("bad-response",
                             f"role {role['key']!r} carried no numeric `noul`")
-        # Clamped: a probability outside 0..1 is a malformed answer, and letting it through would let a
-        # 1.5 pass a 1.0 bar. Clamping is stated here rather than silently trusted.
-        scores[role["key"]] = max(0.0, min(1.0, float(value)))
+        # Refused, not clamped. `json.loads` accepts `NaN` and `Infinity`, and clamping turned an
+        # `Infinity` (or a 1.5) into a confident 1.0 that passes any bar — a malformed answer reported
+        # as the strongest possible score. A probability outside 0..1 is not a score at all.
+        try:
+            probability = float(value)
+        except OverflowError:
+            probability = math.inf
+        if not math.isfinite(probability) or not 0.0 <= probability <= 1.0:
+            raise GateError("bad-response",
+                            f"role {role['key']!r} carried a `noul` outside 0..1")
+        scores[role["key"]] = probability
 
     passing = [role for role, value in scores.items() if value > settings["min_probability"]]
     return scores, passing, rubric_version
