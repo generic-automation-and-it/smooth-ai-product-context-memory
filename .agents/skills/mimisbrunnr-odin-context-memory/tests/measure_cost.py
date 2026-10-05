@@ -4,6 +4,13 @@
 import json
 
 FACTS = 10
+# The capture client's per-`set` item cap (`MAX_CANDIDATES` in context_memory_client.py).
+SET_ITEM_CAP = 20
+# Items one fact can put in a `set`: an authority resolution won by the existing claim writes the
+# candidate's losing version and then restores the existing winner as a second version (authority.py),
+# and the Host stores a blob per item that carries content. A divergence adds a record with no content,
+# so it adds no blob.
+ITEMS_PER_FACT_MAXIMUM = 2
 BASELINE_CANDIDATES = 200
 LOOKUP_SURFACED = 5
 GROUNDING_SURFACED = 20
@@ -13,7 +20,7 @@ def encoded_size(rows):
     return len(json.dumps(rows, separators=(",", ":")).encode("utf-8"))
 
 
-def main():
+def measure():
     raw_rows = [
         {
             "uuid": f"00000000-0000-4000-8000-{index:012d}",
@@ -38,7 +45,7 @@ def main():
             "logicalKeywordJudgements": FACTS,
             "httpCallsMinimum": 3,
             "optionalDeepsearchPasses": 0,
-            "blobWritesMaximum": FACTS,
+            "blobWritesMaximum": min(FACTS * ITEMS_PER_FACT_MAXIMUM, SET_ITEM_CAP),
         },
         "dryRun": {
             "agentInvocations": 1,
@@ -65,7 +72,11 @@ def main():
         "outputTokens": "unavailable",
         "note": "Structural estimates only: counts are contract-derived bounds; byte sizes use deterministic synthetic content, not stored memory or live workflows.",
     }
-    print(json.dumps(result, indent=2))
+    return result
+
+
+def main():
+    print(json.dumps(measure(), indent=2))
 
 
 if __name__ == "__main__":

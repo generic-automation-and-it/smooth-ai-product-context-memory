@@ -1745,6 +1745,96 @@ class CalibrationScorerTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             self.run_score(self.report(self.scored("c02", 0.9), self.scored("c01", 0.1)))
 
+    # --- the comparison against the recorded run (issue 182) ------------------------------------
+
+    def _fixture(self):
+        with open(Path(__file__).resolve().parent / "fixtures" / "decisions_calibration.json",
+                  encoding="utf-8") as handle:
+            return json.load(handle)
+
+    def _collapsed_report(self, doc):
+        """Every verdict and role count of the recorded run at 0.85 — 15/0/6/0, 24/30 expected, 17
+        unexpected — reproduced by scores that sit either side of the bar at 0.84 and 0.86. The gap the
+        threshold rests on is gone, so a comparison that certifies this is certifying a different gate."""
+        roles = ["product-owner", "designer", "developer", "tester", "business"]
+        drop, bleed, records = 6, 17, []
+        for fixture in doc["records"]:
+            if fixture["tier"] < 2:
+                scores = {role: 0.84 for role in roles}
+            else:
+                scores = {}
+                for role in roles:
+                    if role in fixture["expect"]:
+                        clearing = sum(1 for v in scores.values() if v > 0.85)
+                        if drop and len(fixture["expect"]) > 1 and clearing:
+                            scores[role], drop = 0.84, drop - 1
+                        else:
+                            scores[role] = 0.86
+                    elif bleed:
+                        scores[role], bleed = 0.86, bleed - 1
+                    else:
+                        scores[role] = 0.84
+            records.append({"identity": fixture["id"], "outcome": "scored", "scores": scores})
+        return {"rubricVersion": doc["rubricVersion"], "model": "nimble",
+                "endpoint": "http://localhost:11434", "records": records}
+
+    def _compare(self, doc, report, threshold):
+        with contextlib.redirect_stdout(io.StringIO()):
+            measured = self.scorer.score(doc, report, threshold)
+            return self.scorer.compare(doc["recordedRun"], measured, threshold, report)
+
+    def test_a_collapsed_distribution_is_not_certified_by_matching_verdicts(self):
+        doc = self._fixture()
+        report = self._collapsed_report(doc)
+        with contextlib.redirect_stdout(io.StringIO()):
+            measured = self.scorer.score(doc, report, 0.85)
+        for key in ("truePositive", "trueNegative", "expectedRolesClearing", "unexpectedRolesClearing"):
+            self.assertEqual(measured[key], doc["recordedRun"][key],
+                             f"precondition: {key} matches, so only the shape can tell the runs apart")
+        self.assertLess(measured["separation"], 0.1, "the collapsed gap must be measured, not inferred")
+        drifted = self._compare(doc, report, 0.85)
+        for key in ("separation", "tier01MaxBestRole", "tier23MinBestRole"):
+            self.assertIn(key, drifted)
+
+    def test_a_recorded_figure_this_run_did_not_measure_is_drift(self):
+        doc = self._fixture()
+        with contextlib.redirect_stdout(io.StringIO()):
+            drifted = self.scorer.compare(doc["recordedRun"], {"truePositive": 15}, 0.85)
+        self.assertIn("separation", drifted)
+        self.assertIn("precision", drifted)
+
+    def test_a_bar_with_no_recorded_run_is_not_compared(self):
+        """Overriding the bar used to compare against the run recorded at a different one."""
+        doc = self._fixture()
+        self.assertEqual(self._compare(doc, self._collapsed_report(doc), 0.7), ["bar"])
+
+    def test_the_recorded_former_default_is_compared_at_its_own_bar(self):
+        doc = self._fixture()
+        block = self.scorer.recorded_at(doc["recordedRun"], 0.5)
+        self.assertIs(block, doc["recordedRun"]["atBar05"])
+        self.assertIs(self.scorer.recorded_at(doc["recordedRun"], 0.85), doc["recordedRun"])
+
+    def test_a_different_model_is_drift(self):
+        doc = self._fixture()
+        report = {**self._collapsed_report(doc), "model": "another-model"}
+        self.assertIn("model", self._compare(doc, report, 0.85))
+
+    def test_the_distribution_figures_follow_from_the_scores(self):
+        doc = {"records": [{"id": "c01", "tier": 0, "expect": []},
+                           {"id": "c02", "tier": 1, "expect": []},
+                           {"id": "c03", "tier": 2, "expect": ["developer"]}]}
+        report = {"records": [
+            {"scores": {"developer": 0.1, "tester": 0.2}},
+            {"scores": {"developer": 0.3, "tester": 0.0}},
+            {"scores": {"developer": 0.9, "tester": 0.95}}]}
+        shape = self.scorer.distribution(doc, report, ["developer", "tester"], 0.5)
+        self.assertEqual((shape["tier01MeanBestRole"], shape["tier01MaxBestRole"]), (0.25, 0.3))
+        self.assertEqual((shape["tier23MeanBestRole"], shape["tier23MinBestRole"]), (0.95, 0.95))
+        self.assertEqual(shape["separation"], 0.7)
+        self.assertEqual(shape["perRoleClearing"], {"developer": 1, "tester": 1})
+        self.assertEqual(shape["maxCrossRolePair"], "developer/tester")
+
+
 class DiscriminationDisclosureTests(GateTestCase):
     """`passingRoles` becomes `audience:*` tags downstream, and on its own it cannot tell a tie from
     a clear win. Measured on the calibration fixture, 3 of 21 records carry roles scoring exactly

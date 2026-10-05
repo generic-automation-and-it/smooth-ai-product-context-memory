@@ -12,7 +12,11 @@
         "must_not_contain": [
           "AKIAIOSFODNN7EXAMPLE"
         ],
-        "reason": "secret redacted before blob write"
+        "redacted_must_cover": [
+          "candidate_description",
+          "candidate_statement"
+        ],
+        "reason": "secret redacted before blob write; the verdict carries the scrubbed text of every candidate field under `redacted`"
       }
     },
     {

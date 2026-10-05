@@ -2255,6 +2255,23 @@ class AuthorityTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             authority.compose(payload)
 
+    def test_the_cost_evidence_blob_bound_covers_version_restoration(self):
+        # Issue 182: `blobWritesMaximum` assumed one blob per fact, but an existing-winner resolution
+        # writes two content-bearing versions per fact, and the Host stores a blob per such item.
+        spec = importlib.util.spec_from_file_location("_measure_cost", HERE / "measure_cost.py")
+        cost = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cost)
+        bound = cost.measure()["normalWrite"]["blobWritesMaximum"]
+        self.assertEqual(cost.SET_ITEM_CAP, client.MAX_CANDIDATES)
+        items = []
+        for _ in range(cost.FACTS):
+            payload = self.payload("existing")
+            payload["candidateWrite"]["content"] = "losing body"
+            payload["existing"]["write"]["content"] = "winning body"
+            items.extend(authority.compose(payload)["items"])
+        content_items = [item for item in items if item.get("content")]
+        self.assertEqual(len(content_items), 2 * cost.FACTS)
+        self.assertGreaterEqual(bound, min(len(content_items), client.MAX_CANDIDATES))
 
 class SemanticFixtureTests(unittest.TestCase):
     def test_blinded_model_input_excludes_expected_verdicts(self):
@@ -2282,8 +2299,12 @@ class SemanticFixtureTests(unittest.TestCase):
                          len(payload["scenarios"]))
 
     def test_committed_blinded_semantic_evidence_scores_cleanly(self):
-        # The 2026-09-29-balanced run is the current measurement: same-group pairs throughout, as
-        # the group-scoped identity amendment requires, and balanced controls. Earlier dated runs
+        # The 2026-09-29-balanced run is the latest recorded measurement, with balanced controls. Not
+        # "same-group pairs throughout": s4 is a deliberate cross-group control (`g-99`), and that frozen
+        # fixture predates `candidate_group_uuid`, so the model was never shown the writing group and
+        # s4's verdict was not answerable from its input — its 1.0 credits a guess (issue 182). The
+        # frozen file stays as the record of what the model saw; a new run against the live fixture is
+        # what would make s4 a measurement. Earlier dated runs
         # stay on disk as the record of what the model said on the day, and are re-scorable against
         # the frozen fixture they were taken against — see the two re-scoring tests below.
         completed = subprocess.run(
@@ -2593,6 +2614,42 @@ class SemanticFixtureTests(unittest.TestCase):
         self.assertEqual(scenario["expected"]["count"], 3)
         self.assertEqual(atomicity.classify(scenario["candidate_statement"])["verdict"], "bundled")
         self.assertEqual(scenario["candidate_statement"].count(";") + 1, 3)
+
+    def _s1_row(self, s1_verdict):
+        scenarios = self._scenarios()
+        verdicts = self._verdicts_for(scenarios, lambda s: s["expected"]["verdict"])
+        verdicts = [s1_verdict if v["id"] == "s1-redact-planted-credential" else v for v in verdicts]
+        _, score = self._score(scenarios, verdicts)
+        return {row["id"]: row for row in score["rows"]}["s1-redact-planted-credential"]["match"]
+
+    def test_a_scrub_verdict_is_scored_on_its_redacted_content(self):
+        # Issue 182: the banned-token check only saw what a verdict echoed, so a bare `scrub`, or one
+        # whose "redacted" text still held the key lowercased or split, scored as correct.
+        secret = "AKIAIOSFODNN7EXAMPLE"
+        base = {"id": "s1-redact-planted-credential", "verdict": "scrub", "reason": "aws key"}
+        clean = {"candidate_description": "Deployment uses <redacted> for the build pipeline.",
+                 "candidate_statement": "The CI pipeline authenticates with an AWS access key."}
+        self.assertTrue(self._s1_row({**base, "redacted": clean}), "the control must match")
+        for label, verdict in (
+                ("bare verdict", base),
+                ("missing field", {**base, "redacted": {"candidate_description": clean["candidate_description"]}}),
+                ("blank field", {**base, "redacted": {**clean, "candidate_statement": "  "}}),
+                ("lowercased key", {**base, "redacted": {**clean, "candidate_description": secret.lower()}}),
+                ("split key", {**base, "redacted": {**clean, "candidate_description":
+                                                    f"uses {secret[:4]} {secret[4:]}"}})):
+            with self.subTest(label):
+                self.assertFalse(self._s1_row(verdict))
+
+    def test_the_blinded_input_states_the_verdict_shape_without_an_answer(self):
+        completed = subprocess.run(
+            [sys.executable, str(HERE / "fixtures" / "score_fixtures.py"), "--emit-model-input"],
+            capture_output=True, text=True, check=False)
+        payload = json.loads(completed.stdout)
+        self.assertIn("redacted", payload["verdict_shape"]["redact"])
+        shape = json.dumps(payload["verdict_shape"])
+        for scenario in self._scenarios():
+            self.assertNotRegex(shape, rf"\b{re.escape(scenario['expected']['verdict'])}\b",
+                                "the output shape must not name an expected verdict")
 
 
 class AgentContractTests(unittest.TestCase):
