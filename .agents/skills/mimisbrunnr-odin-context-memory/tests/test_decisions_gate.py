@@ -767,20 +767,23 @@ class LedgerIntegrityTests(GateTestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(report["outcome"], "ok")
 
-    def test_the_write_path_applies_the_cap(self):
-        """The cap must be reached on the real write path, or `cap_ledger` is merely a helper nobody
-        calls. Uses a small injected limit against the shipped `MAX_LEDGER_ENTRIES` boundary."""
-        self.stub.probabilities = dict(self.LOW)
-        state = os.path.join(self.tmp, "ledger.json")
-        subjects = [f"s{i}" for i in range(MAX_LEDGER_ENTRIES + 5)]
-        ledger = {s: 1 for s in subjects}
-        capped = cap_ledger(ledger)
-        self.assertEqual(len(capped), MAX_LEDGER_ENTRIES)
-        # And the write path uses exactly this function.
-        with open(state, "w", encoding="utf-8") as handle:
-            json.dump(ledger, handle)
-        self.assertGreater(len(json.load(open(state, encoding="utf-8"))), MAX_LEDGER_ENTRIES,
-                           "control: the raw file is over the cap before cap_ledger runs")
+    def test_cap_ledger_bounds_a_ledger_built_at_the_shipped_limit(self):
+        """The helper's own bound, at the shipped value. **Not** the wiring.
+
+        This case used to be named `test_the_write_path_applies_the_cap` and its docstring claimed
+        "the real write path", while every line called `cap_ledger` directly and asserted on a file it
+        had just written by hand — so it proved the helper bounds a dictionary and nothing about
+        `record_attempt` using it. The review flagged exactly that, and it was right. The wiring is
+        proved by `test_the_ledger_is_capped_end_to_end`, which crosses the cap through the gate
+        itself; keeping a second case whose name asserts the wiring it does not exercise would be the
+        same defect wearing a different body. Retained at a distinct name and scope, and `cap_ledger` is
+        now reached through its own default rather than a second copy of the limit.
+        """
+        ledger = {f"s{i}": 1 for i in range(MAX_LEDGER_ENTRIES + 5)}
+        self.assertEqual(len(cap_ledger(ledger)), MAX_LEDGER_ENTRIES)
+        # Under the bound, nothing is dropped — the cap is a ceiling, not a target.
+        small = {f"s{i}": 1 for i in range(10)}
+        self.assertEqual(cap_ledger(small), small)
 
     def test_the_cap_holds_at_many_times_the_limit(self):
         """Pure-function check at a size no HTTP round trip could carry, so the bound is exercised
