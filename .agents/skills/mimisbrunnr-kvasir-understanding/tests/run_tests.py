@@ -2277,9 +2277,21 @@ class DecisionsGateIntegrationTests(unittest.TestCase):
                 # of `gate_decisions` runs for real here and only its transport is replaced.
                 uc.gate_decisions = _stub_gate_transport(
                     lambda: _Result(1, "", json.dumps({"outcome": outcome})))
+                # The flag is set **here**, not left to the machine. `understanding_client` seeds
+                # `DECISIONS_ENABLED` from `~/.mimisbrunnr/credentials` at import, so a case that does
+                # not set it runs only where that file happens to enable the gate — which is why these
+                # two passed locally and failed on the gate with `0 != 1`. A test's result must not
+                # depend on the operator's configuration; see `HarnessIsolationTests`' counterpart in
+                # the capture skill, where the same leak had the same shape.
+                previous = os.environ.get("CONTEXT_MEMORY_DECISIONS_ENABLED")
+                os.environ["CONTEXT_MEMORY_DECISIONS_ENABLED"] = "true"
                 try:
                     rc, _, err = run(["export", src, "--write", "--initiative", "Present"])
                 finally:
+                    if previous is None:
+                        os.environ.pop("CONTEXT_MEMORY_DECISIONS_ENABLED", None)
+                    else:
+                        os.environ["CONTEXT_MEMORY_DECISIONS_ENABLED"] = previous
                     (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
                      uc.resolve_group, uc._run_capture_client, uc.gate_decisions) = originals
                 self.assertEqual(rc, 1, f"{outcome}: a refusal must exit non-zero")
@@ -2306,9 +2318,15 @@ class DecisionsGateIntegrationTests(unittest.TestCase):
                 uc.gate_decisions = _stub_gate_transport(
                     lambda o=outcome: _Result(3 if "unexpected" in o else 1, "",
                                               json.dumps({"outcome": o})))
+                previous = os.environ.get("CONTEXT_MEMORY_DECISIONS_ENABLED")
+                os.environ["CONTEXT_MEMORY_DECISIONS_ENABLED"] = "true"
                 try:
                     rc, _, err = run(["export", src, "--write", "--initiative", "Present"])
                 finally:
+                    if previous is None:
+                        os.environ.pop("CONTEXT_MEMORY_DECISIONS_ENABLED", None)
+                    else:
+                        os.environ["CONTEXT_MEMORY_DECISIONS_ENABLED"] = previous
                     (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
                      uc.resolve_group, uc._run_capture_client, uc.gate_decisions) = originals
                 self.assertNotIn("REFUSED", err, f"{outcome}: a skip must not be promoted to a refusal")
