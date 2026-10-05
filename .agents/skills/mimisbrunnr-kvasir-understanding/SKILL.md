@@ -43,11 +43,15 @@ already written somewhere into the store so it compounds. It is the **load/trans
 
 ```bash
 python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding_client.py \
-  load <input> [--format store|understanding|foreign|auto] [--all] [--asof YYYY-MM-DD] [--max-chars N]
+  load [<input> | --input <path>] [--format store|understanding|foreign|auto] [--all] [--asof YYYY-MM-DD] [--max-chars N]
 ```
 
 - `load` reads the input (a store Understanding export, or a foreign document) and renders it as
   **cited grounding context** for the agent. **It writes nothing.**
+- **`--input` defaults to the current session.** When neither the positional nor `--input` is given,
+  the skill loads the current session's dump folder (the newest `.context/mimisbrunnr-understandings/*`),
+  which an agent materialises with `dump --currentsession --from <session>` first. Without one it
+  refuses with a pointer to `dump --currentsession`.
 - **Breadth** (store exports only): by default a load returns **only** the understanding-kind records.
   `--all` unions memory **and** understanding — the full context. The breadth default is stated in the
   output, and scoped-memory records that were omitted are listed, never silently dropped.
@@ -112,7 +116,7 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
 
 ```bash
 python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding_client.py \
-  export <input> [--write] \
+  export [<input> | --input <path>] [--write] \
   [--tickets TICKET,...] [--tags TAG,...] [--repository REPO] [--scope scope:id] \
   [--initiative NAME] [--name NAME] [--body TEXT] [--heimdallr true]
 ```
@@ -120,6 +124,10 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
 - `export` orchestrates the capture skill end to end — redaction gate, atomicity gate, the optional value
   gate, the auto-split batch cap, group resolution, preflight, and `set --dryrun` as the veto point — and
   **never writes directly**. It is a **dry run by default**; `--write` performs the capture.
+- **`--input` defaults to the current session.** When neither the positional nor `--input` is given,
+  `export` captures the current session's dump folder (the newest `.context/mimisbrunnr-understandings/*`),
+  which an agent materialises with `dump --currentsession --from <session>` first. Without one it refuses
+  with a pointer to `dump --currentsession`.
 
 - **The value gate is optional and off by default.** With `CONTEXT_MEMORY_DECISIONS_ENABLED=true`, each
   candidate is scored for value to each target role by a **local decision model** (no model in the Host or

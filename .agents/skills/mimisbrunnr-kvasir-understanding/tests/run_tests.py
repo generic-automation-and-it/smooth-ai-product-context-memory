@@ -11,6 +11,7 @@ touching the store (LADR-07).
 
 from __future__ import annotations
 
+import argparse
 import datetime as dt
 import io
 import json
@@ -2365,6 +2366,48 @@ def _stub_gate_transport(fake):
         finally:
             uc.subprocess.run = original
     return gate_decisions
+
+
+class InputDefaultTests(unittest.TestCase):
+    """`load`/`export` default their input to the current session when neither the positional nor
+    `--input` is given — the session's dump folder, materialised by `dump --currentsession` first."""
+
+    def test_resolve_input_prefers_the_flag_over_the_positional(self):
+        args = argparse.Namespace(input_option="/a", input="/b")
+        self.assertEqual(uc.resolve_input(args), "/a")
+
+    def test_resolve_input_falls_back_to_the_positional(self):
+        args = argparse.Namespace(input_option=None, input="/b")
+        self.assertEqual(uc.resolve_input(args), "/b")
+
+    def test_resolve_input_defaults_to_current_session_when_none(self):
+        original = uc.current_session_input
+        uc.current_session_input = lambda: "/dump"
+        try:
+            args = argparse.Namespace(input_option=None, input=None)
+            self.assertEqual(uc.resolve_input(args), "/dump")
+        finally:
+            uc.current_session_input = original
+
+    def test_export_with_no_input_and_no_current_dump_refuses(self):
+        """No input, and no session dump: refuse with a pointer to `dump --currentsession`."""
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md", "A fact worth storing.")
+            originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                         uc.resolve_group, uc._run_capture_client, uc.current_session_input)
+            uc.gate_redaction = lambda texts: (list(texts), {})
+            uc.gate_atomicity = lambda c: [{"verdict": "simple", "signals": []} for _ in c]
+            uc.initiative_exists = lambda name: (True, "ok")
+            uc.resolve_group = lambda b, n, d, dryrun: (None, "dry-run")
+            uc._run_capture_client = lambda s, a, p: (0, "{}", "")
+            uc.current_session_input = lambda: None
+            try:
+                rc, _, err = run(["export", "--initiative", "X", "--heimdallr", "false"])
+            finally:
+                (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                 uc.resolve_group, uc._run_capture_client, uc.current_session_input) = originals
+            self.assertEqual(rc, 1)
+            self.assertIn("dump --currentsession", err)
 
 
 if __name__ == "__main__":

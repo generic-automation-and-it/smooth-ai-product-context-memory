@@ -1,25 +1,34 @@
 ---
 name: mimisbrunnr-odin-context-memory
-description: Get and set persistent context-memory records — the sole authority on the write path to the SmoothAiProductContextMemory store. Use when you need to record a durable fact, decision, preference, or constraint for later retrieval across sessions, or when you need to recall what was previously captured about a subject, ticket, repository, or scope. Captures byproduct facts during work and writes them at an explicit end-of-task checkpoint.
+description: Import and export persistent context-memory records — the sole authority on the write path to the SmoothAiProductContextMemory store. Use when you need to record a durable fact, decision, preference, or constraint for later retrieval across sessions, or when you need to recall what was previously captured about a subject, ticket, repository, or scope. Captures byproduct facts during work and writes them at an explicit end-of-task checkpoint.
 effort: xhigh  # sole write path to the store every later session builds on: semantic dedup, link derivation, atomicity, summary generation
 ---
 
 ## Switches
 
 All switches are **OFF by default**. With no switches the skill captures silently during work and
-writes nothing until an explicit `set` at the end-of-task checkpoint.
+writes nothing until an explicit `--export` at the end-of-task checkpoint.
+
+The store-direction switches align with `mimisbrunnr-kvasir-understanding` and `ai-understanding`
+(LADR-11): `--import` is store → session (recall), `--export` is session → store (capture). The
+low-level client verbs (`set`, `query`, `get-versions`) are the plumbing those directions route
+through — they stay, but the direction is named consistently.
 
 | Switch | Effect |
 |--------|--------|
-| _(none)_ | Silent accumulate during work; no write until the `set` checkpoint. |
+| _(none)_ | Silent accumulate during work; no write until the `--export` checkpoint. |
+| `--import` | Store → session (recall). Query `kind = understanding` (or the requested kind) back into the session as cited grounding context, read token only. The aligned name for the read/`get` direction. |
+| `--export` | Session → store (capture). Write the accumulated candidate facts at the checkpoint through the full write pipeline. The aligned name for the write/`set` direction. |
+| `--input` | The session content for `--export`; defaults to the current session (the newest `.context/mimisbrunnr-understandings/*` dump, materialised by `dump --currentsession` first). |
 | `--dryrun` | Run the full write pipeline (preflight, redaction detection, dedup, link derivation, atomicity, ticket-uniqueness) and produce the digest **without writing anything**. Report what *would* be created / versioned / linked / skipped. **This is the only pre-write veto point** — see Finalization Output. |
-| `--approve` | Write gated kinds (`rule`, `nfr`, `decision`) as `approved` instead of `proposed`. **Only usable when the human explicitly confirms.** Without it, a gated `set` still writes, but with `status: proposed` — excluded or flagged on retrieval until promoted. |
+| `--approve` | Write gated kinds (`rule`, `nfr`, `decision`) as `approved` instead of `proposed`. **Only usable when the human explicitly confirms.** Without it, a gated `--export` still writes, but with `status: proposed` — excluded or flagged on retrieval until promoted. |
 | `--deepsearch` | Delegates bounded expansion: up to four keyword queries of 25 and five depth-one traversals of 20, with 400 unique UUID/version candidates overall. More inspection, never more authority or irreversibility. |
 
 **Implication rule:** `--approve` is the only switch that widens what the write path *does*; all other
-switches (`--dryrun` and `--deepsearch`) change *how much work* is done, never *how irreversible*
-it is. `--dryrun` and `--approve` are mutually exclusive — `--dryrun` writes nothing, `--approve` is the
-permission to write. Treat a request for both as an error: ask which one is meant.
+switches (`--dryrun`, `--deepsearch`, `--import`, `--input`) change *how much work* is done or *which
+direction*, never *how irreversible* it is. `--dryrun` and `--approve` are mutually exclusive —
+`--dryrun` writes nothing, `--approve` is the permission to write. Treat a request for both as an
+error: ask which one is meant.
 
 Requires **Python 3.9 or newer**; the npm launcher (`npm/cli/_run.js`) checks the floor and refuses
 below it. The client normalises a sub-second fraction before parsing `observedAt`, because
@@ -35,7 +44,7 @@ structural read boundary. `--dryrun` performs the same judgement work as write b
 
 # Context Memory
 
-Get and set persistent, summarised, labelled context. The skill is the **sole authority** on the write path to the
+Import and export persistent, summarised, labelled context. The skill is the **sole authority** on the write path to the
 context-memory store. It performs the semantic work
 the database cannot express as constraints.
 
@@ -45,7 +54,7 @@ The skill is the **only** writer to the store. It does not just record — it de
 fact, whether this is a new memory, a version bump, a divergent claim, or a skip, and it derives the
 classification metadata. The pipeline is fixed; the skill does not invent its own write sequence.
 
-Write **only at an explicit end-of-task checkpoint** (the `set` call), never per-fact mid-work.
+Write **only at an explicit end-of-task checkpoint** (the `--export` call), never per-fact mid-work.
 During work, accumulate candidate facts silently.
 
 ## Where Each Step Runs

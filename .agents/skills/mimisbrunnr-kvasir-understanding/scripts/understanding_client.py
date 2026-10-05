@@ -592,7 +592,12 @@ def render_foreign(body: str, src: str, max_chars: int) -> list[str]:
 
 
 def cmd_load(args: argparse.Namespace) -> int:
-    material = read_material(args.input, args.format)
+    src = resolve_input(args)
+    if src is None:
+        print("REFUSED: no --input given and no current session dump found. Run "
+              "`dump --currentsession` first.", file=sys.stderr)
+        return 1
+    material = read_material(src, args.format)
     if isinstance(material, int):
         return material
     src, _, records, body, notes = material
@@ -1358,7 +1363,12 @@ def cmd_export(args: argparse.Namespace) -> int:
     memory — because `resolve-group` has no dry-run mode and would create a group as a side effect
     of asking.
     """
-    material = read_material(args.input, "auto")
+    src = resolve_input(args)
+    if src is None:
+        print("REFUSED: no --input given and no current session dump found. Run "
+              "`dump --currentsession` first.", file=sys.stderr)
+        return 1
+    material = read_material(src, "auto")
     if isinstance(material, int):
         return material
     src, source_kind, records, body, notes = material
@@ -1811,6 +1821,31 @@ def strip_dump_boilerplate(body: str) -> str:
     return re.sub(begin + r".*?" + end, "", body, flags=re.DOTALL).strip()
 
 
+def current_session_input() -> str | None:
+    """The current session's dump folder, or None.
+
+    ``load``/``export`` default to this when ``--input`` is omitted. The current session is the newest
+    ``.context/mimisbrunnr-understandings/*/`` folder holding a ``_session.md`` — an agent materialises
+    it with ``dump --currentsession --from <session>`` first; without one there is nothing to load or
+    export. The newest dump is the current session because a dump mints a fresh, stamped folder.
+    """
+    base = Path(".context/mimisbrunnr-understandings")
+    if not base.is_dir():
+        return None
+    dumps = [d for d in base.iterdir() if d.is_dir() and (d / SESSION_FILE).is_file()]
+    dumps.sort(key=lambda d: d.stat().st_mtime, reverse=True)
+    return str(dumps[0]) if dumps else None
+
+
+def resolve_input(args: argparse.Namespace) -> str | None:
+    """Resolve the input for ``load``/``export``: ``--input`` wins, then the positional, then the
+    current session. Returns None (and the caller refuses) when nothing is available."""
+    src = args.input_option or args.input
+    if src is None:
+        src = current_session_input()
+    return src
+
+
 def dump_metadata_binding(folder: str | Path) -> dict:
     """The binding a dump recorded, or `{}` when the dump carries none or is unreadable.
 
@@ -2013,8 +2048,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     sub = parser.add_subparsers(dest="command", required=True)
 
     load = sub.add_parser("load", help="Render material as cited grounding context (no write).")
-    load.add_argument("input", help="Store export, ai-understanding unit or store folder, session "
-                                    "dump folder, or a foreign document; - for stdin.")
+    load.add_argument("input", nargs="?", help="Store export, ai-understanding unit or store folder, "
+                                               "session dump folder, or a foreign document; - for "
+                                               "stdin. Defaults to the current session when omitted.")
+    load.add_argument("--input", dest="input_option",
+                      help="Explicit input; defaults to the current session when omitted.")
     load.add_argument("--format", choices=("store", "understanding", "foreign", "auto"),
                       default="auto")
     load.add_argument("--all", action="store_true", dest="all_kinds",
@@ -2059,7 +2097,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
     exp = sub.add_parser("export", help="SESSION -> STORE: orchestrate the capture path "
                                         "(dry run unless --write).")
-    exp.add_argument("input", help="Same inputs as load; a dump folder carries its own binding.")
+    exp.add_argument("input", nargs="?", help="Same inputs as load; a dump folder carries its own "
+                                              "binding. Defaults to the current session when omitted.")
+    exp.add_argument("--input", dest="input_option",
+                     help="Explicit input; defaults to the current session when omitted.")
     exp.add_argument("--write", action="store_true",
                      help="Perform the capture. Without it this is a dry run that creates nothing.")
     exp.add_argument("--tickets", help="Comma-separated ticket keys: #12, github:12, provider:key.")
