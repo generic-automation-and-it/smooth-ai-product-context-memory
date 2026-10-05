@@ -146,6 +146,10 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
   without a readable value keeps every candidate. The rubric is `scripts/decisions_rubric.json`, **a copy shared with the capture
   skill** — the two must not drift, so an edit belongs in both. Full contract:
   [`mimisbrunnr-odin-context-memory` → Value Gate](mimisbrunnr-odin-context-memory/SKILL.md).
+  **A dry run never scores.** Scoring spends each record's attempt budget in the gate's ledger, so a
+  dry run runs the gate's content-free `probe` instead and reports `decisions: not scored (dry run …)`
+  — its write count is therefore an upper bound, since the `--write` may hold some. A misconfigured
+  gate is refused on the dry run too, so the preview says what the write would say.
 - **A dry run creates nothing** — no initiative, no group, no memory. `resolve-group` has no dry-run mode
   and its handler commits unconditionally, so a dry run resolves nothing and reports the group and the
   initiative as *would create*, printing the exact commands.

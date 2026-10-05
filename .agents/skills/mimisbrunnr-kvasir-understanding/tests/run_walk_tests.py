@@ -19,7 +19,9 @@ measures what that costs in context. Three surfaces are rendered offline from co
 
 A cold agent receives only the rendered surface plus a question set, and answers each question by
 citing the specific identity (subject / uuid / slug) that supports it, or "not in context" when the
-information is absent. Each question is scored **by identity cited**, never by prose similarity.
+information is absent. Each question is scored **by identity cited and key fact stated**
+(`must_contain` / `must_not_contain` in `walk_questions.json`), never by prose similarity: citing the
+right identity while stating a wrong or superseded claim is not a correct answer (issue 182).
 
 The genuinely model-dependent part — a cold *model* answering the question set — is performed by the
 orchestrator (the skill's cold agent), not by this file. That walk's output is recorded in
@@ -141,22 +143,38 @@ def _present(surface_text: str, q: dict) -> bool:
     return q["identity"].lower() in surface_text.lower()
 
 
+def _facts_match(answer: str, q: dict) -> bool:
+    """The answer states the question's key fact and none of its known-wrong claims.
+
+    Citing a present identity is not answering: an answer that names the right memory and states the
+    superseded or an invented claim scored as correct (issue 182). `must_contain` is the key-fact
+    phrase the material supports (chosen so the question text itself does not supply it) and
+    `must_not_contain` the claim it contradicts, such as a superseded version. A token check, not a
+    semantic one: it catches a wrong fact, not every way to garble a right one.
+    """
+    text = answer.lower()
+    return (all(f.lower() in text for f in q.get("must_contain", []))
+            and not any(f.lower() in text for f in q.get("must_not_contain", [])))
+
+
 def score_answers(surface_text: str, answers: dict, questions: list[dict]) -> list[dict]:
-    """Score one surface's answers by identity cited.
+    """Score one surface's answers by identity cited and key fact stated.
 
     For a question whose identity is rendered (present): correct iff the answer cites an accepted
-    alias of that identity. For a question whose identity is NOT rendered (absent): correct iff the
-    answer declines as not-in-context — an answer that supplies content is a confabulation.
+    alias of that identity **and** states its key fact without a known-wrong claim. For a question
+    whose identity is NOT rendered (absent): correct iff the answer declines as not-in-context — an
+    answer that supplies content is a confabulation.
     """
     results = []
     for q in questions:
         present = _present(surface_text, q)
         ans = (answers.get(q["id"]) or "").strip()
         cited = any(a.lower() in ans.lower() for a in q.get("accept", [q["identity"]]))
+        facts = _facts_match(ans, q)
         declined = bool(DECLINE_RE.fullmatch(ans))
         results.append({
-            "id": q["id"], "present": present, "cited": cited, "declined": declined,
-            "correct": cited if present else declined,
+            "id": q["id"], "present": present, "cited": cited, "facts": facts, "declined": declined,
+            "correct": (cited and facts) if present else declined,
         })
     return results
 
@@ -197,14 +215,28 @@ def confab_answers(questions: list[dict]) -> dict:
 
 
 def perfect_answers(surface_text: str, questions: list[dict]) -> dict:
-    """The ideal cold agent: cites the identity for present questions, declines for absent ones."""
+    """The ideal cold agent: cites the identity and states its key fact for present questions,
+    declines for absent ones."""
     out = {}
     for q in questions:
         if _present(surface_text, q):
-            out[q["id"]] = f"{q['identity']}: supported by the cited material."
+            facts = "; ".join(q.get("must_contain", []))
+            out[q["id"]] = f"{q['identity']}: {facts} — supported by the cited material."
         else:
             out[q["id"]] = "not in context."
     return out
+
+
+def wrong_fact_answers(questions: list[dict]) -> dict:
+    """An agent that cites the right identity but states a wrong or superseded claim."""
+    wrong = {
+        "Q1": "A healthy container is always fresh, so redeploy. Cited: Stale-image trap.",
+        "Q2": "The graph is a join under the hood. Cited: Graph over joins.",
+        "Q3": "SQLite is the storage engine. Cited: Storage engine.",
+        "Q4": "Memcached holds the cache. Cited: Cache path.",
+        "Q5": "not in context",
+    }
+    return {q["id"]: wrong.get(q["id"], "not in context") for q in questions}
 
 
 # ------------------------------------------------------------------------- Tests
@@ -256,8 +288,25 @@ class WalkFixtureTests(unittest.TestCase):
             summ = summarize(results)
             self.assertEqual(summ["confabulations"], summ["absent_asked"],
                              f"{name}: every absent question must be flagged as a confabulation")
-            # And the confab agent does get the present ones right — so the detector is not trivially 0.
-            self.assertEqual(summ["correct_present"], summ["present_asked"], name)
+
+    def test_a_right_citation_with_a_wrong_fact_is_not_correct(self):
+        """Regression (issue 182): scoring by identity alone counted an answer that names the right
+        memory and states a wrong or superseded claim as correct, so an all-wrong walk scored 5/5."""
+        for name, text in self.texts.items():
+            results = score_answers(text, wrong_fact_answers(self.questions), self.questions)
+            summ = summarize(results)
+            self.assertGreater(summ["present_asked"], 0, name)
+            self.assertTrue(all(r["cited"] for r in results if r["present"]), name)
+            self.assertEqual(summ["correct_present"], 0, f"{name}: a wrong fact must not score")
+
+    def test_every_present_question_names_a_fact_its_text_does_not_supply(self):
+        """A key fact the question already states would be scored by an agent that echoes it."""
+        for q in self.questions:
+            if q["absent"]:
+                continue
+            self.assertTrue(q.get("must_contain"), q["id"])
+            for fact in q["must_contain"]:
+                self.assertNotIn(fact.lower(), q["question"].lower(), q["id"])
 
     def test_degenerate_perfect_agent_scores_full_marks(self):
         """The detector is not always-wrong: an ideal cold agent scores 100%."""

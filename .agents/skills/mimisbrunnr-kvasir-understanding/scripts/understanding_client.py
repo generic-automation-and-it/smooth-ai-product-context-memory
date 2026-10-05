@@ -1007,6 +1007,54 @@ def _audience_tags(candidate: dict, result: dict) -> list[str]:
     return tags
 
 
+def probe_decisions(count: int) -> str:
+    """The dry-run counterpart of `gate_decisions`: check the gate without scoring anything.
+
+    Scoring spends each record's attempt budget in the gate's ledger, so a dry run that scored
+    exhausted it: after three previews a `--write` saw `attempts-exhausted` for every record, which
+    keeps the record unscored — the gate bypassed by previewing it (issue 182). `probe` checks the
+    configuration, endpoint and model with a content-free request and writes no ledger. A
+    misconfigured gate is still a refusal here, so the dry run says what the write would say.
+    """
+    if os.environ.get(DECISIONS_ENABLED, "").lower() != "true":
+        return "decisions: disabled"
+    if not DECISIONS_GATE.is_file():
+        print(f"NOTE: the decision gate is enabled but {DECISIONS_GATE} is missing; a --write would "
+              "skip it.", file=sys.stderr)
+        return "decisions: skipped (gate script missing)"
+    not_scored = (f"decisions: not scored (dry run; scoring spends the gate's attempt budget) — "
+                  f"a --write scores {count} candidate(s) and may hold some")
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-B", str(DECISIONS_GATE), "probe"],
+            capture_output=True, text=True, encoding="utf-8", timeout=GATE_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        return f"{not_scored}; gate probe did not answer within {GATE_TIMEOUT_SECONDS}s"
+    except OSError:
+        return f"{not_scored}; gate probe could not run"
+    outcome = None
+    # The probe prints its report on stdout; a configuration error raised before the report exists
+    # reaches stderr as the gate's own `{"outcome": ...}` object.
+    for stream in (proc.stdout, proc.stderr):
+        try:
+            report = json.loads(stream or "")
+        except ValueError:
+            continue
+        if isinstance(report, dict) and isinstance(report.get("outcome"), str):
+            outcome = report["outcome"]
+            break
+    if outcome in ("bad-decisions-config", "bad-decisions-url"):
+        print(f"REFUSED: the decision gate is misconfigured ({outcome}). Nothing was written.",
+              file=sys.stderr)
+        return DECISIONS_REFUSED
+    if outcome == "disabled":
+        return "decisions: disabled"
+    if outcome == "ok":
+        return f"{not_scored}; gate probe ok"
+    return f"{not_scored}; gate probe: {outcome or 'unreadable'} — a --write would skip the gate"
+
+
 def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str]:
     """Score each candidate's role value through the capture skill's decision gate.
 
@@ -1520,7 +1568,11 @@ def cmd_export(args: argparse.Namespace) -> int:
     # something other than what was configured, and both messages say "Nothing was written" — so
     # continuing past them wrote records under a refusal the operator had been told had blocked them.
     # Stopping here is before the group is resolved and before any chunk, so nothing exists to undo.
-    clean, decision_note = gate_decisions(clean)
+    # A dry run probes rather than scores: scoring spends the attempt budget the write needs.
+    if args.write:
+        clean, decision_note = gate_decisions(clean)
+    else:
+        decision_note = probe_decisions(len(clean))
     if decision_note == DECISIONS_REFUSED:
         print("REFUSED: the decision gate refused this export (the reason is above). Nothing was "
               "written; fix the gate or export without it.", file=sys.stderr)

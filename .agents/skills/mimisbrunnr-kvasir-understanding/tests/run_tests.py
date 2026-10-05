@@ -2519,6 +2519,104 @@ def _Result(rc, out, err=""):
     return type("_Result", (), {"returncode": rc, "stdout": out, "stderr": err})()
 
 
+class DecisionsGateDryRunAndTimeoutTests(unittest.TestCase):
+    """Issue 182. A dry run scored through the gate, which spends each record's attempt budget: three
+    previews exhausted it and the `--write` kept every record unscored. A dry run now runs the gate's
+    content-free `probe` instead. And a redactor timeout inside the gate must stay a refusal."""
+
+    def _run_export(self, gate_answer, write_flag):
+        """Run the real `export` with only the gate subprocess and the capture client faked.
+        Returns (rc, out, err, gate argv list, capture-client calls)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md", "The retry budget is three attempts.")
+            originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                         uc.resolve_group, uc._run_capture_client, uc.subprocess.run)
+            gate_argv, called = [], []
+            uc.gate_redaction = lambda texts: (list(texts), {})
+            uc.gate_atomicity = lambda c: [{"verdict": "simple", "signals": []} for _ in c]
+            uc.initiative_exists = lambda name: (True, "present")
+            uc.resolve_group = lambda b, n, d, dryrun: ({"groupUuid": "g-1", "created": False}, "ok")
+            uc._run_capture_client = lambda s, a, p: (called.append(a[0]), (0, "{}", ""))[1]
+
+            def fake_run(argv, **kwargs):
+                gate_argv.append(list(argv))
+                return gate_answer(argv)
+
+            uc.subprocess.run = fake_run
+            previous = os.environ.get("CONTEXT_MEMORY_DECISIONS_ENABLED")
+            os.environ["CONTEXT_MEMORY_DECISIONS_ENABLED"] = "true"
+            try:
+                argv = ["export", src, "--initiative", "Present", "--heimdallr", "false"]
+                if write_flag:
+                    argv.append("--write")
+                rc, out, err = run(argv)
+            finally:
+                if previous is None:
+                    os.environ.pop("CONTEXT_MEMORY_DECISIONS_ENABLED", None)
+                else:
+                    os.environ["CONTEXT_MEMORY_DECISIONS_ENABLED"] = previous
+                (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                 uc.resolve_group, uc._run_capture_client, uc.subprocess.run) = originals
+            return rc, out, err, gate_argv, called
+
+    @staticmethod
+    def _gate_commands(gate_argv):
+        return [a[3] for a in gate_argv if len(a) > 3 and str(a[2]).endswith("decisions_gate.py")]
+
+    def test_a_dry_run_probes_and_never_scores(self):
+        rc, out, err, gate_argv, _ = self._run_export(
+            lambda argv: _Result(0, json.dumps({"outcome": "ok"})), write_flag=False)
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(self._gate_commands(gate_argv), ["probe"],
+                         "a dry run must not spend the gate's attempt budget")
+        self.assertIn("decisions: not scored (dry run", out)
+        self.assertIn("gate probe ok", out)
+
+    def test_a_write_still_scores(self):
+        report = json.dumps({"outcome": "ok", "belowThreshold": "hold",
+                             "records": [{"index": 0, "outcome": "scored", "passed": True}]})
+        rc, _, err, gate_argv, called = self._run_export(lambda argv: _Result(0, report),
+                                                         write_flag=True)
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(self._gate_commands(gate_argv), ["score"])
+        self.assertTrue(called)
+
+    def test_a_dry_run_still_refuses_a_misconfigured_gate(self):
+        """The probe reports a bad setting on stdout, or on stderr when it fails before its report."""
+        for outcome in ("bad-decisions-config", "bad-decisions-url"):
+            for on_stdout in (True, False):
+                payload = json.dumps({"outcome": outcome, "detail": "x"}, indent=2)
+                answer = (lambda argv, p=payload: _Result(1, p, "")) if on_stdout else \
+                    (lambda argv, p=payload: _Result(1, "", p))
+                with self.subTest(outcome=outcome, on_stdout=on_stdout):
+                    rc, _, err, gate_argv, called = self._run_export(answer, write_flag=False)
+                    self.assertEqual(rc, 1)
+                    self.assertIn("REFUSED", err)
+                    self.assertEqual(called, [])
+                    self.assertEqual(self._gate_commands(gate_argv), ["probe"])
+
+    def test_an_unavailable_model_on_a_dry_run_is_disclosed_not_refused(self):
+        rc, out, err, _, _ = self._run_export(
+            lambda argv: _Result(1, json.dumps({"outcome": "unreachable"})), write_flag=False)
+        self.assertEqual(rc, 0, err)
+        self.assertNotIn("REFUSED", err)
+        self.assertIn("gate probe: unreachable", out)
+
+    def test_a_redactor_timeout_inside_the_gate_refuses_the_write(self):
+        """Issue 182 (kvasir side of the gate's redactor-timeout fix): the gate now reports a hung
+        redactor as `redactor-unavailable` on stderr, pretty-printed, and that must stop the export
+        before anything is written — not read as a skipped gate."""
+        stderr = json.dumps({"outcome": "redactor-unavailable",
+                             "detail": "the redactor could not run (TimeoutExpired); no request was made"},
+                            indent=2)
+        rc, _, err, gate_argv, called = self._run_export(lambda argv: _Result(1, "", stderr),
+                                                         write_flag=True)
+        self.assertEqual(rc, 1)
+        self.assertIn("REFUSED", err)
+        self.assertEqual(called, [], "nothing may be resolved or written after a redactor refusal")
+        self.assertEqual(self._gate_commands(gate_argv), ["score"])
+
+
 def _stub_gate_transport(fake):
     """`gate_decisions` with only its subprocess call replaced.
 
