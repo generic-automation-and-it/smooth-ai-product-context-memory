@@ -30,23 +30,26 @@ try:
 except ValueError:
     print("refusing CONTEXT_MEMORY_BASE_URL: not a parseable bare HTTP(S) origin", file=sys.stderr)
     sys.exit(1)
-# Report only parsed, non-secret parts. The raw url is never echoed, for the same reason it is not
-# passed as argv: printing it would write a credential to the terminal and any agent or CI transcript.
+# Report only whether each part is acceptable, never its value. The raw url is never echoed, for the
+# same reason it is not passed as argv: printing it would write a credential to the terminal and any
+# agent or CI transcript. That includes the scheme and the host: `admin:hunter2` parses with scheme
+# `admin`, and a token pasted into the wrong variable becomes a hostname.
+# `urlparse` moves `;params` out of the path, so `http://localhost:5141/;tok=x` reads as a bare
+# origin unless the params are checked too (issue 182).
 if parsed.scheme not in ("http", "https") or parsed.username or parsed.password \
-        or parsed.path not in ("", "/") or parsed.query or parsed.fragment:
-    # The path, query and fragment are reported as present/absent, never quoted: a token pasted into
-    # the base URL lands in one of them as readily as in the userinfo.
+        or parsed.path not in ("", "/") or parsed.params or parsed.query or parsed.fragment:
     print("refusing CONTEXT_MEMORY_BASE_URL: must be a bare HTTP(S) origin with no "
-          "credentials, path, query or fragment (got scheme={!r}, userinfo={}, path={}, query={}, "
-          "fragment={})".format(
-              parsed.scheme, "present" if parsed.username or parsed.password else "absent",
+          "credentials, path, params, query or fragment (scheme={}, userinfo={}, path={}, "
+          "params={}, query={}, fragment={})".format(
+              "valid" if parsed.scheme in ("http", "https") else "invalid",
+              "present" if parsed.username or parsed.password else "absent",
               "present" if parsed.path not in ("", "/") else "absent",
+              "present" if parsed.params else "absent",
               "present" if parsed.query else "absent",
               "present" if parsed.fragment else "absent"), file=sys.stderr)
     sys.exit(1)
 if hostname not in ("localhost", "127.0.0.1", "::1"):
-    print("refusing non-loopback CONTEXT_MEMORY_BASE_URL host: {}".format(hostname),
-          file=sys.stderr)
+    print("refusing non-loopback CONTEXT_MEMORY_BASE_URL host (value not shown)", file=sys.stderr)
     sys.exit(1)
 PY
 }

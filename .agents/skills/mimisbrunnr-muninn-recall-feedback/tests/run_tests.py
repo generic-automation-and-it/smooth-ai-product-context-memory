@@ -6,7 +6,8 @@ Run: python3 -B .agents/skills/mimisbrunnr-muninn-recall-feedback/tests/run_test
 Sources scripts/recall_feedback.sh in bash with a fake `curl` (and a recording `python3` shim) first on
 PATH, so no request leaves the machine. Covers:
   - a non-loopback origin and a userinfo origin are refused before any request, and the refusal does
-    not echo the credential;
+    not echo the credential, the scheme or the hostname;
+  - an origin carrying `;params` is refused (urlparse moves them out of the path);
   - a path that would move the host (`@host/...`, `//host/...`, a scheme, whitespace) is refused before
     any request;
   - every curl call opens with `-q`, so a default `.curlrc` cannot alter the request (the fake curl
@@ -147,6 +148,30 @@ class RecallFeedbackGuardTests(unittest.TestCase):
 
     def test_path_bearing_origin_is_refused(self):
         self.assert_refused(self.run_curl(base="http://localhost:5141/api"))
+
+    def test_params_bearing_origin_is_refused_without_echoing_them(self):
+        # urlparse moves `;params` out of the path, so a guard reading only path/query/fragment took
+        # this for a bare origin and curl sent the params in the request line (issue 182).
+        for base in ("http://localhost:5141/;tok=params-secret-0123",
+                     "http://localhost:5141/;x@evil.example"):
+            with self.subTest(base=base):
+                result = self.run_curl(base=base)
+                self.assert_refused(result)
+                self.assertIn("params=present", result.stderr)
+                self.assertNotIn("params-secret-0123", result.stderr + result.stdout)
+                self.assertNotIn("evil.example", result.stderr + result.stdout)
+
+    def test_refusal_never_echoes_the_scheme_or_the_hostname(self):
+        # A token pasted into the wrong variable parses as a scheme (`admin:hunter2` -> `admin`) or as
+        # a hostname, so both are reported as acceptable or not, never quoted (issue 182).
+        cases = (("scheme-secret-0123:hunter2", "scheme-secret-0123"),
+                 ("http://host-secret-0123.example:5141", "host-secret-0123"))
+        for base, secret in cases:
+            with self.subTest(base=base):
+                result = self.run_curl(base=base)
+                self.assert_refused(result)
+                self.assertNotIn(secret, (result.stderr + result.stdout).lower())
+        self.assertIn("scheme=invalid", self.run_curl(base="ftp://localhost").stderr)
 
     def test_path_query_and_fragment_are_reported_as_present_not_echoed(self):
         # A token pasted into the base lands in the path or query as readily as in the userinfo, so the

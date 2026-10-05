@@ -97,8 +97,9 @@ What the script enforces before any token leaves:
 
 - The base URL is **parsed** and its resolved host asserted to be loopback; a raw-string glob would
   approve `http://localhost:5141@192.0.2.1/` (loopback prefix, non-loopback host via userinfo). A base
-  carrying credentials, a path, a query or a fragment is refused, and the refusal never echoes it —
-  it reports only whether each part is present or absent.
+  carrying credentials, a path, `;params`, a query or a fragment is refused, and the refusal never
+  echoes it — it reports only whether each part is present or absent, and whether the scheme is
+  acceptable; a non-loopback host is refused without naming it.
 - The base reaches the parser through the environment, not argv, so it is never visible in `ps`.
 - The request path must be absolute and carry no `@`, `\`, whitespace or leading `//` — a path such as
   `@evil.example/x` appended to an approved origin would otherwise move the request's host.
