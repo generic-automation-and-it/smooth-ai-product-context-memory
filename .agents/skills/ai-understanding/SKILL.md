@@ -315,7 +315,7 @@ Frontmatter fields:
 | `provenance.session` | Shared by all slugs encoded from one session |
 | `provenance.source` | What produced it — a failure, a doc, an experiment |
 | `provenance.inherited` | `[[slug]]` list of the Understandings this session loaded **and acted on**. Omit when none |
-| `provenance.supersedes` | The **previous folder name** (`agent-memory-design-20260919-1432`), not a path — enough to find the copy this one replaces, and it survives the file being moved. Set on an `improved` unit only; omit on a `new` one. Since the index shows only the newest, this is the only place a reader learns the unit is a third revision rather than a first |
+| `provenance.supersedes` | The **previous folder name** (`agent-memory-design-20260919-1432`), not a path — enough to find the copy this one replaces **in the workspace that wrote it**, and it survives the file being moved. Superseded copies are workspace-local and never ship in a publish archive, so a consumer sees the name, not the copy. Set on an `improved` unit only; omit on a `new` one. Since the index shows only the newest, this is the only place a reader learns the unit is a third revision rather than a first |
 | `updated` | Date of last change |
 
 Body sections: **Answer** (direct operational guidance, answering the frontmatter question and nothing wider), **Why** (the reasoning or failure behind it — enough to judge an edge case the Answer does not cover), **Boundaries** (where it stops applying). The question lives in frontmatter only, so `INDEX.md` never drifts from the unit.
@@ -456,8 +456,8 @@ gitignored, so an archive that someone keeps is the only form that survives the 
 The store is never shared through the repository (LADR-008).
 
 - Destination: `.context/understandings-publish/understandings-<YYYYMMDD-HHMMSS>.zip` by default, or `--path` (a file or directory) when given. Outside the store, so the index generator never mistakes it for a subject folder, and never a tracked path.
-- The archive mirrors the store: `<subject>-<yyyyMMdd-HHmm>/<slug>.understanding.md` with stamps carried verbatim — never re-stamped — plus each unit's `<slug>.assets/` and a regenerated `INDEX.md` covering only the published units.
-- Publishing filters **per Understanding, not per subject** — a subject folder routinely mixes scopes. By default every unit publishes; pass `--portable-only` to restrict the archive to `scope: portable` units, for the cross-repo case. Never let `--portable-only` publish a `repo-specific` unit — that filter is the only thing preventing a local quirk from being shipped to another repo with provenance that makes it look universally verified.
+- The archive mirrors the store's **current** units: `<subject>-<yyyyMMdd-HHmm>/<slug>.understanding.md` with stamps carried verbatim — never re-stamped — plus each unit's `<slug>.assets/` and a regenerated `INDEX.md` covering only the published units.
+- Publishing filters **per Understanding, not per subject** — a subject folder routinely mixes scopes. By default every current unit publishes (superseded copies never do); pass `--portable-only` to restrict the archive to `scope: portable` units, for the cross-repo case. Never let `--portable-only` publish a `repo-specific` unit — that filter is the only thing preventing a local quirk from being shipped to another repo with provenance that makes it look universally verified.
 - When `--portable-only` excludes a unit that a published unit links to, the archived copy drops the brackets around that `[[slug]]` and keeps the entry, so the archive's own index validates.
 - Each archived copy records `provenance.published_from`; the working copy is left in place.
 - No approval needed to write — the default destination or an explicit `--path` is the consent. Report what was published: the count, the destination, and the slugs, grouped by subject.

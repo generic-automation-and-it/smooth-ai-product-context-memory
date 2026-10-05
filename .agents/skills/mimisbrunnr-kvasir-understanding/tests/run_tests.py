@@ -2105,6 +2105,34 @@ class HeimdallrAutofillTests(unittest.TestCase):
             self.assertEqual(metadata["binding"]["repository"], "org/repo")
             self.assertNotIn("tags", metadata["binding"])
 
+    def test_withheld_and_unavailable_tickets_are_disclosed_on_stderr(self):
+        """Issue 182: `ticketsWithheld` / `ticketsUnavailable` were dropped, so a withheld newer
+        commit ticket left an older one bound silently. Counts and reason only, never a value."""
+        withheld = {"repository": "org/repo", "initiative": "unknown", "ticketsWithheld": 2,
+                    "tickets": [{"provider": "github", "key": "159", "seenIn": "commit"}]}
+        unavailable = {"repository": "org/repo", "initiative": "unknown", "tickets": [],
+                       "ticketsWithheld": 0,
+                       "ticketsUnavailable": "redactor unavailable; no unchecked ticket is reported"}
+        for scan, expected in ((withheld, "heimdallr: 2 ticket candidate(s) withheld as credential-shaped"),
+                               (unavailable, "heimdallr: tickets unavailable (redactor unavailable")):
+            uc.heimdallr_scan = lambda s=scan: s
+            with self.subTest(expected=expected), tempfile.TemporaryDirectory() as tmp:
+                src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
+                _, out, err = run(["export", src])
+                self.assertIn(expected, err)
+                self.assertNotIn("heimdallr:", out)
+                _, _, err = run(["dump", "--currentsession", "--out", str(Path(tmp) / "d")])
+                self.assertIn(expected, err)
+                # An explicit ticket means no autofill was attempted, so nothing to disclose.
+                _, _, err = run(["export", src, "--tickets", "github:1"])
+                self.assertNotIn("heimdallr:", err)
+        uc.heimdallr_scan = lambda: {"repository": "org/repo", "initiative": "unknown",
+                                     "tickets": [], "ticketsWithheld": 0, "ticketsUnavailable": None}
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
+            _, _, err = run(["export", src])
+        self.assertNotIn("heimdallr:", err)
+
     def test_import_binds_nothing_on_its_own(self):
         seen = {}
         original = uc.store_query
@@ -2594,6 +2622,29 @@ class DecisionsGateDryRunAndTimeoutTests(unittest.TestCase):
                     self.assertIn("REFUSED", err)
                     self.assertEqual(called, [])
                     self.assertEqual(self._gate_commands(gate_argv), ["probe"])
+
+    def test_a_dry_run_refuses_when_the_gates_redactor_is_missing(self):
+        """Issue 182: `probe` never runs the redactor, so a gate with no `redact.py` beside it
+        answered `ok` on the dry run while the write refused. The dry run must refuse the same way."""
+        original_gate = uc.DECISIONS_GATE
+        with tempfile.TemporaryDirectory() as gate_dir:
+            uc.DECISIONS_GATE = Path(gate_dir) / "decisions_gate.py"
+            uc.DECISIONS_GATE.write_text("", encoding="utf-8")
+            try:
+                rc, _, err, gate_argv, called = self._run_export(
+                    lambda argv: _Result(0, json.dumps({"outcome": "ok"})), write_flag=False)
+                self.assertEqual(rc, 1)
+                self.assertIn("REFUSED: the decision gate's redactor could not run", err)
+                self.assertEqual(called, [])
+                self.assertEqual(self._gate_commands(gate_argv), [])
+                # Control: the same stub gate with its redactor beside it probes normally.
+                (Path(gate_dir) / "redact.py").write_text("", encoding="utf-8")
+                rc, out, err, gate_argv, _ = self._run_export(
+                    lambda argv: _Result(0, json.dumps({"outcome": "ok"})), write_flag=False)
+                self.assertEqual(rc, 0, err)
+                self.assertIn("gate probe ok", out)
+            finally:
+                uc.DECISIONS_GATE = original_gate
 
     def test_an_unavailable_model_on_a_dry_run_is_disclosed_not_refused(self):
         rc, out, err, _, _ = self._run_export(

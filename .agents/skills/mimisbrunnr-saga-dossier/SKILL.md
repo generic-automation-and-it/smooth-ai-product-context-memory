@@ -52,7 +52,8 @@ mkdir -p .context/mimisbrunnr-saga-dossier/scratch
 #    built in the contract's field names (the endpoint rejects unknown properties); only a
 #    missing repo/ticket anchor autofills from the offline Heimdallr git scan (--heimdallr true,
 #    default on; a supplied flag or --body key is never overwritten for that field; tags are never
-#    autofilled). The contract takes ONE ticket, so --ticket provider:key maps to ticketProvider +
+#    autofilled; a credential-shaped branch ticket Heimdallr withheld, or a scan whose redactor
+#    could not load, prints one stderr line with the count or reason, never the value). The contract takes ONE ticket, so --ticket provider:key maps to ticketProvider +
 #    ticketKey, and --tickets with more than one value is refused rather than truncated. widenDepth
 #    is always sent (default 1; --widen-depth sets it, 1-5).
 python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py \

@@ -1530,6 +1530,22 @@ def build_bundle_body(args, body):
     return body
 
 
+def _heimdallr_ticket_disclosure(scan):
+    """One line saying Heimdallr dropped ticket candidates, or None; counts and reason only.
+
+    Reading only `tickets` made a withheld credential-shaped branch ticket, or a scan whose redactor
+    could not load, indistinguishable from "no branch ticket" (issue 182). The withheld values are
+    never in the scan, so none can be printed here.
+    """
+    unavailable = scan.get("ticketsUnavailable")
+    if isinstance(unavailable, str) and unavailable.strip():
+        return f"heimdallr: tickets unavailable ({' '.join(unavailable.split())[:120]})"
+    withheld = scan.get("ticketsWithheld")
+    if isinstance(withheld, int) and not isinstance(withheld, bool) and withheld > 0:
+        return f"heimdallr: {withheld} ticket candidate(s) withheld as credential-shaped"
+    return None
+
+
 def _heimdallr_autofill(body):
     """Fill missing repo/ticket/initiative anchors from the offline Heimdallr scan.
 
@@ -1548,6 +1564,9 @@ def _heimdallr_autofill(body):
         body["repo"] = repo
         filled.append(f"repo {repo}")
     if "ticketProvider" not in body and "ticketKey" not in body:
+        disclosure = _heimdallr_ticket_disclosure(scan)
+        if disclosure:
+            print(disclosure, file=sys.stderr)
         raw = scan.get("tickets")
         branch = []
         if isinstance(raw, list):

@@ -1149,17 +1149,19 @@ class SubsecondToleranceTests(unittest.TestCase):
 
 class HeimdallrBundleAnchorTests(unittest.TestCase):
     # `--heimdallr true` fills missing repo/tickets; explicit flags and --body win.
-    def _bundle(self, argv):
+    SCAN = {
+        "repository": "org/repo",
+        "tickets": [{"provider": "github", "key": "7", "seenIn": "branch"},
+                    {"provider": "github", "key": "6", "seenIn": "commit"}],
+        "initiative": "unknown",
+    }
+
+    def _bundle(self, argv, scan=None):
         import argparse, json
         seen = {}
         original_fetch = dc.fetch_bundle_from_api
         original_scan = dc.heimdallr_scan
-        dc.heimdallr_scan = lambda: {
-            "repository": "org/repo",
-            "tickets": [{"provider": "github", "key": "7", "seenIn": "branch"},
-                        {"provider": "github", "key": "6", "seenIn": "commit"}],
-            "initiative": "unknown",
-        }
+        dc.heimdallr_scan = lambda: scan if scan is not None else self.SCAN
         def fake_fetch(base, body):
             seen["body"] = body
             return {"bundle": "ok"}
@@ -1196,6 +1198,35 @@ class HeimdallrBundleAnchorTests(unittest.TestCase):
         self.assertEqual(body.get("repo"), "other/repo")
         self.assertEqual(body.get("ticketProvider"), "github")
         self.assertEqual(body.get("ticketKey"), "1")
+
+    def test_withheld_and_unavailable_tickets_are_disclosed_on_stderr(self):
+        """Issue 182: `ticketsWithheld` / `ticketsUnavailable` were dropped, so a withheld branch
+        ticket read as "no branch ticket". Counts and reason only, never a value."""
+        import io
+        from contextlib import redirect_stderr
+        cases = (
+            (dict(self.SCAN, ticketsWithheld=1, tickets=[]),
+             "heimdallr: 1 ticket candidate(s) withheld as credential-shaped"),
+            (dict(self.SCAN, tickets=[], ticketsWithheld=0,
+                  ticketsUnavailable="redactor unavailable; no unchecked ticket is reported"),
+             "heimdallr: tickets unavailable (redactor unavailable"),
+        )
+        for scan, expected in cases:
+            with self.subTest(expected=expected):
+                err = io.StringIO()
+                with redirect_stderr(err):
+                    body = self._bundle([], scan=scan)
+                self.assertIn(expected, err.getvalue())
+                self.assertNotIn("ticketKey", body)
+                err = io.StringIO()
+                with redirect_stderr(err):
+                    self._bundle(["--tickets", "github:1"], scan=scan)
+                self.assertNotIn("heimdallr:", err.getvalue(),
+                                 "an explicit ticket means no autofill was attempted")
+        err = io.StringIO()
+        with redirect_stderr(err):
+            self._bundle([], scan=dict(self.SCAN, ticketsWithheld=0, ticketsUnavailable=None))
+        self.assertNotIn("heimdallr:", err.getvalue())
 
     def test_opt_out_disables_autofill(self):
         body = self._bundle(["--heimdallr", "false"])

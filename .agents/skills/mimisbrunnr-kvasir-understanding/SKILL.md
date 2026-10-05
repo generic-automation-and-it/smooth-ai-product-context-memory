@@ -149,7 +149,10 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
   **A dry run never scores.** Scoring spends each record's attempt budget in the gate's ledger, so a
   dry run runs the gate's content-free `probe` instead and reports `decisions: not scored (dry run …)`
   — its write count is therefore an upper bound, since the `--write` may hold some. A misconfigured
-  gate is refused on the dry run too, so the preview says what the write would say.
+  gate, or one whose `redact.py` is missing, is refused on the dry run too. The probe never runs the
+  redactor, so a redactor that is present but fails on the records is found only by the `--write`,
+  which refuses. Skipping scoring is deliberate and differs from the capture skill's `set --dryrun`,
+  which repeats the judgement work: here the attempt budget is kept for the write.
 - **A dry run creates nothing** — no initiative, no group, no memory. `resolve-group` has no dry-run mode
   and its handler commits unconditionally, so a dry run resolves nothing and reports the group and the
   initiative as *would create*, printing the exact commands.
@@ -193,8 +196,11 @@ forward caller flags into the reporter; its own `--initiative` flag is for
 manual runs only.
 
 - `export`/`dump` bind branch-seen tickets when any exist, else the single
-  newest commit ticket — a 10-commit window can carry stale work, so all of it is never
-  bound at once. `import` binds nothing on its own: every filter it sends was passed explicitly.
+  newest commit ticket Heimdallr **reported** — a 10-commit window can carry stale work, so all of it is never
+  bound at once. Heimdallr withholds credential-shaped candidates, so when a newer one was withheld
+  the bound ticket is older than the newest commit; a one-line stderr disclosure
+  (`heimdallr: N ticket candidate(s) withheld …`, or `heimdallr: tickets unavailable (<reason>)` when
+  its redactor could not load) says so, with counts and reason only, never the withheld value. `import` binds nothing on its own: every filter it sends was passed explicitly.
 - Heimdallr reports `unknown` initiative when nothing proves one; that fills nothing.
   It never supplies `--tags`: derive tags from the material's own keywords, or pass
   `--tags` explicitly.

@@ -134,7 +134,8 @@ def heimdallr_scan() -> dict:
     Never fails the caller: a missing script, a non-git checkout or malformed
     output means no autofill, not a refusal. Heimdallr reports repository,
     tickets and initiative only — never tags, which stay agent-derived
-    keywords from the material itself.
+    keywords from the material itself. Its `ticketsWithheld` count and
+    `ticketsUnavailable` reason are disclosed by `heimdallr_ticket_disclosure`.
     """
     if not HEIMDALLR_SCRIPT.is_file():
         return {}
@@ -170,6 +171,24 @@ def heimdallr_autofill_tickets(scan: dict) -> list[str]:
         if isinstance(entry, dict) and entry.get("provider") and entry.get("key"):
             return [f"{entry['provider']}:{entry['key']}"]
     return []
+
+
+def heimdallr_ticket_disclosure(scan: dict) -> str | None:
+    """One line saying Heimdallr dropped ticket candidates, or None; counts and reason only.
+
+    The reporter withholds credential-shaped candidates (`ticketsWithheld`) and reports no ticket at
+    all when its redactor cannot load (`ticketsUnavailable`). Reading only `tickets` made both look
+    like "no ticket found", and a withheld newer commit ticket left an older one bound as if it were
+    the newest (issue 182). The withheld values are never in the scan, so none can be printed here.
+    """
+    unavailable = scan.get("ticketsUnavailable")
+    if isinstance(unavailable, str) and unavailable.strip():
+        return f"heimdallr: tickets unavailable ({' '.join(unavailable.split())[:120]})"
+    withheld = scan.get("ticketsWithheld")
+    if isinstance(withheld, int) and not isinstance(withheld, bool) and withheld > 0:
+        return (f"heimdallr: {withheld} ticket candidate(s) withheld as credential-shaped; an "
+                "autofilled ticket is the newest one reported, not necessarily the newest commit")
+    return None
 
 
 def heimdallr_tickets(scan: dict) -> list[str]:
@@ -933,6 +952,8 @@ DECISIONS_ENABLED = "CONTEXT_MEMORY_DECISIONS_ENABLED"
 # `cmd_export` has to act on it: a refusal says "Nothing was written", so a refusal that only labelled the
 # report and let the export proceed was a message contradicting what the process then did.
 DECISIONS_REFUSED = "decisions: refused"
+_GATE_REDACTOR_REFUSAL = ("REFUSED: the decision gate's redactor could not run, so record content would "
+                          "have been sent unscrubbed. Nothing was written.")
 
 # Seed **only** the flag, and only so this client knows whether to shell out at all. The other nine
 # settings — including the API key, which is a secret — are loaded by the gate subprocess from the same
@@ -1015,6 +1036,11 @@ def probe_decisions(count: int) -> str:
     keeps the record unscored — the gate bypassed by previewing it (issue 182). `probe` checks the
     configuration, endpoint and model with a content-free request and writes no ledger. A
     misconfigured gate is still a refusal here, so the dry run says what the write would say.
+
+    `probe` never runs the redactor, so a gate whose redactor script is missing answered `ok` while
+    the write refused (issue 182). The gate's own first redaction check is `is_file()` on its sibling
+    `redact.py`; repeating that check here costs nothing and makes the two runs agree. A redactor
+    that is present but fails on the records is still found only by the write, which refuses.
     """
     if os.environ.get(DECISIONS_ENABLED, "").lower() != "true":
         return "decisions: disabled"
@@ -1022,6 +1048,9 @@ def probe_decisions(count: int) -> str:
         print(f"NOTE: the decision gate is enabled but {DECISIONS_GATE} is missing; a --write would "
               "skip it.", file=sys.stderr)
         return "decisions: skipped (gate script missing)"
+    if not (DECISIONS_GATE.parent / "redact.py").is_file():
+        print(_GATE_REDACTOR_REFUSAL, file=sys.stderr)
+        return DECISIONS_REFUSED
     not_scored = (f"decisions: not scored (dry run; scoring spends the gate's attempt budget) — "
                   f"a --write scores {count} candidate(s) and may hold some")
     try:
@@ -1097,8 +1126,7 @@ def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str]:
     if proc.returncode != 0:
         detail = proc.stderr.strip() or "no detail"
         if '"redactor-unavailable"' in detail:
-            print("REFUSED: the decision gate's redactor could not run, so record content would "
-                  "have been sent unscrubbed. Nothing was written.", file=sys.stderr)
+            print(_GATE_REDACTOR_REFUSAL, file=sys.stderr)
             return candidates, DECISIONS_REFUSED
         if '"bad-decisions-config"' in detail or '"bad-decisions-url"' in detail:
             print(f"REFUSED: the decision gate is misconfigured ({detail}). Nothing was written.",
@@ -1497,6 +1525,9 @@ def cmd_export(args: argparse.Namespace) -> int:
         scan = heimdallr_scan()
         filled = []
         if not binding["tickets"]:
+            disclosure = heimdallr_ticket_disclosure(scan)
+            if disclosure:
+                print(disclosure, file=sys.stderr)
             found = heimdallr_autofill_tickets(scan)
             if found:
                 binding["tickets"] = found
@@ -2176,6 +2207,9 @@ def cmd_dump(args: argparse.Namespace) -> int:
         scan = heimdallr_scan()
         filled = []
         if not binding["tickets"]:
+            disclosure = heimdallr_ticket_disclosure(scan)
+            if disclosure:
+                print(disclosure, file=sys.stderr)
             found = heimdallr_autofill_tickets(scan)
             if found:
                 binding["tickets"] = found
