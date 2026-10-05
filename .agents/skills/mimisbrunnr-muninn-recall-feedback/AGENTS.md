@@ -67,7 +67,7 @@ records. Output is identity, count and time only.
   for an NFKC-confusable netloc character, a non-numeric port or an unbalanced IPv6 bracket, and the
   message quotes the netloc — userinfo included. The guard's stderr is the caller's stderr, so that
   error must never escape the `try`; the sibling composer closes the same hole at
-  `dossier_composer.py:1113-1117`.
+  `dossier_composer.py` `_assert_loopback`.
 
 ## Test References
 
