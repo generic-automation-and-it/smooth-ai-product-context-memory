@@ -592,10 +592,8 @@ def render_foreign(body: str, src: str, max_chars: int) -> list[str]:
 
 
 def cmd_load(args: argparse.Namespace) -> int:
-    src = resolve_input(args)
+    src, _ = resolve_input(args)
     if src is None:
-        print("REFUSED: no --input given and no current session dump found. Run "
-              "`dump --currentsession` first.", file=sys.stderr)
         return 1
     material = read_material(src, args.format)
     if isinstance(material, int):
@@ -1363,10 +1361,15 @@ def cmd_export(args: argparse.Namespace) -> int:
     memory — because `resolve-group` has no dry-run mode and would create a group as a side effect
     of asking.
     """
-    src = resolve_input(args)
+    src, defaulted = resolve_input(args)
     if src is None:
-        print("REFUSED: no --input given and no current session dump found. Run "
-              "`dump --currentsession` first.", file=sys.stderr)
+        return 1
+    if defaulted and args.write:
+        # The newest dump in a shared workspace may be another session's; capturing it would write that
+        # session's material under its own recorded binding. A defaulted input is review-only.
+        print(f"REFUSED: --write needs an explicit input. The defaulted dump ({src}) may belong to "
+              "another session; re-run with --input <that folder> --write to capture it. Nothing was "
+              "written.", file=sys.stderr)
         return 1
     material = read_material(src, "auto")
     if isinstance(material, int):
@@ -1821,29 +1824,69 @@ def strip_dump_boilerplate(body: str) -> str:
     return re.sub(begin + r".*?" + end, "", body, flags=re.DOTALL).strip()
 
 
-def current_session_input() -> str | None:
-    """The current session's dump folder, or None.
+def dump_root() -> Path:
+    """Where session dumps live: ``.context/mimisbrunnr-understandings`` under the repository root.
 
-    ``load``/``export`` default to this when ``--input`` is omitted. The current session is the newest
-    ``.context/mimisbrunnr-understandings/*/`` folder holding a ``_session.md`` — an agent materialises
-    it with ``dump --currentsession --from <session>`` first; without one there is nothing to load or
-    export. The newest dump is the current session because a dump mints a fresh, stamped folder.
+    Anchored on the git top level rather than the working directory, so a run from a subdirectory
+    finds the same dumps a run from the root wrote. Outside a git checkout it falls back to the working
+    directory, which is where ``dump`` has always written.
     """
-    base = Path(".context/mimisbrunnr-understandings")
+    try:
+        proc = subprocess.run(["git", "rev-parse", "--show-toplevel"],
+                              capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        proc = None
+    top = Path(proc.stdout.strip()) if proc is not None and proc.returncode == 0 and proc.stdout.strip() \
+        else Path.cwd()
+    return top / ".context" / "mimisbrunnr-understandings"
+
+
+def current_session_input() -> str | None:
+    """The newest session dump folder, or None.
+
+    "Newest" is the ``_session.md`` modification time, not the folder's: ``dump`` rewrites
+    ``_session.md`` in place on a re-dump, which leaves the folder's own mtime unchanged, so ordering by
+    the folder picked a stale dump over the one just regenerated. The newest dump in the workspace is
+    not proof it belongs to this session — a shared workspace holds other sessions' dumps — which is
+    why a defaulted input may only dry-run (see ``resolve_input``).
+    """
+    base = dump_root()
     if not base.is_dir():
         return None
-    dumps = [d for d in base.iterdir() if d.is_dir() and (d / SESSION_FILE).is_file()]
-    dumps.sort(key=lambda d: d.stat().st_mtime, reverse=True)
-    return str(dumps[0]) if dumps else None
+    sessions = [d / SESSION_FILE for d in base.iterdir() if (d / SESSION_FILE).is_file()]
+    if not sessions:
+        return None
+    return str(max(sessions, key=lambda f: f.stat().st_mtime).parent)
 
 
-def resolve_input(args: argparse.Namespace) -> str | None:
-    """Resolve the input for ``load``/``export``: ``--input`` wins, then the positional, then the
-    current session. Returns None (and the caller refuses) when nothing is available."""
-    src = args.input_option or args.input
-    if src is None:
-        src = current_session_input()
-    return src
+def resolve_input(args: argparse.Namespace) -> tuple[str | None, bool]:
+    """Resolve ``load``/``export`` input to ``(path, defaulted)``, or print a refusal and return
+    ``(None, False)``.
+
+    An explicit value is final: ``--input`` and the positional may both be given only when they agree,
+    and an empty ``--input`` is refused rather than read as "not given". With neither, the newest
+    session dump is used and ``defaulted`` is True so the caller can disclose it and keep it off the
+    write path.
+    """
+    flag, positional = args.input_option, args.input
+    if flag is not None and not flag.strip():
+        print("REFUSED: --input is empty. Pass a path, or omit it to use the current session dump.",
+              file=sys.stderr)
+        return None, False
+    if flag is not None and positional is not None and flag != positional:
+        print(f"REFUSED: two different inputs given ({positional!r} and --input {flag!r}). Pass one.",
+              file=sys.stderr)
+        return None, False
+    explicit = flag if flag is not None else positional
+    if explicit is not None:
+        return explicit, False
+    found = current_session_input()
+    if found is None:
+        print(f"REFUSED: no input given and no session dump under {dump_root()}. Run "
+              "`dump --currentsession --from <session>` first, or pass --input.", file=sys.stderr)
+        return None, False
+    print(f"Input defaulted to the newest session dump: {found} (pass --input to choose another).")
+    return found, True
 
 
 def dump_metadata_binding(folder: str | Path) -> dict:
@@ -1946,7 +1989,7 @@ def cmd_dump(args: argparse.Namespace) -> int:
     if args.out:
         folder = Path(args.out)
     else:
-        folder = Path(".context/mimisbrunnr-understandings") / folder_name
+        folder = dump_root() / folder_name
 
     refusal = refuse_unsafe_target(folder)
     if refusal is not None:
