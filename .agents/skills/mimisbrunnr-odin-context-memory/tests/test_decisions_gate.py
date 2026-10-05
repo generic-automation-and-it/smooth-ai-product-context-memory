@@ -19,6 +19,7 @@ import io
 import json
 import os
 import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -213,11 +214,32 @@ def gate_subprocess_env(env_extra=None):
     return env
 
 
-def run_gate(args, stdin_text, env_extra=None, timeout=300):
-    proc = subprocess.run([sys.executable, "-B", str(GATE), *args],
+def run_gate(args, stdin_text, env_extra=None, timeout=300, gate=GATE):
+    proc = subprocess.run([sys.executable, "-B", str(gate), *args],
                           input=stdin_text, capture_output=True, text=True,
                           encoding="utf-8", env=gate_subprocess_env(env_extra), timeout=timeout)
     return proc
+
+
+def gate_copy(test, redactor=None, rubric=None):
+    """A private copy of the gate and its two data files, for cases that need a different redactor or
+    rubric. The gate finds both beside itself, so a case swaps them in the copy — never in `scripts/`.
+    Swapping the shipped files in place raced with any concurrent run of a suite reading them, and a
+    restore from a backup taken mid-swap left a stub as the shipped `redact.py` (issue 182).
+
+    `redactor`: replacement source, or `False` to leave none. `rubric`: replacement body."""
+    root = Path(tempfile.mkdtemp())
+    test.addCleanup(shutil.rmtree, root, True)
+    for source in (GATE, REDACTOR, RUBRIC):
+        shutil.copy2(source, root / source.name)
+    if redactor is False:
+        (root / REDACTOR.name).unlink()
+    elif redactor is not None:
+        (root / REDACTOR.name).write_text(redactor, encoding="utf-8")
+    if rubric is not None:
+        (root / RUBRIC.name).write_text(rubric if isinstance(rubric, str) else json.dumps(rubric),
+                                        encoding="utf-8")
+    return root / GATE.name
 
 
 class GateTestCase(unittest.TestCase):
@@ -706,13 +728,8 @@ class RedactorFailClosedTests(GateTestCase):
     def test_no_request_when_the_redactor_cannot_run(self):
         """A redactor that cannot run means content nobody could inspect would be sent. The gate's
         whole value is that it never sends unscrubbed content, so it refuses rather than proceeding."""
-        stub_file = SCRIPTS / "redact.py"
-        backup = stub_file.read_text(encoding="utf-8")
-        stub_file.unlink()
-        try:
-            proc = run_gate(["score"], json.dumps([RECORD]), self.gate_env())
-        finally:
-            stub_file.write_text(backup, encoding="utf-8")
+        proc = run_gate(["score"], json.dumps([RECORD]), self.gate_env(),
+                        gate=gate_copy(self, redactor=False))
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("redactor-unavailable", proc.stderr)
         self.assertEqual(self.stub.requests, [], "no request may be made without redaction")
@@ -761,14 +778,9 @@ class RedactorArityTests(GateTestCase):
     """
 
     def _run_with_redactor(self, stub_source):
-        backup = REDACTOR.read_text(encoding="utf-8")
-        REDACTOR.write_text(stub_source, encoding="utf-8")
-        try:
-            self.stub.probabilities = {"developer": 0.9}
-            proc = run_gate(["score"], json.dumps([RECORD]), self.gate_env())
-        finally:
-            REDACTOR.write_text(backup, encoding="utf-8")
-        return proc
+        self.stub.probabilities = {"developer": 0.9}
+        return run_gate(["score"], json.dumps([RECORD]), self.gate_env(),
+                        gate=gate_copy(self, redactor=stub_source))
 
     def test_a_redactor_that_drops_a_result_is_refused(self):
         proc = self._run_with_redactor(
@@ -1444,20 +1456,15 @@ class RubricValidationTests(GateTestCase):
     `criteria` branch raised `KeyError` straight out of `load_rubric` — a traceback on stderr, the
     same defect class the capture client fixed for a base URL that quoted its own userinfo.
 
-    Each case writes a rubric file and restores the shipped one, so the property is the loader's and
-    not the shipped file's.
+    Each case runs a private copy of the gate with its own rubric, so the shipped file is never
+    rewritten — see `gate_copy`.
     """
 
     GOOD_ROLE = {"key": "developer", "instructions": "Is this useful to a developer?",
                  "criteria": {"true": "yes", "false": "no"}}
 
     def _with_rubric(self, body):
-        backup = RUBRIC.read_text(encoding="utf-8")
-        RUBRIC.write_text(body if isinstance(body, str) else json.dumps(body), encoding="utf-8")
-        try:
-            return run_gate(["probe"], "", self.gate_env())
-        finally:
-            RUBRIC.write_text(backup, encoding="utf-8")
+        return run_gate(["probe"], "", self.gate_env(), gate=gate_copy(self, rubric=body))
 
     def _assert_refused(self, body):
         proc = self._with_rubric(body)
@@ -1995,6 +2002,18 @@ class ProbeTests(GateTestCase):
         proc = run_gate(["probe"], "", self.gate_env())
         if self.stub.requests:
             self.assertEqual(self.stub.requests[0]["state"]["subject"], "probe")
+
+
+_SHIPPED = {path: hashlib.sha256(path.read_bytes()).hexdigest() for path in (GATE, REDACTOR, RUBRIC)}
+
+
+def tearDownModule():
+    """No case may leave a shipped script or data file changed: a suite that rewrites what it tests
+    corrupts any concurrent run, and a crash mid-swap leaves the stub in place (issue 182)."""
+    changed = [path.name for path, digest in _SHIPPED.items()
+               if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != digest]
+    if changed:
+        raise AssertionError(f"the suite left shipped file(s) changed: {', '.join(changed)}")
 
 
 if __name__ == "__main__":
