@@ -118,7 +118,7 @@ def _credential_shaped(redactor, provider: str, candidate: str, start: int, end:
     redactor would change it alone or when it overlaps a span the redactor finds in its whole subject
     (`password=ABC-1234` names a bare key the redactor sees only in context).
     """
-    if False:
+    if redactor.is_credential_key(provider):
         return True
     if redactor.scrub_located(candidate)[0] != candidate:
         return True
