@@ -8,8 +8,9 @@ FACTS = 10
 SET_ITEM_CAP = 20
 # Items one fact can put in a `set`: an authority resolution won by the existing claim writes the
 # candidate's losing version and then restores the existing winner as a second version (authority.py),
-# and the Host stores a blob per item that carries content. A divergence adds a record with no content,
-# so it adds no blob.
+# and the Host makes one blob store call per item that carries content — an existence check, plus an
+# upload only when the bytes are new — so this is an upper bound on store operations, not on uploads.
+# A divergence adds a record with no content, so it adds no blob.
 ITEMS_PER_FACT_MAXIMUM = 2
 BASELINE_CANDIDATES = 200
 LOOKUP_SURFACED = 5

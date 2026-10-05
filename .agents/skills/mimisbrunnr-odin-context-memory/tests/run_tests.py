@@ -633,6 +633,18 @@ ORDINARY_PROSE = (
     "ssh://git@github.com:org/repo.git",
     "https://github.com/generic-automation-and-it/smooth-ai-product-context-memory",
     "Sort by key, then by token count; the cache key is stable.",
+    # `pwd` as the working directory (issue 182): each line was rewritten to `<redacted>` before.
+    "pwd = C:\\Users\\dev\\app",
+    'pwd: "C:\\Users\\dev\\app"',
+    "pwd = $HOME/project",
+    "pwd = %USERPROFILE%\\code",
+    "run pwd = prints workingdir",
+    'pwd: "my working directory"',
+    "pwd = /srv/app",
+    "pwd: ${WORKDIR}/build",
+    "pwd = $WORKDIR",
+    "pwd = ./build/output",
+    "pwd: \\\\fileserver\\share",
 )
 
 
@@ -869,7 +881,7 @@ class SecretShapeCoverageTests(unittest.TestCase):
         import time
 
         for fragment in ("key=", "password=", "sk-", "sk-eyJ", "a://", '"password": "', "Bearer a1",
-                         "pwd:", "session=", "cookie: "):
+                         "pwd:", "session=", "cookie: ", "pwd=", "pwd = ", "pwd=$", "pwd=%", ";pwd=a;"):
             text = fragment * (120_000 // len(fragment))
             with self.subTest(fragment=fragment):
                 started = time.perf_counter()
@@ -928,6 +940,22 @@ class CredentialLikeFixtureTests(unittest.TestCase):
                      "auth: OIDC via the corporate IdP", "cookie: SameSite=Lax", "bearer: the on-call lead"):
             with self.subTest(text=text):
                 self.assertEqual(redact.scrub_located(text), (text, []))
+
+    def test_pwd_still_takes_a_password_and_every_connection_string_value(self):
+        # The working-directory declines must not open a hole: a non-path `pwd` value of eight or more
+        # characters is still a password, and inside a connection string any value is.
+        for text, secret in (("pwd:Hunter2xyzFAKE9", "Hunter2xyzFAKE9"),
+                             ("pwd = $ecretP4ss99", "$ecretP4ss99"),
+                             ("pwd = Hunter2xyzFAKE9 for the db", "Hunter2xyzFAKE9"),
+                             ("Server=db;Uid=sa;Pwd=abc12;", "abc12"),
+                             ("Pwd=ab=cd;Server=db", "ab=cd"),
+                             ("Server=db; Pwd = s3cr3t ;", "s3cr3t"),
+                             ('Server=db;Pwd="pass with spaces";', "pass with spaces"),
+                             ("Server=db;Uid=sa;Pwd=/srv;", "/srv")):
+            with self.subTest(text=text):
+                redacted, hits = redact.scrub_located(text)
+                self.assertTrue(hits)
+                self.assertNotIn(secret, redacted)
 
 
 class ScratchInputConsumeTests(unittest.TestCase):
@@ -1984,9 +2012,31 @@ class DeepSearchTests(unittest.TestCase):
         self.assertIn(reached["uuid"], uuids, "a forbidden anchor must not stop the next one")
         disclosure = result["disclosure"]
         self.assertEqual(disclosure["anchorsForbidden"], 1)
+        # Attempted and refused is not "left out by the cap": counted once, under `anchorsForbidden`.
+        self.assertEqual(disclosure["anchorsOmittedByCap"], 0)
+        self.assertEqual(disclosure["anchorsExecuted"], 1)
         self.assertIn({"kind": "traversal", "value": anchors[0]["uuid"]}, disclosure["passesIncomplete"])
         self.assertTrue(disclosure["possiblyOmitted"])
         self.assertFalse(disclosure["stoppedEarly"])
+
+    def test_endpoints_outside_the_selector_are_counted_once_each(self):
+        # One endpoint linked from several anchors is one memory outside the selection, not one per
+        # anchor that reached it.
+        anchors = [dict(self.row(index), groupUuid=self.GROUP) for index in (1, 2)]
+        shared = dict(self.row(7), groupUuid=self.OTHER_GROUP)
+        lone = dict(self.row(8), groupUuid=self.OTHER_GROUP)
+
+        def request(method, path, payload, **kwargs):
+            if path.endswith("query"):
+                return {"items": anchors}
+            extra = [{"endpoint": lone}] if payload["sourceUuid"] == anchors[1]["uuid"] else []
+            return {"paths": [{"endpoint": shared}] + extra}
+
+        result = deepsearch.execute(
+            {"baseline": {"groupUuid": self.GROUP, "scopeDimension": "product"}, "keywords": []},
+            request=request)
+        self.assertEqual(result["disclosure"]["endpointsOutsideSelector"], 2)
+        self.assertNotIn(shared["uuid"], {item["uuid"] for item in result["items"]})
 
     def test_a_forbidden_baseline_still_fails(self):
         # Only a traversal anchor is one unreadable item among several; a refused baseline is the recall.

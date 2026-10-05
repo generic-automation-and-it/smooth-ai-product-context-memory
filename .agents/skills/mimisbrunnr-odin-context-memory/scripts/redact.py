@@ -19,7 +19,8 @@ a **fail-closed gate on recognition**, and it is easy to describe as more than i
   `sk-…`/`sk-proj-…`/`sk-ant-…`, a JWT, a PEM private-key block (any label, terminated or not), URL
   userinfo (`scheme://user:pass@host`), an `Authorization:` or `Bearer` credential, an assignment to a
   key whose name says secret (`password=`, `"clientSecret": "…"`, `ApiAccess__WriteToken=`,
-  `CONTEXT_MEMORY_WRITE_TOKEN=`, quoted values with spaces included; `pwd` unless the value is a path),
+  `CONTEXT_MEMORY_WRITE_TOKEN=`, quoted values with spaces included; `pwd` of 8+ characters unless the
+  value is a working directory or quoted prose, and any `pwd` value inside a `;` connection string),
   or an assignment to a neutral key (`key`, `token`, `credential`, `auth`, `bearer`, `session`,
   `cookie`) whose value is itself secret-shaped.
 - It does **not** catch a secret that matches no rule. A bare high-entropy value, a base64 blob with
@@ -98,9 +99,21 @@ def _not_already_redacted(value):
     return not value.strip("\"'").startswith("<redacted")
 
 
-def _not_a_path(value):
+# A `pwd` value that names a working directory: a POSIX, home or relative path, a Windows drive or UNC
+# path, or a path that starts at an environment variable (`$HOME/…`, `${WORKDIR}`, `%USERPROFILE%`). A
+# bare `$name` counts only in the all-caps form an environment variable takes, so `$ecretP4ss` is not one.
+_WORKING_DIRECTORY = re.compile(
+    r"(?:/|~|\.{1,2}[\\/]|[A-Za-z]:[\\/]|\\\\|\$\{[A-Za-z_]\w*\}|\$[A-Za-z_]\w*(?=[\\/])"
+    r"|\$[A-Z_][A-Z0-9_]*$|%[A-Za-z_]\w*%)"
+)
+
+
+def _pwd_is_a_password(value):
+    """Decline a `pwd` value that is a working directory, or quoted prose with spaces in it."""
     bare = value.strip("\"'")
-    return _not_already_redacted(value) and not bare.startswith(("/", "~", "./", "../"))
+    quoted = value[:1] in ("\"", "'")
+    return (_not_already_redacted(value) and not _WORKING_DIRECTORY.match(bare)
+            and not (quoted and re.search(r"\s", bare)))
 
 
 # Each rule is (name, pattern, value_group, placeholder, accept).
@@ -156,9 +169,11 @@ RULES = [
     ),
     (
         # A truncated or unterminated block is still key material. Takes the BEGIN line plus the
-        # base64 and `Header: value` lines that follow it — never the prose after them. A final base64
-        # line is usually shorter than 16 characters and, when the byte count divides by three,
-        # unpadded; it is taken only when it is the whole line, so a short prose word is not.
+        # base64 and `Header: value` lines that follow it. A final base64 line is usually shorter than
+        # 16 characters and, when the byte count divides by three, unpadded, so a line of 1–15 base64
+        # characters is taken when it is the whole line. The cost is precise: one-word lines
+        # (`Note`, `Thanks`) directly after a truncated key are taken with it, because nothing tells
+        # them apart from a short key line; a line with a space or punctuation (`The end.`) is not.
         "private-key-pem",
         re.compile(
             r"-----BEGIN " + _PEM_LABEL + r"-----"
@@ -206,7 +221,24 @@ RULES = [
     ),
     (
         "connection-string-password",
-        re.compile(r"(?i)(?:password|pwd)\s*=\s*(" + _QUOTED + r"|[^'\";\s&]+)"),
+        re.compile(r"(?i)password\s*=\s*(" + _QUOTED + r"|[^'\";\s&]+)"),
+        1, PLACEHOLDER, _not_already_redacted,
+    ),
+    (
+        # `pwd=` is a password where a connection string puts it — after a `;` separator, or followed
+        # by one — and is taken on any value there. Elsewhere `pwd` is usually the working directory
+        # (`run pwd = prints the cwd`), and the `pwd` assignment rule below decides.
+        "connection-string-password",
+        re.compile(r"(?i);\s*pwd\s*=\s*(" + _QUOTED + r"|[^'\";\s&]+)"),
+        1, PLACEHOLDER, _not_already_redacted,
+    ),
+    (
+        # The leading `pwd=` of a connection string has no `;` before it, only after. The unquoted
+        # value is bounded and matched atomically (lookahead + backreference), so a failed trailing
+        # `;` check costs at most the bound per start: unbounded, a run of `pwd=` was quadratic.
+        "connection-string-password",
+        re.compile(r"(?i)(?<![A-Za-z0-9_.-])pwd\s*=\s*"
+                   r"(" + _QUOTED + r"|(?=([^'\";\s&]{1,256}))\2)(?=\s*;)"),
         1, PLACEHOLDER, _not_already_redacted,
     ),
     (
@@ -229,11 +261,12 @@ RULES = [
     ),
     (
         # `pwd` is a password abbreviation and also the shell's working directory, and engineering
-        # notes write `pwd: /srv/app` far more often than a password. A path is declined; anything
-        # else is taken on the name, like the rule above.
+        # notes write `pwd: /srv/app` far more often than a password. A working-directory value and
+        # quoted prose (`pwd: "my working directory"`) are declined; anything else of eight or more
+        # characters is taken on the name, like the rule above.
         "generic-secret-assignment",
         _assignment(r"pwd", 8),
-        1, PLACEHOLDER, _not_a_path,
+        1, PLACEHOLDER, _pwd_is_a_password,
     ),
     (
         # A key whose name does NOT say secret — bare `key`/`token`, `sort_key`, `credential` — is

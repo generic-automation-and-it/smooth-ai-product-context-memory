@@ -87,9 +87,12 @@ Targets and verification live in [./nfrs/](./nfrs/). Three shape how code is wri
   explicit scope was supplied; current path API cannot preserve that context, so skipping with
   disclosure is safer than broadening. With an explicit scope, traversal runs, but the path API still
   takes no group selector, so the skill keeps only endpoints whose group is among the baseline rows'
-  groups and discloses the dropped count (`endpointsOutsideSelector`) — traversal follows links without
-  widening past the caller's selection (issue 182). A traversal the API refuses with 403 is a disclosed
-  `forbidden` pass; it no longer aborts the recall and discards the completed baseline.
+  groups and discloses how many distinct endpoints it dropped (`endpointsOutsideSelector`) — traversal
+  follows links without widening past the caller's selection (issue 182). The dropped endpoints stay
+  reachable: a cross-group twin (LADR-04) or a decision chain (BR-11) is read by a separate, deliberate
+  `paths` request under the scope the caller granted, never folded into this recall. A traversal the API
+  refuses with 403 is a disclosed `forbidden` pass (`anchorsForbidden`, kept out of
+  `anchorsOmittedByCap`); it no longer aborts the recall and discards the completed baseline.
 - Read and write execution are delegated. Main-thread orchestration receives cited conclusions and
   receipts, never raw result arrays. Read-only capability is enforced by separate API read/write
   credentials and a read-only client surface; agent prose/frontmatter is defence in depth, not the
@@ -101,6 +104,7 @@ Targets and verification live in [./nfrs/](./nfrs/). Three shape how code is wri
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-05 | Conformance follow-up to the row below. Deep-search note: `endpointsOutsideSelector` now counts **distinct** dropped endpoints (one endpoint reached from several anchors was counted once per anchor), a `forbidden` anchor is counted in `anchorsForbidden` and no longer in `anchorsOmittedByCap`, and the dropped endpoints are stated to stay reachable by a separate, deliberate `paths` read (LADR-04 cross-group twin, BR-05/BR-11) — the read worker's "never fetch them by another route" had contradicted that. NFR-05 evidence: the 0–20 figure is restated as an upper bound on blob **store operations** (existence check, upload only for new bytes), not on uploads, since the restored winner's bytes already exist. README NFR table and the root `README.md` deduplication bullet now carry NFR-02's "same-group pairs plus one cross-group control" wording, which the earlier correction reached only in the NFR-02 files. NFR-01: the skill's `pwd` rule no longer rewrites working-directory prose, closing a byte-identity gap recorded in the skill's changelog. | issue 182 |
 | 2026-10-05 | Deep-search migration note extended: with a group/ticket selector **and** an explicit scope, traversal now keeps only endpoints in the baseline rows' groups and discloses the dropped count (`endpointsOutsideSelector`), because the path API takes no group selector and merged other groups' endpoints into a group-selected recall. A 403 on one traversal anchor is a disclosed `forbidden` pass instead of an abort that discarded the completed baseline. The no-scope skip rule is unchanged. | issue 182 |
 | 2026-10-01 | NFR-01 gained a **Verification Status** section: each verification line mapped to where it runs (client scrub, fail-closed, digest and byte-identity in the skill harness; server log and error-body containment in the new `SecretContainmentTests` L2 test), a factual statement that no server-side backstop exists and that requiring one is an open owner decision, and one observed residual — a duplicate-subject 409 names the `description`-derived slug. | NFR-01 |
 | 2026-10-01 | README status line and NFR table caught up with the 2026-09-29 balanced same-group re-measurement (re-scored 2026-09-30, recall / precision / accuracy 1.0000): NFR-02 re-evidencing no longer listed as open, and the NFR row no longer reads "evidence withdrawn". The root `README.md` deduplication bullet likewise drops "pending re-evidence", and `mimisbrunnr-ymir-bootstrap/SKILL.md` §3 no longer says the protected writer owns *cross-group* deduplication — identity is `(group, uuid)`, so deduplication is within the written group and a same-subject memory in another group is a separate memory to link. The 2026-09-28 rows below are history and stay as written. | NFR-02, LADR-04 |

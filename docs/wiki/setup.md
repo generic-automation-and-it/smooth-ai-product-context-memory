@@ -91,7 +91,9 @@ Reports `disabled`, `unreachable`, `model-missing`, or `ok`, and the endpoint or
 - **Redaction runs before any model call**, and a redactor that cannot run means **no request is made at
   all**. Sending unscrubbed record content to a model is the one outcome the gate exists to prevent.
 - **The attempt counter is the script's, not yours.** A ledger keyed by record identity bounds the
-  rewrite loop, so re-asking cannot buy more attempts.
+  rewrite loop, so re-asking cannot buy more attempts — up to the ledger cap (5 000 records). Past it,
+  the most-spent entries are evicted first (never the record being scored), so a long-spent budget can
+  start again; each `score` run reports how many it dropped as `ledgerEvicted`.
 - **A saturated score is not a confident one.** Each scored record carries a `discrimination` block
   reporting the `margin` between the highest-scoring role and the next one, plus every role tied at
   the top. On the calibration fixture the mean best-role is `0.99` and 3 of 21 records carry roles
