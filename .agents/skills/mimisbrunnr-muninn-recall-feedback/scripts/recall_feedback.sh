@@ -34,10 +34,15 @@ except ValueError:
 # passed as argv: printing it would write a credential to the terminal and any agent or CI transcript.
 if parsed.scheme not in ("http", "https") or parsed.username or parsed.password \
         or parsed.path not in ("", "/") or parsed.query or parsed.fragment:
+    # The path, query and fragment are reported as present/absent, never quoted: a token pasted into
+    # the base URL lands in one of them as readily as in the userinfo.
     print("refusing CONTEXT_MEMORY_BASE_URL: must be a bare HTTP(S) origin with no "
-          "credentials, path, query or fragment (got scheme={!r}, userinfo={}, path={!r})".format(
+          "credentials, path, query or fragment (got scheme={!r}, userinfo={}, path={}, query={}, "
+          "fragment={})".format(
               parsed.scheme, "present" if parsed.username or parsed.password else "absent",
-              parsed.path), file=sys.stderr)
+              "present" if parsed.path not in ("", "/") else "absent",
+              "present" if parsed.query else "absent",
+              "present" if parsed.fragment else "absent"), file=sys.stderr)
     sys.exit(1)
 if hostname not in ("localhost", "127.0.0.1", "::1"):
     print("refusing non-loopback CONTEXT_MEMORY_BASE_URL host: {}".format(hostname),
@@ -87,6 +92,9 @@ recall_feedback_curl() {
   # --noproxy '*' is not optional: curl honours http_proxy/ALL_PROXY from the environment, and a
   # proxy set for outbound traffic would otherwise receive a loopback request *and* its header.
   # --fail-with-body keeps a 4xx body visible instead of collapsing a refusal to an empty success.
+  # -q must stay the FIRST argument: curl reads ~/.curlrc unless -q opens the command line, and a
+  # default config can add a header, a proxy or --location, so the guard would approve one request
+  # and curl would send another.
   (
     header=""
     trap 'rm -f "$header"' EXIT
@@ -96,7 +104,7 @@ recall_feedback_curl() {
     header="$(mktemp)" || exit 1
     chmod 600 "$header"
     printf 'Authorization: Bearer %s\n' "$token" >"$header"
-    curl -sS --noproxy '*' --fail-with-body \
+    curl -q -sS --noproxy '*' --fail-with-body \
       -X "$method" -H "@$header" \
       "${base%/}${path}"
   )

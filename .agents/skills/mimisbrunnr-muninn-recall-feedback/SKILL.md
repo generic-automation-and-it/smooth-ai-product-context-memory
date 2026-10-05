@@ -83,7 +83,8 @@ What the script enforces before any token leaves:
 
 - The base URL is **parsed** and its resolved host asserted to be loopback; a raw-string glob would
   approve `http://localhost:5141@192.0.2.1/` (loopback prefix, non-loopback host via userinfo). A base
-  carrying credentials, a path, a query or a fragment is refused, and the refusal never echoes it.
+  carrying credentials, a path, a query or a fragment is refused, and the refusal never echoes it —
+  it reports only whether each part is present or absent.
 - The base reaches the parser through the environment, not argv, so it is never visible in `ps`.
 - The request path must be absolute and carry no `@`, `\`, whitespace or leading `//` — a path such as
   `@evil.example/x` appended to an approved origin would otherwise move the request's host.
@@ -91,6 +92,8 @@ What the script enforces before any token leaves:
   unlinked on success, failure and interrupt.
 - `--noproxy '*'`: curl honours `http_proxy`/`ALL_PROXY`, and a proxy would otherwise receive the
   loopback request and its header.
+- `-q` is curl's first argument, so a default `~/.curlrc` (an extra header, a proxy, `--location`)
+  cannot change the request the guard approved.
 
 The refusals are checked in the calling function, not a `( ... )` subshell whose `exit 1` nobody
 tests, so a refusal cannot be followed by a request.

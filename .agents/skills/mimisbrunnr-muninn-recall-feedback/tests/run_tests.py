@@ -9,6 +9,8 @@ PATH, so no request leaves the machine. Covers:
     not echo the credential;
   - a path that would move the host (`@host/...`, `//host/...`, a scheme, whitespace) is refused before
     any request;
+  - every curl call opens with `-q`, so a default `.curlrc` cannot alter the request (the fake curl
+    refuses any call that does not, and a real-curl case proves a `.curlrc` canary is ignored);
   - an accepted request carries `--noproxy '*'`, sends the token from a header file and never on argv,
     and unlinks that file afterwards — including when the send is interrupted;
   - the base URL never reaches any process's argv;
@@ -35,6 +37,9 @@ READ_PATH = "/api/context/recall-feedback/miss-rate?from=2026-09-11&to=2026-09-1
 FAKE_CURL = """\
 #!/usr/bin/env bash
 # Records argv one element per line, and the header file's contents and mode at call time.
+# Refuses any call whose first argument is not -q: without it a real curl reads ~/.curlrc first, so
+# every test that reaches curl also proves the default config is disabled.
+if [ "${1:-}" != "-q" ]; then echo "fake curl: -q is not argv[1]" >&2; exit 97; fi
 log="$RF_TEST_DIR/curl.argv"
 : >"$log"
 for arg in "$@"; do printf '%s\\n' "$arg" >>"$log"; done
@@ -127,6 +132,17 @@ class RecallFeedbackGuardTests(unittest.TestCase):
     def test_path_bearing_origin_is_refused(self):
         self.assert_refused(self.run_curl(base="http://localhost:5141/api"))
 
+    def test_path_query_and_fragment_are_reported_as_present_not_echoed(self):
+        # A token pasted into the base lands in the path or query as readily as in the userinfo, so the
+        # refusal says which part is present and never quotes it.
+        result = self.run_curl(
+            base="http://localhost:5141/path-secret-0123?token=query-secret#frag-secret")
+        self.assert_refused(result)
+        for part in ("path=present", "query=present", "fragment=present", "userinfo=absent"):
+            self.assertIn(part, result.stderr)
+        for secret in ("path-secret-0123", "query-secret", "frag-secret"):
+            self.assertNotIn(secret, result.stderr + result.stdout)
+
     # --- path -----------------------------------------------------------------------------------
 
     def test_path_that_moves_the_host_is_refused(self):
@@ -155,6 +171,20 @@ class RecallFeedbackGuardTests(unittest.TestCase):
         header_path = Path((self.dir / "curl.headerpath").read_text(encoding="utf-8").strip())
         self.assertFalse(header_path.exists(), "header file outlived the request")
 
+    def test_curl_is_started_with_q_as_its_first_argument(self):
+        result = self.run_curl()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.curl_argv()[0], "-q")
+
+    def test_every_curl_invocation_in_the_script_opens_with_q(self):
+        # Static, so a curl call the dynamic cases never reach is held to the same rule.
+        calls = [line.split() for line in SCRIPT.read_text(encoding="utf-8").splitlines()
+                 if line.split()[:1] == ["curl"]]
+        self.assertTrue(calls, "the script no longer invokes curl, so this check is vacuous")
+        for words in calls:
+            with self.subTest(call=" ".join(words)):
+                self.assertEqual(words[1], "-q")
+
     def test_trailing_slash_origin_does_not_double_the_separator(self):
         result = self.run_curl(base="http://127.0.0.1:5141/")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -179,6 +209,40 @@ class RecallFeedbackGuardTests(unittest.TestCase):
         self.run_curl(base="http://localhost:5141")
         recorded = (self.dir / "python.argv").read_text(encoding="utf-8")
         self.assertNotIn("localhost:5141", recorded)
+
+    # --- real curl: a default config file is ignored ----------------------------------------------
+
+    def _curlrc_home(self):
+        # A `.curlrc` that redirects curl's stderr into a canary file: if the file appears, curl read
+        # the config. Port 9 on loopback refuses at once, so no request leaves the machine.
+        home = self.dir / "curl-home"
+        home.mkdir()
+        canary = home / "curlrc-was-read"
+        (home / ".curlrc").write_text('stderr = "{}"\n'.format(canary), encoding="utf-8")
+        return home, canary
+
+    def _real_curl_env(self, home):
+        return {"PATH": os.environ.get("PATH", ""), "HOME": str(home), "TMPDIR": str(self.tmp)}
+
+    @unittest.skipUnless(shutil.which("curl"), "curl is not installed")
+    def test_the_curlrc_canary_is_read_by_a_curl_started_without_q(self):
+        # The control: without it, the next case would pass for a canary curl never honours.
+        home, canary = self._curlrc_home()
+        subprocess.run(["curl", "-sS", "http://127.0.0.1:9/"], env=self._real_curl_env(home),
+                       capture_output=True, text=True, timeout=30)
+        self.assertTrue(canary.exists(), "this curl does not read $HOME/.curlrc; the probe is moot")
+
+    @unittest.skipUnless(shutil.which("curl"), "curl is not installed")
+    def test_real_curl_ignores_a_default_curlrc(self):
+        home, canary = self._curlrc_home()
+        env = self._real_curl_env(home)
+        env["CONTEXT_MEMORY_BASE_URL"] = "http://127.0.0.1:9"
+        script = 'source "$1"; recall_feedback_curl GET "$2" "$3"'
+        result = subprocess.run(["bash", "-c", script, "harness", str(SCRIPT), READ_PATH, TOKEN],
+                                env=env, capture_output=True, text=True, timeout=30)
+        self.assertNotEqual(result.returncode, 0, "nothing listens on port 9")
+        self.assertIn("curl:", result.stderr, "curl did not run: " + result.stderr)
+        self.assertFalse(canary.exists(), "curl read the default .curlrc despite -q")
 
     # --- documentation stays wired to the tested code ---------------------------------------------
 
