@@ -1,6 +1,7 @@
 # NFR-02: Correctness — deduplication accuracy
 
-**Status:** Accepted — **evidence re-measured 2026-09-29** on same-group pairs with balanced
+**Status:** Accepted — **evidence re-measured 2026-09-29** on same-group pairs plus one cross-group
+control (`s4`, not answerable from its blinded input — see the evidence file's 2026-10-05 amendment), with balanced
 controls, and **re-scored 2026-09-30** under corrected denominators: recall 1.0000 / precision 1.0000 /
 accuracy 1.0000 across fourteen scenarios. See
 [NFR-02-semantic-evidence-2026-09-29-balanced.md](./NFR-02-semantic-evidence-2026-09-29-balanced.md).
@@ -85,7 +86,7 @@ Goal 2; LADR-04. The largest correctness risk in the system.
 
 ## Evidence
 
-[2026-09-29 blinded semantic evaluation, same-group pairs with balanced controls](./NFR-02-semantic-evidence-2026-09-29-balanced.md)
+[2026-09-29 blinded semantic evaluation, same-group pairs plus one cross-group control, balanced](./NFR-02-semantic-evidence-2026-09-29-balanced.md)
 scored **recall 1.0000 / precision 1.0000 / accuracy 1.0000** across fourteen authored scenarios — 2
 recall positives, 5 precision negatives and 7 covering the other write-path stages — with zero
 over-merge events and verdicts paired by scenario id. Those three figures are that run **re-scored

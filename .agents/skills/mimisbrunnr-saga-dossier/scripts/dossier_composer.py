@@ -6,20 +6,24 @@ The judgement half of the contextual-knowledge-export design. The Host API assem
 lifecycle marking, citation, findings, focus, and the closed reconciliation (NFR-04).
 
 This module holds **no write capability to the store.** It has no write operation at all (LADR-08);
-the only thing it writes is the local dossier artefact, at a gitignored path, and only when the CLI is
-explicitly asked to. The store is never touched and no write endpoint is called (NFR-06). It never
+the only files it writes are the dossier artefact and the scratch bundle, each at a gitignored path,
+owner-only, and only when the CLI is explicitly asked to. The store is never touched and no write
+endpoint is called (NFR-06). It never
 calls a model — composition judgement that needs a model is supplied by the caller (the agent / the
 skill) as ``judgements``; this module enforces the deterministic rules around that judgement and
 delivers the invariants the NFRs require.
 
-Usage (fetch a bundle from the Host API, read-only; --base-url is a top-level option):
-    python3 -B dossier_composer.py --base-url http://localhost:5141 bundle --body '{"repo":"kingstown","widenDepth":3}'
+Usage (fetch a bundle from the Host API, read-only; --base-url is a top-level option; --out must be a
+gitignored path and is written 0600):
+    python3 -B dossier_composer.py --base-url http://localhost:5141 bundle --repo kingstown --widen-depth 3
+        --out .context/mimisbrunnr-saga-dossier/scratch/bundle.json
 
 Usage (preview the selection first — the consent step, LADR-14 — same anchors as bundle):
     python3 -B dossier_composer.py preview --repo kingstown --widen-depth 3
 
-Usage (offline, compose from a previously saved bundle JSON; --out must be a gitignored path):
-    python3 -B dossier_composer.py compose --bundle bundle.json --focus architecture
+Usage (offline, compose from a saved bundle plus the agent's judgements; --out must be gitignored):
+    python3 -B dossier_composer.py compose --bundle .context/mimisbrunnr-saga-dossier/scratch/bundle.json
+        --judgements .context/mimisbrunnr-saga-dossier/scratch/judgements.json --focus architecture
         --out .context/mimisbrunnr-saga-dossier/architecture.md
 """
 
@@ -481,7 +485,11 @@ def consolidate(items, equivalences, edges, asof=None):
     groups = []
     uncertain = []
     for idx, group in enumerate(equivalences or []):
+        if not isinstance(group, dict):
+            raise ValueError("equivalences: each group must be an object with a 'uuids' list")
         uuids = group.get("uuids") or []
+        if not isinstance(uuids, list) or not all(isinstance(u, str) for u in uuids):
+            raise ValueError("equivalences: a group's 'uuids' must be a list of uuid strings")
         # Validate the caller-supplied equivalence group before applying it (F3). A group must name at
         # least two distinct uuids, every one selected in this bundle — an absent or duplicated uuid
         # would silently consolidate on a subset or render duplicate origin citations.
@@ -668,6 +676,8 @@ def derive_findings(items, edges, asof=None, judgements=None, uncertain=None):
     # claims for the same circumstances (scoped exceptions / proposed-vs-shipped are not conflicts);
     # a gap requires one of BR-27's three grounds. Every one carries basis + scope.
     for f in (judgements or {}).get("findings", []) if isinstance(judgements, dict) else []:
+        if not isinstance(f, dict):
+            raise ValueError("findings: each finding must be an object")
         category = f.get("category")
         if category not in FINDING_CATEGORIES:
             raise ValueError(f"unknown finding category '{category}'")
@@ -675,28 +685,42 @@ def derive_findings(items, edges, asof=None, judgements=None, uncertain=None):
         # the composer's to derive, not to override (F4).
         if category not in _CALLER_MERGEABLE_FINDINGS:
             raise ValueError(f"finding category '{category}' is not caller-mergeable")
+        # Shape before any category gate reads the references, so a malformed list is refused with
+        # its shape rather than escaping as an AttributeError from the first `.get`.
+        mems = f.get("memories")
+        mems = [] if mems is None else mems
+        if not isinstance(mems, list) or not all(isinstance(m, dict) for m in mems):
+            raise ValueError(f"{category}: memories must be a list of {{uuid, version}} objects")
+        for m in mems:
+            # Shape before lookup, so a malformed reference is told what is wrong with it rather than
+            # that it is absent. Now that identity is (uuid, version), a versionless reference misses
+            # every key, and "not selected in this bundle" would be a true statement about the wrong
+            # thing.
+            if type(m.get("version")) is not int or m["version"] < 1:
+                raise ValueError(f"{category}: each memory requires a version >= 1")
+            if not isinstance(m.get("uuid"), str) or _item_key(m) not in by_key:
+                raise ValueError(f"{category}: each memory must be selected in this bundle")
         if category == "contradiction":
             _validate_contradiction(f, by_key, edges, asof)
         if category == "gap":
             grounds = f.get("ground")
             if grounds not in ("task", "included-claim", "expectation"):
                 raise ValueError("gap: requires one of BR-27's grounds (task / included-claim / expectation)")
+            # An included-claim gap is about a claim in the slice, so it names that claim. A task or
+            # expectation gap is an answer missing from the slice: no memory supports it, and LADR-13
+            # forbids citing one that does not — so an empty list is the honest reference there.
+            if grounds == "included-claim" and not mems:
+                raise ValueError("gap: an included-claim gap must name the claim it interprets")
+        if category == "near-miss-tag" and not mems:
+            # LADR-10: no evidence means no finding, and the evidence is a supporting memory.
+            raise ValueError("near-miss-tag: requires the supporting memory (uuid/version); "
+                             "no evidence means no finding (LADR-10)")
         basis = f.get("basis")
         if not basis or not str(basis).strip():
             raise ValueError(f"{category}: requires a non-empty basis")
         classification = f.get("classification")
         if classification not in (_OBSERVATION, _ANALYSIS):
             raise ValueError(f"{category}: classification must be observation or analysis")
-        mems = f.get("memories") or []
-        for m in mems:
-            # Shape before lookup, so a malformed reference is told what is wrong with it rather than
-            # that it is absent. Now that identity is (uuid, version), a versionless reference misses
-            # every key, and "not selected in this bundle" would be a true statement about the wrong
-            # thing.
-            if not isinstance(m.get("version"), int) or m["version"] < 1:
-                raise ValueError(f"{category}: each memory requires a version >= 1")
-            if not m.get("uuid") or _item_key(m) not in by_key:
-                raise ValueError(f"{category}: each memory must be selected in this bundle")
         findings.append({
             "category": category,
             "classification": classification,
@@ -705,11 +729,13 @@ def derive_findings(items, edges, asof=None, judgements=None, uncertain=None):
             "memories": mems,
         })
 
-    # Deterministic ordering: by category (taxonomy order), then by memory identity.
+    # Deterministic ordering: by category (taxonomy order), then by memory identity. The dedup key
+    # carries the basis: a task or expectation gap names no memory, so a key of category + memories
+    # alone collapsed every such gap after the first into it, silently.
     seen = set()
     canonical = []
     for f in findings:
-        key = (f["category"], tuple((m["uuid"], m["version"]) for m in f["memories"]))
+        key = (f["category"], tuple((m["uuid"], m["version"]) for m in f["memories"]), f["basis"])
         if key in seen:
             continue
         seen.add(key)
@@ -1182,22 +1208,67 @@ def _near_miss_helper_path():
 # ---------------------------------------------------------------------------- CLI (read-only)
 
 
-def read_bundle(path_or_url):
-    if path_or_url.startswith("http://") or path_or_url.startswith("https://"):
-        # A saved bundle URL is fetched as JSON — the --bundle argument names a bundle to compose,
-        # not an API base. An API base would be a different mode (fetch a fresh bundle with anchors).
-        import urllib.request
-        with urllib.request.urlopen(path_or_url, timeout=60) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    return json.loads(Path(path_or_url).read_text(encoding="utf-8"))
+def read_bundle(path):
+    """Read a saved bundle file. A URL is refused rather than fetched.
+
+    The URL form fetched store content through a default opener — redirects followed, proxies honoured,
+    any host — beside a transport that otherwise only ever talks to a guarded loopback origin. The only
+    documented way to obtain a bundle is ``bundle --out``, so the URL form was surface without a use
+    (issue 182).
+    """
+    if re.match(r"^[A-Za-z][A-Za-z0-9+.-]*://", path):
+        raise ValueError("--bundle must name a saved bundle file, not a URL; fetch one with "
+                         "`bundle --out .context/mimisbrunnr-saga-dossier/scratch/bundle.json`.")
+    return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+_JUDGEMENT_KEYS = ("equivalences", "findings")
+
+
+def read_judgements(path):
+    """Read the agent's semantic judgements for ``compose`` from a JSON file.
+
+    The shape is the ``judgements`` argument of :func:`compose`: an object with optional
+    ``equivalences`` and ``findings`` lists. Unknown keys are refused, so a misspelt key cannot drop
+    a judgement silently; the entries themselves are validated by the composer's own gates.
+    """
+    data = _read_json_object(path, "--judgements")
+    unknown = sorted(set(data) - set(_JUDGEMENT_KEYS))
+    if unknown:
+        raise ValueError(f"--judgements carries unknown key(s) {unknown}; allowed: "
+                         f"{', '.join(_JUDGEMENT_KEYS)}")
+    for key in _JUDGEMENT_KEYS:
+        if key in data and not isinstance(data[key], list):
+            raise ValueError(f"--judgements '{key}' must be a list")
+        for entry in data.get(key, []):
+            if not isinstance(entry, dict):
+                raise ValueError(f"--judgements '{key}' entries must be objects")
+    # A near-miss-tag is evidence-only (LADR-10): it reaches the dossier from the helper's validated
+    # evidence, never from text the agent wrote, which can name no supporting memory at all.
+    if any(f.get("category") == "near-miss-tag" for f in data.get("findings", [])):
+        raise ValueError("--judgements may not carry a near-miss-tag finding; pass the evidence with "
+                         "--near-miss-evidence so the near_miss_tags helper validates it (LADR-10)")
+    return data
+
+
+def _read_json_object(path, flag):
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{flag} is not valid JSON: {exc.msg} (line {exc.lineno})") from None
+    if not isinstance(data, dict):
+        raise ValueError(f"{flag} must be a JSON object")
+    return data
 
 
 def _assert_loopback(base):
     """The read token is a capability for the whole corpus; send it only to loopback.
 
     The whole first condition of the sibling client's `base_url()` guard, not just the host check:
-    a base carrying credentials, a path, a query or a fragment is not an origin, and accepting one
-    turns a typo into a 404 from a doubled path instead of an actionable refusal.
+    a base carrying credentials, a path, `;params`, a query or a fragment is not an origin, and
+    accepting one turns a typo into a 404 from a doubled path instead of an actionable refusal.
+    `urlparse` splits `;params` off the last path segment, so `http://localhost:5141/;tok=x` has the
+    path `/` and passed the path check while carrying a pasted value into every request URL.
 
     A base `urlparse` cannot parse — an NFKC-confusable character in the netloc, a non-numeric port —
     is refused with the same fixed message. The parser's own error quotes the netloc, userinfo
@@ -1214,6 +1285,7 @@ def _assert_loopback(base):
             or parsed.username
             or parsed.password
             or parsed.path not in ("", "/")
+            or parsed.params
             or parsed.query
             or parsed.fragment):
         raise ValueError(
@@ -1336,10 +1408,19 @@ def main(argv=None):
 
     bundle_p = sub.add_parser("bundle")
     _add_anchor_args(bundle_p)
+    bundle_p.add_argument("--out", help="write the bundle to this gitignored path (mode 0600), e.g. "
+                                        ".context/mimisbrunnr-saga-dossier/scratch/bundle.json; "
+                                        "stdout if omitted")
     bundle_p.set_defaults(func=lambda args: cmd_bundle(args))
 
     compose_p = sub.add_parser("compose")
-    compose_p.add_argument("--bundle", help="path to a saved bundle JSON, or an http(s) URL")
+    compose_p.add_argument("--bundle", help="path to a saved bundle JSON")
+    compose_p.add_argument("--judgements",
+                           help="path to the agent's semantic judgements JSON "
+                                "({\"equivalences\": [...], \"findings\": [...]})")
+    compose_p.add_argument("--near-miss-evidence",
+                           help="path to near_miss_tags.py evidence JSON; its findings are the only "
+                                "way a near-miss-tag reaches the dossier from the CLI (LADR-10)")
     compose_p.add_argument("--out", help="write the artefact to this gitignored path, e.g. "
                                          ".context/mimisbrunnr-saga-dossier/<name>.md; "
                                          "stdout if omitted")
@@ -1449,6 +1530,22 @@ def build_bundle_body(args, body):
     return body
 
 
+def _heimdallr_ticket_disclosure(scan):
+    """One line saying Heimdallr dropped ticket candidates, or None; counts and reason only.
+
+    Reading only `tickets` made a withheld credential-shaped branch ticket, or a scan whose redactor
+    could not load, indistinguishable from "no branch ticket" (issue 182). The withheld values are
+    never in the scan, so none can be printed here.
+    """
+    unavailable = scan.get("ticketsUnavailable")
+    if isinstance(unavailable, str) and unavailable.strip():
+        return f"heimdallr: tickets unavailable ({' '.join(unavailable.split())[:120]})"
+    withheld = scan.get("ticketsWithheld")
+    if isinstance(withheld, int) and not isinstance(withheld, bool) and withheld > 0:
+        return f"heimdallr: {withheld} ticket candidate(s) withheld as credential-shaped"
+    return None
+
+
 def _heimdallr_autofill(body):
     """Fill missing repo/ticket/initiative anchors from the offline Heimdallr scan.
 
@@ -1467,6 +1564,9 @@ def _heimdallr_autofill(body):
         body["repo"] = repo
         filled.append(f"repo {repo}")
     if "ticketProvider" not in body and "ticketKey" not in body:
+        disclosure = _heimdallr_ticket_disclosure(scan)
+        if disclosure:
+            print(disclosure, file=sys.stderr)
         raw = scan.get("tickets")
         branch = []
         if isinstance(raw, list):
@@ -1512,25 +1612,72 @@ def cmd_preview(args):
 
 
 def cmd_bundle(args):
+    out = getattr(args, "out", None)
+    # The destination is checked before the request, so a refused path costs no store read.
+    target = _require_ignored_destination(out) if out else None
     bundle = fetch_bundle_from_api(args.base_url, _anchor_body(args))
-    print(json.dumps(bundle, indent=2))
+    text = json.dumps(bundle, indent=2)
+    if target is not None:
+        _write_private(target, text + "\n")
+        print(f"Wrote bundle to {out}")
+    else:
+        print(text)
     return 0
+
+
+def _write_private(target, text):
+    """Write ``text`` to ``target`` as an owner-only (0600) file, atomically.
+
+    A bundle carries every selected memory's body, which can hold personal data, and a shell
+    redirect left it at the umask's mode (typically 0644). ``mkstemp`` creates the temporary file
+    0600 in the destination directory, and ``os.replace`` keeps that mode even over an existing,
+    wider-mode file (issue 182).
+    """
+    import tempfile
+    fd, tmp = tempfile.mkstemp(dir=str(target.parent), prefix=f".{target.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        os.replace(tmp, target)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def _require_ignored_destination(out):
     """Resolve ``--out`` and refuse it unless git reports the destination as ignored.
 
-    A dossier is a projection of sensitive store content and the contract is a local gitignored
-    artefact, so a tracked file (README.md) or an un-ignored path must never receive it. `git
+    A dossier and a bundle both carry sensitive store content and the contract is a local gitignored
+    artefact, so a tracked file (README.md) or an un-ignored path must never receive either. `git
     check-ignore` does not report tracked files as ignored even when a pattern matches them, so one
     check covers both. The path is resolved first so a symlink in an ignored directory cannot point
     the write at a tracked file. Outside a git work tree nothing can be verified, so it is refused.
     """
-    target = Path(out).expanduser().resolve()
+    return _require_ignored_path(out, "--out", ".context/mimisbrunnr-saga-dossier/<name>.md",
+                                 "Omit --out to print to stdout.")
+
+
+def _require_ignored_source(path, flag):
+    """Refuse a ``compose`` input the agent wrote unless it sits at a gitignored path.
+
+    The judgements and near-miss evidence files are written with the agent's Write tool, which runs no
+    ignore check, and they quote store content in their bases. Refusing an un-ignored path here keeps
+    them in the scratch directory the workflow deletes, rather than beside tracked files (issue 182).
+    """
+    return _require_ignored_path(
+        path, flag, f".context/mimisbrunnr-saga-dossier/scratch/<name>.json",
+        "Write it under .context/mimisbrunnr-saga-dossier/scratch/.")
+
+
+def _require_ignored_path(path, flag, example, hint):
+    target = Path(path).expanduser().resolve()
     if target.is_dir():
-        raise ValueError(f"--out names a directory, not a file: {out}")
+        raise ValueError(f"{flag} names a directory, not a file: {path}")
     if not target.parent.is_dir():
-        raise ValueError(f"--out parent directory does not exist: {target.parent}")
+        raise ValueError(f"{flag} parent directory does not exist: {target.parent}")
     try:
         proc = subprocess.run(
             ["git", "-C", str(target.parent), "check-ignore", "-q", "--", str(target)],
@@ -1539,19 +1686,29 @@ def _require_ignored_destination(out):
         proc = None
     if proc is None or proc.returncode != 0:
         raise ValueError(
-            f"--out must name a gitignored path inside a git work tree "
-            f"(e.g. .context/mimisbrunnr-saga-dossier/<name>.md); {out} is tracked, not ignored, "
-            f"or could not be verified. Omit --out to print to stdout.")
+            f"{flag} must name a gitignored path inside a git work tree "
+            f"(e.g. {example}); {path} is tracked, not ignored, or could not be verified. {hint}")
     return target
 
 
 def cmd_compose(args):
+    if not args.bundle:
+        raise ValueError("compose requires --bundle PATH (a bundle saved with `bundle --out`)")
     target = _require_ignored_destination(args.out) if args.out else None
+    judgements = None
+    if args.judgements:
+        judgements = read_judgements(_require_ignored_source(args.judgements, "--judgements"))
+    if args.near_miss_evidence:
+        evidence = _read_json_object(
+            _require_ignored_source(args.near_miss_evidence, "--near-miss-evidence"),
+            "--near-miss-evidence")
+        judgements = dict(judgements or {})
+        judgements["findings"] = list(judgements.get("findings", [])) + near_miss_findings(evidence)
     bundle = read_bundle(args.bundle)
-    dossier = compose(bundle, focus=args.focus, asof=args.asof)
+    dossier = compose(bundle, focus=args.focus, judgements=judgements, asof=args.asof)
     text = render(dossier)
     if target is not None:
-        target.write_text(text, encoding="utf-8")
+        _write_private(target, text)
         print(f"Wrote dossier to {args.out}")
     else:
         print(text)

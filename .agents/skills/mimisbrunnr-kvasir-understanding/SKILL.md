@@ -143,9 +143,20 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
   `CONTEXT_MEMORY_DECISIONS_BELOW_THRESHOLD=hold` keeps the candidate out of the store; `mark` exports it with
   `audience:<role>` tags, which are written beside the binding's `--tags`. The setting in force is the
   one the gate reports (`belowThreshold`) — it may come from `~/.mimisbrunnr/credentials` — and a report
-  without a readable value keeps every candidate. The rubric is `scripts/decisions_rubric.json`, **a copy shared with the capture
+  without a readable value keeps every candidate. The gate also reports when its attempt ledger forgot
+  spent budgets — `ledgerReset` (the ledger was unreadable and restarted empty) or `ledgerEvicted: n`
+  (entries dropped past its 5000-entry cap) — and the client prints one stderr line for each
+  (`decisions: attempt ledger evicted N entries past its cap; those records' attempt budgets restart`),
+  because such a record can be scored again. Absent, zero or unreadable values print nothing. The rubric is `scripts/decisions_rubric.json`, **a copy shared with the capture
   skill** — the two must not drift, so an edit belongs in both. Full contract:
   [`mimisbrunnr-odin-context-memory` → Value Gate](mimisbrunnr-odin-context-memory/SKILL.md).
+  **A dry run never scores.** Scoring spends each record's attempt budget in the gate's ledger, so a
+  dry run runs the gate's content-free `probe` instead and reports `decisions: not scored (dry run …)`
+  — its write count is therefore an upper bound, since the `--write` may hold some. A misconfigured
+  gate, or one whose `redact.py` is missing, is refused on the dry run too. The probe never runs the
+  redactor, so a redactor that is present but fails on the records is found only by the `--write`,
+  which refuses. Skipping scoring is deliberate and differs from the capture skill's `set --dryrun`,
+  which repeats the judgement work: here the attempt budget is kept for the write.
 - **A dry run creates nothing** — no initiative, no group, no memory. `resolve-group` has no dry-run mode
   and its handler commits unconditionally, so a dry run resolves nothing and reports the group and the
   initiative as *would create*, printing the exact commands.
@@ -189,8 +200,11 @@ forward caller flags into the reporter; its own `--initiative` flag is for
 manual runs only.
 
 - `export`/`dump` bind branch-seen tickets when any exist, else the single
-  newest commit ticket — a 10-commit window can carry stale work, so all of it is never
-  bound at once. `import` binds nothing on its own: every filter it sends was passed explicitly.
+  newest commit ticket Heimdallr **reported** — a 10-commit window can carry stale work, so all of it is never
+  bound at once. Heimdallr withholds credential-shaped candidates, so when a newer one was withheld
+  the bound ticket is older than the newest commit; a one-line stderr disclosure
+  (`heimdallr: N ticket candidate(s) withheld …`, or `heimdallr: tickets unavailable (<reason>)` when
+  its redactor could not load) says so, with counts and reason only, never the withheld value. `import` binds nothing on its own: every filter it sends was passed explicitly.
 - Heimdallr reports `unknown` initiative when nothing proves one; that fills nothing.
   It never supplies `--tags`: derive tags from the material's own keywords, or pass
   `--tags` explicitly.

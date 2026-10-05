@@ -78,6 +78,51 @@ def _bundle(items, edges=None, omitted=None, selected_count=None):
     }
 
 
+# Both spellings of the one write credential, written out rather than read from the module so a
+# mutation that drops one from `dc._WRITE_TOKEN_NAMES` cannot shrink the tests along with it.
+_WRITE_TOKEN_SPELLINGS = ("CONTEXT_MEMORY_WRITE_TOKEN", "ApiAccess__WriteToken")
+
+
+class _CleanCredentialEnv:
+    """Isolate a credential test from the operator's shell (issue 182).
+
+    The provisioner's env file exports `ApiAccess__WriteToken`, and a write token is refused before
+    anything else, so an ambient one turned these tests into write-token refusals. Every credential
+    name is cleared for the test and the whole environment is restored afterwards, ambient values
+    included — the previous ad-hoc pops deleted them for the rest of the run.
+    """
+
+    def setUp(self):
+        super().setUp()
+        from unittest import mock
+        patcher = mock.patch.dict(os.environ)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        for name in _WRITE_TOKEN_SPELLINGS + (dc._ENV_READ_TOKEN, dc._ENV_BASE_URL):
+            os.environ.pop(name, None)
+
+
+class _RefusingOpener:
+    """Stands in for `urllib.request.build_opener`; any request is a test failure."""
+
+    def __init__(self, *handlers):
+        raise AssertionError("no request may be built on this path")
+
+
+def _init_ignore_repo(root):
+    """A scratch git repo with `.context/` ignored, a tracked README.md and the documented dirs."""
+    import subprocess
+    repo = root / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    (repo / ".gitignore").write_text(".context/\n", encoding="utf-8")
+    (repo / "README.md").write_text("tracked\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "README.md", ".gitignore"], check=True)
+    scratch = repo / ".context" / "mimisbrunnr-saga-dossier" / "scratch"
+    scratch.mkdir(parents=True)
+    return repo, scratch
+
+
 # ---------------------------------------------------------------------------- NFR-04 completeness
 
 
@@ -623,9 +668,9 @@ class Nfr06CapabilityAbsenceTests(unittest.TestCase):
                       if any(tok in name.lower() for tok in write_ops)]
         self.assertEqual(write_like, [], f"module exposes store-write-like members: {write_like}")
 
-    def test_cli_writes_only_the_local_artefact(self):
-        """NFR-06: the only thing the CLI writes is the dossier artefact at the requested path; the
-        composer has no path back into the store."""
+    def test_cli_has_no_path_back_into_the_store(self):
+        """NFR-06: the CLI writes only local files — the dossier artefact and the scratch bundle, each
+        at a requested gitignored path — and the composer has no path back into the store."""
         self.assertFalse(hasattr(dc, "import_from_store"))
         self.assertFalse(hasattr(dc, "save_changes"))
         # The CLI has a compose/bundle surface only; no subcommand writes to the store.
@@ -769,7 +814,7 @@ class HistoryBundleTests(unittest.TestCase):
         self.assertTrue(doc.reconciliation["closed"])
 
 
-class CredentialTransportTests(unittest.TestCase):
+class CredentialTransportTests(_CleanCredentialEnv, unittest.TestCase):
     """The read token is a capability for the whole corpus, so the two guards the sibling
     context-memory client already had are part of this skill's contract: the origin must be
     loopback, and a credential-bearing request must not follow a redirect. Without the first, a
@@ -788,6 +833,25 @@ class CredentialTransportTests(unittest.TestCase):
             with self.subTest(base=base):
                 with self.assertRaises(ValueError):
                     dc._assert_loopback(base)
+
+    def test_a_base_carrying_path_params_is_refused_before_any_request(self):
+        # urlparse splits `;params` off the last path segment, leaving the path `/` — so the path
+        # check alone accepted `http://localhost:5141/;tok=x` and every request URL carried it.
+        import contextlib
+        import io
+        import urllib.request
+        from unittest import mock
+
+        for base in ("http://localhost:5141/;tok=x", "http://localhost:5141/;tok=x/"):
+            with self.subTest(base=base):
+                stderr = io.StringIO()
+                with mock.patch.dict(os.environ, {dc._ENV_READ_TOKEN: "test-token-not-a-real-secret"}), \
+                        mock.patch.object(urllib.request, "build_opener", _RefusingOpener), \
+                        contextlib.redirect_stderr(stderr):
+                    rc = dc.main(["--base-url", base, "bundle", "--heimdallr", "false"])
+                self.assertEqual(rc, 1)
+                self.assertIn("loopback origin", stderr.getvalue())
+                self.assertNotIn("tok=x", stderr.getvalue())
 
     def test_loopback_forms_are_accepted(self):
         # urlparse lowercases the host, so an uppercase or bracketed form must still pass.
@@ -1085,17 +1149,19 @@ class SubsecondToleranceTests(unittest.TestCase):
 
 class HeimdallrBundleAnchorTests(unittest.TestCase):
     # `--heimdallr true` fills missing repo/tickets; explicit flags and --body win.
-    def _bundle(self, argv):
+    SCAN = {
+        "repository": "org/repo",
+        "tickets": [{"provider": "github", "key": "7", "seenIn": "branch"},
+                    {"provider": "github", "key": "6", "seenIn": "commit"}],
+        "initiative": "unknown",
+    }
+
+    def _bundle(self, argv, scan=None):
         import argparse, json
         seen = {}
         original_fetch = dc.fetch_bundle_from_api
         original_scan = dc.heimdallr_scan
-        dc.heimdallr_scan = lambda: {
-            "repository": "org/repo",
-            "tickets": [{"provider": "github", "key": "7", "seenIn": "branch"},
-                        {"provider": "github", "key": "6", "seenIn": "commit"}],
-            "initiative": "unknown",
-        }
+        dc.heimdallr_scan = lambda: scan if scan is not None else self.SCAN
         def fake_fetch(base, body):
             seen["body"] = body
             return {"bundle": "ok"}
@@ -1132,6 +1198,35 @@ class HeimdallrBundleAnchorTests(unittest.TestCase):
         self.assertEqual(body.get("repo"), "other/repo")
         self.assertEqual(body.get("ticketProvider"), "github")
         self.assertEqual(body.get("ticketKey"), "1")
+
+    def test_withheld_and_unavailable_tickets_are_disclosed_on_stderr(self):
+        """Issue 182: `ticketsWithheld` / `ticketsUnavailable` were dropped, so a withheld branch
+        ticket read as "no branch ticket". Counts and reason only, never a value."""
+        import io
+        from contextlib import redirect_stderr
+        cases = (
+            (dict(self.SCAN, ticketsWithheld=1, tickets=[]),
+             "heimdallr: 1 ticket candidate(s) withheld as credential-shaped"),
+            (dict(self.SCAN, tickets=[], ticketsWithheld=0,
+                  ticketsUnavailable="redactor unavailable; no unchecked ticket is reported"),
+             "heimdallr: tickets unavailable (redactor unavailable"),
+        )
+        for scan, expected in cases:
+            with self.subTest(expected=expected):
+                err = io.StringIO()
+                with redirect_stderr(err):
+                    body = self._bundle([], scan=scan)
+                self.assertIn(expected, err.getvalue())
+                self.assertNotIn("ticketKey", body)
+                err = io.StringIO()
+                with redirect_stderr(err):
+                    self._bundle(["--tickets", "github:1"], scan=scan)
+                self.assertNotIn("heimdallr:", err.getvalue(),
+                                 "an explicit ticket means no autofill was attempted")
+        err = io.StringIO()
+        with redirect_stderr(err):
+            self._bundle([], scan=dict(self.SCAN, ticketsWithheld=0, ticketsUnavailable=None))
+        self.assertNotIn("heimdallr:", err.getvalue())
 
     def test_opt_out_disables_autofill(self):
         body = self._bundle(["--heimdallr", "false"])
@@ -1228,24 +1323,17 @@ class BundleBodyContractTests(unittest.TestCase):
             dc.heimdallr_scan = original
 
 
-class BundleCredentialTests(unittest.TestCase):
+class BundleCredentialTests(_CleanCredentialEnv, unittest.TestCase):
     """The two credential defects: the machine credential file must seed the read token and base URL
     (so a clean shell gets 200, not 403), and the write token must never be loaded or reach the bundle
     request (read-only, LADR-08 / NFR-06)."""
 
     def test_missing_read_token_is_a_missing_credential_error(self):
-        os.environ.pop(dc._ENV_READ_TOKEN, None)
-        os.environ.pop(dc._ENV_BASE_URL, None)
-        os.environ["CONTEXT_MEMORY_BASE_URL"] = "http://localhost:5141"
-        try:
-            with self.assertRaises(ValueError) as caught:
-                dc._resolve_read_credentials(None)
-            self.assertIn("missing-credential", str(caught.exception))
-            self.assertIn(dc._ENV_READ_TOKEN, str(caught.exception))
-        finally:
-            os.environ.pop(dc._ENV_READ_TOKEN, None)
-            os.environ.pop(dc._ENV_BASE_URL, None)
-            os.environ.pop("CONTEXT_MEMORY_BASE_URL", None)
+        os.environ[dc._ENV_BASE_URL] = "http://localhost:5141"
+        with self.assertRaises(ValueError) as caught:
+            dc._resolve_read_credentials(None)
+        self.assertIn("missing-credential", str(caught.exception))
+        self.assertIn(dc._ENV_READ_TOKEN, str(caught.exception))
 
     def test_machine_credential_file_seeds_only_read_token_and_base_url(self):
         import tempfile
@@ -1253,40 +1341,45 @@ class BundleCredentialTests(unittest.TestCase):
             fh.write("CONTEXT_MEMORY_READ_TOKEN=test-read-token\n")
             fh.write("CONTEXT_MEMORY_BASE_URL=http://localhost:5141\n")
             fh.write("CONTEXT_MEMORY_WRITE_TOKEN=must-not-load\n")
+            fh.write("ApiAccess__WriteToken=must-not-load\n")
             path = fh.name
         original = dc._store_client.MACHINE_CREDENTIAL_FILE
         dc._store_client.MACHINE_CREDENTIAL_FILE = path
-        os.environ.pop(dc._ENV_READ_TOKEN, None)
-        os.environ.pop(dc._ENV_BASE_URL, None)
-        os.environ.pop(dc._ENV_WRITE_TOKEN, None)
         try:
             dc._store_client.load_machine_credentials(dc._ENV_READ_TOKEN, dc._ENV_BASE_URL)
             self.assertEqual(os.environ.get(dc._ENV_READ_TOKEN), "test-read-token")
             self.assertEqual(os.environ.get(dc._ENV_BASE_URL), "http://localhost:5141")
-            # The write token is never loaded, even when the file carries one.
-            self.assertNotIn(dc._ENV_WRITE_TOKEN, os.environ)
+            # The write token is never loaded, under either spelling, even when the file carries it.
+            for name in _WRITE_TOKEN_SPELLINGS:
+                self.assertNotIn(name, os.environ)
         finally:
             dc._store_client.MACHINE_CREDENTIAL_FILE = original
-            os.environ.pop(dc._ENV_READ_TOKEN, None)
-            os.environ.pop(dc._ENV_BASE_URL, None)
-            os.environ.pop(dc._ENV_WRITE_TOKEN, None)
             os.unlink(path)
 
-    def test_a_write_token_present_refuses_the_bundle_request(self):
+    def test_either_write_token_spelling_refuses_the_bundle_request(self):
+        """Both spellings of the write credential refuse, and the message names the one present
+        (issue 182: only the skill spelling was pinned, so dropping the Host spelling passed)."""
         import contextlib
         import io
-        os.environ[dc._ENV_WRITE_TOKEN] = "test-write-token"
-        stderr = io.StringIO()
-        try:
-            with contextlib.redirect_stderr(stderr):
+        import urllib.request
+        from unittest import mock
+
+        for name in _WRITE_TOKEN_SPELLINGS:
+            stderr = io.StringIO()
+            with self.subTest(name=name), \
+                    mock.patch.dict(os.environ, {name: "test-write-token",
+                                                 dc._ENV_READ_TOKEN: "test-read-token"}), \
+                    mock.patch.object(urllib.request, "build_opener", _RefusingOpener), \
+                    contextlib.redirect_stderr(stderr):
                 rc = dc.main(["bundle", "--heimdallr", "false"])
-            self.assertEqual(rc, 1)
-            self.assertIn(dc._ENV_WRITE_TOKEN, stderr.getvalue())
-        finally:
-            os.environ.pop(dc._ENV_WRITE_TOKEN, None)
+                self.assertEqual(rc, 1)
+                self.assertIn(f"{name} must not be present", stderr.getvalue())
+                for other in _WRITE_TOKEN_SPELLINGS:
+                    if other != name:
+                        self.assertNotIn(other, stderr.getvalue())
 
 
-class BundleServerErrorTests(unittest.TestCase):
+class BundleServerErrorTests(_CleanCredentialEnv, unittest.TestCase):
     """On HTTPError the composer surfaces the server's problem title/detail and fails non-zero, never
     the raw body — which may echo request content."""
 
@@ -1498,7 +1591,7 @@ class OutputDestinationTests(unittest.TestCase):
         self.assertIn("# Context Dossier", target.read_text(encoding="utf-8"))
 
 
-class PreviewRequestTests(unittest.TestCase):
+class PreviewRequestTests(_CleanCredentialEnv, unittest.TestCase):
     """``preview`` is the consent step before the bundle (LADR-14): the same anchor body, read-only
     credentials and transport guards, posted to the preview endpoint."""
 
@@ -1556,6 +1649,344 @@ class PreviewRequestTests(unittest.TestCase):
             rc = dc.main(["preview", "--heimdallr", "false"])
         self.assertEqual(rc, 1)
         self.assertIn(dc._ENV_WRITE_TOKEN, stderr.getvalue())
+
+
+class ComposeJudgementsCliTests(unittest.TestCase):
+    """``compose --judgements`` carries the agent's semantic judgements into the CLI (issue 182). The
+    CLI called ``compose()`` without them, so a skill restricted to its own CLI could never emit a
+    gap, a contradiction or a consolidation — the findings report held only deterministic findings."""
+
+    A = "aaaaaaaa-0000-4000-8000-000000000001"
+    B = "aaaaaaaa-0000-4000-8000-000000000002"
+
+    def setUp(self):
+        import tempfile
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.repo, self.scratch = _init_ignore_repo(Path(self._tmp.name).resolve())
+        self.bundle = self.scratch / "bundle.json"
+        self.bundle.write_text(json.dumps(_bundle([
+            _mk(self.A, "A", "The default is A."),
+            _mk(self.B, "B", "The default is A, restated.", source_ref="r2"),
+        ])), encoding="utf-8")
+
+    def _run(self, argv):
+        import contextlib
+        import io
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            rc = dc.main(argv)
+        return rc, stdout.getvalue(), stderr.getvalue()
+
+    def _compose(self, judgements=None, raw=None, evidence=None, path=None):
+        argv = ["compose", "--bundle", str(self.bundle)]
+        if judgements is not None or raw is not None:
+            path = path or self.scratch / "judgements.json"
+            path.write_text(raw if raw is not None else json.dumps(judgements), encoding="utf-8")
+            argv += ["--judgements", str(path)]
+        if evidence is not None:
+            ev_path = self.scratch / "near-miss.json"
+            ev_path.write_text(json.dumps(evidence), encoding="utf-8")
+            argv += ["--near-miss-evidence", str(ev_path)]
+        return self._run(argv)
+
+    def _gap(self, basis, ground="task", memories=()):
+        return {"category": "gap", "ground": ground, "basis": basis,
+                "memories": [{"uuid": u, "version": 1} for u in memories],
+                "classification": "analysis"}
+
+    def test_judgements_reach_the_rendered_dossier(self):
+        judgements = {
+            "equivalences": [{"uuids": [self.A, self.B], "meaning": "same default"}],
+            "findings": [self._gap("No rollout plan captured", memories=[self.A])],
+        }
+        rc, out, err = self._compose(judgements)
+        self.assertEqual(rc, 0, err)
+        self.assertIn("### gap", out)
+        self.assertIn("No rollout plan captured", out)
+        self.assertIn("Consolidated into a present claim: 1", out)
+        # Without the file the same bundle carries neither, so the file is what supplied them.
+        rc, plain, err = self._compose()
+        self.assertEqual(rc, 0, err)
+        self.assertNotIn("### gap", plain)
+        self.assertIn("Consolidated into a present claim: 0", plain)
+
+    def test_the_skill_md_example_shape_is_accepted(self):
+        # The SKILL.md example is what an agent copies; it must pass the composer's own gates.
+        skill = (HERE.parent / "SKILL.md").read_text(encoding="utf-8")
+        block = re.search(r"```json\n(.*?)\n```", skill, re.S)
+        self.assertIsNotNone(block, "SKILL.md carries no ```json judgements example")
+        example = block.group(1).replace("<uuid-a>", self.A).replace("<uuid-b>", self.B)
+        rc, out, err = self._compose(raw=example)
+        self.assertEqual(rc, 0, err)
+        self.assertIn("### gap", out)
+
+    def test_malformed_judgements_are_refused_cleanly(self):
+        """Every malformed shape is a one-line refusal with exit 1 — an AttributeError or TypeError
+        escaping `main` would surface here as a test error, not a failure."""
+        mem = {"uuid": self.A, "version": 1}
+        finding = {"category": "gap", "ground": "task", "basis": "b", "classification": "analysis"}
+        cases = {
+            "invalid json": ("{not json", "not valid JSON"),
+            "not an object": ("[]", "JSON object"),
+            "unknown key": (json.dumps({"finding": []}), "unknown key"),
+            "findings not a list": (json.dumps({"findings": {}}), "must be a list"),
+            "entry not an object": (json.dumps({"findings": ["gap"]}), "entries must be objects"),
+            "deterministic category": (json.dumps({"findings": [dict(
+                finding, category="stale", memories=[mem])]}), "not caller-mergeable"),
+            "gap without a ground": (json.dumps({"findings": [dict(
+                finding, ground=None, memories=[mem])]}), "BR-27"),
+            "memories a string": (json.dumps({"findings": [dict(finding, memories="x")]}),
+                                  "memories must be a list"),
+            "memory a string": (json.dumps({"findings": [dict(finding, memories=["x"])]}),
+                                "memories must be a list"),
+            "uuid a list": (json.dumps({"findings": [dict(
+                finding, memories=[{"uuid": [self.A], "version": 1}])]}), "selected in this bundle"),
+            "version a bool": (json.dumps({"findings": [dict(
+                finding, memories=[{"uuid": self.A, "version": True}])]}), "version >= 1"),
+            "contradiction memories a string": (json.dumps({"findings": [dict(
+                finding, category="contradiction", memories="xy")]}), "memories must be a list"),
+            "equivalence group a string": (json.dumps({"equivalences": ["x"]}),
+                                           "entries must be objects"),
+            "equivalence uuids a string": (json.dumps({"equivalences": [{"uuids": "ab"}]}),
+                                           "list of uuid strings"),
+            "equivalence uuid unhashable": (json.dumps({"equivalences": [{"uuids": [[self.A], self.B]}]}),
+                                            "list of uuid strings"),
+        }
+        for name, (raw, fragment) in cases.items():
+            with self.subTest(case=name):
+                rc, out, err = self._compose(raw=raw)
+                self.assertEqual(rc, 1, f"{name}: {out}")
+                self.assertIn(fragment, err)
+
+    def test_a_caller_near_miss_tag_is_refused_with_or_without_memories(self):
+        """LADR-10: no evidence means no finding. A near-miss-tag the agent wrote — `memories: []`
+        included — is refused; only the helper's validated evidence produces one."""
+        for mems in ([], [self.A]):
+            with self.subTest(memories=mems):
+                rc, out, err = self._compose({"findings": [{
+                    "category": "near-miss-tag", "basis": "tag drift", "classification": "analysis",
+                    "memories": [{"uuid": u, "version": 1} for u in mems]}]})
+                self.assertEqual(rc, 1, out)
+                self.assertIn("--near-miss-evidence", err)
+
+    def test_an_evidenceless_near_miss_tag_is_refused_by_compose_itself(self):
+        # The Python API path has no read_judgements in front of it; the composer gate holds alone.
+        bundle = json.loads(self.bundle.read_text(encoding="utf-8"))
+        with self.assertRaises(ValueError) as caught:
+            dc.compose(bundle, judgements={"findings": [{
+                "category": "near-miss-tag", "basis": "tag drift", "classification": "analysis",
+                "memories": []}]})
+        self.assertIn("LADR-10", str(caught.exception))
+
+    def test_near_miss_evidence_reaches_the_dossier_through_the_helper(self):
+        evidence = NearMissTagTests._evidence(self)
+        rc, out, err = self._compose(evidence=evidence)
+        self.assertEqual(rc, 0, err)
+        self.assertIn("### near-miss-tag", out)
+        self.assertIn(f"Memories: {self.A} v1", out)
+        # No relevant analysis is no evidence, so no finding.
+        evidence["analyses"][0]["relevant"] = False
+        rc, out, err = self._compose(evidence=evidence)
+        self.assertEqual(rc, 0, err)
+        self.assertNotIn("### near-miss-tag", out)
+
+    def test_gap_memory_references_follow_their_ground(self):
+        """BR-27 / LADR-13: an included-claim gap names the claim it interprets; a task or expectation
+        gap is an answer missing from the slice and names none rather than citing an unrelated one."""
+        rc, _, err = self._compose({"findings": [self._gap("What does A mean here?",
+                                                           ground="included-claim")]})
+        self.assertEqual(rc, 1)
+        self.assertIn("included-claim gap must name", err)
+        for ground in ("task", "expectation"):
+            with self.subTest(ground=ground):
+                rc, out, err = self._compose({"findings": [self._gap("No rollout plan", ground)]})
+                self.assertEqual(rc, 0, err)
+                self.assertIn("No rollout plan", out)
+
+    def test_memoryless_gaps_with_different_bases_are_all_kept(self):
+        # The dedup key was category + memories, so every memoryless gap after the first vanished.
+        rc, out, err = self._compose({"findings": [self._gap("No rollout plan"),
+                                                   self._gap("No owner named")]})
+        self.assertEqual(rc, 0, err)
+        self.assertIn("No rollout plan", out)
+        self.assertIn("No owner named", out)
+
+    def test_agent_written_inputs_outside_an_ignored_path_are_refused(self):
+        unignored = self.repo / "judgements.json"
+        rc, _, err = self._compose({"findings": []}, path=unignored)
+        self.assertEqual(rc, 1)
+        self.assertIn("--judgements must name a gitignored path", err)
+        evidence = self.repo / "near-miss.json"
+        evidence.write_text("{}", encoding="utf-8")
+        rc, _, err = self._run(["compose", "--bundle", str(self.bundle),
+                                "--near-miss-evidence", str(evidence)])
+        self.assertEqual(rc, 1)
+        self.assertIn("--near-miss-evidence must name a gitignored path", err)
+
+    def test_compose_without_a_bundle_is_refused_cleanly(self):
+        rc, _, err = self._run(["compose"])
+        self.assertEqual(rc, 1)
+        self.assertIn("compose requires --bundle", err)
+
+
+class BundleFileOnlyTests(unittest.TestCase):
+    """``compose --bundle`` reads a saved file and refuses a URL (issue 182). The URL form was fetched
+    through a default opener — any host, redirects followed, proxies honoured."""
+
+    def test_a_url_bundle_is_refused_without_a_request(self):
+        import contextlib
+        import io
+        import urllib.request
+        from unittest import mock
+
+        def _no_fetch(*a, **k):
+            raise AssertionError("a --bundle URL must not be fetched")
+
+        for url in ("http://localhost:5141/bundle.json", "https://evil.example/bundle.json",
+                    "HTTP://evil.example/b.json", "ftp://evil.example/b.json"):
+            with self.subTest(url=url):
+                stderr = io.StringIO()
+                with mock.patch.object(urllib.request, "urlopen", _no_fetch), \
+                        mock.patch.object(urllib.request, "build_opener", _RefusingOpener), \
+                        contextlib.redirect_stderr(stderr):
+                    rc = dc.main(["compose", "--bundle", url])
+                self.assertEqual(rc, 1)
+                self.assertIn("saved bundle file", stderr.getvalue())
+
+
+class BundleOutTests(_CleanCredentialEnv, unittest.TestCase):
+    """``bundle --out`` writes the raw bundle — every selected memory's body — only to a gitignored
+    path, owner-only (issue 182). The documented workflow used a shell redirect, which bypassed the
+    ignore check ``compose --out`` enforces and left the file at the umask's mode."""
+
+    PAYLOAD = {"bundle": {"items": [], "edges": [], "omitted": [],
+                          "manifest": {"selectedCount": 0}}}
+
+    def setUp(self):
+        super().setUp()
+        import tempfile
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.repo, self.scratch = _init_ignore_repo(Path(self._tmp.name).resolve())
+        os.environ[dc._ENV_READ_TOKEN] = "test-token-not-a-real-secret"
+
+    def _bundle_to(self, out, opener=None):
+        import contextlib
+        import io
+        import urllib.request
+        from unittest import mock
+
+        payload = json.dumps(self.PAYLOAD).encode("utf-8")
+
+        class _FakeResponse:
+            def read(self):
+                return payload
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        class _FakeOpener:
+            def __init__(self, *handlers):
+                pass
+
+            def open(self, req, timeout=None):
+                return _FakeResponse()
+
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with mock.patch.object(urllib.request, "build_opener", opener or _FakeOpener), \
+                contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            rc = dc.main(["bundle", "--heimdallr", "false", "--repo", "owner/repo",
+                          "--out", str(out)])
+        return rc, stdout.getvalue(), stderr.getvalue()
+
+    def test_the_documented_scratch_destination_is_written_owner_only(self):
+        import stat
+        target = self.scratch / "bundle.json"
+        # A pre-existing wider-mode file must not keep its mode.
+        target.write_text("{}", encoding="utf-8")
+        os.chmod(target, 0o644)
+        rc, out, err = self._bundle_to(target)
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(json.loads(target.read_text(encoding="utf-8")), self.PAYLOAD["bundle"])
+        self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o600)
+        self.assertNotIn("selectedCount", out)  # the body went to the file, not stdout
+        self.assertEqual([p.name for p in self.scratch.iterdir()], ["bundle.json"])
+
+    def test_unignored_tracked_and_symlinked_destinations_are_refused_before_the_request(self):
+        readme = self.repo / "README.md"
+        link = self.scratch / "link.json"
+        link.symlink_to(readme)
+        for target in (self.repo / "bundle.json", readme, link):
+            with self.subTest(target=target.name):
+                rc, _, err = self._bundle_to(target, opener=_RefusingOpener)
+                self.assertEqual(rc, 1)
+                self.assertIn("gitignored", err)
+        self.assertFalse((self.repo / "bundle.json").exists())
+        self.assertEqual(readme.read_text(encoding="utf-8"), "tracked\n")
+
+    def test_compose_out_is_written_owner_only_too(self):
+        import contextlib
+        import io
+        import stat
+        bundle = self.scratch / "bundle.json"
+        bundle.write_text(json.dumps(_bundle([_mk(
+            "aaaaaaaa-0000-4000-8000-000000000001", "A", "The default is A.")])), encoding="utf-8")
+        target = self.scratch.parent / "dossier.md"
+        with contextlib.redirect_stdout(io.StringIO()):
+            rc = dc.main(["compose", "--bundle", str(bundle), "--out", str(target)])
+        self.assertEqual(rc, 0)
+        self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o600)
+
+
+class FixtureReachConsistencyTests(unittest.TestCase):
+    """A committed bundle fixture must report a reach the selection can produce (issue 182). The
+    reconciliation fixture said 1 anchor + 5 widened = 5 selected while every item was reached via an
+    anchor. A widening never returns its own sources (NpgsqlMemoryTraversal), so anchors and widened
+    are disjoint and sum to the selected memories."""
+
+    def test_every_fixture_reach_is_producible(self):
+        checked = 0
+        for path in sorted(FIXTURES.glob("*.json")):
+            bundle = json.loads(path.read_text(encoding="utf-8"))
+            reach = (bundle.get("manifest") or {}).get("reach") if isinstance(bundle, dict) else None
+            if not reach:
+                continue
+            checked += 1
+            with self.subTest(fixture=path.name):
+                items = bundle["items"]
+                selected = {i["uuid"] for i in items} | {o["uuid"] for o in bundle["omitted"]}
+                anchored = {i["uuid"] for i in items if "anchor" in i.get("reachedVia", [])}
+                widened = {i["uuid"] for i in items if "widen" in i.get("reachedVia", [])}
+                self.assertEqual(reach["anchors"] + reach["widened"], reach["selected"])
+                self.assertEqual(reach["selected"], len(selected))
+                self.assertEqual(reach["edges"], len(bundle["edges"]))
+                self.assertGreaterEqual(reach["anchors"], len(anchored))
+                self.assertGreaterEqual(reach["widened"], len(widened))
+                if not bundle["omitted"]:
+                    self.assertEqual(reach["anchors"], len(anchored))
+                    self.assertEqual(reach["widened"], len(widened))
+        self.assertGreater(checked, 0, "no fixture carries a reach, so nothing was checked")
+
+
+class AmbientWriteTokenIsolationTests(unittest.TestCase):
+    """The credential classes pass with both write-token spellings exported (issue 182). Run in a
+    child process so the ambient values are really present at import and for every test."""
+
+    CLASSES = ("CredentialTransportTests", "BundleCredentialTests", "BundleServerErrorTests",
+               "PreviewRequestTests", "BundleOutTests")
+
+    def test_credential_classes_pass_with_ambient_write_tokens(self):
+        import subprocess
+        env = dict(os.environ)
+        for name in _WRITE_TOKEN_SPELLINGS:
+            env[name] = "test-ambient-write-token"
+        proc = subprocess.run([sys.executable, "-B", str(Path(__file__).resolve()), *self.CLASSES],
+                              capture_output=True, text=True, env=env, timeout=300)
+        self.assertEqual(proc.returncode, 0, proc.stderr[-4000:])
 
 
 if __name__ == "__main__":

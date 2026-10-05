@@ -234,8 +234,10 @@ def base_url(value=None):
         value = os.environ.get(ENV_BASE_URL, DEFAULT_BASE_URL)
     value = value.rstrip("/")
     parsed = _parse_base(value)
+    # `params` is the `;…` tail of the last path segment, which `urlparse` splits away from `path`, so
+    # `http://localhost:5141/;token=…` passed as a bare origin with the path check alone.
     if parsed.scheme not in ("http", "https") or parsed.username or parsed.password \
-            or parsed.path not in ("", "/") or parsed.query or parsed.fragment:
+            or parsed.path not in ("", "/") or parsed.params or parsed.query or parsed.fragment:
         raise ClientError(0, "bad-base-url", "Context-memory base URL must be an HTTP(S) origin")
     if parsed.hostname not in ("localhost", "127.0.0.1", "::1"):
         raise ClientError(0, "bad-base-url", "Context-memory API origin must be loopback")
@@ -389,11 +391,17 @@ def cmd_decisions_probe(args):
         sys.exit(1)
 
 
-def read_payload(path):
-    if path:
-        with open(path, "r", encoding="utf-8") as fh:
-            return json.load(fh)
-    return json.load(sys.stdin)
+def read_payload(path, consume=False):
+    """The request body from `path` (stdin when None). See `redact.load_input` for `consume`."""
+    if consume and not path:
+        raise ClientError(0, "bad-input",
+                          "--consume needs --payload: there is no file to remove when reading stdin")
+    return redact.load_input(path, consume)
+
+
+def payload_of(args):
+    """`read_payload` for a parsed command, honouring its `--consume`."""
+    return read_payload(args.payload, consume=getattr(args, "consume", False))
 
 
 def cmd_preflight(args):
@@ -404,7 +412,7 @@ def cmd_preflight(args):
     responses would report chunk-local indices as batch indices and lose cross-chunk
     collisions, so over-cap batches are refused outright — same contract as cmd_set.
     """
-    payload = read_payload(args.payload)
+    payload = payload_of(args)
     if not isinstance(payload, (dict, list)):
         raise ClientError(
             0,
@@ -433,6 +441,19 @@ def cmd_preflight(args):
             "bad-response",
             "preflight response must carry 'candidates' and 'intraBatchCollisions' as lists",
         )
+    # One result per candidate, each with its own index and a `matches` list. A short list, a repeated
+    # or out-of-range index, or a result without `matches` leaves some candidate unanswered, and an
+    # unanswered candidate reads exactly like "no match" — the same duplicate-writing default as above.
+    answered = {item["index"] for item in candidates_out
+                if isinstance(item, dict) and type(item.get("index")) is int
+                and 0 <= item["index"] < len(candidates) and isinstance(item.get("matches"), list)}
+    if len(candidates_out) != len(candidates) or answered != set(range(len(candidates))):
+        raise ClientError(
+            0,
+            "bad-response",
+            f"preflight answered {len(answered)} of {len(candidates)} candidate(s) with an index and "
+            "a 'matches' list; refusing to read the rest as 'no match'",
+        )
     out = {
         "candidates": candidates_out,
         "intra_batch_collisions": collisions_out,
@@ -448,7 +469,7 @@ def cmd_set(args):
     written, so a secret that reaches the server can only be orphaned, never edited out. The
     digest names each rule, the field it altered and the offsets it replaced — never the span's text.
     """
-    payload = read_payload(args.payload)
+    payload = payload_of(args)
     validate_set_payload(payload)
     query = {"dryRun": "true"} if args.dryrun else None
     resp = scrubbed_write("set", "POST", "/api/context/memories", payload, query=query)
@@ -589,7 +610,7 @@ def print_recall(payload, *, banner=True):
 
 def cmd_query(args):
     """POST /api/context/query. Semantic-dedup recall surface."""
-    payload = read_payload(args.payload)
+    payload = payload_of(args)
     if not isinstance(payload, dict):
         raise ClientError(0, "bad-input", "'query' payload must be an object")
     if "limit" not in payload:
@@ -625,25 +646,25 @@ def cmd_get_blob(args):
 
 
 def cmd_resolve_group(args):
-    resp = scrubbed_write("resolve_group", "POST", "/api/context/groups/resolve", read_payload(args.payload))
+    resp = scrubbed_write("resolve_group", "POST", "/api/context/groups/resolve", payload_of(args))
     print(json.dumps(resp, indent=2))
     return resp
 
 
 def cmd_update_group(args):
-    resp = scrubbed_write("update_group", "PATCH", group_path(args.uuid), read_payload(args.payload))
+    resp = scrubbed_write("update_group", "PATCH", group_path(args.uuid), payload_of(args))
     print(json.dumps(resp, indent=2))
     return resp
 
 
 def cmd_append_description(args):
-    resp = scrubbed_write("append_description", "POST", group_descriptions_path(args.uuid), read_payload(args.payload))
+    resp = scrubbed_write("append_description", "POST", group_descriptions_path(args.uuid), payload_of(args))
     print(json.dumps(resp, indent=2))
     return resp
 
 
 def cmd_create_link(args):
-    resp = scrubbed_write("create_link", "POST", "/api/context/links", read_payload(args.payload))
+    resp = scrubbed_write("create_link", "POST", "/api/context/links", payload_of(args))
     print(json.dumps(resp, indent=2))
     return resp
 
@@ -655,7 +676,7 @@ def cmd_labels(args):
 
 
 def cmd_propose_label(args):
-    resp = scrubbed_write("propose_label", "POST", "/api/context/labels", read_payload(args.payload))
+    resp = scrubbed_write("propose_label", "POST", "/api/context/labels", payload_of(args))
     print(json.dumps(resp, indent=2))
     return resp
 
@@ -667,7 +688,7 @@ def cmd_initiatives(args):
 
 
 def cmd_upsert_initiative(args):
-    resp = scrubbed_write("upsert_initiative", "POST", "/api/context/initiatives", read_payload(args.payload))
+    resp = scrubbed_write("upsert_initiative", "POST", "/api/context/initiatives", payload_of(args))
     print(json.dumps(resp, indent=2))
     return resp
 
@@ -679,7 +700,7 @@ def cmd_paths(args):
     enriched with a rendered `summary` line (endpoint name + relation chain) so the agent reads the
     path without joining UUIDs itself; the full hop/endpoint data is preserved beneath it.
     """
-    payload = read_payload(args.payload)
+    payload = payload_of(args)
     if not isinstance(payload, dict):
         raise ClientError(0, "bad-input", "'paths' payload must be an object")
     if not isinstance(payload.get("maxDepth"), int) or isinstance(payload.get("maxDepth"), bool) or payload["maxDepth"] < 1:
@@ -747,7 +768,7 @@ def _ticket_identity(value, field):
 
 def cmd_ticket_parent(args):
     """PUT an explicit declaration, or inspect locally without any network call."""
-    payload, hits = scrub_or_refuse(read_payload(args.payload), "ticket_parent")
+    payload, hits = scrub_or_refuse(payload_of(args), "ticket_parent")
     required = {"child", "parent", "expectedParent", "reason", "source"}
     if (not isinstance(payload, dict) or not required <= payload.keys()
             or payload.keys() - required - {"observedAt"}):
@@ -790,7 +811,7 @@ def cmd_ticket_parent(args):
 
 def cmd_ticket_paths(args):
     """Separate ticket traversal; preserve the entire response, including disclosure."""
-    payload = read_payload(args.payload)
+    payload = payload_of(args)
     allowed = {"anchor", "maxDepth", "direction", "scopeDimension", "kind", "pathLimit", "memoryLimit"}
     if not isinstance(payload, dict) or payload.keys() - allowed:
         raise ClientError(0, "bad-input", "'ticket-paths' requires an object with supported fields")
@@ -818,6 +839,13 @@ def cmd_ticket_paths(args):
 COMMAND_ALIASES = {"export": "set", "import": "query"}
 
 
+def add_payload_arguments(parser):
+    """`--payload` plus `--consume`, shared by both clients so the two surfaces cannot drift."""
+    parser.add_argument("--payload", help="JSON file; defaults to stdin")
+    parser.add_argument("--consume", action="store_true",
+                        help="delete the --payload file once it has been read")
+
+
 def main():
     parser = argparse.ArgumentParser(prog="context_memory_client")
     parser.add_argument("--base-url", help="override " + ENV_BASE_URL)
@@ -831,18 +859,18 @@ def main():
     p.set_defaults(func=cmd_decisions_probe)
 
     p = sub.add_parser("preflight", help="POST /api/context/preflight (batch, array-in/out)")
-    p.add_argument("--payload", help="JSON file; defaults to stdin")
+    add_payload_arguments(p)
     p.set_defaults(func=cmd_preflight)
 
     p = sub.add_parser("set", aliases=["export"],
                        help="POST /api/context/memories (alias: export, session -> store)")
-    p.add_argument("--payload", help="JSON file; defaults to stdin")
+    add_payload_arguments(p)
     p.add_argument("--dryrun", action="store_true", help="append ?dryRun=true; write nothing")
     p.set_defaults(func=cmd_set)
 
     p = sub.add_parser("query", aliases=["import"],
                        help="POST /api/context/query (semantic-dedup recall; alias: import, store -> session)")
-    p.add_argument("--payload", help="JSON file; defaults to stdin")
+    add_payload_arguments(p)
     p.set_defaults(func=cmd_query)
 
     p = sub.add_parser("get-versions", help="GET /api/context/memories/{uuid}/versions")
@@ -857,28 +885,28 @@ def main():
     p.set_defaults(func=cmd_get_blob)
 
     p = sub.add_parser("resolve-group", help="POST /api/context/groups/resolve")
-    p.add_argument("--payload", help="JSON file; defaults to stdin")
+    add_payload_arguments(p)
     p.set_defaults(func=cmd_resolve_group)
 
     p = sub.add_parser("update-group", help="PATCH /api/context/groups/{uuid}")
     p.add_argument("uuid")
-    p.add_argument("--payload", help="JSON file; defaults to stdin")
+    add_payload_arguments(p)
     p.set_defaults(func=cmd_update_group)
 
     p = sub.add_parser("append-description", help="POST /api/context/groups/{uuid}/descriptions")
     p.add_argument("uuid")
-    p.add_argument("--payload", help="JSON file; defaults to stdin")
+    add_payload_arguments(p)
     p.set_defaults(func=cmd_append_description)
 
     p = sub.add_parser("create-link", help="POST /api/context/links")
-    p.add_argument("--payload", help="JSON file; defaults to stdin")
+    add_payload_arguments(p)
     p.set_defaults(func=cmd_create_link)
 
     p = sub.add_parser("labels", help="GET /api/context/labels")
     p.set_defaults(func=cmd_labels)
 
     p = sub.add_parser("propose-label", help="POST /api/context/labels")
-    p.add_argument("--payload", help="JSON file; defaults to stdin")
+    add_payload_arguments(p)
     p.set_defaults(func=cmd_propose_label)
 
     p = sub.add_parser("initiatives", help="GET /api/context/initiatives")
@@ -886,20 +914,20 @@ def main():
     p.set_defaults(func=cmd_initiatives)
 
     p = sub.add_parser("upsert-initiative", help="POST /api/context/initiatives")
-    p.add_argument("--payload", help="JSON file; defaults to stdin")
+    add_payload_arguments(p)
     p.set_defaults(func=cmd_upsert_initiative)
 
     p = sub.add_parser("paths", help="POST /api/context/paths (bounded multi-hop traversal)")
-    p.add_argument("--payload", help="JSON file; defaults to stdin")
+    add_payload_arguments(p)
     p.set_defaults(func=cmd_paths)
 
     p = sub.add_parser("ticket-parent", help="PUT /api/context/tickets/parent (declared hierarchy only)")
-    p.add_argument("--payload", help="JSON file; defaults to stdin")
+    add_payload_arguments(p)
     p.add_argument("--dryrun", action="store_true", help="local inspection only; no request or write")
     p.set_defaults(func=cmd_ticket_parent)
 
     p = sub.add_parser("ticket-paths", help="POST /api/context/tickets/paths (required depth 1..5)")
-    p.add_argument("--payload", help="JSON file; defaults to stdin")
+    add_payload_arguments(p)
     p.set_defaults(func=cmd_ticket_paths)
 
     args = parser.parse_args()

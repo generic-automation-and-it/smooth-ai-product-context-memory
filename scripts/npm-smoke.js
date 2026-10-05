@@ -70,6 +70,22 @@ try {
     run(executable, args, { cwd: installDir });
     console.log(`OK: ${name} ${args.join(" ")}`);
   }
+
+  // Heimdallr has no bin, but kvasir's autofill runs the packed copy, and that copy screens tickets
+  // with odin's redact.py found by sibling path. If the allowlist ever drops odin's scripts, the scan
+  // still exits 0 and only reports `ticketsUnavailable`, so assert that field, not the exit code.
+  const heimdallr = join(
+    installDir, "node_modules", "@generic-automation-and-it", "mimisbrunnr-skills",
+    ".agents", "skills", "mimisbrunnr-heimdallr-find-session-metadata", "scripts",
+    "find_session_metadata.py",
+  );
+  const scan = JSON.parse(
+    run("python3", ["-B", heimdallr, "--json", "--repo-root", pkgRoot], { cwd: installDir }).stdout,
+  );
+  if (scan.ticketsUnavailable !== null) {
+    throw new Error(`packed heimdallr could not load the packed redactor: ${scan.ticketsUnavailable}`);
+  }
+  console.log("OK: find_session_metadata.py --json (redactor resolved)");
 } finally {
   rmSync(tempRoot, { recursive: true, force: true });
 }

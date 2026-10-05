@@ -19,8 +19,10 @@ a **fail-closed gate on recognition**, and it is easy to describe as more than i
   `sk-…`/`sk-proj-…`/`sk-ant-…`, a JWT, a PEM private-key block (any label, terminated or not), URL
   userinfo (`scheme://user:pass@host`), an `Authorization:` or `Bearer` credential, an assignment to a
   key whose name says secret (`password=`, `"clientSecret": "…"`, `ApiAccess__WriteToken=`,
-  `CONTEXT_MEMORY_WRITE_TOKEN=`, quoted values with spaces included), or an assignment to a neutral key
-  (`key`, `token`, `credential`) whose value is itself secret-shaped.
+  `CONTEXT_MEMORY_WRITE_TOKEN=`, quoted values with spaces included; `pwd` of 8+ characters unless the
+  value is a working directory or quoted prose, and any `pwd` value inside a `;` connection string),
+  or an assignment to a neutral key (`key`, `token`, `credential`, `auth`, `bearer`, `session`,
+  `cookie`) whose value is itself secret-shaped.
 - It does **not** catch a secret that matches no rule. A bare high-entropy value, a base64 blob with
   no label, an unusual vendor token format, or a password in prose all pass through untouched.
 
@@ -34,10 +36,48 @@ that is a deliberate, separate decision rather than something this module does i
 import argparse
 import bisect
 import json
+import os
 import re
 import sys
 
 PLACEHOLDER = "<redacted>"
+
+# Words that name a credential when they appear as a key, a label or a ticket provider. Matched per
+# identifier segment (see `is_credential_key`), never as a substring, so `author`, `credit` and
+# `monkey` are not credential names while `authToken`, `ApiAccess__WriteToken` and `x-api-key` are.
+_CREDENTIAL_WORDS = frozenset({
+    "password", "passwd", "pwd", "passphrase", "secret", "secrets", "token", "tokens", "apikey",
+    "auth", "bearer", "cred", "creds", "credential", "credentials", "session", "sessionid",
+    "cookie", "cookies",
+})
+# A run-together segment (`authtoken`, `clientsecret`) still ends in the word that makes it one.
+_CREDENTIAL_SUFFIXES = ("password", "passwd", "secret", "token", "apikey", "cookie", "credential")
+# Two-segment names whose segments are neutral alone: `api`/`key`, `access`/`key`, `private`/`key`.
+_CREDENTIAL_PAIRS = ("apikey", "accesskey", "privatekey", "clientsecret")
+
+
+def _segments(name):
+    """Lower-cased identifier segments: split on camelCase and on every non-alphanumeric run."""
+    spaced = re.sub(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])", " ", name)
+    return [part for part in re.split(r"[^A-Za-z0-9]+", spaced.lower()) if part]
+
+
+def is_credential_key(name: str) -> bool:
+    """True when `name` is a credential word: `password`, `pwd`, `API_KEY`, `authToken`, `session`.
+
+    Case-insensitive, and judged on the name alone — the value is not consulted. The redactor's
+    assignment rules use their own key patterns because they also need the value's shape; this is the
+    shared answer to "does this label say credential", for a caller (Heimdallr's ticket providers, say)
+    that has a name and must refuse to report it.
+    """
+    if not isinstance(name, str):
+        return False
+    segments = _segments(name)
+    if any(segment in _CREDENTIAL_WORDS or segment.endswith(_CREDENTIAL_SUFFIXES)
+           for segment in segments):
+        return True
+    joined = "".join(segments)
+    return any(pair in joined for pair in _CREDENTIAL_PAIRS)
 
 # Characters a token-shaped value is built from: alphanumerics plus the base64/base64url extras.
 _TOKEN_RUN = re.compile(r"[A-Za-z0-9+/]{16,}")
@@ -57,6 +97,23 @@ def _secret_shaped(value):
 
 def _not_already_redacted(value):
     return not value.strip("\"'").startswith("<redacted")
+
+
+# A `pwd` value that names a working directory: a POSIX, home or relative path, a Windows drive or UNC
+# path, or a path that starts at an environment variable (`$HOME/…`, `${WORKDIR}`, `%USERPROFILE%`). A
+# bare `$name` counts only in the all-caps form an environment variable takes, so `$ecretP4ss` is not one.
+_WORKING_DIRECTORY = re.compile(
+    r"(?:/|~|\.{1,2}[\\/]|[A-Za-z]:[\\/]|\\\\|\$\{[A-Za-z_]\w*\}|\$[A-Za-z_]\w*(?=[\\/])"
+    r"|\$[A-Z_][A-Z0-9_]*$|%[A-Za-z_]\w*%)"
+)
+
+
+def _pwd_is_a_password(value):
+    """Decline a `pwd` value that is a working directory, or quoted prose with spaces in it."""
+    bare = value.strip("\"'")
+    quoted = value[:1] in ("\"", "'")
+    return (_not_already_redacted(value) and not _WORKING_DIRECTORY.match(bare)
+            and not (quoted and re.search(r"\s", bare)))
 
 
 # Each rule is (name, pattern, value_group, placeholder, accept).
@@ -112,11 +169,16 @@ RULES = [
     ),
     (
         # A truncated or unterminated block is still key material. Takes the BEGIN line plus the
-        # base64 and `Header: value` lines that follow it — never the prose after them.
+        # base64 and `Header: value` lines that follow it. A final base64 line is usually shorter than
+        # 16 characters and, when the byte count divides by three, unpadded, so a line of 1–15 base64
+        # characters is taken when it is the whole line. The cost is precise: one-word lines
+        # (`Note`, `Thanks`) directly after a truncated key are taken with it, because nothing tells
+        # them apart from a short key line; a line with a space or punctuation (`The end.`) is not.
         "private-key-pem",
         re.compile(
             r"-----BEGIN " + _PEM_LABEL + r"-----"
-            r"(?:\s+(?:[A-Za-z0-9+/]{16,}={0,2}|[A-Za-z0-9+/]{0,15}={1,2}|[A-Z][A-Za-z-]*:[^\r\n]*))*"
+            r"(?:\s+(?:[A-Za-z0-9+/]{16,}={0,2}|[A-Za-z0-9+/]{0,15}={1,2}"
+            r"|(?<=\n)[A-Za-z0-9+/]{1,15}(?=[ \t]*(?:\r?\n|$))|[A-Z][A-Za-z-]*:[^\r\n]*))*"
         ),
         0, "<redacted-private-key>", None,
     ),
@@ -159,7 +221,24 @@ RULES = [
     ),
     (
         "connection-string-password",
-        re.compile(r"(?i)(?:password|pwd)\s*=\s*(" + _QUOTED + r"|[^'\";\s&]+)"),
+        re.compile(r"(?i)password\s*=\s*(" + _QUOTED + r"|[^'\";\s&]+)"),
+        1, PLACEHOLDER, _not_already_redacted,
+    ),
+    (
+        # `pwd=` is a password where a connection string puts it — after a `;` separator, or followed
+        # by one — and is taken on any value there. Elsewhere `pwd` is usually the working directory
+        # (`run pwd = prints the cwd`), and the `pwd` assignment rule below decides.
+        "connection-string-password",
+        re.compile(r"(?i);\s*pwd\s*=\s*(" + _QUOTED + r"|[^'\";\s&]+)"),
+        1, PLACEHOLDER, _not_already_redacted,
+    ),
+    (
+        # The leading `pwd=` of a connection string has no `;` before it, only after. The unquoted
+        # value is bounded and matched atomically (lookahead + backreference), so a failed trailing
+        # `;` check costs at most the bound per start: unbounded, a run of `pwd=` was quadratic.
+        "connection-string-password",
+        re.compile(r"(?i)(?<![A-Za-z0-9_.-])pwd\s*=\s*"
+                   r"(" + _QUOTED + r"|(?=([^'\";\s&]{1,256}))\2)(?=\s*;)"),
         1, PLACEHOLDER, _not_already_redacted,
     ),
     (
@@ -181,11 +260,22 @@ RULES = [
         1, PLACEHOLDER, _not_already_redacted,
     ),
     (
+        # `pwd` is a password abbreviation and also the shell's working directory, and engineering
+        # notes write `pwd: /srv/app` far more often than a password. A working-directory value and
+        # quoted prose (`pwd: "my working directory"`) are declined; anything else of eight or more
+        # characters is taken on the name, like the rule above.
+        "generic-secret-assignment",
+        _assignment(r"pwd", 8),
+        1, PLACEHOLDER, _pwd_is_a_password,
+    ),
+    (
         # A key whose name does NOT say secret — bare `key`/`token`, `sort_key`, `credential` — is
         # redacted only when the value itself is secret-shaped. This is the rule that used to turn
-        # `sort key = created_on` into `sort key = <redacted>`.
+        # `sort key = created_on` into `sort key = <redacted>`. `auth`, `bearer`, `session` and
+        # `cookie` are here rather than above for the same reason: `session: 2026-10-05 standup` and
+        # `auth: OIDC` are prose, and only a generated-looking value is evidence.
         "generic-secret-assignment",
-        _assignment(r"[A-Za-z0-9_.-]*key|token|credentials?", 16),
+        _assignment(r"[A-Za-z0-9_.-]*key|token|credentials?|auth|bearer|session|cookie", 16),
         1, PLACEHOLDER, _secret_shaped,
     ),
 ]
@@ -394,16 +484,37 @@ def findings_for(located):
             for name, spans in sorted(by_rule.items())]
 
 
+def load_input(path, consume):
+    """The JSON batch from `path` (stdin when None); with `consume`, the file is unlinked once read.
+
+    The batch file is the redactor's input, so it holds the text before any scrub. Unlinking it the
+    moment it has been parsed keeps that copy on disk for the length of one call rather than until
+    someone remembers to delete it. A file that fails to parse is left in place: the caller must see
+    the error and the input together, and the checkpoint's scratch cleanup removes it either way.
+    """
+    if consume and not path:
+        raise ValueError("--consume needs --input: there is no file to remove when reading stdin")
+    if not path:
+        return json.load(sys.stdin)
+    with open(path, "r", encoding="utf-8") as fh:
+        batch = json.load(fh)
+    if consume:
+        os.unlink(path)
+    return batch
+
+
 def main():
     parser = argparse.ArgumentParser(prog="redact")
     parser.add_argument("--input", help="JSON file of content strings; defaults to stdin")
+    parser.add_argument("--consume", action="store_true",
+                        help="delete the --input file once it has been read")
     args = parser.parse_args()
 
-    if args.input:
-        with open(args.input, "r", encoding="utf-8") as fh:
-            batch = json.load(fh)
-    else:
-        batch = json.load(sys.stdin)
+    try:
+        batch = load_input(args.input, args.consume)
+    except ValueError as error:
+        print(f"redact: {error}", file=sys.stderr)
+        sys.exit(1)
 
     if not isinstance(batch, list):
         print("redact: expected a JSON array on stdin", file=sys.stderr)

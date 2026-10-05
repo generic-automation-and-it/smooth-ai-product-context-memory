@@ -58,10 +58,16 @@ def execute(payload, request=client._request, clock=time.monotonic):
         """Run one pass under the deadline. Returns `(response, status)`.
 
         `status` is `completed`, `timed-out` (the store accepted the connection and did not answer
-        within the budget) or `not-run` (the wall clock was already spent). A timeout stops the chain
-        rather than aborting it: the passes already completed are kept and the rest are disclosed,
-        because a hang that discards every completed pass is the outcome the deadline exists to
-        prevent. Whole passes only — a pass contributes all of its records or none.
+        within the budget), `not-run` (the wall clock was already spent) or, for a traversal only,
+        `forbidden`. A timeout stops the chain rather than aborting it: the passes already completed
+        are kept and the rest are disclosed, because a hang that discards every completed pass is the
+        outcome the deadline exists to prevent. Whole passes only — a pass contributes all of its
+        records or none.
+
+        A traversal the store refuses with 403 — the anchor's group sits outside the requested scope,
+        which a group or ticket selector makes possible because the baseline ignores scope there — is
+        one unreadable anchor, not a failed recall. It is disclosed and the chain continues; raising
+        here discarded the completed baseline along with it.
         """
         nonlocal stopped_early, budget_exhausted
         if stopped_early:
@@ -74,6 +80,8 @@ def execute(payload, request=client._request, clock=time.monotonic):
         try:
             return request(method, path, body, timeout=budget), "completed"
         except client.ClientError as error:
+            if kind == "traversal" and error.status == 403:
+                return None, "forbidden"
             if error.status_text != "timed-out":
                 raise
             stopped_early = True
@@ -102,6 +110,8 @@ def execute(payload, request=client._request, clock=time.monotonic):
     seen = set()
     passes = []
     keyword_plan = keywords[:MAX_KEYWORDS]
+    # Distinct, because one endpoint linked from several anchors is one memory outside the selection.
+    endpoints_outside_selector = set()
 
     def mark_not_run(kind, values, limit):
         for value in values:
@@ -135,6 +145,13 @@ def execute(payload, request=client._request, clock=time.monotonic):
             if len(merged) >= AGGREGATE_LIMIT:
                 break
 
+        # A group or ticket selector narrows the baseline, but `/paths` takes no selector, so its
+        # endpoints can sit in any group of the requested scope. Only endpoints inside the selected
+        # group(s) are kept; the rest are counted, never merged, so traversal widens along links
+        # without widening past what the caller selected.
+        selected_groups = {row.get("groupUuid") for row in baseline_rows if row.get("groupUuid")}
+        if baseline.get("groupUuid") is not None:
+            selected_groups.add(baseline["groupUuid"])
         traversal_plan = [] if traversal_skipped_for_context else eligible_anchors[:MAX_TRAVERSALS]
         for index, anchor in enumerate(traversal_plan):
             path_request = {
@@ -149,8 +166,15 @@ def execute(payload, request=client._request, clock=time.monotonic):
                                         "/api/context/paths", path_request)
             rows = [path.get("endpoint", {}) for path in response.get("paths", [])] \
                 if response is not None else []
-            added = _add(rows, merged, seen, AGGREGATE_LIMIT)
+            kept = rows
+            if has_context_selector:
+                kept = [row for row in rows if row.get("groupUuid") in selected_groups]
+                endpoints_outside_selector.update(_key(row) for row in rows
+                                                  if row.get("groupUuid") not in selected_groups)
+            added = _add(kept, merged, seen, AGGREGATE_LIMIT)
             passes.append(_disclosure("traversal", anchor, TRAVERSAL_LIMIT, rows, added, status))
+            if status == "forbidden":
+                continue
             if status != "completed":
                 mark_not_run("traversal", traversal_plan[index + 1:], TRAVERSAL_LIMIT)
                 break
@@ -162,7 +186,10 @@ def execute(payload, request=client._request, clock=time.monotonic):
     keywords_omitted = len(keywords) - keywords_executed
     anchors_executed = sum(1 for item in passes if item["kind"] == "traversal"
                            and item["status"] == "completed")
-    anchors_omitted = len(eligible_anchors) - anchors_executed
+    anchors_forbidden = sum(1 for item in passes if item["status"] == "forbidden")
+    # A forbidden anchor was attempted and refused, not left out by the cap; it is counted once, in
+    # `anchorsForbidden`.
+    anchors_omitted = len(eligible_anchors) - anchors_executed - anchors_forbidden
     passes_incomplete = [{"kind": item["kind"], "value": item["value"]}
                          for item in passes if item["status"] != "completed"]
 
@@ -188,10 +215,17 @@ def execute(payload, request=client._request, clock=time.monotonic):
             "anchorsExecuted": anchors_executed,
             "anchorsOmittedByCap": anchors_omitted if baseline_completed else None,
             "traversalSkippedForContextSelector": traversal_skipped_for_context,
+            # Anchors the store refused to traverse (403), each also listed in `passesIncomplete`.
+            "anchorsForbidden": anchors_forbidden,
+            # Distinct path endpoints dropped because they sit outside the group/ticket selector.
+            # Deliberately not part of `possiblyOmitted`: they were never in the selection, so nothing
+            # selected is missing — but the count says the links exist.
+            "endpointsOutsideSelector": len(endpoints_outside_selector),
             "passes": passes,
             "passesIncomplete": passes_incomplete,
             "possiblyOmitted": len(merged) >= AGGREGATE_LIMIT
-                or keywords_omitted > 0 or anchors_omitted > 0 or traversal_skipped_for_context
+                or keywords_omitted > 0 or anchors_omitted > 0 or anchors_forbidden > 0
+                or traversal_skipped_for_context
                 or any(item["limitReached"] for item in passes)
                 or stopped_early,
         },

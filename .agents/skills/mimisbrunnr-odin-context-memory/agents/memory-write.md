@@ -26,7 +26,16 @@ Run exactly once in fixed order:
 4. **Atomicity check**: one memory per fact; split or skip bundled claims.
 5. **Write**: one transactional `set`; API owns version ordering, identities, and graph writes.
 
-Assign `createUuid` to every create before dry-run. Reuse identical UUIDs and payload for real write.
+Every batch and payload file goes under `.context/mimisbrunnr-scratch/`, written with the file tool —
+never an `echo`/heredoc, and never an environment variable (a child process inherits it and the process
+table exposes it). Pass `--consume` to `redact.py`, `atomicity.py` and every `--payload` so each file is
+deleted once read — **except `set --dryrun`**, whose payload file is kept and passed unchanged to the
+real `set --payload <file> --consume`. Remove `.context/mimisbrunnr-scratch/` after the real write, and
+also when the checkpoint is refused, fails or is abandoned: the batch file is the unredacted copy of the
+candidates, redaction never removes personal data from it, and `decisions_gate.py score < <batch-file>`
+cannot consume its own input, so the folder cleanup is what removes that copy.
+Assign `createUuid` to every create before dry-run. Reuse the identical payload file — same UUIDs, same
+items — for the real write; never rebuild it.
 Never use follow-up `create-link` for a link known at capture time.
 
 Apply BR-10 authority only after confirming same subject, scope, applicability, and business time:

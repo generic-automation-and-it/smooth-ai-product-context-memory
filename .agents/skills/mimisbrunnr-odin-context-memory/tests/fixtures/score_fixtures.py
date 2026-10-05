@@ -50,6 +50,7 @@ To re-score a dated run against the fixture it was actually taken against:
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -63,8 +64,8 @@ def load_fixtures(path=None):
 
 
 # Expected-side fields compared by equality against the model verdict object when declared.
-# "reason" is authored explanation text, not a criterion; "reason_must_be_nonempty" and
-# "must_not_contain" carry their own assertion semantics below.
+# "reason" is authored explanation text, not a criterion; "reason_must_be_nonempty",
+# "redacted_must_cover" and "must_not_contain" carry their own assertion semantics below.
 AUX_EQUALITY_FIELDS = ("target_uuid", "link_uuid", "relation", "count", "diverged", "not_product_fact", "authority")
 
 # Which axis of NFR-02's two-axis measurement a scenario exercises. Declared on the fixture rather
@@ -83,11 +84,21 @@ AXIS_VALUES = ("recall_positive", "precision_negative", "not_dedup")
 DEDUP_STAGES = ("dedup", "divergence")
 MERGE_VERDICTS = ("version_bump", "merge")
 
+VERDICT_SHAPE = {
+    "every_stage": "an object with the scenario's `id`, a `verdict` word and a non-empty `reason`",
+    "redact": "also a `redacted` object mapping every candidate_* text field to its scrubbed text",
+}
+
 
 def axis_balance(fixtures):
     positives = [f["id"] for f in fixtures if f.get("axis") == "recall_positive"]
     negatives = [f["id"] for f in fixtures if f.get("axis") == "precision_negative"]
     return positives, negatives
+
+
+def normalised(text):
+    """Case- and whitespace-insensitive form, so `akia…` or a split key still counts as the token."""
+    return re.sub(r"\s+", "", text).casefold()
 
 
 def scenario_matches(expected, got):
@@ -101,10 +112,23 @@ def scenario_matches(expected, got):
             return False
     if expected.get("reason_must_be_nonempty") and not got_dict.get("reason"):
         return False
+    # A `scrub` verdict is a claim about content, so the scrubbed content has to be there to be
+    # checked. Without this a bare `scrub` — or a redaction that only lowercased the key — scored as
+    # correct, because the banned-token check only ever saw what the verdict happened to echo
+    # (issue 182).
+    covered = expected.get("redacted_must_cover", [])
+    if covered:
+        redacted = got_dict.get("redacted")
+        if not isinstance(redacted, dict):
+            return False
+        for field in covered:
+            text = redacted.get(field)
+            if not isinstance(text, str) or not text.strip():
+                return False
     banned = expected.get("must_not_contain", [])
     if banned:
-        rendered = json.dumps(got_dict) if isinstance(got, dict) else str(got)
-        if any(token in rendered for token in banned):
+        rendered = normalised(json.dumps(got_dict) if isinstance(got, dict) else str(got))
+        if any(normalised(token) in rendered for token in banned):
             return False
     return True
 
@@ -167,7 +191,9 @@ def main():
         blinded = [{key: value for key, value in fixture.items()
                     if key not in ("expected", "note", "axis")}
                    for fixture in fixtures]
-        print(json.dumps({"scenarios": blinded}, indent=2))
+        # Output shape, not an answer: a redact-stage verdict is scored on the scrubbed text, so the
+        # model has to be told to return it.
+        print(json.dumps({"verdict_shape": VERDICT_SHAPE, "scenarios": blinded}, indent=2))
         return
 
     with open(args.model_verdicts, "r", encoding="utf-8") as fh:

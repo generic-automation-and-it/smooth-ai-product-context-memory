@@ -16,6 +16,7 @@ import json
 import re
 import sys
 
+from redact import load_input
 # Junction signals that a single record likely asserts more than one *independent* fact.
 #
 # Deliberately excluded, because each marks one fact rather than two:
@@ -107,13 +108,15 @@ def classify(text):
 def main():
     parser = argparse.ArgumentParser(prog="atomicity")
     parser.add_argument("--input", help="JSON file of candidate {description,statement} objects; defaults to stdin")
+    parser.add_argument("--consume", action="store_true",
+                        help="delete the --input file once it has been read")
     args = parser.parse_args()
 
-    if args.input:
-        with open(args.input, "r", encoding="utf-8") as fh:
-            batch = json.load(fh)
-    else:
-        batch = json.load(sys.stdin)
+    try:
+        batch = load_input(args.input, args.consume)
+    except ValueError as error:
+        print(f"atomicity: {error}", file=sys.stderr)
+        sys.exit(1)
 
     if not isinstance(batch, list):
         print("atomicity: expected a JSON array on stdin", file=sys.stderr)

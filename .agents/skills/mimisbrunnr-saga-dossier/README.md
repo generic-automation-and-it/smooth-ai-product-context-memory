@@ -45,7 +45,7 @@ from that — nothing added, nothing quietly dropped.
 ## Try it
 
 ```bash
-mkdir -p .context/mimisbrunnr-saga-dossier
+mkdir -p .context/mimisbrunnr-saga-dossier/scratch
 
 # 1. Preview first. This is blob-free and cheap: it shows the selection the store would hand back —
 #    which memories, how many, how far the links reach, the estimated cost and any limit it hit.
@@ -55,24 +55,34 @@ python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py \
 # 2. Stop and decide. Approve the scope as shown, narrow it (change the flags and preview again),
 #    or cancel. Nothing past this point runs until the scope is approved.
 
-# 3. Fetch the bundle for exactly the approved anchors — same flags as the approved preview.
+# 3. Fetch the bundle for exactly the approved anchors — same flags as the approved preview. It is
+#    written owner-only, and only to a gitignored path: it holds every selected memory's full text.
 python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py \
-  bundle --repo kingstown --widen-depth 3 > .context/mimisbrunnr-saga-dossier/bundle.json
+  bundle --repo kingstown --widen-depth 3 --out .context/mimisbrunnr-saga-dossier/scratch/bundle.json
 
-# 4. Turn that bundle into a readable document, angled for an architecture write-up.
+# 4. Write your judgements — which memories restate each other, what conflicts, what is missing —
+#    to .context/mimisbrunnr-saga-dossier/scratch/judgements.json (shape in SKILL.md). Skip it and
+#    the findings carry no gaps, contradictions or merges. Tag near-misses are not written here: they
+#    come only from the shared helper's evidence, passed as --near-miss-evidence (see SKILL.md).
+
+# 5. Turn that bundle into a readable document, angled for an architecture write-up.
 python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py \
-  compose --bundle .context/mimisbrunnr-saga-dossier/bundle.json --focus architecture \
-  --out .context/mimisbrunnr-saga-dossier/architecture.md
+  compose --bundle .context/mimisbrunnr-saga-dossier/scratch/bundle.json \
+  --judgements .context/mimisbrunnr-saga-dossier/scratch/judgements.json \
+  --focus architecture --out .context/mimisbrunnr-saga-dossier/architecture.md
+
+# 6. Done composing? Delete the scratch files, even if something failed along the way.
+rm -rf .context/mimisbrunnr-saga-dossier/scratch
 ```
 
-Steps 1 and 3 each cost a request against the store; step 4 is free to re-run as many times as you like
+Steps 1 and 3 each cost a request against the store; step 5 is free to re-run as many times as you like
 against the same saved bundle — try a few focuses on one bundle without re-asking the store. If the
 store changed between steps 1 and 3, the bundle's `manifest.selection` will not match the approved
 preview's `selection`: preview again and re-approve rather than composing a scope nobody approved.
 
-`--out` must be a gitignored path — the dossier carries store content, so a tracked or un-ignored
-destination (a `README.md`, say) is refused, as is a path outside a git checkout. Leave `--out` off to
-print to stdout instead. `--asof YYYY-MM-DD` composes lifecycle and staleness as of that date; a date
+`--out` must be a gitignored path, for `bundle` and `compose` alike — both carry store content, so a
+tracked or un-ignored destination (a `README.md`, say) is refused, as is a path outside a git checkout,
+and the file is written readable by you only. Leave `--out` off to print to stdout instead. `--asof YYYY-MM-DD` composes lifecycle and staleness as of that date; a date
 that does not parse is refused rather than silently read as today.
 
 The read token and base URL are seeded from the machine credential file (`~/.mimisbrunnr/credentials`)
@@ -101,8 +111,9 @@ reason `outside-focus`.
 - **Findings** — a short, bounded list of what's wrong with the material itself. The composer derives
   `no-links-in-slice`, `unattributed`, `stale`, `superseded-still-referenced`, `weak-summary`,
   `provenance-cycle` and `equivalence-uncertain` on its own; `gap` and `contradiction` are the semantic
-  judgement you supply (see `SKILL.md`), so the two commands above report neither — an empty result for
-  those two means "not examined", not "none found".
+  judgement you supply in step 4's judgements file (see `SKILL.md`). Compose without it and the dossier
+  reports neither — an empty result for those two then means "not examined", not "none found".
+  `near-miss-tag` appears only from the shared helper's evidence (`--near-miss-evidence`).
 - **A reconciliation line** — present + consolidated + omitted always adds up to what the bundle actually
   contained. If something's missing from the document, that line is where you'd catch it.
 

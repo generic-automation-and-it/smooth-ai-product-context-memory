@@ -134,7 +134,8 @@ def heimdallr_scan() -> dict:
     Never fails the caller: a missing script, a non-git checkout or malformed
     output means no autofill, not a refusal. Heimdallr reports repository,
     tickets and initiative only — never tags, which stay agent-derived
-    keywords from the material itself.
+    keywords from the material itself. Its `ticketsWithheld` count and
+    `ticketsUnavailable` reason are disclosed by `heimdallr_ticket_disclosure`.
     """
     if not HEIMDALLR_SCRIPT.is_file():
         return {}
@@ -170,6 +171,24 @@ def heimdallr_autofill_tickets(scan: dict) -> list[str]:
         if isinstance(entry, dict) and entry.get("provider") and entry.get("key"):
             return [f"{entry['provider']}:{entry['key']}"]
     return []
+
+
+def heimdallr_ticket_disclosure(scan: dict) -> str | None:
+    """One line saying Heimdallr dropped ticket candidates, or None; counts and reason only.
+
+    The reporter withholds credential-shaped candidates (`ticketsWithheld`) and reports no ticket at
+    all when its redactor cannot load (`ticketsUnavailable`). Reading only `tickets` made both look
+    like "no ticket found", and a withheld newer commit ticket left an older one bound as if it were
+    the newest (issue 182). The withheld values are never in the scan, so none can be printed here.
+    """
+    unavailable = scan.get("ticketsUnavailable")
+    if isinstance(unavailable, str) and unavailable.strip():
+        return f"heimdallr: tickets unavailable ({' '.join(unavailable.split())[:120]})"
+    withheld = scan.get("ticketsWithheld")
+    if isinstance(withheld, int) and not isinstance(withheld, bool) and withheld > 0:
+        return (f"heimdallr: {withheld} ticket candidate(s) withheld as credential-shaped; an "
+                "autofilled ticket is the newest one reported, not necessarily the newest commit")
+    return None
 
 
 def heimdallr_tickets(scan: dict) -> list[str]:
@@ -933,6 +952,8 @@ DECISIONS_ENABLED = "CONTEXT_MEMORY_DECISIONS_ENABLED"
 # `cmd_export` has to act on it: a refusal says "Nothing was written", so a refusal that only labelled the
 # report and let the export proceed was a message contradicting what the process then did.
 DECISIONS_REFUSED = "decisions: refused"
+_GATE_REDACTOR_REFUSAL = ("REFUSED: the decision gate's redactor could not run, so record content would "
+                          "have been sent unscrubbed. Nothing was written.")
 
 # Seed **only** the flag, and only so this client knows whether to shell out at all. The other nine
 # settings — including the API key, which is a secret — are loaded by the gate subprocess from the same
@@ -1007,6 +1028,84 @@ def _audience_tags(candidate: dict, result: dict) -> list[str]:
     return tags
 
 
+def probe_decisions(count: int) -> str:
+    """The dry-run counterpart of `gate_decisions`: check the gate without scoring anything.
+
+    Scoring spends each record's attempt budget in the gate's ledger, so a dry run that scored
+    exhausted it: after three previews a `--write` saw `attempts-exhausted` for every record, which
+    keeps the record unscored — the gate bypassed by previewing it (issue 182). `probe` checks the
+    configuration, endpoint and model with a content-free request and writes no ledger. A
+    misconfigured gate is still a refusal here, so the dry run says what the write would say.
+
+    `probe` never runs the redactor, so a gate whose redactor script is missing answered `ok` while
+    the write refused (issue 182). The gate's own first redaction check is `is_file()` on its sibling
+    `redact.py`; repeating that check here costs nothing and makes the two runs agree. A redactor
+    that is present but fails on the records is still found only by the write, which refuses.
+    """
+    if os.environ.get(DECISIONS_ENABLED, "").lower() != "true":
+        return "decisions: disabled"
+    if not DECISIONS_GATE.is_file():
+        print(f"NOTE: the decision gate is enabled but {DECISIONS_GATE} is missing; a --write would "
+              "skip it.", file=sys.stderr)
+        return "decisions: skipped (gate script missing)"
+    if not (DECISIONS_GATE.parent / "redact.py").is_file():
+        print(_GATE_REDACTOR_REFUSAL, file=sys.stderr)
+        return DECISIONS_REFUSED
+    not_scored = (f"decisions: not scored (dry run; scoring spends the gate's attempt budget) — "
+                  f"a --write scores {count} candidate(s) and may hold some")
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-B", str(DECISIONS_GATE), "probe"],
+            capture_output=True, text=True, encoding="utf-8", timeout=GATE_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        return f"{not_scored}; gate probe did not answer within {GATE_TIMEOUT_SECONDS}s"
+    except OSError:
+        return f"{not_scored}; gate probe could not run"
+    outcome = None
+    # The probe prints its report on stdout; a configuration error raised before the report exists
+    # reaches stderr as the gate's own `{"outcome": ...}` object.
+    for stream in (proc.stdout, proc.stderr):
+        try:
+            report = json.loads(stream or "")
+        except ValueError:
+            continue
+        if isinstance(report, dict) and isinstance(report.get("outcome"), str):
+            outcome = report["outcome"]
+            break
+    if outcome in ("bad-decisions-config", "bad-decisions-url"):
+        print(f"REFUSED: the decision gate is misconfigured ({outcome}). Nothing was written.",
+              file=sys.stderr)
+        return DECISIONS_REFUSED
+    if outcome == "disabled":
+        return "decisions: disabled"
+    if outcome == "ok":
+        return f"{not_scored}; gate probe ok"
+    return f"{not_scored}; gate probe: {outcome or 'unreadable'} — a --write would skip the gate"
+
+
+def _ledger_disclosures(report: dict) -> list[str]:
+    """Stderr lines for the gate's attempt-ledger disclosures; fixed wording and a count only.
+
+    `ledgerReset` (a prose string when the ledger was unreadable and started empty) and
+    `ledgerEvicted` (entries the 5000-entry cap dropped) both mean a spent attempt budget was
+    forgotten, so an exhausted record could be scored again. Reading only the verdicts lost both
+    (issue 182). The gate's reset text is not echoed: the fact is what matters, and a value this
+    client cannot interpret is ignored rather than trusted or crashed on.
+    """
+    lines = []
+    reset = report.get("ledgerReset")
+    if reset is True or (isinstance(reset, str) and reset.strip()):
+        lines.append("decisions: attempt ledger was unreadable and restarted empty; every record's "
+                     "attempt budget restarts")
+    evicted = report.get("ledgerEvicted")
+    if isinstance(evicted, int) and not isinstance(evicted, bool) and evicted > 0:
+        noun = "entry" if evicted == 1 else "entries"
+        lines.append(f"decisions: attempt ledger evicted {evicted} {noun} past its cap; those "
+                     "records' attempt budgets restart")
+    return lines
+
+
 def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str]:
     """Score each candidate's role value through the capture skill's decision gate.
 
@@ -1049,8 +1148,7 @@ def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str]:
     if proc.returncode != 0:
         detail = proc.stderr.strip() or "no detail"
         if '"redactor-unavailable"' in detail:
-            print("REFUSED: the decision gate's redactor could not run, so record content would "
-                  "have been sent unscrubbed. Nothing was written.", file=sys.stderr)
+            print(_GATE_REDACTOR_REFUSAL, file=sys.stderr)
             return candidates, DECISIONS_REFUSED
         if '"bad-decisions-config"' in detail or '"bad-decisions-url"' in detail:
             print(f"REFUSED: the decision gate is misconfigured ({detail}). Nothing was written.",
@@ -1076,6 +1174,9 @@ def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str]:
         print("NOTE: the decision gate returned an unrecognised report shape; the gate was skipped "
               "and the export continued.", file=sys.stderr)
         return candidates, "decisions: skipped (unrecognised report)"
+
+    for line in _ledger_disclosures(report):
+        print(line, file=sys.stderr)
 
     if report.get("outcome") == "disabled":
         return candidates, "decisions: disabled"
@@ -1449,6 +1550,9 @@ def cmd_export(args: argparse.Namespace) -> int:
         scan = heimdallr_scan()
         filled = []
         if not binding["tickets"]:
+            disclosure = heimdallr_ticket_disclosure(scan)
+            if disclosure:
+                print(disclosure, file=sys.stderr)
             found = heimdallr_autofill_tickets(scan)
             if found:
                 binding["tickets"] = found
@@ -1520,7 +1624,11 @@ def cmd_export(args: argparse.Namespace) -> int:
     # something other than what was configured, and both messages say "Nothing was written" — so
     # continuing past them wrote records under a refusal the operator had been told had blocked them.
     # Stopping here is before the group is resolved and before any chunk, so nothing exists to undo.
-    clean, decision_note = gate_decisions(clean)
+    # A dry run probes rather than scores: scoring spends the attempt budget the write needs.
+    if args.write:
+        clean, decision_note = gate_decisions(clean)
+    else:
+        decision_note = probe_decisions(len(clean))
     if decision_note == DECISIONS_REFUSED:
         print("REFUSED: the decision gate refused this export (the reason is above). Nothing was "
               "written; fix the gate or export without it.", file=sys.stderr)
@@ -2124,6 +2232,9 @@ def cmd_dump(args: argparse.Namespace) -> int:
         scan = heimdallr_scan()
         filled = []
         if not binding["tickets"]:
+            disclosure = heimdallr_ticket_disclosure(scan)
+            if disclosure:
+                print(disclosure, file=sys.stderr)
             found = heimdallr_autofill_tickets(scan)
             if found:
                 binding["tickets"] = found

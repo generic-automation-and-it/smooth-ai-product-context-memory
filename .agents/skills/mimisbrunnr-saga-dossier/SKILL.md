@@ -1,9 +1,10 @@
 ---
 name: mimisbrunnr-saga-dossier
-description: Compose a read-only, cited context dossier — one ordered document plus a findings report (gaps, contradictions, stale claims) — for a slice of the Mímisbrunnr store (repository, initiative, ticket, tags). Use when re-entering a repo or ticket, handing reasoning to a colleague, grounding a design document, or auditing the store. Fetches a deterministic bundle from the Host API and writes only a local gitignored artefact; never writes to the store. Triggers on "dossier", "catch me up on", "everything the store knows about".
+description: Compose a read-only, cited context dossier — one ordered document plus a findings report (gaps, contradictions, stale claims) — for a slice of the Mímisbrunnr store (repository, initiative, ticket, tags). Use when re-entering a repo or ticket, handing reasoning to a colleague, grounding a design document, or auditing the store. Fetches a deterministic bundle from the Host API and writes only the gitignored dossier plus transient scratch files it deletes; never writes to the store. Triggers on "dossier", "catch me up on", "everything the store knows about".
 allowed-tools:
   - Bash(python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py:*)
-  - Bash(mkdir -p .context/mimisbrunnr-saga-dossier)
+  - Bash(mkdir -p .context/mimisbrunnr-saga-dossier/scratch)
+  - Bash(rm -rf .context/mimisbrunnr-saga-dossier/scratch)
   - Read
   - Write
 effort: high  # equivalence, contradiction and gap judgement across a whole store slice
@@ -14,8 +15,9 @@ effort: high  # equivalence, contradiction and gap judgement across a whole stor
 Compose a **context dossier** — a read-only, focused, cited document plus its findings — for a slice of
 the Mímisbrunnr store. **This skill is read-only (LADR-08 / NFR-06): it has no write capability at
 all.** It requests a deterministic **bundle** from the Host API, applies judgement to compose the
-**dossier**, and writes only the local artefact to a gitignored path. It never writes to the store and
-never calls a write endpoint.
+**dossier**, and writes only the dossier artefact to a gitignored path, plus transient scratch files
+(the bundle and your judgements) under `.context/mimisbrunnr-saga-dossier/scratch/` that the workflow
+deletes at the end. It never writes to the store and never calls a write endpoint.
 
 Requires **Python 3.9 or newer**. The composer normalises a sub-second fraction before parsing,
 because `datetime.fromisoformat` only accepts an arbitrary number of fractional digits from 3.11
@@ -41,7 +43,7 @@ selection the practitioner approved in the preview, the difference is reported (
 ## Workflow
 
 ```bash
-mkdir -p .context/mimisbrunnr-saga-dossier
+mkdir -p .context/mimisbrunnr-saga-dossier/scratch
 
 # 1. Preview the selection (NFR-03 / LADR-14) — POST /api/context/dossier/preview, read-only and
 #    blob-free. Takes the same anchor flags as `bundle` and returns the effective selection, volume,
@@ -50,7 +52,8 @@ mkdir -p .context/mimisbrunnr-saga-dossier
 #    built in the contract's field names (the endpoint rejects unknown properties); only a
 #    missing repo/ticket anchor autofills from the offline Heimdallr git scan (--heimdallr true,
 #    default on; a supplied flag or --body key is never overwritten for that field; tags are never
-#    autofilled). The contract takes ONE ticket, so --ticket provider:key maps to ticketProvider +
+#    autofilled; a credential-shaped branch ticket Heimdallr withheld, or a scan whose redactor
+#    could not load, prints one stderr line with the count or reason, never the value). The contract takes ONE ticket, so --ticket provider:key maps to ticketProvider +
 #    ticketKey, and --tickets with more than one value is refused rather than truncated. widenDepth
 #    is always sent (default 1; --widen-depth sets it, 1-5).
 python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py \
@@ -61,18 +64,33 @@ python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py \
 # 2. STOP. Show the practitioner the preview and get an explicit approve / narrow / cancel. Narrowing
 #    means new flags and a new preview. Never fetch the bundle on an unapproved scope.
 
-# 3. Fetch the deterministic bundle with the approved anchors, saving the whole of it. Compare its
-#    manifest.selection with the approved preview's selection; report any difference (LADR-14)
-#    and re-preview rather than composing it.
+# 3. Fetch the deterministic bundle with the approved anchors into the scratch directory. --out goes
+#    through the same gitignored-destination check as compose --out and is written owner-only
+#    (0600): the bundle carries every selected memory's body, which can hold personal data. Never
+#    use a shell redirect instead. Compare its manifest.selection with the approved preview's
+#    selection; report any difference (LADR-14) and re-preview rather than composing it.
 python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py \
-  bundle --repo owner/repo --ticket github:160 > .context/mimisbrunnr-saga-dossier/bundle.json
+  bundle --repo owner/repo --ticket github:160 \
+  --out .context/mimisbrunnr-saga-dossier/scratch/bundle.json
 
-# 4. Compose from the saved bundle, apply an optional focus, write the artefact. --out must be a
-#    gitignored path inside the checkout (verified with `git check-ignore`; a tracked, un-ignored or
-#    out-of-checkout destination is refused); omit it to print to stdout.
+# 4. Read the bundle and write your semantic judgements (see "Invoking the judgement") with the
+#    Write tool to .context/mimisbrunnr-saga-dossier/scratch/judgements.json. Without this file the
+#    dossier carries no gap, contradiction or consolidation — only the deterministic findings. A
+#    near-miss-tag is not a judgement: write its evidence to scratch/near-miss.json and pass it with
+#    --near-miss-evidence (see Rules). Both paths must be gitignored or compose refuses them.
+
+# 5. Compose from the saved bundle and judgements, apply an optional focus, write the artefact.
+#    --out must be a gitignored path inside the checkout (verified with `git check-ignore`; a
+#    tracked, un-ignored or out-of-checkout destination is refused) and is written 0600; omit it to
+#    print to stdout. Re-run with other focuses against the same scratch files as needed.
 python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py \
-  compose --bundle .context/mimisbrunnr-saga-dossier/bundle.json --focus architecture \
-  --out .context/mimisbrunnr-saga-dossier/architecture.md
+  compose --bundle .context/mimisbrunnr-saga-dossier/scratch/bundle.json \
+  --judgements .context/mimisbrunnr-saga-dossier/scratch/judgements.json \
+  --focus architecture --out .context/mimisbrunnr-saga-dossier/architecture.md
+
+# 6. Delete the scratch directory once composition is finished — also when a step failed or the
+#    practitioner cancelled. The bundle is raw store content; only the dossier is the artefact.
+rm -rf .context/mimisbrunnr-saga-dossier/scratch
 ```
 
 `--asof YYYY-MM-DD` (or an ISO-8601 timestamp) bounds the validity window used for lifecycle and
@@ -89,16 +107,32 @@ document (findings first).
 Composition is judgement (LADR-02). The deterministic skeleton in
 `scripts/dossier_composer.py` enforces the rules and delivers the invariants; the **semantic** parts —
 which restatements are truly equivalent, whether two claims truly conflict, whether there is a gap —
-are the agent's to supply as `judgements` to `compose()`:
+are the agent's to supply as a judgements file passed to `compose --judgements` (the CLI hands it to
+`compose(bundle, judgements=...)` unchanged). Every memory reference names a uuid **and** a version
+from the bundle; replace the placeholders with real identities:
 
-```python
-from dossier_composer import compose
-doc = compose(bundle, focus="requirements", judgements={
-    "equivalences": [{"uuids": [...], "meaning": "same rule"}],   # consolidation candidates (LADR-05)
-    "findings": [{"category": "contradiction", "basis": ..., "memories": [...],   # semantic findings
-                  "classification": "analysis"}],
-})
+```json
+{
+  "equivalences": [
+    {"uuids": ["<uuid-a>", "<uuid-b>"], "meaning": "same default rule"}
+  ],
+  "findings": [
+    {"category": "gap", "ground": "task", "basis": "No rollout plan is captured for this rule",
+     "memories": [{"uuid": "<uuid-a>", "version": 1}], "classification": "analysis"}
+  ]
+}
 ```
+
+- `equivalences` — consolidation candidates (LADR-05); a group names memories, not versions.
+- `findings` — only `contradiction` and `gap` are accepted here (the composer derives the deterministic
+  categories itself, and a `near-miss-tag` comes only from `--near-miss-evidence`). A `gap` needs a
+  `ground` of `task`, `included-claim` or `expectation` (BR-27). An `included-claim` gap names the
+  claim it interprets; a `task` or `expectation` gap is an answer missing from the slice and may name
+  no memory — never cite one that does not support it (LADR-13). A `contradiction` names at least two
+  memories. Each needs a non-empty `basis` and a `classification` of `observation` or `analysis`.
+- Only the keys `equivalences` and `findings` are accepted. Anything else, a malformed entry, or a
+  finding that fails its gate refuses the whole compose rather than dropping it; an equivalence that
+  fails the applicability/lifecycle gate is kept distinct and reported `equivalence-uncertain`.
 
 The composer then enforces the deterministic gates: applicability + lifecycle must match before a
 consolidation, and a contradiction requires identical applicability and identical derived lifecycle —
@@ -119,8 +153,9 @@ and its memories by identity + version (LADR-13). Findings are focus-invariant i
   (NFR-05).
 - **Reconciliation** — present + consolidated + omitted-with-reason == the manifest's selected count,
   closed in the dossier itself (NFR-04).
-- **Read-only** — the module exposes no write operation; the only artefact is the dossier at the
-  requested path, which must be gitignored (NFR-06).
+- **Read-only** — the module exposes no write operation; the only files it writes are the dossier
+  and the scratch bundle, each at a requested gitignored path and owner-only (0600) (NFR-06). A
+  `--bundle` URL is refused: a bundle is read from a saved file only.
 
 ## Rules
 
@@ -140,8 +175,11 @@ and its memories by identity + version (LADR-13). Findings are focus-invariant i
 - **`kind = understanding` is a kind like any other** — same selection, citation, reconciliation,
   focus and confidentiality (LADR-15). Its load/import is a separate capability owned by
   `mimisbrunnr-kvasir-understanding`, not this skill.
-- **`near-miss-tag` is evidence-only** (LADR-10). Use the shared
-  `mimisbrunnr-odin-context-memory/scripts/near_miss_tags.py` helper via `near_miss_findings()`. No evidence
+- **`near-miss-tag` is evidence-only** (LADR-10). Write the shared
+  `mimisbrunnr-odin-context-memory/scripts/near_miss_tags.py` helper's input to
+  `.context/mimisbrunnr-saga-dossier/scratch/near-miss.json` and pass it as `compose
+  --near-miss-evidence`; the helper validates it and its findings name their supporting memory. A
+  near-miss-tag written into `--judgements` is refused, as is one naming no memory. No evidence
   means no finding; no tag-graph or full-dossier completeness claim is made.
 
 ## Base URL / token
@@ -153,8 +191,8 @@ the write token is never loaded, and a write token present in the environment re
 request (read-only, LADR-08 / NFR-06). A missing read token is a `missing-credential` error naming the
 variable and the file, never an unauthenticated request that gets 403. The token value never appears in
 a committed file (skill-secret-handling). `--base-url` overrides for a one-off. The base must be a bare
-http(s) loopback origin (`localhost`, `127.0.0.1` or `::1`) — userinfo, a path, a query or a fragment
-is refused, and a trailing slash is ignored.
+http(s) loopback origin (`localhost`, `127.0.0.1` or `::1`) — userinfo, a path, `;params`, a query or
+a fragment is refused, and a trailing slash is ignored.
 
 ## Scripts
 
@@ -164,7 +202,7 @@ is refused, and a trailing slash is ignored.
 
 ## Test
 
-Committed harness: `python3 -B .agents/skills/mimisbrunnr-saga-dossier/tests/run_tests.py` (94 tests).
+Committed harness: `python3 -B .agents/skills/mimisbrunnr-saga-dossier/tests/run_tests.py` (111 tests).
 
 ## Related
 

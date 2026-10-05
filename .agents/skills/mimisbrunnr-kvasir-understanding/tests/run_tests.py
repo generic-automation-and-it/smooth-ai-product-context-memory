@@ -2105,6 +2105,34 @@ class HeimdallrAutofillTests(unittest.TestCase):
             self.assertEqual(metadata["binding"]["repository"], "org/repo")
             self.assertNotIn("tags", metadata["binding"])
 
+    def test_withheld_and_unavailable_tickets_are_disclosed_on_stderr(self):
+        """Issue 182: `ticketsWithheld` / `ticketsUnavailable` were dropped, so a withheld newer
+        commit ticket left an older one bound silently. Counts and reason only, never a value."""
+        withheld = {"repository": "org/repo", "initiative": "unknown", "ticketsWithheld": 2,
+                    "tickets": [{"provider": "github", "key": "159", "seenIn": "commit"}]}
+        unavailable = {"repository": "org/repo", "initiative": "unknown", "tickets": [],
+                       "ticketsWithheld": 0,
+                       "ticketsUnavailable": "redactor unavailable; no unchecked ticket is reported"}
+        for scan, expected in ((withheld, "heimdallr: 2 ticket candidate(s) withheld as credential-shaped"),
+                               (unavailable, "heimdallr: tickets unavailable (redactor unavailable")):
+            uc.heimdallr_scan = lambda s=scan: s
+            with self.subTest(expected=expected), tempfile.TemporaryDirectory() as tmp:
+                src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
+                _, out, err = run(["export", src])
+                self.assertIn(expected, err)
+                self.assertNotIn("heimdallr:", out)
+                _, _, err = run(["dump", "--currentsession", "--out", str(Path(tmp) / "d")])
+                self.assertIn(expected, err)
+                # An explicit ticket means no autofill was attempted, so nothing to disclose.
+                _, _, err = run(["export", src, "--tickets", "github:1"])
+                self.assertNotIn("heimdallr:", err)
+        uc.heimdallr_scan = lambda: {"repository": "org/repo", "initiative": "unknown",
+                                     "tickets": [], "ticketsWithheld": 0, "ticketsUnavailable": None}
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
+            _, _, err = run(["export", src])
+        self.assertNotIn("heimdallr:", err)
+
     def test_import_binds_nothing_on_its_own(self):
         seen = {}
         original = uc.store_query
@@ -2177,6 +2205,45 @@ class DecisionsGateIntegrationTests(unittest.TestCase):
         """A gate report. `belowThreshold` is the gate's resolved setting, which the client obeys."""
         out = json.dumps({"outcome": outcome, "belowThreshold": below, "records": records})
         return lambda: _Result(0, out)
+
+    def test_ledger_reset_and_eviction_are_disclosed_on_stderr(self):
+        """Issue 182: `ledgerReset` / `ledgerEvicted` mean a spent attempt budget was forgotten, so
+        an exhausted record could be scored again. Only the verdicts were read, so neither reached
+        the operator. Absent, zero, false or malformed values print nothing and never crash."""
+        records = [{"index": i, "outcome": "scored", "passed": True, "passingRoles": ["developer"]}
+                   for i in range(3)]
+        reset_text = "the attempt ledger at this path was unreadable or malformed and has been started empty"
+
+        def gate(**extra):
+            out = json.dumps(dict({"outcome": "ok", "belowThreshold": "hold", "records": records},
+                                  **extra))
+            return lambda: _Result(0, out)
+
+        evicted_line = "decisions: attempt ledger evicted"
+        reset_line = "decisions: attempt ledger was unreadable and restarted empty"
+        cases = [
+            ({"ledgerEvicted": 1}, ["evicted 1 entry past its cap"], [reset_line]),
+            ({"ledgerEvicted": 4}, ["evicted 4 entries past its cap"], [reset_line]),
+            ({"ledgerReset": reset_text, "ledgerEvicted": 0}, [reset_line], [evicted_line]),
+            ({"ledgerReset": reset_text, "ledgerEvicted": 2}, [reset_line, "evicted 2 entries"], []),
+            ({}, [], [evicted_line, reset_line]),
+            ({"ledgerEvicted": 0, "ledgerReset": False}, [], [evicted_line, reset_line]),
+            ({"ledgerEvicted": "7", "ledgerReset": ["x"]}, [], [evicted_line, reset_line]),
+            ({"ledgerEvicted": True, "ledgerReset": "  "}, [], [evicted_line, reset_line]),
+            ({"ledgerEvicted": -3, "ledgerReset": None}, [], [evicted_line, reset_line]),
+        ]
+        for extra, expected, absent in cases:
+            with self.subTest(extra=extra):
+                err = io.StringIO()
+                with redirect_stderr(err):
+                    survivors, note, _ = self._run_gate(gate(**extra))
+                self.assertEqual(len(survivors), 3)
+                self.assertTrue(note.startswith("decisions: ok"), note)
+                for text in expected:
+                    self.assertIn(text, err.getvalue())
+                for text in absent:
+                    self.assertNotIn(text, err.getvalue())
+                self.assertNotIn(reset_text, err.getvalue(), "the gate's prose is never echoed")
 
     def test_disabled_keeps_everything_and_calls_nothing(self):
         def explode():
@@ -2517,6 +2584,127 @@ class ExportTagsAndScopeTests(unittest.TestCase):
 def _Result(rc, out, err=""):
     """A stand-in for `subprocess.CompletedProcess`; the gate reads only these three attributes."""
     return type("_Result", (), {"returncode": rc, "stdout": out, "stderr": err})()
+
+
+class DecisionsGateDryRunAndTimeoutTests(unittest.TestCase):
+    """Issue 182. A dry run scored through the gate, which spends each record's attempt budget: three
+    previews exhausted it and the `--write` kept every record unscored. A dry run now runs the gate's
+    content-free `probe` instead. And a redactor timeout inside the gate must stay a refusal."""
+
+    def _run_export(self, gate_answer, write_flag):
+        """Run the real `export` with only the gate subprocess and the capture client faked.
+        Returns (rc, out, err, gate argv list, capture-client calls)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md", "The retry budget is three attempts.")
+            originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                         uc.resolve_group, uc._run_capture_client, uc.subprocess.run)
+            gate_argv, called = [], []
+            uc.gate_redaction = lambda texts: (list(texts), {})
+            uc.gate_atomicity = lambda c: [{"verdict": "simple", "signals": []} for _ in c]
+            uc.initiative_exists = lambda name: (True, "present")
+            uc.resolve_group = lambda b, n, d, dryrun: ({"groupUuid": "g-1", "created": False}, "ok")
+            uc._run_capture_client = lambda s, a, p: (called.append(a[0]), (0, "{}", ""))[1]
+
+            def fake_run(argv, **kwargs):
+                gate_argv.append(list(argv))
+                return gate_answer(argv)
+
+            uc.subprocess.run = fake_run
+            previous = os.environ.get("CONTEXT_MEMORY_DECISIONS_ENABLED")
+            os.environ["CONTEXT_MEMORY_DECISIONS_ENABLED"] = "true"
+            try:
+                argv = ["export", src, "--initiative", "Present", "--heimdallr", "false"]
+                if write_flag:
+                    argv.append("--write")
+                rc, out, err = run(argv)
+            finally:
+                if previous is None:
+                    os.environ.pop("CONTEXT_MEMORY_DECISIONS_ENABLED", None)
+                else:
+                    os.environ["CONTEXT_MEMORY_DECISIONS_ENABLED"] = previous
+                (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                 uc.resolve_group, uc._run_capture_client, uc.subprocess.run) = originals
+            return rc, out, err, gate_argv, called
+
+    @staticmethod
+    def _gate_commands(gate_argv):
+        return [a[3] for a in gate_argv if len(a) > 3 and str(a[2]).endswith("decisions_gate.py")]
+
+    def test_a_dry_run_probes_and_never_scores(self):
+        rc, out, err, gate_argv, _ = self._run_export(
+            lambda argv: _Result(0, json.dumps({"outcome": "ok"})), write_flag=False)
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(self._gate_commands(gate_argv), ["probe"],
+                         "a dry run must not spend the gate's attempt budget")
+        self.assertIn("decisions: not scored (dry run", out)
+        self.assertIn("gate probe ok", out)
+
+    def test_a_write_still_scores(self):
+        report = json.dumps({"outcome": "ok", "belowThreshold": "hold",
+                             "records": [{"index": 0, "outcome": "scored", "passed": True}]})
+        rc, _, err, gate_argv, called = self._run_export(lambda argv: _Result(0, report),
+                                                         write_flag=True)
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(self._gate_commands(gate_argv), ["score"])
+        self.assertTrue(called)
+
+    def test_a_dry_run_still_refuses_a_misconfigured_gate(self):
+        """The probe reports a bad setting on stdout, or on stderr when it fails before its report."""
+        for outcome in ("bad-decisions-config", "bad-decisions-url"):
+            for on_stdout in (True, False):
+                payload = json.dumps({"outcome": outcome, "detail": "x"}, indent=2)
+                answer = (lambda argv, p=payload: _Result(1, p, "")) if on_stdout else \
+                    (lambda argv, p=payload: _Result(1, "", p))
+                with self.subTest(outcome=outcome, on_stdout=on_stdout):
+                    rc, _, err, gate_argv, called = self._run_export(answer, write_flag=False)
+                    self.assertEqual(rc, 1)
+                    self.assertIn("REFUSED", err)
+                    self.assertEqual(called, [])
+                    self.assertEqual(self._gate_commands(gate_argv), ["probe"])
+
+    def test_a_dry_run_refuses_when_the_gates_redactor_is_missing(self):
+        """Issue 182: `probe` never runs the redactor, so a gate with no `redact.py` beside it
+        answered `ok` on the dry run while the write refused. The dry run must refuse the same way."""
+        original_gate = uc.DECISIONS_GATE
+        with tempfile.TemporaryDirectory() as gate_dir:
+            uc.DECISIONS_GATE = Path(gate_dir) / "decisions_gate.py"
+            uc.DECISIONS_GATE.write_text("", encoding="utf-8")
+            try:
+                rc, _, err, gate_argv, called = self._run_export(
+                    lambda argv: _Result(0, json.dumps({"outcome": "ok"})), write_flag=False)
+                self.assertEqual(rc, 1)
+                self.assertIn("REFUSED: the decision gate's redactor could not run", err)
+                self.assertEqual(called, [])
+                self.assertEqual(self._gate_commands(gate_argv), [])
+                # Control: the same stub gate with its redactor beside it probes normally.
+                (Path(gate_dir) / "redact.py").write_text("", encoding="utf-8")
+                rc, out, err, gate_argv, _ = self._run_export(
+                    lambda argv: _Result(0, json.dumps({"outcome": "ok"})), write_flag=False)
+                self.assertEqual(rc, 0, err)
+                self.assertIn("gate probe ok", out)
+            finally:
+                uc.DECISIONS_GATE = original_gate
+
+    def test_an_unavailable_model_on_a_dry_run_is_disclosed_not_refused(self):
+        rc, out, err, _, _ = self._run_export(
+            lambda argv: _Result(1, json.dumps({"outcome": "unreachable"})), write_flag=False)
+        self.assertEqual(rc, 0, err)
+        self.assertNotIn("REFUSED", err)
+        self.assertIn("gate probe: unreachable", out)
+
+    def test_a_redactor_timeout_inside_the_gate_refuses_the_write(self):
+        """Issue 182 (kvasir side of the gate's redactor-timeout fix): the gate now reports a hung
+        redactor as `redactor-unavailable` on stderr, pretty-printed, and that must stop the export
+        before anything is written — not read as a skipped gate."""
+        stderr = json.dumps({"outcome": "redactor-unavailable",
+                             "detail": "the redactor could not run (TimeoutExpired); no request was made"},
+                            indent=2)
+        rc, _, err, gate_argv, called = self._run_export(lambda argv: _Result(1, "", stderr),
+                                                         write_flag=True)
+        self.assertEqual(rc, 1)
+        self.assertIn("REFUSED", err)
+        self.assertEqual(called, [], "nothing may be resolved or written after a redactor refusal")
+        self.assertEqual(self._gate_commands(gate_argv), ["score"])
 
 
 def _stub_gate_transport(fake):

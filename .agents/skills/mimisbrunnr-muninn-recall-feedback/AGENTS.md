@@ -56,22 +56,26 @@ records. Output is identity, count and time only.
   asserted, never glob-matched as a string: `http://localhost:5141@192.0.2.1/` has a loopback prefix
   and a non-loopback host, which is the exact bypass the guard exists to close. Mirrors
   `context_memory_client.base_url()`.
-- **A refused base reports each part as present/absent, never its value.** Userinfo, path, query and
-  fragment are all named that way; the path was once quoted (`path={!r}`), and a token pasted into the
-  base lands in the path or query as readily as in the userinfo.
+- **A refused base reports each part as present/absent, never its value.** Userinfo, path, `;params`,
+  query and fragment are all named that way; the path was once quoted (`path={!r}`), and a token pasted
+  into the base lands in the path or query as readily as in the userinfo. The scheme is reported only as
+  `valid`/`invalid` and a non-loopback host is refused without naming it: `admin:hunter2` parses with
+  scheme `admin`, and a token pasted into the wrong variable parses as a hostname. `params` must be
+  checked separately because `urlparse` moves `;…` out of `path`, so `http://localhost:5141/;tok=x`
+  otherwise reads as a bare origin.
 - **A base the parser cannot read is refused with a fixed message.** `urlsplit` raises `ValueError`
   for an NFKC-confusable netloc character, a non-numeric port or an unbalanced IPv6 bracket, and the
   message quotes the netloc — userinfo included. The guard's stderr is the caller's stderr, so that
   error must never escape the `try`; the sibling composer closes the same hole at
-  `dossier_composer.py:1113-1117`.
+  `dossier_composer.py` `_assert_loopback`.
 
 ## Test References
 
 - `python3 -B .agents/skills/mimisbrunnr-muninn-recall-feedback/tests/run_tests.py` — stdlib unittest, no
   network. Sources `scripts/recall_feedback.sh` under bash with a recording fake `curl` and a `python3`
-  shim on `PATH`, and asserts: non-loopback, userinfo and path-bearing origins are refused before any
-  request (and neither the userinfo nor a path, query or fragment is echoed — each is reported
-  present/absent); host-moving paths (`@host/…`, `//host`, a scheme, whitespace,
+  shim on `PATH`, and asserts: non-loopback, userinfo, path-bearing and `;params`-bearing origins are
+  refused before any request (and neither the userinfo nor a path, params, query or fragment is echoed —
+  each is reported present/absent — nor the scheme or a non-loopback hostname); host-moving paths (`@host/…`, `//host`, a scheme, whitespace,
   `\`) are refused; an accepted request carries `--noproxy '*'`, sends the token only from a mode-600
   header file and never on argv; the header file is gone after success, curl failure and `TERM`; the
   base URL never appears in any python argv; every `curl` call opens with `-q` (the fake curl refuses a
@@ -89,6 +93,7 @@ records. Output is identity, count and time only.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-05 | **The guard accepted `;params` and its refusals named the scheme and the host.** `urlparse` moves `;…` out of `path`, so `http://localhost:5141/;tok=x` passed as a bare origin and curl sent the params in the request line (the host stayed loopback; curl ends the authority at the first `/`). `parsed.params` is now refused and reported present/absent like the other parts. The refusal also printed `scheme={!r}` and the non-loopback hostname, and both can carry a pasted secret (`admin:hunter2` has scheme `admin`); the scheme is now `valid`/`invalid` and the host is not named. The message keeps the word `non-loopback`. Mutation-checked: dropping the params check fails 2 subtests, restoring either echo fails 3. Harness 21 -> 23. | issue 182 |
 | 2026-10-05 | **Documented queries take the operator's window, and the harness can see a lost `--fail-with-body`.** `SKILL.md` hard-coded a September 2026 window and `asOf`, so following it re-measured the same past period on every run and a tuning change could never appear in the before/after comparison; the queries now read `RF_FROM`/`RF_TO` (`asOf` = `RF_TO`) and stop before sending when either is unset. The fake curl returned success whatever the flags, so deleting `--fail-with-body` left the harness green while a `403` read as an empty result; the harness now asserts the option reaches curl and drives a real curl against a loopback `403` responder (exit 22, body kept). Harness 17 -> 21. | issue 179 |
 | 2026-10-05 | **Two request-integrity leaks in the guard closed.** (1) A refused base printed `path={!r}`, so a credential pasted into the base URL's path reached stderr — and the guard's stderr is the caller's transcript; the refusal now reports path, query and fragment as present/absent, the way userinfo already was. (2) curl ran without `-q`, so a default `~/.curlrc` could add a header, a proxy or a redirect-follow to a request the guard had approved; `-q` is now curl's first argument. The fake curl refuses any call without it, a static check covers every invocation, and a real-curl case with an isolated `HOME` proves a `.curlrc` is ignored. | issue 179 |
 | 2026-10-02 | Renamed `mimisbrunnr-recall-feedback` → `mimisbrunnr-muninn-recall-feedback` (folder, `name:`, CI paths, every cross-reference). Muninn is Odin's raven Memory — reports what was never seen. Behaviour unchanged; harness green. | session request |

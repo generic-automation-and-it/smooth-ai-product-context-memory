@@ -5,7 +5,7 @@
 | _(none)_ | **Baseline** | Silent capture; write only at checkpoint; no approval override. |
 | `--dryrun` | **Same as a real write** | Full pipeline, no persistence. Costs the LLM judgements but writes nothing. The **only** pre-write inspection point — a plain `set`'s digest arrives after the transaction has committed. |
 | `--approve` | **No extra cost, narrower gate** | Writes `rule`/`nfr`/`decision` as `approved` rather than `proposed`. Saves a human round-trip at the cost of canon becoming citable without review — the "ask about what is not reversible" rule. Without it the fact is still stored, just not yet citable. |
-| `--deepsearch` | **Bounded opt-in** | Adds four keyword passes of 25 and five depth-one traversals of 20, capped at 400 unique UUID/version candidates. Reports saturation and possible omissions. |
+| `--deepsearch` | **Bounded opt-in** | Adds four keyword passes of 25 and five depth-one traversals of 20, capped at 400 unique UUID/version candidates. Reports saturation and possible omissions. Under a group/ticket selector it never returns another group's endpoints, and a refused (403) anchor is reported rather than failing the recall. |
 
 **Bottom line:** writes are expensive by design (R13) and cheap by default for reads. The skill's value
 is not that it is cheap — it is that it is the *only* way to make real, long-lived memory, and it makes

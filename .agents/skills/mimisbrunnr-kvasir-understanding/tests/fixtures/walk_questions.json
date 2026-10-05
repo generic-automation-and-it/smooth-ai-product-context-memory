@@ -4,6 +4,8 @@
     "question": "The container is green but a newly added endpoint 404s. What does the loaded material say the verified fix is, and which memory or unit states it?",
     "identity": "Stale-image trap",
     "accept": ["stale-image trap", "aaaaaaaa-1111-1111-1111-111111111111", "stale-image-trap"],
+    "must_contain": ["verify freshness"],
+    "must_not_contain": ["always fresh"],
     "absent": false
   },
   {
@@ -11,6 +13,8 @@
     "question": "In the loaded material, what is the graph store's relationship to relational joins, and which memory states it?",
     "identity": "Graph over joins",
     "accept": ["graph over joins", "aaaaaaaa-2222-2222-2222-222222222222", "graph-over-joins"],
+    "must_contain": ["not a join"],
+    "must_not_contain": ["is a join"],
     "absent": false
   },
   {
@@ -18,6 +22,7 @@
     "question": "Which datastore is the authoritative storage engine, and which record states it?",
     "identity": "Storage engine",
     "accept": ["storage engine", "bbbbbbbb-1111-1111-1111-111111111111"],
+    "must_contain": ["postgres"],
     "absent": false
   },
   {
@@ -25,6 +30,7 @@
     "question": "Which component holds the cache, as distinct from the store, and which record states it?",
     "identity": "Cache path",
     "accept": ["cache path", "bbbbbbbb-2222-2222-2222-222222222222"],
+    "must_contain": ["redis"],
     "absent": false
   },
   {
