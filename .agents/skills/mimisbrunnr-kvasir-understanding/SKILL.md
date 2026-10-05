@@ -43,11 +43,16 @@ already written somewhere into the store so it compounds. It is the **load/trans
 
 ```bash
 python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding_client.py \
-  load <input> [--format store|understanding|foreign|auto] [--all] [--asof YYYY-MM-DD] [--max-chars N]
+  load [<input> | --input <path>] [--format store|understanding|foreign|auto] [--all] [--asof YYYY-MM-DD] [--max-chars N]
 ```
 
 - `load` reads the input (a store Understanding export, or a foreign document) and renders it as
   **cited grounding context** for the agent. **It writes nothing.**
+- **Input is optional.** Give it as the positional or `--input` (both only if they agree; an empty
+  `--input` is refused). With neither, the skill uses the newest session dump — the
+  `.context/mimisbrunnr-understandings/*` folder, under the repository root, whose `_session.md` was
+  written most recently — and prints `Input defaulted to …`. `dump --currentsession --from <session>`
+  creates that dump. With no dump it refuses and names `dump --currentsession`.
 - **Breadth** (store exports only): by default a load returns **only** the understanding-kind records.
   `--all` unions memory **and** understanding — the full context. The breadth default is stated in the
   output, and scoped-memory records that were omitted are listed, never silently dropped.
@@ -112,7 +117,7 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
 
 ```bash
 python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding_client.py \
-  export <input> [--write] \
+  export [<input> | --input <path>] [--write] \
   [--tickets TICKET,...] [--tags TAG,...] [--repository REPO] [--scope scope:id] \
   [--initiative NAME] [--name NAME] [--body TEXT] [--heimdallr true]
 ```
@@ -120,6 +125,10 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
 - `export` orchestrates the capture skill end to end — redaction gate, atomicity gate, the optional value
   gate, the auto-split batch cap, group resolution, preflight, and `set --dryrun` as the veto point — and
   **never writes directly**. It is a **dry run by default**; `--write` performs the capture.
+- **Input is optional, as for `load`, but a defaulted input is dry-run only.** The newest dump in a
+  shared workspace can be another session's, so `export --write` with no explicit input refuses before
+  reading anything and asks for `--input <folder> --write`. A dry run on the default proceeds and says
+  which dump it used.
 
 - **The value gate is optional and off by default.** With `CONTEXT_MEMORY_DECISIONS_ENABLED=true`, each
   candidate is scored for value to each target role by a **local decision model** (no model in the Host or

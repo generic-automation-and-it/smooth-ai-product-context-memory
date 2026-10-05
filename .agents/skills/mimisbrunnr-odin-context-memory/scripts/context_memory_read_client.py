@@ -51,7 +51,7 @@ def main():
     command.set_defaults(func=client.cmd_probe)
     for name, function in (("query", client.cmd_query), ("paths", client.cmd_paths),
                            ("ticket-paths", client.cmd_ticket_paths)):
-        command = sub.add_parser(name)
+        command = sub.add_parser(name, aliases=["import"] if name == "query" else [])
         command.add_argument("--payload")
         command.set_defaults(func=function)
     command = sub.add_parser("get-versions")
@@ -73,6 +73,7 @@ def main():
     command.set_defaults(func=lambda args: print_deepsearch(args))
 
     args = parser.parse_args()
+    args.command = client.COMMAND_ALIASES.get(args.command, args.command)
     if args.base_url:
         os.environ[client.ENV_BASE_URL] = args.base_url
     try:

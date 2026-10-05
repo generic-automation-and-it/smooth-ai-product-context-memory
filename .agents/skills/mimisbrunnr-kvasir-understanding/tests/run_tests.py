@@ -11,6 +11,7 @@ touching the store (LADR-07).
 
 from __future__ import annotations
 
+import argparse
 import datetime as dt
 import io
 import json
@@ -2365,6 +2366,107 @@ def _stub_gate_transport(fake):
         finally:
             uc.subprocess.run = original
     return gate_decisions
+
+
+class InputDefaultTests(unittest.TestCase):
+    """`load`/`export` take an optional input. Explicit input is final; with none, the newest session
+    dump is used, disclosed, and kept off the write path, because in a shared workspace the newest dump
+    can be another session's."""
+
+    def _args(self, flag=None, positional=None):
+        return argparse.Namespace(input_option=flag, input=positional)
+
+    def _dump(self, root, name, mtime):
+        folder = Path(root) / name
+        folder.mkdir(parents=True)
+        session = folder / uc.SESSION_FILE
+        session.write_text("# s\n\nA fact worth storing.\n", encoding="utf-8")
+        os.utime(session, (mtime, mtime))
+        return folder
+
+    def _resolve(self, args):
+        err = io.StringIO()
+        with redirect_stdout(io.StringIO()), redirect_stderr(err):
+            result = uc.resolve_input(args)
+        return result, err.getvalue()
+
+    def test_the_flag_wins_and_equal_flag_and_positional_are_accepted(self):
+        self.assertEqual(self._resolve(self._args(flag="/a"))[0], ("/a", False))
+        self.assertEqual(self._resolve(self._args(positional="/b"))[0], ("/b", False))
+        self.assertEqual(self._resolve(self._args(flag="/a", positional="/a"))[0], ("/a", False))
+
+    def test_two_different_inputs_are_refused_not_silently_resolved(self):
+        (src, _), err = self._resolve(self._args(flag="/a", positional="/b"))
+        self.assertIsNone(src)
+        self.assertIn("two different inputs", err)
+
+    def test_an_empty_flag_is_refused_rather_than_read_as_absent(self):
+        (src, _), err = self._resolve(self._args(flag="  "))
+        self.assertIsNone(src)
+        self.assertIn("--input is empty", err)
+
+    def test_the_newest_dump_is_chosen_by_its_session_file_not_its_folder(self):
+        """A re-dump rewrites `_session.md` in place and leaves the folder mtime alone; ordering by the
+        folder chose the stale dump. The fixture makes the two orderings disagree."""
+        with tempfile.TemporaryDirectory() as tmp:
+            redumped = self._dump(tmp, "redumped", mtime=2_000_000)
+            other = self._dump(tmp, "other", mtime=1_000_000)
+            os.utime(redumped, (500_000, 500_000))
+            os.utime(other, (1_500_000, 1_500_000))
+            (Path(tmp) / "no-session").mkdir()
+            with with_stubbed("dump_root", lambda: Path(tmp)):
+                self.assertEqual(uc.current_session_input(), str(redumped))
+
+    def test_no_dump_folder_and_an_empty_dump_folder_both_yield_none(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with with_stubbed("dump_root", lambda: Path(tmp) / "absent"):
+                self.assertIsNone(uc.current_session_input())
+            (Path(tmp) / "only-a-dir").mkdir()
+            with with_stubbed("dump_root", lambda: Path(tmp)):
+                self.assertIsNone(uc.current_session_input())
+
+    def test_a_defaulted_input_is_disclosed(self):
+        with with_stubbed("current_session_input", lambda: "/dump"):
+            out = io.StringIO()
+            with redirect_stdout(out):
+                self.assertEqual(uc.resolve_input(self._args()), ("/dump", True))
+        self.assertIn("Input defaulted to the newest session dump: /dump", out.getvalue())
+
+    def test_load_and_export_refuse_with_no_input_and_no_dump(self):
+        with with_stubbed("current_session_input", lambda: None):
+            for argv in (["load"], ["export", "--heimdallr", "false"]):
+                with self.subTest(argv=argv):
+                    rc, _, err = run(argv)
+                    self.assertEqual(rc, 1)
+                    self.assertIn("dump --currentsession", err)
+
+    def test_export_write_refuses_a_defaulted_input_before_reading_it(self):
+        """The newest dump may be another session's; `--write` on a guess would capture it."""
+        called = []
+        with with_stubbed("current_session_input", lambda: "/someone-elses-dump"), \
+                with_stubbed("read_material", lambda *a: called.append(a) or 2):
+            rc, _, err = run(["export", "--write", "--heimdallr", "false"])
+        self.assertEqual(rc, 1)
+        self.assertIn("--write needs an explicit input", err)
+        self.assertEqual(called, [], "nothing may be read once the write is refused")
+
+    def test_export_dry_run_proceeds_on_a_defaulted_input(self):
+        seen = []
+        with with_stubbed("current_session_input", lambda: "/dump"), \
+                with_stubbed("read_material", lambda src, fmt: seen.append(src) or 2):
+            run(["export", "--heimdallr", "false"])
+        self.assertEqual(seen, ["/dump"])
+
+    def test_dump_root_falls_back_to_the_working_directory_outside_git(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = os.getcwd()
+            os.chdir(tmp)
+            try:
+                root = uc.dump_root()
+            finally:
+                os.chdir(cwd)
+        self.assertEqual(root.parts[-2:], (".context", "mimisbrunnr-understandings"))
+        self.assertEqual(root.parent.parent.resolve(), Path(tmp).resolve())
 
 
 if __name__ == "__main__":

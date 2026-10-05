@@ -33,10 +33,10 @@ It has 4 phases:
 1. **Initialize** (resolve the group from ticket/repo/initiative/scope)
 2. **Listen** (accumulate candidates silently, never write)
 3. **Compare-or-Clarify** (the bounded pre-write round: within-group dedup + cross-group link derivation + ticket-uniqueness)
-4. **Write** (the explicit `set` checkpoint)
+4. **Export** (the explicit `--export` checkpoint, which runs `set`; both clients also accept `export`/`import` as aliases of `set`/`query`)
 
 …plus a fixed five-stage write pipeline (preflight → redact → dedupe/derive-links → atomicity → write)
-and a retrieval (`get`) path that returns cheap fields by default and touches the blob only on drill-down.
+and a recall (`--import`) path that returns cheap fields by default and touches the blob only on drill-down.
 Phase 3 above **is** pipeline stage 1 — the phases and the stages overlap rather than nest, which is why
 the pipeline table in `SKILL.md` is the canonical numbering.
 
