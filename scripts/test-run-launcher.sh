@@ -46,6 +46,24 @@ no() {
   return 0
 }
 
+# Portable in-place substitution, because `sed -i` is not one command.
+#
+# BSD sed requires an explicit empty suffix (`-i ''`) and GNU sed attaches the suffix to the flag
+# (`-i.bak`), so on GNU the quoted empty string is taken as the *script* and the real expression is
+# taken as a filename: `sed: can't read s/…/: No such file or directory`. This harness is a PR-gate
+# step and the gate runs on ubuntu, so a BSD-only spelling is red on the platform that actually gates
+# it while green on the developer's machine. Write beside the file and rename, which is atomic and
+# behaves identically on both.
+sed_inplace() {
+  sed_tmp="$(mktemp "${1}.XXXXXX")" || { no "sed_inplace could not create a temp file" ; return 1; }
+  if ! sed "$2" "$1" >"$sed_tmp"; then
+    rm -f "$sed_tmp"
+    no "sed_inplace: sed failed on $1"
+    return 1
+  fi
+  mv "$sed_tmp" "$1"
+}
+
 # Run the launcher against a scratch home. Never inherits the operator's MIMIS_* overrides, and points
 # the machine-credential publication at the scratch tree as well — the launcher derives that path from
 # MIMIS_HOME, and a harness that only redirected the home would still write to the real ~/.mimisbrunnr.
@@ -462,8 +480,8 @@ fi
 # An operator who turns the gate on must keep it on. This is the case the add-only pattern exists
 # for: a write-every-time rewrite resets ENABLED to false on every single start, so the gate could
 # never be left enabled between runs.
-sed -i '' 's/^CONTEXT_MEMORY_DECISIONS_ENABLED=false$/CONTEXT_MEMORY_DECISIONS_ENABLED=true/' \
-  "$scratch/home/credentials"
+sed_inplace "$scratch/home/credentials" \
+  's/^CONTEXT_MEMORY_DECISIONS_ENABLED=false$/CONTEXT_MEMORY_DECISIONS_ENABLED=true/'
 run_launcher env >/dev/null 2>&1
 if grep -q '^CONTEXT_MEMORY_DECISIONS_ENABLED=true$' "$scratch/home/credentials"; then
   ok "a re-run preserves an operator's ENABLED=true"
@@ -474,8 +492,8 @@ fi
 
 # A remote endpoint's API key is a secret and must survive a re-run without ever being printed.
 planted_key="sk-decisions-planted-0123456789abcdef"
-sed -i '' "s|^CONTEXT_MEMORY_DECISIONS_API_KEY=.*|CONTEXT_MEMORY_DECISIONS_API_KEY=$planted_key|" \
-  "$scratch/home/credentials"
+sed_inplace "$scratch/home/credentials" \
+  "s|^CONTEXT_MEMORY_DECISIONS_API_KEY=.*|CONTEXT_MEMORY_DECISIONS_API_KEY=$planted_key|"
 run_launcher env >/dev/null 2>&1
 if grep -q "^CONTEXT_MEMORY_DECISIONS_API_KEY=$planted_key$" "$scratch/home/credentials"; then
   ok "a re-run preserves a stored decision API key"
@@ -514,10 +532,10 @@ export_dir="$scratch/export-effective"
 mkdir -p "$export_dir"
 env -u MIMIS_TOKEN_FILE MIMIS_HOME="$export_dir" MIMIS_MACHINE_CREDENTIALS="$export_dir/credentials" \
   "$launcher" env >/dev/null 2>&1
-sed -i '' 's/^CONTEXT_MEMORY_DECISIONS_ENABLED=false$/CONTEXT_MEMORY_DECISIONS_ENABLED=true/' \
-  "$export_dir/credentials"
-sed -i '' 's|^CONTEXT_MEMORY_DECISIONS_MODEL=nimble$|CONTEXT_MEMORY_DECISIONS_MODEL=some-other-model|' \
-  "$export_dir/credentials"
+sed_inplace "$export_dir/credentials" \
+  's/^CONTEXT_MEMORY_DECISIONS_ENABLED=false$/CONTEXT_MEMORY_DECISIONS_ENABLED=true/'
+sed_inplace "$export_dir/credentials" \
+  's|^CONTEXT_MEMORY_DECISIONS_MODEL=nimble$|CONTEXT_MEMORY_DECISIONS_MODEL=some-other-model|'
 env -u MIMIS_TOKEN_FILE MIMIS_HOME="$export_dir" MIMIS_MACHINE_CREDENTIALS="$export_dir/credentials" \
   "$launcher" env-export >"$export_dir/out.sh" 2>/dev/null
 if grep -q "^export CONTEXT_MEMORY_DECISIONS_ENABLED=true$" "$export_dir/out.sh"; then
@@ -557,8 +575,8 @@ key_dir="$scratch/export-key"
 mkdir -p "$key_dir"
 env -u MIMIS_TOKEN_FILE MIMIS_HOME="$key_dir" MIMIS_MACHINE_CREDENTIALS="$key_dir/credentials" \
   "$launcher" env >/dev/null 2>&1
-sed -i '' "s|^CONTEXT_MEMORY_DECISIONS_API_KEY=.*|CONTEXT_MEMORY_DECISIONS_API_KEY=sk-planted-export-key|" \
-  "$key_dir/credentials"
+sed_inplace "$key_dir/credentials" \
+  "s|^CONTEXT_MEMORY_DECISIONS_API_KEY=.*|CONTEXT_MEMORY_DECISIONS_API_KEY=sk-planted-export-key|"
 env -u MIMIS_TOKEN_FILE MIMIS_HOME="$key_dir" MIMIS_MACHINE_CREDENTIALS="$key_dir/credentials" \
   "$launcher" env-export >"$key_dir/out.sh" 2>/dev/null
 if grep -qF 'sk-planted-export-key' "$key_dir/out.sh"; then

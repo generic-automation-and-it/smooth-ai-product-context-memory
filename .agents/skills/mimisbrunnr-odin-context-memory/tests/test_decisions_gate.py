@@ -165,6 +165,18 @@ def run_gate(args, stdin_text, env_extra=None, timeout=300):
     for key in list(env):
         if key.startswith("CONTEXT_MEMORY_DECISIONS_"):
             env.pop(key)
+    # Point the credential-file lookup at a path that does not exist, unless the case names its own.
+    #
+    # The gate seeds its settings from this file **at import**, so without this every case in this
+    # suite silently inherited the operator's real `~/.mimisbrunnr/credentials` — the one file on the
+    # machine describing the machine's real decision configuration. Three failures came from that and
+    # none of them looked like it: cases whose stub endpoint was overridden by the file's
+    # `BASE_URL` reached for a real decision model and hung, and a case setting the flag to the empty
+    # string read as enabled because the file said `true` and an empty value does not count as
+    # "already set". A hermetic suite is one whose result depends on the code under test and not on
+    # who is running it.
+    env.setdefault("CONTEXT_MEMORY_CREDENTIAL_FILE",
+                   str(Path(tempfile.gettempdir()) / "mimisbrunnr-gate-harness-absent-credentials"))
     env.update(env_extra or {})
     proc = subprocess.run([sys.executable, "-B", str(GATE), *args],
                           input=stdin_text, capture_output=True, text=True,
@@ -897,14 +909,47 @@ class CredentialLoadingTests(GateTestCase):
 
     def test_only_the_named_keys_are_seeded(self):
         """A machine file holding an unrelated secret must not pull it into this process — the read
-        client's refusal to start with a write token present depends on that discipline. The gate's own
-        endpoint comes from the harness's stub, so reaching `ok` here is what shows the file was read and
-        the unlisted key ignored."""
+        client's refusal to start with a write token present depends on that discipline.
+
+        The endpoint is the harness's stub, passed explicitly. This case previously passed **only**
+        the credential file, so `CONTEXT_MEMORY_DECISIONS_BASE_URL` fell back to its documented default
+        of `http://localhost:11434` and the assertion was really "a decision model answered somewhere on
+        this developer's machine". It passed locally and failed in CI with `unreachable`, because CI has
+        no Ollama. The docstring claimed the endpoint came from the stub; it never did. A test that
+        silently depends on a developer's local daemon is not hermetic, and it is green for the wrong
+        reason on exactly the machine least able to catch it.
+        """
         self._write("CONTEXT_MEMORY_DECISIONS_ENABLED=true\n"
                     "SOME_OTHER_SECRET=should-not-be-loaded\n")
-        proc = run_gate(["probe"], "", {"CONTEXT_MEMORY_CREDENTIAL_FILE": self._credential_file()})
+        proc = run_gate(["probe"], "", self.gate_env(
+            CONTEXT_MEMORY_CREDENTIAL_FILE=self._credential_file()))
         self.assertEqual(json.loads(proc.stdout)["outcome"], "ok",
                          "enabled from the file, and the stub answered")
+
+        # The case is named for the *exclusion*, and reaching `ok` only proves the inclusion — the
+        # named flag was read. Nothing here asserted the unlisted key stayed out, so a loader that
+        # seeded every key in the file would have passed.
+        #
+        # Driven in a subprocess that reports what its own environment holds. Loading the gate
+        # in-process was the obvious alternative and it leaked: the loader runs at import, so the
+        # unlisted key landed in `os.environ` for the rest of the process, and the sibling
+        # loader-agreement test — which passes that same name as a *wanted* key and relies on
+        # "a value already in the environment wins" — then diverged. One test's environment became
+        # another's input. A subprocess cannot do that.
+        probe = ("import os,sys;sys.path.insert(0, %r);"
+                 "import importlib.util as u;"
+                 "s=u.spec_from_file_location('g', %r);m=u.module_from_spec(s);s.loader.exec_module(m);"
+                 "print(repr(os.environ.get('CONTEXT_MEMORY_DECISIONS_ENABLED')),"
+                 "repr(os.environ.get('SOME_OTHER_SECRET')))"
+                 % (str(SCRIPTS), str(GATE)))
+        clean = {k: v for k, v in os.environ.items()
+                 if not k.startswith("CONTEXT_MEMORY_DECISIONS_")}
+        clean["CONTEXT_MEMORY_CREDENTIAL_FILE"] = self._credential_file()
+        result = subprocess.run([sys.executable, "-B", "-c", probe],
+                                capture_output=True, text=True, env=clean)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "'true' None",
+                         "the named key must be seeded from the file and the unlisted key must not")
 
     def test_the_two_loaders_agree(self):
         """The duplication guard: the gate's loader and the capture client's must produce the same
@@ -1253,6 +1298,53 @@ class DiscriminationDisclosureTests(GateTestCase):
         self.assertAlmostEqual(rec["discrimination"]["margin"], 0.7, places=6)
         # One role is trivially tied with itself; `tied` names it rather than claiming a field.
         self.assertEqual(rec["discrimination"]["tied"], ["business"])
+
+
+class HarnessIsolationTests(GateTestCase):
+    """The suite's result must depend on the code under test, not on who is running it.
+
+    These three defects shared one cause: the gate seeds its settings from the machine credential file
+    at import, and the harness scrubbed the settings from the *environment* without redirecting the
+    file *pointer*. Every case therefore inherited the operator's real configuration. It is worth a
+    class of its own because the symptom is invisible by construction — the tests that break are the
+    ones that touch a stub endpoint or an empty setting, so the suite still looks comprehensive.
+    """
+
+    def test_a_case_does_not_inherit_the_operators_credential_file(self):
+        """A file that says enabled and points somewhere real must not reach a case that asked for
+        neither. `self.gate_env` sets the endpoint to the stub; if the operator's file won, the stub is
+        never reached and the assertion below is testing the operator's machine."""
+        operator_file = os.path.expanduser("~/.mimisbrunnr/credentials")
+        if not os.path.isfile(operator_file):
+            self.skipTest("no operator credential file on this machine, so there is nothing to leak")
+        proc, report = self.score()
+        self.assertEqual(report["endpoint"], self.stub.base_url,
+                         "the gate used an endpoint other than the stub, so the operator's credential "
+                         "file reached this case")
+        self.assertEqual(len(self.stub.requests), 1, "the stub served no request")
+
+    def test_an_empty_setting_is_still_empty_without_an_operator_file(self):
+        """The empty value is a case, not an absence. It reads as disabled because the flag is the
+        exact string `true` — and it only reads that way if nothing seeded it behind the case's back."""
+        proc, report = self.score(CONTEXT_MEMORY_DECISIONS_ENABLED="")
+        self.assertEqual(report["outcome"], "disabled",
+                         "an empty flag must not be seeded from anywhere")
+
+    def test_the_harness_points_the_credential_file_at_a_path_that_does_not_exist(self):
+        """The isolation itself, asserted rather than assumed — if a future edit drops the `setdefault`
+        the guard above would still pass on a machine with no credential file."""
+        default = str(Path(tempfile.gettempdir())
+                      / "mimisbrunnr-gate-harness-absent-credentials")
+        self.assertFalse(os.path.exists(default),
+                         "the harness's isolation path exists, so it would be read as a real file")
+        probe = subprocess.run(
+            [sys.executable, "-B", "-c",
+             "import os;print(os.environ.get('CONTEXT_MEMORY_CREDENTIAL_FILE'))"],
+            capture_output=True, text=True,
+            env={**{k: v for k, v in os.environ.items()
+                    if not k.startswith("CONTEXT_MEMORY_DECISIONS_")},
+                 "CONTEXT_MEMORY_CREDENTIAL_FILE": default})
+        self.assertEqual(probe.stdout.strip(), default)
 
 
 class ProbeTests(GateTestCase):
