@@ -16,8 +16,12 @@ console. Offline, read-only, no store call, no secret read.
 From the repository root:
 
 ```bash
-python3 -B .agents/skills/mimisbrunnr-heimdallr-find-session-metadata/scripts/find_session_metadata.py [--json] [--initiative NAME]
+python3 -B .agents/skills/mimisbrunnr-heimdallr-find-session-metadata/scripts/find_session_metadata.py [--json] [--initiative NAME] [--repo-root DIR]
 ```
+
+`--repo-root DIR` scans that checkout (`git -C DIR`) instead of the working directory. Use it whenever the
+repository you are binding is not the one the session runs in, and check the reported `root` before
+accepting anything from the scan.
 
 ## Sources (and only these)
 
@@ -27,6 +31,9 @@ python3 -B .agents/skills/mimisbrunnr-heimdallr-find-session-metadata/scripts/fi
 | `tickets` | Current branch name + recent commit subjects (`HEAD`, last 10), matched for `#123`, `provider:key`, `JIRA-123` shapes | `github:160` from `feat/160-...` |
 | `initiative` | `--initiative NAME` flag only, else `unknown` | never guessed from prose |
 | `branch` | `git branch --show-current` (reported, not a binding) | `feat/160-...` |
+| `root` | `git rev-parse --show-toplevel` — which checkout was scanned | `/work/smooth-ai-product-context-memory` |
+| `ticketsWithheld` | Count of credential-shaped candidates dropped (values never shown) | `1` |
+| `ticketsUnavailable` | Why no ticket is reported at all (the redactor could not be loaded), else `null` | `null` |
 
 ## Rules
 
@@ -34,4 +41,8 @@ python3 -B .agents/skills/mimisbrunnr-heimdallr-find-session-metadata/scripts/fi
 - **Never guess the initiative.** A branch, a folder name and a commit message are not an initiative. Without the flag it is `unknown` and the export binds by nothing.
 - **Never open `.context/`, `.env*` or `*.env`.** The provisioned token file lives in the working tree; discovery stays on git output.
 - **Prose is evidence, not binding.** A ticket-shaped string in a commit message is reported with its source; nothing is promoted to a binding without the operator.
+- **Credential-shaped candidates are withheld.** `provider:key` matches any `word:value`, so every candidate
+  passes the capture skill's redactor (`mimisbrunnr-odin-context-memory/scripts/redact.py`): one whose
+  provider is a credential word (`password`, `token`, `API_KEY` …), or whose text — alone or in its subject —
+  the redactor would change, is dropped and only counted. Without the redactor no ticket is reported.
 - **Deduped, sourced.** Each ticket is listed once with where it was seen (branch, commit subject). No ordering beyond first-seen.
