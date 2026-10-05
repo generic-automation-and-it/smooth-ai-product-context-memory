@@ -771,6 +771,11 @@ SECRET_SHAPES = (
      ["Ab3d_Ef5h_Ij7l_Mn9p_Qr1t_Uv2x"]),
     ("openai service account", _fake("s", "k-svcacct-", "wordy_body_with_no_digits_at_all"),
      ["wordy_body_with_no_digits_at_all"]),
+    # Issue 182: a truncated block's final line is short and, when its byte count divides by three,
+    # unpadded — the shape the unterminated rule took only when it ended in `=`.
+    ("pem unterminated short unpadded tail", "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEF\n"
+     "Qk1hYmNk\n", ["MIIEvQIBADANBgkqhkiG9w0BAQEF", "Qk1hYmNk"]),
+    ("pem cut mid-line", "-----BEGIN RSA PRIVATE KEY-----\nMIIEvQIBADAN", ["MIIEvQIBADAN"]),
 )
 
 
@@ -826,6 +831,23 @@ class SecretShapeCoverageTests(unittest.TestCase):
         redacted, _hits = redact.scrub_located(text)
         self.assertTrue(redacted.endswith("\nThe key above was rotated on Monday."))
 
+    def test_a_short_pem_tail_is_taken_only_when_it_is_the_whole_line(self):
+        # Issue 182: the short-tail alternative must not eat a prose line that starts with a short word.
+        for prose in ("rotated monday", "The key was rotated.", "Rotated by ops on Monday"):
+            text = f"-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEF\n{prose}"
+            with self.subTest(prose=prose):
+                redacted, _hits = redact.scrub_located(text)
+                self.assertEqual(redacted, f"<redacted-private-key>\n{prose}")
+
+    def test_short_pem_tail_lines_scrub_in_linear_time(self):
+        import time
+
+        text = "-----BEGIN PRIVATE KEY-----\n" + "Ab12\n" * 50_000 + "plain prose " * 5000
+        started = time.perf_counter()
+        redacted, _hits = redact.scrub_located(text)
+        self.assertLess(time.perf_counter() - started, 0.5)
+        self.assertNotIn("Ab12", redacted)
+
     def test_unterminated_pem_markers_scrub_in_linear_time(self):
         import time
 
@@ -846,13 +868,143 @@ class SecretShapeCoverageTests(unittest.TestCase):
         # `\b` anchor inside a token class that includes `-`.
         import time
 
-        for fragment in ("key=", "password=", "sk-", "sk-eyJ", "a://", '"password": "', "Bearer a1"):
+        for fragment in ("key=", "password=", "sk-", "sk-eyJ", "a://", '"password": "', "Bearer a1",
+                         "pwd:", "session=", "cookie: "):
             text = fragment * (120_000 // len(fragment))
             with self.subTest(fragment=fragment):
                 started = time.perf_counter()
                 redact.scrub_located(text)
                 self.assertLess(time.perf_counter() - started, 0.5)
 
+
+CREDENTIAL_LIKE = json.loads((HERE / "fixtures" / "credential_like.json").read_text(encoding="utf-8"))
+
+
+class CredentialLikeFixtureTests(unittest.TestCase):
+    """Issue 182: the shared credential-like fixture, read by the redactor, the gate and Heimdallr.
+
+    One list for three consumers, so the redactor's half is asserted against the same entries the
+    other two read rather than a private copy that could drift from them.
+    """
+
+    def test_every_gated_secret_is_removed(self):
+        gated = [entry for entry in CREDENTIAL_LIKE["credentials"] if entry["gate"]]
+        self.assertTrue(gated, "precondition: the fixture declares gated entries")
+        for entry in gated:
+            with self.subTest(entry=entry["id"]):
+                redacted, hits = redact.scrub_located(entry["text"])
+                self.assertTrue(hits, f"{entry['id']}: no rule matched")
+                self.assertNotIn(entry["secret"], redacted)
+
+    def test_every_control_passes_unchanged(self):
+        for entry in CREDENTIAL_LIKE["controls"]:
+            with self.subTest(entry=entry["id"]):
+                self.assertEqual(redact.scrub_located(entry["text"]), (entry["text"], []))
+
+    def test_every_credential_provider_is_a_credential_key_and_no_control_is(self):
+        # `aws:` is not a credential word — its value is caught by shape — so it is the one gated
+        # entry this name test does not cover, and it is excluded by name rather than by accident.
+        for entry in CREDENTIAL_LIKE["credentials"]:
+            provider = entry["text"].split(":", 1)[0]
+            with self.subTest(entry=entry["id"]):
+                self.assertEqual(redact.is_credential_key(provider), entry["id"] != "aws-key-as-ticket")
+        for entry in CREDENTIAL_LIKE["controls"]:
+            with self.subTest(entry=entry["id"]):
+                self.assertFalse(redact.is_credential_key(entry["text"].split(":", 1)[0]))
+
+    def test_is_credential_key_reads_identifier_segments_case_insensitively(self):
+        for name in ("PASSWORD", "Pwd", "api_key", "x-api-key", "ApiAccess__WriteToken", "authToken",
+                     "CLIENT_SECRET", "accessKey", "private-key", "Set-Cookie", "SessionId", "creds"):
+            with self.subTest(name=name):
+                self.assertTrue(redact.is_credential_key(name))
+        for name in ("author", "credit", "monkey", "sort_key", "jira", "github", "node", "", None):
+            with self.subTest(name=name):
+                self.assertFalse(redact.is_credential_key(name))
+
+    def test_the_new_key_words_leave_their_prose_alone(self):
+        # `pwd` is also the working directory, and `session`/`auth`/`cookie` label prose as often as
+        # they label a credential; only a secret-shaped value (or, for `pwd`, a non-path) is taken.
+        for text in ("pwd: /srv/app/current", "pwd: ~/work/repo", "session: 2026-10-05 standup",
+                     "auth: OIDC via the corporate IdP", "cookie: SameSite=Lax", "bearer: the on-call lead"):
+            with self.subTest(text=text):
+                self.assertEqual(redact.scrub_located(text), (text, []))
+
+
+class ScratchInputConsumeTests(unittest.TestCase):
+    """Issue 182: `--consume` removes the agent-written batch file once it has been read.
+
+    The batch file holds candidate text before any scrub, so it is the one on-disk copy of whatever
+    the redactor is about to find. Unlinking it on read bounds that copy to one call.
+    """
+
+    def setUp(self):
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        self.directory = Path(scratch.name)
+
+    def _batch(self, content):
+        path = self.directory / "batch.json"
+        path.write_text(json.dumps(content), encoding="utf-8")
+        return path
+
+    def _run(self, script, *args):
+        return subprocess.run([sys.executable, "-B", str(SCRIPTS / script), *args],
+                              capture_output=True, text=True, timeout=30)
+
+    def test_each_offline_script_removes_its_input_and_answers_the_same(self):
+        for script, batch in (("redact.py", ["password=Hunter2-FAKE-0000"]),
+                              ("atomicity.py", [{"statement": "Postgres stores the index."}])):
+            with self.subTest(script=script):
+                kept = self._run(script, "--input", str(self._batch(batch)))
+                path = self._batch(batch)
+                consumed = self._run(script, "--input", str(path), "--consume")
+                self.assertEqual(consumed.returncode, 0, consumed.stderr)
+                self.assertEqual(consumed.stdout, kept.stdout)
+                self.assertFalse(path.exists(), "--consume must remove the batch file")
+
+    def test_without_consume_the_input_stays(self):
+        path = self._batch(["plain"])
+        self.assertEqual(self._run("redact.py", "--input", str(path)).returncode, 0)
+        self.assertTrue(path.exists())
+
+    def test_consume_without_an_input_file_is_refused(self):
+        for script in ("redact.py", "atomicity.py"):
+            with self.subTest(script=script):
+                completed = subprocess.run([sys.executable, "-B", str(SCRIPTS / script), "--consume"],
+                                           input="[]", capture_output=True, text=True, timeout=30)
+                self.assertEqual(completed.returncode, 1)
+                self.assertIn("--consume needs --input", completed.stderr)
+
+    def test_an_unreadable_batch_is_left_for_the_caller(self):
+        path = self.directory / "batch.json"
+        path.write_text("{not json", encoding="utf-8")
+        completed = self._run("redact.py", "--input", str(path), "--consume")
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertTrue(path.exists())
+
+    def test_the_client_payload_is_consumed_on_read(self):
+        path = self._batch({"candidates": [{"description": "d"}]})
+        args = SimpleNamespace(payload=str(path), consume=True)
+        self.assertEqual(client.payload_of(args), {"candidates": [{"description": "d"}]})
+        self.assertFalse(path.exists())
+
+    def test_the_client_refuses_consume_without_a_payload_file(self):
+        with self.assertRaises(client.ClientError) as caught:
+            client.payload_of(SimpleNamespace(payload=None, consume=True))
+        self.assertEqual(caught.exception.status_text, "bad-input")
+
+    def test_every_payload_command_on_both_clients_accepts_consume(self):
+        # One helper adds `--payload` and `--consume` together, so a command that takes a payload
+        # cannot be left without the flag. Driven through `--help` so argparse is the witness.
+        for script in ("context_memory_client.py", "context_memory_read_client.py"):
+            for command in ("query", "deepsearch") if "read" in script else ("set", "preflight", "query"):
+                with self.subTest(script=script, command=command):
+                    env = {key: value for key, value in os.environ.items()
+                           if key != client.ENV_WRITE_TOKEN}
+                    completed = subprocess.run(
+                        [sys.executable, "-B", str(SCRIPTS / script), command, "--help"],
+                        capture_output=True, text=True, timeout=30, env=env)
+                    self.assertIn("--consume", completed.stdout)
 class AtomicityTests(unittest.TestCase):
     def test_single_atomic_fact_is_simple(self):
         verdict = atomicity.classify("PostgreSQL stores our search index.")
@@ -1032,6 +1184,51 @@ class WritePayloadTests(unittest.TestCase):
                 self.assertEqual(error.exception.status_text, "bad-response")
                 self.assertEqual(out.getvalue(), "", "a refused stage must print no result")
 
+    def test_preflight_refuses_an_incomplete_candidate_result(self):
+        # Issue 182: both lists present is not enough. Any candidate left without a result of its own —
+        # a short list, a repeated or out-of-range index, or a result with no `matches` list — reads
+        # as "no match", which is the answer that writes a duplicate.
+        three = {"candidates": [{"description": "a"}, {"description": "b"}, {"description": "c"}]}
+        ok = {"index": 0, "matches": []}
+        for label, results in (
+                ("short list", [ok, {"index": 1, "matches": []}]),
+                ("repeated index", [ok, ok, {"index": 2, "matches": []}]),
+                ("out of range", [ok, {"index": 1, "matches": []}, {"index": 3, "matches": []}]),
+                ("boolean index", [ok, {"index": True, "matches": []}, {"index": 2, "matches": []}]),
+                ("non-object result", [ok, "1", {"index": 2, "matches": []}]),
+                ("missing matches", [ok, {"index": 1}, {"index": 2, "matches": []}]),
+                ("null matches", [ok, {"index": 1, "matches": None}, {"index": 2, "matches": []}])):
+            with self.subTest(case=label):
+                out = io.StringIO()
+                with patch.object(client, "read_payload", return_value=copy.deepcopy(three)), \
+                        patch.object(client, "_request",
+                                     return_value={"candidates": results, "intraBatchCollisions": []}), \
+                        redirect_stdout(out):
+                    with self.assertRaises(client.ClientError) as error:
+                        client.cmd_preflight(SimpleNamespace(payload=None))
+                self.assertEqual(error.exception.status_text, "bad-response")
+                self.assertEqual(out.getvalue(), "", "a refused stage must print no result")
+
+    def test_preflight_accepts_one_result_per_candidate_in_any_order(self):
+        three = {"candidates": [{"description": "a"}, {"description": "b"}, {"description": "c"}]}
+        results = [{"index": 2, "matches": []}, {"index": 0, "matches": [{"uuid": "u"}]},
+                   {"index": 1, "matches": []}]
+        with patch.object(client, "read_payload", return_value=three), \
+                patch.object(client, "_request",
+                             return_value={"candidates": results, "intraBatchCollisions": []}), \
+                redirect_stdout(io.StringIO()):
+            out = client.cmd_preflight(SimpleNamespace(payload=None))
+        self.assertEqual(out["candidates"], results)
+
+    def test_base_url_refuses_semicolon_params(self):
+        # Issue 182: `urlparse` splits `;…` off the last path segment into `params`, so a `/;token=…`
+        # tail passed a check that looked only at `path`.
+        for value in ("http://localhost:5141/;token=FAKE0000", "http://127.0.0.1:5141/;x"):
+            with self.subTest(value=value), patch.dict(os.environ, {client.ENV_BASE_URL: value}):
+                with self.assertRaises(client.ClientError) as caught:
+                    client.base_url()
+                self.assertEqual(caught.exception.status_text, "bad-base-url")
+                self.assertNotIn("FAKE0000", str(caught.exception))
     def test_preflight_passes_well_formed_lists_through(self):
         response = {"candidates": [{"index": 0, "matches": []}],
                     "intraBatchCollisions": [{"left": 0, "right": 1}]}
@@ -1726,6 +1923,78 @@ class DeepSearchTests(unittest.TestCase):
         self.assertTrue(result["disclosure"]["traversalSkippedForContextSelector"])
         self.assertTrue(result["disclosure"]["possiblyOmitted"])
 
+    GROUP = "11111111-1111-4111-8111-111111111111"
+    OTHER_GROUP = "22222222-2222-4222-8222-222222222222"
+
+    def test_group_context_with_scope_keeps_only_endpoints_in_the_selected_group(self):
+        # Issue 182: `/paths` takes no group selector, so with a group (or ticket) and a scope its
+        # endpoints can come from any group in that scope. Traversal still runs, but an endpoint from
+        # another group is counted and never merged.
+        anchor = dict(self.row(1), groupUuid=self.GROUP)
+        inside = dict(self.row(2), groupUuid=self.GROUP)
+        outside = dict(self.row(3), groupUuid=self.OTHER_GROUP)
+        calls = []
+
+        def request(method, path, payload, **kwargs):
+            calls.append(path)
+            if path.endswith("query"):
+                return {"items": [anchor]}
+            return {"paths": [{"endpoint": inside}, {"endpoint": outside}]}
+
+        for selector in ({"groupUuid": self.GROUP}, {"ticketProvider": "jira", "ticketKey": "PROJ-1"}):
+            calls.clear()
+            with self.subTest(selector=selector):
+                result = deepsearch.execute(
+                    {"baseline": dict(selector, scopeDimension="product"), "keywords": []},
+                    request=request)
+                self.assertIn("/api/context/paths", calls)
+                uuids = {item["uuid"] for item in result["items"]}
+                self.assertIn(inside["uuid"], uuids)
+                self.assertNotIn(outside["uuid"], uuids, "an endpoint outside the selector was merged")
+                self.assertEqual(result["disclosure"]["endpointsOutsideSelector"], 1)
+                self.assertFalse(result["disclosure"]["traversalSkippedForContextSelector"])
+
+    def test_without_a_selector_traversal_endpoints_are_not_group_filtered(self):
+        anchor = dict(self.row(1), groupUuid=self.GROUP)
+        elsewhere = dict(self.row(3), groupUuid=self.OTHER_GROUP)
+        result = deepsearch.execute(
+            {"baseline": {"scopeDimension": "product"}, "keywords": []},
+            request=lambda method, path, payload, **kwargs:
+                {"items": [anchor]} if path.endswith("query") else {"paths": [{"endpoint": elsewhere}]})
+        self.assertIn(elsewhere["uuid"], {item["uuid"] for item in result["items"]})
+        self.assertEqual(result["disclosure"]["endpointsOutsideSelector"], 0)
+
+    def test_a_forbidden_traversal_is_disclosed_and_keeps_the_baseline(self):
+        # Issue 182: a 403 on one anchor raised out of deepsearch and discarded the completed baseline.
+        anchors = [dict(self.row(index), groupUuid=self.GROUP) for index in (1, 2)]
+        reached = dict(self.row(5), groupUuid=self.GROUP)
+
+        def request(method, path, payload, **kwargs):
+            if path.endswith("query"):
+                return {"items": anchors}
+            if payload["sourceUuid"] == anchors[0]["uuid"]:
+                raise client.ClientError(403, "Forbidden", "Traversal blocked by scope")
+            return {"paths": [{"endpoint": reached}]}
+
+        result = deepsearch.execute(
+            {"baseline": {"groupUuid": self.GROUP, "scopeDimension": "program"}, "keywords": []},
+            request=request)
+        uuids = [item["uuid"] for item in result["items"]]
+        self.assertEqual(uuids[:2], [anchor["uuid"] for anchor in anchors], "the baseline must survive")
+        self.assertIn(reached["uuid"], uuids, "a forbidden anchor must not stop the next one")
+        disclosure = result["disclosure"]
+        self.assertEqual(disclosure["anchorsForbidden"], 1)
+        self.assertIn({"kind": "traversal", "value": anchors[0]["uuid"]}, disclosure["passesIncomplete"])
+        self.assertTrue(disclosure["possiblyOmitted"])
+        self.assertFalse(disclosure["stoppedEarly"])
+
+    def test_a_forbidden_baseline_still_fails(self):
+        # Only a traversal anchor is one unreadable item among several; a refused baseline is the recall.
+        def request(method, path, payload, **kwargs):
+            raise client.ClientError(403, "Forbidden", "nope")
+
+        with self.assertRaises(client.ClientError):
+            deepsearch.execute({"baseline": {}, "keywords": []}, request=request)
     @staticmethod
     def row(index):
         return {"uuid": f"00000000-0000-4000-8000-{index:012d}", "version": 1}

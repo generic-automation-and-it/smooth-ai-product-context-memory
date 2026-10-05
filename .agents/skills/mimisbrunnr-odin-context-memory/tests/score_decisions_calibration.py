@@ -87,6 +87,55 @@ def require_scored(doc, report):
                              f"({scored.get('outcome')!r}); every figure would count it as a hold")
 
 
+def mean(values):
+    return sum(values) / len(values) if values else 0.0
+
+
+def pearson(xs, ys):
+    """Pearson's r, or None when either side is constant and r is undefined."""
+    mx, my = mean(xs), mean(ys)
+    sxy = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
+    sxx = sum((x - mx) ** 2 for x in xs)
+    syy = sum((y - my) ** 2 for y in ys)
+    if not sxx or not syy:
+        return None
+    return sxy / (sxx * syy) ** 0.5
+
+
+def distribution(doc, report, roles, threshold):
+    """The shape of the scores, not only the verdicts they produce.
+
+    The confusion matrix and role counts are verdict-level, so a run whose hold side climbed from 0.2
+    to 0.84 and whose pass side fell from 0.96 to 0.86 reproduced every one of them at a 0.85 bar
+    while the bimodal gap the threshold rests on had closed (issue 182). These are the figures the
+    fixture records about that gap; measuring them is what lets `compare` notice it moving.
+    """
+    hold, keep = [], []
+    clearing = {role: 0 for role in roles}
+    for fixture, scored in zip(doc["records"], report["records"]):
+        scores = scored["scores"]
+        (keep if fixture["tier"] >= 2 else hold).append(max(scores.values()))
+        for role in roles:
+            clearing[role] += scores.get(role, 0.0) > threshold
+    best_pair, best_r = None, None
+    columns = {role: [r["scores"].get(role, 0.0) for r in report["records"]] for role in roles}
+    for i, first in enumerate(roles):
+        for second in roles[i + 1:]:
+            r = pearson(columns[first], columns[second])
+            if r is not None and (best_r is None or r > best_r):
+                best_pair, best_r = f"{first}/{second}", r
+    return {
+        "tier01MeanBestRole": round(mean(hold), 3),
+        "tier01MaxBestRole": round(max(hold), 3) if hold else 0.0,
+        "tier23MeanBestRole": round(mean(keep), 3),
+        "tier23MinBestRole": round(min(keep), 3) if keep else 0.0,
+        "separation": round(mean(keep) - mean(hold), 3),
+        "perRoleClearing": clearing,
+        "maxCrossRoleCorrelation": None if best_r is None else round(best_r, 3),
+        "maxCrossRolePair": best_pair,
+    }
+
+
 def score(doc, report, threshold):
     require_scored(doc, report)
     roles = list(report["records"][0]["scores"])
@@ -123,10 +172,14 @@ def score(doc, report, threshold):
     print(f"\n  gate outcome      precision {prec:.2f}  recall {rec:.2f}  "
           f"(tp={tp} fp={fp} tn={tn} fn={fn})")
     print(f"  role attribution  expected clearing {hit}/{pairs}, unexpected clearing {bleed}")
+    shape = distribution(doc, report, roles, threshold)
+    print(f"  score shape       hold-side mean {shape['tier01MeanBestRole']:.3f} "
+          f"max {shape['tier01MaxBestRole']:.3f}, pass-side mean {shape['tier23MeanBestRole']:.3f} "
+          f"min {shape['tier23MinBestRole']:.3f}, separation {shape['separation']:.3f}")
     return dict(truePositive=tp, falsePositive=fp, trueNegative=tn, falseNegative=fn,
                 precision=prec, recall=rec,
                 expectedRolesClearing=hit, expectedRolesTotal=pairs,
-                unexpectedRolesClearing=bleed)
+                unexpectedRolesClearing=bleed, **shape)
 
 
 def check_determinism(doc, threshold, endpoint, model, rounds=3):
@@ -153,17 +206,52 @@ def check_determinism(doc, threshold, endpoint, model, rounds=3):
     return agree
 
 
-def compare(recorded, measured, threshold):
-    """Say plainly whether this run reproduces the committed numbers."""
+# Every figure a recorded run may carry. A key listed here that the recorded run holds and this run did
+# not measure is drift, never a skip: the previous `continue` on an unmeasured key is how the
+# distribution figures went unchecked while the comparison printed "reproduces" (issue 182).
+COMPARED_KEYS = ("truePositive", "falsePositive", "trueNegative", "falseNegative",
+                 "precision", "recall", "expectedRolesClearing", "expectedRolesTotal",
+                 "unexpectedRolesClearing", "tier01MeanBestRole", "tier01MaxBestRole",
+                 "tier23MeanBestRole", "tier23MinBestRole", "separation", "perRoleClearing",
+                 "maxCrossRoleCorrelation", "maxCrossRolePair")
+
+
+def recorded_at(recorded, threshold):
+    """The recorded block measured at this bar: the primary run, or a nested `atBar…` run."""
+    candidates = [recorded] + [value for key, value in recorded.items()
+                               if key.startswith("atBar") and isinstance(value, dict)]
+    for candidate in candidates:
+        if isinstance(candidate.get("bar"), (int, float)) and abs(candidate["bar"] - threshold) < 1e-9:
+            return candidate
+    return None
+
+
+def compare(recorded, measured, threshold, report=None):
+    """Say plainly whether this run reproduces the committed numbers. Returns the drifted keys."""
     print(f"\n  recorded run vs this run (bar {threshold})")
+    block = recorded_at(recorded, threshold)
+    if block is None:
+        print(f"    no recorded run at bar {threshold}; a different bar measures a different gate, so "
+              "nothing here can be compared with the committed numbers.")
+        return ["bar"]
     drifted = []
-    for key, got in measured.items():
-        want = recorded.get(key)
-        if want is None:
+    if report is not None:
+        for key in ("model", "endpoint"):
+            if key in recorded and report.get(key) != recorded[key]:
+                print(f"    {key:<28}recorded {recorded[key]!s:<8} measured {report.get(key)!s:<8} DIFFERENT")
+                drifted.append(key)
+    for key in COMPARED_KEYS:
+        if key not in block:
             continue
-        ok = abs(got - want) < 0.005 if isinstance(want, float) else got == want
+        want, got = block[key], measured.get(key)
+        if got is None:
+            ok = False
+        elif isinstance(want, float) or isinstance(got, float):
+            ok = abs(got - want) < 0.005
+        else:
+            ok = got == want
         print(f"    {key:<28}recorded {str(want):<8} measured {str(got):<8} "
-              f"{'same' if ok else 'DIFFERENT'}")
+              f"{'same' if ok else ('NOT MEASURED' if got is None else 'DIFFERENT')}")
         if not ok:
             drifted.append(key)
     if drifted:
@@ -172,6 +260,7 @@ def compare(recorded, measured, threshold):
               "recordedRun deliberately, or fix the drift, and say which in the changelog.")
     else:
         print("\n  reproduces the committed measurement.")
+    return drifted
 
 
 def main():
@@ -211,7 +300,7 @@ def main():
         print("  WARNING: the shipped rubric's bytes differ from the rubric the fixture was measured "
               "against, whatever its version says. Re-record recordedRun and rubricSha256 together.")
     measured = score(doc, report, threshold)
-    compare(recorded, measured, threshold)
+    compare(recorded, measured, threshold, report)
     return 0
 
 

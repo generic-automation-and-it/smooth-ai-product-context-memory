@@ -36,7 +36,18 @@ sys.path.insert(0, str(SCRIPTS))
 import importlib.util as _ilu
 _spec = _ilu.spec_from_file_location("_decisions_gate_under_test", GATE)
 _gate = _ilu.module_from_spec(_spec)
-_spec.loader.exec_module(_gate)
+# The gate seeds `os.environ` from the machine credential file at import, so the in-process copy is
+# loaded against an absent file too — otherwise the operator's decision settings land in this process.
+_saved_credential_file = os.environ.get("CONTEXT_MEMORY_CREDENTIAL_FILE")
+os.environ["CONTEXT_MEMORY_CREDENTIAL_FILE"] = str(
+    Path(tempfile.gettempdir()) / "mimisbrunnr-gate-harness-absent-credentials")
+try:
+    _spec.loader.exec_module(_gate)
+finally:
+    if _saved_credential_file is None:
+        os.environ.pop("CONTEXT_MEMORY_CREDENTIAL_FILE", None)
+    else:
+        os.environ["CONTEXT_MEMORY_CREDENTIAL_FILE"] = _saved_credential_file
 MAX_LEDGER_ENTRIES = _gate.MAX_LEDGER_ENTRIES
 cap_ledger = _gate.cap_ledger
 ledger_cap = _gate.ledger_cap
@@ -172,7 +183,12 @@ class Stub:
         self.server.server_close()
 
 
-def run_gate(args, stdin_text, env_extra=None, timeout=300):
+HARNESS_CREDENTIAL_FILE = str(Path(tempfile.gettempdir())
+                              / "mimisbrunnr-gate-harness-absent-credentials")
+
+
+def gate_subprocess_env(env_extra=None):
+    """The environment every gate subprocess in this suite runs under."""
     env = os.environ.copy()
     env.pop("CONTEXT_MEMORY_DECISIONS_ENABLED", None)
     for key in list(env):
@@ -188,12 +204,19 @@ def run_gate(args, stdin_text, env_extra=None, timeout=300):
     # string read as enabled because the file said `true` and an empty value does not count as
     # "already set". A hermetic suite is one whose result depends on the code under test and not on
     # who is running it.
-    env.setdefault("CONTEXT_MEMORY_CREDENTIAL_FILE",
-                   str(Path(tempfile.gettempdir()) / "mimisbrunnr-gate-harness-absent-credentials"))
+    #
+    # Assigned, not `setdefault`: an exported `CONTEXT_MEMORY_CREDENTIAL_FILE` is the same leak by
+    # another route, and with one pointing at a populated file 24 cases failed (issue 182). A case that
+    # wants a file passes it in `env_extra`.
+    env["CONTEXT_MEMORY_CREDENTIAL_FILE"] = HARNESS_CREDENTIAL_FILE
     env.update(env_extra or {})
+    return env
+
+
+def run_gate(args, stdin_text, env_extra=None, timeout=300):
     proc = subprocess.run([sys.executable, "-B", str(GATE), *args],
                           input=stdin_text, capture_output=True, text=True,
-                          encoding="utf-8", env=env, timeout=timeout)
+                          encoding="utf-8", env=gate_subprocess_env(env_extra), timeout=timeout)
     return proc
 
 
@@ -430,6 +453,26 @@ class OversizeTests(GateTestCase):
         _, report = self.score([huge])
         self.assertIn("token", report["records"][0]["detail"])
 
+    def test_the_rubric_counts_toward_the_size_limit(self):
+        """The guard sized only the record, while the request also carries every role's instructions
+        and criteria. A record just under the limit on its own overflows once the rubric rides along,
+        and must be held without a request (issue 182)."""
+        limit_chars = _gate.MAX_CONTEXT_TOKENS * _gate.CHARS_PER_TOKEN
+        base = len(json.dumps(_gate.record_state({**RECORD, "statement": ""}), ensure_ascii=False))
+        record = {**RECORD, "statement": "x" * (limit_chars - base - 30)}
+        state_alone = json.dumps(_gate.record_state(record), ensure_ascii=False)
+        self.assertLessEqual(_gate.estimate_tokens(state_alone), _gate.MAX_CONTEXT_TOKENS,
+                             "precondition: the record alone fits, so only the rubric can tip it over")
+        _, roles = _gate.load_rubric(_gate.DEFAULT_ROLES.split(","))
+        self.assertGreater(len(_gate.encode_request(_gate.record_state(record), roles,
+                                                    _gate.DEFAULT_MODEL)),
+                           limit_chars, "precondition: the full request is over the limit")
+
+        _, report = self.score([record])
+        self.assertEqual(report["records"][0]["outcome"], "oversize")
+        self.assertIn("rubric included", report["records"][0]["detail"])
+        self.assertEqual(self.stub.requests, [], "an oversize request must never be sent")
+
 
 class EndpointGuardTests(GateTestCase):
     """A refused endpoint is a *per-record* outcome, not a process failure.
@@ -469,6 +512,19 @@ class EndpointGuardTests(GateTestCase):
         combined = proc.stdout + proc.stderr
         self.assertIn("bad-decisions-url", combined)
         self.assertNotIn("s3cret", combined, "the refusal must not echo the credential")
+
+    def test_parameters_query_or_fragment_on_the_base_are_refused_without_echoing(self):
+        """The path is appended after the base, so anything after the origin rides along with every
+        request — `;tok=x` reached the stub as part of the path. Refused before any request (issue 182)."""
+        for suffix in ("/;tok=s3cretparam", "?tok=s3cretparam", "#s3cretparam"):
+            with self.subTest(suffix=suffix):
+                proc = run_gate(["probe"], "", self.gate_env(
+                    CONTEXT_MEMORY_DECISIONS_BASE_URL=self.stub.base_url + suffix))
+                combined = proc.stdout + proc.stderr
+                self.assertNotEqual(proc.returncode, 0)
+                self.assertIn("bad-decisions-url", combined)
+                self.assertNotIn("s3cretparam", combined)
+        self.assertEqual(self.stub.requests, [])
 
     def test_a_bad_endpoint_marks_records_without_failing_the_batch(self):
         proc = run_gate(["score"], json.dumps([RECORD, {**RECORD, "subject": "Second"}]),
@@ -601,6 +657,37 @@ class RedactionTests(GateTestCase):
         for rule in report["redaction"]:
             self.assertNotIn("hunter2secretvalue", rule)
 
+    def test_no_gated_credential_from_the_shared_fixture_reaches_the_model_or_the_ledger(self):
+        """Every `gate: true` entry of the shared credential fixture, planted in the subject, the
+        description and the statement: the model's request never carries the secret, and neither does
+        the ledger. Driven from the one list the redactor and Heimdallr harnesses also read (issue 182)."""
+        fixture = json.loads((Path(__file__).resolve().parent / "fixtures"
+                              / "credential_like.json").read_text(encoding="utf-8"))
+        gated = [entry for entry in fixture["credentials"] if entry["gate"]]
+        self.assertTrue(gated)
+        self.stub.probabilities = {"developer": 0.9}
+        for entry in gated:
+            for field in ("subject", "description", "statement"):
+                with self.subTest(id=entry["id"], field=field):
+                    self.stub.server.requests.clear()
+                    state = os.path.join(self.tmp, f"ledger-{entry['id']}-{field}.json")
+                    text = f"Deploy note {entry['text']} for the pipeline."
+                    record = {**RECORD, field: text}
+                    if field != "subject":
+                        record.pop("subject")
+                    if field == "statement":
+                        record["description"] = "Deploy note"
+                    proc, report = self.score([record], state_file=state)
+                    self.assertEqual(proc.returncode, 0, proc.stderr)
+                    self.assertEqual(len(self.stub.requests), 1)
+                    self.assertNotIn(entry["secret"], json.dumps(self.stub.requests[0]),
+                                     "a gated credential reached the decision model")
+                    with open(state, encoding="utf-8") as handle:
+                        ledger_text = handle.read()
+                    self.assertNotIn(entry["secret"], ledger_text)
+                    for key in json.loads(ledger_text):
+                        self.assertNotIn(entry["secret"], key)
+
 
 class SecretHandlingTests(GateTestCase):
     def test_api_key_never_appears_in_output(self):
@@ -629,6 +716,39 @@ class RedactorFailClosedTests(GateTestCase):
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("redactor-unavailable", proc.stderr)
         self.assertEqual(self.stub.requests, [], "no request may be made without redaction")
+
+
+class RedactorTimeoutTests(unittest.TestCase):
+    """A redactor that overruns its budget is a redactor that cannot run (issue 182).
+
+    `subprocess.run(timeout=…)` raises `TimeoutExpired`, which is neither `OSError` nor `ValueError`, so
+    it escaped as a traceback; the kvasir caller reads a traceback as a skipped gate and writes the
+    record unscored. Socket-free: the redactor call and the model call are both replaced in-process.
+    """
+
+    def _run_main(self):
+        from unittest import mock
+        timeout = subprocess.TimeoutExpired(cmd="redact.py", timeout=_gate.REDACTOR_TIMEOUT_SECONDS)
+        stderr = io.StringIO()
+        env = {k: v for k, v in os.environ.items() if not k.startswith("CONTEXT_MEMORY_DECISIONS_")}
+        env["CONTEXT_MEMORY_DECISIONS_ENABLED"] = "true"
+        with mock.patch.dict(os.environ, env, clear=True), \
+                mock.patch.object(sys, "argv", ["decisions_gate.py", "score"]), \
+                mock.patch.object(sys, "stdin", io.StringIO(json.dumps([RECORD]))), \
+                mock.patch("subprocess.run", side_effect=timeout) as run, \
+                mock.patch.object(_gate, "call_model") as call_model, \
+                contextlib.redirect_stderr(stderr), contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(SystemExit) as exited:
+                _gate.main()
+        return exited.exception.code, stderr.getvalue(), run, call_model
+
+    def test_a_redactor_timeout_is_redactor_unavailable_and_sends_nothing(self):
+        code, stderr, run, call_model = self._run_main()
+        self.assertEqual(code, 1)
+        self.assertEqual(json.loads(stderr)["outcome"], "redactor-unavailable")
+        self.assertIn("no request was made", json.loads(stderr)["detail"])
+        self.assertEqual(run.call_args.kwargs["timeout"], _gate.REDACTOR_TIMEOUT_SECONDS)
+        call_model.assert_not_called()
 
 
 class RedactorArityTests(GateTestCase):
@@ -850,22 +970,31 @@ class LedgerIntegrityTests(GateTestCase):
         ledger = {f"s{i}": (i % 7) + 1 for i in range(MAX_LEDGER_ENTRIES * 4)}
         capped = cap_ledger(ledger)
         self.assertEqual(len(capped), MAX_LEDGER_ENTRIES)
-        self.assertEqual(max(capped.values()), 7,
-                         "the highest counts survive the cap")
+        self.assertEqual(max(capped.values()), 2,
+                         "the most-spent entries are the ones the cap drops")
 
     def test_the_cap_drops_the_most_spent_entries(self):
         """Losing the memory of a spent budget is the least harmful entry to lose, so the cap drops
-        the highest counts rather than an arbitrary slice."""
+        the highest counts rather than an arbitrary slice. This case used to assert the reverse — the
+        shipped sort kept the most-spent entries, contradicting its own docstring (issue 182)."""
         ledger = {f"s{i}": (i % 5) + 1 for i in range(20)}
         capped = cap_ledger(ledger, max_entries=5)
         self.assertEqual(len(capped), 5)
-        # Four entries tie at the maximum of 5 and all four are kept, so the fifth slot goes to the
-        # highest count below that -- and the tie among those is broken by key, which makes the
+        # Four entries tie at the minimum of 1 and all four are kept, so the fifth slot goes to the
+        # lowest count above that -- and the tie among those is broken by key, which makes the
         # eviction deterministic rather than dependent on dict ordering.
-        kept_counts = sorted(capped.values(), reverse=True)
-        self.assertEqual(kept_counts, [5, 5, 5, 5, 4])
-        self.assertTrue(all(v >= 4 for v in capped.values()),
-                        "the cap must drop the least-spent entries, not an arbitrary slice")
+        self.assertEqual(sorted(capped.values()), [1, 1, 1, 1, 2])
+        self.assertEqual(capped, cap_ledger(dict(reversed(list(ledger.items()))), max_entries=5))
+
+    def test_the_cap_never_evicts_the_key_being_written(self):
+        """The defect: a new record enters at attempts=1, the least-spent entry, so at the cap the old
+        policy evicted it on the write that counted it — every round was its first, and the budget
+        never ran out. The key being written survives whatever its count."""
+        ledger = {"a": 1, "b": 1, "new": 3}
+        capped = cap_ledger(ledger, max_entries=2, keep="new")
+        self.assertIn("new", capped)
+        self.assertEqual(len(capped), 2)
+        self.assertEqual(cap_ledger({"new": 9}, max_entries=1, keep="new"), {"new": 9})
 
     def test_the_cap_leaves_a_small_ledger_alone(self):
         ledger = {"a": 1, "b": 2}
@@ -873,10 +1002,40 @@ class LedgerIntegrityTests(GateTestCase):
 
     def test_a_record_the_cap_evicted_can_be_scored_again(self):
         """The documented cost of the cap, stated so it is a decision and not a surprise: eviction
-        restores a record's budget. It is bounded and it is disclosed by the cap itself."""
+        restores a record's budget. It is bounded, and `ledgerEvicted` discloses it."""
         ledger = {"a": 3, "b": 1}
         capped = cap_ledger(ledger, max_entries=1)
-        self.assertNotIn("b", capped, "the least-spent entry is the one evicted")
+        self.assertNotIn("a", capped, "the most-spent entry is the one evicted")
+
+    def test_the_budget_holds_at_the_cap_end_to_end(self):
+        """Through the real gate at a cap of 2: the record being scored is never the one evicted, so
+        round max+1 is `attempts-exhausted`, and every eviction is disclosed (issue 182).
+
+        Run against fillers both more and less spent than the record, so whichever entry the eviction
+        order would pick, the record being written is the one it must not pick."""
+        self.stub.probabilities = dict(self.LOW)
+        env = {"CONTEXT_MEMORY_DECISIONS_MAX_ATTEMPTS": "2",
+               "CONTEXT_MEMORY_DECISIONS_LEDGER_MAX_ENTRIES": "2"}
+        for filler_attempts in (0, 5):
+            with self.subTest(filler_attempts=filler_attempts):
+                state = os.path.join(self.tmp, f"ledger-{filler_attempts}.json")
+                with open(state, "w", encoding="utf-8") as handle:
+                    json.dump({_gate.ledger_key(f"filler-{i}"): {"attempts": filler_attempts,
+                                                                 "best": None}
+                               for i in (1, 2)}, handle)
+                rounds = [self.score(state_file=state, **env)[1] for _ in range(3)]
+                self.assertEqual([r["records"][0]["outcome"] for r in rounds],
+                                 ["scored", "scored", "attempts-exhausted"])
+                self.assertEqual([r["ledgerEvicted"] for r in rounds], [1, 0, 0])
+                with open(state, encoding="utf-8") as handle:
+                    ledger = json.load(handle)
+                self.assertEqual(len(ledger), 2)
+                self.assertEqual(ledger[_gate.ledger_key(RECORD["subject"])]["attempts"], 2)
+
+    def test_no_eviction_reports_zero(self):
+        self.stub.probabilities = dict(self.LOW)
+        _, report = self.score(state_file=os.path.join(self.tmp, "ledger.json"))
+        self.assertEqual(report["ledgerEvicted"], 0)
 
 
 class BestAttemptTests(GateTestCase):
@@ -1105,7 +1264,7 @@ class LedgerPrivacyTests(unittest.TestCase):
             return handle.read()
 
     def test_the_ledger_file_holds_a_digest_and_never_the_subject(self):
-        attempt, _reset, _best = _gate.next_attempt(self.state, self.SUBJECT, 3)
+        attempt, _reset, _best, _evicted = _gate.next_attempt(self.state, self.SUBJECT, 3)
         _gate.record_attempt(self.state, self.SUBJECT, attempt, {"developer": 0.4})
         raw = self.read_raw()
         self.assertNotIn("Jane", raw)
@@ -1119,7 +1278,7 @@ class LedgerPrivacyTests(unittest.TestCase):
         # nothing otherwise.
         with open(self.state, "w", encoding="utf-8") as handle:
             json.dump({self.SUBJECT: {"attempts": 2, "best": None}}, handle)
-        attempt, reset, _best = _gate.next_attempt(self.state, self.SUBJECT, 2)
+        attempt, reset, _best, _evicted = _gate.next_attempt(self.state, self.SUBJECT, 2)
         self.assertIsNone(attempt, "the spent budget must survive the migration")
         self.assertFalse(reset, "a migration is not a discarded ledger")
         raw = self.read_raw()
@@ -1230,58 +1389,50 @@ class CredentialLoadingTests(GateTestCase):
         self.assertEqual(result.stdout.strip(), "'true' None",
                          "the named key must be seeded from the file and the unlisted key must not")
 
+    LOADER_KEYS = ("CONTEXT_MEMORY_DECISIONS_ENABLED", "SPACED",
+                   "CONTEXT_MEMORY_DECISIONS_MODEL", "SOME_OTHER_SECRET")
+
+    def _loader_result(self, script, wanted):
+        """What `script`'s loader seeds from this case's file, read in a fresh process.
+
+        A fresh process because both scripts fix the file path when they are imported: the previous
+        in-process version set `CONTEXT_MEMORY_CREDENTIAL_FILE` after import, so both loaders read the
+        operator's real file (or none) and agreed on whatever it held — on CI, all-None on both sides
+        (issue 182). A script that fails to import is a failure here, never a skip.
+        """
+        probe = ("import importlib.util as u, json, os, sys\n"
+                 "sys.path.insert(0, sys.argv[1])\n"
+                 "s = u.spec_from_file_location('loader_under_test', sys.argv[2])\n"
+                 "m = u.module_from_spec(s); s.loader.exec_module(m)\n"
+                 "m.load_machine_credentials(*json.loads(sys.argv[3]))\n"
+                 "print(json.dumps({k: os.environ.get(k) for k in json.loads(sys.argv[4])}))\n")
+        env = {k: v for k, v in os.environ.items()
+               if k not in self.LOADER_KEYS and not k.startswith("CONTEXT_MEMORY_")}
+        env["CONTEXT_MEMORY_CREDENTIAL_FILE"] = self._credential_file()
+        proc = subprocess.run(
+            [sys.executable, "-B", "-c", probe, str(SCRIPTS), str(script),
+             json.dumps(wanted), json.dumps(self.LOADER_KEYS)],
+            capture_output=True, text=True, env=env)
+        self.assertEqual(proc.returncode, 0,
+                         f"{script.name} could not be loaded for comparison: {proc.stderr[-400:]}")
+        return json.loads(proc.stdout.strip().splitlines()[-1])
+
     def test_the_two_loaders_agree(self):
         """The duplication guard: the gate's loader and the capture client's must produce the same
-        environment from the same file. This is the test that makes the duplication safe."""
-        capture = SCRIPTS / "context_memory_client.py"
-        loader = _ilu.spec_from_file_location("_capture_client_loader", capture)
-        # The capture client imports `redact` at module scope, so the scripts dir must be importable.
-        if str(SCRIPTS) not in sys.path:
-            sys.path.insert(0, str(SCRIPTS))
-        module = _ilu.module_from_spec(loader)
-        try:
-            loader.loader.exec_module(module)
-        except Exception as exc:  # noqa: BLE001 — the agreement test reports, it does not raise
-            self.skipTest(f"the capture client could not be loaded for comparison: {exc}")
-        finally:
-            if sys.path and sys.path[0] == str(SCRIPTS):
-                sys.path.pop(0)
+        environment from the same file. This is the test that makes the duplication safe.
 
-        body = ("# comment\nCONTEXT_MEMORY_DECISIONS_ENABLED=true\n"
-                "malformed line without a delimiter\n"
-                "  SPACED = value  \nCONTEXT_MEMORY_DECISIONS_MODEL=nimble\n")
-        results = {}
-        for name, fn in (("capture", module.load_machine_credentials),
-                         ("gate", _gate.load_machine_credentials)):
-            with self.subTest(loader=name):
-                path = self._credential_file()
-                with open(path, "w", encoding="utf-8") as handle:
-                    handle.write(body)
-                saved = {k: os.environ.get(k) for k in
-                         ("CONTEXT_MEMORY_DECISIONS_ENABLED", "SPACED",
-                          "CONTEXT_MEMORY_DECISIONS_MODEL", "SOME_OTHER_SECRET")}
-                for k in saved:
-                    os.environ.pop(k, None)
-                saved_path = os.environ.get("CONTEXT_MEMORY_CREDENTIAL_FILE")
-                os.environ["CONTEXT_MEMORY_CREDENTIAL_FILE"] = path
-                try:
-                    fn("CONTEXT_MEMORY_DECISIONS_ENABLED", "CONTEXT_MEMORY_DECISIONS_MODEL",
-                       "SPACED", "SOME_OTHER_SECRET")
-                    results[name] = {k: os.environ.get(k) for k in
-                                     ("CONTEXT_MEMORY_DECISIONS_ENABLED", "SPACED",
-                                      "CONTEXT_MEMORY_DECISIONS_MODEL", "SOME_OTHER_SECRET")}
-                finally:
-                    for k, v in saved.items():
-                        if v is None:
-                            os.environ.pop(k, None)
-                        else:
-                            os.environ[k] = v
-                    if saved_path is None:
-                        os.environ.pop("CONTEXT_MEMORY_CREDENTIAL_FILE", None)
-                    else:
-                        os.environ["CONTEXT_MEMORY_CREDENTIAL_FILE"] = saved_path
-
-        self.assertEqual(results["capture"], results["gate"],
+        Agreement alone is satisfied by two loaders that both read nothing, so the expected values are
+        asserted too — `SPACED` proves the file was really parsed (key and value both trimmed)."""
+        self._write("# comment\nCONTEXT_MEMORY_DECISIONS_ENABLED=true\n"
+                    "malformed line without a delimiter\n"
+                    "  SPACED = value  \nCONTEXT_MEMORY_DECISIONS_MODEL=nimble\n")
+        wanted = ["CONTEXT_MEMORY_DECISIONS_ENABLED", "CONTEXT_MEMORY_DECISIONS_MODEL", "SPACED"]
+        gate = self._loader_result(GATE, wanted)
+        capture = self._loader_result(SCRIPTS / "context_memory_client.py", wanted)
+        self.assertEqual(gate, {"CONTEXT_MEMORY_DECISIONS_ENABLED": "true", "SPACED": "value",
+                                "CONTEXT_MEMORY_DECISIONS_MODEL": "nimble",
+                                "SOME_OTHER_SECRET": None})
+        self.assertEqual(capture, gate,
                          "the two loaders diverged; the duplication is only safe while they agree")
 
 
@@ -1696,20 +1847,40 @@ class HarnessIsolationTests(GateTestCase):
                          "an empty flag must not be seeded from anywhere")
 
     def test_the_harness_points_the_credential_file_at_a_path_that_does_not_exist(self):
-        """The isolation itself, asserted rather than assumed — if a future edit drops the `setdefault`
-        the guard above would still pass on a machine with no credential file."""
-        default = str(Path(tempfile.gettempdir())
-                      / "mimisbrunnr-gate-harness-absent-credentials")
-        self.assertFalse(os.path.exists(default),
+        """The isolation itself, asserted on the environment `run_gate` actually builds. The previous
+        version built its own environment and checked it echoed back, so it passed with the isolation
+        removed (issue 182)."""
+        self.assertFalse(os.path.exists(HARNESS_CREDENTIAL_FILE),
                          "the harness's isolation path exists, so it would be read as a real file")
-        probe = subprocess.run(
-            [sys.executable, "-B", "-c",
-             "import os;print(os.environ.get('CONTEXT_MEMORY_CREDENTIAL_FILE'))"],
-            capture_output=True, text=True,
-            env={**{k: v for k, v in os.environ.items()
-                    if not k.startswith("CONTEXT_MEMORY_DECISIONS_")},
-                 "CONTEXT_MEMORY_CREDENTIAL_FILE": default})
-        self.assertEqual(probe.stdout.strip(), default)
+        self.assertEqual(gate_subprocess_env()["CONTEXT_MEMORY_CREDENTIAL_FILE"],
+                         HARNESS_CREDENTIAL_FILE)
+
+    def test_an_exported_credential_file_does_not_reach_a_case(self):
+        """An operator who exported `CONTEXT_MEMORY_CREDENTIAL_FILE` must not configure the suite. The
+        hostile file enables the gate, raises the bar above every stub score and narrows the roles —
+        each of which would turn this case's pass into a fail if it leaked (issue 182)."""
+        hostile = os.path.join(self.tmp, "exported-credentials")
+        with open(hostile, "w", encoding="utf-8") as handle:
+            handle.write("CONTEXT_MEMORY_DECISIONS_ENABLED=true\n"
+                         "CONTEXT_MEMORY_DECISIONS_BASE_URL=http://127.0.0.1:9\n"
+                         "CONTEXT_MEMORY_DECISIONS_MIN_PROBABILITY=0.99\n"
+                         "CONTEXT_MEMORY_DECISIONS_ROLES=tester\n")
+        self.stub.probabilities = {"developer": 0.9}
+        saved = os.environ.get("CONTEXT_MEMORY_CREDENTIAL_FILE")
+        os.environ["CONTEXT_MEMORY_CREDENTIAL_FILE"] = hostile
+        try:
+            proc, report = self.score()
+            _, empty = self.score(CONTEXT_MEMORY_DECISIONS_ENABLED="")
+        finally:
+            if saved is None:
+                os.environ.pop("CONTEXT_MEMORY_CREDENTIAL_FILE", None)
+            else:
+                os.environ["CONTEXT_MEMORY_CREDENTIAL_FILE"] = saved
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(report["endpoint"], self.stub.base_url)
+        self.assertEqual(report["minProbability"], _gate.DEFAULT_MIN_PROBABILITY)
+        self.assertTrue(report["records"][0]["passed"])
+        self.assertEqual(empty["outcome"], "disabled")
 
 
 class ProbeTests(GateTestCase):

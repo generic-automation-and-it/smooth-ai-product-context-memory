@@ -27,6 +27,12 @@ file and never reach for the write client.
   depth-one traversals of 20, with 400 unique UUID/version candidates overall.
 - A group/ticket-context query without explicit scope skips graph traversal because current path API
   cannot preserve that relational context; disclosure reports this omission rather than widening scope.
+  With an explicit scope, traversal runs but keeps only endpoints inside the baseline's group(s);
+  `endpointsOutsideSelector` counts the rest, which were never merged. Report the count — the links
+  exist — but never fetch those endpoints by another route.
+- A traversal anchor the store refuses (403) is a `forbidden` pass, counted in `anchorsForbidden` and
+  listed in `passesIncomplete`; the baseline and the other passes stand. Report it, and do not retry it
+  under a wider scope.
 - **A recall is bounded by one foreground deadline.** A `timed-out` result means the store accepted the
   connection and did not answer — report it as a hang, never as "no results". Deepsearch stops at the
   deadline and returns the passes it completed with `stoppedEarly` / `budgetExhausted` and

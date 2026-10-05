@@ -52,7 +52,7 @@ def main():
     for name, function in (("query", client.cmd_query), ("paths", client.cmd_paths),
                            ("ticket-paths", client.cmd_ticket_paths)):
         command = sub.add_parser(name, aliases=["import"] if name == "query" else [])
-        command.add_argument("--payload")
+        client.add_payload_arguments(command)
         command.set_defaults(func=function)
     command = sub.add_parser("get-versions")
     command.add_argument("uuid")
@@ -69,7 +69,7 @@ def main():
     command.add_argument("--status")
     command.set_defaults(func=client.cmd_initiatives)
     command = sub.add_parser("deepsearch")
-    command.add_argument("--payload")
+    client.add_payload_arguments(command)
     command.set_defaults(func=lambda args: print_deepsearch(args))
 
     args = parser.parse_args()
@@ -163,7 +163,7 @@ def _parse_framed_json(raw: str):
 
 
 def print_deepsearch(args):
-    result = deepsearch.execute(client.read_payload(args.payload))
+    result = deepsearch.execute(client.payload_of(args))
     print(json.dumps(result, indent=2))
     return result
 

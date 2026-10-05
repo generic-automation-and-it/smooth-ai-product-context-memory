@@ -208,18 +208,28 @@ NOT-AVAILABLE, never a silent miss.
 
 **Candidate content never goes into a shell command.** `<batch-file>` is a JSON file the agent writes
 with its file-write tool — never `echo`, `printf` or a heredoc — under the gitignored
-`.context/mimisbrunnr-scratch/`, and deletes once the script has answered. Interpolating captured text
-into a command line puts unredacted content (the very secrets the redactor is about to find) into the
-command, shell history and process list, and lets a quote inside a fact rewrite the command. The same
-applies to `--payload` files for the client. See `.agents/rules/skills/skill-secret-handling.instructions.md`.
+`.context/mimisbrunnr-scratch/`. Interpolating captured text into a command line puts unredacted
+content (the very secrets the redactor is about to find) into the command, shell history and process
+list, and lets a quote inside a fact rewrite the command. The same applies to `--payload` files for the
+client. Environment variables are not a content channel either: a child process inherits them, and they
+are readable from the process table on the same account. See
+`.agents/rules/skills/skill-secret-handling.instructions.md`.
+
+**The batch file is the one unredacted copy on disk, so it is consumed and the folder is cleaned.** It
+has to be: it is the redactor's input. Pass `--consume` to `redact.py`, `atomicity.py` and the client's
+`--payload` so each file is deleted the moment it has been read (`--consume` without a file is refused;
+a file that fails to parse is left for you to see). At the end of every checkpoint — **including one
+that failed or was abandoned** — remove `.context/mimisbrunnr-scratch/` (`rm -r` of the folder is
+fine: its command line names the folder, not the content). Redaction does not cover personal data (a
+name, an email), so this cleanup is the only thing that removes it.
 
 | Script | Invocation | Pipeline stage | What it does (and does NOT do) |
 |---|---|---|---|
 | `context_memory_client.py` | `python3 .../context_memory_client.py <subcommand>` | 1 (preflight), 3 (dedup/links), 5 (write) | Base-URL resolution + health probe, all HTTP calls, JSON assembly from a payload file or stdin, over-cap batch refusal at the **20-candidate cap** (preflight and set both refuse; indices are request-relative, so batches are never silently chunked). Subcommands: `probe`, `preflight`, `set` (with `--dryrun`), `query`, `get-versions`, `get-blob`, `resolve-group`, `update-group`, `append-description`, `create-link`, `paths`, `ticket-parent` (with local `--dryrun`), `ticket-paths`, `labels`, `propose-label`, `initiatives`, `upsert-initiative`. |
 | `context_memory_read_client.py` | `python3 .../context_memory_read_client.py <subcommand>` | Read delegation | Read-only CLI surface: `probe`, `query`, `deepsearch`, `get-versions`, `get-blob`, `paths`, `ticket-paths`, `labels`, `initiatives`. Requires only `CONTEXT_MEMORY_READ_TOKEN`, and **refuses to start when a write token is present** in the environment — the read surface can never mutate, by construction. |
-| `redact.py` | `python3 .../redact.py --input <batch-file>` | 2 (redact) | Fingerprint secret detection, stdin→stdout. Emits redacted content plus per-candidate findings `{rule_name, hit_count, spans: [{start, end}]}`. **Reports rule names and character offsets only** — never the matched text, never the content around it. A key whose name says secret (`password`, `secret`, `api_key`, `access_key`, a qualified `*_TOKEN`) is redacted on any value of 8+ characters; a neutral key (`key`, `sort_key`, bare `token`, `credential`) only when the value itself is secret-shaped (an unbroken 16+ character run mixing letters and digits), so `sort key = created_on` passes untouched. Redact-and-flag (LADR-003): a **found** secret is flagged, never a rejection of the record. An **unavailable scrubber** is the opposite case — every persisting write calls it automatically and refuses if it cannot run, so the gate never fails open. That refusal arrives as `redactor-unavailable` and is **terminal: do not retry it.** It names the failure, never the content, so it is safe to surface. |
-| `atomicity.py` | `python3 .../atomicity.py --input <batch-file>` | 4 (atomicity) | Conservative bundle detector, stdin→stdout. Flags `simple` / `bundled` per candidate. It is a detector only — the split-vs-skip decision and the routing of the unprocessable remainder stay here, in the agent's judgement (LADR-002). |
-| `deepsearch.py` | `python3 .../deepsearch.py` | 3 (opt-in recall) | Baseline 200 plus bounded keyword/traversal passes, stable UUID/version dedupe, 400 aggregate cap and saturation disclosure. Bounded by the one recall deadline: a timed-out or deadline-stopped pass ends the chain but keeps the completed passes, disclosing `stoppedEarly`, `budgetExhausted` and `passesIncomplete`. |
+| `redact.py` | `python3 .../redact.py --input <batch-file> --consume` | 2 (redact) | Fingerprint secret detection, stdin→stdout. Emits redacted content plus per-candidate findings `{rule_name, hit_count, spans: [{start, end}]}`. **Reports rule names and character offsets only** — never the matched text, never the content around it. A key whose name says secret (`password`, `secret`, `api_key`, `access_key`, a qualified `*_TOKEN`) is redacted on any value of 8+ characters; a neutral key (`key`, `sort_key`, bare `token`, `credential`, `auth`, `bearer`, `session`, `cookie`) only when the value itself is secret-shaped (an unbroken 16+ character run mixing letters and digits), so `sort key = created_on` passes untouched; `pwd` is taken on the name unless its value is a path (`pwd: /srv/app`). `redact.is_credential_key(name)` is the shared name-only test other skills import. Redact-and-flag (LADR-003): a **found** secret is flagged, never a rejection of the record. An **unavailable scrubber** is the opposite case — every persisting write calls it automatically and refuses if it cannot run, so the gate never fails open. That refusal arrives as `redactor-unavailable` and is **terminal: do not retry it.** It names the failure, never the content, so it is safe to surface. |
+| `atomicity.py` | `python3 .../atomicity.py --input <batch-file> --consume` | 4 (atomicity) | Conservative bundle detector, stdin→stdout. Flags `simple` / `bundled` per candidate. It is a detector only — the split-vs-skip decision and the routing of the unprocessable remainder stay here, in the agent's judgement (LADR-002). |
+| `deepsearch.py` | `python3 .../deepsearch.py` | 3 (opt-in recall) | Baseline 200 plus bounded keyword/traversal passes, stable UUID/version dedupe, 400 aggregate cap and saturation disclosure. Bounded by the one recall deadline: a timed-out or deadline-stopped pass ends the chain but keeps the completed passes, disclosing `stoppedEarly`, `budgetExhausted` and `passesIncomplete`. Under a group/ticket selector with a scope, traversal endpoints outside the selected group are dropped and counted (`endpointsOutsideSelector`); an anchor the store refuses (403) is a disclosed `forbidden` pass (`anchorsForbidden`), not a failed recall. |
 | `authority.py` | `python3 .../authority.py` | 3 (authority resolution) | Converts a stated-authority judgement into one or two ordered version writes. Existing-winner cases record the losing candidate as history, then restore the winner as current in the same transaction. |
 | `divergence.py` | `python3 .../divergence.py` | 3 (conflict composition) | Converts an explicit same-subject genuine-conflict judgement into a separately identified claim, proposed divergence memory and two contradiction links; rejects cross-scope and recursive evidence and deduplicates exact claim pairs. |
 | `near_miss_tags.py` | `python3 .../near_miss_tags.py < approved-evidence.json` | Read-only reporting | Bounded stdin JSON validation, exact tag comparison, scoped `near-miss-tag` output. No network, file output, vocabulary lookup or semantic heuristic. See Evidence-only Near Misses below. |
@@ -444,7 +454,9 @@ is spent, deepsearch **stops the chain and returns the passes already completed*
 record, and never an abort that discards them. Its disclosure gains `deadlineSeconds`, `stoppedEarly`
 (any pass did not complete), `budgetExhausted` (the wall clock was spent, which is *not* the same as a
 pass hanging) and `passesIncomplete` (each named by `kind` and `value`), in the same shape as the
-existing cap disclosures, and every pass carries a `status` of `completed`, `timed-out` or `not-run`.
+existing cap disclosures, and every pass carries a `status` of `completed`, `timed-out`, `not-run` or —
+for a traversal the store refuses with 403 — `forbidden`. A forbidden anchor does not stop the chain:
+the baseline and every other pass are kept, and `anchorsForbidden` counts it.
 `anchorsEligible` and `anchorsOmittedByCap` are `null` when the baseline never answered — the traversal
 set was never enumerated, so a `0` would read as "nothing to traverse" rather than "unknown". A timeout
 is a **bounded, reported** result, not a silent one.
@@ -501,7 +513,7 @@ and [HLD-003 LADR-08](../../../docs/hlds/003-graph-edges-on-age/ladrs/LADR-08-ca
 - `--approve` remains the human-confirmed memory-status gate; it does not grant hierarchy permission.
   Hierarchy has no proposed status. A declaration authorizes only its stated set/reparent/remove;
   it does not authorize future replacements or retries with a changed expected parent.
-- Run `context_memory_client.py ticket-parent --payload declaration.json` only at that checkpoint.
+- Run `context_memory_client.py ticket-parent --payload declaration.json --consume` only at that checkpoint.
   It sends `PUT /api/context/tickets/parent` with this shape:
 
 ```json

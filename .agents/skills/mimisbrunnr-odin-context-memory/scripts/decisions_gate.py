@@ -135,6 +135,10 @@ MAX_LEDGER_ENTRIES = 5000
 # record that fits at 3.3 chars/token does not fit at 4.
 CHARS_PER_TOKEN = 3
 
+# How long the redactor subprocess may run. A redactor that overruns it is `redactor-unavailable`
+# like any other redactor that cannot run: no request is made.
+REDACTOR_TIMEOUT_SECONDS = 60
+
 
 class GateError(RuntimeError):
     """A refusal that names its own cause. Never carries record content."""
@@ -243,6 +247,11 @@ def resolve_endpoint(base_url, api_key):
     if parsed.scheme not in ("http", "https"):
         raise GateError("bad-decisions-url",
                         f"the decision endpoint must be http or https, not {parsed.scheme!r}")
+    if parsed.params or parsed.query or parsed.fragment:
+        # The path is appended after the base, so `;tok=x`, `?k=v` or `#f` would ride along with
+        # every request, or swallow the path. Never echoed: the parameter may be a pasted credential.
+        raise GateError("bad-decisions-url",
+                        "the decision endpoint URL must not carry ';' parameters, a query or a fragment")
     if parsed.hostname in ("localhost", "127.0.0.1", "::1"):
         return base_url
     if parsed.scheme != "https" or not api_key:
@@ -354,9 +363,11 @@ def redact_records(records):
         proc = subprocess.run(
             [sys.executable, "-B", str(REDACTOR)],
             input=json.dumps(unique),
-            capture_output=True, text=True, encoding="utf-8", timeout=60,
+            capture_output=True, text=True, encoding="utf-8", timeout=REDACTOR_TIMEOUT_SECONDS,
         )
-    except (OSError, ValueError) as exc:
+    # `SubprocessError` covers `TimeoutExpired`. Uncaught, a hung redactor escaped as a traceback,
+    # which the kvasir caller read as a skipped gate and wrote the record unscored (issue 182).
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
         raise GateError("redactor-unavailable",
                         f"the redactor could not run ({type(exc).__name__}); no request was made")
 
@@ -418,17 +429,21 @@ def estimate_tokens(text):
     return math.ceil(len(text) / CHARS_PER_TOKEN)
 
 
-def size_guard(state, roles):
-    """Refuse an oversize record BEFORE the request. Never truncate to fit."""
-    state_text = json.dumps(state, ensure_ascii=False)
-    questions = len(roles)
-    total = estimate_tokens(state_text)
-    body = len(state_text.encode("utf-8"))
+def size_guard(state, roles, model):
+    """Refuse an oversize request BEFORE it is sent. Never truncate to fit.
+
+    Sized on the request body `call_model` sends, not on the record alone: every role's instructions
+    and criteria travel with the record, so a record that fits on its own could still overflow the
+    model's context once the rubric was added (issue 182).
+    """
+    request_text = encode_request(state, roles, model).decode("utf-8")
+    total = estimate_tokens(request_text)
+    body = len(request_text.encode("utf-8"))
     if total > MAX_CONTEXT_TOKENS:
-        return (f"record estimates to ~{total} tokens against a {MAX_CONTEXT_TOKENS}-token context "
-                f"({len(state_text)} chars)")
+        return (f"request estimates to ~{total} tokens against a {MAX_CONTEXT_TOKENS}-token context "
+                f"({len(request_text)} chars, rubric included)")
     if body > MAX_BODY_BYTES:
-        return f"record body is {body} bytes against a {MAX_BODY_BYTES}-byte limit"
+        return f"request body is {body} bytes against a {MAX_BODY_BYTES}-byte limit"
     return None
 
 
@@ -446,6 +461,11 @@ def build_request(state, roles, model):
             for role in roles
         },
     }
+
+
+def encode_request(state, roles, model):
+    """The exact bytes `call_model` sends, shared with `size_guard` so the two cannot disagree."""
+    return json.dumps(build_request(state, roles, model), ensure_ascii=False).encode("utf-8")
 
 
 def _classify(exc, timeout):
@@ -535,8 +555,7 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 def call_model(state, roles, settings, rubric_version):
     """Score one record. Returns scores, passing roles, and the rubric version recorded with them."""
-    payload = build_request(state, roles, settings["model"])
-    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    body = encode_request(state, roles, settings["model"])
     url = resolve_url(settings)
 
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
@@ -726,7 +745,7 @@ def ledger_cap():
     return value
 
 
-def cap_ledger(ledger, max_entries=None):
+def cap_ledger(ledger, max_entries=None, keep=None):
     """Bound the ledger by dropping the most-spent entries once it grows past the cap.
 
     Nothing else prunes it: an entry is kept precisely because it must remember that its budget is
@@ -734,13 +753,29 @@ def cap_ledger(ledger, max_entries=None):
     20 000-subject session reaches ~430 KB of `{"subject": 3}` lines and keeps growing. Dropping the
     **most-spent** entries is the cheapest way to bound it: those are the records most likely to have
     been written already, and losing the memory of a spent budget is the least harmful entry to lose.
+
+    `keep` is the key being written, and it is never evicted. Without that guarantee, a ledger at the
+    cap evicted the entry it had just counted, so that record restarted at attempt 1 on every round and
+    its budget never ran out (issue 182). Ties are broken by key so the eviction is deterministic.
     """
     if max_entries is None:
         max_entries = ledger_cap()
     if len(ledger) <= max_entries:
         return ledger
-    ordered = sorted(ledger.items(), key=lambda pair: (-entry_attempts(pair[1]), pair[0]))
-    return dict(ordered[:max_entries])
+    ordered = sorted(((key, value) for key, value in ledger.items() if key != keep),
+                     key=lambda pair: (entry_attempts(pair[1]), pair[0]))
+    room = max_entries - (1 if keep in ledger else 0)
+    capped = dict(ordered[:max(room, 0)])
+    if keep in ledger:
+        capped[keep] = ledger[keep]
+    return capped
+
+
+def write_capped_ledger(state_file, ledger, keep):
+    """Cap, write, and return how many entries the cap evicted, so the caller can disclose it."""
+    capped = cap_ledger(ledger, keep=keep)
+    write_ledger(state_file, capped)
+    return len(ledger) - len(capped)
 
 
 def write_ledger(state_file, ledger):
@@ -775,8 +810,9 @@ def next_attempt(state_file, identity, max_attempts):
     "improve until it passes" will otherwise re-ask whenever the answer is inconvenient. Once the
     budget is spent, further attempts are refused rather than silently accepted.
 
-    Returns `(attempt, reset)`; `reset` is True when the ledger had to be discarded, which the caller
-    surfaces so a cleared budget is never mistaken for a first attempt.
+    Returns `(attempt, reset, prior_best, evicted)`; `reset` is True when the ledger had to be
+    discarded, which the caller surfaces so a cleared budget is never mistaken for a first attempt, and
+    `evicted` counts the entries the cap dropped on this write.
     """
     ledger, discarded, migrated = read_ledger(state_file)
     key = ledger_key(identity)
@@ -788,16 +824,17 @@ def next_attempt(state_file, identity, max_attempts):
     prior_best = entry_best(entry)
     used = entry_attempts(entry) if entry is not None else 0
     if used >= max_attempts:
+        evicted = 0
         if migrated:
             # Nothing else would rewrite the file on this path, and a spent budget is exactly the
             # entry that stays put — so the raw subjects would outlive the upgrade indefinitely.
-            write_ledger(state_file, cap_ledger(ledger))
-        return None, discarded, prior_best
+            evicted = write_capped_ledger(state_file, ledger, key)
+        return None, discarded, prior_best, evicted
     # The count is spent whether or not the model answers, so it is written now with the best carried
     # through untouched; `record_attempt` then raises the best without disturbing the count.
     ledger[key] = {"attempts": used + 1, "best": prior_best}
-    write_ledger(state_file, cap_ledger(ledger))
-    return used + 1, discarded, prior_best
+    evicted = write_capped_ledger(state_file, ledger, key)
+    return used + 1, discarded, prior_best, evicted
 
 
 def record_attempt(state_file, identity, attempt, scores):
@@ -805,7 +842,7 @@ def record_attempt(state_file, identity, attempt, scores):
 
     Written separately from `next_attempt` because the count is spent whether or not the model
     answered — an `unreachable` round must still count against the budget, or a down model would
-    grant unlimited attempts for free.
+    grant unlimited attempts for free. Returns `(best, evicted)`.
     """
     ledger, _discarded, _migrated = read_ledger(state_file)
     key = ledger_key(identity)
@@ -815,18 +852,17 @@ def record_attempt(state_file, identity, attempt, scores):
     # survives here rather than from the value passed in. Counting up from the surviving count keeps a
     # ledger written in the earlier format converging instead of restarting.
     #
-    # The `is not None` guard is load-bearing, and `next_attempt` already carries the same one. The two
-    # calls are separate reads of the file, and between them `cap_ledger` can evict *this* identity —
-    # at which point `entry` is `None`, `entry_attempts(None)` is `None`, and `max(None, attempt)`
-    # raises `TypeError`. A capped ledger therefore crashed on the very records it had just evicted,
-    # which is why no earlier case reached it: every one of them ran below the cap. Found by the
-    # end-to-end case that finally crosses the cap.
+    # The `is not None` guard is load-bearing. The two calls are separate reads of the file, and an
+    # entry can be gone by the second one — before `keep` existed, `cap_ledger` evicted the very
+    # identity it had just counted, and another process sharing the file can still drop it. Then
+    # `entry_attempts(None)` is `None` and `max(None, attempt)` raises `TypeError`.
     prior = entry_best(entry)
     prior_attempts = entry_attempts(entry) if entry is not None else 0
     ledger[key] = {"attempts": max(prior_attempts, attempt),
                    "best": best_attempt(prior, candidate)}
-    write_ledger(state_file, cap_ledger(ledger))
-    return ledger[key]["best"]
+    best = ledger[key]["best"]
+    evicted = write_capped_ledger(state_file, ledger, key)
+    return best, evicted
 
 
 def best_attempt(previous, candidate):
@@ -875,8 +911,9 @@ def cmd_score(args):
 
     results = []
     ledger_reset = False
+    ledger_evicted = 0
     for index, (original, state) in enumerate(zip(records, redacted)):
-        oversize = size_guard(state, roles)
+        oversize = size_guard(state, roles, settings["model"])
         if oversize:
             # `discrimination` is disclosed on every record, not only the scored ones: a consumer
             # reading `margin` must not KeyError on exactly the records whose outcome it most needs to
@@ -890,9 +927,10 @@ def cmd_score(args):
             continue
 
         if args.state_file:
-            attempt, this_reset, prior_best = next_attempt(args.state_file,
-                                                       record_identity(original, index),
-                                                       settings["max_attempts"])
+            attempt, this_reset, prior_best, evicted = next_attempt(args.state_file,
+                                                                    record_identity(original, index),
+                                                                    settings["max_attempts"])
+            ledger_evicted += evicted
             # One reset anywhere in the batch is reported, since it is one file and one bound.
             ledger_reset = ledger_reset or this_reset
             if attempt is None:
@@ -926,8 +964,12 @@ def cmd_score(args):
                         {"attempt": attempt, "scores": scores, "max": max(scores.values())})
         # Persist only once a score exists, so a failed round leaves the best untouched while still
         # having spent its attempt above.
-        stored = record_attempt(args.state_file, record_identity(original, index),
-                                attempt, scores) if args.state_file else best
+        if args.state_file:
+            stored, evicted = record_attempt(args.state_file, record_identity(original, index),
+                                             attempt, scores)
+            ledger_evicted += evicted
+        else:
+            stored = best
         margin, tied = discrimination(scores)
         results.append({
             "index": index, "identity": record_identity(original, index), "attempt": attempt,
@@ -957,6 +999,9 @@ def cmd_score(args):
     }
     if args.state_file:
         payload["stateFile"] = str(args.state_file)
+        # Always present with a ledger: an evicted entry is a record whose spent budget was forgotten,
+        # so the count says how many budgets this run restarted.
+        payload["ledgerEvicted"] = ledger_evicted
         if ledger_reset:
             # Said plainly, because a cleared ledger means every record's attempt budget starts again
             # — so an `attempt: 1` here is not evidence that this record is new.
