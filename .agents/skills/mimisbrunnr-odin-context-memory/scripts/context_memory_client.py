@@ -224,8 +224,15 @@ def _parse_base(value):
                       f"check {ENV_BASE_URL} for malformed or non-ASCII characters")
 
 
-def base_url():
-    value = os.environ.get(ENV_BASE_URL, DEFAULT_BASE_URL).rstrip("/")
+def base_url(value=None):
+    """The validated store origin: `value` when given, else the environment's.
+
+    One rule for both sources, so an explicit override (`probe --base-url`) cannot skip the loopback,
+    userinfo and shape checks the environment value has to pass.
+    """
+    if value is None:
+        value = os.environ.get(ENV_BASE_URL, DEFAULT_BASE_URL)
+    value = value.rstrip("/")
     parsed = _parse_base(value)
     if parsed.scheme not in ("http", "https") or parsed.username or parsed.password \
             or parsed.path not in ("", "/") or parsed.query or parsed.fragment:
@@ -352,7 +359,9 @@ def _probe(base):
 
 
 def cmd_probe(args):
-    base = args.base_url or base_url()
+    # Validated before it is used or printed: an unchecked override reached `_probe` and the console
+    # verbatim, userinfo included. A validated origin carries none, so printing it is safe.
+    base = base_url(args.base_url or None)
     if _probe(base):
         print(f"mimisbrunnr-odin-context-memory API reachable at {base}")
         return

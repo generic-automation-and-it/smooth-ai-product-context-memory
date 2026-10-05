@@ -235,8 +235,9 @@ more valuable-sounding:
 - The rewrite re-runs redaction, the atomicity gate and preflight. A rewrite the atomicity gate flags is
   not a valid attempt.
 
-**The attempt counter is the script's, not yours.** `decisions_gate.py` keeps a ledger keyed by record
-identity in the file passed as `--state-file`, so re-asking after an inconvenient answer buys nothing. It also
+**The attempt counter is the script's, not yours.** `decisions_gate.py` keeps a ledger keyed by a SHA-256
+digest of the record identity in the file passed as `--state-file`, so re-asking after an inconvenient answer
+buys nothing and the subject never reaches the file. It also
 carries the **best** attempt across rounds, so `best` is the highest-scoring version seen and
 `bestThisRound` says whether *this* rewrite actually improved on the source. **A `false` there means the
 rewrite scored lower than what came before** — surface that rather than reporting the round as progress.

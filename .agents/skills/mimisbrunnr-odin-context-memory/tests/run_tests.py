@@ -1023,6 +1023,42 @@ class WritePayloadTests(unittest.TestCase):
                 self.assertNotIn("Traceback", completed.stderr)
                 self.assertNotIn("s3cret", completed.stderr + completed.stdout)
 
+    def test_a_probe_override_is_validated_like_the_environment_value(self):
+        # `probe --base-url` used the override as given, skipping the loopback, userinfo and shape
+        # checks, and printed it — credential included.
+        for value in ("http://operator:s3cret@localhost:5141", "http://memory.example:5141",
+                      "http://localhost:5141/api", "ftp://localhost:5141",
+                      "http://localhost:5141@192.0.2.1/"):
+            with self.subTest(value=value), patch.object(client, "_probe") as probed:
+                out = io.StringIO()
+                with self.assertRaises(client.ClientError) as caught, redirect_stdout(out):
+                    client.cmd_probe(SimpleNamespace(base_url=value))
+                self.assertEqual(caught.exception.status_text, "bad-base-url")
+                probed.assert_not_called()
+                self.assertNotIn("s3cret", str(caught.exception) + out.getvalue())
+
+    def test_a_valid_probe_override_is_probed_and_reported(self):
+        out = io.StringIO()
+        with patch.object(client, "_probe", return_value=True) as probed, redirect_stdout(out):
+            client.cmd_probe(SimpleNamespace(base_url="http://127.0.0.1:5141/"))
+        probed.assert_called_once_with("http://127.0.0.1:5141")
+        self.assertIn("reachable at http://127.0.0.1:5141", out.getvalue())
+
+    def test_the_cli_refuses_a_credential_bearing_probe_override_as_a_classified_error(self):
+        env = dict(os.environ, **{client.ENV_READ_TOKEN: "read-only"})
+        env.pop(client.ENV_WRITE_TOKEN, None)
+        env.pop(client.ENV_BASE_URL, None)
+        for script in ("context_memory_client.py", "context_memory_read_client.py"):
+            with self.subTest(script=script):
+                completed = subprocess.run(
+                    [sys.executable, "-B", str(SCRIPTS / script),
+                     "--base-url", "http://operator:s3cret@memory.example:5141", "probe"],
+                    capture_output=True, text=True, env=env, timeout=30)
+                self.assertEqual(completed.returncode, 1)
+                self.assertIn("bad-base-url", completed.stderr)
+                self.assertNotIn("Traceback", completed.stderr)
+                self.assertNotIn("s3cret", completed.stderr + completed.stdout)
+
     def test_the_real_opener_disables_proxies_and_refuses_redirects(self):
         # The handler is only a guard if `_open` actually installs it, and the proxy bypass only
         # holds if the opener is built with an empty ProxyHandler rather than the environment's.

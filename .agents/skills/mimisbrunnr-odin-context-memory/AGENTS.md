@@ -258,6 +258,23 @@ flowchart LR
   scope consent. Render the whole response, including disclosure, on empty/capped results. Never retry
   errors with broader scope or a changed expected parent. API owns ownership/cycles and atomic mutation;
   hierarchy is current state, not history, and separate from the memory-set transaction.
+- **The decision gate's request and ledger never leak what they carry.** `decisions_gate.py` sends a
+  redacted record and, for a hosted endpoint, a bearer key, so three guards hold: the configured
+  `CONTEXT_MEMORY_DECISIONS_PATH` must be absolute with a single leading `/` and no `@`, `\`, whitespace
+  or control character (muninn's `recall_feedback_path_ok` rule), and the joined URL's scheme, host and
+  port must equal the validated base's — `bad-decisions-url` otherwise, the path never echoed; the
+  opener installs a `_NoRedirect` handler, so a 3xx is a `redirect-refused` outcome, not a replay of the
+  record and key to `Location`; and the attempt ledger is keyed by `sha256:<hex>` of the record
+  identity, never the subject, because a subject can carry personal data and the ledger is a file on
+  disk (`.context/decisions-ledger.json` by default). **Migration:** a ledger written with raw-subject
+  keys is re-keyed by hashing on read — not dropped, which would silently reset every budget — and the
+  file is rewritten on that same run even when every budget is spent, so raw subjects leave the disk on
+  the first `score` after upgrade. A raw key meeting its own digest (an old and a new gate sharing the
+  file) merges to the larger count and the better best. The report's `identity` field stays the raw
+  subject: it is stdout to the caller, not persisted.
+- **`probe --base-url` is validated like the environment value.** `base_url(value)` applies one
+  loopback/userinfo/shape rule to an explicit override and to `CONTEXT_MEMORY_BASE_URL`, so the override
+  cannot reach `_probe` or the console unchecked; a refusal is the fixed-text `bad-base-url`.
 - **Ticket shape guards match deterministic wire limits.** Identity strings max 512 and reason/source
   max 4000 UTF-16 code units, including surrogate pairs for non-BMP characters; NUL/invalid Unicode fail.
   No trimming/truncation. Shared checks apply to write/dry-run and traversal anchors; traversal filter
@@ -291,7 +308,8 @@ flowchart LR
    PEM and repeated-prefix linear-time guards; `RedactionPrecisionTests`: an ordinary-prose corpus that
    must pass byte-identical and located digests; case-insensitive keys; `OtherWriteRedactionTests`:
    every persisting write tool); `atomicity.py` bundle
-   detection; `context_memory_client.py` path-segment, exact-route credential, loopback, unparseable-base-URL
+   detection; `context_memory_client.py` path-segment, exact-route credential, loopback, unparseable-base-URL,
+   `probe --base-url` override (validated like the environment value, never printed with userinfo)
    and redirect guards — the last two through the client's real opener, not the handler in isolation; `deepsearch.py`
    caps, deduplication and omission disclosure; `divergence.py` composition, pair idempotency and
    recursion rejection; `authority.py` ordered version composition; read-client fail-closed
@@ -317,6 +335,11 @@ flowchart LR
    bounds/output/no-I/O guarantees.
    Run: `python3 -B .agents/skills/mimisbrunnr-odin-context-memory/tests/run_tests.py`. The PR gate runs it and
    `tests/measure_cost.py` (reproducible structural cost evidence) in the same step.
+- **Decision-gate harness:** `tests/test_decisions_gate.py` (`python3 -B …/tests/test_decisions_gate.py`).
+  Most cases drive the gate against a loopback stub server; `RequestPathGuardTests`, `RedirectGuardTests`
+  and `LedgerPrivacyTests` are socket-free and pin the host-moving-path refusal, the redirect refusal
+  through the real opener (an in-memory 307 transport) and the digest-keyed ledger with its raw-key
+  migration.
 - **Deterministic near-miss fixtures:** `tests/fixtures/near_miss_tags.json` exercises grounded mismatch,
   exact match, ANY overlap, irrelevant evidence, unsupported plausible synonym and empty tags. Its evidence
   contains the original API query, scope-bound approval entry, and explicit approved lifecycle status.
@@ -384,6 +407,7 @@ redaction detector is a stdin→stdout fingerprint script reporting rule names o
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-05 | **Four request and at-rest leaks closed in the gate and the client.** (1) The attempt ledger was keyed by the raw subject, which can carry personal data, and written to `.context/decisions-ledger.json`; keys are now `sha256:<hex>` of the identity, and an existing raw-keyed ledger is re-keyed by hashing on read and rewritten on the same run — hashing rather than dropping, because dropping would silently reset every budget. (2) `CONTEXT_MEMORY_DECISIONS_PATH` was appended to the validated base unchecked, so `@other-host/…` or `//host` moved the record and bearer key off the approved endpoint; the path now follows muninn's rule and the joined URL's scheme/host/port must equal the base's. (3) The gate's opener followed redirects with the bearer key; it now installs `_NoRedirect` (`redirect-refused`), the store client's pattern. (4) `probe --base-url` bypassed `base_url()`'s loopback/userinfo/shape checks and printed the URL; `base_url(value)` now validates the override with the same rule. Regression tests: `RequestPathGuardTests`, `RedirectGuardTests`, `RedirectEndToEndTests`, `LedgerPrivacyTests` and three `WritePayloadTests` probe cases. | issue 179 |
 | 2026-10-05 | **`export`/`import` are now real command aliases, and the `--input` switch is gone.** The row below added `--import`/`--export`/`--input` to the Switches table as wording only, so the table described commands neither client had, and an `--input` that "defaults to the current session dump" when this skill's capture reads no dump at all. The write client now accepts `export` (runs `set`) and `import` (runs `query`); the read client accepts `import` only, since it has no write command. Both normalise the alias to the canonical name right after parsing, so write-route selection and recall framing never see a second spelling — `DirectionAliasTests` pins the routing and that an aliased recall is still framed. `--input` was removed: capturing a dump is `mimisbrunnr-kvasir-understanding export --input`. Checkpoint wording in SKILL.md now says `--export`. Harness 156 -> 159. | PR #178 review |
 | 2026-10-05 | **The store-direction switches are named to match `kvasir`/`ai-understanding`.** The SKILL.md Switches table gained `--import` (store → session, recall) and `--export` (session → store, capture) as the aligned direction names, plus `--input` (defaults to the current session dump), replacing the get/set wording for the direction. The low-level client verbs (`set`, `query`, `get-versions`) stay as the plumbing the directions route through. Wording-only; the write path is unchanged. | session request |
 | 2026-10-05 | **`test_the_write_path_applies_the_cap` asserted a name its body did not earn, and the full review caught it.** The docstring claimed "the cap must be reached on the real write path, or `cap_ledger` is merely a helper nobody calls", while every line called `cap_ledger` directly and asserted on a file the case had just written by hand — so it proved the helper bounds a dictionary and nothing whatever about `record_attempt` using it. That gap is now closed properly by `test_the_ledger_is_capped_end_to_end`, which crosses the cap through the gate itself. Rather than delete it, it is kept at a name and scope it can defend — `test_cap_ledger_bounds_a_ledger_built_at_the_shipped_limit` — and gained the under-the-bound case that shows the cap is a ceiling rather than a target. A second case whose name asserts wiring it does not exercise is the same defect in different clothing, and a reader scanning names would have believed the wiring twice while it was proved zero times. | decision gate ledger cap |
