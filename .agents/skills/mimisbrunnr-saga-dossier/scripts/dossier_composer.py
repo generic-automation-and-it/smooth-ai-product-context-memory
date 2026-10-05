@@ -6,8 +6,9 @@ The judgement half of the contextual-knowledge-export design. The Host API assem
 lifecycle marking, citation, findings, focus, and the closed reconciliation (NFR-04).
 
 This module holds **no write capability to the store.** It has no write operation at all (LADR-08);
-the only thing it writes is the local dossier artefact, at a gitignored path, and only when the CLI is
-explicitly asked to. The store is never touched and no write endpoint is called (NFR-06). It never
+the only files it writes are the dossier artefact and the scratch bundle, each at a gitignored path,
+owner-only, and only when the CLI is explicitly asked to. The store is never touched and no write
+endpoint is called (NFR-06). It never
 calls a model — composition judgement that needs a model is supplied by the caller (the agent / the
 skill) as ``judgements``; this module enforces the deterministic rules around that judgement and
 delivers the invariants the NFRs require.

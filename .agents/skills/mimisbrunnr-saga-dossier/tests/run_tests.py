@@ -668,9 +668,9 @@ class Nfr06CapabilityAbsenceTests(unittest.TestCase):
                       if any(tok in name.lower() for tok in write_ops)]
         self.assertEqual(write_like, [], f"module exposes store-write-like members: {write_like}")
 
-    def test_cli_writes_only_the_local_artefact(self):
-        """NFR-06: the only thing the CLI writes is the dossier artefact at the requested path; the
-        composer has no path back into the store."""
+    def test_cli_has_no_path_back_into_the_store(self):
+        """NFR-06: the CLI writes only local files — the dossier artefact and the scratch bundle, each
+        at a requested gitignored path — and the composer has no path back into the store."""
         self.assertFalse(hasattr(dc, "import_from_store"))
         self.assertFalse(hasattr(dc, "save_changes"))
         # The CLI has a compose/bundle surface only; no subcommand writes to the store.
@@ -1631,35 +1631,43 @@ class ComposeJudgementsCliTests(unittest.TestCase):
     def setUp(self):
         import tempfile
         self._tmp = tempfile.TemporaryDirectory()
-        self.root = Path(self._tmp.name)
-        self.bundle = self.root / "bundle.json"
+        self.addCleanup(self._tmp.cleanup)
+        self.repo, self.scratch = _init_ignore_repo(Path(self._tmp.name).resolve())
+        self.bundle = self.scratch / "bundle.json"
         self.bundle.write_text(json.dumps(_bundle([
             _mk(self.A, "A", "The default is A."),
             _mk(self.B, "B", "The default is A, restated.", source_ref="r2"),
         ])), encoding="utf-8")
 
-    def tearDown(self):
-        self._tmp.cleanup()
-
-    def _compose(self, judgements=None, raw=None):
+    def _run(self, argv):
         import contextlib
         import io
-        argv = ["compose", "--bundle", str(self.bundle)]
-        if judgements is not None or raw is not None:
-            path = self.root / "judgements.json"
-            path.write_text(raw if raw is not None else json.dumps(judgements), encoding="utf-8")
-            argv += ["--judgements", str(path)]
         stdout, stderr = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
             rc = dc.main(argv)
         return rc, stdout.getvalue(), stderr.getvalue()
 
+    def _compose(self, judgements=None, raw=None, evidence=None, path=None):
+        argv = ["compose", "--bundle", str(self.bundle)]
+        if judgements is not None or raw is not None:
+            path = path or self.scratch / "judgements.json"
+            path.write_text(raw if raw is not None else json.dumps(judgements), encoding="utf-8")
+            argv += ["--judgements", str(path)]
+        if evidence is not None:
+            ev_path = self.scratch / "near-miss.json"
+            ev_path.write_text(json.dumps(evidence), encoding="utf-8")
+            argv += ["--near-miss-evidence", str(ev_path)]
+        return self._run(argv)
+
+    def _gap(self, basis, ground="task", memories=()):
+        return {"category": "gap", "ground": ground, "basis": basis,
+                "memories": [{"uuid": u, "version": 1} for u in memories],
+                "classification": "analysis"}
+
     def test_judgements_reach_the_rendered_dossier(self):
         judgements = {
             "equivalences": [{"uuids": [self.A, self.B], "meaning": "same default"}],
-            "findings": [{"category": "gap", "ground": "task", "basis": "No rollout plan captured",
-                          "memories": [{"uuid": self.A, "version": 1}],
-                          "classification": "analysis"}],
+            "findings": [self._gap("No rollout plan captured", memories=[self.A])],
         }
         rc, out, err = self._compose(judgements)
         self.assertEqual(rc, 0, err)
@@ -1682,25 +1690,113 @@ class ComposeJudgementsCliTests(unittest.TestCase):
         self.assertEqual(rc, 0, err)
         self.assertIn("### gap", out)
 
-    def test_malformed_judgements_are_refused(self):
+    def test_malformed_judgements_are_refused_cleanly(self):
+        """Every malformed shape is a one-line refusal with exit 1 — an AttributeError or TypeError
+        escaping `main` would surface here as a test error, not a failure."""
+        mem = {"uuid": self.A, "version": 1}
+        finding = {"category": "gap", "ground": "task", "basis": "b", "classification": "analysis"}
         cases = {
-            "invalid json": "{not json",
-            "not an object": "[]",
-            "unknown key": json.dumps({"finding": []}),
-            "findings not a list": json.dumps({"findings": {}}),
-            "entry not an object": json.dumps({"findings": ["gap"]}),
-            "deterministic category": json.dumps({"findings": [{
-                "category": "stale", "basis": "b", "classification": "analysis",
-                "memories": [{"uuid": self.A, "version": 1}]}]}),
-            "gap without a ground": json.dumps({"findings": [{
-                "category": "gap", "basis": "b", "classification": "analysis",
-                "memories": [{"uuid": self.A, "version": 1}]}]}),
+            "invalid json": ("{not json", "not valid JSON"),
+            "not an object": ("[]", "JSON object"),
+            "unknown key": (json.dumps({"finding": []}), "unknown key"),
+            "findings not a list": (json.dumps({"findings": {}}), "must be a list"),
+            "entry not an object": (json.dumps({"findings": ["gap"]}), "entries must be objects"),
+            "deterministic category": (json.dumps({"findings": [dict(
+                finding, category="stale", memories=[mem])]}), "not caller-mergeable"),
+            "gap without a ground": (json.dumps({"findings": [dict(
+                finding, ground=None, memories=[mem])]}), "BR-27"),
+            "memories a string": (json.dumps({"findings": [dict(finding, memories="x")]}),
+                                  "memories must be a list"),
+            "memory a string": (json.dumps({"findings": [dict(finding, memories=["x"])]}),
+                                "memories must be a list"),
+            "uuid a list": (json.dumps({"findings": [dict(
+                finding, memories=[{"uuid": [self.A], "version": 1}])]}), "selected in this bundle"),
+            "version a bool": (json.dumps({"findings": [dict(
+                finding, memories=[{"uuid": self.A, "version": True}])]}), "version >= 1"),
+            "contradiction memories a string": (json.dumps({"findings": [dict(
+                finding, category="contradiction", memories="xy")]}), "memories must be a list"),
+            "equivalence group a string": (json.dumps({"equivalences": ["x"]}),
+                                           "entries must be objects"),
+            "equivalence uuids a string": (json.dumps({"equivalences": [{"uuids": "ab"}]}),
+                                           "list of uuid strings"),
+            "equivalence uuid unhashable": (json.dumps({"equivalences": [{"uuids": [[self.A], self.B]}]}),
+                                            "list of uuid strings"),
         }
-        for name, raw in cases.items():
+        for name, (raw, fragment) in cases.items():
             with self.subTest(case=name):
                 rc, out, err = self._compose(raw=raw)
                 self.assertEqual(rc, 1, f"{name}: {out}")
-                self.assertTrue(err.strip())
+                self.assertIn(fragment, err)
+
+    def test_a_caller_near_miss_tag_is_refused_with_or_without_memories(self):
+        """LADR-10: no evidence means no finding. A near-miss-tag the agent wrote — `memories: []`
+        included — is refused; only the helper's validated evidence produces one."""
+        for mems in ([], [self.A]):
+            with self.subTest(memories=mems):
+                rc, out, err = self._compose({"findings": [{
+                    "category": "near-miss-tag", "basis": "tag drift", "classification": "analysis",
+                    "memories": [{"uuid": u, "version": 1} for u in mems]}]})
+                self.assertEqual(rc, 1, out)
+                self.assertIn("--near-miss-evidence", err)
+
+    def test_an_evidenceless_near_miss_tag_is_refused_by_compose_itself(self):
+        # The Python API path has no read_judgements in front of it; the composer gate holds alone.
+        bundle = json.loads(self.bundle.read_text(encoding="utf-8"))
+        with self.assertRaises(ValueError) as caught:
+            dc.compose(bundle, judgements={"findings": [{
+                "category": "near-miss-tag", "basis": "tag drift", "classification": "analysis",
+                "memories": []}]})
+        self.assertIn("LADR-10", str(caught.exception))
+
+    def test_near_miss_evidence_reaches_the_dossier_through_the_helper(self):
+        evidence = NearMissTagTests._evidence(self)
+        rc, out, err = self._compose(evidence=evidence)
+        self.assertEqual(rc, 0, err)
+        self.assertIn("### near-miss-tag", out)
+        self.assertIn(f"Memories: {self.A} v1", out)
+        # No relevant analysis is no evidence, so no finding.
+        evidence["analyses"][0]["relevant"] = False
+        rc, out, err = self._compose(evidence=evidence)
+        self.assertEqual(rc, 0, err)
+        self.assertNotIn("### near-miss-tag", out)
+
+    def test_gap_memory_references_follow_their_ground(self):
+        """BR-27 / LADR-13: an included-claim gap names the claim it interprets; a task or expectation
+        gap is an answer missing from the slice and names none rather than citing an unrelated one."""
+        rc, _, err = self._compose({"findings": [self._gap("What does A mean here?",
+                                                           ground="included-claim")]})
+        self.assertEqual(rc, 1)
+        self.assertIn("included-claim gap must name", err)
+        for ground in ("task", "expectation"):
+            with self.subTest(ground=ground):
+                rc, out, err = self._compose({"findings": [self._gap("No rollout plan", ground)]})
+                self.assertEqual(rc, 0, err)
+                self.assertIn("No rollout plan", out)
+
+    def test_memoryless_gaps_with_different_bases_are_all_kept(self):
+        # The dedup key was category + memories, so every memoryless gap after the first vanished.
+        rc, out, err = self._compose({"findings": [self._gap("No rollout plan"),
+                                                   self._gap("No owner named")]})
+        self.assertEqual(rc, 0, err)
+        self.assertIn("No rollout plan", out)
+        self.assertIn("No owner named", out)
+
+    def test_agent_written_inputs_outside_an_ignored_path_are_refused(self):
+        unignored = self.repo / "judgements.json"
+        rc, _, err = self._compose({"findings": []}, path=unignored)
+        self.assertEqual(rc, 1)
+        self.assertIn("--judgements must name a gitignored path", err)
+        evidence = self.repo / "near-miss.json"
+        evidence.write_text("{}", encoding="utf-8")
+        rc, _, err = self._run(["compose", "--bundle", str(self.bundle),
+                                "--near-miss-evidence", str(evidence)])
+        self.assertEqual(rc, 1)
+        self.assertIn("--near-miss-evidence must name a gitignored path", err)
+
+    def test_compose_without_a_bundle_is_refused_cleanly(self):
+        rc, _, err = self._run(["compose"])
+        self.assertEqual(rc, 1)
+        self.assertIn("compose requires --bundle", err)
 
 
 class BundleFileOnlyTests(unittest.TestCase):

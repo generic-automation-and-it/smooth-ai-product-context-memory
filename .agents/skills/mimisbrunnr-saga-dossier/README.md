@@ -62,7 +62,8 @@ python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py \
 
 # 4. Write your judgements — which memories restate each other, what conflicts, what is missing —
 #    to .context/mimisbrunnr-saga-dossier/scratch/judgements.json (shape in SKILL.md). Skip it and
-#    the findings carry no gaps, contradictions or merges.
+#    the findings carry no gaps, contradictions or merges. Tag near-misses are not written here: they
+#    come only from the shared helper's evidence, passed as --near-miss-evidence (see SKILL.md).
 
 # 5. Turn that bundle into a readable document, angled for an architecture write-up.
 python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py \
@@ -110,8 +111,9 @@ reason `outside-focus`.
 - **Findings** — a short, bounded list of what's wrong with the material itself. The composer derives
   `no-links-in-slice`, `unattributed`, `stale`, `superseded-still-referenced`, `weak-summary`,
   `provenance-cycle` and `equivalence-uncertain` on its own; `gap` and `contradiction` are the semantic
-  judgement you supply (see `SKILL.md`), so the two commands above report neither — an empty result for
-  those two means "not examined", not "none found".
+  judgement you supply in step 4's judgements file (see `SKILL.md`). Compose without it and the dossier
+  reports neither — an empty result for those two then means "not examined", not "none found".
+  `near-miss-tag` appears only from the shared helper's evidence (`--near-miss-evidence`).
 - **A reconciliation line** — present + consolidated + omitted always adds up to what the bundle actually
   contained. If something's missing from the document, that line is where you'd catch it.
 

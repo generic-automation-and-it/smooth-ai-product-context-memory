@@ -1,6 +1,6 @@
 ---
 name: mimisbrunnr-saga-dossier
-description: Compose a read-only, cited context dossier — one ordered document plus a findings report (gaps, contradictions, stale claims) — for a slice of the Mímisbrunnr store (repository, initiative, ticket, tags). Use when re-entering a repo or ticket, handing reasoning to a colleague, grounding a design document, or auditing the store. Fetches a deterministic bundle from the Host API and writes only a local gitignored artefact; never writes to the store. Triggers on "dossier", "catch me up on", "everything the store knows about".
+description: Compose a read-only, cited context dossier — one ordered document plus a findings report (gaps, contradictions, stale claims) — for a slice of the Mímisbrunnr store (repository, initiative, ticket, tags). Use when re-entering a repo or ticket, handing reasoning to a colleague, grounding a design document, or auditing the store. Fetches a deterministic bundle from the Host API and writes only the gitignored dossier plus transient scratch files it deletes; never writes to the store. Triggers on "dossier", "catch me up on", "everything the store knows about".
 allowed-tools:
   - Bash(python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py:*)
   - Bash(mkdir -p .context/mimisbrunnr-saga-dossier/scratch)
@@ -15,8 +15,9 @@ effort: high  # equivalence, contradiction and gap judgement across a whole stor
 Compose a **context dossier** — a read-only, focused, cited document plus its findings — for a slice of
 the Mímisbrunnr store. **This skill is read-only (LADR-08 / NFR-06): it has no write capability at
 all.** It requests a deterministic **bundle** from the Host API, applies judgement to compose the
-**dossier**, and writes only the local artefact to a gitignored path. It never writes to the store and
-never calls a write endpoint.
+**dossier**, and writes only the dossier artefact to a gitignored path, plus transient scratch files
+(the bundle and your judgements) under `.context/mimisbrunnr-saga-dossier/scratch/` that the workflow
+deletes at the end. It never writes to the store and never calls a write endpoint.
 
 Requires **Python 3.9 or newer**. The composer normalises a sub-second fraction before parsing,
 because `datetime.fromisoformat` only accepts an arbitrary number of fractional digits from 3.11
@@ -73,7 +74,9 @@ python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py \
 
 # 4. Read the bundle and write your semantic judgements (see "Invoking the judgement") with the
 #    Write tool to .context/mimisbrunnr-saga-dossier/scratch/judgements.json. Without this file the
-#    dossier carries no gap, contradiction or consolidation — only the deterministic findings.
+#    dossier carries no gap, contradiction or consolidation — only the deterministic findings. A
+#    near-miss-tag is not a judgement: write its evidence to scratch/near-miss.json and pass it with
+#    --near-miss-evidence (see Rules). Both paths must be gitignored or compose refuses them.
 
 # 5. Compose from the saved bundle and judgements, apply an optional focus, write the artefact.
 #    --out must be a gitignored path inside the checkout (verified with `git check-ignore`; a
@@ -120,10 +123,12 @@ from the bundle; replace the placeholders with real identities:
 ```
 
 - `equivalences` — consolidation candidates (LADR-05); a group names memories, not versions.
-- `findings` — only `contradiction`, `gap` and `near-miss-tag` are accepted (the composer derives the
-  rest itself). A `gap` needs a `ground` of `task`, `included-claim` or `expectation` (BR-27); a
-  `contradiction` names at least two memories. Each needs a non-empty `basis` and a `classification`
-  of `observation` or `analysis`.
+- `findings` — only `contradiction` and `gap` are accepted here (the composer derives the deterministic
+  categories itself, and a `near-miss-tag` comes only from `--near-miss-evidence`). A `gap` needs a
+  `ground` of `task`, `included-claim` or `expectation` (BR-27). An `included-claim` gap names the
+  claim it interprets; a `task` or `expectation` gap is an answer missing from the slice and may name
+  no memory — never cite one that does not support it (LADR-13). A `contradiction` names at least two
+  memories. Each needs a non-empty `basis` and a `classification` of `observation` or `analysis`.
 - Only the keys `equivalences` and `findings` are accepted. Anything else, a malformed entry, or a
   finding that fails its gate refuses the whole compose rather than dropping it; an equivalence that
   fails the applicability/lifecycle gate is kept distinct and reported `equivalence-uncertain`.
@@ -169,8 +174,11 @@ and its memories by identity + version (LADR-13). Findings are focus-invariant i
 - **`kind = understanding` is a kind like any other** — same selection, citation, reconciliation,
   focus and confidentiality (LADR-15). Its load/import is a separate capability owned by
   `mimisbrunnr-kvasir-understanding`, not this skill.
-- **`near-miss-tag` is evidence-only** (LADR-10). Use the shared
-  `mimisbrunnr-odin-context-memory/scripts/near_miss_tags.py` helper via `near_miss_findings()`. No evidence
+- **`near-miss-tag` is evidence-only** (LADR-10). Write the shared
+  `mimisbrunnr-odin-context-memory/scripts/near_miss_tags.py` helper's input to
+  `.context/mimisbrunnr-saga-dossier/scratch/near-miss.json` and pass it as `compose
+  --near-miss-evidence`; the helper validates it and its findings name their supporting memory. A
+  near-miss-tag written into `--judgements` is refused, as is one naming no memory. No evidence
   means no finding; no tag-graph or full-dossier completeness claim is made.
 
 ## Base URL / token
@@ -193,7 +201,7 @@ a fragment is refused, and a trailing slash is ignored.
 
 ## Test
 
-Committed harness: `python3 -B .agents/skills/mimisbrunnr-saga-dossier/tests/run_tests.py` (104 tests).
+Committed harness: `python3 -B .agents/skills/mimisbrunnr-saga-dossier/tests/run_tests.py` (111 tests).
 
 ## Related
 

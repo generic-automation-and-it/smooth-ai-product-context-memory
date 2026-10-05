@@ -17,7 +17,7 @@ Specifically:
 - A memory whose scope dimension is hidden for the caller is absent — as a body, as an identity, and as an endpoint of a reported edge. Its edges' reasons are absent too, since a reason discloses the memory it describes.
 - A widening path routed **through** a hidden memory is dropped, not repaired by skipping the hidden hop. Reporting the far end would disclose that a connection exists.
 - Reading a hidden dimension requires the caller to declare that dimension, exactly as the blob proxy and version history already require. An undeclared request receives the narrowed result, never an error that reveals what was withheld.
-- Every dossier artefact carries a sensitivity banner naming the store it came from, and is written to a location excluded from version control and from any synchronisation by default.
+- Every dossier artefact carries a sensitivity banner naming the store it came from, and is written to a location excluded from version control and from any synchronisation by default. The banner requirement is scoped to the dossier: the scratch bundle is a machine intermediate (LADR-02) in the bundle contract's JSON shape, which has no room for a banner. It is held to the location half instead — written owner-only, refused at any path git does not ignore, and deleted when composition ends (amended 2026-10-05, issue 182).
 
 ## Verification
 
@@ -35,7 +35,7 @@ Specifically:
 - No edge reason, path, count or omission entry reveals the existence of a hidden memory — including by counting it.
 - A visible memory's relationship to a hidden one is absent, so the hidden memory cannot be inferred from what its neighbour links to.
 - An export requested without declaring a hidden dimension returns the narrowed result and never signals that something was withheld.
-- Every produced artefact states its sensitivity in its first lines.
+- Every produced dossier states its sensitivity in its first lines. Scratch intermediates (the saved bundle and the skill's judgement inputs) are not artefacts: they carry no banner, and are instead owner-only, gitignored and removed when composition ends.
 - The default artefact location is ignored by version control, proven by test.
 
 ## Applies To
