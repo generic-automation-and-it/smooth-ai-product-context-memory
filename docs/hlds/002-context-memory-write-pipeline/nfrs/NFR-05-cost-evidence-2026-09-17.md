@@ -19,7 +19,7 @@ available from repository execution and are not inferred from logical fact count
 
 | Workflow | Agent invocations | Logical summary judgements | Logical keyword judgements | HTTP calls / recall passes | Blob I/O | Main-context bytes |
 |---|---:|---:|---:|---|---|---:|
-| Normal ten-fact write | 1 write agent | 10 | 10 | minimum 3: preflight, baseline query, set | 0–10 writes | digest only; provider measurement unavailable |
+| Normal ten-fact write | 1 write agent | 10 | 10 | minimum 3: preflight, baseline query, set | 0–20 writes | digest only; provider measurement unavailable |
 | Ten-fact dry-run | 1 write agent | 10 | 10 | same minimum 3 | 0 | digest only; provider measurement unavailable |
 | Explicit deep search | 1 delegated agent | workflow-dependent | workflow-dependent | 1 baseline + at most 4 keyword + 5 traversal passes | 0 unless later selected drill-down | bounded conclusion only |
 | Lookup | 1 read agent | n/a | n/a | bounded read | selected drill-down only | 3,030 synthetic bytes |
@@ -28,7 +28,12 @@ available from repository execution and are not inferred from logical fact count
 
 Deep-search tests cap candidate judgement at 400 unique UUID/version pairs. Default execution performs zero
 optional deep-search passes. Dry-run and write use identical semantic stages; only `set` persistence and
-blob writes differ. Delegation reduces representative main-context payload by 97.2% for lookup and
+blob writes differ. The write's blob bound is two per fact, capped by the 20-item `set` limit: an
+authority resolution won by the existing claim writes the losing candidate version and then restores the
+existing winner as a second content-bearing version, and the Host stores one blob per such item (a blob
+whose bytes already exist is checked, not re-uploaded). The bound was first published as 0–10, one per
+fact, which missed the restoration write (corrected 2026-10-05, issue 182). Delegation reduces
+representative main-context payload by 97.2% for lookup and
 86.2% for grounding versus the 200-row synthetic baseline. Aggregate token spend may increase because
 delegated agents establish their own context.
 
