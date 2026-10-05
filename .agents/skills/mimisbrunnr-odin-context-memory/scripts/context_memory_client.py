@@ -793,6 +793,11 @@ def cmd_ticket_paths(args):
     return resp
 
 
+# The store-direction names shared with kvasir and ai-understanding, as aliases of the canonical verbs.
+# Normalised right after parsing so every later check (write-route selection, framing) sees one name.
+COMMAND_ALIASES = {"export": "set", "import": "query"}
+
+
 def main():
     parser = argparse.ArgumentParser(prog="context_memory_client")
     parser.add_argument("--base-url", help="override " + ENV_BASE_URL)
@@ -809,12 +814,14 @@ def main():
     p.add_argument("--payload", help="JSON file; defaults to stdin")
     p.set_defaults(func=cmd_preflight)
 
-    p = sub.add_parser("set", help="POST /api/context/memories")
+    p = sub.add_parser("set", aliases=["export"],
+                       help="POST /api/context/memories (alias: export, session -> store)")
     p.add_argument("--payload", help="JSON file; defaults to stdin")
     p.add_argument("--dryrun", action="store_true", help="append ?dryRun=true; write nothing")
     p.set_defaults(func=cmd_set)
 
-    p = sub.add_parser("query", help="POST /api/context/query (semantic-dedup recall)")
+    p = sub.add_parser("query", aliases=["import"],
+                       help="POST /api/context/query (semantic-dedup recall; alias: import, store -> session)")
     p.add_argument("--payload", help="JSON file; defaults to stdin")
     p.set_defaults(func=cmd_query)
 
@@ -876,6 +883,7 @@ def main():
     p.set_defaults(func=cmd_ticket_paths)
 
     args = parser.parse_args()
+    args.command = COMMAND_ALIASES.get(args.command, args.command)
 
     if args.base_url:
         os.environ[ENV_BASE_URL] = args.base_url

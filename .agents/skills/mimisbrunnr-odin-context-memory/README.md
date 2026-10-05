@@ -33,7 +33,7 @@ It has 4 phases:
 1. **Initialize** (resolve the group from ticket/repo/initiative/scope)
 2. **Listen** (accumulate candidates silently, never write)
 3. **Compare-or-Clarify** (the bounded pre-write round: within-group dedup + cross-group link derivation + ticket-uniqueness)
-4. **Export** (the explicit `--export` checkpoint — the capture direction, named to match `kvasir`/`ai-understanding`)
+4. **Export** (the explicit `--export` checkpoint, which runs `set`; both clients also accept `export`/`import` as aliases of `set`/`query`)
 
 …plus a fixed five-stage write pipeline (preflight → redact → dedupe/derive-links → atomicity → write)
 and a recall (`--import`) path that returns cheap fields by default and touches the blob only on drill-down.

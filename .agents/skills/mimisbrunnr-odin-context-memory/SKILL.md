@@ -10,22 +10,22 @@ All switches are **OFF by default**. With no switches the skill captures silentl
 writes nothing until an explicit `--export` at the end-of-task checkpoint.
 
 The store-direction switches align with `mimisbrunnr-kvasir-understanding` and `ai-understanding`
-(LADR-11): `--import` is store → session (recall), `--export` is session → store (capture). The
-low-level client verbs (`set`, `query`, `get-versions`) are the plumbing those directions route
-through — they stay, but the direction is named consistently.
+(LADR-11): `--import` is store → session (recall), `--export` is session → store (capture). Both
+clients accept them as command aliases — `export` runs `set`, `import` runs `query` — normalised to the
+canonical name right after parsing, so `set`/`query` stay the names used everywhere below. The read
+client has `import` only; it has no write command to alias.
 
 | Switch | Effect |
 |--------|--------|
 | _(none)_ | Silent accumulate during work; no write until the `--export` checkpoint. |
-| `--import` | Store → session (recall). Query `kind = understanding` (or the requested kind) back into the session as cited grounding context, read token only. The aligned name for the read/`get` direction. |
-| `--export` | Session → store (capture). Write the accumulated candidate facts at the checkpoint through the full write pipeline. The aligned name for the write/`set` direction. |
-| `--input` | The session content for `--export`; defaults to the current session (the newest `.context/mimisbrunnr-understandings/*` dump, materialised by `dump --currentsession` first). |
+| `--import` | Store → session (recall) through `memory-read`: the `query` command, aliased `import`. Read token only. |
+| `--export` | Session → store (capture) at the end-of-task checkpoint through `memory-write`: the full write pipeline ending in `set`, aliased `export`. Input is the facts accumulated during the session; this skill reads no dump file — to capture a dump, use `mimisbrunnr-kvasir-understanding export --input <folder>`. |
 | `--dryrun` | Run the full write pipeline (preflight, redaction detection, dedup, link derivation, atomicity, ticket-uniqueness) and produce the digest **without writing anything**. Report what *would* be created / versioned / linked / skipped. **This is the only pre-write veto point** — see Finalization Output. |
 | `--approve` | Write gated kinds (`rule`, `nfr`, `decision`) as `approved` instead of `proposed`. **Only usable when the human explicitly confirms.** Without it, a gated `--export` still writes, but with `status: proposed` — excluded or flagged on retrieval until promoted. |
 | `--deepsearch` | Delegates bounded expansion: up to four keyword queries of 25 and five depth-one traversals of 20, with 400 unique UUID/version candidates overall. More inspection, never more authority or irreversibility. |
 
 **Implication rule:** `--approve` is the only switch that widens what the write path *does*; all other
-switches (`--dryrun`, `--deepsearch`, `--import`, `--input`) change *how much work* is done or *which
+switches (`--dryrun`, `--deepsearch`, `--import`) change *how much work* is done or *which
 direction*, never *how irreversible* it is. `--dryrun` and `--approve` are mutually exclusive —
 `--dryrun` writes nothing, `--approve` is the permission to write. Treat a request for both as an
 error: ask which one is meant.
@@ -108,7 +108,7 @@ For each fact captured during work:
 - Confirm capture in one or two sentences, but **do not write anything**.
 - Preserve rough phrasing, intent, trade-offs, decisions, open questions, and contradictions.
 - Treat later user corrections as authoritative.
-- Do not expose the full accumulation every turn; hold it until `set`.
+- Do not expose the full accumulation every turn; hold it until the `--export` checkpoint.
 
 **Atomicity discipline — restated:** one memory is **one atomic fact**. Bundle-skew is the single
 most demonstrated failure of this write path (three trials all showed the model merging several facts
@@ -151,7 +151,7 @@ single bounded pass; do not drip questions per candidate.
 
 ### 4. Write (Set At Checkpoint)
 
-Only when the user issues explicit `set` at the end-of-task checkpoint, delegate discrete facts to
+Only when the user issues an explicit `--export` at the end-of-task checkpoint, delegate discrete facts to
 `memory-write`:
 
 - Run the pipeline in this fixed order: **preflight → redact → dedupe/derive-links → atomicity-check →
@@ -476,7 +476,7 @@ Authority: [HLD-002 LADR-08](../../../docs/hlds/002-context-memory-write-pipelin
 and [HLD-003 LADR-08](../../../docs/hlds/003-graph-edges-on-age/ladrs/LADR-08-captured-ticket-hierarchy.md).
 
 - Accumulate **explicit practitioner declarations only**, then carry them into the authorized
-  end-of-task `set` checkpoint. No parent inference from spelling, shared groups, memory claims/links,
+  end-of-task `--export` checkpoint. No parent inference from spelling, shared groups, memory claims/links,
   or tracker polling. Ambiguous intent requires clarification, not a proposed hierarchy write.
 - `--approve` remains the human-confirmed memory-status gate; it does not grant hierarchy permission.
   Hierarchy has no proposed status. A declaration authorizes only its stated set/reparent/remove;

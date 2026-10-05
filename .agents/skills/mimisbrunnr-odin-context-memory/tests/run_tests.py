@@ -2719,6 +2719,40 @@ class SubsecondToleranceTests(unittest.TestCase):
                     client.cmd_ticket_parent(SimpleNamespace(payload=None, dryrun=True))
                 request.assert_not_called()
 
+class DirectionAliasTests(unittest.TestCase):
+    """`export` and `import` are the store-direction names shared with kvasir and ai-understanding.
+    They are aliases of `set` and `query`, normalised to the canonical name right after parsing, so the
+    write-route choice and the read client's framing never see a second spelling."""
+
+    def test_the_write_client_routes_export_to_set_and_import_to_query(self):
+        for alias, canonical, target in (("export", "set", "cmd_set"), ("import", "query", "cmd_query")):
+            with self.subTest(alias=alias):
+                seen = []
+                with patch.object(sys, "argv", ["client", alias]), \
+                        patch.object(client, target, side_effect=lambda args: seen.append(args.command)):
+                    client.main()
+                self.assertEqual(seen, [canonical])
+
+    def test_the_read_client_routes_import_to_a_framed_query(self):
+        seen = []
+
+        def fake_query(args):
+            seen.append(args.command)
+            print(json.dumps({"items": []}))
+
+        buffer = io.StringIO()
+        with _env(client.ENV_WRITE_TOKEN, None), patch.object(sys, "argv", ["read", "import"]), \
+                patch.object(client, "cmd_query", side_effect=fake_query), redirect_stdout(buffer):
+            rc = read_client.main()
+        self.assertEqual(rc, 0)
+        self.assertEqual(seen, ["query"])
+        self.assertIn(client.RECALL_NOTICE, buffer.getvalue(), "an aliased recall must still be framed")
+
+    def test_the_read_client_offers_no_export_alias(self):
+        with _env(client.ENV_WRITE_TOKEN, None), patch.object(sys, "argv", ["read", "export"]), \
+                redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            read_client.main()
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
