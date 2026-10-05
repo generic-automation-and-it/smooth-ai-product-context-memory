@@ -8,6 +8,7 @@ Pure-prompt behavioral skill (no scripts): a listen-first capture session whose 
 
 - **A braindump is never permission to implement.** Even with all switches on, only *grounding* (reading/searching) is widened — the no-modify rule holds until the user asks to synthesize.
 - **Don't "optimize" the SKILL.md by deduplicating switch semantics.** The switch rules are intentionally restated in Switches, Listen, and Guardrails — reinforcement against the model's drift toward premature questioning/action is the point, not redundancy.
+- **A git-discovered ticket is a suggestion, never a binding.** The Heimdallr reporter runs no earlier than synthesis (or during Listen under `--oktoreaddocs`/`--all`), and every ticket it finds needs the operator's confirmation before it reaches an artifact.
 
 ## Architecture Decisions
 
@@ -17,6 +18,7 @@ Pure-prompt behavioral skill (no scripts): a listen-first capture session whose 
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-05 | **Heimdallr autofill moved out of Initialize and stopped binding tickets on its own.** Initialize ran the git-scanning reporter on every session, breaking the tool-free default (LADR-001); the reporter now runs no earlier than synthesis, or during Listen only when `--oktoreaddocs`/`--all` enables grounding. A branch-seen or newest-commit ticket was promoted straight to the binding, so an artifact could be filed against unrelated work; discovered tickets are now listed with their source and need the operator's confirmation — no answer means unbound. Wording only, no script. | issue 179 |
 | 2026-10-03 | **Initialize fills a missing repository/ticket binding from Heimdallr by default** (same skills root, no hardcoded path); tags stay agent-derived keywords; explicit caller values always win. Wording only, no script. | session request |
 | 2026-06-12 | Initial version. | |
 | 2026-09-13 | Added `--all` (enables `--oktoask` `--thinking` `--oktoreaddocs` `--oktowebsearch`). | |

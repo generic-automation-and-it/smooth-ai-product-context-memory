@@ -13,19 +13,25 @@ PATH, so no request leaves the machine. Covers:
     refuses any call that does not, and a real-curl case proves a `.curlrc` canary is ignored);
   - an accepted request carries `--noproxy '*'`, sends the token from a header file and never on argv,
     and unlinks that file afterwards — including when the send is interrupted;
+  - a `403` is a non-zero exit with its body kept: the option reaches the fake curl, and a real curl
+    against a loopback responder proves the behaviour (skipped when curl lacks `--fail-with-body`);
   - the base URL never reaches any process's argv;
-  - SKILL.md sources this script rather than carrying its own copy of the guard.
+  - SKILL.md sources this script rather than carrying its own copy of the guard, and its documented
+    queries take their window from operator-set variables instead of a fixed date.
 
 stdlib unittest; no external runner. bash 3.2 and GNU bash.
 """
 
+import http.server
 import os
+import re
 import shutil
 import stat
 import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import unittest
 from pathlib import Path
 
@@ -33,6 +39,16 @@ SKILL = Path(__file__).resolve().parents[1]
 SCRIPT = SKILL / "scripts" / "recall_feedback.sh"
 TOKEN = "synthetic-recall-feedback-token-0123456789"
 READ_PATH = "/api/context/recall-feedback/miss-rate?from=2026-09-11&to=2026-09-18"
+
+
+def _curl_has_fail_with_body():
+    if not shutil.which("curl"):
+        return False
+    probe = subprocess.run(["curl", "--help", "all"], capture_output=True, text=True, timeout=30)
+    return "--fail-with-body" in probe.stdout
+
+
+CURL_HAS_FAIL_WITH_BODY = _curl_has_fail_with_body()
 
 FAKE_CURL = """\
 #!/usr/bin/env bash
@@ -164,6 +180,7 @@ class RecallFeedbackGuardTests(unittest.TestCase):
         index = argv.index("--noproxy")
         self.assertEqual(argv[index + 1], "*")
         self.assertEqual(argv[-1], "http://localhost:5141" + READ_PATH)
+        self.assertIn("--fail-with-body", argv)
         self.assertFalse(any(TOKEN in arg for arg in argv), "token reached curl argv")
         header = (self.dir / "curl.header").read_text(encoding="utf-8")
         self.assertEqual(header, "Authorization: Bearer {}\n".format(TOKEN))
@@ -244,6 +261,49 @@ class RecallFeedbackGuardTests(unittest.TestCase):
         self.assertIn("curl:", result.stderr, "curl did not run: " + result.stderr)
         self.assertFalse(canary.exists(), "curl read the default .curlrc despite -q")
 
+    # --- real curl: a refusal is a failure, not an empty success -----------------------------------
+
+    @unittest.skipUnless(CURL_HAS_FAIL_WITH_BODY, "curl is absent or older than 7.76")
+    def test_real_curl_turns_a_403_into_a_failure_that_keeps_the_body(self):
+        # The fake curl answers whatever it is told, so only a real curl shows what the flags do: without
+        # --fail-with-body a 403 exits 0 and a wrong token reads as "no findings"; with plain --fail
+        # the exit is non-zero but the refusal's body is lost.
+        seen = []
+
+        class Refuse(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                seen.append(self.headers.get("Authorization"))
+                body = b'{"error":"forbidden-canary"}'
+                self.send_response(403)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), Refuse)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            home = self.dir / "curl-home"
+            home.mkdir()
+            env = self._real_curl_env(home)
+            env["CONTEXT_MEMORY_BASE_URL"] = "http://127.0.0.1:{}".format(server.server_address[1])
+            script = 'source "$1"; recall_feedback_curl GET "$2" "$3"'
+            result = subprocess.run(
+                ["bash", "-c", script, "harness", str(SCRIPT), READ_PATH, TOKEN],
+                env=env, capture_output=True, text=True, timeout=30)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=10)
+        self.assertEqual(seen, ["Bearer " + TOKEN], "the request never reached the responder")
+        self.assertEqual(result.returncode, 22, result.stderr)
+        self.assertIn("forbidden-canary", result.stdout)
+        self.assertEqual(list(self.tmp.iterdir()), [], "header file outlived the refused request")
+
     # --- documentation stays wired to the tested code ---------------------------------------------
 
     def test_skill_sources_the_tested_script(self):
@@ -251,6 +311,50 @@ class RecallFeedbackGuardTests(unittest.TestCase):
         self.assertIn("scripts/recall_feedback.sh", skill)
         self.assertNotIn("recall_feedback_guard() {", skill,
                          "SKILL.md carries its own copy of the guard instead of sourcing the script")
+
+    def _documented_queries(self):
+        skill = (SKILL / "SKILL.md").read_text(encoding="utf-8")
+        blocks = re.findall(r"```bash\n(.*?)```", skill, re.S)
+        queries = [b.replace("\\\n", " ").strip() for b in blocks if "recall_feedback_curl GET" in b]
+        self.assertEqual(len(queries), 2, "expected the never-recalled and miss-rate queries")
+        return queries
+
+    def _run_documented(self, query, extra_env):
+        env = {
+            "PATH": "{}:{}".format(self.bin, os.environ.get("PATH", "")),
+            "HOME": str(self.dir),
+            "TMPDIR": str(self.tmp),
+            "RF_TEST_DIR": str(self.dir),
+            "RF_REAL_PYTHON": sys.executable,
+            "CONTEXT_MEMORY_READ_TOKEN": TOKEN,
+        }
+        env.update(extra_env)
+        return subprocess.run(["bash", "-c", 'source "$1"\n' + query, "harness", str(SCRIPT)],
+                              env=env, capture_output=True, text=True, timeout=30)
+
+    def test_documented_queries_carry_no_fixed_date(self):
+        # A copied fixed window re-measures the same past period on every run, so a tuning change can
+        # never show up in the before/after comparison.
+        for query in self._documented_queries():
+            with self.subTest(query=query):
+                self.assertIsNone(re.search(r"\d{4}-\d{2}-\d{2}", query), query)
+
+    def test_documented_queries_refuse_to_send_without_the_operator_window(self):
+        for query in self._documented_queries():
+            with self.subTest(query=query):
+                result = self._run_documented(query, {})
+                self.assertNotEqual(result.returncode, 0, result.stderr)
+                self.assertFalse(self.curl_called(), "a query ran without an operator-set window")
+
+    def test_documented_queries_send_the_operator_window(self):
+        window = {"RF_FROM": "2030-01-01", "RF_TO": "2030-01-08"}
+        sent = []
+        for query in self._documented_queries():
+            result = self._run_documented(query, window)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            sent.append(self.curl_argv()[-1])
+        self.assertTrue(any("asOf=2030-01-08" in url for url in sent), sent)
+        self.assertTrue(any("from=2030-01-01&to=2030-01-08" in url for url in sent), sent)
 
 
 if __name__ == "__main__":

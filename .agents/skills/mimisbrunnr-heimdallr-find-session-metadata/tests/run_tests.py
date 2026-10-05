@@ -8,6 +8,8 @@ URL shapes, ticket extraction with sources, initiative flag-or-unknown, and the
 console-only contract (no file created, --json parses). stdlib unittest.
 """
 
+from __future__ import annotations
+
 import json
 import os
 import stat
@@ -159,6 +161,15 @@ class TicketTests(unittest.TestCase):
         hits = [t for t in result["tickets"] if t["key"] == "160"]
         self.assertEqual(len(hits), 1)
         self.assertEqual(hits[0]["seenIn"], "branch")
+
+    def test_tickets_within_one_subject_keep_first_seen_order(self):
+        # Pattern order would list #456 (the first pattern) before ABC-123 and jira:XYZ-9, although
+        # the subject names them the other way round.
+        result = self._scan("main", "fix ABC-123 then jira:XYZ-9 and #456\n")
+        self.assertEqual(
+            [(t["provider"], t["key"]) for t in result["tickets"]],
+            [("local", "ABC-123"), ("jira", "XYZ-9"), ("github", "456")],
+        )
 
     def test_initiative_flag_or_unknown(self):
         self.assertEqual(self._scan("main", "")["initiative"], "unknown")
