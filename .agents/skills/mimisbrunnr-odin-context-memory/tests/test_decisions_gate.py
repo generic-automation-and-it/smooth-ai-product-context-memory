@@ -12,9 +12,13 @@ per role, a transport failure never reading as a low score, a ledger the caller 
 exactly the ones a live model cannot pin.
 """
 
+import contextlib
+import hashlib
 import http.server
+import io
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -90,6 +94,13 @@ class StubHandler(http.server.BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(b"{not json")
+            return
+        if override == "redirect":
+            # A 307 keeps the POST and its body, so following it would replay the record — and a
+            # hosted endpoint's bearer key — to wherever `Location` points.
+            self.send_response(307)
+            self.send_header("Location", "/v1/elsewhere")
+            self.end_headers()
             return
         if override == "no-answers":
             self.send_response(200)
@@ -355,6 +366,54 @@ class FailureClassificationTests(GateTestCase):
         record = report["records"][0]
         self.assertEqual(record["outcome"], "timed-out")
         self.assertEqual(record["scores"], {})
+
+
+class ProbabilityRangeTests(GateTestCase):
+    """A `noul` outside 0..1 is a malformed answer, never a score (issue 179).
+
+    `json.loads` accepts `NaN` and `Infinity`, and the gate used to clamp, so an `Infinity` became a
+    1.0 that clears any bar — the strongest possible score produced by an answer nobody gave.
+    """
+
+    ROLES = ("product-owner", "designer", "developer", "tester", "business")
+
+    def _expect_bad_response(self, value):
+        self.stub.probabilities = {role: 0.1 for role in self.ROLES}
+        self.stub.probabilities["developer"] = value
+        proc, report = self.score()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        record = report["records"][0]
+        self.assertEqual(record["outcome"], "bad-response")
+        self.assertFalse(record["passed"])
+        self.assertEqual(record["scores"], {}, "a rejected answer must not carry a score")
+
+    def test_infinity_is_rejected_rather_than_clamped_to_a_pass(self):
+        self._expect_bad_response(float("inf"))
+
+    def test_negative_infinity_is_rejected(self):
+        self._expect_bad_response(float("-inf"))
+
+    def test_nan_is_rejected(self):
+        self._expect_bad_response(float("nan"))
+
+    def test_above_one_is_rejected_rather_than_clamped(self):
+        self._expect_bad_response(1.5)
+
+    def test_below_zero_is_rejected_rather_than_clamped(self):
+        self._expect_bad_response(-0.1)
+
+    def test_an_integer_too_large_for_a_float_is_rejected_not_a_traceback(self):
+        self._expect_bad_response(10 ** 400)
+
+    def test_the_closed_bounds_are_still_scores(self):
+        """The control: 0 and 1 are probabilities, so the range check must not reject its own ends."""
+        self.stub.probabilities = {role: 0.0 for role in self.ROLES}
+        self.stub.probabilities["developer"] = 1
+        _, report = self.score()
+        record = report["records"][0]
+        self.assertEqual(record["outcome"], "scored")
+        self.assertEqual(record["scores"]["developer"], 1.0)
+        self.assertEqual(record["scores"]["tester"], 0.0)
 
 
 class OversizeTests(GateTestCase):
@@ -875,7 +934,7 @@ class BestAttemptTests(GateTestCase):
         self.score(state_file=state, **env)
         with open(state, encoding="utf-8") as handle:
             ledger = json.load(handle)
-        entry = ledger[RECORD["subject"]]
+        entry = ledger[_gate.ledger_key(RECORD["subject"])]
         self.assertEqual(entry["attempts"], 2)
         self.assertEqual(entry["best"]["max"], 0.9)
 
@@ -903,6 +962,181 @@ class BestAttemptTests(GateTestCase):
         self.assertEqual(entry_attempts({"attempts": 3, "best": None}), 3)
         self.assertIsNone(entry_best(3))
         self.assertIsNone(entry_best({"attempts": 3, "best": None}))
+
+
+LOOPBACK_SETTINGS = {"base_url": "http://127.0.0.1:11434", "path": "/v1/systemone", "api_key": ""}
+HOST_MOVING_PATHS = ("@evil.invalid/v1", "/v1@evil.invalid", "//evil.invalid/v1",
+                     "http://evil.invalid/v1", "v1/systemone", "/v1 x", "/v1\\x", "/v1\tx")
+
+
+class RequestPathGuardTests(unittest.TestCase):
+    """A configured path is appended to an already-approved base, so it must not move the request.
+
+    Model-free and socket-free: every refusal happens before a connection is attempted.
+    """
+
+    def test_a_path_that_moves_the_authority_is_refused(self):
+        for path in HOST_MOVING_PATHS:
+            with self.subTest(path=path):
+                with self.assertRaises(_gate.GateError) as caught:
+                    _gate.resolve_url({**LOOPBACK_SETTINGS, "path": path})
+                self.assertEqual(caught.exception.outcome, "bad-decisions-url")
+                self.assertNotIn("evil.invalid", caught.exception.detail,
+                                 "the refusal must not echo the configured path")
+
+    def test_an_ordinary_path_keeps_the_validated_origin(self):
+        self.assertEqual(_gate.resolve_url(LOOPBACK_SETTINGS), "http://127.0.0.1:11434/v1/systemone")
+
+    def test_probe_refuses_a_host_moving_path_before_any_request(self):
+        proc = run_gate(["probe"], "", {
+            "CONTEXT_MEMORY_DECISIONS_ENABLED": "true",
+            "CONTEXT_MEMORY_DECISIONS_BASE_URL": "http://127.0.0.1:9",
+            "CONTEXT_MEMORY_DECISIONS_PATH": "@evil.invalid/v1/systemone"})
+        report = json.loads(proc.stdout)
+        self.assertEqual(report["outcome"], "bad-decisions-url")
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertNotIn("evil.invalid", proc.stdout + proc.stderr)
+
+    def test_score_marks_every_record_for_a_host_moving_path(self):
+        proc = run_gate(["score"], json.dumps([RECORD]), {
+            "CONTEXT_MEMORY_DECISIONS_ENABLED": "true",
+            "CONTEXT_MEMORY_DECISIONS_BASE_URL": "http://127.0.0.1:9",
+            "CONTEXT_MEMORY_DECISIONS_PATH": "//evil.invalid/v1/systemone"})
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual([r["outcome"] for r in json.loads(proc.stdout)["records"]],
+                         ["bad-decisions-url"])
+
+
+class RedirectGuardTests(unittest.TestCase):
+    """The opener must refuse a redirect: it would replay the record and the bearer key elsewhere."""
+
+    def test_the_redirect_handler_refuses_with_a_classified_outcome(self):
+        request = _gate.urllib.request.Request(
+            "https://decisions.example/v1/systemone", headers={"Authorization": "Bearer secret"})
+        with self.assertRaises(_gate.GateError) as caught:
+            _gate._NoRedirect().redirect_request(request, None, 302, "Found", {},
+                                                 "https://evil.example/")
+        self.assertEqual(caught.exception.outcome, "redirect-refused")
+        self.assertNotIn("secret", caught.exception.detail)
+
+    def test_the_real_opener_installs_the_redirect_and_proxy_guards(self):
+        # The handler only guards if `call_model` installs it, so the opener it builds is inspected.
+        from unittest.mock import patch
+
+        built = []
+
+        class Sent(Exception):
+            pass
+
+        def spy(*handlers):
+            built.append(handlers)
+            raise Sent()
+
+        with patch.object(_gate.urllib.request, "build_opener", side_effect=spy):
+            with self.assertRaises(Sent):
+                _gate.call_model({"subject": "probe", "statement": "probe"},
+                                 [{"key": "developer", "instructions": "x",
+                                   "criteria": {"true": "t", "false": "f"}}],
+                                 {**LOOPBACK_SETTINGS, "model": "nimble", "timeout": 1}, "v")
+        (handlers,) = built
+        self.assertIn(_gate._NoRedirect, handlers)
+        proxies = [h for h in handlers if isinstance(h, _gate.urllib.request.ProxyHandler)]
+        self.assertEqual([p.proxies for p in proxies], [{}])
+
+
+    def test_a_redirect_through_the_real_opener_is_refused(self):
+        # The opener `call_model` builds, unchanged, with one in-memory transport added ahead of the
+        # socket one, so the 307 travels urllib's real redirect machinery without binding a port.
+        import email.message
+        import io
+        import urllib.response
+        from unittest.mock import patch
+
+        hits = []
+
+        class Answers307(_gate.urllib.request.BaseHandler):
+            handler_order = 100
+
+            def http_open(self, req):
+                hits.append(req.full_url)
+                headers = email.message.Message()
+                headers["Location"] = "/v1/elsewhere"
+                response = urllib.response.addinfourl(io.BytesIO(b""), headers, req.full_url, 307)
+                response.msg = "Temporary Redirect"
+                return response
+
+        real_build = _gate.urllib.request.build_opener
+        with patch.object(_gate.urllib.request, "build_opener",
+                          side_effect=lambda *handlers: real_build(*handlers, Answers307)):
+            with self.assertRaises(_gate.GateError) as caught:
+                _gate.call_model({"subject": "probe", "statement": "probe"},
+                                 [{"key": "developer", "instructions": "x",
+                                   "criteria": {"true": "t", "false": "f"}}],
+                                 {**LOOPBACK_SETTINGS, "model": "nimble", "timeout": 1}, "v")
+        self.assertEqual(caught.exception.outcome, "redirect-refused")
+        self.assertEqual(hits, ["http://127.0.0.1:11434/v1/systemone"],
+                         "the redirect target must never be requested")
+
+
+class RedirectEndToEndTests(GateTestCase):
+    def test_a_redirect_from_the_endpoint_is_refused_not_followed(self):
+        self.stub.override = "redirect"
+        proc, report = self.score()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(report["records"][0]["outcome"], "redirect-refused")
+        self.assertNotIn("Traceback", proc.stderr)
+        self.assertEqual(self.stub.requests, [], "the redirect target must never be reached")
+
+
+class LedgerPrivacyTests(unittest.TestCase):
+    """The ledger is a file on disk, and a subject can carry personal data, so keys are digests.
+
+    Socket-free: the ledger functions are driven directly against a temporary state file.
+    """
+
+    SUBJECT = "Onboarding for Jane Example <jane.example@example.com>"
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.state = os.path.join(self.tmp, "ledger.json")
+
+    def read_raw(self):
+        with open(self.state, encoding="utf-8") as handle:
+            return handle.read()
+
+    def test_the_ledger_file_holds_a_digest_and_never_the_subject(self):
+        attempt, _reset, _best = _gate.next_attempt(self.state, self.SUBJECT, 3)
+        _gate.record_attempt(self.state, self.SUBJECT, attempt, {"developer": 0.4})
+        raw = self.read_raw()
+        self.assertNotIn("Jane", raw)
+        self.assertNotIn("jane.example@example.com", raw)
+        self.assertEqual(list(json.loads(raw)), [_gate.ledger_key(self.SUBJECT)])
+        self.assertRegex(_gate.ledger_key(self.SUBJECT), r"^sha256:[0-9a-f]{64}$")
+
+    def test_a_raw_keyed_ledger_is_migrated_and_keeps_its_spent_budget(self):
+        # An older gate wrote raw subjects. Dropping them would reset each budget; hashing keeps it,
+        # and the rewrite takes the subject off the disk even on the exhausted path, which writes
+        # nothing otherwise.
+        with open(self.state, "w", encoding="utf-8") as handle:
+            json.dump({self.SUBJECT: {"attempts": 2, "best": None}}, handle)
+        attempt, reset, _best = _gate.next_attempt(self.state, self.SUBJECT, 2)
+        self.assertIsNone(attempt, "the spent budget must survive the migration")
+        self.assertFalse(reset, "a migration is not a discarded ledger")
+        raw = self.read_raw()
+        self.assertNotIn("Jane", raw)
+        self.assertEqual(json.loads(raw),
+                         {_gate.ledger_key(self.SUBJECT): {"attempts": 2, "best": None}})
+
+    def test_a_raw_and_a_digest_key_for_one_record_merge_to_the_larger_count(self):
+        key = _gate.ledger_key(self.SUBJECT)
+        best = {"attempt": 1, "max": 0.4, "scores": {"developer": 0.4}}
+        ledger, migrated = _gate.migrate_ledger({self.SUBJECT: 3, key: {"attempts": 1, "best": best}})
+        self.assertTrue(migrated)
+        self.assertEqual(ledger, {key: {"attempts": 3, "best": best}})
+
+    def test_a_digest_keyed_ledger_is_not_rewritten_as_a_migration(self):
+        ledger = {_gate.ledger_key(self.SUBJECT): 1}
+        self.assertEqual(_gate.migrate_ledger(ledger), (ledger, False))
 
 
 class CredentialLoadingTests(GateTestCase):
@@ -1197,6 +1431,35 @@ class CalibrationEvidenceTests(unittest.TestCase):
         self.assertRegex(str(self.doc["rubricVersion"]), r"^\d+$")
         self.assertRegex(str(self.rubric["version"]), r"^\d+$")
 
+    def test_the_recorded_run_is_pinned_to_the_shipped_rubric_bytes(self):
+        """The version pin alone passes an edit that keeps the version, so recorded figures could
+        certify instructions or criteria they never scored (issue 179). The digest is of the bytes."""
+        shipped = hashlib.sha256(RUBRIC.read_bytes()).hexdigest()
+        self.assertEqual(self.doc["rubricSha256"], shipped,
+                         "the shipped rubric's bytes differ from the rubric the calibration fixture "
+                         "was measured against. Re-measure with tests/score_decisions_calibration.py "
+                         "and re-record recordedRun and rubricSha256 together, or revert the rubric.")
+
+    def test_the_recorded_bar_is_the_gate_code_default(self):
+        """The fixture called 0.85 the shipped default while DEFAULT_MIN_PROBABILITY was still 0.5,
+        so a run without the launcher's credential file gated at a bar nothing measured (issue 179)."""
+        self.assertEqual(self.measured["bar"], _gate.DEFAULT_MIN_PROBABILITY,
+                         "recordedRun.bar no longer matches DEFAULT_MIN_PROBABILITY; re-measure "
+                         "at the new default or correct the fixture")
+        self.assertLess(self.measured["tier01MaxBestRole"], self.measured["bar"])
+        self.assertGreater(self.measured["tier23MinBestRole"], self.measured["bar"])
+
+    def test_the_primary_bar_is_the_one_the_launcher_publishes(self):
+        """`bar` is labelled as the value `scripts/run.sh` writes into the credential file. That
+        script exists only in the repository that ships the launcher, not in every consumer."""
+        run_sh = Path(__file__).resolve().parents[4] / "scripts" / "run.sh"
+        if not run_sh.is_file():
+            self.skipTest("scripts/run.sh is not part of this checkout")
+        published = re.search(r"^CONTEXT_MEMORY_DECISIONS_MIN_PROBABILITY=(\S+)$",
+                              run_sh.read_text(encoding="utf-8"), re.MULTILINE)
+        self.assertIsNotNone(published, "run.sh no longer publishes a decision threshold")
+        self.assertEqual(float(published.group(1)), self.measured["bar"])
+
     def test_every_record_declares_a_tier_a_statement_and_an_expectation(self):
         for record in self.records:
             self.assertIn("id", record)
@@ -1273,6 +1536,63 @@ class CalibrationEvidenceTests(unittest.TestCase):
             "a role clearing every record carries no negative information, which is exactly the "
             "defect the two rejected variants were measured against")
 
+
+class CalibrationScorerTests(unittest.TestCase):
+    """`score_decisions_calibration.py` needs a model to run end to end, but its arithmetic does not.
+
+    An unscored record carried no scores and was read as a best-role of 0.0, so a failed round
+    counted as a hold — a true negative or a false negative, never disclosed (issue 179).
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        spec = _ilu.spec_from_file_location(
+            "_score_decisions_calibration_under_test",
+            Path(__file__).resolve().parent / "score_decisions_calibration.py")
+        cls.scorer = _ilu.module_from_spec(spec)
+        spec.loader.exec_module(cls.scorer)
+        cls.doc = {"records": [
+            {"id": "c01", "tier": 0, "expect": [], "statement": "junk"},
+            {"id": "c02", "tier": 2, "expect": ["developer"], "statement": "a fact"},
+        ]}
+
+    def report(self, *records):
+        return {"rubricVersion": "2", "model": "nimble", "endpoint": "http://127.0.0.1",
+                "records": list(records)}
+
+    @staticmethod
+    def scored(identity, developer):
+        return {"identity": identity, "outcome": "scored",
+                "scores": {"developer": developer, "tester": 0.1}}
+
+    def run_score(self, report):
+        with contextlib.redirect_stdout(io.StringIO()):
+            return self.scorer.score(self.doc, report, 0.5)
+
+    def test_a_fully_scored_report_is_scored(self):
+        """The control: the refusals below are about unscored records, not about scoring at all."""
+        result = self.run_score(self.report(self.scored("c01", 0.1), self.scored("c02", 0.9)))
+        self.assertEqual((result["truePositive"], result["trueNegative"]), (1, 1))
+
+    def test_an_unscored_pass_side_record_is_refused_not_counted_as_a_false_negative(self):
+        failed = {"identity": "c02", "outcome": "unreachable", "scores": {}}
+        with self.assertRaises(SystemExit) as caught:
+            self.run_score(self.report(self.scored("c01", 0.1), failed))
+        self.assertIn("c02", str(caught.exception))
+        self.assertIn("unreachable", str(caught.exception))
+
+    def test_an_unscored_hold_side_record_is_refused_not_counted_as_a_true_negative(self):
+        failed = {"identity": "c01", "outcome": "bad-response", "scores": {}}
+        with self.assertRaises(SystemExit):
+            self.run_score(self.report(failed, self.scored("c02", 0.9)))
+
+    def test_a_report_missing_a_record_is_refused(self):
+        with self.assertRaises(SystemExit):
+            self.run_score(self.report(self.scored("c01", 0.1)))
+
+    def test_a_misaligned_report_is_refused(self):
+        with self.assertRaises(SystemExit):
+            self.run_score(self.report(self.scored("c02", 0.9), self.scored("c01", 0.1)))
 
 class DiscriminationDisclosureTests(GateTestCase):
     """`passingRoles` becomes `audience:*` tags downstream, and on its own it cannot tell a tie from

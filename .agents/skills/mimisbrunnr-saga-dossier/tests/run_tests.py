@@ -179,9 +179,30 @@ class Nfr04ReconciliationTests(unittest.TestCase):
         rendered = dc.render(doc)
         self.assertIn("None detected in the selected material in this bundle (2 memory(ies)).",
                       rendered)
+
+    def test_finding_bearing_slice_scopes_every_finding_to_the_slice(self):
+        """LADR-13, the finding-bearing half: the empty case above cannot see store-wide language in a
+        finding because there are none. Here every derived category the composer emits on its own,
+        plus a caller contradiction, must scope itself to the examined slice."""
+        unlinked = _mk("aaaaaaaa-0000-4000-8000-000000000001", "A", "The default is A for every tenant.",
+                       summ="A")
+        expired = _mk("bbbbbbbb-0000-4000-8000-000000000002", "B", "The default is B.",
+                      valid_until="2020-01-01")
+        expired["sources"] = []
+        rival = _mk("cccccccc-0000-4000-8000-000000000003", "C", "The default is C.")
+        judg = {"findings": [
+            {"category": "contradiction", "classification": "analysis",
+             "basis": "Two current claims name different defaults for the same circumstances.",
+             "memories": [{"uuid": unlinked["uuid"], "version": 1}, {"uuid": rival["uuid"], "version": 1}]}]}
+        doc = dc.compose(_bundle([unlinked, expired, rival]), focus=None, judgements=judg)
+        cats = {f["category"] for f in doc.findings}
+        self.assertTrue({"no-links-in-slice", "unattributed", "stale", "weak-summary",
+                         "contradiction"} <= cats, cats)
         for f in doc.findings:
-            self.assertNotRegex(f["scope"], r"\b(?:store|product|everywhere|all memories)\b")
-            self.assertNotRegex(f["basis"], r"\b(?:no memory in the store|the store has no)\b")
+            with self.subTest(category=f["category"]):
+                self.assertNotRegex(f["scope"], r"\b(?:store|product|everywhere|all memories)\b")
+                self.assertRegex(f["scope"], r"\bthis bundle\b")
+                self.assertNotRegex(f["basis"], r"\b(?:no memory in the store|the store has no)\b")
 
     def test_unreadable_body_is_omitted_with_the_reason(self):
         """NFR-04: an unreadable body is an omission with the ``unreadable body`` reason, never a
@@ -776,10 +797,30 @@ class CredentialTransportTests(unittest.TestCase):
                 dc._assert_loopback(base)  # must not raise
 
     def test_a_non_loopback_base_is_refused_before_any_request(self):
-        # Proves the guard runs pre-flight rather than alongside the request: no opener is built
-        # and no bytes leave, because the assertion is the ValueError itself.
-        with self.assertRaises(ValueError):
-            dc.fetch_bundle_from_api("http://evil.example:5141", {"anchor": {}})
+        # A read token is present, so a missing-credential ValueError cannot stand in for the loopback
+        # refusal; the recording opener proves no request is built or opened for the foreign base.
+        import urllib.request
+        from unittest import mock
+
+        opened = []
+
+        class _RecordingOpener:
+            def open(self, req, timeout=None):
+                opened.append(req.full_url)
+                raise AssertionError("a request was opened for a non-loopback base")
+
+        env = {dc._ENV_READ_TOKEN: "test-token-not-a-real-secret"}
+        with mock.patch.dict(os.environ, env), \
+                mock.patch.object(urllib.request, "build_opener",
+                                  side_effect=lambda *h: _RecordingOpener()) as build:
+            for name in dc._WRITE_TOKEN_NAMES:
+                os.environ.pop(name, None)
+            with self.assertRaises(ValueError) as caught:
+                dc.fetch_bundle_from_api("http://evil.example:5141", {"anchor": {}})
+        self.assertIn("loopback origin", str(caught.exception))
+        self.assertNotIn("missing-credential", str(caught.exception))
+        build.assert_not_called()
+        self.assertEqual(opened, [])
 
     def test_an_unparseable_base_is_refused_without_echoing_its_userinfo(self):
         # urlsplit's own ValueError quotes the whole netloc, userinfo included, and main() prints
@@ -1278,6 +1319,243 @@ class BundleServerErrorTests(unittest.TestCase):
             urllib.request.build_opener = real_build
             os.environ.pop(dc._ENV_READ_TOKEN, None)
             os.environ.pop(dc._ENV_BASE_URL, None)
+
+
+class AsofValidationTests(unittest.TestCase):
+    """An explicit ``asof`` that does not parse is refused (issue 179). ``_parse_time`` returns None
+    for it and the lifecycle and stale checks fell back to today, so a typo composed against today
+    while the dossier displayed the typo."""
+
+    def _expiring(self):
+        return _mk("aaaaaaaa-0000-4000-8000-000000000001", "A", "The default is A.",
+                   valid_until="2025-06-01")
+
+    def test_an_unparseable_asof_is_refused(self):
+        for bad in ("2026-13-45", "not-a-date", "06/01/2025", ""):
+            with self.subTest(asof=bad):
+                with self.assertRaises(ValueError) as caught:
+                    dc.compose(_bundle([self._expiring()]), focus=None, asof=bad)
+                self.assertIn("asof", str(caught.exception))
+
+    def test_a_valid_asof_bounds_the_validity_window(self):
+        item = self._expiring()
+        before = dc.compose(_bundle([item]), focus=None, asof="2025-01-01")
+        self.assertEqual(before.lifecycle[dc._item_key(item)], "current")
+        self.assertNotIn("stale", {f["category"] for f in before.findings})
+        after = dc.compose(_bundle([item]), focus=None, asof="2025-07-01T00:00:00Z")
+        self.assertEqual(after.lifecycle[dc._item_key(item)], "no-longer-true")
+        self.assertIn("stale", {f["category"] for f in after.findings})
+
+    def test_absent_asof_still_means_today(self):
+        doc = dc.compose(_bundle([self._expiring()]), focus=None)
+        self.assertIn("stale", {f["category"] for f in doc.findings})
+
+    def test_the_cli_refuses_an_unparseable_asof(self):
+        import contextlib
+        import io
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "bundle.json"
+            path.write_text(json.dumps(_bundle([self._expiring()])), encoding="utf-8")
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                rc = dc.main(["compose", "--bundle", str(path), "--asof", "2025-02-30"])
+        self.assertEqual(rc, 1)
+        self.assertIn("asof", stderr.getvalue())
+        self.assertEqual(stdout.getvalue(), "", "no dossier is rendered against today")
+
+
+class ContradictionLifecycleTests(unittest.TestCase):
+    """The contradiction gate compares derived lifecycles the way consolidate does (issue 179): a
+    mixed set is not the same circumstances, an identical set is."""
+
+    A = "aaaaaaaa-0000-4000-8000-000000000001"
+    B = "bbbbbbbb-0000-4000-8000-000000000002"
+
+    def _judg(self):
+        return {"findings": [{"category": "contradiction", "classification": "analysis",
+                              "basis": "Both claims set the default for the same circumstances.",
+                              "memories": [{"uuid": self.A, "version": 1},
+                                           {"uuid": self.B, "version": 1}]}]}
+
+    def test_two_conflicting_proposals_are_a_contradiction(self):
+        a = _mk(self.A, "A", "Propose default A.", status="proposed")
+        b = _mk(self.B, "B", "Propose default B.", status="proposed")
+        doc = dc.compose(_bundle([a, b]), focus=None, judgements=self._judg())
+        self.assertIn("contradiction", {f["category"] for f in doc.findings})
+
+    def test_proposed_versus_shipped_is_still_refused(self):
+        a = _mk(self.A, "A", "Propose default A.", status="proposed")
+        b = _mk(self.B, "B", "The default is B.", status="current")
+        with self.assertRaises(ValueError):
+            dc.compose(_bundle([a, b]), focus=None, judgements=self._judg())
+
+    def test_current_versus_superseded_is_refused(self):
+        a = _mk(self.A, "A", "The default is A.", status="superseded")
+        b = _mk(self.B, "B", "The default is B.", status="current")
+        with self.assertRaises(ValueError):
+            dc.compose(_bundle([a, b]), focus=None, judgements=self._judg())
+
+
+class OmissionIdentityRenderTests(unittest.TestCase):
+    """A rendered omission names the version it cut and the memory's uuid (issue 179): a history
+    dossier can keep v1 of a memory and cut v3, and a name-only line could not say which."""
+
+    UUID = "aaaaaaaa-0000-4000-8000-000000000001"
+
+    def _omitted_section(self, rendered):
+        return rendered.split("## Omitted", 1)[1]
+
+    def test_a_cut_version_is_named_in_the_rendered_omission(self):
+        v1 = _mk(self.UUID, "the rule", "the original claim", kind="decision")
+        bundle = _bundle([v1], omitted=[{"uuid": self.UUID, "version": 3, "reason": "cap reached",
+                                         "name": "the rule"}])
+        section = self._omitted_section(dc.render(dc.compose(bundle, focus=None)))
+        self.assertIn(f"- the rule ({self.UUID} v3) — cap reached", section)
+        self.assertNotIn(" v1)", section)
+
+    def test_a_nameless_omission_shows_uuid_and_version(self):
+        bundle = _bundle([], omitted=[{"uuid": self.UUID, "version": 2, "reason": "unreadable body"}])
+        section = self._omitted_section(dc.render(dc.compose(bundle, focus=None)))
+        self.assertIn(f"- {self.UUID} v2 — unreadable body", section)
+
+    def test_an_outside_focus_omission_carries_its_version(self):
+        item = _mk(self.UUID, "impl", "the build step", kind="implementation")
+        item["version"] = 4
+        section = self._omitted_section(
+            dc.render(dc.compose(_bundle([item]), focus="requirements")))
+        self.assertIn(f"- impl ({self.UUID} v4) — outside-focus", section)
+
+
+@unittest.skipUnless(__import__("shutil").which("git"), "git is required for the --out guard")
+class OutputDestinationTests(unittest.TestCase):
+    """``compose --out`` writes only to a gitignored path (issue 179). A dossier is a projection of
+    sensitive store content; a tracked path such as README.md must never be overwritten with it."""
+
+    def setUp(self):
+        import subprocess
+        import tempfile
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name).resolve()
+        self.repo = self.root / "repo"
+        self.repo.mkdir()
+        subprocess.run(["git", "init", "-q", str(self.repo)], check=True)
+        (self.repo / ".gitignore").write_text(".context/\n", encoding="utf-8")
+        self.readme = self.repo / "README.md"
+        self.readme.write_text("tracked\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(self.repo), "add", "README.md", ".gitignore"], check=True)
+        self.ignored_dir = self.repo / ".context" / "mimisbrunnr-saga-dossier"
+        self.ignored_dir.mkdir(parents=True)
+        self.bundle = self.root / "bundle.json"
+        self.bundle.write_text(json.dumps(_bundle([_mk(
+            "aaaaaaaa-0000-4000-8000-000000000001", "A", "The default is A.")])), encoding="utf-8")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _compose(self, out):
+        import contextlib
+        import io
+
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            rc = dc.main(["compose", "--bundle", str(self.bundle), "--out", str(out)])
+        return rc, stderr.getvalue()
+
+    def test_a_tracked_file_is_refused_and_left_untouched(self):
+        rc, err = self._compose(self.readme)
+        self.assertEqual(rc, 1)
+        self.assertIn("gitignored", err)
+        self.assertEqual(self.readme.read_text(encoding="utf-8"), "tracked\n")
+
+    def test_an_unignored_untracked_path_is_refused(self):
+        target = self.repo / "dossier.md"
+        rc, _ = self._compose(target)
+        self.assertEqual(rc, 1)
+        self.assertFalse(target.exists())
+
+    def test_a_path_outside_a_git_work_tree_is_refused(self):
+        outside = self.root / "elsewhere"
+        outside.mkdir()
+        target = outside / "dossier.md"
+        rc, _ = self._compose(target)
+        self.assertEqual(rc, 1)
+        self.assertFalse(target.exists())
+
+    def test_a_symlink_in_an_ignored_directory_to_a_tracked_file_is_refused(self):
+        link = self.ignored_dir / "link.md"
+        link.symlink_to(self.readme)
+        rc, _ = self._compose(link)
+        self.assertEqual(rc, 1)
+        self.assertEqual(self.readme.read_text(encoding="utf-8"), "tracked\n")
+
+    def test_the_documented_gitignored_destination_is_written(self):
+        target = self.ignored_dir / "architecture.md"
+        rc, err = self._compose(target)
+        self.assertEqual(rc, 0, err)
+        self.assertIn("# Context Dossier", target.read_text(encoding="utf-8"))
+
+
+class PreviewRequestTests(unittest.TestCase):
+    """``preview`` is the consent step before the bundle (LADR-14): the same anchor body, read-only
+    credentials and transport guards, posted to the preview endpoint."""
+
+    def test_preview_posts_the_bundle_body_to_the_preview_endpoint(self):
+        import contextlib
+        import io
+        import urllib.request
+        from unittest import mock
+
+        captured = []
+
+        class _FakeResponse:
+            def read(self):
+                return b'{"selection": {}, "noMatch": false}'
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        class _FakeOpener:
+            def open(self, req, timeout=None):
+                captured.append((req.full_url, json.loads(req.data.decode("utf-8")),
+                                 dict(req.headers)))
+                return _FakeResponse()
+
+        env = {dc._ENV_READ_TOKEN: "test-token-not-a-real-secret",
+               dc._ENV_BASE_URL: "http://localhost:5141"}
+        stdout = io.StringIO()
+        with mock.patch.dict(os.environ, env), \
+                mock.patch.object(urllib.request, "build_opener", side_effect=lambda *h: _FakeOpener()), \
+                contextlib.redirect_stdout(stdout):
+            for name in dc._WRITE_TOKEN_NAMES:
+                os.environ.pop(name, None)
+            rc = dc.main(["preview", "--repo", "owner/repo", "--ticket", "github:160",
+                          "--widen-depth", "2", "--heimdallr", "false"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(captured), 1)
+        url, body, headers = captured[0]
+        self.assertEqual(url, "http://localhost:5141/api/context/dossier/preview")
+        self.assertEqual(body, {"repo": "owner/repo", "ticketProvider": "github", "ticketKey": "160",
+                                "widenDepth": 2})
+        self.assertIn("Authorization", headers)
+        self.assertEqual(json.loads(stdout.getvalue()), {"selection": {}, "noMatch": False})
+
+    def test_preview_refuses_a_write_token(self):
+        import contextlib
+        import io
+        from unittest import mock
+
+        stderr = io.StringIO()
+        with mock.patch.dict(os.environ, {dc._ENV_WRITE_TOKEN: "test-write-token"}), \
+                contextlib.redirect_stderr(stderr):
+            rc = dc.main(["preview", "--heimdallr", "false"])
+        self.assertEqual(rc, 1)
+        self.assertIn(dc._ENV_WRITE_TOKEN, stderr.getvalue())
 
 
 if __name__ == "__main__":

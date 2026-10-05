@@ -19,6 +19,7 @@ recall 1.00. Two attempts to tighten the rubric both made it worse. The numbers 
 in the fixture, so the next argument starts from them.
 """
 import argparse
+import hashlib
 import json
 import os
 import pathlib
@@ -28,11 +29,16 @@ import sys
 HERE = pathlib.Path(__file__).resolve().parent
 FIXTURE = HERE / "fixtures" / "decisions_calibration.json"
 GATE = HERE.parent / "scripts" / "decisions_gate.py"
+RUBRIC = HERE.parent / "scripts" / "decisions_rubric.json"
 
 
 def load():
     with FIXTURE.open(encoding="utf-8") as handle:
         return json.load(handle)
+
+
+def rubric_sha256():
+    return hashlib.sha256(RUBRIC.read_bytes()).hexdigest()
 
 
 def emit_model_input(doc):
@@ -59,13 +65,36 @@ def run_gate(doc, threshold, endpoint, model):
     return json.loads(proc.stdout)
 
 
+def require_scored(doc, report):
+    """Refuse a report in which any fixture record was not scored, or cannot be paired to its record.
+
+    A record the gate did not score — `unreachable`, `timed-out`, `bad-response`, `oversize` — carries
+    no scores, and reading that as a best-role of 0.0 counted it as a hold: a true negative on the
+    hold side and a false negative on the pass side, with nothing saying it was never measured. That
+    is the gate's own rule (a failed round is never a low score) broken by the tool that measures it.
+    Records pair by the id sent as `subject`, so a reordered or truncated report cannot misalign them.
+    """
+    records = report.get("records")
+    if not isinstance(records, list) or len(records) != len(doc["records"]):
+        raise SystemExit(f"the gate reported {len(records) if isinstance(records, list) else 'no'} "
+                         f"record(s) for {len(doc['records'])} fixture record(s); refusing to score")
+    for fixture, scored in zip(doc["records"], records):
+        if scored.get("identity") != fixture["id"]:
+            raise SystemExit(f"calibration record {fixture['id']} was paired with "
+                             f"{scored.get('identity')!r}; refusing to score")
+        if scored.get("outcome") != "scored" or not scored.get("scores"):
+            raise SystemExit(f"calibration record {fixture['id']} was not scored "
+                             f"({scored.get('outcome')!r}); every figure would count it as a hold")
+
+
 def score(doc, report, threshold):
-    roles = list(doc["records"][0] and report["records"][0]["scores"])
+    require_scored(doc, report)
+    roles = list(report["records"][0]["scores"])
     rows, tp, fp, tn, fn = [], 0, 0, 0, 0
     hit = bleed = pairs = 0
     for fixture, scored in zip(doc["records"], report["records"]):
-        scores = scored.get("scores") or {}
-        best = max(scores.values()) if scores else 0.0
+        scores = scored["scores"]
+        best = max(scores.values())
         want = fixture["tier"] >= 2
         got = best > threshold
         tp += got and want
@@ -112,7 +141,8 @@ def check_determinism(doc, threshold, endpoint, model, rounds=3):
     runs = []
     for _ in range(rounds):
         report = run_gate(doc, threshold, endpoint, model)
-        runs.append([r.get("scores") for r in report["records"]])
+        require_scored(doc, report)
+        runs.append([r["scores"] for r in report["records"]])
     agree = all(r == runs[0] for r in runs)
     print(f"  determinism over {rounds} full passes: "
           f"{'identical' if agree else 'DIFFERENT — every figure below is a mean over disagreeing runs'}")
@@ -177,6 +207,9 @@ def main():
         print(f"  WARNING: the shipped rubric is version {report['rubricVersion']} but the fixture "
               f"is pinned to {doc['rubricVersion']}. CalibrationEvidenceTests should already have "
               f"failed; these numbers describe a rubric the fixture was not written for.")
+    if rubric_sha256() != doc["rubricSha256"]:
+        print("  WARNING: the shipped rubric's bytes differ from the rubric the fixture was measured "
+              "against, whatever its version says. Re-record recordedRun and rubricSha256 together.")
     measured = score(doc, report, threshold)
     compare(recorded, measured, threshold)
     return 0

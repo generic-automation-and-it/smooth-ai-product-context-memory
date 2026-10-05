@@ -77,34 +77,33 @@ def find_tickets(*texts: str) -> list[dict]:
     """Deduped tickets in first-seen order, each with its source label."""
     seen: dict[str, dict] = {}
     for label, text in texts:
+        text = text or ""
+        # (offset, pattern rank, provider, key): sorting on offset reports a subject's tickets in the
+        # order they appear, not in pattern order — `fix ABC-123 and #456` must list ABC-123 first.
+        found = []
         if label == "branch":
-            for match in BRANCH_TICKET.finditer(text or ""):
-                ident = "github:%s" % match.group(1)
-                if ident not in seen:
-                    seen[ident] = {
-                        "provider": "github",
-                        "key": match.group(1),
-                        "seenIn": label,
-                    }
+            for match in BRANCH_TICKET.finditer(text):
+                found.append((match.start(), 0, "github", match.group(1)))
         # The bare-key pattern matches ABC-123 inside `jira:ABC-123`, which would re-emit it as a
         # spurious `local:ABC-123`. Collect the provider:key spans first and suppress bare-key
         # matches that fall within one — the provider:key already captured that ticket.
-        text = text or ""
         provider_spans = [m.span() for m in TICKET_PATTERNS[1].finditer(text)]
-        for pattern in TICKET_PATTERNS:
+        for rank, pattern in enumerate(TICKET_PATTERNS, start=1):
             for match in pattern.finditer(text):
                 if pattern is TICKET_PATTERNS[2] and any(
                         match.start() >= s and match.end() <= e for (s, e) in provider_spans):
                     continue
-                if match.re.pattern.startswith("#"):
+                if pattern is TICKET_PATTERNS[0]:
                     provider, key = "github", match.group(1)
-                elif ":" in match.group(0) and match.lastindex == 2:
+                elif pattern is TICKET_PATTERNS[1]:
                     provider, key = match.group(1).lower(), match.group(2)
                 else:
                     provider, key = "local", match.group(1)
-                ident = "%s:%s" % (provider, key)
-                if ident not in seen:
-                    seen[ident] = {"provider": provider, "key": key, "seenIn": label}
+                found.append((match.start(), rank, provider, key))
+        for _offset, _rank, provider, key in sorted(found):
+            ident = "%s:%s" % (provider, key)
+            if ident not in seen:
+                seen[ident] = {"provider": provider, "key": key, "seenIn": label}
     return list(seen.values())
 
 

@@ -3,6 +3,7 @@ name: mimisbrunnr-saga-dossier
 description: Compose a read-only, cited context dossier — one ordered document plus a findings report (gaps, contradictions, stale claims) — for a slice of the Mímisbrunnr store (repository, initiative, ticket, tags). Use when re-entering a repo or ticket, handing reasoning to a colleague, grounding a design document, or auditing the store. Fetches a deterministic bundle from the Host API and writes only a local gitignored artefact; never writes to the store. Triggers on "dossier", "catch me up on", "everything the store knows about".
 allowed-tools:
   - Bash(python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py:*)
+  - Bash(mkdir -p .context/mimisbrunnr-saga-dossier)
   - Read
   - Write
 effort: high  # equivalence, contradiction and gap judgement across a whole store slice
@@ -40,10 +41,11 @@ selection the practitioner approved in the preview, the difference is reported (
 ## Workflow
 
 ```bash
-# 1. Fetch the bundle for the anchor set. This is the deterministic bundle, not the preview:
-#    the NFR-03 preview (prices the selection without bodies) and the LADR-14 preview-vs-bundle
-#    difference check are performed by the agent directly against the Host API —
-#    POST /api/context/dossier/preview and POST /api/context/dossier/bundle. Read-only.
+mkdir -p .context/mimisbrunnr-saga-dossier
+
+# 1. Preview the selection (NFR-03 / LADR-14) — POST /api/context/dossier/preview, read-only and
+#    blob-free. Takes the same anchor flags as `bundle` and returns the effective selection, volume,
+#    reach, cost estimate and limitsHit.
 #    Anchor flags (--repo/--ticket/--tickets/--tags/--initiative/--widen-depth) merge into --body,
 #    built in the contract's field names (the endpoint rejects unknown properties); only a
 #    missing repo/ticket anchor autofills from the offline Heimdallr git scan (--heimdallr true,
@@ -52,15 +54,29 @@ selection the practitioner approved in the preview, the difference is reported (
 #    ticketKey, and --tickets with more than one value is refused rather than truncated. widenDepth
 #    is always sent (default 1; --widen-depth sets it, 1-5).
 python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py \
-  bundle --repo owner/repo --ticket github:160 | head
+  preview --repo owner/repo --ticket github:160
 # (the script path above is relative to the skills root, so it holds under
 # .agents/skills, .claude/skills or .codex/skills; --heimdallr false disables autofill)
 
-# 2. Compose from a saved bundle, apply an optional focus, write the artefact (gitignored).
+# 2. STOP. Show the practitioner the preview and get an explicit approve / narrow / cancel. Narrowing
+#    means new flags and a new preview. Never fetch the bundle on an unapproved scope.
+
+# 3. Fetch the deterministic bundle with the approved anchors, saving the whole of it. Compare its
+#    manifest.selection with the approved preview's selection; report any difference (LADR-14)
+#    and re-preview rather than composing it.
 python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py \
-  compose --bundle bundle.json --focus architecture \
+  bundle --repo owner/repo --ticket github:160 > .context/mimisbrunnr-saga-dossier/bundle.json
+
+# 4. Compose from the saved bundle, apply an optional focus, write the artefact. --out must be a
+#    gitignored path inside the checkout (verified with `git check-ignore`; a tracked, un-ignored or
+#    out-of-checkout destination is refused); omit it to print to stdout.
+python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py \
+  compose --bundle .context/mimisbrunnr-saga-dossier/bundle.json --focus architecture \
   --out .context/mimisbrunnr-saga-dossier/architecture.md
 ```
+
+`--asof YYYY-MM-DD` (or an ISO-8601 timestamp) bounds the validity window used for lifecycle and
+staleness; omitted means today, and a supplied value that does not parse is refused.
 
 `--focus` is a **single-valued bounded enum** — `requirements`, `architecture`, `specification`,
 `implementation`, `review` — or omitted for the unfocused default (LADR-12). An unknown focus fails. A
@@ -85,8 +101,9 @@ doc = compose(bundle, focus="requirements", judgements={
 ```
 
 The composer then enforces the deterministic gates: applicability + lifecycle must match before a
-consolidation, and a scoped exception or proposed-versus-shipped pair is never a contradiction
-(LADR-04/05). Every finding is emitted with a basis, a scope (the examined material, never the store),
+consolidation, and a contradiction requires identical applicability and identical derived lifecycle —
+so a scoped exception or a proposed-versus-shipped pair is never a contradiction, while two conflicting
+proposals are (LADR-04/05). Every finding is emitted with a basis, a scope (the examined material, never the store),
 and its memories by identity + version (LADR-13). Findings are focus-invariant in presence.
 
 ## What the composer guarantees
@@ -103,7 +120,7 @@ and its memories by identity + version (LADR-13). Findings are focus-invariant i
 - **Reconciliation** — present + consolidated + omitted-with-reason == the manifest's selected count,
   closed in the dossier itself (NFR-04).
 - **Read-only** — the module exposes no write operation; the only artefact is the dossier at the
-  requested path (NFR-06).
+  requested path, which must be gitignored (NFR-06).
 
 ## Rules
 
@@ -129,7 +146,7 @@ and its memories by identity + version (LADR-13). Findings are focus-invariant i
 
 ## Base URL / token
 
-The bundle is requested from the Host API. The base URL is read from `CONTEXT_MEMORY_BASE_URL`
+The preview and the bundle are requested from the Host API. The base URL is read from `CONTEXT_MEMORY_BASE_URL`
 (default `http://localhost:5141`) and the read token from `CONTEXT_MEMORY_READ_TOKEN`, both seeded at
 import from the machine credential file (`~/.mimisbrunnr/credentials`) — read token and base URL only;
 the write token is never loaded, and a write token present in the environment refuses the bundle
@@ -143,11 +160,11 @@ is refused, and a trailing slash is ignored.
 
 | Script | Purpose |
 |---|---|
-| `scripts/dossier_composer.py` | Read-only bundle request + dossier composition (ordering, consolidation, lifecycle, citation, findings, focus, reconciliation), and the `near_miss_findings()` helper |
+| `scripts/dossier_composer.py` | Read-only preview + bundle requests and dossier composition (ordering, consolidation, lifecycle, citation, findings, focus, reconciliation), and the `near_miss_findings()` helper |
 
 ## Test
 
-Committed harness: `python3 -B .agents/skills/mimisbrunnr-saga-dossier/tests/run_tests.py` (76 tests).
+Committed harness: `python3 -B .agents/skills/mimisbrunnr-saga-dossier/tests/run_tests.py` (94 tests).
 
 ## Related
 

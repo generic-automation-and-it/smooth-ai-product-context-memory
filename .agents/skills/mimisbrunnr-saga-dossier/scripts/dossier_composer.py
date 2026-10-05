@@ -15,8 +15,12 @@ delivers the invariants the NFRs require.
 Usage (fetch a bundle from the Host API, read-only; --base-url is a top-level option):
     python3 -B dossier_composer.py --base-url http://localhost:5141 bundle --body '{"repo":"kingstown","widenDepth":3}'
 
-Usage (offline, compose from a previously saved bundle JSON):
-    python3 -B dossier_composer.py compose --bundle bundle.json --focus architecture --out artefact.md
+Usage (preview the selection first — the consent step, LADR-14 — same anchors as bundle):
+    python3 -B dossier_composer.py preview --repo kingstown --widen-depth 3
+
+Usage (offline, compose from a previously saved bundle JSON; --out must be a gitignored path):
+    python3 -B dossier_composer.py compose --bundle bundle.json --focus architecture
+        --out .context/mimisbrunnr-saga-dossier/architecture.md
 """
 
 from __future__ import annotations
@@ -737,12 +741,11 @@ def _validate_contradiction(f, by_key, edges=None, asof=None):
     apps = [_applicability(i) for i in items]
     statuses = {mark_lifecycle(i, edges, asof) for i in items}
     scoped = len(set(apps)) > 1
-    # Lifecycle precondition. A proposed claim and an expired (no-longer-true) claim are both
-    # excluded: like proposed-versus-shipped, current-versus-no-longer-true is not incompatible for
-    # the same circumstances (they hold over different time windows). The derived statuses already
-    # collapse "proposed" and an expired origin here, so both must be checked — the docstring above
-    # states it, and only the literal "proposed" was.
-    lifecycle_differs = bool({LIFECYCLE_PROPOSED, LIFECYCLE_NO_LONGER_TRUE} & statuses)
+    # Lifecycle precondition, compared the way consolidate compares it: the derived lifecycles must
+    # be identical. Proposed-versus-shipped and current-versus-no-longer-true hold over different
+    # circumstances, so a mixed set is refused; two proposals (or two current claims) that disagree
+    # are the same circumstances and are a conflict. Rejecting any proposed member refused that pair.
+    lifecycle_differs = len(statuses) > 1
     if scoped or lifecycle_differs:
         raise ValueError(
             "contradiction: claims differ in applicability or lifecycle, so they are not a conflict "
@@ -859,6 +862,7 @@ def compose(bundle, focus=UNFOCUSED, judgements=None, asof=None, store_name=STOR
     validate_bundle(bundle)
     if focus not in FOCUSES and focus is not UNFOCUSED:
         raise ValueError(f"unknown focus '{focus}'; must be one of {', '.join(FOCUSES)} or unfocused")
+    _validate_asof(asof)
 
     items = bundle["items"]
     edges = bundle["edges"]
@@ -932,6 +936,19 @@ def compose(bundle, focus=UNFOCUSED, judgements=None, asof=None, store_name=STOR
         store_name=store_name,
         meta={"moment": _now_iso(), "generatedProjection": True},
     )
+
+
+def _validate_asof(asof):
+    """Refuse an explicitly supplied ``asof`` that does not parse.
+
+    ``_parse_time`` returns ``None`` for an unparseable value and the lifecycle and stale checks fall
+    back to today on ``None``, so a typo silently composed against today while the dossier still showed
+    the typo. Only an absent ``asof`` means today.
+    """
+    if asof is None:
+        return
+    if _parse_time(asof) is None:
+        raise ValueError(f"asof must be a date (YYYY-MM-DD) or ISO-8601 timestamp, got '{asof}'")
 
 
 def _now_iso():
@@ -1069,8 +1086,11 @@ def render(dossier):
     lines.append("")
     if dossier.omitted:
         for o in dossier.omitted:
-            name = o.get("name") or o["uuid"]
-            lines.append(f"- {name} — {o['reason']}")
+            # A history bundle can cut one version of a memory and keep another, so the version is
+            # part of what was omitted; the uuid is shown too, since a name is not an identity.
+            ident = f"{o['uuid']} v{o['version']}"
+            label = f"{o['name']} ({ident})" if o.get("name") else ident
+            lines.append(f"- {label} — {o['reason']}")
     else:
         lines.append(f"None — nothing selected was omitted. ({len(b['items'])} selected)")
     lines.append("")
@@ -1260,9 +1280,23 @@ def fetch_bundle_from_api(base_url, body):
     never appears in a committed file. Makes no write and never calls a write endpoint (NFR-06). A
     non-success answers with the server's problem title/detail, never the raw body.
     """
+    payload = _post_read_only(base_url, "/api/context/dossier/bundle", body, "bundle")
+    return payload.get("bundle", payload)
+
+
+def fetch_preview_from_api(base_url, body):
+    """POST the same anchor set to /api/context/dossier/preview (read-only, blob-free).
+
+    The consent step (LADR-14, NFR-03): the practitioner approves, narrows or cancels on the returned
+    selection, volume, reach, cost and limits before the bundle is requested.
+    """
+    return _post_read_only(base_url, "/api/context/dossier/preview", body, "preview")
+
+
+def _post_read_only(base_url, path, body, label):
     base, token = _resolve_read_credentials(base_url)
     req = urllib.request.Request(
-        base + "/api/context/dossier/bundle",
+        base + path,
         data=json.dumps(body).encode("utf-8"),
         headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
         method="POST",
@@ -1273,8 +1307,22 @@ def fetch_bundle_from_api(base_url, body):
             payload = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         raise ValueError(
-            f"bundle request failed ({exc.code} {exc.reason}): {_problem_summary(exc)}") from None
-    return payload.get("bundle", payload)
+            f"{label} request failed ({exc.code} {exc.reason}): {_problem_summary(exc)}") from None
+    return payload
+
+
+def _add_anchor_args(p):
+    p.add_argument("--body", help="JSON anchor set; defaults to a stub")
+    p.add_argument("--repo", help="Anchor: repository owner/repo (explicit flag wins).")
+    p.add_argument("--ticket", help="Anchor: single provider:key ticket.")
+    p.add_argument("--tickets", help="Anchor: comma-separated provider:key tickets.")
+    p.add_argument("--tags", help="Anchor: comma-separated tags (never autofilled).")
+    p.add_argument("--initiative", help="Anchor: initiative name.")
+    p.add_argument("--widen-depth", type=int, default=1,
+                   help="Widen depth (1-5; the contract requires it, default 1).")
+    p.add_argument("--heimdallr", choices=_HEIMDALLR_CHOICES, default="true",
+                   help="Autofill missing repo/ticket anchors from the offline Heimdallr git "
+                        "scan (default true; explicit flags and --body keys always win).")
 
 
 def main(argv=None):
@@ -1282,23 +1330,19 @@ def main(argv=None):
     parser.add_argument("--base-url", help="override " + "CONTEXT_MEMORY_BASE_URL")
     sub = parser.add_subparsers(dest="command", required=True)
 
+    preview_p = sub.add_parser("preview")
+    _add_anchor_args(preview_p)
+    preview_p.set_defaults(func=lambda args: cmd_preview(args))
+
     bundle_p = sub.add_parser("bundle")
-    bundle_p.add_argument("--body", help="JSON anchor set; defaults to a stub")
-    bundle_p.add_argument("--repo", help="Bundle anchor: repository owner/repo (explicit flag wins).")
-    bundle_p.add_argument("--ticket", help="Bundle anchor: single provider:key ticket.")
-    bundle_p.add_argument("--tickets", help="Bundle anchor: comma-separated provider:key tickets.")
-    bundle_p.add_argument("--tags", help="Bundle anchor: comma-separated tags (never autofilled).")
-    bundle_p.add_argument("--initiative", help="Bundle anchor: initiative name.")
-    bundle_p.add_argument("--widen-depth", type=int, default=1,
-                          help="Bundle widen depth (1-5; the contract requires it, default 1).")
-    bundle_p.add_argument("--heimdallr", choices=_HEIMDALLR_CHOICES, default="true",
-                          help="Autofill missing repo/ticket anchors from the offline Heimdallr git "
-                               "scan (default true; explicit flags and --body keys always win).")
+    _add_anchor_args(bundle_p)
     bundle_p.set_defaults(func=lambda args: cmd_bundle(args))
 
     compose_p = sub.add_parser("compose")
     compose_p.add_argument("--bundle", help="path to a saved bundle JSON, or an http(s) URL")
-    compose_p.add_argument("--out", help="write the artefact to this path (gitignored); stdout if omitted")
+    compose_p.add_argument("--out", help="write the artefact to this gitignored path, e.g. "
+                                         ".context/mimisbrunnr-saga-dossier/<name>.md; "
+                                         "stdout if omitted")
     compose_p.add_argument("--focus", choices=list(FOCUSES), help="the focus lens (default: unfocused)")
     compose_p.add_argument("--asof", help="validity window bound (YYYY-MM-DD)")
     compose_p.set_defaults(func=lambda args: cmd_compose(args))
@@ -1448,7 +1492,7 @@ def _heimdallr_autofill(body):
     return body, filled
 
 
-def cmd_bundle(args):
+def _anchor_body(args):
     body = json.loads(args.body) if args.body else {}
     if not isinstance(body, dict):
         raise ValueError("--body must be a JSON object of bundle anchors")
@@ -1458,17 +1502,56 @@ def cmd_bundle(args):
         if filled:
             print(f"Heimdallr autofill ({'; '.join(filled)}); explicit flags and --body keys "
                   f"always win. Pass --heimdallr false to disable.", file=sys.stderr)
-    bundle = fetch_bundle_from_api(args.base_url, body)
+    return body
+
+
+def cmd_preview(args):
+    preview = fetch_preview_from_api(args.base_url, _anchor_body(args))
+    print(json.dumps(preview, indent=2))
+    return 0
+
+
+def cmd_bundle(args):
+    bundle = fetch_bundle_from_api(args.base_url, _anchor_body(args))
     print(json.dumps(bundle, indent=2))
     return 0
 
 
+def _require_ignored_destination(out):
+    """Resolve ``--out`` and refuse it unless git reports the destination as ignored.
+
+    A dossier is a projection of sensitive store content and the contract is a local gitignored
+    artefact, so a tracked file (README.md) or an un-ignored path must never receive it. `git
+    check-ignore` does not report tracked files as ignored even when a pattern matches them, so one
+    check covers both. The path is resolved first so a symlink in an ignored directory cannot point
+    the write at a tracked file. Outside a git work tree nothing can be verified, so it is refused.
+    """
+    target = Path(out).expanduser().resolve()
+    if target.is_dir():
+        raise ValueError(f"--out names a directory, not a file: {out}")
+    if not target.parent.is_dir():
+        raise ValueError(f"--out parent directory does not exist: {target.parent}")
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(target.parent), "check-ignore", "-q", "--", str(target)],
+            capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        proc = None
+    if proc is None or proc.returncode != 0:
+        raise ValueError(
+            f"--out must name a gitignored path inside a git work tree "
+            f"(e.g. .context/mimisbrunnr-saga-dossier/<name>.md); {out} is tracked, not ignored, "
+            f"or could not be verified. Omit --out to print to stdout.")
+    return target
+
+
 def cmd_compose(args):
+    target = _require_ignored_destination(args.out) if args.out else None
     bundle = read_bundle(args.bundle)
     dossier = compose(bundle, focus=args.focus, asof=args.asof)
     text = render(dossier)
-    if args.out:
-        Path(args.out).write_text(text, encoding="utf-8")
+    if target is not None:
+        target.write_text(text, encoding="utf-8")
         print(f"Wrote dossier to {args.out}")
     else:
         print(text)

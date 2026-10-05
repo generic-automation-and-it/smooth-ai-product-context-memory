@@ -27,6 +27,9 @@ from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
 SCRIPTS = HERE.parent / "scripts"
+# The fixture the 2026-09-29-balanced run was taken against, frozen when the live fixture's model
+# input changed. A recorded run is re-scored against what that model saw, not against today's file.
+BALANCED_FIXTURE = HERE / "fixtures" / "scenarios-2026-09-29-balanced.json"
 sys.path.insert(0, str(SCRIPTS))
 
 
@@ -316,6 +319,34 @@ class RecallFramingTests(unittest.TestCase):
         out = buffer.getvalue()
         self.assertIn(client.RECALL_NOTICE, out)
         self.assertIn(raw, out, "non-JSON output must be passed through, not dropped")
+
+    def test_get_blob_body_is_emitted_byte_for_byte(self):
+        # Issue 179: the body was stripped and given a trailing newline, so a caller hashing or
+        # diffing it saw bytes the store never held. Leading whitespace, interior blank lines and a
+        # missing final newline must all survive, through both clients' real entry points.
+        uuid = "11111111-1111-1111-1111-111111111111"
+        body = "  {\"a\": 1}\n\n  indented tail without final newline  "
+        with _env(client.ENV_WRITE_TOKEN, None), _env(client.ENV_READ_TOKEN, "test-token"), \
+                patch.object(client, "_open", return_value=_FakeResponse(body)):
+            buffer = io.StringIO()
+            with patch.object(sys, "argv", ["context_memory_read_client", "get-blob", uuid, "1"]), \
+                    redirect_stdout(buffer):
+                rc = read_client.main()
+            self.assertEqual(rc, 0)
+            self.assertEqual(buffer.getvalue(), client.BANNER_PREFIX + client.RECALL_NOTICE + "\n" + body)
+
+            direct = io.StringIO()
+            with redirect_stdout(direct):
+                client.cmd_get_blob(SimpleNamespace(uuid=uuid, version=1, scope=None))
+            self.assertEqual(direct.getvalue(), body)
+
+    def test_a_blob_quoting_the_notice_still_gets_the_banner(self):
+        args = SimpleNamespace(command="get-blob", payload=None, uuid="x", version=1, scope=None)
+        args.func = lambda _args: sys.stdout.write("quoted: " + client.RECALL_NOTICE)
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            read_client._run_framed(args)
+        self.assertTrue(buffer.getvalue().startswith(client.BANNER_PREFIX + client.RECALL_NOTICE + "\n"))
 
     def test_every_read_subcommand_is_framed_by_default(self):
         """Every content-returning subcommand is framed; only `probe` opts out.
@@ -734,6 +765,12 @@ SECRET_SHAPES = (
      ["MIICXgIBAAKBgQCfakefake", "0123456789ABCDEF"]),
     ("pem unterminated", "pasted: -----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEF\n"
      "AASCBKcwggSjAgEAAoIBAQC7\n", ["MIIEvQIBADANBgkqhkiG9w0BAQEF", "AASCBKcwggSjAgEAAoIBAQC7"]),
+    # Underscore-separated bodies: every segment is shorter than the 16-character run the neutral-key
+    # shape test needs, which is how these passed unredacted before the qualified prefix was trusted.
+    ("openai project underscored", _fake("s", "k-proj-", "Ab3d_Ef5h_Ij7l_Mn9p_Qr1t_Uv2x"),
+     ["Ab3d_Ef5h_Ij7l_Mn9p_Qr1t_Uv2x"]),
+    ("openai service account", _fake("s", "k-svcacct-", "wordy_body_with_no_digits_at_all"),
+     ["wordy_body_with_no_digits_at_all"]),
 )
 
 
@@ -768,6 +805,20 @@ class SecretShapeCoverageTests(unittest.TestCase):
         for text in ORDINARY_PROSE:
             with self.subTest(text=text):
                 self.assertEqual(redact.scrub_located(text), (text, []))
+
+    def test_a_qualified_vendor_prefix_redacts_without_the_shape_test(self):
+        # Issue 179: the shape test was applied to every `sk-` key, so a project key whose body is
+        # `_`-separated words passed through. The qualified prefix is enough evidence on its own.
+        key = _fake("s", "k-proj-", "Ab3d_Ef5h_Ij7l_Mn9p_Qr1t_Uv2x")
+        self.assertFalse(redact._secret_shaped(key), "precondition: the body must fail the shape test")
+        redacted, hits = redact.scrub_located(f"export OPENAI_KEY_FOR_CI {key} today")
+        self.assertNotIn("Ab3d_Ef5h", redacted)
+        self.assertEqual([name for name, _start, _end in hits], ["api-key-sk"])
+
+    def test_a_bare_sk_prefix_still_needs_a_secret_shaped_value(self):
+        # A bare `sk-` is not qualified, so prose that happens to start with it is left alone.
+        text = "Install sk-learn-compatible-estimators-v2 for the pipeline."
+        self.assertEqual(redact.scrub_located(text), (text, []))
 
     def test_a_pem_block_does_not_swallow_the_prose_after_it(self):
         text = ("-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEF\n-----END PRIVATE KEY-----\n"
@@ -963,6 +1014,34 @@ class WritePayloadTests(unittest.TestCase):
             client.cmd_set(SimpleNamespace(payload=None, dryrun=False))
         request.assert_not_called()
 
+    def test_preflight_refuses_a_response_missing_either_list(self):
+        # Issue 179: a missing or malformed list used to become [], which reads as "no matches" and
+        # "no collisions" — the answer that lets a duplicate be written.
+        for response in ({"candidates": []},
+                         {"intraBatchCollisions": []},
+                         {"candidates": None, "intraBatchCollisions": []},
+                         {"candidates": [], "intraBatchCollisions": {}},
+                         ["not", "an", "object"]):
+            with self.subTest(response=response):
+                out = io.StringIO()
+                with patch.object(client, "read_payload", return_value={"candidates": [{"description": "d"}]}), \
+                        patch.object(client, "_request", return_value=response), \
+                        redirect_stdout(out):
+                    with self.assertRaises(client.ClientError) as error:
+                        client.cmd_preflight(SimpleNamespace(payload=None))
+                self.assertEqual(error.exception.status_text, "bad-response")
+                self.assertEqual(out.getvalue(), "", "a refused stage must print no result")
+
+    def test_preflight_passes_well_formed_lists_through(self):
+        response = {"candidates": [{"index": 0, "matches": []}],
+                    "intraBatchCollisions": [{"left": 0, "right": 1}]}
+        with patch.object(client, "read_payload", return_value={"candidates": [{"description": "d"}]}), \
+                patch.object(client, "_request", return_value=response), \
+                redirect_stdout(io.StringIO()):
+            out = client.cmd_preflight(SimpleNamespace(payload=None))
+        self.assertEqual(out, {"candidates": response["candidates"],
+                               "intra_batch_collisions": response["intraBatchCollisions"]})
+
     def test_missing_capability_fails_before_transport(self):
         with patch.dict(os.environ, {}, clear=True), \
                 patch.object(client, "_open") as transport:
@@ -1018,6 +1097,42 @@ class WritePayloadTests(unittest.TestCase):
             with self.subTest(script=script):
                 completed = subprocess.run([sys.executable, "-B", str(SCRIPTS / script), "labels"],
                                            capture_output=True, text=True, env=env, timeout=30)
+                self.assertEqual(completed.returncode, 1)
+                self.assertIn("bad-base-url", completed.stderr)
+                self.assertNotIn("Traceback", completed.stderr)
+                self.assertNotIn("s3cret", completed.stderr + completed.stdout)
+
+    def test_a_probe_override_is_validated_like_the_environment_value(self):
+        # `probe --base-url` used the override as given, skipping the loopback, userinfo and shape
+        # checks, and printed it — credential included.
+        for value in ("http://operator:s3cret@localhost:5141", "http://memory.example:5141",
+                      "http://localhost:5141/api", "ftp://localhost:5141",
+                      "http://localhost:5141@192.0.2.1/"):
+            with self.subTest(value=value), patch.object(client, "_probe") as probed:
+                out = io.StringIO()
+                with self.assertRaises(client.ClientError) as caught, redirect_stdout(out):
+                    client.cmd_probe(SimpleNamespace(base_url=value))
+                self.assertEqual(caught.exception.status_text, "bad-base-url")
+                probed.assert_not_called()
+                self.assertNotIn("s3cret", str(caught.exception) + out.getvalue())
+
+    def test_a_valid_probe_override_is_probed_and_reported(self):
+        out = io.StringIO()
+        with patch.object(client, "_probe", return_value=True) as probed, redirect_stdout(out):
+            client.cmd_probe(SimpleNamespace(base_url="http://127.0.0.1:5141/"))
+        probed.assert_called_once_with("http://127.0.0.1:5141")
+        self.assertIn("reachable at http://127.0.0.1:5141", out.getvalue())
+
+    def test_the_cli_refuses_a_credential_bearing_probe_override_as_a_classified_error(self):
+        env = dict(os.environ, **{client.ENV_READ_TOKEN: "read-only"})
+        env.pop(client.ENV_WRITE_TOKEN, None)
+        env.pop(client.ENV_BASE_URL, None)
+        for script in ("context_memory_client.py", "context_memory_read_client.py"):
+            with self.subTest(script=script):
+                completed = subprocess.run(
+                    [sys.executable, "-B", str(SCRIPTS / script),
+                     "--base-url", "http://operator:s3cret@memory.example:5141", "probe"],
+                    capture_output=True, text=True, env=env, timeout=30)
                 self.assertEqual(completed.returncode, 1)
                 self.assertIn("bad-base-url", completed.stderr)
                 self.assertNotIn("Traceback", completed.stderr)
@@ -1395,14 +1510,17 @@ class SetRedactionGateTests(unittest.TestCase):
     def test_caller_payload_is_not_mutated(self):
         # A shallow copy shares item dicts, so an in-place scrub would silently rewrite what the
         # caller still holds — including the test's own fixture, which is how this gate could
-        # look like it passed while a retry posted the original.
-        original = copy.deepcopy(PLANTED)
-        with patch.object(client, "read_payload", return_value=copy.deepcopy(PLANTED)), \
+        # look like it passed while a retry posted the original. The object compared afterwards is
+        # the very one `cmd_set` received, so an in-place scrub cannot hide behind a copy.
+        payload = copy.deepcopy(PLANTED)
+        original = copy.deepcopy(payload)
+        with patch.object(client, "read_payload", return_value=payload), \
                 patch.object(client, "_request", return_value={"created": 1}) as request, \
                 redirect_stdout(io.StringIO()):
             client.cmd_set(SimpleNamespace(payload=None, dryrun=False))
         _assert_no_secret(self, request.call_args.args[2])
-        self.assertEqual(original, PLANTED)
+        self.assertIsNot(request.call_args.args[2], payload)
+        self.assertEqual(payload, original)
 
     def test_unavailable_redactor_refuses_the_write(self):
         # Fail closed. "The scrubber could not run" is precisely the condition under which
@@ -1819,6 +1937,23 @@ class DivergenceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             divergence.compose(payload)
 
+    def test_write_scope_disagreeing_with_its_wrapper_is_refused(self):
+        # Issue 179: the wrapper and the existing claim agreed while the write that would be stored
+        # said otherwise, so a cross-scope pair was composed as a genuine conflict.
+        for field, value in (("scopeDimension", "program"), ("scopeIdentifier", "acme")):
+            with self.subTest(field=field):
+                payload = self.payload()
+                payload["candidate"]["write"][field] = value
+                with self.assertRaises(ValueError) as error:
+                    divergence.compose(payload)
+                self.assertIn(field, str(error.exception))
+
+    def test_a_write_without_scope_fields_takes_the_wrapper_scope(self):
+        payload = self.payload()
+        del payload["candidate"]["write"]["scopeDimension"]
+        del payload["candidate"]["write"]["scopeIdentifier"]
+        self.assertEqual(divergence.compose(payload)["diverged"], 1)
+
 
 class AuthorityTests(unittest.TestCase):
     def payload(self, winner):
@@ -1884,6 +2019,7 @@ class SemanticFixtureTests(unittest.TestCase):
         # the frozen fixture they were taken against — see the two re-scoring tests below.
         completed = subprocess.run(
             [sys.executable, str(HERE / "fixtures" / "score_fixtures.py"),
+             "--fixtures", str(BALANCED_FIXTURE),
              "--model-verdicts", str(HERE / "fixtures" / "model-verdicts-2026-09-29-balanced.json")],
             capture_output=True,
             text=True,
@@ -1942,7 +2078,7 @@ class SemanticFixtureTests(unittest.TestCase):
         try:
             completed = subprocess.run(
                 [sys.executable, str(fixtures / "score_fixtures.py"),
-                 "--model-verdicts", str(reordered)],
+                 "--fixtures", str(BALANCED_FIXTURE), "--model-verdicts", str(reordered)],
                 capture_output=True, text=True, check=False)
             self.assertEqual(completed.returncode, 0, completed.stderr)
             score = json.loads(completed.stdout)
@@ -2113,6 +2249,7 @@ class SemanticFixtureTests(unittest.TestCase):
         only a demotion of the claim rather than a demotion of the wording."""
         completed = subprocess.run(
             [sys.executable, str(HERE / "fixtures" / "score_fixtures.py"),
+             "--fixtures", str(BALANCED_FIXTURE),
              "--model-verdicts", str(HERE / "fixtures" / "model-verdicts-2026-09-29-balanced.json")],
             capture_output=True, text=True, check=False)
         score = json.loads(completed.stdout)
@@ -2129,9 +2266,64 @@ class SemanticFixtureTests(unittest.TestCase):
             if scenario.get("axis") != "recall_positive":
                 continue
             for recalled in scenario.get("recall_set", []):
-                self.assertEqual(recalled["group_uuid"], "g-01",
+                self.assertEqual(recalled["group_uuid"], scenario["candidate_group_uuid"],
                                  f"{scenario['id']} is a recall positive but its recalled memory "
                                  "is in another group, so the shipped write path cannot version it")
+
+    def test_the_cross_group_control_states_a_different_writing_group(self):
+        # Issue 179: without the candidate's own group the model could not see that s4's twin is
+        # foreign, so the scenario scored a judgement the input never made answerable.
+        scenario = {s["id"]: s for s in self._scenarios()}["s4-cross-group-match-is-not-a-bump"]
+        self.assertNotEqual(scenario["candidate_group_uuid"], scenario["recall_set"][0]["group_uuid"])
+
+    def test_the_blinded_input_carries_each_candidates_writing_group(self):
+        completed = subprocess.run(
+            [sys.executable, str(HERE / "fixtures" / "score_fixtures.py"), "--emit-model-input"],
+            capture_output=True, text=True, check=False)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        for scenario in json.loads(completed.stdout)["scenarios"]:
+            if scenario.get("recall_set"):
+                with self.subTest(id=scenario["id"]):
+                    self.assertTrue(scenario.get("candidate_group_uuid"))
+
+    def test_emission_refuses_a_recall_scenario_without_a_writing_group(self):
+        scenarios = self._scenarios()
+        del scenarios[1]["candidate_group_uuid"]
+        scratch = HERE / ".ungrouped-fixtures.json"
+        scratch.write_text(json.dumps({"scenarios": scenarios}))
+        try:
+            completed = subprocess.run(
+                [sys.executable, str(HERE / "fixtures" / "score_fixtures.py"),
+                 "--fixtures", str(scratch), "--emit-model-input"],
+                capture_output=True, text=True, check=False)
+        finally:
+            scratch.unlink()
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn(scenarios[1]["id"], completed.stderr)
+
+    def test_a_collapse_into_the_wrong_memory_is_not_a_correct_prediction(self):
+        # Issue 179: precision credited any claimed collapse on a recall positive, so a bump into the
+        # wrong memory — which overwrites an unrelated claim — scored as a correct collapse.
+        scenarios = self._scenarios()
+        verdicts = self._verdicts_for(scenarios, lambda s: s["expected"]["verdict"])
+        for verdict, scenario in zip(verdicts, scenarios):
+            if scenario.get("axis") == "recall_positive":
+                verdict["target_uuid"] = "m-wrong"
+        completed, score = self._score(scenarios, verdicts)
+
+        self.assertEqual(score["counts"]["predicted_positives"], 2)
+        self.assertEqual(score["counts"]["correct_predictions"], 0)
+        self.assertEqual(score["counts"]["wrong_target"], 2)
+        self.assertEqual(score["precision"], 0.0)
+        self.assertNotEqual(completed.returncode, 0)
+
+    def test_the_atomicity_scenario_statement_carries_its_three_claims(self):
+        # The expected split is about the statement; a statement that only names the decisions
+        # scored a model on claims it was never shown. The shipped detector is the cheap witness.
+        scenario = {s["id"]: s for s in self._scenarios()}["s3-bundled-split-counted"]
+        self.assertEqual(scenario["expected"]["count"], 3)
+        self.assertEqual(atomicity.classify(scenario["candidate_statement"])["verdict"], "bundled")
+        self.assertEqual(scenario["candidate_statement"].count(";") + 1, 3)
 
 
 class AgentContractTests(unittest.TestCase):

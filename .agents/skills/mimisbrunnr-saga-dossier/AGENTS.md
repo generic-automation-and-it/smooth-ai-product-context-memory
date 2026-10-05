@@ -44,12 +44,18 @@ The skill never re-selects. It takes the bundle (or the approved preview's recor
 composes. If the bundle it receives differs from the approved preview selection, it reports the
 difference (LADR-14) rather than silently composing the new one.
 
-The `bundle` request is the skill's only network call. It seeds the read token and base URL from the
+The `preview` and `bundle` requests are the skill's only network calls; both post the same anchor body
+through one read-only transport. They seed the read token and base URL from the
 machine credential file at import (read token + base URL only, never a write token — read-only
-LADR-08/NFR-06), builds the anchor body in the contract's field names (the endpoint rejects unknown
-properties), and always sends `widenDepth`. `--ticket`/`--tickets` map to one `ticketProvider` +
+LADR-08/NFR-06), build the anchor body in the contract's field names (the endpoint rejects unknown
+properties), and always send `widenDepth`. `--ticket`/`--tickets` map to one `ticketProvider` +
 `ticketKey` pair; more than one ticket is refused, never truncated. Heimdallr autofill uses the same
 builder and fills tickets from the branch only (commit-subject tickets are PR numbers).
+
+`compose --out` writes only where `git check-ignore` reports the resolved destination as ignored; a
+tracked file, an un-ignored path or a path outside a work tree is refused. An explicit `--asof` that
+does not parse is refused — only an absent one means today. A contradiction needs identical
+applicability **and** identical derived lifecycle, the same comparison consolidation uses.
 
 ### Ordering (LADR-07)
 
@@ -158,6 +164,7 @@ the only file it writes is the local dossier artefact. Tests: `tests/run_tests.p
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-05 | **Consumer-review fixes (issue 179).** (1) An explicit `--asof` that does not parse (`2026-13-45`) is refused in `compose()`; `_parse_time` returned `None` and the lifecycle/stale checks fell back to today while the dossier displayed the typo. (2) The contradiction gate now requires identical derived lifecycles, as `consolidate` does — two conflicting proposals are a contradiction (previously refused because any `proposed` member was); current-versus-superseded and current-versus-unknown are now refused alongside proposed-versus-shipped. (3) A rendered omission names `uuid vN` beside the name, so a history dossier that keeps v1 and cuts v3 says which was cut. (4) `compose --out` is refused unless `git check-ignore` reports the **resolved** destination ignored (a tracked file is never reported ignored, and resolving defeats a symlink to one); outside a work tree it is refused, stdout remains. (5) New `preview` subcommand (same anchor flags, `POST /api/context/dossier/preview`, shared read-only transport) so the LADR-14 consent step is runnable with the skill's own allowed tool; README quickstart and SKILL.md workflow now preview → approve → save the **whole** bundle to `.context/mimisbrunnr-saga-dossier/bundle.json` (SKILL.md piped it to `head` and composed a `bundle.json` never written) → compose. (6) Tests: the non-loopback refusal test now supplies a fake read token and a recording opener and asserts nothing is built or opened (a missing-credential error previously satisfied it); the store-wide-language test gained a finding-bearing case (it iterated an empty list). Harness 76 -> 94; each behaviour fix mutation-checked; green on 3.9.6 and 3.13. HLD-005 references in Contexts left as-is — `docs/hlds/005-contextual-export/` exists in this repo. | issue 179 |
 | 2026-10-04 | **The bundle's write-token refusal checked one spelling of a credential that has two.** `_resolve_read_credentials` refused only `CONTEXT_MEMORY_WRITE_TOKEN`, while the established read path treats the two forms as one credential — the kvasir client strips `CONTEXT_MEMORY_WRITE_TOKEN` **and** `ApiAccess__WriteToken` from a read subprocess precisely so a read surface stays read-only "whichever form the shell set", and the provisioner writes the Host's `ApiAccess__WriteToken` beside the skill name. An operator who had sourced the provisioned env file therefore held a live write credential in this read-only composer's environment while the refusal stayed silent — contradicting this file's own `No write capability` non-negotiable and the function's own docstring ("a write token present is refused before anything else"). Both spellings are now refused, via `_WRITE_TOKEN_NAMES`; the message names **whichever form is actually present**, so the refusal stays actionable instead of naming a variable the operator never set. The composer never reads the Host form, so no request changes — this closes the boundary, not a live capability. **Unpinned by the harness:** `BundleCredentialTests.test_a_write_token_present_refuses_the_bundle_request` covers the skill spelling only, so the second branch has no committed test; one asserting `ApiAccess__WriteToken` also refuses (and that the message names it) is the obvious follow-up. Test edits were out of scope for this pass. | PR review |
 | 2026-10-04 | Review clean-up: removed the dead `--base-url`→`CONTEXT_MEMORY_BASE_URL` env write in `cmd_bundle` — `fetch_bundle_from_api` passes the flag straight to `_resolve_read_credentials`, so the env write no longer feeds anything. | code review |
 | 2026-10-04 | Review hardening: `_problem_summary` never raises past `main()` (a truncated HTTP error body can raise `http.client.IncompleteRead`, which an OSError-only handler missed), and the half-specified `--body` ticket refusal names the fix (drop the partial fields, use `--ticket` alone). | code review |

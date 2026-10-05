@@ -21,14 +21,16 @@ Design rules that the harness pins, each of which exists because the cheaper ver
 - **Redaction runs before any model call, and fails closed.** An unavailable redactor is
   `redactor-unavailable`, and no request is made. Sending unscrubbed content to a model is the one
   outcome this gate exists to avoid.
-- **The attempt counter is the script's, not the caller's.** A ledger keyed by record identity in a
-  state file bounds the rewrite loop, so an agent cannot reset it by re-asking.
+- **The attempt counter is the script's, not the caller's.** A ledger keyed by a SHA-256 digest of the
+  record identity in a state file bounds the rewrite loop, so an agent cannot reset it by re-asking —
+  and the subject, which can carry personal data, never reaches the file.
 - **The score is a quality signal, never authority.** It never changes status, kind, or approval.
 
 Python 3.9+, stdlib only.
 """
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -43,7 +45,7 @@ from urllib.parse import urlparse
 DEFAULT_BASE_URL = "http://localhost:11434"
 DEFAULT_PATH = "/v1/systemone"
 DEFAULT_MODEL = "nimble"
-DEFAULT_MIN_PROBABILITY = 0.5
+DEFAULT_MIN_PROBABILITY = 0.85
 DEFAULT_MAX_ATTEMPTS = 3
 DEFAULT_TIMEOUT = 30
 DEFAULT_ROLES = "product-owner,designer,developer,tester,business"
@@ -479,11 +481,63 @@ def discrimination(scores):
     return margin, sorted(tied)
 
 
+def request_path(path):
+    """The configured request path, refused unless it can only extend the validated origin.
+
+    The path is appended to a base URL that `resolve_endpoint` has already approved, so it can move the
+    request as surely as the base can: `@other.example/v1` turns `http://localhost:11434` into a URL
+    whose userinfo is `localhost:11434` and whose host is other.example — and the record and the bearer
+    key go with it. Only an absolute path with no authority-bearing character passes. Same rule as
+    muninn's `recall_feedback_path_ok`. The path is never echoed: it is configuration that may carry a
+    pasted credential.
+    """
+    if not path.startswith("/") or path.startswith("//"):
+        raise GateError("bad-decisions-url",
+                        f"{ENV_PATH} must be an absolute path starting with a single '/'")
+    if "@" in path or "\\" in path or any(ch.isspace() or ord(ch) < 0x20 or ord(ch) == 0x7F
+                                           for ch in path):
+        raise GateError("bad-decisions-url",
+                        f"{ENV_PATH} must not carry '@', '\\', whitespace or a control character")
+    return path
+
+
+def _authority(parsed):
+    return parsed.scheme.lower(), parsed.hostname, parsed.port
+
+
+def resolve_url(settings):
+    """The full request URL, asserted to reach the same scheme, host and port as the approved base.
+
+    The path rules above are the first net; this is the second, judged on the joined URL itself, so a
+    path shape the rules did not anticipate still cannot change the destination.
+    """
+    base = resolve_endpoint(settings["base_url"], settings["api_key"])
+    url = base + request_path(settings["path"])
+    try:
+        same = _authority(urlparse(url)) == _authority(urlparse(base))
+    except ValueError:
+        same = False
+    if not same:
+        raise GateError("bad-decisions-url",
+                        f"{ENV_PATH} changes the request's destination; refusing to send")
+    return url
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuse every redirect. The request carries the record and, for a hosted endpoint, the bearer
+    key; urllib would replay both to whatever `Location` names. Same guard as the store client's."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise GateError("redirect-refused",
+                        f"the decision endpoint answered {code} with a redirect; credential-bearing "
+                        "requests do not follow redirects")
+
+
 def call_model(state, roles, settings, rubric_version):
     """Score one record. Returns scores, passing roles, and the rubric version recorded with them."""
     payload = build_request(state, roles, settings["model"])
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    url = resolve_endpoint(settings["base_url"], settings["api_key"]) + settings["path"]
+    url = resolve_url(settings)
 
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
     # Sent only when non-empty: local Ollama needs no key, and an empty Authorization header is a
@@ -492,7 +546,7 @@ def call_model(state, roles, settings, rubric_version):
         headers["Authorization"] = f"Bearer {settings['api_key']}"
 
     request = urllib.request.Request(url, data=body, headers=headers, method="POST")
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
     try:
         with opener.open(request, timeout=settings["timeout"]) as response:
             raw = response.read().decode("utf-8")
@@ -528,9 +582,17 @@ def call_model(state, roles, settings, rubric_version):
         if not isinstance(value, (int, float)) or isinstance(value, bool):
             raise GateError("bad-response",
                             f"role {role['key']!r} carried no numeric `noul`")
-        # Clamped: a probability outside 0..1 is a malformed answer, and letting it through would let a
-        # 1.5 pass a 1.0 bar. Clamping is stated here rather than silently trusted.
-        scores[role["key"]] = max(0.0, min(1.0, float(value)))
+        # Refused, not clamped. `json.loads` accepts `NaN` and `Infinity`, and clamping turned an
+        # `Infinity` (or a 1.5) into a confident 1.0 that passes any bar — a malformed answer reported
+        # as the strongest possible score. A probability outside 0..1 is not a score at all.
+        try:
+            probability = float(value)
+        except OverflowError:
+            probability = math.inf
+        if not math.isfinite(probability) or not 0.0 <= probability <= 1.0:
+            raise GateError("bad-response",
+                            f"role {role['key']!r} carried a `noul` outside 0..1")
+        scores[role["key"]] = probability
 
     passing = [role for role, value in scores.items() if value > settings["min_probability"]]
     return scores, passing, rubric_version
@@ -543,8 +605,50 @@ def ledger_path(state_file):
     return Path(state_file)
 
 
+LEDGER_KEY_PREFIX = "sha256:"
+_LEDGER_KEY = re.compile(r"sha256:[0-9a-f]{64}")
+
+
+def ledger_key(identity):
+    """The on-disk key for a record identity: a SHA-256 digest, never the identity itself.
+
+    The identity is the record's subject, and a subject can carry personal data — a name, an email, a
+    customer. The ledger only needs to recognise the same record again, which a digest does as well as
+    the raw text, so the raw text never has to reach the file.
+    """
+    return LEDGER_KEY_PREFIX + hashlib.sha256(identity.encode("utf-8")).hexdigest()
+
+
+def _merge_entries(first, second):
+    """One entry from two that now share a key: the larger spent count and the better best."""
+    if first is None:
+        return second
+    best_first, best_second = entry_best(first), entry_best(second)
+    best = best_first if best_second is None else best_attempt(best_first, best_second)
+    return {"attempts": max(entry_attempts(first), entry_attempts(second)), "best": best}
+
+
+def migrate_ledger(ledger):
+    """Re-key a ledger written before keys were digests. Returns `(ledger, migrated)`.
+
+    A raw-identity key is hashed rather than dropped: dropping it would reset that record's budget on
+    upgrade, the same silent reset `ledgerReset` exists to expose. Two raw keys never hash alike, but a
+    raw key can meet the digest of itself if an older and a newer gate both wrote this file; those are
+    merged, keeping the larger spent count. The caller rewrites the file whenever `migrated` is true, so
+    the raw subjects leave the disk on the first run after an upgrade.
+    """
+    migrated = {}
+    changed = False
+    for key, value in ledger.items():
+        if not _LEDGER_KEY.fullmatch(key):
+            key = ledger_key(key)
+            changed = True
+        migrated[key] = _merge_entries(migrated.get(key), value)
+    return migrated, changed
+
+
 def read_ledger(state_file):
-    """The ledger, and whether it had to be discarded.
+    """The ledger, whether it had to be discarded, and whether it was re-keyed from raw identities.
 
     A missing or unreadable ledger starts empty rather than refusing: the ledger bounds a convenience
     loop, and a corrupt file must not be a way to make scoring fail permanently. **That choice is
@@ -557,11 +661,11 @@ def read_ledger(state_file):
         with open(ledger_path(state_file), encoding="utf-8") as handle:
             data = json.load(handle)
     except OSError:
-        return {}, False
+        return {}, False, False
     except ValueError:
-        return {}, True
+        return {}, True, False
     if not isinstance(data, dict):
-        return {}, True
+        return {}, True, False
     # An entry is `{"attempts": int, "best": {...} | null}`, because the best attempt has to survive
     # between invocations for the comparison it exists to make. A **bare integer is also accepted** and
     # read as a count with no recorded best, so a ledger written by the earlier count-only format
@@ -569,17 +673,18 @@ def read_ledger(state_file):
     # the exact failure `ledgerReset` exists to make visible.
     for key, value in data.items():
         if not isinstance(key, str):
-            return {}, True
+            return {}, True, False
         if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
             continue
         if not isinstance(value, dict):
-            return {}, True
+            return {}, True, False
         attempts = value.get("attempts")
         if not isinstance(attempts, int) or isinstance(attempts, bool) or attempts < 0:
-            return {}, True
+            return {}, True, False
         if value.get("best") is not None and not isinstance(value.get("best"), dict):
-            return {}, True
-    return data, False
+            return {}, True, False
+    ledger, migrated = migrate_ledger(data)
+    return ledger, False, migrated
 
 
 def entry_attempts(value):
@@ -673,8 +778,9 @@ def next_attempt(state_file, identity, max_attempts):
     Returns `(attempt, reset)`; `reset` is True when the ledger had to be discarded, which the caller
     surfaces so a cleared budget is never mistaken for a first attempt.
     """
-    ledger, discarded = read_ledger(state_file)
-    entry = ledger.get(identity)
+    ledger, discarded, migrated = read_ledger(state_file)
+    key = ledger_key(identity)
+    entry = ledger.get(key)
     # Read both parts of the entry BEFORE any write. Two separate writes were the first cut of this,
     # and the second one read back a file the first had already replaced: writing the bare count
     # discards the recorded best, so every rewrite looked like an improvement and the stored `best`
@@ -682,10 +788,14 @@ def next_attempt(state_file, identity, max_attempts):
     prior_best = entry_best(entry)
     used = entry_attempts(entry) if entry is not None else 0
     if used >= max_attempts:
+        if migrated:
+            # Nothing else would rewrite the file on this path, and a spent budget is exactly the
+            # entry that stays put — so the raw subjects would outlive the upgrade indefinitely.
+            write_ledger(state_file, cap_ledger(ledger))
         return None, discarded, prior_best
     # The count is spent whether or not the model answers, so it is written now with the best carried
     # through untouched; `record_attempt` then raises the best without disturbing the count.
-    ledger[identity] = {"attempts": used + 1, "best": prior_best}
+    ledger[key] = {"attempts": used + 1, "best": prior_best}
     write_ledger(state_file, cap_ledger(ledger))
     return used + 1, discarded, prior_best
 
@@ -697,9 +807,10 @@ def record_attempt(state_file, identity, attempt, scores):
     answered — an `unreachable` round must still count against the budget, or a down model would
     grant unlimited attempts for free.
     """
-    ledger, _discarded = read_ledger(state_file)
+    ledger, _discarded, _migrated = read_ledger(state_file)
+    key = ledger_key(identity)
     candidate = {"attempt": attempt, "max": max(scores.values()), "scores": scores}
-    entry = ledger.get(identity)
+    entry = ledger.get(key)
     # `next_attempt` may have replaced a dict entry with a bare count, so the best is read from what
     # survives here rather than from the value passed in. Counting up from the surviving count keeps a
     # ledger written in the earlier format converging instead of restarting.
@@ -712,10 +823,10 @@ def record_attempt(state_file, identity, attempt, scores):
     # end-to-end case that finally crosses the cap.
     prior = entry_best(entry)
     prior_attempts = entry_attempts(entry) if entry is not None else 0
-    ledger[identity] = {"attempts": max(prior_attempts, attempt),
-                        "best": best_attempt(prior, candidate)}
+    ledger[key] = {"attempts": max(prior_attempts, attempt),
+                   "best": best_attempt(prior, candidate)}
     write_ledger(state_file, cap_ledger(ledger))
-    return ledger[identity]["best"]
+    return ledger[key]["best"]
 
 
 def best_attempt(previous, candidate):
@@ -869,7 +980,7 @@ def cmd_probe(args):
         return 0
 
     try:
-        resolve_endpoint(settings["base_url"], settings["api_key"])
+        resolve_url(settings)
         rubric_version, roles = load_rubric(settings["roles"])
     except GateError as exc:
         report["outcome"] = exc.outcome

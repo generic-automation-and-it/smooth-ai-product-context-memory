@@ -28,26 +28,40 @@ is written to be self-guarding rather than trusting the operator to have run the
 the resolved host through the same helper and refuses rather than sending, so a copied-out command
 block cannot skip the guard that documents it.
 
+**Choose the window first.** The dates are the operator's, not the skill's — there is no default, and
+a copied date silently re-measures an old window. Set them once per shell as ISO 8601 dates
+(`YYYY-MM-DD`, or a UTC instant ending in `Z` — a `+hh:mm` offset would need URL-encoding) and every
+query below reuses them; a query whose variable is unset stops before it sends:
+
+```bash
+RF_FROM=YYYY-MM-DD   # start of the window being measured
+RF_TO=YYYY-MM-DD     # end of that window; also the never-recalled asOf
+```
+
 ### 1. Which memories have never been recalled?
 
 ```bash
-recall_feedback_curl GET "/api/context/recall-feedback/never-recalled?asOf=2026-09-18&limit=500" \
+recall_feedback_curl GET "/api/context/recall-feedback/never-recalled?asOf=${RF_TO:?set RF_TO}&limit=500" \
   "$CONTEXT_MEMORY_READ_TOKEN"
 ```
 
-`asOf` is required (ISO 8601). The list already excludes memories captured within the recency grace
+`asOf` is required (ISO 8601) and is the window's end, `RF_TO`, so the list describes the same period
+as the miss rate. The list already excludes memories captured within the recency grace
 (it distinguishes "never recalled" from "recently captured and not yet retrieved"), so a new memory does
 not pollute the signal.
 
 ### 2. How often does retrieval return nothing?
 
 ```bash
-recall_feedback_curl GET "/api/context/recall-feedback/miss-rate?from=2026-09-11&to=2026-09-18" \
+recall_feedback_curl GET "/api/context/recall-feedback/miss-rate?from=${RF_FROM:?set RF_FROM}&to=${RF_TO:?set RF_TO}" \
   "$CONTEXT_MEMORY_READ_TOKEN"
 ```
 
 Returns `{ "retrievals": N, "misses": M, "missRate": 0.0 }`. Count a window before and after a tuning
-change to show whether a change moved it — this is the before/after comparison NFR-03 exists for.
+change to show whether a change moved it — this is the before/after comparison NFR-03 exists for. Run
+the queries once with `RF_FROM`/`RF_TO` set to the window ending at the change, then again with an
+equal-length window starting at it; record both pairs of dates beside the results, since the numbers
+mean nothing without them.
 
 ### 3. Reset the baseline
 
@@ -83,7 +97,8 @@ What the script enforces before any token leaves:
 
 - The base URL is **parsed** and its resolved host asserted to be loopback; a raw-string glob would
   approve `http://localhost:5141@192.0.2.1/` (loopback prefix, non-loopback host via userinfo). A base
-  carrying credentials, a path, a query or a fragment is refused, and the refusal never echoes it.
+  carrying credentials, a path, a query or a fragment is refused, and the refusal never echoes it —
+  it reports only whether each part is present or absent.
 - The base reaches the parser through the environment, not argv, so it is never visible in `ps`.
 - The request path must be absolute and carry no `@`, `\`, whitespace or leading `//` — a path such as
   `@evil.example/x` appended to an approved origin would otherwise move the request's host.
@@ -91,6 +106,8 @@ What the script enforces before any token leaves:
   unlinked on success, failure and interrupt.
 - `--noproxy '*'`: curl honours `http_proxy`/`ALL_PROXY`, and a proxy would otherwise receive the
   loopback request and its header.
+- `-q` is curl's first argument, so a default `~/.curlrc` (an extra header, a proxy, `--location`)
+  cannot change the request the guard approved.
 
 The refusals are checked in the calling function, not a `( ... )` subshell whose `exit 1` nobody
 tests, so a refusal cannot be followed by a request.

@@ -238,6 +238,14 @@ def read_unit(unit_file: Path, subject: str, root: Path | None = None) -> tuple[
                         f"{where}: 'provenance.inherited' still holds a template placeholder — "
                         "name what this session inherited, or omit the list"
                     )
+        elif inherited is not None and not looks_like_flow_sequence(inherited):
+            # A scalar never reaches the lineage reader, so a placeholder or bare name written on one
+            # line would pass silently. A flow sequence is excluded only because `inline_sequences`
+            # already reports it with the block-list remedy.
+            problems.append(
+                f"{where}: 'provenance.inherited' must be a block list of [[slug]] entries — "
+                "rewrite it as one, or omit it"
+            )
 
     context = fields.get("agents_context")
     if isinstance(context, str) and context and not placeholder(context):
@@ -411,12 +419,16 @@ def load_units(store: Path) -> tuple[list[dict], list[dict], list[str]]:
 
 
 def case_collisions(records: list[dict]) -> list[str]:
-    """Slugs or subject folders that are distinct names but the same file on some filesystem.
+    """Unit files or subject folders that are distinct names but the same entry on some filesystem.
 
     On a case-insensitive filesystem (the default on macOS and Windows) `Foo.understanding.md` and
     `foo.understanding.md` are one file, and the second write silently replaces the first. Ordinal
     comparison cannot see it, so neither can the version grouping: a repeated slug is treated as a
     version chain, which is correct on a case-sensitive filesystem and wrong here.
+
+    Compared per filesystem entry, never per bare name: a unit file by its full `<subject>/<file>` path
+    and a subject folder by its full stamped name. A store-wide slug bucket reported `Foo` and `foo` in
+    two differently stamped folders, which are two files on every filesystem (issue 179).
 
     Running here catches a store that **already holds** a collision, and makes it reportable; it cannot
     undo an overwrite. The check that prevents the overwrite is the pre-extraction refusal in
@@ -429,13 +441,14 @@ def case_collisions(records: list[dict]) -> list[str]:
     file on disk.
     """
     problems = []
-    for field, kind in (("slug", "slug"), ("subject", "subject folder")):
+    for field, kind in (("path", "unit file"), ("subject", "subject folder")):
         buckets: dict[str, set[str]] = {}
         for record in records:
             buckets.setdefault(str(record[field]).casefold(), set()).add(str(record[field]))
         for names in sorted(buckets.values(), key=sorted):
-            # One distinct name cannot collide with itself; only a genuine disagreement is a problem,
-            # and the set is what makes a repeated slug — the versioning mechanism — stay silent.
+            # One distinct name cannot collide with itself; only a genuine disagreement is a problem.
+            # Folder names are bucketed as a set, so many units in one folder stay silent, and a
+            # repeated slug lives at a different path in each folder, so a version chain stays silent.
             if len(names) > 1:
                 rendered = ", ".join(f"'{n}'" for n in sorted(names))
                 problems.append(

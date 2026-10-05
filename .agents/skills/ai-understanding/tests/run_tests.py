@@ -130,9 +130,20 @@ class CaseCollisionTests(unittest.TestCase):
     def test_slugs_differing_only_by_case_are_reported(self):
         found = ui.case_collisions(self.records(("Foo", "s-20260101-0000"), ("foo", "s-20260101-0000")))
         self.assertEqual(len(found), 1, found)
-        self.assertIn("'Foo'", found[0])
-        self.assertIn("'foo'", found[0])
+        self.assertIn(f"'s-20260101-0000/Foo{ui.UNIT_SUFFIX}'", found[0])
+        self.assertIn(f"'s-20260101-0000/foo{ui.UNIT_SUFFIX}'", found[0])
+        self.assertIn("unit file", found[0])
         self.assertIn("case-insensitive", found[0])
+
+    def test_case_differing_slugs_in_differently_stamped_folders_are_distinct_files(self):
+        """Issue 179: a store-wide slug bucket reported these, but they are two paths on every filesystem."""
+        self.assertEqual(ui.case_collisions(self.records(("Foo", "auth-20261001-1200"),
+                                                        ("foo", "auth-20261002-1200"))), [])
+
+    def test_folders_differing_only_by_case_in_name_but_not_stamp_are_distinct(self):
+        """`Auth-<stamp1>` and `auth-<stamp2>` are two directories; the full stamped name is compared."""
+        self.assertEqual(ui.case_collisions(self.records(("x", "Auth-20261001-1200"),
+                                                        ("x", "auth-20261002-1200"))), [])
 
     def test_folders_differing_only_by_case_are_reported(self):
         found = ui.case_collisions(self.records(("one", "S-20260101-0000"), ("two", "s-20260101-0000")))
@@ -232,6 +243,56 @@ class CaseCollisionTests(unittest.TestCase):
             rc, _out, err = run(argv(store))
             self.assertEqual(rc, 1, "a case collision must be a validation failure")
             self.assertIn("case-insensitive", err)
+
+
+class InheritedShapeTests(unittest.TestCase):
+    """`provenance.inherited` must be a block list; any other present shape is a validation problem.
+
+    A scalar never reaches the list-only placeholder check or the lineage reader, so a one-line
+    placeholder exited 0 and silently recorded nothing (issue 179).
+    """
+
+    def write_inherited_unit(self, store: Path, inherited_block: str) -> None:
+        folder = store / "proj-20260930-1700"
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / f"alpha{ui.UNIT_SUFFIX}").write_text(
+            UNIT_FRONTMATTER.format(slug="alpha", updated="2026-09-30")
+            .replace("  source: test harness\n", f"  source: test harness\n{inherited_block}"),
+            encoding="utf-8")
+
+    def problems_for(self, inherited_block: str) -> list[str]:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Path(tmp) / "understandings"
+            self.write_inherited_unit(store, inherited_block)
+            return ui.load_units(store)[2]
+
+    def test_scalar_placeholder_is_reported(self):
+        found = [p for p in self.problems_for("  inherited: <[[slug]] this session acted on>\n")
+                 if "provenance.inherited" in p]
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("block list", found[0])
+
+    def test_scalar_placeholder_fails_the_exit_code(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Path(tmp) / "understandings"
+            self.write_inherited_unit(store, "  inherited: <[[slug]] this session acted on>\n")
+            rc, _out, err = run(argv(store))
+            self.assertEqual(rc, 1)
+            self.assertIn("provenance.inherited", err)
+
+    def test_bare_scalar_name_is_reported(self):
+        self.assertTrue(any("provenance.inherited" in p
+                            for p in self.problems_for("  inherited: alpha\n")))
+
+    def test_flow_sequence_is_reported_once_by_the_inline_list_check(self):
+        found = [p for p in self.problems_for("  inherited: [[alpha]]\n") if "provenance.inherited" in p]
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("inline list", found[0])
+
+    def test_block_list_and_absence_are_accepted(self):
+        """Negative controls: the shapes the template uses must stay silent."""
+        self.assertEqual(self.problems_for("  inherited:\n    - \"[[alpha]]\"\n"), [])
+        self.assertEqual(self.problems_for(""), [])
 
 
 class AgentsContextResolutionTests(unittest.TestCase):

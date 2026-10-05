@@ -13,16 +13,20 @@
     "tier 0 = no checkable fact, 1 = topic words but no fact, 2 = one concrete fact, 3 = concrete",
     "fact spanning several roles. tier >= 2 is the PASS side; 0-1 is the HOLD side.",
     "rubricVersion below is the version of decisions_rubric.json these numbers were measured",
-    "against. Editing the rubric without re-measuring must FAIL CalibrationEvidenceTests, so a",
-    "recorded run can never certify a rubric it did not score."
+    "against, and rubricSha256 is the SHA-256 of that file's bytes. Editing the rubric without",
+    "re-measuring must FAIL CalibrationEvidenceTests -- the digest catches an edit that keeps the",
+    "version -- so a recorded run can never certify a rubric it did not score.",
+    "`bar` is the shipped default: the gate's built-in DEFAULT_MIN_PROBABILITY and the value",
+    "scripts/run.sh publishes into the machine credential file. `atBar05` holds the earlier 0.5 run."
   ],
   "rubricVersion": "2",
+  "rubricSha256": "e7b391a21b6f593bd7e50f9b4fff8ff321e7df0295dec6573ee994f7f2b8612c",
   "recordedRun": {
     "date": "2026-10-04",
     "model": "nimble",
     "endpoint": "http://localhost:11434",
     "bar": 0.85,
-    "note": "Raw returned probabilities, no temperature scaling, at the SHIPPED default bar of 0.85. 0.85 sits inside the bimodal gap (hold-side max 0.205, pass-side min 0.961), so gate verdicts are identical to those at 0.5 -- 1.00/1.00 -- while role attribution falls from 27/30 to 24/30. That is the measured cost of the stricter bar, stated rather than hidden. See the temperature row in the skill changelog: the vendor's fitted T=2.179 reduces separation and is a trap for a gate.",
+    "note": "Raw returned probabilities, no temperature scaling, at the shipped 0.85 default (DEFAULT_MIN_PROBABILITY and scripts/run.sh). 0.85 sits inside the bimodal gap (hold-side max 0.205, pass-side min 0.961), so gate verdicts are identical to those at 0.5 -- 1.00/1.00 -- while role attribution falls from 27/30 to 24/30. That is the measured cost of the stricter bar, stated rather than hidden. See the temperature row in the skill changelog: the vendor's fitted T=2.179 reduces separation and is a trap for a gate.",
     "tier01MeanBestRole": 0.103,
     "tier01MaxBestRole": 0.205,
     "tier23MeanBestRole": 0.991,
@@ -67,11 +71,12 @@
       }
     ],
     "atBar05": {
+      "bar": 0.5,
       "precision": 1.0,
       "recall": 1.0,
       "expectedRolesClearing": 27,
       "unexpectedRolesClearing": 22,
-      "note": "same corpus, same rubric, bar 0.5 -- recorded because it shows the bar changes attribution, not the verdict"
+      "note": "same corpus, same rubric, at the former 0.5 default -- recorded because it shows the bar changes attribution, not the verdict"
     }
   },
   "records": [
