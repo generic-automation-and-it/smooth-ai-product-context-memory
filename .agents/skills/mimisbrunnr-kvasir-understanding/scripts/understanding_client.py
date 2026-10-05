@@ -961,6 +961,36 @@ def _seed_decisions_enabled() -> None:
 
 _seed_decisions_enabled()
 
+# The outer bound on one gate subprocess. Without it a hung gate blocks the export indefinitely,
+# which is the one outcome the note text below promises cannot happen: every failure mode is supposed
+# to skip the gate and keep every candidate. The bound is deliberately generous rather than tight —
+# the gate scores one record per request, sequentially, at its own 30s per request
+# (`DEFAULT_TIMEOUT` in decisions_gate.py), so a full 20-candidate batch can legitimately run for
+# minutes and a tight bound here would cut a healthy scoring run short, which is the same export-killing
+# defect in the other direction. This only converts an indefinite hang into a disclosed skip.
+GATE_TIMEOUT_SECONDS = 600
+
+
+def _audience_tags(candidate: dict, result: dict) -> list[str]:
+    """A candidate's own tags plus one `audience:<role>` tag per role the gate says passed.
+
+    `passingRoles` is read only when it is a list of strings. A string is iterable, so reading one
+    that way yielded a tag per character (`audience:d`, `audience:e`, …) — metadata the record never
+    carried, written into it under `mark` and read back as evidence of anything. A value this client
+    cannot interpret is treated as *no* evidence rather than as garbage; it never changes the
+    disposition, because `passed` alone decides whether the record is kept, tagged or held.
+    """
+    tags = list(candidate.get("tags") or [])
+    roles = result.get("passingRoles")
+    if isinstance(roles, list):
+        for role in roles:
+            if not isinstance(role, str):
+                continue
+            tag = f"audience:{role}"
+            if tag not in tags:
+                tags.append(tag)
+    return tags
+
 
 def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str]:
     """Score each candidate's role value through the capture skill's decision gate.
@@ -987,10 +1017,20 @@ def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str]:
 
     state_file = Path(os.environ.get("MIMIS_DECISIONS_STATE",
                                      ".context/decisions-ledger.json"))
-    proc = subprocess.run(
-        [sys.executable, "-B", str(DECISIONS_GATE), "score", "--state-file", str(state_file)],
-        input=json.dumps(candidates), capture_output=True, text=True, encoding="utf-8",
-    )
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-B", str(DECISIONS_GATE), "score", "--state-file", str(state_file)],
+            input=json.dumps(candidates), capture_output=True, text=True, encoding="utf-8",
+            timeout=GATE_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        # A gate that never answers is a down decision model, which is a skip — the same class as an
+        # unreachable one — so every candidate is kept and the reason is stated. Without this the export
+        # waited on the subprocess forever, contradicting the contract this function's own docstring
+        # states. It is never a refusal: nothing about a timeout means content would go uninspected.
+        print(f"NOTE: the decision gate did not answer within {GATE_TIMEOUT_SECONDS}s; the gate was "
+              "skipped and the export continued.", file=sys.stderr)
+        return candidates, f"decisions: skipped (gate timed out after {GATE_TIMEOUT_SECONDS}s)"
     if proc.returncode != 0:
         detail = proc.stderr.strip() or "no detail"
         if '"redactor-unavailable"' in detail:
@@ -1059,18 +1099,18 @@ def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str]:
             # model-missing — none of these is a score, so none of them may hold a record.
             unscored += 1
             continue
-        if result.get("passed"):
+        if result.get("passed") is True:
+            # Read as `is True`, mirroring the `is False` guard below, so the pass path accepts exactly
+            # what the gate emits (`bool(passing)`). A truthy non-boolean — `"false"`, `1` — is not a
+            # score saying "yes" any more than a falsey one is a score saying "no", and truthiness here
+            # tagged it as passing under `mark`; it now falls through to the same not-scored-and-kept
+            # bucket, which is the rule this client already applies to every value it cannot interpret.
             # Under `mark`, a passing record is exported and its passing roles are the evidence for
             # the audience tags, so they are tagged too. Under `hold` nothing is tagged: the gate
             # never writes metadata of its own on the pass path.
             if below == "mark":
                 candidate = dict(candidates[index])
-                tags = list(candidate.get("tags") or [])
-                for role in result.get("passingRoles") or []:
-                    tag = f"audience:{role}"
-                    if tag not in tags:
-                        tags.append(tag)
-                candidate["tags"] = tags
+                candidate["tags"] = _audience_tags(candidate, result)
                 marked[index] = candidate
             continue
         # Only a verdict that says `passed: false` may hold a record, and it is compared as `is False`
@@ -1083,12 +1123,7 @@ def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str]:
             continue
         if below == "mark":
             candidate = dict(candidates[index])
-            tags = list(candidate.get("tags") or [])
-            for role in result.get("passingRoles") or []:
-                tag = f"audience:{role}"
-                if tag not in tags:
-                    tags.append(tag)
-            candidate["tags"] = tags
+            candidate["tags"] = _audience_tags(candidate, result)
             marked[index] = candidate
         else:
             held_indices.add(index)
