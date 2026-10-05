@@ -282,10 +282,12 @@ never as an `improved` unit: nothing about the knowledge changed.
 Copy `assets/UNDERSTANDING.template.md` to `.context/understandings/<subject>-<yyyyMMdd-HHmm>/<slug>.understanding.md` — or under `--path` when given — and fill it.
 
 Subject **name**: kebab-case, names the topic or piece of work. Reuse the name a body of work already
-uses in the store — `ls .context/understandings/` shows them — so its runs stay browsable together.
+uses in the store — `INDEX.md` groups current units by subject, and the Glob tool on
+`.context/understandings/*/*.understanding.md` lists every folder — so its runs stay browsable together.
 
 Subject **folder**: always new, always this run. Create `<subject>-<yyyyMMdd-HHmm>/` with the current UTC
-time, 24-hour (`date -u +%Y%m%d-%H%M`, e.g. `20260919-1432`), and write this run's output into it. Never
+time, 24-hour (`python3 .agents/skills/ai-understanding/scripts/understanding_index.py --stamp`, e.g.
+`20260919-1432`), and write this run's output into it. Never
 write into a folder an earlier run created. The one exception is a second export in the same minute with
 the same subject: the name collides, so write into it — it is the same run for practical purposes, and the
 stamp does not gain seconds to avoid this.
@@ -438,7 +440,7 @@ python3 .agents/skills/ai-understanding/scripts/understanding_index.py --review
 | `never inherited` | The question probably does not match what anyone asks. Re-word it, or accept the unit was never needed and prune it. Counts inheritance of **any** version of the slug, so a unit revised three times is not reported unused because the lineage names an earlier copy |
 | superseded copies | How many revisions of a slug sit on disk unlisted. Prune guidance only — nothing removes history automatically, and a deep chain is signal that the knowledge is still moving |
 | overdue re-check | Run the unit's `recheck` command — the report prints it beside the flag — then read the unit against what it says. Outcome units are flagged after 30 days, knowledge after 90. A flagged unit carrying no `recheck` is reported as carrying none: add one while you are in there |
-| `unpublished` | The store is gitignored and these units are in no archive under `.context/understandings-publish/`, so they would vanish with this workspace. Judged by **membership**, never archive time — a `--portable-only` archive is newer than the `repo-specific` units it left out. An archive written elsewhere with `--path` is not seen, so its units stay listed. Run `--publish` to carry them out (LADR-008: the zip is the only durable form). Listed only when the store is gitignored — the guard reports the store's own `git check-ignore` answer, and a tracked store reports nothing |
+| `unpublished` | The store is gitignored and these **current** units are in no archive under `.context/understandings-publish/`, so they would vanish with this workspace. Judged by **membership**, never archive time — a `--portable-only` archive is newer than the `repo-specific` units it left out — and a member counts only if its bytes read back cleanly, so a damaged archive member is not proof of capture. An archive written elsewhere with `--path` is not seen, so its units stay listed. Run `--publish` to carry them out (LADR-008: the zip is the only durable form). Superseded copies are never listed here: publish archives current versions only, so history is workspace-local by design and a warning `--publish` could never clear would only teach the operator to ignore it. Listed only when the store is gitignored — the guard reports the store's own `git check-ignore` answer, and a tracked store reports nothing |
 
 Advisory only — it never changes the exit code, because none of it is wrong, it is just decaying. Act on it
 when you are already in the store; do not make a project of it. Every run on a gitignored store also
@@ -466,7 +468,13 @@ Sharing is sending someone the zip. Full contract: `references/publish-consume.m
 
 The reverse of publish: another workspace's archive becomes available here.
 
-The source is a local path to a published archive — always positional; `--path` overrides only the store it unpacks into (default `.context/understandings/`), never the source. How it arrived — mail, chat, a drive — is out of band; this skill does not fetch remote content. Extraction refuses any entry whose resolved path escapes the store (`..` segments, absolute paths, symlinks) and rejects the whole archive rather than unpacking part of it.
+The source is a local path to a published archive — always positional; `--path` overrides only the store it unpacks into (default `.context/understandings/`), never the source. How it arrived — mail, chat, a drive — is out of band; this skill does not fetch remote content. Before extracting anything, run the pre-extraction gate and extract nothing unless it exits `0`:
+
+```bash
+python3 .agents/skills/ai-understanding/scripts/understanding_index.py --consume-check <zip> [store-dir]
+```
+
+It refuses the whole archive — never part of it — on an entry whose resolved path escapes the store (`..` segments, absolute paths, symlinks), a symlink entry, or a case-folded collision with another entry or a local path. Details: `references/publish-consume.md`.
 
 Reconciliation, per incoming slug. The key is the slug; an incoming copy keeps its own stamped folder, because a slug in two folders is a version chain rather than an error:
 

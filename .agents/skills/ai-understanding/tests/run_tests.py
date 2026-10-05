@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import io
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -87,12 +88,30 @@ def write_unit(store: Path, subject: str, slug: str, updated: str = "2026-09-30"
 
 def publish(store: Path, name: str, *unit_paths: str) -> None:
     """Write a real archive holding the given `<subject>/<slug>.understanding.md` store paths."""
+    publish_with(store, name, zipfile.ZIP_STORED, *unit_paths)
+
+
+def publish_with(store: Path, name: str, compression: int, *unit_paths: str) -> None:
     pub = store.parent / ui.PUBLISH_DIR_NAME
     pub.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(pub / name, "w") as zf:
+    with zipfile.ZipFile(pub / name, "w", compression) as zf:
         for rel in unit_paths:
             zf.write(store / rel, rel)
         zf.writestr("INDEX.md", "# index\n")
+
+
+def corrupt_member(archive: Path, member: str) -> None:
+    """Flip bytes inside one member's data, leaving the central directory (and `namelist()`) intact."""
+    with zipfile.ZipFile(archive) as zf:
+        info = zf.getinfo(member)
+    data = bytearray(archive.read_bytes())
+    # Local header: 30 fixed bytes, then the name and extra field whose lengths sit at offsets 26/28.
+    name_len = int.from_bytes(data[info.header_offset + 26:info.header_offset + 28], "little")
+    extra_len = int.from_bytes(data[info.header_offset + 28:info.header_offset + 30], "little")
+    start = info.header_offset + 30 + name_len + extra_len
+    for i in range(start + 2, start + 2 + min(8, info.compress_size - 2)):
+        data[i] ^= 0xFF
+    archive.write_bytes(bytes(data))
 
 
 def flagged(store: Path) -> set[str]:
@@ -434,6 +453,47 @@ class DurabilityGuardTests(unittest.TestCase):
             (pub / "understandings-20260930-180000.zip").write_bytes(b"not a zip")
             self.assertEqual(flagged(store), {"alpha"})
 
+    def test_a_damaged_member_counts_for_nothing_and_spares_its_siblings(self):
+        """Issue 182: the central directory still lists a member whose bytes are damaged, so judging by
+        `namelist()` reported it published. Stored data fails its CRC (`BadZipFile`); a deflate stream
+        fails in zlib (`zlib.error`, not an `OSError`), which a narrow except let crash the generator."""
+        for compression in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
+            with self.subTest(compression=compression), tempfile.TemporaryDirectory() as tmp:
+                repo = make_repo(tmp, ignore_store=True)
+                store = repo / ".context" / "understandings"
+                write_unit(store, "proj-20260930-1700", "damaged")
+                write_unit(store, "proj-20260930-1700", "intact")
+                archive = store.parent / ui.PUBLISH_DIR_NAME / "understandings-20260930-180000.zip"
+                publish_with(store, archive.name, compression,
+                             "proj-20260930-1700/damaged.understanding.md",
+                             "proj-20260930-1700/intact.understanding.md")
+                corrupt_member(archive, "proj-20260930-1700/damaged.understanding.md")
+                with zipfile.ZipFile(archive) as zf:
+                    self.assertIn("proj-20260930-1700/damaged.understanding.md", zf.namelist())
+                self.assertEqual(flagged(store), {"damaged"})
+                rc, out, err = run(argv(store, review=True))
+                self.assertEqual(rc, 0, err)
+                self.assertIn("proj-20260930-1700/damaged.understanding.md", out)
+                self.assertNotIn("proj-20260930-1700/intact.understanding.md", out)
+                self.assertNotIn("Traceback", err)
+
+    def test_superseded_copies_are_workspace_local_and_never_flagged(self):
+        """Issue 182: publish archives current versions only, so a superseded copy is never in any
+        archive. Flagging it would raise a warning `--publish` can never clear."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = make_repo(tmp, ignore_store=True)
+            store = repo / ".context" / "understandings"
+            write_unit(store, "proj-20260930-1700", "decay")
+            write_unit(store, "proj-20261001-0900", "decay")
+            publish(store, "understandings-20261001-100000.zip",
+                    "proj-20261001-0900/decay.understanding.md")
+            self.assertEqual(flagged(store), set())
+            rc, out, _ = run(argv(store, review=True))
+            self.assertEqual(rc, 0)
+            self.assertNotIn("unpublished", out)
+            self.assertNotIn("warning:", out)
+            self.assertIn("superseded copy(ies) on disk", out)
+
     def test_tracked_store_produces_no_warning(self):
         with tempfile.TemporaryDirectory() as tmp:
             repo = make_repo(tmp, ignore_store=False)
@@ -454,6 +514,164 @@ class DurabilityGuardTests(unittest.TestCase):
             self.assertEqual(rc0, 0)
             self.assertEqual(rc1, 0)
             self.assertIn("unpublished", out1)
+
+
+SKILL_DIR = Path(__file__).resolve().parents[1]
+
+
+def make_archive(path: Path, *entries) -> Path:
+    """Entries are names (written with a small body) or `(ZipInfo, body)` pairs for special modes."""
+    with zipfile.ZipFile(path, "w") as zf:
+        for entry in entries:
+            if isinstance(entry, tuple):
+                zf.writestr(*entry)
+            else:
+                zf.writestr(entry, "body\n")
+    return path
+
+
+def consume(archive: Path, store: Path) -> tuple[int, str, str]:
+    return run(["understanding_index.py", "--consume-check", str(archive), str(store)])
+
+
+class ConsumeCheckTests(unittest.TestCase):
+    """Issue 182: the pre-extraction gate was a documented heredoc and pipeline the skill's
+    `allowed-tools` could not run, so it moved into the generator as `--consume-check`."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.store = self.root / "store"
+        self.store.mkdir()
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def assert_refused(self, archive: Path, fragment: str) -> None:
+        before = sorted(p.as_posix() for p in self.store.rglob("*"))
+        rc, out, _ = consume(archive, self.store)
+        self.assertEqual(rc, 1, out)
+        self.assertIn(fragment, out)
+        self.assertIn("refused: the whole archive is rejected", out)
+        self.assertEqual(sorted(p.as_posix() for p in self.store.rglob("*")), before,
+                         "the check must never extract anything")
+
+    def test_a_clean_archive_is_accepted(self):
+        archive = make_archive(self.root / "a.zip", "s-20260101-0000/a.understanding.md", "INDEX.md")
+        rc, out, _ = consume(archive, self.store)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("safe to extract", out)
+
+    def test_escaping_paths_are_refused(self):
+        for name in ("../evil.understanding.md", "s-20260101-0000/../../evil.md", "/etc/evil.md",
+                     "C:/evil.md", "s-20260101-0000\\..\\evil.md"):
+            with self.subTest(name=name):
+                self.assert_refused(make_archive(self.root / "e.zip", name), "escapes the target store")
+
+    def test_a_symlink_entry_is_refused(self):
+        info = zipfile.ZipInfo("s-20260101-0000/link.understanding.md")
+        info.external_attr = (0o120777 << 16)
+        self.assert_refused(make_archive(self.root / "l.zip", (info, "/etc/passwd")), "symlink entry")
+
+    def test_a_local_symlinked_folder_that_leads_outside_is_refused(self):
+        outside = self.root / "outside"
+        outside.mkdir()
+        (self.store / "s-20260101-0000").symlink_to(outside, target_is_directory=True)
+        self.assert_refused(make_archive(self.root / "s.zip", "s-20260101-0000/a.understanding.md"),
+                            "through a local symlink")
+
+    def test_a_case_collision_between_entries_is_refused(self):
+        archive = make_archive(self.root / "c.zip", "Foo-20260101-0000/a.understanding.md",
+                               "foo-20260101-0000/b.understanding.md")
+        self.assert_refused(archive, "elsewhere in this archive")
+
+    def test_a_case_collision_with_a_local_folder_is_refused(self):
+        write_unit(self.store, "s-20260101-0000", "local")
+        archive = make_archive(self.root / "c.zip", "S-20260101-0000/incoming.understanding.md")
+        self.assert_refused(archive, "local '")
+
+    def test_an_exactly_matching_local_folder_is_not_a_collision(self):
+        write_unit(self.store, "s-20260101-0000", "local")
+        archive = make_archive(self.root / "x.zip", "s-20260101-0000/incoming.understanding.md",
+                               "INDEX.md")
+        (self.store / "INDEX.md").write_text("# index\n", encoding="utf-8")
+        rc, out, _ = consume(archive, self.store)
+        self.assertEqual(rc, 0, out)
+
+    def test_casefold_catches_what_lower_does_not(self):
+        archive = make_archive(self.root / "u.zip", "straße-20260101-0000/a.understanding.md",
+                               "strasse-20260101-0000/b.understanding.md")
+        self.assert_refused(archive, "elsewhere in this archive")
+
+    def test_an_unreadable_archive_exits_2(self):
+        bad = self.root / "bad.zip"
+        bad.write_bytes(b"not a zip")
+        rc, _, err = consume(bad, self.store)
+        self.assertEqual(rc, 2)
+        self.assertIn("not a readable zip archive", err)
+
+    def test_bad_arguments_exit_2(self):
+        self.assertEqual(run(["understanding_index.py", "--consume-check"])[0], 2)
+        self.assertEqual(run(["understanding_index.py", "--consume-check", "a", "b", "c"])[0], 2)
+
+    def test_stamp_prints_a_utc_minute_stamp(self):
+        rc, out, _ = run(["understanding_index.py", "--stamp"])
+        self.assertEqual(rc, 0)
+        self.assertRegex(out.strip(), r"^\d{8}-\d{4}$")
+
+
+# Inline spans that name a command without instructing the agent to run it. Each is described in
+# the docs as something the script does itself or as the thing not to do.
+DESCRIBED_NOT_RUN = {
+    "git check-ignore",  # run by the generator, which reports its answer
+    "python3 -",         # cited as the refused heredoc form
+    "unzip -l",          # cited as unable to show a symlink entry
+}
+SHELL_WORDS = ("ls", "date", "python3", "python", "unzip", "zip", "grep", "git", "cat", "find", "mkdir",
+               "cp", "mv", "rm", "bash", "sh", "cd", "sed", "awk", "curl", "echo", "printf", "touch",
+               "tar")
+
+
+class AllowedToolsCoverDocumentedCommandsTests(unittest.TestCase):
+    """Issue 182: the docs told the agent to run commands `allowed-tools` did not permit (a heredoc
+    `python3 -`, `… | grep`, `ls`, `date`), so the consume gate was denied or prompted and an agent
+    that skipped it extracted unchecked. Every command the skill's docs instruct must fit a
+    `Bash(<prefix>:*)` entry."""
+
+    @staticmethod
+    def allowed_prefixes() -> list[str]:
+        text = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
+        frontmatter = text.split("---", 2)[1]
+        return re.findall(r"^\s*-\s*Bash\((.+?):\*\)\s*$", frontmatter, re.M)
+
+    @staticmethod
+    def documented_commands() -> list[tuple[str, str]]:
+        docs = [SKILL_DIR / "SKILL.md", *sorted((SKILL_DIR / "references").glob("*.md"))]
+        found = []
+        for doc in docs:
+            text = doc.read_text(encoding="utf-8")
+            for block in re.findall(r"```(?:bash|sh|shell|zsh)\n(.*?)```", text, re.S):
+                for line in block.splitlines():
+                    line = line.split(" #", 1)[0].strip()
+                    if line and not line.startswith("#"):
+                        found.extend((doc.name, part.strip())
+                                     for part in re.split(r"\|\||&&|\||;", line) if part.strip())
+            for span in re.findall(r"`([^`\n]+)`", text):
+                if span.split(" ", 1)[0] in SHELL_WORDS and span not in DESCRIBED_NOT_RUN:
+                    found.append((doc.name, span))
+        return found
+
+    def test_every_documented_command_fits_an_allowed_prefix(self):
+        prefixes = self.allowed_prefixes()
+        self.assertIn("python3 .agents/skills/ai-understanding/scripts/understanding_index.py",
+                      prefixes)
+        commands = self.documented_commands()
+        self.assertTrue(any("--consume-check" in c for _, c in commands), commands)
+        for doc, command in commands:
+            with self.subTest(doc=doc, command=command):
+                self.assertNotIn("<<", command, "a heredoc is not a permitted command")
+                self.assertTrue(any(command == p or command.startswith(p + " ") for p in prefixes),
+                                f"{doc}: `{command}` fits no allowed-tools Bash prefix {prefixes}")
 
 
 if __name__ == "__main__":
