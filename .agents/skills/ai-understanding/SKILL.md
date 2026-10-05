@@ -255,6 +255,8 @@ cutting specific slugs as the alternative, rather than a prose list a reader cou
 one toward writing rather than dropping, and report what was written, so the user prunes afterwards
 instead of beforehand. `--all` is a request for breadth: a one-unit export out of a session carrying
 several lessons answers the letter of the switch and defeats its purpose.
+**With `--dontask`, skip the ask but keep the bar** — write every candidate that qualifies under the
+normal test, and drop a marginal one exactly as an unflagged export would.
 
 ### Redact before you write
 

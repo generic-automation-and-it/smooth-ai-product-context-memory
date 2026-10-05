@@ -70,9 +70,17 @@ is the consent, and the reconciliation table below is reported per slug after wr
 
 A zip is untrusted input. Refuse any entry whose resolved path escapes the target store (`..` segments,
 absolute paths, symlinks), and reject the whole archive with a clear message rather than unpacking part
-of it. **List the archive before extracting any of it** — `unzip -l <zip>` — and check every entry
+of it. **List the archive before extracting any of it** — `unzip -Z <zip>` — and check every entry
 against that rule there; no enforcing script exists yet (LADR-008 is specification only), so the listing
 is the only gate, and extracting first to inspect afterwards has already lost.
+
+Use `unzip -Z` (zipinfo), not `unzip -l`: `-l` prints names and sizes only, so a symlink entry is
+indistinguishable from a file there. zipinfo prints each entry's Unix mode first, and a symlink's begins
+with `l`. Any output from this refuses the whole archive:
+
+```bash
+unzip -Z "$ARCHIVE" | grep '^l'   # one line per symlink entry; empty output means none
+```
 
 **Refuse a case-folded collision in that same listing, before extracting.** On a case-insensitive
 filesystem (the default on macOS and Windows) `Foo-20260101-0000/x.understanding.md` and
@@ -81,7 +89,11 @@ a parity check afterwards cannot see it because by then the destination is the s
 class as the path-escape rule and refuses the same way — the whole archive, not the entry.
 
 Compare **every** incoming path against the target store, not just the other incoming paths, because the
-destructive case is an incoming unit landing on a *local* one that differs only by case:
+destructive case is an incoming unit landing on a *local* one that differs only by case. Compare folders
+too, including the **implicit** parents of a file entry: an archive need not carry a separate entry for
+`Foo-20260101-0000/`, and two file entries under `Foo-20260101-0000/` and `foo-20260101-0000/` have
+distinct full paths yet extract into one folder. A folder whose name matches a local folder **exactly** is
+not a collision — the per-slug reconcile table below decides what happens to the units inside it:
 
 ```bash
 ARCHIVE=understandings-20261001-120000.zip   # the archive being consumed
@@ -91,25 +103,46 @@ STORE=.context/understandings/               # the target store (default unless 
 # Both paths are passed as arguments: a heredoc arrives on stdin, so `python3 -` leaves argv empty.
 python3 - "$ARCHIVE" "$STORE" <<'PY'
 import sys, zipfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 archive, store = Path(sys.argv[1]), Path(sys.argv[2])
-seen = {}
+local_files, local_dirs = {}, {}
 for existing in store.rglob("*"):
-    seen.setdefault(str(existing.relative_to(store)).casefold(), existing)
-claimed = {}
+    rel = existing.relative_to(store).as_posix()
+    (local_dirs if existing.is_dir() else local_files).setdefault(rel.casefold(), existing)
+claimed_files, claimed_dirs = {}, {}
 clashes = []
+
+def check_dir(folder, entry):
+    key = folder.casefold()
+    if key in local_files:
+        clashes.append((entry, f"local '{local_files[key]}'"))
+    elif key in local_dirs and local_dirs[key].relative_to(store).as_posix() != folder:
+        clashes.append((entry, f"local '{local_dirs[key]}'"))
+    if key in claimed_files:
+        clashes.append((entry, f"'{claimed_files[key]}' elsewhere in this archive"))
+    elif claimed_dirs.setdefault(key, folder) != folder:
+        clashes.append((entry, f"folder '{claimed_dirs[key]}' elsewhere in this archive"))
+
 with zipfile.ZipFile(archive) as zf:
     for name in zf.namelist():
+        path = PurePosixPath(name)
+        # Every parent folder, outermost first; the last of `parents` is '.', which is the store itself.
+        for parent in reversed(list(path.parents)[:-1]):
+            check_dir(parent.as_posix(), name)
         # The generated index is exempt, as it already is from the stray-file check: every archive
         # carries one and every store holds one, so comparing it would refuse every archive.
-        if Path(name).name == "INDEX.md":
+        if path.name == "INDEX.md":
             continue
-        key = str(Path(name)).casefold()
-        if key in seen:
-            clashes.append((name, f"local '{seen[key]}'"))
-        elif key in claimed:
-            clashes.append((name, f"'{claimed[key]}' elsewhere in this archive"))
-        claimed.setdefault(key, name)
+        if name.endswith("/"):
+            check_dir(path.as_posix(), name)
+            continue
+        key = path.as_posix().casefold()
+        if key in local_files or key in local_dirs:
+            clashes.append((name, f"local '{local_files.get(key) or local_dirs[key]}'"))
+        elif key in claimed_files or key in claimed_dirs:
+            other = claimed_files.get(key) or claimed_dirs[key]
+            clashes.append((name, f"'{other}' elsewhere in this archive"))
+        claimed_files.setdefault(key, name)
 if clashes:
     for name, target in clashes:
         print(f"refusing: '{name}' collides on a case-insensitive filesystem with {target}")
@@ -118,12 +151,12 @@ print("no case-folded collisions")
 PY
 ```
 
-Two shapes the wording of the refusal has to carry. A collision against a *local* file names that path;
-a collision between two entries of the **archive** names the other entry, because there is no local
-path to name — `claimed` remembers which entry first claimed each folded key, so the operator is sent to
-the duplicate in the archive they hold rather than to a file that does not exist. The generated
-`INDEX.md` is exempt on both sides: it is regenerated on every write (publish step 6, and the consume
-step's own regeneration afterwards), so a case fold on it cannot lose knowledge.
+Two shapes the wording of the refusal has to carry. A collision against a *local* file or folder names
+that path; a collision between two entries of the **archive** names the other entry, because there is no
+local path to name — `claimed_files` and `claimed_dirs` remember which entry first claimed each folded
+key, so the operator is sent to the duplicate in the archive they hold rather than to a path that does
+not exist. The generated `INDEX.md` is exempt on both sides: it is regenerated on every write (publish
+step 6, and the consume step's own regeneration afterwards), so a case fold on it cannot lose knowledge.
 
 Use `casefold`, not `lower`: it is the full Unicode folding a filesystem compares, so `straße` and
 `strasse` are caught as one file — which `lower` keeps apart. The generator applies the same rule
