@@ -12,10 +12,16 @@ Never accept a raw transcript. The runtime supplies both API credentials; never 
 
 ## Pipeline
 
+Before stage 1, turn the main thread's proposed group binding into a group — this is the only place a
+group or initiative is created. On the create path run `upsert-initiative` first (a missing initiative
+is a `404` from `resolve-group`), then `resolve-group`, and carry its `groupUuid` into every preflight
+candidate and the `set` request. Under `--dryrun` run neither: report the group and initiative as
+*would create*.
+
 Run exactly once in fixed order:
 
 1. **Preflight**: batched cross-group read-before-write; facts only, no API judgement.
-2. **Redact**: scrub detected secrets before any content reaches storage; report rule names, field paths and replaced offsets only — never the replaced text. If a location covers prose rather than a secret, reword it and re-run.
+2. **Redact**: scrub detected secrets before any content reaches storage; report rule names, field paths and replaced offsets only — never the replaced text. If a location covers prose rather than a secret, reword it and re-run. The scrubber recognises secret *shapes* only, so it is not a personal-data filter: a name, email address, phone number or other personal detail that is not needed for the fact must be removed or generalised before the candidate is written, because a written blob cannot be edited afterwards.
 3. **Dedupe / derive links**: judge subject matches and links from bounded recall.
 4. **Atomicity check**: one memory per fact; split or skip bundled claims.
 5. **Write**: one transactional `set`; API owns version ordering, identities, and graph writes.

@@ -12,7 +12,8 @@ Three numbers, and the difference between them is the whole point of this file:
             model collapsed instead of creating a second memory. A matcher that matches nothing scores
             0.0 here, which is the only way this number can mean anything.
   precision correct / the predictions the model actually made. The share of claimed collapses that were
-            really collapses, over the dedup-class scenarios it claimed them on.
+            really collapses into the expected memory, over the dedup-class scenarios it claimed them
+            on. A collapse into the wrong target counts against it (`wrong_target`).
   accuracy  correct / every scenario. Reported because the recall used to be this number under the
             name recall, which let a run that missed a scenario outright still print a healthy score.
 
@@ -43,6 +44,8 @@ To re-score a dated run against the fixture it was actually taken against:
 
     python3 tests/fixtures/score_fixtures.py --fixtures tests/fixtures/scenarios-2026-09-29.json \
         --model-verdicts tests/fixtures/model-verdicts-2026-09-17.json --allow-legacy-positional
+    python3 tests/fixtures/score_fixtures.py --fixtures tests/fixtures/scenarios-2026-09-29-balanced.json \
+        --model-verdicts tests/fixtures/model-verdicts-2026-09-29-balanced.json
 """
 
 import argparse
@@ -150,6 +153,14 @@ def main():
 
     fixtures = load_fixtures(args.fixtures)
     if args.emit_model_input:
+        # Without the writing group a model cannot tell a same-group bump from a cross-group twin,
+        # and that distinction is what several dedup scenarios score. Refused at emission only, so a
+        # frozen fixture that predates the field stays re-scorable.
+        ungrouped = [fixture["id"] for fixture in fixtures
+                     if fixture.get("recall_set") and not fixture.get("candidate_group_uuid")]
+        if ungrouped:
+            raise SystemExit("score: scenario(s) with a recall set but no candidate_group_uuid: "
+                             + ", ".join(ungrouped))
         # `id` is emitted: it identifies the row without revealing the answer, and without it the
         # scorer can only pair by position. `expected`, `note` and `axis` stay withheld — `axis`
         # would tell the model which way the pair is meant to fall.
@@ -228,6 +239,7 @@ def main():
     predicted_positives = 0
     correct_predictions = 0
     over_merge = 0
+    wrong_target = 0
     for fixture, got in pairs:
         if fixture["stage"] not in DEDUP_STAGES:
             continue
@@ -237,8 +249,12 @@ def main():
         should_claim = expected_verdict in MERGE_VERDICTS
         if claimed:
             predicted_positives += 1
-            if should_claim:
+            # A collapse into the wrong memory is not a correct collapse: it overwrites a claim the
+            # candidate never restated. So the full match, target included, is what counts.
+            if should_claim and scenario_matches(fixture["expected"], got):
                 correct_predictions += 1
+            elif should_claim:
+                wrong_target += 1
             else:
                 over_merge += 1
     precision = correct_predictions / predicted_positives if predicted_positives else 1.0
@@ -257,6 +273,7 @@ def main():
             "predicted_positives": predicted_positives,
             "correct_predictions": correct_predictions,
             "over_merge": over_merge,
+            "wrong_target": wrong_target,
         },
         "paired_by": "position (legacy)" if positional else "id",
     }, indent=2))

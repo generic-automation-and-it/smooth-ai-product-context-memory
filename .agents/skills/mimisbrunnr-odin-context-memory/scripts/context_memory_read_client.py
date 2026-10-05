@@ -101,7 +101,16 @@ def _run_framed(args):
     buffer = io.StringIO()
     with redirect_stdout(buffer):
         result = args.func(args)
-    raw = buffer.getvalue().strip()
+    captured = buffer.getvalue()
+    # A raw body goes out exactly as the store returned it — not stripped, no newline appended —
+    # because the caller asked for the body and may hash or diff it. The inner command prints no
+    # banner, so the banner is unconditional here: a body quoting the notice must not suppress it.
+    if getattr(args, "command", None) in RAW_BODY_COMMANDS:
+        if captured:
+            print(client.BANNER_PREFIX + client.RECALL_NOTICE)
+            sys.stdout.write(captured)
+        return result
+    raw = captured.strip()
     if not raw:
         return result
     # Single emission comes from this buffer, not from a banner check: whatever the inner layer printed
@@ -109,14 +118,10 @@ def _run_framed(args):
     # `cmd_query` banner never gets out, and `print_recall` is free to print its own on every path
     # without coordinating with it.
     payload = _parse_framed_json(raw)
-    # Two cases take the banner-and-passthrough path rather than the framed envelope, and they are the
-    # same shape: there is nothing to carry a field.
-    #
-    #  - Not JSON: a bare blob body, or a formatted error.
-    #  - A raw-body command whose output happens to parse as JSON. A `get-blob` body that is valid JSON
-    #    would otherwise be re-indented and merged into an envelope: the caller asked for a body, not a
-    #    parsed object, and re-serialising changes bytes it may be hashing or diffing.
-    if payload is _NOT_JSON or getattr(args, "command", None) in RAW_BODY_COMMANDS:
+    # Not JSON — a formatted error, say — takes the banner-and-passthrough path rather than the framed
+    # envelope: there is nothing to carry a field. Raw-body commands returned above for the same reason,
+    # and because a body that happens to be valid JSON must not be re-indented into an envelope.
+    if payload is _NOT_JSON:
         # The notice check is here only so output that already arrived framed (an inner layer that
         # printed its own banner) is not given a second one; a repeated notice reads as emphasis and
         # trains a reader to scroll past it.

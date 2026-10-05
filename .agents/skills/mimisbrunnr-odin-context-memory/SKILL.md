@@ -74,10 +74,12 @@ Spawn project agents `memory-read` and `memory-write`. `memory-read` runs only t
 
 ## Session Phases
 
-### 1. Initialize (Resolve Group)
+### 1. Initialize (Propose The Group Binding)
 
-When the user starts a mimisbrunnr-odin-context-memory session, resolve the target group from what the caller provides
-— ticket, repository, initiative, or scope — or create it if it does not exist.
+When the user starts a mimisbrunnr-odin-context-memory session, **propose** the target group from what
+the caller provides — ticket, repository, initiative, or scope. Initialize is read-only: it never
+creates an initiative or a group. Creation is a write, and writes happen only at the authorized
+`--export` checkpoint (Phase 4), so a session that ends without one leaves nothing behind.
 When the caller provides none of these, run the sibling
 `mimisbrunnr-heimdallr-find-session-metadata` reporter (offline git scan, same skills root,
 no hardcoded `.agents/` prefix) and use its repository plus branch-seen tickets (else the
@@ -85,21 +87,31 @@ single newest commit ticket) as the proposed binding — `unknown` initiative fi
 An explicit caller value always wins; `--heimdallr false` on the kvasir export/dump verbs disables the
 automatic form of this. Tags are never autofilled: derive them from the material's keywords.
 
-- If the caller supplies a ticket, look up the group that owns it. **A ticket belongs to at most one
-  group** (soft constraint); if it is already attached elsewhere, do not silently create a second group
-  for it — surface the conflict in the digest.
-- Untracked work (no ticket) receives a **synthetic `local:<guid>` ticket**. Never create an illegal,
+- **There is no read-only group lookup.** The API has no group read route, and `resolve-group` commits
+  unconditionally — calling it to "look up" a group creates one. The only read-only evidence available
+  here is through `memory-read`: `initiatives` says whether the named initiative exists, and a `query`
+  filtered by `ticketProvider`/`ticketKey` shows the owning group's `groupUuid` when that group already
+  holds memories. Anything else stays a proposal (repo, ticket, initiative, scope) carried to the
+  checkpoint.
+- If the caller supplies a ticket, the proposal names it. **A ticket belongs to at most one group**
+  (soft constraint); if it is already attached elsewhere, do not silently create a second group for
+  it — surface the conflict in the digest.
+- Untracked work (no ticket) receives a **synthetic `local:<guid>` ticket**. Never propose an illegal,
   empty-ticket group.
-- If the group does not exist, create it with the initiative defaulting to the seeded `to-be-decided`
-  sentinel unless the caller names one.
+- An unnamed initiative is proposed as the seeded `to-be-decided` sentinel.
+- If the target is ambiguous, still begin accumulating; do not block the session.
+
+**At the `--export` checkpoint, before preflight,** `memory-write` turns the proposal into a group:
+
 - **Fresh-store precondition: on the create path, an initiative must exist before `resolve-group`.**
   `resolve-group` answers `404` for an initiative that is not in the store **when it has to create the
   group**; when the supplied tickets already resolve to an existing group it never looks the initiative
-  up, so no upsert is needed. Upsert it first only on the create path.
-- **`resolve-group` is not dry-runnable.** Its handler commits unconditionally — calling it to "look up"
-  a group creates one. A dry run must resolve nothing and report the group and initiative as *would
-  create*, exactly as `mimisbrunnr-kvasir-understanding --export` does.
-- If the target is ambiguous, still begin accumulating; do not block the session.
+  up, so no upsert is needed. Run `upsert-initiative` first only on the create path.
+- Then `resolve-group` with the proposed binding; its `groupUuid` is the `groupUuid` every preflight
+  candidate and the `set` request carry.
+- **`resolve-group` is not dry-runnable.** A `--dryrun` checkpoint must call neither command; it reports
+  the group and initiative as *would create*, exactly as `mimisbrunnr-kvasir-understanding --export`
+  does.
 
 ### 2. Listen (Accumulate Candidates)
 
@@ -194,17 +206,24 @@ the scripts do not decide semantic relevance. Root the base URL via
 `CONTEXT_MEMORY_BASE_URL` (fallback `http://localhost:5141`, loopback origins only); always `probe` first for an honest
 NOT-AVAILABLE, never a silent miss.
 
+**Candidate content never goes into a shell command.** `<batch-file>` is a JSON file the agent writes
+with its file-write tool — never `echo`, `printf` or a heredoc — under the gitignored
+`.context/mimisbrunnr-scratch/`, and deletes once the script has answered. Interpolating captured text
+into a command line puts unredacted content (the very secrets the redactor is about to find) into the
+command, shell history and process list, and lets a quote inside a fact rewrite the command. The same
+applies to `--payload` files for the client. See `.agents/rules/skills/skill-secret-handling.instructions.md`.
+
 | Script | Invocation | Pipeline stage | What it does (and does NOT do) |
 |---|---|---|---|
 | `context_memory_client.py` | `python3 .../context_memory_client.py <subcommand>` | 1 (preflight), 3 (dedup/links), 5 (write) | Base-URL resolution + health probe, all HTTP calls, JSON assembly from a payload file or stdin, over-cap batch refusal at the **20-candidate cap** (preflight and set both refuse; indices are request-relative, so batches are never silently chunked). Subcommands: `probe`, `preflight`, `set` (with `--dryrun`), `query`, `get-versions`, `get-blob`, `resolve-group`, `update-group`, `append-description`, `create-link`, `paths`, `ticket-parent` (with local `--dryrun`), `ticket-paths`, `labels`, `propose-label`, `initiatives`, `upsert-initiative`. |
 | `context_memory_read_client.py` | `python3 .../context_memory_read_client.py <subcommand>` | Read delegation | Read-only CLI surface: `probe`, `query`, `deepsearch`, `get-versions`, `get-blob`, `paths`, `ticket-paths`, `labels`, `initiatives`. Requires only `CONTEXT_MEMORY_READ_TOKEN`, and **refuses to start when a write token is present** in the environment — the read surface can never mutate, by construction. |
-| `redact.py` | `echo '<json array of content strings>' \| python3 .../redact.py` | 2 (redact) | Fingerprint secret detection, stdin→stdout. Emits redacted content plus per-candidate findings `{rule_name, hit_count, spans: [{start, end}]}`. **Reports rule names and character offsets only** — never the matched text, never the content around it. A key whose name says secret (`password`, `secret`, `api_key`, `access_key`, a qualified `*_TOKEN`) is redacted on any value of 8+ characters; a neutral key (`key`, `sort_key`, bare `token`, `credential`) only when the value itself is secret-shaped (an unbroken 16+ character run mixing letters and digits), so `sort key = created_on` passes untouched. Redact-and-flag (LADR-003): a **found** secret is flagged, never a rejection of the record. An **unavailable scrubber** is the opposite case — every persisting write calls it automatically and refuses if it cannot run, so the gate never fails open. That refusal arrives as `redactor-unavailable` and is **terminal: do not retry it.** It names the failure, never the content, so it is safe to surface. |
-| `atomicity.py` | `echo '<json array of {description,statement}>' \| python3 .../atomicity.py` | 4 (atomicity) | Conservative bundle detector, stdin→stdout. Flags `simple` / `bundled` per candidate. It is a detector only — the split-vs-skip decision and the routing of the unprocessable remainder stay here, in the agent's judgement (LADR-002). |
+| `redact.py` | `python3 .../redact.py --input <batch-file>` | 2 (redact) | Fingerprint secret detection, stdin→stdout. Emits redacted content plus per-candidate findings `{rule_name, hit_count, spans: [{start, end}]}`. **Reports rule names and character offsets only** — never the matched text, never the content around it. A key whose name says secret (`password`, `secret`, `api_key`, `access_key`, a qualified `*_TOKEN`) is redacted on any value of 8+ characters; a neutral key (`key`, `sort_key`, bare `token`, `credential`) only when the value itself is secret-shaped (an unbroken 16+ character run mixing letters and digits), so `sort key = created_on` passes untouched. Redact-and-flag (LADR-003): a **found** secret is flagged, never a rejection of the record. An **unavailable scrubber** is the opposite case — every persisting write calls it automatically and refuses if it cannot run, so the gate never fails open. That refusal arrives as `redactor-unavailable` and is **terminal: do not retry it.** It names the failure, never the content, so it is safe to surface. |
+| `atomicity.py` | `python3 .../atomicity.py --input <batch-file>` | 4 (atomicity) | Conservative bundle detector, stdin→stdout. Flags `simple` / `bundled` per candidate. It is a detector only — the split-vs-skip decision and the routing of the unprocessable remainder stay here, in the agent's judgement (LADR-002). |
 | `deepsearch.py` | `python3 .../deepsearch.py` | 3 (opt-in recall) | Baseline 200 plus bounded keyword/traversal passes, stable UUID/version dedupe, 400 aggregate cap and saturation disclosure. Bounded by the one recall deadline: a timed-out or deadline-stopped pass ends the chain but keeps the completed passes, disclosing `stoppedEarly`, `budgetExhausted` and `passesIncomplete`. |
 | `authority.py` | `python3 .../authority.py` | 3 (authority resolution) | Converts a stated-authority judgement into one or two ordered version writes. Existing-winner cases record the losing candidate as history, then restore the winner as current in the same transaction. |
 | `divergence.py` | `python3 .../divergence.py` | 3 (conflict composition) | Converts an explicit same-subject genuine-conflict judgement into a separately identified claim, proposed divergence memory and two contradiction links; rejects cross-scope and recursive evidence and deduplicates exact claim pairs. |
 | `near_miss_tags.py` | `python3 .../near_miss_tags.py < approved-evidence.json` | Read-only reporting | Bounded stdin JSON validation, exact tag comparison, scoped `near-miss-tag` output. No network, file output, vocabulary lookup or semantic heuristic. See Evidence-only Near Misses below. |
-| `decisions_gate.py` | `echo '<json array>' \| python3 .../decisions_gate.py score [--state-file PATH]` | Optional value gate | Scores each record for value to each target role via a **local decision model**. **Off by default** (`CONTEXT_MEMORY_DECISIONS_ENABLED=false`). Carries no model in the Host or Application — everything here is client-side. Two subcommands: `score` and `probe`. See the Value Gate below. |
+| `decisions_gate.py` | `python3 .../decisions_gate.py score [--state-file PATH] < <batch-file>` | Optional value gate | Scores each record for value to each target role via a **local decision model**. **Off by default** (`CONTEXT_MEMORY_DECISIONS_ENABLED=false`). Carries no model in the Host or Application — everything here is client-side. Two subcommands: `score` and `probe`. See the Value Gate below. |
 
 ### Value Gate (optional, off by default)
 

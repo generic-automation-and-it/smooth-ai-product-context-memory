@@ -423,9 +423,19 @@ def cmd_preflight(args):
         )
 
     resp = _request("POST", "/api/context/preflight", {"candidates": candidates})
+    # Both lists are required. Defaulting a missing one to [] would report "no matches" and "no
+    # collisions" for a response that never said so, and the caller would write duplicates on it.
+    candidates_out = resp.get("candidates") if isinstance(resp, dict) else None
+    collisions_out = resp.get("intraBatchCollisions") if isinstance(resp, dict) else None
+    if not isinstance(candidates_out, list) or not isinstance(collisions_out, list):
+        raise ClientError(
+            0,
+            "bad-response",
+            "preflight response must carry 'candidates' and 'intraBatchCollisions' as lists",
+        )
     out = {
-        "candidates": resp.get("candidates", []),
-        "intra_batch_collisions": resp.get("intraBatchCollisions", []),
+        "candidates": candidates_out,
+        "intra_batch_collisions": collisions_out,
     }
     print(json.dumps(out, indent=2))
     return out
@@ -610,7 +620,8 @@ def cmd_get_blob(args):
     if not token:
         raise ClientError(0, "missing-credential", f"{ENV_READ_TOKEN} is required")
     req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"}, method="GET")
-    print(_read_response(req))
+    # Written as received: the body may be hashed or diffed, so no newline is appended.
+    sys.stdout.write(_read_response(req))
 
 
 def cmd_resolve_group(args):

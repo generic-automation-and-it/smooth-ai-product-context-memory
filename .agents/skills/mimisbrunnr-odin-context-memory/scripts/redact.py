@@ -126,9 +126,19 @@ RULES = [
         0, "<redacted-jwt>", None,
     ),
     (
+        # A qualified vendor prefix is the evidence on its own. Project and service-account keys use
+        # `_`/`-`-separated bodies, which `_secret_shaped` reads as short words, so requiring it here
+        # let `sk-proj-…` keys through unredacted.
         "api-key-sk",
-        re.compile(r"(?<![A-Za-z0-9_-])(sk-(?:proj-|ant-|live-|test-)?[A-Za-z0-9_-]{20,}"
+        re.compile(r"(?<![A-Za-z0-9_-])(sk-(?:proj|ant|live|test|svcacct|admin)-[A-Za-z0-9_-]{16,}"
                    r"|[sr]k_(?:live|test)_[A-Za-z0-9]{16,})"),
+        0, "<redacted-api-key>", None,
+    ),
+    (
+        # A bare `sk-` is ambiguous with prose (`sk-learn-compatible-…`), so it still needs the value
+        # itself to look generated.
+        "api-key-sk",
+        re.compile(r"(?<![A-Za-z0-9_-])(sk-[A-Za-z0-9_-]{20,})"),
         0, "<redacted-api-key>", _secret_shaped,
     ),
     (
