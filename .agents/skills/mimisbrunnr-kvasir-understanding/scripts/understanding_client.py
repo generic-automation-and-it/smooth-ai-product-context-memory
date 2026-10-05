@@ -983,14 +983,22 @@ def _audience_tags(candidate: dict, result: dict) -> list[str]:
     The same rule covers a blank role: `""` names no role, and interpolating it wrote the bare tag
     `audience:` — an entry that looks like an audience and asserts nothing, stored on the record under
     `mark` and read back as evidence of anything.
+
+    The stripped role is the one tagged, not the raw one. A padded role (`" engineer "`) passes a
+    blank check that strips, so the padding used to survive into `audience:engineer ` — a tag that
+    reads as tagged while matching no exact consumer of the same role, which is the same
+    looks-like-evidence-without-being-it outcome the blank role above is refused for.
     """
     tags = list(candidate.get("tags") or [])
     roles = result.get("passingRoles")
     if isinstance(roles, list):
         for role in roles:
-            if not isinstance(role, str) or not role.strip():
+            if not isinstance(role, str):
                 continue
-            tag = f"audience:{role}"
+            name = role.strip()
+            if not name:
+                continue
+            tag = f"audience:{name}"
             if tag not in tags:
                 tags.append(tag)
     return tags
