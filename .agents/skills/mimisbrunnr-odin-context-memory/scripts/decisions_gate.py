@@ -59,6 +59,9 @@ ENV_MAX_ATTEMPTS = "CONTEXT_MEMORY_DECISIONS_MAX_ATTEMPTS"
 ENV_ROLES = "CONTEXT_MEMORY_DECISIONS_ROLES"
 ENV_BELOW_THRESHOLD = "CONTEXT_MEMORY_DECISIONS_BELOW_THRESHOLD"
 ENV_TIMEOUT = "CONTEXT_MEMORY_DECISIONS_TIMEOUT"
+# Not one of the ten operator settings: a test seam for the ledger cap, documented in
+# `ledger_cap`. It exists because the shipped 5000 cannot be reached over HTTP in a suite.
+ENV_LEDGER_MAX = "CONTEXT_MEMORY_DECISIONS_LEDGER_MAX_ENTRIES"
 
 SCRIPTS = Path(__file__).resolve().parent
 REDACTOR = SCRIPTS / "redact.py"
@@ -181,6 +184,11 @@ def config():
     attempts = number(ENV_MAX_ATTEMPTS, DEFAULT_MAX_ATTEMPTS, int)
     if attempts < 1:
         raise GateError("bad-decisions-config", f"{ENV_MAX_ATTEMPTS} must be at least 1")
+
+    # Validated here rather than at first use so a malformed cap is refused once, up front, from the
+    # same place every other bad setting is refused — and so it cannot surface as a traceback from
+    # inside `record_attempt`, which is not under the per-record handler.
+    ledger_cap()
 
     timeout = number(ENV_TIMEOUT, DEFAULT_TIMEOUT, int)
     if timeout < 1:
@@ -584,7 +592,36 @@ def entry_best(value):
     return value.get("best") if isinstance(value, dict) else None
 
 
-def cap_ledger(ledger, max_entries=MAX_LEDGER_ENTRIES):
+def ledger_cap():
+    """The entry cap, overridable so it can be exercised through the **real write path**.
+
+    Reaching `MAX_LEDGER_ENTRIES` over HTTP needs 5000 subprocess round trips, so the only end-to-end
+    case that fitted in a test suite ran 55 subjects — comfortably under the shipped cap — and deleting
+    the `cap_ledger` call from `record_attempt` left every ledger test green. A bound no case crosses
+    is not a bound the suite tests, and a ledger growing without bound is exactly the defect this cap
+    exists to prevent. A test-only seam beats both a suite too slow to run and a case that asserts the
+    helper while calling the helper.
+
+    Read per call rather than resolved at import, so a malformed value is a classified refusal from
+    the same place every other bad setting is refused, instead of an import-time crash. It is refused
+    rather than clamped, on the same rule as every other numeric setting: a cap that silently becomes
+    something other than what was asked for is one the operator trusts and the system does not honour.
+    """
+    raw = os.environ.get(ENV_LEDGER_MAX, "").strip()
+    if not raw:
+        return MAX_LEDGER_ENTRIES
+    try:
+        value = int(raw)
+    except ValueError:
+        raise GateError("bad-decisions-config",
+                        f"{ENV_LEDGER_MAX} must be a positive integer; refusing to run with a "
+                        "different cap") from None
+    if value < 1:
+        raise GateError("bad-decisions-config", f"{ENV_LEDGER_MAX} must be at least 1")
+    return value
+
+
+def cap_ledger(ledger, max_entries=None):
     """Bound the ledger by dropping the most-spent entries once it grows past the cap.
 
     Nothing else prunes it: an entry is kept precisely because it must remember that its budget is
@@ -593,6 +630,8 @@ def cap_ledger(ledger, max_entries=MAX_LEDGER_ENTRIES):
     **most-spent** entries is the cheapest way to bound it: those are the records most likely to have
     been written already, and losing the memory of a spent budget is the least harmful entry to lose.
     """
+    if max_entries is None:
+        max_entries = ledger_cap()
     if len(ledger) <= max_entries:
         return ledger
     ordered = sorted(ledger.items(), key=lambda pair: (-entry_attempts(pair[1]), pair[0]))
@@ -664,8 +703,15 @@ def record_attempt(state_file, identity, attempt, scores):
     # `next_attempt` may have replaced a dict entry with a bare count, so the best is read from what
     # survives here rather than from the value passed in. Counting up from the surviving count keeps a
     # ledger written in the earlier format converging instead of restarting.
+    #
+    # The `is not None` guard is load-bearing, and `next_attempt` already carries the same one. The two
+    # calls are separate reads of the file, and between them `cap_ledger` can evict *this* identity —
+    # at which point `entry` is `None`, `entry_attempts(None)` is `None`, and `max(None, attempt)`
+    # raises `TypeError`. A capped ledger therefore crashed on the very records it had just evicted,
+    # which is why no earlier case reached it: every one of them ran below the cap. Found by the
+    # end-to-end case that finally crosses the cap.
     prior = entry_best(entry)
-    prior_attempts = entry_attempts(entry)
+    prior_attempts = entry_attempts(entry) if entry is not None else 0
     ledger[identity] = {"attempts": max(prior_attempts, attempt),
                         "best": best_attempt(prior, candidate)}
     write_ledger(state_file, cap_ledger(ledger))

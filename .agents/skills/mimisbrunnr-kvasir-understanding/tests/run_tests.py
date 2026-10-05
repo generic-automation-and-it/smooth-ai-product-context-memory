@@ -2252,6 +2252,68 @@ class DecisionsGateIntegrationTests(unittest.TestCase):
                     lambda d=detail: _Result(1, "", json.dumps({"outcome": d})))
                 self.assertEqual(note, "decisions: refused")
 
+    def test_a_refusal_actually_stops_the_export(self):
+        """The property the two cases above do not reach.
+
+        They assert the *note label*, so they pass against a `gate_decisions` that labels a refusal
+        and a `cmd_export` that never reads the label — which is exactly what shipped. Both messages
+        say "Nothing was written", so an operator whose gate had refused was told nothing was stored
+        while the records were stored anyway. Driven through the real `export` entry point, and the
+        assertion is on the thing that matters: the capture client is never reached, so nothing is
+        resolved, chunked, prefetched or written.
+        """
+        for outcome in ("redactor-unavailable", "bad-decisions-config", "bad-decisions-url"):
+            with self.subTest(outcome=outcome), tempfile.TemporaryDirectory() as tmp:
+                src = write(tmp, "notes.md", "The retry budget is three attempts.")
+                originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                             uc.resolve_group, uc._run_capture_client, uc.gate_decisions)
+                called = []
+                uc.gate_redaction = lambda texts: (list(texts), {})
+                uc.gate_atomicity = lambda c: [{"verdict": "simple", "signals": []} for _ in c]
+                uc.initiative_exists = lambda name: (True, "present")
+                uc.resolve_group = lambda b, n, d, dryrun: ({"groupUuid": "g-1", "created": False}, "ok")
+                uc._run_capture_client = lambda s, a, p: (called.append(a[0]), (0, "{}", ""))[1]
+                # The refusal is produced by the gate subprocess's own exit and payload, so the whole
+                # of `gate_decisions` runs for real here and only its transport is replaced.
+                uc.gate_decisions = _stub_gate_transport(
+                    lambda: _Result(1, "", json.dumps({"outcome": outcome})))
+                try:
+                    rc, _, err = run(["export", src, "--write", "--initiative", "Present"])
+                finally:
+                    (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                     uc.resolve_group, uc._run_capture_client, uc.gate_decisions) = originals
+                self.assertEqual(rc, 1, f"{outcome}: a refusal must exit non-zero")
+                self.assertIn("REFUSED", err)
+                self.assertEqual(called, [],
+                                 f"{outcome}: the export continued past a refusal that said "
+                                 "'Nothing was written'")
+
+    def test_a_skip_does_not_stop_the_export(self):
+        """The control for the case above, and the property the refusals must not break: an
+        unavailable, timing-out or unrecognised gate skips and keeps, because a down decision model
+        must never block a capture. If the stop were applied too widely, this is what would break."""
+        for outcome in ("unreachable", "timed-out", "http-500", "something unexpected"):
+            with self.subTest(outcome=outcome), tempfile.TemporaryDirectory() as tmp:
+                src = write(tmp, "notes.md", "The retry budget is three attempts.")
+                originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                             uc.resolve_group, uc._run_capture_client, uc.gate_decisions)
+                called = []
+                uc.gate_redaction = lambda texts: (list(texts), {})
+                uc.gate_atomicity = lambda c: [{"verdict": "simple", "signals": []} for _ in c]
+                uc.initiative_exists = lambda name: (True, "present")
+                uc.resolve_group = lambda b, n, d, dryrun: ({"groupUuid": "g-1", "created": False}, "ok")
+                uc._run_capture_client = lambda s, a, p: (called.append(a[0]), (0, "{}", ""))[1]
+                uc.gate_decisions = _stub_gate_transport(
+                    lambda o=outcome: _Result(3 if "unexpected" in o else 1, "",
+                                              json.dumps({"outcome": o})))
+                try:
+                    rc, _, err = run(["export", src, "--write", "--initiative", "Present"])
+                finally:
+                    (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                     uc.resolve_group, uc._run_capture_client, uc.gate_decisions) = originals
+                self.assertNotIn("REFUSED", err, f"{outcome}: a skip must not be promoted to a refusal")
+                self.assertTrue(called, f"{outcome}: a skipped gate must not block the export")
+
     def test_an_unknown_gate_failure_skips_rather_than_refusing(self):
         """An unrecognised non-zero exit is not one of the two known refusals, so it must not be
         promoted into one — nor silently treated as a pass without saying so."""
@@ -2264,6 +2326,27 @@ class DecisionsGateIntegrationTests(unittest.TestCase):
 def _Result(rc, out, err=""):
     """A stand-in for `subprocess.CompletedProcess`; the gate reads only these three attributes."""
     return type("_Result", (), {"returncode": rc, "stdout": out, "stderr": err})()
+
+
+def _stub_gate_transport(fake):
+    """`gate_decisions` with only its subprocess call replaced.
+
+    The point of this helper is to leave the refusal logic itself real. Stubbing `gate_decisions`
+    outright — which is what the pre-existing refusal cases do — asserts whatever string the stub was
+    told to return, so a `cmd_export` that never reads the note label still passes. Here the whole
+    function runs and only the transport is faked, so the note the export acts on is produced by the
+    same code that produces it in production.
+    """
+    real = uc.gate_decisions
+
+    def gate_decisions(candidates):
+        original = uc.subprocess.run
+        uc.subprocess.run = lambda *a, **k: fake()
+        try:
+            return real(candidates)
+        finally:
+            uc.subprocess.run = original
+    return gate_decisions
 
 
 if __name__ == "__main__":

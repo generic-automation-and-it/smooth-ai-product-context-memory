@@ -35,11 +35,13 @@ _gate = _ilu.module_from_spec(_spec)
 _spec.loader.exec_module(_gate)
 MAX_LEDGER_ENTRIES = _gate.MAX_LEDGER_ENTRIES
 cap_ledger = _gate.cap_ledger
-# The cap is exercised through `cap_ledger` with an injected limit rather than at the shipped 5000:
-# the end-to-end path costs one subprocess round trip per record, so crossing the real cap took the
-# suite from ~40s to over 300s. The bound is the same property either way — what the end-to-end case
-# adds is that the cap is wired into the write path, which one call with a small injected limit shows.
-TEST_CAP = 40
+ledger_cap = _gate.ledger_cap
+# The end-to-end case crosses the cap through the **real write path** using an injected limit, because
+# the path costs one subprocess round trip per record: at the shipped 5000 the suite went from ~40s to
+# over 300s, so the only end-to-end case that fitted ran 55 subjects — under the cap, and therefore
+# asserting nothing about it. Deleting the `cap_ledger` call from `record_attempt` left every ledger
+# test green, which is the mutation `test_the_ledger_is_capped_end_to_end` now fails.
+TEST_CAP = 20
 best_attempt = _gate.best_attempt
 entry_attempts = _gate.entry_attempts
 entry_best = _gate.entry_best
@@ -705,25 +707,65 @@ class LedgerIntegrityTests(GateTestCase):
         self.assertIn("ledgerReset", report)
 
     def test_the_ledger_is_capped_end_to_end(self):
-        """The cap must hold on the real write path, not only in the helper.
+        """The cap must hold on the **real write path**, driven by a batch that crosses it.
 
-        Sized to exceed `MAX_LEDGER_ENTRIES` deliberately: an earlier version of this case used 30
-        subjects, comfortably under the cap of 5000, so removing the cap entirely left it green. A
-        bound the fixture never crosses is not a bound the fixture tests.
+        The previous version of this case asserted the cap's wiring while never reaching it: it wrote
+        55 subjects against a shipped cap of 5000, and its own comment said so. Deleting the
+        `cap_ledger` call from `record_attempt` therefore left the whole suite green — verified, not
+        assumed — while the ledger grew without bound, which is the single defect the cap exists to
+        prevent. Crossing 5000 for real needs 5000 subprocess round trips, so the cap is made
+        injectable (`ledger_cap`) and this case crosses a small one through the identical code path a
+        production run takes.
         """
         self.stub.probabilities = dict(self.LOW)
         state = os.path.join(self.tmp, "ledger.json")
-        subjects = [f"subject-{i}" for i in range(TEST_CAP + 15)]
+        cap = 20
+        subjects = [f"subject-{i}" for i in range(cap + 15)]
         records = [{"subject": s, "description": s, "statement": "x"} for s in subjects]
-        proc, _ = self.score(records=records, state_file=state,
-                             CONTEXT_MEMORY_DECISIONS_MAX_ATTEMPTS="1")
+        proc, report = self.score(records=records, state_file=state,
+                                  CONTEXT_MEMORY_DECISIONS_MAX_ATTEMPTS="1",
+                                  CONTEXT_MEMORY_DECISIONS_LEDGER_MAX_ENTRIES=str(cap))
+        self.assertEqual(proc.returncode, 0, proc.stderr)
         with open(state, encoding="utf-8") as handle:
             ledger = json.load(handle)
-        # The write path caps at the shipped value, so an end-to-end batch of TEST_CAP + 15 is below
-        # it; the cap's *wiring* is what this proves, and `test_the_cap_holds_at_many_times_the_limit`
-        # proves the bound itself at the real limit.
-        self.assertEqual(len(ledger), len(subjects))
+        self.assertEqual(len(ledger), cap,
+                         "the write path wrote more entries than the cap allows, so the cap is not "
+                         "wired into record_attempt")
         self.assertGreater(len(ledger), 0, "the ledger must not be emptied")
+        # The batch really did exceed the cap, so this is a crossed bound and not an under-filled one.
+        self.assertGreater(len(subjects), cap)
+
+    def test_the_shipped_cap_is_the_default_when_unset(self):
+        """The seam must be inert in production: unset means the documented 5000, not a test number."""
+        self.stub.probabilities = dict(self.LOW)
+        state = os.path.join(self.tmp, "ledger.json")
+        self.score(records=[{"subject": "a", "description": "a", "statement": "x"}],
+                   state_file=state, CONTEXT_MEMORY_DECISIONS_MAX_ATTEMPTS="1",
+                   CONTEXT_MEMORY_DECISIONS_LEDGER_MAX_ENTRIES="")
+        with open(state, encoding="utf-8") as handle:
+            self.assertEqual(len(json.load(handle)), 1)
+        self.assertEqual(ledger_cap(), MAX_LEDGER_ENTRIES)
+
+    def test_a_malformed_ledger_cap_is_refused_rather_than_clamped(self):
+        """Same rule as every other numeric setting: a cap that silently becomes a different number is
+        one the operator trusts and the system does not honour. Also reachable at import, since the
+        value is read per call — so a bad value is a classified refusal, not a traceback."""
+        for value in ("0", "-1", "abc", "12.5"):
+            with self.subTest(value=value):
+                proc = run_gate(["score"], json.dumps([RECORD]),
+                                self.gate_env(CONTEXT_MEMORY_DECISIONS_LEDGER_MAX_ENTRIES=value))
+                combined = proc.stdout + proc.stderr
+                self.assertNotEqual(proc.returncode, 0, f"{value}: a bad cap must not succeed")
+                self.assertIn("bad-decisions-config", combined)
+                self.assertNotIn("Traceback", combined,
+                                 f"{value}: a bad cap must be a refusal, never a crash")
+
+    def test_a_blank_ledger_cap_keeps_the_shipped_default(self):
+        """Whitespace is an unset value, not a malformed one — the same rule the other settings follow."""
+        self.stub.probabilities = dict(self.LOW)
+        proc, report = self.score(CONTEXT_MEMORY_DECISIONS_LEDGER_MAX_ENTRIES="   ")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(report["outcome"], "ok")
 
     def test_the_write_path_applies_the_cap(self):
         """The cap must be reached on the real write path, or `cap_ledger` is merely a helper nobody
