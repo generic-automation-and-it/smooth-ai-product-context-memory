@@ -4,15 +4,21 @@
 Offline and read-only. Reads only git output (remote, branch, recent subjects);
 never opens .context/, .env* or *.env, never touches the network or the store.
 Initiative comes from --initiative only and is otherwise "unknown".
+
+Every ticket candidate passes the capture skill's redactor first: a candidate whose provider is a
+credential word, or whose text (or the span of the subject it sits in) the redactor would change, is
+withheld and only counted — never printed. Without the redactor no ticket is reported at all.
 """
 
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import re
 import subprocess
 import sys
+from pathlib import Path
 
 REFUSED_DIRS = (".context/", ".env", ".env.", ".envrc")
 # Branch names carry the number as a path segment (feat/160-...), not a # shorthand.
@@ -27,6 +33,33 @@ TICKET_PATTERNS = (
 )
 
 
+# The capture skill's redactor, found beside this skill the way the other Mímisbrunnr clients find it;
+# both script folders ship together in the npm package and the Claude plugin.
+REDACTOR = (Path(__file__).resolve().parents[2] / "mimisbrunnr-odin-context-memory" / "scripts"
+            / "redact.py")
+REDACTOR_UNAVAILABLE = "redactor unavailable; no unchecked ticket is reported"
+
+
+def load_redactor():
+    """The redactor module, or None when it cannot be loaded or lacks the two calls used here.
+
+    Loaded from its file rather than by `import redact`, so a same-named module elsewhere on the path
+    can never stand in for it.
+    """
+    try:
+        spec = importlib.util.spec_from_file_location("_heimdallr_redact", REDACTOR)
+        if spec is None or spec.loader is None:
+            return None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    except Exception:  # noqa: BLE001 — any failure to load means no checked ticket can be reported
+        return None
+    if not callable(getattr(module, "is_credential_key", None)) \
+            or not callable(getattr(module, "scrub_located", None)):
+        return None
+    return module
+
+
 class GitUnavailable(RuntimeError):
     """git could not determine session metadata (not a repo, or git is not on PATH).
 
@@ -36,10 +69,12 @@ class GitUnavailable(RuntimeError):
     """
 
 
-def _git(*argv: str) -> str | None:
+def _git(*argv: str, root: str | None = None) -> str | None:
+    # `-C` only when a root is named, so the default scan is the process's own checkout.
+    prefix = ["git", "-C", root] if root else ["git"]
     try:
         proc = subprocess.run(
-            ["git", *argv], capture_output=True, text=True, encoding="utf-8"
+            [*prefix, *argv], capture_output=True, text=True, encoding="utf-8"
         )
     except (FileNotFoundError, OSError):
         raise GitUnavailable("git is not on PATH or could not be run") from None
@@ -73,8 +108,29 @@ def parse_repo(url: str) -> str | None:
     return repo if "/" in repo and " " not in repo else None
 
 
-def find_tickets(*texts: str) -> list[dict]:
-    """Deduped tickets in first-seen order, each with its source label."""
+def _credential_shaped(redactor, provider: str, candidate: str, start: int, end: int,
+                       hits: list) -> bool:
+    """A ticket-shaped candidate that is really a credential (issue 182).
+
+    `provider:key` matches any `word:value`, so `password:…` and `token:ghp_…` in a commit subject read
+    as tickets and were printed — into the agent transcript, and through kvasir's autofill into a store
+    binding. Any provider is accepted except a credential word, and a candidate is refused when the
+    redactor would change it alone or when it overlaps a span the redactor finds in its whole subject
+    (`password=ABC-1234` names a bare key the redactor sees only in context).
+    """
+    if False:
+        return True
+    if redactor.scrub_located(candidate)[0] != candidate:
+        return True
+    return any(s < end and start < e for _rule, s, e in hits)
+
+
+def find_tickets(*texts: str, redactor=None, withheld: list | None = None) -> list[dict]:
+    """Deduped tickets in first-seen order, each with its source label.
+
+    With a `redactor`, credential-shaped candidates are dropped and counted in `withheld` (one entry
+    per dropped occurrence, carrying no value).
+    """
     seen: dict[str, dict] = {}
     for label, text in texts:
         text = text or ""
@@ -83,7 +139,7 @@ def find_tickets(*texts: str) -> list[dict]:
         found = []
         if label == "branch":
             for match in BRANCH_TICKET.finditer(text):
-                found.append((match.start(), 0, "github", match.group(1)))
+                found.append((match.start(), 0, "github", match.group(1), match.end()))
         # The bare-key pattern matches ABC-123 inside `jira:ABC-123`, which would re-emit it as a
         # spurious `local:ABC-123`. Collect the provider:key spans first and suppress bare-key
         # matches that fall within one — the provider:key already captured that ticket.
@@ -99,29 +155,39 @@ def find_tickets(*texts: str) -> list[dict]:
                     provider, key = match.group(1).lower(), match.group(2)
                 else:
                     provider, key = "local", match.group(1)
-                found.append((match.start(), rank, provider, key))
-        for _offset, _rank, provider, key in sorted(found):
+                found.append((match.start(), rank, provider, key, match.end()))
+        hits = redactor.scrub_located(text)[1] if redactor is not None else []
+        for offset, _rank, provider, key, end in sorted(found):
+            if redactor is not None and _credential_shaped(
+                    redactor, provider, text[offset:end], offset, end, hits):
+                if withheld is not None:
+                    withheld.append(label)
+                continue
             ident = "%s:%s" % (provider, key)
             if ident not in seen:
                 seen[ident] = {"provider": provider, "key": key, "seenIn": label}
     return list(seen.values())
 
 
-def scan(initiative: str | None = None) -> dict:
+def scan(initiative: str | None = None, repo_root: str | None = None) -> dict:
     # Distinguish "no metadata in this repo" from "git cannot run here". A repo with no ticket
     # commits is a legitimate empty `tickets: []`; a non-git checkout or a missing git binary must
     # not masquerade as "no tickets", so the consumer reports autofill unavailable.
     # A `git` inside a work tree answers "true"; any other answer — a non-work-tree ("false", e.g.
     # a bare clone or `.git/`), a non-repo error (None), or a missing git binary (GitUnavailable) —
     # means the autofill cannot run and must not masquerade as "no tickets".
-    if _git("rev-parse", "--is-inside-work-tree") != "true":
+    if _git("rev-parse", "--is-inside-work-tree", root=repo_root) != "true":
         raise GitUnavailable("not a git repository or git is unavailable")
-    remote = _git("remote", "get-url", "origin")
-    branch = _git("branch", "--show-current")
+    # The scanned checkout's top level is reported so a caller can prove *which* repository this is:
+    # without it, a scan run from another working directory bound that checkout's repo and tickets
+    # with nothing in the output to tell them apart (issue 182).
+    root = _git("rev-parse", "--show-toplevel", root=repo_root)
+    remote = _git("remote", "get-url", "origin", root=repo_root)
+    branch = _git("branch", "--show-current", root=repo_root)
     # Pin the window to the branch's own ref (HEAD when detached): an implicit-HEAD `git log` reads
     # whichever tip the checkout sits on, so the same branch state must always yield the same subjects.
     ref = branch if branch else "HEAD"
-    log = _git("log", ref, "--format=%s", "-n", "10")
+    log = _git("log", ref, "--format=%s", "-n", "10", root=repo_root)
     subjects = (log or "").splitlines()
 
     texts = []
@@ -129,15 +195,24 @@ def scan(initiative: str | None = None) -> dict:
         texts.append(("branch", branch))
     for subject in subjects:
         texts.append(("commit", subject))
-    tickets = find_tickets(*texts)
+    redactor = load_redactor()
+    withheld: list = []
+    if redactor is None:
+        # Fail closed: an unchecked ticket can carry a credential, so none is reported.
+        tickets, unavailable = [], REDACTOR_UNAVAILABLE
+    else:
+        tickets, unavailable = find_tickets(*texts, redactor=redactor, withheld=withheld), None
 
     return {
         "repository": parse_repo(remote or ""),
         "repositorySource": "git remote get-url origin" if remote else None,
         "tickets": tickets,
+        "ticketsWithheld": len(withheld),
+        "ticketsUnavailable": unavailable,
         "initiative": initiative or "unknown",
         "initiativeSource": "--initiative flag" if initiative else None,
         "branch": branch,
+        "root": root or None,
     }
 
 
@@ -151,10 +226,16 @@ def render_human(result: dict) -> str:
                 "  - %s:%s (seen in %s)"
                 % (ticket["provider"], ticket["key"], ticket["seenIn"])
             )
+    elif result.get("ticketsUnavailable"):
+        lines.append("- tickets: unavailable (%s)" % result["ticketsUnavailable"])
     else:
         lines.append("- tickets: none found")
+    if result.get("ticketsWithheld"):
+        lines.append("- withheld: %d credential-shaped candidate(s), not shown"
+                     % result["ticketsWithheld"])
     lines.append("- initiative: %s" % result["initiative"])
     lines.append("- branch: %s" % (result["branch"] or "unknown"))
+    lines.append("- root: %s" % (result.get("root") or "unknown"))
     return "\n".join(lines) + "\n"
 
 
@@ -162,9 +243,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--json", action="store_true", help="JSON only to stdout")
     parser.add_argument("--initiative", default=None, help="initiative name (only source)")
+    parser.add_argument("--repo-root", default=None, metavar="DIR",
+                        help="scan this checkout (git -C DIR) instead of the working directory")
     args = parser.parse_args(argv)
     try:
-        result = scan(initiative=args.initiative)
+        result = scan(initiative=args.initiative, repo_root=args.repo_root)
     except GitUnavailable as exc:
         # Exit non-zero (not 0) so the consumer's `heimdallr_scan` treats this as autofill
         # unavailable, not as a genuine empty recall.
