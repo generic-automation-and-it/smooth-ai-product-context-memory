@@ -979,12 +979,16 @@ def _audience_tags(candidate: dict, result: dict) -> list[str]:
     carried, written into it under `mark` and read back as evidence of anything. A value this client
     cannot interpret is treated as *no* evidence rather than as garbage; it never changes the
     disposition, because `passed` alone decides whether the record is kept, tagged or held.
+
+    The same rule covers a blank role: `""` names no role, and interpolating it wrote the bare tag
+    `audience:` — an entry that looks like an audience and asserts nothing, stored on the record under
+    `mark` and read back as evidence of anything.
     """
     tags = list(candidate.get("tags") or [])
     roles = result.get("passingRoles")
     if isinstance(roles, list):
         for role in roles:
-            if not isinstance(role, str):
+            if not isinstance(role, str) or not role.strip():
                 continue
             tag = f"audience:{role}"
             if tag not in tags:
