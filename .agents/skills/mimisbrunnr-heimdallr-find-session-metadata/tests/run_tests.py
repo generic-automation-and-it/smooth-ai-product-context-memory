@@ -250,6 +250,89 @@ class CredentialShapedTicketTests(unittest.TestCase):
             self.assertIn("tickets: unavailable (redactor unavailable", human)
 
 
+class BranchRedactionTests(unittest.TestCase):
+    """Issue 184: the branch name was printed whole while only its ticket candidates were checked, so a
+    credential in a branch name reached the transcript through the `branch` field."""
+
+    def _scan(self, branch: str, *extra: str, script: Path = SCRIPT) -> subprocess.CompletedProcess:
+        proc = run_with_git(
+            {
+                "remote get-url origin": "https://github.com/acme/widgets.git\n",
+                "branch --show-current": branch + "\n",
+                f"log {branch} --format=%s -n 10": "fix #7\n",
+            },
+            *extra,
+            script=script,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return proc
+
+    def test_a_credential_in_the_branch_name_is_never_printed(self):
+        branches = [("assign-" + e["id"], "fix/" + e["text"].replace(":", "=", 1), e["secret"])
+                    for e in CREDENTIAL_LIKE["credentials"] if e["gate"]]
+        branches += [("ticket-" + e["id"], "fix/" + e["text"], e["secret"])
+                     for e in CREDENTIAL_LIKE["credentials"]]
+        for case, branch, secret in branches:
+            for flags in ((), ("--json",)):
+                with self.subTest(case=case, json=bool(flags)):
+                    proc = self._scan(branch, *flags)
+                    self.assertNotIn(secret, proc.stdout + proc.stderr)
+                    if flags:
+                        result = json.loads(proc.stdout)
+                        self.assertIsNone(result["branch"])
+                        self.assertEqual(result["branchWithheld"], "credential-shaped; not shown")
+                        self.assertIn({"provider": "github", "key": "7", "seenIn": "commit"},
+                                      result["tickets"])
+                    else:
+                        self.assertIn("- branch: withheld (credential-shaped; not shown)", proc.stdout)
+
+    def test_an_ordinary_branch_is_still_shown(self):
+        result = json.loads(self._scan("feat/160-node=20-upgrade", "--json").stdout)
+        self.assertEqual(result["branch"], "feat/160-node=20-upgrade")
+        self.assertIsNone(result["branchWithheld"])
+        self.assertIn({"provider": "github", "key": "160", "seenIn": "branch"}, result["tickets"])
+
+    def test_without_the_redactor_the_branch_is_not_shown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lone = Path(tmp) / "skills" / "mimisbrunnr-heimdallr-find-session-metadata" / "scripts"
+            lone.mkdir(parents=True)
+            shutil.copy(SCRIPT, lone / SCRIPT.name)
+            proc = self._scan("feat/160-x", "--json", script=lone / SCRIPT.name)
+            result = json.loads(proc.stdout)
+            self.assertIsNone(result["branch"])
+            self.assertIn("redactor unavailable", result["branchWithheld"])
+            self.assertNotIn("feat/160-x", proc.stdout)
+
+
+class CommitHistoryTests(unittest.TestCase):
+    """Issue 184: a failed `git log` returned nothing, so a broken read looked exactly like a repository
+    with no ticket commits."""
+
+    BASE = {
+        "remote get-url origin": "https://github.com/acme/widgets.git\n",
+        "branch --show-current": "main\n",
+    }
+
+    def test_a_failed_log_on_a_resolvable_ref_is_disclosed(self):
+        # No `log` response: the fake git exits 1 for it, while the ref still resolves to a commit.
+        responses = dict(self.BASE, **{"rev-parse --verify -q main^{commit}": "0" * 40 + "\n"})
+        proc = run_with_git(responses, "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        result = json.loads(proc.stdout)
+        self.assertEqual(result["tickets"], [])
+        self.assertIn("git log failed", result["commitsUnavailable"])
+        human = run_with_git(responses).stdout
+        self.assertIn("- commits: unavailable (git log failed", human)
+
+    def test_a_readable_history_and_an_unborn_branch_are_not_failures(self):
+        ok = run_with_git(dict(self.BASE, **{"log main --format=%s -n 10": "fix #3\n"}), "--json")
+        self.assertIsNone(json.loads(ok.stdout)["commitsUnavailable"])
+        # Unborn: neither the log nor the ref resolves — a genuine empty history.
+        unborn = run_with_git(dict(self.BASE), "--json")
+        self.assertIsNone(json.loads(unborn.stdout)["commitsUnavailable"])
+        self.assertNotIn("commits:", run_with_git(dict(self.BASE)).stdout)
+
+
 class ContractTests(unittest.TestCase):
     def test_human_default_and_no_files(self):
         tmp = tempfile.mkdtemp()
@@ -349,6 +432,23 @@ class RepoRootTests(unittest.TestCase):
             capture_output=True, text=True, encoding="utf-8", cwd=str(self.other))
         self.assertEqual(proc.returncode, 2, proc.stderr)
         self.assertIn("git unavailable", proc.stderr)
+
+    def test_a_real_unborn_branch_is_an_empty_history_not_a_failure(self):
+        unborn = Path(self._tmp.name) / "unborn"
+        subprocess.run(["git", "-c", "init.defaultBranch=main", "init", "-q", str(unborn)],
+                       check=True, capture_output=True)
+        result = self._scan("--repo-root", str(unborn))
+        self.assertEqual(result["tickets"], [])
+        self.assertIsNone(result["commitsUnavailable"])
+
+    def test_a_real_credential_branch_is_withheld(self):
+        secret = "Hunter2-FAKE-0000"
+        subprocess.run(["git", "-C", str(self.chosen), "checkout", "-q", "-b",
+                        "fix/password=" + secret], check=True, capture_output=True)
+        result = self._scan("--repo-root", str(self.chosen))
+        self.assertIsNone(result["branch"])
+        self.assertNotIn(secret, json.dumps(result))
+        self.assertIsNone(result["commitsUnavailable"])
 
 
 if __name__ == "__main__":

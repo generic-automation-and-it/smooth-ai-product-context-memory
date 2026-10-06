@@ -13,7 +13,7 @@ python3 -B .agents/skills/mimisbrunnr-heimdallr-find-session-metadata/scripts/fi
 | Field | Source |
 |---|---|
 | repository | `git remote get-url origin` → `owner/repo` |
-| tickets | branch name + last 10 commit subjects; credential-shaped candidates are withheld (counted, never shown) |
+| tickets | branch name + last 10 commit subjects; credential-shaped candidates are withheld (counted, never shown), and so is a credential-shaped branch name; a failed `git log` is disclosed (`commitsUnavailable`), never an empty history |
 | initiative | `--initiative` flag only, else `unknown` |
 | root | the checkout scanned (`--repo-root DIR`, else the working directory) |
 

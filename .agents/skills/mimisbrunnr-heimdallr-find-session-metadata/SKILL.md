@@ -28,12 +28,14 @@ accepting anything from the scan.
 | Field | Source | Example |
 |---|---|---|
 | `repository` | `git remote get-url origin`, parsed to `owner/repo` | `generic-automation-and-it/smooth-ai-product-context-memory` |
-| `tickets` | Current branch name + recent commit subjects (`HEAD`, last 10), matched for `#123`, `provider:key`, `JIRA-123` shapes | `github:160` from `feat/160-...` |
+| `tickets` | Current branch name + recent commit subjects (the branch ref, `HEAD` when detached; last 10), matched for `#123`, `provider:key`, `JIRA-123` shapes | `github:160` from `feat/160-...` |
 | `initiative` | `--initiative NAME` flag only, else `unknown` | never guessed from prose |
-| `branch` | `git branch --show-current` (reported, not a binding) | `feat/160-...` |
+| `branch` | `git branch --show-current` (reported, not a binding); `null` when withheld | `feat/160-...` |
+| `branchWithheld` | Why the branch name is not shown (credential-shaped, or no redactor to check it), else `null` | `null` |
 | `root` | `git rev-parse --show-toplevel` — which checkout was scanned | `/work/smooth-ai-product-context-memory` |
 | `ticketsWithheld` | Count of credential-shaped candidates dropped (values never shown) | `1` |
 | `ticketsUnavailable` | Why no ticket is reported at all (the redactor could not be loaded), else `null` | `null` |
+| `commitsUnavailable` | Why recent commit subjects were not read (`git log` failed on a ref that resolves), else `null`; tickets then come from the branch alone. An unborn branch is an empty history, not a failure | `null` |
 
 ## Rules
 
@@ -44,5 +46,7 @@ accepting anything from the scan.
 - **Credential-shaped candidates are withheld.** `provider:key` matches any `word:value`, so every candidate
   passes the capture skill's redactor (`mimisbrunnr-odin-context-memory/scripts/redact.py`): one whose
   provider is a credential word (`password`, `token`, `API_KEY` …), or whose text — alone or in its subject —
-  the redactor would change, is dropped and only counted. Without the redactor no ticket is reported.
+  the redactor would change, is dropped and only counted. The branch name is withheld (`branchWithheld`) when
+  the redactor would change it or a candidate inside it was dropped. Without the redactor no ticket and no
+  branch name is reported.
 - **Deduped, sourced.** Each ticket is listed once with where it was seen (branch, commit subject). No ordering beyond first-seen.

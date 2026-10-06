@@ -7,7 +7,9 @@ Initiative comes from --initiative only and is otherwise "unknown".
 
 Every ticket candidate passes the capture skill's redactor first: a candidate whose provider is a
 credential word, or whose text (or the span of the subject it sits in) the redactor would change, is
-withheld and only counted — never printed. Without the redactor no ticket is reported at all.
+withheld and only counted — never printed. The branch name is withheld the same way, and when a candidate
+inside it was. Without the redactor no ticket and no branch name is reported at all. A failed `git log`
+is disclosed as `commitsUnavailable`, never reported as an empty history.
 """
 
 from __future__ import annotations
@@ -38,6 +40,9 @@ TICKET_PATTERNS = (
 REDACTOR = (Path(__file__).resolve().parents[2] / "mimisbrunnr-odin-context-memory" / "scripts"
             / "redact.py")
 REDACTOR_UNAVAILABLE = "redactor unavailable; no unchecked ticket is reported"
+BRANCH_CREDENTIAL_SHAPED = "credential-shaped; not shown"
+BRANCH_UNCHECKED = "redactor unavailable; the branch is not shown unchecked"
+COMMITS_UNAVAILABLE = "git log failed; recent commit subjects were not read"
 
 
 def load_redactor():
@@ -188,6 +193,13 @@ def scan(initiative: str | None = None, repo_root: str | None = None) -> dict:
     # whichever tip the checkout sits on, so the same branch state must always yield the same subjects.
     ref = branch if branch else "HEAD"
     log = _git("log", ref, "--format=%s", "-n", "10", root=repo_root)
+    commits_unavailable = None
+    if log is None and _git("rev-parse", "--verify", "-q", ref + "^{commit}",
+                            root=repo_root) is not None:
+        # The ref resolves to a commit, so a failed `git log` is a read failure, not an empty history.
+        # Reporting it as no subjects made a broken read look like a repository with no ticket
+        # commits (issue 184). An unborn branch has no commit to resolve and stays a genuine empty.
+        commits_unavailable = COMMITS_UNAVAILABLE
     subjects = (log or "").splitlines()
 
     texts = []
@@ -202,6 +214,18 @@ def scan(initiative: str | None = None, repo_root: str | None = None) -> dict:
         tickets, unavailable = [], REDACTOR_UNAVAILABLE
     else:
         tickets, unavailable = find_tickets(*texts, redactor=redactor, withheld=withheld), None
+    shown_branch, branch_withheld = branch, None
+    if branch:
+        # The branch name is free text like a commit subject, and it was printed whole while its
+        # ticket candidates were checked (issue 184). It is withheld when the redactor would change it
+        # or a candidate inside it was withheld — printing it would print that value — and, failing
+        # closed like the tickets, when no redactor is available to check it.
+        if redactor is None:
+            branch_withheld = BRANCH_UNCHECKED
+        elif "branch" in withheld or redactor.scrub_located(branch)[0] != branch:
+            branch_withheld = BRANCH_CREDENTIAL_SHAPED
+        if branch_withheld:
+            shown_branch = None
 
     return {
         "repository": parse_repo(remote or ""),
@@ -209,9 +233,11 @@ def scan(initiative: str | None = None, repo_root: str | None = None) -> dict:
         "tickets": tickets,
         "ticketsWithheld": len(withheld),
         "ticketsUnavailable": unavailable,
+        "commitsUnavailable": commits_unavailable,
         "initiative": initiative or "unknown",
         "initiativeSource": "--initiative flag" if initiative else None,
-        "branch": branch,
+        "branch": shown_branch,
+        "branchWithheld": branch_withheld,
         "root": root or None,
     }
 
@@ -230,11 +256,17 @@ def render_human(result: dict) -> str:
         lines.append("- tickets: unavailable (%s)" % result["ticketsUnavailable"])
     else:
         lines.append("- tickets: none found")
+    if result.get("commitsUnavailable"):
+        # Tickets above come from the branch alone; an empty list is not an empty history.
+        lines.append("- commits: unavailable (%s)" % result["commitsUnavailable"])
     if result.get("ticketsWithheld"):
         lines.append("- withheld: %d credential-shaped candidate(s), not shown"
                      % result["ticketsWithheld"])
     lines.append("- initiative: %s" % result["initiative"])
-    lines.append("- branch: %s" % (result["branch"] or "unknown"))
+    if result.get("branchWithheld"):
+        lines.append("- branch: withheld (%s)" % result["branchWithheld"])
+    else:
+        lines.append("- branch: %s" % (result["branch"] or "unknown"))
     lines.append("- root: %s" % (result.get("root") or "unknown"))
     return "\n".join(lines) + "\n"
 
