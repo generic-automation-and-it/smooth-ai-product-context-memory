@@ -215,7 +215,9 @@ def scan(initiative: str | None = None, repo_root: str | None = None) -> dict:
     else:
         tickets, unavailable = find_tickets(*texts, redactor=redactor, withheld=withheld), None
     shown_branch, branch_withheld = branch, None
-    if branch:
+    if branch is None:
+        branch_withheld = "branch read failed; not shown"
+    elif branch:
         # The branch name is free text like a commit subject, and it was printed whole while its
         # ticket candidates were checked (issue 184). It is withheld when the redactor would change it
         # or a candidate inside it was withheld — printing it would print that value — and, failing

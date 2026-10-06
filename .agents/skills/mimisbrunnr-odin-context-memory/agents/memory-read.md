@@ -9,7 +9,8 @@ tools:
 
 Read the store through the read-only client only: `context_memory_read_client.py`. It exposes no write
 subcommand and refuses to start if a write token is present in the environment —
-`CONTEXT_MEMORY_WRITE_TOKEN` or the Host's `ApiAccess__WriteToken` (any case), which sourcing
+`CONTEXT_MEMORY_WRITE_TOKEN`, the Host's `ApiAccess__WriteToken`, or the controller's
+`Parameters__api-write-token` (any case, `:` read as `__`), which sourcing
 `.context/mimisbrunnr.env` exports together — so the read surface cannot mutate, by
 construction. That structural guarantee, plus the store's per-request
 scope enforcement, is what read-only access rests on — keep it: your environment holds the read token and

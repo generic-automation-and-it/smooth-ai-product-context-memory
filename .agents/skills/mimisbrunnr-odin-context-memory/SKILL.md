@@ -72,7 +72,8 @@ with the deliberate write step (`set -a && source ~/.mimisbrunnr/credentials && 
 `Write` tool for its scratch batch files. API authorization is the capability boundary.
 Spawn project agents `memory-read` and `memory-write`. `memory-read` runs only the read-only client
 `context_memory_read_client.py`, which exposes no write operation and refuses to start with
-`CONTEXT_MEMORY_WRITE_TOKEN` (or the Host's `ApiAccess__WriteToken`) present; `memory-write` runs
+any write-token spelling present (`CONTEXT_MEMORY_WRITE_TOKEN`, the Host's `ApiAccess__WriteToken`,
+or the controller's `Parameters__api-write-token`, any case, `:` read as `__`); `memory-write` runs
 `context_memory_client.py`.
 
 ## Session Phases
