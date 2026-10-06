@@ -134,7 +134,7 @@ from the bundle; replace the placeholders with real identities:
   ],
   "findings": [
     {"category": "gap", "ground": "task", "basis": "No rollout plan is captured for this rule",
-     "memories": [{"uuid": "<uuid-a>", "version": 1}], "classification": "analysis"}
+     "memories": [], "classification": "analysis"}
   ]
 }
 ```

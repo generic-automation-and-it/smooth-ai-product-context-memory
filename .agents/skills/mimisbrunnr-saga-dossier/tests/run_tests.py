@@ -524,6 +524,26 @@ class Nfr05AttributionTests(unittest.TestCase):
             self.assertEqual(uncited, [], f"uncited substantive statements under focus={focus}")
         self.assertGreater(examined, 0, "no substantive statements examined under any focus")
 
+    def test_every_memory_a_finding_names_is_cited_with_its_capture_time(self):
+        """Review #23: the attribution check read only Ordered claims, and findings listed their
+        memories as a bare `uuid vN` — no capture time, unlike every claim."""
+        items = [_mk("11111111-1111-1111-1111-111111111111", "A", "The default is A.",
+                     created="2026-01-01T10:00:00Z"),
+                 _mk("22222222-2222-2222-2222-222222222222", "B", "The default is B.",
+                     created="2026-01-02T10:00:00Z")]
+        finding = {"category": "contradiction", "basis": "A and B name different defaults.",
+                   "classification": "analysis",
+                   "memories": [{"uuid": i["uuid"], "version": 1} for i in items]}
+        rendered = dc.render(dc.compose(_bundle(items), focus=None, judgements={"findings": [finding]}))
+        section = rendered.split("## Findings", 1)[1].split("\n## ", 1)[0]
+        lines = [l for l in section.splitlines() if l.startswith("- ") and "Memories: none" not in l]
+        self.assertTrue(lines)
+        for line in lines:
+            with self.subTest(line=line[:60]):
+                self.assertTrue(_has_citation(line), line)
+        self.assertIn("[memory 22222222-2222-2222-2222-222222222222 v1, captured 2026-01-02T10:00:00Z]",
+                      section)
+
     def test_three_captures_collapsing_cite_all_three_origins(self):
         """NFR-05: a collapsed claim cites every origin, not the one the composition preferred."""
         items = [
@@ -670,6 +690,27 @@ class Nfr07FidelityTests(unittest.TestCase):
                           "Retry windows must stay under one hour."):
             self.assertIn(f"condition: {condition}", rendered)
         self.assertIn("Retry windows must stay under one hour. — [memory 22222222-2222-2222-2222-222222222222 v1", rendered)
+
+    def test_a_contradiction_needs_two_distinct_memories(self):
+        """Review #6: one memory listed twice satisfied the two-memory rule, so a claim was reported as
+        contradicting itself."""
+        item = _mk("11111111-1111-1111-1111-111111111111", "A", "The default is A.",
+                   created="2026-01-01T10:00:00Z")
+        ref = {"uuid": item["uuid"], "version": 1}
+        finding = {"category": "contradiction", "basis": "conflict", "classification": "analysis",
+                   "memories": [ref, dict(ref)]}
+        with self.assertRaisesRegex(ValueError, "two distinct memories"):
+            dc.compose(_bundle([item]), focus=None, judgements={"findings": [finding]})
+
+    def test_a_decimal_threshold_survives_condition_extraction(self):
+        """Review #22: sentences were cut at every `.`, so "at most 2.5 seconds" became "at most 2."
+        — a threshold rendered as a different, false one."""
+        item = dict(_mk("11111111-1111-1111-1111-111111111111", "Timeout", "Requests time out.",
+                        created="2026-01-01T10:00:00Z"),
+                    bodyText="Retries must stay under 2.5 seconds per call. Version 1.2 only applies here.")
+        rendered = dc.render(dc.compose(_bundle([item]), focus=None))
+        self.assertIn("condition: Retries must stay under 2.5 seconds per call.", rendered)
+        self.assertIn("condition: Version 1.2 only applies here.", rendered)
 
     def test_overlapping_sources_are_not_independent(self):
         """Issue 190: origins sharing one source but not all — `[A, B]` and `[B, C]` — were labelled
@@ -1918,7 +1959,7 @@ class ComposeJudgementsCliTests(unittest.TestCase):
         rc, out, err = self._compose(evidence=evidence)
         self.assertEqual(rc, 0, err)
         self.assertIn("### near-miss-tag", out)
-        self.assertIn(f"Memories: {self.A} v1", out)
+        self.assertIn(f"Memories: [memory {self.A} v1, captured ", out)
         # No relevant analysis is no evidence, so no finding.
         evidence["analyses"][0]["relevant"] = False
         rc, out, err = self._compose(evidence=evidence)
@@ -2435,6 +2476,21 @@ class PersonalDataTextTests(unittest.TestCase):
         self.assertIn("Make sure the approved slice holds no personal data first", readme)
         self.assertIn("a judgement adds no personal data to a file", text)
         self.assertIn("(GDPR personal data) is masked and generalised", text)
+
+
+class JudgementsExampleTests(unittest.TestCase):
+    """Review #15: SKILL.md's example task gap cited a memory, though a task gap is an answer missing
+    from the slice and LADR-13 forbids citing a memory that does not support it."""
+
+    def test_the_documented_task_and_expectation_gaps_cite_no_memory(self):
+        doc = (Path(__file__).resolve().parents[1] / "SKILL.md").read_text(encoding="utf-8")
+        blocks = [b[len("json"):] for b in doc.split("```") if b.startswith("json") and '"findings"' in b]
+        self.assertTrue(blocks, "no judgements example found")
+        for block in blocks:
+            for finding in json.loads(block)["findings"]:
+                if finding.get("category") == "gap" and finding.get("ground") in ("task", "expectation"):
+                    with self.subTest(basis=finding["basis"]):
+                        self.assertEqual(finding["memories"], [])
 
 
 if __name__ == "__main__":

@@ -125,8 +125,10 @@ reason `outside-focus`.
 
 ## Guarantees worth knowing about
 
-- **It never writes anything, anywhere.** Not to the store, not a version, not a label — this is
-  structural, not a rule the skill has to remember to follow.
+- **It never writes to the store.** Not a memory, not a version, not a label — this is structural,
+  not a rule the skill has to remember to follow. Locally it writes only the files the quickstart
+  names: the owner-only, gitignored scratch bundle and judgements (deleted after composing) and the
+  dossier itself.
 - **A contradiction is reported, never quietly resolved.** No "the newer one must be right" — you see
   both claims and decide, unless the store itself states which one has authority.
 - **Nothing is silently truncated or dropped.** Cut for size, hidden by scope, or outside the current
