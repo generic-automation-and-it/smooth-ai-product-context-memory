@@ -15,7 +15,7 @@ so the same word means the same direction in both skills (LADR-11) — the previ
 
   SESSION -> STORE, one offline and one live:
 
-    dump --currentsession [--from FILE|-] [--out DIR] [--session-name NAME] [binding]
+    dump --currentsession --from <session-summary-file|-> [--out DIR] [--session-name NAME] [binding]
         Write the session's understanding to .context/mimisbrunnr-understandings/<folder>/, with its
         binding recorded as structured metadata beside it. An export, not a write; redacted before it
         reaches disk, and the folder name is reported so another session can discover it.
@@ -358,7 +358,9 @@ def five_parts(record: dict) -> dict:
         "sources": record.get("sources") or [],
         "kind": record.get("kind") or "",
         "origin": record.get("origin") or "",
-        "confidence": record.get("confidence") or "",
+        # `or ""` turned a confidence of 0 — the lowest there is — into "no confidence", which is
+        # never flagged, so the least trustworthy record lost its warning (review #2).
+        "confidence": "" if record.get("confidence") is None else record.get("confidence"),
         "portability": record.get("portability") or "",
     }
 
@@ -410,7 +412,7 @@ def _render_record(parts: dict) -> list[str]:
     # the integer this write path now sends — 70 *is* the encoding of verified — so comparing the raw
     # value against the label flagged every record exported through `export` as though it were below
     # verified, which is the opposite of what a flagged confidence is for.
-    if parts["confidence"] and confidence_flagged(parts["confidence"]):
+    if confidence_flagged(parts["confidence"]):
         flags.append(f"confidence: {parts['confidence']}")
     if parts["portability"] == "repo-specific":
         flags.append("repo-specific, may not hold in another repository")
@@ -888,7 +890,7 @@ def cmd_import(args: argparse.Namespace) -> int:
               "initiative. It is an `export`/`dump` switch. Nothing was written.\n"
               "  to review:  understanding_client.py export <input>\n"
               "  to capture: understanding_client.py export <input> --write\n"
-              "  to dump:    understanding_client.py dump --currentsession",
+              "  to dump:    understanding_client.py dump --currentsession --from <session-summary-file|->",
               file=sys.stderr)
         return 1
     if args.input:
@@ -1051,7 +1053,8 @@ def _seed_decisions_enabled() -> None:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, value = line.partition("=")
-        if key.strip() == DECISIONS_ENABLED and value and not _os.environ.get(DECISIONS_ENABLED):
+        # Presence, not truthiness, like the capture client's loader (review #4).
+        if key.strip() == DECISIONS_ENABLED and value and DECISIONS_ENABLED not in _os.environ:
             _os.environ[DECISIONS_ENABLED] = value.strip()
             return
 
@@ -1923,7 +1926,7 @@ def export_candidates(records: list[dict] | None, body: str) -> tuple[list[dict]
                                "sources": parts["sources"],
                                "originUuid": parts["uuid"] or None,
                                "originVersion": parts["version"],
-                               "confidence": parts["confidence"] or None,
+                               "confidence": None if parts["confidence"] == "" else parts["confidence"],
                                "portability": parts["portability"] or None})
         if skipped_kind:
             skips.append(f"Skipped {skipped_kind} record(s) that were not understanding-kind; export "
@@ -2035,6 +2038,12 @@ def refuse_unsafe_target(folder: Path) -> str | None:
         return f"refusing to dump to a path that is not a directory ({resolved})"
     if (resolved / ".git").exists():
         return f"refusing to dump into a repository root ({resolved})"
+    # A dump replaces only a folder it made. Without the marker, a `_session.md` or `_dump.json`
+    # already there is somebody else's file, and the dump overwrote it (review #10).
+    if not (resolved / DUMP_MARKER).exists() and any(
+            (resolved / name).exists() for name in (SESSION_FILE, METADATA_FILE)):
+        return (f"refusing to overwrite {SESSION_FILE} or {METADATA_FILE} in a folder this client did "
+                f"not create ({resolved}); choose another --out")
     return None
 
 
@@ -2525,6 +2534,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     dump.add_argument("--heimdallr", choices=_HEIMDALLR_CHOICES, default="true",
                       help="Autofill missing --tickets/--repository/--initiative from the offline "
                            "Heimdallr git scan (default true; explicit flags always win).")
+
+    # Documented in SKILL.md as accepted for forward compatibility, but no parser took it, so the
+    # documented spelling failed with "unrecognized arguments" (review #11). A no-op until an
+    # interactive question exists.
+    for command in (load, imp, exp, dump):
+        command.add_argument("--dontask", action="store_true",
+                             help="Skip interactive questions and take the recommended option "
+                                  "(none exist yet; accepted for forward compatibility).")
 
     return parser.parse_args(argv)
 

@@ -223,7 +223,9 @@ def _surface_supports(surface_text: str, q: dict) -> bool:
     (issue 188). A present question is correct only when the surface still supports its answer.
     """
     text = surface_text.lower()
-    return all(fact.lower() in text for fact in q.get("must_contain", []))
+    # Stated, not merely present: a surface that says "postgres is not the storage engine" contains
+    # "postgres" and used to keep the recorded answer's marks (issue 190 #17).
+    return all(_stated_affirmatively(text, fact.lower()) for fact in q.get("must_contain", []))
 
 
 def summarize(results: list[dict]) -> dict:
@@ -268,7 +270,9 @@ def perfect_answers(surface_text: str, questions: list[dict]) -> dict:
     for q in questions:
         if _present(surface_text, q):
             facts = "; ".join(q.get("must_contain", []))
-            out[q["id"]] = f"{q['identity']}: {facts} — supported by the cited material."
+            # Cite an accepted alias: the identity is a display name, and where the question itself
+            # names it, it is not accepted as a citation (review #13).
+            out[q["id"]] = f"{q['identity']} ({q['accept'][-1]}): {facts} — supported by the cited material."
         else:
             out[q["id"]] = "not in context."
     return out
@@ -279,8 +283,8 @@ def wrong_fact_answers(questions: list[dict]) -> dict:
     wrong = {
         "Q1": "A healthy container is always fresh, so redeploy. Cited: Stale-image trap.",
         "Q2": "The graph is a join under the hood. Cited: Graph over joins.",
-        "Q3": "SQLite is the storage engine. Cited: Storage engine.",
-        "Q4": "Memcached holds the cache. Cited: Cache path.",
+        "Q3": "SQLite is the storage engine. Cited: bbbbbbbb-1111-1111-1111-111111111111.",
+        "Q4": "Memcached holds the cache. Cited: bbbbbbbb-2222-2222-2222-222222222222.",
         "Q5": "not in context",
     }
     return {q["id"]: wrong.get(q["id"], "not in context") for q in questions}
@@ -352,8 +356,8 @@ class WalkFixtureTests(unittest.TestCase):
         negated = {
             "Q1": "Do not verify freshness; a green container is current. Cited: Stale-image trap.",
             "Q2": "The graph is never 'not a join'. Cited: Graph over joins.",
-            "Q3": "Postgres is not the storage engine. Cited: Storage engine.",
-            "Q4": "Redis never holds the cache. Cited: Cache path.",
+            "Q3": "Postgres is not the storage engine. Cited: bbbbbbbb-1111-1111-1111-111111111111.",
+            "Q4": "Redis never holds the cache. Cited: bbbbbbbb-2222-2222-2222-222222222222.",
         }
         for name, text in self.texts.items():
             results = score_answers(text, negated, self.questions)
@@ -418,6 +422,34 @@ class WalkFixtureTests(unittest.TestCase):
                 lost = summarize(score_answers(stripped, answers, self.questions))
                 self.assertGreater(kept["correct_present"], 0)
                 self.assertEqual(lost["correct_present"], 0)
+
+    def test_a_surface_that_negates_its_facts_loses_its_marks(self):
+        """Issue 190 #17: the surface check was a substring match, so a rendering that came to deny a
+        key fact still supported the recorded answer stating it."""
+        text = self.texts["load_all"]
+        answers = perfect_answers(text, self.questions)
+        negated = re.sub(r"(?i)\bpostgres\b", "not postgres", text)
+        q3 = [r for r in score_answers(negated, answers, self.questions) if r["id"] == "Q3"][0]
+        self.assertTrue(q3["present"])
+        self.assertFalse(q3["supported"])
+        self.assertFalse(q3["correct"])
+
+    def test_no_accepted_citation_is_supplied_by_its_own_question(self):
+        """Review #13: Q3 accepted "storage engine" as a citation while asking about the storage engine,
+        so an answer that only echoed the question cited a record without naming one. Every accepted
+        alias must be something the question text does not already contain."""
+        for q in self.questions:
+            for alias in q.get("accept", []):
+                with self.subTest(question=q["id"], alias=alias):
+                    self.assertNotIn(alias.lower(), q["question"].lower())
+
+    def test_an_answer_echoing_the_question_does_not_cite(self):
+        text = self.texts["load_all"]
+        answers = {q["id"]: ("The storage engine is postgres." if q["id"] == "Q3" else "not in context.")
+                   for q in self.questions}
+        q3 = [r for r in score_answers(text, answers, self.questions) if r["id"] == "Q3"][0]
+        self.assertFalse(q3["cited"])
+        self.assertFalse(q3["correct"])
 
     def test_every_present_question_names_a_fact_its_text_does_not_supply(self):
         """A key fact the question already states would be scored by an agent that echoes it."""

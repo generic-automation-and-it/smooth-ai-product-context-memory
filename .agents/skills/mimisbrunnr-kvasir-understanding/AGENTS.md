@@ -1,5 +1,9 @@
 # mimisbrunnr-kvasir-understanding — AGENTS.md
 
+> **References.** Every HLD, LADR, NFR, BRD, issue and PR number in this file belongs to the upstream
+> repository, `generic-automation-and-it/smooth-ai-product-context-memory` (`docs/hlds/`, `docs/brd/`),
+> not to a repository this skill is vendored into.
+
 ## TL;DR
 
 A **session/store bridge** for a Mímisbrunnr **Understanding**. `load` injects a file or folder into the
@@ -144,7 +148,8 @@ recalls the live store via `import` (read token only) and orchestrates the captu
   handler commits unconditionally, so a dry run resolves no group and reports the group and initiative as
   *would create*, printing the exact commands. The initiative must already exist (`resolve-group` answers
   `404` otherwise); a `--write` refuses with the `upsert-initiative` command when it is absent.
-- **Every gate is a gate.** A redactor or atomicity detector that cannot run, or a post-`--write`
+- **Every gate is a gate.** A redactor or atomicity detector that cannot run or returns an unknown
+  verdict, or a post-`--write`
   `set --dryrun` refusal, stops with nothing written rather than bypassing the boundary. The
   `MAX_CANDIDATES` (20) cap is **not** a refusal: an over-cap batch auto-splits into consecutive ≤20
   chunks, each processed end to end (its own preflight, its own `set --dryrun` veto, its own write), so
@@ -265,12 +270,14 @@ recalls the live store via `import` (read token only) and orchestrates the captu
   instrument. The committed dossier bundle's `reach` is asserted against its own items (anchors,
   widened, selected, edges), so the recorded slice stays one the Host could have produced.
 - These tests validate plumbing and the non-destructive guarantees, **not** LLM judgement or live API
-  behaviour. The client makes no network call.
+  behaviour. The harness makes no network call: `import` and `export` reach the live store through the
+  context-memory clients in real use, and every test stubs that boundary.
 
 ## Changelog
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-06 | **Issue 190, part 2, and consumer review `5430979214` (#2, #7, #9, #10, #11, #12, #13).** (1) A confidence of **0** was turned into "no confidence" (`or ""`) and never flagged, so the least trustworthy record reached the reader unwarned (#2); `None` alone is now absent. (2) `dump` overwrote a `_session.md` or `_dump.json` in a folder it did not create (#10); without the dump marker it refuses. (3) `--dontask`, documented as accepted, was rejected by every subcommand (#11); it is now a no-op flag on all four. (4) The session-name scrub test restored a fixed directory instead of the one it found, leaving later cases elsewhere (#12). (5) Walk harness: Q3/Q4 accepted "storage engine"/"cache path" as citations while asking about them, so echoing the question cited a record (#13); aliases are now uuid-only and a test refuses any alias its own question supplies. The recorded surface check used a substring match, so a surface negating a fact still supported the answer (issue 190 #17); it uses `_stated_affirmatively`. Recorded walk scores unchanged. (6) Docs: every runnable `dump --currentsession` in SKILL.md, README and ai-understanding's README passes `--from` (without it the dump is a blank template; issue 190 #16, review #7); README states that names and other personal data are not reliably detected by the dump's redaction (issue 190 #15); "nothing is written" is qualified "to the store"; this file's harness note no longer says the client makes no network call (#9), and the export-gate bullet names an unknown atomicity verdict. Mutation-checked. `run_tests.py` 194 -> 199, walk harness 18 -> 21. | issue 190, review 5430979214 |
 | 2026-10-06 | **Issue 190, part 1.** (1) `dump --currentsession` passes every binding value and `--session-name` through both steps — the secret redactor, then the personal-data rules — before anything is written; a value the scrub changes is withheld from `_dump.json` and reported by field only, a session name that would change is not used as the folder name, and an unavailable redactor writes nothing (finding 1). (2) An atomicity verdict other than `simple`/`bundled` refuses the export instead of passing as clean (finding 8). (3) The real gate with an invalid endpoint refuses the export, end to end (finding 7). Mutation-checked. Harness 190 -> 194. | issue 190 |
 | 2026-10-06 | **Issue 188.** (1) Only a list of objects each carrying a text `statement` is read as a store export; any other JSON array (`[1, 2, 3]`, `{"items": ["a"]}`) is foreign material and no longer crashes `load`. (2) The walk scorer requires the rendered surface itself to carry a present question's key facts, so a recorded walk loses its marks when a rendering change drops them (scores unchanged: 2/2+3/3, 4/4+1/1, 4/4+1/1). (3) Rules and Test References: the verbs share a direction with `ai-understanding`, not a destination; `import` is described as the read it is. `test_bare_json_array_is_classified_visibly` recorded the old parse as a known limitation and now pins the resolution: foreign material, loaded visibly. Mutation-checked. Harness 188 -> 190, walk 17 -> 18. | issue 188 |
 | 2026-10-06 | **Issue 186.** (1) Redactor and atomicity answers are paired by `candidate_index` through one reader (`_indexed_results`): a short, reordered, duplicated or non-object answer is refused at all three call sites (`gate_redaction`, `gate_atomicity`, `redact`) — a short atomicity answer used to drop trailing candidates silently (recurrence of issue 179 finding 1). (2) A Heimdallr timeout falls back to no autofill instead of a traceback. (3) A malformed initiatives reply is unreadable (`None`), not a missing initiative. (4) A withheld repository (`repositoryWithheld`) is disclosed where the repository would have been autofilled. (5) The decision gate receives the binding as `group`, so its ledger keys a record by group and subject. (6) Docs: `dump` example carries `--from`; the switches name local files and the live store apart; the Value Gate link resolves (issue 179 finding 48 again), pinned by a link check over every in-tree relative link. (7) Harness: offline by construction — the store origin, credential file and write tokens are redirected before import, and a child-process case proves an unstubbed export never reaches a store the shell points at (finding 23); the walk harness's CI claim no longer asserts on another repository's `pr-gate.yml`; a docstring no longer promises dedup the test does not check. Mutation-checked. Harness 175 -> 188. | issue 186 |

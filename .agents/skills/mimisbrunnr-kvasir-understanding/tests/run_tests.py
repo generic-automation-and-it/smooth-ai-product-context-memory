@@ -1641,7 +1641,11 @@ class DumpBindingScrubTests(unittest.TestCase):
 
     def test_a_session_name_carrying_personal_data_is_not_the_folder_name(self):
         email = "someone.fake@corp.example"
+        previous = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
+            # Restored to whatever the runner started in, not to this file's folder: a fixed target
+            # left every later case in a different working directory than it started in (review #12).
+            self.addCleanup(os.chdir, previous)
             os.chdir(tmp)
             subprocess.run(["git", "init", "-q", tmp], check=True)
             (Path(tmp) / ".gitignore").write_text(".context/\n", encoding="utf-8")
@@ -1649,11 +1653,43 @@ class DumpBindingScrubTests(unittest.TestCase):
                 rc, out, err = run(["dump", "--currentsession", "--heimdallr", "false",
                                     "--session-name", f"notes for {email}"])
             finally:
-                os.chdir(Path(__file__).resolve().parent)
+                os.chdir(previous)
             self.assertEqual(rc, 0, err)
             names = [p.name for p in (Path(tmp) / ".context").rglob("*")]
             self.assertFalse(any("corp" in name or "someone" in name for name in names), names)
             self.assertIn("--session-name carried a secret or personal data", err)
+
+    def test_the_working_directory_is_left_as_the_runner_set_it(self):
+        """Review #12: the session-name case restored a fixed directory instead of the one it found."""
+        start = tempfile.mkdtemp()
+        original = os.getcwd()
+        self.addCleanup(os.chdir, original)
+        os.chdir(start)
+        before = os.getcwd()
+        case = DumpBindingScrubTests("test_a_session_name_carrying_personal_data_is_not_the_folder_name")
+        case.setUp()
+        try:
+            case.test_a_session_name_carrying_personal_data_is_not_the_folder_name()
+        finally:
+            case.tearDown()
+            case.doCleanups()
+        self.assertEqual(os.getcwd(), before)
+
+    def test_a_session_file_the_client_did_not_create_is_not_overwritten(self):
+        """Review #10: a folder holding someone's own `_session.md` was overwritten by a dump; only a
+        folder carrying the dump marker is replaced."""
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "notes"
+            out_dir.mkdir()
+            (out_dir / uc.SESSION_FILE).write_text("my own notes\n", encoding="utf-8")
+            rc, _, err = run(["dump", "--currentsession", "--out", str(out_dir), "--heimdallr", "false"])
+            self.assertEqual(rc, 1)
+            self.assertIn("did not create", err)
+            self.assertEqual((out_dir / uc.SESSION_FILE).read_text(encoding="utf-8"), "my own notes\n")
+            # Control: a folder the client made is regenerated.
+            fresh = Path(tmp) / "dump"
+            self.assertEqual(run(["dump", "--currentsession", "--out", str(fresh), "--heimdallr", "false"])[0], 0)
+            self.assertEqual(run(["dump", "--currentsession", "--out", str(fresh), "--heimdallr", "false"])[0], 0)
 
     def test_an_unavailable_redactor_writes_nothing(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -3218,6 +3254,53 @@ class GateEndpointRefusalTests(unittest.TestCase):
             survivors, note = uc.gate_decisions([{"subject": "S", "description": "S",
                                                    "statement": "A claim."}])
         self.assertEqual(note, uc.DECISIONS_REFUSED)
+
+
+class ZeroConfidenceTests(unittest.TestCase):
+    """Review #2: a confidence of 0 was read as "no confidence" (`or ""`) and never flagged, so the
+    least trustworthy record reached the reader without its warning."""
+
+    def test_a_zero_confidence_record_is_flagged(self):
+        record = {"uuid": "11111111-1111-1111-1111-111111111111", "version": 1, "subject": "S",
+                  "statement": "A claim.", "kind": "understanding", "confidence": 0}
+        rendered = "\n".join(uc.render_store([record], "the store", None, all_kinds=True))
+        self.assertIn("confidence: 0", rendered)
+        candidates, _ = uc.export_candidates([record], "")
+        self.assertEqual(candidates[0]["confidence"], 0)
+
+
+class DontAskSwitchTests(unittest.TestCase):
+    """Review #11: SKILL.md documents `--dontask` as accepted, but every subcommand rejected it."""
+
+    def test_every_subcommand_accepts_dontask(self):
+        for argv in (["load", "x", "--dontask"], ["import", "--dontask"], ["export", "x", "--dontask"],
+                     ["dump", "--currentsession", "--dontask"]):
+            with self.subTest(argv=argv):
+                self.assertTrue(uc.parse_args(argv).dontask)
+
+
+class DumpHandoffDocsTests(unittest.TestCase):
+    """Issue 190 #16, review #7: the handoff instructions said `dump --currentsession` with no `--from`,
+    which writes a blank template, not the session. Every runnable dump command passes `--from`."""
+
+    def test_every_documented_dump_command_passes_from(self):
+        root = Path(__file__).resolve().parents[1]
+        docs = [root / "SKILL.md", root / "README.md", root.parent / "ai-understanding" / "README.md"]
+        commands = []
+        for doc in (d for d in docs if d.exists()):
+            text = doc.read_text(encoding="utf-8")
+            # A runnable command: a fenced block line, or inline code naming the script or skill.
+            for block in text.split("```")[1::2]:
+                commands += [(doc.name, c) for c in block.replace("\\\n", " ").splitlines()
+                             if "dump --currentsession" in c and "──" not in c]  # not a diagram
+            commands += [(doc.name, c) for c in re.findall(r"`([^`]*dump --currentsession[^`]*)`", text,
+                                                            flags=re.S)
+                         if "understanding_client.py" in c or "kvasir-understanding dump" in c
+                         or c.strip().startswith("dump --currentsession ")]
+        self.assertTrue(commands)
+        for doc, command in commands:
+            with self.subTest(doc=doc, command=command.strip()[:70]):
+                self.assertIn("--from", command)
 
 
 if __name__ == "__main__":
