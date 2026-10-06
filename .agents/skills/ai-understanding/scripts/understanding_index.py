@@ -535,8 +535,8 @@ def published_paths(store: Path) -> set[str]:
 
     A member counts only once its bytes read back cleanly. The central directory alone lists a member
     whose data is damaged, so `namelist()` reported it published while no extract could recover it
-    (issue 182). Each member is read on its own (`member_reads_cleanly`), so one damaged unit does not
-    un-publish its siblings.
+    (issue 182). Each member is read on its own (`member_reads_cleanly`), but if any member fails
+    `consume_problems` the whole archive is refused and no member is published.
     """
     paths: set[str] = set()
     pub_dir = store.parent / PUBLISH_DIR_NAME
