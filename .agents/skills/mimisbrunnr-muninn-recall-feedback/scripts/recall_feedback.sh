@@ -73,7 +73,8 @@ recall_feedback_path_ok() {
   return 0
 }
 
-# The token arrives as a shell-function argument and reaches curl on stdin (`-H @-`) from the
+# The capability arrives as a shell-function argument (`read`/`write`); the token is read
+# from the environment and reaches curl on stdin (`-H @-`) from the
 # `printf` builtin. Never a curl argv element: a process's argv is readable in `ps` by every user on the
 # host, so `-H "Authorization: Bearer $TOKEN"` puts the credential in the process table. Never a file
 # either: a mode-600 temp file still put the token on disk, where a SIGKILL leaves it behind,

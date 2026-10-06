@@ -854,7 +854,8 @@ def render_table(records: list[dict], all_kinds: bool, asof: dt.date | None,
 
 def _cell(text: str) -> str:
     """A pipe-safe, newline-free table cell. A raw pipe would silently add a column."""
-    return str(text or "").replace("|", "/").replace("\n", " ").strip() or "-"
+    s = str(text) if isinstance(text, (int, float)) and not isinstance(text, bool) else str(text or "")
+    return s.replace("|", "/").replace("\n", " ").strip() or "-"
 
 
 def _short(uuid: str) -> str:

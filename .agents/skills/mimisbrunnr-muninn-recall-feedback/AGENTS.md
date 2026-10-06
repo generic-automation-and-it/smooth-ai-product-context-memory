@@ -18,8 +18,9 @@ records. Output is identity, count and time only.
   followed it ran regardless of what the guard decided — the guard was decorative. If you refactor the
   smoke check, keep the refusal and the send on one code path.
 - **The token is never an argv element and never a file.** `recall_feedback_curl` pipes the
-  `Authorization` header from the `printf` builtin into curl's stdin (`-H @-`); the operator passes the
-  token as a function argument, never as a `curl -H "Authorization: Bearer …"` literal. A process's argv
+  `Authorization` header from the `printf` builtin into curl's stdin (`-H @-`); the operator passes a
+  capability (`read`/`write`) as a function argument and the helper reads the matching token from the
+  environment itself, never as a `curl -H "Authorization: Bearer …"` literal. A process's argv
   is readable in `ps` by every user on the host, and a temp header file (the previous design) put the
   token on disk where a kill left it — contradicting the "never written to a file" guarantee below.
 - **The guard lives in `scripts/recall_feedback.sh`, and `SKILL.md` sources it.** Do not paste a copy
