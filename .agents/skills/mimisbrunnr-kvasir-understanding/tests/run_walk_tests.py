@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Cold-agent walk harness (BRD-003 assumption 2).
 
-Run (model-free degenerate assertions; the PR gate runs this):
+Run (model-free degenerate assertions):
     python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/tests/run_walk_tests.py
+
+CI coverage depends on the repository holding the skill. In the repository that develops it, the PR
+gate (`.github/workflows/pr-gate.yml`) runs this file; a repository that vendors the skill runs it only
+if its own CI adds a step for it (issue 184).
 
 Run (also score the recorded cold-agent walk):
     SMOOTH_WALK_BENCH=1 python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/tests/run_walk_tests.py
@@ -143,17 +147,45 @@ def _present(surface_text: str, q: dict) -> bool:
     return q["identity"].lower() in surface_text.lower()
 
 
+# A clause ends at sentence punctuation, a comma or a dash. A key fact is stated only when no clause
+# holding it also negates it: "Postgres is not the storage engine" contains "postgres" (issue 184).
+CLAUSE_BOUNDARY = re.compile(r"[.;:!?,\n\u2014\u2013]|\s-\s")
+NEGATION = re.compile(r"\b(?:not|never|no|none|nor|neither|cannot|without)\b|n't\b|n\u2019t\b")
+
+
+def _stated_affirmatively(text: str, fact: str) -> bool:
+    """`fact` occurs in `text`, and every clause holding it is free of negation outside the fact.
+
+    The fact's own words are excluded, so a fact that is itself a negation (`not a join`) still
+    counts. Every occurrence must pass, not one: a fact asserted once and denied once is not stated.
+    That under-credits an answer that negates something else in the fact's clause, which is the safe
+    direction for an instrument whose job is to catch a wrong answer.
+    """
+    starts = [m.start() for m in re.finditer(re.escape(fact), text)]
+    if not starts:
+        return False
+    for start in starts:
+        end = start + len(fact)
+        left = max((m.end() for m in CLAUSE_BOUNDARY.finditer(text, 0, start)), default=0)
+        right_match = CLAUSE_BOUNDARY.search(text, end)
+        right = right_match.start() if right_match else len(text)
+        if NEGATION.search(text[left:start]) or NEGATION.search(text[end:right]):
+            return False
+    return True
+
+
 def _facts_match(answer: str, q: dict) -> bool:
     """The answer states the question's key fact and none of its known-wrong claims.
 
     Citing a present identity is not answering: an answer that names the right memory and states the
     superseded or an invented claim scored as correct (issue 182). `must_contain` is the key-fact
     phrase the material supports (chosen so the question text itself does not supply it) and
-    `must_not_contain` the claim it contradicts, such as a superseded version. A token check, not a
-    semantic one: it catches a wrong fact, not every way to garble a right one.
+    `must_not_contain` the claim it contradicts, such as a superseded version. A key fact found only
+    inside a negated clause is not stated (issue 184). A token check, not a semantic one: it catches a
+    wrong or denied fact, not every way to garble a right one.
     """
     text = answer.lower()
-    return (all(f.lower() in text for f in q.get("must_contain", []))
+    return (all(_stated_affirmatively(text, f.lower()) for f in q.get("must_contain", []))
             and not any(f.lower() in text for f in q.get("must_not_contain", [])))
 
 
@@ -299,6 +331,61 @@ class WalkFixtureTests(unittest.TestCase):
             self.assertTrue(all(r["cited"] for r in results if r["present"]), name)
             self.assertEqual(summ["correct_present"], 0, f"{name}: a wrong fact must not score")
 
+    def test_a_negated_key_fact_is_not_correct(self):
+        """Regression (issue 184): `must_contain` was a substring check, so an answer denying the fact
+        ("Postgres is not the storage engine") scored as stating it."""
+        negated = {
+            "Q1": "Do not verify freshness; a green container is current. Cited: Stale-image trap.",
+            "Q2": "The graph is never 'not a join'. Cited: Graph over joins.",
+            "Q3": "Postgres is not the storage engine. Cited: Storage engine.",
+            "Q4": "Redis never holds the cache. Cited: Cache path.",
+        }
+        for name, text in self.texts.items():
+            results = score_answers(text, negated, self.questions)
+            for r in results:
+                if r["present"]:
+                    with self.subTest(surface=name, question=r["id"]):
+                        self.assertTrue(r["cited"])
+                        self.assertFalse(r["facts"], negated[r["id"]])
+                        self.assertFalse(r["correct"])
+
+    def test_negation_elsewhere_does_not_cancel_a_stated_fact(self):
+        """Controls: a fact that is itself a negation, a negation in another clause, and a contrast
+        after a comma all still count."""
+        by_id = {q["id"]: q for q in self.questions}
+        for qid, answer in (("Q2", "The graph is a path, not a join."),
+                            ("Q4", "Redis holds the cache, not the store."),
+                            ("Q3", "Postgres is the storage engine. It is not the cache."),
+                            ("Q1", "Not the health check: verify freshness by calling the endpoint.")):
+            with self.subTest(answer=answer):
+                self.assertTrue(_facts_match(answer, by_id[qid]), answer)
+
+    def test_the_newer_walk_unit_records_what_it_supersedes(self):
+        """Regression (issue 184): the fixture's newer `stale-image-trap` omitted
+        `provenance.supersedes`, so the store folder modelled a version chain the export procedure
+        never produces. Every non-oldest copy of a slug names the folder of the copy before it."""
+        root = _fixture("walk_understandings")
+        copies: dict = {}
+        for unit in sorted(root.glob("*/*.understanding.md")):
+            copies.setdefault(unit.name, []).append(unit)
+        self.assertTrue(any(len(paths) > 1 for paths in copies.values()))
+        for paths in copies.values():
+            for older, newer in zip(paths, paths[1:]):
+                text = newer.read_text(encoding="utf-8")
+                self.assertRegex(text, rf"(?m)^  supersedes: {re.escape(older.parent.name)}$",
+                                 newer.relative_to(root).as_posix())
+
+    def test_ci_coverage_is_claimed_per_repository(self):
+        """Regression (issue 184): the run instructions said the PR gate runs this file, which is false
+        in a repository that vendors the skill. The claim is qualified, and true where it is made."""
+        doc = sys.modules[__name__].__doc__ or ""
+        self.assertNotIn("the PR gate runs this)", doc)
+        self.assertIn("vendors the skill", doc)
+        workflow = UND_ROOT.parents[2] / ".github" / "workflows" / "pr-gate.yml"
+        if workflow.is_file():
+            self.assertIn("mimisbrunnr-kvasir-understanding/tests/run_walk_tests.py",
+                          workflow.read_text(encoding="utf-8"))
+
     def test_every_present_question_names_a_fact_its_text_does_not_supply(self):
         """A key fact the question already states would be scored by an agent that echoes it."""
         for q in self.questions:
@@ -397,8 +484,8 @@ class WalkModelTests(unittest.TestCase):
     The model walk itself is performed by the orchestrator (a cold agent given only the rendered
     surface + question set), never by this module. This test reads that recorded output and scores it
     with the same scoring function, so the measured per-surface numbers are reproducible without
-    re-running a model. Gated by SMOOTH_WALK_BENCH=1 because it is a walk-bench instrument, not a
-    PR-gate test.
+    re-running a model. Gated by SMOOTH_WALK_BENCH=1 because it is a walk-bench instrument: a CI run
+    of this file skips it unless that variable is set.
     """
 
     def _score_surfaces(self, answers: dict) -> dict:
