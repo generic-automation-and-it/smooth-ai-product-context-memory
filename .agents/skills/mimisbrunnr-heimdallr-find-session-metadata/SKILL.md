@@ -27,7 +27,8 @@ accepting anything from the scan.
 
 | Field | Source | Example |
 |---|---|---|
-| `repository` | `git remote get-url origin`, parsed to `owner/repo` | `generic-automation-and-it/smooth-ai-product-context-memory` |
+| `repository` | `git remote get-url origin`, parsed to `owner/repo`; `null` when withheld | `generic-automation-and-it/smooth-ai-product-context-memory` |
+| `repositoryWithheld` | Why the origin path is not shown (credential-shaped, or no redactor to check it), else `null` | `null` |
 | `tickets` | Current branch name + recent commit subjects (the branch ref, `HEAD` when detached; last 10), matched for `#123`, `provider:key`, `JIRA-123` shapes | `github:160` from `feat/160-...` |
 | `initiative` | `--initiative NAME` flag only, else `unknown` | never guessed from prose |
 | `branch` | `git branch --show-current` (reported, not a binding); `null` when withheld | `feat/160-...` |
