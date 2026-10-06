@@ -83,7 +83,7 @@ and work best together.
 | Goal | Continue this task | Hand knowledge to a future agent |
 | Content | Task state: todo, files touched, next step, attempts | Only what has no other home — no narrative, no paths, no toolchain |
 | Lifetime | Inside one session | Files, zip, or the Mímisbrunnr store — across sessions, workspaces, repos |
-| Loading | Whole summary always in context | Only units whose question matches, via `INDEX.md` |
+| Loading | Whole summary always in context | Only units whose question matches — or, for an outcome unit with no question, whose description matches — via `INDEX.md` |
 | Controls | None | Reconcile against the index, versions, `confidence`, `recheck`, `--review`, write-time redaction |
 | Trust | Summary reads as fact | Evidence — the system outranks it; a wrong unit is marked `contested` |
 | Repeated use | Summary of a summary drifts | Improved units are rewritten in full; history kept |
