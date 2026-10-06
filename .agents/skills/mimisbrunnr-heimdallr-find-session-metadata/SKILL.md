@@ -48,6 +48,5 @@ accepting anything from the scan.
   passes the capture skill's redactor (`mimisbrunnr-odin-context-memory/scripts/redact.py`): one whose
   provider is a credential word (`password`, `token`, `API_KEY` …), or whose text — alone or in its subject —
   the redactor would change, is dropped and only counted. The branch name is withheld (`branchWithheld`) when
-  the redactor would change it or a candidate inside it was dropped. Without the redactor no ticket and no
-  branch name is reported.
+  the redactor would change it or a candidate inside it was dropped. Without the redactor no ticket, no branch name, and no repository is reported.
 - **Deduped, sourced.** Each ticket is listed once with where it was seen (branch, commit subject). No ordering beyond first-seen.

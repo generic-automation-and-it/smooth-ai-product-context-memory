@@ -980,6 +980,8 @@ def gate_redaction(texts: list[str]) -> tuple[list[str], dict] | None:
     for result in results:
         scrubbed.append(result["redacted"])
         for finding in result.get("findings") or []:
+            if not isinstance(finding, dict):
+                return None
             rule = finding.get("rule_name", "unknown")
             findings[rule] = findings.get(rule, 0) + finding.get("hit_count", 0)
     return scrubbed, findings
@@ -998,7 +1000,10 @@ def gate_atomicity(candidates: list[dict]) -> list[dict] | None:
     if proc.returncode != 0:
         return None
     # A short or reordered answer dropped or mis-paired candidates silently (issue 186); refuse it.
-    return _indexed_results(proc.stdout, len(candidates))
+    results = _indexed_results(proc.stdout, len(candidates))
+    if results is None or not all(isinstance(r.get("verdict"), str) for r in results):
+        return None
+    return results
 
 
 DECISIONS_GATE = _CAPTURE_SCRIPTS / "decisions_gate.py"
