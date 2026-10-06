@@ -603,6 +603,44 @@ class ConsumeCheckTests(unittest.TestCase):
                                "strasse-20260101-0000/b.understanding.md")
         self.assert_refused(archive, "elsewhere in this archive")
 
+    def test_a_damaged_member_is_refused(self):
+        """Issue 184: the gate inspected names and modes only, so an archive whose member data was
+        damaged was cleared for extraction. Stored data fails its CRC; a deflate stream fails in zlib."""
+        member = "s-20260101-0000/a.understanding.md"
+        for compression in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
+            with self.subTest(compression=compression):
+                archive = self.root / f"d{compression}.zip"
+                with zipfile.ZipFile(archive, "w", compression) as zf:
+                    zf.writestr(member, "synthetic body long enough to corrupt\n" * 4)
+                    zf.writestr("s-20260101-0000/b.understanding.md", "intact\n")
+                    zf.writestr("INDEX.md", "# index\n")
+                corrupt_member(archive, member)
+                self.assert_refused(archive, f"'{member}' is damaged")
+
+    def test_a_nested_index_is_not_exempt_from_collision(self):
+        """Issue 184: the exemption matched any file named `INDEX.md`, so a nested one landing on a local
+        file differing only by case was cleared. Only the generated root index is exempt."""
+        (self.store / "s-20260101-0000").mkdir()
+        (self.store / "s-20260101-0000" / "index.md").write_text("local\n", encoding="utf-8")
+        archive = make_archive(self.root / "n.zip", "s-20260101-0000/INDEX.md")
+        self.assert_refused(archive, "local '")
+
+    def test_a_nested_index_collides_with_another_entry(self):
+        archive = make_archive(self.root / "n2.zip", "s-20260101-0000/index.md",
+                               "s-20260101-0000/INDEX.md")
+        self.assert_refused(archive, "elsewhere in this archive")
+
+    def test_the_root_index_stays_exempt(self):
+        """Control: the root index still lands on a local one differing by case, as every consume does,
+        and an archive wrapped in a top-level folder carrying its own index is not refused for it."""
+        (self.store / "index.md").write_text("local\n", encoding="utf-8")
+        rc, out, _ = consume(make_archive(self.root / "r.zip", "INDEX.md"), self.store)
+        self.assertEqual(rc, 0, out)
+        wrapped = make_archive(self.root / "w.zip", "understandings/INDEX.md",
+                               "understandings/s-20260101-0000/a.understanding.md")
+        rc, out, _ = consume(wrapped, self.store)
+        self.assertEqual(rc, 0, out)
+
     def test_an_unreadable_archive_exits_2(self):
         bad = self.root / "bad.zip"
         bad.write_bytes(b"not a zip")
