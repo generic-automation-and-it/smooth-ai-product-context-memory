@@ -469,6 +469,21 @@ class DurabilityGuardTests(unittest.TestCase):
                 zf.writestr(info, "../../elsewhere")
             self.assertEqual(flagged(store), {"alpha"})
 
+    def test_an_archive_consume_would_refuse_proves_nothing(self):
+        """Issue 190: units in an archive `--consume` rejects — here an escaping entry beside a valid
+        unit — were credited as published, so an unrestorable archive silenced the warning."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = make_repo(tmp, ignore_store=True)
+            store = repo / ".context" / "understandings"
+            write_unit(store, "proj-20260930-1700", "alpha")
+            pub = store.parent / ui.PUBLISH_DIR_NAME
+            pub.mkdir(parents=True, exist_ok=True)
+            with zipfile.ZipFile(pub / "understandings-20260930-180000.zip", "w") as zf:
+                zf.write(store / "proj-20260930-1700" / "alpha.understanding.md",
+                         "proj-20260930-1700/alpha.understanding.md")
+                zf.writestr("../escape.md", "x\n")
+            self.assertEqual(flagged(store), {"alpha"})
+
     def test_unreadable_archive_counts_for_nothing(self):
         """A corrupt zip cannot prove anything was captured; its units stay reported, without a crash."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -480,10 +495,14 @@ class DurabilityGuardTests(unittest.TestCase):
             (pub / "understandings-20260930-180000.zip").write_bytes(b"not a zip")
             self.assertEqual(flagged(store), {"alpha"})
 
-    def test_a_damaged_member_counts_for_nothing_and_spares_its_siblings(self):
+    def test_a_damaged_member_makes_its_archive_prove_nothing(self):
         """Issue 182: the central directory still lists a member whose bytes are damaged, so judging by
         `namelist()` reported it published. Stored data fails its CRC (`BadZipFile`); a deflate stream
-        fails in zlib (`zlib.error`, not an `OSError`), which a narrow except let crash the generator."""
+        fails in zlib (`zlib.error`, not an `OSError`), which a narrow except let crash the generator.
+
+        Issue 182 also spared the damaged member's siblings. Issue 184 made `--consume` refuse the
+        whole archive for one damaged member, so those siblings cannot be restored from it either, and
+        crediting them silenced the warning for units nothing could bring back (issue 190)."""
         for compression in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
             with self.subTest(compression=compression), tempfile.TemporaryDirectory() as tmp:
                 repo = make_repo(tmp, ignore_store=True)
@@ -497,11 +516,11 @@ class DurabilityGuardTests(unittest.TestCase):
                 corrupt_member(archive, "proj-20260930-1700/damaged.understanding.md")
                 with zipfile.ZipFile(archive) as zf:
                     self.assertIn("proj-20260930-1700/damaged.understanding.md", zf.namelist())
-                self.assertEqual(flagged(store), {"damaged"})
+                self.assertEqual(flagged(store), {"damaged", "intact"})
                 rc, out, err = run(argv(store, review=True))
                 self.assertEqual(rc, 0, err)
                 self.assertIn("proj-20260930-1700/damaged.understanding.md", out)
-                self.assertNotIn("proj-20260930-1700/intact.understanding.md", out)
+                self.assertIn("proj-20260930-1700/intact.understanding.md", out)
                 self.assertNotIn("Traceback", err)
 
     def test_superseded_copies_are_workspace_local_and_never_flagged(self):
@@ -609,6 +628,16 @@ class ConsumeCheckTests(unittest.TestCase):
         (self.store / "alias-20260101-0000").symlink_to(real, target_is_directory=True)
         self.assert_refused(make_archive(self.root / "a.zip", "alias-20260101-0000/a.understanding.md"),
                             "local '")
+
+    def test_two_entries_landing_on_one_file_are_refused(self):
+        """Issue 190: `alias/x` (through a local folder symlinked inside the store) and `real/x` have
+        different names and the same destination; compared by name only, one extracted over the other."""
+        real = self.store / "s-20260101-0000"
+        real.mkdir()
+        (self.store / "alias-20260101-0000").symlink_to(real, target_is_directory=True)
+        self.assert_refused(make_archive(self.root / "d.zip", "alias-20260101-0000/b.understanding.md",
+                                         "s-20260101-0000/b.understanding.md"),
+                            "elsewhere in this archive")
 
     def test_a_local_symlinked_folder_that_leads_outside_is_refused(self):
         outside = self.root / "outside"
