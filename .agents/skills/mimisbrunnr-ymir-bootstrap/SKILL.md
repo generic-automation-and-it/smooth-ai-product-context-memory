@@ -39,12 +39,16 @@ At the start, establish:
 - the chosen repository root and verified repository identity (default the Heimdallr
   reporter's `owner/repo` from the same skills root when the caller names none —
   `.agents/skills`, `.claude/skills` or `.codex/skills`, never a hardcoded prefix —
-  plus branch-seen tickets for a next-feature scope; tags stay agent-derived keywords). Run the
-  reporter as `find_session_metadata.py --json --repo-root <chosen root>`, never from whatever
-  working directory the session happens to be in, and accept its `repository` and tickets only when
-  its reported `root` resolves to the chosen root; otherwise treat the identity as unproven and bind
-  nothing from it. A session's working directory is often a different checkout from the one being
-  bootstrapped, and a scan there reports that checkout's repository and tickets;
+  with branch-seen tickets **proposed**, not bound, for a next-feature scope; tags stay agent-derived
+  keywords). Run the reporter as `find_session_metadata.py --json --repo-root <chosen root>`, never
+  from whatever working directory the session happens to be in, and accept its `repository` and
+  tickets only when its reported `root` resolves to the chosen root; otherwise treat the identity as
+  unproven and bind nothing from it. A session's working directory is often a different checkout from
+  the one being bootstrapped, and a scan there reports that checkout's repository and tickets. A
+  matching root proves **where** a ticket was found, not that it belongs to the named feature: a branch
+  carries whatever ticket the last piece of work on it used. So ask the user to confirm each proposed
+  ticket belongs to the named next feature before it enters the capture binding, and bind none they do
+  not confirm;
 - whether the task is baseline-only or includes deeper inspection for one named next feature;
 - any user-approved external evidence sources.
 

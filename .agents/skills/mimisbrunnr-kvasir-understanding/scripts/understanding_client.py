@@ -152,7 +152,9 @@ def heimdallr_scan() -> dict:
         proc = subprocess.run(
             [sys.executable, "-B", str(HEIMDALLR_SCRIPT), "--json"],
             capture_output=True, text=True, encoding="utf-8", timeout=30)
-    except (OSError, ValueError):
+    # `SubprocessError` covers `TimeoutExpired`: a hung reporter escaped the optional-autofill
+    # fallback as a traceback and killed the caller (issue 186).
+    except (OSError, ValueError, subprocess.SubprocessError):
         return {}
     if proc.returncode != 0:
         return {}
@@ -206,6 +208,19 @@ def heimdallr_ticket_disclosure(scan: dict) -> str | None:
         lines.append("heimdallr: commit history unavailable "
                      f"({' '.join(commits.split())[:120]}); only branch tickets were considered")
     return "\n".join(lines) or None
+
+
+def heimdallr_repository_disclosure(scan: dict) -> str | None:
+    """One line saying Heimdallr withheld the repository, or None; the reason only, never the path.
+
+    A credential-shaped origin path is withheld (`repositoryWithheld`), which leaves the repository
+    unbound; reading only `repository` made that look like a checkout with no origin (issue 186).
+    """
+    reason = scan.get("repositoryWithheld")
+    if isinstance(reason, str) and reason.strip():
+        return (f"heimdallr: repository withheld ({' '.join(reason.split())[:120]}); "
+                "pass --repository to bind one")
+    return None
 
 
 def heimdallr_tickets(scan: dict) -> list[str]:
@@ -917,6 +932,33 @@ def cmd_import(args: argparse.Namespace) -> int:
 # --------------------------------------------------------------- store write (export)
 
 
+def _indexed_results(stdout: str, count: int) -> list[dict] | None:
+    """The `results` of a capture-skill script, ordered by `candidate_index`, or None.
+
+    The redactor and the atomicity detector answer one object per input, each carrying its own
+    `candidate_index`. Pairing their answers with the inputs by position trusted the order and the
+    length: a short list silently dropped the trailing candidates from the export, and a reordered one
+    put one candidate's scrubbed text — or verdict — on another (issue 186). Every index from 0 to
+    `count - 1` must appear exactly once, on an object; anything else is an answer this client cannot
+    interpret, and the caller refuses rather than guesses.
+    """
+    try:
+        results = json.loads(stdout)["results"]
+    except (ValueError, KeyError, TypeError):
+        return None
+    if not isinstance(results, list) or len(results) != count:
+        return None
+    ordered: list = [None] * count
+    for result in results:
+        if not isinstance(result, dict):
+            return None
+        index = result.get("candidate_index")
+        if type(index) is not int or not 0 <= index < count or ordered[index] is not None:
+            return None
+        ordered[index] = result
+    return ordered
+
+
 def gate_redaction(texts: list[str]) -> tuple[list[str], dict] | None:
     """Run every candidate's free text through the capture skill's redactor, or None if it cannot run.
 
@@ -931,16 +973,15 @@ def gate_redaction(texts: list[str]) -> tuple[list[str], dict] | None:
                           input=json.dumps(texts), capture_output=True, text=True, encoding="utf-8")
     if proc.returncode != 0:
         return None
-    try:
-        results = json.loads(proc.stdout)["results"]
-    except (ValueError, KeyError, TypeError):
-        return None
-    if not isinstance(results, list) or len(results) != len(texts):
+    results = _indexed_results(proc.stdout, len(texts))
+    if results is None or not all(isinstance(r.get("redacted"), str) for r in results):
         return None
     scrubbed, findings = [], {}
     for result in results:
-        scrubbed.append(result.get("redacted", ""))
+        scrubbed.append(result["redacted"])
         for finding in result.get("findings") or []:
+            if not isinstance(finding, dict):
+                return None
             rule = finding.get("rule_name", "unknown")
             findings[rule] = findings.get(rule, 0) + finding.get("hit_count", 0)
     return scrubbed, findings
@@ -958,10 +999,11 @@ def gate_atomicity(candidates: list[dict]) -> list[dict] | None:
     )
     if proc.returncode != 0:
         return None
-    try:
-        return json.loads(proc.stdout)["results"]
-    except (ValueError, KeyError, TypeError):
+    # A short or reordered answer dropped or mis-paired candidates silently (issue 186); refuse it.
+    results = _indexed_results(proc.stdout, len(candidates))
+    if results is None or not all(isinstance(r.get("verdict"), str) for r in results):
         return None
+    return results
 
 
 DECISIONS_GATE = _CAPTURE_SCRIPTS / "decisions_gate.py"
@@ -1365,7 +1407,11 @@ def initiative_exists(name: str) -> tuple[bool, str]:
     elif isinstance(document, dict):
         items = next((document[key] for key in ("items", "initiatives")
                       if isinstance(document.get(key), list)), None)
-    for item in items or []:
+    if not isinstance(items, list):
+        # An answer with no collection in it is unreadable, not empty: reading it as "missing" turned
+        # a malformed reply into a write remedy against a store that may hold the initiative (issue 186).
+        return None, "unreadable initiatives response"
+    for item in items:
         if isinstance(item, dict) and item.get("name") == name:
             return True, "ok"
     return False, "missing"
@@ -1576,6 +1622,9 @@ def cmd_export(args: argparse.Namespace) -> int:
                 binding["tickets"] = found
                 filled.append(f"tickets {','.join(found)}")
         if not binding["repository"]:
+            disclosure = heimdallr_repository_disclosure(scan)
+            if disclosure:
+                print(disclosure, file=sys.stderr)
             repo = heimdallr_repository(scan)
             if repo:
                 binding["repository"] = repo
@@ -1644,7 +1693,10 @@ def cmd_export(args: argparse.Namespace) -> int:
     # Stopping here is before the group is resolved and before any chunk, so nothing exists to undo.
     # A dry run probes rather than scores: scoring spends the attempt budget the write needs.
     if args.write:
-        clean, decision_note = gate_decisions(clean)
+        # The gate's attempt ledger keys a record by its group as well as its subject; the group is
+        # not resolved yet, so the binding it will be resolved from stands in for it (issue 186).
+        ledger_group = {key: binding.get(key) for key in ("repository", "scope", "initiative", "tickets")}
+        clean, decision_note = gate_decisions([dict(c, group=ledger_group) for c in clean])
     else:
         decision_note = probe_decisions(len(clean))
     if decision_note == DECISIONS_REFUSED:
@@ -2121,10 +2173,12 @@ def redact(content: str) -> tuple[str, dict[str, int]] | None:
                           capture_output=True, text=True, encoding="utf-8")
     if proc.returncode != 0:
         return None
+    results = _indexed_results(proc.stdout, 1)
+    if results is None or not isinstance(results[0].get("redacted"), str):
+        return None
     try:
-        result = json.loads(proc.stdout)["results"][0]
-        return result["redacted"], {f["rule_name"]: f["hit_count"] for f in result["findings"]}
-    except (ValueError, KeyError, IndexError, TypeError):
+        return results[0]["redacted"], {f["rule_name"]: f["hit_count"] for f in results[0]["findings"]}
+    except (KeyError, TypeError):
         return None
 
 
@@ -2258,6 +2312,9 @@ def cmd_dump(args: argparse.Namespace) -> int:
                 binding["tickets"] = found
                 filled.append(f"tickets {','.join(found)}")
         if not binding["repository"]:
+            disclosure = heimdallr_repository_disclosure(scan)
+            if disclosure:
+                print(disclosure, file=sys.stderr)
             repo = heimdallr_repository(scan)
             if repo:
                 binding["repository"] = repo

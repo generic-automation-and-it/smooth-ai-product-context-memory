@@ -13,6 +13,7 @@ from __future__ import annotations
 import io
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -49,22 +50,17 @@ def case_sensitive_filesystem(directory: Path) -> bool:
     and only the pure-function coverage applies. Guessing wrong would either silently skip everywhere
     or try to create a state the filesystem refuses.
     """
-    probe = directory / ".case-probe"
+    # A probe directory of its own, never a fixed name: two runs sharing `directory` (two harnesses on
+    # one machine, or CI shards) used to create and remove the same `.case-probe`, so one run's cleanup
+    # deleted the other's probe mid-check (issue 186). Only what this call created is removed.
+    probe = Path(tempfile.mkdtemp(prefix="case-probe-", dir=directory))
     try:
-        (probe / "a").mkdir(parents=True, exist_ok=True)
+        (probe / "a").mkdir()
         (probe / "A").mkdir()
     except OSError:
         return False
     finally:
-        for child in ("a", "A"):
-            try:
-                (probe / child).rmdir()
-            except OSError:
-                pass
-        try:
-            probe.rmdir()
-        except OSError:
-            pass
+        shutil.rmtree(probe, ignore_errors=True)
     return True
 
 
@@ -442,6 +438,22 @@ class DurabilityGuardTests(unittest.TestCase):
             publish(store, "understandings-20260930-180000.zip", f"{ui.UNFILED}/kept.understanding.md")
             self.assertEqual(flagged(store), {"loose"})
 
+    def test_a_member_outside_the_published_shape_proves_nothing(self):
+        """Issue 186: the last two parts of any member name were taken as a unit path, so `x/<subject>/
+        <slug>`, `../<subject>/<slug>` or an absolute name marked the unit published while no consume
+        would place it there. Only `<subject>/<slug>.understanding.md` counts."""
+        rel = "proj-20260930-1700/alpha.understanding.md"
+        for name in ("wrap/" + rel, "../" + rel, "/" + rel, "./" + rel, "proj-20260930-1700//alpha.understanding.md"):
+            with self.subTest(member=name), tempfile.TemporaryDirectory() as tmp:
+                repo = make_repo(tmp, ignore_store=True)
+                store = repo / ".context" / "understandings"
+                write_unit(store, "proj-20260930-1700", "alpha")
+                pub = store.parent / ui.PUBLISH_DIR_NAME
+                pub.mkdir(parents=True, exist_ok=True)
+                with zipfile.ZipFile(pub / "understandings-20260930-180000.zip", "w") as zf:
+                    zf.writestr(name, "body\n")
+                self.assertEqual(flagged(store), {"alpha"})
+
     def test_unreadable_archive_counts_for_nothing(self):
         """A corrupt zip cannot prove anything was captured; its units stay reported, without a crash."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -630,6 +642,19 @@ class ConsumeCheckTests(unittest.TestCase):
                                "s-20260101-0000/INDEX.md")
         self.assert_refused(archive, "elsewhere in this archive")
 
+    def test_a_folder_named_index_is_refused(self):
+        """Issue 186: the root-index exemption also matched a directory entry `INDEX.md/` and a parent
+        folder `INDEX.md/…`, so a folder could land where the generated index is written."""
+        for entries, fragment in (((("INDEX.md/"),), "the store's root index must be a file"),
+                                  (("INDEX.md/x.md",), "the store's root index must be a file"),
+                                  (("index.md/s-20260101-0000/a.understanding.md",),
+                                   "the store's root index must be a file")):
+            with self.subTest(entries=entries):
+                self.assert_refused(make_archive(self.root / "i.zip", *entries), fragment)
+        (self.store / "INDEX.md").mkdir()
+        self.assert_refused(make_archive(self.root / "j.zip", "INDEX.md"),
+                            "'INDEX.md' must be a file")
+
     def test_the_root_index_stays_exempt(self):
         """Control: the root index still lands on a local one differing by case, as every consume does,
         and an archive wrapped in a top-level folder carrying its own index is not refused for it."""
@@ -710,6 +735,21 @@ class AllowedToolsCoverDocumentedCommandsTests(unittest.TestCase):
                 self.assertNotIn("<<", command, "a heredoc is not a permitted command")
                 self.assertTrue(any(command == p or command.startswith(p + " ") for p in prefixes),
                                 f"{doc}: `{command}` fits no allowed-tools Bash prefix {prefixes}")
+
+
+class CaseProbeTests(unittest.TestCase):
+    """Issue 186: the filesystem probe used a fixed `.case-probe` name and removed it, so a run sharing
+    the directory deleted another run's probe mid-check."""
+
+    def test_the_probe_touches_only_what_it_created(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            other = directory / ".case-probe" / "a"
+            other.mkdir(parents=True)
+            case_sensitive_filesystem(directory)
+            self.assertTrue(other.is_dir(), "another run's probe was removed")
+            self.assertEqual(sorted(p.name for p in directory.iterdir()), [".case-probe"],
+                             "the probe left its own directory behind")
 
 
 if __name__ == "__main__":

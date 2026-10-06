@@ -244,7 +244,9 @@ class CredentialShapedTicketTests(unittest.TestCase):
             result = json.loads(proc.stdout)
             self.assertEqual(result["tickets"], [])
             self.assertIn("redactor unavailable", result["ticketsUnavailable"])
-            self.assertEqual(result["repository"], "acme/widgets")
+            # The origin path is free text too and fails closed the same way (issue 186).
+            self.assertIsNone(result["repository"])
+            self.assertIn("redactor unavailable", result["repositoryWithheld"])
             self.assertNotIn(CREDENTIAL_LIKE["credentials"][0]["secret"], proc.stdout + proc.stderr)
             human = self._scan("fix github:182\n", script=lone / SCRIPT.name).stdout
             self.assertIn("tickets: unavailable (redactor unavailable", human)
@@ -302,6 +304,62 @@ class BranchRedactionTests(unittest.TestCase):
             self.assertIsNone(result["branch"])
             self.assertIn("redactor unavailable", result["branchWithheld"])
             self.assertNotIn("feat/160-x", proc.stdout)
+
+
+class RepositoryRedactionTests(unittest.TestCase):
+    """Issue 186: `parse_repo` drops the host and userinfo but keeps every path segment, so a credential
+    in the origin path was printed as part of the repository — the branch-name defect, one field over."""
+
+    def _scan(self, remote: str, *extra: str, script: Path = SCRIPT) -> subprocess.CompletedProcess:
+        proc = run_with_git(
+            {
+                "remote get-url origin": remote + "\n",
+                "branch --show-current": "main\n",
+                "log main --format=%s -n 10": "fix #7\n",
+            },
+            *extra,
+            script=script,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return proc
+
+    def test_a_credential_in_the_origin_path_is_never_printed(self):
+        for entry in CREDENTIAL_LIKE["credentials"]:
+            remote = "https://git.example/" + entry["text"].replace(":", "/", 1) + "/widgets.git"
+            for flags in ((), ("--json",)):
+                with self.subTest(case=entry["id"], json=bool(flags)):
+                    proc = self._scan(remote, *flags)
+                    self.assertNotIn(entry["secret"], proc.stdout + proc.stderr)
+                    if flags:
+                        result = json.loads(proc.stdout)
+                        self.assertIsNone(result["repository"])
+                        self.assertEqual(result["repositoryWithheld"],
+                                         "credential-shaped origin path; not shown")
+                        self.assertIn({"provider": "github", "key": "7", "seenIn": "commit"},
+                                      result["tickets"])
+                    else:
+                        self.assertIn("- repository: withheld (", proc.stdout)
+
+    def test_an_ordinary_origin_is_still_shown(self):
+        for remote, repo in (("https://github.com/acme/widgets.git", "acme/widgets"),
+                             ("git@gitlab.com:group/sub-group/node-20.git", "group/sub-group/node-20"),
+                             ("https://github.com/generic-automation-and-it/smooth-ai-product-context-memory",
+                              "generic-automation-and-it/smooth-ai-product-context-memory")):
+            with self.subTest(remote=remote):
+                result = json.loads(self._scan(remote, "--json").stdout)
+                self.assertEqual(result["repository"], repo)
+                self.assertIsNone(result["repositoryWithheld"])
+
+    def test_without_the_redactor_the_repository_is_not_shown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lone = Path(tmp) / "skills" / "mimisbrunnr-heimdallr-find-session-metadata" / "scripts"
+            lone.mkdir(parents=True)
+            shutil.copy(SCRIPT, lone / SCRIPT.name)
+            proc = self._scan("https://github.com/acme/widgets.git", "--json", script=lone / SCRIPT.name)
+            result = json.loads(proc.stdout)
+            self.assertIsNone(result["repository"])
+            self.assertIn("redactor unavailable", result["repositoryWithheld"])
+            self.assertNotIn("acme/widgets", proc.stdout)
 
 
 class CommitHistoryTests(unittest.TestCase):

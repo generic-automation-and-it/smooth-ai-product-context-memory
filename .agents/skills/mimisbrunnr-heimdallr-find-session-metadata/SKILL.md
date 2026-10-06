@@ -27,7 +27,8 @@ accepting anything from the scan.
 
 | Field | Source | Example |
 |---|---|---|
-| `repository` | `git remote get-url origin`, parsed to `owner/repo` | `generic-automation-and-it/smooth-ai-product-context-memory` |
+| `repository` | `git remote get-url origin`, parsed to `owner/repo`; `null` when withheld | `generic-automation-and-it/smooth-ai-product-context-memory` |
+| `repositoryWithheld` | Why the origin path is not shown (credential-shaped, or no redactor to check it), else `null` | `null` |
 | `tickets` | Current branch name + recent commit subjects (the branch ref, `HEAD` when detached; last 10), matched for `#123`, `provider:key`, `JIRA-123` shapes | `github:160` from `feat/160-...` |
 | `initiative` | `--initiative NAME` flag only, else `unknown` | never guessed from prose |
 | `branch` | `git branch --show-current` (reported, not a binding); `null` when withheld | `feat/160-...` |
@@ -47,6 +48,5 @@ accepting anything from the scan.
   passes the capture skill's redactor (`mimisbrunnr-odin-context-memory/scripts/redact.py`): one whose
   provider is a credential word (`password`, `token`, `API_KEY` …), or whose text — alone or in its subject —
   the redactor would change, is dropped and only counted. The branch name is withheld (`branchWithheld`) when
-  the redactor would change it or a candidate inside it was dropped. Without the redactor no ticket and no
-  branch name is reported.
+  the redactor would change it or a candidate inside it was dropped. Without the redactor no ticket, no branch name, and no repository is reported.
 - **Deduped, sourced.** Each ticket is listed once with where it was seen (branch, commit subject). No ordering beyond first-seen.

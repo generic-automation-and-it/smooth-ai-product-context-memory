@@ -226,13 +226,22 @@ client. Environment variables are not a content channel either: a child process 
 are readable from the process table on the same account. See
 `.agents/rules/skills/skill-secret-handling.instructions.md`.
 
-**The folder ignores itself before the first batch file is written.** "Gitignored" is true of this
-repository, which ignores `.context/`; a repository that vendors these skills may not, and there an
-unredacted batch file is one `git add -A` from a commit. So the first file written is
-`.context/mimisbrunnr-scratch/.gitignore` holding the single line `*`, with the file tool, and only then
-the batch file. It carries no content and goes with the folder at cleanup. Writing the batch file before
-redaction is the agreed content channel (the alternatives put content in argv, history or the
-environment); this only bounds where that copy can travel.
+**The folder is owner-only and ignores itself before the first batch file is written.** Create it with
+`mkdir -p -m 700 .context/mimisbrunnr-scratch` — the file tool writes with the default mode, so without
+it the unredacted batch is readable by every account on the machine, and every reader (`redact.py`,
+`atomicity.py`, the client's `--payload`) refuses a file that neither it nor its folder makes
+owner-only; an existing folder keeps its mode, so remove and recreate one left by an older run.
+"Gitignored" is true of this repository, which ignores `.context/`; a repository that vendors these
+skills may not, and there an unredacted batch file is one `git add -A` from a commit. So the first file
+written is `.context/mimisbrunnr-scratch/.gitignore` holding the single line `*`, with the file tool, and
+only then the batch file. It carries no content and goes with the folder at cleanup.
+
+**Writing the batch before redaction is deliberate, and it is the only channel there is.** The redactor
+needs the unredacted text as input, and an agent can hand a script text only through a file, the
+command line or the environment. The command line and environment are readable by other processes for
+the call's duration and are recorded in history and the tool transcript; a file is not. So the file is
+the channel, and its exposure is bounded instead of removed: owner-only, self-ignoring, consumed on read,
+and the folder removed at the end — see the odin `AGENTS.md` LADR on the capture content channel.
 
 **The batch file is the one unredacted copy on disk, so it is consumed and the folder is cleaned.** It
 has to be: it is the redactor's input. Pass `--consume` to `redact.py`, `atomicity.py` and the client's
@@ -289,7 +298,10 @@ more valuable-sounding:
 
 **The attempt counter is the script's, not yours.** `decisions_gate.py` keeps a ledger keyed by a SHA-256
 digest of the record identity in the file passed as `--state-file`, so re-asking after an inconvenient answer
-buys nothing and the subject never reaches the file. It also
+buys nothing and the subject never reaches the file. The identity is the subject **and its group**: give each
+record its `groupUuid`, or, before the group exists, a `group` object describing the binding it will be
+resolved from — a memory is `(group, subject)`, and a record carrying neither shares one budget with the
+same subject in every other group. It also
 carries the **best** attempt across rounds, so `best` is the highest-scoring version seen and
 `bestThisRound` says whether *this* rewrite actually improved on the source. **A `false` there means the
 rewrite scored lower than what came before** — surface that rather than reporting the round as progress.

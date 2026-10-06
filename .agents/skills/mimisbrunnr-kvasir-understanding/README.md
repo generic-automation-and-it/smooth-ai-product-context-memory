@@ -33,7 +33,7 @@ python3 .../understanding_client.py export <input> [--write] \
   [--tickets A,1] [--tags tag] [--repository repo] [--scope product:x]
 
 # Dump the current session's context to a discoverable local folder (export, no write)
-python3 .../understanding_client.py dump --currentsession [--out .context/mimisbrunnr-understandings/<folder>]
+python3 .../understanding_client.py dump --currentsession --from <session-file|-> [--out .context/mimisbrunnr-understandings/<folder>]
 ```
 
 ## Design

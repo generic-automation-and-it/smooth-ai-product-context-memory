@@ -43,6 +43,27 @@ REDACTOR_UNAVAILABLE = "redactor unavailable; no unchecked ticket is reported"
 BRANCH_CREDENTIAL_SHAPED = "credential-shaped; not shown"
 BRANCH_UNCHECKED = "redactor unavailable; the branch is not shown unchecked"
 COMMITS_UNAVAILABLE = "git log failed; recent commit subjects were not read"
+REPOSITORY_CREDENTIAL_SHAPED = "credential-shaped origin path; not shown"
+REPOSITORY_UNCHECKED = "redactor unavailable; the repository is not shown unchecked"
+
+
+def _repository_withheld(redactor, repository: str | None) -> str | None:
+    """Why the parsed origin path must not be printed, or None when it may be (issue 186).
+
+    `parse_repo` drops the host and any userinfo, but every path segment survives, so an origin such as
+    `https://host/x-access-token/<token>/org/repo.git` printed the token as part of the repository — the
+    same class as the branch name, one field over. The path is withheld when the redactor would change
+    it or a segment is a credential word, and, failing closed like the tickets, when no redactor can
+    check it.
+    """
+    if not repository:
+        return None
+    if redactor is None:
+        return REPOSITORY_UNCHECKED
+    if redactor.scrub_located(repository)[0] != repository or any(
+            redactor.is_credential_key(segment) for segment in repository.split("/")):
+        return REPOSITORY_CREDENTIAL_SHAPED
+    return None
 
 
 def load_redactor():
@@ -229,8 +250,11 @@ def scan(initiative: str | None = None, repo_root: str | None = None) -> dict:
         if branch_withheld:
             shown_branch = None
 
+    repository = parse_repo(remote or "")
+    repository_withheld = _repository_withheld(redactor, repository)
     return {
-        "repository": parse_repo(remote or ""),
+        "repository": None if repository_withheld else repository,
+        "repositoryWithheld": repository_withheld,
         "repositorySource": "git remote get-url origin" if remote else None,
         "tickets": tickets,
         "ticketsWithheld": len(withheld),
@@ -246,7 +270,10 @@ def scan(initiative: str | None = None, repo_root: str | None = None) -> dict:
 
 def render_human(result: dict) -> str:
     lines = ["Session metadata (offline git scan, nothing written):"]
-    lines.append("- repository: %s" % (result["repository"] or "unknown"))
+    if result.get("repositoryWithheld"):
+        lines.append("- repository: withheld (%s)" % result["repositoryWithheld"])
+    else:
+        lines.append("- repository: %s" % (result["repository"] or "unknown"))
     if result["tickets"]:
         lines.append("- tickets:")
         for ticket in result["tickets"]:

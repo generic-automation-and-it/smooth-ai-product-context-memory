@@ -213,15 +213,35 @@ def check_determinism(doc, threshold, endpoint, model, rounds=3):
     for _ in range(rounds):
         report = run_gate(doc, threshold, endpoint, model)
         require_scored(doc, report)
-        runs.append([r["scores"] for r in report["records"]])
-    agree = all(r == runs[0] for r in runs)
+        runs.append([{"scores": r.get("scores"), "outcome": r.get("outcome"), "passed": r.get("passed")}
+                     for r in report["records"]])
+    divergences = first_divergences(runs)
+    agree = not divergences
     print(f"  determinism over {rounds} full passes: "
           f"{'identical' if agree else 'DIFFERENT — every figure below is a mean over disagreeing runs'}")
-    if not agree:
-        for i, (a, b) in enumerate(zip(runs[0], runs[1])):
-            if a != b:
-                print(f"    first divergence at record {i}: {a} vs {b}")
+    for line in divergences:
+        print(f"    {line}")
     return agree
+
+
+def first_divergences(runs):
+    """For every pass after the first, where it first disagrees with pass 1 — or nothing when all agree.
+
+    Each later pass is compared with the first, on every record's scores, outcome and pass flag. Only
+    pass 2 used to be reported, so a disagreement that appeared in pass 3 failed the check with no line
+    saying where (issue 186); a different record count is a divergence too, not a shorter comparison.
+    """
+    lines = []
+    for number, run in enumerate(runs[1:], start=2):
+        if len(run) != len(runs[0]):
+            lines.append(f"pass {number} scored {len(run)} record(s), pass 1 scored {len(runs[0])}")
+            continue
+        for index, (first, later) in enumerate(zip(runs[0], run)):
+            if first != later:
+                lines.append(f"pass {number} first diverges from pass 1 at record {index}: "
+                             f"{first} vs {later}")
+                break
+    return lines
 
 
 # Every figure a recorded run may carry. A key listed here that the recorded run holds and this run did

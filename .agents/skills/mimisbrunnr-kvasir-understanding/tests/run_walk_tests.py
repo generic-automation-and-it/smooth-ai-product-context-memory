@@ -4,9 +4,10 @@
 Run (model-free degenerate assertions):
     python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/tests/run_walk_tests.py
 
-CI coverage depends on the repository holding the skill. In the repository that develops it, the PR
-gate (`.github/workflows/pr-gate.yml`) runs this file; a repository that vendors the skill runs it only
-if its own CI adds a step for it (issue 184).
+It needs no CI, no network and no particular repository: the command above is the whole run. Whether a
+CI runs it is up to the repository holding the skill — the repository that develops the skill runs it in
+its PR gate; a repository that vendors the skill covers it only if it adds its own CI step (issues 184,
+186).
 
 Run (also score the recorded cold-agent walk):
     SMOOTH_WALK_BENCH=1 python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/tests/run_walk_tests.py
@@ -381,10 +382,13 @@ class WalkFixtureTests(unittest.TestCase):
         doc = sys.modules[__name__].__doc__ or ""
         self.assertNotIn("the PR gate runs this)", doc)
         self.assertIn("vendors the skill", doc)
+        # Checked only in a repository whose gate runs the Mímisbrunnr harnesses at all. A repository
+        # vendoring the skill can have its own `pr-gate.yml` for unrelated work, and asserting on it
+        # made this harness fail there for a fact about another repository's CI (issue 186).
         workflow = UND_ROOT.parents[2] / ".github" / "workflows" / "pr-gate.yml"
-        if workflow.is_file():
-            self.assertIn("mimisbrunnr-kvasir-understanding/tests/run_walk_tests.py",
-                          workflow.read_text(encoding="utf-8"))
+        text = workflow.read_text(encoding="utf-8") if workflow.is_file() else ""
+        if "mimisbrunnr-odin-context-memory/tests/" in text:
+            self.assertIn("mimisbrunnr-kvasir-understanding/tests/run_walk_tests.py", text)
 
     def test_every_present_question_names_a_fact_its_text_does_not_supply(self):
         """A key fact the question already states would be scored by an agent that echoes it."""
