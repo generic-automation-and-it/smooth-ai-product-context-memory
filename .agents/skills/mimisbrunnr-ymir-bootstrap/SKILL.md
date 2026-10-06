@@ -42,7 +42,8 @@ At the start, establish:
   with branch-seen tickets **proposed**, not bound, for a next-feature scope; tags stay agent-derived
   keywords). Run the reporter as `find_session_metadata.py --json --repo-root <chosen root>`, never
   from whatever working directory the session happens to be in, and accept its `repository` and
-  tickets only when its reported `root` resolves to the chosen root; otherwise treat the identity as
+  tickets only when its `rootMatches` is `true` (the reporter compares resolved paths itself; its `root` is a
+  display form and may be withheld); otherwise treat the identity as
   unproven and bind nothing from it. A session's working directory is often a different checkout from
   the one being bootstrapped, and a scan there reports that checkout's repository and tickets. A
   matching root proves **where** a ticket was found, not that it belongs to the named feature: a branch

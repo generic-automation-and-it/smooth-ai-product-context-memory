@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
@@ -43,8 +44,40 @@ REDACTOR_UNAVAILABLE = "redactor unavailable; no unchecked ticket is reported"
 BRANCH_CREDENTIAL_SHAPED = "credential-shaped; not shown"
 BRANCH_UNCHECKED = "redactor unavailable; the branch is not shown unchecked"
 COMMITS_UNAVAILABLE = "git log failed; recent commit subjects were not read"
+ROOT_CREDENTIAL_SHAPED = "credential-shaped checkout path; not shown"
+ROOT_UNCHECKED = "redactor unavailable; the checkout path is not shown unchecked"
 REPOSITORY_CREDENTIAL_SHAPED = "credential-shaped origin path; not shown"
 REPOSITORY_UNCHECKED = "redactor unavailable; the repository is not shown unchecked"
+
+
+def _shown_root(redactor, root: str | None) -> tuple[str | None, str | None]:
+    """The checkout path as it may be printed, and why it is withheld when it may not (issue 188).
+
+    An absolute checkout path starts with the account's home folder — `/Users/<name>/…` — so printing
+    it put the operator's account name, and anything credential-shaped further down the path, into
+    every transcript: the branch-name class of issues 184 and 186, one field over. The home prefix is
+    shown as `~`, and the rest is withheld when the redactor would change it, a segment is a credential
+    word, or — failing closed — no redactor can check it. `rootMatches` carries the comparison a caller
+    actually needs, so nothing has to compare paths against this display form.
+    """
+    if not root:
+        return None, None
+    if redactor is None:
+        return None, ROOT_UNCHECKED
+    home = os.path.realpath(os.path.expanduser("~"))
+    real = os.path.realpath(root)
+    shown = "~" + real[len(home):] if real == home or real.startswith(home + os.sep) else real
+    if redactor.scrub_located(shown)[0] != shown or any(
+            redactor.is_credential_key(segment) for segment in shown.split("/")):
+        return None, ROOT_CREDENTIAL_SHAPED
+    return shown, None
+
+
+def _root_matches(root: str | None, repo_root: str | None) -> bool | None:
+    """Whether the scanned checkout's top level is the requested root; None when none was requested."""
+    if repo_root is None:
+        return None
+    return bool(root) and os.path.realpath(root) == os.path.realpath(repo_root)
 
 
 def _repository_withheld(redactor, repository: str | None) -> str | None:
@@ -195,6 +228,16 @@ def find_tickets(*texts: str, redactor=None, withheld: list | None = None) -> li
     return list(seen.values())
 
 
+def _unborn(branch: str | None, repo_root: str | None) -> bool:
+    """True only on positive evidence that `branch` has no commit yet (a fresh `git init`)."""
+    if not branch:
+        return False  # a detached HEAD always names a commit
+    head = _git("symbolic-ref", "-q", "HEAD", root=repo_root)
+    if head != f"refs/heads/{branch}":
+        return False  # git could not read HEAD, or it points elsewhere: not evidence of anything
+    return _git("show-ref", "--verify", "-q", f"refs/heads/{branch}", root=repo_root) is None
+
+
 def scan(initiative: str | None = None, repo_root: str | None = None) -> dict:
     # Distinguish "no metadata in this repo" from "git cannot run here". A repo with no ticket
     # commits is a legitimate empty `tickets: []`; a non-git checkout or a missing git binary must
@@ -215,11 +258,12 @@ def scan(initiative: str | None = None, repo_root: str | None = None) -> dict:
     ref = branch if branch else "HEAD"
     log = _git("log", ref, "--format=%s", "-n", "10", root=repo_root)
     commits_unavailable = None
-    if log is None and _git("rev-parse", "--verify", "-q", ref + "^{commit}",
-                            root=repo_root) is not None:
-        # The ref resolves to a commit, so a failed `git log` is a read failure, not an empty history.
-        # Reporting it as no subjects made a broken read look like a repository with no ticket
-        # commits (issue 184). An unborn branch has no commit to resolve and stays a genuine empty.
+    if log is None and not _unborn(branch, repo_root):
+        # A failed `git log` is a read failure unless the branch is provably unborn. Issue 184 inferred
+        # "unborn" from a second failed read (the ref did not resolve), so when git itself could not
+        # read the repository both reads failed and a broken read still looked like an empty history
+        # (issue 188). Unborn now needs positive evidence: HEAD is a readable symbolic ref to this
+        # branch and the branch has no ref of its own.
         commits_unavailable = COMMITS_UNAVAILABLE
     subjects = (log or "").splitlines()
 
@@ -250,6 +294,7 @@ def scan(initiative: str | None = None, repo_root: str | None = None) -> dict:
         if branch_withheld:
             shown_branch = None
 
+    shown_root, root_withheld = _shown_root(redactor, root)
     repository = parse_repo(remote or "")
     repository_withheld = _repository_withheld(redactor, repository)
     return {
@@ -264,7 +309,9 @@ def scan(initiative: str | None = None, repo_root: str | None = None) -> dict:
         "initiativeSource": "--initiative flag" if initiative else None,
         "branch": shown_branch,
         "branchWithheld": branch_withheld,
-        "root": root or None,
+        "root": shown_root,
+        "rootWithheld": root_withheld,
+        "rootMatches": _root_matches(root, repo_root),
     }
 
 
@@ -296,7 +343,12 @@ def render_human(result: dict) -> str:
         lines.append("- branch: withheld (%s)" % result["branchWithheld"])
     else:
         lines.append("- branch: %s" % (result["branch"] or "unknown"))
-    lines.append("- root: %s" % (result.get("root") or "unknown"))
+    if result.get("rootWithheld"):
+        lines.append("- root: withheld (%s)" % result["rootWithheld"])
+    else:
+        lines.append("- root: %s" % (result.get("root") or "unknown"))
+    if result.get("rootMatches") is not None:
+        lines.append("- root matches --repo-root: %s" % ("yes" if result["rootMatches"] else "no"))
     return "\n".join(lines) + "\n"
 
 
