@@ -548,6 +548,36 @@ class EndpointGuardTests(GateTestCase):
                 self.assertNotIn("s3cretparam", combined)
         self.assertEqual(self.stub.requests, [])
 
+    def test_a_malformed_port_is_a_classified_outcome_not_a_traceback(self):
+        """`endpoint_origin` read `.port` outside its handler, and the report builds it before the
+        guard runs (`probe`) or after every record (`score`), so `:99999` or `:abc` escaped as a
+        traceback instead of `bad-decisions-url` — and with the gate off as well (issue 184)."""
+        for port in ("99999", "abc"):
+            url = f"http://127.0.0.1:{port}"
+            with self.subTest(port=port, command="probe"):
+                proc = run_gate(["probe"], "", self.gate_env(CONTEXT_MEMORY_DECISIONS_BASE_URL=url))
+                self.assertNotIn("Traceback", proc.stderr)
+                report = json.loads(proc.stdout)
+                self.assertEqual(report["outcome"], "bad-decisions-url")
+                self.assertEqual(report["endpoint"], "<unparseable>")
+                self.assertNotEqual(proc.returncode, 0)
+            with self.subTest(port=port, command="score"):
+                proc = run_gate(["score"], json.dumps([RECORD]),
+                                self.gate_env(CONTEXT_MEMORY_DECISIONS_BASE_URL=url))
+                self.assertNotIn("Traceback", proc.stderr)
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                report = json.loads(proc.stdout)
+                self.assertEqual(report["endpoint"], "<unparseable>")
+                self.assertEqual([r["outcome"] for r in report["records"]], ["bad-decisions-url"])
+            for command in ("probe", "score"):
+                with self.subTest(port=port, command=command, enabled=False):
+                    proc = run_gate([command], json.dumps([RECORD]), self.gate_env(
+                        CONTEXT_MEMORY_DECISIONS_BASE_URL=url, CONTEXT_MEMORY_DECISIONS_ENABLED="false"))
+                    self.assertNotIn("Traceback", proc.stderr)
+                    self.assertEqual(proc.returncode, 0, proc.stderr)
+                    self.assertEqual(json.loads(proc.stdout)["outcome"], "disabled")
+        self.assertEqual(self.stub.requests, [])
+
     def test_a_bad_endpoint_marks_records_without_failing_the_batch(self):
         proc = run_gate(["score"], json.dumps([RECORD, {**RECORD, "subject": "Second"}]),
                         self.gate_env(CONTEXT_MEMORY_DECISIONS_BASE_URL="http://decisions.invalid"))
@@ -709,6 +739,58 @@ class RedactionTests(GateTestCase):
                     self.assertNotIn(entry["secret"], ledger_text)
                     for key in json.loads(ledger_text):
                         self.assertNotIn(entry["secret"], key)
+
+    def test_a_secret_in_a_non_string_field_is_redacted_before_the_model_sees_it(self):
+        """A field that arrives as a list or a nested map skipped the redactor — only strings were
+        collected — and went to the model as-is (issue 184). Each shape is sent through the real
+        gate, with a secret the shipped redactor recognises, and the request must not carry it."""
+        self.stub.probabilities = {"developer": 0.9}
+        secret = "hunter2nestedsecret77"
+        shapes = {
+            "list": ["first claim", f"password={secret}"],
+            "nested map": {"config": {"password": secret}},
+            "list of maps": [{"note": "deploy"}, {"api_key": secret}],
+        }
+        for label, value in shapes.items():
+            for field in ("statement", "contentSummary", "boundaries"):
+                with self.subTest(shape=label, field=field):
+                    self.stub.server.requests.clear()
+                    proc, report = self.score([{**RECORD, field: value}])
+                    self.assertEqual(proc.returncode, 0, proc.stderr)
+                    self.assertEqual(len(self.stub.requests), 1)
+                    sent = json.dumps(self.stub.requests[0])
+                    self.assertNotIn(secret, sent, "a secret inside a non-string field reached the model")
+                    self.assertTrue(report["redaction"], "the scrub must be reported")
+
+    def test_a_non_string_field_keeps_its_content_rather_than_being_dropped(self):
+        """The control: the fix must not 'redact' by emptying the field. A clean list or number still
+        reaches the model, serialised, so the record is judged on what it carries."""
+        self.stub.probabilities = {"developer": 0.9}
+        self.score([{**RECORD, "statement": ["Postgres stores the index", 42]}])
+        state = self.stub.requests[0]["state"]
+        self.assertIn("Postgres stores the index", state["statement"])
+        self.assertIn("42", state["statement"])
+        self.assertIsInstance(state["statement"], str)
+
+    def test_a_field_the_redactor_never_saw_is_refused_not_sent(self):
+        """Defence in depth behind the serialisation: if the state built for the request ever differs
+        from the one sent to the redactor, the uninspected field refuses rather than passing through."""
+        from unittest import mock
+        calls = {"n": 0}
+        real = _gate.record_state
+
+        def drifting(record):
+            calls["n"] += 1
+            state = real(record)
+            if calls["n"] > 1:
+                state["statement"] = "password=uninspectedsecret99"
+            return state
+
+        with mock.patch.object(_gate, "record_state", drifting):
+            with self.assertRaises(_gate.GateError) as caught:
+                _gate.redact_records([dict(RECORD)])
+        self.assertEqual(caught.exception.outcome, "redactor-unavailable")
+        self.assertNotIn("uninspectedsecret99", caught.exception.detail)
 
 
 class SecretHandlingTests(GateTestCase):
@@ -1840,6 +1922,91 @@ class CalibrationScorerTests(unittest.TestCase):
         self.assertEqual(shape["separation"], 0.7)
         self.assertEqual(shape["perRoleClearing"], {"developer": 1, "tester": 1})
         self.assertEqual(shape["maxCrossRolePair"], "developer/tester")
+
+
+class CalibrationIsolationTests(GateTestCase):
+    """The calibration run measures the shipped gate, not the operator's configuration of it.
+
+    `run_gate` copied `os.environ`, so an exported `CONTEXT_MEMORY_DECISIONS_*` setting reached the gate,
+    and so did every unset one the gate seeds at import from `CONTEXT_MEMORY_CREDENTIAL_FILE` — a
+    recurrence of issue 179 finding 41 (issue 184). Driven end to end through the real gate against the
+    stub, with a hostile credential file and a hostile environment, because asserting the env dict alone
+    would pass with a gate that still read the file.
+    """
+
+    SHIPPED_ROLES = ["product-owner", "designer", "developer", "tester", "business"]
+    HOSTILE = {
+        "CONTEXT_MEMORY_DECISIONS_ROLES": "tester",
+        "CONTEXT_MEMORY_DECISIONS_BELOW_THRESHOLD": "mark",
+        "CONTEXT_MEMORY_DECISIONS_MAX_ATTEMPTS": "1",
+        "CONTEXT_MEMORY_DECISIONS_API_KEY": "synthetic-operator-key-not-a-secret",
+        "CONTEXT_MEMORY_DECISIONS_LEDGER_MAX_ENTRIES": "1",
+    }
+
+    @classmethod
+    def setUpClass(cls):
+        spec = _ilu.spec_from_file_location(
+            "_score_decisions_calibration_isolation",
+            Path(__file__).resolve().parent / "score_decisions_calibration.py")
+        cls.scorer = _ilu.module_from_spec(spec)
+        spec.loader.exec_module(cls.scorer)
+
+    def setUp(self):
+        super().setUp()
+        self.stub.probabilities = {role: 0.9 for role in self.SHIPPED_ROLES}
+        saved = {key: value for key, value in os.environ.items()
+                 if key.startswith("CONTEXT_MEMORY_DECISIONS_") or key == "CONTEXT_MEMORY_CREDENTIAL_FILE"}
+
+        def restore():
+            for key in [k for k in os.environ
+                        if k.startswith("CONTEXT_MEMORY_DECISIONS_") or k == "CONTEXT_MEMORY_CREDENTIAL_FILE"]:
+                del os.environ[key]
+            os.environ.update(saved)
+        self.addCleanup(restore)
+        for key in saved:
+            del os.environ[key]
+
+    def hostile_credential_file(self):
+        path = Path(self.tmp) / "credentials"
+        lines = [f"{key}={value}" for key, value in self.HOSTILE.items()]
+        lines[0] = "CONTEXT_MEMORY_DECISIONS_ROLES=developer"
+        lines.append("CONTEXT_MEMORY_DECISIONS_PATH=/v1/operator-path")
+        lines.append("CONTEXT_MEMORY_DECISIONS_TIMEOUT=1")
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return str(path)
+
+    def calibrate(self):
+        doc = {"records": [{"id": "c01", "statement": "PostgreSQL is the storage engine."},
+                           {"id": "c02", "statement": "Exports are capped at twenty records."}]}
+        report = self.scorer.run_gate(doc, 0.85, self.stub.base_url, "nimble")
+        self.scorer.require_scored(doc, report)
+        return report
+
+    def assert_shipped_configuration(self, report):
+        for record in report["records"]:
+            self.assertEqual(sorted(record["scores"]), sorted(self.SHIPPED_ROLES))
+        self.assertEqual(len(self.stub.requests), 2)
+        for body in self.stub.requests:
+            self.assertEqual(sorted(body["questions"]), sorted(self.SHIPPED_ROLES))
+
+    def test_a_hostile_credential_file_does_not_configure_the_calibration(self):
+        os.environ["CONTEXT_MEMORY_CREDENTIAL_FILE"] = self.hostile_credential_file()
+        self.assert_shipped_configuration(self.calibrate())
+
+    def test_exported_decision_settings_do_not_configure_the_calibration(self):
+        os.environ.update(self.HOSTILE)
+        self.assert_shipped_configuration(self.calibrate())
+
+    def test_the_credential_pointer_is_redirected_even_when_unset(self):
+        """Unset is not isolated: the gate falls back to `~/.mimisbrunnr/credentials`."""
+        env = self.scorer.gate_environment(0.85, "http://127.0.0.1:1", "nimble", base={
+            "PATH": "/usr/bin", **self.HOSTILE})
+        self.assertEqual(env["CONTEXT_MEMORY_CREDENTIAL_FILE"], os.devnull)
+        self.assertEqual(sorted(k for k in env if k.startswith("CONTEXT_MEMORY_DECISIONS_")),
+                         sorted(["CONTEXT_MEMORY_DECISIONS_ENABLED", "CONTEXT_MEMORY_DECISIONS_BASE_URL",
+                                 "CONTEXT_MEMORY_DECISIONS_MODEL",
+                                 "CONTEXT_MEMORY_DECISIONS_MIN_PROBABILITY"]))
+        self.assertEqual(env["PATH"], "/usr/bin")
 
 
 class DiscriminationDisclosureTests(GateTestCase):

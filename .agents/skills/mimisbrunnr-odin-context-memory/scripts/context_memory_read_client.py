@@ -40,8 +40,11 @@ def main():
     # and would restore a deliberately cleared token in the only path where it acts, so a caller could
     # never establish that this surface fails closed without a credential - which is the guarantee the
     # check below exists to support.
-    if os.environ.get(client.ENV_WRITE_TOKEN):
-        print(f"{client.ENV_WRITE_TOKEN} must not be present in the read worker environment", file=sys.stderr)
+    present = client.write_tokens_present()
+    if present:
+        print(f"{', '.join(present)} must not be present in the read worker environment "
+              f"(a write credential in any spelling, {client.ENV_WRITE_TOKEN} or the Host's "
+              f"ApiAccess__WriteToken)", file=sys.stderr)
         return 2
     parser = argparse.ArgumentParser(prog="context_memory_read_client")
     parser.add_argument("--base-url", help="override " + client.ENV_BASE_URL)

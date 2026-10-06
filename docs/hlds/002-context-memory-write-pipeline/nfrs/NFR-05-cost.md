@@ -16,7 +16,9 @@ count is platform-dependent: one invocation may batch several facts, so fact cou
 ## Verification
 
 - Count provider/agent invocations, logical judgements, candidates inspected, HTTP calls, blob I/O and
-  exposed token counts separately for a representative batch.
+  exposed token counts separately for a representative batch. Blob I/O is counted at each level it
+  costs — store calls, object-store requests and HTTP attempts under retry — because one store call is
+  several requests.
 - Assert the default path invokes no optional expensive stage.
 - Assert the documented cost profile names both what the design saves and what it does not — an honest accounting, not a sales note.
 

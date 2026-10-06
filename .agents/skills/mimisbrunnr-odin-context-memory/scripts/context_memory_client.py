@@ -25,6 +25,29 @@ ENV_BASE_URL = "CONTEXT_MEMORY_BASE_URL"
 ENV_READ_TOKEN = "CONTEXT_MEMORY_READ_TOKEN"
 ENV_WRITE_TOKEN = "CONTEXT_MEMORY_WRITE_TOKEN"
 
+# Every spelling the write token is carried under in this repository's tooling, folded for comparison.
+# `provision-credentials.sh` writes the Host form `ApiAccess__WriteToken` beside the skill form, so
+# `set -a && source .context/mimisbrunnr.env` exports both; the Host binds configuration keys
+# case-insensitively and reads `:` and `__` alike, and the controller takes `Parameters__api-write-token`.
+# The read client checked the skill form only, so a shell holding just the Host form started a read
+# worker with the write credential in its environment (issue 184).
+WRITE_TOKEN_NAMES = frozenset({
+    "context_memory_write_token",
+    "apiaccess__writetoken",
+    "parameters__api-write-token",
+})
+
+
+def write_tokens_present(environ=None):
+    """The environment names that carry a write token, sorted. Names only — never a value.
+
+    An empty value is not a credential, so it does not count: `KEY=` in a sourced file is how an unset
+    variable is spelled.
+    """
+    environ = os.environ if environ is None else environ
+    return sorted(name for name, value in environ.items()
+                  if value and name.casefold().replace(":", "__") in WRITE_TOKEN_NAMES)
+
 # Static, configurable candidate cap (decision 6). Change this constant to widen or narrow the
 # preflight batch without touching pipeline logic. Mirrors Preflight.MaxCandidates.
 MAX_CANDIDATES = 20
@@ -492,9 +515,20 @@ def validate_set_payload(payload):
 
 
 def attach_redaction(resp, hits):
-    """Put the redaction digest on a response object, so no scrub reaches the caller silently."""
-    if hits and isinstance(resp, dict):
+    """Put the redaction digest on a response object, so no scrub reaches the caller silently.
+
+    A response that is not an object — an empty body is `None` — has no field to carry the digest, so
+    it goes to stderr as one JSON line instead, and stdout keeps exactly what the store answered. It used
+    to be dropped (issue 184). Not wrapped: a caller parsing `resolve-group` reads the object it prints,
+    and a wrapper would turn "no group came back" into an object that looks like one — the same reason
+    a raw blob takes the banner branch rather than a field.
+    """
+    if not hits:
+        return resp
+    if isinstance(resp, dict):
         resp["redaction"] = redact.digest(hits)
+    else:
+        print(json.dumps({"redaction": redact.digest(hits)}), file=sys.stderr)
     return resp
 
 
@@ -804,7 +838,7 @@ def cmd_ticket_parent(args):
                 "validation": "Local shape only; ownership, cycles and expected parent are unverified."}
     else:
         resp = _request("PUT", "/api/context/tickets/parent", payload)
-    attach_redaction(resp, hits)
+    resp = attach_redaction(resp, hits)
     print(json.dumps(resp, indent=2))
     return resp
 

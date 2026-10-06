@@ -3,12 +3,18 @@ name: memory-write
 description: Delegated Mimisbrunnr capture pipeline with write capability.
 tools:
   - Bash
+  - Write
 ---
 
 # Memory Write
 
 Run the write client, `context_memory_client.py`. Receive discrete candidate facts and target metadata.
-Never accept a raw transcript. The runtime supplies both API credentials; never print either credential.
+Never accept a raw transcript. The write credential is never ambient: the client seeds only the read
+token and base URL, so `CONTEXT_MEMORY_WRITE_TOKEN` is absent until you load it. Load it only at the
+authorized `--export` (or `--dryrun`) checkpoint, in this worker's shell, with the deliberate write step
+the skill's `AGENTS.md` names — `set -a && source ~/.mimisbrunnr/credentials && set +a` — and never
+earlier. Never print either credential. The `Write` tool is for the batch and payload files below and
+nothing else.
 
 ## Pipeline
 
@@ -28,7 +34,8 @@ Run exactly once in fixed order:
 
 Every batch and payload file goes under `.context/mimisbrunnr-scratch/`, written with the file tool —
 never an `echo`/heredoc, and never an environment variable (a child process inherits it and the process
-table exposes it). Pass `--consume` to `redact.py`, `atomicity.py` and every `--payload` so each file is
+table exposes it). Write `.context/mimisbrunnr-scratch/.gitignore` holding `*` first, before any batch
+file, so the folder ignores itself even in a checkout that does not ignore `.context/`. Pass `--consume` to `redact.py`, `atomicity.py` and every `--payload` so each file is
 deleted once read — **except `set --dryrun`**, whose payload file is kept and passed unchanged to the
 real `set --payload <file> --consume`. Remove `.context/mimisbrunnr-scratch/` after the real write, and
 also when the checkpoint is refused, fails or is abandoned: the batch file is the unredacted copy of the
