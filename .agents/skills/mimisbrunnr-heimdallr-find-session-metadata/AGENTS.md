@@ -28,8 +28,9 @@ Heimdallr watches and reports — he does not judge or bind. The operator binds.
 - **No unchecked origin path.** `parse_repo` drops the host and userinfo but keeps every path segment, so
   the repository is `null` with `repositoryWithheld` when the redactor would change it, a segment is a
   credential word (`is_credential_key`), or the redactor cannot be loaded. kvasir and saga disclose it.
-- **A failed read is not an empty answer.** A `git log` that fails on a ref resolving to a commit is
-  disclosed as `commitsUnavailable`; only an unborn branch (no commit to resolve) is an empty history.
+- **A failed read is not an empty answer.** A `git log` that fails is disclosed as `commitsUnavailable`
+  unless the branch is provably unborn (HEAD is a readable symbolic ref to it and it has no ref of its
+  own); only that case is an empty history.
 
 ## Key Behaviors
 
@@ -40,9 +41,9 @@ Heimdallr watches and reports — he does not judge or bind. The operator binds.
   detached, so the same branch state always yields the same subjects — the report is reproducible.
 - Unprovable fields read `unknown` with no source, never an empty string dressed as an answer.
 - `--repo-root DIR` scans that checkout with `git -C DIR`; without it the working directory is scanned.
-  Either way `root` (`git rev-parse --show-toplevel`) names the checkout read, so a caller binding a
-  different repository can refuse a scan of the wrong one (ymir requires `root` to resolve to its chosen
-  root).
+  `root` is a `~/...` display form of the checkout read and may be withheld (`null` with `rootWithheld`);
+  never compare it — use `rootMatches` for checkout identity (ymir requires `rootMatches` against its
+  chosen root).
 - Python 3.9 compatible, stdlib only.
 
 ## Test References

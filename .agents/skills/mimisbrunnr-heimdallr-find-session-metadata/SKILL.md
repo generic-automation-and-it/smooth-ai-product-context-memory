@@ -38,7 +38,7 @@ accepting anything from the scan.
 | `rootMatches` | With `--repo-root`: whether the scanned checkout's top level is that directory (resolved paths); else `null` | `true` |
 | `ticketsWithheld` | Count of credential-shaped candidates dropped (values never shown) | `1` |
 | `ticketsUnavailable` | Why no ticket is reported at all (the redactor could not be loaded), else `null` | `null` |
-| `commitsUnavailable` | Why recent commit subjects were not read (`git log` failed on a ref that resolves), else `null`; tickets then come from the branch alone. An unborn branch is an empty history, not a failure | `null` |
+| `commitsUnavailable` | Why recent commit subjects were not read (`git log` failed and the branch is not provably unborn), else `null`; tickets then come from the branch alone. Only a provably unborn branch (HEAD reads as a symbolic ref to it and it has no ref) is an empty history, not a failure | `null` |
 
 ## Rules
 
