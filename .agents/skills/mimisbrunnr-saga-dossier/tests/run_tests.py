@@ -2380,6 +2380,7 @@ class PersonalDataTextTests(unittest.TestCase):
         self.assertNotIn("which can hold personal data", text)
         self.assertIn("the capture rule keeps personal data out of the store", text)
         self.assertIn("a judgement adds no personal data to a file", text)
+        self.assertIn("(GDPR personal data) is masked and generalised", text)
 
 
 if __name__ == "__main__":

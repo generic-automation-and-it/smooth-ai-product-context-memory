@@ -218,14 +218,25 @@ the scripts do not decide semantic relevance. Root the base URL via
 `CONTEXT_MEMORY_BASE_URL` (fallback `http://localhost:5141`, loopback origins only); always `probe` first for an honest
 NOT-AVAILABLE, never a silent miss.
 
-**No personal data reaches a file — remove it before writing, not after.** Before the first batch or
-payload file exists, remove or generalise personal data in every candidate: a person's name, email
-address, phone number, employee or account identifier, or a home-folder path. Name a role instead ("the
-release manager", "the consumer's orchestrator"). If a fact cannot be stated without it, omit the
-candidate and say so in the digest. Neither the secret redactor nor the cleanup does this: the redactor
-recognises secret shapes only, and a file removed afterwards was still written. Because nothing personal
-is written, nothing personal reaches the store either — which is also what keeps a dossier or a bundle
-read back from it free of personal data.
+**Personal data is masked and generalised before any file is written — never stored.** Personal data is
+what the GDPR protects: any information relating to an identified or identifiable natural person,
+directly or indirectly. That covers names, email addresses, phone numbers, postal addresses, identity
+numbers (national ID or social security), employee, account and customer identifiers, online
+identifiers such as user names, IP addresses and home-folder paths, location data, and any special
+category — health, ethnicity, beliefs, union membership, sexual orientation. Before the first batch or
+payload file exists, in every candidate:
+
+- **mask the value** — drop it entirely; it never appears in a file, the store or the digest;
+- **generalise what it stood for** — a person becomes a role (*"the user"*, *"the release manager"*,
+  *"the consumer's orchestrator"*), a value becomes its type (*"an identity number"*, *"an email
+  address"*), so the fact keeps its meaning without the person;
+- **generalise until no one can be singled out** — *"the only Danish tester on team X"* still identifies
+  someone; widen it until the remaining description fits more than one person.
+
+A fact that means nothing once generalised is not captured; say so in the digest. Neither the secret
+redactor nor the cleanup does any of this: the redactor recognises secret shapes only, and a file removed
+afterwards was still written. Because nothing personal is written, nothing personal reaches the store —
+which is also what keeps a dossier or a bundle read back from it free of personal data.
 
 **Candidate content never goes into a shell command.** `<batch-file>` is a JSON file the agent writes
 with its file-write tool — never `echo`, `printf` or a heredoc — under the gitignored

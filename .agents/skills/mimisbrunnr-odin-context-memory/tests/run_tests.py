@@ -3227,8 +3227,8 @@ class AgentContractTests(unittest.TestCase):
     def test_every_capture_procedure_removes_personal_data_before_the_first_file(self):
         """Issue 188, fixed as a class: the text at every site that writes a batch told the agent to clean
         up personal data afterwards, which cannot meet a no-personal-data-on-disk rule. Each must say
-        it is removed or generalised before any file exists, and that a candidate which cannot survive
-        that is omitted; none may present cleanup as what removes it."""
+        that every personal identifier the GDPR covers is masked and generalised before any file
+        exists; none may present cleanup as what removes it."""
         documents = {
             "SKILL.md": HERE.parent / "SKILL.md",
             "AGENTS.md": HERE.parent / "AGENTS.md",
@@ -3238,8 +3238,12 @@ class AgentContractTests(unittest.TestCase):
         for name, path in documents.items():
             with self.subTest(document=name):
                 text = " ".join(path.read_text(encoding="utf-8").split()).lower()
-                self.assertRegex(text, r"remove(s|d)? or generalise(s)? (it|personal data)")
-                self.assertRegex(text, r"omit(s)? (a|the) candidate|omits a candidate|omit one")
+                # Any personal identifier the GDPR covers is masked (value dropped) and generalised
+                # (role or type in its place) before the first file exists.
+                self.assertIn("gdpr", text)
+                self.assertRegex(text, r"mask(ed)? and generalise(d)?")
+                self.assertRegex(text, r"role")
+                self.assertNotRegex(text, r"omit(s)? (a|the) candidate whose fact|omit one whose fact")
                 self.assertNotIn("this cleanup is the only thing that removes it", text)
                 self.assertNotIn("redaction never removes personal data from it", text)
 

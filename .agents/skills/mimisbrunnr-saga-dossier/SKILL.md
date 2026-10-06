@@ -80,7 +80,8 @@ python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py \
 
 # 4. Read the bundle and write your semantic judgements (see "Invoking the judgement") with the
 #    Write tool to .context/mimisbrunnr-saga-dossier/scratch/judgements.json. Refer to memories by
-#    uuid and version and to people by role: a judgement adds no personal data to a file. The file is optional:
+#    uuid and version and to people by role: a judgement adds no personal data to a file — any
+#    personal identifier (GDPR personal data) is masked and generalised, as the capture rule requires. The file is optional:
 #    without it the dossier carries no gap, contradiction or consolidation — only the deterministic
 #    findings — and step 5 runs WITHOUT its --judgements line (passing a path you never wrote fails).
 #    A near-miss-tag is not a judgement: write its evidence to scratch/near-miss.json and pass it

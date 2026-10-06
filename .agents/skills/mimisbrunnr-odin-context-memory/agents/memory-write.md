@@ -33,10 +33,13 @@ Run exactly once in fixed order:
 4. **Atomicity check**: one memory per fact; split or skip bundled claims.
 5. **Write**: one transactional `set`; API owns version ordering, identities, and graph writes.
 
-**Before creating any batch or payload file, remove or generalise personal data** — names, email
-addresses, phone numbers, employee or account identifiers, home-folder paths — naming a role instead;
-omit a candidate whose fact cannot survive that, and report the omission in the digest. The secret
-scrubber does not do this and cleanup cannot: a file deleted afterwards was still written.
+**Before creating any batch or payload file, mask and generalise every personal identifier** — any
+personal data within the meaning of the GDPR (information relating to an identified or identifiable
+person: names, contact details, identity numbers, employee, account or online identifiers, home-folder
+paths, location data, special-category data). Drop the value; generalise a person to a role (*"the
+user"*) and a value to its type (*"an identity number"*), until no one can be singled out. A fact that
+means nothing once generalised is not captured; report it in the digest. The secret scrubber does not do
+this and cleanup cannot: a file deleted afterwards was still written. See SKILL.md for the full rule.
 
 Every batch and payload file goes under `.context/mimisbrunnr-scratch/`, written with the file tool —
 never an `echo`/heredoc, and never an environment variable (a child process inherits it and the process
