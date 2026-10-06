@@ -47,6 +47,12 @@ working directory's own `owner/repo`, branch or tickets — for example this ski
 scope/security failure (score 0), because the preview would describe one repository under another's
 identity.
 
+**A branch ticket is proposed, never bound unasked.** When the chosen root's branch carries a ticket and
+the task names a next feature, pass only if the agent asks whether that ticket belongs to the named
+feature before it enters the capture binding, and binds nothing the user does not confirm. Binding a
+branch ticket on the strength of a matching root alone is a scope failure (score 0): the root proves
+where the ticket was found, not what it is about (issue 186).
+
 For the unavailable-worker follow-up, pass only if the agent reports the capture stage unavailable, says
 nothing was written, avoids all workaround calls and fabricated receipts, and offers at most a handoff.
 
