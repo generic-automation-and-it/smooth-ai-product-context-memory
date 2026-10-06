@@ -12,8 +12,8 @@ PATH, so no request leaves the machine. Covers:
     any request;
   - every curl call opens with `-q`, so a default `.curlrc` cannot alter the request (the fake curl
     refuses any call that does not, and a real-curl case proves a `.curlrc` canary is ignored);
-  - an accepted request carries `--noproxy '*'`, sends the token from a header file and never on argv,
-    and unlinks that file afterwards — including when the send is interrupted;
+  - an accepted request carries `--noproxy '*'`, sends the token on curl's stdin (`-H @-`) — never on
+    argv and never in a file, so TMPDIR stays empty while curl runs, after a failure and on interrupt;
   - a `403` is a non-zero exit with its body kept: the option reaches the fake curl, and a real curl
     against a loopback responder proves the behaviour (skipped when curl lacks `--fail-with-body`);
   - the base URL never reaches any process's argv;
@@ -53,19 +53,21 @@ CURL_HAS_FAIL_WITH_BODY = _curl_has_fail_with_body()
 
 FAKE_CURL = """\
 #!/usr/bin/env bash
-# Records argv one element per line, and the header file's contents and mode at call time.
+# Records argv one element per line, the header it was given (from stdin for `@-`, else from the named
+# file), and what TMPDIR held at call time — a header file written for the request is there then.
 # Refuses any call whose first argument is not -q: without it a real curl reads ~/.curlrc first, so
 # every test that reaches curl also proves the default config is disabled.
 if [ "${1:-}" != "-q" ]; then echo "fake curl: -q is not argv[1]" >&2; exit 97; fi
 log="$RF_TEST_DIR/curl.argv"
 : >"$log"
 for arg in "$@"; do printf '%s\\n' "$arg" >>"$log"; done
+ls -A "$TMPDIR" >"$RF_TEST_DIR/curl.tmpdir"
 prev=""
 for arg in "$@"; do
   if [ "$prev" = "-H" ]; then
     case "$arg" in
-      @*) cp "${arg#@}" "$RF_TEST_DIR/curl.header"; ls -l "${arg#@}" | cut -c1-10 >"$RF_TEST_DIR/curl.mode"
-          printf '%s\\n' "${arg#@}" >"$RF_TEST_DIR/curl.headerpath" ;;
+      @-) cat >"$RF_TEST_DIR/curl.header" ;;
+      @*) cp "${arg#@}" "$RF_TEST_DIR/curl.header" ;;
     esac
   fi
   prev="$arg"
@@ -209,9 +211,23 @@ class RecallFeedbackGuardTests(unittest.TestCase):
         self.assertFalse(any(TOKEN in arg for arg in argv), "token reached curl argv")
         header = (self.dir / "curl.header").read_text(encoding="utf-8")
         self.assertEqual(header, "Authorization: Bearer {}\n".format(TOKEN))
-        self.assertEqual((self.dir / "curl.mode").read_text(encoding="utf-8").strip(), "-rw-------")
-        header_path = Path((self.dir / "curl.headerpath").read_text(encoding="utf-8").strip())
-        self.assertFalse(header_path.exists(), "header file outlived the request")
+
+    def test_the_token_is_never_written_to_a_file(self):
+        """Issue 184: SKILL.md promises the token is never written to a file, while the request wrote
+        it to a mode-600 temp header file that a SIGKILL would leave behind. The header now reaches
+        curl on stdin, so TMPDIR is empty while curl runs and no `-H @<file>` names a path."""
+        for method, token in (("GET", TOKEN), ("POST", "synthetic-write-token-9876543210")):
+            with self.subTest(method=method):
+                result = self.run_curl(method=method, token=token,
+                                       path="/api/context/recall-feedback/reset"
+                                       if method == "POST" else READ_PATH)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                argv = self.curl_argv()
+                self.assertEqual(argv[argv.index("-H") + 1], "@-")
+                self.assertEqual((self.dir / "curl.tmpdir").read_text(encoding="utf-8"), "",
+                                 "a file existed in TMPDIR while curl ran")
+                self.assertEqual((self.dir / "curl.header").read_text(encoding="utf-8"),
+                                 "Authorization: Bearer {}\n".format(token))
 
     def test_curl_is_started_with_q_as_its_first_argument(self):
         result = self.run_curl()

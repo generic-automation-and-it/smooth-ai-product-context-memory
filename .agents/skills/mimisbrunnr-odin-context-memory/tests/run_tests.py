@@ -126,6 +126,26 @@ def _env(name, value):
             os.environ[name] = previous
 
 
+def _without_write_tokens(env):
+    """A copy of `env` holding no write token under any spelling the read client refuses.
+
+    Clearing only `CONTEXT_MEMORY_WRITE_TOKEN` left the suite dependent on the shell that ran it: with
+    the Host form `ApiAccess__WriteToken` exported, every read-client case exercised the capability
+    guard instead of the behaviour it names (issue 184).
+    """
+    return {key: value for key, value in env.items() if not client.write_tokens_present({key: value})}
+
+
+@contextlib.contextmanager
+def _no_write_tokens():
+    """Clear every write-token spelling from `os.environ` for the block, restoring them afterwards."""
+    removed = {key: os.environ.pop(key) for key in client.write_tokens_present()}
+    try:
+        yield
+    finally:
+        os.environ.update(removed)
+
+
 class _FakeResponse:
     """Minimal context manager standing in for an HTTP response, for the framing sweep."""
 
@@ -213,7 +233,7 @@ class RecallFramingTests(unittest.TestCase):
         payload = json.dumps(self._hostile_result())
         # The read client refuses to run with the write credential present, so it is cleared for the
         # duration — otherwise the framing assertions would be testing the capability guard.
-        with _env(client.ENV_WRITE_TOKEN, None), _env(client.ENV_READ_TOKEN, "test-token"):
+        with _no_write_tokens(), _env(client.ENV_READ_TOKEN, "test-token"):
             with patch.object(sys, "argv", argv):
                 with patch.object(sys, "stdin", io.StringIO(payload if stdin_payload is None
                                                              else stdin_payload)):
@@ -281,7 +301,7 @@ class RecallFramingTests(unittest.TestCase):
                 # Both transport seams are stubbed: `query`/`paths`/`labels` go through `_request`,
                 # while `get-blob` and `get-versions` call `_open` themselves. Leaving either live
                 # turns the assertion into a real connection attempt.
-                with _env(client.ENV_WRITE_TOKEN, None), _env(client.ENV_READ_TOKEN, "test-token"), \
+                with _no_write_tokens(), _env(client.ENV_READ_TOKEN, "test-token"), \
                         patch.object(client, "_request", return_value=self._hostile_result()), \
                         patch.object(client, "_open", return_value=_FakeResponse(
                             json.dumps(self._hostile_result()))), \
@@ -326,7 +346,7 @@ class RecallFramingTests(unittest.TestCase):
         # missing final newline must all survive, through both clients' real entry points.
         uuid = "11111111-1111-1111-1111-111111111111"
         body = "  {\"a\": 1}\n\n  indented tail without final newline  "
-        with _env(client.ENV_WRITE_TOKEN, None), _env(client.ENV_READ_TOKEN, "test-token"), \
+        with _no_write_tokens(), _env(client.ENV_READ_TOKEN, "test-token"), \
                 patch.object(client, "_open", return_value=_FakeResponse(body)):
             buffer = io.StringIO()
             with patch.object(sys, "argv", ["context_memory_read_client", "get-blob", uuid, "1"]), \
@@ -1027,8 +1047,7 @@ class ScratchInputConsumeTests(unittest.TestCase):
         for script in ("context_memory_client.py", "context_memory_read_client.py"):
             for command in ("query", "deepsearch") if "read" in script else ("set", "preflight", "query"):
                 with self.subTest(script=script, command=command):
-                    env = {key: value for key, value in os.environ.items()
-                           if key != client.ENV_WRITE_TOKEN}
+                    env = _without_write_tokens(os.environ)
                     completed = subprocess.run(
                         [sys.executable, "-B", str(SCRIPTS / script), command, "--help"],
                         capture_output=True, text=True, timeout=30, env=env)
@@ -1315,9 +1334,9 @@ class WritePayloadTests(unittest.TestCase):
                 self.assertNotIn("s3cret", str(probed.exception))
 
     def test_the_cli_reports_an_unparseable_base_url_as_a_classified_error(self):
-        env = dict(os.environ, **{client.ENV_BASE_URL: "http://user:s3cret@local\uff03host:5141",
-                                  client.ENV_READ_TOKEN: "read-only"})
-        env.pop(client.ENV_WRITE_TOKEN, None)
+        env = _without_write_tokens(dict(
+            os.environ, **{client.ENV_BASE_URL: "http://user:s3cret@local\uff03host:5141",
+                           client.ENV_READ_TOKEN: "read-only"}))
         for script in ("context_memory_client.py", "context_memory_read_client.py"):
             with self.subTest(script=script):
                 completed = subprocess.run([sys.executable, "-B", str(SCRIPTS / script), "labels"],
@@ -1349,8 +1368,7 @@ class WritePayloadTests(unittest.TestCase):
         self.assertIn("reachable at http://127.0.0.1:5141", out.getvalue())
 
     def test_the_cli_refuses_a_credential_bearing_probe_override_as_a_classified_error(self):
-        env = dict(os.environ, **{client.ENV_READ_TOKEN: "read-only"})
-        env.pop(client.ENV_WRITE_TOKEN, None)
+        env = _without_write_tokens(dict(os.environ, **{client.ENV_READ_TOKEN: "read-only"}))
         env.pop(client.ENV_BASE_URL, None)
         for script in ("context_memory_client.py", "context_memory_read_client.py"):
             with self.subTest(script=script):
@@ -1866,6 +1884,39 @@ class OtherWriteRedactionTests(unittest.TestCase):
                 self.assertEqual(self._planted(out.getvalue()), [])
                 self.assertIn('"redaction"', out.getvalue())
 
+    def test_the_digest_survives_a_response_that_is_not_an_object(self):
+        """An empty body (`None`) or a non-object answer had nowhere to carry the digest, so the scrub
+        went unreported (issue 184). It now goes to stderr as one JSON line, and stdout keeps exactly
+        what the store answered — not wrapped, because `resolve-group`'s caller parses that object."""
+        writes = dict(CLI_WRITES, set=client.cmd_set)
+        payloads = {tool: entry[3] for tool, entry in OTHER_WRITES.items()}
+        payloads["set"] = PLANTED
+        for answer in (None, [], "ok"):
+            for tool, command in sorted(writes.items()):
+                needs_uuid = tool != "set" and OTHER_WRITES[tool][2]
+                args = SimpleNamespace(payload=None, dryrun=False, uuid=GOOD_UUID if needs_uuid else None)
+                with self.subTest(tool=tool, answer=answer), \
+                        patch.object(client, "read_payload", return_value=copy.deepcopy(payloads[tool])), \
+                        patch.object(client, "_request", return_value=answer), \
+                        redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()) as err:
+                    result = command(args)
+                    self.assertEqual(result, answer, "the store's answer must reach the caller unchanged")
+                    self.assertEqual(json.loads(out.getvalue()), answer)
+                    digest = json.loads(err.getvalue())["redaction"]
+                    self.assertTrue(digest and all(entry["locations"] for entry in digest))
+                    self.assertEqual(self._planted(err.getvalue() + out.getvalue()), [])
+                    for secret in PLANTED_SECRETS:
+                        self.assertNotIn(secret, err.getvalue() + out.getvalue())
+
+    def test_an_object_response_carries_the_digest_and_stderr_stays_quiet(self):
+        # The control: the field is still the channel whenever there is an object to carry it.
+        with patch.object(client, "read_payload", return_value=copy.deepcopy(PLANTED)), \
+                patch.object(client, "_request", return_value={"created": 1}), \
+                redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as err:
+            response = client.cmd_set(SimpleNamespace(payload=None, dryrun=False))
+        self.assertTrue(response["redaction"])
+        self.assertEqual(err.getvalue(), "")
+
     def test_ticket_parent_dry_run_previews_the_scrubbed_request(self):
         payload = OTHER_WRITES["ticket_parent"][3]
         with patch.object(client, "read_payload", return_value=copy.deepcopy(payload)), \
@@ -2045,6 +2096,113 @@ class DeepSearchTests(unittest.TestCase):
 
         with self.assertRaises(client.ClientError):
             deepsearch.execute({"baseline": {}, "keywords": []}, request=request)
+
+    # Issue 184: each shape below is an answer that is not a complete page. Before the fix every one of
+    # them was read as "no rows" and reported as a completed pass — full coverage the recall never got.
+    INCOMPLETE_QUERY_ANSWERS = {
+        "empty body": None,
+        "not an object": [],
+        "missing items": {"total": 3},
+        "items not a list": {"items": "00000000-0000-4000-8000-000000000001"},
+        "row not an object": {"items": ["00000000-0000-4000-8000-000000000001"]},
+        "row without a uuid": {"items": [{"version": 1}]},
+    }
+
+    def test_an_incomplete_baseline_answer_is_disclosed_never_a_completed_empty_pass(self):
+        for label, answer in self.INCOMPLETE_QUERY_ANSWERS.items():
+            with self.subTest(answer=label):
+                result = deepsearch.execute({"baseline": {"facets": ["storage"]}, "keywords": ["alpha"]},
+                                            request=lambda *a, **k: answer)
+                disclosure = result["disclosure"]
+                baseline = disclosure["passes"][0]
+                self.assertEqual(baseline["status"], "malformed")
+                self.assertEqual(result["items"], [])
+                self.assertIn({"kind": "baseline", "value": None}, disclosure["passesIncomplete"])
+                self.assertTrue(disclosure["possiblyOmitted"])
+                self.assertGreaterEqual(disclosure["passesMalformed"], 1)
+                # The traversal set was never enumerated, so it is unknown, not empty.
+                self.assertIsNone(disclosure["anchorsEligible"])
+
+    def test_a_truncated_body_is_a_malformed_pass_and_keeps_the_completed_ones(self):
+        """A body cut off mid-JSON raised out of deepsearch and discarded the completed baseline."""
+        def request(method, path, payload, **kwargs):
+            if path.endswith("paths"):
+                return {"paths": []}
+            if payload.get("query") is None:
+                return {"items": [self.row(1)]}
+            if payload.get("query") == "alpha":
+                raise json.JSONDecodeError("Unterminated string", '{"items": [{"uuid": "0', 20)
+            return {"items": [self.row(2)]}
+
+        result = deepsearch.execute(
+            {"baseline": {"facets": ["storage"]}, "keywords": ["alpha", "beta"]}, request=request)
+        statuses = {item["value"]: item["status"] for item in result["disclosure"]["passes"]
+                    if item["kind"] != "traversal"}
+        self.assertEqual(statuses, {None: "completed", "alpha": "malformed", "beta": "completed"})
+        self.assertIn(self.row(1), result["items"])
+        self.assertIn(self.row(2), result["items"], "a malformed pass must not stop the chain")
+        self.assertEqual(result["disclosure"]["passesMalformed"], 1)
+        self.assertEqual(result["disclosure"]["keywordsOmittedByCap"], 0,
+                         "an attempted pass is not one the cap left out")
+        self.assertTrue(result["disclosure"]["possiblyOmitted"])
+        self.assertFalse(result["disclosure"]["stoppedEarly"])
+
+    def test_an_incomplete_keyword_or_traversal_page_contributes_nothing(self):
+        """Whole passes only: a page with one unreadable row adds none of its rows, and a path without
+        an `endpoint` is not merged as an empty item."""
+        anchor = self.row(1)
+        good = self.row(5)
+        for label, kind, answer in (
+                ("keyword row without uuid", "keyword", {"items": [self.row(9), {"version": 2}]}),
+                ("keyword missing items", "keyword", {}),
+                ("path without endpoint", "traversal", {"paths": [{"endpoint": good}, {"depth": 1}]}),
+                ("paths missing", "traversal", {"items": [good]})):
+            with self.subTest(answer=label):
+                def request(method, path, payload, **kwargs):
+                    if path.endswith("paths"):
+                        return answer if kind == "traversal" else {"paths": []}
+                    if payload.get("query") is None:
+                        return {"items": [anchor]}
+                    return answer if kind == "keyword" else {"items": []}
+
+                result = deepsearch.execute(
+                    {"baseline": {"facets": ["storage"]}, "keywords": ["alpha"]}, request=request)
+                disclosure = result["disclosure"]
+                malformed = [item for item in disclosure["passes"] if item["status"] == "malformed"]
+                self.assertEqual([item["kind"] for item in malformed], [kind])
+                self.assertEqual(result["items"], [anchor], "rows of an unreadable page were merged")
+                self.assertEqual(disclosure["passesMalformed"], 1)
+                self.assertTrue(disclosure["possiblyOmitted"])
+                if kind == "traversal":
+                    self.assertEqual(disclosure["anchorsOmittedByCap"], 0)
+                    self.assertEqual(disclosure["anchorsExecuted"], 0)
+
+    def test_a_malformed_traversal_does_not_stop_the_next_anchor(self):
+        # Like a forbidden anchor: the store answered, so the deadline is not the problem.
+        anchors = [self.row(1), self.row(2)]
+        reached = self.row(6)
+
+        def request(method, path, payload, **kwargs):
+            if path.endswith("query"):
+                return {"items": anchors}
+            if payload["sourceUuid"] == anchors[0]["uuid"]:
+                return {"paths": [{"depth": 1}]}
+            return {"paths": [{"endpoint": reached}]}
+
+        result = deepsearch.execute({"baseline": {"facets": ["storage"]}, "keywords": []},
+                                    request=request)
+        self.assertIn(reached, result["items"])
+        self.assertEqual(result["disclosure"]["anchorsExecuted"], 1)
+        self.assertEqual(result["disclosure"]["passesMalformed"], 1)
+        self.assertEqual(result["disclosure"]["anchorsOmittedByCap"], 0)
+
+    def test_a_complete_empty_answer_is_still_a_completed_pass(self):
+        # The control: an empty list is a real answer, not a malformed one.
+        result = deepsearch.execute({"baseline": {"facets": ["storage"]}, "keywords": []},
+                                    request=lambda *a, **k: {"items": []})
+        self.assertEqual(result["disclosure"]["passes"][0]["status"], "completed")
+        self.assertEqual(result["disclosure"]["passesMalformed"], 0)
+        self.assertFalse(result["disclosure"]["possiblyOmitted"])
     @staticmethod
     def row(index):
         return {"uuid": f"00000000-0000-4000-8000-{index:012d}", "version": 1}
@@ -2306,12 +2464,13 @@ class AuthorityTests(unittest.TestCase):
             authority.compose(payload)
 
     def test_the_cost_evidence_blob_bound_covers_version_restoration(self):
-        # Issue 182: `blobWritesMaximum` assumed one blob per fact, but an existing-winner resolution
-        # writes two content-bearing versions per fact, and the Host stores a blob per such item.
+        # Issue 182: `blobWritesMaximum` (now `blobStoreCallsMaximum`) assumed one blob per fact, but
+        # an existing-winner resolution writes two content-bearing versions per fact, and the Host
+        # stores a blob per such item.
         spec = importlib.util.spec_from_file_location("_measure_cost", HERE / "measure_cost.py")
         cost = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(cost)
-        bound = cost.measure()["normalWrite"]["blobWritesMaximum"]
+        bound = cost.measure()["normalWrite"]["blobStoreCallsMaximum"]
         self.assertEqual(cost.SET_ITEM_CAP, client.MAX_CANDIDATES)
         items = []
         for _ in range(cost.FACTS):
@@ -2322,6 +2481,61 @@ class AuthorityTests(unittest.TestCase):
         content_items = [item for item in items if item.get("content")]
         self.assertEqual(len(content_items), 2 * cost.FACTS)
         self.assertGreaterEqual(bound, min(len(content_items), client.MAX_CANDIDATES))
+
+    def test_the_cost_evidence_counts_object_store_requests_not_store_calls(self):
+        # Issue 184: the bound counted `IBlobStorage.StoreAsync` calls and called them operations, but
+        # one call on new bytes is a stat, a bucket check and a put, the first write into a missing
+        # bucket adds a create and its race re-check, and the Host's standard resilience handler
+        # retries each request up to three times. The per-call figures are read from the Host source
+        # here, so a change to `S3BlobStorage` that adds a request fails this test instead of leaving
+        # the published bound low. The vendored skill ships without `src/`, so a consumer checkout
+        # pins only the arithmetic.
+        spec = importlib.util.spec_from_file_location("_measure_cost", HERE / "measure_cost.py")
+        cost = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cost)
+        calls = min(cost.FACTS * 2, client.MAX_CANDIDATES)
+        normal = cost.measure()["normalWrite"]
+        self.assertEqual(normal["blobStoreCallsMaximum"], calls)
+        self.assertEqual(normal["blobUploadsMaximum"], calls)
+        self.assertEqual(normal["objectStoreRequestsMaximum"],
+                         calls * cost.REQUESTS_PER_NEW_BODY + cost.BUCKET_CREATION_REQUESTS)
+        self.assertEqual(normal["objectStoreHttpAttemptsMaximum"],
+                         normal["objectStoreRequestsMaximum"] * cost.HTTP_ATTEMPTS_PER_REQUEST)
+        self.assertEqual(cost.measure()["dryRun"]["objectStoreRequests"], 0)
+
+        src = HERE.parents[3] / "src"
+        storage = src / "SmoothAiProductContextMemory.Infrastructure" / "Storage" / "S3BlobStorage.cs"
+        if not storage.exists():
+            return
+        text = storage.read_text(encoding="utf-8")
+
+        def body(method):
+            match = re.search(rf"\n    (?:public|private) async Task(?:<[^>\n]*>)? {method}\(.*?\n    }}\n",
+                              text, re.S)
+            self.assertIsNotNone(match, f"S3BlobStorage.{method} not found")
+            return match.group(0)
+
+        def client_calls(method):
+            return re.findall(r"_client\.(\w+)\(", body(method))
+
+        store = client_calls("StoreAsync")
+        self.assertIn("await ObjectExistsAsync(", body("StoreAsync"))
+        self.assertIn("await EnsureBucketAsync(", body("StoreAsync"))
+        stat, ensure = client_calls("ObjectExistsAsync"), client_calls("EnsureBucketAsync")
+        self.assertEqual(stat, ["StatObjectAsync"])
+        self.assertEqual(ensure, ["BucketExistsAsync", "MakeBucketAsync", "BucketExistsAsync"])
+        # New bytes, bucket present: stat + the first bucket check + every client call in StoreAsync.
+        self.assertEqual(len(stat) + 1 + len(store), cost.REQUESTS_PER_NEW_BODY)
+        self.assertEqual(len(ensure) - 1, cost.BUCKET_CREATION_REQUESTS)
+
+        defaults = (src / "SmoothAiProductContextMemory.Host" / "Configuration"
+                    / "HostApplicationBuilderExtensions.cs").read_text(encoding="utf-8")
+        self.assertIn("AddStandardResilienceHandler()", defaults,
+                      "the attempts figure assumes the standard handler's default retry count")
+        self.assertNotIn("DisableFor", defaults)
+        self.assertNotIn("MaxRetryAttempts", defaults)
+        # One attempt plus the standard handler's default of three retries, which covers PUT too.
+        self.assertEqual(cost.HTTP_ATTEMPTS_PER_REQUEST, 1 + 3)
 
 class SemanticFixtureTests(unittest.TestCase):
     def test_blinded_model_input_excludes_expected_verdicts(self):
@@ -2690,6 +2904,51 @@ class SemanticFixtureTests(unittest.TestCase):
             with self.subTest(label):
                 self.assertFalse(self._s1_row(verdict))
 
+    def test_a_key_split_by_a_line_break_or_an_invisible_character_still_fails_the_scrub(self):
+        # Issue 184: the banned-token check normalised whitespace in `json.dumps` output, where a line
+        # break or a tab is the two characters `\n`/`\t`, so a key split across lines passed.
+        secret = "AKIAIOSFODNN7EXAMPLE"
+        base = {"id": "s1-redact-planted-credential", "verdict": "scrub", "reason": "aws key"}
+        clean = {"candidate_description": "Deployment uses <redacted> for the build pipeline.",
+                 "candidate_statement": "The CI pipeline authenticates with an AWS access key."}
+        for label, separator in (("line feed", "\n"), ("crlf", "\r\n"), ("tab", "\t"),
+                                 ("zero-width space", "\u200b"), ("soft hyphen", "\u00ad")):
+            for field in ("candidate_description", "reason"):
+                split = f"uses {secret[:8]}{separator}{secret[8:]}"
+                verdict = ({**base, "reason": split, "redacted": clean} if field == "reason"
+                           else {**base, "redacted": {**clean, field: split}})
+                with self.subTest(label, field=field):
+                    self.assertFalse(self._s1_row(verdict))
+
+    def test_every_verdict_needs_a_non_empty_reason_not_only_the_one_scenario_that_says_so(self):
+        # Issue 184: only `s5` declares `reason_must_be_nonempty`, so a reasonless verdict scored as
+        # correct on every other scenario although the blinded input requires a reason on all of them.
+        scenarios = self._scenarios()
+        clean = {"candidate_description": "Deployment uses <redacted> for the build pipeline.",
+                 "candidate_statement": "The CI pipeline authenticates with an AWS access key."}
+
+        def answered():
+            verdicts = self._verdicts_for(scenarios, lambda s: s["expected"]["verdict"])
+            for verdict in verdicts:
+                if verdict["id"] == "s1-redact-planted-credential":
+                    verdict["redacted"] = clean
+            return verdicts
+
+        _, control = self._score(scenarios, answered())
+        self.assertTrue(all(row["match"] for row in control["rows"]), "the control must match")
+        for label, reason in (("missing", None), ("empty", ""), ("blank", "  \n"), ("not a string", 7)):
+            verdicts = answered()
+            for verdict in verdicts:
+                if reason is None:
+                    del verdict["reason"]
+                else:
+                    verdict["reason"] = reason
+            completed, score = self._score(scenarios, verdicts)
+            with self.subTest(label):
+                self.assertEqual([row["id"] for row in score["rows"] if row["match"]], [])
+                self.assertFalse(any(row["reason_present"] for row in score["rows"]))
+                self.assertNotEqual(completed.returncode, 0)
+
     def test_the_blinded_input_states_the_verdict_shape_without_an_answer(self):
         completed = subprocess.run(
             [sys.executable, str(HERE / "fixtures" / "score_fixtures.py"), "--emit-model-input"],
@@ -2731,6 +2990,35 @@ class AgentContractTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 2)
         self.assertIn(client.ENV_WRITE_TOKEN, completed.stderr)
 
+    def test_read_client_refuses_the_host_spelling_of_the_write_credential(self):
+        """`provision-credentials.sh` writes `ApiAccess__WriteToken` beside the skill form, and the Host
+        binds it case-insensitively with `:` or `__`. Only the skill form was refused, so a shell holding
+        just the Host form started a read worker carrying the write credential (issue 184; the
+        recurrence of issue 179's finding 24, which had been closed in kvasir's subprocess env only).
+        Every case runs with the skill form absent, so the refusal can only come from the Host form."""
+        base = _without_write_tokens(dict(
+            os.environ, **{client.ENV_READ_TOKEN: "read",
+                           "CONTEXT_MEMORY_CREDENTIAL_FILE": os.path.join(
+                               tempfile.gettempdir(), "mimisbrunnr-odin-harness-absent-credentials")}))
+        planted = "synthetic-host-write-value"
+        for name in ("ApiAccess__WriteToken", "APIACCESS__WRITETOKEN", "apiaccess:writetoken",
+                     "Parameters__api-write-token"):
+            with self.subTest(name=name):
+                completed = subprocess.run(
+                    [sys.executable, "-B", str(SCRIPTS / "context_memory_read_client.py"), "probe"],
+                    env={**base, name: planted}, capture_output=True, text=True, check=False,
+                    timeout=30)
+                self.assertEqual(completed.returncode, 2, completed.stderr)
+                self.assertIn(name, completed.stderr)
+                self.assertNotIn(planted, completed.stderr + completed.stdout,
+                                 "the refusal must name the variable, never its value")
+
+    def test_an_empty_or_unrelated_token_name_does_not_trip_the_read_guard(self):
+        # The control: the guard is on write-token names with a value, not on anything token-shaped.
+        environ = {"ApiAccess__WriteToken": "", "ApiAccess__ReadToken": "r",
+                   client.ENV_READ_TOKEN: "r", "CONTEXT_MEMORY_WRITE_TOKEN_FILE": "/x"}
+        self.assertEqual(client.write_tokens_present(environ), [])
+
     def test_agents_and_orchestration_contract_exist(self):
         read = (self.AGENTS / "memory-read.md").read_text(encoding="utf-8")
         write = (self.AGENTS / "memory-write.md").read_text(encoding="utf-8")
@@ -2744,6 +3032,67 @@ class AgentContractTests(unittest.TestCase):
         registration = (HERE.parents[2] / "agents" / "memory-write.md").read_text(encoding="utf-8")
         self.assertIn("context_memory_client.py", registration)
         self.assertNotIn("context_memory_read_client.py", registration)
+
+    WRITE_STEP = "set -a && source ~/.mimisbrunnr/credentials && set +a"
+
+    @staticmethod
+    def _tools(text):
+        """The `tools:` block list of an agent file's frontmatter."""
+        front = text.split("---", 2)[1]
+        block = re.search(r"^tools:\n((?:[ \t]+-[^\n]*\n)+)", front, re.MULTILINE)
+        return [line.strip()[1:].strip() for line in block.group(1).splitlines()] if block else []
+
+    def test_both_write_registrations_grant_the_tool_the_capture_procedure_needs(self):
+        """The capture procedure has the worker write its batch file with the file tool — never `echo`
+        or a heredoc — but neither write registration granted `Write`, so a runtime honouring the grant
+        left the worker only the shell channels the procedure forbids (issue 184)."""
+        for path in (self.AGENTS / "memory-write.md", HERE.parents[2] / "agents" / "memory-write.md"):
+            with self.subTest(path=str(path)):
+                text = path.read_text(encoding="utf-8")
+                self.assertIn("Write", self._tools(text))
+                self.assertIn("Bash", self._tools(text))
+
+    def test_no_write_registration_assumes_the_write_credential_is_ambient(self):
+        """Both registrations said the runtime supplies both credentials, while the client seeds only
+        the read token and the write token is deliberately never ambient — so the worker had no step
+        that loads it (issue 184; issue 181's finding 31 again). Each must name the deliberate write
+        step, and that step must be the one the operator documentation gives."""
+        readme = (HERE.parents[3] / "README.md").read_text(encoding="utf-8")
+        self.assertIn(self.WRITE_STEP, readme, "the registrations must cite the documented step")
+        for path in (self.AGENTS / "memory-write.md", HERE.parents[2] / "agents" / "memory-write.md"):
+            with self.subTest(path=str(path)):
+                text = " ".join(path.read_text(encoding="utf-8").split())
+                self.assertNotRegex(text, r"(?i)runtime supplies both")
+                self.assertIn(self.WRITE_STEP, text)
+                self.assertIn("never ambient", text)
+
+    def test_the_scratch_folder_ignores_itself_before_the_batch_file_is_written(self):
+        """Issue 184 re-raised issue 182's finding 5: the capture procedure writes unredacted candidate
+        content to disk before redaction. That channel is the agreed design and stays; what was not
+        bounded is where the copy can travel — the docs called the folder "gitignored", which only this
+        repository's `.gitignore` makes true. Both procedures must have the folder ignore itself first."""
+        skill = " ".join((HERE.parent / "SKILL.md").read_text(encoding="utf-8").split())
+        worker = " ".join((self.AGENTS / "memory-write.md").read_text(encoding="utf-8").split())
+        for name, text in (("SKILL.md", skill), ("memory-write.md", worker)):
+            with self.subTest(document=name):
+                self.assertIn("`.context/mimisbrunnr-scratch/.gitignore` holding", text)
+                self.assertRegex(text, r"\.gitignore` holding (the single line )?`\*`")
+
+    def test_preflight_runs_at_the_checkpoint_after_the_group_is_resolved(self):
+        """Phase 3 opened with "Before writing", so it read as a round run during work — before the
+        group it sends as `groupUuid` exists, since `resolve-group` is a write that waits for the
+        checkpoint (issue 184). The section must place itself at the checkpoint, after resolution, and
+        say what a dry run (which resolves nothing) sends instead."""
+        skill = (HERE.parent / "SKILL.md").read_text(encoding="utf-8")
+        phase3 = skill.split("### 3. Compare Or Clarify", 1)[1].split("### 4.", 1)[0]
+        flat = " ".join(phase3.split())
+        self.assertNotIn("Before writing, delegate", flat)
+        self.assertIn("**after** the group binding is resolved", flat)
+        self.assertIn("`resolve-group`", flat)
+        self.assertIn("Under `--dryrun` no group is resolved", flat)
+        # The first pipeline stage of the worker contract comes after the resolution step.
+        worker = (self.AGENTS / "memory-write.md").read_text(encoding="utf-8")
+        self.assertLess(worker.index("resolve-group"), worker.index("1. **Preflight**"))
 
 
 class TicketClientTests(unittest.TestCase):
@@ -3309,7 +3658,7 @@ class DirectionAliasTests(unittest.TestCase):
             print(json.dumps({"items": []}))
 
         buffer = io.StringIO()
-        with _env(client.ENV_WRITE_TOKEN, None), patch.object(sys, "argv", ["read", "import"]), \
+        with _no_write_tokens(), patch.object(sys, "argv", ["read", "import"]), \
                 patch.object(client, "cmd_query", side_effect=fake_query), redirect_stdout(buffer):
             rc = read_client.main()
         self.assertEqual(rc, 0)
@@ -3317,7 +3666,7 @@ class DirectionAliasTests(unittest.TestCase):
         self.assertIn(client.RECALL_NOTICE, buffer.getvalue(), "an aliased recall must still be framed")
 
     def test_the_read_client_offers_no_export_alias(self):
-        with _env(client.ENV_WRITE_TOKEN, None), patch.object(sys, "argv", ["read", "export"]), \
+        with _no_write_tokens(), patch.object(sys, "argv", ["read", "export"]), \
                 redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             read_client.main()
 

@@ -3,7 +3,7 @@ name: mimisbrunnr-saga-dossier
 description: Compose a read-only, cited context dossier — one ordered document plus a findings report (gaps, contradictions, stale claims) — for a slice of the Mímisbrunnr store (repository, initiative, ticket, tags). Use when re-entering a repo or ticket, handing reasoning to a colleague, grounding a design document, or auditing the store. Fetches a deterministic bundle from the Host API and writes only the gitignored dossier plus transient scratch files it deletes; never writes to the store. Triggers on "dossier", "catch me up on", "everything the store knows about".
 allowed-tools:
   - Bash(python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py:*)
-  - Bash(mkdir -p .context/mimisbrunnr-saga-dossier/scratch)
+  - Bash(mkdir -p -m 700 .context/mimisbrunnr-saga-dossier/scratch)
   - Bash(rm -rf .context/mimisbrunnr-saga-dossier/scratch)
   - Read
   - Write
@@ -43,7 +43,11 @@ selection the practitioner approved in the preview, the difference is reported (
 ## Workflow
 
 ```bash
-mkdir -p .context/mimisbrunnr-saga-dossier/scratch
+# 0. Create the scratch directory owner-only. The Write tool creates files with the umask's mode
+#    (0644 under the usual 022), so this directory is what keeps the judgement inputs private;
+#    compose refuses an input that neither it nor its directory keeps owner-only. A scratch directory
+#    left from an earlier run is not re-permissioned by -m: remove it first (step 6).
+mkdir -p -m 700 .context/mimisbrunnr-saga-dossier/scratch
 
 # 1. Preview the selection (NFR-03 / LADR-14) — POST /api/context/dossier/preview, read-only and
 #    blob-free. Takes the same anchor flags as `bundle` and returns the effective selection, volume,
@@ -74,15 +78,19 @@ python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py \
   --out .context/mimisbrunnr-saga-dossier/scratch/bundle.json
 
 # 4. Read the bundle and write your semantic judgements (see "Invoking the judgement") with the
-#    Write tool to .context/mimisbrunnr-saga-dossier/scratch/judgements.json. Without this file the
-#    dossier carries no gap, contradiction or consolidation — only the deterministic findings. A
-#    near-miss-tag is not a judgement: write its evidence to scratch/near-miss.json and pass it with
-#    --near-miss-evidence (see Rules). Both paths must be gitignored or compose refuses them.
+#    Write tool to .context/mimisbrunnr-saga-dossier/scratch/judgements.json. The file is optional:
+#    without it the dossier carries no gap, contradiction or consolidation — only the deterministic
+#    findings — and step 5 runs WITHOUT its --judgements line (passing a path you never wrote fails).
+#    A near-miss-tag is not a judgement: write its evidence to scratch/near-miss.json and pass it
+#    with --near-miss-evidence (see Rules). Both paths must be gitignored and owner-only (the 0700
+#    scratch directory from step 0 does that) or compose refuses them.
 
 # 5. Compose from the saved bundle and judgements, apply an optional focus, write the artefact.
+#    Drop the --judgements line if you skipped step 4.
 #    --out must be a gitignored path inside the checkout (verified with `git check-ignore`; a
 #    tracked, un-ignored or out-of-checkout destination is refused) and is written 0600; omit it to
-#    print to stdout. Re-run with other focuses against the same scratch files as needed.
+#    print to stdout. Re-run with other focuses against the same scratch files as needed. A
+#    reconciliation that does not close is a composer defect: compose exits 1 and writes nothing.
 python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py \
   compose --bundle .context/mimisbrunnr-saga-dossier/scratch/bundle.json \
   --judgements .context/mimisbrunnr-saga-dossier/scratch/judgements.json \
@@ -143,7 +151,8 @@ and its memories by identity + version (LADR-13). Findings are focus-invariant i
 ## What the composer guarantees
 
 - **Ordering** — topological over `supersedes` / `depends_on` / `implements` only; a provenance cycle
-  is reported and still produces the document (LADR-07).
+  is reported (its members only — a memory that merely rests on a cycle is ordered after it, not
+  reported as part of it) and still produces the document (LADR-07).
 - **Consolidation** — merges only where meaning + applicability + lifecycle match; every origin
   retained and reported as origins, never counted as corroboration (LADR-05).
 - **Lifecycle** — current / proposed / superseded / no-longer-true / unknown, with capture recency
@@ -152,7 +161,8 @@ and its memories by identity + version (LADR-13). Findings are focus-invariant i
   composition-authored text is marked **analysis** and states its basis; missing provenance is visible
   (NFR-05).
 - **Reconciliation** — present + consolidated + omitted-with-reason == the manifest's selected count,
-  closed in the dossier itself (NFR-04).
+  closed in the dossier itself (NFR-04). A bundle repeating an item or an omission is refused, and a
+  reconciliation that would not close produces no dossier (exit 1) rather than a "✗ FAILED" one.
 - **Read-only** — the module exposes no write operation; the only files it writes are the dossier
   and the scratch bundle, each at a requested gitignored path and owner-only (0600) (NFR-06). A
   `--bundle` URL is refused: a bundle is read from a saved file only.
@@ -202,7 +212,7 @@ a fragment is refused, and a trailing slash is ignored.
 
 ## Test
 
-Committed harness: `python3 -B .agents/skills/mimisbrunnr-saga-dossier/tests/run_tests.py` (111 tests).
+Committed harness: `python3 -B .agents/skills/mimisbrunnr-saga-dossier/tests/run_tests.py` (125 tests).
 
 ## Related
 

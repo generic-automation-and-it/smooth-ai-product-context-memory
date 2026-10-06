@@ -19,6 +19,29 @@ def _key(item):
     return item.get("uuid"), item.get("version")
 
 
+def _rows(response, field, endpoint=False):
+    """The rows of one answered pass, or None when the answer is not a complete page.
+
+    The store always answers `{"items": [...]}` for a query and `{"paths": [{"endpoint": {...}}]}` for a
+    traversal. An empty body, a non-object, a missing or non-list `items`/`paths`, a row that is not an
+    object or has no `uuid`, and a path without an `endpoint` object are all an answer this client
+    cannot read — and reading any of them as "no rows" reported a completed empty pass, which is the
+    full-coverage claim an incomplete response must never make (issue 184). Whole passes only: a page
+    with one unreadable row contributes nothing rather than the rows around it.
+    """
+    if not isinstance(response, dict) or not isinstance(response.get(field), list):
+        return None
+    rows = response[field]
+    if endpoint:
+        if not all(isinstance(path, dict) and isinstance(path.get("endpoint"), dict) for path in rows):
+            return None
+        rows = [path["endpoint"] for path in rows]
+    if not all(isinstance(row, dict) and isinstance(row.get("uuid"), str) and row["uuid"]
+               for row in rows):
+        return None
+    return rows
+
+
 def _add(items, merged, seen, remaining):
     added = 0
     for item in items:
@@ -55,37 +78,46 @@ def execute(payload, request=client._request, clock=time.monotonic):
     budget_exhausted = False
 
     def run_pass(kind, value, limit, method, path, body):
-        """Run one pass under the deadline. Returns `(response, status)`.
+        """Run one pass under the deadline. Returns `(rows, status)`.
 
         `status` is `completed`, `timed-out` (the store accepted the connection and did not answer
-        within the budget), `not-run` (the wall clock was already spent) or, for a traversal only,
-        `forbidden`. A timeout stops the chain rather than aborting it: the passes already completed
-        are kept and the rest are disclosed, because a hang that discards every completed pass is the
-        outcome the deadline exists to prevent. Whole passes only — a pass contributes all of its
-        records or none.
+        within the budget), `not-run` (the wall clock was already spent), `malformed` (an answer that
+        is not a complete page — see `_rows`) or, for a traversal only, `forbidden`. `rows` is the
+        page's rows for a completed pass and empty otherwise. A timeout stops the chain rather than
+        aborting it: the passes already completed are kept and the rest are disclosed, because a hang
+        that discards every completed pass is the outcome the deadline exists to prevent. Whole passes
+        only — a pass contributes all of its records or none.
 
         A traversal the store refuses with 403 — the anchor's group sits outside the requested scope,
         which a group or ticket selector makes possible because the baseline ignores scope there — is
         one unreadable anchor, not a failed recall. It is disclosed and the chain continues; raising
-        here discarded the completed baseline along with it.
+        here discarded the completed baseline along with it. A `malformed` pass is disclosed the same
+        way and does not stop the chain: the store answered, so the deadline is not the problem.
         """
         nonlocal stopped_early, budget_exhausted
         if stopped_early:
-            return None, "not-run"
+            return [], "not-run"
         if remaining() <= 0:
             stopped_early = True
             budget_exhausted = True
-            return None, "not-run"
+            return [], "not-run"
         budget = max(0.001, min(client.HTTP_TIMEOUT, remaining()))
         try:
-            return request(method, path, body, timeout=budget), "completed"
+            response = request(method, path, body, timeout=budget)
         except client.ClientError as error:
             if kind == "traversal" and error.status == 403:
-                return None, "forbidden"
+                return [], "forbidden"
             if error.status_text != "timed-out":
                 raise
             stopped_early = True
-            return None, "timed-out"
+            return [], "timed-out"
+        except ValueError:
+            # A body cut off mid-JSON. The client raises rather than guessing, and here that is one
+            # unreadable page, not grounds to discard the passes already completed.
+            return [], "malformed"
+        rows = _rows(response, "paths" if kind == "traversal" else "items",
+                     endpoint=kind == "traversal")
+        return ([], "malformed") if rows is None else (rows, "completed")
 
     baseline = dict(payload["baseline"])
     baseline["limit"] = BASELINE_LIMIT
@@ -117,10 +149,9 @@ def execute(payload, request=client._request, clock=time.monotonic):
         for value in values:
             passes.append(_disclosure(kind, value, limit, [], 0, "not-run"))
 
-    response, status = run_pass("baseline", None, BASELINE_LIMIT, "POST",
-                                "/api/context/query", baseline)
+    baseline_rows, status = run_pass("baseline", None, BASELINE_LIMIT, "POST",
+                                     "/api/context/query", baseline)
     baseline_completed = status == "completed"
-    baseline_rows = response.get("items", []) if response is not None else []
     added = _add(baseline_rows, merged, seen, AGGREGATE_LIMIT)
     passes.append(_disclosure("baseline", None, BASELINE_LIMIT, baseline_rows, added, status))
 
@@ -134,12 +165,11 @@ def execute(payload, request=client._request, clock=time.monotonic):
         for index, keyword in enumerate(keyword_plan):
             query = dict(baseline)
             query.update(query=keyword, facets=[], tags=[], kind=None, limit=KEYWORD_LIMIT)
-            response, status = run_pass("keyword", keyword, KEYWORD_LIMIT, "POST",
-                                        "/api/context/query", query)
-            rows = response.get("items", []) if response is not None else []
+            rows, status = run_pass("keyword", keyword, KEYWORD_LIMIT, "POST",
+                                    "/api/context/query", query)
             added = _add(rows, merged, seen, AGGREGATE_LIMIT)
             passes.append(_disclosure("keyword", keyword, KEYWORD_LIMIT, rows, added, status))
-            if status != "completed":
+            if status not in ("completed", "malformed"):
                 mark_not_run("keyword", keyword_plan[index + 1:], KEYWORD_LIMIT)
                 break
             if len(merged) >= AGGREGATE_LIMIT:
@@ -162,10 +192,8 @@ def execute(payload, request=client._request, clock=time.monotonic):
             }
             if scope:
                 path_request["scopeDimension"] = scope
-            response, status = run_pass("traversal", anchor, TRAVERSAL_LIMIT, "POST",
-                                        "/api/context/paths", path_request)
-            rows = [path.get("endpoint", {}) for path in response.get("paths", [])] \
-                if response is not None else []
+            rows, status = run_pass("traversal", anchor, TRAVERSAL_LIMIT, "POST",
+                                    "/api/context/paths", path_request)
             kept = rows
             if has_context_selector:
                 kept = [row for row in rows if row.get("groupUuid") in selected_groups]
@@ -173,7 +201,7 @@ def execute(payload, request=client._request, clock=time.monotonic):
                                                   if row.get("groupUuid") not in selected_groups)
             added = _add(kept, merged, seen, AGGREGATE_LIMIT)
             passes.append(_disclosure("traversal", anchor, TRAVERSAL_LIMIT, rows, added, status))
-            if status == "forbidden":
+            if status in ("forbidden", "malformed"):
                 continue
             if status != "completed":
                 mark_not_run("traversal", traversal_plan[index + 1:], TRAVERSAL_LIMIT)
@@ -181,15 +209,20 @@ def execute(payload, request=client._request, clock=time.monotonic):
             if len(merged) >= AGGREGATE_LIMIT:
                 break
 
-    keywords_executed = sum(1 for item in passes if item["kind"] == "keyword"
-                            and item["status"] == "completed")
-    keywords_omitted = len(keywords) - keywords_executed
-    anchors_executed = sum(1 for item in passes if item["kind"] == "traversal"
-                           and item["status"] == "completed")
-    anchors_forbidden = sum(1 for item in passes if item["status"] == "forbidden")
+    def count(kind, status):
+        return sum(1 for item in passes if item["kind"] == kind and item["status"] == status)
+
+    keywords_executed = count("keyword", "completed")
+    # A malformed pass was attempted and answered unreadably, not left out by the cap; like a forbidden
+    # anchor it is counted once, under its own name.
+    keywords_omitted = len(keywords) - keywords_executed - count("keyword", "malformed")
+    anchors_executed = count("traversal", "completed")
+    anchors_forbidden = count("traversal", "forbidden")
     # A forbidden anchor was attempted and refused, not left out by the cap; it is counted once, in
     # `anchorsForbidden`.
-    anchors_omitted = len(eligible_anchors) - anchors_executed - anchors_forbidden
+    anchors_omitted = (len(eligible_anchors) - anchors_executed - anchors_forbidden
+                       - count("traversal", "malformed"))
+    passes_malformed = sum(1 for item in passes if item["status"] == "malformed")
     passes_incomplete = [{"kind": item["kind"], "value": item["value"]}
                          for item in passes if item["status"] != "completed"]
 
@@ -221,10 +254,15 @@ def execute(payload, request=client._request, clock=time.monotonic):
             # Deliberately not part of `possiblyOmitted`: they were never in the selection, so nothing
             # selected is missing — but the count says the links exist.
             "endpointsOutsideSelector": len(endpoints_outside_selector),
+            # Passes the store answered with something other than a complete page — an empty body, a
+            # missing or non-list `items`/`paths`, a row without a `uuid`, a body cut off mid-JSON.
+            # Each contributed nothing and is listed in `passesIncomplete`; never a completed empty pass.
+            "passesMalformed": passes_malformed,
             "passes": passes,
             "passesIncomplete": passes_incomplete,
             "possiblyOmitted": len(merged) >= AGGREGATE_LIMIT
                 or keywords_omitted > 0 or anchors_omitted > 0 or anchors_forbidden > 0
+                or passes_malformed > 0
                 or traversal_skipped_for_context
                 or any(item["limitReached"] for item in passes)
                 or stopped_early,

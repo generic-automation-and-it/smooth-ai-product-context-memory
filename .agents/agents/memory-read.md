@@ -8,5 +8,6 @@ model: sonnet
 
 Follow `.agents/skills/mimisbrunnr-odin-context-memory/agents/memory-read.md` exactly. Use only
 `context_memory_read_client.py`, the read-only client: it exposes no write subcommand and refuses to
-start with `CONTEXT_MEMORY_WRITE_TOKEN` present, so the read surface cannot mutate by construction. Run
+start with a write token present — `CONTEXT_MEMORY_WRITE_TOKEN` or the Host's `ApiAccess__WriteToken` (any case, `:` read as `__`; full set in `client.WRITE_TOKEN_NAMES`) —
+so the read surface cannot mutate by construction. Run
 only the read surface; the write credential is never ambient, so do not source the full credential file.

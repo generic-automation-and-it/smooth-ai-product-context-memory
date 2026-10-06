@@ -217,12 +217,16 @@ def endpoint_origin(base_url):
     """The scheme://host:port of the endpoint, for reporting. Never any userinfo, never the key."""
     try:
         parsed = urlparse(base_url)
+        # Read inside the handler: `.port` is lazy and raises on `:99999` or `:abc`, which escaped as a
+        # traceback from `probe` and from the end of `score` — before the endpoint guard could refuse it
+        # as `bad-decisions-url` (issue 184).
+        port = parsed.port
     except ValueError:
         return "<unparseable>"
     host = parsed.hostname or "<no-host>"
     if ":" in host and not host.startswith("["):
         host = f"[{host}]"
-    return f"{parsed.scheme}://{host}:{parsed.port}" if parsed.port else f"{parsed.scheme}://{host}"
+    return f"{parsed.scheme}://{host}:{port}" if port else f"{parsed.scheme}://{host}"
 
 
 def resolve_endpoint(base_url, api_key):
@@ -321,13 +325,29 @@ def load_rubric(roles):
     return rubric.get("version", "unversioned"), [defined[role] for role in roles]
 
 
+def _field_text(value):
+    """A record field as the text the redactor inspects and the model receives.
+
+    A string passes through. Anything else that carries content — a number, a list, a nested map — is
+    serialised to JSON first, so the redactor sees all of it, keys included: a nested
+    `{"password": "…"}` is caught by the quoted-key rule only while the key sits beside its value, and
+    scrubbing leaves one by one would lose that. Before this the non-string value skipped the redactor
+    and reached the model unscrubbed (issue 184). Never iterated: a string is iterable too, and a field
+    walked element by element is how one malformed value becomes several plausible ones.
+    """
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
 def record_state(record):
     """The record as exported, as the model's `state`.
 
     Only the fields a reader would judge value from. Deliberately not the whole payload: a uuid, a
-    timestamp and an internal flag tell the model nothing about whether this is worth keeping.
+    timestamp and an internal flag tell the model nothing about whether this is worth keeping. Every
+    value is text (`_field_text`), so every value passes through the redactor.
     """
-    return {
+    state = {
         "subject": record.get("subject") or record.get("description") or record.get("name") or "",
         "statement": record.get("statement") or record.get("answer") or "",
         "summary": record.get("contentSummary") or record.get("why") or "",
@@ -335,6 +355,7 @@ def record_state(record):
         "kind": record.get("kind") or "",
         "scope": record.get("scope") or record.get("scopeDimension") or "",
     }
+    return {field: _field_text(value) for field, value in state.items()}
 
 
 def redact_records(records):
@@ -418,8 +439,13 @@ def redact_records(records):
     for record in records:
         state = record_state(record)
         for field, value in state.items():
-            if isinstance(value, str) and value in scrubbed:
+            if value in scrubbed:
                 state[field] = scrubbed[value]
+            elif value:
+                # Every non-empty field was sent to the redactor above; one that has no scrubbed
+                # counterpart was never inspected, and an uninspected field is never sent.
+                raise GateError("redactor-unavailable",
+                                f"field {field!r} was not inspected by the redactor; no request was made")
         out.append(state)
     return out, findings
 

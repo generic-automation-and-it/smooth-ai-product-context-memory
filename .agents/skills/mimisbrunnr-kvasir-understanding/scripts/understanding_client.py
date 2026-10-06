@@ -58,6 +58,14 @@ REDACTOR = _CAPTURE_SCRIPTS / "redact.py"
 ATOMICITY = _CAPTURE_SCRIPTS / "atomicity.py"
 READ_CLIENT = _CAPTURE_SCRIPTS / "context_memory_read_client.py"
 WRITE_CLIENT = _CAPTURE_SCRIPTS / "context_memory_client.py"
+# The write-token spellings the read client refuses to start with, folded as it folds them. Kept equal
+# to the capture client's `WRITE_TOKEN_NAMES` by a test rather than imported: importing that module
+# would make its redactor import a startup dependency of this client.
+WRITE_TOKEN_NAMES = frozenset({
+    "context_memory_write_token",
+    "apiaccess__writetoken",
+    "parameters__api-write-token",
+})
 # Heimdallr session-metadata reporter, resolved relative to this file so the lookup
 # holds under any skills root (.agents/skills, .claude/skills, .codex/skills, npm
 # layout): two levels up is the skills root, never a hardcoded prefix.
@@ -134,8 +142,9 @@ def heimdallr_scan() -> dict:
     Never fails the caller: a missing script, a non-git checkout or malformed
     output means no autofill, not a refusal. Heimdallr reports repository,
     tickets and initiative only — never tags, which stay agent-derived
-    keywords from the material itself. Its `ticketsWithheld` count and
-    `ticketsUnavailable` reason are disclosed by `heimdallr_ticket_disclosure`.
+    keywords from the material itself. Its `ticketsWithheld` count and its
+    `ticketsUnavailable` / `commitsUnavailable` reasons are disclosed by
+    `heimdallr_ticket_disclosure`.
     """
     if not HEIMDALLR_SCRIPT.is_file():
         return {}
@@ -174,21 +183,29 @@ def heimdallr_autofill_tickets(scan: dict) -> list[str]:
 
 
 def heimdallr_ticket_disclosure(scan: dict) -> str | None:
-    """One line saying Heimdallr dropped ticket candidates, or None; counts and reason only.
+    """Lines saying Heimdallr dropped or could not read ticket candidates, or None; counts and reasons only.
 
-    The reporter withholds credential-shaped candidates (`ticketsWithheld`) and reports no ticket at
-    all when its redactor cannot load (`ticketsUnavailable`). Reading only `tickets` made both look
+    The reporter withholds credential-shaped candidates (`ticketsWithheld`), reports no ticket at
+    all when its redactor cannot load (`ticketsUnavailable`), and says when `git log` failed so only
+    branch tickets were considered (`commitsUnavailable`, issue 184). Reading only `tickets` made both look
     like "no ticket found", and a withheld newer commit ticket left an older one bound as if it were
     the newest (issue 182). The withheld values are never in the scan, so none can be printed here.
     """
     unavailable = scan.get("ticketsUnavailable")
     if isinstance(unavailable, str) and unavailable.strip():
         return f"heimdallr: tickets unavailable ({' '.join(unavailable.split())[:120]})"
+    lines = []
     withheld = scan.get("ticketsWithheld")
     if isinstance(withheld, int) and not isinstance(withheld, bool) and withheld > 0:
-        return (f"heimdallr: {withheld} ticket candidate(s) withheld as credential-shaped; an "
-                "autofilled ticket is the newest one reported, not necessarily the newest commit")
-    return None
+        lines.append(f"heimdallr: {withheld} ticket candidate(s) withheld as credential-shaped; an "
+                     "autofilled ticket is the newest one reported, not necessarily the newest commit")
+    # A failed `git log` leaves only the branch's tickets; an empty list then is not an empty
+    # history, so an unbound ticket must not read as "this work has no ticket" (issue 184).
+    commits = scan.get("commitsUnavailable")
+    if isinstance(commits, str) and commits.strip():
+        lines.append("heimdallr: commit history unavailable "
+                     f"({' '.join(commits.split())[:120]}); only branch tickets were considered")
+    return "\n".join(lines) or None
 
 
 def heimdallr_tickets(scan: dict) -> list[str]:
@@ -661,10 +678,11 @@ def _run_capture_client(script: Path, argv: list[str], payload: dict | None) -> 
     # are read-only by contract. Strip the write token from the subprocess env rather than requiring the
     # caller to `unset` it — the recall path used to need a manual `unset CONTEXT_MEMORY_WRITE_TOKEN`,
     # which is exactly the friction this skill exists to remove. `ApiAccess__WriteToken` is the Host's
-    # token-name form; stripping both keeps a read subprocess read-only whichever form the shell set.
+    # token-name form; every spelling the read client refuses is stripped, matched the way it matches
+    # them (case-insensitive, `:` read as `__`), so a variant cannot make the read client refuse.
     if script == READ_CLIENT:
-        env.pop("CONTEXT_MEMORY_WRITE_TOKEN", None)
-        env.pop("ApiAccess__WriteToken", None)
+        for name in [n for n in env if n.casefold().replace(":", "__") in WRITE_TOKEN_NAMES]:
+            del env[name]
     proc = subprocess.run(
         [sys.executable, "-B", str(script), *argv],
         input=json.dumps(payload) if payload is not None else None,

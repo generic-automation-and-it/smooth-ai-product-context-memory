@@ -66,11 +66,15 @@ During work, accumulate candidate facts silently.
 **Never call the store client, redaction helper, atomicity helper, deep-search helper, or divergence
 helper directly from the main thread.** Raw recall arrays stay inside `memory-read` or `memory-write`.
 Main thread receives cited conclusions, omission disclosure, bounded clarification needs, and receipts.
-Read worker receives only `CONTEXT_MEMORY_READ_TOKEN`; write worker also receives
-`CONTEXT_MEMORY_WRITE_TOKEN`. API authorization is the capability boundary.
+Read worker holds only `CONTEXT_MEMORY_READ_TOKEN`; write worker also holds
+`CONTEXT_MEMORY_WRITE_TOKEN`, which is never ambient — it loads it itself at the authorized checkpoint
+with the deliberate write step (`set -a && source ~/.mimisbrunnr/credentials && set +a`) and needs the
+`Write` tool for its scratch batch files. API authorization is the capability boundary.
 Spawn project agents `memory-read` and `memory-write`. `memory-read` runs only the read-only client
 `context_memory_read_client.py`, which exposes no write operation and refuses to start with
-`CONTEXT_MEMORY_WRITE_TOKEN` present; `memory-write` runs `context_memory_client.py`.
+any write-token spelling present (`CONTEXT_MEMORY_WRITE_TOKEN`, the Host's `ApiAccess__WriteToken`,
+or the controller's `Parameters__api-write-token`, any case, `:` read as `__`); `memory-write` runs
+`context_memory_client.py`.
 
 ## Session Phases
 
@@ -130,7 +134,11 @@ checkpoint**, not as one merged record. A compound record is a red flag, not a s
 
 ### 3. Compare Or Clarify (Pre-Write Round)
 
-Before writing, delegate **one bounded clarification round** to `memory-write` — this begins with
+At the `--export` (or `--dryrun`) checkpoint — **after** the group binding is resolved (the checkpoint
+step at the end of Phase 1) and before anything is written — delegate **one bounded clarification
+round** to `memory-write`. It never runs during work: preflight needs the target `groupUuid` (item 3 and
+the in-group test of item 1), and that does not exist until `resolve-group` has run, which is itself a
+write and so waits for the checkpoint. This round begins with
 **stage 1 (preflight)** of the write pipeline below and performs cross-group read-before-write. Submit the whole batch at once
 (**array-in / array-out, never per-candidate**): a per-candidate preflight cannot see collisions
 *within* the batch. This single traversal serves four purposes (batched, not four separate lookups):
@@ -148,7 +156,10 @@ Before writing, delegate **one bounded clarification round** to `memory-write` �
    `implements`) to mentally-related existing memories, each with a mandatory `reason`.
 3. **Ticket uniqueness** — confirm no candidate's ticket is already owned by another group. Send the
    target group as `groupUuid` on each candidate: without it the endpoint cannot tell *another*
-   group's ownership from your own and reports the group you are writing into as a conflict.
+   group's ownership from your own and reports the group you are writing into as a conflict. Under
+   `--dryrun` no group is resolved: send the `groupUuid` Initialize's read-only ticket `query` found, if
+   any; otherwise omit it, and read a conflict naming the group that already owns the binding's ticket
+   as the group `resolve-group` would return — your own — not as a conflict.
 4. **Intra-batch collision** — detect two candidates *in this same batch* sharing a subject. Neither is
    written yet, so no cross-group lookup against the store will find them; only the batched preflight
    can. Resolve them into one memory (or one memory plus a version) before writing, never two.
@@ -215,6 +226,14 @@ client. Environment variables are not a content channel either: a child process 
 are readable from the process table on the same account. See
 `.agents/rules/skills/skill-secret-handling.instructions.md`.
 
+**The folder ignores itself before the first batch file is written.** "Gitignored" is true of this
+repository, which ignores `.context/`; a repository that vendors these skills may not, and there an
+unredacted batch file is one `git add -A` from a commit. So the first file written is
+`.context/mimisbrunnr-scratch/.gitignore` holding the single line `*`, with the file tool, and only then
+the batch file. It carries no content and goes with the folder at cleanup. Writing the batch file before
+redaction is the agreed content channel (the alternatives put content in argv, history or the
+environment); this only bounds where that copy can travel.
+
 **The batch file is the one unredacted copy on disk, so it is consumed and the folder is cleaned.** It
 has to be: it is the redactor's input. Pass `--consume` to `redact.py`, `atomicity.py` and the client's
 `--payload` so each file is deleted the moment it has been read (`--consume` without a file is refused;
@@ -230,10 +249,10 @@ cover personal data (a name, an email), so this cleanup is the only thing that r
 | Script | Invocation | Pipeline stage | What it does (and does NOT do) |
 |---|---|---|---|
 | `context_memory_client.py` | `python3 .../context_memory_client.py <subcommand>` | 1 (preflight), 3 (dedup/links), 5 (write) | Base-URL resolution + health probe, all HTTP calls, JSON assembly from a payload file or stdin, over-cap batch refusal at the **20-candidate cap** (preflight and set both refuse; indices are request-relative, so batches are never silently chunked). Subcommands: `probe`, `preflight`, `set` (with `--dryrun`), `query`, `get-versions`, `get-blob`, `resolve-group`, `update-group`, `append-description`, `create-link`, `paths`, `ticket-parent` (with local `--dryrun`), `ticket-paths`, `labels`, `propose-label`, `initiatives`, `upsert-initiative`. |
-| `context_memory_read_client.py` | `python3 .../context_memory_read_client.py <subcommand>` | Read delegation | Read-only CLI surface: `probe`, `query`, `deepsearch`, `get-versions`, `get-blob`, `paths`, `ticket-paths`, `labels`, `initiatives`. Requires only `CONTEXT_MEMORY_READ_TOKEN`, and **refuses to start when a write token is present** in the environment — the read surface can never mutate, by construction. |
+| `context_memory_read_client.py` | `python3 .../context_memory_read_client.py <subcommand>` | Read delegation | Read-only CLI surface: `probe`, `query`, `deepsearch`, `get-versions`, `get-blob`, `paths`, `ticket-paths`, `labels`, `initiatives`. Requires only `CONTEXT_MEMORY_READ_TOKEN`, and **refuses to start when a write token is present** in the environment — `CONTEXT_MEMORY_WRITE_TOKEN` or the Host's `ApiAccess__WriteToken`, in any case — so the read surface can never mutate, by construction. |
 | `redact.py` | `python3 .../redact.py --input <batch-file> --consume` | 2 (redact) | Fingerprint secret detection, stdin→stdout. Emits redacted content plus per-candidate findings `{rule_name, hit_count, spans: [{start, end}]}`. **Reports rule names and character offsets only** — never the matched text, never the content around it. A key whose name says secret (`password`, `secret`, `api_key`, `access_key`, a qualified `*_TOKEN`) is redacted on any value of 8+ characters; a neutral key (`key`, `sort_key`, bare `token`, `credential`, `auth`, `bearer`, `session`, `cookie`) only when the value itself is secret-shaped (an unbroken 16+ character run mixing letters and digits), so `sort key = created_on` passes untouched but a generated-looking session ID (`session = ses_…`) is scrubbed; `pwd` is taken on the name at 8+ characters unless its value is a working directory (`/srv/app`, `C:\app`, `$HOME/x`, `%USERPROFILE%`) or quoted prose, and on any value inside a `;` connection string (`…;Pwd=x;`). `redact.is_credential_key(name)` is the shared name-only test other skills import. Redact-and-flag (LADR-003): a **found** secret is flagged, never a rejection of the record. An **unavailable scrubber** is the opposite case — every persisting write calls it automatically and refuses if it cannot run, so the gate never fails open. That refusal arrives as `redactor-unavailable` and is **terminal: do not retry it.** It names the failure, never the content, so it is safe to surface. |
 | `atomicity.py` | `python3 .../atomicity.py --input <batch-file> --consume` | 4 (atomicity) | Conservative bundle detector, stdin→stdout. Flags `simple` / `bundled` per candidate. It is a detector only — the split-vs-skip decision and the routing of the unprocessable remainder stay here, in the agent's judgement (LADR-002). |
-| `deepsearch.py` | `python3 .../deepsearch.py` | 3 (opt-in recall) | Baseline 200 plus bounded keyword/traversal passes, stable UUID/version dedupe, 400 aggregate cap and saturation disclosure. Bounded by the one recall deadline: a timed-out or deadline-stopped pass ends the chain but keeps the completed passes, disclosing `stoppedEarly`, `budgetExhausted` and `passesIncomplete`. Under a group/ticket selector with a scope, traversal endpoints outside the selected group are dropped and counted once each (`endpointsOutsideSelector`); an anchor the store refuses (403) is a disclosed `forbidden` pass (`anchorsForbidden`, not counted in `anchorsOmittedByCap`), not a failed recall. |
+| `deepsearch.py` | `python3 .../deepsearch.py` | 3 (opt-in recall) | Baseline 200 plus bounded keyword/traversal passes, stable UUID/version dedupe, 400 aggregate cap and saturation disclosure. Bounded by the one recall deadline: a timed-out or deadline-stopped pass ends the chain but keeps the completed passes, disclosing `stoppedEarly`, `budgetExhausted` and `passesIncomplete`. Under a group/ticket selector with a scope, traversal endpoints outside the selected group are dropped and counted once each (`endpointsOutsideSelector`); an anchor the store refuses (403) is a disclosed `forbidden` pass (`anchorsForbidden`, not counted in `anchorsOmittedByCap`), not a failed recall. An incomplete answer (empty body, truncated JSON, missing list, row without a `uuid`) is a disclosed `malformed` pass (`passesMalformed`), never a completed empty one. |
 | `authority.py` | `python3 .../authority.py` | 3 (authority resolution) | Converts a stated-authority judgement into one or two ordered version writes. Existing-winner cases record the losing candidate as history, then restore the winner as current in the same transaction. |
 | `divergence.py` | `python3 .../divergence.py` | 3 (conflict composition) | Converts an explicit same-subject genuine-conflict judgement into a separately identified claim, proposed divergence memory and two contradiction links; rejects cross-scope and recursive evidence and deduplicates exact claim pairs. |
 | `near_miss_tags.py` | `python3 .../near_miss_tags.py < approved-evidence.json` | Read-only reporting | Bounded stdin JSON validation, exact tag comparison, scoped `near-miss-tag` output. No network, file output, vocabulary lookup or semantic heuristic. See Evidence-only Near Misses below. |
@@ -468,7 +487,11 @@ record, and never an abort that discards them. Its disclosure gains `deadlineSec
 pass hanging) and `passesIncomplete` (each named by `kind` and `value`), in the same shape as the
 existing cap disclosures, and every pass carries a `status` of `completed`, `timed-out`, `not-run` or —
 for a traversal the store refuses with 403 — `forbidden`. A forbidden anchor does not stop the chain:
-the baseline and every other pass are kept, and `anchorsForbidden` counts it.
+the baseline and every other pass are kept, and `anchorsForbidden` counts it. An answer that is not a
+complete page — an empty body, a body cut off mid-JSON, a missing or non-list `items`/`paths`, a row
+without a `uuid`, a path without an `endpoint` — is a `malformed` pass: it contributes no rows, is
+listed in `passesIncomplete`, counted in `passesMalformed` and sets `possiblyOmitted`, and never reads as
+a completed empty pass. A malformed baseline leaves the anchor counters `null` like a timed-out one.
 `anchorsEligible` and `anchorsOmittedByCap` are `null` when the baseline never answered — the traversal
 set was never enumerated, so a `0` would read as "nothing to traverse" rather than "unknown". A timeout
 is a **bounded, reported** result, not a silent one.

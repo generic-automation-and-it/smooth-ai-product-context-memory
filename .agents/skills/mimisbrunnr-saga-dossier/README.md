@@ -45,7 +45,9 @@ from that — nothing added, nothing quietly dropped.
 ## Try it
 
 ```bash
-mkdir -p .context/mimisbrunnr-saga-dossier/scratch
+# 0. Scratch space, readable by you only. The judgement files you write later get your default file
+#    mode, so this directory is what keeps them private; compose refuses them otherwise.
+mkdir -p -m 700 .context/mimisbrunnr-saga-dossier/scratch
 
 # 1. Preview first. This is blob-free and cheap: it shows the selection the store would hand back —
 #    which memories, how many, how far the links reach, the estimated cost and any limit it hit.
@@ -60,12 +62,13 @@ python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py \
 python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py \
   bundle --repo kingstown --widen-depth 3 --out .context/mimisbrunnr-saga-dossier/scratch/bundle.json
 
-# 4. Write your judgements — which memories restate each other, what conflicts, what is missing —
-#    to .context/mimisbrunnr-saga-dossier/scratch/judgements.json (shape in SKILL.md). Skip it and
-#    the findings carry no gaps, contradictions or merges. Tag near-misses are not written here: they
-#    come only from the shared helper's evidence, passed as --near-miss-evidence (see SKILL.md).
+# 4. Optional: write your judgements — which memories restate each other, what conflicts, what is
+#    missing — to .context/mimisbrunnr-saga-dossier/scratch/judgements.json (shape in SKILL.md).
+#    Skip it and the findings carry no gaps, contradictions or merges. Tag near-misses are not written
+#    here: they come only from the shared helper's evidence, passed as --near-miss-evidence.
 
 # 5. Turn that bundle into a readable document, angled for an architecture write-up.
+#    Skipped step 4? Drop the --judgements line — there is no file for it to read.
 python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py \
   compose --bundle .context/mimisbrunnr-saga-dossier/scratch/bundle.json \
   --judgements .context/mimisbrunnr-saga-dossier/scratch/judgements.json \
@@ -115,7 +118,8 @@ reason `outside-focus`.
   reports neither — an empty result for those two then means "not examined", not "none found".
   `near-miss-tag` appears only from the shared helper's evidence (`--near-miss-evidence`).
 - **A reconciliation line** — present + consolidated + omitted always adds up to what the bundle actually
-  contained. If something's missing from the document, that line is where you'd catch it.
+  contained. If something's missing from the document, that line is where you'd catch it — and if the
+  arithmetic would not add up, compose stops with an error instead of handing you the document.
 
 ## Guarantees worth knowing about
 

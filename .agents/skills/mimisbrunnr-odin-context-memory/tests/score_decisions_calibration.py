@@ -48,13 +48,31 @@ def emit_model_input(doc):
     sys.stdout.write("\n")
 
 
-def run_gate(doc, threshold, endpoint, model):
-    """Drive the real gate. A reimplementation of the scoring path would measure the copy."""
-    env = dict(os.environ)
+def gate_environment(threshold, endpoint, model, base=None):
+    """The gate's environment for a calibration run: what this run states, and nothing the operator set.
+
+    The gate resolves every `CONTEXT_MEMORY_DECISIONS_*` setting from the environment and, at import,
+    seeds the unset ones from the machine credential file. Inheriting either let the operator's own
+    roles, request path, API key, below-threshold mode, timeout or attempt budget into a measurement
+    that is compared with a committed run recorded without them — so a drifted figure could be the
+    operator's configuration rather than the model (issue 184; issue 179 finding 41). Every decision
+    setting is dropped, the credential-file pointer is redirected at an empty file rather than merely
+    unset (an unset pointer falls back to `~/.mimisbrunnr/credentials`), and the run sets only the four
+    it measures; the rest take the gate's shipped defaults, which is what the recorded run used.
+    """
+    env = {key: value for key, value in (os.environ if base is None else base).items()
+           if not key.startswith("CONTEXT_MEMORY_DECISIONS_")}
+    env["CONTEXT_MEMORY_CREDENTIAL_FILE"] = os.devnull
     env["CONTEXT_MEMORY_DECISIONS_ENABLED"] = "true"
     env["CONTEXT_MEMORY_DECISIONS_MIN_PROBABILITY"] = str(threshold)
     env["CONTEXT_MEMORY_DECISIONS_BASE_URL"] = endpoint
     env["CONTEXT_MEMORY_DECISIONS_MODEL"] = model
+    return env
+
+
+def run_gate(doc, threshold, endpoint, model):
+    """Drive the real gate. A reimplementation of the scoring path would measure the copy."""
+    env = gate_environment(threshold, endpoint, model)
     payload = [{"subject": r["id"], "statement": r["statement"]} for r in doc["records"]]
     proc = subprocess.run(
         [sys.executable, "-B", str(GATE), "score"],

@@ -204,7 +204,9 @@ manual runs only.
   bound at once. Heimdallr withholds credential-shaped candidates, so when a newer one was withheld
   the bound ticket is older than the newest commit; a one-line stderr disclosure
   (`heimdallr: N ticket candidate(s) withheld …`, or `heimdallr: tickets unavailable (<reason>)` when
-  its redactor could not load) says so, with counts and reason only, never the withheld value. `import` binds nothing on its own: every filter it sends was passed explicitly.
+  its redactor could not load) says so, with counts and reason only, never the withheld value. A failed
+  `git log` adds `heimdallr: commit history unavailable (<reason>)`: only branch tickets were considered,
+  so no ticket bound is not "this work has no ticket". `import` binds nothing on its own: every filter it sends was passed explicitly.
 - Heimdallr reports `unknown` initiative when nothing proves one; that fills nothing.
   It never supplies `--tags`: derive tags from the material's own keywords, or pass
   `--tags` explicitly.
@@ -297,4 +299,4 @@ Committed harness: `python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/t
 - `docs/hlds/007-understanding-transfer/` — design (LADR-01…09), NFRs.
 - `.agents/skills/ai-understanding/` — writes the `.understanding.md` files and stores this skill loads.
 - `docs/brd/003-understanding-transfer/` — business requirements (BR-38…BR-45).
-- `.agents/skills/mimisbrunnr-odin-context-memory/` — the capture skill (sole writer) an import funnels through.
+- `.agents/skills/mimisbrunnr-odin-context-memory/` — the capture skill (sole writer) an `export` funnels through; `import` only reads the store through its read client.

@@ -477,15 +477,32 @@ class StoreImportTests(unittest.TestCase):
         uc.subprocess.run = fake_run
         try:
             with mock.patch.dict(os.environ, {"CONTEXT_MEMORY_WRITE_TOKEN": "secret",
-                                              "ApiAccess__WriteToken": "secret"}):
+                                              "ApiAccess__WriteToken": "secret",
+                                              "apiaccess:writetoken": "secret",
+                                              "Parameters__api-write-token": "secret"}):
                 uc._run_capture_client(uc.READ_CLIENT, ["query"], {"kind": "understanding"})
         finally:
             uc.subprocess.run = original
-        self.assertNotIn("CONTEXT_MEMORY_WRITE_TOKEN", captured["env"])
-        self.assertNotIn("ApiAccess__WriteToken", captured["env"])
+        for name in ("CONTEXT_MEMORY_WRITE_TOKEN", "ApiAccess__WriteToken", "apiaccess:writetoken",
+                     "Parameters__api-write-token"):
+            self.assertNotIn(name, captured["env"])
         # The synthetic tokens live only inside `patch.dict`; setting them before it made the patch
         # restore *them*, so they outlived the test (issue 179).
         self.assertEqual({k: os.environ.get(k) for k in before}, before)
+
+    def test_write_token_names_match_the_read_clients_refusal_set(self):
+        """kvasir strips exactly the spellings the read client refuses (issue 184)."""
+        # Parsed, not imported: importing the client seeds the operator's machine credentials into
+        # this process at import, which would make the suite read real configuration.
+        import ast
+        tree = ast.parse((uc._CAPTURE_SCRIPTS / "context_memory_client.py").read_text(encoding="utf-8"))
+        names = None
+        for node in tree.body:
+            if isinstance(node, ast.Assign) and any(
+                    isinstance(t, ast.Name) and t.id == "WRITE_TOKEN_NAMES" for t in node.targets):
+                names = frozenset(ast.literal_eval(node.value.args[0]))
+        self.assertIsNotNone(names, "the capture client no longer defines WRITE_TOKEN_NAMES")
+        self.assertEqual(uc.WRITE_TOKEN_NAMES, names)
 
     def test_unreachable_timed_out_and_empty_are_three_distinct_outcomes(self):
         """The three never collapse.
@@ -2113,8 +2130,13 @@ class HeimdallrAutofillTests(unittest.TestCase):
         unavailable = {"repository": "org/repo", "initiative": "unknown", "tickets": [],
                        "ticketsWithheld": 0,
                        "ticketsUnavailable": "redactor unavailable; no unchecked ticket is reported"}
+        # Issue 184: a failed `git log` read as an empty history.
+        no_commits = {"repository": "org/repo", "initiative": "unknown", "tickets": [],
+                      "ticketsWithheld": 0, "ticketsUnavailable": None,
+                      "commitsUnavailable": "git log failed; recent commit subjects were not read"}
         for scan, expected in ((withheld, "heimdallr: 2 ticket candidate(s) withheld as credential-shaped"),
-                               (unavailable, "heimdallr: tickets unavailable (redactor unavailable")):
+                               (unavailable, "heimdallr: tickets unavailable (redactor unavailable"),
+                               (no_commits, "heimdallr: commit history unavailable (git log failed")):
             uc.heimdallr_scan = lambda s=scan: s
             with self.subTest(expected=expected), tempfile.TemporaryDirectory() as tmp:
                 src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
@@ -2827,6 +2849,17 @@ class InputDefaultTests(unittest.TestCase):
                 os.chdir(cwd)
         self.assertEqual(root.parts[-2:], (".context", "mimisbrunnr-understandings"))
         self.assertEqual(root.parent.parent.resolve(), Path(tmp).resolve())
+
+
+class RelatedPointerTests(unittest.TestCase):
+    def test_the_capture_skill_is_named_as_what_export_funnels_through(self):
+        """Regression (issue 184): SKILL.md's Related line said an `import` funnels through the capture
+        skill, inverting LADR-11 — `import` only reads; `export` is the capture path."""
+        skill = (Path(__file__).resolve().parents[1] / "SKILL.md").read_text(encoding="utf-8")
+        line = next(l for l in skill.splitlines()
+                    if l.startswith("- `.agents/skills/mimisbrunnr-odin-context-memory/`"))
+        self.assertIn("`export` funnels through", line)
+        self.assertNotIn("an import funnels", line)
 
 
 if __name__ == "__main__":

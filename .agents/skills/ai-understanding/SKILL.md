@@ -474,7 +474,7 @@ The source is a local path to a published archive — always positional; `--path
 python3 .agents/skills/ai-understanding/scripts/understanding_index.py --consume-check <zip> [store-dir]
 ```
 
-It refuses the whole archive — never part of it — on an entry whose resolved path escapes the store (`..` segments, absolute paths, symlinks), a symlink entry, or a case-folded collision with another entry or a local path. Details: `references/publish-consume.md`.
+It refuses the whole archive — never part of it — on an entry whose resolved path escapes the store (`..` segments, absolute paths, symlinks), a symlink entry, a member whose data does not read back cleanly, or a case-folded collision with another entry or a local path. Details: `references/publish-consume.md`.
 
 Reconciliation, per incoming slug. The key is the slug; an incoming copy keeps its own stamped folder, because a slug in two folders is a version chain rather than an error:
 

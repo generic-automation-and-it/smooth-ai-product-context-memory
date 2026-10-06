@@ -52,6 +52,7 @@ import argparse
 import json
 import re
 import sys
+import unicodedata
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -97,8 +98,29 @@ def axis_balance(fixtures):
 
 
 def normalised(text):
-    """Case- and whitespace-insensitive form, so `akia…` or a split key still counts as the token."""
+    """Case-, whitespace- and invisible-character-insensitive form, so `akia…` or a key split by a
+    space, a line break or a zero-width character still counts as the token."""
+    text = "".join(ch for ch in text if unicodedata.category(ch) != "Cf")
     return re.sub(r"\s+", "", text).casefold()
+
+
+def rendered_text(value):
+    """Every string a verdict carries, keys included, joined in order.
+
+    Read from the decoded strings rather than from `json.dumps`, which writes a line break or a tab as
+    the two characters `\\n`/`\\t` — not whitespace, so `normalised` left them in place and a key split
+    across lines passed the banned-token check (issue 184)."""
+    if isinstance(value, dict):
+        return "".join(str(key) + rendered_text(item) for key, item in value.items())
+    if isinstance(value, (list, tuple)):
+        return "".join(rendered_text(item) for item in value)
+    return "" if value is None else str(value)
+
+
+def has_reason(got):
+    """A non-blank string `reason`: the shape every verdict is told to carry (`VERDICT_SHAPE`)."""
+    reason = got.get("reason") if isinstance(got, dict) else None
+    return isinstance(reason, str) and bool(reason.strip())
 
 
 def scenario_matches(expected, got):
@@ -110,7 +132,11 @@ def scenario_matches(expected, got):
     for field in AUX_EQUALITY_FIELDS:
         if field in expected and got_dict.get(field) != expected[field]:
             return False
-    if expected.get("reason_must_be_nonempty") and not got_dict.get("reason"):
+    # Every stage, not only the scenarios declaring `reason_must_be_nonempty`: the blinded input
+    # tells the model every verdict carries a non-empty reason, and a reasonless verdict scored as
+    # correct on the thirteen scenarios that did not repeat the rule (issue 184). Every committed run
+    # carries a reason on every verdict, so no recorded figure moves.
+    if not has_reason(got):
         return False
     # A `scrub` verdict is a claim about content, so the scrubbed content has to be there to be
     # checked. Without this a bare `scrub` — or a redaction that only lowercased the key — scored as
@@ -127,7 +153,7 @@ def scenario_matches(expected, got):
                 return False
     banned = expected.get("must_not_contain", [])
     if banned:
-        rendered = normalised(json.dumps(got_dict) if isinstance(got, dict) else str(got))
+        rendered = normalised(rendered_text(got))
         if any(normalised(token) in rendered for token in banned):
             return False
     return True
@@ -241,7 +267,7 @@ def main():
                 "expected": expected["verdict"],
                 "got": got_verdict,
                 "match": ok,
-                "reason_present": bool((got if isinstance(got, dict) else {}).get("reason")),
+                "reason_present": has_reason(got),
             }
         )
 

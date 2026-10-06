@@ -509,6 +509,22 @@ def is_gitignored(path: Path) -> bool:
     return proc.returncode == 0
 
 
+def member_reads_cleanly(zf: zipfile.ZipFile, info: zipfile.ZipInfo) -> bool:
+    """True when one member's bytes decompress and pass their CRC.
+
+    The central directory lists a member whose data is damaged, so a name check alone clears it. The
+    except is broad because a corrupt deflate stream raises `zlib.error` — neither an `OSError` nor a
+    `BadZipFile` — and an encrypted or unsupported member raises other types again (issue 182).
+    """
+    try:
+        with zf.open(info) as member:
+            while member.read(1 << 20):
+                pass
+    except Exception:  # noqa: BLE001 — any unreadable member proves nothing
+        return False
+    return True
+
+
 def published_paths(store: Path) -> set[str]:
     """Every unit path held by an archive in the publish dir beside the store.
 
@@ -518,9 +534,8 @@ def published_paths(store: Path) -> set[str]:
 
     A member counts only once its bytes read back cleanly. The central directory alone lists a member
     whose data is damaged, so `namelist()` reported it published while no extract could recover it
-    (issue 182). Each member is read on its own, so one damaged unit does not un-publish its siblings,
-    and the except is broad because a corrupt deflate stream raises `zlib.error` — neither an
-    `OSError` nor a `BadZipFile` — and an encrypted or unsupported member raises other types again.
+    (issue 182). Each member is read on its own (`member_reads_cleanly`), so one damaged unit does not
+    un-publish its siblings.
     """
     paths: set[str] = set()
     pub_dir = store.parent / PUBLISH_DIR_NAME
@@ -533,11 +548,7 @@ def published_paths(store: Path) -> set[str]:
                     parts = Path(info.filename).parts
                     if len(parts) < 2 or not parts[-1].endswith(UNIT_SUFFIX):
                         continue
-                    try:
-                        with zf.open(info) as member:
-                            while member.read(1 << 20):
-                                pass
-                    except Exception:  # noqa: BLE001 — any unreadable member proves nothing
+                    if not member_reads_cleanly(zf, info):
                         continue
                     paths.add(f"{parts[-2]}/{parts[-1]}")
         except (zipfile.BadZipFile, OSError):
@@ -566,7 +577,8 @@ def consume_problems(archive: Path, store: Path) -> list[str]:
     the skill's `allowed-tools` could not run). An archive is untrusted input and is refused whole, never
     in part: an entry whose path escapes the store (absolute, a drive, `..`, a backslash, or a local
     symlinked folder pointing outside), a symlink entry (its Unix mode in `external_attr`, which `unzip
-    -l` cannot show), or a case-folded collision with another entry or a local path. A collision is the
+    -l` cannot show), a member whose data does not read back cleanly (CRC or decompression failure,
+    issue 184), or a case-folded collision with another entry or a local path. A collision is the
     same class as an escape: on a case-insensitive filesystem the second extract silently replaces the
     first, and no check afterwards can see it because by then the destination is the source.
     """
@@ -597,9 +609,15 @@ def consume_problems(archive: Path, store: Path) -> list[str]:
 
     with zipfile.ZipFile(archive) as zf:
         infos = zf.infolist()
+        # Every member's bytes are read before anything else is judged. A name and a mode say nothing
+        # about the data, and a damaged member extracts as garbage or not at all — a partial extract,
+        # which refusing the whole archive exists to prevent (issue 184).
+        damaged = {info.filename for info in infos if not member_reads_cleanly(zf, info)}
     for info in infos:
         name = info.filename
         path = PurePosixPath(name)
+        if name in damaged:
+            problems.append(f"'{name}' is damaged: its data does not read back cleanly")
         if (name.startswith("/") or "\\" in name or re.match(r"^[A-Za-z]:", name)
                 or ".." in path.parts):
             problems.append(f"'{name}' escapes the target store")
@@ -614,9 +632,11 @@ def consume_problems(archive: Path, store: Path) -> list[str]:
         # Every parent folder, outermost first; the last of `parents` is '.', the store itself.
         for parent in reversed(list(path.parents)[:-1]):
             check_dir(parent.as_posix(), name)
-        # The generated index is exempt: every archive carries one and every store holds one, and it
-        # is regenerated after every write, so a case fold on it cannot lose knowledge.
-        if path.name == "INDEX.md":
+        # The generated root index is exempt: every archive carries one and every store holds one, and
+        # it is regenerated after every write, so a case fold on it cannot lose knowledge. Only the
+        # root one — a nested `INDEX.md` is not regenerated by anything and lands like any file
+        # (issue 184).
+        if path.as_posix() == "INDEX.md":
             continue
         if name.endswith("/"):
             check_dir(path.as_posix(), name)
@@ -644,7 +664,7 @@ def consume_check(archive: Path, store: Path) -> int:
         print("refused: the whole archive is rejected; extract none of it")
         return 1
     print(f"consume-check: {archive} is safe to extract into {store} "
-          "(no escaping path, symlink entry or case-folded collision)")
+          "(no escaping path, symlink entry, damaged member or case-folded collision)")
     return 0
 
 
