@@ -33,7 +33,7 @@ It has 4 phases:
 1. **Initialize** (propose the group binding from ticket/repo/initiative/scope — read-only; the group is created only at the `--export` checkpoint)
 2. **Listen** (accumulate candidates silently, never write)
 3. **Compare-or-Clarify** (the bounded pre-write round: within-group dedup + cross-group link derivation + ticket-uniqueness)
-4. **Export** (the explicit `--export` checkpoint, which runs `set`; both clients also accept `export`/`import` as aliases of `set`/`query`)
+4. **Export** (the explicit `--export` checkpoint, which runs `set`; the capture client accepts `export`/`import` as aliases of `set`/`query`, while the read-only client accepts `import` only)
 
 …plus a fixed five-stage write pipeline (preflight → redact → dedupe/derive-links → atomicity → write)
 and a recall (`--import`) path that returns cheap fields by default and touches the blob only on drill-down.

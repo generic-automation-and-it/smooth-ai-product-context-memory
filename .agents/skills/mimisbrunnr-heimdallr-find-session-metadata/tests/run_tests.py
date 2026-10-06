@@ -51,6 +51,8 @@ def run_with_git(responses: dict, *argv: str, cwd: str | None = None,
         "        sys.exit(128)\n"
         "    sys.stdout.write('false\\n' if data.get('_bare') else 'true\\n')\n"
         "    sys.exit(0)\n"
+        "if key in data.get('_exit', {}):\n"
+        "    sys.exit(data['_exit'][key])\n"
         "if key in data:\n"
         "    sys.stdout.write(data[key])\n"
         "    sys.exit(0)\n"
@@ -392,6 +394,14 @@ class CommitHistoryTests(unittest.TestCase):
         self.assertIsNone(json.loads(unborn.stdout)["commitsUnavailable"])
         self.assertNotIn("commits:", run_with_git(unborn_git).stdout)
 
+    def test_a_failed_ref_read_is_not_an_unborn_branch(self):
+        """Issue 190 #14: every non-zero `show-ref` was read as "no such ref", so a ref store git could
+        not read (exit 128) turned a failed `git log` into an empty history. Only exit 1 is absence."""
+        responses = dict(self.BASE, **{"symbolic-ref -q HEAD": "refs/heads/main\n",
+                                       "_exit": {"show-ref --verify -q refs/heads/main": 128}})
+        result = json.loads(run_with_git(responses, "--json").stdout)
+        self.assertIn("git log failed", result["commitsUnavailable"])
+
     def test_two_failed_reads_are_not_an_empty_history(self):
         """Issue 188: with git unable to read the repository, both `log` and the ref check failed, and
         the second failure was read as "unborn". Without positive evidence the log failure is
@@ -478,15 +488,18 @@ class RepoRootTests(unittest.TestCase):
         self._tmp.cleanup()
 
     def _scan(self, *argv: str) -> dict:
+        # HOME is the folder holding every checkout, as a real one sits under the operator's home: a
+        # checkout outside home is withheld (issue 190 #13).
         proc = subprocess.run([sys.executable, "-B", str(SCRIPT), "--json", *argv],
-                              capture_output=True, text=True, encoding="utf-8", cwd=str(self.other))
+                              capture_output=True, text=True, encoding="utf-8", cwd=str(self.other),
+                              env=dict(os.environ, HOME=self._tmp.name))
         self.assertEqual(proc.returncode, 0, proc.stderr)
         return json.loads(proc.stdout)
 
     def test_repo_root_scans_the_named_checkout_not_the_working_directory(self):
         result = self._scan("--repo-root", str(self.chosen))
         self.assertEqual(result["repository"], "acme/chosen")
-        self.assertEqual(os.path.realpath(result["root"]), os.path.realpath(self.chosen))
+        self.assertEqual(result["root"], "~/chosen")
         self.assertEqual([(t["provider"], t["key"]) for t in result["tickets"]], [("github", "12")])
 
     def test_without_repo_root_the_root_names_the_working_directory(self):
@@ -494,10 +507,10 @@ class RepoRootTests(unittest.TestCase):
         # a caller refuse a scan of the wrong repository.
         result = self._scan()
         self.assertEqual(result["repository"], "acme/other")
-        self.assertEqual(os.path.realpath(result["root"]), os.path.realpath(self.other))
+        self.assertEqual(result["root"], "~/other")
 
     def _scan_env(self, cwd, *argv, home=None, script=SCRIPT):
-        env = dict(os.environ, **({"HOME": str(home)} if home is not None else {}))
+        env = dict(os.environ, HOME=str(home) if home is not None else self._tmp.name)
         proc = subprocess.run([sys.executable, "-B", str(script), "--json", *argv],
                               capture_output=True, text=True, encoding="utf-8", cwd=str(cwd), env=env)
         self.assertEqual(proc.returncode, 0, proc.stderr)
@@ -511,6 +524,18 @@ class RepoRootTests(unittest.TestCase):
         result = json.loads(proc.stdout)
         self.assertEqual(result["root"], "~/chosen")
         self.assertIsNone(result["rootWithheld"])
+        self.assertNotIn(os.path.realpath(self._tmp.name), proc.stdout)
+
+    def test_a_checkout_outside_home_is_withheld(self):
+        """Issue 190 #13: outside home there is no `~` to stand for the account part, so the absolute
+        path was printed — another account's name, or a mount named after a person, included."""
+        elsewhere = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, elsewhere, True)
+        proc = self._scan_env(self.chosen, "--repo-root", str(self.chosen), home=elsewhere)
+        result = json.loads(proc.stdout)
+        self.assertIsNone(result["root"])
+        self.assertEqual(result["rootWithheld"], "checkout path outside home; not shown")
+        self.assertTrue(result["rootMatches"], "the comparison needs no displayed path")
         self.assertNotIn(os.path.realpath(self._tmp.name), proc.stdout)
 
     def test_a_credential_shaped_checkout_path_is_withheld(self):

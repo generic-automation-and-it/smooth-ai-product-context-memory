@@ -42,13 +42,16 @@ _ADDITIVE = [
     # "both X and Y" is usually one fact about a coordinated pair ("for both capture and
     # retrieval"), so it contributes rather than deciding on its own.
     r"\bboth\b",
+    # A universal quantifier is one claim about a set ("all of the retries are idempotent"). It sat
+    # in the tally tier, so it alone marked a single fact as a bundle (review #18); like "both", it
+    # now only contributes.
+    r"\b(?:all of|each of)\b",
 ]
 _TALLY = [
     # Leading negative lookbehind (not \b) so "local-first" or "v1-first" does not count "first"
     # as an enumerator — a common false positive in product phrasing.
     r"(?<![-\w])(?:first|second|third|fourth|fifth|finally|lastly)\b",
     r"(?:\b\d+\b|\b(?:two|three|four|five|several|many))\s+(?:things?|points?|reasons?|facts?)\b",
-    r"\b(?:all of|each of)\b",
 ]
 _SPLIT = [
     r"\b(?:this|that|the latter|the former)\b",

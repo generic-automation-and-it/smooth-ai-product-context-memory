@@ -57,7 +57,9 @@ Anchor repository scope to verified local identity such as the repository root, 
 revision. Never record a remote URL containing credentials or tokens, and reject a user-supplied evidence
 source whose URL embeds credentials before echoing, citing, or opening it. If inspected evidence contains a
 secret, cite only its location and show the value as `<REDACTED>` in the preview; never carry it into a
-candidate or a runtime token into any output. Stay inside the selected repository
+candidate or a runtime token into any output. If it contains a personal identifier (a name, email, account
+name or identity number), generalise it to a role or type ("the maintainer", "an email address") before
+building candidates — never carry the value into a candidate, the preview or a handoff. Stay inside the selected repository
 and explicitly supplied external sources. Do not discover or inspect personal vaults, sibling repositories,
 other workspaces, issue trackers, or services merely because they may contain useful context.
 
@@ -133,9 +135,10 @@ bounded batch and disclose what was deferred; never silently chunk the remainder
 Ask only questions whose answers would materially change claim meaning, scope, lifecycle, group placement,
 or authorization. A disputed candidate can be held while uncontested candidates continue.
 
-For each selected noun (the subject of a change-impact note), also ask the owner what points **into** the
-area from outside — configs, CI, scripts, other repositories — and record each inbound referrer on the claim
-it lands on. Nothing in the tree reveals these; they come from the owner. First-order only.
+For each selected noun (the subject of a change-impact note), first look in the bounded repository evidence
+for what points **into** the area — configs, CI, scripts — and cite each visible referrer on the claim it
+lands on. Then ask the owner only about referrers the checkout cannot show (other repositories, external
+jobs). First-order only.
 
 ### 2. Present A Cited Preview
 

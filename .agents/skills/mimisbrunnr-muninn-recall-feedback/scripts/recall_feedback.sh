@@ -73,13 +73,22 @@ recall_feedback_path_ok() {
   return 0
 }
 
-# The token arrives as a shell-function argument and reaches curl on stdin (`-H @-`) from the
+# The capability arrives as a shell-function argument (`read`/`write`); the token is read
+# from the environment and reaches curl on stdin (`-H @-`) from the
 # `printf` builtin. Never a curl argv element: a process's argv is readable in `ps` by every user on the
 # host, so `-H "Authorization: Bearer $TOKEN"` puts the credential in the process table. Never a file
 # either: a mode-600 temp file still put the token on disk, where a SIGKILL leaves it behind,
 # contradicting SKILL.md's "never written to a file" (issue 184).
 recall_feedback_curl() {
-  local method="$1" path="$2" token="$3"
+  # The third argument names a capability, never a credential: the token is read here from the
+  # runtime environment, so a call site never expands a secret into an argument (review #14).
+  local method="$1" path="$2" capability="$3" token
+  case "$capability" in
+    read) token="${CONTEXT_MEMORY_READ_TOKEN:-}" ;;
+    write) token="${CONTEXT_MEMORY_WRITE_TOKEN:-}" ;;
+    *) echo "recall-feedback: the capability must be 'read' or 'write'; no request was sent." >&2
+       return 1 ;;
+  esac
   local base="${CONTEXT_MEMORY_BASE_URL:-http://localhost:5141}"
   # One read of the base, judged and then used, so the guard approves the URL that is actually sent.
   if ! recall_feedback_guard "$base"; then
@@ -91,7 +100,7 @@ recall_feedback_curl() {
     return 1
   fi
   if [ -z "$token" ]; then
-    echo "recall-feedback: no token supplied; no request was sent." >&2
+    echo "recall-feedback: no ${capability} token in the environment; no request was sent." >&2
     return 1
   fi
   # --noproxy '*' is not optional: curl honours http_proxy/ALL_PROXY from the environment, and a

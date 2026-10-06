@@ -102,6 +102,9 @@ class RecallFeedbackGuardTests(unittest.TestCase):
         shutil.rmtree(self.dir, ignore_errors=True)
 
     def run_curl(self, path=READ_PATH, token=TOKEN, base=None, extra_env=None, method="GET"):
+        # The helper takes a capability and reads the token from the environment (review #14): a GET
+        # is a read, anything else a write, and the token is set in the matching variable.
+        capability = "read" if method == "GET" else "write"
         env = {
             "PATH": "{}:{}".format(self.bin, os.environ.get("PATH", "")),
             "HOME": str(self.dir),
@@ -111,13 +114,15 @@ class RecallFeedbackGuardTests(unittest.TestCase):
         }
         if base is not None:
             env["CONTEXT_MEMORY_BASE_URL"] = base
+        if token:
+            env["CONTEXT_MEMORY_READ_TOKEN" if capability == "read" else "CONTEXT_MEMORY_WRITE_TOKEN"] = token
         env.update(extra_env or {})
         script = textwrap.dedent("""\
             source "$1"
             recall_feedback_curl "$2" "$3" "$4"
             """)
         return subprocess.run(
-            ["bash", "-c", script, "harness", str(SCRIPT), method, path, token],
+            ["bash", "-c", script, "harness", str(SCRIPT), method, path, capability],
             env=env, capture_output=True, text=True, timeout=30)
 
     def curl_called(self):
@@ -162,6 +167,28 @@ class RecallFeedbackGuardTests(unittest.TestCase):
                 self.assertIn("params=present", result.stderr)
                 self.assertNotIn("params-secret-0123", result.stderr + result.stdout)
                 self.assertNotIn("evil.example", result.stderr + result.stdout)
+
+    def test_no_call_site_expands_a_token_into_an_argument(self):
+        """Review #14: the documented calls expanded the token into the helper's arguments. Each now
+        names a capability, and the helper reads the token from the environment."""
+        doc = (SCRIPT.parents[1] / "SKILL.md").read_text(encoding="utf-8")
+        calls = [b for b in doc.split("```") if "recall_feedback_curl" in b and b.startswith("bash")]
+        self.assertTrue(calls)
+        for call in calls:
+            with self.subTest(call=call.strip()[:60]):
+                self.assertNotIn("$CONTEXT_MEMORY_", call)
+                self.assertRegex(call, r"\b(read|write)\s*$")
+
+    def test_an_unknown_capability_sends_nothing(self):
+        script = 'source "$1"; recall_feedback_curl GET "$2" "$3"'
+        env = {"PATH": "{}:{}".format(self.bin, os.environ.get("PATH", "")), "HOME": str(self.dir),
+               "TMPDIR": str(self.tmp), "RF_TEST_DIR": str(self.dir), "RF_REAL_PYTHON": sys.executable,
+               "CONTEXT_MEMORY_READ_TOKEN": TOKEN}
+        result = subprocess.run(["bash", "-c", script, "harness", str(SCRIPT), READ_PATH, TOKEN],
+                                env=env, capture_output=True, text=True, timeout=30)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("capability must be 'read' or 'write'", result.stderr)
+        self.assertFalse(self.curl_called())
 
     def test_an_empty_delimiter_is_refused(self):
         # Issue 188: `urlparse` reads `http://localhost:5141?` as an empty query, so the bare-origin
@@ -306,8 +333,9 @@ class RecallFeedbackGuardTests(unittest.TestCase):
         home, canary = self._curlrc_home()
         env = self._real_curl_env(home)
         env["CONTEXT_MEMORY_BASE_URL"] = "http://127.0.0.1:9"
-        script = 'source "$1"; recall_feedback_curl GET "$2" "$3"'
-        result = subprocess.run(["bash", "-c", script, "harness", str(SCRIPT), READ_PATH, TOKEN],
+        env["CONTEXT_MEMORY_READ_TOKEN"] = TOKEN
+        script = 'source "$1"; recall_feedback_curl GET "$2" read'
+        result = subprocess.run(["bash", "-c", script, "harness", str(SCRIPT), READ_PATH],
                                 env=env, capture_output=True, text=True, timeout=30)
         self.assertNotEqual(result.returncode, 0, "nothing listens on port 9")
         self.assertIn("curl:", result.stderr, "curl did not run: " + result.stderr)
@@ -343,9 +371,10 @@ class RecallFeedbackGuardTests(unittest.TestCase):
             home.mkdir()
             env = self._real_curl_env(home)
             env["CONTEXT_MEMORY_BASE_URL"] = "http://127.0.0.1:{}".format(server.server_address[1])
-            script = 'source "$1"; recall_feedback_curl GET "$2" "$3"'
+            env["CONTEXT_MEMORY_READ_TOKEN"] = TOKEN
+            script = 'source "$1"; recall_feedback_curl GET "$2" read'
             result = subprocess.run(
-                ["bash", "-c", script, "harness", str(SCRIPT), READ_PATH, TOKEN],
+                ["bash", "-c", script, "harness", str(SCRIPT), READ_PATH],
                 env=env, capture_output=True, text=True, timeout=30)
         finally:
             server.shutdown()
@@ -358,9 +387,23 @@ class RecallFeedbackGuardTests(unittest.TestCase):
 
     # --- documentation stays wired to the tested code ---------------------------------------------
 
+    def _documented_source(self):
+        """The `source` command SKILL.md tells the operator to run, with its path mapped onto the
+        script under test. Issue 190 #18: the wiring test only looked for the path anywhere in the
+        file, and the query runs sourced the script themselves, so deleting the documented `source`
+        line left every test green."""
+        skill = (SKILL / "SKILL.md").read_text(encoding="utf-8")
+        lines = [line.strip() for block in re.findall(r"```bash\n(.*?)```", skill, re.S)
+                 for line in block.splitlines() if line.strip().startswith("source ")]
+        self.assertEqual(len(lines), 1, "SKILL.md must document exactly one `source` of the script")
+        path = lines[0].split(None, 1)[1]
+        self.assertTrue(path.endswith("mimisbrunnr-muninn-recall-feedback/scripts/recall_feedback.sh"),
+                        path)
+        return 'source "$1"'
+
     def test_skill_sources_the_tested_script(self):
         skill = (SKILL / "SKILL.md").read_text(encoding="utf-8")
-        self.assertIn("scripts/recall_feedback.sh", skill)
+        self._documented_source()
         self.assertNotIn("recall_feedback_guard() {", skill,
                          "SKILL.md carries its own copy of the guard instead of sourcing the script")
 
@@ -381,7 +424,7 @@ class RecallFeedbackGuardTests(unittest.TestCase):
             "CONTEXT_MEMORY_READ_TOKEN": TOKEN,
         }
         env.update(extra_env)
-        return subprocess.run(["bash", "-c", 'source "$1"\n' + query, "harness", str(SCRIPT)],
+        return subprocess.run(["bash", "-c", self._documented_source() + "\n" + query, "harness", str(SCRIPT)],
                               env=env, capture_output=True, text=True, timeout=30)
 
     def test_documented_queries_carry_no_fixed_date(self):

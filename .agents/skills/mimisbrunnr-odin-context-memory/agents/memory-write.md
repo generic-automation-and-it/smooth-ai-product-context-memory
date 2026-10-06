@@ -21,9 +21,11 @@ nothing else.
 Before stage 1, turn the main thread's proposed group binding into a group — this is the only place a
 group or initiative is created. On the create path run `upsert-initiative` first (a missing initiative
 is a `404` from `resolve-group`), then `resolve-group`, and carry its `groupUuid` into every preflight
-candidate and the `set` request. Under `--dryrun` run neither: for a group that does not exist yet,
-report the group and initiative as *would create* and preview the plan offline — `set --dryrun` needs a
-`groupUuid`, so say the set stage was not tested rather than claiming a full dry run.
+candidate and the `set` request. Under `--dryrun` run neither. Unless the main thread passed a
+`groupUuid` it found read-only (a ticket `query` returns one only when the group already holds memories) —
+for a group that does not exist yet, or an existing group with no memories — report the group and
+initiative as *would create* and preview the plan offline: `set --dryrun` needs a `groupUuid`, so say
+the set stage was not tested rather than claiming a full dry run.
 
 Run exactly once in fixed order:
 

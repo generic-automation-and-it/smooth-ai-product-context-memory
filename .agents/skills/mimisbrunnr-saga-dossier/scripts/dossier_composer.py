@@ -877,8 +877,11 @@ def _superseded(item, edges):
 
 def _validate_contradiction(f, by_key, edges=None, asof=None):
     mems = f.get("memories") or []
-    if len(mems) < 2:
-        raise ValueError("contradiction: requires at least two memories")
+    # Two *distinct* memories: the same reference listed twice, or two versions of one memory, counted
+    # as two and passed the gate as a contradiction with itself (review #6). Versions of one memory
+    # are supersession, not conflict.
+    if len({m.get("uuid") for m in mems if isinstance(m, dict)}) < 2:
+        raise ValueError("contradiction: requires at least two distinct memories")
     items = [by_key[_item_key(m)] for m in mems if m.get("uuid") and _item_key(m) in by_key]
     if len(items) < 2:
         raise ValueError("contradiction: memories must be selected in this bundle")
@@ -1185,6 +1188,8 @@ def render(dossier):
     # Findings-first for the review focus (LADR-12).
     findings_first = dossier.focus == "review"
 
+    items_by_key = {(i.get("uuid"), i.get("version")): i for i in b["items"]}
+
     def emit_findings():
         if not dossier.findings:
             # ``None detected`` is always qualified by the examined scope (LADR-13).
@@ -1204,7 +1209,12 @@ def render(dossier):
                 lines.append(f"> **Qualification:** {qualification}")
                 lines.append("")
             for f in by_cat[cat]:
-                mems = ", ".join(f"{m_['uuid']} v{m_['version']}" for m_ in f.get("memories", []))
+                # Cited in the claims' own form — uuid, version and capture time — not as a bare
+                # `uuid vN`: a finding is a substantive statement too, and the attribution check
+                # skipped this section, so its references carried no capture time (review #23).
+                mems = ", ".join(_cite(items_by_key.get((m_["uuid"], m_["version"]),
+                                                        {"uuid": m_["uuid"], "version": m_["version"]}))
+                                 for m_ in f.get("memories", []))
                 lines.append(f"- **{f['classification']}** {f['basis']} "
                              f"— scope: {f['scope']}. Memories: {mems or 'none'}."
                              + _cycle_break_text(f)
@@ -1329,10 +1339,15 @@ def _conditions(item):
     return found
 
 
+# A sentence ends at `.`, `!` or `?` followed by whitespace or the end of the text — never at a decimal
+# point or a version separator, which split "at most 2.5 seconds" into "at most 2." (review #22).
+_SENTENCE_END = re.compile(r"[.!?](?=\s|$)")
+
+
 def _sentence_at(text, idx):
-    start = text.rfind(".", 0, idx) + 1
-    end = text.find(".", idx)
-    end = len(text) if end == -1 else end + 1
+    start = max((m.end() for m in _SENTENCE_END.finditer(text, 0, idx)), default=0)
+    following = _SENTENCE_END.search(text, idx)
+    end = following.end() if following else len(text)
     return text[start:end].strip()
 
 

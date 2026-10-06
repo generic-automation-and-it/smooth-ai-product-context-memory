@@ -21,14 +21,16 @@ Verdicts are matched to scenarios by `id`, not by position. Positional matching 
 deleting or reordering a scenario silently misaligned every verdict after it, and because
 `run_tests.py` asserts the committed run scores exactly 1.0/1.0, the harness would then have
 certified the wrong verdicts against the wrong scenarios with no test failing. The blinded input
-therefore carries each scenario's `id` and the model echoes it back.
+therefore carries an identifier for each scenario and the model echoes it back.
 
-What keeps the run blinded is the emitter withholding `expected`, `note` and `axis` — asserted by
-`run_tests.py::SemanticFixtureTests`. The `id` is emitted for pairing, and an id is not a general
-licence to read intent off a string: in this fixture set `s4-cross-group-match-is-not-a-bump` and
-`s8-near-miss-negative` name their own expected verdicts, so anyone reading the repository can see
-the answers. That is a transparency property of a committed evidence file, not a property of the
-blinded input, and it is recorded here rather than papered over with a claim about identifiers.
+That identifier is **opaque** (`opaque_id`: a hash of the scenario id), never the id itself. The ids are
+authored to be read by people — `s4-cross-group-match-is-not-a-bump`, `s8-near-miss-negative` — and the
+model reads the blinded input, so emitting them put the expected verdict in the model's own context
+(issue 179 #39, issue 190 #20). The hash is stable under reordering, so pairing stays by identity, and
+the scorer accepts either form, so a recorded run that echoed the real ids is still scorable. The rest
+of the blinding is the emitter withholding `expected`, `note` and `axis` — all asserted by
+`run_tests.py::SemanticFixtureTests`. `stage` is emitted: it is the question being asked, and the
+verdict shape depends on it.
 
 A verdicts file with no ids at all is refused unless `--allow-legacy-positional` is passed. That flag
 exists only so a superseded dated run stays re-scorable, which is how the 0.9 / 0.8333 figure was
@@ -49,6 +51,7 @@ To re-score a dated run against the fixture it was actually taken against:
 """
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -164,11 +167,23 @@ def scenario_matches(expected, got):
     return True
 
 
+def opaque_id(scenario_id):
+    """The identifier the blinded input carries: stable under reordering, and says nothing about the
+    expected verdict, which a human-readable scenario id often does."""
+    return "c-" + hashlib.sha256(scenario_id.encode("utf-8")).hexdigest()[:10]
+
+
 def pair_by_id(fixtures, model, allow_legacy_positional):
-    """Return [(fixture, verdict)] in fixture order, refusing anything that would pair by accident."""
+    """Return [(fixture, verdict)] in fixture order, refusing anything that would pair by accident.
+
+    A verdict may name its scenario by the real id (a recorded run) or by the opaque id the blinded
+    input carried (a run taken since issue 190); both resolve to the same scenario."""
     known = {fixture["id"]: fixture for fixture in fixtures}
     if len(known) != len(fixtures):
         raise SystemExit("score: the fixture contains a duplicate id")
+    aliases = {opaque_id(fixture["id"]): fixture["id"] for fixture in fixtures}
+    if len(aliases) != len(fixtures) or set(aliases) & set(known):
+        raise SystemExit("score: two scenarios share an opaque id")
 
     identified = [isinstance(entry, dict) and "id" in entry for entry in model]
     if allow_legacy_positional and not any(identified):
@@ -187,11 +202,12 @@ def pair_by_id(fixtures, model, allow_legacy_positional):
                 "--allow-legacy-positional to score a superseded dated run taken against an older "
                 "fixture; a new run must echo each scenario's id."
             )
-        if entry["id"] not in known:
+        scenario = aliases.get(entry["id"], entry["id"])
+        if scenario not in known:
             raise SystemExit(f"score: verdict names unknown scenario id {entry['id']!r}")
-        if entry["id"] in by_id:
+        if scenario in by_id:
             raise SystemExit(f"score: scenario id {entry['id']!r} was judged more than once")
-        by_id[entry["id"]] = entry
+        by_id[scenario] = entry
 
     missing = [fixture["id"] for fixture in fixtures if fixture["id"] not in by_id]
     if missing:
@@ -223,11 +239,11 @@ def main():
         if ungrouped:
             raise SystemExit("score: scenario(s) with a recall set but no candidate_group_uuid: "
                              + ", ".join(ungrouped))
-        # `id` is emitted: it identifies the row without revealing the answer, and without it the
-        # scorer can only pair by position. `expected`, `note` and `axis` stay withheld — `axis`
-        # would tell the model which way the pair is meant to fall.
-        blinded = [{key: value for key, value in fixture.items()
-                    if key not in ("expected", "note", "axis")}
+        # An opaque id is emitted, never the authored one: without an id the scorer can only pair by
+        # position, and the authored ids name expected verdicts (issue 190 #20). `expected`, `note`
+        # and `axis` stay withheld — `axis` would tell the model which way the pair is meant to fall.
+        blinded = [dict({key: value for key, value in fixture.items()
+                         if key not in ("expected", "note", "axis")}, id=opaque_id(fixture["id"]))
                    for fixture in fixtures]
         # Output shape, not an answer: a redact-stage verdict is scored on the scrubbed text, so the
         # model has to be told to return it.

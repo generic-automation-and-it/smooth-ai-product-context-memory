@@ -89,8 +89,8 @@
       "id": "s5-link-derivation",
       "stage": "links",
       "axis": "not_dedup",
-      "candidate_description": "The memory service is local-first and private to our workspace.",
-      "candidate_statement": "Storage is local-first.",
+      "candidate_description": "Backups of the memory service are written to the local disk only.",
+      "candidate_statement": "Backups never leave the local machine.",
       "candidate_group_uuid": "g-01",
       "recall_set": [
         {

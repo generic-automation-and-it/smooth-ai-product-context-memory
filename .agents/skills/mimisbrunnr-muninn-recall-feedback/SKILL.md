@@ -42,7 +42,7 @@ RF_TO=YYYY-MM-DD     # end of that window; also the never-recalled asOf
 
 ```bash
 recall_feedback_curl GET "/api/context/recall-feedback/never-recalled?asOf=${RF_TO:?set RF_TO}&limit=500" \
-  "$CONTEXT_MEMORY_READ_TOKEN"
+  read
 ```
 
 `asOf` is required (ISO 8601) and is the window's end, `RF_TO`, so the list describes the same period
@@ -54,7 +54,7 @@ not pollute the signal.
 
 ```bash
 recall_feedback_curl GET "/api/context/recall-feedback/miss-rate?from=${RF_FROM:?set RF_FROM}&to=${RF_TO:?set RF_TO}" \
-  "$CONTEXT_MEMORY_READ_TOKEN"
+  read
 ```
 
 Returns `{ "retrievals": N, "misses": M, "missRate": 0.0 }`. Count a window before and after a tuning
@@ -66,7 +66,7 @@ mean nothing without them.
 ### 3. Reset the baseline
 
 ```bash
-recall_feedback_curl POST "/api/context/recall-feedback/reset" "$CONTEXT_MEMORY_WRITE_TOKEN"
+recall_feedback_curl POST "/api/context/recall-feedback/reset" write
 ```
 
 Legitimate, not destructive: feedback is disposable (LADR-04), and a tuning experiment must be able to

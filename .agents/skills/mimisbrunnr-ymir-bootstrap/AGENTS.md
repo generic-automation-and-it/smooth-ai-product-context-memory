@@ -1,5 +1,10 @@
 # Mímisbrunnr Bootstrap Maintenance Context
 
+> **References.** The `### LADR-NN` decisions below are this skill's own. Every other HLD, LADR, NFR,
+> BRD, issue and PR number in this file belongs to the upstream repository,
+> `generic-automation-and-it/smooth-ai-product-context-memory` (`docs/hlds/`, `docs/brd/`), not to a
+> repository this skill is vendored into.
+
 ## TL;DR
 
 Turns a bounded repository inspection into reviewed, source-backed memory candidates by composing the
@@ -60,8 +65,11 @@ check excluded the seeded tables while the clear step deleted them. The prompt i
 
 **Decision.** Change-impact and inbound referrers are recorded in the offline cited preview (Step 2) and the
 skill contract (Step 1's discovery questions), not as store candidates or relations. The preview shows, per
-selected noun, **Hits / Does not hit**; discovery asks the owner what points *into* the area from outside.
-First-order only, no transitive waterfalls.
+selected noun, **Hits / Does not hit**; discovery cites the inbound referrers the repository evidence shows
+(configs, CI, scripts) and asks the owner only about those the checkout cannot show. First-order only, no
+transitive waterfalls. *Amended 2026-10-06 (upstream issue 190 #26):* discovery previously asked the owner
+for every referrer, on the claim that the tree reveals none, which the bootstrap evaluation itself
+contradicts by crediting a CI referrer cited from the evidence.
 
 **Rejected (a)** — a claim convention inside `statement`/`contentSummary`: no new structure, but it bundles
 noun + impact + the negative into one fact, and the atomicity gate flags bundled candidates; "does not hit"
@@ -108,6 +116,7 @@ authorization are available. Static validation is packaging evidence only.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-06 | **Issue 190 #25/#26.** Personal identifiers in inspected evidence are generalised to a role or type before candidates are built, and never reach a candidate, the preview or a handoff. Inbound referrers visible in the bounded repository evidence (configs, CI, scripts) are cited first, and the owner is asked only about those the checkout cannot show; **LADR-01 amended** — "nothing in the tree reveals these" was contradicted by this skill's own evaluation, which credits a CI referrer cited from the evidence. `tests/expectations.md` updated to match. Prose contract and evaluation rubric only: no automated harness. | issue 190 |
 | 2026-10-06 | Heimdallr's `root` is now a display form that may be withheld, so the identity check reads its `rootMatches` instead of comparing paths (issue 188). | issue 188 |
 | 2026-10-06 | **A branch ticket is proposed, never bound unasked.** A matching reporter root proves where a ticket was found, not that it belongs to the named feature, so SKILL.md has the agent confirm each branch ticket with the user before it enters the capture binding; `tests/expectations.md` scores binding one unasked as a scope failure. | issue 186 |
 | 2026-10-06 | **The withheld rubric no longer penalises the question the workflow requires.** `tests/expectations.md` allowed "at most a consequential question" (the cutoff), while `SKILL.md` step 1 requires asking the owner, per selected noun, what points into the area from outside — so an agent following the skill failed the rubric's question limit. The limit now covers claim questions (one: which cutoff is canonical), the inbound-referrer question is named as required and not counted, and the Conflict row says so. Rubric wording only; no skill behaviour change. No automated test: this skill has no committed harness (its checks are the manual evaluation and the packaging static checks in `tests/README.md`), so the fix is verified by reading the rubric against `SKILL.md` step 1. | issue 184 |

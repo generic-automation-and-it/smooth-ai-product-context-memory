@@ -21,7 +21,7 @@
     "id": "Q3",
     "question": "Which datastore is the authoritative storage engine, and which record states it?",
     "identity": "Storage engine",
-    "accept": ["storage engine", "bbbbbbbb-1111-1111-1111-111111111111"],
+    "accept": ["bbbbbbbb-1111-1111-1111-111111111111"],
     "must_contain": ["postgres"],
     "absent": false
   },
@@ -29,7 +29,7 @@
     "id": "Q4",
     "question": "Which component holds the cache, as distinct from the store, and which record states it?",
     "identity": "Cache path",
-    "accept": ["cache path", "bbbbbbbb-2222-2222-2222-222222222222"],
+    "accept": ["bbbbbbbb-2222-2222-2222-222222222222"],
     "must_contain": ["redis"],
     "absent": false
   },

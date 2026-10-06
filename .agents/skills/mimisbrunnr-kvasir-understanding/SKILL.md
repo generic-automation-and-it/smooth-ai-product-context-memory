@@ -221,14 +221,17 @@ manual runs only.
 
 ```bash
 python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding_client.py \
-  dump --currentsession [--from FILE|-] [--out .context/mimisbrunnr-understandings/<session-folder>] \
+  dump --currentsession --from <session-summary-file|-> [--out .context/mimisbrunnr-understandings/<session-folder>] \
   [--session-name NAME] \
   [--tickets TICKET,...] [--tags TAG,...] [--repository REPO] [--scope scope:id] [--initiative NAME] \
   [--heimdallr true]
 ```
 
 - `dump --currentsession` writes the current session's understanding (its Understandings, decisions
-  and key learnings) to `.context/mimisbrunnr-understandings/<session-folder>/` as Markdown.
+  and key learnings) to `.context/mimisbrunnr-understandings/<session-folder>/` as Markdown. The
+  session content is what `--from` supplies (a file, or `-` for stdin): write the summary first, then
+  pass it. Without `--from` the dump is a **blank template** to fill in by hand, not the session, and
+  the client prints a `NOTE` saying so.
 - **The binding travels as structured metadata**, recorded in `_dump.json`, not as prose in
   `_session.md`. A later `export` of this folder reads it as the default binding; an explicit flag
   overrides it. A dump with no binding says so rather than writing an empty object.

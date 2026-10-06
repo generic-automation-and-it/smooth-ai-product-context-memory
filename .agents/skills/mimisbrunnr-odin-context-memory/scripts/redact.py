@@ -133,8 +133,11 @@ _PEM_LABEL = r"(?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?"
 # past its first word); unquoted ones stop at whitespace, a quote, `,` or `;`. A quoted value runs to its
 # closing quote **or the end of the line**, with no length cap: the earlier 512-character cap made a
 # longer quoted password match neither alternative, so it passed whole (issue 186). The run stops at the
-# next quote or line break, and nothing mandatory follows it, so the search stays linear.
-_QUOTED = r""""[^"\r\n]+"?|'[^'\r\n]+'?"""
+# next quote or line break, and nothing mandatory follows it, so the search stays linear. A backslash
+# escapes the next character, so `"ab\"cd"` is one value: stopping at the escaped quote left the rest of
+# the password in place (review #5). The two alternatives cannot both match a character, so it stays
+# linear.
+_QUOTED = r""""(?:[^"\\\r\n]|\\.)+"?|'(?:[^'\\\r\n]|\\.)+'?"""
 
 
 def _assignment(key, min_unquoted):

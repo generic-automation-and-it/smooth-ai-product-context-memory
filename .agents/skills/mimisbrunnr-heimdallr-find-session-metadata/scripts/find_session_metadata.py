@@ -46,6 +46,7 @@ BRANCH_UNCHECKED = "redactor unavailable; the branch is not shown unchecked"
 COMMITS_UNAVAILABLE = "git log failed; recent commit subjects were not read"
 ROOT_CREDENTIAL_SHAPED = "credential-shaped checkout path; not shown"
 ROOT_UNCHECKED = "redactor unavailable; the checkout path is not shown unchecked"
+ROOT_OUTSIDE_HOME = "checkout path outside home; not shown"
 REPOSITORY_CREDENTIAL_SHAPED = "credential-shaped origin path; not shown"
 REPOSITORY_UNCHECKED = "redactor unavailable; the repository is not shown unchecked"
 
@@ -66,7 +67,11 @@ def _shown_root(redactor, root: str | None) -> tuple[str | None, str | None]:
         return None, ROOT_UNCHECKED
     home = os.path.realpath(os.path.expanduser("~"))
     real = os.path.realpath(root)
-    shown = "~" + real[len(home):] if real == home or real.startswith(home + os.sep) else real
+    # Outside home there is no `~` to stand for the account part, so the full path — which can carry
+    # another account's name or a mount named after a person — was printed (issue 190 #13).
+    if real != home and not real.startswith(home + os.sep):
+        return None, ROOT_OUTSIDE_HOME
+    shown = "~" + real[len(home):]
     if redactor.scrub_located(shown)[0] != shown or any(
             redactor.is_credential_key(segment) for segment in shown.split("/")):
         return None, ROOT_CREDENTIAL_SHAPED
@@ -128,7 +133,7 @@ class GitUnavailable(RuntimeError):
     """
 
 
-def _git(*argv: str, root: str | None = None) -> str | None:
+def _git(*argv: str, root: str | None = None, return_status: bool = False) -> str | None | int:
     # `-C` only when a root is named, so the default scan is the process's own checkout.
     prefix = ["git", "-C", root] if root else ["git"]
     try:
@@ -137,6 +142,8 @@ def _git(*argv: str, root: str | None = None) -> str | None:
         )
     except (FileNotFoundError, OSError):
         raise GitUnavailable("git is not on PATH or could not be run") from None
+    if return_status:
+        return proc.returncode
     if proc.returncode != 0:
         return None
     return proc.stdout.strip()
@@ -235,7 +242,10 @@ def _unborn(branch: str | None, repo_root: str | None) -> bool:
     head = _git("symbolic-ref", "-q", "HEAD", root=repo_root)
     if head != f"refs/heads/{branch}":
         return False  # git could not read HEAD, or it points elsewhere: not evidence of anything
-    return _git("show-ref", "--verify", "-q", f"refs/heads/{branch}", root=repo_root) is None
+    # Exit 1 is git's "no such ref"; any other failure (a corrupt ref store, a permission error) is a
+    # read failure and must stay one, not become an empty history (issue 190 #14).
+    return _git("show-ref", "--verify", "-q", f"refs/heads/{branch}",
+                root=repo_root, return_status=True) == 1
 
 
 def scan(initiative: str | None = None, repo_root: str | None = None) -> dict:

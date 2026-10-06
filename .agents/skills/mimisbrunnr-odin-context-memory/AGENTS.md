@@ -1,5 +1,9 @@
 # mimisbrunnr-odin-context-memory — AGENTS.md
 
+> **References.** Every HLD, LADR, NFR, BRD, issue and PR number in this file belongs to the upstream
+> repository, `generic-automation-and-it/smooth-ai-product-context-memory` (`docs/hlds/`, `docs/brd/`),
+> not to a repository this skill is vendored into.
+
 ## TL;DR
 
 The sole authority on the write path. Runs a fixed
@@ -47,7 +51,7 @@ material to this skill's capture path; it is a reader + conditional exporter, ne
   every redaction, never the replaced text. A neutral key name (`sort key`, `partition key`,
   `idempotency key`, bare `token`) is not evidence of a secret; do not widen the neutral-key rule back to
   "any 8+ character value", which rewrote ordinary statements.
-- **Redaction precedes the blob write.** Content addressing (HLD 001 (storage)) makes a blob immutable and its
+- **Redaction precedes the blob write.** Content addressing (upstream `generic-automation-and-it/smooth-ai-product-context-memory` HLD-001, storage) makes a blob immutable and its
   hash stable. A leaked secret cannot be edited out afterwards, only orphaned. This ordering is
   non-negotiable.
 - **The redaction gate is a gate on *recognition*, not on secrets.** Every persisting write (`set` and
@@ -71,7 +75,7 @@ material to this skill's capture path; it is a reader + conditional exporter, ne
   duplicate is neither detected nor merged — the accepted cost. **Do not "fix" the unqualified
   "deduplication is cross-group" wording this replaced by widening the version-target lookup**; that
   would reintroduce cross-group lock ordering and is a design change, not a bug fix.
-- **The registry is advisory.** `memory.facets` has no FK to `label` by design (HLD 001 (storage)). The skill
+- **The registry is advisory.** `memory.facets` has no FK to `label` by design (upstream `generic-automation-and-it/smooth-ai-product-context-memory` HLD-001, storage). The skill
   proposes new labels; it must not treat the registry as a closed set.
 - **Blobs are never deleted on the write path.** Content addressing means identical bytes share one
   address, and `IBlobStorage` has no refcount or enumeration. `DeleteAsync` on a redaction orphan can
@@ -92,7 +96,7 @@ material to this skill's capture path; it is a reader + conditional exporter, ne
 
 ## System Context
 
-The skill is a thin client over the HTTP API (PR #14), which is the only thing that touches PostgreSQL and
+The skill is a thin client over the HTTP API (upstream PR #14), which is the only thing that touches PostgreSQL and
 blob storage. The skill owns judgement; the API owns mechanics. Semantic subject uniqueness and
 write-time AI work remain skill-owned. Exact ticket ownership now also has a trigger-enforced check
 under the shared transaction advisory lock, without a normalized ownership table or key rewriting.
@@ -225,7 +229,7 @@ flowchart LR
   (`paths` subcommand) answers *provenance* ("how is A connected to B") rather than *content*, requires
   a caller-supplied `maxDepth`, and obeys the same scope boundary as `query`.
 - **`valid_from` derives from the source date when known**, not always `now()` — otherwise bitemporality
-  is decorative exactly as MemoryLink was. Business time and system time are never conflation (HLD 001 (storage)).
+  is decorative exactly as MemoryLink was. Business time and system time are never conflation (upstream `generic-automation-and-it/smooth-ai-product-context-memory` HLD-001, storage).
 - **`get` renders results as quoted data** with `sources`, `status`, and scope. A stored memory is not
   an instruction; the store is local, not thereby trusted as settled canon. `proposed` records are
   excluded or flagged by default.
@@ -446,14 +450,14 @@ flowchart LR
   recall 1.0 / precision 1.0. So a stale expectation is not inert: it is *certified*. A fixture whose
   expected verdict contradicts the shipped contract will not fail a test, it will make the recorded run
   look perfect.
-- **Verdicts pair by `id`, not by position.** The emitter emits each scenario's `id` and the scorer
-  refuses a verdicts file whose entries carry no id unless `--allow-legacy-positional` is passed.
-  What keeps a run blinded is the emitter withholding `expected`, `note` and `axis`, which the
-  harness asserts. The id is emitted for pairing; do **not** restate that as "an identifier is not an
-  answer" — in this fixture set two ids (`s4-cross-group-match-is-not-a-bump`,
-  `s8-near-miss-negative`) name their own expected verdicts, so anyone reading the repository can see
-  the answers. That is a transparency property of a *committed* evidence file, and the honest handling
-  is to record it rather than to build id-scrubbing for the blinded input, which is already sound.
+- **Verdicts pair by `id`, not by position.** The emitter emits an **opaque** id per scenario
+  (`opaque_id`, a hash of the authored id) and the scorer refuses a verdicts file whose entries carry
+  no id unless `--allow-legacy-positional` is passed. The scorer accepts the opaque or the authored id,
+  so a recorded run that echoed authored ids stays scorable. The authored ids are not emitted because
+  they name expected verdicts (`s4-cross-group-match-is-not-a-bump`, `s8-near-miss-negative`) and the
+  model reads the blinded input — an earlier note here called that a property of the committed file
+  only, which was wrong (issue 190 #20). The emitter also withholds `expected`, `note` and `axis`;
+  `stage` stays, since it is the question asked and sets the verdict shape. All asserted by the harness.
   Pairing matters because positional pairing meant that
   inserting, deleting or reordering a scenario silently misaligned every verdict after it, and the
   1.0/1.0 assertion above would then have certified the wrong verdicts against the wrong scenarios
@@ -511,6 +515,7 @@ redaction detector is a stdin→stdout fingerprint script reporting rule names o
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-06 | **Issue 190, part 2, and consumer review `5430979214` (#4, #5, #17, #18, #19, #20, #21).** (1) *Credential loaders read presence, not truthiness* (#4): `context_memory_client` and `decisions_gate` filled any setting the environment left **empty**, so `CONTEXT_MEMORY_DECISIONS_ENABLED=` did not turn off a gate the credential file enabled; `key not in os.environ` now decides, in both loaders and kvasir's flag seed, and the loader-agreement test still holds. (2) *Escaped quotes* (#5): `_QUOTED` stopped at `\"`, leaving the rest of a quoted password in place; a backslash now escapes the next character (still linear), with two secret-shape entries and three slow-regex probes. (3) *Missing model* (#19): any HTTP error whose body mentioned "model" read as `model-missing`; only a 404, or a 400 saying the model was not found, does now. (4) *Atomicity* (#18): `all of`/`each of` moved from the tally tier (decides alone) to the additive tier (contributes, like "both"), so one claim about a set is not a bundle. (5) *Deepsearch* (issue 190 #10): `keywordsOmittedByCap`/`anchorsOmittedByCap` subtracted only completed and malformed passes, so a timed-out pass and every not-run pass after it read as cap omissions; omitted-by-cap is now requested minus every recorded pass, and a traversal skipped for a context selector is 0 (its own flag discloses it). The consumer's patch used `len(keywords) - len(keyword_plan)`, which dropped keywords left when the aggregate limit filled from every count. (6) *Blinded fixture input* (issue 190 #20, recurring issue 179 #39): the emitter sent the authored scenario ids, which name expected verdicts, into the model's own input; it now sends `opaque_id` (a hash, stable under reordering) and the scorer accepts either form, so recorded runs score unchanged. The note here that called this a property of the committed file only is corrected. (7) *Link fixture* (#21): live `scenarios.json` s5 expected `link` for a same-group restatement, which is a version bump; the candidate is now a distinct, related fact, and a test refuses a link scenario restating a same-group memory. Frozen fixtures untouched. (8) *Docs:* README no longer offers `export` on the read client (issue 190 #9); SKILL.md promises a full `--dryrun` only when the `groupUuid` is known read-only, which excludes an existing group with no memories (#20); every vendored Mímisbrunnr `AGENTS.md` now says its HLD/LADR/PR numbers are upstream's (#17). Every fix fails its test on the pre-fix code (mutation-checked). `run_tests.py` 236 -> 242, gate harness 159 -> 161. | issue 190, review 5430979214 |
 | 2026-10-06 | **Issue 190, part 1 — persisted values pass both steps, every read surface frames, a bad endpoint refuses.** (1) The capture procedures (SKILL.md, `agents/memory-write.md`, the registration, LADR-007) have the agent mask every secret it recognises as `<REDACTED>` before the first batch file exists, the same discipline as personal data, so the redactor on the file is the mechanical second check; an existing scratch folder is repaired to `chmod 700` first, since `mkdir -m` leaves an existing folder's mode alone (findings 2, 12, 19). (2) The capture client frames every command that prints stored content — `get-blob`, `get-versions`, the traversals and listings — through the same `run_framed` the read client uses, now in the shared module (finding 6). (3) `decisions_gate.py score` validates the endpoint once before any record, so an invalid URL is a refusal (exit 1, `bad-decisions-url`) instead of a per-record outcome the export skipped past (finding 7); three tests that pinned the old mark-and-continue design now pin the refusal. Each fix fails its test on the pre-fix code. `run_tests.py` 232 -> 236. | issue 190 |
 | 2026-10-06 | **Issue 188.** *Personal data in scratch files (findings 2, 8, 9, 13, 16 — the open class), fixed across all the text:* SKILL.md, `agents/memory-write.md`, the `.agents/agents/memory-write.md` registration and LADR-007 now have the agent **mask and generalise every personal identifier — personal data as the GDPR defines it — before the first batch or payload file exists**: the value is dropped, a person is named by role (*"the user"*) and a value by its type (*"an identity number"*), until no one can be singled out, and a fact meaningless once generalised is not captured; none presents cleanup as what removes it. The batch is therefore the not-yet-*secret*-redacted copy only, and because nothing personal is written, nothing personal reaches the store — which is what keeps a saga bundle or dossier free of it. *URLs carrying data (1, 6, 23):* every origin validator (client `base_url`, gate `resolve_endpoint`, saga, muninn) refuses the `?`, `#` and `;` delimiters themselves — `urlparse` reads `http://localhost:5141?` as an empty query — the gate's path refuses a query, fragment or `;` parameter (`?token=`), a URL with no host is refused, and no refusal or report echoes an unaccepted scheme. *Incomplete answers read as success (11, 22):* `get-versions`, `labels`, `initiatives`, `paths` and `ticket-paths` refuse an answer without their documented lists (`require_lists`), and deepsearch treats a versionless row as unreadable. *Docs (7, 10, 12, 15):* `set` needs an existing `groupUuid`, so a dry run for a new group previews the plan without the set stage and its payload is built after creation; the initiative prerequisite applies on the create path only; the read registration says to launch without any write-token spelling. *Tests (24, 25, portability):* the live s12 recalled record states one value (frozen run untouched); every gate case starts with no `CONTEXT_MEMORY_DECISIONS_*` set, proved by a child run with hostile settings exported. Each fix fails its test on the pre-fix code. `run_tests.py` 226 -> 232, gate harness 157 -> 159. | issue 188 |
 | 2026-10-06 | **Issue 186, fixed by defect class rather than by line.** *Write-before-redact* (findings 3, 10, 16; third round): the channel is unchanged and now recorded as **LADR-007**, and the one unredacted copy is bounded at every site that writes or reads it — the scratch folder is created owner-only (`mkdir -p -m 700`) in SKILL.md, `agents/memory-write.md` and the `.agents/agents/memory-write.md` registration (which also gains the `.gitignore` step it lacked), and `redact.load_input` (so `redact.py`, `atomicity.py` and both clients' `--payload`) refuses a file that neither it nor its folder makes owner-only, leaving it in place. *Secret-shaped input bypassing redaction* (2, 8, 19): session-ID keys (`sessionId`, `session_id`, `JSESSIONID`, `PHPSESSID`, `connect.sid`) are a value-gated rule that also takes a UUID; a quoted value runs to its closing quote or end of line with no 512-character cap (still linear); the gate pairs redactor results by `candidate_index` with every index exactly once and a text `redacted`, instead of by position. *Remote text echoed* (9): the client's `ClientError` carries `problem_text` — a problem object's title, detail, field errors and path, bounded — never the raw body, and the gate reports an HTTP failure by status and body size only. *Malformed response read as success* (17, 18): `query` refuses a body without an `items` list instead of framing it as a recall, and the recall notice is written last so a store field cannot replace it. Also: the attempt ledger keys a record by `groupUuid`/`group` as well as its subject (25; a record carrying neither keeps the old key); `openai.yaml`'s default prompt writes only on an explicit `--export` (24); the scorer requires `redacted_must_keep` facts in a scrub (26, live `scenarios.json` s1 only — frozen runs untouched) and refuses a mixed id/positional run (27); the calibration's determinism check reports the first divergence of every later pass (32); the credential-step test reads this skill's SKILL.md, not the host repository's README, and the calibration-bar test skips a `scripts/run.sh` that is not the Mímisbrunnr launcher (vendoring portability). Every fix has a test that fails on the pre-fix code (mutation-checked). `run_tests.py` 219 -> 226, gate harness 152 -> 157. | issue 186 |

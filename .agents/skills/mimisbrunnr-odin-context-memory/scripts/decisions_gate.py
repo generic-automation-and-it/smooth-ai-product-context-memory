@@ -106,7 +106,9 @@ def load_machine_credentials(*names):
             continue
         key, _, value = line.partition("=")
         key = key.strip()
-        if key in wanted and value and not os.environ.get(key):
+        # Presence, not truthiness: an explicitly set empty value is the operator turning a setting
+        # off — `CONTEXT_MEMORY_DECISIONS_ENABLED=` must not be re-enabled from the file (review #4).
+        if key in wanted and value and key not in os.environ:
             os.environ[key] = value.strip()
     return MACHINE_CREDENTIAL_FILE
 
@@ -620,7 +622,11 @@ def call_model(state, roles, settings, rubric_version):
     except urllib.error.HTTPError as exc:
         detail = (exc.read().decode("utf-8", errors="replace") or "").strip()
         # A missing model is the one HTTP failure an operator can act on without reading a traceback.
-        if exc.code == 404 or "model" in detail.lower():
+        # Only a 404 — or a 400 whose body names the model as not found — reads as missing. Any
+        # status whose body merely mentions "model" (a 500 from inside the model server, say) was
+        # reported as a missing model, sending the operator to pull a model that was there (review #19).
+        if exc.code == 404 or (exc.code == 400 and re.search(r"model\b.*\bnot found|no such model",
+                                                             detail, re.IGNORECASE)):
             raise GateError("model-missing",
                             f"the decision model is not available ({exc.code})") from None
         # The body is read only to classify, never echoed: the endpoint may be hosted, and its error

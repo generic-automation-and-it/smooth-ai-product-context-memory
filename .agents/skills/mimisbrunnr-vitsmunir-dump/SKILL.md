@@ -121,6 +121,10 @@ Only when the user asks to update/create/synthesize an artifact:
 - Confirm the target if multiple were mentioned.
 - Resolve bindings (below) before writing any repository or ticket into the artifact.
 - Use the accumulated context and any final decisions.
+- **Before the artifact is written**, mask secrets as `<REDACTED>` and remove or generalise every
+  personal identifier — names, emails, account names, identity numbers — to a role or type ("the
+  reviewer", "an identity number") until no one can be singled out. Never copy unprocessed braindump
+  content into a repository file or ticket: a file deleted or edited afterwards was still written.
 - Produce the requested artifact directly: issue description, ADR, worktask, PR body, implementation checklist, acceptance criteria, etc.
 - Preserve decisions and non-goals explicitly.
 - Include open questions only when still unresolved.

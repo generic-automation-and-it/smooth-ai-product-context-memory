@@ -20,6 +20,7 @@ import os
 import re
 import subprocess
 import sys
+import shutil
 import tempfile
 import unittest
 from contextlib import redirect_stdout, redirect_stderr
@@ -820,6 +821,8 @@ SECRET_SHAPES = (
     ("jwt", _fake("ey", "JhbGciOiJIUzI1NiJ9.", "ey", "JzdWIiOiIxMjM0In0.", "dBjftJeZ4CVPmB92K27uhbUJU1p1r"),
      ["dBjftJeZ4CVPmB92K27uhbUJU1p1r", "JzdWIiOiIxMjM0In0"]),
     ("long quoted password", 'password="' + "Hunter2-FAKE " * 60 + '" done', ["Hunter2-FAKE"]),
+    ("escaped double quote", 'password="ab\\"cdFAKE123" ok', ["cdFAKE123"]),
+    ("escaped single quote", "password='ab\\'cdFAKE123' ok", ["cdFAKE123"]),
     ("long quoted unterminated", "password='" + "s3cretFAKE" * 70, ["s3cretFAKE"]),
     ("session id key", "sessionId=ses_FAKEaaedbbffe3WQq4eMmqdT6Ia", ["FAKEaaedbbffe3WQq4eMmqdT6Ia"]),
     ("session id snake", "session_id: abcd1234FAKE1234abcd", ["abcd1234FAKE1234abcd"]),
@@ -967,7 +970,8 @@ class SecretShapeCoverageTests(unittest.TestCase):
 
         for fragment in ("key=", "password=", "sk-", "sk-eyJ", "a://", '"password": "', "Bearer a1",
                          "pwd:", "session=", "cookie: ", "pwd=", "pwd = ", "pwd=$", "pwd=%", ";pwd=a;",
-                         'password="a', "password='a ", 'password="', "sessionId=", "x.sid="):
+                         'password="a', "password='a ", 'password="', "sessionId=", "x.sid=",
+                         'password="\\', 'password="\\"', "password='\\'"):
             text = fragment * (120_000 // len(fragment))
             with self.subTest(fragment=fragment):
                 started = time.perf_counter()
@@ -1151,6 +1155,16 @@ class ScratchInputConsumeTests(unittest.TestCase):
                         capture_output=True, text=True, timeout=30, env=env)
                     self.assertIn("--consume", completed.stdout)
 class AtomicityTests(unittest.TestCase):
+    def test_a_universal_quantifier_alone_is_one_claim(self):
+        """Review #18: "all of" / "each of" sat with the enumerators, so a single claim about a set was
+        flagged as a bundle. It now contributes like "both", and a real enumeration still bundles."""
+        for text in ("All of the retries are idempotent.", "Each of the workers reads the same queue."):
+            with self.subTest(text=text):
+                self.assertEqual(atomicity.classify(text)["verdict"], "simple")
+        self.assertEqual(atomicity.classify(
+            "All of the retries are idempotent, and each of the workers also reads one queue.")["verdict"],
+            "bundled")
+
     def test_single_atomic_fact_is_simple(self):
         verdict = atomicity.classify("PostgreSQL stores our search index.")
         self.assertEqual(verdict["verdict"], "simple")
@@ -2293,6 +2307,32 @@ class DeepSearchTests(unittest.TestCase):
                     self.assertEqual(disclosure["anchorsOmittedByCap"], 0)
                     self.assertEqual(disclosure["anchorsExecuted"], 0)
 
+    def test_a_failed_pass_is_not_a_cap_omission(self):
+        """Issue 190 #10: omitted-by-cap subtracted only completed and malformed passes, so a pass that
+        timed out — and every pass marked not-run after it — was reported as left out by the cap,
+        pointing the reader at the cap instead of the failure."""
+        anchors = [self.row(n) for n in range(1, deepsearch.MAX_TRAVERSALS + 3)]
+        for failing in ("keyword", "traversal"):
+            with self.subTest(failing=failing):
+                def request(method, path, payload, **kwargs):
+                    if path.endswith("paths"):
+                        if failing == "traversal":
+                            raise client.ClientError(None, "timed-out", "")
+                        return {"paths": []}
+                    if payload.get("query") is None:
+                        return {"items": anchors}
+                    raise client.ClientError(None, "timed-out", "")
+
+                result = deepsearch.execute({"baseline": {"facets": ["storage"]},
+                                             "keywords": ["alpha", "beta", "gamma"]}, request=request)
+                disclosure = result["disclosure"]
+                self.assertTrue(disclosure["stoppedEarly"])
+                self.assertEqual(disclosure["keywordsOmittedByCap"], 0)
+                # Only the anchors past MAX_TRAVERSALS were left out by the cap; the failed and
+                # not-run ones are in passesIncomplete.
+                self.assertEqual(disclosure["anchorsOmittedByCap"], len(anchors) - deepsearch.MAX_TRAVERSALS)
+                self.assertTrue(disclosure["passesIncomplete"])
+
     def test_a_malformed_traversal_does_not_stop_the_next_anchor(self):
         # Like a forbidden anchor: the store answered, so the deadline is not the problem.
         anchors = [self.row(1), self.row(2)]
@@ -2653,6 +2693,14 @@ class AuthorityTests(unittest.TestCase):
         # One attempt plus the standard handler's default of three retries, which covers PUT too.
         self.assertEqual(cost.HTTP_ATTEMPTS_PER_REQUEST, 1 + 3)
 
+def _scratch(case, name):
+    """A scratch file in a temporary directory the case removes. A fixed name in the tests folder let
+    two concurrent runs overwrite and delete each other's file mid-test."""
+    folder = tempfile.mkdtemp()
+    case.addCleanup(shutil.rmtree, folder, True)
+    return Path(folder) / name
+
+
 class SemanticFixtureTests(unittest.TestCase):
     def test_blinded_model_input_excludes_expected_verdicts(self):
         completed = subprocess.run(
@@ -2664,19 +2712,55 @@ class SemanticFixtureTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 0)
         payload = json.loads(completed.stdout)
         self.assertTrue(payload["scenarios"])
-        # `id` is now emitted, because without it the scorer can only pair by position — and the
+        # An id is emitted, because without it the scorer can only pair by position — and the
         # 1.0/1.0 assertion below would then certify the wrong verdicts against the wrong scenarios
-        # with nothing failing. What keeps the run blinded is the withholding asserted on the next
-        # line; the id is emitted for pairing and is not a general licence to read intent off a
-        # string, since in this fixture set two ids name their own expected verdicts. That is a
-        # transparency property of a committed evidence file, not of this input.
-        # `axis` must stay withheld: it says which way the pair is meant to fall.
+        # with nothing failing. `axis` must stay withheld: it says which way the pair is meant to fall.
         self.assertTrue(all("id" in scenario for scenario in payload["scenarios"]))
         self.assertTrue(all("expected" not in scenario and "note" not in scenario
                             and "axis" not in scenario
                             for scenario in payload["scenarios"]))
         self.assertEqual(len({scenario["id"] for scenario in payload["scenarios"]}),
                          len(payload["scenarios"]))
+
+    def test_the_blinded_input_does_not_carry_the_authored_ids(self):
+        """Issue 190 #20 (issue 179 #39): the authored ids name expected verdicts
+        (`s8-near-miss-negative`), and the model reads the blinded input, so emitting them put the
+        answer in its context. The emitted id is opaque and carries no word of the authored one."""
+        payload = json.loads(subprocess.run(
+            [sys.executable, str(HERE / "fixtures" / "score_fixtures.py"), "--emit-model-input"],
+            capture_output=True, text=True, check=True).stdout)
+        scenarios = json.loads((HERE / "fixtures" / "scenarios.json").read_text())["scenarios"]
+        words = {w for s in scenarios for w in re.split(r"[^a-z]+", s["id"].lower()) if len(w) > 2}
+        words |= {w for s in scenarios for w in re.split(r"[^a-z]+", s["expected"]["verdict"]) if w}
+        for emitted in payload["scenarios"]:
+            with self.subTest(id=emitted["id"]):
+                self.assertNotIn(emitted["id"], {s["id"] for s in scenarios})
+                self.assertFalse([w for w in words if w in emitted["id"].lower()], emitted["id"])
+
+    def test_a_run_echoing_the_opaque_ids_scores_like_the_recorded_run(self):
+        """The recorded run echoed the authored ids and stays scorable; a run taken against the opaque
+        input pairs to the same scenarios and scores the same."""
+        fixtures = HERE / "fixtures"
+        sys.path.insert(0, str(fixtures))
+        try:
+            import score_fixtures
+        finally:
+            sys.path.remove(str(fixtures))
+        verdicts = json.loads((fixtures / "model-verdicts-2026-09-29-balanced.json").read_text())
+        opaque = [dict(v, id=score_fixtures.opaque_id(v["id"])) for v in reversed(verdicts)]
+        scratch = _scratch(self, "opaque-verdicts.json")
+        scratch.write_text(json.dumps(opaque))
+
+        def score(path):
+            done = subprocess.run([sys.executable, str(fixtures / "score_fixtures.py"),
+                                   "--fixtures", str(BALANCED_FIXTURE), "--model-verdicts", str(path)],
+                                  capture_output=True, text=True, check=False)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            return json.loads(done.stdout)
+
+        recorded, echoed = score(fixtures / "model-verdicts-2026-09-29-balanced.json"), score(scratch)
+        self.assertEqual(echoed, recorded)
+        self.assertEqual((echoed["recall"], echoed["precision"]), (1.0, 1.0))
 
     def test_committed_blinded_semantic_evidence_scores_cleanly(self):
         # The 2026-09-29-balanced run is the latest recorded measurement, with balanced controls. Not
@@ -2743,7 +2827,7 @@ class SemanticFixtureTests(unittest.TestCase):
         # The property positional pairing could not have. Reversed input, same score.
         fixtures = HERE / "fixtures"
         verdicts = json.loads((fixtures / "model-verdicts-2026-09-29-balanced.json").read_text())
-        reordered = HERE.parent / "tests" / ".reordered-verdicts.json"
+        reordered = _scratch(self, "reordered-verdicts.json")
         reordered.write_text(json.dumps(list(reversed(verdicts))))
         try:
             completed = subprocess.run(
@@ -2757,6 +2841,21 @@ class SemanticFixtureTests(unittest.TestCase):
             self.assertTrue(all(row["match"] for row in score["rows"]))
         finally:
             reordered.unlink()
+
+    def test_a_link_scenario_does_not_restate_a_same_group_memory(self):
+        """Review #21: s5 expected `link` for a candidate repeating a same-group memory's description —
+        a version bump by the write path's own identity rule — so the fixture rewarded the wrong
+        verdict. A link must relate two distinct facts."""
+        def norm(text):
+            return " ".join((text or "").lower().rstrip(".").split())
+        scenarios = json.loads((HERE / "fixtures" / "scenarios.json").read_text())["scenarios"]
+        for s in scenarios:
+            if s.get("expected", {}).get("verdict") != "link":
+                continue
+            for m in s.get("recall_set", []):
+                if m.get("group_uuid") == s.get("candidate_group_uuid"):
+                    with self.subTest(scenario=s["id"], memory=m["uuid"]):
+                        self.assertNotEqual(norm(s["candidate_description"]), norm(m["description"]))
 
     def test_negative_controls_are_at_least_as_numerous_as_positive_pairs(self):
         # NFR-02's acceptance criterion, asserted so it cannot quietly unbalance again. Labelled on
@@ -2798,8 +2897,8 @@ class SemanticFixtureTests(unittest.TestCase):
     def _score(self, scenarios, verdicts, extra=()):
         """Score a synthetic run through the real CLI, so the numbers under test are the ones a
         reader of the output actually sees rather than a re-implementation of them."""
-        scratch = HERE / ".synthetic-fixtures.json"
-        verdicts_path = HERE / ".synthetic-verdicts.json"
+        scratch = _scratch(self, "synthetic-fixtures.json")
+        verdicts_path = _scratch(self, "synthetic-verdicts.json")
         scratch.write_text(json.dumps({"scenarios": scenarios}))
         verdicts_path.write_text(json.dumps(verdicts))
         try:
@@ -2959,7 +3058,7 @@ class SemanticFixtureTests(unittest.TestCase):
     def test_emission_refuses_a_recall_scenario_without_a_writing_group(self):
         scenarios = self._scenarios()
         del scenarios[1]["candidate_group_uuid"]
-        scratch = HERE / ".ungrouped-fixtures.json"
+        scratch = _scratch(self, "ungrouped-fixtures.json")
         scratch.write_text(json.dumps({"scenarios": scenarios}))
         try:
             completed = subprocess.run(
@@ -3272,7 +3371,11 @@ class AgentContractTests(unittest.TestCase):
         skill = " ".join((HERE.parent / "SKILL.md").read_text(encoding="utf-8").split())
         worker = " ".join((self.AGENTS / "memory-write.md").read_text(encoding="utf-8").split())
         agents = " ".join((HERE.parent / "AGENTS.md").read_text(encoding="utf-8").split())
-        self.assertIn("For a group that does **not exist yet**, `set` cannot run", skill)
+        # Review 5430979214 #20: an existing group with no memories has no read-only `groupUuid`
+        # either, so it gets the offline preview too, in both the skill and the worker.
+        self.assertIn("a group that does not exist yet, or an existing group with no memories", skill)
+        self.assertIn("`set` cannot run", skill)
+        self.assertIn("for a group that does not exist yet, or an existing group with no memories", worker)
         self.assertIn("after creation supplies its `groupUuid`", worker)
         self.assertIn("on the create path an initiative must exist first", agents)
         self.assertNotIn("and an initiative must exist first.**", agents)
@@ -3999,6 +4102,12 @@ class DirectionAliasTests(unittest.TestCase):
         with _no_write_tokens(), patch.object(sys, "argv", ["read", "export"]), \
                 redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             read_client.main()
+
+    def test_the_readme_does_not_offer_export_on_the_read_client(self):
+        """Issue 190 #9: the README said both clients accept `export`, which the read client rejects."""
+        readme = (HERE.parent / "README.md").read_text(encoding="utf-8")
+        self.assertNotRegex(readme, r"(?i)both clients[^.\n]*`export`")
+        self.assertIn("the read-only client accepts `import` only", readme)
 
 
 if __name__ == "__main__":
