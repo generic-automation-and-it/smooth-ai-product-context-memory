@@ -652,6 +652,53 @@ class Nfr07FidelityTests(unittest.TestCase):
                 self.assertIn("these re-capture one source", rendered)
                 self.assertNotIn("these are distinct sources", rendered)
 
+    def test_a_condition_stated_only_in_the_body_survives(self):
+        """Issue 190: conditions were read from the statement alone, so a claim qualified only in its
+        body ("…unless the batch is replayed") rendered as unqualified. Body conditions, later
+        occurrences of a marker, and a consolidated claim's other origins are all kept and cited."""
+        first = dict(_mk("11111111-1111-1111-1111-111111111111", "Retry", "Exports retry three times.",
+                         created="2026-01-01T10:00:00Z"),
+                     bodyText="Exports retry three times. Retries stop unless the batch is replayed. "
+                              "Replays are allowed only after an operator approves them.")
+        second = dict(_mk("22222222-2222-2222-2222-222222222222", "Retry", "Exports retry three times.",
+                          created="2026-01-02T10:00:00Z"),
+                      bodyText="Exports retry three times. Retry windows must stay under one hour.")
+        judg = {"equivalences": [{"uuids": [first["uuid"], second["uuid"]], "meaning": "same"}]}
+        rendered = dc.render(dc.compose(_bundle([first, second]), focus=None, judgements=judg))
+        for condition in ("Retries stop unless the batch is replayed.",
+                          "Replays are allowed only after an operator approves them.",
+                          "Retry windows must stay under one hour."):
+            self.assertIn(f"condition: {condition}", rendered)
+        self.assertIn("Retry windows must stay under one hour. — [memory 22222222-2222-2222-2222-222222222222 v1", rendered)
+
+    def test_overlapping_sources_are_not_independent(self):
+        """Issue 190: origins sharing one source but not all — `[A, B]` and `[B, C]` — were labelled
+        distinct sources and shown as independent observations."""
+        a = {"kind": "doc", "reference": "SPEC-1"}
+        b = {"kind": "ticket", "reference": "ABC-2"}
+        c = {"kind": "doc", "reference": "SPEC-3"}
+        items = [
+            dict(_mk("11111111-1111-1111-1111-111111111111", "A", "The default is A.",
+                     created="2026-01-01T10:00:00Z"), sources=[a, b]),
+            dict(_mk("22222222-2222-2222-2222-222222222222", "B", "The default is A.",
+                     created="2026-01-02T10:00:00Z"), sources=[b, c]),
+        ]
+        judg = {"equivalences": [{"uuids": [i["uuid"] for i in items], "meaning": "same"}]}
+        rendered = dc.render(dc.compose(_bundle(items), focus=None, judgements=judg))
+        self.assertIn("these share a source, so they are not independent observations", rendered)
+        self.assertNotIn("shown as independent observations", rendered)
+
+    def test_capture_times_with_offsets_order_as_instants(self):
+        """Issue 190: the tiebreak compared capture times as text, so `10:00+02:00` (08:00 UTC) sorted
+        after `09:00Z`."""
+        early = _mk("bbbbbbbb-0000-4000-8000-000000000002", "Early", "Claim E.",
+                    created="2026-01-01T10:00:00+02:00", valid_from="2026-01-01")
+        late = _mk("aaaaaaaa-0000-4000-8000-000000000001", "Late", "Claim L.",
+                   created="2026-01-01T09:00:00Z", valid_from="2026-01-01")
+        doc = dc.compose(_bundle([late, early]), focus=None)
+        order = [c["origins"][0]["uuid"] for c in doc.claims]
+        self.assertEqual(order, [early["uuid"], late["uuid"]])
+
     def test_differing_customer_scope_claims_not_consolidated(self):
         """NFR-07: two claims sharing wording but differing in customer scope are not consolidated."""
         items = [
@@ -2378,7 +2425,14 @@ class PersonalDataTextTests(unittest.TestCase):
         text = " ".join((Path(dc.__file__).resolve().parents[1] / "SKILL.md").read_text(
             encoding="utf-8").split())
         self.assertNotIn("which can hold personal data", text)
-        self.assertIn("the capture rule keeps personal data out of the store", text)
+        # Issue 190: the bundle was assumed free of personal data; older records may not be, so the
+        # workflow establishes it before anything reaches disk and stops when it cannot.
+        self.assertNotIn("so the bundle, like the dossier composed from it, holds none", text)
+        self.assertIn("establish that the approved slice holds no personal data", text)
+        self.assertIn("stop — do not write the bundle or the", text)
+        readme = " ".join((Path(dc.__file__).resolve().parents[1] / "README.md").read_text(
+            encoding="utf-8").split())
+        self.assertIn("Make sure the approved slice holds no personal data first", readme)
         self.assertIn("a judgement adds no personal data to a file", text)
         self.assertIn("(GDPR personal data) is masked and generalised", text)
 

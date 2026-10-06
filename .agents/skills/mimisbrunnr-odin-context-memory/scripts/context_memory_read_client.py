@@ -31,7 +31,7 @@ FRAMED_COMMANDS = frozenset(READ_COMMANDS - UNFRAMED_COMMANDS)
 # Commands whose stdout is a body, not a structured result. They are still framed — the banner is the
 # only framing a raw body can carry — but the body is never parsed and re-serialised, so a blob that
 # happens to be valid JSON comes back byte-identical to what the store holds.
-RAW_BODY_COMMANDS = frozenset({"get-blob"})
+RAW_BODY_COMMANDS = client.RAW_BODY_COMMANDS
 
 
 def main():
@@ -90,79 +90,11 @@ def main():
     return 0
 
 
-def _run_framed(args):
-    """Run a subcommand and frame whatever it printed.
-
-    Capturing stdout rather than routing each `cmd_*` through `print_recall` is what makes the framing
-    a default rather than a per-subcommand decision: nine call sites each remembering to print a notice
-    is nine chances to add a tenth and forget, and the read client's own subcommand list is the only place
-    that knows which surfaces exist.
-    """
-    import io
-    from contextlib import redirect_stdout
-
-    buffer = io.StringIO()
-    with redirect_stdout(buffer):
-        result = args.func(args)
-    captured = buffer.getvalue()
-    # A raw body goes out exactly as the store returned it — not stripped, no newline appended —
-    # because the caller asked for the body and may hash or diff it. The inner command prints no
-    # banner, so the banner is unconditional here: a body quoting the notice must not suppress it.
-    if getattr(args, "command", None) in RAW_BODY_COMMANDS:
-        if captured:
-            print(client.BANNER_PREFIX + client.RECALL_NOTICE)
-            sys.stdout.write(captured)
-        return result
-    raw = captured.strip()
-    if not raw:
-        return result
-    # Single emission comes from this buffer, not from a banner check: whatever the inner layer printed
-    # is captured here and discarded, and only the re-emitted payload reaches stdout. So an inner
-    # `cmd_query` banner never gets out, and `print_recall` is free to print its own on every path
-    # without coordinating with it.
-    payload = _parse_framed_json(raw)
-    # Not JSON — a formatted error, say — takes the banner-and-passthrough path rather than the framed
-    # envelope: there is nothing to carry a field. Raw-body commands returned above for the same reason,
-    # and because a body that happens to be valid JSON must not be re-indented into an envelope.
-    if payload is _NOT_JSON:
-        # The notice check is here only so output that already arrived framed (an inner layer that
-        # printed its own banner) is not given a second one; a repeated notice reads as emphasis and
-        # trains a reader to scroll past it.
-        if client.RECALL_NOTICE not in raw:
-            print(client.BANNER_PREFIX + client.RECALL_NOTICE)
-        print(raw)
-        return result
-    client.print_recall(payload)
-    return result
-
-
-# Sentinel distinguishing "not JSON" from "JSON that happens to be null", which a bare `None` cannot do.
-_NOT_JSON = object()
-
-
-def _parse_framed_json(raw: str):
-    """Parse stdout that may already carry a banner from an inner framing layer.
-
-    `query` and `deepsearch` are reachable from both the capture client and the read client, and the
-    inner one frames on its own. So the text arriving here can be `banner + JSON`, and parsing the whole
-    thing as JSON fails — which previously fell through to the not-JSON branch and emitted a *second*
-    banner, which reads as emphasis and trains a reader to scroll past it.
-
-    Tried on the whole text first, then from the first brace. The second attempt is what recovers the
-    already-bannered case; it cannot misclassify a raw body, because a body that parses from its first
-    brace would have parsed whole.
-    """
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        pass
-    start = raw.find("{")
-    if start == -1:
-        return _NOT_JSON
-    try:
-        return json.loads(raw[start:])
-    except json.JSONDecodeError:
-        return _NOT_JSON
+# The framing dispatch lives in the shared client module so the capture client's read commands use the
+# same code (issue 190); the names are kept here for the read client's own dispatch and its tests.
+_run_framed = client.run_framed
+_parse_framed_json = client._parse_framed_json
+_NOT_JSON = client._NOT_JSON
 
 
 def print_deepsearch(args):

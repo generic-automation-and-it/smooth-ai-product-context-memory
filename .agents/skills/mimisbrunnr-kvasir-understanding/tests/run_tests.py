@@ -1608,6 +1608,68 @@ class ImportTests(unittest.TestCase):
             self.assertNotIn("Rendered 0 record(s)", out)
 
 
+class DumpBindingScrubTests(unittest.TestCase):
+    """Issue 190: `_session.md` was scrubbed but `_dump.json` and the folder name were written from the
+    flags as supplied, so a secret or an email passed as a binding value or a session name reached disk."""
+
+    def setUp(self):
+        self.original = uc.heimdallr_scan
+        uc.heimdallr_scan = lambda: {}
+
+    def tearDown(self):
+        uc.heimdallr_scan = self.original
+
+    def test_no_binding_value_or_folder_name_reaches_disk_unscrubbed(self):
+        secret = "ghp_" + "FAKE" * 9
+        email = "someone.fake@corp.example"
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "dump"
+            rc, out, err = run(["dump", "--currentsession", "--out", str(out_dir), "--heimdallr", "false",
+                                "--tickets", f"github:1,token:{secret}", "--tags", f"ok,{email}",
+                                "--repository", "org/repo", "--initiative", f"password={secret}"])
+            self.assertEqual(rc, 0, err)
+            on_disk = "".join(f.read_text(encoding="utf-8") for f in out_dir.iterdir() if f.is_file())
+            self.assertNotIn(secret, on_disk + out + err)
+            self.assertNotIn(email, on_disk + out + err)
+            binding = json.loads((out_dir / uc.METADATA_FILE).read_text(encoding="utf-8"))["binding"]
+            self.assertEqual(binding["tickets"], ["github:1"])
+            self.assertEqual(binding["tags"], ["ok"])
+            self.assertEqual(binding["repository"], "org/repo")
+            self.assertNotIn("initiative", binding)
+            for field in ("tickets", "tags", "initiative"):
+                self.assertIn(f"a {field} value carried a secret or personal data", err)
+
+    def test_a_session_name_carrying_personal_data_is_not_the_folder_name(self):
+        email = "someone.fake@corp.example"
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            subprocess.run(["git", "init", "-q", tmp], check=True)
+            (Path(tmp) / ".gitignore").write_text(".context/\n", encoding="utf-8")
+            try:
+                rc, out, err = run(["dump", "--currentsession", "--heimdallr", "false",
+                                    "--session-name", f"notes for {email}"])
+            finally:
+                os.chdir(Path(__file__).resolve().parent)
+            self.assertEqual(rc, 0, err)
+            names = [p.name for p in (Path(tmp) / ".context").rglob("*")]
+            self.assertFalse(any("corp" in name or "someone" in name for name in names), names)
+            self.assertIn("--session-name carried a secret or personal data", err)
+
+    def test_an_unavailable_redactor_writes_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "dump"
+            original = uc.redact
+            uc.redact = lambda content: None
+            try:
+                rc, _, err = run(["dump", "--currentsession", "--out", str(out_dir), "--heimdallr", "false",
+                                  "--tickets", "github:1"])
+            finally:
+                uc.redact = original
+            self.assertEqual(rc, 1)
+            self.assertIn("REFUSED", err)
+            self.assertFalse(out_dir.exists())
+
+
 class DumpTests(unittest.TestCase):
     def test_dump_requires_currentsession(self):
         rc, _, err = run(["dump"])
@@ -2985,6 +3047,12 @@ class CaptureScriptAnswerShapeTests(unittest.TestCase):
             with self.subTest(shape=name):
                 self.assertIsNone(self._with_answer(results, lambda: uc.gate_atomicity(two)))
                 self.assertIsNone(self._with_answer(results, lambda: uc.gate_redaction(["A.", "B."])))
+        # Issue 190: a verdict other than simple/bundled was filed as clean.
+        for verdict in ("unknown", "", "BUNDLED"):
+            with self.subTest(verdict=verdict):
+                answer = [{"candidate_index": 0, "verdict": verdict, "signals": []},
+                          {"candidate_index": 1, "verdict": "simple", "signals": []}]
+                self.assertIsNone(self._with_answer(answer, lambda: uc.gate_atomicity(two)))
         self.assertIsNone(self._with_answer([], lambda: uc.redact("A.")))
         self.assertIsNone(self._with_answer([{"candidate_index": 0, "redacted": 7, "findings": []}],
                                             lambda: uc.redact("A.")))
@@ -3136,6 +3204,20 @@ class ForeignJsonTests(unittest.TestCase):
     def test_store_records_still_parse(self):
         self.assertEqual(len(uc.parse_store_export(json.dumps(STORE_EXPORT))), 2)
         self.assertEqual(uc.parse_store_export("[]"), [])
+
+
+class GateEndpointRefusalTests(unittest.TestCase):
+    """Issue 190: with an invalid decision endpoint the real gate marked each record and exited 0, so
+    the export kept them unscored and carried on. Driven through the real gate subprocess."""
+
+    def test_an_invalid_decision_endpoint_refuses_the_export(self):
+        env = {"CONTEXT_MEMORY_DECISIONS_ENABLED": "true",
+               "CONTEXT_MEMORY_DECISIONS_BASE_URL": "http://decisions.invalid"}
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.dict(os.environ, dict(env, MIMIS_DECISIONS_STATE=str(Path(tmp) / "ledger.json"))):
+            survivors, note = uc.gate_decisions([{"subject": "S", "description": "S",
+                                                   "statement": "A claim."}])
+        self.assertEqual(note, uc.DECISIONS_REFUSED)
 
 
 if __name__ == "__main__":

@@ -607,10 +607,8 @@ class EndpointGuardTests(GateTestCase):
                 proc = run_gate(["score"], json.dumps([RECORD]),
                                 self.gate_env(CONTEXT_MEMORY_DECISIONS_BASE_URL=url))
                 self.assertNotIn("Traceback", proc.stderr)
-                self.assertEqual(proc.returncode, 0, proc.stderr)
-                report = json.loads(proc.stdout)
-                self.assertEqual(report["endpoint"], "<unparseable>")
-                self.assertEqual([r["outcome"] for r in report["records"]], ["bad-decisions-url"])
+                self.assertNotEqual(proc.returncode, 0)
+                self.assertEqual(json.loads(proc.stderr)["outcome"], "bad-decisions-url")
             for command in ("probe", "score"):
                 with self.subTest(port=port, command=command, enabled=False):
                     proc = run_gate([command], json.dumps([RECORD]), self.gate_env(
@@ -620,13 +618,14 @@ class EndpointGuardTests(GateTestCase):
                     self.assertEqual(json.loads(proc.stdout)["outcome"], "disabled")
         self.assertEqual(self.stub.requests, [])
 
-    def test_a_bad_endpoint_marks_records_without_failing_the_batch(self):
+    def test_a_bad_endpoint_refuses_the_batch(self):
+        """Issue 190: an invalid endpoint was recorded as each record's outcome with exit 0, so the
+        export kept every record unscored and carried on. It is configuration, so the batch refuses."""
         proc = run_gate(["score"], json.dumps([RECORD, {**RECORD, "subject": "Second"}]),
                         self.gate_env(CONTEXT_MEMORY_DECISIONS_BASE_URL="http://decisions.invalid"))
-        report = json.loads(proc.stdout)
-        self.assertEqual(proc.returncode, 0)
-        self.assertEqual([r["outcome"] for r in report["records"]],
-                         ["bad-decisions-url", "bad-decisions-url"])
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertEqual(json.loads(proc.stderr)["outcome"], "bad-decisions-url")
+        self.assertEqual(proc.stdout, "")
         self.assertEqual(self.stub.requests, [], "nothing may be sent to a refused endpoint")
 
 
@@ -1372,14 +1371,13 @@ class RequestPathGuardTests(unittest.TestCase):
         self.assertNotEqual(proc.returncode, 0)
         self.assertNotIn("evil.invalid", proc.stdout + proc.stderr)
 
-    def test_score_marks_every_record_for_a_host_moving_path(self):
+    def test_score_refuses_a_host_moving_path(self):
         proc = run_gate(["score"], json.dumps([RECORD]), {
             "CONTEXT_MEMORY_DECISIONS_ENABLED": "true",
             "CONTEXT_MEMORY_DECISIONS_BASE_URL": "http://127.0.0.1:9",
             "CONTEXT_MEMORY_DECISIONS_PATH": "//evil.invalid/v1/systemone"})
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual([r["outcome"] for r in json.loads(proc.stdout)["records"]],
-                         ["bad-decisions-url"])
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertEqual(json.loads(proc.stderr)["outcome"], "bad-decisions-url")
 
 
 class RedirectGuardTests(unittest.TestCase):

@@ -967,6 +967,11 @@ def cmd_score(args):
         return 0
 
     rubric_version, roles = load_rubric(settings["roles"])
+    # The endpoint is configuration, not a per-record condition. Checked inside `call_model` only, an
+    # invalid URL became each record's outcome, the gate exited 0, and the export kept every record
+    # unscored and carried on — a misconfigured gate read as a skipped one (issue 190). Checked once
+    # here, before any record is touched, it is a refusal like every other bad setting.
+    resolve_url(settings)
 
     redacted, findings = redact_records(records)
 

@@ -1012,7 +1012,9 @@ def gate_atomicity(candidates: list[dict]) -> list[dict] | None:
         return None
     # A short or reordered answer dropped or mis-paired candidates silently (issue 186); refuse it.
     results = _indexed_results(proc.stdout, len(candidates))
-    if results is None or not all(isinstance(r.get("verdict"), str) for r in results):
+    # Only the two verdicts the detector defines are read. Any other text was filed as "clean" by the
+    # `== "bundled"` test below, so an unknown verdict let a candidate through unchecked (issue 190).
+    if results is None or any(r.get("verdict") not in ("simple", "bundled") for r in results):
         return None
     return results
 
@@ -2208,6 +2210,44 @@ PERSONAL_DATA_RULES = [
 ]
 
 
+def _scrubbed(value: str) -> str | None:
+    """`value` after both steps — the secret redactor, then the personal-data rules — or None when the
+    redactor cannot run. One function for every string a dump persists, so no field reaches disk on a
+    path that skipped a step (issue 190)."""
+    result = redact(value)
+    if result is None:
+        return None
+    return redact_personal_data(result[0])[0]
+
+
+def scrub_binding(binding: dict) -> tuple[dict, list[str]] | None:
+    """The binding with every value that the scrub would change withheld, and the withheld field names.
+
+    The binding is written to `_dump.json` beside the scrubbed `_session.md`, but its values — ticket
+    keys, tags, the repository, scope and initiative — went to disk as supplied (issue 190). A value
+    the scrub changes is not rewritten into a placeholder (a scrubbed ticket key binds nothing) but
+    withheld, and only its field is reported, never the value. None when the redactor cannot run.
+    """
+    clean: dict = {}
+    withheld: list[str] = []
+    for field, value in binding.items():
+        values = value if isinstance(value, list) else [value]
+        kept = []
+        for item in values:
+            if not isinstance(item, str) or not item:
+                kept.append(item)
+                continue
+            scrubbed = _scrubbed(item)
+            if scrubbed is None:
+                return None
+            if scrubbed == item:
+                kept.append(item)
+            elif field not in withheld:
+                withheld.append(field)
+        clean[field] = kept if isinstance(value, list) else (kept[0] if kept else None)
+    return clean, withheld
+
+
 def redact_personal_data(content: str) -> tuple[str, dict[str, int]]:
     """Replace recognisable personal data; return the text and `{rule_name: hit_count}`.
 
@@ -2268,8 +2308,62 @@ def cmd_dump(args: argparse.Namespace) -> int:
         # Secrets first, so a credential that happens to contain an `@` is reported under its own rule.
         content, personal = redact_personal_data(content)
         findings.update(personal)
-    folder_name = derive_folder_name(content, args.session_name)
+    session_name = args.session_name
+    if session_name:
+        # The name becomes a folder on disk, so it passes both steps like the content; a name the scrub
+        # would change is not used, and the folder is named from the scrubbed content instead.
+        scrubbed_name = _scrubbed(session_name)
+        if scrubbed_name is None:
+            print(f"REFUSED: the redactor ({REDACTOR}) could not run, so the session name cannot be "
+                  "checked. Nothing was written.", file=sys.stderr)
+            return 1
+        if scrubbed_name != session_name:
+            print("NOTE: --session-name carried a secret or personal data; it was not used as the "
+                  "folder name (value not shown).", file=sys.stderr)
+            session_name = None
+    folder_name = derive_folder_name(content, session_name)
 
+    # The binding travels as structure, so an export of this folder binds by default instead of
+    # re-deriving it from prose. A dump with no binding says so explicitly rather than writing an
+    # empty object that reads as "bound to nothing on purpose".
+    binding = dump_binding(args)
+    if heimdallr_enabled(args) and (not binding["tickets"] or not binding["repository"]
+                                    or not binding["initiative"]):
+        scan = heimdallr_scan()
+        filled = []
+        if not binding["tickets"]:
+            disclosure = heimdallr_ticket_disclosure(scan)
+            if disclosure:
+                print(disclosure, file=sys.stderr)
+            found = heimdallr_autofill_tickets(scan)
+            if found:
+                binding["tickets"] = found
+                filled.append(f"tickets {','.join(found)}")
+        if not binding["repository"]:
+            disclosure = heimdallr_repository_disclosure(scan)
+            if disclosure:
+                print(disclosure, file=sys.stderr)
+            repo = heimdallr_repository(scan)
+            if repo:
+                binding["repository"] = repo
+                filled.append(f"repository {repo}")
+        if not binding["initiative"]:
+            initiative = heimdallr_initiative(scan)
+            if initiative:
+                binding["initiative"] = initiative
+                filled.append(f"initiative {initiative}")
+        if filled:
+            print(f"Heimdallr autofill ({', '.join(filled)}); an explicit flag always wins. "
+                  f"Pass --heimdallr false to disable.")
+    scrubbed_binding = scrub_binding(binding)
+    if scrubbed_binding is None:
+        print(f"REFUSED: the redactor ({REDACTOR}) could not run, so the binding cannot be scrubbed "
+              "before it is written. Nothing was written.", file=sys.stderr)
+        return 1
+    binding, withheld = scrubbed_binding
+    for field in withheld:
+        print(f"NOTE: a {field} value carried a secret or personal data and was withheld from "
+              f"{METADATA_FILE} (value not shown).", file=sys.stderr)
     if args.out:
         folder = Path(args.out)
     else:
@@ -2306,38 +2400,6 @@ def cmd_dump(args: argparse.Namespace) -> int:
     ]
     (folder / SESSION_FILE).write_text("\n".join(body), encoding="utf-8")
 
-    # The binding travels as structure, so an export of this folder binds by default instead of
-    # re-deriving it from prose. A dump with no binding says so explicitly rather than writing an
-    # empty object that reads as "bound to nothing on purpose".
-    binding = dump_binding(args)
-    if heimdallr_enabled(args) and (not binding["tickets"] or not binding["repository"]
-                                    or not binding["initiative"]):
-        scan = heimdallr_scan()
-        filled = []
-        if not binding["tickets"]:
-            disclosure = heimdallr_ticket_disclosure(scan)
-            if disclosure:
-                print(disclosure, file=sys.stderr)
-            found = heimdallr_autofill_tickets(scan)
-            if found:
-                binding["tickets"] = found
-                filled.append(f"tickets {','.join(found)}")
-        if not binding["repository"]:
-            disclosure = heimdallr_repository_disclosure(scan)
-            if disclosure:
-                print(disclosure, file=sys.stderr)
-            repo = heimdallr_repository(scan)
-            if repo:
-                binding["repository"] = repo
-                filled.append(f"repository {repo}")
-        if not binding["initiative"]:
-            initiative = heimdallr_initiative(scan)
-            if initiative:
-                binding["initiative"] = initiative
-                filled.append(f"initiative {initiative}")
-        if filled:
-            print(f"Heimdallr autofill ({', '.join(filled)}); an explicit flag always wins. "
-                  f"Pass --heimdallr false to disable.")
     metadata = {
         "generated": generated,
         "folder": folder.name,

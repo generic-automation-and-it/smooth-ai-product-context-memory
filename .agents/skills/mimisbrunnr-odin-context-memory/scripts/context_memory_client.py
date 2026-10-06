@@ -953,6 +953,93 @@ def add_payload_arguments(parser):
                         help="delete the --payload file once it has been read")
 
 
+# Commands whose stdout is a body, not a structured result. Framed with the banner only, so a blob that
+# happens to be valid JSON comes back byte-identical to what the store holds.
+RAW_BODY_COMMANDS = frozenset({"get-blob"})
+
+# Every capture-client subcommand that prints stored content. The read client frames all of its
+# commands at dispatch, but this client printed `get-blob`, `get-versions`, the traversals and the
+# listings unframed, so the same stored text arrived with the recall notice from one client and
+# without it from the other (issue 190). Every read surface frames; this is the capture client's list.
+FRAMED_COMMANDS = frozenset({"query", "get-versions", "get-blob", "paths", "ticket-paths", "labels",
+                             "initiatives"})
+
+
+def run_framed(args):
+    """Run a subcommand and frame whatever it printed.
+
+    Capturing stdout rather than routing each `cmd_*` through `print_recall` is what makes the framing
+    a default rather than a per-subcommand decision: nine call sites each remembering to print a notice
+    is nine chances to add a tenth and forget, and the read client's own subcommand list is the only place
+    that knows which surfaces exist.
+    """
+    import io
+    from contextlib import redirect_stdout
+
+    buffer = io.StringIO()
+    with redirect_stdout(buffer):
+        result = args.func(args)
+    captured = buffer.getvalue()
+    # A raw body goes out exactly as the store returned it — not stripped, no newline appended —
+    # because the caller asked for the body and may hash or diff it. The inner command prints no
+    # banner, so the banner is unconditional here: a body quoting the notice must not suppress it.
+    if getattr(args, "command", None) in RAW_BODY_COMMANDS:
+        if captured:
+            print(BANNER_PREFIX + RECALL_NOTICE)
+            sys.stdout.write(captured)
+        return result
+    raw = captured.strip()
+    if not raw:
+        return result
+    # Single emission comes from this buffer, not from a banner check: whatever the inner layer printed
+    # is captured here and discarded, and only the re-emitted payload reaches stdout. So an inner
+    # `cmd_query` banner never gets out, and `print_recall` is free to print its own on every path
+    # without coordinating with it.
+    payload = _parse_framed_json(raw)
+    # Not JSON — a formatted error, say — takes the banner-and-passthrough path rather than the framed
+    # envelope: there is nothing to carry a field. Raw-body commands returned above for the same reason,
+    # and because a body that happens to be valid JSON must not be re-indented into an envelope.
+    if payload is _NOT_JSON:
+        # The notice check is here only so output that already arrived framed (an inner layer that
+        # printed its own banner) is not given a second one; a repeated notice reads as emphasis and
+        # trains a reader to scroll past it.
+        if RECALL_NOTICE not in raw:
+            print(BANNER_PREFIX + RECALL_NOTICE)
+        print(raw)
+        return result
+    print_recall(payload)
+    return result
+
+
+# Sentinel distinguishing "not JSON" from "JSON that happens to be null", which a bare `None` cannot do.
+_NOT_JSON = object()
+
+
+def _parse_framed_json(raw: str):
+    """Parse stdout that may already carry a banner from an inner framing layer.
+
+    `query` and `deepsearch` are reachable from both the capture client and the read client, and the
+    inner one frames on its own. So the text arriving here can be `banner + JSON`, and parsing the whole
+    thing as JSON fails — which previously fell through to the not-JSON branch and emitted a *second*
+    banner, which reads as emphasis and trains a reader to scroll past it.
+
+    Tried on the whole text first, then from the first brace. The second attempt is what recovers the
+    already-bannered case; it cannot misclassify a raw body, because a body that parses from its first
+    brace would have parsed whole.
+    """
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        pass
+    start = raw.find("{")
+    if start == -1:
+        return _NOT_JSON
+    try:
+        return json.loads(raw[start:])
+    except json.JSONDecodeError:
+        return _NOT_JSON
+
+
 def main():
     parser = argparse.ArgumentParser(prog="context_memory_client")
     parser.add_argument("--base-url", help="override " + ENV_BASE_URL)
@@ -1044,7 +1131,10 @@ def main():
         os.environ[ENV_BASE_URL] = args.base_url
 
     try:
-        args.func(args)
+        if args.command in FRAMED_COMMANDS:
+            run_framed(args)
+        else:
+            args.func(args)
     except ClientError as e:
         print(str(e), file=sys.stderr)
         sys.exit(1)

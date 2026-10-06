@@ -36,6 +36,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import zipfile
 from datetime import date, datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -534,14 +535,24 @@ def published_paths(store: Path) -> set[str]:
 
     A member counts only once its bytes read back cleanly. The central directory alone lists a member
     whose data is damaged, so `namelist()` reported it published while no extract could recover it
-    (issue 182). Each member is read on its own (`member_reads_cleanly`), so one damaged unit does not
-    un-publish its siblings.
+    (issue 182). Each member is read on its own (`member_reads_cleanly`), but if any member fails
+    `consume_problems` the whole archive is refused and no member is published.
     """
     paths: set[str] = set()
     pub_dir = store.parent / PUBLISH_DIR_NAME
     if not pub_dir.is_dir():
         return paths
     for archive in sorted(pub_dir.glob("*.zip")):
+        # An archive `--consume` would refuse — an escaping or symlink entry, a damaged member, two
+        # entries landing on one path — can restore nothing, so it proves nothing was captured; it used
+        # to be credited member by member and silenced the warning (issue 190). Judged against an empty
+        # store, so only the archive's own defects count, not a collision with the units it holds.
+        try:
+            with tempfile.TemporaryDirectory() as empty:
+                if consume_problems(archive, Path(empty)):
+                    continue
+        except (zipfile.BadZipFile, OSError):
+            continue
         try:
             with zipfile.ZipFile(archive) as zf:
                 for info in zf.infolist():
@@ -669,7 +680,14 @@ def consume_problems(archive: Path, store: Path) -> list[str]:
             collide(name, f"local '{local_files.get(key) or local_dirs[key]}'")
         elif key in claimed_files or key in claimed_dirs:
             collide(name, f"'{claimed_files.get(key) or claimed_dirs[key]}' elsewhere in this archive")
+        elif resolved_key in claimed_files or resolved_key in claimed_dirs:
+            # Two entries with different names that land on one file — `alias/x` through a local
+            # symlinked folder and `real/x` — were compared by name only, so one extracted over the
+            # other (issue 190).
+            collide(name, f"'{claimed_files.get(resolved_key) or claimed_dirs[resolved_key]}' "
+                          "elsewhere in this archive (same destination)")
         claimed_files.setdefault(key, name)
+        claimed_files.setdefault(resolved_key, name)
     return problems
 
 

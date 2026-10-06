@@ -256,8 +256,21 @@ def validate_bundle(bundle):
 
 
 def _business_key(item):
-    return (item.get("validFrom") or "", item.get("createdOn") or "", item.get("uuid") or "",
-            item.get("version") or 0)
+    # Times compare as instants, not strings: `2026-01-01T10:00:00+02:00` is earlier than
+    # `2026-01-01T09:00:00Z`, but sorts later as text, so an offset capture time broke the tiebreak
+    # (issue 190). A missing value sorts first, as the empty string always did; an unparseable one
+    # keeps its text, after every parsed one.
+    return (_instant_key(item.get("validFrom")), _instant_key(item.get("createdOn")),
+            item.get("uuid") or "", item.get("version") or 0)
+
+
+def _instant_key(value):
+    if not value:
+        return (0, "")
+    parsed = _parse_time(value)
+    if parsed is not None:
+        return (1, parsed.astimezone(dt.timezone.utc).isoformat())
+    return (2, str(value))
 
 
 def topological_order(items, edges):
@@ -1226,10 +1239,14 @@ def render(dossier):
         lines.append("")
         lines.append(f"**Lifecycle:** {lifecycle}.")
         if claim.get("consolidated"):
-            source_desc = (f"these re-capture one source" if _same_source(origins)
-                           else (f"provenance incomplete for at least one origin — shown as unattributed"
-                                 if not all(o.get("sources") for o in origins)
-                                 else "these are distinct sources, shown as independent observations"))
+            source_desc = ("provenance incomplete for at least one origin — shown as unattributed"
+                           if not all(o.get("sources") for o in origins)
+                           else "these re-capture one source" if _same_source(origins)
+                           # Sharing any source is not independence: `[A, B]` and `[B, C]` both rest on
+                           # B, and were labelled independent observations (issue 190).
+                           else "these share a source, so they are not independent observations"
+                           if _sources_overlap(origins)
+                           else "these are distinct sources, shown as independent observations")
             lines.append(f"> **analysis** — consolidation basis: "
                          f"{claim.get('equivalenceClass') or 'equivalent restatements'}. "
                          f"The {len(origins)} capture(s) share meaning, applicability and lifecycle, so "
@@ -1245,9 +1262,14 @@ def render(dossier):
             if not (origin.get("sources") or []):
                 lines.append(
                     f"  - _{_cite(origin)}: no recorded source or confidence — provenance was never captured._")
-        # Conditions / exceptions preserved verbatim where paraphrase would change meaning (NFR-07).
-        for cond in _conditions(primary):
-            lines.append(f"  - condition: {cond} — {_cite(primary)}")
+        # Conditions / exceptions preserved verbatim where paraphrase would change meaning (NFR-07),
+        # from every origin of a consolidated claim, each cited to the origin that states it.
+        shown_conditions = set()
+        for origin in origins:
+            for cond in _conditions(origin):
+                if cond not in shown_conditions:
+                    shown_conditions.add(cond)
+                    lines.append(f"  - condition: {cond} — {_cite(origin)}")
         lines.append("")
         if claim.get("depth") == "summary":
             for other in origins[1:]:
@@ -1289,16 +1311,21 @@ def _conditions(item):
     verbatim. It is deliberately not exhaustive — full fidelity is a semantic property (NFR-07
     primary verification is a review), but the invariant is that a condition never *drops*.
     """
-    text = item.get("statement") or ""
     markers = ("only ", " must ", " may not ", " unless ", " except ", " requires ", " allowed ",
                " at least ", " at most ", " prior to ", " after ", " per ", " limit of ")
     found = []
-    for marker in markers:
-        idx = text.lower().find(marker)
-        if idx >= 0:
-            sentence = _sentence_at(text, idx)
-            if sentence and sentence not in found:
-                found.append(sentence)
+    # The body as well as the statement: a condition stated only in the memory's body was dropped, so
+    # a qualified claim rendered as unqualified (issue 190). Every occurrence of a marker counts, not
+    # only the first, for the same reason.
+    for text in (item.get("statement") or "", item.get("bodyText") or ""):
+        lowered = text.lower()
+        for marker in markers:
+            start = 0
+            while (idx := lowered.find(marker, start)) >= 0:
+                sentence = _sentence_at(text, idx)
+                if sentence and sentence not in found:
+                    found.append(sentence)
+                start = idx + len(marker)
     return found
 
 
@@ -1316,6 +1343,11 @@ def _same_source(origins):
     if not all(sigs):
         return False
     return len(set(sigs)) == 1
+
+
+def _sources_overlap(origins):
+    sources = [set(_source_signature(origin)) for origin in origins]
+    return any(left & right for index, left in enumerate(sources) for right in sources[index + 1:])
 
 
 # ---------------------------------------------------------------------------- near-miss-tag
