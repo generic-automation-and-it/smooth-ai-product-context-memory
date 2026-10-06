@@ -33,6 +33,7 @@ import json
 import os
 import re
 import sys
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -1052,6 +1053,28 @@ class NearMissTagTests(unittest.TestCase):
         self.assertTrue(nm_findings[0]["basis"])
         self.assertTrue(nm_findings[0]["scope"])
 
+    def test_a_near_miss_keeps_its_evidence_qualifications_in_the_dossier(self):
+        """Issue 186: the composed and rendered finding kept only the analysis sentence, so a
+        relevance judgement about a proposed record read as an established finding. The observed tag
+        mismatch, the proposed status, the judgement's author and the helper's standing qualification
+        must survive composition and appear in the rendered dossier."""
+        item = _mk("aaaaaaaa-0000-4000-8000-000000000001", "DB", "Uses PostgreSQL.", kind="architecture")
+        evidence = self._evidence()
+        evidence["records"][0]["status"] = "proposed"
+        nm = dc.near_miss_findings(evidence)
+        doc = dc.compose(_bundle([item]), focus=None, judgements={"findings": nm})
+        finding = [f for f in doc.findings if f["category"] == "near-miss-tag"][0]
+        self.assertEqual(finding["observation"]["requestedTags"], ["postgres"])
+        self.assertEqual(finding["observation"]["actualTags"], ["database"])
+        self.assertTrue(finding["proposedEvidence"])
+        self.assertEqual(finding["basisAuthor"], "skill")
+        self.assertIn("not store-wide absence", finding["qualification"])
+        text = dc.render(doc)
+        self.assertIn("requested tags [postgres] (any), record tags [database], no exact tag match", text)
+        self.assertIn("the supporting record is proposed, not canon", text)
+        self.assertIn("relevance judged by the skill", text)
+        self.assertIn("**Qualification:** Findings concern only supplied, approved examined evidence", text)
+
 
 class SubsecondToleranceTests(unittest.TestCase):
     """A capture timestamp must not silently become "unknown" on Python 3.9 or 3.10.
@@ -1239,6 +1262,22 @@ class HeimdallrBundleAnchorTests(unittest.TestCase):
         with redirect_stderr(err):
             self._bundle([], scan=dict(self.SCAN, ticketsWithheld=0, ticketsUnavailable=None))
         self.assertNotIn("heimdallr:", err.getvalue())
+
+    def test_a_withheld_repository_is_disclosed_and_not_anchored(self):
+        """Issue 186: a credential-shaped origin path is withheld; say why, never the path."""
+        import io
+        from contextlib import redirect_stderr
+        scan = dict(self.SCAN, repository=None,
+                    repositoryWithheld="credential-shaped origin path; not shown")
+        err = io.StringIO()
+        with redirect_stderr(err):
+            body = self._bundle([], scan=scan)
+        self.assertIn("heimdallr: repository withheld (credential-shaped origin path", err.getvalue())
+        self.assertNotIn("repo", body)
+        err = io.StringIO()
+        with redirect_stderr(err):
+            self._bundle(["--repo", "org/repo"], scan=scan)
+        self.assertNotIn("repository withheld", err.getvalue())
 
     def test_opt_out_disables_autofill(self):
         body = self._bundle(["--heimdallr", "false"])
@@ -2276,6 +2315,20 @@ class AmbientWriteTokenIsolationTests(unittest.TestCase):
         proc = subprocess.run([sys.executable, "-B", str(Path(__file__).resolve()), *self.CLASSES],
                               capture_output=True, text=True, env=env, timeout=300)
         self.assertEqual(proc.returncode, 0, proc.stderr[-4000:])
+
+
+class HeimdallrTimeoutTests(unittest.TestCase):
+    """A hung Heimdallr reporter means no autofill, never a traceback (issue 186)."""
+
+    def test_a_reporter_timeout_falls_back_to_no_autofill(self):
+        def hang(*args, **kwargs):
+            raise subprocess.TimeoutExpired(cmd="find_session_metadata.py", timeout=30)
+        original = dc.subprocess.run
+        dc.subprocess.run = hang
+        try:
+            self.assertEqual(dc.heimdallr_scan(), {})
+        finally:
+            dc.subprocess.run = original
 
 
 if __name__ == "__main__":

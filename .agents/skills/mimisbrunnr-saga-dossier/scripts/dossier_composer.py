@@ -92,7 +92,9 @@ def heimdallr_scan() -> dict:
         proc = subprocess.run(
             [sys.executable, "-B", str(HEIMDALLR_SCRIPT), "--json"],
             capture_output=True, text=True, encoding="utf-8", timeout=30)
-    except (OSError, ValueError):
+    # `SubprocessError` covers `TimeoutExpired`: a hung reporter escaped the optional-autofill
+    # fallback as a traceback and killed the caller (issue 186).
+    except (OSError, ValueError, subprocess.SubprocessError):
         return {}
     if proc.returncode != 0:
         return {}
@@ -810,13 +812,26 @@ def derive_findings(items, edges, asof=None, judgements=None, uncertain=None):
         classification = f.get("classification")
         if classification not in (_OBSERVATION, _ANALYSIS):
             raise ValueError(f"{category}: classification must be observation or analysis")
-        findings.append({
+        finding = {
             "category": category,
             "classification": classification,
             "basis": str(basis),
             "scope": f.get("scope", scope_text),
             "memories": mems,
-        })
+        }
+        if category == "near-miss-tag":
+            # The evidence qualifications a near-miss carries are part of the finding, not decoration:
+            # dropping them here rendered "relevance is analysis, the record is only proposed, absence
+            # is not store-wide" as a bare claim (issue 186). Kept only in the shapes the helper emits.
+            if isinstance(f.get("observation"), dict):
+                finding["observation"] = f["observation"]
+            if isinstance(f.get("proposedEvidence"), bool):
+                finding["proposedEvidence"] = f["proposedEvidence"]
+            if f.get("basisAuthor") in ("caller", "skill"):
+                finding["basisAuthor"] = f["basisAuthor"]
+            if isinstance(f.get("qualification"), str) and f["qualification"].strip():
+                finding["qualification"] = f["qualification"]
+        findings.append(finding)
 
     # Deterministic ordering: by category (taxonomy order), then by memory identity. The dedup key
     # carries the basis: a task or expectation gap names no memory, so a key of category + memories
@@ -1086,6 +1101,23 @@ def _cite(item):
         uuid=item["uuid"], version=item["version"], created_on=item.get("createdOn") or "unknown")
 
 
+def _near_miss_evidence_text(finding):
+    """The observed side of a near-miss finding, rendered beside its analysis (issue 186)."""
+    parts = []
+    observation = finding.get("observation")
+    if isinstance(observation, dict):
+        requested = ", ".join(map(str, observation.get("requestedTags") or [])) or "none"
+        actual = ", ".join(map(str, observation.get("actualTags") or [])) or "none"
+        mode = observation.get("facetMatchMode") or "unknown"
+        parts.append(f"Observed: requested tags [{requested}] ({mode}), record tags [{actual}], "
+                     "no exact tag match")
+    if finding.get("proposedEvidence"):
+        parts.append("the supporting record is proposed, not canon")
+    if finding.get("basisAuthor"):
+        parts.append(f"relevance judged by the {finding['basisAuthor']}")
+    return (" " + "; ".join(parts) + ".") if parts else ""
+
+
 def render(dossier):
     """Render the dossier to a Markdown artefact with the invariant guarantees (NFR-05).
 
@@ -1138,10 +1170,15 @@ def render(dossier):
                 continue
             lines.append(f"### {cat}")
             lines.append("")
+            qualifications = sorted({f["qualification"] for f in by_cat[cat] if f.get("qualification")})
+            for qualification in qualifications:
+                lines.append(f"> **Qualification:** {qualification}")
+                lines.append("")
             for f in by_cat[cat]:
                 mems = ", ".join(f"{m_['uuid']} v{m_['version']}" for m_ in f.get("memories", []))
                 lines.append(f"- **{f['classification']}** {f['basis']} "
-                             f"— scope: {f['scope']}. Memories: {mems or 'none'}.")
+                             f"— scope: {f['scope']}. Memories: {mems or 'none'}."
+                             + _near_miss_evidence_text(f))
             lines.append("")
 
     if findings_first:
@@ -1284,6 +1321,11 @@ def near_miss_findings(payload):
     report = module.build_report(payload)
     out = []
     for f in report.get("findings", []):
+        # The helper's qualifications travel with each finding: the observed tag mismatch, whether the
+        # supporting record is only proposed, who authored the relevance judgement, and the report's
+        # standing caveat (examined evidence only, absence is not store-wide, mismatch is not synonymy).
+        # Keeping only the explanation sentence rendered an analysis as if it were an established
+        # finding (issue 186).
         out.append({
             "category": "near-miss-tag",
             "classification": f.get("classification", _ANALYSIS),
@@ -1291,6 +1333,9 @@ def near_miss_findings(payload):
             "scope": f.get("scope", ""),
             "memories": [{"uuid": f["memory"]["uuid"], "version": f["memory"]["version"]}],
             "observation": f.get("observation"),
+            "proposedEvidence": f.get("proposedEvidence") is True,
+            "basisAuthor": f.get("basis", {}).get("author"),
+            "qualification": report.get("qualification"),
         })
     return out
 
@@ -1437,8 +1482,10 @@ def _problem_summary(exc):
         return exc.reason or "the server returned an error"
     if isinstance(data, dict):
         shown = data.get("detail") or data.get("title")
-        if shown:
-            return str(shown)
+        if isinstance(shown, str) and shown.strip():
+            # Bounded and on one line, like the capture client's `problem_text` (issue 186).
+            shown = " ".join(shown.split())
+            return shown if len(shown) <= 600 else shown[:600] + "…"
     return exc.reason or "the server returned an error"
 
 
@@ -1643,6 +1690,19 @@ def _heimdallr_ticket_disclosure(scan):
     return None
 
 
+def _heimdallr_repository_disclosure(scan):
+    """One line saying Heimdallr withheld the repository, or None; the reason only, never the path.
+
+    A credential-shaped origin path is withheld (`repositoryWithheld`), which leaves the `repo` anchor
+    unfilled; reading only `repository` made that look like a checkout with no origin (issue 186).
+    """
+    reason = scan.get("repositoryWithheld")
+    if isinstance(reason, str) and reason.strip():
+        return (f"heimdallr: repository withheld ({' '.join(reason.split())[:120]}); "
+                "pass --repo to anchor one")
+    return None
+
+
 def _heimdallr_autofill(body):
     """Fill missing repo/ticket/initiative anchors from the offline Heimdallr scan.
 
@@ -1657,6 +1717,10 @@ def _heimdallr_autofill(body):
     scan = heimdallr_scan()
     filled = []
     repo = scan.get("repository")
+    if "repo" not in body:
+        disclosure = _heimdallr_repository_disclosure(scan)
+        if disclosure:
+            print(disclosure, file=sys.stderr)
     if "repo" not in body and isinstance(repo, str) and repo:
         body["repo"] = repo
         filled.append(f"repo {repo}")
