@@ -6,9 +6,10 @@ effort: high  # judgement on understanding vs scoped fact, and capture-path funn
 
 ## Switches
 
-The four operations are **never conflated**. The two store-facing verbs are named to match
-`ai-understanding`, so the same word means the same direction in both skills: `--import` reads the store
-into the session, `--export` sends the session's material to the store. All switches are **off by default**.
+The four operations are **never conflated**. The verbs share a direction with `ai-understanding`, not a
+target: `ai-understanding --import` reads local Understanding files into the session, while Kvasir
+`import` queries the live store; `ai-understanding --export` writes local files, while Kvasir `export`
+sends session material through the capture path to the live store. All switches are **off by default**.
 
 | Operation | Direction | Reads store? | Writes store? |
 |---|---|---|---|
@@ -149,7 +150,7 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
   (`decisions: attempt ledger evicted N entries past its cap; those records' attempt budgets restart`),
   because such a record can be scored again. Absent, zero or unreadable values print nothing. The rubric is `scripts/decisions_rubric.json`, **a copy shared with the capture
   skill** — the two must not drift, so an edit belongs in both. Full contract:
-  [`mimisbrunnr-odin-context-memory` → Value Gate](mimisbrunnr-odin-context-memory/SKILL.md).
+  [`mimisbrunnr-odin-context-memory` → Value Gate](../mimisbrunnr-odin-context-memory/SKILL.md).
   **A dry run never scores.** Scoring spends each record's attempt budget in the gate's ledger, so a
   dry run runs the gate's content-free `probe` instead and reports `decisions: not scored (dry run …)`
   — its write count is therefore an upper bound, since the `--write` may hold some. A misconfigured

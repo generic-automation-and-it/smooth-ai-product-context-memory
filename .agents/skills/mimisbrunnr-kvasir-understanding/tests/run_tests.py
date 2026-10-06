@@ -15,6 +15,7 @@ import argparse
 import datetime as dt
 import io
 import json
+import re
 import os
 import subprocess
 import sys
@@ -25,6 +26,21 @@ from contextlib import redirect_stdout, redirect_stderr
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+
+# Offline by construction (issue 186). A case that does not stub the capture clients runs the real ones
+# as subprocesses, and they read the store origin and the read token from the environment or the
+# operator's machine credential file — so on a machine with a running store, an unstubbed dry-run export
+# posted this suite's candidates to it. The pointers are redirected, not merely the values: the file
+# pointer to a path with no credentials and the origin to a loopback port nothing listens on, so an
+# unstubbed call fails fast as unreachable. Write tokens in every spelling are dropped. Set before the
+# client is imported, because it seeds the gate flag from the credential file at import.
+os.environ["CONTEXT_MEMORY_CREDENTIAL_FILE"] = os.devnull
+os.environ["CONTEXT_MEMORY_BASE_URL"] = "http://127.0.0.1:9"
+os.environ["CONTEXT_MEMORY_READ_TOKEN"] = "harness-offline-read-token"
+for _name in [n for n in os.environ
+              if n.casefold().replace(":", "__") in {"context_memory_write_token", "apiaccess__writetoken",
+                                                       "parameters__api-write-token"}]:
+    del os.environ[_name]
 
 import understanding_client as uc  # noqa: E402
 
@@ -1188,8 +1204,10 @@ class ExportVersionBumpTests(unittest.TestCase):
             self.assertFalse(item["uuid"] and item["createUuid"])
 
     def test_write_sends_a_version_bump_for_a_matched_subject(self):
-        """AC2: the preflight match's uuid is fed into the item as a version target, so the write is a
-        `versioned`, never a 409, and an unchanged claim is skipped by the capture path's dedup."""
+        """AC2: the preflight match's uuid is fed into the item as a version target (`uuid`, no
+        `createUuid`), so the write is a version bump rather than a create the store would refuse as a
+        409. Deduplicating an unchanged claim is the capture client's and the store's job; this test
+        pins only the version target kvasir sends (issue 186)."""
         with tempfile.TemporaryDirectory() as tmp:
             src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
             originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
@@ -2155,6 +2173,23 @@ class HeimdallrAutofillTests(unittest.TestCase):
             _, _, err = run(["export", src])
         self.assertNotIn("heimdallr:", err)
 
+    def test_a_withheld_repository_is_disclosed_and_left_unbound(self):
+        """Issue 186: a credential-shaped origin path is withheld; the export says why instead of
+        binding no repository silently, and never prints the path."""
+        uc.heimdallr_scan = lambda: {"repository": None, "initiative": "unknown", "tickets": [],
+                                     "ticketsWithheld": 0, "ticketsUnavailable": None,
+                                     "repositoryWithheld": "credential-shaped origin path; not shown"}
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
+            _, out, err = run(["export", src])
+            self.assertIn("heimdallr: repository withheld (credential-shaped origin path", err)
+            self.assertNotIn("Heimdallr autofill (repository", out)
+            _, _, err = run(["dump", "--currentsession", "--out", str(Path(tmp) / "d")])
+            self.assertIn("heimdallr: repository withheld", err)
+            _, _, err = run(["export", src, "--repository", "org/repo", "--tickets", "github:1",
+                             "--initiative", "x"])
+            self.assertNotIn("heimdallr:", err)
+
     def test_import_binds_nothing_on_its_own(self):
         seen = {}
         original = uc.store_query
@@ -2543,6 +2578,30 @@ class ExportTagsAndScopeTests(unittest.TestCase):
     def _set_payloads(sent):
         return [payload for args, payload in sent["calls"] if args == ("set",)]
 
+    def test_the_gate_keys_each_record_by_its_binding_as_well_as_its_subject(self):
+        """Issue 186: the gate's ledger keyed by subject alone, so the same subject exported for two
+        groups shared one attempt budget. The group is not resolved when the gate runs, so the binding
+        it will be resolved from travels as `group`."""
+        seen = []
+        original = uc.gate_decisions
+
+        def gate(candidates):
+            seen.extend(candidates)
+            return candidates, "decisions: skipped (test)"
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
+            uc.gate_decisions = gate
+            os.environ["CONTEXT_MEMORY_DECISIONS_ENABLED"] = "true"
+            try:
+                self._export(src, ["--repository", "org/repo", "--scope", "product:x",
+                                   "--tickets", "github:1"])
+            finally:
+                uc.gate_decisions = original
+                os.environ["CONTEXT_MEMORY_DECISIONS_ENABLED"] = "false"
+        self.assertTrue(seen)
+        self.assertEqual(seen[0]["group"], {"repository": "org/repo", "scope": "product:x",
+                                            "initiative": "Present", "tickets": ["github:1"]})
+
     def test_set_items_merges_binding_tags_with_the_candidates_own(self):
         now = dt.datetime.now(dt.timezone.utc)
         items = uc.set_items([{"statement": "A claim.", "description": "S",
@@ -2861,6 +2920,196 @@ class RelatedPointerTests(unittest.TestCase):
         self.assertIn("`export` funnels through", line)
         self.assertNotIn("an import funnels", line)
 
+
+class InitiativeReplyShapeTests(unittest.TestCase):
+    """A malformed initiatives reply is unreadable (None), never a missing initiative (issue 186)."""
+
+    def _exists(self, stdout):
+        original = uc._run_capture_client
+        uc._run_capture_client = lambda s, a, p: (0, stdout, "")
+        try:
+            return uc.initiative_exists("mimisbrunnr")
+        finally:
+            uc._run_capture_client = original
+
+    def test_a_reply_without_a_collection_is_unreadable(self):
+        for stdout in ("{}", '{"items": "mimisbrunnr"}', '{"initiatives": null}', "not json", ""):
+            with self.subTest(stdout=stdout):
+                exists, why = self._exists(stdout)
+                self.assertIsNone(exists)
+                self.assertIn("unreadable", why)
+
+    def test_a_readable_reply_still_answers(self):
+        self.assertEqual(self._exists('{"items": []}'), (False, "missing"))
+        self.assertEqual(self._exists('[{"name": "mimisbrunnr"}]'), (True, "ok"))
+        self.assertEqual(self._exists('{"initiatives": [{"name": "mimisbrunnr"}]}'), (True, "ok"))
+
+
+class CaptureScriptAnswerShapeTests(unittest.TestCase):
+    """The redactor's and atomicity detector's answers are paired by `candidate_index`, never position.
+
+    A short answer dropped the trailing candidates from an export without a word, and a reordered one
+    put one candidate's scrubbed text or verdict on another (issue 186). Each malformed shape must make
+    the gate return None, which every caller turns into a refusal.
+    """
+
+    class _Done:
+        def __init__(self, stdout):
+            self.returncode, self.stdout, self.stderr = 0, stdout, ""
+
+    def _with_answer(self, results, call):
+        original = uc.subprocess.run
+        uc.subprocess.run = lambda *a, **k: self._Done(json.dumps({"results": results}))
+        try:
+            return call()
+        finally:
+            uc.subprocess.run = original
+
+    def test_malformed_answers_are_refused_by_every_call_site(self):
+        two = [{"description": "a", "statement": "A."}, {"description": "b", "statement": "B."}]
+        shapes = {
+            "short": [{"candidate_index": 0, "redacted": "A.", "verdict": "simple", "findings": []}],
+            "duplicate index": [{"candidate_index": 0, "redacted": "A.", "verdict": "simple",
+                                 "findings": []}] * 2,
+            "out of range": [{"candidate_index": 0, "redacted": "A.", "verdict": "simple",
+                              "findings": []},
+                             {"candidate_index": 2, "redacted": "B.", "verdict": "simple",
+                              "findings": []}],
+            "missing index": [{"redacted": "A.", "verdict": "simple", "findings": []},
+                              {"redacted": "B.", "verdict": "simple", "findings": []}],
+            "non-object": ["A.", "B."],
+        }
+        for name, results in shapes.items():
+            with self.subTest(shape=name):
+                self.assertIsNone(self._with_answer(results, lambda: uc.gate_atomicity(two)))
+                self.assertIsNone(self._with_answer(results, lambda: uc.gate_redaction(["A.", "B."])))
+        self.assertIsNone(self._with_answer([], lambda: uc.redact("A.")))
+        self.assertIsNone(self._with_answer([{"candidate_index": 0, "redacted": 7, "findings": []}],
+                                            lambda: uc.redact("A.")))
+
+    def test_a_reordered_answer_is_paired_by_index(self):
+        results = [{"candidate_index": 1, "redacted": "second <redacted>", "verdict": "bundled",
+                    "signals": ["and"], "findings": []},
+                   {"candidate_index": 0, "redacted": "first", "verdict": "simple", "signals": [],
+                    "findings": []}]
+        scrubbed, _ = self._with_answer(results, lambda: uc.gate_redaction(["first", "second token"]))
+        self.assertEqual(scrubbed, ["first", "second <redacted>"])
+        verdicts = self._with_answer(results, lambda: uc.gate_atomicity([{}, {}]))
+        self.assertEqual([v["verdict"] for v in verdicts], ["simple", "bundled"])
+
+    def test_a_short_atomicity_answer_refuses_the_export(self):
+        """End to end: two candidates, one verdict — nothing is written and the refusal says so."""
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.\n\n"
+                                         "The relational store keeps the canonical rows.")
+            original = (uc.gate_redaction, uc._run_capture_client, uc.subprocess.run)
+            uc.gate_redaction = lambda texts: (list(texts), {})
+            called = []
+            uc._run_capture_client = lambda s, a, p: (called.append(a[0]), (0, "{}", ""))[1]
+            uc.subprocess.run = lambda *a, **k: self._Done(json.dumps(
+                {"results": [{"candidate_index": 0, "verdict": "simple", "signals": []}]}))
+            try:
+                rc, _, err = run(["export", src, "--write"])
+            finally:
+                (uc.gate_redaction, uc._run_capture_client, uc.subprocess.run) = original
+            self.assertEqual(rc, 1)
+            self.assertIn("atomicity detector", err)
+            self.assertEqual(called, [])
+
+
+class HeimdallrTimeoutTests(unittest.TestCase):
+    """A hung Heimdallr reporter means no autofill, never a traceback (issue 186)."""
+
+    def test_a_reporter_timeout_falls_back_to_no_autofill(self):
+        def hang(*args, **kwargs):
+            raise subprocess.TimeoutExpired(cmd="find_session_metadata.py", timeout=30)
+        original = uc.subprocess.run
+        uc.subprocess.run = hang
+        try:
+            self.assertEqual(uc.heimdallr_scan(), {})
+        finally:
+            uc.subprocess.run = original
+
+
+class DocLinkTests(unittest.TestCase):
+    """Issue 186: the Value Gate link was written relative to the skills root, so from this skill's own
+    folder it pointed at a path that does not exist (issue 179 finding 48 again). Every relative link
+    that stays inside the skills tree must resolve from the document that holds it. Links that leave
+    the skills tree name the host repository's docs and are not checked: a repository vendoring the
+    skill has different ones."""
+
+    def test_every_in_tree_relative_link_resolves(self):
+        skill = Path(uc.__file__).resolve().parents[1]
+        skills_root = skill.parent
+        for name in ("SKILL.md", "README.md", "AGENTS.md"):
+            document = skill / name
+            for target in re.findall(r"\]\(([^)#\s]+)(?:#[^)]*)?\)", document.read_text(encoding="utf-8")):
+                if "://" in target or target.startswith("mailto:"):
+                    continue
+                resolved = (document.parent / target).resolve()
+                if skills_root not in resolved.parents and resolved != skills_root:
+                    continue
+                with self.subTest(document=name, link=target):
+                    self.assertTrue(resolved.exists(), f"{name} links to a missing path: {target}")
+
+    def test_the_switches_name_local_files_and_the_live_store_apart(self):
+        """Issue 186: "the same word means the same direction" read as the same target, but
+        ai-understanding moves local files and this skill moves the live store."""
+        text = " ".join((Path(uc.__file__).resolve().parents[1] / "SKILL.md").read_text(
+            encoding="utf-8").split())
+        self.assertIn("reads local Understanding files into the session", text)
+        self.assertIn("queries the live store", text)
+        self.assertNotIn("the same word means the same direction in both skills", text)
+
+    def test_the_documented_dump_command_carries_the_session_content(self):
+        """Without `--from`, `dump --currentsession` writes the empty template; the README example
+        must show where the session content comes from."""
+        readme = (Path(uc.__file__).resolve().parents[1] / "README.md").read_text(encoding="utf-8")
+        for line in readme.splitlines():
+            if "understanding_client.py dump --currentsession" in line:
+                self.assertIn("--from", line)
+
+
+class HarnessIsolationTests(unittest.TestCase):
+    """Issue 186: the offline harness could post its test candidates to a live store."""
+
+    def test_the_store_pointers_are_offline(self):
+        self.assertEqual(os.environ["CONTEXT_MEMORY_CREDENTIAL_FILE"], os.devnull)
+        self.assertEqual(os.environ["CONTEXT_MEMORY_BASE_URL"], "http://127.0.0.1:9")
+        self.assertFalse([n for n in os.environ
+                          if n.casefold().replace(":", "__") in uc.WRITE_TOKEN_NAMES])
+
+    def test_an_unstubbed_case_never_reaches_a_store_the_shell_points_at(self):
+        """End to end: with the operator's shell aimed at a listening store, the unstubbed dry-run
+        export case runs in a child process and the store receives nothing."""
+        import http.server
+        import threading
+        hits = []
+
+        class Store(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):  # noqa: N802
+                hits.append(self.path)
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"candidates": [], "intraBatchCollisions": [], "items": []}')
+            do_GET = do_POST
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), Store)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.shutdown)
+        env = dict(os.environ, CONTEXT_MEMORY_BASE_URL=f"http://127.0.0.1:{server.server_port}",
+                   CONTEXT_MEMORY_READ_TOKEN="operator-read-token")
+        env.pop("CONTEXT_MEMORY_CREDENTIAL_FILE", None)
+        proc = subprocess.run(
+            [sys.executable, "-B", str(Path(__file__).resolve()),
+             "ImportTests.test_export_with_selectors_writes_nothing"],
+            capture_output=True, text=True, env=env, timeout=120)
+        self.assertEqual(proc.returncode, 0, proc.stderr[-2000:])
+        self.assertEqual(hits, [], "an offline harness case reached the store the shell points at")
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
