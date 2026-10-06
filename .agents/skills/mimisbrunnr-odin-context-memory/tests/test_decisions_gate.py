@@ -95,6 +95,13 @@ class StubHandler(http.server.BaseHTTPRequestHandler):
             import time
             time.sleep(override_delay())
             return
+        if override and override.startswith("status-body:"):
+            _, code, text = override.split(":", 2)
+            self.send_response(int(code))
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": text}).encode("utf-8"))
+            return
         if override and override.startswith("status:"):
             code = int(override.split(":", 1)[1])
             self.send_response(code)
@@ -401,6 +408,16 @@ class FailureClassificationTests(GateTestCase):
         self.assertIn("HTTP 500", detail)
         self.assertNotIn("stub", detail)
         self.assertNotIn("stub", proc.stdout + proc.stderr)
+
+    def test_a_server_error_mentioning_the_model_is_not_a_missing_model(self):
+        """Review #19: any HTTP failure whose body contained "model" was reported as a missing model,
+        so a 500 from inside a running model server sent the operator to pull a model that was there."""
+        self.stub.override = "status-body:500:the model runner crashed"
+        proc, report = self.score()
+        self.assertEqual(report["records"][0]["outcome"], "http-500")
+        self.stub.override = "status-body:400:model 'nimble' not found, try pulling it first"
+        proc, report = self.score()
+        self.assertEqual(report["records"][0]["outcome"], "model-missing")
 
     def test_404_reads_as_model_missing(self):
         self._expect_not_scored("status:404", "model-missing")
@@ -2244,6 +2261,23 @@ class HarnessIsolationTests(GateTestCase):
         proc, report = self.score(CONTEXT_MEMORY_DECISIONS_ENABLED="")
         self.assertEqual(report["outcome"], "disabled",
                          "an empty flag must not be seeded from anywhere")
+
+    def test_an_explicitly_empty_setting_wins_over_the_operator_file(self):
+        """Review #4: the loader filled any setting that was empty, so `CONTEXT_MEMORY_DECISIONS_ENABLED=`
+        did not turn off a gate the credential file enabled, and records went to the model. An
+        explicitly set value — empty included — wins over the file."""
+        credentials = os.path.join(self.tmp, "credentials")
+        with open(credentials, "w", encoding="utf-8") as handle:
+            handle.write("CONTEXT_MEMORY_DECISIONS_ENABLED=true\n")
+        proc, report = self.score(CONTEXT_MEMORY_DECISIONS_ENABLED="",
+                                  CONTEXT_MEMORY_CREDENTIAL_FILE=credentials)
+        self.assertEqual(report["outcome"], "disabled")
+        self.assertEqual(self.stub.requests, [])
+        env = {k: v for k, v in self.gate_env().items() if k != "CONTEXT_MEMORY_DECISIONS_ENABLED"}
+        proc = run_gate(["score"], json.dumps([RECORD]),
+                        dict(env, CONTEXT_MEMORY_CREDENTIAL_FILE=credentials))
+        self.assertNotEqual(json.loads(proc.stdout)["outcome"], "disabled",
+                            "control: an unset flag is seeded from the file")
 
     def test_the_harness_points_the_credential_file_at_a_path_that_does_not_exist(self):
         """The isolation itself, asserted on the environment `run_gate` actually builds. The previous

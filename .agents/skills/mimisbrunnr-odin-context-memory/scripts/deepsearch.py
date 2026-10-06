@@ -215,16 +215,20 @@ def execute(payload, request=client._request, clock=time.monotonic):
     def count(kind, status):
         return sum(1 for item in passes if item["kind"] == kind and item["status"] == status)
 
+    def recorded(kind):
+        return sum(1 for item in passes if item["kind"] == kind)
+
     keywords_executed = count("keyword", "completed")
-    # A malformed pass was attempted and answered unreadably, not left out by the cap; like a forbidden
-    # anchor it is counted once, under its own name.
-    keywords_omitted = len(keywords) - keywords_executed - count("keyword", "malformed")
+    # Omitted by a cap = never given a pass at all: past MAX_KEYWORDS/MAX_TRAVERSALS, or left when the
+    # aggregate limit filled. Every pass that *was* recorded — completed, malformed, forbidden, or
+    # timed out / not run after a failure — is counted under its own status and listed in
+    # `passesIncomplete`; subtracting only some statuses counted a failed recall as a cap omission
+    # (issue 190 #10). A traversal skipped for a context selector is not a cap omission either: it has
+    # its own flag.
+    keywords_omitted = len(keywords) - recorded("keyword")
     anchors_executed = count("traversal", "completed")
     anchors_forbidden = count("traversal", "forbidden")
-    # A forbidden anchor was attempted and refused, not left out by the cap; it is counted once, in
-    # `anchorsForbidden`.
-    anchors_omitted = (len(eligible_anchors) - anchors_executed - anchors_forbidden
-                       - count("traversal", "malformed"))
+    anchors_omitted = 0 if traversal_skipped_for_context else len(eligible_anchors) - recorded("traversal")
     passes_malformed = sum(1 for item in passes if item["status"] == "malformed")
     passes_incomplete = [{"kind": item["kind"], "value": item["value"]}
                          for item in passes if item["status"] != "completed"]

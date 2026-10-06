@@ -87,7 +87,9 @@ def load_machine_credentials(*names):
             continue
         key, _, value = line.partition("=")
         key = key.strip()
-        if key in wanted and value and not os.environ.get(key):
+        # Presence, not truthiness: an explicitly set empty value is the operator turning a setting
+        # off, and filling it from the file silently overrode them (review #4).
+        if key in wanted and value and key not in os.environ:
             os.environ[key] = value.strip()
     return path
 
