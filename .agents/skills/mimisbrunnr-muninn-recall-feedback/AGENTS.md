@@ -1,5 +1,9 @@
 # mimisbrunnr-muninn-recall-feedback — AGENTS.md
 
+> **References.** Every HLD, LADR, NFR, BRD, issue and PR number in this file belongs to the upstream
+> repository, `generic-automation-and-it/smooth-ai-product-context-memory` (`docs/hlds/`, `docs/brd/`),
+> not to a repository this skill is vendored into.
+
 ## TL;DR
 
 Thin, read-mostly helper over the three HLD-004 NFR-03 tuning surfaces: never-recalled list, miss rate
@@ -95,6 +99,7 @@ records. Output is identity, count and time only.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-06 | **Issue 190 #18 and consumer review `5430979214` #14.** `recall_feedback_curl` takes a **capability** (`read`/`write`) as its third argument and reads the matching token from the environment itself; the documented calls expanded the token into the helper's arguments. An unknown capability sends nothing. The documentation-wiring test only checked that the script's path appeared somewhere in SKILL.md, and the documented-query runs sourced the script themselves, so deleting the documented `source` line passed; the runs now use the documented `source` line, which must name this script. Mutation-checked. Harness 25 -> 27. | issue 190, review 5430979214 |
 | 2026-10-06 | **An empty `?`, `#` or `;` no longer passes as a bare origin.** `urlparse` reports `http://localhost:5141?` as an empty query, so the guard's `parsed.query` check passed it; the delimiters themselves are now refused and reported as present (finding 6). Harness 24 -> 25. | issue 188 |
 | 2026-10-06 | **The token is no longer written to a file.** SKILL.md and this file promised the token values are "never written to a file", while `recall_feedback_curl` wrote the header to a mode-600 temp file that a `SIGKILL` would leave behind. The safer behaviour wins over the doc: the header now reaches curl on stdin (`-H @-`) from the `printf` builtin, so it is in neither argv nor a file, and the temp file, its `EXIT`/`HUP`/`INT`/`TERM` traps and the scoping subshell are gone. Verified with real curl 8.7.1 (`-H @-` needs ≥ 7.55; `--fail-with-body` already needs 7.76) against the in-process 403 responder. The fake curl now records `TMPDIR` at call time and reads an `@-` header from stdin. Mutation-checked: restoring the temp-file send fails both subtests (GET and POST) of the new test. `builtin` (guarding against a shadowing `printf` function) is hardening with no test. Harness 23 -> 24. | issue 184 |
 | 2026-10-05 | **The guard accepted `;params` and its refusals named the scheme and the host.** `urlparse` moves `;…` out of `path`, so `http://localhost:5141/;tok=x` passed as a bare origin and curl sent the params in the request line (the host stayed loopback; curl ends the authority at the first `/`). `parsed.params` is now refused and reported present/absent like the other parts. The refusal also printed `scheme={!r}` and the non-loopback hostname, and both can carry a pasted secret (`admin:hunter2` has scheme `admin`); the scheme is now `valid`/`invalid` and the host is not named. The message keeps the word `non-loopback`. Mutation-checked: dropping the params check fails 2 subtests, restoring either echo fails 3. Harness 21 -> 23. | issue 182 |
