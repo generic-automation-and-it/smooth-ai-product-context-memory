@@ -13,10 +13,11 @@ records. Output is identity, count and time only.
   subshell's `exit 1` returns to a caller that never tested it, so the three `curl` commands that
   followed it ran regardless of what the guard decided — the guard was decorative. If you refactor the
   smoke check, keep the refusal and the send on one code path.
-- **The token is never an argv element.** `recall_feedback_curl` reads the `Authorization` header
-  from a mode-600 temp file (`-H @file`) and the operator passes the token as a function argument,
-  never as a `curl -H "Authorization: Bearer …"` literal. Anything in a function's argument list is
-  readable in `ps` by every user on the host.
+- **The token is never an argv element and never a file.** `recall_feedback_curl` pipes the
+  `Authorization` header from the `printf` builtin into curl's stdin (`-H @-`); the operator passes the
+  token as a function argument, never as a `curl -H "Authorization: Bearer …"` literal. A process's argv
+  is readable in `ps` by every user on the host, and a temp header file (the previous design) put the
+  token on disk where a kill left it — contradicting the "never written to a file" guarantee below.
 - **The guard lives in `scripts/recall_feedback.sh`, and `SKILL.md` sources it.** Do not paste a copy
   of the functions back into `SKILL.md`: the harness tests the script, so an inline copy is untested
   code that the operator runs instead.
@@ -46,9 +47,9 @@ records. Output is identity, count and time only.
   token cannot read as "no findings", and keeps the refusal's body (plain `--fail` drops it). Needs curl ≥ 7.76; on older curl drop that one flag — the
   loopback refusal and the argv redaction are the parts that protect the token.
 - **A missing token is refused before the request**, not sent and 403'd.
-- **The temp header file is unlinked by an `EXIT` trap in the send subshell**, on success, failure and
-  `HUP`/`INT`/`TERM` alike. The subshell only scopes the traps — every refusal has already returned
-  from the calling function before it starts.
+- **No header file exists to clean up.** The header travels through a pipe, so there is no temp file,
+  no `EXIT` trap and no window in which a `SIGKILL` leaves the token on disk. Every refusal returns
+  from the calling function before the pipe starts.
 - **`verify`/`reset` need different capabilities**: the two read queries take
   `CONTEXT_MEMORY_READ_TOKEN`, reset takes `CONTEXT_MEMORY_WRITE_TOKEN` (which includes read). Values
   are runtime-only and are never written to a file, prompt or commit.
@@ -76,8 +77,9 @@ records. Output is identity, count and time only.
   shim on `PATH`, and asserts: non-loopback, userinfo, path-bearing and `;params`-bearing origins are
   refused before any request (and neither the userinfo nor a path, params, query or fragment is echoed —
   each is reported present/absent — nor the scheme or a non-loopback hostname); host-moving paths (`@host/…`, `//host`, a scheme, whitespace,
-  `\`) are refused; an accepted request carries `--noproxy '*'`, sends the token only from a mode-600
-  header file and never on argv; the header file is gone after success, curl failure and `TERM`; the
+  `\`) are refused; an accepted request carries `--noproxy '*'`, sends the token on curl's stdin (`-H @-`)
+  and never on argv; `TMPDIR` is empty while curl runs (GET and POST), after a curl failure and on
+  `TERM`; the
   base URL never appears in any python argv; every `curl` call opens with `-q` (the fake curl refuses a
   call that does not, a static scan covers every invocation in the script, and a real-curl case with an
   isolated `HOME` proves a `.curlrc` canary is ignored, skipped when curl is absent); `--fail-with-body`
@@ -93,6 +95,7 @@ records. Output is identity, count and time only.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-06 | **The token is no longer written to a file.** SKILL.md and this file promised the token values are "never written to a file", while `recall_feedback_curl` wrote the header to a mode-600 temp file that a `SIGKILL` would leave behind. The safer behaviour wins over the doc: the header now reaches curl on stdin (`-H @-`) from the `printf` builtin, so it is in neither argv nor a file, and the temp file, its `EXIT`/`HUP`/`INT`/`TERM` traps and the scoping subshell are gone. Verified with real curl 8.7.1 (`-H @-` needs ≥ 7.55; `--fail-with-body` already needs 7.76) against the in-process 403 responder. The fake curl now records `TMPDIR` at call time and reads an `@-` header from stdin. Mutation-checked: restoring the temp-file send fails both subtests (GET and POST) of the new test. `builtin` (guarding against a shadowing `printf` function) is hardening with no test. Harness 23 -> 24. | issue 184 |
 | 2026-10-05 | **The guard accepted `;params` and its refusals named the scheme and the host.** `urlparse` moves `;…` out of `path`, so `http://localhost:5141/;tok=x` passed as a bare origin and curl sent the params in the request line (the host stayed loopback; curl ends the authority at the first `/`). `parsed.params` is now refused and reported present/absent like the other parts. The refusal also printed `scheme={!r}` and the non-loopback hostname, and both can carry a pasted secret (`admin:hunter2` has scheme `admin`); the scheme is now `valid`/`invalid` and the host is not named. The message keeps the word `non-loopback`. Mutation-checked: dropping the params check fails 2 subtests, restoring either echo fails 3. Harness 21 -> 23. | issue 182 |
 | 2026-10-05 | **Documented queries take the operator's window, and the harness can see a lost `--fail-with-body`.** `SKILL.md` hard-coded a September 2026 window and `asOf`, so following it re-measured the same past period on every run and a tuning change could never appear in the before/after comparison; the queries now read `RF_FROM`/`RF_TO` (`asOf` = `RF_TO`) and stop before sending when either is unset. The fake curl returned success whatever the flags, so deleting `--fail-with-body` left the harness green while a `403` read as an empty result; the harness now asserts the option reaches curl and drives a real curl against a loopback `403` responder (exit 22, body kept). Harness 17 -> 21. | issue 179 |
 | 2026-10-05 | **Two request-integrity leaks in the guard closed.** (1) A refused base printed `path={!r}`, so a credential pasted into the base URL's path reached stderr — and the guard's stderr is the caller's transcript; the refusal now reports path, query and fragment as present/absent, the way userinfo already was. (2) curl ran without `-q`, so a default `~/.curlrc` could add a header, a proxy or a redirect-follow to a request the guard had approved; `-q` is now curl's first argument. The fake curl refuses any call without it, a static check covers every invocation, and a real-curl case with an isolated `HOME` proves a `.curlrc` is ignored. | issue 179 |

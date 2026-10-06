@@ -103,8 +103,8 @@ What the script enforces before any token leaves:
 - The base reaches the parser through the environment, not argv, so it is never visible in `ps`.
 - The request path must be absolute and carry no `@`, `\`, whitespace or leading `//` — a path such as
   `@evil.example/x` appended to an approved origin would otherwise move the request's host.
-- The token is read from a mode-600 header file (`-H @file`), never an argv element, and that file is
-  unlinked on success, failure and interrupt.
+- The token reaches curl on stdin (`-H @-`) from the shell's `printf` builtin: never an argv element and
+  never a file, so nothing holding it is left on disk, even after a kill.
 - `--noproxy '*'`: curl honours `http_proxy`/`ALL_PROXY`, and a proxy would otherwise receive the
   loopback request and its header.
 - `-q` is curl's first argument, so a default `~/.curlrc` (an extra header, a proxy, `--location`)

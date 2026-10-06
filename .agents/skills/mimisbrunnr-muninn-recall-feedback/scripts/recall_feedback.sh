@@ -70,9 +70,11 @@ recall_feedback_path_ok() {
   return 0
 }
 
-# The token arrives as a shell-function argument, never as a curl `-H` argument: a process's argv is
-# readable in `ps` by every user on the host for its lifetime, so `-H "Authorization: Bearer $TOKEN"`
-# puts the credential in the process table. curl reads the header from a mode-600 file instead.
+# The token arrives as a shell-function argument and reaches curl on stdin (`-H @-`) from the
+# `printf` builtin. Never a curl argv element: a process's argv is readable in `ps` by every user on the
+# host, so `-H "Authorization: Bearer $TOKEN"` puts the credential in the process table. Never a file
+# either: a mode-600 temp file still put the token on disk, where a SIGKILL leaves it behind,
+# contradicting SKILL.md's "never written to a file" (issue 184).
 recall_feedback_curl() {
   local method="$1" path="$2" token="$3"
   local base="${CONTEXT_MEMORY_BASE_URL:-http://localhost:5141}"
@@ -89,26 +91,15 @@ recall_feedback_curl() {
     echo "recall-feedback: no token supplied; no request was sent." >&2
     return 1
   fi
-  # The send runs in a subshell only so its traps cannot disturb the operator's shell: the refusals
-  # above have already returned. The EXIT trap unlinks the header file on success, failure and an
-  # interrupt alike — a signal converted to `exit` still runs it, a bare signal would not.
   # --noproxy '*' is not optional: curl honours http_proxy/ALL_PROXY from the environment, and a
   # proxy set for outbound traffic would otherwise receive a loopback request *and* its header.
   # --fail-with-body keeps a 4xx body visible instead of collapsing a refusal to an empty success.
   # -q must stay the FIRST argument: curl reads ~/.curlrc unless -q opens the command line, and a
   # default config can add a header, a proxy or --location, so the guard would approve one request
-  # and curl would send another.
-  (
-    header=""
-    trap 'rm -f "$header"' EXIT
-    trap 'exit 129' HUP
-    trap 'exit 130' INT
-    trap 'exit 143' TERM
-    header="$(mktemp)" || exit 1
-    chmod 600 "$header"
-    printf 'Authorization: Bearer %s\n' "$token" >"$header"
+  # and curl would send another. `builtin` keeps a same-named function or an external `printf` (whose
+  # argv would carry the token) out of the pipe. The pipeline's status is curl's.
+  builtin printf 'Authorization: Bearer %s\n' "$token" |
     curl -q -sS --noproxy '*' --fail-with-body \
-      -X "$method" -H "@$header" \
+      -X "$method" -H @- \
       "${base%/}${path}"
-  )
 }
