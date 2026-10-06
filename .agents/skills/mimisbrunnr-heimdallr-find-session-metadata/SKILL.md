@@ -34,7 +34,7 @@ accepting anything from the scan.
 | `branch` | `git branch --show-current` (reported, not a binding); `null` when withheld | `feat/160-...` |
 | `branchWithheld` | Why the branch name is not shown (credential-shaped, or no redactor to check it), else `null` | `null` |
 | `root` | `git rev-parse --show-toplevel` — which checkout was scanned, shown from `~` under the home folder; `null` when withheld | `~/work/smooth-ai-product-context-memory` |
-| `rootWithheld` | Why the checkout path is not shown (credential-shaped, or no redactor to check it), else `null` | `null` |
+| `rootWithheld` | Why the checkout path is not shown (outside the home folder, credential-shaped, or no redactor to check it), else `null` | `null` |
 | `rootMatches` | With `--repo-root`: whether the scanned checkout's top level is that directory (resolved paths); else `null` | `true` |
 | `ticketsWithheld` | Count of credential-shaped candidates dropped (values never shown) | `1` |
 | `ticketsUnavailable` | Why no ticket is reported at all (the redactor could not be loaded), else `null` | `null` |
