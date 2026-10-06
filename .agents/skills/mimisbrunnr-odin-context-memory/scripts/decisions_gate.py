@@ -226,7 +226,10 @@ def endpoint_origin(base_url):
     host = parsed.hostname or "<no-host>"
     if ":" in host and not host.startswith("["):
         host = f"[{host}]"
-    return f"{parsed.scheme}://{host}:{port}" if port else f"{parsed.scheme}://{host}"
+    # Only a scheme the guard accepts is shown: `admin:hunter2` parses with scheme `admin`, so a
+    # credential pasted into the variable was echoed back in every report (issue 188).
+    scheme = parsed.scheme if parsed.scheme in ("http", "https") else "<invalid-scheme>"
+    return f"{scheme}://{host}:{port}" if port else f"{scheme}://{host}"
 
 
 def resolve_endpoint(base_url, api_key):
@@ -249,9 +252,13 @@ def resolve_endpoint(base_url, api_key):
         raise GateError("bad-decisions-url",
                         "the decision endpoint URL must not carry userinfo")
     if parsed.scheme not in ("http", "https"):
-        raise GateError("bad-decisions-url",
-                        f"the decision endpoint must be http or https, not {parsed.scheme!r}")
-    if parsed.params or parsed.query or parsed.fragment:
+        # The scheme is not echoed: `admin:hunter2` parses with scheme `admin` (issue 188).
+        raise GateError("bad-decisions-url", "the decision endpoint must be http or https")
+    if not parsed.hostname:
+        # `http:///v1` and `http://:11434` parse with no host; urllib would then resolve one of its
+        # own choosing, so there is nothing to validate the destination against (issue 188).
+        raise GateError("bad-decisions-url", "the decision endpoint must name a host")
+    if parsed.params or parsed.query or parsed.fragment or any(mark in base_url for mark in "?#;"):
         # The path is appended after the base, so `;tok=x`, `?k=v` or `#f` would ride along with
         # every request, or swallow the path. Never echoed: the parameter may be a pasted credential.
         raise GateError("bad-decisions-url",
@@ -554,6 +561,11 @@ def request_path(path):
                                            for ch in path):
         raise GateError("bad-decisions-url",
                         f"{ENV_PATH} must not carry '@', '\\', whitespace or a control character")
+    if any(mark in path for mark in "?#;"):
+        # A query, fragment or `;` parameter in the path rides along with every request, and a pasted
+        # `?token=…` is the shape a credential most often takes there (issue 188).
+        raise GateError("bad-decisions-url",
+                        f"{ENV_PATH} must not carry a query, a fragment or ';' parameters")
     return path
 
 

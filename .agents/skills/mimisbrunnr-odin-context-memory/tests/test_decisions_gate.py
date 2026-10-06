@@ -26,6 +26,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest import mock
 from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
@@ -247,6 +248,14 @@ class GateTestCase(unittest.TestCase):
         self.stub = Stub()
         self.addCleanup(self.stub.close)
         self.tmp = tempfile.mkdtemp()
+        # In-process calls (`ledger_cap()`, `cap_ledger()` at its default) read the live environment, so
+        # an operator's exported `CONTEXT_MEMORY_DECISIONS_*` decided what they returned — subprocess
+        # cases were isolated by `run_gate`, these were not (issue 188; 179 and 182 before it). Every
+        # case starts with none set; a case that wants one passes it explicitly.
+        isolated = {k: v for k, v in os.environ.items() if not k.startswith("CONTEXT_MEMORY_DECISIONS_")}
+        patcher = mock.patch.dict(os.environ, isolated, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def gate_env(self, **overrides):
         env = {
@@ -559,6 +568,28 @@ class EndpointGuardTests(GateTestCase):
                 self.assertNotIn("s3cretparam", combined)
         self.assertEqual(self.stub.requests, [])
 
+    def test_empty_delimiters_a_missing_host_and_a_path_query_are_refused(self):
+        """Issue 188: `?`, `#` or `;` with nothing after them parsed as empty and passed; a URL with no
+        host passed the loopback check's `else`; and the path accepted `?token=…`. Each is refused
+        before any request, and neither the value nor the scheme is echoed."""
+        cases = [
+            {"CONTEXT_MEMORY_DECISIONS_BASE_URL": self.stub.base_url + suffix} for suffix in ("?", "#", "/;")
+        ] + [
+            {"CONTEXT_MEMORY_DECISIONS_BASE_URL": base} for base in ("http:///v1", "http://:11434")
+        ] + [
+            {"CONTEXT_MEMORY_DECISIONS_PATH": path}
+            for path in ("/v1/systemone?token=s3cretquery", "/v1/systemone#s3cretquery", "/v1;s3cretquery")
+        ] + [{"CONTEXT_MEMORY_DECISIONS_BASE_URL": "s3cretscheme://localhost:11434"}]
+        for overrides in cases:
+            with self.subTest(**overrides):
+                self.stub.requests.clear()
+                proc = run_gate(["probe"], "", self.gate_env(**overrides))
+                combined = proc.stdout + proc.stderr
+                self.assertNotEqual(proc.returncode, 0)
+                self.assertIn("bad-decisions-url", combined)
+                self.assertNotIn("s3cret", combined)
+                self.assertEqual(self.stub.requests, [])
+
     def test_a_malformed_port_is_a_classified_outcome_not_a_traceback(self):
         """`endpoint_origin` read `.port` outside its handler, and the report builds it before the
         guard runs (`probe`) or after every record (`score`), so `:99999` or `:abc` escaped as a
@@ -597,6 +628,17 @@ class EndpointGuardTests(GateTestCase):
         self.assertEqual([r["outcome"] for r in report["records"]],
                          ["bad-decisions-url", "bad-decisions-url"])
         self.assertEqual(self.stub.requests, [], "nothing may be sent to a refused endpoint")
+
+
+class HostileEnvironmentTests(unittest.TestCase):
+    """Issue 188: the in-process ledger-cap cases read the operator's exported decision settings."""
+
+    def test_the_gate_cases_pass_with_hostile_decision_settings_exported(self):
+        env = dict(os.environ, CONTEXT_MEMORY_DECISIONS_LEDGER_MAX_ENTRIES="3",
+                   CONTEXT_MEMORY_DECISIONS_MAX_ATTEMPTS="1", CONTEXT_MEMORY_DECISIONS_ROLES="tester")
+        proc = subprocess.run([sys.executable, "-B", str(Path(__file__).resolve()), "LedgerIntegrityTests"],
+                              capture_output=True, text=True, env=env, timeout=600)
+        self.assertEqual(proc.returncode, 0, proc.stderr[-2000:])
 
 
 class AttemptLedgerTests(GateTestCase):

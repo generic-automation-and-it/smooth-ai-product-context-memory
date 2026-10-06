@@ -297,8 +297,11 @@ def base_url(value=None):
     parsed = _parse_base(value)
     # `params` is the `;…` tail of the last path segment, which `urlparse` splits away from `path`, so
     # `http://localhost:5141/;token=…` passed as a bare origin with the path check alone.
+    # The delimiters themselves are refused, not only what follows them: `urlparse` reports an empty
+    # query for `http://localhost:5141?`, so a bare `?`, `#` or `;` passed as an origin (issue 186/188).
     if parsed.scheme not in ("http", "https") or parsed.username or parsed.password \
-            or parsed.path not in ("", "/") or parsed.params or parsed.query or parsed.fragment:
+            or parsed.path not in ("", "/") or parsed.params or parsed.query or parsed.fragment \
+            or any(mark in value for mark in "?#;"):
         raise ClientError(0, "bad-base-url", "Context-memory base URL must be an HTTP(S) origin")
     if parsed.hostname not in ("localhost", "127.0.0.1", "::1"):
         raise ClientError(0, "bad-base-url", "Context-memory API origin must be loopback")
@@ -704,12 +707,30 @@ def cmd_query(args):
     return resp
 
 
+def require_lists(resp, command, *fields):
+    """Refuse a read answer that lacks one of its documented collections (issue 186/188).
+
+    Every read route answers an object holding its collections as lists of objects — `items` for
+    versions, labels and initiatives, `paths` for a traversal, `paths` and `items` for a ticket
+    traversal. An empty body, a non-object, or a missing or malformed list was printed as though the
+    store had answered "nothing", which reads as complete coverage. Fixed text, never the body.
+    """
+    if not isinstance(resp, dict) or not all(
+            isinstance(resp.get(field), list) and all(isinstance(row, dict) for row in resp[field])
+            for field in fields):
+        raise ClientError(0, "bad-response",
+                          f"{command} response must be an object with " +
+                          " and ".join(f"a '{field}' list of objects" for field in fields))
+    return resp
+
+
 def cmd_get_versions(args):
     resp = _request(
         "GET",
         memory_versions_path(args.uuid),
         query={"scope": args.scope} if args.scope else None,
     )
+    require_lists(resp, "get-versions", "items")
     print(json.dumps(resp, indent=2))
     return resp
 
@@ -754,7 +775,7 @@ def cmd_create_link(args):
 
 
 def cmd_labels(args):
-    resp = _request("GET", "/api/context/labels")
+    resp = require_lists(_request("GET", "/api/context/labels"), "labels", "items")
     print(json.dumps(resp, indent=2))
     return resp
 
@@ -767,6 +788,7 @@ def cmd_propose_label(args):
 
 def cmd_initiatives(args):
     resp = _request("GET", "/api/context/initiatives", query={"status": args.status} if args.status else None)
+    require_lists(resp, "initiatives", "items")
     print(json.dumps(resp, indent=2))
     return resp
 
@@ -797,8 +819,8 @@ def cmd_paths(args):
     if not isinstance(source_uuid, str) or not source_uuid.strip():
         raise ClientError(0, "bad-input", "'paths' requires 'sourceUuid' as a non-empty string")
 
-    resp = _request("POST", "/api/context/paths", payload)
-    for path in resp.get("paths", []):
+    resp = require_lists(_request("POST", "/api/context/paths", payload), "paths", "paths")
+    for path in resp["paths"]:
         path["summary"] = _render_path(path)
     print(json.dumps(resp, indent=2))
     return resp
@@ -913,7 +935,8 @@ def cmd_ticket_paths(args):
     for field, limit in (("scopeDimension", 32), ("kind", 64)):
         if payload.get(field) is not None:
             _ticket_text(payload[field], field, limit)
-    resp = _request("POST", "/api/context/tickets/paths", payload)
+    resp = require_lists(_request("POST", "/api/context/tickets/paths", payload), "ticket-paths",
+                         "paths", "items")
     print(json.dumps(resp, indent=2))
     return resp
 

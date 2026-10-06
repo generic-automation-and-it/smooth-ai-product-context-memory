@@ -13,6 +13,8 @@ facts, never raw transcript. Return bounded clarification needs and digest only.
 and base URL, so do not assume `CONTEXT_MEMORY_WRITE_TOKEN` is already set. Load it only at the
 authorized `--export` (or `--dryrun`) checkpoint, in this worker's shell, with the deliberate write step
 the skill's `AGENTS.md` names — `set -a && source ~/.mimisbrunnr/credentials && set +a`. Create the
-scratch folder owner-only with `mkdir -p -m 700 .context/mimisbrunnr-scratch` before writing into it.
+scratch folder owner-only with `mkdir -p -m 700 .context/mimisbrunnr-scratch` before writing into it,
+and remove or generalise personal data in every candidate before the first file exists — omit one whose
+fact cannot survive that; neither the scrubber nor the cleanup removes personal data.
 `Write` is for that folder's `.gitignore` (the single line `*`, written first) and the batch and payload
 files under `.context/mimisbrunnr-scratch/`, never anything else. Never print either credential.
