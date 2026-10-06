@@ -195,6 +195,44 @@ def _classify_transport_error(exc, timeout=HTTP_TIMEOUT):
     return ClientError(0, "unreachable", str(exc))
 
 
+PROBLEM_TEXT_LIMIT = 600
+
+
+def problem_text(raw):
+    """The actionable part of an error body, never the raw body (issue 186).
+
+    The Host answers a failure with a problem object — `title`, `detail`, field-keyed validation
+    `errors` and a JSON `path` extension — and that is what a reader acts on (a 409's detail names the
+    subject that already exists; a 400 names the field). Anything else in the body, and any body that
+    is not a problem object, is remote text this client did not ask for: echoing it into a diagnostic
+    put whatever the answering process chose to send into the agent transcript. Only those members are
+    kept, as text, bounded; anything else is reported by size only.
+    """
+    text = (raw or "").strip()
+    if not text:
+        return ""
+    try:
+        document = json.loads(text)
+    except ValueError:
+        document = None
+    if not isinstance(document, dict):
+        return f"(a non-problem error body of {len(text)} characters was not shown)"
+    parts = [str(document[key]) for key in ("title", "detail") if isinstance(document.get(key), str)]
+    errors = document.get("errors")
+    if isinstance(errors, dict):
+        for field, messages in errors.items():
+            if isinstance(messages, list):
+                shown = "; ".join(m for m in messages if isinstance(m, str))
+                if shown:
+                    parts.append(f"{field}: {shown}")
+    if isinstance(document.get("path"), str):
+        parts.append(f"at {document['path']}")
+    summary = " — ".join(" ".join(part.split()) for part in parts)
+    if not summary:
+        return "(the error body carried no problem title, detail or errors)"
+    return summary if len(summary) <= PROBLEM_TEXT_LIMIT else summary[:PROBLEM_TEXT_LIMIT] + "…"
+
+
 # A context manager wrapping the read-and-decode, so every transport site shares one handler set
 # instead of repeating the same four `except` lines. `cmd_get_blob` used to carry its own copy, which
 # is exactly how a fix lands in one and misses the other.
@@ -211,7 +249,7 @@ def _read_response(request, timeout=None):
         with _open(request, timeout) as resp:
             return resp.read().decode("utf-8")
     except urllib.error.HTTPError as e:
-        raise ClientError(e.code, e.reason, e.read().decode("utf-8", errors="replace")) from e
+        raise ClientError(e.code, e.reason, problem_text(e.read().decode("utf-8", errors="replace"))) from e
     except urllib.error.URLError as e:
         # A connect-phase timeout arrives wrapped in URLError; the reason carries the timeout.
         raise _classify_transport_error(e.reason, timeout) from e
@@ -419,6 +457,11 @@ def read_payload(path, consume=False):
     if consume and not path:
         raise ClientError(0, "bad-input",
                           "--consume needs --payload: there is no file to remove when reading stdin")
+    if path:
+        try:
+            redact.require_owner_only(path)
+        except ValueError as error:
+            raise ClientError(0, "bad-input", str(error)) from None
     return redact.load_input(path, consume)
 
 
@@ -611,7 +654,9 @@ def framed_recall(payload):
     directly; building it here is what makes "one notice" true rather than aspirational.
     """
     if isinstance(payload, dict):
-        return {RECALL_NOTICE_KEY: RECALL_NOTICE, **payload}
+        # The notice is written last, so a store response carrying its own `recallNotice` cannot
+        # replace the framing with text of its choosing (issue 186).
+        return {**payload, RECALL_NOTICE_KEY: RECALL_NOTICE}
     # A list or scalar result has nowhere to put a top-level field, so it is wrapped in an envelope
     # rather than dropped — silently losing the framing on an unexpected shape is the one outcome this
     # cannot have.
@@ -650,6 +695,11 @@ def cmd_query(args):
     if "limit" not in payload:
         payload["limit"] = MAX_QUERY_LIMIT
     resp = _request("POST", "/api/context/query", payload)
+    # The store always answers `{"items": [...]}`. An empty body, a non-object or a missing list is an
+    # answer this client cannot read; framing it as a recall presented "nothing found" for a response
+    # that never said so (issue 186). Fixed text: the body is never echoed.
+    if not isinstance(resp, dict) or not isinstance(resp.get("items"), list):
+        raise ClientError(0, "bad-response", "query response must be an object with an 'items' list")
     print_recall(resp)
     return resp
 

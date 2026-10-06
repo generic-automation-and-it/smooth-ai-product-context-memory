@@ -65,7 +65,7 @@ def load_fixtures(path=None):
 
 
 # Expected-side fields compared by equality against the model verdict object when declared.
-# "reason" is authored explanation text, not a criterion; "reason_must_be_nonempty",
+# "reason" is authored explanation text, not a criterion; "reason_must_be_nonempty", "redacted_must_keep",
 # "redacted_must_cover" and "must_not_contain" carry their own assertion semantics below.
 AUX_EQUALITY_FIELDS = ("target_uuid", "link_uuid", "relation", "count", "diverged", "not_product_fact", "authority")
 
@@ -147,9 +147,14 @@ def scenario_matches(expected, got):
         redacted = got_dict.get("redacted")
         if not isinstance(redacted, dict):
             return False
+        keep = expected.get("redacted_must_keep", {})
         for field in covered:
             text = redacted.get(field)
             if not isinstance(text, str) or not text.strip():
+                return False
+            # Scrubbing is replacing the secret, not dropping the claim around it: a field reduced to
+            # `<redacted>` passed `must_not_contain` as easily as a correct scrub did (issue 186).
+            if any(normalised(token) not in normalised(text) for token in keep.get(field, [])):
                 return False
     banned = expected.get("must_not_contain", [])
     if banned:
@@ -165,11 +170,18 @@ def pair_by_id(fixtures, model, allow_legacy_positional):
     if len(known) != len(fixtures):
         raise SystemExit("score: the fixture contains a duplicate id")
 
+    identified = [isinstance(entry, dict) and "id" in entry for entry in model]
+    if allow_legacy_positional and not any(identified):
+        return list(zip(fixtures, model)), True
     by_id = {}
     for entry in model:
         if not isinstance(entry, dict) or "id" not in entry:
-            if allow_legacy_positional:
-                return list(zip(fixtures, model)), True
+            if any(identified):
+                # Some verdicts name their scenario and some do not: a run that is neither by-id nor
+                # positional. Falling back to position here let an id-bearing verdict be scored against
+                # whatever scenario sat at its position (issue 186), so a mixed run is always refused.
+                raise SystemExit("score: some verdicts carry an 'id' and some do not; a mixed run "
+                                 "cannot be paired, by id or by position")
             raise SystemExit(
                 "score: a verdict carries no 'id', so it can only be paired by position. Pass "
                 "--allow-legacy-positional to score a superseded dated run taken against an older "

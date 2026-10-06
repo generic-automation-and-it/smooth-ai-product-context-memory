@@ -81,6 +81,7 @@ def is_credential_key(name: str) -> bool:
 
 # Characters a token-shaped value is built from: alphanumerics plus the base64/base64url extras.
 _TOKEN_RUN = re.compile(r"[A-Za-z0-9+/]{16,}")
+_UUID = re.compile(r"[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}")
 
 
 def _secret_shaped(value):
@@ -129,8 +130,11 @@ def _pwd_is_a_password(value):
 _PEM_LABEL = r"(?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?"
 
 # A value after `key = ` / `key: `. Quoted values may contain spaces (a passphrase is still a secret
-# past its first word); unquoted ones stop at whitespace, a quote, `,` or `;`.
-_QUOTED = r""""[^"\r\n]{1,512}"|'[^'\r\n]{1,512}'"""
+# past its first word); unquoted ones stop at whitespace, a quote, `,` or `;`. A quoted value runs to its
+# closing quote **or the end of the line**, with no length cap: the earlier 512-character cap made a
+# longer quoted password match neither alternative, so it passed whole (issue 186). The run stops at the
+# next quote or line break, and nothing mandatory follows it, so the search stays linear.
+_QUOTED = r""""[^"\r\n]+"?|'[^'\r\n]+'?"""
 
 
 def _assignment(key, min_unquoted):
@@ -267,6 +271,16 @@ RULES = [
         "generic-secret-assignment",
         _assignment(r"pwd", 8),
         1, PLACEHOLDER, _pwd_is_a_password,
+    ),
+    (
+        # A session identifier under any of its key spellings — `sessionId`, `session_id`, `JSESSIONID`,
+        # `PHPSESSID`, `connect.sid` — is a bearer credential: whoever holds it is the session. The
+        # neutral rule below matched only the bare word `session`, so a generated ID under its usual
+        # key name passed (issue 186). Still value-gated, so `sessionId: standup` stays prose; a UUID
+        # counts here, unlike under a neutral key, because a session UUID is the credential itself.
+        "generic-secret-assignment",
+        _assignment(r"[A-Za-z0-9_.-]*(?:sess(?:ion)?[_.-]?id|sid)", 16),
+        1, PLACEHOLDER, lambda value: _secret_shaped(value) or bool(_UUID.search(value)),
     ),
     (
         # A key whose name does NOT say secret — bare `key`/`token`, `sort_key`, `credential` — is
@@ -484,6 +498,31 @@ def findings_for(located):
             for name, spans in sorted(by_rule.items())]
 
 
+SCRATCH_MKDIR = "mkdir -p -m 700 .context/mimisbrunnr-scratch"
+
+
+def require_owner_only(path):
+    """Refuse an input file other accounts can read: the file or its directory must be owner-only.
+
+    The batch file is written **before** redaction — the agreed content channel, because every
+    alternative puts the content in argv, shell history or the environment — so it is the one copy of
+    the candidates nothing has scrubbed yet (issue 186, and 182/184 before it). The file tool creates it
+    with the default mode, and a plain `mkdir` leaves the folder world-readable, so that copy was
+    readable by every account on the machine for as long as it existed. The folder is created
+    owner-only instead (`mkdir -p -m 700`); a file in such a folder, or a file that is itself
+    owner-only, passes. Mode bits only: a platform without them (Windows) is not checked here.
+    """
+    if os.name != "posix":
+        return
+    file_mode = os.stat(path).st_mode & 0o777
+    dir_mode = os.stat(os.path.dirname(os.path.abspath(path))).st_mode & 0o777
+    if file_mode & 0o077 and dir_mode & 0o077:
+        raise ValueError(
+            "the input file is readable by other users: neither it nor its folder is owner-only. "
+            f"Create the scratch folder owner-only ({SCRATCH_MKDIR}) before writing into it; an "
+            "existing folder keeps its mode, so remove it and recreate it.")
+
+
 def load_input(path, consume):
     """The JSON batch from `path` (stdin when None); with `consume`, the file is unlinked once read.
 
@@ -496,6 +535,7 @@ def load_input(path, consume):
         raise ValueError("--consume needs --input: there is no file to remove when reading stdin")
     if not path:
         return json.load(sys.stdin)
+    require_owner_only(path)
     with open(path, "r", encoding="utf-8") as fh:
         batch = json.load(fh)
     if consume:

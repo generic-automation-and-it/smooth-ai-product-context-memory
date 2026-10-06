@@ -16,7 +16,16 @@
           "candidate_description",
           "candidate_statement"
         ],
-        "reason": "secret redacted before blob write; the verdict carries the scrubbed text of every candidate field under `redacted`"
+        "reason": "secret redacted before blob write; the verdict carries the scrubbed text of every candidate field under `redacted`",
+        "redacted_must_keep": {
+          "candidate_description": [
+            "Deployment uses",
+            "build pipeline"
+          ],
+          "candidate_statement": [
+            "CI pipeline authenticates with an AWS access key"
+          ]
+        }
       }
     },
     {

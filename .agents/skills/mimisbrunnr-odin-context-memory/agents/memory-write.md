@@ -34,8 +34,10 @@ Run exactly once in fixed order:
 
 Every batch and payload file goes under `.context/mimisbrunnr-scratch/`, written with the file tool —
 never an `echo`/heredoc, and never an environment variable (a child process inherits it and the process
-table exposes it). Write `.context/mimisbrunnr-scratch/.gitignore` holding `*` first, before any batch
-file, so the folder ignores itself even in a checkout that does not ignore `.context/`. Pass `--consume` to `redact.py`, `atomicity.py` and every `--payload` so each file is
+table exposes it). Create the folder owner-only first (`mkdir -p -m 700 .context/mimisbrunnr-scratch`;
+the readers refuse a batch other accounts can read), then write `.context/mimisbrunnr-scratch/.gitignore`
+holding `*`, before any batch file, so the folder ignores itself even in a checkout that does not ignore
+`.context/`. Pass `--consume` to `redact.py`, `atomicity.py` and every `--payload` so each file is
 deleted once read — **except `set --dryrun`**, whose payload file is kept and passed unchanged to the
 real `set --payload <file> --consume`. Remove `.context/mimisbrunnr-scratch/` after the real write, and
 also when the checkpoint is refused, fails or is abandoned: the batch file is the unredacted copy of the

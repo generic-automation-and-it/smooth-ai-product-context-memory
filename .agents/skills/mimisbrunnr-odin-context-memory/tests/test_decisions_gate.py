@@ -382,6 +382,17 @@ class FailureClassificationTests(GateTestCase):
     def test_http_500_is_not_a_score(self):
         self._expect_not_scored("status:500", "http-500")
 
+    def test_an_error_body_is_never_echoed(self):
+        """Issue 186: the endpoint's error body went verbatim into the record's detail. The stub
+        answers `{"error": "stub"}`; only the status and the body's size may be reported."""
+        self.stub.override = "status:500"
+        proc, report = self.score()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        detail = report["records"][0]["detail"]
+        self.assertIn("HTTP 500", detail)
+        self.assertNotIn("stub", detail)
+        self.assertNotIn("stub", proc.stdout + proc.stderr)
+
     def test_404_reads_as_model_missing(self):
         self._expect_not_scored("status:404", "model-missing")
 
@@ -629,6 +640,25 @@ class AttemptLedgerTests(GateTestCase):
         report = json.loads(proc.stdout)
         self.assertEqual(report["records"][0]["outcome"], "scored")
         self.assertEqual(report["records"][1]["outcome"], "attempts-exhausted")
+
+    def test_one_subject_in_two_groups_has_two_budgets(self):
+        """Issue 186: a memory is `(group, subject)`, and keying the ledger by subject alone let one
+        group's record spend another group's budget. Same subject, different `groupUuid` (or `group`
+        binding): two budgets; same group: one. A record with neither keeps the subject-only key."""
+        self.stub.probabilities = {role: 0.1 for role in
+                                   ("product-owner", "designer", "developer", "tester", "business")}
+        env = self.gate_env(CONTEXT_MEMORY_DECISIONS_MAX_ATTEMPTS="1")
+        for field, first, second in (("groupUuid", "g-1", "g-2"),
+                                     ("group", {"repository": "a/b"}, {"repository": "c/d"})):
+            with self.subTest(field=field):
+                state = os.path.join(self.tmp, f"ledger-{field}.json")
+                records = [{**RECORD, field: first}, {**RECORD, field: second}]
+                report = json.loads(run_gate(["score", "--state-file", state], json.dumps(records),
+                                             env).stdout)
+                self.assertEqual([r["outcome"] for r in report["records"]], ["scored", "scored"])
+                again = json.loads(run_gate(["score", "--state-file", state],
+                                            json.dumps([{**RECORD, field: first}]), env).stdout)
+                self.assertEqual(again["records"][0]["outcome"], "attempts-exhausted")
 
     def test_identity_survives_a_rewrite(self):
         """The ledger must key on something a rewrite preserves. A content hash would make every
@@ -909,6 +939,56 @@ class RedactorArityTests(GateTestCase):
         )
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("redactor-unavailable", proc.stderr)
+
+    # A stub that scrubs with the shipped rules but answers in reverse order. `sys.path` is the copy's
+    # own scripts directory, so `redact` there is the stub; the real rules load from the source tree.
+    _REVERSED = (
+        "import json, sys, importlib.util\n"
+        "spec = importlib.util.spec_from_file_location('real_redact', {real!r})\n"
+        "real = importlib.util.module_from_spec(spec); spec.loader.exec_module(real)\n"
+        "data = json.load(sys.stdin)\n"
+        "rows = [{{'candidate_index': i, 'redacted': real.scrub_located(t)[0], 'findings': []}}\n"
+        "        for i, t in enumerate(data)]\n"
+        "{mutate}\n"
+        "sys.stdout.write(json.dumps({{'results': rows}}))\n"
+    )
+
+    def _reversed(self, mutate="rows.reverse()"):
+        real = str(Path(__file__).resolve().parents[1] / "scripts" / "redact.py")
+        return self._REVERSED.format(real=real, mutate=mutate)
+
+    def test_a_reordered_answer_is_paired_by_candidate_index(self):
+        """Each field is sent with its own scrubbed text, whatever order the redactor answers in
+        (issue 186); pairing by position put one field's text into another's slot."""
+        secret = "hunter2secretvalue123"
+        record = dict(RECORD, statement=f"The db password={secret} lives in the vault.")
+        self.stub.probabilities = {"developer": 0.9}
+        proc = run_gate(["score"], json.dumps([record]), self.gate_env(),
+                        gate=gate_copy(self, redactor=self._reversed()))
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        state = self.stub.requests[0]["state"]
+        self.assertNotIn(secret, json.dumps(self.stub.requests[0]))
+        self.assertTrue(state["statement"].startswith("The db password="), state["statement"])
+        self.assertEqual(state["subject"], RECORD["subject"])
+        self.assertEqual(state["kind"], RECORD["kind"])
+
+    def test_an_unusable_candidate_index_is_refused(self):
+        mutations = {
+            "duplicate": "rows[-1]['candidate_index'] = rows[0]['candidate_index']",
+            "missing": "rows[0].pop('candidate_index')",
+            "out of range": "rows[0]['candidate_index'] = len(rows)",
+            "not an integer": "rows[0]['candidate_index'] = str(rows[0]['candidate_index'])",
+            "non-text redacted": "rows[0]['redacted'] = 7",
+        }
+        for name, mutate in mutations.items():
+            with self.subTest(case=name):
+                self.stub.requests.clear()
+                self.stub.probabilities = {"developer": 0.9}
+                proc = run_gate(["score"], json.dumps([RECORD]), self.gate_env(),
+                                gate=gate_copy(self, redactor=self._reversed(mutate)))
+                self.assertNotEqual(proc.returncode, 0)
+                self.assertIn("redactor-unavailable", proc.stderr)
+                self.assertEqual(self.stub.requests, [])
 
     def test_the_arity_mismatch_is_named_in_the_detail(self):
         proc = self._run_with_redactor(
@@ -1693,10 +1773,12 @@ class CalibrationEvidenceTests(unittest.TestCase):
         """`bar` is labelled as the value `scripts/run.sh` writes into the credential file. That
         script exists only in the repository that ships the launcher, not in every consumer."""
         run_sh = Path(__file__).resolve().parents[4] / "scripts" / "run.sh"
-        if not run_sh.is_file():
-            self.skipTest("scripts/run.sh is not part of this checkout")
-        published = re.search(r"^CONTEXT_MEMORY_DECISIONS_MIN_PROBABILITY=(\S+)$",
-                              run_sh.read_text(encoding="utf-8"), re.MULTILINE)
+        text = run_sh.read_text(encoding="utf-8") if run_sh.is_file() else ""
+        # A vendoring repository can have its own `scripts/run.sh`; only the launcher that publishes
+        # the decision settings is this one (issue 186).
+        if "CONTEXT_MEMORY_DECISIONS_" not in text:
+            self.skipTest("this checkout's scripts/run.sh is not the Mímisbrunnr launcher")
+        published = re.search(r"^CONTEXT_MEMORY_DECISIONS_MIN_PROBABILITY=(\S+)$", text, re.MULTILINE)
         self.assertIsNotNone(published, "run.sh no longer publishes a decision threshold")
         self.assertEqual(float(published.group(1)), self.measured["bar"])
 
@@ -1799,6 +1881,19 @@ class CalibrationScorerTests(unittest.TestCase):
     def report(self, *records):
         return {"rubricVersion": "2", "model": "nimble", "endpoint": "http://127.0.0.1",
                 "records": list(records)}
+
+    def test_a_disagreement_in_a_later_pass_is_reported(self):
+        """Issue 186: only pass 2 was compared for the report, so a pass-3 divergence failed the check
+        silently; a different record count is a divergence, not a shorter comparison."""
+        same = [{"scores": {"developer": 0.9}, "outcome": "scored", "passed": True}]
+        other = [{"scores": {"developer": 0.2}, "outcome": "scored", "passed": False}]
+        self.assertEqual(self.scorer.first_divergences([same, same, same]), [])
+        lines = self.scorer.first_divergences([same, same, other])
+        self.assertEqual(len(lines), 1)
+        self.assertIn("pass 3 first diverges from pass 1 at record 0", lines[0])
+        self.assertIn("pass 2 scored 0 record(s)", self.scorer.first_divergences([same, []])[0])
+        flipped = [{"scores": {"developer": 0.9}, "outcome": "bad-response", "passed": False}]
+        self.assertTrue(self.scorer.first_divergences([same, flipped]))
 
     @staticmethod
     def scored(identity, developer):

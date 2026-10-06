@@ -416,18 +416,28 @@ def redact_records(records):
 
     scrubbed = {}
     findings = {}
-    for position, item in enumerate(results):
+    seen = set()
+    for item in results:
         if not isinstance(item, dict):
             raise GateError("redactor-unavailable",
                             "the redactor returned an unexpected shape; no request was made")
-        # Trust the position we sent rather than a returned index: a redactor that reordered an entry
-        # would otherwise silently scrub one field's content into another's slot.
-        if "redacted" not in item:
-            # Absent is not "unchanged". Defaulting to "" would blank the field, and defaulting to
-            # the original would send it; neither is an inspection, so this refuses.
+        # Pair by the returned `candidate_index`, and require every index exactly once. Pairing by
+        # position trusted the order: a reordered answer put one field's scrubbed text in another's
+        # slot, so a field could be sent carrying text the redactor had never been asked to inspect
+        # in that position (issue 186). Any index that is missing, repeated, out of range or not an
+        # integer means the mapping is untrustworthy, and that refuses.
+        index = item.get("candidate_index")
+        if type(index) is not int or not 0 <= index < len(unique) or index in seen:
             raise GateError("redactor-unavailable",
-                            "a redactor result carried no 'redacted' field; no request was made")
-        scrubbed[unique[position]] = item["redacted"]
+                            "a redactor result carried no usable candidate_index; no request was made")
+        seen.add(index)
+        if not isinstance(item.get("redacted"), str):
+            # Absent is not "unchanged". Defaulting to "" would blank the field, and defaulting to
+            # the original would send it; neither is an inspection, so this refuses — as does a
+            # non-text value, which is not a scrub of the text that was sent.
+            raise GateError("redactor-unavailable",
+                            "a redactor result carried no text 'redacted' field; no request was made")
+        scrubbed[unique[index]] = item["redacted"]
         for finding in item.get("findings") or []:
             if not isinstance(finding, dict):
                 raise GateError("redactor-unavailable",
@@ -601,8 +611,13 @@ def call_model(state, roles, settings, rubric_version):
         if exc.code == 404 or "model" in detail.lower():
             raise GateError("model-missing",
                             f"the decision model is not available ({exc.code})") from None
+        # The body is read only to classify, never echoed: the endpoint may be hosted, and its error
+        # text — which can quote the request, the key's account, or anything else it chooses — went
+        # straight into the report and the export's transcript (issue 186). Its size is the signal.
         raise GateError(f"http-{exc.code}",
-                        detail or "the decision endpoint returned no detail") from None
+                        f"the decision endpoint refused the request (HTTP {exc.code}"
+                        + (f"; a {len(detail)}-character body was not shown)" if detail else ")")
+                        ) from None
     except urllib.error.URLError as exc:
         raise _classify(exc.reason, settings["timeout"]) from None
     except (TimeoutError, socket.timeout) as exc:
@@ -826,6 +841,14 @@ def record_identity(record, index):
         # A record with no subject cannot be identified across attempts, so it is keyed by position
         # and gets the budget for this call only — reported, so the caller knows it is not durable.
         return f"index:{index}"
+    # A memory is `(group, subject)`, not the subject alone: the same subject captured for two groups is
+    # two memories. Keying by subject alone made them share one attempt budget, so scoring one spent the
+    # other's (issue 186). The group is `groupUuid` when the caller has it, else `group` — whatever
+    # describes it before it exists (kvasir sends the binding the group will be resolved from). A
+    # record carrying neither keeps the subject-only key, so existing ledgers are read unchanged.
+    group = record.get("groupUuid") or record.get("group")
+    if group:
+        return json.dumps({"group": group, "subject": str(subject)}, sort_keys=True, ensure_ascii=False)
     return str(subject)
 
 
