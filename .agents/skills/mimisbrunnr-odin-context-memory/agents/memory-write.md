@@ -38,13 +38,17 @@ personal data within the meaning of the GDPR (information relating to an identif
 person: names, contact details, identity numbers, employee, account or online identifiers, home-folder
 paths, location data, special-category data). Drop the value; generalise a person to a role (*"the
 user"*) and a value to its type (*"an identity number"*), until no one can be singled out. A fact that
-means nothing once generalised is not captured; report it in the digest. The secret scrubber does not do
-this and cleanup cannot: a file deleted afterwards was still written. See SKILL.md for the full rule.
+means nothing once generalised is not captured; report it in the digest. **Mask every secret you
+recognise the same way** — credentials, tokens, keys, passwords, connection strings become `<REDACTED>`
+— so nothing written holds a value that has not passed both steps; the secret scrubber is the mechanical
+second check on the file, and cleanup is not a step at all. See SKILL.md for the full rule.
 
 Every batch and payload file goes under `.context/mimisbrunnr-scratch/`, written with the file tool —
 never an `echo`/heredoc, and never an environment variable (a child process inherits it and the process
 table exposes it). Create the folder owner-only first (`mkdir -p -m 700 .context/mimisbrunnr-scratch`;
-the readers refuse a batch other accounts can read), then write `.context/mimisbrunnr-scratch/.gitignore`
+the readers refuse a batch other accounts can read); if it already exists, `chmod 700` it — or remove
+and recreate it — before writing any file, since `mkdir -m` does not change an existing folder. Then
+write `.context/mimisbrunnr-scratch/.gitignore`
 holding `*`, before any batch file, so the folder ignores itself even in a checkout that does not ignore
 `.context/`. Pass `--consume` to `redact.py`, `atomicity.py` and every `--payload` so each file is
 deleted once read — **except `set --dryrun`**, whose payload file is kept and passed unchanged to the

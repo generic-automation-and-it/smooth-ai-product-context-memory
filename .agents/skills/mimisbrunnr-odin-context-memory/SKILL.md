@@ -248,17 +248,23 @@ are readable from the process table on the same account. See
 `.agents/rules/skills/skill-secret-handling.instructions.md`.
 
 **The folder is owner-only and ignores itself before the first batch file is written.** Create it with
-`mkdir -p -m 700 .context/mimisbrunnr-scratch` — the file tool writes with the default mode, so without
-it the unredacted batch is readable by every account on the machine, and every reader (`redact.py`,
-`atomicity.py`, the client's `--payload`) refuses a file that neither it nor its folder makes
-owner-only; an existing folder keeps its mode, so remove and recreate one left by an older run.
+`mkdir -p -m 700 .context/mimisbrunnr-scratch`, and **if it already exists, repair it first**:
+`chmod 700 .context/mimisbrunnr-scratch` (or remove and recreate it) before writing any file, because
+`mkdir -m` sets the mode only on a folder it creates. The file tool writes with the default mode, so
+without an owner-only folder the batch is readable by every account on the machine, and every reader
+(`redact.py`, `atomicity.py`, the client's `--payload`) refuses a file that neither it nor its folder
+makes owner-only.
 "Gitignored" is true of this repository, which ignores `.context/`; a repository that vendors these
 skills may not, and there an unredacted batch file is one `git add -A` from a commit. So the first file
 written is `.context/mimisbrunnr-scratch/.gitignore` holding the single line `*`, with the file tool, and
 only then the batch file. It carries no content and goes with the folder at cleanup.
 
-**Writing the batch before *secret* redaction is deliberate, and it is the only channel there is.** It holds
-no personal data (removed above); what it may still hold is a secret the redactor is about to find. The redactor
+**Secrets are masked before the batch is written too; the redactor is the second check.** Mask every
+secret you can recognise in a candidate — credential, token, key, password, connection string,
+private-key block — as `<REDACTED>` before the first file exists: the same discipline as personal data,
+so nothing written holds a value that has not passed both steps. The redactor then runs on that file as the mechanical check
+for what judgement missed; it cannot run first, because a file is the only way to hand it the text.
+**Writing the batch before the mechanical check is deliberate, and it is the only channel there is.** The redactor
 needs the unredacted text as input, and an agent can hand a script text only through a file, the
 command line or the environment. The command line and environment are readable by other processes for
 the call's duration and are recorded in history and the tool transcript; a file is not. So the file is
