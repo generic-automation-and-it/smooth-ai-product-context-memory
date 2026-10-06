@@ -78,6 +78,14 @@ def _bundle(items, edges=None, omitted=None, selected_count=None):
     }
 
 
+def _finding_identities(doc):
+    """Every finding of a dossier as a sorted list of full identities — a multiset, not a set of
+    categories, so one finding of a repeated category going missing is visible (issue 184)."""
+    return sorted(json.dumps({k: f.get(k) for k in ("category", "classification", "basis", "scope",
+                                                    "memories")}, sort_keys=True)
+                  for f in doc.findings)
+
+
 # Both spellings of the one write credential, written out rather than read from the module so a
 # mutation that drops one from `dc._WRITE_TOKEN_NAMES` cannot shrink the tests along with it.
 _WRITE_TOKEN_SPELLINGS = ("CONTEXT_MEMORY_WRITE_TOKEN", "ApiAccess__WriteToken")
@@ -120,6 +128,9 @@ def _init_ignore_repo(root):
     subprocess.run(["git", "-C", str(repo), "add", "README.md", ".gitignore"], check=True)
     scratch = repo / ".context" / "mimisbrunnr-saga-dossier" / "scratch"
     scratch.mkdir(parents=True)
+    # The documented `mkdir -p -m 700`: the Write tool's files take the umask's mode, so the
+    # directory is what keeps the agent-written inputs owner-only (issue 184).
+    scratch.chmod(0o700)
     return repo, scratch
 
 
@@ -427,7 +438,7 @@ class Nfr04ReconciliationTests(unittest.TestCase):
             "33333333-3333-3333-3333-333333333333")], "meaning": "same default rule"}]}
         selected_ids = {(i["uuid"], i["version"]) for i in bundle["items"]}
         unfocused = dc.compose(bundle, focus=None, judgements=judg)
-        unfocused_cats = {f["category"] for f in unfocused.findings}
+        unfocused_findings = _finding_identities(unfocused)
         for focus in dc.FOCUSES:
             doc = dc.compose(bundle, focus=focus, judgements=judg)
             self.assertTrue(doc.reconciliation["closed"], focus)
@@ -437,8 +448,9 @@ class Nfr04ReconciliationTests(unittest.TestCase):
                     accounted.update((o["uuid"], o["version"]) for o in c["origins"])
             accounted.update((o["uuid"], o["version"]) for o in doc.omitted)
             self.assertEqual(accounted, selected_ids, focus)
-            focused_cats = {f["category"] for f in doc.findings}
-            self.assertEqual(focused_cats, unfocused_cats, focus)
+            # Every finding, not every category: a set of categories cannot see the second finding
+            # of a repeated category disappear (issue 184).
+            self.assertEqual(_finding_identities(doc), unfocused_findings, focus)
         # The review focus inverts the document: findings appear before the narrative (LADR-12).
         review_doc = dc.compose(bundle, focus="review", judgements=judg)
         rendered = dc.render(review_doc)
@@ -1970,6 +1982,283 @@ class FixtureReachConsistencyTests(unittest.TestCase):
                     self.assertEqual(reach["anchors"], len(anchored))
                     self.assertEqual(reach["widened"], len(widened))
         self.assertGreater(checked, 0, "no fixture carries a reach, so nothing was checked")
+
+
+class ReconciliationGuardTests(unittest.TestCase):
+    """A reconciliation that does not close produces no dossier (issue 184, recurrence of issue 179).
+
+    `validate_bundle` checked that the manifest counted every item and omission, but the
+    reconciliation counts distinct (uuid, version) pairs, so a repeated omission kept the bundle valid,
+    left the arithmetic one short, rendered "✗ FAILED" and exited 0. HLD-005 NFR-04's acceptance is
+    that the reconciliation closes for every dossier; BR-30's "marks incomplete output" is the reached
+    limits, not this arithmetic, so there is no legitimate open-reconciliation rendering to preserve.
+    """
+
+    A = "aaaaaaaa-0000-4000-8000-000000000001"
+    CUT = "cccccccc-0000-4000-8000-000000000003"
+
+    def _repeated_omission_bundle(self):
+        cut = {"uuid": self.CUT, "version": 1, "reason": "cap reached"}
+        return _bundle([_mk(self.A, "A", "The default is A.")], omitted=[cut, dict(cut)])
+
+    def test_a_repeated_omission_is_refused_at_validation(self):
+        bundle = self._repeated_omission_bundle()
+        self.assertEqual(bundle["manifest"]["selectedCount"], 3)  # the manifest itself is consistent
+        with self.assertRaises(ValueError) as caught:
+            dc.compose(bundle, focus=None)
+        self.assertIn("same omitted item", str(caught.exception))
+
+    def test_the_same_memory_at_two_versions_may_be_omitted_twice(self):
+        # Keyed on the pair, like items: a history bundle legitimately cuts v1 and v2 of one memory.
+        cuts = [{"uuid": self.CUT, "version": v, "reason": "cap reached"} for v in (1, 2)]
+        doc = dc.compose(_bundle([_mk(self.A, "A", "The default is A.")], omitted=cuts), focus=None)
+        self.assertTrue(doc.reconciliation["closed"])
+        self.assertEqual(doc.reconciliation["omitted"], 2)
+
+    def test_an_open_reconciliation_raises_instead_of_rendering(self):
+        """Defence in depth: with the validation step bypassed, compose itself refuses to return a
+        dossier whose arithmetic does not close."""
+        from unittest import mock
+        with mock.patch.object(dc, "validate_bundle", lambda b: b):
+            with self.assertRaises(ValueError) as caught:
+                dc.compose(self._repeated_omission_bundle(), focus=None)
+        self.assertIn("reconciliation did not close", str(caught.exception))
+        self.assertIn("1 omitted != 3 selected", str(caught.exception))
+
+    def test_cli_exits_nonzero_and_writes_no_dossier(self):
+        import contextlib
+        import io
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            _, scratch = _init_ignore_repo(Path(tmp).resolve())
+            bundle = scratch / "bundle.json"
+            bundle.write_text(json.dumps(self._repeated_omission_bundle()), encoding="utf-8")
+            target = scratch.parent / "dossier.md"
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                rc = dc.main(["compose", "--bundle", str(bundle), "--out", str(target)])
+            self.assertEqual(rc, 1, stdout.getvalue())
+            self.assertFalse(target.exists())
+            self.assertNotIn("Context Dossier", stdout.getvalue())
+            self.assertIn("same omitted item", stderr.getvalue())
+
+
+class ProvenanceCycleMembershipTests(unittest.TestCase):
+    """A provenance-cycle finding names the cycle's members only (issue 184, recurrence of issue 179).
+
+    Every item Kahn's sort could not emit was reported as "part of a cycle", which includes a memory
+    that merely depends on one; and the leftovers were emitted in business-key order, so such a memory
+    could render before the cycle it rests on. LADR-07: break at a stated point, report the cycle.
+    """
+
+    A = "aaaaaaaa-0000-4000-8000-000000000001"
+    B = "bbbbbbbb-0000-4000-8000-000000000002"
+    C = "cccccccc-0000-4000-8000-000000000003"
+    D = "dddddddd-0000-4000-8000-000000000004"
+    E = "eeeeeeee-0000-4000-8000-000000000005"
+
+    @staticmethod
+    def _edge(src, tgt, relation="supersedes"):
+        return {"sourceUuid": src, "targetUuid": tgt, "relation": relation, "reason": "r"}
+
+    def _item(self, uuid, day):
+        return _mk(uuid, uuid[:1].upper(), f"Claim {uuid[:1]}.", created=f"2026-01-{day:02d}T10:00:00Z",
+                   valid_from=f"2026-01-{day:02d}")
+
+    @staticmethod
+    def _cycles(doc):
+        return [f for f in doc.findings if f["category"] == "provenance-cycle"]
+
+    def test_a_memory_downstream_of_a_cycle_is_not_a_member_and_follows_it(self):
+        # C depends on B and has the earliest business key, so business-key order puts it first.
+        items = [self._item(self.A, 2), self._item(self.B, 3), self._item(self.C, 1)]
+        edges = [self._edge(self.A, self.B), self._edge(self.B, self.A),
+                 self._edge(self.C, self.B, "depends_on")]
+        doc = dc.compose(_bundle(items, edges), focus=None)
+        cycles = self._cycles(doc)
+        self.assertEqual(len(cycles), 1)
+        self.assertEqual({m["uuid"] for m in cycles[0]["memories"]}, {self.A, self.B})
+        self.assertIn("2 memory(ies)", cycles[0]["basis"])
+        self.assertEqual(cycles[0]["brokenAt"], self.A)
+        order = [c["origins"][0]["uuid"] for c in doc.claims]
+        self.assertLess(order.index(self.B), order.index(self.C))
+        self.assertTrue(doc.reconciliation["closed"])
+
+    def test_each_cycle_is_its_own_finding_and_upstream_breaks_first(self):
+        # Cycle D<->E rests on cycle A<->B (D depends on A) and has the earlier business keys, so a
+        # global earliest-key break would emit D before A, which D depends on.
+        items = [self._item(self.A, 3), self._item(self.B, 4),
+                 self._item(self.D, 1), self._item(self.E, 2)]
+        edges = [self._edge(self.A, self.B), self._edge(self.B, self.A),
+                 self._edge(self.D, self.E), self._edge(self.E, self.D),
+                 self._edge(self.D, self.A, "depends_on")]
+        doc = dc.compose(_bundle(items, edges), focus=None)
+        members = sorted(sorted(m["uuid"] for m in f["memories"]) for f in self._cycles(doc))
+        self.assertEqual(members, [[self.A, self.B], [self.D, self.E]])
+        for f in self._cycles(doc):
+            self.assertIn(f["brokenAt"], {m["uuid"] for m in f["memories"]})
+        order = [c["origins"][0]["uuid"] for c in doc.claims]
+        self.assertLess(order.index(self.A), order.index(self.D))
+        self.assertEqual(sorted(order), sorted([self.A, self.B, self.D, self.E]))
+
+    def test_an_acyclic_slice_reports_no_cycle(self):
+        items = [self._item(self.A, 1), self._item(self.B, 2), self._item(self.C, 3)]
+        edges = [self._edge(self.B, self.A), self._edge(self.C, self.B, "depends_on")]
+        doc = dc.compose(_bundle(items, edges), focus=None)
+        self.assertEqual(self._cycles(doc), [])
+        self.assertEqual([c["origins"][0]["uuid"] for c in doc.claims], [self.A, self.B, self.C])
+
+
+class PerFocusFindingMultisetTests(unittest.TestCase):
+    """NFR-04 per-focus: every finding in the unfocused dossier is in each focused one (issue 184).
+
+    The per-focus test compared sets of categories over a fixture with one finding, so a focus that
+    dropped the second `stale` or the second `gap` passed. This slice repeats every category it emits
+    and spreads them across kinds each focus sets aside.
+    """
+
+    def _slice(self):
+        r1 = _mk("aaaaaaaa-0000-4000-8000-000000000001", "R1", "Requests are retried three times "
+                 "with backoff.", kind="requirement", summ="retry")
+        r1["sources"] = []
+        r2 = _mk("aaaaaaaa-0000-4000-8000-000000000002", "R2", "Requests are retried five times "
+                 "without backoff.", kind="requirement", summ="retry")
+        a1 = _mk("aaaaaaaa-0000-4000-8000-000000000003", "A1", "The queue is a table.",
+                 kind="architecture", valid_until="2020-01-01")
+        a2 = _mk("aaaaaaaa-0000-4000-8000-000000000004", "A2", "The cache is per process.",
+                 kind="architecture", valid_until="2020-06-01")
+        a2["sources"] = []
+        i1 = _mk("aaaaaaaa-0000-4000-8000-000000000005", "I1", "The worker polls every second.",
+                 kind="implementation")
+        judgements = {"findings": [
+            {"category": "gap", "ground": "task", "basis": "No rollout plan is captured.",
+             "classification": "analysis", "memories": []},
+            {"category": "gap", "ground": "task", "basis": "No owner is named.",
+             "classification": "analysis", "memories": []},
+            {"category": "contradiction", "classification": "analysis",
+             "basis": "Two current requirements give different retry counts.",
+             "memories": [{"uuid": r1["uuid"], "version": 1}, {"uuid": r2["uuid"], "version": 1}]},
+        ]}
+        return _bundle([r1, r2, a1, a2, i1]), judgements
+
+    def test_every_focus_carries_every_unfocused_finding(self):
+        bundle, judgements = self._slice()
+        unfocused = dc.compose(bundle, focus=None, judgements=judgements)
+        counts = {}
+        for f in unfocused.findings:
+            counts[f["category"]] = counts.get(f["category"], 0) + 1
+        # Precondition: the categories repeat, so a set comparison could not see a loss.
+        for category in ("no-links-in-slice", "unattributed", "stale", "weak-summary", "gap"):
+            self.assertGreaterEqual(counts.get(category, 0), 2, category)
+        expected = _finding_identities(unfocused)
+        for focus in dc.FOCUSES:
+            with self.subTest(focus=focus):
+                doc = dc.compose(bundle, focus=focus, judgements=judgements)
+                self.assertEqual(_finding_identities(doc), expected)
+                if focus not in ("review",):
+                    self.assertTrue(any(o["reason"] == "outside-focus" for o in doc.omitted), focus)
+
+
+class ScratchInputPermissionTests(unittest.TestCase):
+    """Agent-written compose inputs must be owner-only (issue 184, HLD-005 NFR-01).
+
+    NFR-01 holds the scratch intermediates — the bundle and the judgement inputs — to owner-only,
+    gitignored and deleted. The bundle is written 0600 by `bundle --out`, but the judgements and the
+    near-miss evidence are written by the agent's Write tool with the umask's mode (0644 under 022),
+    and the documented `mkdir -p` made the scratch directory 0755, so both were readable by every
+    local user until the scratch directory was removed.
+    """
+
+    A = "aaaaaaaa-0000-4000-8000-000000000001"
+
+    def setUp(self):
+        if os.name == "nt":
+            self.skipTest("POSIX modes only")
+        import tempfile
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        _, self.scratch = _init_ignore_repo(Path(self._tmp.name).resolve())
+        self.bundle = self.scratch / "bundle.json"
+        self.bundle.write_text(json.dumps(_bundle([_mk(self.A, "A", "The default is A.")])),
+                               encoding="utf-8")
+
+    def _compose(self, flag, path):
+        import contextlib
+        import io
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            rc = dc.main(["compose", "--bundle", str(self.bundle), flag, str(path)])
+        return rc, stderr.getvalue()
+
+    def _write(self, name, file_mode, dir_mode):
+        self.scratch.chmod(dir_mode)
+        self.addCleanup(self.scratch.chmod, 0o700)
+        path = self.scratch / name
+        path.write_text(json.dumps({"findings": []}) if name == "judgements.json" else "{}",
+                        encoding="utf-8")
+        path.chmod(file_mode)
+        return path
+
+    def test_a_world_readable_input_in_a_world_readable_directory_is_refused(self):
+        for flag, name in (("--judgements", "judgements.json"),
+                           ("--near-miss-evidence", "near-miss.json")):
+            with self.subTest(flag=flag):
+                rc, err = self._compose(flag, self._write(name, 0o644, 0o755))
+                self.assertEqual(rc, 1)
+                self.assertIn(f"{flag} is readable by other users", err)
+                self.assertIn("mkdir -p -m 700", err)
+
+    def test_owner_only_file_or_owner_only_directory_is_accepted(self):
+        for file_mode, dir_mode in ((0o644, 0o700), (0o600, 0o755)):
+            with self.subTest(file=oct(file_mode), directory=oct(dir_mode)):
+                rc, err = self._compose("--judgements",
+                                        self._write("judgements.json", file_mode, dir_mode))
+                self.assertEqual(rc, 0, err)
+
+    def test_the_documented_workflow_creates_the_scratch_directory_owner_only(self):
+        for doc in ("SKILL.md", "README.md"):
+            with self.subTest(doc=doc):
+                text = (HERE.parent / doc).read_text(encoding="utf-8")
+                self.assertIn("mkdir -p -m 700 .context/mimisbrunnr-saga-dossier/scratch", text)
+                self.assertNotIn("mkdir -p .context/mimisbrunnr-saga-dossier", text)
+        skill = (HERE.parent / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("Bash(mkdir -p -m 700 .context/mimisbrunnr-saga-dossier/scratch)", skill)
+
+
+class QuickstartJudgementsOptionalTests(unittest.TestCase):
+    """The quickstarts call the judgements file optional, so they must say how to compose without it
+    (issue 184). Step 5 passed `--judgements` unconditionally, which fails on a file never written."""
+
+    def _workflow(self, doc):
+        text = (HERE.parent / doc).read_text(encoding="utf-8")
+        return re.search(r"```bash\n(.*?)\n```", text, re.S).group(1)
+
+    def test_each_quickstart_says_to_drop_judgements_when_step_4_is_skipped(self):
+        for doc in ("SKILL.md", "README.md"):
+            with self.subTest(doc=doc):
+                block = self._workflow(doc)
+                step4 = re.search(r"# 4\..*?(?=\n# 5\.)", block, re.S).group(0)
+                step5 = re.search(r"# 5\..*?(?=\n# 6\.)", block, re.S).group(0)
+                self.assertRegex(step4, r"(?i)optional|skip")
+                self.assertIn("--judgements", step5)
+                self.assertRegex(step5, r"(?i)drop the --judgements line")
+
+    def test_compose_without_judgements_is_the_documented_skip_path(self):
+        import contextlib
+        import io
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            _, scratch = _init_ignore_repo(Path(tmp).resolve())
+            bundle = scratch / "bundle.json"
+            bundle.write_text(json.dumps(_bundle([_mk("aaaaaaaa-0000-4000-8000-000000000001", "A",
+                                                      "The default is A.")])), encoding="utf-8")
+            stderr = io.StringIO()
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
+                with_missing = dc.main(["compose", "--bundle", str(bundle),
+                                        "--judgements", str(scratch / "judgements.json")])
+                without = dc.main(["compose", "--bundle", str(bundle)])
+            self.assertEqual(with_missing, 1)
+            self.assertEqual(without, 0, stderr.getvalue())
 
 
 class AmbientWriteTokenIsolationTests(unittest.TestCase):

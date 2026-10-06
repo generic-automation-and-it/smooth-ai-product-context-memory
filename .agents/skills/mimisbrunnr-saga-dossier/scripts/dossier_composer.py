@@ -233,7 +233,13 @@ def validate_bundle(bundle):
     item_ids = [_item_key(i) for i in bundle["items"]]
     _require(len(set(item_ids)) == len(item_ids),
              "bundle: the same item (uuid and version) appears more than once")
-    omitted_ids = {_omitted_key(o) for o in bundle["omitted"]}
+    # The same for omissions: the manifest count tallies every entry while the reconciliation counts
+    # distinct (uuid, version) pairs, so a repeated omission left the arithmetic one short and still
+    # rendered a dossier (issue 184).
+    omitted_keys = [_omitted_key(o) for o in bundle["omitted"]]
+    _require(len(set(omitted_keys)) == len(omitted_keys),
+             "bundle: the same omitted item (uuid and version) appears more than once")
+    omitted_ids = set(omitted_keys)
     _require(not (set(item_ids) & omitted_ids),
              "bundle: an item is listed in both items and omitted")
     # The manifest count is the trustworthy left-hand side: it must equal the bundle's item+omitted
@@ -296,41 +302,124 @@ def topological_order(items, edges):
     heap = [(_business_key(by_key[key]), key) for key in by_key if indeg[key] == 0]
     heapq.heapify(heap)
     ordered = []
+    emitted = set()
     cycle_findings = []
 
     # Kahn's algorithm with a deterministic tiebreak (LADR-07): business-time validity, then capture
-    # time, then memory identity. The ``heap`` key is exactly that tuple.
-    while heap:
-        _, key = heapq.heappop(heap)
-        ordered.append(by_key[key])
-        successors = adj.get(key, [])
-        for succ in successors:
-            indeg[succ] -= 1
-            if indeg[succ] == 0:
-                heapq.heappush(heap, (_business_key(by_key[succ]), succ))
+    # time, then memory identity. The ``heap`` key is exactly that tuple. A key pushed again after a
+    # forced cycle break is skipped, never emitted twice.
+    def drain():
+        while heap:
+            _, key = heapq.heappop(heap)
+            if key in emitted:
+                continue
+            emitted.add(key)
+            ordered.append(by_key[key])
+            for succ in adj.get(key, []):
+                indeg[succ] -= 1
+                if indeg[succ] == 0 and succ not in emitted:
+                    heapq.heappush(heap, (_business_key(by_key[succ]), succ))
 
-    if len(ordered) != len(by_key):
-        # There is a provenance cycle. Break at a stated point: the un-emitted item with the earliest
-        # identity key is emitted next (stated, not traversal accident), and every un-emitted item is
-        # reported as part of a cycle (LADR-07). Still produce the document.
-        in_cycle = [key for key in by_key if indeg[key] > 0]
-        in_cycle.sort(key=lambda k: _business_key(by_key[k]))
-        cycle_findings.append({
+    drain()
+    if len(ordered) == len(by_key):
+        return ordered, cycle_findings
+
+    # There is a provenance cycle (LADR-07). An un-emitted item is either ON a cycle or only
+    # downstream of one; only the former is reported, because "this rests on a cycle" is not "this is
+    # part of one" (issue 184). The cycles are the cyclic strongly connected components of what the
+    # sort could not emit, and every cycle in the slice lies wholly inside that residue.
+    components = {}
+    findings_by_component = []
+    residual = sorted((k for k in by_key if k not in emitted), key=lambda k: _business_key(by_key[k]))
+    for comp in _strongly_connected(residual, adj):
+        if len(comp) == 1 and comp[0] not in adj[comp[0]]:
+            continue
+        comp.sort(key=lambda k: _business_key(by_key[k]))
+        finding = {
             "category": "provenance-cycle",
             "classification": _OBSERVATION,
             "basis": f"Provenance edges among the selected memories form a cycle involving "
-                    f"{len(in_cycle)} memory(ies); ordering over {', '.join(ORDERING_RELATIONS)} "
+                    f"{len(comp)} memory(ies); ordering over {', '.join(ORDERING_RELATIONS)} "
                     f"left them unorderable.",
             "scope": "the selected material in this bundle",
-            "memories": [{"uuid": k[0], "version": k[1]} for k in in_cycle],
-            "brokenAt": in_cycle[0][0],
-        })
-        # Emit the cycle members in identity order so the sort terminates deterministically; they
-        # remain present (the cycle is a finding, not a dropped item).
-        for key in in_cycle:
-            ordered.append(by_key[key])
+            "memories": [{"uuid": k[0], "version": k[1]} for k in comp],
+            "brokenAt": None,
+        }
+        findings_by_component.append(finding)
+        for k in comp:
+            components[k] = finding
 
+    # Break at a stated point, repeatedly until everything is emitted: among the cycles nothing else
+    # still waits on, the un-emitted member with the earliest business key is emitted next. Choosing
+    # from an upstream-free cycle keeps a downstream cycle behind the one it rests on; what follows a
+    # break is ordered topologically again, so a memory downstream of a cycle still comes after it.
+    while len(ordered) != len(by_key):
+        remaining = [k for k in residual if k not in emitted]
+        sccs = _strongly_connected(remaining, adj)
+        owner = {k: i for i, comp in enumerate(sccs) for k in comp}
+        fed = {owner[s] for k in remaining for s in adj[k] if s in owner and owner[s] != owner[k]}
+        candidates = [k for i, comp in enumerate(sccs) if i not in fed for k in comp]
+        breakpoint_ = min(candidates, key=lambda k: _business_key(by_key[k]))
+        finding = components.get(breakpoint_)
+        if finding is not None and finding["brokenAt"] is None:
+            finding["brokenAt"] = breakpoint_[0]
+        heapq.heappush(heap, (_business_key(by_key[breakpoint_]), breakpoint_))
+        drain()
+
+    findings_by_component.sort(key=lambda f: _business_key(by_key[(f["memories"][0]["uuid"],
+                                                                   f["memories"][0]["version"])]))
+    cycle_findings.extend(findings_by_component)
     return ordered, cycle_findings
+
+
+def _strongly_connected(nodes, adj):
+    """Tarjan's strongly connected components of the subgraph induced by ``nodes``, iteratively.
+
+    Membership of a component is unique, so the result does not depend on visit order; callers sort
+    each component themselves.
+    """
+    inside = set(nodes)
+    index, low, on_stack = {}, {}, set()
+    stack, components = [], []
+    counter = 0
+    for root in nodes:
+        if root in index:
+            continue
+        index[root] = low[root] = counter
+        counter += 1
+        stack.append(root)
+        on_stack.add(root)
+        work = [(root, iter([s for s in adj.get(root, []) if s in inside]))]
+        while work:
+            node, successors = work[-1]
+            descended = False
+            for succ in successors:
+                if succ not in index:
+                    index[succ] = low[succ] = counter
+                    counter += 1
+                    stack.append(succ)
+                    on_stack.add(succ)
+                    work.append((succ, iter([s for s in adj.get(succ, []) if s in inside])))
+                    descended = True
+                    break
+                if succ in on_stack:
+                    low[node] = min(low[node], index[succ])
+            if descended:
+                continue
+            work.pop()
+            if work:
+                parent = work[-1][0]
+                low[parent] = min(low[parent], low[node])
+            if low[node] == index[node]:
+                component = []
+                while True:
+                    member = stack.pop()
+                    on_stack.discard(member)
+                    component.append(member)
+                    if member == node:
+                        break
+                components.append(component)
+    return components
 
 
 # ---------------------------------------------------------------------------- lifecycle marking
@@ -947,8 +1036,16 @@ def compose(bundle, focus=UNFOCUSED, judgements=None, asof=None, store_name=STOR
     # 6. Findings (LADR-13, NFR-04); focus-invariant in presence.
     findings = derive_findings(items, edges, asof=asof, judgements=judgements, uncertain=uncertain)
 
-    # 7. Reconciliation (NFR-04), closed in the dossier.
+    # 7. Reconciliation (NFR-04), closed in the dossier. Its acceptance criterion is that it closes for
+    #    every dossier: BR-30's "marks incomplete output" is the reached limits, not this arithmetic.
+    #    A validated bundle always closes, so an open one is a composer defect and no dossier is
+    #    produced — rendering "✗ FAILED" exited 0 and handed the reader a document that lost material.
     reconciliation = reconcile(bundle, claims, omitted)
+    if not reconciliation["closed"]:
+        raise ValueError(
+            f"reconciliation did not close: {reconciliation['present']} present + "
+            f"{reconciliation['consolidated']} consolidated + {reconciliation['omitted']} omitted != "
+            f"{reconciliation['selected']} selected; no dossier was produced (NFR-04)")
 
     return Dossier(
         bundle=bundle,
@@ -1667,9 +1764,36 @@ def _require_ignored_source(path, flag):
     ignore check, and they quote store content in their bases. Refusing an un-ignored path here keeps
     them in the scratch directory the workflow deletes, rather than beside tracked files (issue 182).
     """
-    return _require_ignored_path(
+    target = _require_ignored_path(
         path, flag, f".context/mimisbrunnr-saga-dossier/scratch/<name>.json",
         "Write it under .context/mimisbrunnr-saga-dossier/scratch/.")
+    _require_owner_only_input(target, flag)
+    return target
+
+
+_SCRATCH_MKDIR = "mkdir -p -m 700 .context/mimisbrunnr-saga-dossier/scratch"
+
+
+def _require_owner_only_input(target, flag):
+    """Refuse an agent-written input other local users can read (issue 184, HLD-005 NFR-01).
+
+    The scratch intermediates are owner-only by NFR-01, but the Write tool creates a file with the
+    umask's mode — 0644 under the usual 022 — and runs no permission step. Either the file or the
+    directory holding it must therefore deny group and other; the documented workflow gets that from
+    the scratch directory, created 0700. A missing file is left to the reader's own error.
+    """
+    if os.name == "nt":
+        return
+    try:
+        file_mode = target.stat().st_mode
+        dir_mode = target.parent.stat().st_mode
+    except OSError:
+        return
+    if file_mode & 0o077 and dir_mode & 0o077:
+        raise ValueError(
+            f"{flag} is readable by other users: neither the file nor its directory is owner-only. "
+            f"Create the scratch directory owner-only ({_SCRATCH_MKDIR}) before writing into it; a "
+            f"scratch directory left from an earlier run must be removed and recreated that way.")
 
 
 def _require_ignored_path(path, flag, example, hint):
