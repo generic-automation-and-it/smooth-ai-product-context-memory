@@ -163,6 +163,17 @@ class RecallFeedbackGuardTests(unittest.TestCase):
                 self.assertNotIn("params-secret-0123", result.stderr + result.stdout)
                 self.assertNotIn("evil.example", result.stderr + result.stdout)
 
+    def test_an_empty_delimiter_is_refused(self):
+        # Issue 188: `urlparse` reads `http://localhost:5141?` as an empty query, so the bare-origin
+        # guard passed it; the delimiter itself is refused and reported as present.
+        for base, part in (("http://localhost:5141?", "query=present"),
+                           ("http://localhost:5141#", "fragment=present"),
+                           ("http://localhost:5141/;", "params=present")):
+            with self.subTest(base=base):
+                result = self.run_curl(base=base)
+                self.assert_refused(result)
+                self.assertIn(part, result.stderr)
+
     def test_refusal_never_echoes_the_scheme_or_the_hostname(self):
         # A token pasted into the wrong variable parses as a scheme (`admin:hunter2` -> `admin`) or as
         # a hostname, so both are reported as acceptable or not, never quoted (issue 182).

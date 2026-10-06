@@ -36,17 +36,20 @@ except ValueError:
 # `admin`, and a token pasted into the wrong variable becomes a hostname.
 # `urlparse` moves `;params` out of the path, so `http://localhost:5141/;tok=x` reads as a bare
 # origin unless the params are checked too (issue 182).
+# The delimiters are refused themselves: `urlparse` reports `http://localhost:5141?` as an empty query,
+# so an empty `?`, `#` or `;` passed as a bare origin (issue 188).
 if parsed.scheme not in ("http", "https") or parsed.username or parsed.password \
-        or parsed.path not in ("", "/") or parsed.params or parsed.query or parsed.fragment:
+        or parsed.path not in ("", "/") or parsed.params or parsed.query or parsed.fragment \
+        or any(mark in url for mark in "?#;"):
     print("refusing CONTEXT_MEMORY_BASE_URL: must be a bare HTTP(S) origin with no "
           "credentials, path, params, query or fragment (scheme={}, userinfo={}, path={}, "
           "params={}, query={}, fragment={})".format(
               "valid" if parsed.scheme in ("http", "https") else "invalid",
               "present" if parsed.username or parsed.password else "absent",
               "present" if parsed.path not in ("", "/") else "absent",
-              "present" if parsed.params else "absent",
-              "present" if parsed.query else "absent",
-              "present" if parsed.fragment else "absent"), file=sys.stderr)
+              "present" if parsed.params or ";" in url else "absent",
+              "present" if parsed.query or "?" in url else "absent",
+              "present" if parsed.fragment or "#" in url else "absent"), file=sys.stderr)
     sys.exit(1)
 if hostname not in ("localhost", "127.0.0.1", "::1"):
     print("refusing non-loopback CONTEXT_MEMORY_BASE_URL host (value not shown)", file=sys.stderr)
