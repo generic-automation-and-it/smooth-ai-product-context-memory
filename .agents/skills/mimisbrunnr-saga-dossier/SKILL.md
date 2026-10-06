@@ -68,11 +68,14 @@ python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py \
 # 2. STOP. Show the practitioner the preview and get an explicit approve / narrow / cancel. Narrowing
 #    means new flags and a new preview. Never fetch the bundle on an unapproved scope.
 
-# 3. Fetch the deterministic bundle with the approved anchors into the scratch directory. --out goes
-#    through the same gitignored-destination check as compose --out and is written owner-only
-#    (0600). The bundle is store content only: the capture rule keeps personal data out of the store
-#    (mimisbrunnr-odin-context-memory removes it before any file is written), so the bundle, like the
-#    dossier composed from it, holds none. Never use a shell redirect instead. Compare its manifest.selection with the approved preview's
+# 3. Before anything reaches disk, establish that the approved slice holds no personal data. Records
+#    captured since the capture rule (odin, issue 188) hold none, but older records may: if the slice
+#    can include records captured before it and you cannot rule personal data out, ask the
+#    practitioner, and if it still cannot be established, stop — do not write the bundle or the
+#    dossier. Neither gitignore nor owner-only mode makes personal data on disk acceptable.
+#    Then fetch the deterministic bundle with the approved anchors into the scratch directory. --out
+#    goes through the same gitignored-destination check as compose --out and is written owner-only
+#    (0600). Never use a shell redirect instead. Compare its manifest.selection with the approved preview's
 #    selection; report any difference (LADR-14) and re-preview rather than composing it.
 python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py \
   bundle --repo owner/repo --ticket github:160 \

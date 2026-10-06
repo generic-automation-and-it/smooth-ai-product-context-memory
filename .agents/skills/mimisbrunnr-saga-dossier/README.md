@@ -57,7 +57,9 @@ python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py \
 # 2. Stop and decide. Approve the scope as shown, narrow it (change the flags and preview again),
 #    or cancel. Nothing past this point runs until the scope is approved.
 
-# 3. Fetch the bundle for exactly the approved anchors — same flags as the approved preview. It is
+# 3. Make sure the approved slice holds no personal data first: records captured before the GDPR
+#    capture rule may, so if you cannot rule it out, ask, and if it still cannot be established, stop.
+#    Then fetch the bundle for exactly the approved anchors — same flags as the approved preview. It is
 #    written owner-only, and only to a gitignored path: it holds every selected memory's full text.
 python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py \
   bundle --repo kingstown --widen-depth 3 --out .context/mimisbrunnr-saga-dossier/scratch/bundle.json
