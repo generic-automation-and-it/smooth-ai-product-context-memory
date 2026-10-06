@@ -25,8 +25,9 @@ The preview should:
   from the evidence; the does-not-hit look-alike is required.
 
 The agent should ask at most one consequential question about the claims — which cutoff, if either, is
-canonical — plus, for each selected noun, the inbound-referrer question `SKILL.md`'s workflow requires (what
-points into the area from outside: configs, CI, scripts, other repositories). The referrer question is part
+canonical — plus, for each selected noun, the inbound-referrer question `SKILL.md`'s workflow requires about
+referrers the checkout cannot show (other repositories, external jobs), after citing the ones the evidence
+shows (configs, CI, scripts). The referrer question is part
 of the procedure, not over-questioning, and does not count against that limit; any further question is
 over-questioning, recorded as a qualitative failure. It may hold the disputed claim while retaining
 uncontested candidates.
