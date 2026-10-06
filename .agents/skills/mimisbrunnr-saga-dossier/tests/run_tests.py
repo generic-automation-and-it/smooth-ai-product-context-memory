@@ -633,6 +633,25 @@ class Nfr07FidelityTests(unittest.TestCase):
         self.assertIn("re-capture one source", rendered)
         self.assertIn("not independent corroboration", rendered)
 
+    def test_the_same_sources_in_another_order_are_not_independent(self):
+        """Issue 188: the source signature was an ordered tuple, so two copies listing the same two
+        sources in opposite order — or one source twice — read as independent corroboration."""
+        first = {"kind": "doc", "reference": "SPEC-1", "capturedOn": "2026-01-01T00:00:00Z"}
+        second = {"kind": "ticket", "reference": "ABC-2", "capturedOn": "2026-01-01T00:00:00Z"}
+        for label, a_sources, b_sources in (("reordered", [first, second], [second, first]),
+                                            ("repeated", [first, first], [first])):
+            with self.subTest(label):
+                items = [
+                    dict(_mk("11111111-1111-1111-1111-111111111111", "A", "The default is A.",
+                             created="2026-01-01T10:00:00Z"), sources=a_sources),
+                    dict(_mk("22222222-2222-2222-2222-222222222222", "B", "The default is A.",
+                             created="2026-01-02T10:00:00Z"), sources=b_sources),
+                ]
+                judg = {"equivalences": [{"uuids": [i["uuid"] for i in items], "meaning": "same"}]}
+                rendered = dc.render(dc.compose(_bundle(items), focus=None, judgements=judg))
+                self.assertIn("these re-capture one source", rendered)
+                self.assertNotIn("these are distinct sources", rendered)
+
     def test_differing_customer_scope_claims_not_consolidated(self):
         """NFR-07: two claims sharing wording but differing in customer scope are not consolidated."""
         items = [
@@ -865,6 +884,23 @@ class CredentialTransportTests(_CleanCredentialEnv, unittest.TestCase):
                 self.assertEqual(rc, 1)
                 self.assertIn("loopback origin", stderr.getvalue())
                 self.assertNotIn("tok=x", stderr.getvalue())
+
+    def test_an_empty_delimiter_is_refused_before_any_request(self):
+        # Issue 188: `http://localhost:5141?` parses with an empty query and passed as an origin.
+        import contextlib
+        import io
+        import urllib.request
+        from unittest import mock
+
+        for base in ("http://localhost:5141?", "http://localhost:5141#", "http://localhost:5141/;"):
+            with self.subTest(base=base):
+                stderr = io.StringIO()
+                with mock.patch.dict(os.environ, {dc._ENV_READ_TOKEN: "test-token-not-a-real-secret"}), \
+                        mock.patch.object(urllib.request, "build_opener", _RefusingOpener), \
+                        contextlib.redirect_stderr(stderr):
+                    rc = dc.main(["--base-url", base, "bundle", "--heimdallr", "false"])
+                self.assertEqual(rc, 1)
+                self.assertIn("loopback origin", stderr.getvalue())
 
     def test_loopback_forms_are_accepted(self):
         # urlparse lowercases the host, so an uppercase or bracketed form must still pass.
@@ -2119,9 +2155,12 @@ class ProvenanceCycleMembershipTests(unittest.TestCase):
         self.assertEqual({m["uuid"] for m in cycles[0]["memories"]}, {self.A, self.B})
         self.assertIn("2 memory(ies)", cycles[0]["basis"])
         self.assertEqual(cycles[0]["brokenAt"], self.A)
+        self.assertEqual(cycles[0]["brokenAtVersion"], 1)
         order = [c["origins"][0]["uuid"] for c in doc.claims]
         self.assertLess(order.index(self.B), order.index(self.C))
         self.assertTrue(doc.reconciliation["closed"])
+        # Issue 188: the break point was computed and never shown to a reader of the dossier.
+        self.assertIn(f"Broken at {self.A} v1", dc.render(doc))
 
     def test_each_cycle_is_its_own_finding_and_upstream_breaks_first(self):
         # Cycle D<->E rests on cycle A<->B (D depends on A) and has the earlier business keys, so a
@@ -2329,6 +2368,19 @@ class HeimdallrTimeoutTests(unittest.TestCase):
             self.assertEqual(dc.heimdallr_scan(), {})
         finally:
             dc.subprocess.run = original
+
+
+class PersonalDataTextTests(unittest.TestCase):
+    """Issue 188: the workflow said the bundle can hold personal data and wrote it to disk anyway. The
+    capture rule keeps personal data out of the store, and the judgement file adds none."""
+
+    def test_the_workflow_names_where_personal_data_is_kept_out(self):
+        text = " ".join((Path(dc.__file__).resolve().parents[1] / "SKILL.md").read_text(
+            encoding="utf-8").split())
+        self.assertNotIn("which can hold personal data", text)
+        self.assertIn("the capture rule keeps personal data out of the store", text)
+        self.assertIn("a judgement adds no personal data to a file", text)
+        self.assertIn("(GDPR personal data) is masked and generalised", text)
 
 
 if __name__ == "__main__":

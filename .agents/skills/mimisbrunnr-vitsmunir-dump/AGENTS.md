@@ -18,6 +18,7 @@ Pure-prompt behavioral skill (no scripts): a listen-first capture session whose 
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-06 | README intent review names the Compare / Clarify phase: Listen defers by default, and Compare or Clarify (or `--oktoreaddocs` / `--oktoask`) inspects material and asks grounded questions; synthesis still waits for an explicit request (issue 188). | issue 188 |
 | 2026-10-05 | **Heimdallr autofill moved out of Initialize and stopped binding tickets on its own.** Initialize ran the git-scanning reporter on every session, breaking the tool-free default (LADR-001); the reporter now runs no earlier than synthesis, or during Listen only when `--oktoreaddocs`/`--all` enables grounding. A branch-seen or newest-commit ticket was promoted straight to the binding, so an artifact could be filed against unrelated work; discovered tickets are now listed with their source and need the operator's confirmation — no answer means unbound. Wording only, no script. | issue 179 |
 | 2026-10-03 | **Initialize fills a missing repository/ticket binding from Heimdallr by default** (same skills root, no hardcoded path); tags stay agent-derived keywords; explicit caller values always win. Wording only, no script. | session request |
 | 2026-06-12 | Initial version. | |

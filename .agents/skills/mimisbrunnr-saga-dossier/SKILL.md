@@ -70,15 +70,18 @@ python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py \
 
 # 3. Fetch the deterministic bundle with the approved anchors into the scratch directory. --out goes
 #    through the same gitignored-destination check as compose --out and is written owner-only
-#    (0600): the bundle carries every selected memory's body, which can hold personal data. Never
-#    use a shell redirect instead. Compare its manifest.selection with the approved preview's
+#    (0600). The bundle is store content only: the capture rule keeps personal data out of the store
+#    (mimisbrunnr-odin-context-memory removes it before any file is written), so the bundle, like the
+#    dossier composed from it, holds none. Never use a shell redirect instead. Compare its manifest.selection with the approved preview's
 #    selection; report any difference (LADR-14) and re-preview rather than composing it.
 python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py \
   bundle --repo owner/repo --ticket github:160 \
   --out .context/mimisbrunnr-saga-dossier/scratch/bundle.json
 
 # 4. Read the bundle and write your semantic judgements (see "Invoking the judgement") with the
-#    Write tool to .context/mimisbrunnr-saga-dossier/scratch/judgements.json. The file is optional:
+#    Write tool to .context/mimisbrunnr-saga-dossier/scratch/judgements.json. Refer to memories by
+#    uuid and version and to people by role: a judgement adds no personal data to a file — any
+#    personal identifier (GDPR personal data) is masked and generalised, as the capture rule requires. The file is optional:
 #    without it the dossier carries no gap, contradiction or consolidation — only the deterministic
 #    findings — and step 5 runs WITHOUT its --judgements line (passing a path you never wrote fails).
 #    A near-miss-tag is not a judgement: write its evidence to scratch/near-miss.json and pass it
@@ -97,7 +100,9 @@ python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py \
   --focus architecture --out .context/mimisbrunnr-saga-dossier/architecture.md
 
 # 6. Delete the scratch directory once composition is finished — also when a step failed or the
-#    practitioner cancelled. The bundle is raw store content; only the dossier is the artefact.
+#    practitioner cancelled. The bundle is raw store content; only the dossier is the artefact. If a
+#    bundle does carry personal data, the store holds it from before the capture rule: the fix is at
+#    the store, through mimisbrunnr-odin-context-memory, never by editing the dossier.
 rm -rf .context/mimisbrunnr-saga-dossier/scratch
 ```
 

@@ -204,12 +204,26 @@ def score_answers(surface_text: str, answers: dict, questions: list[dict]) -> li
         ans = (answers.get(q["id"]) or "").strip()
         cited = any(a.lower() in ans.lower() for a in q.get("accept", [q["identity"]]))
         facts = _facts_match(ans, q)
+        supported = _surface_supports(surface_text, q)
         declined = bool(DECLINE_RE.fullmatch(ans))
         results.append({
-            "id": q["id"], "present": present, "cited": cited, "facts": facts, "declined": declined,
-            "correct": (cited and facts) if present else declined,
+            "id": q["id"], "present": present, "cited": cited, "facts": facts,
+            "supported": supported, "declined": declined,
+            "correct": (cited and facts and supported) if present else declined,
         })
     return results
+
+
+def _surface_supports(surface_text: str, q: dict) -> bool:
+    """The rendered surface itself carries the question's key facts.
+
+    The answers are recorded once; the surfaces are re-rendered on every run. Scoring only the answer
+    let a recorded walk keep its marks after a rendering change dropped the very fact the answer
+    states, so the walk proved an agent could act on material the surface no longer contains
+    (issue 188). A present question is correct only when the surface still supports its answer.
+    """
+    text = surface_text.lower()
+    return all(fact.lower() in text for fact in q.get("must_contain", []))
 
 
 def summarize(results: list[dict]) -> dict:
@@ -389,6 +403,21 @@ class WalkFixtureTests(unittest.TestCase):
         text = workflow.read_text(encoding="utf-8") if workflow.is_file() else ""
         if "mimisbrunnr-odin-context-memory/tests/" in text:
             self.assertIn("mimisbrunnr-kvasir-understanding/tests/run_walk_tests.py", text)
+
+    def test_a_surface_that_loses_its_facts_loses_its_marks(self):
+        """Regression (issue 188): a recorded answer kept scoring after the rendered surface stopped
+        carrying its key fact. Strip the facts from a surface and the same answers stop being correct."""
+        for name, text in self.texts.items():
+            answers = perfect_answers(text, self.questions)
+            stripped = text
+            for q in self.questions:
+                for fact in q.get("must_contain", []):
+                    stripped = re.sub(re.escape(fact), "[removed]", stripped, flags=re.IGNORECASE)
+            with self.subTest(surface=name):
+                kept = summarize(score_answers(text, answers, self.questions))
+                lost = summarize(score_answers(stripped, answers, self.questions))
+                self.assertGreater(kept["correct_present"], 0)
+                self.assertEqual(lost["correct_present"], 0)
 
     def test_every_present_question_names_a_fact_its_text_does_not_supply(self):
         """A key fact the question already states would be scored by an agent that echoes it."""

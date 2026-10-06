@@ -314,12 +314,23 @@ def parse_store_export(body: str) -> list[dict] | None:
             continue
         if isinstance(data, dict):
             for key in ("understandings", "items", "memories"):
-                if isinstance(data.get(key), list):
+                if _store_records(data.get(key)):
                     return data[key]
-            return [data] if "statement" in data else None
-        if isinstance(data, list):
+            return [data] if isinstance(data.get("statement"), str) else None
+        if _store_records(data):
             return data
     return None
+
+
+def _store_records(records) -> bool:
+    """A list of record objects, each with a text `statement` — the only shape read as a store export.
+
+    Any JSON array used to qualify, so a foreign file such as `[1, 2, 3]` or `{"items": ["a"]}` was
+    taken for an export and crashed the load on the first `.get` (issue 188). Anything else is foreign
+    material and takes the prose path.
+    """
+    return isinstance(records, list) and all(
+        isinstance(record, dict) and isinstance(record.get("statement"), str) for record in records)
 
 
 def five_parts(record: dict) -> dict:

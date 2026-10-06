@@ -36,7 +36,10 @@ def _rows(response, field, endpoint=False):
         if not all(isinstance(path, dict) and isinstance(path.get("endpoint"), dict) for path in rows):
             return None
         rows = [path["endpoint"] for path in rows]
+    # A row is identified by uuid **and** version: merging and dedupe key on both, so a versionless row
+    # could not be placed and was counted as a completed pass all the same (issue 188).
     if not all(isinstance(row, dict) and isinstance(row.get("uuid"), str) and row["uuid"]
+               and type(row.get("version")) is int and row["version"] > 0
                for row in rows):
         return None
     return rows

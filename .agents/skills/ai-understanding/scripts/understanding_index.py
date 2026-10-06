@@ -555,7 +555,9 @@ def published_paths(store: Path) -> set[str]:
                             or "\\" in name or re.match(r"^[A-Za-z]:", name)
                             or not parts[1].endswith(UNIT_SUFFIX)):
                         continue
-                    if not member_reads_cleanly(zf, info):
+                    # A symlink entry is a pointer, not the unit: consume refuses it, so it can never
+                    # land the unit anywhere and proves nothing was captured (issue 188).
+                    if (info.external_attr >> 16) & S_IFMT == S_IFLNK or not member_reads_cleanly(zf, info):
                         continue
                     paths.add(name)
         except (zipfile.BadZipFile, OSError):
@@ -657,6 +659,12 @@ def consume_problems(archive: Path, store: Path) -> list[str]:
             check_dir(path.as_posix(), name)
             continue
         key = path.as_posix().casefold()
+        # Where the entry would really land. A local folder symlinked inside the store makes
+        # `alias/x.md` land on `real/x.md`, which the name-based check could not see, so an existing
+        # file was overwritten through the alias (issue 188).
+        resolved_key = resolved.relative_to(store_real).as_posix().casefold()
+        if resolved_key != key and (resolved_key in local_files or resolved_key in local_dirs):
+            collide(name, f"local '{local_files.get(resolved_key) or local_dirs.get(resolved_key)}'")
         if key in local_files or key in local_dirs:
             collide(name, f"local '{local_files.get(key) or local_dirs[key]}'")
         elif key in claimed_files or key in claimed_dirs:

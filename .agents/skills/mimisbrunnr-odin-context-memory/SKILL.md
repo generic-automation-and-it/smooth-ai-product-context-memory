@@ -20,7 +20,7 @@ client has `import` only; it has no write command to alias.
 | _(none)_ | Silent accumulate during work; no write until the `--export` checkpoint. |
 | `--import` | Store → session (recall) through `memory-read`: the `query` command, aliased `import`. Read token only. |
 | `--export` | Session → store (capture) at the end-of-task checkpoint through `memory-write`: the full write pipeline ending in `set`, aliased `export`. Input is the facts accumulated during the session; this skill reads no dump file — to capture a dump, use `mimisbrunnr-kvasir-understanding export --input <folder>`. |
-| `--dryrun` | Run the full write pipeline (preflight, redaction detection, dedup, link derivation, atomicity, ticket-uniqueness) and produce the digest **without writing anything**. Report what *would* be created / versioned / linked / skipped. **This is the only pre-write veto point** — see Finalization Output. |
+| `--dryrun` | For an **existing** group, run the full write pipeline (preflight, redaction detection, dedup, link derivation, atomicity, ticket-uniqueness, `set --dryrun`) and produce the digest **without writing anything**. For a group that does **not exist yet**, `set` cannot run — it needs a `groupUuid` — so the dry run previews the plan offline and says the set stage was not tested. Report what *would* be created / versioned / linked / skipped. **This is the only pre-write veto point for an existing group** — see Finalization Output. |
 | `--approve` | Write gated kinds (`rule`, `nfr`, `decision`) as `approved` instead of `proposed`. **Only usable when the human explicitly confirms.** Without it, a gated `--export` still writes, but with `status: proposed` — excluded or flagged on retrieval until promoted. |
 | `--deepsearch` | Delegates bounded expansion: up to four keyword queries of 25 and five depth-one traversals of 20, with 400 unique UUID/version candidates overall. More inspection, never more authority or irreversibility. |
 
@@ -115,7 +115,8 @@ automatic form of this. Tags are never autofilled: derive them from the material
   candidate and the `set` request carry.
 - **`resolve-group` is not dry-runnable.** A `--dryrun` checkpoint must call neither command; it reports
   the group and initiative as *would create*, exactly as `mimisbrunnr-kvasir-understanding --export`
-  does.
+  does. That is a plan preview, not a reusable `set --dryrun` payload: build the `set` payload with the
+  resolved `groupUuid` after the authorised write creates the group.
 
 ### 2. Listen (Accumulate Candidates)
 
@@ -217,6 +218,26 @@ the scripts do not decide semantic relevance. Root the base URL via
 `CONTEXT_MEMORY_BASE_URL` (fallback `http://localhost:5141`, loopback origins only); always `probe` first for an honest
 NOT-AVAILABLE, never a silent miss.
 
+**Personal data is masked and generalised before any file is written — never stored.** Personal data is
+what the GDPR protects: any information relating to an identified or identifiable natural person,
+directly or indirectly. That covers names, email addresses, phone numbers, postal addresses, identity
+numbers (national ID or social security), employee, account and customer identifiers, online
+identifiers such as user names, IP addresses and home-folder paths, location data, and any special
+category — health, ethnicity, beliefs, union membership, sexual orientation. Before the first batch or
+payload file exists, in every candidate:
+
+- **mask the value** — drop it entirely; it never appears in a file, the store or the digest;
+- **generalise what it stood for** — a person becomes a role (*"the user"*, *"the release manager"*,
+  *"the consumer's orchestrator"*), a value becomes its type (*"an identity number"*, *"an email
+  address"*), so the fact keeps its meaning without the person;
+- **generalise until no one can be singled out** — *"the only Danish tester on team X"* still identifies
+  someone; widen it until the remaining description fits more than one person.
+
+A fact that means nothing once generalised is not captured; say so in the digest. Neither the secret
+redactor nor the cleanup does any of this: the redactor recognises secret shapes only, and a file removed
+afterwards was still written. Because nothing personal is written, nothing personal reaches the store —
+which is also what keeps a dossier or a bundle read back from it free of personal data.
+
 **Candidate content never goes into a shell command.** `<batch-file>` is a JSON file the agent writes
 with its file-write tool — never `echo`, `printf` or a heredoc — under the gitignored
 `.context/mimisbrunnr-scratch/`. Interpolating captured text into a command line puts unredacted
@@ -236,15 +257,16 @@ skills may not, and there an unredacted batch file is one `git add -A` from a co
 written is `.context/mimisbrunnr-scratch/.gitignore` holding the single line `*`, with the file tool, and
 only then the batch file. It carries no content and goes with the folder at cleanup.
 
-**Writing the batch before redaction is deliberate, and it is the only channel there is.** The redactor
+**Writing the batch before *secret* redaction is deliberate, and it is the only channel there is.** It holds
+no personal data (removed above); what it may still hold is a secret the redactor is about to find. The redactor
 needs the unredacted text as input, and an agent can hand a script text only through a file, the
 command line or the environment. The command line and environment are readable by other processes for
 the call's duration and are recorded in history and the tool transcript; a file is not. So the file is
 the channel, and its exposure is bounded instead of removed: owner-only, self-ignoring, consumed on read,
 and the folder removed at the end — see the odin `AGENTS.md` LADR on the capture content channel.
 
-**The batch file is the one unredacted copy on disk, so it is consumed and the folder is cleaned.** It
-has to be: it is the redactor's input. Pass `--consume` to `redact.py`, `atomicity.py` and the client's
+**The batch file is the one not-yet-secret-redacted copy on disk, so it is consumed and the folder is
+cleaned.** It has to be: it is the redactor's input. Pass `--consume` to `redact.py`, `atomicity.py` and the client's
 `--payload` so each file is deleted the moment it has been read (`--consume` without a file is refused;
 a file that fails to parse is left for you to see). **One exception: `set --dryrun` never takes
 `--consume`.** The dry-run payload is the one the real write reuses unchanged (same `createUuid`s, same
@@ -252,8 +274,8 @@ items), so it stays on disk until the real `set --payload <file> --consume` read
 would write something other than what the dry run showed. Remove `.context/mimisbrunnr-scratch/` after
 the real write, and **also when the checkpoint fails or is abandoned** (`rm -r` of the folder is fine:
 its command line names the folder, not the content). `decisions_gate.py score < <batch-file>` reads
-stdin and cannot consume its file, so that copy is removed only by this cleanup. Redaction does not
-cover personal data (a name, an email), so this cleanup is the only thing that removes it.
+stdin and cannot consume its file, so that copy is removed only by this cleanup. Cleanup bounds how long
+a secret sits on disk; it is never how personal data is removed — that happened before the file existed.
 
 | Script | Invocation | Pipeline stage | What it does (and does NOT do) |
 |---|---|---|---|

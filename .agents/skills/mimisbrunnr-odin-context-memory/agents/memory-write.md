@@ -21,16 +21,25 @@ nothing else.
 Before stage 1, turn the main thread's proposed group binding into a group — this is the only place a
 group or initiative is created. On the create path run `upsert-initiative` first (a missing initiative
 is a `404` from `resolve-group`), then `resolve-group`, and carry its `groupUuid` into every preflight
-candidate and the `set` request. Under `--dryrun` run neither: report the group and initiative as
-*would create*.
+candidate and the `set` request. Under `--dryrun` run neither: for a group that does not exist yet,
+report the group and initiative as *would create* and preview the plan offline — `set --dryrun` needs a
+`groupUuid`, so say the set stage was not tested rather than claiming a full dry run.
 
 Run exactly once in fixed order:
 
 1. **Preflight**: batched cross-group read-before-write; facts only, no API judgement.
-2. **Redact**: scrub detected secrets before any content reaches storage; report rule names, field paths and replaced offsets only — never the replaced text. If a location covers prose rather than a secret, reword it and re-run. The scrubber recognises secret *shapes* only, so it is not a personal-data filter: a name, email address, phone number or other personal detail that is not needed for the fact must be removed or generalised before the candidate is written, because a written blob cannot be edited afterwards.
+2. **Redact**: scrub detected secrets before any content reaches storage; report rule names, field paths and replaced offsets only — never the replaced text. If a location covers prose rather than a secret, reword it and re-run. The scrubber recognises secret *shapes* only, so it is not a personal-data filter: personal data was already removed before any file was written (below).
 3. **Dedupe / derive links**: judge subject matches and links from bounded recall.
 4. **Atomicity check**: one memory per fact; split or skip bundled claims.
 5. **Write**: one transactional `set`; API owns version ordering, identities, and graph writes.
+
+**Before creating any batch or payload file, mask and generalise every personal identifier** — any
+personal data within the meaning of the GDPR (information relating to an identified or identifiable
+person: names, contact details, identity numbers, employee, account or online identifiers, home-folder
+paths, location data, special-category data). Drop the value; generalise a person to a role (*"the
+user"*) and a value to its type (*"an identity number"*), until no one can be singled out. A fact that
+means nothing once generalised is not captured; report it in the digest. The secret scrubber does not do
+this and cleanup cannot: a file deleted afterwards was still written. See SKILL.md for the full rule.
 
 Every batch and payload file goes under `.context/mimisbrunnr-scratch/`, written with the file tool —
 never an `echo`/heredoc, and never an environment variable (a child process inherits it and the process
@@ -40,11 +49,12 @@ holding `*`, before any batch file, so the folder ignores itself even in a check
 `.context/`. Pass `--consume` to `redact.py`, `atomicity.py` and every `--payload` so each file is
 deleted once read — **except `set --dryrun`**, whose payload file is kept and passed unchanged to the
 real `set --payload <file> --consume`. Remove `.context/mimisbrunnr-scratch/` after the real write, and
-also when the checkpoint is refused, fails or is abandoned: the batch file is the unredacted copy of the
-candidates, redaction never removes personal data from it, and `decisions_gate.py score < <batch-file>`
-cannot consume its own input, so the folder cleanup is what removes that copy.
-Assign `createUuid` to every create before dry-run. Reuse the identical payload file — same UUIDs, same
-items — for the real write; never rebuild it.
+also when the checkpoint is refused, fails or is abandoned: the batch file is the not-yet-secret-redacted
+copy of the candidates (it holds no personal data), and `decisions_gate.py score < <batch-file>` cannot
+consume its own input, so the folder cleanup is what removes that copy.
+Assign `createUuid` to every create before dry-run. For an existing group, reuse the identical payload
+file — same UUIDs, same items — for the real write; never rebuild it. For a group created at this
+checkpoint, build and validate the `set` payload after creation supplies its `groupUuid`.
 Never use follow-up `create-link` for a link known at capture time.
 
 Apply BR-10 authority only after confirming same subject, scope, applicability, and business time:

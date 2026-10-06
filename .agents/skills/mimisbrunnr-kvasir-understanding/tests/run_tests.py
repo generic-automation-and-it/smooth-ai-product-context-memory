@@ -1595,15 +1595,17 @@ class ImportTests(unittest.TestCase):
             self.assertTrue(any("carrying no statement" in note for note in skips), skips)
 
     def test_bare_json_array_is_classified_visibly(self):
-        """A bare JSON array of statement-less dicts parses as a store export and yields nothing.
-        That classification is a known limitation, not a fixed behaviour — what is pinned here is
-        that it stays *visible*: a zero-record render that says so, never a silent empty load."""
+        """A bare JSON array of statement-less dicts is not a store export. It used to parse as one
+        and render zero records — the known limitation this case recorded — and issue 188 resolved it:
+        only records carrying a text `statement` are an export, so this is foreign material, loaded
+        visibly and cited as data, never a silent empty load."""
         with tempfile.TemporaryDirectory() as tmp:
             src = write(tmp, "arr.json", json.dumps([{"a": 1}, {"b": 2}]))
             rc, out, _ = run(["load", src])
             self.assertEqual(rc, 0)
-            self.assertIn("Rendered 0 record(s)", out)
-            self.assertIn("2 record(s) omitted", out)
+            self.assertIn("(foreign material — outside the store)", out)
+            self.assertIn('[{"a": 1}, {"b": 2}]', out)
+            self.assertNotIn("Rendered 0 record(s)", out)
 
 
 class DumpTests(unittest.TestCase):
@@ -3060,6 +3062,12 @@ class DocLinkTests(unittest.TestCase):
         self.assertIn("reads local Understanding files into the session", text)
         self.assertIn("queries the live store", text)
         self.assertNotIn("the same word means the same direction in both skills", text)
+        # Issue 188: the Rules section still said both skills' `--export` is session → store.
+        self.assertNotIn("in both skills", text)
+        self.assertIn("its `--import` reads local files", text)
+        agents = " ".join((Path(uc.__file__).resolve().parents[1] / "AGENTS.md").read_text(
+            encoding="utf-8").split())
+        self.assertNotIn("import refused without `--store`", agents)
 
     def test_the_documented_dump_command_carries_the_session_content(self):
         """Without `--from`, `dump --currentsession` writes the empty template; the README example
@@ -3110,6 +3118,25 @@ class HarnessIsolationTests(unittest.TestCase):
             capture_output=True, text=True, env=env, timeout=120)
         self.assertEqual(proc.returncode, 0, proc.stderr[-2000:])
         self.assertEqual(hits, [], "an offline harness case reached the store the shell points at")
+
+class ForeignJsonTests(unittest.TestCase):
+    """Issue 188: any JSON array was read as a store export, so a foreign `[1, 2, 3]` or
+    `{"items": ["a"]}` crashed `load` instead of taking the foreign-material path."""
+
+    def test_json_that_is_not_records_is_foreign_material(self):
+        for body in ("[1, 2, 3]", '["a", "b"]', '{"items": ["a"]}', '{"memories": [{"x": 1}]}',
+                     '[{"statement": 7}]'):
+            with self.subTest(body=body):
+                self.assertIsNone(uc.parse_store_export(body))
+                with tempfile.TemporaryDirectory() as tmp:
+                    rc, out, err = run(["load", write(tmp, "foreign.json", body)])
+                self.assertNotIn("Traceback", err)
+                self.assertEqual(rc, 0, err)
+
+    def test_store_records_still_parse(self):
+        self.assertEqual(len(uc.parse_store_export(json.dumps(STORE_EXPORT))), 2)
+        self.assertEqual(uc.parse_store_export("[]"), [])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

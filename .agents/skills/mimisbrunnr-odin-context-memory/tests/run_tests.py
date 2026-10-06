@@ -181,8 +181,10 @@ class RecallFramingTests(unittest.TestCase):
     @staticmethod
     def _hostile_result():
         # `items` is the store's query shape (`QueryMemories.Response(Items)`); a body without it is
-        # refused as unreadable rather than framed as a recall (issue 186).
+        # refused as unreadable rather than framed as a recall (issue 186). `paths` is carried too, so
+        # the same hostile answer satisfies the traversal commands' shape check (issue 188).
         return {
+            "paths": [],
             "items": [
                 {
                     "uuid": "11111111-1111-1111-1111-111111111111",
@@ -1363,6 +1365,18 @@ class WritePayloadTests(unittest.TestCase):
             out = client.cmd_preflight(SimpleNamespace(payload=None))
         self.assertEqual(out["candidates"], results)
 
+    def test_base_url_refuses_an_empty_query_fragment_or_params_delimiter(self):
+        # Issue 188: `urlparse` reports `http://localhost:5141?` as an empty query, so a bare delimiter
+        # passed as an origin; the delimiters are refused themselves.
+        for value in ("http://localhost:5141?", "http://localhost:5141#", "http://localhost:5141/;",
+                      "http://localhost:5141/?"):
+            with self.subTest(value=value), patch.dict(os.environ, {client.ENV_BASE_URL: value}):
+                with self.assertRaises(client.ClientError) as caught:
+                    client.base_url()
+                self.assertEqual(caught.exception.status_text, "bad-base-url")
+        with patch.dict(os.environ, {client.ENV_BASE_URL: "http://localhost:5141/"}):
+            self.assertEqual(client.base_url(), "http://localhost:5141")
+
     def test_base_url_refuses_semicolon_params(self):
         # Issue 182: `urlparse` splits `;…` off the last path segment into `params`, so a `/;token=…`
         # tail passed a check that looked only at `path`.
@@ -2252,7 +2266,13 @@ class DeepSearchTests(unittest.TestCase):
                 ("keyword row without uuid", "keyword", {"items": [self.row(9), {"version": 2}]}),
                 ("keyword missing items", "keyword", {}),
                 ("path without endpoint", "traversal", {"paths": [{"endpoint": good}, {"depth": 1}]}),
-                ("paths missing", "traversal", {"items": [good]})):
+                ("paths missing", "traversal", {"items": [good]}),
+                # Issue 188: a row is placed by uuid and version, so a versionless row is unreadable.
+                ("keyword row without version", "keyword",
+                 {"items": [self.row(9), {"uuid": "cccccccc-0000-4000-8000-000000000009"}]}),
+                ("endpoint without version", "traversal",
+                 {"paths": [{"endpoint": {"uuid": "cccccccc-0000-4000-8000-000000000010",
+                                          "version": 0}}]})):
             with self.subTest(answer=label):
                 def request(method, path, payload, **kwargs):
                     if path.endswith("paths"):
@@ -3000,6 +3020,18 @@ class SemanticFixtureTests(unittest.TestCase):
             with self.subTest(label):
                 self.assertFalse(self._s1_row(verdict))
 
+    def test_the_s12_recalled_record_states_one_value(self):
+        # Issue 188: the recalled record's description said 02:00 — the candidate's value — while its
+        # statement and summary said 03:00, so whether the pair conflicts depended on which field a
+        # matcher read. Every field of the recalled record states the one value the candidate contradicts.
+        scenario = {s["id"]: s for s in self._scenarios()}["s12-same-words-different-scope-negative"]
+        recalled = scenario["recall_set"][0]
+        for field in ("description", "statement", "content_summary"):
+            with self.subTest(field=field):
+                self.assertIn("03:00", recalled[field])
+                self.assertNotIn("02:00", recalled[field])
+        self.assertIn("02:00", scenario["candidate_statement"])
+
     def test_a_scrub_that_drops_the_fact_does_not_pass(self):
         # Issue 186: `redacted_must_cover` asked only for non-empty text, so a field scrubbed down to
         # `<redacted>` — the secret gone and the claim with it — scored as a correct scrub.
@@ -3093,6 +3125,12 @@ class AgentContractTests(unittest.TestCase):
         self.assertIn(client.ENV_WRITE_TOKEN, text)
 
         registration = (HERE.parents[2] / "agents" / "memory-read.md").read_text(encoding="utf-8")
+        # Issue 188 (issue 181 finding 30 again): "the write credential is never ambient" told the
+        # worker a write token could not be in its environment, while sourcing the credential file
+        # exports one and the read client then refuses to start. Launching without one is the step.
+        flat = " ".join(registration.split())
+        self.assertIn("no write-token spelling in its environment", flat)
+        self.assertNotIn("the write credential is never ambient", flat)
         self.assertIn("context_memory_read_client.py", registration)
         self.assertNotIn("context_memory_client.py", registration)
         self.assertIn(client.ENV_WRITE_TOKEN, registration)
@@ -3186,6 +3224,41 @@ class AgentContractTests(unittest.TestCase):
                 self.assertIn(self.WRITE_STEP, text)
                 self.assertIn("never ambient", text)
 
+    def test_every_capture_procedure_removes_personal_data_before_the_first_file(self):
+        """Issue 188, fixed as a class: the text at every site that writes a batch told the agent to clean
+        up personal data afterwards, which cannot meet a no-personal-data-on-disk rule. Each must say
+        that every personal identifier the GDPR covers is masked and generalised before any file
+        exists; none may present cleanup as what removes it."""
+        documents = {
+            "SKILL.md": HERE.parent / "SKILL.md",
+            "AGENTS.md": HERE.parent / "AGENTS.md",
+            "agents/memory-write.md": self.AGENTS / "memory-write.md",
+            "registration": HERE.parents[2] / "agents" / "memory-write.md",
+        }
+        for name, path in documents.items():
+            with self.subTest(document=name):
+                text = " ".join(path.read_text(encoding="utf-8").split()).lower()
+                # Any personal identifier the GDPR covers is masked (value dropped) and generalised
+                # (role or type in its place) before the first file exists.
+                self.assertIn("gdpr", text)
+                self.assertRegex(text, r"mask(ed)? and generalise(d)?")
+                self.assertRegex(text, r"role")
+                self.assertNotRegex(text, r"omit(s)? (a|the) candidate whose fact|omit one whose fact")
+                self.assertNotIn("this cleanup is the only thing that removes it", text)
+                self.assertNotIn("redaction never removes personal data from it", text)
+
+    def test_a_dry_run_for_a_new_group_does_not_promise_the_set_stage(self):
+        """Issue 188: `set` needs an existing `groupUuid`, so a dry run for a group that does not exist
+        yet cannot run `set --dryrun`, and its payload cannot be the one the real write reuses. The
+        initiative prerequisite applies on the create path only."""
+        skill = " ".join((HERE.parent / "SKILL.md").read_text(encoding="utf-8").split())
+        worker = " ".join((self.AGENTS / "memory-write.md").read_text(encoding="utf-8").split())
+        agents = " ".join((HERE.parent / "AGENTS.md").read_text(encoding="utf-8").split())
+        self.assertIn("For a group that does **not exist yet**, `set` cannot run", skill)
+        self.assertIn("after creation supplies its `groupUuid`", worker)
+        self.assertIn("on the create path an initiative must exist first", agents)
+        self.assertNotIn("and an initiative must exist first.**", agents)
+
     def test_the_default_prompt_writes_only_on_an_explicit_export(self):
         """Issue 186 (issue 179 finding 23, issue 181 again): the default prompt told an agent to write
         at the end of every task, while every switch is off by default and nothing is written without an
@@ -3242,7 +3315,47 @@ class AgentContractTests(unittest.TestCase):
         self.assertLess(worker.index("resolve-group"), worker.index("1. **Preflight**"))
 
 
+class ReadShapeTests(unittest.TestCase):
+    """Issue 188: the traversal and listing commands printed whatever came back, so an empty body or a
+    missing list read as "the store has nothing" — full coverage that was never answered."""
+
+    COMMANDS = (
+        ("get-versions", lambda: client.cmd_get_versions(SimpleNamespace(uuid="u", scope=None))),
+        ("labels", lambda: client.cmd_labels(SimpleNamespace())),
+        ("initiatives", lambda: client.cmd_initiatives(SimpleNamespace(status=None))),
+        ("paths", lambda: client.cmd_paths(SimpleNamespace(payload=None))),
+        ("ticket-paths", lambda: client.cmd_ticket_paths(SimpleNamespace(payload=None))),
+    )
+    PAYLOADS = {"paths": {"sourceUuid": "u", "maxDepth": 1},
+                "ticket-paths": {"anchor": {"provider": "github", "key": "1"}, "maxDepth": 1}}
+    VALID = {"get-versions": {"items": []}, "labels": {"items": []}, "initiatives": {"items": []},
+             "paths": {"paths": []}, "ticket-paths": {"paths": [], "items": [], "disclosure": {}}}
+
+    def _call(self, name, run, answer):
+        with patch.object(client, "read_payload", return_value=copy.deepcopy(self.PAYLOADS.get(name))), \
+                patch.object(client, "memory_versions_path", return_value="/x"), \
+                patch.object(client, "_request", return_value=answer), redirect_stdout(io.StringIO()):
+            return run()
+
+    def test_an_answer_without_its_collection_is_refused(self):
+        for name, run in self.COMMANDS:
+            for answer in (None, {}, [], "ok", {"items": "x", "paths": "x"},
+                           {"items": [1], "paths": [1]}):
+                with self.subTest(command=name, answer=answer):
+                    with self.assertRaises(client.ClientError) as caught:
+                        self._call(name, run, answer)
+                    self.assertEqual(caught.exception.status_text, "bad-response")
+
+    def test_a_documented_empty_answer_is_still_an_answer(self):
+        for name, run in self.COMMANDS:
+            with self.subTest(command=name):
+                self.assertEqual(self._call(name, run, copy.deepcopy(self.VALID[name])), self.VALID[name])
+
+
 class TicketClientTests(unittest.TestCase):
+    # The ticket traversal's documented answer shape; a stub that omits `paths` or `items` is refused
+    # as an unreadable response (issue 188).
+    EMPTY = {"paths": [], "items": [], "disclosure": {}}
     CHILD = {"provider": "GitHub ", "key": " 42"}
     PARENT = {"provider": "github", "key": "10"}
 
@@ -3356,7 +3469,7 @@ class TicketClientTests(unittest.TestCase):
                 else:
                     request.assert_called_once_with("PUT", "/api/context/tickets/parent", payload)
             query = {"anchor": payload["child"], "maxDepth": 1}
-            _, request = self.invoke(client.cmd_ticket_paths, query, {})
+            _, request = self.invoke(client.cmd_ticket_paths, query, self.EMPTY)
             self.assertEqual(request.call_args.args[2]["anchor"], payload["child"])
 
     def test_ticket_path_filter_string_limits(self):
@@ -3366,7 +3479,7 @@ class TicketClientTests(unittest.TestCase):
                                      {"anchor": self.PARENT, "maxDepth": 1, field: value})
             for value in ("x" * limit, "\U0001f600" * (limit // 2), None):
                 _, request = self.invoke(client.cmd_ticket_paths,
-                                         {"anchor": self.PARENT, "maxDepth": 1, field: value}, {})
+                                         {"anchor": self.PARENT, "maxDepth": 1, field: value}, self.EMPTY)
                 self.assertEqual(request.call_args.args[2][field], value)
 
     def test_observed_at_wire_shape_and_calendar_guards(self):
@@ -3399,7 +3512,7 @@ class TicketClientTests(unittest.TestCase):
             for depth in (1, 5):
                 payload = {"anchor": self.CHILD, "maxDepth": depth, "direction": direction,
                            "scopeDimension": "program", "kind": "decision", "pathLimit": 1, "memoryLimit": 200}
-                _, request = self.invoke(client.cmd_ticket_paths, payload, {})
+                _, request = self.invoke(client.cmd_ticket_paths, payload, self.EMPTY)
                 request.assert_called_once_with("POST", "/api/context/tickets/paths", payload)
 
     def test_ticket_paths_guards_before_transport(self):
@@ -3433,11 +3546,11 @@ class TicketClientTests(unittest.TestCase):
         ):
             with patch.object(sys, "argv", ["client", command]), \
                     patch.object(sys, "stdin", io.StringIO(json.dumps(payload))), \
-                    patch.object(client, "_request", return_value={"disclosure": "kept"}) as request, \
+                    patch.object(client, "_request", return_value=dict(self.EMPTY, disclosure="kept")) as request, \
                     redirect_stdout(io.StringIO()) as output:
                 client.main()
             self.assertEqual(request.call_args.args[:2], (method, endpoint))
-            self.assertEqual(json.loads(output.getvalue()), {"disclosure": "kept"})
+            self.assertEqual(json.loads(output.getvalue()), dict(self.EMPTY, disclosure="kept"))
 
     def test_http_wire_methods_json_and_response(self):
         for command, payload, method, endpoint in (
@@ -3452,7 +3565,7 @@ class TicketClientTests(unittest.TestCase):
                                              client.ENV_WRITE_TOKEN: "write-token"}), \
                      patch.object(client, "_open") as transport, \
                     redirect_stdout(io.StringIO()) as output:
-                transport.return_value.__enter__.return_value.read.return_value = b'{"disclosure":{"kept":true}}'
+                transport.return_value.__enter__.return_value.read.return_value = b'{"paths":[],"items":[],"disclosure":{"kept":true}}'
                 command(SimpleNamespace(payload=None, dryrun=False))
             request = transport.call_args.args[0]
             self.assertEqual(request.full_url, "http://example.invalid" + endpoint)
@@ -3461,7 +3574,8 @@ class TicketClientTests(unittest.TestCase):
             self.assertEqual(request.get_header("Content-type"), "application/json")
             expected_token = "write-token" if method == "PUT" else "read-token"
             self.assertEqual(request.get_header("Authorization"), f"Bearer {expected_token}")
-            self.assertEqual(json.loads(output.getvalue()), {"disclosure": {"kept": True}})
+            self.assertEqual(json.loads(output.getvalue()),
+                             {"paths": [], "items": [], "disclosure": {"kept": True}})
 
 
 class NearMissTagsTests(unittest.TestCase):

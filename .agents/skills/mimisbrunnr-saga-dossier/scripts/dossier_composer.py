@@ -346,6 +346,7 @@ def topological_order(items, edges):
             "scope": "the selected material in this bundle",
             "memories": [{"uuid": k[0], "version": k[1]} for k in comp],
             "brokenAt": None,
+            "brokenAtVersion": None,
         }
         findings_by_component.append(finding)
         for k in comp:
@@ -365,6 +366,7 @@ def topological_order(items, edges):
         finding = components.get(breakpoint_)
         if finding is not None and finding["brokenAt"] is None:
             finding["brokenAt"] = breakpoint_[0]
+            finding["brokenAtVersion"] = breakpoint_[1]
         heapq.heappush(heap, (_business_key(by_key[breakpoint_]), breakpoint_))
         drain()
 
@@ -662,10 +664,13 @@ def consolidate(items, equivalences, edges, asof=None):
 def _source_signature(item):
     # Same source = same kind + reference (the document the claim came from). Capture time is not
     # part of identity: three captures of one document are re-captures, not independent observations.
-    return tuple(
+    # A set, sorted: the same sources listed in another order, or one listed twice, are the same
+    # provenance. As an ordered tuple, `[A, B]` and `[B, A]` compared unequal and were shown as
+    # independent corroboration (issue 188).
+    return tuple(sorted({
         (s.get("kind") or "", s.get("reference") or "")
         for s in (item.get("sources") or [])
-    )
+    }))
 
 
 def derive_findings(items, edges, asof=None, judgements=None, uncertain=None):
@@ -1101,6 +1106,17 @@ def _cite(item):
         uuid=item["uuid"], version=item["version"], created_on=item.get("createdOn") or "unknown")
 
 
+def _cycle_break_text(finding):
+    """Where a provenance cycle was broken, so a reader can see which claim was placed first by rule
+    rather than by provenance (issue 188: the break point was computed and never rendered)."""
+    if finding.get("category") != "provenance-cycle" or not finding.get("brokenAt"):
+        return ""
+    version = finding.get("brokenAtVersion")
+    where = f"{finding['brokenAt']} v{version}" if version is not None else finding["brokenAt"]
+    return (f" Broken at {where}: the earliest member by business time was placed first, and "
+            "provenance ordering resumed after it.")
+
+
 def _near_miss_evidence_text(finding):
     """The observed side of a near-miss finding, rendered beside its analysis (issue 186)."""
     parts = []
@@ -1178,6 +1194,7 @@ def render(dossier):
                 mems = ", ".join(f"{m_['uuid']} v{m_['version']}" for m_ in f.get("memories", []))
                 lines.append(f"- **{f['classification']}** {f['basis']} "
                              f"— scope: {f['scope']}. Memories: {mems or 'none'}."
+                             + _cycle_break_text(f)
                              + _near_miss_evidence_text(f))
             lines.append("")
 
@@ -1429,7 +1446,10 @@ def _assert_loopback(base):
             or parsed.path not in ("", "/")
             or parsed.params
             or parsed.query
-            or parsed.fragment):
+            or parsed.fragment
+            # `urlparse` reports `http://localhost:5141?` as an empty query: the delimiter is refused
+            # itself (issue 188).
+            or any(mark in base for mark in "?#;")):
         raise ValueError(
             "Context-memory API base must be a bare http(s) loopback origin, "
             "e.g. http://localhost:5141 (localhost/127.0.0.1/::1)")

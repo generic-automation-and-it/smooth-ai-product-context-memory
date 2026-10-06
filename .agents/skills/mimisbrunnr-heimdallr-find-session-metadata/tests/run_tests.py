@@ -385,10 +385,23 @@ class CommitHistoryTests(unittest.TestCase):
     def test_a_readable_history_and_an_unborn_branch_are_not_failures(self):
         ok = run_with_git(dict(self.BASE, **{"log main --format=%s -n 10": "fix #3\n"}), "--json")
         self.assertIsNone(json.loads(ok.stdout)["commitsUnavailable"])
-        # Unborn: neither the log nor the ref resolves — a genuine empty history.
-        unborn = run_with_git(dict(self.BASE), "--json")
+        # Unborn: HEAD is a readable symbolic ref to `main` and `main` has no ref — a genuine empty
+        # history, proved rather than inferred from a second failure.
+        unborn_git = dict(self.BASE, **{"symbolic-ref -q HEAD": "refs/heads/main\n"})
+        unborn = run_with_git(unborn_git, "--json")
         self.assertIsNone(json.loads(unborn.stdout)["commitsUnavailable"])
-        self.assertNotIn("commits:", run_with_git(dict(self.BASE)).stdout)
+        self.assertNotIn("commits:", run_with_git(unborn_git).stdout)
+
+    def test_two_failed_reads_are_not_an_empty_history(self):
+        """Issue 188: with git unable to read the repository, both `log` and the ref check failed, and
+        the second failure was read as "unborn". Without positive evidence the log failure is
+        disclosed, including on a detached HEAD."""
+        for responses in (dict(self.BASE),
+                          dict(self.BASE, **{"symbolic-ref -q HEAD": "refs/heads/other\n"}),
+                          dict(self.BASE, **{"branch --show-current": "\n"})):
+            with self.subTest(responses=sorted(responses)):
+                result = json.loads(run_with_git(responses, "--json").stdout)
+                self.assertIn("git log failed", result["commitsUnavailable"])
 
 
 class ContractTests(unittest.TestCase):
@@ -482,6 +495,54 @@ class RepoRootTests(unittest.TestCase):
         result = self._scan()
         self.assertEqual(result["repository"], "acme/other")
         self.assertEqual(os.path.realpath(result["root"]), os.path.realpath(self.other))
+
+    def _scan_env(self, cwd, *argv, home=None, script=SCRIPT):
+        env = dict(os.environ, **({"HOME": str(home)} if home is not None else {}))
+        proc = subprocess.run([sys.executable, "-B", str(script), "--json", *argv],
+                              capture_output=True, text=True, encoding="utf-8", cwd=str(cwd), env=env)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return proc
+
+    def test_the_root_under_home_is_shown_without_the_account_folder(self):
+        """Issue 188: the absolute checkout path carried the account's home folder, so every scan printed
+        the operator's account name. Under HOME the path is shown from `~`."""
+        home = Path(self._tmp.name)
+        proc = self._scan_env(self.chosen, home=home)
+        result = json.loads(proc.stdout)
+        self.assertEqual(result["root"], "~/chosen")
+        self.assertIsNone(result["rootWithheld"])
+        self.assertNotIn(os.path.realpath(self._tmp.name), proc.stdout)
+
+    def test_a_credential_shaped_checkout_path_is_withheld(self):
+        for entry in CREDENTIAL_LIKE["credentials"]:
+            folder = entry["text"].replace(":", "-", 1).replace("/", "-")
+            if not entry["gate"] and ":" in entry["text"]:
+                folder = entry["text"].split(":", 1)[0] + "/" + entry["text"].split(":", 1)[1]
+            with self.subTest(case=entry["id"]):
+                repo = _real_repo(Path(self._tmp.name) / "creds" / entry["id"] / folder,
+                                  "https://github.com/acme/x.git", "fix #1")
+                proc = self._scan_env(repo)
+                result = json.loads(proc.stdout)
+                self.assertIsNone(result["root"])
+                self.assertEqual(result["rootWithheld"], "credential-shaped checkout path; not shown")
+                self.assertNotIn(entry["secret"], proc.stdout + proc.stderr)
+
+    def test_root_matches_reports_the_comparison_a_caller_needs(self):
+        self.assertTrue(self._scan("--repo-root", str(self.chosen))["rootMatches"])
+        sub = self.chosen / "sub"
+        sub.mkdir()
+        self.assertFalse(self._scan("--repo-root", str(sub))["rootMatches"])
+        self.assertIsNone(self._scan()["rootMatches"])
+
+    def test_without_the_redactor_the_root_is_not_shown(self):
+        lone = Path(self._tmp.name) / "skills" / "mimisbrunnr-heimdallr-find-session-metadata" / "scripts"
+        lone.mkdir(parents=True)
+        shutil.copy(SCRIPT, lone / SCRIPT.name)
+        result = json.loads(self._scan_env(self.chosen, "--repo-root", str(self.chosen),
+                                           script=lone / SCRIPT.name).stdout)
+        self.assertIsNone(result["root"])
+        self.assertIn("redactor unavailable", result["rootWithheld"])
+        self.assertTrue(result["rootMatches"], "the comparison needs no displayed path")
 
     def test_a_repo_root_that_is_not_a_checkout_is_unavailable(self):
         proc = subprocess.run(

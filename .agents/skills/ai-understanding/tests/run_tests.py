@@ -454,6 +454,21 @@ class DurabilityGuardTests(unittest.TestCase):
                     zf.writestr(name, "body\n")
                 self.assertEqual(flagged(store), {"alpha"})
 
+    def test_a_symlink_entry_proves_nothing_was_published(self):
+        """Issue 188: a symlink entry named like a unit was counted as the unit's capture, though consume
+        refuses it and it holds no unit."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = make_repo(tmp, ignore_store=True)
+            store = repo / ".context" / "understandings"
+            write_unit(store, "proj-20260930-1700", "alpha")
+            pub = store.parent / ui.PUBLISH_DIR_NAME
+            pub.mkdir(parents=True, exist_ok=True)
+            info = zipfile.ZipInfo("proj-20260930-1700/alpha.understanding.md")
+            info.external_attr = (0o120777 << 16)
+            with zipfile.ZipFile(pub / "understandings-20260930-180000.zip", "w") as zf:
+                zf.writestr(info, "../../elsewhere")
+            self.assertEqual(flagged(store), {"alpha"})
+
     def test_unreadable_archive_counts_for_nothing(self):
         """A corrupt zip cannot prove anything was captured; its units stay reported, without a crash."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -584,6 +599,16 @@ class ConsumeCheckTests(unittest.TestCase):
         info = zipfile.ZipInfo("s-20260101-0000/link.understanding.md")
         info.external_attr = (0o120777 << 16)
         self.assert_refused(make_archive(self.root / "l.zip", (info, "/etc/passwd")), "symlink entry")
+
+    def test_an_existing_file_reached_through_an_internal_symlink_is_refused(self):
+        """Issue 188: a local folder symlinked to another folder inside the store passed the escape
+        check, and the name-based collision check could not see the file the entry would overwrite."""
+        real = self.store / "s-20260101-0000"
+        real.mkdir()
+        (real / "a.understanding.md").write_text("local\n", encoding="utf-8")
+        (self.store / "alias-20260101-0000").symlink_to(real, target_is_directory=True)
+        self.assert_refused(make_archive(self.root / "a.zip", "alias-20260101-0000/a.understanding.md"),
+                            "local '")
 
     def test_a_local_symlinked_folder_that_leads_outside_is_refused(self):
         outside = self.root / "outside"
@@ -750,6 +775,15 @@ class CaseProbeTests(unittest.TestCase):
             self.assertTrue(other.is_dir(), "another run's probe was removed")
             self.assertEqual(sorted(p.name for p in directory.iterdir()), [".case-probe"],
                              "the probe left its own directory behind")
+
+
+class ReadmeTests(unittest.TestCase):
+    def test_loading_names_description_matching_for_outcome_units(self):
+        """Issue 188: the README said only a question is matched, while an outcome unit carries none
+        and is matched on its description (SKILL.md, Import)."""
+        readme = (Path(ui.__file__).resolve().parents[1] / "README.md").read_text(encoding="utf-8")
+        row = next(line for line in readme.splitlines() if line.startswith("| Loading |"))
+        self.assertIn("description matches", row)
 
 
 if __name__ == "__main__":

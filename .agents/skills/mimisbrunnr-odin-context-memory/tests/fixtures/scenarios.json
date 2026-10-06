@@ -257,7 +257,7 @@
         {
           "uuid": "m-008",
           "group_uuid": "g-01",
-          "description": "The nightly export job runs at 02:00 UTC",
+          "description": "The nightly export job runs at 03:00 UTC.",
           "statement": "The nightly export starts at 03:00 UTC.",
           "kind": "operations",
           "content_summary": "Export schedule is 03:00 UTC."
