@@ -11,7 +11,7 @@ access, no raw feedback records. Output is identity / count / time only; content
 leave the store.
 
 Base URL: `CONTEXT_MEMORY_BASE_URL` (default `http://localhost:5141`). Loopback origins only — the
-client refuses any origin that is not localhost/127.0.0.1, so a value like `https://api.example.com`
+client refuses any origin that is not `localhost`, `127.0.0.1` or `::1`, so a value like `https://api.example.com`
 fails before a request is sent. Export it once, or `set -a && source .context/mimisbrunnr.env && set +a`
 if you provisioned via `scripts/provision-credentials.sh`.
 

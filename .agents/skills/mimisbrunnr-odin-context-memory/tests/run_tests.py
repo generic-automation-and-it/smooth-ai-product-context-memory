@@ -3355,6 +3355,10 @@ class AgentContractTests(unittest.TestCase):
                 self.assertIn(name, completed.stderr)
                 self.assertNotIn(planted, completed.stderr + completed.stdout,
                                  "the refusal must name the variable, never its value")
+                # Issue 200 #6: the message named two of the three spellings the guard refuses.
+                for spelling in (client.ENV_WRITE_TOKEN, "ApiAccess__WriteToken",
+                                 "Parameters__api-write-token"):
+                    self.assertIn(spelling, completed.stderr)
 
     def test_an_empty_or_unrelated_token_name_does_not_trip_the_read_guard(self):
         # The control: the guard is on write-token names with a value, not on anything token-shaped.

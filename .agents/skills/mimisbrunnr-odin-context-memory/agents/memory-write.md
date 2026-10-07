@@ -12,7 +12,7 @@ Run the write client, `context_memory_client.py`. Receive discrete candidate fac
 Never accept a raw transcript. The write credential is never ambient: the client seeds only the read
 token and base URL, so `CONTEXT_MEMORY_WRITE_TOKEN` is absent until you load it. Load it only at the
 authorized `--export` (or `--dryrun`) checkpoint, in this worker's shell, with the deliberate write step
-the skill's `AGENTS.md` names — `set -a && source ~/.mimisbrunnr/credentials && set +a` — and never
+the skill's `SKILL.md` names — `set -a && source ~/.mimisbrunnr/credentials && set +a` — and never
 earlier. Never print either credential. The `Write` tool is for the batch and payload files below and
 nothing else.
 

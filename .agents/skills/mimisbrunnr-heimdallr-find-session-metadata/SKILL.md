@@ -20,8 +20,9 @@ python3 -B .agents/skills/mimisbrunnr-heimdallr-find-session-metadata/scripts/fi
 ```
 
 `--repo-root DIR` scans that checkout (`git -C DIR`) instead of the working directory. Use it whenever the
-repository you are binding is not the one the session runs in, and check the reported `root` before
-accepting anything from the scan.
+repository you are binding is not the one the session runs in, and check `rootMatches` before accepting
+anything from the scan: it answers whether the scanned checkout is the requested one, while `root` is for
+display only and is `null` when withheld.
 
 ## Sources (and only these)
 

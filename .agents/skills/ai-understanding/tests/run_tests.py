@@ -3,8 +3,8 @@
 
 Run: python3 -B .agents/skills/ai-understanding/tests/run_tests.py
 
-Covers the durability guard: a gitignored store that holds units newer than the newest published
-archive is warned about, and the store's gitignore status — not a text search — decides whether any
+Covers the durability guard: a gitignored store that holds current units no publish archive contains
+(judged by archive membership, never archive time) is warned about, and the store's gitignore status — not a text search — decides whether any
 warning is owed. The guard is advisory: no reported unit changes the exit code.
 """
 
