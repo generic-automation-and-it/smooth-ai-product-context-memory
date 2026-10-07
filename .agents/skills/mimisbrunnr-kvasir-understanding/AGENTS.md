@@ -147,8 +147,13 @@ recalls the live store via `import` (read token only) and orchestrates the captu
   capturing it would write that session's material under its own recorded binding.
 - **`export` is a dry run by default and creates nothing.** `resolve-group` has no dry-run mode and its
   handler commits unconditionally, so a dry run resolves no group and reports the group and initiative as
-  *would create*, printing the exact commands. The initiative must already exist (`resolve-group` answers
-  `404` otherwise); a `--write` refuses with the `upsert-initiative` command when it is absent.
+  *would create*, printing the exact commands. A **new** group needs its initiative (`resolve-group`
+  answers `404` otherwise); an existing ticket-bound group is returned without one. So an absent
+  initiative refuses a ticketless `--write` (always a create) before the decision gate spends any
+  attempt, while a ticket-bound one proceeds and refuses only if `resolve-group` fails, naming
+  `upsert-initiative`. **Accepted cost:** that ticket-bound refusal comes after scoring, because only
+  the mutating `resolve-group` can tell an existing group from a new one, and it must stay after the
+  gate's refusal point.
 - **Every gate is a gate.** A redactor or atomicity detector that cannot run or returns an unknown
   verdict, or a post-`--write`
   `set --dryrun` refusal, stops with nothing written rather than bypassing the boundary. The
