@@ -1013,6 +1013,86 @@ class ExportOrchestrationTests(unittest.TestCase):
 
             self._with_gates(body)
 
+    def test_an_atomicity_held_candidate_is_queued_not_just_printed(self):
+        """Part A: a held candidate lands in the review queue, so the reviewer can act on it later.
+
+        The mutation this defuses is the old behaviour (print `HELD BACK` and drop it). Remove the
+        `_queue_held` call in `cmd_export` and the queue file stays empty.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md",
+                        "We chose Postgres for storage, but Redis handles the cache.\n\n"
+                        "The graph store holds provenance edges.")
+            queue = Path(tmp) / "review" / "queue.jsonl"
+            os.environ["CONTEXT_MEMORY_REVIEW_QUEUE"] = str(queue)
+            self.addCleanup(os.environ.pop, "CONTEXT_MEMORY_REVIEW_QUEUE", None)
+
+            def body(calls, verdicts, created):
+                verdicts[:] = [{"verdict": "bundled", "signals": ["discourse"]},
+                               {"verdict": "simple", "signals": []}]
+                rc, out, _ = run(["export", src])
+                self.assertEqual(rc, 0)
+                self.assertIn("-> review queue", out)
+                self.assertTrue(queue.is_file(), "a held candidate must be persisted to the queue")
+                lines = queue.read_text(encoding="utf-8").strip().splitlines()
+                records = [json.loads(line) for line in lines]
+                entries = [r for r in records if r.get("kind") == "entry"]
+                self.assertEqual(len(entries), 1)
+                self.assertEqual(entries[0]["heldBy"], "atomicity")
+                self.assertEqual(entries[0]["conflictType"], "held-atomic")
+                self.assertEqual(entries[0]["menu"], ["split", "drop", "park"])
+
+            self._with_gates(body)
+
+    def test_a_cross_kind_subject_veto_queues_and_presents_the_menu(self):
+        """Part C.4: a subject-exists veto with no kind+facets preflight match re-preflights on the
+        subject alone to find the holder, and queues it under the `cross-kind-subject` menu instead of
+        failing with no path."""
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md", "The store holds provenance edges.")
+            queue = Path(tmp) / "review" / "queue.jsonl"
+            os.environ["CONTEXT_MEMORY_REVIEW_QUEUE"] = str(queue)
+            self.addCleanup(os.environ.pop, "CONTEXT_MEMORY_REVIEW_QUEUE", None)
+            originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                         uc.resolve_group, uc._run_capture_client)
+            try:
+                uc.gate_redaction = lambda texts: (list(texts), {})
+                uc.gate_atomicity = lambda c: [{"verdict": "simple", "signals": []} for _ in c]
+                uc.initiative_exists = lambda name: (True, "ok")
+                uc.resolve_group = lambda b, n, d, dryrun: (
+                    (None if dryrun else {"groupUuid": "g-1", "created": False}),
+                    "dry-run" if dryrun else "ok")
+
+                def client(script, argv, payload):
+                    if argv[0] == "preflight":
+                        # The version-map preflight sends kind+facets; the cross-kind re-preflight omits
+                        # them. Distinguish by the candidate's payload, which is the whole point.
+                        if "kind" in (payload.get("candidates") or [{}])[0]:
+                            return 0, json.dumps({"candidates": []}), ""
+                        # Subject-only re-preflight finds the holder, of a different kind.
+                        return 0, json.dumps({"candidates": [
+                            {"uuid": "holder-uuid", "kind": "architecture"}]}), ""
+                    if argv[0] == "set" and "--dryrun" in argv:
+                        return (1, "",
+                                "Subject 'the store' already exists in this group. "
+                                "Send it as a version bump.")
+                    if argv[0] == "set":
+                        return 0, json.dumps({"created": 1}), ""
+                    return 0, json.dumps({}), ""
+
+                uc._run_capture_client = client
+                rc, out, err = run(["export", src, "--write", "--initiative", "Present"])
+                self.assertEqual(rc, 1)
+                self.assertIn("CROSS-KIND", out)
+                self.assertIn("reclassify, rename, drop", out)
+                records = [json.loads(line) for line in queue.read_text(encoding="utf-8").strip().splitlines()]
+                entry = next(r for r in records if r.get("kind") == "entry")
+                self.assertEqual(entry["conflictType"], "cross-kind-subject")
+                self.assertEqual(entry["evidence"]["matchedUuid"], "holder-uuid")
+            finally:
+                (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                 uc.resolve_group, uc._run_capture_client) = originals
+
     def test_an_over_cap_batch_auto_splits_into_consecutive_batches(self):
         """The 20-candidate cap no longer refuses; it splits into consecutive ≤20 chunks, each
         processed end to end, and reports the boundary so a reader sees it."""
@@ -2124,7 +2204,7 @@ class DecisionsGateIntegrationTests(unittest.TestCase):
         else:
             os.environ["CONTEXT_MEMORY_DECISIONS_BELOW_THRESHOLD"] = below
         try:
-            survivors, note = uc.gate_decisions(
+            survivors, note, _held = uc.gate_decisions(
                 list(candidates if candidates is not None else self.CANDIDATES))
             return survivors, note, seen
         finally:

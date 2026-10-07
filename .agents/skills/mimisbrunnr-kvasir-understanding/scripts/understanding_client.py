@@ -58,6 +58,9 @@ REDACTOR = _CAPTURE_SCRIPTS / "redact.py"
 ATOMICITY = _CAPTURE_SCRIPTS / "atomicity.py"
 READ_CLIENT = _CAPTURE_SCRIPTS / "context_memory_read_client.py"
 WRITE_CLIENT = _CAPTURE_SCRIPTS / "context_memory_client.py"
+REVIEW_QUEUE = _CAPTURE_SCRIPTS / "review_queue.py"
+DEDUP = _CAPTURE_SCRIPTS / "dedup.py"
+DEDUP_ENABLED = "CONTEXT_MEMORY_DECISIONS_DEDUP_ENABLED"
 # Heimdallr session-metadata reporter, resolved relative to this file so the lookup
 # holds under any skills root (.agents/skills, .claude/skills, .codex/skills, npm
 # layout): two levels up is the skills root, never a hardcoded prefix.
@@ -1007,15 +1010,19 @@ def _audience_tags(candidate: dict, result: dict) -> list[str]:
     return tags
 
 
-def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str]:
+def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str, list[tuple[dict, dict]]]:
     """Score each candidate's role value through the capture skill's decision gate.
 
-    Returns `(survivors, note)`. Every failure mode except `redactor-unavailable` and a bad
+    Returns `(survivors, note, held)`. Every failure mode except `redactor-unavailable` and a bad
     configuration **skips the gate and says why** — a decision model that is down, missing, or
     timing out must never block a capture, and must never be reported as a low score. The two
     refusals are the opposite case: a redactor that cannot run means content nobody could inspect
     would be sent, and a misconfigured threshold or role list means the gate would judge against
     something other than what was configured.
+
+    `held` is the list of `(candidate, verdict)` pairs the gate held below threshold under `hold`,
+    with the verdict carrying the scores a reviewer needs. The capture path queues exactly these to
+    the review queue, rather than re-deriving them from the survivors list.
 
     The gate runs its own redaction first, so a candidate's text is scrubbed before any model call.
     """
@@ -1024,11 +1031,11 @@ def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str]:
     # operator who set ENABLED=true in `~/.mimisbrunnr/credentials` — the file the launcher maintains — was
     # told the gate was disabled while the gate itself would have run.
     if os.environ.get("CONTEXT_MEMORY_DECISIONS_ENABLED", "").lower() != "true":
-        return candidates, "decisions: disabled"
+        return candidates, "decisions: disabled", []
     if not DECISIONS_GATE.is_file():
         print(f"NOTE: the decision gate is enabled but {DECISIONS_GATE} is missing; the gate was "
               "skipped and the export continued.", file=sys.stderr)
-        return candidates, "decisions: skipped (gate script missing)"
+        return candidates, "decisions: skipped (gate script missing)", []
 
     state_file = Path(os.environ.get("MIMIS_DECISIONS_STATE",
                                      ".context/decisions-ledger.json"))
@@ -1045,27 +1052,27 @@ def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str]:
         # states. It is never a refusal: nothing about a timeout means content would go uninspected.
         print(f"NOTE: the decision gate did not answer within {GATE_TIMEOUT_SECONDS}s; the gate was "
               "skipped and the export continued.", file=sys.stderr)
-        return candidates, f"decisions: skipped (gate timed out after {GATE_TIMEOUT_SECONDS}s)"
+        return candidates, f"decisions: skipped (gate timed out after {GATE_TIMEOUT_SECONDS}s)", []
     if proc.returncode != 0:
         detail = proc.stderr.strip() or "no detail"
         if '"redactor-unavailable"' in detail:
             print("REFUSED: the decision gate's redactor could not run, so record content would "
                   "have been sent unscrubbed. Nothing was written.", file=sys.stderr)
-            return candidates, DECISIONS_REFUSED
+            return candidates, DECISIONS_REFUSED, []
         if '"bad-decisions-config"' in detail or '"bad-decisions-url"' in detail:
             print(f"REFUSED: the decision gate is misconfigured ({detail}). Nothing was written.",
                   file=sys.stderr)
-            return candidates, DECISIONS_REFUSED
+            return candidates, DECISIONS_REFUSED, []
         print(f"NOTE: the decision gate failed ({detail}); the gate was skipped and the export "
               "continued.", file=sys.stderr)
-        return candidates, "decisions: skipped (gate failed)"
+        return candidates, "decisions: skipped (gate failed)", []
 
     try:
         report = json.loads(proc.stdout)
     except ValueError:
         print("NOTE: the decision gate returned unreadable output; the gate was skipped and the "
               "export continued.", file=sys.stderr)
-        return candidates, "decisions: skipped (unreadable output)"
+        return candidates, "decisions: skipped (unreadable output)", []
     if not isinstance(report, dict):
         # Readable JSON of a shape this client cannot interpret — a list, a string, a number — is
         # not the same as unreadable output, and it reached the `.get` calls below as an
@@ -1075,10 +1082,10 @@ def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str]:
         # plausible answer and never stop a capture over it.
         print("NOTE: the decision gate returned an unrecognised report shape; the gate was skipped "
               "and the export continued.", file=sys.stderr)
-        return candidates, "decisions: skipped (unrecognised report)"
+        return candidates, "decisions: skipped (unrecognised report)", []
 
     if report.get("outcome") == "disabled":
-        return candidates, "decisions: disabled"
+        return candidates, "decisions: disabled", []
 
     below = os.environ.get("CONTEXT_MEMORY_DECISIONS_BELOW_THRESHOLD", "hold").strip().lower()
     if below not in ("hold", "mark"):
@@ -1096,9 +1103,10 @@ def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str]:
         print(f"NOTE: the decision gate returned no usable 'records' list "
               f"({report.get('outcome')!r}); the gate was skipped and the export continued.",
               file=sys.stderr)
-        return candidates, "decisions: skipped (unrecognised report)"
+        return candidates, "decisions: skipped (unrecognised report)", []
 
     held_indices: set[int] = set()
+    held_results: dict[int, dict] = {}
     marked: dict[int, dict] = {}
     unscored = 0
     malformed = 0
@@ -1142,14 +1150,17 @@ def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str]:
             marked[index] = candidate
         else:
             held_indices.add(index)
+            held_results[index] = result
 
     survivors = []
     held = []
+    held_verdicts = []
     for index, candidate in enumerate(candidates):
         if index in marked:
             survivors.append(marked[index])
         elif index in held_indices:
             held.append(candidate)
+            held_verdicts.append((candidate, held_results.get(index)))
         else:
             survivors.append(candidate)
 
@@ -1159,7 +1170,7 @@ def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str]:
         note += f", {unscored} not scored and kept (a failed gate is never a low score)"
     if malformed:
         note += f", {malformed} unreadable verdict(s) ignored (the affected records were kept)"
-    return survivors, note
+    return survivors, note, held_verdicts
 
 
 def ticket_inputs(values: list[str], repository: str | None) -> list[dict]:
@@ -1351,6 +1362,169 @@ def set_items(candidates: list[dict], binding: dict, now: dt.datetime) -> list[d
     return items
 
 
+def _review_queue_path() -> str:
+    """The queue file this client will write to, matching `review_queue.py`'s resolution exactly.
+
+    Duplicated rather than imported (the two script folders ship as separate packages). The env
+    override and the default must agree with the module the queue writes, or the digest would name a
+    path that is not the one the entries landed in.
+    """
+    return os.path.expanduser(
+        os.environ.get("CONTEXT_MEMORY_REVIEW_QUEUE", "~/.mimisbrunnr/review/queue.jsonl"))
+
+
+def _queue_held(candidate: dict, held_by: str, conflict_type: str, reason: str,
+                evidence: dict, binding: dict, source: str, session_id: str) -> bool:
+    """Append one held candidate to the review queue. True on success.
+
+    The queue is where a candidate the capture path held back goes so a reviewer can actually act on
+    it later, instead of it vanishing with the session. A queue failure never blocks the capture — the
+    candidate is already held, not written, so the capture's safety is unaffected — but it is
+    reported, because a held candidate that did not land in the queue is one a reviewer will never
+    see.
+    """
+    if not REVIEW_QUEUE.is_file():
+        print(f"NOTE: the review queue ({REVIEW_QUEUE}) is missing; held candidates were not queued.",
+              file=sys.stderr)
+        return False
+    entry = {
+        "conflictType": conflict_type,
+        "heldBy": held_by,
+        "reason": reason,
+        "evidence": evidence,
+        "candidate": candidate,
+        "binding": binding,
+        "source": source,
+        "sessionId": session_id,
+    }
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-B", str(REVIEW_QUEUE), "append"],
+            input=json.dumps(entry), capture_output=True, text=True, encoding="utf-8",
+        )
+    except OSError:
+        print("NOTE: the review queue could not be run; held candidates were not queued.", file=sys.stderr)
+        return False
+    if proc.returncode != 0:
+        detail = proc.stderr.strip() or proc.stdout.strip() or "no detail"
+        print(f"NOTE: the review queue refused a held candidate ({detail}); it was not queued.",
+              file=sys.stderr)
+        return False
+    return True
+
+
+def _dedup_candidates(candidates: list[dict], group_uuid: str | None, binding: dict,
+                      source: str, session_id: str) -> tuple[int, int]:
+    """Stage 2/3 over a chunk, queueing duplicate proposals. Opt-in via `_DEDUP_ENABLED`.
+
+    Returns `(queued, proposals)`. A proposal is a human decision under the `duplicate` menu, never an
+    automatic merge, version or skip — it is surfaced in the review queue for the operator to resolve.
+    The default (`_DEDUP_ENABLED` unset) runs nothing, so an uninstrumented export is unaffected and
+    makes no store query.
+    """
+    if os.environ.get(DEDUP_ENABLED, "").lower() != "true":
+        return 0, 0
+    if not DEDUP.is_file():
+        print(f"NOTE: dedup ({DEDUP}) is missing; no duplicate proposals were made.", file=sys.stderr)
+        return 0, 0
+    payload = {"candidates": candidates, "groupUuid": group_uuid,
+               "repository": binding.get("repository")}
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-B", str(DEDUP), "stage"],
+            input=json.dumps(payload), capture_output=True, text=True, encoding="utf-8",
+        )
+    except OSError:
+        return 0, 0
+    if proc.returncode != 0:
+        print(f"NOTE: dedup failed ({proc.stderr.strip()[:200]}); no duplicate proposals were made.",
+              file=sys.stderr)
+        return 0, 0
+    try:
+        report = json.loads(proc.stdout)
+    except ValueError:
+        return 0, 0
+    proposals = report.get("proposals") if isinstance(report, dict) else None
+    if not isinstance(proposals, list):
+        return 0, 0
+
+    queued = 0
+    shown = 0
+    degraded = 0
+    for proposal in proposals:
+        index = proposal.get("index") if isinstance(proposal, dict) else None
+        if not isinstance(index, int) or isinstance(index, bool) or not 0 <= index < len(candidates):
+            continue
+        outcome = proposal.get("outcome")
+        if outcome == "unexamined":
+            # A lexical store query that could not run: there are no matches to act on, so it is
+            # disclosed but not queued — a candidate nobody could check is not a duplicate proposal.
+            degraded += 1
+            continue
+        if outcome not in ("proposed", "possible-duplicate", "unexamined (budget)"):
+            continue
+        shown += 1
+        candidate = candidates[index]
+        evidence = {"dedup": outcome, "detail": proposal.get("detail"),
+                    "matches": proposal.get("matches")}
+        if _queue_held(candidate, "dedup", "duplicate", f"staged dedup: {outcome}",
+                       evidence, binding, source, session_id):
+            queued += 1
+    if degraded:
+        print(f"NOTE: {degraded} candidate(s) could not be duplicate-checked (the store query "
+              "failed); they were not queued.", file=sys.stderr)
+    return queued, shown
+
+
+def _handle_cross_kind_409(items: list[dict], candidates: list[dict], group_uuid: str,
+                           binding: dict, source: str, session_id: str, veto_error: str) -> bool:
+    """Re-preflight a `Subject '…' already exists` veto without kind and facets.
+
+    The write's subject-uniqueness check (SetMemories `takenSubjectSlugs`) is subject-only, while the
+    preflight used for the version map matches subject **and** kind **and** facets. So a same-subject
+    memory of a different kind coerced the dry-run veto to refuse even though preflight matched
+    nothing — the subject-exists 409. When the veto carries that signature and the preflight found no
+    holder, this re-preflights on the subject alone to find who holds it, queues the candidate under
+    the `cross-kind-subject` menu with the holder's uuid, and returns True so the caller presents the
+    menu rather than failing without a path. Returns False when it cannot determine a holder.
+    """
+    if "already exists in this group" not in veto_error:
+        return False
+
+    rc, out, err = _run_capture_client(
+        WRITE_CLIENT, ["preflight"],
+        {"candidates": [{"description": (item.get("name") or item.get("description") or str(item)),
+                         "groupUuid": group_uuid} for item in items]})
+    if rc != 0:
+        return False
+    try:
+        preflight = json.loads(out)
+    except ValueError:
+        return False
+    matches = preflight.get("candidates") if isinstance(preflight, dict) else None
+    if not isinstance(matches, list):
+        return False
+
+    found = False
+    for candidate, match in zip(candidates, matches):
+        if not isinstance(match, dict):
+            continue
+        holder = (match.get("match") or match.get("existing") or {}).get("uuid") or \
+            match.get("uuid") or match.get("matchedUuid")
+        holder_kind = (match.get("match") or match.get("existing") or {}).get("kind") or \
+            match.get("kind") or ""
+        if not holder:
+            continue
+        if _queue_held(candidate, "conflict", "cross-kind-subject",
+                       f"subject exists under a different kind in this group",
+                       {"matchedUuid": holder, "matchedKind": holder_kind},
+                       binding, source, session_id):
+            found = True
+            print(f"  CROSS-KIND: subject held by memory {holder}"
+                  f" (kind {holder_kind or '?'}); choices: reclassify, rename, drop")
+    return found
+
+
 def cmd_export(args: argparse.Namespace) -> int:
     """SESSION -> STORE. Orchestrate the capture path; write nothing unless `--write`.
 
@@ -1454,6 +1628,18 @@ def cmd_export(args: argparse.Namespace) -> int:
         (held if verdict.get("verdict") == "bundled" else clean).append(candidate)
         candidate["atomicity"] = verdict
 
+    # A held candidate is persisted to the review queue, so it can be reviewed later rather than
+    # vanishing with the session (the defect part A fixes). Queueing is never a blocker — the candidate
+    # is already held, not written — but a candidate that did not land in the queue is reported.
+    session_id = os.environ.get("MIMIS_SESSION", "")
+    queued = 0
+    for candidate in held:
+        signals = candidate.get("atomicity", {}).get("signals") or []
+        if _queue_held(candidate, "atomicity", "held-atomic",
+                       f"bundled ({', '.join(signals) or '?'})",
+                       {"signals": signals}, binding, src, session_id):
+            queued += 1
+
     # Gate 5 (decision value), only when enabled. Scores are a quality signal, never authority: they
     # never change status, kind, or approval, and a disabled or absent model skips the gate and says
     # so rather than blocking the export. A **refusal** is the one outcome that does stop it: the gate
@@ -1461,11 +1647,22 @@ def cmd_export(args: argparse.Namespace) -> int:
     # something other than what was configured, and both messages say "Nothing was written" — so
     # continuing past them wrote records under a refusal the operator had been told had blocked them.
     # Stopping here is before the group is resolved and before any chunk, so nothing exists to undo.
-    clean, decision_note = gate_decisions(clean)
+    clean, decision_note, held_verdicts = gate_decisions(clean)
     if decision_note == DECISIONS_REFUSED:
         print("REFUSED: the decision gate refused this export (the reason is above). Nothing was "
               "written; fix the gate or export without it.", file=sys.stderr)
         return 1
+
+    # The gate's below-threshold holds, under `hold`, are held candidates too and go to the same queue.
+    for candidate, result in held_verdicts:
+        evidence = {
+            "scores": result.get("scores") if isinstance(result, dict) else {},
+            "passingRoles": result.get("passingRoles") if isinstance(result, dict) else [],
+            "discrimination": result.get("discrimination") if isinstance(result, dict) else {},
+        }
+        if _queue_held(candidate, "decisions", "below-value", "below the decision-gate threshold",
+                       evidence, binding, src, session_id):
+            queued += 1
 
     # The cap is the capture skill's. An over-cap batch is auto-split into consecutive ≤ MAX_CANDIDATES
     # chunks, each processed end to end (its own preflight, its own `set --dryrun` veto, its own write),
@@ -1497,7 +1694,13 @@ def cmd_export(args: argparse.Namespace) -> int:
         for candidate in held:
             print(f"  HELD BACK (bundled: {', '.join(candidate['atomicity'].get('signals') or ['?'])}): "
                   f"{candidate['statement'][:90]}")
-        print("  A held candidate is never written past the flag. Split it, or drop it.")
+    if queued:
+        print(f"  {queued} held -> review queue {_review_queue_path()}")
+    if held or held_verdicts:
+        print("  A held candidate is never written past the flag. Review the queue, or split/drop it.")
+    if held_verdicts:
+        print(f"  {len(held_verdicts)} also held by the decision gate (below threshold) -> "
+              f"{_review_queue_path()}")
     if total_chunks > 1:
         print(f"Split into {total_chunks} batch(es) of at most {MAX_CANDIDATES} candidates: "
               + ", ".join(str(len(c)) for c in chunks) + ".")
@@ -1560,6 +1763,16 @@ def cmd_export(args: argparse.Namespace) -> int:
         # this chunk; map by the candidate's position in the chunk, never a global clean-list index.
         for local_index, candidate in enumerate(chunk):
             candidate["_versionUuid"] = version_map.get(local_index)
+            # A preflight match is the exact (stage 1) duplicate; stage 2/3 concern only the rest.
+            candidate["_exactMatch"] = bool(version_map.get(local_index))
+        # Stage 2/3 of dedup runs on the candidates the exact preflight did not match. Opt-in (see
+        # `_dedup_candidates`); a proposal is a human decision under the `duplicate` menu, never an
+        # automatic merge, version or skip.
+        dedup_queued, dedup_shown = _dedup_candidates(
+            chunk, group_uuid, binding, src, session_id)
+        if dedup_shown:
+            print(f"Staged dedup: {dedup_shown} duplicate proposal(s), {dedup_queued} queued -> "
+                  f"{_review_queue_path()}")
         # Two candidates in one chunk sharing a subject is ambiguous input: the capture path refuses two
         # same-subject creates in one batch, and sending both as version targets would double-version the
         # same memory. The preflight's intra-batch collision list is the authoritative detector (it uses
@@ -1598,9 +1811,19 @@ def cmd_export(args: argparse.Namespace) -> int:
                                                 "links": [], "labelsProposed": []})
         if rc != 0:
             early = ("Earlier batch(es) were already written and remain; " if batch_no > 1 else "")
-            print(f"REFUSED at the dry-run veto: {err.strip() or out.strip()}. {early}No memory from "
+            veto_text = f"{err.strip() or out.strip()}"
+            # A subject-exists veto with no preflight match is the cross-kind 409: the write's
+            # subject-uniqueness check is subject-only, so a same-subject memory of a different kind
+            # refuses even though the kind+facets preflight found nothing. Present the menu instead of
+            # failing without a path.
+            cross_kind = _handle_cross_kind_409(items, chunk, group_uuid, binding, src,
+                                                session_id, veto_text)
+            print(f"REFUSED at the dry-run veto: {veto_text}. {early}No memory from "
                   f"this batch was written; the group {group_uuid} was already resolved or created and "
                   f"remains.", file=sys.stderr)
+            if cross_kind:
+                print(f"  The cross-kind candidate(s) above are queued for review -> "
+                      f"{_review_queue_path()}", file=sys.stderr)
             return 1
         print(f"\nset --dryrun (the veto point){tag}:\n{out.strip()[:1200]}")
 

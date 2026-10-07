@@ -171,6 +171,12 @@ Only when the user issues an explicit `--export` at the end-of-task checkpoint, 
   be regenerated in bulk later. On generation failure, write the fact unsummarised and flag it for
   backfill — never drop the fact over a summary problem.
 - Return the digest. **Nothing mutates silently.**
+- **A held candidate is queued, not dropped.** When the atomicity gate holds a candidate back, the
+  decision gate holds one below threshold, or staged dedup proposes a duplicate, the capture path
+  appends it to the review queue (`~/.mimisbrunnr/review/queue.jsonl` by default) and the digest prints
+  `N held -> review queue <path>`. Review it with `review list` / `review show <id>` /
+  `review resolve <id> --choice <menu-key>` — a resolve takes only a choice from `conflict_menus.json`,
+  and a choice that leads to a capture routes through the export's dry-run veto, never a direct write.
 
 ## Write Pipeline (fixed order, do not re-sequence)
 
