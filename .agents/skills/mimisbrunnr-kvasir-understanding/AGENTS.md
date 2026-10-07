@@ -16,8 +16,9 @@ sole writer of clean facts).
 ## Non-Negotiables
 
 - **A load writes nothing.** A load changes nothing in the store.
-- **Never write directly.** `export` funnels through the capture path (preflight → redact → dedup/link →
-  atomicity → write), not a direct `set`. `import` is read-only — read token only, and the read client
+- **Never write directly.** `export` funnels through the capture path (preflight → redact →
+  exact-subject dedup → atomicity → write), not a direct `set`. It performs **no semantic matching and
+  no link derivation** (see Key Behaviors); never describe it as the full judgement pipeline. `import` is read-only — read token only, and the read client
   refuses to run with a write token present.
 - **The store-facing verbs match `ai-understanding`.** `export` is session → store, `import` is store →
   session, in both skills. Do not confuse this skill's `import` with a capture: the old
@@ -159,7 +160,7 @@ recalls the live store via `import` (read token only) and orchestrates the captu
 - **A candidate whose subject already exists in the export's group is a version bump, not a create.**
   Each chunk preflights its own request (after the previous chunk's write, for a `--write`), and a
   match in the export's group feeds its `uuid` back as the item's `uuid` (version target, mutually
-  exclusive with `createUuid`); the capture path's semantic dedup skips a byte-identical claim. A
+  exclusive with `createUuid`). A
   same-subject memory in another group is a separate memory to link, never a version target — memory
   identity is group-scoped `(group, uuid)`. Preflight indices are request-relative within each chunk,
   so the version map is keyed by the candidate's position in its own chunk; a duplicate subject split
@@ -172,6 +173,15 @@ recalls the live store via `import` (read token only) and orchestrates the captu
   the `set --dryrun` veto still catches a same-group duplicate before any write. A dry run has no
   resolved group, so its receipt shows the write count and discloses how many candidates matched an
   existing same-subject memory (those whose match is in the export's group would be versioned).
+- **Dedup is exact-subject only: no semantic matching, no derived links.** The match above is the
+  preflight's same-subject match; every `set` carries `links: []`. A paraphrase of an existing memory
+  under another subject, or a relation worth a typed link, needs the judgement the capture skill's
+  Compare-or-Clarify round makes, which this script cannot make, and the staged client-side dedup
+  that would propose it (exact → lexical → decision model, proposals only, no automatic merge) is
+  planned, not implemented. So the agent does it before `--write`: recall each candidate's subject
+  (`import`, or the capture skill's `--import`) and, where a candidate restates or relates to a
+  recalled memory, capture it through `mimisbrunnr-odin-context-memory --export` instead, or drop it
+  from this input (review 5432012955 #2).
 - **A byte-identical re-export is not deduped.** The capture path (`SetMemories`) versions any item
   sent with a `uuid` target and compares no content, and the preflight returns no statement to compare
   against, so re-exporting an unchanged subject writes a new (empty) version rather than skipping it.
@@ -193,10 +203,11 @@ recalls the live store via `import` (read token only) and orchestrates the captu
   again. Absent, `0`, `false` and malformed values (a string count, a boolean, a negative, a list,
   whitespace) print nothing and never stop the export (issue 182).
 - **A store-export record keeps its source scope.** The group's scope comes from the binding, so
-  `reconcile_source_scope` runs before any gate: with no `--scope`, one shared source scope is adopted
-  and disclosed (`Scope taken from the source records: …`); mixed source scopes, or a `--scope` that
-  differs from any record's, are refused with nothing sent. A re-scope (programme ↔ product) is never
-  a side effect of an export.
+  `reconcile_source_scope` runs before any gate: with no `--scope`, one source scope shared by **every**
+  record is adopted and disclosed (`Scope taken from the source records: …`); mixed source scopes,
+  scoped records beside unscoped ones, or a `--scope` that differs from any record's, are refused with
+  nothing sent. An explicit `--scope` is a choice for the whole export, so it does apply to unscoped
+  records. A re-scope (programme ↔ product) is never a side effect of an export.
 - **The dump's generated header is fenced** and its binding is recorded as structured metadata in
   `_dump.json`, so a dump → import round trip never proposes the header but binds by the dump's own
   context (an explicit flag overrides it).
@@ -277,6 +288,8 @@ recalls the live store via `import` (read token only) and orchestrates the captu
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-07 | **PR 196 review.** `reconcile_source_scope`'s docstring still described the pre-fix contract; it now states the scoped-beside-unscoped refusal and that an explicit `--scope` applies to every record. `test_the_write_sends_no_derived_links` counted the literal `"links": [],` in the source, so a `'links'` spelling or a computed value would pass while deriving links; it now runs `export --write` against a recording client and asserts `links == []` on both the `set --dryrun` and `set` payloads. Mutation-checked on a private copy (single-quoted non-empty links fails it). | PR 196 |
+| 2026-10-06 | **Consumer review `5432012955` (#1, #2, #5, #9).** (1) With no `--scope`, a scoped record's scope was adopted for **every** record, so an unscoped Understanding beside a `program` one was written as programme-scoped (#1); `reconcile_source_scope` now refuses scoped beside unscoped, while an explicit `--scope` still applies to all (a choice, as for session material). The issue-179 test's fixture was itself mixed and passed by that re-scope; it now uses an all-`program` copy, and the mixed fixture is the refusal case. (2) The docs claimed dedup plus link derivation for export; it matches subjects exactly and sends `links: []` (#2). **Not implemented here, deliberately:** semantic dedup is part B of the proposed staged-dedup work (proposals only, no automatic merge, no autonomous adjudication), so the docs now state exact-subject dedup and tell the agent to recall before `--write` and route a paraphrase or link through the capture skill; a test holds the docs to the code's `links: []`. A sentence crediting semantic dedup with skipping byte-identical claims, which contradicted the next bullet, is removed. (3) "Write the summary first" put the unprocessed summary on disk (#9); SKILL.md and README now generalise personal data before the summary exists anywhere and pipe it with `--from -`. (4) Walk harness: an answer naming a version is supported only by that version's section, so v3's fact credited to v1 no longer scores (#5); recorded scores unchanged. Mutation-checked. `run_tests.py` 199 -> 203, walk 21 -> 22. | review 5432012955 |
 | 2026-10-06 | **Issue 190, part 2, and consumer review `5430979214` (#2, #7, #9, #10, #11, #12, #13).** (1) A confidence of **0** was turned into "no confidence" (`or ""`) and never flagged, so the least trustworthy record reached the reader unwarned (#2); `None` alone is now absent. (2) `dump` overwrote a `_session.md` or `_dump.json` in a folder it did not create (#10); without the dump marker it refuses. (3) `--dontask`, documented as accepted, was rejected by every subcommand (#11); it is now a no-op flag on all four. (4) The session-name scrub test restored a fixed directory instead of the one it found, leaving later cases elsewhere (#12). (5) Walk harness: Q3/Q4 accepted "storage engine"/"cache path" as citations while asking about them, so echoing the question cited a record (#13); aliases are now uuid-only and a test refuses any alias its own question supplies. The recorded surface check used a substring match, so a surface negating a fact still supported the answer (issue 190 #17); it uses `_stated_affirmatively`. Recorded walk scores unchanged. (6) Docs: every runnable `dump --currentsession` in SKILL.md, README and ai-understanding's README passes `--from` (without it the dump is a blank template; issue 190 #16, review #7); README states that names and other personal data are not reliably detected by the dump's redaction (issue 190 #15); "nothing is written" is qualified "to the store"; this file's harness note no longer says the client makes no network call (#9), and the export-gate bullet names an unknown atomicity verdict. Mutation-checked. `run_tests.py` 194 -> 199, walk harness 18 -> 21. | issue 190, review 5430979214 |
 | 2026-10-06 | **Issue 190, part 1.** (1) `dump --currentsession` passes every binding value and `--session-name` through both steps — the secret redactor, then the personal-data rules — before anything is written; a value the scrub changes is withheld from `_dump.json` and reported by field only, a session name that would change is not used as the folder name, and an unavailable redactor writes nothing (finding 1). (2) An atomicity verdict other than `simple`/`bundled` refuses the export instead of passing as clean (finding 8). (3) The real gate with an invalid endpoint refuses the export, end to end (finding 7). Mutation-checked. Harness 190 -> 194. | issue 190 |
 | 2026-10-06 | **Issue 188.** (1) Only a list of objects each carrying a text `statement` is read as a store export; any other JSON array (`[1, 2, 3]`, `{"items": ["a"]}`) is foreign material and no longer crashes `load`. (2) The walk scorer requires the rendered surface itself to carry a present question's key facts, so a recorded walk loses its marks when a rendering change drops them (scores unchanged: 2/2+3/3, 4/4+1/1, 4/4+1/1). (3) Rules and Test References: the verbs share a direction with `ai-understanding`, not a destination; `import` is described as the read it is. `test_bare_json_array_is_classified_visibly` recorded the old parse as a known limitation and now pins the resolution: foreign material, loaded visibly. Mutation-checked. Harness 188 -> 190, walk 17 -> 18. | issue 188 |

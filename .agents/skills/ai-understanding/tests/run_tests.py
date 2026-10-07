@@ -405,6 +405,26 @@ class DurabilityGuardTests(unittest.TestCase):
             self.assertIn("proj-20260930-1900", out)
             self.assertNotIn("proj-20260930-1700", out)
 
+    def test_a_unit_whose_assets_were_left_out_is_not_published(self):
+        """Review 5432012955 #3: the unit file alone counted as published, so a lost workspace could
+        leave a "published" Understanding without the repro or diagram in its `.assets/`."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = make_repo(tmp, ignore_store=True)
+            store = repo / ".context" / "understandings"
+            write_unit(store, "proj-20260930-1700", "alpha")
+            assets = store / "proj-20260930-1700" / ("alpha" + ui.ASSETS_SUFFIX)
+            (assets / "repro").mkdir(parents=True)
+            (assets / "repro" / "steps.sh").write_text("echo repro\n", encoding="utf-8")
+            (assets / "diagram.md").write_text("graph\n", encoding="utf-8")
+            unit = "proj-20260930-1700/alpha.understanding.md"
+            publish(store, "understandings-20260930-180000.zip", unit,
+                    "proj-20260930-1700/alpha.assets/diagram.md")
+            self.assertNotIn(unit, ui.published_paths(store), "one asset file is missing")
+            publish(store, "understandings-20260930-190000.zip", unit,
+                    "proj-20260930-1700/alpha.assets/diagram.md",
+                    "proj-20260930-1700/alpha.assets/repro/steps.sh")
+            self.assertIn(unit, ui.published_paths(store), "control: unit and every asset archived")
+
     def test_unit_left_out_of_a_newer_portable_only_archive_stays_unpublished(self):
         """A `--portable-only` archive is newer than the repo-specific unit it excluded. Judging by
         archive time reported that unit published, so it could vanish with no warning."""

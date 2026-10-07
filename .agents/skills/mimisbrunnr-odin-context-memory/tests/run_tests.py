@@ -1155,6 +1155,36 @@ class ScratchInputConsumeTests(unittest.TestCase):
                         capture_output=True, text=True, timeout=30, env=env)
                     self.assertIn("--consume", completed.stdout)
 class AtomicityTests(unittest.TestCase):
+    def test_also_means_is_one_junction_not_two(self):
+        """Review 5432012955 #8: `also` and `also means` both matched the one word, so a single
+        "X also means Y" reached the two-junction threshold and was flagged as a bundle."""
+        for text in ("The cache also means faster reads.", "Retention also means fewer restores."):
+            with self.subTest(text=text):
+                self.assertEqual(atomicity.classify(text)["verdict"], "simple")
+        self.assertEqual(atomicity.classify(
+            "The cache also means faster reads, and it moreover cuts cost.")["verdict"], "bundled")
+
+    def test_the_redaction_guarantee_is_stated_for_recognised_secrets_only(self):
+        """Review 5432012955 #6: LADR-003 said the stored blob "never" contains a leaked secret, which
+        the Non-Negotiable above it forbids — the gate is on recognition, not on secrets."""
+        agents = " ".join((HERE.parent / "AGENTS.md").read_text(encoding="utf-8").split())
+        self.assertNotIn("the stored blob and DB never contain it", agents)
+        self.assertIn("a leaked secret the rules **recognise** is scrubbed before write", agents)
+
+    def test_every_documented_harness_command_is_runnable(self):
+        """Review 5432012955 #15: a documented command carried a `…` placeholder for its path."""
+        for name in ("AGENTS.md", "SKILL.md", "README.md"):
+            text = (HERE.parent / name).read_text(encoding="utf-8")
+            with self.subTest(doc=name):
+                self.assertNotRegex(text, r"python3 -B …/")
+
+    def test_the_readme_promises_a_full_dry_run_only_with_a_known_group(self):
+        """Review 5432012955 #7: the README promised `set --dryrun` for any existing group, but an
+        existing group with no memories has no read-only `groupUuid`."""
+        readme = " ".join((HERE.parent / "README.md").read_text(encoding="utf-8").split())
+        self.assertNotIn("For an existing group the full pipeline runs", readme)
+        self.assertIn("or exists with no memories, has no read-only `groupUuid`", readme)
+
     def test_a_universal_quantifier_alone_is_one_claim(self):
         """Review #18: "all of" / "each of" sat with the enumerators, so a single claim about a set was
         flagged as a bundle. It now contributes like "both", and a real enumeration still bundles."""
@@ -1368,9 +1398,36 @@ class WritePayloadTests(unittest.TestCase):
                 self.assertEqual(error.exception.status_text, "bad-response")
                 self.assertEqual(out.getvalue(), "", "a refused stage must print no result")
 
+    def test_preflight_refuses_a_malformed_match_or_collision(self):
+        """Review 5432012955 #10: the lists were checked but not their entries, and a caller skips an
+        entry it cannot read, so a broken match or collision read as "none"."""
+        two = {"candidates": [{"description": "a"}, {"description": "a"}]}
+        empty = [{"index": 0, "matches": []}, {"index": 1, "matches": []}]
+        slug = "graph-store"
+        for label, results, collisions in (
+                ("match not an object", [{"index": 0, "matches": ["u"]}, empty[1]], []),
+                ("match without groupUuid", [{"index": 0, "matches": [{"uuid": "u"}]}, empty[1]], []),
+                ("match with blank uuid", [{"index": 0, "matches": [{"uuid": " ", "groupUuid": "g"}]},
+                                           empty[1]], []),
+                ("collision not an object", empty, ["0-1"]),
+                ("collision out of range", empty, [{"leftIndex": 0, "rightIndex": 2, "subjectSlug": slug}]),
+                ("collision with itself", empty, [{"leftIndex": 1, "rightIndex": 1, "subjectSlug": slug}]),
+                ("collision boolean index", empty, [{"leftIndex": True, "rightIndex": 0, "subjectSlug": slug}]),
+                ("collision without slug", empty, [{"leftIndex": 0, "rightIndex": 1}])):
+            with self.subTest(case=label):
+                out = io.StringIO()
+                with patch.object(client, "read_payload", return_value=copy.deepcopy(two)), \
+                        patch.object(client, "_request", return_value={
+                            "candidates": results, "intraBatchCollisions": collisions}), \
+                        redirect_stdout(out):
+                    with self.assertRaises(client.ClientError) as error:
+                        client.cmd_preflight(SimpleNamespace(payload=None))
+                self.assertEqual(error.exception.status_text, "bad-response")
+                self.assertEqual(out.getvalue(), "", "a refused stage must print no result")
+
     def test_preflight_accepts_one_result_per_candidate_in_any_order(self):
         three = {"candidates": [{"description": "a"}, {"description": "b"}, {"description": "c"}]}
-        results = [{"index": 2, "matches": []}, {"index": 0, "matches": [{"uuid": "u"}]},
+        results = [{"index": 2, "matches": []}, {"index": 0, "matches": [{"uuid": "u", "groupUuid": "g"}]},
                    {"index": 1, "matches": []}]
         with patch.object(client, "read_payload", return_value=three), \
                 patch.object(client, "_request",
@@ -1401,9 +1458,10 @@ class WritePayloadTests(unittest.TestCase):
                 self.assertEqual(caught.exception.status_text, "bad-base-url")
                 self.assertNotIn("FAKE0000", str(caught.exception))
     def test_preflight_passes_well_formed_lists_through(self):
-        response = {"candidates": [{"index": 0, "matches": []}],
-                    "intraBatchCollisions": [{"left": 0, "right": 1}]}
-        with patch.object(client, "read_payload", return_value={"candidates": [{"description": "d"}]}), \
+        response = {"candidates": [{"index": 0, "matches": []}, {"index": 1, "matches": []}],
+                    "intraBatchCollisions": [{"leftIndex": 0, "rightIndex": 1, "subjectSlug": "s"}]}
+        with patch.object(client, "read_payload",
+                          return_value={"candidates": [{"description": "d"}, {"description": "d"}]}), \
                 patch.object(client, "_request", return_value=response), \
                 redirect_stdout(io.StringIO()):
             out = client.cmd_preflight(SimpleNamespace(payload=None))

@@ -525,6 +525,31 @@ def cmd_preflight(args):
             f"preflight answered {len(answered)} of {len(candidates)} candidate(s) with an index and "
             "a 'matches' list; refusing to read the rest as 'no match'",
         )
+    # The entries inside the lists, too (review 5432012955 #10). A match is acted on by its `uuid` (the
+    # version target) and `groupUuid` (whether that target is in this group); a collision by its two
+    # candidate indices and its `subjectSlug`. A caller skips an entry it cannot read, so a malformed
+    # match or collision vanished and the pair it named was written as unrelated creates.
+    def is_text(value):
+        return isinstance(value, str) and bool(value.strip())
+
+    def is_index(value):
+        return type(value) is int and 0 <= value < len(candidates)
+
+    bad_matches = sum(1 for item in candidates_out for match in item["matches"]
+                      if not (isinstance(match, dict) and is_text(match.get("uuid"))
+                              and is_text(match.get("groupUuid"))))
+    bad_collisions = sum(1 for c in collisions_out
+                         if not (isinstance(c, dict) and is_index(c.get("leftIndex"))
+                                 and is_index(c.get("rightIndex"))
+                                 and c["leftIndex"] != c["rightIndex"] and is_text(c.get("subjectSlug"))))
+    if bad_matches or bad_collisions:
+        raise ClientError(
+            0,
+            "bad-response",
+            f"preflight returned {bad_matches} match(es) without a 'uuid' and 'groupUuid' and "
+            f"{bad_collisions} collision(s) without two distinct in-range indices and a 'subjectSlug'; "
+            "refusing to read them as no match or no collision",
+        )
     out = {
         "candidates": candidates_out,
         "intra_batch_collisions": collisions_out,

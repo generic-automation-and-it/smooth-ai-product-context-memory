@@ -759,10 +759,28 @@ def read_ledger(state_file):
         attempts = value.get("attempts")
         if not isinstance(attempts, int) or isinstance(attempts, bool) or attempts < 0:
             return {}, True, False
-        if value.get("best") is not None and not isinstance(value.get("best"), dict):
+        if value.get("best") is not None and not valid_best(value["best"]):
             return {}, True, False
     ledger, migrated = migrate_ledger(data)
     return ledger, False, migrated
+
+
+def _finite_number(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def valid_best(best):
+    """A recorded best attempt in the shape `record_attempt` writes.
+
+    Checking only that it was an object let `{}` or a non-numeric `max` through, and the next scored
+    round raised `KeyError`/`TypeError` in `best_attempt` — a traceback instead of the disclosed reset a
+    damaged ledger gets (review 5432012955 #11).
+    """
+    return (isinstance(best, dict)
+            and type(best.get("attempt")) is int and best["attempt"] >= 1
+            and _finite_number(best.get("max"))
+            and isinstance(best.get("scores"), dict)
+            and all(isinstance(k, str) and _finite_number(v) for k, v in best["scores"].items()))
 
 
 def entry_attempts(value):

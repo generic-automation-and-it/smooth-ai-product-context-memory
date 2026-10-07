@@ -2726,7 +2726,11 @@ class ExportTagsAndScopeTests(unittest.TestCase):
         cases = [
             # (candidate scopes, bound scope, accepted, resulting bound scope)
             ([None, ""], None, True, None),
-            (["program:roadmap", None], None, True, "program:roadmap"),
+            # Review 5432012955 #1: adopting the scoped record's scope re-scoped the unscoped one.
+            (["program:roadmap", None], None, False, None),
+            (["program:roadmap", ""], None, False, None),
+            # An explicit --scope chooses for the whole export, as for unscoped session material.
+            (["program:roadmap", None], "program:roadmap", True, "program:roadmap"),
             (["product:", "product"], None, True, "product"),
             (["program:roadmap", "product:x"], None, False, None),
             (["program:roadmap"], "program:roadmap", True, "program:roadmap"),
@@ -2745,12 +2749,26 @@ class ExportTagsAndScopeTests(unittest.TestCase):
     def test_a_store_export_keeps_its_source_scope_on_the_group(self):
         """Regression (issue 179): the group scope came from `--scope` alone, so a `program` record
         re-exported with no flag was written into an unscoped group."""
+        # Every record scoped: the shared fixture mixes in an unscoped record, which is refused below.
+        export = json.loads(json.dumps(STORE_EXPORT))
+        for item in export["understandings"]:
+            item["scope"] = "program"
         with tempfile.TemporaryDirectory() as tmp:
-            src = write(tmp, "export.json", json.dumps(STORE_EXPORT))
+            src = write(tmp, "export.json", json.dumps(export))
             rc, out, err, sent = self._export(src, [])
         self.assertEqual(rc, 0, err)
         self.assertEqual([b["scope"] for b in sent["bindings"]], ["program"])
         self.assertIn("Scope taken from the source records: program", out)
+
+    def test_an_unscoped_record_is_not_given_another_records_scope(self):
+        """Review 5432012955 #1: with no --scope, a `program` record's scope was adopted for the whole
+        group, so the unscoped record beside it was written as programme-scoped."""
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "export.json", json.dumps(STORE_EXPORT))
+            rc, _, err, sent = self._export(src, [])
+        self.assertEqual(rc, 1)
+        self.assertIn("carry none", err)
+        self.assertEqual((sent["bindings"], sent["calls"]), ([], []))
 
     def test_a_conflicting_scope_flag_is_refused_before_anything_is_sent(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -3283,6 +3301,17 @@ class DumpHandoffDocsTests(unittest.TestCase):
     """Issue 190 #16, review #7: the handoff instructions said `dump --currentsession` with no `--from`,
     which writes a blank template, not the session. Every runnable dump command passes `--from`."""
 
+    def test_personal_data_is_generalised_before_the_summary_reaches_a_file(self):
+        """Review 5432012955 #9: "write the summary first, then pass it" put the unprocessed summary on
+        disk before anything generalised it; the README said to clean the file afterwards."""
+        root = Path(__file__).resolve().parents[1]
+        skill = " ".join((root / "SKILL.md").read_text(encoding="utf-8").split())
+        readme = " ".join((root / "README.md").read_text(encoding="utf-8").split())
+        self.assertNotIn("write the summary first", skill)
+        self.assertIn("Generalise personal data before the summary exists anywhere", skill)
+        self.assertNotIn("remove them from the session file", readme)
+        self.assertIn("before the summary is written anywhere", readme)
+
     def test_every_documented_dump_command_passes_from(self):
         root = Path(__file__).resolve().parents[1]
         docs = [root / "SKILL.md", root / "README.md", root.parent / "ai-understanding" / "README.md"]
@@ -3301,6 +3330,56 @@ class DumpHandoffDocsTests(unittest.TestCase):
         for doc, command in commands:
             with self.subTest(doc=doc, command=command.strip()[:70]):
                 self.assertIn("--from", command)
+
+
+class ExportDedupClaimTests(unittest.TestCase):
+    """Review 5432012955 #2: the docs said export runs "dedup/link" while it sends `links: []` and
+    matches subjects exactly. Semantic dedup is planned, not implemented, so the docs must not claim it
+    and must tell the agent to recall before `--write`."""
+
+    def test_the_docs_claim_only_exact_subject_dedup(self):
+        root = Path(__file__).resolve().parents[1]
+        for name in ("SKILL.md", "README.md", "AGENTS.md"):
+            text = (root / name).read_text(encoding="utf-8")
+            with self.subTest(doc=name):
+                self.assertNotIn("dedup/link", text)
+                self.assertNotIn("semantic dedup skips", text)
+                self.assertIn("exact-subject dedup", " ".join(text.split()))
+        skill = " ".join((root / "SKILL.md").read_text(encoding="utf-8").split())
+        self.assertIn("**Before `--write`**, recall each candidate's subject", skill)
+
+    def test_the_write_sends_no_derived_links(self):
+        """The claim the docs now make, held against the payloads an export actually sends: every
+        `set` and `set --dryrun` carries `links: []`, whatever quote style or helper builds it."""
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
+            originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                         uc.resolve_group, uc._run_capture_client)
+            uc.gate_redaction = lambda texts: (list(texts), {})
+            uc.gate_atomicity = lambda c: [{"verdict": "simple", "signals": []} for _ in c]
+            uc.initiative_exists = lambda name: (True, "ok")
+            uc.resolve_group = lambda b, n, d, dryrun: ({"groupUuid": "g-target", "created": False}, "ok")
+            calls = []
+
+            def record(script, argv, payload):
+                calls.append((tuple(argv), payload))
+                if argv[0] == "preflight":
+                    return 0, json.dumps({"candidates": [
+                        {"index": 0, "matches": [], "ticketConflict": None}]}), ""
+                return 0, json.dumps({"created": 1, "versioned": 0, "linked": 0, "skipped": 0}), ""
+
+            uc._run_capture_client = record
+            try:
+                rc, _, err = run(["export", src, "--write"])
+            finally:
+                (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                 uc.resolve_group, uc._run_capture_client) = originals
+        self.assertEqual(rc, 0, err)
+        set_payloads = [p for argv, p in calls if argv[0] == "set"]
+        self.assertEqual(len(set_payloads), 2, "expected the dry-run veto and the write")
+        for payload in set_payloads:
+            self.assertEqual(payload["links"], [], "a set call derives links now; update the "
+                             "exact-subject-only docs")
 
 
 if __name__ == "__main__":

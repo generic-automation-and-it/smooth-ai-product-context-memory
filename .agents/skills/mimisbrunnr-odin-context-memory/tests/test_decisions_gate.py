@@ -534,15 +534,22 @@ class OversizeTests(GateTestCase):
 
 
 class EndpointGuardTests(GateTestCase):
-    """A refused endpoint is a *per-record* outcome, not a process failure.
+    """A refused endpoint refuses the whole run, before any record is read.
 
-    `score` handles each record independently, so a bad URL marks every record `bad-decisions-url`
-    and the run still exits 0 — one unusable endpoint must not turn a batch into a crash. `probe` is
-    where the operator asks the question directly, and there it exits non-zero.
+    `score` validates the endpoint first and exits non-zero with `bad-decisions-url`: marking each
+    record and exiting 0 let an export read the batch as scored-and-skipped and write it unscored
+    (issue 190). `probe` refuses the same way. Neither echoes the refused URL's userinfo, parameters,
+    query or fragment.
 
     Note these cases use the real example.com host. A non-loopback URL is refused on scheme and key
     alone, *before* any DNS or connection, which is what makes the test hermetic.
     """
+
+    def test_the_class_docstring_matches_the_batch_refusal(self):
+        """Review 5432012955 #14: this docstring still described the per-record, exit-0 behaviour
+        issue 190 replaced with a refusal."""
+        self.assertNotIn("run still exits 0", EndpointGuardTests.__doc__)
+        self.assertIn("refuses the whole run", EndpointGuardTests.__doc__)
 
     def test_non_loopback_http_is_refused(self):
         proc = run_gate(["probe"], "", self.gate_env(
@@ -1116,6 +1123,31 @@ class LedgerIntegrityTests(GateTestCase):
             json.dump({"S": "many"}, handle)
         _, report = self.score(state_file=state, CONTEXT_MEMORY_DECISIONS_MAX_ATTEMPTS="1")
         self.assertIn("ledgerReset", report)
+
+    def test_a_malformed_best_attempt_is_a_disclosed_reset_not_a_traceback(self):
+        """Review 5432012955 #11: only a non-object `best` was discarded, so `{}` or a non-numeric
+        `max` reached `best_attempt` and the round crashed with a traceback."""
+        self.stub.probabilities = dict(self.LOW)
+        state = os.path.join(self.tmp, "ledger.json")
+        key = _gate.ledger_key(RECORD["subject"])
+        for label, best in (("empty", {}),
+                            ("text max", {"attempt": 1, "max": "high", "scores": {}}),
+                            ("no scores", {"attempt": 1, "max": 0.4}),
+                            ("text score", {"attempt": 1, "max": 0.4, "scores": {"developer": "x"}}),
+                            ("zero attempt", {"attempt": 0, "max": 0.4, "scores": {}})):
+            with self.subTest(best=label):
+                with open(state, "w", encoding="utf-8") as handle:
+                    json.dump({key: {"attempts": 1, "best": best}}, handle)
+                proc, report = self.score(state_file=state, CONTEXT_MEMORY_DECISIONS_MAX_ATTEMPTS="3")
+                self.assertNotIn("Traceback", proc.stderr)
+                self.assertEqual(report["records"][0]["outcome"], "scored")
+                self.assertIn("ledgerReset", report)
+        # Control: the shape the gate writes is kept, not reset.
+        with open(state, "w", encoding="utf-8") as handle:
+            json.dump({key: {"attempts": 1, "best": {"attempt": 1, "max": 0.4,
+                                                     "scores": {"developer": 0.4}}}}, handle)
+        _, report = self.score(state_file=state, CONTEXT_MEMORY_DECISIONS_MAX_ATTEMPTS="3")
+        self.assertNotIn("ledgerReset", report)
 
     def test_the_ledger_is_capped_end_to_end(self):
         """The cap must hold on the **real write path**, driven by a batch that crosses it.

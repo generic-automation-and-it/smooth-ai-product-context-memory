@@ -3,8 +3,8 @@
 
 Run: python3 -B .agents/skills/mimisbrunnr-muninn-recall-feedback/tests/run_tests.py
 
-Sources scripts/recall_feedback.sh in bash with a fake `curl` (and a recording `python3` shim) first on
-PATH, so no request leaves the machine. Covers:
+Sources and executes scripts/recall_feedback.sh in bash with a fake `curl` (and a recording `python3`
+shim) first on PATH, so no request leaves the machine. Covers:
   - a non-loopback origin and a userinfo origin are refused before any request, and the refusal does
     not echo the credential, the scheme or the hostname;
   - an origin carrying `;params` is refused (urlparse moves them out of the path);
@@ -17,8 +17,11 @@ PATH, so no request leaves the machine. Covers:
   - a `403` is a non-zero exit with its body kept: the option reaches the fake curl, and a real curl
     against a loopback responder proves the behaviour (skipped when curl lacks `--fail-with-body`);
   - the base URL never reaches any process's argv;
-  - SKILL.md sources this script rather than carrying its own copy of the guard, and its documented
-    queries take their window from operator-set variables instead of a fixed date.
+  - the command line: each command builds its own path and picks its own token, and a missing,
+    empty or malformed date, an unknown option, or an option the command does not take sends nothing
+    and is not echoed; sourcing the script runs nothing;
+  - SKILL.md runs this script rather than carrying its own copy of the guard, and its documented
+    commands take their window from operator-supplied dates instead of a fixed date.
 
 stdlib unittest; no external runner. bash 3.2 and GNU bash.
 """
@@ -86,7 +89,9 @@ exec "$RF_REAL_PYTHON" "$@"
 """
 
 
-class RecallFeedbackGuardTests(unittest.TestCase):
+class FakeCurlCase(unittest.TestCase):
+    """A scratch HOME/TMPDIR with the recording fake `curl` and `python3` shim first on PATH."""
+
     def setUp(self):
         self.dir = Path(tempfile.mkdtemp(prefix="rf-guard-"))
         self.bin = self.dir / "bin"
@@ -100,6 +105,15 @@ class RecallFeedbackGuardTests(unittest.TestCase):
 
     def tearDown(self):
         shutil.rmtree(self.dir, ignore_errors=True)
+
+    def curl_called(self):
+        return (self.dir / "curl.argv").exists()
+
+    def curl_argv(self):
+        return (self.dir / "curl.argv").read_text(encoding="utf-8").splitlines()
+
+
+class RecallFeedbackGuardTests(FakeCurlCase):
 
     def run_curl(self, path=READ_PATH, token=TOKEN, base=None, extra_env=None, method="GET"):
         # The helper takes a capability and reads the token from the environment (review #14): a GET
@@ -124,12 +138,6 @@ class RecallFeedbackGuardTests(unittest.TestCase):
         return subprocess.run(
             ["bash", "-c", script, "harness", str(SCRIPT), method, path, capability],
             env=env, capture_output=True, text=True, timeout=30)
-
-    def curl_called(self):
-        return (self.dir / "curl.argv").exists()
-
-    def curl_argv(self):
-        return (self.dir / "curl.argv").read_text(encoding="utf-8").splitlines()
 
     def assert_refused(self, result):
         self.assertNotEqual(result.returncode, 0, result.stderr)
@@ -169,15 +177,16 @@ class RecallFeedbackGuardTests(unittest.TestCase):
                 self.assertNotIn("evil.example", result.stderr + result.stdout)
 
     def test_no_call_site_expands_a_token_into_an_argument(self):
-        """Review #14: the documented calls expanded the token into the helper's arguments. Each now
-        names a capability, and the helper reads the token from the environment."""
+        """Review #14: the documented calls expanded the token into the helper's arguments. They now
+        run the script with dates only, and the script reads the token from the environment."""
         doc = (SCRIPT.parents[1] / "SKILL.md").read_text(encoding="utf-8")
-        calls = [b for b in doc.split("```") if "recall_feedback_curl" in b and b.startswith("bash")]
+        calls = [b for b in re.findall(r"```bash\n(.*?)```", doc, re.S) if "recall_feedback" in b]
         self.assertTrue(calls)
         for call in calls:
             with self.subTest(call=call.strip()[:60]):
                 self.assertNotIn("$CONTEXT_MEMORY_", call)
-                self.assertRegex(call, r"\b(read|write)\s*$")
+                self.assertNotIn("TOKEN", call)
+                self.assertNotIn("recall_feedback_curl", call)
 
     def test_an_unknown_capability_sends_nothing(self):
         script = 'source "$1"; recall_feedback_curl GET "$2" "$3"'
@@ -387,34 +396,34 @@ class RecallFeedbackGuardTests(unittest.TestCase):
 
     # --- documentation stays wired to the tested code ---------------------------------------------
 
-    def _documented_source(self):
-        """The `source` command SKILL.md tells the operator to run, with its path mapped onto the
-        script under test. Issue 190 #18: the wiring test only looked for the path anywhere in the
-        file, and the query runs sourced the script themselves, so deleting the documented `source`
-        line left every test green."""
+    def _documented_commands(self):
+        """The script invocations SKILL.md tells the operator to run, keyed by command. Issue 190 #18:
+        a wiring test that only looked for the path anywhere in the file stayed green with the
+        documented step deleted, so each command is read from a fenced block and run as written."""
         skill = (SKILL / "SKILL.md").read_text(encoding="utf-8")
-        lines = [line.strip() for block in re.findall(r"```bash\n(.*?)```", skill, re.S)
-                 for line in block.splitlines() if line.strip().startswith("source ")]
-        self.assertEqual(len(lines), 1, "SKILL.md must document exactly one `source` of the script")
-        path = lines[0].split(None, 1)[1]
-        self.assertTrue(path.endswith("mimisbrunnr-muninn-recall-feedback/scripts/recall_feedback.sh"),
-                        path)
-        return 'source "$1"'
+        suffix = "mimisbrunnr-muninn-recall-feedback/scripts/recall_feedback.sh"
+        commands = {}
+        for block in re.findall(r"```bash\n(.*?)```", skill, re.S):
+            for line in block.replace("\\\n", " ").splitlines():
+                words = line.split()
+                if words and words[0].endswith(suffix):
+                    self.assertNotIn(words[1], commands, "a command is documented twice")
+                    commands[words[1]] = words[2:]
+        self.assertEqual(sorted(commands), ["guard", "miss-rate", "never-recalled", "reset"], commands)
+        return commands
 
-    def test_skill_sources_the_tested_script(self):
+    def test_skill_runs_the_tested_script(self):
         skill = (SKILL / "SKILL.md").read_text(encoding="utf-8")
-        self._documented_source()
+        self._documented_commands()
         self.assertNotIn("recall_feedback_guard() {", skill,
-                         "SKILL.md carries its own copy of the guard instead of sourcing the script")
+                         "SKILL.md carries its own copy of the guard instead of running the script")
+        self.assertNotIn("source .agents/skills/mimisbrunnr-muninn-recall-feedback", skill,
+                         "SKILL.md still sources the script instead of running it")
 
-    def _documented_queries(self):
-        skill = (SKILL / "SKILL.md").read_text(encoding="utf-8")
-        blocks = re.findall(r"```bash\n(.*?)```", skill, re.S)
-        queries = [b.replace("\\\n", " ").strip() for b in blocks if "recall_feedback_curl GET" in b]
-        self.assertEqual(len(queries), 2, "expected the never-recalled and miss-rate queries")
-        return queries
+    def test_the_script_is_executable(self):
+        self.assertTrue(os.access(SCRIPT, os.X_OK), "SKILL.md runs the script, so it must be executable")
 
-    def _run_documented(self, query, extra_env):
+    def _run_documented(self, args, extra_env):
         env = {
             "PATH": "{}:{}".format(self.bin, os.environ.get("PATH", "")),
             "HOME": str(self.dir),
@@ -424,33 +433,162 @@ class RecallFeedbackGuardTests(unittest.TestCase):
             "CONTEXT_MEMORY_READ_TOKEN": TOKEN,
         }
         env.update(extra_env)
-        return subprocess.run(["bash", "-c", self._documented_source() + "\n" + query, "harness", str(SCRIPT)],
+        return subprocess.run(["bash", str(SCRIPT)] + list(args),
                               env=env, capture_output=True, text=True, timeout=30)
+
+    def _queries(self):
+        commands = self._documented_commands()
+        return {name: commands[name] for name in ("never-recalled", "miss-rate")}
 
     def test_documented_queries_carry_no_fixed_date(self):
         # A copied fixed window re-measures the same past period on every run, so a tuning change can
         # never show up in the before/after comparison.
-        for query in self._documented_queries():
-            with self.subTest(query=query):
-                self.assertIsNone(re.search(r"\d{4}-\d{2}-\d{2}", query), query)
+        for name, args in self._queries().items():
+            with self.subTest(query=name):
+                self.assertIsNone(re.search(r"\d{4}-\d{2}-\d{2}", " ".join(args)), args)
 
     def test_documented_queries_refuse_to_send_without_the_operator_window(self):
-        for query in self._documented_queries():
-            with self.subTest(query=query):
-                result = self._run_documented(query, {})
-                self.assertNotEqual(result.returncode, 0, result.stderr)
-                self.assertFalse(self.curl_called(), "a query ran without an operator-set window")
+        for name, args in self._queries().items():
+            with self.subTest(query=name):
+                result = self._run_documented([name] + args, {})
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertFalse(self.curl_called(), "a query ran with the placeholder date")
 
     def test_documented_queries_send_the_operator_window(self):
-        window = {"RF_FROM": "2030-01-01", "RF_TO": "2030-01-08"}
         sent = []
-        for query in self._documented_queries():
-            result = self._run_documented(query, window)
+        for name, args in self._queries().items():
+            dates = iter(["2030-01-01", "2030-01-08"] if "--from" in args else ["2030-01-08"])
+            filled = [next(dates) if a == "YYYY-MM-DD" else a for a in args]
+            result = self._run_documented([name] + filled, {})
             self.assertEqual(result.returncode, 0, result.stderr)
             sent.append(self.curl_argv()[-1])
-        self.assertTrue(any("asOf=2030-01-08" in url for url in sent), sent)
+        self.assertTrue(any("asOf=2030-01-08&limit=500" in url for url in sent), sent)
         self.assertTrue(any("from=2030-01-01&to=2030-01-08" in url for url in sent), sent)
 
+
+class RecallFeedbackCommandLineTests(FakeCurlCase):
+    """The executable entry point: what each command sends, and what it refuses before sending."""
+
+    def run_cli(self, *args, read=TOKEN, write=None, base=None):
+        env = {
+            "PATH": "{}:{}".format(self.bin, os.environ.get("PATH", "")),
+            "HOME": str(self.dir),
+            "TMPDIR": str(self.tmp),
+            "RF_TEST_DIR": str(self.dir),
+            "RF_REAL_PYTHON": sys.executable,
+        }
+        if read:
+            env["CONTEXT_MEMORY_READ_TOKEN"] = read
+        if write:
+            env["CONTEXT_MEMORY_WRITE_TOKEN"] = write
+        if base is not None:
+            env["CONTEXT_MEMORY_BASE_URL"] = base
+        return subprocess.run([str(SCRIPT)] + list(args), env=env, capture_output=True, text=True,
+                              timeout=30)
+
+    def sent(self):
+        argv = self.curl_argv()
+        header = (self.dir / "curl.header").read_text(encoding="utf-8")
+        return argv[argv.index("-X") + 1], argv[-1], header
+
+    def test_never_recalled_sends_the_window_end_and_default_limit_with_the_read_token(self):
+        result = self.run_cli("never-recalled", "--to", "2030-01-08", write="write-token-unused")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        method, url, header = self.sent()
+        self.assertEqual(method, "GET")
+        self.assertEqual(url, "http://localhost:5141/api/context/recall-feedback/never-recalled"
+                              "?asOf=2030-01-08&limit=500")
+        self.assertEqual(header, "Authorization: Bearer {}\n".format(TOKEN))
+
+    def test_never_recalled_takes_a_limit_and_a_utc_instant(self):
+        result = self.run_cli("never-recalled", "--to", "2030-01-08T12:00:00.5Z", "--limit", "25")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(self.sent()[1].endswith("asOf=2030-01-08T12:00:00.5Z&limit=25"), self.sent()[1])
+
+    def test_miss_rate_sends_both_dates(self):
+        result = self.run_cli("miss-rate", "--from", "2030-01-01", "--to", "2030-01-08")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        method, url, _ = self.sent()
+        self.assertEqual(method, "GET")
+        self.assertTrue(url.endswith("/miss-rate?from=2030-01-01&to=2030-01-08"), url)
+
+    def test_reset_posts_with_the_write_token_only(self):
+        result = self.run_cli("reset", write="synthetic-write-token-0123")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        method, url, header = self.sent()
+        self.assertEqual(method, "POST")
+        self.assertTrue(url.endswith("/api/context/recall-feedback/reset"), url)
+        self.assertEqual(header, "Authorization: Bearer synthetic-write-token-0123\n")
+
+    def test_reset_with_only_a_read_token_sends_nothing(self):
+        result = self.run_cli("reset")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("no write token", result.stderr)
+        self.assertFalse(self.curl_called())
+
+    def test_a_query_with_only_a_write_token_sends_nothing(self):
+        result = self.run_cli("miss-rate", "--from", "2030-01-01", "--to", "2030-01-08", read=None,
+                              write="synthetic-write-token-0123")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("no read token", result.stderr)
+        self.assertFalse(self.curl_called())
+
+    def test_guard_sends_nothing(self):
+        result = self.run_cli("guard")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("origin approved", result.stdout)
+        self.assertFalse(self.curl_called())
+        refused = self.run_cli("guard", base="http://evil.example")
+        self.assertEqual(refused.returncode, 1)
+        self.assertNotIn("evil.example", refused.stderr + refused.stdout)
+
+    def test_bad_arguments_send_nothing_and_are_not_echoed(self):
+        secret = "pasted-secret-0123"
+        cases = [
+            (),
+            ("bogus",),
+            (secret,),
+            ("never-recalled",),
+            ("never-recalled", "--to"),
+            ("never-recalled", "--to", ""),
+            ("never-recalled", "--to", secret),
+            ("never-recalled", "--to", "2030-13"),
+            ("never-recalled", "--to", "2030-01-08&limit=1"),
+            ("never-recalled", "--to", "2030-01-08T00:00:00+01:00"),
+            ("never-recalled", "--to", "2030-01-08", "--limit", "0"),
+            ("never-recalled", "--to", "2030-01-08", "--limit", "10001"),
+            ("never-recalled", "--to", "2030-01-08", "--limit", ""),
+            ("never-recalled", "--to", "2030-01-08", "--from", "2030-01-01"),
+            ("never-recalled", "--to", "2030-01-08", secret),
+            ("miss-rate", "--from", "2030-01-01"),
+            ("miss-rate", "--to", "2030-01-08"),
+            ("miss-rate", "--from", secret, "--to", "2030-01-08"),
+            ("reset", "--to", "2030-01-08"),
+            ("reset", "--limit", "500"),
+            ("guard", "--from", "2030-01-01"),
+        ]
+        for args in cases:
+            with self.subTest(args=args):
+                result = self.run_cli(*args, write="synthetic-write-token-0123")
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertFalse(self.curl_called(), "a request was sent")
+                self.assertNotIn(secret, result.stderr + result.stdout)
+
+    def test_help_lists_every_command(self):
+        result = self.run_cli("--help")
+        self.assertEqual(result.returncode, 0)
+        for command in ("never-recalled", "miss-rate", "reset", "guard"):
+            self.assertIn(command, result.stdout)
+
+    def test_sourcing_runs_nothing(self):
+        env = {"PATH": "{}:{}".format(self.bin, os.environ.get("PATH", "")), "HOME": str(self.dir),
+               "TMPDIR": str(self.tmp), "RF_TEST_DIR": str(self.dir), "RF_REAL_PYTHON": sys.executable,
+               "CONTEXT_MEMORY_WRITE_TOKEN": TOKEN}
+        result = subprocess.run(["bash", "-c", 'source "$1" reset; echo sourced', "harness", str(SCRIPT)],
+                                env=env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "sourced")
+        self.assertFalse(self.curl_called())
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -27,7 +27,7 @@ accepted for forward compatibility.
 Move Mímisbrunnr **Understanding** knowledge between a session and the store. **`load`** brings a file,
 folder or transcript into the session's context, writing nothing. **`import`** queries the store itself
 (`kind = understanding`) back into the session, read token only. **`export`** sends session material to
-the store through the capture path (preflight → redact → dedup/link → atomicity → write), never as a
+the store through the capture path (preflight → redact → exact-subject dedup → atomicity → write), never as a
 direct write, and dry-runs by default so a dry run creates nothing. **`dump`** writes the session's
 understanding to a local folder for offline transfer.
 
@@ -126,6 +126,11 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
 - `export` orchestrates the capture skill end to end — redaction gate, atomicity gate, the optional value
   gate, the auto-split batch cap, group resolution, preflight, and `set --dryrun` as the veto point — and
   **never writes directly**. It is a **dry run by default**; `--write` performs the capture.
+- **Dedup is exact-subject only.** A candidate whose subject already exists in the group becomes a
+  version bump; nothing else is matched, and no link is derived (`links: []`). **Before `--write`**,
+  recall each candidate's subject (`import`) and, where a candidate paraphrases or relates to a
+  recalled memory, capture it through `mimisbrunnr-odin-context-memory --export` instead — its
+  Compare-or-Clarify round makes that judgement — or drop it from the input.
 - **Input is optional, as for `load`, but a defaulted input is dry-run only.** The newest dump in a
   shared workspace can be another session's, so `export --write` with no explicit input refuses before
   reading anything and asks for `--input <folder> --write`. A dry run on the default proceeds and says
@@ -229,9 +234,13 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
 
 - `dump --currentsession` writes the current session's understanding (its Understandings, decisions
   and key learnings) to `.context/mimisbrunnr-understandings/<session-folder>/` as Markdown. The
-  session content is what `--from` supplies (a file, or `-` for stdin): write the summary first, then
-  pass it. Without `--from` the dump is a **blank template** to fill in by hand, not the session, and
-  the client prints a `NOTE` saying so.
+  session content is what `--from` supplies (a file, or `-` for stdin). **Generalise personal data
+  before the summary exists anywhere**: compose it with every name, email, account name or identity
+  number replaced by a role or type ("the reviewer", "an email address"), then pass it on stdin
+  (`--from -`) so no unprocessed copy reaches disk — or, if a file is needed, write only the
+  generalised text. The dump's own redaction catches recognised secrets, emails and UPNs, not names.
+  Without `--from` the dump is a **blank template** to fill in by hand, not the session, and the client
+  prints a `NOTE` saying so.
 - **The binding travels as structured metadata**, recorded in `_dump.json`, not as prose in
   `_session.md`. A later `export` of this folder reads it as the default binding; an explicit flag
   overrides it. A dump with no binding says so rather than writing an empty object.

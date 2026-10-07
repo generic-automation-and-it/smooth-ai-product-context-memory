@@ -38,7 +38,9 @@ _CONTRASTIVE = [
 _ADDITIVE = [
     r"\b(?:also|furthermore|moreover|additionally)\b",
     r",\s*and\b",
-    r"\b(?:that explains|also means)\b",
+    # "also means" is not listed: the `also` above already counts it, and listing it again scored one
+    # "X also means Y" as two junctions — a single clause flagged as a bundle (review 5432012955 #8).
+    r"\bthat explains\b",
     # "both X and Y" is usually one fact about a coordinated pair ("for both capture and
     # retrieval"), so it contributes rather than deciding on its own.
     r"\bboth\b",

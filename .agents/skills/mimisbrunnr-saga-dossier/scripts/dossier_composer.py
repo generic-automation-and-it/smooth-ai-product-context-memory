@@ -1117,6 +1117,25 @@ def _now_iso():
 # ---------------------------------------------------------------------------- rendering (NFR-05)
 
 
+_LINE_BREAKS = re.compile(r"[\r\n\v\f\x85\u2028\u2029]+")
+_BLOCK_START = re.compile(r"^(?:#{1,6}(?:\s|$)|>|[-+*](?:\s|$)|\d{1,9}[.)](?:\s|$)|`{3}|~{3}|\||=+\s*$|-+\s*$)")
+_TAG_OPEN = re.compile(r"<(?=[A-Za-z/!?])")
+
+
+def _md_inline(value):
+    """Stored or caller text as inline Markdown that cannot leave the line it is placed on.
+
+    A statement is store content; a line break in it ended the cited list item, and what followed —
+    a `## heading`, a `> quote`, a list of instructions — rendered as uncited document structure
+    (review 5432012955 #12). Line breaks become spaces, a leading block marker is escaped, and an HTML
+    tag opener is escaped so a `<details>` cannot hide the rest. The words are unchanged.
+    """
+    text = _LINE_BREAKS.sub(" ", "" if value is None else str(value)).strip()
+    if _BLOCK_START.match(text):
+        text = "\\" + text
+    return _TAG_OPEN.sub(r"\\<", text)
+
+
 def _cite(item):
     return CITATION_FORM.format(
         uuid=item["uuid"], version=item["version"], created_on=item.get("createdOn") or "unknown")
@@ -1206,7 +1225,7 @@ def render(dossier):
             lines.append("")
             qualifications = sorted({f["qualification"] for f in by_cat[cat] if f.get("qualification")})
             for qualification in qualifications:
-                lines.append(f"> **Qualification:** {qualification}")
+                lines.append(f"> **Qualification:** {_md_inline(qualification)}")
                 lines.append("")
             for f in by_cat[cat]:
                 # Cited in the claims' own form — uuid, version and capture time — not as a bare
@@ -1215,10 +1234,11 @@ def render(dossier):
                 mems = ", ".join(_cite(items_by_key.get((m_["uuid"], m_["version"]),
                                                         {"uuid": m_["uuid"], "version": m_["version"]}))
                                  for m_ in f.get("memories", []))
-                lines.append(f"- **{f['classification']}** {f['basis']} "
-                             f"— scope: {f['scope']}. Memories: {mems or 'none'}."
-                             + _cycle_break_text(f)
-                             + _near_miss_evidence_text(f))
+                lines.append(f"- **{f['classification']}** {_md_inline(f['basis'])} "
+                             f"— scope: {_md_inline(f['scope'])}. Memories: {mems or 'none'}."
+                             + (" " + _md_inline(_cycle_break_text(f)) if _cycle_break_text(f) else "")
+                             + (" " + _md_inline(_near_miss_evidence_text(f))
+                                if _near_miss_evidence_text(f) else ""))
             lines.append("")
 
     if findings_first:
@@ -1244,8 +1264,8 @@ def render(dossier):
         origins = claim["origins"]
         primary = origins[0]
         lifecycle = dossier.lifecycle.get(_item_key(primary), LIFECYCLE_UNKNOWN)
-        kind_tag = f" [{primary.get('kind')}]" if primary.get("kind") else ""
-        lines.append(f"### {primary.get('name') or '(untitled)'}{kind_tag}")
+        kind_tag = f" [{_md_inline(primary.get('kind'))}]" if primary.get("kind") else ""
+        lines.append(f"### {_md_inline(primary.get('name')) or '(untitled)'}{kind_tag}")
         lines.append("")
         lines.append(f"**Lifecycle:** {lifecycle}.")
         if claim.get("consolidated"):
@@ -1258,16 +1278,24 @@ def render(dossier):
                            if _sources_overlap(origins)
                            else "these are distinct sources, shown as independent observations")
             lines.append(f"> **analysis** — consolidation basis: "
-                         f"{claim.get('equivalenceClass') or 'equivalent restatements'}. "
+                         f"{_md_inline(claim.get('equivalenceClass')) or 'equivalent restatements'}. "
                          f"The {len(origins)} capture(s) share meaning, applicability and lifecycle, so "
                          f"they are presented once with every origin retained. Several captures of one "
                          f"source are not independent corroboration — "
                          f"{source_desc}.")
             lines.append("")
         # The substantive statement, cited (NFR-05). A consolidated claim cites every origin.
-        lines.append(f"- {primary.get('statement') or ''} — {_cite(primary)}")
+        lines.append(f"- {_md_inline(primary.get('statement'))} — {_cite(primary)}")
+        # Each further origin's own words when they differ from the primary's: equivalence is a caller
+        # judgement, and a qualification only a secondary origin states ("…on weekdays") was cited but
+        # never shown, while reconciliation still closed (review 5432012955 #4).
+        shown = _md_inline(primary.get("statement"))
         for other in origins[1:]:
-            lines.append(f"  - also from — {_cite(other)}")
+            words = _md_inline(other.get("statement"))
+            if words and " ".join(words.split()) != " ".join(shown.split()):
+                lines.append(f"  - also stated as: {words} — {_cite(other)}")
+            else:
+                lines.append(f"  - also from — {_cite(other)}")
         for origin in origins:
             if not (origin.get("sources") or []):
                 lines.append(
@@ -1279,7 +1307,7 @@ def render(dossier):
             for cond in _conditions(origin):
                 if cond not in shown_conditions:
                     shown_conditions.add(cond)
-                    lines.append(f"  - condition: {cond} — {_cite(origin)}")
+                    lines.append(f"  - condition: {_md_inline(cond)} — {_cite(origin)}")
         lines.append("")
         if claim.get("depth") == "summary":
             for other in origins[1:]:
@@ -1298,8 +1326,8 @@ def render(dossier):
             # A history bundle can cut one version of a memory and keep another, so the version is
             # part of what was omitted; the uuid is shown too, since a name is not an identity.
             ident = f"{o['uuid']} v{o['version']}"
-            label = f"{o['name']} ({ident})" if o.get("name") else ident
-            lines.append(f"- {label} — {o['reason']}")
+            label = f"{_md_inline(o['name'])} ({ident})" if o.get("name") else ident
+            lines.append(f"- {label} — {_md_inline(o['reason'])}")
     else:
         lines.append(f"None — nothing selected was omitted. ({len(b['items'])} selected)")
     lines.append("")
