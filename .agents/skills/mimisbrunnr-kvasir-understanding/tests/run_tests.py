@@ -1741,6 +1741,23 @@ class DumpTests(unittest.TestCase):
             self.assertIn("Replacement content line.", body)
             self.assertNotIn("Original content line.", body)
 
+    def test_dump_refuses_an_oversized_raw_from(self):
+        """`--from` carrying a raw transcript-sized blob is a misuse: a dump is a distilled projection
+        of the session's understanding, not the verbatim session.
+
+        Regression for the e2e where a 446 KB braindump transcript was written through `--from`
+        untouched, and an export of that `_session.md` split it into 2220 candidates (532 flagged
+        bundled, and batch 1 refused on a duplicated `5-messages-elided` subject). The raw transcript is
+        refused with a direction to author the distilled understanding first.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            big = write(tmp, "raw.md", "# Not distilled\n\n" + ("x" * 70000))
+            rc, _, err = run(["dump", "--currentsession", "--from", big], expect=1)
+            self.assertEqual(rc, 1)
+            self.assertIn("REFUSED", err)
+            self.assertIn("distilled", err)
+            self.assertIn(str(uc.DUMP_MAX_BODY_CHARS), err)
+
     def test_dumped_folder_round_trips_through_load(self):
         """The dump/load pair is the whole point: cross-session, cross-repo sharing (LADR-07)."""
         with tempfile.TemporaryDirectory() as tmp:

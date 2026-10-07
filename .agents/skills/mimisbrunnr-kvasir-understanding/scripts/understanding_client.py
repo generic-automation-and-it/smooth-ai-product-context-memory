@@ -71,6 +71,12 @@ HEIMDALLR_SCRIPT = (Path(__file__).resolve().parents[2]
 # separate packages, so this client cannot acquire a cross-skill import (the same reason the recall
 # notice is duplicated verbatim and asserted equal by a test).
 MAX_CANDIDATES = 20
+# A dump is a distilled projection of the session's understanding, not the verbatim session. `--from`
+# carrying a raw transcript-sized blob was written through untouched, and an export of that `_session.md`
+# split the whole transcript into thousands of candidates (a 446 KB braindump -> 2220, of which 532 were
+# flagged bundled). The ceiling is generous for a real distilled session (tens of records) but refuses
+# the raw-transcript footgun with a direction to author the understanding first.
+DUMP_MAX_BODY_CHARS = 60000
 # `ai-understanding` records confidence as a qualitative label — `observed`, `verified`, `contested`
 # (VALID_CONFIDENCE in its index script) — while the store holds a 0-100 integer. Passing the label
 # through reached the API as the string "verified", which the server rejected with a 400 whose detail
@@ -2197,6 +2203,12 @@ def cmd_dump(args: argparse.Namespace) -> int:
             return 2
 
     content = read_input(args.from_file) if args.from_file else ""
+    if len(content) > DUMP_MAX_BODY_CHARS:
+        print(f"REFUSED: --from content is {len(content)} chars, larger than a distilled session "
+              f"projection ({DUMP_MAX_BODY_CHARS}). A dump is the agent's distilled understanding, "
+              "not a raw session transcript — author the understanding (or distill the session) first, "
+              "then re-run --from with it. Nothing was written.", file=sys.stderr)
+        return 1
     findings: dict[str, int] = {}
     if content.strip():
         # A dump exists to be carried to another session or repository, so a secret must be gone

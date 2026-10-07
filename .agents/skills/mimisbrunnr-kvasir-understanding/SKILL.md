@@ -206,6 +206,12 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
 
 - `dump --currentsession` writes the current session's understanding (its Understandings, decisions
   and key learnings) to `.context/mimisbrunnr-understandings/<session-folder>/` as Markdown.
+- **The dump is a distilled projection, not the verbatim session.** `--from` carries the session's
+  *understanding* — the material the agent has already distilled — never a raw session transcript.
+  A `--from` body over `DUMP_MAX_BODY_CHARS` is refused with a direction to author the understanding
+  first, because an export of a verbatim transcript splits it into thousands of candidates (a 446 KB
+  braindump produced 2220, of which 532 were flagged bundled and batch 1 was refused on a duplicated
+  subject).
 - **The binding travels as structured metadata**, recorded in `_dump.json`, not as prose in
   `_session.md`. A later `export` of this folder reads it as the default binding; an explicit flag
   overrides it. A dump with no binding says so rather than writing an empty object.
