@@ -148,8 +148,10 @@ python3 -B .agents/skills/mimisbrunnr-saga-dossier/tests/run_tests.py
 - **`SKILL.md`** — the full invocation contract, written for the agent rather than for you.
 - **`AGENTS.md`** (in this folder) — the composition rules and the design decisions behind them, if
   you're changing the skill itself.
-- **`docs/hlds/005-contextual-export/`** — the design: why a dossier exists, the determinism boundary
-  between bundle and dossier, the full findings taxonomy.
+- **`docs/hlds/005-contextual-export/` in the upstream repository**
+  (`generic-automation-and-it/smooth-ai-product-context-memory`; absent from a vendored copy) — the
+  design: why a dossier exists, the determinism boundary between bundle and dossier, the full findings
+  taxonomy.
 - **`.agents/skills/mimisbrunnr-odin-context-memory/`** — the capture skill and the only path in this skill
   set that can write. This skill only ever reads.
 - **`.agents/skills/mimisbrunnr-kvasir-understanding/`** — the sibling that loads and imports Understandings;
