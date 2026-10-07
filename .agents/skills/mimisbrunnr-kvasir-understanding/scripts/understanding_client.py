@@ -1560,10 +1560,13 @@ def _scope_key(scope: str) -> tuple[str, str]:
 def reconcile_source_scope(candidates: list[dict], binding: dict) -> bool:
     """Keep a store-export record's own scope rather than letting the group binding replace it.
 
-    With no bound scope, one source scope shared by every record is adopted and disclosed;
-    mixed source scopes, or scoped records beside unscoped ones, are refused before anything
-    is sent. An explicit --scope is a choice for the whole export and applies to unscoped
-    records too; a bound scope differing from any record's is refused.
+    A record carries its scope, but the write lands in a group whose scope comes from `--scope`, so a
+    `program` record re-exported with no flag landed unscoped and one exported under a different flag
+    was silently re-scoped — the programme/product boundary moved without anyone choosing it (issue
+    179). With no bound scope, one source scope shared by every record is adopted and disclosed;
+    mixed source scopes, or scoped records beside unscoped ones, are refused before anything is sent.
+    An explicit --scope is a choice for the whole export and applies to unscoped records too; a bound
+    scope that differs from any record's is refused.
     """
     scoped = [c for c in candidates if isinstance(c.get("scope"), str) and c["scope"].strip()]
     sources = {_scope_key(c["scope"]) for c in scoped}

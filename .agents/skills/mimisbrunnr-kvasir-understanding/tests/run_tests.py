@@ -3349,10 +3349,37 @@ class ExportDedupClaimTests(unittest.TestCase):
         self.assertIn("**Before `--write`**, recall each candidate's subject", skill)
 
     def test_the_write_sends_no_derived_links(self):
-        """The claim the docs now make, held against the code: every `set` carries no links."""
-        source = Path(uc.__file__).read_text(encoding="utf-8")
-        self.assertEqual(source.count('"links": [],'), source.count('["set"'), "a set call derives links "
-                         "now; update the exact-subject-only docs")
+        """The claim the docs now make, held against the payloads an export actually sends: every
+        `set` and `set --dryrun` carries `links: []`, whatever quote style or helper builds it."""
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
+            originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                         uc.resolve_group, uc._run_capture_client)
+            uc.gate_redaction = lambda texts: (list(texts), {})
+            uc.gate_atomicity = lambda c: [{"verdict": "simple", "signals": []} for _ in c]
+            uc.initiative_exists = lambda name: (True, "ok")
+            uc.resolve_group = lambda b, n, d, dryrun: ({"groupUuid": "g-target", "created": False}, "ok")
+            calls = []
+
+            def record(script, argv, payload):
+                calls.append((tuple(argv), payload))
+                if argv[0] == "preflight":
+                    return 0, json.dumps({"candidates": [
+                        {"index": 0, "matches": [], "ticketConflict": None}]}), ""
+                return 0, json.dumps({"created": 1, "versioned": 0, "linked": 0, "skipped": 0}), ""
+
+            uc._run_capture_client = record
+            try:
+                rc, _, err = run(["export", src, "--write"])
+            finally:
+                (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                 uc.resolve_group, uc._run_capture_client) = originals
+        self.assertEqual(rc, 0, err)
+        set_payloads = [p for argv, p in calls if argv[0] == "set"]
+        self.assertEqual(len(set_payloads), 2, "expected the dry-run veto and the write")
+        for payload in set_payloads:
+            self.assertEqual(payload["links"], [], "a set call derives links now; update the "
+                             "exact-subject-only docs")
 
 
 if __name__ == "__main__":
