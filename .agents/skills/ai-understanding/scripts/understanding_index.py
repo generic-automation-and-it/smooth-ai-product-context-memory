@@ -607,7 +607,7 @@ def _same_unit(archived: bytes, local: bytes) -> bool:
     the `provenance.published_from` line it adds, and the `[[…]]` brackets `--portable-only` drops
     around an excluded slug (publish-consume steps 4 and 5)."""
     def normal(text: str) -> str:
-        return text.replace("[[", "").replace("]]", "")
+        return re.sub(r"\[\[([^\[\]]+)\]\]", r"\1", text)
     archived_text = _PUBLISHED_FROM.sub("", archived.decode("utf-8", errors="replace"))
     return normal(archived_text) == normal(local.decode("utf-8", errors="replace"))
 

@@ -18,7 +18,7 @@ python3 -B .agents/skills/mimisbrunnr-heimdallr-find-session-metadata/scripts/fi
 | root | the checkout scanned (`--repo-root DIR`, else the working directory) |
 
 The report is evidence, not a binding. Before passing any of it to the export flags, check
-`rootMatches` (whether the scanned checkout is the one you asked for with `--repo-root`; `root` is for
+`rootMatches` (`null` without `--repo-root`; whether the scanned checkout is the one you asked for with it; `root` is for
 display and is withheld outside your home folder), and choose which reported tickets the export is actually about —
 the commit tickets come from the last ten subjects and can belong to unrelated work. Then pass only
 those: `export <input> --tickets <the relevant ones> --repository ... --initiative ...`.
