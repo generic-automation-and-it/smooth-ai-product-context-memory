@@ -520,6 +520,7 @@ redaction detector is a stdin→stdout fingerprint script reporting rule names o
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-07 | Calibration counts hold-side role clearing as bleed; recorded runs have no false positive, so their figures stand. | review 5440964552 |
 | 2026-10-07 | Deepsearch's malformed-row rule names `version`; workers point at `SKILL.md` for the credential load (`AGENTS.md` never named it); the read client's refusal names all three write-token spellings. | issue 200 |
 | 2026-10-07 | `query` refuses rows without `uuid`/`groupUuid`/`version`; deepsearch counts keyword-found groups as selected; Kvasir's narrower capture path named. | review 5438563690 |
 | 2026-10-06 | Preflight entries are checked, not just the lists: an unreadable match read as "none" and wrote a duplicate. A malformed ledger `best` is a disclosed reset. | review 5432012955 |
