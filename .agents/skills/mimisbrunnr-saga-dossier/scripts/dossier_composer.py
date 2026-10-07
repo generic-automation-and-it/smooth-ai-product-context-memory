@@ -851,13 +851,15 @@ def derive_findings(items, edges, asof=None, judgements=None, uncertain=None):
                 finding["qualification"] = f["qualification"]
         findings.append(finding)
 
-    # Deterministic ordering: by category (taxonomy order), then by memory identity. The dedup key
-    # carries the basis: a task or expectation gap names no memory, so a key of category + memories
-    # alone collapsed every such gap after the first into it, silently.
+    # Deterministic ordering: by category (taxonomy order), then by memory identity. Only an identical
+    # finding collapses: the key is the whole normalized finding. A key of category + memories + basis
+    # merged two findings that differed in scope, classification, observation or qualification, and
+    # reconciliation still reported closed — a finding suppressed silently (consumer review 5438563690
+    # #1); before that, a key without the basis collapsed every memory-less gap into the first.
     seen = set()
     canonical = []
     for f in findings:
-        key = (f["category"], tuple((m["uuid"], m["version"]) for m in f["memories"]), f["basis"])
+        key = json.dumps(f, sort_keys=True, ensure_ascii=False, default=str)
         if key in seen:
             continue
         seen.add(key)

@@ -2368,6 +2368,24 @@ class PerFocusFindingMultisetTests(unittest.TestCase):
                 if focus not in ("review",):
                     self.assertTrue(any(o["reason"] == "outside-focus" for o in doc.omitted), focus)
 
+    def test_only_an_identical_finding_collapses(self):
+        """Consumer review 5438563690 #1: the dedup key was category + memories + basis, so two gaps
+        differing only in scope or classification merged into one while reconciliation closed."""
+        bundle, _ = self._slice()
+        gap = {"category": "gap", "ground": "task", "basis": "No rollout plan is captured.",
+               "classification": "analysis", "memories": []}
+        judgements = {"findings": [
+            dict(gap, scope="repository X"),
+            dict(gap, scope="repository Y"),
+            dict(gap, scope="repository X", classification="observation"),
+            dict(gap, scope="repository X"),
+        ]}
+        doc = dc.compose(bundle, focus=None, judgements=judgements)
+        gaps = [(f["scope"], f["classification"]) for f in doc.findings
+                if f["category"] == "gap" and f["basis"] == gap["basis"]]
+        self.assertEqual(sorted(gaps), [("repository X", "analysis"), ("repository X", "observation"),
+                                        ("repository Y", "analysis")])
+
 
 class ScratchInputPermissionTests(unittest.TestCase):
     """Agent-written compose inputs must be owner-only (issue 184, HLD-005 NFR-01).
