@@ -294,6 +294,7 @@ recalls the live store via `import` (read token only) and orchestrates the captu
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-07 | Walk Q4's key fact is the relationship (`redis holds the cache`), not the word `redis`. | review 5440964552 |
 | 2026-10-07 | `SKILL.md` capture order matches the client: redact → atomicity → value gate → group → preflight → `set --dryrun` → write. | issue 200 |
 | 2026-10-07 | Initiative check runs before the decision gate, so a refused write spends no attempt; an absent initiative refuses only a ticketless write. Walk facts bind to their "stated by" version. | review 5438563690 |
 | 2026-10-07 | `links: []` pinned on the payloads actually sent, not a source-text count a quote style could dodge. | PR 196 |

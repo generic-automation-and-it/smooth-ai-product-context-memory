@@ -478,6 +478,17 @@ class WalkFixtureTests(unittest.TestCase):
         self.assertFalse(score_answers(text, wrong, [q1])[0]["correct"])
         self.assertTrue(score_answers(text, right, [q1])[0]["correct"])
 
+    def test_the_wrong_cache_relationship_is_not_correct(self):
+        """Consumer review 5440964552 #8: Q4's key fact was the word `redis`, so "Redis holds the store"
+        citing the right record scored correct. The fact is now the relationship."""
+        text = self.texts["load_all"]
+        q4 = [q for q in self.questions if q["id"] == "Q4"][0]
+        cite = " Stated by record bbbbbbbb-2222-2222-2222-222222222222."
+        self.assertFalse(score_answers(text, {"Q4": "Redis holds the store, not the cache." + cite},
+                                       [q4])[0]["correct"])
+        self.assertTrue(score_answers(text, {"Q4": "Redis holds the cache, not the store." + cite},
+                                      [q4])[0]["correct"])
+
     def test_naming_the_current_version_does_not_rescue_a_false_attribution(self):
         """Consumer review 5438563690 #5: support was the union over every version the answer named,
         so crediting v1 while also mentioning v3 borrowed v3's support."""
