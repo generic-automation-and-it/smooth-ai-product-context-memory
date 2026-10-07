@@ -727,11 +727,22 @@ def cmd_query(args):
     resp = _request("POST", "/api/context/query", payload)
     # The store always answers `{"items": [...]}`. An empty body, a non-object or a missing list is an
     # answer this client cannot read; framing it as a recall presented "nothing found" for a response
-    # that never said so (issue 186). Fixed text: the body is never echoed.
+    # that never said so (issue 186). Each row must carry the identity the dedup judgement acts on —
+    # `uuid`, `groupUuid`, `version` — or a row the caller cannot place reads as no match and the next
+    # write duplicates it (consumer review 5438563690 #2). Fixed text: the body is never echoed.
     if not isinstance(resp, dict) or not isinstance(resp.get("items"), list):
         raise ClientError(0, "bad-response", "query response must be an object with an 'items' list")
+    if not all(_identified_row(row) for row in resp["items"]):
+        raise ClientError(0, "bad-response", "query response rows must be objects carrying "
+                                             "'uuid', 'groupUuid' and 'version'")
     print_recall(resp)
     return resp
+
+
+def _identified_row(row):
+    return (isinstance(row, dict) and isinstance(row.get("uuid"), str) and bool(row["uuid"].strip())
+            and isinstance(row.get("groupUuid"), str) and bool(row["groupUuid"].strip())
+            and type(row.get("version")) is int and row["version"] >= 1)
 
 
 def require_lists(resp, command, *fields):

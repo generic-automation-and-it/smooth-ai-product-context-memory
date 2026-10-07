@@ -159,6 +159,11 @@ def execute(payload, request=client._request, clock=time.monotonic):
     passes.append(_disclosure("baseline", None, BASELINE_LIMIT, baseline_rows, added, status))
 
     eligible_anchors = [row.get("uuid") for row in baseline_rows if row.get("uuid")]
+    # Groups the caller's selector admitted. A keyword pass keeps the baseline's group/ticket selector
+    # (it clears only facets, tags and kind), so a group it finds is selected too; collecting only the
+    # baseline's groups discarded traversal endpoints in that group as outside the selection
+    # (consumer review 5438563690 #14).
+    selected_groups = {row.get("groupUuid") for row in baseline_rows if row.get("groupUuid")}
 
     if not baseline_completed:
         # Traversal anchors come from the baseline rows, so none can be named when the baseline itself
@@ -172,6 +177,8 @@ def execute(payload, request=client._request, clock=time.monotonic):
                                     "/api/context/query", query)
             added = _add(rows, merged, seen, AGGREGATE_LIMIT)
             passes.append(_disclosure("keyword", keyword, KEYWORD_LIMIT, rows, added, status))
+            if status == "completed":
+                selected_groups.update(row.get("groupUuid") for row in rows if row.get("groupUuid"))
             if status not in ("completed", "malformed"):
                 mark_not_run("keyword", keyword_plan[index + 1:], KEYWORD_LIMIT)
                 break
@@ -182,7 +189,6 @@ def execute(payload, request=client._request, clock=time.monotonic):
         # endpoints can sit in any group of the requested scope. Only endpoints inside the selected
         # group(s) are kept; the rest are counted, never merged, so traversal widens along links
         # without widening past what the caller selected.
-        selected_groups = {row.get("groupUuid") for row in baseline_rows if row.get("groupUuid")}
         if baseline.get("groupUuid") is not None:
             selected_groups.add(baseline["groupUuid"])
         traversal_plan = [] if traversal_skipped_for_context else eligible_anchors[:MAX_TRAVERSALS]
