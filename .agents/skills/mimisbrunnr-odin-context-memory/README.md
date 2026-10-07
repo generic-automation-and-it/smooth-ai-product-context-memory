@@ -3,7 +3,7 @@
 | Switch | Cost impact | Why |
 |--------|-------------|-----|
 | _(none)_ | **Baseline** | Silent capture; write only at checkpoint; no approval override. |
-| `--dryrun` | **Judgement cost; set stage only for an existing group** | No persistence. For an existing group the full pipeline runs through `set --dryrun` — the **only** pre-write inspection point, since a plain `set`'s digest arrives after the transaction has committed. A group that does not exist yet has no `groupUuid`, so its dry run previews the plan offline and cannot test the set stage. |
+| `--dryrun` | **Judgement cost; set stage only when the `groupUuid` is known** | No persistence. For an existing group that **already holds memories** — the only case a read-only ticket query returns its `groupUuid` — the full pipeline runs through `set --dryrun`, the **only** pre-write inspection point, since a plain `set`'s digest arrives after the transaction has committed. A group that does not exist yet, or exists with no memories, has no read-only `groupUuid`, so its dry run previews the plan offline and cannot test the set stage. |
 | `--approve` | **No extra cost, narrower gate** | Writes `rule`/`nfr`/`decision` as `approved` rather than `proposed`. Saves a human round-trip at the cost of canon becoming citable without review — the "ask about what is not reversible" rule. Without it the fact is still stored, just not yet citable. |
 | `--deepsearch` | **Bounded opt-in** | Adds four keyword passes of 25 and five depth-one traversals of 20, capped at 400 unique UUID/version candidates. Reports saturation and possible omissions. Under a group/ticket selector it never returns another group's endpoints, and a refused (403) anchor is reported rather than failing the recall. |
 
