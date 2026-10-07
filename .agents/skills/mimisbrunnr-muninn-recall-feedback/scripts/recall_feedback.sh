@@ -1,7 +1,10 @@
+#!/usr/bin/env bash
 # shellcheck shell=bash
-# Sourced, not executed: `source .agents/skills/mimisbrunnr-muninn-recall-feedback/scripts/recall_feedback.sh`.
-# Defines `recall_feedback_guard`, the origin check, and `recall_feedback_curl`, the only function that
-# sends a token. Runs on bash 3.2 (macOS) and GNU bash. Harness: tests/run_tests.py beside this skill.
+# Run it: `recall_feedback.sh never-recalled --to DATE [--limit N]`, `miss-rate --from DATE --to DATE`,
+# `reset`, `guard` (see `--help`). Each command builds its own request path and picks its own
+# capability, so a caller passes dates, never a path or a token. Also sourceable: it then only defines
+# `recall_feedback_guard`, the origin check, and `recall_feedback_curl`, the only function that sends a
+# token. Runs on bash 3.2 (macOS) and GNU bash. Harness: tests/run_tests.py beside this skill.
 
 # ${VAR:-default} supplies loopback when unset. The base URL is parsed and its **resolved host**
 # asserted to be loopback — matching the raw string with a glob instead approves
@@ -115,3 +118,88 @@ recall_feedback_curl() {
       -X "$method" -H @- \
       "${base%/}${path}"
 }
+
+recall_feedback_usage() {
+  cat <<'USAGE'
+Usage: recall_feedback.sh <command> [options]
+
+  never-recalled --to DATE [--limit N]   memories never recalled up to DATE (asOf); limit 1-10000, default 500
+  miss-rate --from DATE --to DATE        retrievals, misses and miss rate over the window
+  reset                                  delete the recall-feedback baseline (write token)
+  guard                                  check CONTEXT_MEMORY_BASE_URL only; sends nothing
+
+DATE is YYYY-MM-DD or a UTC instant YYYY-MM-DDTHH:MM:SS[.fff]Z.
+Tokens come from CONTEXT_MEMORY_READ_TOKEN (queries) and CONTEXT_MEMORY_WRITE_TOKEN (reset).
+USAGE
+}
+
+# Dates reach a query string, so only the two ISO 8601 shapes the endpoints accept pass; anything else,
+# including a `+hh:mm` offset that would need URL-encoding, is refused before a request.
+recall_feedback_date_ok() {
+  [[ "$1" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}(T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})?Z)?$ ]]
+}
+
+recall_feedback_main() {
+  local command="${1:-}" from="" to="" limit=""
+  [ $# -gt 0 ] && shift
+  case "$command" in
+    -h|--help|help) recall_feedback_usage; return 0 ;;
+    never-recalled|miss-rate|reset|guard) ;;
+    "") recall_feedback_usage >&2; return 2 ;;
+    *) echo "recall-feedback: unknown command; run with --help. No request was sent." >&2; return 2 ;;
+  esac
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --from|--to|--limit)
+        if [ $# -lt 2 ] || [ -z "$2" ]; then
+          echo "recall-feedback: $1 needs a value; no request was sent." >&2
+          return 2
+        fi
+        case "$1" in --from) from="$2" ;; --to) to="$2" ;; --limit) limit="$2" ;; esac
+        shift 2 ;;
+      *) echo "recall-feedback: unknown option for $command; run with --help. No request was sent." >&2
+         return 2 ;;
+    esac
+  done
+  case "$command" in
+    never-recalled)
+      if [ -n "$from" ]; then
+        echo "recall-feedback: never-recalled takes --to only; no request was sent." >&2
+        return 2
+      fi
+      if ! recall_feedback_date_ok "$to"; then
+        echo "recall-feedback: --to must be an ISO 8601 date; no request was sent." >&2
+        return 2
+      fi
+      limit="${limit:-500}"
+      if ! [[ "$limit" =~ ^[0-9]{1,5}$ ]] || [ "$limit" -lt 1 ] || [ "$limit" -gt 10000 ]; then
+        echo "recall-feedback: --limit must be 1-10000; no request was sent." >&2
+        return 2
+      fi
+      recall_feedback_curl GET "/api/context/recall-feedback/never-recalled?asOf=${to}&limit=${limit}" read ;;
+    miss-rate)
+      if ! recall_feedback_date_ok "$from" || ! recall_feedback_date_ok "$to"; then
+        echo "recall-feedback: --from and --to must both be ISO 8601 dates; no request was sent." >&2
+        return 2
+      fi
+      recall_feedback_curl GET "/api/context/recall-feedback/miss-rate?from=${from}&to=${to}" read ;;
+    reset|guard)
+      if [ -n "$from$to$limit" ]; then
+        echo "recall-feedback: $command takes no options; no request was sent." >&2
+        return 2
+      fi
+      if [ "$command" = reset ]; then
+        recall_feedback_curl POST "/api/context/recall-feedback/reset" write
+      elif recall_feedback_guard; then
+        echo "origin approved"
+      else
+        return 1
+      fi ;;
+  esac
+}
+
+# Executed, not sourced: dispatch the command line. Sourcing defines the functions and runs nothing.
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  recall_feedback_main "$@"
+  exit $?
+fi

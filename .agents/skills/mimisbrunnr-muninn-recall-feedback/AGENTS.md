@@ -23,9 +23,14 @@ records. Output is identity, count and time only.
   environment itself, never as a `curl -H "Authorization: Bearer …"` literal. A process's argv
   is readable in `ps` by every user on the host, and a temp header file (the previous design) put the
   token on disk where a kill left it — contradicting the "never written to a file" guarantee below.
-- **The guard lives in `scripts/recall_feedback.sh`, and `SKILL.md` sources it.** Do not paste a copy
-  of the functions back into `SKILL.md`: the harness tests the script, so an inline copy is untested
-  code that the operator runs instead.
+- **`scripts/recall_feedback.sh` is the one entry point, and `SKILL.md` runs it.** It is executable,
+  with one command per question (`never-recalled --to DATE [--limit N]`, `miss-rate --from DATE --to
+  DATE`, `reset`, `guard`). Each command builds its own request path and picks its own capability, so
+  the operator passes dates, never a path, a capability or a token. Do not paste a copy of the functions
+  or a hand-built path back into `SKILL.md`: the harness tests the script, so an inline copy is untested
+  code that the operator runs instead. Sourcing still defines the functions and runs nothing.
+- **The tokens must be exported.** The script is its own process, so a token set as an unexported
+  shell variable is invisible to it and the request is refused as tokenless, never sent.
 - **The request path is validated, not just the origin.** The path is concatenated after an approved
   origin, so `@evil.example/x` would make `localhost:5141` userinfo and send the token to
   `evil.example`. Only an absolute path with no `@`, `\`, whitespace, control character or leading
@@ -38,9 +43,12 @@ records. Output is identity, count and time only.
 - **`-q` is the first argument of every `curl` call.** curl reads `~/.curlrc` unless `-q` opens the
   command line, and a default config can add a header, a proxy or `--location` — so the guard would
   approve one request and curl would send another. It must be first: curl honours `-q` only there.
-- **The query window is the operator's.** `SKILL.md`'s queries read `RF_FROM`/`RF_TO` through
-  `${VAR:?}`, with `asOf` = `RF_TO`, and carry no literal date: a copied fixed window re-measures the
-  same past period on every run, so a tuning change could never show in the before/after comparison.
+- **The query window is the operator's.** `--from`/`--to` are required, with `asOf` = `--to`, and
+  `SKILL.md` shows only the `YYYY-MM-DD` placeholder, never a literal date: a copied fixed window
+  re-measures the same past period on every run, so a tuning change could never show in the
+  before/after comparison. A missing, empty or malformed date (only `YYYY-MM-DD` or a `…Z` UTC
+  instant), an unknown option, or an option the command does not take exits 2 before anything is sent,
+  and the refusal never echoes the value — a pasted secret in the wrong slot stays off the terminal.
 - **No free-text query goes to these endpoints.** They are tuning surfaces, not a retrieval path, and
   feedback must never influence ranking.
 - **The output is identity and counts.** Do not attempt to reconstruct query text or memory content
@@ -78,8 +86,8 @@ records. Output is identity, count and time only.
 ## Test References
 
 - `python3 -B .agents/skills/mimisbrunnr-muninn-recall-feedback/tests/run_tests.py` — stdlib unittest, no
-  network. Sources `scripts/recall_feedback.sh` under bash with a recording fake `curl` and a `python3`
-  shim on `PATH`, and asserts: non-loopback, userinfo, path-bearing and `;params`-bearing origins are
+  network. Sources and executes `scripts/recall_feedback.sh` under bash with a recording fake `curl` and
+  a `python3` shim on `PATH`, and asserts: non-loopback, userinfo, path-bearing and `;params`-bearing origins are
   refused before any request (and neither the userinfo nor a path, params, query or fragment is echoed —
   each is reported present/absent — nor the scheme or a non-loopback hostname); host-moving paths (`@host/…`, `//host`, a scheme, whitespace,
   `\`) are refused; an accepted request carries `--noproxy '*'`, sends the token on curl's stdin (`-H @-`)
@@ -89,9 +97,12 @@ records. Output is identity, count and time only.
   call that does not, a static scan covers every invocation in the script, and a real-curl case with an
   isolated `HOME` proves a `.curlrc` canary is ignored, skipped when curl is absent); `--fail-with-body`
   reaches curl, and a real curl against an in-process loopback responder answering `403` exits 22 with
-  the body kept (skipped when curl lacks the option); and `SKILL.md` sources the script instead of an
-  inline copy, its two queries carry no literal date, refuse to send with `RF_FROM`/`RF_TO` unset and
-  send the operator's window when set. Runs on macOS bash 3.2 and GNU bash.
+  the body kept (skipped when curl lacks the option); each command sends its own method, path and
+  capability's token (`reset` POSTs with the write token, the queries GET with the read token, and the
+  other token alone is refused), every malformed or misplaced argument exits 2 with nothing sent or
+  echoed, `guard` sends nothing, and sourcing runs nothing; and `SKILL.md` runs the executable script
+  (all four commands documented, no `source`, no inline copy), its queries carry no literal date,
+  refuse to send with the placeholder and send the operator's window when filled. Runs on macOS bash 3.2 and GNU bash.
 - **CI runs this harness, and a red harness is a gate failure.** `.github/workflows/pr-gate.yml`'s
   `python-harnesses` job ("Test recall-feedback skill") runs it on both the 3.9 and 3.12 legs.
   Run it locally whenever the script changes — the gate runs the same command.
@@ -100,6 +111,7 @@ records. Output is identity, count and time only.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-07 | **One executable script with parameters, replacing the sourced helper and inline query blocks.** `SKILL.md` had the operator `source` the script, set `RF_FROM`/`RF_TO`, and paste three `recall_feedback_curl` lines that hand-built each path and named a capability — the shape the practitioner originally asked to be a parameterised script. `recall_feedback.sh` is now executable with `never-recalled --to DATE [--limit N]` (1–10000, default 500), `miss-rate --from DATE --to DATE`, `reset` and `guard`; each command builds its own path and picks its own capability, and the guard, path check, stdin token, `--noproxy` and `-q` are unchanged because every command goes through `recall_feedback_curl`. Arguments are validated before anything is sent (exit 2, value never echoed); options take no empty value, and `reset`/`guard` take none, tracked by presence so a default-valued `--limit 500` is refused too. **Behaviour change:** tokens must now be exported, since the script is a child process. Harness 27 -> 38 (a `FakeCurlCase` base so the CLI class does not re-run the guard tests). Mutation-checked on a private copy: loosened date regex, `reset` on the read capability, dispatch on source, echoing the unknown command, `reset` accepting `--limit`, an ignored `--limit` — each fails the suite. | PR 196 |
 | 2026-10-06 | **Issue 190 #18 and consumer review `5430979214` #14.** `recall_feedback_curl` takes a **capability** (`read`/`write`) as its third argument and reads the matching token from the environment itself; the documented calls expanded the token into the helper's arguments. An unknown capability sends nothing. The documentation-wiring test only checked that the script's path appeared somewhere in SKILL.md, and the documented-query runs sourced the script themselves, so deleting the documented `source` line passed; the runs now use the documented `source` line, which must name this script. Mutation-checked. Harness 25 -> 27. | issue 190, review 5430979214 |
 | 2026-10-06 | **An empty `?`, `#` or `;` no longer passes as a bare origin.** `urlparse` reports `http://localhost:5141?` as an empty query, so the guard's `parsed.query` check passed it; the delimiters themselves are now refused and reported as present (finding 6). Harness 24 -> 25. | issue 188 |
 | 2026-10-06 | **The token is no longer written to a file.** SKILL.md and this file promised the token values are "never written to a file", while `recall_feedback_curl` wrote the header to a mode-600 temp file that a `SIGKILL` would leave behind. The safer behaviour wins over the doc: the header now reaches curl on stdin (`-H @-`) from the `printf` builtin, so it is in neither argv nor a file, and the temp file, its `EXIT`/`HUP`/`INT`/`TERM` traps and the scoping subshell are gone. Verified with real curl 8.7.1 (`-H @-` needs ≥ 7.55; `--fail-with-body` already needs 7.76) against the in-process 403 responder. The fake curl now records `TMPDIR` at call time and reads an `@-` header from stdin. Mutation-checked: restoring the temp-file send fails both subtests (GET and POST) of the new test. `builtin` (guarding against a shadowing `printf` function) is hardening with no test. Harness 23 -> 24. | issue 184 |
