@@ -43,7 +43,8 @@ python3 .../understanding_client.py dump --currentsession --from <session-file|-
 - **Import is read-only.** It queries the store through the capture skill's read client — read token only,
   no write capability — and renders the recalled records as cited grounding context (HLD-007 LADR-11).
 - **Export funnels through the capture path.** `export [<input> | --input <path>]` hands material to the existing capture
-  path — atomicity, redaction, dedup/link — never a direct write, and it dry-runs unless `--write` is
+  path — atomicity, redaction, exact-subject dedup (no semantic matching or derived links; recall first
+  and route a paraphrase through the capture skill) — never a direct write, and it dry-runs unless `--write` is
   passed (HLD-007 LADR-03). An over-20-candidate batch auto-splits into consecutive ≤20 chunks, each
   processed end to end, and a candidate whose subject already exists in the target group is sent as a
   version bump rather than a create that 409s.
@@ -54,7 +55,8 @@ python3 .../understanding_client.py dump --currentsession --from <session-file|-
   `.context/mimisbrunnr-understandings/<session-folder>/`, with a fitting folder name reported on output so another
   agent can discover it (HLD-007 LADR-07). It changes nothing in the store. Recognised secrets, emails
   and UPNs are redacted before it is written; **names and other personal data are not reliably
-  detectable**, so remove them from the session file before dumping.
+  detectable**, so generalise them to roles or types before the summary is written anywhere — pipe it
+  in with `--from -` rather than saving an unprocessed copy.
 - **ai-understanding files are structured input.** A `.understanding.md` unit, or a whole store folder
   (newest version per slug), loads as question/answer/why/boundaries rather than raw prose (HLD-007 LADR-09).
 

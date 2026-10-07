@@ -1566,12 +1566,21 @@ def reconcile_source_scope(candidates: list[dict], binding: dict) -> bool:
     179). With no bound scope, one shared source scope is adopted and disclosed; mixed source scopes,
     or a bound scope that differs from any record's, are refused before anything is sent.
     """
-    sources = {_scope_key(c["scope"]) for c in candidates
-               if isinstance(c.get("scope"), str) and c["scope"].strip()}
+    scoped = [c for c in candidates if isinstance(c.get("scope"), str) and c["scope"].strip()]
+    sources = {_scope_key(c["scope"]) for c in scoped}
     if not sources:
         return True
     labels = ", ".join(sorted(f"{d}:{i}" if i else d for d, i in sources))
     if not binding.get("scope"):
+        # An unscoped record beside a scoped one would take the scoped one's scope: nobody chose that
+        # for it, which is the re-scoping this function exists to refuse (review 5432012955 #1). An
+        # explicit --scope is a choice for the whole export, as it is for unscoped session material.
+        if len(scoped) != len(candidates):
+            print(f"REFUSED: {len(scoped)} of {len(candidates)} source records carry a scope ({labels}) "
+                  "and the rest carry none, so adopting it would re-scope the unscoped ones. Export "
+                  "them separately, or pass --scope to choose one scope for all. Nothing was written.",
+                  file=sys.stderr)
+            return False
         if len(sources) > 1:
             print(f"REFUSED: the source records carry more than one scope ({labels}), and one export "
                   "writes one group with one scope. Export each scope separately with a matching "

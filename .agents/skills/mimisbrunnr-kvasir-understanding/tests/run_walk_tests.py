@@ -204,7 +204,7 @@ def score_answers(surface_text: str, answers: dict, questions: list[dict]) -> li
         ans = (answers.get(q["id"]) or "").strip()
         cited = any(a.lower() in ans.lower() for a in q.get("accept", [q["identity"]]))
         facts = _facts_match(ans, q)
-        supported = _surface_supports(surface_text, q)
+        supported = _surface_supports(_cited_version_text(surface_text, ans, q), q)
         declined = bool(DECLINE_RE.fullmatch(ans))
         results.append({
             "id": q["id"], "present": present, "cited": cited, "facts": facts,
@@ -212,6 +212,33 @@ def score_answers(surface_text: str, answers: dict, questions: list[dict]) -> li
             "correct": (cited and facts and supported) if present else declined,
         })
     return results
+
+
+_VERSION_RE = re.compile(r"(?i)\b(?:v|version\s+)(\d+)\b")
+
+
+def _cited_version_text(surface_text: str, ans: str, q: dict) -> str:
+    """The part of the surface the answer attributes its fact to.
+
+    An answer naming a version of the record ("Stale-image trap v1") is supported only by that
+    version's section: checking the whole surface credited a fact from v3 to a v1 that says the
+    opposite (review 5432012955 #5). A section is a heading and the lines under it, kept when it names
+    the record and one of the cited versions. An answer naming no version is held to the whole surface.
+    """
+    cited = set(_VERSION_RE.findall(ans))
+    if not cited:
+        return surface_text
+    names = [a.lower() for a in q.get("accept", [])] + [q["identity"].lower()]
+    sections, current = [], []
+    for line in surface_text.splitlines():
+        if line.startswith("#") and current:
+            sections.append("\n".join(current))
+            current = []
+        current.append(line)
+    if current:
+        sections.append("\n".join(current))
+    return "\n".join(s for s in sections
+                     if any(n in s.lower() for n in names) and cited & set(_VERSION_RE.findall(s)))
 
 
 def _surface_supports(surface_text: str, q: dict) -> bool:
@@ -422,6 +449,17 @@ class WalkFixtureTests(unittest.TestCase):
                 lost = summarize(score_answers(stripped, answers, self.questions))
                 self.assertGreater(kept["correct_present"], 0)
                 self.assertEqual(lost["correct_present"], 0)
+
+    def test_a_fact_credited_to_a_superseded_version_is_not_correct(self):
+        """Review 5432012955 #5: an answer attributing v3's "verify freshness" to v1 — which says a
+        healthy container is always fresh — scored full marks, because support was checked against the
+        whole surface rather than the version the answer cites."""
+        text = self.texts["load_all"]
+        q1 = [q for q in self.questions if q["id"] == "Q1"][0]
+        wrong = {"Q1": "Verify freshness by calling a newly added endpoint. Stated by Stale-image trap v1."}
+        right = {"Q1": "Verify freshness by calling a newly added endpoint. Stated by Stale-image trap v3."}
+        self.assertFalse(score_answers(text, wrong, [q1])[0]["correct"])
+        self.assertTrue(score_answers(text, right, [q1])[0]["correct"])
 
     def test_a_surface_that_negates_its_facts_loses_its_marks(self):
         """Issue 190 #17: the surface check was a substring match, so a rendering that came to deny a
