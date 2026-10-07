@@ -27,8 +27,8 @@ accepted for forward compatibility.
 Move Mímisbrunnr **Understanding** knowledge between a session and the store. **`load`** brings a file,
 folder or transcript into the session's context, writing nothing. **`import`** queries the store itself
 (`kind = understanding`) back into the session, read token only. **`export`** sends session material to
-the store through the capture path (preflight → redact → exact-subject dedup → atomicity → write), never as a
-direct write, and dry-runs by default so a dry run creates nothing. **`dump`** writes the session's
+the store through the capture path (redact → atomicity → initiative check → optional value gate → group resolution →
+preflight with exact-subject dedup → `set --dryrun` veto → write), never as a direct write, and dry-runs by default so a dry run creates nothing. **`dump`** writes the session's
 understanding to a local folder for offline transfer.
 
 Requires **Python 3.9 or newer**; the npm launcher (`npm/cli/_run.js`) checks the floor and refuses

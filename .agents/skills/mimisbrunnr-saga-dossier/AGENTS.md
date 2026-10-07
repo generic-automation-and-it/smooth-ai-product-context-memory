@@ -40,9 +40,30 @@ nothing back to the store. Composition is judgement
 
 ## How it works
 
+```mermaid
+C4Context
+    Person(practitioner, "Practitioner / agent")
+    System(saga, "mimisbrunnr-saga-dossier", "Selects nothing; composes a cited dossier from one bundle")
+    System_Ext(host, "Mímisbrunnr Host API", "Loopback only; read token; dossier preview + bundle")
+    System_Ext(heimdallr, "Heimdallr reporter", "Sibling skill; git-only repo/ticket autofill")
+    Rel(practitioner, saga, "preview, approve, compose")
+    Rel(saga, host, "POST preview / bundle (read-only)")
+    Rel(saga, heimdallr, "autofill missing anchors")
 ```
-practitioner → preview (bundle/preview endpoint) → approves/narrows/cancels (LADR-14)
-            → bundle (bundle/preview endpoint, same selection) → compose → dossier artefact
+
+```mermaid
+sequenceDiagram
+    participant P as Practitioner
+    participant S as Saga CLI
+    participant H as Host API
+    P->>S: preview (anchors)
+    S->>H: POST dossier/preview
+    H-->>S: selection + counts
+    P->>S: approve / narrow / cancel (LADR-14)
+    S->>H: POST dossier/bundle (same selection)
+    H-->>S: bundle → owner-only scratch file
+    P->>S: compose --bundle FILE [--judgements FILE]
+    S-->>P: dossier artefact (gitignored) + reconciliation; scratch deleted
 ```
 
 The skill never re-selects. It takes the bundle (or the approved preview's recorded selection) and
@@ -195,6 +216,8 @@ Tests: `tests/run_tests.py`.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-07 | Bundle guard reuses odin's `write_tokens_present` (a two-name list let `Parameters__api-write-token` and case variants through); README points to the upstream HLD; C4 + sequence diagrams. | review 5440964552 |
+| 2026-10-07 | `SKILL.md` drops a stale harness test count. | issue 200 |
 | 2026-10-07 | Dedupe on the whole normalized finding, not category+memories+basis, so findings differing only in scope/classification/observation/qualification both reach the dossier. | review 5438563690 |
 | 2026-10-06 | A consolidated claim shows a differing origin's words (`also stated as`); stored text is inline-escaped, since a line break ended the cited item. | review 5432012955 |
 | 2026-10-06 | A contradiction needs two distinct uuids (two versions of one memory are supersession); sentence cuts respect abbreviations. | issue 190, review 5430979214 |

@@ -113,6 +113,8 @@ records. Output is identity, count and time only.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-07 | Token storage between shells is operator machine config (provisioned env file, managed `~/.zshrc` block); the skill writes no value anywhere. | review 5440964552 |
+| 2026-10-07 | `SKILL.md` lists `::1` among accepted loopback hosts. | issue 200 |
 | 2026-10-07 | Dates checked against the calendar, not just the shape (`2030-02-30` refused); older-curl fallback is `--fail`, never dropping it — without one a 403 exits 0. | review 5438563690 |
 | 2026-10-07 | One executable script with subcommands replaces sourcing plus hand-built `recall_feedback_curl` lines; each command picks its own path and token. Tokens must now be exported. | PR 196 |
 | 2026-10-06 | Call sites pass a capability (`read`/`write`), never a token; the helper reads the token from the environment. | issue 190, review 5430979214 |

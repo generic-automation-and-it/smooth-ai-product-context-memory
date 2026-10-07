@@ -168,6 +168,8 @@ An Understanding is the input and outcome of a session's memory, written for ano
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-07 | A unit counts as published only when the archived bytes match the working copy (publish's `published_from` and unbracketing discounted) and every asset's bytes match; `--promote` wording: recurrence is not verification. | review 5440964552 |
+| 2026-10-07 | Harness docstring: durability is judged by archive membership, not time. | issue 200 |
 | 2026-10-07 | Consume and publish accept a member only when its Unix type matches its name; a directory/FIFO/device entry passed and counted as published. | review 5438563690 |
 | 2026-10-06 | A unit counts as published only with every local `<slug>.assets/` file restorable from the same archive. Template divergence. | review 5432012955 |
 | 2026-10-06 | README handoff passes `--from`: `dump --currentsession` without it writes a blank template. | review 5430979214 |

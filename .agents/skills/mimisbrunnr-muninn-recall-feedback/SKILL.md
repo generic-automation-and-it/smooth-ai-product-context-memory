@@ -11,15 +11,16 @@ access, no raw feedback records. Output is identity / count / time only; content
 leave the store.
 
 Base URL: `CONTEXT_MEMORY_BASE_URL` (default `http://localhost:5141`). Loopback origins only — the
-client refuses any origin that is not localhost/127.0.0.1, so a value like `https://api.example.com`
+client refuses any origin that is not `localhost`, `127.0.0.1` or `::1`, so a value like `https://api.example.com`
 fails before a request is sent. Export it once, or `set -a && source .context/mimisbrunnr.env && set +a`
 if you provisioned via `scripts/provision-credentials.sh`.
 
 API access requires runtime credentials: `CONTEXT_MEMORY_READ_TOKEN` for the two read queries and
-`CONTEXT_MEMORY_WRITE_TOKEN` for reset (write includes read). They must be **exported** (an
-`export` in the shell or your `~/.zshrc`, or the `set -a` line above): the script runs as its own
-process and sees only the environment. The **values** are runtime-only — never written to a file,
-prompt or commit. Each request carries the token as a `Bearer` Authorization header. A missing token
+`CONTEXT_MEMORY_WRITE_TOKEN` for reset (write includes read). They must be **exported** into the
+shell that runs the script, which sees only its environment. Where the operator keeps them between
+shells is operator machine configuration outside the repository — the provisioner's owner-only env file
+or the managed `~/.zshrc` block written by `scripts/run.sh env-export --profile`, sourced automatically by new shells. This
+skill never writes a value to a file, a prompt or a commit, and never asks an agent to. Each request carries the token as a `Bearer` Authorization header. A missing token
 is refused before the request; a wrong one returns `403`.
 
 ## Queries

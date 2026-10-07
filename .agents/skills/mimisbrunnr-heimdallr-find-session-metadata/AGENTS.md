@@ -56,6 +56,8 @@ Heimdallr watches and reports — he does not judge or bind. The operator binds.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-07 | README checks `rootMatches`, not the withholdable `root`. | review 5440964552 |
+| 2026-10-07 | `SKILL.md` checks `rootMatches`, not `root` (display only, `null` when withheld). | issue 200 |
 | 2026-10-07 | README: operator checks `root` and picks relevant tickets instead of passing every reported one. | review 5438563690 |
 | 2026-10-06 | A checkout outside the home folder is withheld (`rootWithheld`): its absolute path can name another account. | issue 190 |
 | 2026-10-06 | Root shown from `~`, withheld when credential-shaped or unredactable; `rootMatches` answers `--repo-root` without printing it. | issue 188 |

@@ -30,7 +30,7 @@
     "question": "Which component holds the cache, as distinct from the store, and which record states it?",
     "identity": "Cache path",
     "accept": ["bbbbbbbb-2222-2222-2222-222222222222"],
-    "must_contain": ["redis"],
+    "must_contain": ["redis holds the cache"], "must_not_contain": ["redis holds the store", "redis is the store"],
     "absent": false
   },
   {

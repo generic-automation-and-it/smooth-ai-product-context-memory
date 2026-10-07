@@ -529,7 +529,7 @@ existing cap disclosures, and every pass carries a `status` of `completed`, `tim
 for a traversal the store refuses with 403 — `forbidden`. A forbidden anchor does not stop the chain:
 the baseline and every other pass are kept, and `anchorsForbidden` counts it. An answer that is not a
 complete page — an empty body, a body cut off mid-JSON, a missing or non-list `items`/`paths`, a row
-without a `uuid`, a path without an `endpoint` — is a `malformed` pass: it contributes no rows, is
+without a `uuid` or a positive integer `version`, a path without an `endpoint` — is a `malformed` pass: it contributes no rows, is
 listed in `passesIncomplete`, counted in `passesMalformed` and sets `possiblyOmitted`, and never reads as
 a completed empty pass. A malformed baseline leaves the anchor counters `null` like a timed-out one.
 `anchorsEligible` and `anchorsOmittedByCap` are `null` when the baseline never answered — the traversal

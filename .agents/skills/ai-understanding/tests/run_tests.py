@@ -3,8 +3,8 @@
 
 Run: python3 -B .agents/skills/ai-understanding/tests/run_tests.py
 
-Covers the durability guard: a gitignored store that holds units newer than the newest published
-archive is warned about, and the store's gitignore status — not a text search — decides whether any
+Covers the durability guard: a gitignored store that holds current units no publish archive contains
+(judged by archive membership, never archive time) is warned about, and the store's gitignore status — not a text search — decides whether any
 warning is owed. The guard is advisory: no reported unit changes the exit code.
 """
 
@@ -424,6 +424,48 @@ class DurabilityGuardTests(unittest.TestCase):
                     "proj-20260930-1700/alpha.assets/diagram.md",
                     "proj-20260930-1700/alpha.assets/repro/steps.sh")
             self.assertIn(unit, ui.published_paths(store), "control: unit and every asset archived")
+
+    def test_a_unit_changed_after_its_publish_is_not_published(self):
+        """Consumer review 5440964552 #2: membership was judged by path alone, so a unit redacted in
+        place, or an asset refreshed, after the last publish still read as captured."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = make_repo(tmp, ignore_store=True)
+            store = repo / ".context" / "understandings"
+            write_unit(store, "proj-20260930-1700", "alpha")
+            assets = store / "proj-20260930-1700" / ("alpha" + ui.ASSETS_SUFFIX)
+            assets.mkdir(parents=True)
+            (assets / "diagram.md").write_text("graph v1\n", encoding="utf-8")
+            unit = "proj-20260930-1700/alpha.understanding.md"
+            publish(store, "understandings-20260930-180000.zip", unit,
+                    "proj-20260930-1700/alpha.assets/diagram.md")
+            self.assertIn(unit, ui.published_paths(store), "control: archived as it stands")
+            (assets / "diagram.md").write_text("graph v2\n", encoding="utf-8")
+            self.assertNotIn(unit, ui.published_paths(store), "an asset changed after publish")
+            (assets / "diagram.md").write_text("graph v1\n", encoding="utf-8")
+            local = store / unit
+            local.write_text(local.read_text(encoding="utf-8") + "\nA <REDACTED> value.\n",
+                             encoding="utf-8")
+            self.assertNotIn(unit, ui.published_paths(store), "the unit changed after publish")
+
+    def test_publishs_own_edits_to_the_archived_copy_still_count_as_published(self):
+        """The archived copy gains `provenance.published_from` and, under `--portable-only`, loses the
+        brackets around an excluded slug; neither is a change to the knowledge."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = make_repo(tmp, ignore_store=True)
+            store = repo / ".context" / "understandings"
+            write_unit(store, "proj-20260930-1700", "alpha")
+            unit = "proj-20260930-1700/alpha.understanding.md"
+            local = store / unit
+            local.write_text(local.read_text(encoding="utf-8").replace(
+                "provenance:\n", "provenance:\n  inherited:\n    - \"[[beta]]\"\n", 1), encoding="utf-8")
+            archived = local.read_text(encoding="utf-8").replace("[[beta]]", "beta").replace(
+                "provenance:\n", "provenance:\n  published_from: org/repo\n", 1)
+            self.assertNotEqual(archived, local.read_text(encoding="utf-8"))
+            pub = store.parent / ui.PUBLISH_DIR_NAME
+            pub.mkdir(parents=True, exist_ok=True)
+            with zipfile.ZipFile(pub / "understandings-20260930-180000.zip", "w") as zf:
+                zf.writestr(unit, archived)
+            self.assertIn(unit, ui.published_paths(store))
 
     def test_unit_left_out_of_a_newer_portable_only_archive_stays_unpublished(self):
         """A `--portable-only` archive is newer than the repo-specific unit it excluded. Judging by

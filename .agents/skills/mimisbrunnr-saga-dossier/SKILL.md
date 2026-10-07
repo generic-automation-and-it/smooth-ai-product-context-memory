@@ -220,7 +220,7 @@ a fragment is refused, and a trailing slash is ignored.
 
 ## Test
 
-Committed harness: `python3 -B .agents/skills/mimisbrunnr-saga-dossier/tests/run_tests.py` (125 tests).
+Committed harness: `python3 -B .agents/skills/mimisbrunnr-saga-dossier/tests/run_tests.py`.
 
 ## Related
 

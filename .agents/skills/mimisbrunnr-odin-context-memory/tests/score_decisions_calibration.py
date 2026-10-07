@@ -171,8 +171,12 @@ def score(doc, report, threshold):
         if fixture["expect"]:
             pairs += len(fixture["expect"])
             hit += sum(1 for role in fixture["expect"] if scores.get(role, 0) > threshold)
-            bleed += sum(1 for role, v in scores.items()
-                         if v > threshold and role not in fixture["expect"])
+        # Every role that clears without being expected is bleed, a hold-side record (no expected role)
+        # included: counting only records with an expectation hid exactly the role clearing on junk
+        # (consumer review 5440964552 #5). The recorded runs hold no false positive, so their figures
+        # are unchanged.
+        bleed += sum(1 for role, v in scores.items()
+                     if v > threshold and role not in fixture["expect"])
         rows.append((fixture, scores, best, got, want))
 
     print(f"  rubric version {report['rubricVersion']}  model {report['model']}  "

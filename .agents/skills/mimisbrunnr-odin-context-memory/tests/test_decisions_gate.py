@@ -1998,6 +1998,13 @@ class CalibrationScorerTests(unittest.TestCase):
         result = self.run_score(self.report(self.scored("c01", 0.1), self.scored("c02", 0.9)))
         self.assertEqual((result["truePositive"], result["trueNegative"]), (1, 1))
 
+    def test_a_role_clearing_on_a_hold_side_record_counts_as_bleed(self):
+        """Consumer review 5440964552 #5: bleed was counted only on records with an expected role, so a
+        junk record clearing `developer` was a false positive yet showed no unexpected clearing."""
+        result = self.run_score(self.report(self.scored("c01", 0.9), self.scored("c02", 0.9)))
+        self.assertEqual(result["falsePositive"], 1)
+        self.assertEqual(result["unexpectedRolesClearing"], 1)
+
     def test_an_unscored_pass_side_record_is_refused_not_counted_as_a_false_negative(self):
         failed = {"identity": "c02", "outcome": "unreachable", "scores": {}}
         with self.assertRaises(SystemExit) as caught:

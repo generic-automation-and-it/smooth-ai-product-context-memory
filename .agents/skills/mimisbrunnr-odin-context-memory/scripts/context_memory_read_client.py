@@ -43,8 +43,8 @@ def main():
     present = client.write_tokens_present()
     if present:
         print(f"{', '.join(present)} must not be present in the read worker environment "
-              f"(a write credential in any spelling, {client.ENV_WRITE_TOKEN} or the Host's "
-              f"ApiAccess__WriteToken)", file=sys.stderr)
+              f"(a write credential in any spelling: {client.ENV_WRITE_TOKEN}, the Host's "
+              f"ApiAccess__WriteToken or Parameters__api-write-token)", file=sys.stderr)
         return 2
     parser = argparse.ArgumentParser(prog="context_memory_read_client")
     parser.add_argument("--base-url", help="override " + client.ENV_BASE_URL)

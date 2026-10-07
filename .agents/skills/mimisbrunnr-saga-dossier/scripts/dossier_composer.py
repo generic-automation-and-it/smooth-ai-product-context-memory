@@ -58,11 +58,6 @@ import context_memory_client as _store_client  # noqa: E402
 _ENV_BASE_URL = _store_client.ENV_BASE_URL
 _ENV_READ_TOKEN = _store_client.ENV_READ_TOKEN
 _ENV_WRITE_TOKEN = _store_client.ENV_WRITE_TOKEN
-# The write credential under **both** spellings a shell can set: the sibling's skill-facing name and
-# the Host's own `ApiAccess__WriteToken`. They are one credential in two forms — the provisioner writes
-# both beside each other — so a read-only surface has to refuse both. The Host form is not re-exported
-# by the sibling (it is the server's configuration spelling, not a client one), hence the literal.
-_WRITE_TOKEN_NAMES = (_ENV_WRITE_TOKEN, "ApiAccess__WriteToken")
 _MACHINE_CREDENTIAL_FILE = _store_client.MACHINE_CREDENTIAL_FILE
 
 # Heimdallr session-metadata reporter, resolved relative to this file so the
@@ -1545,16 +1540,16 @@ def _resolve_read_credentials(base_url):
     The machine credential file was seeded at import; nothing is reloaded per call, so a caller that
     deliberately cleared the token to prove a refusal is not handed one back. A write token present is
     refused before anything else (read-only, LADR-08 / NFR-06) — a read-only worker that sources it
-    gains write capability. Both spellings are checked because the established read path treats them as
-    one credential: the kvasir client strips `CONTEXT_MEMORY_WRITE_TOKEN` *and* `ApiAccess__WriteToken`
-    from a read subprocess, so a single-spelling check here left the Host form ambient past this
-    refusal. Loopback is asserted before the token is read, so a non-loopback base
+    gains write capability. Every spelling the sibling read client refuses is refused here, through its
+    own `write_tokens_present` (any case, `:` or `__`): a local list of two names let
+    `Parameters__api-write-token` or a case variant stay ambient past this refusal (consumer review
+    5440964552 #1). Loopback is asserted before the token is read, so a non-loopback base
     refuses before any request is considered. A missing token is a ``missing-credential`` error naming
     the variable and the file — never an unauthenticated request that would come back 403.
     """
-    for name in _WRITE_TOKEN_NAMES:
-        if os.environ.get(name):
-            raise ValueError(f"{name} must not be present in a read-only bundle request")
+    present = _store_client.write_tokens_present()
+    if present:
+        raise ValueError(f"{', '.join(present)} must not be present in a read-only bundle request")
     base = (base_url or os.environ.get(_ENV_BASE_URL, "http://localhost:5141")).rstrip("/")
     _assert_loopback(base)
     token = os.environ.get(_ENV_READ_TOKEN)
