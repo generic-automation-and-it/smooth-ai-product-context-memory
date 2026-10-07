@@ -22,7 +22,7 @@ existing `mimisbrunnr-odin-context-memory` contracts. It is not another store cl
   capture, and recall verification were unavailable.
 - The existing context-memory writer remains the sole write authority. Do not add a backend, schema,
   alternate client, helper script, or direct HTTP fallback here.
-- `resolve-group` is a real mutation with no dry-run. A full memory-set dry-run requires a persisted group;
+- `resolve-group` is a real mutation with no dry-run. A full memory-set dry-run requires a persisted group whose UUID is known read-only (the group already holds memories);
   never create one solely to preview, and disclose any separately authorized group creation.
 - The preview and authorization checkpoint must preserve evidence class, lifecycle, provenance, uncertainty,
   and the writer's 20-candidate cap. Capture permission is not canonical `--approve` permission.
@@ -49,7 +49,8 @@ sequenceDiagram
 ```
 
 Without verified protected workers, the sequence stops after the cited offline preview. A persisted group
-is required for a full set dry-run; group creation is a separate real mutation and may remain on failure.
+whose UUID is known read-only (the group already holds memories) is required for a full set dry-run;
+group creation is a separate real mutation and may remain on failure.
 
 ## Architecture Decisions
 

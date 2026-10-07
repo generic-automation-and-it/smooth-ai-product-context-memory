@@ -104,7 +104,7 @@ that group is a real mutation and can remain if later capture pauses or fails.
 
 The full memory-set `--dryrun` is available only when the applicable group's UUID is known — found
 read-only because the group already holds memories — or after group creation has been separately
-authorized. An existing empty group, like a group not yet created, gets only an offline plan preview. It previews the memory set, not the earlier group mutation, so it
+authorized. An existing empty group, like a group not yet created, gets only an offline plan preview. The full `--dryrun` previews the memory set, not the earlier group mutation, so it
 must not be described as guaranteeing zero mutations overall.
 
 On a rerun, unchanged claims should be skipped, meaningfully changed claims should be versioned when their
@@ -115,8 +115,7 @@ candidates and coverage gaps; a bounded baseline is never “complete repository
 ## Troubleshooting
 
 - **Only a preview is produced:** protected workers were not verified. This is the safe expected fallback.
-- **No full dry-run is offered:** there is no existing applicable group, and group creation was not separately
-  authorized.
+- **No full dry-run is offered:** there is no applicable group with a read-only-known UUID (including an existing empty group), and group creation was not separately authorized.
 - **Recall returns `NOT FOUND` after capture:** confirm the actual write receipt, stored status, and effective
   recall filters before attributing the result to proposed-lifecycle filtering. Until then, the recall gap
   remains unverified; do not promote records merely to make the check pass.
