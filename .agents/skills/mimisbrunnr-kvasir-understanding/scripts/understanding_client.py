@@ -1712,6 +1712,31 @@ def cmd_export(args: argparse.Namespace) -> int:
         (held if verdict.get("verdict") == "bundled" else clean).append(candidate)
         candidate["atomicity"] = verdict
 
+    # Fresh-store precondition: `resolve-group` answers 404 for an initiative that does not exist when
+    # it must create the group. Checked before the decision gate, which spends a finite attempt budget
+    # per record: a write this check refuses must not spend it (consumer review 5438563690 #11).
+    initiative = binding["initiative"] or "to-be-decided"
+    exists, why = initiative_exists(initiative)
+    if exists is None:
+        print(f"REFUSED: the initiative read failed ({why}); this is not evidence that "
+              f"'{initiative}' is absent. Nothing was written.", file=sys.stderr)
+        return 1
+    initiative_note = (f"initiative '{initiative}' exists" if exists else
+                      f"initiative '{initiative}' is absent — would create: "
+                      f"context_memory_client.py upsert-initiative "
+                      f"<<<'name': '{initiative}', 'status': 'active'>>>")
+    create_hint = (f"Create it first, then re-run:\n"
+                   f"  echo '{{\"name\": \"{initiative}\", \"status\": \"active\"}}' | "
+                   f"python3 -B {WRITE_CLIENT} upsert-initiative\n")
+    # Only a group that must be created needs the initiative: `resolve-group` returns an existing
+    # ticket-bound group without looking it up, so an absent initiative refuses a ticketless write (which
+    # always creates) here, and a ticket-bound one only if resolution reports it (consumer review
+    # 5438563690 #12).
+    if args.write and not exists and not binding["tickets"]:
+        print(f"REFUSED: initiative '{initiative}' does not exist, and resolve-group answers 404 for "
+              f"it when it creates a group. {create_hint}Nothing was written.", file=sys.stderr)
+        return 1
+
     # Gate 5 (decision value), only when enabled. Scores are a quality signal, never authority: they
     # never change status, kind, or approval, and a disabled or absent model skips the gate and says
     # so rather than blocking the export. A **refusal** is the one outcome that does stop it: the gate
@@ -1737,25 +1762,6 @@ def cmd_export(args: argparse.Namespace) -> int:
     # so the capture path never chunks *silently* and a reader sees the boundary.
     chunks = [clean[i:i + MAX_CANDIDATES] for i in range(0, len(clean), MAX_CANDIDATES)]
     total_chunks = len(chunks)
-
-    # Fresh-store precondition: `resolve-group` answers 404 for an initiative that does not exist.
-    initiative = binding["initiative"] or "to-be-decided"
-    exists, why = initiative_exists(initiative)
-    if exists is None:
-        print(f"REFUSED: the initiative read failed ({why}); this is not evidence that "
-              f"'{initiative}' is absent. Nothing was written.", file=sys.stderr)
-        return 1
-    initiative_note = (f"initiative '{initiative}' exists" if exists else
-                      f"initiative '{initiative}' is absent — would create: "
-                      f"context_memory_client.py upsert-initiative "
-                      f"<<<'name': '{initiative}', 'status': 'active'>>>")
-    if args.write and not exists:
-        print(f"REFUSED: initiative '{initiative}' does not exist, and resolve-group answers 404 for "
-              f"it. Create it first, then re-run:\n"
-              f"  echo '{{\"name\": \"{initiative}\", \"status\": \"active\"}}' | "
-              f"python3 -B {WRITE_CLIENT} upsert-initiative\n"
-              f"Nothing was written.", file=sys.stderr)
-        return 1
 
     print(f"Candidates: {len(clean)} to capture; {len(held)} held back by the atomicity gate.")
     if held:
@@ -1783,7 +1789,9 @@ def cmd_export(args: argparse.Namespace) -> int:
     group, group_state = resolve_group(binding, args.name, args.body, dryrun=not args.write)
     if args.write:
         if group is None:
-            print(f"REFUSED: resolve-group failed: {group_state}. Nothing was written.",
+            hint = (f" Initiative '{initiative}' does not exist; a new group needs it. {create_hint}"
+                    if not exists else " ")
+            print(f"REFUSED: resolve-group failed: {group_state}.{hint}Nothing was written.",
                   file=sys.stderr)
             return 1
         group_uuid = group.get("groupUuid") or group.get("uuid") or group.get("Uuid")

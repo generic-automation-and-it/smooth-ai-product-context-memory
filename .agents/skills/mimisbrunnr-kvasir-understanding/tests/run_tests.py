@@ -893,6 +893,63 @@ class ExportOrchestrationTests(unittest.TestCase):
             self.assertIn("upsert-initiative", err)
             self.assertEqual(called, [], "nothing may be sent after the refusal")
 
+    def _export_with_absent_initiative(self, argv, resolve):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
+            original = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                        uc.resolve_group, uc._run_capture_client, uc.gate_decisions)
+            uc.gate_redaction = lambda texts: (list(texts), {})
+            uc.gate_atomicity = lambda c: [{"verdict": "simple", "signals": []} for _ in c]
+            uc.initiative_exists = lambda name: (False, "missing")
+            uc.resolve_group = resolve
+            scored, called = [], []
+            uc.gate_decisions = lambda c: (scored.append(len(c)), (c, "Decision gate: disabled."))[1]
+
+            def capture(script, args, payload):
+                called.append(args[0])
+                if args[0] == "preflight":
+                    return 0, json.dumps({"candidates": [{"index": 0, "matches": [],
+                                                          "ticketConflict": None}]}), ""
+                return 0, json.dumps({"created": 1, "versioned": 0, "linked": 0, "skipped": 0}), ""
+
+            uc._run_capture_client = capture
+            try:
+                # Heimdallr off: an autofilled branch or commit ticket would make every case
+                # ticket-bound and the result depend on this checkout's git history.
+                rc, out, err = run(["export", src, "--write", "--initiative", "Absent",
+                                    "--heimdallr", "false"] + argv)
+            finally:
+                (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                 uc.resolve_group, uc._run_capture_client, uc.gate_decisions) = original
+        return rc, out, err, scored, called
+
+    def test_a_refused_write_spends_no_decision_attempt(self):
+        """Consumer review 5438563690 #11: the gate scored, and spent each record's finite attempt
+        budget, before the initiative check that then refused the write."""
+        rc, _, err, scored, called = self._export_with_absent_initiative(
+            [], lambda b, n, d, dryrun: (None, "unreachable"))
+        self.assertEqual(rc, 1)
+        self.assertIn("upsert-initiative", err)
+        self.assertEqual(scored, [], "the decision gate ran before a precondition refused the write")
+        self.assertEqual(called, [])
+
+    def test_an_existing_ticket_group_is_written_without_its_initiative(self):
+        """Consumer review 5438563690 #12: `resolve-group` returns an existing ticket-bound group
+        without looking the initiative up, so an absent initiative must not refuse that write."""
+        rc, out, err, _, called = self._export_with_absent_initiative(
+            ["--tickets", "#157"],
+            lambda b, n, d, dryrun: ({"groupUuid": "g-existing", "created": False}, "ok"))
+        self.assertEqual(rc, 0, err)
+        self.assertIn("set", called)
+        self.assertIn("g-existing", out)
+
+    def test_a_new_ticket_group_with_an_absent_initiative_names_the_command(self):
+        rc, _, err, _, called = self._export_with_absent_initiative(
+            ["--tickets", "#157"], lambda b, n, d, dryrun: (None, "HTTP 404"))
+        self.assertEqual(rc, 1)
+        self.assertIn("upsert-initiative", err)
+        self.assertNotIn("set", called)
+
     def test_export_refuses_when_the_initiative_read_fails(self):
         """A down store must not be reported as a missing initiative with a write remedy."""
         with tempfile.TemporaryDirectory() as tmp:

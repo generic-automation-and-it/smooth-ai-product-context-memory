@@ -204,7 +204,7 @@ def score_answers(surface_text: str, answers: dict, questions: list[dict]) -> li
         ans = (answers.get(q["id"]) or "").strip()
         cited = any(a.lower() in ans.lower() for a in q.get("accept", [q["identity"]]))
         facts = _facts_match(ans, q)
-        supported = _surface_supports(_cited_version_text(surface_text, ans, q), q)
+        supported = all(_surface_supports(text, q) for text in _cited_version_texts(surface_text, ans, q))
         declined = bool(DECLINE_RE.fullmatch(ans))
         results.append({
             "id": q["id"], "present": present, "cited": cited, "facts": facts,
@@ -217,17 +217,33 @@ def score_answers(surface_text: str, answers: dict, questions: list[dict]) -> li
 _VERSION_RE = re.compile(r"(?i)\b(?:v|version\s+)(\d+)\b")
 
 
-def _cited_version_text(surface_text: str, ans: str, q: dict) -> str:
-    """The part of the surface the answer attributes its fact to.
+_ATTRIBUTION_RE = re.compile(r"(?i)\b(?:stated|asserted|recorded|said)\s+by\b([^.;()]*)")
+
+
+def _attributed_versions(ans: str) -> set[str]:
+    """The versions the answer credits its fact to.
+
+    An answer often names a second version only to set it aside ("stated by v3 … (the v1 version is
+    superseded)"), so the versions inside a "stated by …" clause are the attribution. With no such
+    clause every version named is attributed, and each must then support the fact: unioning them let
+    "stated by v1" plus a passing mention of v3 borrow v3's support (consumer review 5438563690 #5).
+    """
+    clauses = _ATTRIBUTION_RE.findall(ans)
+    attributed = {v for clause in clauses for v in _VERSION_RE.findall(clause)}
+    return attributed or set(_VERSION_RE.findall(ans))
+
+
+def _cited_version_texts(surface_text: str, ans: str, q: dict) -> list[str]:
+    """The part of the surface each attributed version stands for — one text per version.
 
     An answer naming a version of the record ("Stale-image trap v1") is supported only by that
     version's section: checking the whole surface credited a fact from v3 to a v1 that says the
     opposite (review 5432012955 #5). A section is a heading and the lines under it, kept when it names
-    the record and one of the cited versions. An answer naming no version is held to the whole surface.
+    the record and the version. An answer naming no version is held to the whole surface.
     """
-    cited = set(_VERSION_RE.findall(ans))
-    if not cited:
-        return surface_text
+    versions = _attributed_versions(ans)
+    if not versions:
+        return [surface_text]
     names = [a.lower() for a in q.get("accept", [])] + [q["identity"].lower()]
     sections, current = [], []
     for line in surface_text.splitlines():
@@ -237,8 +253,9 @@ def _cited_version_text(surface_text: str, ans: str, q: dict) -> str:
         current.append(line)
     if current:
         sections.append("\n".join(current))
-    return "\n".join(s for s in sections
-                     if any(n in s.lower() for n in names) and cited & set(_VERSION_RE.findall(s)))
+    return ["\n".join(s for s in sections
+                      if any(n in s.lower() for n in names) and version in _VERSION_RE.findall(s))
+            for version in sorted(versions)]
 
 
 def _surface_supports(surface_text: str, q: dict) -> bool:
@@ -460,6 +477,22 @@ class WalkFixtureTests(unittest.TestCase):
         right = {"Q1": "Verify freshness by calling a newly added endpoint. Stated by Stale-image trap v3."}
         self.assertFalse(score_answers(text, wrong, [q1])[0]["correct"])
         self.assertTrue(score_answers(text, right, [q1])[0]["correct"])
+
+    def test_naming_the_current_version_does_not_rescue_a_false_attribution(self):
+        """Consumer review 5438563690 #5: support was the union over every version the answer named,
+        so crediting v1 while also mentioning v3 borrowed v3's support."""
+        text = self.texts["load_all"]
+        q1 = [q for q in self.questions if q["id"] == "Q1"][0]
+        cases = {
+            "Verify freshness by calling a newly added endpoint. Stated by Stale-image trap v1 "
+            "(v3 is the current version).": False,
+            "Verify freshness by calling a newly added endpoint, per Stale-image trap v1 and v3.": False,
+            "Verify freshness by calling a newly added endpoint. Stated by Stale-image trap v3 "
+            "(the v1 version is superseded).": True,
+        }
+        for answer, expected in cases.items():
+            with self.subTest(answer=answer):
+                self.assertEqual(score_answers(text, {"Q1": answer}, [q1])[0]["correct"], expected)
 
     def test_a_surface_that_negates_its_facts_loses_its_marks(self):
         """Issue 190 #17: the surface check was a substring match, so a rendering that came to deny a
