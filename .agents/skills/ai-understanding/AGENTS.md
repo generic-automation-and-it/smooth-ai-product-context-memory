@@ -7,7 +7,7 @@ An Understanding is the input and outcome of a session's memory, written for ano
 ## Non-Negotiables
 
 - **Never drop the subject folder.** `<subject>-<yyyyMMdd-HHmm>/<slug>.understanding.md`. The subject is what keeps a session's lessons legible as a body of work months later, and it was an explicit design correction from the user — not an incidental layout choice. Equally, do not reintroduce a folder per unit: a unit is one file, and the rare unit carrying artifacts puts them in a sibling `<slug>.assets/`.
-- **Never make the index subject-first for retrieval.** The index groups by subject for browsing, but lists every unit with its question, because an agent has a question in mind rather than a subject. An edit that makes a reader open a subject before seeing questions files knowledge under the one label nobody searches by.
+- **Never make the index subject-first for retrieval.** The index groups by subject for browsing, but lists every unit with its question — or, for an outcome unit, which carries none, its description — because an agent has a question in mind rather than a subject. Never invent a question for an outcome unit to fill the column. An edit that makes a reader open a subject before seeing questions files knowledge under the one label nobody searches by.
 - **Never let a write edit or delete an existing copy of a slug.** An improved Understanding is re-written in full into *this export run's* stamped folder and carries `provenance.supersedes`; previous copies are immutable history (LADR-010). An edit that adds an "overwrite", "force", or merge-in-place path deletes knowledge the user chose to keep, and erases the revision depth that tells a reader how settled the knowledge is. The single exception is striking a credential value that should never have been written (LADR-012) — a repair, not a revision, and not a door to a general edit path.
 - **Never let `--portable-only` publish a `repo-specific` unit.** That filter is the only thing preventing a local quirk from being shipped to another repo with provenance that makes it look universally verified.
 - **Never add remote fetching to this skill.** `--consume` takes a local archive path only; how the zip arrived (mail, chat, a drive) is out of band and not this skill's concern (LADR-008). A transport implementation here would be a second provenance model and a second merge semantics next to `ai-asset-sync`'s.
@@ -168,6 +168,7 @@ An Understanding is the input and outcome of a session's memory, written for ano
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-07 | Durability discounts `[[…]]` only where the archive dropped it, so a link unbracketed locally after publish is unpublished again (#4); index lists the description for an outcome unit, never an invented question (#3). | review 5441621898 |
 | 2026-10-07 | A unit counts as published only when the archived bytes match the working copy (publish's `published_from` and unbracketing discounted) and every asset's bytes match; `--promote` wording: recurrence is not verification. | review 5440964552 |
 | 2026-10-07 | Harness docstring: durability is judged by archive membership, not time. | issue 200 |
 | 2026-10-07 | Consume and publish accept a member only when its Unix type matches its name; a directory/FIFO/device entry passed and counted as published. | review 5438563690 |

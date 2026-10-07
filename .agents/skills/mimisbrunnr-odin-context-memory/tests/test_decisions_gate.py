@@ -1088,6 +1088,21 @@ class LedgerIntegrityTests(GateTestCase):
                       "a discarded ledger must be reported, not silently replaced")
         self.assertIn("begins again", report["ledgerReset"])
 
+    def test_an_unreadable_ledger_is_reported(self):
+        """Consumer review 5441621898 #6: an existing ledger that cannot be opened read as a first run,
+        so the spent budgets were cleared with no `ledgerReset`. A write-only file is unreadable but
+        still replaceable, so the case isolates the read."""
+        if hasattr(os, "geteuid") and os.geteuid() == 0:
+            self.skipTest("root reads a mode-0200 file, so the permission case cannot be built")
+        self.stub.probabilities = dict(self.LOW)
+        state = os.path.join(self.tmp, "ledger.json")
+        with open(state, "w", encoding="utf-8") as handle:
+            handle.write("{}")
+        os.chmod(state, 0o200)
+        proc, report = self.score(state_file=state, CONTEXT_MEMORY_DECISIONS_MAX_ATTEMPTS="1")
+        self.assertIn("ledgerReset", report,
+                      "an unreadable ledger must be reported, not silently treated as new")
+
     def test_a_spent_budget_is_still_reported_as_a_first_attempt_after_reset(self):
         """The sequence that made the silence a defect: spend the budget, truncate, and observe the
         budget start over with the reset disclosed."""
@@ -2075,6 +2090,21 @@ class CalibrationScorerTests(unittest.TestCase):
         drifted = self._compare(doc, report, 0.85)
         for key in ("separation", "tier01MaxBestRole", "tier23MinBestRole"):
             self.assertIn(key, drifted)
+
+    def test_two_undefined_correlations_are_not_drift(self):
+        """Consumer review 5441621898 #9: constant scores leave the correlation undefined (`None`), and
+        a recorded `None` matched by a measured `None` was reported as drift."""
+        recorded = {"bar": 0.85, "maxCrossRoleCorrelation": None, "maxCrossRolePair": None}
+        with contextlib.redirect_stdout(io.StringIO()):
+            same = self.scorer.compare(recorded, {"maxCrossRoleCorrelation": None,
+                                                  "maxCrossRolePair": None}, 0.85)
+            unmeasured = self.scorer.compare(recorded, {}, 0.85)
+            defined = self.scorer.compare(dict(recorded, maxCrossRoleCorrelation=0.4),
+                                          {"maxCrossRoleCorrelation": None, "maxCrossRolePair": None},
+                                          0.85)
+        self.assertEqual(same, [])
+        self.assertIn("maxCrossRoleCorrelation", unmeasured, "an unmeasured key is still drift")
+        self.assertIn("maxCrossRoleCorrelation", defined)
 
     def test_a_recorded_figure_this_run_did_not_measure_is_drift(self):
         doc = self._fixture()

@@ -76,7 +76,10 @@ python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py \
 #    Then fetch the deterministic bundle with the approved anchors into the scratch directory. --out
 #    goes through the same gitignored-destination check as compose --out and is written owner-only
 #    (0600). Never use a shell redirect instead. Compare its manifest.selection with the approved preview's
-#    selection; report any difference (LADR-14) and re-preview rather than composing it.
+#    selection AND its manifest.selectedCount with the preview's volume.selected; report any difference
+#    (LADR-14) and re-preview rather than composing it. The selection holds only the anchors and
+#    policies, so a store change that keeps the count equal (one memory replaced by another) is not
+#    detectable from either; a snapshot identifier for that is proposed, not implemented.
 python3 -B .agents/skills/mimisbrunnr-saga-dossier/scripts/dossier_composer.py \
   bundle --repo owner/repo --ticket github:160 \
   --out .context/mimisbrunnr-saga-dossier/scratch/bundle.json

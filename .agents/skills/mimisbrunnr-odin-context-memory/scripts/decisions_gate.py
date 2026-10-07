@@ -738,9 +738,13 @@ def read_ledger(state_file):
     try:
         with open(ledger_path(state_file), encoding="utf-8") as handle:
             data = json.load(handle)
-    except OSError:
+    except FileNotFoundError:
         return {}, False, False
-    except ValueError:
+    except (OSError, ValueError):
+        # Only a missing file is a first run. A ledger that exists and cannot be read (permissions, a
+        # directory in its place, an I/O error) starts empty too, so it is a reset and is disclosed like a
+        # corrupt one: an `OSError` returned "not discarded" and cleared every spent budget silently
+        # (consumer review 5441621898 #6).
         return {}, True, False
     if not isinstance(data, dict):
         return {}, True, False

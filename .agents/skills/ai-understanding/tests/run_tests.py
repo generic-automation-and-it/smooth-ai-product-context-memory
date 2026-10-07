@@ -467,6 +467,23 @@ class DurabilityGuardTests(unittest.TestCase):
                 zf.writestr(unit, archived)
             self.assertIn(unit, ui.published_paths(store))
 
+    def test_a_link_unbracketed_in_the_working_copy_after_publish_is_not_published(self):
+        """Consumer review 5441621898 #4: brackets were stripped from both copies, so a working-copy
+        `[[beta]]` turned bare after publish still matched an archive holding `[[beta]]`."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = make_repo(tmp, ignore_store=True)
+            store = repo / ".context" / "understandings"
+            write_unit(store, "proj-20260930-1700", "alpha")
+            unit = "proj-20260930-1700/alpha.understanding.md"
+            local = store / unit
+            local.write_text(local.read_text(encoding="utf-8").replace(
+                "provenance:\n", "provenance:\n  inherited:\n    - \"[[beta]]\"\n", 1), encoding="utf-8")
+            publish(store, "understandings-20260930-180000.zip", unit)
+            self.assertIn(unit, ui.published_paths(store), "control: archived as it stands")
+            local.write_text(local.read_text(encoding="utf-8").replace("[[beta]]", "beta"),
+                             encoding="utf-8")
+            self.assertNotIn(unit, ui.published_paths(store), "the lineage changed after publish")
+
     def test_unit_left_out_of_a_newer_portable_only_archive_stays_unpublished(self):
         """A `--portable-only` archive is newer than the repo-specific unit it excluded. Judging by
         archive time reported that unit published, so it could vanish with no warning."""
