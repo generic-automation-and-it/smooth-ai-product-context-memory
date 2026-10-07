@@ -216,6 +216,7 @@ Tests: `tests/run_tests.py`.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-07 | Approval compares `selection` and `selectedCount`: `selection` holds anchors, not memories, so a same-count store change is undetectable (snapshot id proposed, not implemented) (#8). | review 5441621898 |
 | 2026-10-07 | Bundle guard reuses odin's `write_tokens_present` (a two-name list let `Parameters__api-write-token` and case variants through); README points to the upstream HLD; C4 + sequence diagrams. | review 5440964552 |
 | 2026-10-07 | `SKILL.md` drops a stale harness test count. | issue 200 |
 | 2026-10-07 | Dedupe on the whole normalized finding, not category+memories+basis, so findings differing only in scope/classification/observation/qualification both reach the dossier. | review 5438563690 |

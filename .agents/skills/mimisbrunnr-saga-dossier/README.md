@@ -81,9 +81,12 @@ rm -rf .context/mimisbrunnr-saga-dossier/scratch
 ```
 
 Steps 1 and 3 each cost a request against the store; step 5 is free to re-run as many times as you like
-against the same saved bundle — try a few focuses on one bundle without re-asking the store. If the
-store changed between steps 1 and 3, the bundle's `manifest.selection` will not match the approved
-preview's `selection`: preview again and re-approve rather than composing a scope nobody approved.
+against the same saved bundle — try a few focuses on one bundle without re-asking the store. Compare
+the bundle's `manifest.selection` with the approved preview's `selection`, and its
+`manifest.selectedCount` with the preview's `volume.selected`; if either differs, preview again and
+re-approve rather than composing a scope nobody approved. `selection` records the anchors and policies,
+not the memories, so a store change between steps 1 and 3 shows only through the count — a change that
+keeps the count equal is not caught (a snapshot identifier for it is proposed, not implemented).
 
 `--out` must be a gitignored path, for `bundle` and `compose` alike — both carry store content, so a
 tracked or un-ignored destination (a `README.md`, say) is refused, as is a path outside a git checkout,
