@@ -600,16 +600,27 @@ def published_paths(store: Path) -> set[str]:
 
 
 _PUBLISHED_FROM = re.compile(r"(?m)^[ \t]*published_from:[^\n]*\n?")
+_LINK = re.compile(r"\[\[([^\[\]\n]+)\]\]")
 
 
 def _same_unit(archived: bytes, local: bytes) -> bool:
     """Whether an archived unit holds the working copy, discounting only what publish itself changes:
     the `provenance.published_from` line it adds, and the `[[…]]` brackets `--portable-only` drops
-    around an excluded slug (publish-consume steps 4 and 5)."""
-    def normal(text: str) -> str:
-        return re.sub(r"\[\[([^\[\]]+)\]\]", r"\1", text)
+    around an excluded slug (publish-consume steps 4 and 5).
+
+    The brackets are discounted in one direction only: a working-copy `[[slug]]` may appear bare in the
+    archive. Stripping them from both sides also accepted a working copy whose `[[slug]]` had since
+    become bare, so changed lineage read as published (consumer review 5441621898 #4).
+    """
     archived_text = _PUBLISHED_FROM.sub("", archived.decode("utf-8", errors="replace"))
-    return normal(archived_text) == normal(local.decode("utf-8", errors="replace"))
+    local_text = local.decode("utf-8", errors="replace")
+    pattern, last = [], 0
+    for link in _LINK.finditer(local_text):
+        slug = re.escape(link.group(1))
+        pattern += [re.escape(local_text[last:link.start()]), rf"(?:\[\[{slug}\]\]|{slug})"]
+        last = link.end()
+    pattern.append(re.escape(local_text[last:]))
+    return re.fullmatch("".join(pattern), archived_text, re.DOTALL) is not None
 
 
 def unpublished_units(units: list[dict], store: Path) -> list[dict]:
