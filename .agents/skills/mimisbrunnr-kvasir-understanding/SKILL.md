@@ -170,8 +170,10 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
   missing one. A `--write` refuses with the `upsert-initiative` command when it is absent; a dry run
   reports it as *would create* rather than creating it.
 - **The binding comes from the input or the flags.** A dump folder carries its binding as structured
-  metadata (`_dump.json`), read as the default; an explicit flag overrides it. Absent both, no
-  association is made.
+  metadata (`_dump.json`), read as the default; an explicit flag overrides it; Heimdallr autofill (on by
+  default, below) fills repository and branch tickets that neither supplied. So an export with **no
+  explicit selector** can still be bound; only when the input, the flags and autofill all supply nothing
+  is no association made (`--heimdallr false` skips autofill).
 - **A store export keeps its records' scope.** With no `--scope`, a single scope shared by the source
   records becomes the group's scope and is printed. Records in more than one scope, or a `--scope` that
   differs from theirs, are refused with nothing sent — export each scope separately with a matching
