@@ -245,7 +245,7 @@ recalls the live store via `import` (read token only) and orchestrates the captu
   classification, `--table` rows under the framing notice, the framed banner parsed in the shared place
   that also backs `load`, and the old `--store` spelling deprecated with a message); `export` orchestrates
   the capture path with `--write` off by default, and the dry runs create no initiative, no group and no
-  memory (the resolve is a read `initiative_exists`, never `resolve-group`), a missing initiative refuses
+  memory (the resolve is a read `initiative_exists`, never `resolve-group`), a missing initiative on a ticketless `--write` refuses
   with the upsert command, the 20-candidate cap and atomicity-holdback are enforced, and a failing
   redactor or atomicity detector is a refusal, not a flag. Dump coverage gained the generated-header
   fence, structured `_dump.json` binding, and UTC-with-offset `Generated:`. Decision-gate coverage

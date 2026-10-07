@@ -295,7 +295,7 @@ flowchart LR
   completed** — never a partial record — disclosing `deadlineSeconds`, `stoppedEarly` (any pass
   incomplete) and `budgetExhausted` (the wall clock was spent — *not* the same as a pass hanging) and
   `passesIncomplete`, with every pass carrying a `status` of `completed` / `timed-out` / `not-run` /
-  `forbidden` / `malformed` (an answer missing its list, a row without its identity, or an unparseable
+  `forbidden` / `malformed` (an answer missing its list, a row without `uuid`/`groupUuid`/`version`, or an unparseable
   body: no rows taken, listed in `passesIncomplete`, counted in `passesMalformed`, sets
   `possiblyOmitted`, does not stop the chain; a malformed baseline leaves the anchor counters `null` —
   issue 184); the anchor counters are `null` when the baseline never answered. A `forbidden` traversal

@@ -195,7 +195,7 @@ Tests: `tests/run_tests.py`.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
-| 2026-10-07 | Findings dedupe on the whole finding: a category+memories+basis key merged findings differing in scope or qualification. | review 5438563690 |
+| 2026-10-07 | Dedupe on the whole normalized finding, not category+memories+basis, so findings differing only in scope/classification/observation/qualification both reach the dossier. | review 5438563690 |
 | 2026-10-06 | A consolidated claim shows a differing origin's words (`also stated as`); stored text is inline-escaped, since a line break ended the cited item. | review 5432012955 |
 | 2026-10-06 | A contradiction needs two distinct uuids (two versions of one memory are supersession); sentence cuts respect abbreviations. | issue 190, review 5430979214 |
 | 2026-10-06 | Body-only and secondary-origin conditions are kept and cited; capture-time ties compare instants, not offset strings. | issue 190 |
