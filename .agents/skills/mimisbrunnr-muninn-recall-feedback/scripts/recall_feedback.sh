@@ -134,9 +134,23 @@ USAGE
 }
 
 # Dates reach a query string, so only the two ISO 8601 shapes the endpoints accept pass; anything else,
-# including a `+hh:mm` offset that would need URL-encoding, is refused before a request.
+# including a `+hh:mm` offset that would need URL-encoding, is refused before a request. The shape
+# alone let an impossible date such as 2030-02-30 or 24:00:00 through to the store (consumer review
+# 5438563690 #7), so the calendar is checked too; the value reaches python by environment, as the base
+# does, though the shape check already leaves only digits and separators.
 recall_feedback_date_ok() {
-  [[ "$1" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}(T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})?Z)?$ ]]
+  [[ "$1" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}(T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})?Z)?$ ]] || return 1
+  RECALL_FEEDBACK_DATE="$1" python3 - <<'PY'
+import datetime, os, sys
+value = os.environ["RECALL_FEEDBACK_DATE"]
+try:
+    if "T" in value:
+        datetime.datetime.strptime(value[:19], "%Y-%m-%dT%H:%M:%S")
+    else:
+        datetime.datetime.strptime(value, "%Y-%m-%d")
+except ValueError:
+    sys.exit(1)
+PY
 }
 
 recall_feedback_main() {

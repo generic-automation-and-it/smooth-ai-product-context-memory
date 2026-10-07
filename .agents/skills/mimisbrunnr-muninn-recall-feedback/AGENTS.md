@@ -18,9 +18,10 @@ records. Output is identity, count and time only.
   followed it ran regardless of what the guard decided — the guard was decorative. If you refactor the
   smoke check, keep the refusal and the send on one code path.
 - **The token is never an argv element and never a file.** `recall_feedback_curl` pipes the
-  `Authorization` header from the `printf` builtin into curl's stdin (`-H @-`); the operator passes a
-  capability (`read`/`write`) as a function argument and the helper reads the matching token from the
-  environment itself, never as a `curl -H "Authorization: Bearer …"` literal. A process's argv
+  `Authorization` header from the `printf` builtin into curl's stdin (`-H @-`). The operator passes
+  only a command and dates; each command picks its capability (`read`/`write`) internally and the
+  helper reads the matching token from the exported environment itself — never an argument, never a
+  `curl -H "Authorization: Bearer …"` literal. A process's argv
   is readable in `ps` by every user on the host, and a temp header file (the previous design) put the
   token on disk where a kill left it — contradicting the "never written to a file" guarantee below.
 - **`scripts/recall_feedback.sh` is the one entry point, and `SKILL.md` runs it.** It is executable,
@@ -57,8 +58,9 @@ records. Output is identity, count and time only.
 ## Key Behaviors
 
 - **`--fail-with-body` turns a `403` into a non-zero exit** rather than an empty success, so a wrong
-  token cannot read as "no findings", and keeps the refusal's body (plain `--fail` drops it). Needs curl ≥ 7.76; on older curl drop that one flag — the
-  loopback refusal and the argv redaction are the parts that protect the token.
+  token cannot read as "no findings", and keeps the refusal's body (plain `--fail` drops it). Needs
+  curl ≥ 7.76. On an older curl the fallback is `--fail`, never removing the option: without either a
+  `403` exits 0 and a wrong token reads as an empty result (consumer review 5438563690 #8).
 - **A missing token is refused before the request**, not sent and 403'd.
 - **No header file exists to clean up.** The header travels through a pipe, so there is no temp file,
   no `EXIT` trap and no window in which a `SIGKILL` leaves the token on disk. Every refusal returns
@@ -111,6 +113,7 @@ records. Output is identity, count and time only.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-07 | Dates are checked against the calendar, not only the shape (`2030-02-30`, `24:00:00` refused) (#7); the older-curl fallback is `--fail`, never dropping the option (#8); the token wording matches the command-line contract (#6). Mutation-checked; harness 38 -> 40. | consumer review 5438563690 |
 | 2026-10-07 | **One executable script with parameters, replacing the sourced helper and inline query blocks.** `SKILL.md` had the operator `source` the script, set `RF_FROM`/`RF_TO`, and paste three `recall_feedback_curl` lines that hand-built each path and named a capability — the shape the practitioner originally asked to be a parameterised script. `recall_feedback.sh` is now executable with `never-recalled --to DATE [--limit N]` (1–10000, default 500), `miss-rate --from DATE --to DATE`, `reset` and `guard`; each command builds its own path and picks its own capability, and the guard, path check, stdin token, `--noproxy` and `-q` are unchanged because every command goes through `recall_feedback_curl`. Arguments are validated before anything is sent (exit 2, value never echoed); options take no empty value, and `reset`/`guard` take none, tracked by presence so a default-valued `--limit 500` is refused too. **Behaviour change:** tokens must now be exported, since the script is a child process. Harness 27 -> 38 (a `FakeCurlCase` base so the CLI class does not re-run the guard tests). Mutation-checked on a private copy: loosened date regex, `reset` on the read capability, dispatch on source, echoing the unknown command, `reset` accepting `--limit`, an ignored `--limit` — each fails the suite. | PR 196 |
 | 2026-10-06 | **Issue 190 #18 and consumer review `5430979214` #14.** `recall_feedback_curl` takes a **capability** (`read`/`write`) as its third argument and reads the matching token from the environment itself; the documented calls expanded the token into the helper's arguments. An unknown capability sends nothing. The documentation-wiring test only checked that the script's path appeared somewhere in SKILL.md, and the documented-query runs sourced the script themselves, so deleting the documented `source` line passed; the runs now use the documented `source` line, which must name this script. Mutation-checked. Harness 25 -> 27. | issue 190, review 5430979214 |
 | 2026-10-06 | **An empty `?`, `#` or `;` no longer passes as a bare origin.** `urlparse` reports `http://localhost:5141?` as an empty query, so the guard's `parsed.query` check passed it; the delimiters themselves are now refused and reported as present (finding 6). Harness 24 -> 25. | issue 188 |
