@@ -16,10 +16,11 @@ fails before a request is sent. Export it once, or `set -a && source .context/mi
 if you provisioned via `scripts/provision-credentials.sh`.
 
 API access requires runtime credentials: `CONTEXT_MEMORY_READ_TOKEN` for the two read queries and
-`CONTEXT_MEMORY_WRITE_TOKEN` for reset (write includes read). They must be **exported** (an
-`export` in the shell or your `~/.zshrc`, or the `set -a` line above): the script runs as its own
-process and sees only the environment. The **values** are runtime-only — never written to a file,
-prompt or commit. Each request carries the token as a `Bearer` Authorization header. A missing token
+`CONTEXT_MEMORY_WRITE_TOKEN` for reset (write includes read). They must be **exported** into the
+shell that runs the script, which sees only its environment. Where the operator keeps them between
+shells is operator machine configuration outside the repository — the provisioner's owner-only env file
+or the managed `~/.zshrc` block written by `scripts/run.sh env-export`, both sourced as above. This
+skill never writes a value to a file, a prompt or a commit, and never asks an agent to. Each request carries the token as a `Bearer` Authorization header. A missing token
 is refused before the request; a wrong one returns `403`.
 
 ## Queries
