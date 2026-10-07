@@ -555,6 +555,10 @@ def published_paths(store: Path) -> set[str]:
             continue
         try:
             with zipfile.ZipFile(archive) as zf:
+                # Members that would restore: not a symlink, and bytes that read back cleanly.
+                restorable = {info.filename for info in zf.infolist()
+                              if (info.external_attr >> 16) & S_IFMT != S_IFLNK
+                              and member_reads_cleanly(zf, info)}
                 for info in zf.infolist():
                     # Exactly `<subject-folder>/<slug>.understanding.md`, the only shape publish writes.
                     # Taking the last two parts of any name let `../x/slug…`, `a/b/slug…` or an
@@ -568,7 +572,15 @@ def published_paths(store: Path) -> set[str]:
                         continue
                     # A symlink entry is a pointer, not the unit: consume refuses it, so it can never
                     # land the unit anywhere and proves nothing was captured (issue 188).
-                    if (info.external_attr >> 16) & S_IFMT == S_IFLNK or not member_reads_cleanly(zf, info):
+                    if name not in restorable:
+                        continue
+                    # A unit travels with its `<slug>.assets/` evidence (publish-consume step 3). An
+                    # archive holding the unit file but not every local asset file would restore it
+                    # without its repro or diagram, yet credited it published (review 5432012955 #3).
+                    assets = store / parts[0] / (parts[1][: -len(UNIT_SUFFIX)] + ASSETS_SUFFIX)
+                    if assets.is_dir() and not {
+                            f"{parts[0]}/{assets.name}/{f.relative_to(assets).as_posix()}"
+                            for f in assets.rglob("*") if f.is_file()} <= restorable:
                         continue
                     paths.add(name)
         except (zipfile.BadZipFile, OSError):
