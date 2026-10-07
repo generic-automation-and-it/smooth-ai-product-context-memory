@@ -102,8 +102,9 @@ Nothing is stored before the practitioner reviews the cited preview and explicit
 batch, repository/scope, and any possible group creation. A new project may require creating a durable group;
 that group is a real mutation and can remain if later capture pauses or fails.
 
-The full memory-set `--dryrun` is available only when the applicable group already exists, or after group
-creation has been separately authorized. It previews the memory set, not the earlier group mutation, so it
+The full memory-set `--dryrun` is available only when the applicable group's UUID is known — found
+read-only because the group already holds memories — or after group creation has been separately
+authorized. An existing empty group, like a group not yet created, gets only an offline plan preview. It previews the memory set, not the earlier group mutation, so it
 must not be described as guaranteeing zero mutations overall.
 
 On a rerun, unchanged claims should be skipped, meaningfully changed claims should be versioned when their

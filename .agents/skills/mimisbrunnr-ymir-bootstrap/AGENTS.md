@@ -116,6 +116,7 @@ authorization are available. Static validation is packaging evidence only.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-07 | SKILL.md/README offer the full `set --dryrun` only when the group UUID is known read-only (the group holds memories) or after authorized creation; an existing empty group gets the offline plan (#15). | consumer review 5438563690 |
 | 2026-10-06 | **Issue 190 #25/#26.** Personal identifiers in inspected evidence are generalised to a role or type before candidates are built, and never reach a candidate, the preview or a handoff. Inbound referrers visible in the bounded repository evidence (configs, CI, scripts) are cited first, and the owner is asked only about those the checkout cannot show; **LADR-01 amended** — "nothing in the tree reveals these" was contradicted by this skill's own evaluation, which credits a CI referrer cited from the evidence. `tests/expectations.md` updated to match. Prose contract and evaluation rubric only: no automated harness. | issue 190 |
 | 2026-10-06 | Heimdallr's `root` is now a display form that may be withheld, so the identity check reads its `rootMatches` instead of comparing paths (issue 188). | issue 188 |
 | 2026-10-06 | **A branch ticket is proposed, never bound unasked.** A matching reporter root proves where a ticket was found, not that it belongs to the named feature, so SKILL.md has the agent confirm each branch ticket with the user before it enters the capture binding; `tests/expectations.md` scores binding one unasked as a scope failure. | issue 186 |
