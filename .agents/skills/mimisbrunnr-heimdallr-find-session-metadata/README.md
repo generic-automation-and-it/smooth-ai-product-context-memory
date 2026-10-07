@@ -17,5 +17,7 @@ python3 -B .agents/skills/mimisbrunnr-heimdallr-find-session-metadata/scripts/fi
 | initiative | `--initiative` flag only, else `unknown` |
 | root | the checkout scanned (`--repo-root DIR`, else the working directory) |
 
-Feed the answers straight into the export flags:
-`export <input> --tickets ... --repository ... --initiative ...`.
+The report is evidence, not a binding. Before passing any of it to the export flags, check that `root`
+is the checkout the session worked in, and choose which reported tickets the export is actually about —
+the commit tickets come from the last ten subjects and can belong to unrelated work. Then pass only
+those: `export <input> --tickets <the relevant ones> --repository ... --initiative ...`.

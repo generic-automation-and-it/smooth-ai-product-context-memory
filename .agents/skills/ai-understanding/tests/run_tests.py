@@ -489,6 +489,21 @@ class DurabilityGuardTests(unittest.TestCase):
                 zf.writestr(info, "../../elsewhere")
             self.assertEqual(flagged(store), {"alpha"})
 
+    def test_a_directory_entry_named_like_a_unit_proves_nothing_was_published(self):
+        """Consumer review 5438563690 #3: a directory-mode member named like a unit was credited as
+        published, though the archive held no regular unit file."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = make_repo(tmp, ignore_store=True)
+            store = repo / ".context" / "understandings"
+            write_unit(store, "proj-20260930-1700", "alpha")
+            pub = store.parent / ui.PUBLISH_DIR_NAME
+            pub.mkdir(parents=True, exist_ok=True)
+            info = zipfile.ZipInfo("proj-20260930-1700/alpha.understanding.md")
+            info.external_attr = (0o040755 << 16)
+            with zipfile.ZipFile(pub / "understandings-20260930-180000.zip", "w") as zf:
+                zf.writestr(info, "body\n")
+            self.assertEqual(flagged(store), {"alpha"})
+
     def test_an_archive_consume_would_refuse_proves_nothing(self):
         """Issue 190: units in an archive `--consume` rejects — here an escaping entry beside a valid
         unit — were credited as published, so an unrestorable archive silenced the warning."""
@@ -638,6 +653,23 @@ class ConsumeCheckTests(unittest.TestCase):
         info = zipfile.ZipInfo("s-20260101-0000/link.understanding.md")
         info.external_attr = (0o120777 << 16)
         self.assert_refused(make_archive(self.root / "l.zip", (info, "/etc/passwd")), "symlink entry")
+
+    def test_a_non_regular_entry_is_refused(self):
+        """Consumer review 5438563690 #3: only symlinks were refused, so a directory, FIFO or device
+        entry named like a unit passed the gate. A folder entry named as a folder, and an entry with
+        no Unix mode at all, still pass."""
+        for mode in (0o040755, 0o010644, 0o020644):
+            with self.subTest(mode=oct(mode)):
+                info = zipfile.ZipInfo("s-20260101-0000/odd.understanding.md")
+                info.external_attr = mode << 16
+                self.assert_refused(make_archive(self.root / "n.zip", (info, "x")),
+                                    "not a regular file or folder entry")
+        folder = zipfile.ZipInfo("s-20260101-0000/")
+        folder.external_attr = 0o040755 << 16
+        plain = zipfile.ZipInfo("s-20260101-0000/a.understanding.md")
+        plain.external_attr = 0
+        rc, out, _ = consume(make_archive(self.root / "ok.zip", (folder, ""), (plain, "x")), self.store)
+        self.assertEqual(rc, 0, out)
 
     def test_an_existing_file_reached_through_an_internal_symlink_is_refused(self):
         """Issue 188: a local folder symlinked to another folder inside the store passed the escape

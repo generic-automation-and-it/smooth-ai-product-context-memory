@@ -505,6 +505,19 @@ class RecallFeedbackCommandLineTests(FakeCurlCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(self.sent()[1].endswith("asOf=2030-01-08T12:00:00.5Z&limit=25"), self.sent()[1])
 
+    def test_a_real_leap_day_is_accepted(self):
+        result = self.run_cli("miss-rate", "--from", "2028-02-29", "--to", "2028-03-01")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_older_curl_guidance_keeps_a_failing_exit(self):
+        """Consumer review 5438563690 #8: the docs said to drop `--fail-with-body` on older curl, which
+        makes a 403 exit 0. The fallback is `--fail`."""
+        for doc in ("SKILL.md", "AGENTS.md"):
+            text = " ".join((SKILL / doc).read_text(encoding="utf-8").split())
+            with self.subTest(doc=doc):
+                self.assertNotIn("drop that one flag", text)
+                self.assertIn("`--fail`", text)
+
     def test_miss_rate_sends_both_dates(self):
         result = self.run_cli("miss-rate", "--from", "2030-01-01", "--to", "2030-01-08")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -555,6 +568,9 @@ class RecallFeedbackCommandLineTests(FakeCurlCase):
             ("never-recalled", "--to", "2030-13"),
             ("never-recalled", "--to", "2030-01-08&limit=1"),
             ("never-recalled", "--to", "2030-01-08T00:00:00+01:00"),
+            ("never-recalled", "--to", "2030-02-30"),
+            ("never-recalled", "--to", "2030-01-08T24:00:00Z"),
+            ("miss-rate", "--from", "2030-02-29", "--to", "2030-03-01"),
             ("never-recalled", "--to", "2030-01-08", "--limit", "0"),
             ("never-recalled", "--to", "2030-01-08", "--limit", "10001"),
             ("never-recalled", "--to", "2030-01-08", "--limit", ""),
@@ -569,6 +585,8 @@ class RecallFeedbackCommandLineTests(FakeCurlCase):
         ]
         for args in cases:
             with self.subTest(args=args):
+                # One case's request must not read as the next case's: each judges a fresh log.
+                (self.dir / "curl.argv").unlink(missing_ok=True)
                 result = self.run_cli(*args, write="synthetic-write-token-0123")
                 self.assertEqual(result.returncode, 2, result.stderr)
                 self.assertFalse(self.curl_called(), "a request was sent")

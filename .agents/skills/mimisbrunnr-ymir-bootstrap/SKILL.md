@@ -176,8 +176,11 @@ itself does not identify an existing group: ticketless resolution creates a synt
 `resolve-group` has no dry-run. Reuse a known, applicable group or ticket when available. If identity is
 absent, leave it for the writer at the authorized checkpoint. A no-op batch must not create a group.
 
-The full memory-set `--dryrun` requires an already-persisted group. Offer it only when an applicable group
-already exists, or after the user separately authorizes group creation. Never create a group solely to
+The full memory-set `--dryrun` requires an already-persisted group **whose UUID is known**. Offer it only
+when that UUID was found read-only — a ticket `query` returns it only when the group already holds
+memories — or after the user separately authorizes group creation. An existing group with no memories
+has no read-only route to its UUID, so for it, as for a group that does not exist yet, the writer can
+preview only the offline plan and reports the set stage as not tested. Never create a group solely to
 preview a batch. `--dryrun` and `--approve` are mutually exclusive. A dry-run after authorized group
 creation means the memory set is dry but the preceding group mutation is real; disclose that the group can
 remain if capture pauses or fails. Present any dry-run result as a reviewable preview, including creates,

@@ -108,8 +108,9 @@ The refusals are checked in the calling function, not a `( ... )` subshell whose
 tests, so a refusal cannot be followed by a request.
 
 `--fail-with-body` (curl ≥ 7.76) turns a `403` into a non-zero exit instead of a silent success, so a
-wrong token cannot read as an empty result set. On older curl, drop that one flag from the script —
-the loopback refusal and the argv redaction are the parts that protect the token.
+wrong token cannot read as an empty result set. It needs curl ≥ 7.76. On an older curl, replace it
+with `--fail`, never remove it: `--fail` keeps the non-zero exit and loses only the refusal's body,
+while removing both makes a `403` exit 0 and read as an empty result.
 
 **A note on what this does not prove.** The guard approves an *origin*; it does not make the response
 safe, and it does not audit the store. It exists so a misconfigured `CONTEXT_MEMORY_BASE_URL` cannot

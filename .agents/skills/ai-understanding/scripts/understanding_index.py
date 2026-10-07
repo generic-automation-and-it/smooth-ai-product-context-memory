@@ -557,8 +557,7 @@ def published_paths(store: Path) -> set[str]:
             with zipfile.ZipFile(archive) as zf:
                 # Members that would restore: not a symlink, and bytes that read back cleanly.
                 restorable = {info.filename for info in zf.infolist()
-                              if (info.external_attr >> 16) & S_IFMT != S_IFLNK
-                              and member_reads_cleanly(zf, info)}
+                              if entry_type_ok(info) and member_reads_cleanly(zf, info)}
                 for info in zf.infolist():
                     # Exactly `<subject-folder>/<slug>.understanding.md`, the only shape publish writes.
                     # Taking the last two parts of any name let `../x/slug…`, `a/b/slug…` or an
@@ -600,6 +599,17 @@ def unpublished_units(units: list[dict], store: Path) -> list[dict]:
 
 S_IFMT = 0o170000
 S_IFLNK = 0o120000
+S_IFREG = 0o100000
+S_IFDIR = 0o040000
+
+
+def entry_type_ok(info: zipfile.ZipInfo) -> bool:
+    """A member's Unix type matches what its name extracts as: a `/`-ending name a folder, every other
+    name a regular file. A type of 0 (no Unix mode, e.g. an archive written on Windows) is accepted.
+    Only symlinks were refused, so a directory, FIFO or device entry named like a unit was credited as
+    published with no regular unit file behind it (consumer review 5438563690 #3)."""
+    kind = (info.external_attr >> 16) & S_IFMT
+    return kind in (0, S_IFDIR if info.filename.endswith("/") else S_IFREG)
 
 
 def consume_problems(archive: Path, store: Path) -> list[str]:
@@ -659,6 +669,9 @@ def consume_problems(archive: Path, store: Path) -> list[str]:
             continue
         if (info.external_attr >> 16) & S_IFMT == S_IFLNK:
             problems.append(f"'{name}' is a symlink entry")
+            continue
+        if not entry_type_ok(info):
+            problems.append(f"'{name}' is not a regular file or folder entry")
             continue
         resolved = Path(os.path.realpath(store_real / name))
         if resolved != store_real and store_real not in resolved.parents:

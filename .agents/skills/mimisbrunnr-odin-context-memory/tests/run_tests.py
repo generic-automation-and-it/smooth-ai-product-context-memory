@@ -189,6 +189,7 @@ class RecallFramingTests(unittest.TestCase):
             "items": [
                 {
                     "uuid": "11111111-1111-1111-1111-111111111111",
+                    "groupUuid": "22222222-2222-2222-2222-222222222222",
                     "version": 3,
                     "createdOn": "2026-09-30T10:00:00Z",
                     "description": "Deployment policy",
@@ -266,8 +267,14 @@ class RecallFramingTests(unittest.TestCase):
         self._assert_framed(out, banner, parsed)
 
     def test_an_unreadable_query_answer_is_refused_not_framed(self):
-        """An empty body, a non-object or a missing `items` list is not "nothing found" (issue 186)."""
-        for answer in (None, {}, [], "ok", {"items": "x"}, {"memories": []}):
+        """An empty body, a non-object or a missing `items` list is not "nothing found" (issue 186),
+        and neither is a row the dedup judgement cannot place (consumer review 5438563690 #2)."""
+        good = {"uuid": "u-1", "groupUuid": "g-1", "version": 1}
+        malformed_rows = ["x", None, {}, dict(good, uuid=""), dict(good, uuid=None),
+                          {k: v for k, v in good.items() if k != "groupUuid"}, dict(good, groupUuid=7),
+                          dict(good, version="1"), dict(good, version=0), dict(good, version=True)]
+        for answer in (None, {}, [], "ok", {"items": "x"}, {"memories": []},
+                       *({"items": [good, row]} for row in malformed_rows)):
             with self.subTest(answer=answer):
                 buffer, err = io.StringIO(), io.StringIO()
                 with patch.object(client, "_request", return_value=answer), \
@@ -2214,6 +2221,29 @@ class DeepSearchTests(unittest.TestCase):
                 self.assertNotIn(outside["uuid"], uuids, "an endpoint outside the selector was merged")
                 self.assertEqual(result["disclosure"]["endpointsOutsideSelector"], 1)
                 self.assertFalse(result["disclosure"]["traversalSkippedForContextSelector"])
+
+    def test_a_group_found_by_a_keyword_pass_counts_as_selected(self):
+        # Consumer review 5438563690 #14: a ticket-scoped keyword pass can find a second group the
+        # ticket selects that the narrower baseline missed. Its traversal endpoints are inside the
+        # selection, and filtering against the baseline's groups alone discarded them.
+        anchor = dict(self.row(1), groupUuid=self.GROUP)
+        keyword_hit = dict(self.row(2), groupUuid=self.OTHER_GROUP)
+        reached = dict(self.row(3), groupUuid=self.OTHER_GROUP)
+        stranger = dict(self.row(4), groupUuid="33333333-3333-4333-8333-333333333333")
+
+        def request(method, path, payload, **kwargs):
+            if path.endswith("query"):
+                return {"items": [anchor] if payload.get("query") is None else [keyword_hit]}
+            return {"paths": [{"endpoint": reached}, {"endpoint": stranger}]}
+
+        result = deepsearch.execute(
+            {"baseline": {"ticketProvider": "jira", "ticketKey": "PROJ-1", "scopeDimension": "product"},
+             "keywords": ["retry"]},
+            request=request)
+        uuids = {item["uuid"] for item in result["items"]}
+        self.assertIn(reached["uuid"], uuids, "an endpoint in a keyword-found selected group was dropped")
+        self.assertNotIn(stranger["uuid"], uuids)
+        self.assertEqual(result["disclosure"]["endpointsOutsideSelector"], 1)
 
     def test_without_a_selector_traversal_endpoints_are_not_group_filtered(self):
         anchor = dict(self.row(1), groupUuid=self.GROUP)
