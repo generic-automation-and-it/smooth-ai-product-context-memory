@@ -573,18 +573,43 @@ def published_paths(store: Path) -> set[str]:
                     # land the unit anywhere and proves nothing was captured (issue 188).
                     if name not in restorable:
                         continue
+                    # The archived bytes must be this working copy's, not an earlier one: a unit
+                    # redacted in place or a refreshed asset after the last publish left the only current
+                    # copy in a disposable workspace while the path still matched (consumer review
+                    # 5440964552 #2). Publish's own edits to the copy are discounted, nothing else.
+                    local_unit = store / name
+                    if not (local_unit.is_file()
+                            and _same_unit(zf.read(name), local_unit.read_bytes())):
+                        continue
                     # A unit travels with its `<slug>.assets/` evidence (publish-consume step 3). An
                     # archive holding the unit file but not every local asset file would restore it
                     # without its repro or diagram, yet credited it published (review 5432012955 #3).
                     assets = store / parts[0] / (parts[1][: -len(UNIT_SUFFIX)] + ASSETS_SUFFIX)
-                    if assets.is_dir() and not {
-                            f"{parts[0]}/{assets.name}/{f.relative_to(assets).as_posix()}"
-                            for f in assets.rglob("*") if f.is_file()} <= restorable:
-                        continue
+                    if assets.is_dir():
+                        local_assets = {
+                            f"{parts[0]}/{assets.name}/{f.relative_to(assets).as_posix()}": f
+                            for f in assets.rglob("*") if f.is_file()}
+                        if not set(local_assets) <= restorable or any(
+                                zf.read(member) != path.read_bytes()
+                                for member, path in local_assets.items()):
+                            continue
                     paths.add(name)
         except (zipfile.BadZipFile, OSError):
             continue
     return paths
+
+
+_PUBLISHED_FROM = re.compile(r"(?m)^[ \t]*published_from:[^\n]*\n?")
+
+
+def _same_unit(archived: bytes, local: bytes) -> bool:
+    """Whether an archived unit holds the working copy, discounting only what publish itself changes:
+    the `provenance.published_from` line it adds, and the `[[…]]` brackets `--portable-only` drops
+    around an excluded slug (publish-consume steps 4 and 5)."""
+    def normal(text: str) -> str:
+        return text.replace("[[", "").replace("]]", "")
+    archived_text = _PUBLISHED_FROM.sub("", archived.decode("utf-8", errors="replace"))
+    return normal(archived_text) == normal(local.decode("utf-8", errors="replace"))
 
 
 def unpublished_units(units: list[dict], store: Path) -> list[dict]:
