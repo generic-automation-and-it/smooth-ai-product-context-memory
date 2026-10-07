@@ -287,7 +287,10 @@ def compare(recorded, measured, threshold, report=None):
             continue
         want, got = block[key], measured.get(key)
         if got is None:
-            ok = False
+            # A measured `None` is drift unless the key was measured and the recorded run is `None` too:
+            # Pearson is undefined for constant scores, and two undefined correlations agree (consumer
+            # review 5441621898 #9). An unmeasured key stays drift (issue 182).
+            ok = want is None and key in measured
         elif isinstance(want, float) or isinstance(got, float):
             ok = abs(got - want) < 0.005
         else:
