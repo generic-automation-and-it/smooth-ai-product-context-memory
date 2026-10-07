@@ -178,6 +178,10 @@ recall_feedback_main() {
       fi
       recall_feedback_curl GET "/api/context/recall-feedback/never-recalled?asOf=${to}&limit=${limit}" read ;;
     miss-rate)
+      if [ -n "$limit" ]; then
+        echo "recall-feedback: miss-rate takes --from and --to only; no request was sent." >&2
+        return 2
+      fi
       if ! recall_feedback_date_ok "$from" || ! recall_feedback_date_ok "$to"; then
         echo "recall-feedback: --from and --to must both be ISO 8601 dates; no request was sent." >&2
         return 2
