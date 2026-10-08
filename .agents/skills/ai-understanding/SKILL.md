@@ -255,6 +255,8 @@ cutting specific slugs as the alternative, rather than a prose list a reader cou
 one toward writing rather than dropping, and report what was written, so the user prunes afterwards
 instead of beforehand. `--all` is a request for breadth: a one-unit export out of a session carrying
 several lessons answers the letter of the switch and defeats its purpose.
+**With `--dontask`, skip the ask but keep the bar** — write every candidate that qualifies under the
+normal test, and drop a marginal one exactly as an unflagged export would.
 
 ### Redact before you write
 
@@ -280,10 +282,12 @@ never as an `improved` unit: nothing about the knowledge changed.
 Copy `assets/UNDERSTANDING.template.md` to `.context/understandings/<subject>-<yyyyMMdd-HHmm>/<slug>.understanding.md` — or under `--path` when given — and fill it.
 
 Subject **name**: kebab-case, names the topic or piece of work. Reuse the name a body of work already
-uses in the store — `ls .context/understandings/` shows them — so its runs stay browsable together.
+uses in the store — `INDEX.md` groups current units by subject, and the Glob tool on
+`.context/understandings/*/*.understanding.md` lists every folder — so its runs stay browsable together.
 
 Subject **folder**: always new, always this run. Create `<subject>-<yyyyMMdd-HHmm>/` with the current UTC
-time, 24-hour (`date -u +%Y%m%d-%H%M`, e.g. `20260919-1432`), and write this run's output into it. Never
+time, 24-hour (`python3 .agents/skills/ai-understanding/scripts/understanding_index.py --stamp`, e.g.
+`20260919-1432`), and write this run's output into it. Never
 write into a folder an earlier run created. The one exception is a second export in the same minute with
 the same subject: the name collides, so write into it — it is the same run for practical purposes, and the
 stamp does not gain seconds to avoid this.
@@ -311,7 +315,7 @@ Frontmatter fields:
 | `provenance.session` | Shared by all slugs encoded from one session |
 | `provenance.source` | What produced it — a failure, a doc, an experiment |
 | `provenance.inherited` | `[[slug]]` list of the Understandings this session loaded **and acted on**. Omit when none |
-| `provenance.supersedes` | The **previous folder name** (`agent-memory-design-20260919-1432`), not a path — enough to find the copy this one replaces, and it survives the file being moved. Set on an `improved` unit only; omit on a `new` one. Since the index shows only the newest, this is the only place a reader learns the unit is a third revision rather than a first |
+| `provenance.supersedes` | The **previous folder name** (`agent-memory-design-20260919-1432`), not a path — enough to find the copy this one replaces **in the workspace that wrote it**, and it survives the file being moved. Superseded copies are workspace-local and never ship in a publish archive, so a consumer sees the name, not the copy. Set on an `improved` unit only; omit on a `new` one. Since the index shows only the newest, this is the only place a reader learns the unit is a third revision rather than a first |
 | `updated` | Date of last change |
 
 Body sections: **Answer** (direct operational guidance, answering the frontmatter question and nothing wider), **Why** (the reasoning or failure behind it — enough to judge an edge case the Answer does not cover), **Boundaries** (where it stops applying). The question lives in frontmatter only, so `INDEX.md` never drifts from the unit.
@@ -436,7 +440,7 @@ python3 .agents/skills/ai-understanding/scripts/understanding_index.py --review
 | `never inherited` | The question probably does not match what anyone asks. Re-word it, or accept the unit was never needed and prune it. Counts inheritance of **any** version of the slug, so a unit revised three times is not reported unused because the lineage names an earlier copy |
 | superseded copies | How many revisions of a slug sit on disk unlisted. Prune guidance only — nothing removes history automatically, and a deep chain is signal that the knowledge is still moving |
 | overdue re-check | Run the unit's `recheck` command — the report prints it beside the flag — then read the unit against what it says. Outcome units are flagged after 30 days, knowledge after 90. A flagged unit carrying no `recheck` is reported as carrying none: add one while you are in there |
-| `unpublished` | The store is gitignored and these units are in no archive under `.context/understandings-publish/`, so they would vanish with this workspace. Judged by **membership**, never archive time — a `--portable-only` archive is newer than the `repo-specific` units it left out. An archive written elsewhere with `--path` is not seen, so its units stay listed. Run `--publish` to carry them out (LADR-008: the zip is the only durable form). Listed only when the store is gitignored — the guard reports the store's own `git check-ignore` answer, and a tracked store reports nothing |
+| `unpublished` | The store is gitignored and these **current** units are in no archive under `.context/understandings-publish/`, so they would vanish with this workspace. Judged by **membership**, never archive time — a `--portable-only` archive is newer than the `repo-specific` units it left out — and only an archive `--consume` would accept counts — a damaged member, an escaping or symlink entry, or two entries landing on one path makes the whole archive prove nothing, since none of it could be restored. A unit with a local `<slug>.assets/` counts only when every asset file is a restorable member of the same archive, since a unit restored without its repro or diagram is not the unit that was learned. The archived bytes must also be the working copy's — the unit's, discounting only the `provenance.published_from` line and `--portable-only` unbracketing publish itself adds, and every asset's exactly — so a unit redacted in place or an asset refreshed after the last publish is listed again. An archive written elsewhere with `--path` is not seen, so its units stay listed. Run `--publish` to carry them out (LADR-008: the zip is the only durable form). Superseded copies are never listed here: publish archives current versions only, so history is workspace-local by design and a warning `--publish` could never clear would only teach the operator to ignore it. Listed only when the store is gitignored — the guard reports the store's own `git check-ignore` answer, and a tracked store reports nothing |
 
 Advisory only — it never changes the exit code, because none of it is wrong, it is just decaying. Act on it
 when you are already in the store; do not make a project of it. Every run on a gitignored store also
@@ -452,8 +456,8 @@ gitignored, so an archive that someone keeps is the only form that survives the 
 The store is never shared through the repository (LADR-008).
 
 - Destination: `.context/understandings-publish/understandings-<YYYYMMDD-HHMMSS>.zip` by default, or `--path` (a file or directory) when given. Outside the store, so the index generator never mistakes it for a subject folder, and never a tracked path.
-- The archive mirrors the store: `<subject>-<yyyyMMdd-HHmm>/<slug>.understanding.md` with stamps carried verbatim — never re-stamped — plus each unit's `<slug>.assets/` and a regenerated `INDEX.md` covering only the published units.
-- Publishing filters **per Understanding, not per subject** — a subject folder routinely mixes scopes. By default every unit publishes; pass `--portable-only` to restrict the archive to `scope: portable` units, for the cross-repo case. Never let `--portable-only` publish a `repo-specific` unit — that filter is the only thing preventing a local quirk from being shipped to another repo with provenance that makes it look universally verified.
+- The archive mirrors the store's **current** units: `<subject>-<yyyyMMdd-HHmm>/<slug>.understanding.md` with stamps carried verbatim — never re-stamped — plus each unit's `<slug>.assets/` and a regenerated `INDEX.md` covering only the published units.
+- Publishing filters **per Understanding, not per subject** — a subject folder routinely mixes scopes. By default every current unit publishes (superseded copies never do); pass `--portable-only` to restrict the archive to `scope: portable` units, for the cross-repo case. Never let `--portable-only` publish a `repo-specific` unit — that filter is the only thing preventing a local quirk from being shipped to another repo with provenance that makes it look universally verified.
 - When `--portable-only` excludes a unit that a published unit links to, the archived copy drops the brackets around that `[[slug]]` and keeps the entry, so the archive's own index validates.
 - Each archived copy records `provenance.published_from`; the working copy is left in place.
 - No approval needed to write — the default destination or an explicit `--path` is the consent. Report what was published: the count, the destination, and the slugs, grouped by subject.
@@ -464,7 +468,13 @@ Sharing is sending someone the zip. Full contract: `references/publish-consume.m
 
 The reverse of publish: another workspace's archive becomes available here.
 
-The source is a local path to a published archive — always positional; `--path` overrides only the store it unpacks into (default `.context/understandings/`), never the source. How it arrived — mail, chat, a drive — is out of band; this skill does not fetch remote content. Extraction refuses any entry whose resolved path escapes the store (`..` segments, absolute paths, symlinks) and rejects the whole archive rather than unpacking part of it.
+The source is a local path to a published archive — always positional; `--path` overrides only the store it unpacks into (default `.context/understandings/`), never the source. How it arrived — mail, chat, a drive — is out of band; this skill does not fetch remote content. Before extracting anything, run the pre-extraction gate and extract nothing unless it exits `0`:
+
+```bash
+python3 .agents/skills/ai-understanding/scripts/understanding_index.py --consume-check <zip> [store-dir]
+```
+
+It refuses the whole archive — never part of it — on an entry whose resolved path escapes the store (`..` segments, absolute paths, symlinks), a symlink entry, a member whose data does not read back cleanly, or a case-folded collision with another entry or a local path. Details: `references/publish-consume.md`.
 
 Reconciliation, per incoming slug. The key is the slug; an incoming copy keeps its own stamped folder, because a slug in two folders is a version chain rather than an error:
 
@@ -484,8 +494,10 @@ An Understanding that keeps proving true has outgrown the disposable store:
 - Applies to nearly every task, or has become a decision rather than an observation → propose a rule under `.github/instructions/`, following `manage-rule-system`.
 
 **Three independent sessions is the threshold, and the evidence is `provenance.inherited`.** A unit that
-has been inherited in three distinct `provenance.session` values has been re-derived rather than recalled;
-propose promoting it. **Nothing counts that for you** — `--review` reports only `never inherited`, which
+has been inherited in three distinct `provenance.session` values keeps recurring in real work; propose
+promoting it. Recurrence is not verification — inheriting a unit means it shaped the work, not that it
+was re-checked — so judge `confidence` separately, and promote an `observed` unit only after verifying
+it. **Nothing counts that for you** — `--review` reports only `never inherited`, which
 is the complementary signal, so the count is read by hand: open every unit whose `provenance.inherited`
 names this slug and count the distinct `provenance.session` values on them. Below three, propose anyway
 only if you **state why** — name what makes this the exception (a cost that repeats, a decision already

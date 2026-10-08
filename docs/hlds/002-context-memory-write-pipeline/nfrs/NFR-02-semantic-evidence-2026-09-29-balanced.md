@@ -1,4 +1,4 @@
-# NFR-02 semantic evidence — 2026-09-29 (balanced, same-group)
+# NFR-02 semantic evidence — 2026-09-29 (balanced, same-group pairs plus one cross-group control)
 
 The re-measurement the 2026-09-28 withdrawal called for. The claim is unchanged — *semantic subject
 matching is accurate on both axes* — but the evidence underneath it is new, and this run is the first
@@ -20,6 +20,13 @@ unaffected: it is 1.0000 on all three.
 refuses that target, so the verdict was unachievable and the write would have 404'd. The scenario is
 retained as a **negative control** rather than deleted: a cross-group match is a new memory plus a
 typed link, so "must not bump" is a real precision case.
+
+> **Amended 2026-10-05 (issue 182).** The blinded input for `s4` carries the recalled match's group
+> but not the candidate's writing group, so the model could not tell from its input that the match sat
+> in another group; its correct `new_memory` verdict on `s4` is credited but was not answerable. This run
+> is persisted evidence and stays as recorded — the fixture is not edited after the fact. The live
+> `scenarios.json` declares `candidate_group_uuid` on every recall scenario, so the next dated run
+> measures `s4` properly.
 
 **The controls were unbalanced.** The acceptance criteria require negative controls at least as
 numerous as positive pairs — a matcher that matches nothing scores perfect precision and fills the

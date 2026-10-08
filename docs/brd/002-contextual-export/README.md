@@ -5,7 +5,7 @@
 | **Document** | Business Requirements Document |
 | **Status** | Approved — delivered; whether an export counts toward recall feedback stays open, because the recall-feedback design has never considered an export |
 | **Owner** | Product owner / practitioner |
-| **Last updated** | 2026-09-29 |
+| **Last updated** | 2026-10-05 |
 | **Extends** | [BRD 001 — Cross-product linked context memory](../001-context-memory/) |
 | **Related** | [HLD 005 — Contextual knowledge export](../../hlds/005-contextual-export/) |
 
@@ -117,7 +117,7 @@ and a shared team corpus are out of scope. The practitioner reviews the file bef
 - Consolidating equivalent restatements while preserving all origins and meaningful distinctions.
 - Distinguishing current, proposed, superseded and no-longer-true knowledge.
 - Reporting gaps, conflicts, quality problems and omissions within the examined material.
-- Previewing size and estimated composition cost, then producing a portable local file.
+- Previewing size and estimated composition cost, then producing a portable local file. That file is the one deliverable; intermediates the composition needs on the way are transient, kept out of version control and removed when it ends (amended 2026-10-05, issue 182).
 
 ### Out of scope
 

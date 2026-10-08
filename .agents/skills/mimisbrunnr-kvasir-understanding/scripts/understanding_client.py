@@ -15,7 +15,7 @@ so the same word means the same direction in both skills (LADR-11) — the previ
 
   SESSION -> STORE, one offline and one live:
 
-    dump --currentsession [--from FILE|-] [--out DIR] [--session-name NAME] [binding]
+    dump --currentsession --from <session-summary-file|-> [--out DIR] [--session-name NAME] [binding]
         Write the session's understanding to .context/mimisbrunnr-understandings/<folder>/, with its
         binding recorded as structured metadata beside it. An export, not a write; redacted before it
         reaches disk, and the folder name is reported so another session can discover it.
@@ -61,6 +61,14 @@ WRITE_CLIENT = _CAPTURE_SCRIPTS / "context_memory_client.py"
 REVIEW_QUEUE = _CAPTURE_SCRIPTS / "review_queue.py"
 DEDUP = _CAPTURE_SCRIPTS / "dedup.py"
 DEDUP_ENABLED = "CONTEXT_MEMORY_DECISIONS_DEDUP_ENABLED"
+# The write-token spellings the read client refuses to start with, folded as it folds them. Kept equal
+# to the capture client's `WRITE_TOKEN_NAMES` by a test rather than imported: importing that module
+# would make its redactor import a startup dependency of this client.
+WRITE_TOKEN_NAMES = frozenset({
+    "context_memory_write_token",
+    "apiaccess__writetoken",
+    "parameters__api-write-token",
+})
 # Heimdallr session-metadata reporter, resolved relative to this file so the lookup
 # holds under any skills root (.agents/skills, .claude/skills, .codex/skills, npm
 # layout): two levels up is the skills root, never a hardcoded prefix.
@@ -143,7 +151,9 @@ def heimdallr_scan() -> dict:
     Never fails the caller: a missing script, a non-git checkout or malformed
     output means no autofill, not a refusal. Heimdallr reports repository,
     tickets and initiative only — never tags, which stay agent-derived
-    keywords from the material itself.
+    keywords from the material itself. Its `ticketsWithheld` count and its
+    `ticketsUnavailable` / `commitsUnavailable` reasons are disclosed by
+    `heimdallr_ticket_disclosure`.
     """
     if not HEIMDALLR_SCRIPT.is_file():
         return {}
@@ -151,7 +161,9 @@ def heimdallr_scan() -> dict:
         proc = subprocess.run(
             [sys.executable, "-B", str(HEIMDALLR_SCRIPT), "--json"],
             capture_output=True, text=True, encoding="utf-8", timeout=30)
-    except (OSError, ValueError):
+    # `SubprocessError` covers `TimeoutExpired`: a hung reporter escaped the optional-autofill
+    # fallback as a traceback and killed the caller (issue 186).
+    except (OSError, ValueError, subprocess.SubprocessError):
         return {}
     if proc.returncode != 0:
         return {}
@@ -179,6 +191,45 @@ def heimdallr_autofill_tickets(scan: dict) -> list[str]:
         if isinstance(entry, dict) and entry.get("provider") and entry.get("key"):
             return [f"{entry['provider']}:{entry['key']}"]
     return []
+
+
+def heimdallr_ticket_disclosure(scan: dict) -> str | None:
+    """Lines saying Heimdallr dropped or could not read ticket candidates, or None; counts and reasons only.
+
+    The reporter withholds credential-shaped candidates (`ticketsWithheld`), reports no ticket at
+    all when its redactor cannot load (`ticketsUnavailable`), and says when `git log` failed so only
+    branch tickets were considered (`commitsUnavailable`, issue 184). Reading only `tickets` made both look
+    like "no ticket found", and a withheld newer commit ticket left an older one bound as if it were
+    the newest (issue 182). The withheld values are never in the scan, so none can be printed here.
+    """
+    unavailable = scan.get("ticketsUnavailable")
+    if isinstance(unavailable, str) and unavailable.strip():
+        return f"heimdallr: tickets unavailable ({' '.join(unavailable.split())[:120]})"
+    lines = []
+    withheld = scan.get("ticketsWithheld")
+    if isinstance(withheld, int) and not isinstance(withheld, bool) and withheld > 0:
+        lines.append(f"heimdallr: {withheld} ticket candidate(s) withheld as credential-shaped; an "
+                     "autofilled ticket is the newest one reported, not necessarily the newest commit")
+    # A failed `git log` leaves only the branch's tickets; an empty list then is not an empty
+    # history, so an unbound ticket must not read as "this work has no ticket" (issue 184).
+    commits = scan.get("commitsUnavailable")
+    if isinstance(commits, str) and commits.strip():
+        lines.append("heimdallr: commit history unavailable "
+                     f"({' '.join(commits.split())[:120]}); only branch tickets were considered")
+    return "\n".join(lines) or None
+
+
+def heimdallr_repository_disclosure(scan: dict) -> str | None:
+    """One line saying Heimdallr withheld the repository, or None; the reason only, never the path.
+
+    A credential-shaped origin path is withheld (`repositoryWithheld`), which leaves the repository
+    unbound; reading only `repository` made that look like a checkout with no origin (issue 186).
+    """
+    reason = scan.get("repositoryWithheld")
+    if isinstance(reason, str) and reason.strip():
+        return (f"heimdallr: repository withheld ({' '.join(reason.split())[:120]}); "
+                "pass --repository to bind one")
+    return None
 
 
 def heimdallr_tickets(scan: dict) -> list[str]:
@@ -272,12 +323,23 @@ def parse_store_export(body: str) -> list[dict] | None:
             continue
         if isinstance(data, dict):
             for key in ("understandings", "items", "memories"):
-                if isinstance(data.get(key), list):
+                if _store_records(data.get(key)):
                     return data[key]
-            return [data] if "statement" in data else None
-        if isinstance(data, list):
+            return [data] if isinstance(data.get("statement"), str) else None
+        if _store_records(data):
             return data
     return None
+
+
+def _store_records(records) -> bool:
+    """A list of record objects, each with a text `statement` — the only shape read as a store export.
+
+    Any JSON array used to qualify, so a foreign file such as `[1, 2, 3]` or `{"items": ["a"]}` was
+    taken for an export and crashed the load on the first `.get` (issue 188). Anything else is foreign
+    material and takes the prose path.
+    """
+    return isinstance(records, list) and all(
+        isinstance(record, dict) and isinstance(record.get("statement"), str) for record in records)
 
 
 def five_parts(record: dict) -> dict:
@@ -305,7 +367,9 @@ def five_parts(record: dict) -> dict:
         "sources": record.get("sources") or [],
         "kind": record.get("kind") or "",
         "origin": record.get("origin") or "",
-        "confidence": record.get("confidence") or "",
+        # `or ""` turned a confidence of 0 — the lowest there is — into "no confidence", which is
+        # never flagged, so the least trustworthy record lost its warning (review #2).
+        "confidence": "" if record.get("confidence") is None else record.get("confidence"),
         "portability": record.get("portability") or "",
     }
 
@@ -357,7 +421,7 @@ def _render_record(parts: dict) -> list[str]:
     # the integer this write path now sends — 70 *is* the encoding of verified — so comparing the raw
     # value against the label flagged every record exported through `export` as though it were below
     # verified, which is the opposite of what a flagged confidence is for.
-    if parts["confidence"] and confidence_flagged(parts["confidence"]):
+    if confidence_flagged(parts["confidence"]):
         flags.append(f"confidence: {parts['confidence']}")
     if parts["portability"] == "repo-specific":
         flags.append("repo-specific, may not hold in another repository")
@@ -651,10 +715,11 @@ def _run_capture_client(script: Path, argv: list[str], payload: dict | None) -> 
     # are read-only by contract. Strip the write token from the subprocess env rather than requiring the
     # caller to `unset` it — the recall path used to need a manual `unset CONTEXT_MEMORY_WRITE_TOKEN`,
     # which is exactly the friction this skill exists to remove. `ApiAccess__WriteToken` is the Host's
-    # token-name form; stripping both keeps a read subprocess read-only whichever form the shell set.
+    # token-name form; every spelling the read client refuses is stripped, matched the way it matches
+    # them (case-insensitive, `:` read as `__`), so a variant cannot make the read client refuse.
     if script == READ_CLIENT:
-        env.pop("CONTEXT_MEMORY_WRITE_TOKEN", None)
-        env.pop("ApiAccess__WriteToken", None)
+        for name in [n for n in env if n.casefold().replace(":", "__") in WRITE_TOKEN_NAMES]:
+            del env[name]
     proc = subprocess.run(
         [sys.executable, "-B", str(script), *argv],
         input=json.dumps(payload) if payload is not None else None,
@@ -798,7 +863,8 @@ def render_table(records: list[dict], all_kinds: bool, asof: dt.date | None,
 
 def _cell(text: str) -> str:
     """A pipe-safe, newline-free table cell. A raw pipe would silently add a column."""
-    return str(text or "").replace("|", "/").replace("\n", " ").strip() or "-"
+    s = str(text) if isinstance(text, (int, float)) and not isinstance(text, bool) else str(text or "")
+    return s.replace("|", "/").replace("\n", " ").strip() or "-"
 
 
 def _short(uuid: str) -> str:
@@ -834,7 +900,7 @@ def cmd_import(args: argparse.Namespace) -> int:
               "initiative. It is an `export`/`dump` switch. Nothing was written.\n"
               "  to review:  understanding_client.py export <input>\n"
               "  to capture: understanding_client.py export <input> --write\n"
-              "  to dump:    understanding_client.py dump --currentsession",
+              "  to dump:    understanding_client.py dump --currentsession --from <session-summary-file|->",
               file=sys.stderr)
         return 1
     if args.input:
@@ -889,6 +955,33 @@ def cmd_import(args: argparse.Namespace) -> int:
 # --------------------------------------------------------------- store write (export)
 
 
+def _indexed_results(stdout: str, count: int) -> list[dict] | None:
+    """The `results` of a capture-skill script, ordered by `candidate_index`, or None.
+
+    The redactor and the atomicity detector answer one object per input, each carrying its own
+    `candidate_index`. Pairing their answers with the inputs by position trusted the order and the
+    length: a short list silently dropped the trailing candidates from the export, and a reordered one
+    put one candidate's scrubbed text — or verdict — on another (issue 186). Every index from 0 to
+    `count - 1` must appear exactly once, on an object; anything else is an answer this client cannot
+    interpret, and the caller refuses rather than guesses.
+    """
+    try:
+        results = json.loads(stdout)["results"]
+    except (ValueError, KeyError, TypeError):
+        return None
+    if not isinstance(results, list) or len(results) != count:
+        return None
+    ordered: list = [None] * count
+    for result in results:
+        if not isinstance(result, dict):
+            return None
+        index = result.get("candidate_index")
+        if type(index) is not int or not 0 <= index < count or ordered[index] is not None:
+            return None
+        ordered[index] = result
+    return ordered
+
+
 def gate_redaction(texts: list[str]) -> tuple[list[str], dict] | None:
     """Run every candidate's free text through the capture skill's redactor, or None if it cannot run.
 
@@ -903,16 +996,15 @@ def gate_redaction(texts: list[str]) -> tuple[list[str], dict] | None:
                           input=json.dumps(texts), capture_output=True, text=True, encoding="utf-8")
     if proc.returncode != 0:
         return None
-    try:
-        results = json.loads(proc.stdout)["results"]
-    except (ValueError, KeyError, TypeError):
-        return None
-    if not isinstance(results, list) or len(results) != len(texts):
+    results = _indexed_results(proc.stdout, len(texts))
+    if results is None or not all(isinstance(r.get("redacted"), str) for r in results):
         return None
     scrubbed, findings = [], {}
     for result in results:
-        scrubbed.append(result.get("redacted", ""))
+        scrubbed.append(result["redacted"])
         for finding in result.get("findings") or []:
+            if not isinstance(finding, dict):
+                return None
             rule = finding.get("rule_name", "unknown")
             findings[rule] = findings.get(rule, 0) + finding.get("hit_count", 0)
     return scrubbed, findings
@@ -930,10 +1022,13 @@ def gate_atomicity(candidates: list[dict]) -> list[dict] | None:
     )
     if proc.returncode != 0:
         return None
-    try:
-        return json.loads(proc.stdout)["results"]
-    except (ValueError, KeyError, TypeError):
+    # A short or reordered answer dropped or mis-paired candidates silently (issue 186); refuse it.
+    results = _indexed_results(proc.stdout, len(candidates))
+    # Only the two verdicts the detector defines are read. Any other text was filed as "clean" by the
+    # `== "bundled"` test below, so an unknown verdict let a candidate through unchecked (issue 190).
+    if results is None or any(r.get("verdict") not in ("simple", "bundled") for r in results):
         return None
+    return results
 
 
 DECISIONS_GATE = _CAPTURE_SCRIPTS / "decisions_gate.py"
@@ -942,6 +1037,8 @@ DECISIONS_ENABLED = "CONTEXT_MEMORY_DECISIONS_ENABLED"
 # `cmd_export` has to act on it: a refusal says "Nothing was written", so a refusal that only labelled the
 # report and let the export proceed was a message contradicting what the process then did.
 DECISIONS_REFUSED = "decisions: refused"
+_GATE_REDACTOR_REFUSAL = ("REFUSED: the decision gate's redactor could not run, so record content would "
+                          "have been sent unscrubbed. Nothing was written.")
 
 # Seed **only** the flag, and only so this client knows whether to shell out at all. The other nine
 # settings — including the API key, which is a secret — are loaded by the gate subprocess from the same
@@ -966,7 +1063,8 @@ def _seed_decisions_enabled() -> None:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, value = line.partition("=")
-        if key.strip() == DECISIONS_ENABLED and value and not _os.environ.get(DECISIONS_ENABLED):
+        # Presence, not truthiness, like the capture client's loader (review #4).
+        if key.strip() == DECISIONS_ENABLED and value and DECISIONS_ENABLED not in _os.environ:
             _os.environ[DECISIONS_ENABLED] = value.strip()
             return
 
@@ -1016,6 +1114,84 @@ def _audience_tags(candidate: dict, result: dict) -> list[str]:
     return tags
 
 
+def probe_decisions(count: int) -> str:
+    """The dry-run counterpart of `gate_decisions`: check the gate without scoring anything.
+
+    Scoring spends each record's attempt budget in the gate's ledger, so a dry run that scored
+    exhausted it: after three previews a `--write` saw `attempts-exhausted` for every record, which
+    keeps the record unscored — the gate bypassed by previewing it (issue 182). `probe` checks the
+    configuration, endpoint and model with a content-free request and writes no ledger. A
+    misconfigured gate is still a refusal here, so the dry run says what the write would say.
+
+    `probe` never runs the redactor, so a gate whose redactor script is missing answered `ok` while
+    the write refused (issue 182). The gate's own first redaction check is `is_file()` on its sibling
+    `redact.py`; repeating that check here costs nothing and makes the two runs agree. A redactor
+    that is present but fails on the records is still found only by the write, which refuses.
+    """
+    if os.environ.get(DECISIONS_ENABLED, "").lower() != "true":
+        return "decisions: disabled"
+    if not DECISIONS_GATE.is_file():
+        print(f"NOTE: the decision gate is enabled but {DECISIONS_GATE} is missing; a --write would "
+              "skip it.", file=sys.stderr)
+        return "decisions: skipped (gate script missing)"
+    if not (DECISIONS_GATE.parent / "redact.py").is_file():
+        print(_GATE_REDACTOR_REFUSAL, file=sys.stderr)
+        return DECISIONS_REFUSED
+    not_scored = (f"decisions: not scored (dry run; scoring spends the gate's attempt budget) — "
+                  f"a --write scores {count} candidate(s) and may hold some")
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-B", str(DECISIONS_GATE), "probe"],
+            capture_output=True, text=True, encoding="utf-8", timeout=GATE_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        return f"{not_scored}; gate probe did not answer within {GATE_TIMEOUT_SECONDS}s"
+    except OSError:
+        return f"{not_scored}; gate probe could not run"
+    outcome = None
+    # The probe prints its report on stdout; a configuration error raised before the report exists
+    # reaches stderr as the gate's own `{"outcome": ...}` object.
+    for stream in (proc.stdout, proc.stderr):
+        try:
+            report = json.loads(stream or "")
+        except ValueError:
+            continue
+        if isinstance(report, dict) and isinstance(report.get("outcome"), str):
+            outcome = report["outcome"]
+            break
+    if outcome in ("bad-decisions-config", "bad-decisions-url"):
+        print(f"REFUSED: the decision gate is misconfigured ({outcome}). Nothing was written.",
+              file=sys.stderr)
+        return DECISIONS_REFUSED
+    if outcome == "disabled":
+        return "decisions: disabled"
+    if outcome == "ok":
+        return f"{not_scored}; gate probe ok"
+    return f"{not_scored}; gate probe: {outcome or 'unreadable'} — a --write would skip the gate"
+
+
+def _ledger_disclosures(report: dict) -> list[str]:
+    """Stderr lines for the gate's attempt-ledger disclosures; fixed wording and a count only.
+
+    `ledgerReset` (a prose string when the ledger was unreadable and started empty) and
+    `ledgerEvicted` (entries the 5000-entry cap dropped) both mean a spent attempt budget was
+    forgotten, so an exhausted record could be scored again. Reading only the verdicts lost both
+    (issue 182). The gate's reset text is not echoed: the fact is what matters, and a value this
+    client cannot interpret is ignored rather than trusted or crashed on.
+    """
+    lines = []
+    reset = report.get("ledgerReset")
+    if reset is True or (isinstance(reset, str) and reset.strip()):
+        lines.append("decisions: attempt ledger was unreadable and restarted empty; every record's "
+                     "attempt budget restarts")
+    evicted = report.get("ledgerEvicted")
+    if isinstance(evicted, int) and not isinstance(evicted, bool) and evicted > 0:
+        noun = "entry" if evicted == 1 else "entries"
+        lines.append(f"decisions: attempt ledger evicted {evicted} {noun} past its cap; those "
+                     "records' attempt budgets restart")
+    return lines
+
+
 def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str, list[tuple[dict, dict]]]:
     """Score each candidate's role value through the capture skill's decision gate.
 
@@ -1062,8 +1238,7 @@ def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str, list[tuple[
     if proc.returncode != 0:
         detail = proc.stderr.strip() or "no detail"
         if '"redactor-unavailable"' in detail:
-            print("REFUSED: the decision gate's redactor could not run, so record content would "
-                  "have been sent unscrubbed. Nothing was written.", file=sys.stderr)
+            print(_GATE_REDACTOR_REFUSAL, file=sys.stderr)
             return candidates, DECISIONS_REFUSED, []
         if '"bad-decisions-config"' in detail or '"bad-decisions-url"' in detail:
             print(f"REFUSED: the decision gate is misconfigured ({detail}). Nothing was written.",
@@ -1090,12 +1265,21 @@ def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str, list[tuple[
               "and the export continued.", file=sys.stderr)
         return candidates, "decisions: skipped (unrecognised report)", []
 
+    for line in _ledger_disclosures(report):
+        print(line, file=sys.stderr)
+
     if report.get("outcome") == "disabled":
         return candidates, "decisions: disabled", []
 
-    below = os.environ.get("CONTEXT_MEMORY_DECISIONS_BELOW_THRESHOLD", "hold").strip().lower()
+    # The gate's own report is the authority on hold-vs-mark, never this process's environment: the
+    # gate resolves the setting from the machine credential file as well, so an operator who set `mark`
+    # there saw the gate run under `mark` while this client defaulted to `hold` and silently dropped
+    # every below-threshold record (issue 179). A value this client cannot read is not guessed at.
+    below = report.get("belowThreshold")
     if below not in ("hold", "mark"):
-        below = "hold"
+        print(f"NOTE: the decision gate reported no usable belowThreshold ({below!r}); the gate was "
+              "skipped and the export continued.", file=sys.stderr)
+        return candidates, "decisions: skipped (unrecognised belowThreshold)", []
 
     # **Every candidate survives unless a score says otherwise.** The list is built by walking the
     # gate's verdicts and marking indices, rather than by appending the candidates the verdicts
@@ -1257,7 +1441,11 @@ def initiative_exists(name: str) -> tuple[bool, str]:
     elif isinstance(document, dict):
         items = next((document[key] for key in ("items", "initiatives")
                       if isinstance(document.get(key), list)), None)
-    for item in items or []:
+    if not isinstance(items, list):
+        # An answer with no collection in it is unreadable, not empty: reading it as "missing" turned
+        # a malformed reply into a write remedy against a store that may hold the initiative (issue 186).
+        return None, "unreadable initiatives response"
+    for item in items:
         if isinstance(item, dict) and item.get("name") == name:
             return True, "ok"
     return False, "missing"
@@ -1334,6 +1522,19 @@ def _intra_batch_collision_subject(preflight_output: str) -> str | None:
     return None
 
 
+def _merged_tags(binding_tags: list[str], candidate_tags) -> list[str]:
+    """The binding's tags, then the candidate's own (the gate's `audience:*` tags under `mark`).
+
+    Writing the binding alone dropped the audience tags the gate had just attached, so a marked record
+    reached the store indistinguishable from one the gate never judged (issue 179).
+    """
+    tags = list(binding_tags)
+    for tag in candidate_tags if isinstance(candidate_tags, list) else []:
+        if isinstance(tag, str) and tag.strip() and tag not in tags:
+            tags.append(tag)
+    return tags
+
+
 def set_items(candidates: list[dict], binding: dict, now: dt.datetime) -> list[dict]:
     """Project candidates onto the write payload's item shape.
 
@@ -1355,7 +1556,7 @@ def set_items(candidates: list[dict], binding: dict, now: dt.datetime) -> list[d
             "contentSummary": candidate.get("contentSummary") or "",
             "kind": KIND_UNDERSTANDING,
             "facets": ["understanding"],
-            "tags": split_list(binding.get("tags")),
+            "tags": _merged_tags(split_list(binding.get("tags")), candidate.get("tags")),
             "status": candidate.get("status") or "approved",
             "confidence": confidence_value(candidate.get("confidence")),
             "content": candidate["statement"],
@@ -1377,6 +1578,8 @@ def _review_queue_path() -> str:
     """
     return os.path.expanduser(
         os.environ.get("CONTEXT_MEMORY_REVIEW_QUEUE", "~/.mimisbrunnr/review/queue.jsonl"))
+
+
 
 
 def _queue_held(candidate: dict, held_by: str, conflict_type: str, reason: str,
@@ -1417,6 +1620,59 @@ def _queue_held(candidate: dict, held_by: str, conflict_type: str, reason: str,
               file=sys.stderr)
         return False
     return True
+
+
+
+
+def _scope_key(scope: str) -> tuple[str, str]:
+    dimension, _, identifier = scope.strip().partition(":")
+    return dimension.strip(), identifier.strip()
+
+
+
+
+def reconcile_source_scope(candidates: list[dict], binding: dict) -> bool:
+    """Keep a store-export record's own scope rather than letting the group binding replace it.
+
+    A record carries its scope, but the write lands in a group whose scope comes from `--scope`, so a
+    `program` record re-exported with no flag landed unscoped and one exported under a different flag
+    was silently re-scoped — the programme/product boundary moved without anyone choosing it (issue
+    179). With no bound scope, one source scope shared by every record is adopted and disclosed;
+    mixed source scopes, or scoped records beside unscoped ones, are refused before anything is sent.
+    An explicit --scope is a choice for the whole export and applies to unscoped records too; a bound
+    scope that differs from any record's is refused.
+    """
+    scoped = [c for c in candidates if isinstance(c.get("scope"), str) and c["scope"].strip()]
+    sources = {_scope_key(c["scope"]) for c in scoped}
+    if not sources:
+        return True
+    labels = ", ".join(sorted(f"{d}:{i}" if i else d for d, i in sources))
+    if not binding.get("scope"):
+        # An unscoped record beside a scoped one would take the scoped one's scope: nobody chose that
+        # for it, which is the re-scoping this function exists to refuse (review 5432012955 #1). An
+        # explicit --scope is a choice for the whole export, as it is for unscoped session material.
+        if len(scoped) != len(candidates):
+            print(f"REFUSED: {len(scoped)} of {len(candidates)} source records carry a scope ({labels}) "
+                  "and the rest carry none, so adopting it would re-scope the unscoped ones. Export "
+                  "them separately, or pass --scope to choose one scope for all. Nothing was written.",
+                  file=sys.stderr)
+            return False
+        if len(sources) > 1:
+            print(f"REFUSED: the source records carry more than one scope ({labels}), and one export "
+                  "writes one group with one scope. Export each scope separately with a matching "
+                  "--scope. Nothing was written.", file=sys.stderr)
+            return False
+        dimension, identifier = next(iter(sources))
+        binding["scope"] = f"{dimension}:{identifier}" if identifier else dimension
+        print(f"Scope taken from the source records: {binding['scope']} (pass --scope to state it).")
+        return True
+    if sources != {_scope_key(binding["scope"])}:
+        print(f"REFUSED: the source records are scoped {labels}, but this export binds scope "
+              f"{binding['scope']}; writing would re-scope them. Export each scope separately with a "
+              "matching --scope. Nothing was written.", file=sys.stderr)
+        return False
+    return True
+
 
 
 def _dedup_candidates(candidates: list[dict], group_uuid: str | None, binding: dict,
@@ -1573,11 +1829,17 @@ def cmd_export(args: argparse.Namespace) -> int:
         scan = heimdallr_scan()
         filled = []
         if not binding["tickets"]:
+            disclosure = heimdallr_ticket_disclosure(scan)
+            if disclosure:
+                print(disclosure, file=sys.stderr)
             found = heimdallr_autofill_tickets(scan)
             if found:
                 binding["tickets"] = found
                 filled.append(f"tickets {','.join(found)}")
         if not binding["repository"]:
+            disclosure = heimdallr_repository_disclosure(scan)
+            if disclosure:
+                print(disclosure, file=sys.stderr)
             repo = heimdallr_repository(scan)
             if repo:
                 binding["repository"] = repo
@@ -1605,6 +1867,10 @@ def cmd_export(args: argparse.Namespace) -> int:
     if not candidates:
         print("Nothing to export: no candidate carried a usable claim. Nothing was written.")
         return 1
+
+    if not reconcile_source_scope(candidates, binding):
+        return 1
+
 
     # Gate 2 (redaction) before anything is built or sent, so the digest can report what would be
     # scrubbed. Every free-text field set_items will send is gated — not just the statement — so a
@@ -1653,7 +1919,48 @@ def cmd_export(args: argparse.Namespace) -> int:
     # something other than what was configured, and both messages say "Nothing was written" — so
     # continuing past them wrote records under a refusal the operator had been told had blocked them.
     # Stopping here is before the group is resolved and before any chunk, so nothing exists to undo.
-    clean, decision_note, held_verdicts = gate_decisions(clean)
+    # Fresh-store precondition: `resolve-group` answers 404 for an initiative that does not exist when
+    # it must create the group. Checked before the decision gate, which spends a finite attempt budget
+    # per record: a write this check refuses must not spend it (consumer review 5438563690 #11).
+    initiative = binding["initiative"] or "to-be-decided"
+    exists, why = initiative_exists(initiative)
+    if exists is None:
+        print(f"REFUSED: the initiative read failed ({why}); this is not evidence that "
+              f"'{initiative}' is absent. Nothing was written.", file=sys.stderr)
+        return 1
+    initiative_note = (f"initiative '{initiative}' exists" if exists else
+                      f"initiative '{initiative}' is absent — would create: "
+                      f"context_memory_client.py upsert-initiative "
+                      f"<<<'name': '{initiative}', 'status': 'active'>>>")
+    create_hint = (f"Create it first, then re-run:\n"
+                   f"  echo '{{\"name\": \"{initiative}\", \"status\": \"active\"}}' | "
+                   f"python3 -B {WRITE_CLIENT} upsert-initiative\n")
+    # Only a group that must be created needs the initiative: `resolve-group` returns an existing
+    # ticket-bound group without looking it up, so an absent initiative refuses a ticketless write (which
+    # always creates) here, and a ticket-bound one only if resolution reports it (consumer review
+    # 5438563690 #12).
+    if args.write and not exists and not binding["tickets"]:
+        print(f"REFUSED: initiative '{initiative}' does not exist, and resolve-group answers 404 for "
+              f"it when it creates a group. {create_hint}Nothing was written.", file=sys.stderr)
+        return 1
+
+
+    # Gate 5 (decision value), only when enabled. Scores are a quality signal, never authority: they
+    # never change status, kind, or approval, and a disabled or absent model skips the gate and says
+    # so rather than blocking the export. A **refusal** is the one outcome that does stop it: the gate
+    # refused because content nobody could inspect would be sent, or because it would judge against
+    # something other than what was configured, and both messages say "Nothing was written" — so
+    # continuing past them wrote records under a refusal the operator had been told had blocked them.
+    # Stopping here is before the group is resolved and before any chunk, so nothing exists to undo.
+    # A dry run probes rather than scores: scoring spends the attempt budget the write needs.
+    if args.write:
+        # The gate's attempt ledger keys a record by its group as well as its subject; the group is
+        # not resolved yet, so the binding it will be resolved from stands in for it (issue 186).
+        ledger_group = {key: binding.get(key) for key in ("repository", "scope", "initiative", "tickets")}
+        clean, decision_note, held_verdicts = gate_decisions([dict(c, group=ledger_group) for c in clean])
+    else:
+        decision_note = probe_decisions(len(clean))
+        held_verdicts = []
     if decision_note == DECISIONS_REFUSED:
         print("REFUSED: the decision gate refused this export (the reason is above). Nothing was "
               "written; fix the gate or export without it.", file=sys.stderr)
@@ -1670,30 +1977,12 @@ def cmd_export(args: argparse.Namespace) -> int:
                        evidence, binding, src, session_id):
             queued += 1
 
+
     # The cap is the capture skill's. An over-cap batch is auto-split into consecutive ≤ MAX_CANDIDATES
     # chunks, each processed end to end (its own preflight, its own `set --dryrun` veto, its own write),
     # so the capture path never chunks *silently* and a reader sees the boundary.
     chunks = [clean[i:i + MAX_CANDIDATES] for i in range(0, len(clean), MAX_CANDIDATES)]
     total_chunks = len(chunks)
-
-    # Fresh-store precondition: `resolve-group` answers 404 for an initiative that does not exist.
-    initiative = binding["initiative"] or "to-be-decided"
-    exists, why = initiative_exists(initiative)
-    if exists is None:
-        print(f"REFUSED: the initiative read failed ({why}); this is not evidence that "
-              f"'{initiative}' is absent. Nothing was written.", file=sys.stderr)
-        return 1
-    initiative_note = (f"initiative '{initiative}' exists" if exists else
-                      f"initiative '{initiative}' is absent — would create: "
-                      f"context_memory_client.py upsert-initiative "
-                      f"<<<'name': '{initiative}', 'status': 'active'>>>")
-    if args.write and not exists:
-        print(f"REFUSED: initiative '{initiative}' does not exist, and resolve-group answers 404 for "
-              f"it. Create it first, then re-run:\n"
-              f"  echo '{{\"name\": \"{initiative}\", \"status\": \"active\"}}' | "
-              f"python3 -B {WRITE_CLIENT} upsert-initiative\n"
-              f"Nothing was written.", file=sys.stderr)
-        return 1
 
     print(f"Candidates: {len(clean)} to capture; {len(held)} held back by the atomicity gate.")
     if held:
@@ -1874,6 +2163,281 @@ def cmd_export(args: argparse.Namespace) -> int:
           "a `decision`/`rule`/`nfr` captured through this path is an understanding of one, not "
           "approved canon.")
     return 0
+    # A held candidate is persisted to the review queue, so it can be reviewed later rather than
+    # vanishing with the session (the defect part A fixes). Queueing is never a blocker — the candidate
+    # is already held, not written — but a candidate that did not land in the queue is reported.
+    session_id = os.environ.get("MIMIS_SESSION", "")
+    queued = 0
+    for candidate in held:
+        signals = candidate.get("atomicity", {}).get("signals") or []
+        if _queue_held(candidate, "atomicity", "held-atomic",
+                       f"bundled ({', '.join(signals) or '?'})",
+                       {"signals": signals}, binding, src, session_id):
+            queued += 1
+
+    # Gate 5 (decision value), only when enabled. Scores are a quality signal, never authority: they
+    # never change status, kind, or approval, and a disabled or absent model skips the gate and says
+    # so rather than blocking the export. A **refusal** is the one outcome that does stop it: the gate
+    # refused because content nobody could inspect would be sent, or because it would judge against
+    # something other than what was configured, and both messages say "Nothing was written" — so
+    # continuing past them wrote records under a refusal the operator had been told had blocked them.
+    # Stopping here is before the group is resolved and before any chunk, so nothing exists to undo.
+    clean, decision_note, held_verdicts = gate_decisions(clean)
+    if decision_note == DECISIONS_REFUSED:
+        print("REFUSED: the decision gate refused this export (the reason is above). Nothing was "
+              "written; fix the gate or export without it.", file=sys.stderr)
+        return 1
+
+    # The gate's below-threshold holds, under `hold`, are held candidates too and go to the same queue.
+    for candidate, result in held_verdicts:
+        evidence = {
+            "scores": result.get("scores") if isinstance(result, dict) else {},
+            "passingRoles": result.get("passingRoles") if isinstance(result, dict) else [],
+            "discrimination": result.get("discrimination") if isinstance(result, dict) else {},
+        }
+        if _queue_held(candidate, "decisions", "below-value", "below the decision-gate threshold",
+                       evidence, binding, src, session_id):
+            queued += 1
+
+    # The cap is the capture skill's. An over-cap batch is auto-split into consecutive ≤ MAX_CANDIDATES
+    # chunks, each processed end to end (its own preflight, its own `set --dryrun` veto, its own write),
+    # so the capture path never chunks *silently* and a reader sees the boundary.
+    chunks = [clean[i:i + MAX_CANDIDATES] for i in range(0, len(clean), MAX_CANDIDATES)]
+    total_chunks = len(chunks)
+
+    # Fresh-store precondition: `resolve-group` answers 404 for an initiative that does not exist.
+    # Fresh-store precondition: `resolve-group` answers 404 for an initiative that does not exist when
+    # it must create the group. Checked before the decision gate, which spends a finite attempt budget
+    # per record: a write this check refuses must not spend it (consumer review 5438563690 #11).
+    initiative = binding["initiative"] or "to-be-decided"
+    exists, why = initiative_exists(initiative)
+    if exists is None:
+        print(f"REFUSED: the initiative read failed ({why}); this is not evidence that "
+              f"'{initiative}' is absent. Nothing was written.", file=sys.stderr)
+        return 1
+    initiative_note = (f"initiative '{initiative}' exists" if exists else
+                      f"initiative '{initiative}' is absent — would create: "
+                      f"context_memory_client.py upsert-initiative "
+                      f"<<<'name': '{initiative}', 'status': 'active'>>>")
+    create_hint = (f"Create it first, then re-run:\n"
+                   f"  echo '{{\"name\": \"{initiative}\", \"status\": \"active\"}}' | "
+                   f"python3 -B {WRITE_CLIENT} upsert-initiative\n")
+    # Only a group that must be created needs the initiative: `resolve-group` returns an existing
+    # ticket-bound group without looking it up, so an absent initiative refuses a ticketless write (which
+    # always creates) here, and a ticket-bound one only if resolution reports it (consumer review
+    # 5438563690 #12).
+    if args.write and not exists and not binding["tickets"]:
+        print(f"REFUSED: initiative '{initiative}' does not exist, and resolve-group answers 404 for "
+              f"it when it creates a group. {create_hint}Nothing was written.", file=sys.stderr)
+        return 1
+
+    # Gate 5 (decision value), only when enabled. Scores are a quality signal, never authority: they
+    # never change status, kind, or approval, and a disabled or absent model skips the gate and says
+    # so rather than blocking the export. A **refusal** is the one outcome that does stop it: the gate
+    # refused because content nobody could inspect would be sent, or because it would judge against
+    # something other than what was configured, and both messages say "Nothing was written" — so
+    # continuing past them wrote records under a refusal the operator had been told had blocked them.
+    # Stopping here is before the group is resolved and before any chunk, so nothing exists to undo.
+    # A dry run probes rather than scores: scoring spends the attempt budget the write needs.
+    if args.write:
+        # The gate's attempt ledger keys a record by its group as well as its subject; the group is
+        # not resolved yet, so the binding it will be resolved from stands in for it (issue 186).
+        ledger_group = {key: binding.get(key) for key in ("repository", "scope", "initiative", "tickets")}
+        clean, decision_note = gate_decisions([dict(c, group=ledger_group) for c in clean])
+    else:
+        decision_note = probe_decisions(len(clean))
+    if decision_note == DECISIONS_REFUSED:
+        print("REFUSED: the decision gate refused this export (the reason is above). Nothing was "
+              "written; fix the gate or export without it.", file=sys.stderr)
+        return 1
+
+    # The cap is the capture skill's. An over-cap batch is auto-split into consecutive ≤ MAX_CANDIDATES
+    # chunks, each processed end to end (its own preflight, its own `set --dryrun` veto, its own write),
+    # so the capture path never chunks *silently* and a reader sees the boundary.
+    chunks = [clean[i:i + MAX_CANDIDATES] for i in range(0, len(clean), MAX_CANDIDATES)]
+    total_chunks = len(chunks)
+
+    print(f"Candidates: {len(clean)} to capture; {len(held)} held back by the atomicity gate.")
+    if held:
+        for candidate in held:
+            print(f"  HELD BACK (bundled: {', '.join(candidate['atomicity'].get('signals') or ['?'])}): "
+                  f"{candidate['statement'][:90]}")
+    if queued:
+        print(f"  {queued} held -> review queue {_review_queue_path()}")
+    if held or held_verdicts:
+        print("  A held candidate is never written past the flag. Review the queue, or split/drop it.")
+    if held_verdicts:
+        print(f"  {len(held_verdicts)} also held by the decision gate (below threshold) -> "
+              f"{_review_queue_path()}")
+    if total_chunks > 1:
+        print(f"Split into {total_chunks} batch(es) of at most {MAX_CANDIDATES} candidates: "
+              + ", ".join(str(len(c)) for c in chunks) + ".")
+    if redaction:
+        print("Redaction (detected before send): "
+              + ", ".join(f"{name} x{count}" for name, count in sorted(redaction.items())))
+    print(decision_note)
+    if not any(binding.values()):
+        print("NOTE: no selectors supplied, so no association is made "
+              "(--tickets/--tags/--repository/--scope/--initiative).")
+    if not clean:
+        # Every candidate was held back by the atomicity gate: there is no writable batch. Stopping
+        # here also means a `--write` does not create a group for nothing.
+        print("Nothing to capture: every candidate was held back by the atomicity gate. "
+              "Nothing was written.", file=sys.stderr)
+        return 1
+
+    group, group_state = resolve_group(binding, args.name, args.body, dryrun=not args.write)
+    if args.write:
+        if group is None:
+            hint = (f" Initiative '{initiative}' does not exist; a new group needs it. {create_hint}"
+                    if not exists else " ")
+            print(f"REFUSED: resolve-group failed: {group_state}.{hint}Nothing was written.",
+                  file=sys.stderr)
+            return 1
+        group_uuid = group.get("groupUuid") or group.get("uuid") or group.get("Uuid")
+        print(f"Group: {group_uuid}"
+              f"{' (created)' if group.get('created') or group.get('Created') else ' (existing)'}")
+    else:
+        group_uuid = None
+        print(f"Group: would {'resolve or create' if binding['tickets'] else 'create'} for "
+              f"{json.dumps(_group_body(binding, args.name, args.body))}")
+        print(f"Initiative: {initiative_note}")
+
+    total_candidates = 0
+    matched = 0
+    for batch_no, chunk in enumerate(chunks, start=1):
+        multi = total_chunks > 1
+        tag = f" [batch {batch_no}/{total_chunks}]" if multi else ""
+        # Each chunk's preflight runs after the previous chunk's write (for a `--write`), so a
+        # duplicate subject split across chunks is surfaced by the later chunk's preflight and becomes
+        # a version bump; the capture path has no cross-batch transaction, hence the sequential order.
+        rc, out, err = _run_capture_client(
+            WRITE_CLIENT, ["preflight"],
+            {"candidates": [{"description": _subject(c), "kind": KIND_UNDERSTANDING,
+                             "facets": ["understanding"], "groupUuid": group_uuid} for c in chunk]})
+        if rc == 0:
+            preflight = out.strip()
+            version_map = build_version_map(preflight, group_uuid)
+            matched += preflight_match_count(preflight)
+            shown = (preflight if len(preflight) <= 1200
+                     else preflight[:1200] + f"\n  … {len(preflight) - 1200} more character(s) not shown")
+            print((f"Batch {batch_no}/{total_chunks} " if multi else "") + f"Preflight: {shown}")
+        else:
+            # A preflight failure leaves no version map, so a duplicate subject would degrade to a
+            # create. That is fail-safe: the `set --dryrun` veto still catches a subject already in the
+            # group before any write, so a transient preflight-side error must not abort a capture that
+            # needs no version resolution (and one that does refuses at the veto, not silently).
+            print(f"Preflight: unavailable ({err.strip()[:200] or f'exit {rc}'})")
+            version_map = {}
+        # Each chunk preflights its own request, so the preflight indices are request-relative within
+        # this chunk; map by the candidate's position in the chunk, never a global clean-list index.
+        for local_index, candidate in enumerate(chunk):
+            candidate["_versionUuid"] = version_map.get(local_index)
+            # A preflight match is the exact (stage 1) duplicate; stage 2/3 concern only the rest.
+            candidate["_exactMatch"] = bool(version_map.get(local_index))
+        # Stage 2/3 of dedup runs on the candidates the exact preflight did not match. Opt-in (see
+        # `_dedup_candidates`); a proposal is a human decision under the `duplicate` menu, never an
+        # automatic merge, version or skip.
+        dedup_queued, dedup_shown = _dedup_candidates(
+            chunk, group_uuid, binding, src, session_id)
+        if dedup_shown:
+            print(f"Staged dedup: {dedup_shown} duplicate proposal(s), {dedup_queued} queued -> "
+                  f"{_review_queue_path()}")
+        # Two candidates in one chunk sharing a subject is ambiguous input: the capture path refuses two
+        # same-subject creates in one batch, and sending both as version targets would double-version the
+        # same memory. The preflight's intra-batch collision list is the authoritative detector (it uses
+        # the server's slug normalisation, so a case/punctuation-equivalent pair is caught); fall back to
+        # an exact-string check when the preflight did not run.
+        collision_subject = _intra_batch_collision_subject(preflight) if rc == 0 else None
+        if collision_subject is None:
+            subjects = [_subject(c) for c in chunk]
+            if len(set(subjects)) != len(subjects):
+                collision_subject = next(s for s in subjects if subjects.count(s) > 1)
+        if collision_subject:
+            early = ("Earlier batch(es) were already written and remain; " if args.write and batch_no > 1 else "")
+            print(f"REFUSED: two candidates in batch {batch_no} share a subject ('{collision_subject}'); "
+                  f"merge them before exporting. {early}Nothing from this batch was written.",
+                  file=sys.stderr)
+            return 1
+        # Each chunk gets its own capture timestamp so a slow multi-batch write does not stamp every
+        # later batch's memories with the export-start time.
+        now = dt.datetime.now(dt.timezone.utc)
+        items = set_items(chunk, binding, now)
+        if multi:
+            line = f"Batch {batch_no}/{total_chunks}: {len(chunk)} candidate(s)"
+            if args.write:
+                # The version/new split is accurate only when the group is resolved; in a dry run the
+                # group is not, so the receipt discloses the match count instead.
+                count = (sum(1 for i in items if i["uuid"]), sum(1 for i in items if not i["uuid"]))
+                line += f" ({count[0]} version(s), {count[1]} new)"
+            print(line)
+        total_candidates += len(chunk)
+
+        if not args.write:
+            continue
+
+        rc, out, err = _run_capture_client(
+            WRITE_CLIENT, ["set", "--dryrun"], {"groupUuid": group_uuid, "items": items,
+                                                "links": [], "labelsProposed": []})
+        if rc != 0:
+            early = ("Earlier batch(es) were already written and remain; " if batch_no > 1 else "")
+            veto_text = f"{err.strip() or out.strip()}"
+            # A subject-exists veto with no preflight match is the cross-kind 409: the write's
+            # subject-uniqueness check is subject-only, so a same-subject memory of a different kind
+            # refuses even though the kind+facets preflight found nothing. Present the menu instead of
+            # failing without a path.
+            cross_kind = _handle_cross_kind_409(items, chunk, group_uuid, binding, src,
+                                                session_id, veto_text)
+            print(f"REFUSED at the dry-run veto: {veto_text}. {early}No memory from "
+                  f"this batch was written; the group {group_uuid} was already resolved or created and "
+                  f"remains.", file=sys.stderr)
+            if cross_kind:
+                print(f"  The cross-kind candidate(s) above are queued for review -> "
+                      f"{_review_queue_path()}", file=sys.stderr)
+            return 1
+        print(f"\nset --dryrun (the veto point){tag}:\n{out.strip()[:1200]}")
+
+        rc, out, err = _run_capture_client(
+            WRITE_CLIENT, ["set"], {"groupUuid": group_uuid, "items": items,
+                                    "links": [], "labelsProposed": []})
+        if rc != 0:
+            print(f"WRITE FAILED{tag}: {err.strip() or out.strip()}", file=sys.stderr)
+            return 1
+        print(f"\nWROTE{tag}:\n{out.strip()[:1200]}")
+
+    if not args.write:
+        # `set --dryrun` is the veto point, and it needs a resolved `groupUuid` — which a dry run
+        # cannot have, because resolving a group is itself the write that must not happen. So the
+        # offline half of the pipeline runs here (both gates, the cap, the candidate list) and the
+        # server-side half runs at the head of `--write`, before anything is persisted. Saying so is
+        # better than sending a request that can only fail on a null group.
+        print(f"\nDRY RUN — nothing was written, and nothing was created.\n"
+              f"  would write: memory ({total_candidates})"
+              + (f", group ({group_state})" if group_state == "dry-run" else "")
+              + f"\n  would not create: anything under an existing group, because no group was "
+                f"resolved\nThe server-side `set --dryrun` veto runs at the start of `--write`, once "
+              f"a group exists. Re-run with `--write` to capture.")
+        if matched:
+            print(f"  {matched} candidate(s) matched an existing same-subject memory; a `--write` would "
+                  f"version those whose match is in the export's group (a match in another group stays "
+                  f"a separate new memory).")
+        if total_chunks > 1:
+            print("  Note: a multi-batch `--write` is not atomic across batches; a later batch could "
+                  "be refused at its veto after an earlier batch was already written.")
+        print("Decisions and rules captured this way are written as `kind = understanding`, which does "
+              "NOT pass the gated-kind approval: a `decision`/`rule`/`nfr` captured through this path "
+              "is an understanding of one, not approved canon.")
+        return 0
+
+    if total_chunks > 1:
+        print("\nNon-atomic multi-batch write: each batch was written independently, so a failure in a "
+              "later batch leaves earlier batch(es) committed.")
+    print("This is a receipt: the memories are persisted now, so a post-write digest is not an "
+          "opportunity to approve. Pre-write review is `--export` without `--write`.")
+    print("Records written as `kind = understanding`, which does NOT pass the gated-kind approval: "
+          "a `decision`/`rule`/`nfr` captured through this path is an understanding of one, not "
+          "approved canon.")
+    return 0
 
 
 def export_candidates(records: list[dict] | None, body: str) -> tuple[list[dict], list[str]]:
@@ -1902,7 +2466,7 @@ def export_candidates(records: list[dict] | None, body: str) -> tuple[list[dict]
                                "sources": parts["sources"],
                                "originUuid": parts["uuid"] or None,
                                "originVersion": parts["version"],
-                               "confidence": parts["confidence"] or None,
+                               "confidence": None if parts["confidence"] == "" else parts["confidence"],
                                "portability": parts["portability"] or None})
         if skipped_kind:
             skips.append(f"Skipped {skipped_kind} record(s) that were not understanding-kind; export "
@@ -2014,6 +2578,12 @@ def refuse_unsafe_target(folder: Path) -> str | None:
         return f"refusing to dump to a path that is not a directory ({resolved})"
     if (resolved / ".git").exists():
         return f"refusing to dump into a repository root ({resolved})"
+    # A dump replaces only a folder it made. Without the marker, a `_session.md` or `_dump.json`
+    # already there is somebody else's file, and the dump overwrote it (review #10).
+    if not (resolved / DUMP_MARKER).exists() and any(
+            (resolved / name).exists() for name in (SESSION_FILE, METADATA_FILE)):
+        return (f"refusing to overwrite {SESSION_FILE} or {METADATA_FILE} in a folder this client did "
+                f"not create ({resolved}); choose another --out")
     return None
 
 
@@ -2032,7 +2602,8 @@ SESSION_TEMPLATE = """## Understandings
 
 _(One entry per Understanding, each with: question, answer, why, boundaries, provenance. State
 behaviour, contracts and invariants, not file paths or line numbers, which rot. Never a credential
-value; the dump redacts what it recognises, but that is the second net, not the first.)_
+value and no personal data (names, emails, user IDs); the dump redacts what it recognises, but that is
+the second net, not the first.)_
 
 ## Decisions
 
@@ -2164,11 +2735,80 @@ def redact(content: str) -> tuple[str, dict[str, int]] | None:
                           capture_output=True, text=True, encoding="utf-8")
     if proc.returncode != 0:
         return None
-    try:
-        result = json.loads(proc.stdout)["results"][0]
-        return result["redacted"], {f["rule_name"]: f["hit_count"] for f in result["findings"]}
-    except (ValueError, KeyError, IndexError, TypeError):
+    results = _indexed_results(proc.stdout, 1)
+    if results is None or not isinstance(results[0].get("redacted"), str):
         return None
+    try:
+        return results[0]["redacted"], {f["rule_name"]: f["hit_count"] for f in results[0]["findings"]}
+    except (KeyError, TypeError):
+        return None
+
+
+# Personal-data rules for the dump: (name, pattern, placeholder). Fixed shapes only, like the secret
+# rules. An email address and a UPN (`user@corp.example`) are one shape, so one rule covers both. The
+# lookbehind starts a match only at the beginning of a local part, which keeps the search linear on a
+# long run of local-part characters with no `@`. Human names have no reliable shape and are not
+# attempted: keeping them out of the dump is the author's job, stated in SKILL.md.
+PERSONAL_DATA_RULES = [
+    (
+        "email-address",
+        re.compile(r"(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*"
+                   r"\.[A-Za-z]{2,}(?![A-Za-z0-9-])"),
+        "<redacted-email>",
+    ),
+]
+
+
+def _scrubbed(value: str) -> str | None:
+    """`value` after both steps — the secret redactor, then the personal-data rules — or None when the
+    redactor cannot run. One function for every string a dump persists, so no field reaches disk on a
+    path that skipped a step (issue 190)."""
+    result = redact(value)
+    if result is None:
+        return None
+    return redact_personal_data(result[0])[0]
+
+
+def scrub_binding(binding: dict) -> tuple[dict, list[str]] | None:
+    """The binding with every value that the scrub would change withheld, and the withheld field names.
+
+    The binding is written to `_dump.json` beside the scrubbed `_session.md`, but its values — ticket
+    keys, tags, the repository, scope and initiative — went to disk as supplied (issue 190). A value
+    the scrub changes is not rewritten into a placeholder (a scrubbed ticket key binds nothing) but
+    withheld, and only its field is reported, never the value. None when the redactor cannot run.
+    """
+    clean: dict = {}
+    withheld: list[str] = []
+    for field, value in binding.items():
+        values = value if isinstance(value, list) else [value]
+        kept = []
+        for item in values:
+            if not isinstance(item, str) or not item:
+                kept.append(item)
+                continue
+            scrubbed = _scrubbed(item)
+            if scrubbed is None:
+                return None
+            if scrubbed == item:
+                kept.append(item)
+            elif field not in withheld:
+                withheld.append(field)
+        clean[field] = kept if isinstance(value, list) else (kept[0] if kept else None)
+    return clean, withheld
+
+
+def redact_personal_data(content: str) -> tuple[str, dict[str, int]]:
+    """Replace recognisable personal data; return the text and `{rule_name: hit_count}`.
+
+    In-process and cannot fail, so unlike the secret redactor it has no refusal path. The matched
+    values are never returned — the caller reports rule names and counts only.
+    """
+    findings: dict[str, int] = {}
+    for name, pattern, placeholder in PERSONAL_DATA_RULES:
+        content, count = pattern.subn(placeholder, content)
+        if count:
+            findings[name] = findings.get(name, 0) + count
+    return content, findings
 
 
 def git_ignored(path: Path) -> bool:
@@ -2211,16 +2851,74 @@ def cmd_dump(args: argparse.Namespace) -> int:
         return 1
     findings: dict[str, int] = {}
     if content.strip():
-        # A dump exists to be carried to another session or repository, so a secret must be gone
-        # before the file exists, not caught later on the way out (fail closed).
+        # A dump exists to be carried to another session or repository, so a secret or a recognisable
+        # piece of personal data must be gone before the file exists, not caught later on the way out
+        # (fail closed).
         scrubbed = redact(content)
         if scrubbed is None:
             print(f"REFUSED: the redactor ({REDACTOR}) could not run, so the dump cannot be "
                   "scrubbed. Nothing was written.", file=sys.stderr)
             return 1
         content, findings = scrubbed
-    folder_name = derive_folder_name(content, args.session_name)
+        # Secrets first, so a credential that happens to contain an `@` is reported under its own rule.
+        content, personal = redact_personal_data(content)
+        findings.update(personal)
+    session_name = args.session_name
+    if session_name:
+        # The name becomes a folder on disk, so it passes both steps like the content; a name the scrub
+        # would change is not used, and the folder is named from the scrubbed content instead.
+        scrubbed_name = _scrubbed(session_name)
+        if scrubbed_name is None:
+            print(f"REFUSED: the redactor ({REDACTOR}) could not run, so the session name cannot be "
+                  "checked. Nothing was written.", file=sys.stderr)
+            return 1
+        if scrubbed_name != session_name:
+            print("NOTE: --session-name carried a secret or personal data; it was not used as the "
+                  "folder name (value not shown).", file=sys.stderr)
+            session_name = None
+    folder_name = derive_folder_name(content, session_name)
 
+    # The binding travels as structure, so an export of this folder binds by default instead of
+    # re-deriving it from prose. A dump with no binding says so explicitly rather than writing an
+    # empty object that reads as "bound to nothing on purpose".
+    binding = dump_binding(args)
+    if heimdallr_enabled(args) and (not binding["tickets"] or not binding["repository"]
+                                    or not binding["initiative"]):
+        scan = heimdallr_scan()
+        filled = []
+        if not binding["tickets"]:
+            disclosure = heimdallr_ticket_disclosure(scan)
+            if disclosure:
+                print(disclosure, file=sys.stderr)
+            found = heimdallr_autofill_tickets(scan)
+            if found:
+                binding["tickets"] = found
+                filled.append(f"tickets {','.join(found)}")
+        if not binding["repository"]:
+            disclosure = heimdallr_repository_disclosure(scan)
+            if disclosure:
+                print(disclosure, file=sys.stderr)
+            repo = heimdallr_repository(scan)
+            if repo:
+                binding["repository"] = repo
+                filled.append(f"repository {repo}")
+        if not binding["initiative"]:
+            initiative = heimdallr_initiative(scan)
+            if initiative:
+                binding["initiative"] = initiative
+                filled.append(f"initiative {initiative}")
+        if filled:
+            print(f"Heimdallr autofill ({', '.join(filled)}); an explicit flag always wins. "
+                  f"Pass --heimdallr false to disable.")
+    scrubbed_binding = scrub_binding(binding)
+    if scrubbed_binding is None:
+        print(f"REFUSED: the redactor ({REDACTOR}) could not run, so the binding cannot be scrubbed "
+              "before it is written. Nothing was written.", file=sys.stderr)
+        return 1
+    binding, withheld = scrubbed_binding
+    for field in withheld:
+        print(f"NOTE: a {field} value carried a secret or personal data and was withheld from "
+              f"{METADATA_FILE} (value not shown).", file=sys.stderr)
     if args.out:
         folder = Path(args.out)
     else:
@@ -2257,32 +2955,6 @@ def cmd_dump(args: argparse.Namespace) -> int:
     ]
     (folder / SESSION_FILE).write_text("\n".join(body), encoding="utf-8")
 
-    # The binding travels as structure, so an export of this folder binds by default instead of
-    # re-deriving it from prose. A dump with no binding says so explicitly rather than writing an
-    # empty object that reads as "bound to nothing on purpose".
-    binding = dump_binding(args)
-    if heimdallr_enabled(args) and (not binding["tickets"] or not binding["repository"]
-                                    or not binding["initiative"]):
-        scan = heimdallr_scan()
-        filled = []
-        if not binding["tickets"]:
-            found = heimdallr_autofill_tickets(scan)
-            if found:
-                binding["tickets"] = found
-                filled.append(f"tickets {','.join(found)}")
-        if not binding["repository"]:
-            repo = heimdallr_repository(scan)
-            if repo:
-                binding["repository"] = repo
-                filled.append(f"repository {repo}")
-        if not binding["initiative"]:
-            initiative = heimdallr_initiative(scan)
-            if initiative:
-                binding["initiative"] = initiative
-                filled.append(f"initiative {initiative}")
-        if filled:
-            print(f"Heimdallr autofill ({', '.join(filled)}); an explicit flag always wins. "
-                  f"Pass --heimdallr false to disable.")
     metadata = {
         "generated": generated,
         "folder": folder.name,
@@ -2408,6 +3080,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     dump.add_argument("--heimdallr", choices=_HEIMDALLR_CHOICES, default="true",
                       help="Autofill missing --tickets/--repository/--initiative from the offline "
                            "Heimdallr git scan (default true; explicit flags always win).")
+
+    # Documented in SKILL.md as accepted for forward compatibility, but no parser took it, so the
+    # documented spelling failed with "unrecognized arguments" (review #11). A no-op until an
+    # interactive question exists.
+    for command in (load, imp, exp, dump):
+        command.add_argument("--dontask", action="store_true",
+                             help="Skip interactive questions and take the recommended option "
+                                  "(none exist yet; accepted for forward compatibility).")
 
     return parser.parse_args(argv)
 

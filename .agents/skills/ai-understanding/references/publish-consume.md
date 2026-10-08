@@ -13,7 +13,7 @@ durability boundary is the archive a human keeps.
 | Tier | Path | Tracked | Lifetime | Purpose |
 |------|------|---------|----------|---------|
 | Working memory | `.context/understandings/<subject>-<yyyyMMdd-HHmm>/<slug>.understanding.md` | No | This workspace | Where export lands — one stamped folder per export run; a slug repeated across folders is a version chain, newest current |
-| Published archive | `.context/understandings-publish/understandings-<YYYYMMDD-HHMMSS>.zip` by default, or `--path` when given | No | Whoever keeps the file | A snapshot of the store, mailed, dropped in a channel, or copied to a stick |
+| Published archive | `.context/understandings-publish/understandings-<YYYYMMDD-HHMMSS>.zip` by default, or `--path` when given | No | Whoever keeps the file | A snapshot of the store's **current** units, mailed, dropped in a channel, or copied to a stick — superseded copies stay in the working store |
 
 Nothing is published implicitly — it takes the `--publish` invocation. No approval prompt gates the
 write itself: the invocation, and an explicit `--path` if given, is the consent, and the report after
@@ -38,7 +38,7 @@ acting on it.
 
 ## Publish
 
-1. Read the working store's index; select every unit, or only `portable` units with `--portable-only`.
+1. Read the working store's index; select every unit, or only `portable` units with `--portable-only`. The index lists the **current** version of each slug, so only current versions are archived: superseded copies are workspace-local history and are never published (issue 182). A consumer receives the newest knowledge, not its revision chain, and the durability guard warns about unpublished current units only — a warning `--publish` could never clear would only teach the operator to ignore it.
 2. No approval needed — the default archive path, or an explicit `--path`, is the consent. Step 7 reports the slug list and the path after writing.
 3. Archive each `<subject>-<yyyyMMdd-HHmm>/<slug>.understanding.md`, plus its `<slug>.assets/` when it has one. Filter per Understanding, never per subject — one subject routinely mixes scopes. Subject folders keep their stamp verbatim: publishing never re-stamps, because the stamp records when the knowledge was learned and the archive name already records when it was sent.
 4. When `--portable-only` excludes a unit that an archived unit's `links` or `provenance.inherited` names, drop the brackets around that `[[slug]]` in the archived copy and keep the entry — the same convention the store uses for a pruned ancestor. Without `--portable-only` every unit is present and the case cannot arise.
@@ -69,67 +69,51 @@ arrived — mail, chat, a shared drive — is out of band. **This skill does not
 is the consent, and the reconciliation table below is reported per slug after writing.
 
 A zip is untrusted input. Refuse any entry whose resolved path escapes the target store (`..` segments,
-absolute paths, symlinks), and reject the whole archive with a clear message rather than unpacking part
-of it. **List the archive before extracting any of it** — `unzip -l <zip>` — and check every entry
-against that rule there; no enforcing script exists yet (LADR-008 is specification only), so the listing
-is the only gate, and extracting first to inspect afterwards has already lost.
-
-**Refuse a case-folded collision in that same listing, before extracting.** On a case-insensitive
-filesystem (the default on macOS and Windows) `Foo-20260101-0000/x.understanding.md` and
-`foo-20260101-0000/x.understanding.md` are *one file*: the second extract silently replaces the first, and
-a parity check afterwards cannot see it because by then the destination is the source. This is the same
-class as the path-escape rule and refuses the same way — the whole archive, not the entry.
-
-Compare **every** incoming path against the target store, not just the other incoming paths, because the
-destructive case is an incoming unit landing on a *local* one that differs only by case:
+absolute paths, a drive or backslash, symlinks — including a local symlinked folder the entry would land
+under), and reject the whole archive with a clear message rather than unpacking part of it. **Check the
+archive before extracting any of it**, with the generator's pre-extraction gate:
 
 ```bash
-ARCHIVE=understandings-20261001-120000.zip   # the archive being consumed
-STORE=.context/understandings/               # the target store (default unless --path overrides)
-
-# Fails loudly on any collision, incoming-vs-incoming and incoming-vs-local alike.
-# Both paths are passed as arguments: a heredoc arrives on stdin, so `python3 -` leaves argv empty.
-python3 - "$ARCHIVE" "$STORE" <<'PY'
-import sys, zipfile
-from pathlib import Path
-archive, store = Path(sys.argv[1]), Path(sys.argv[2])
-seen = {}
-for existing in store.rglob("*"):
-    seen.setdefault(str(existing.relative_to(store)).casefold(), existing)
-claimed = {}
-clashes = []
-with zipfile.ZipFile(archive) as zf:
-    for name in zf.namelist():
-        # The generated index is exempt, as it already is from the stray-file check: every archive
-        # carries one and every store holds one, so comparing it would refuse every archive.
-        if Path(name).name == "INDEX.md":
-            continue
-        key = str(Path(name)).casefold()
-        if key in seen:
-            clashes.append((name, f"local '{seen[key]}'"))
-        elif key in claimed:
-            clashes.append((name, f"'{claimed[key]}' elsewhere in this archive"))
-        claimed.setdefault(key, name)
-if clashes:
-    for name, target in clashes:
-        print(f"refusing: '{name}' collides on a case-insensitive filesystem with {target}")
-    sys.exit(1)
-print("no case-folded collisions")
-PY
+python3 .agents/skills/ai-understanding/scripts/understanding_index.py --consume-check <zip> [store-dir]
 ```
 
-Two shapes the wording of the refusal has to carry. A collision against a *local* file names that path;
-a collision between two entries of the **archive** names the other entry, because there is no local
-path to name — `claimed` remembers which entry first claimed each folded key, so the operator is sent to
-the duplicate in the archive they hold rather than to a file that does not exist. The generated
-`INDEX.md` is exempt on both sides: it is regenerated on every write (publish step 6, and the consume
-step's own regeneration afterwards), so a case fold on it cannot lose knowledge.
+`store-dir` is the target store, `.context/understandings/` unless `--path` overrides it. Exit `0` means
+safe to extract; exit `1` prints one `refusing:` line per problem and rejects the whole archive; exit `2`
+means the archive could not be read. Extract nothing on a non-zero exit — extracting first to inspect
+afterwards has already lost. The gate lives in the script rather than in an inline snippet because the
+skill's `allowed-tools` permit only that script, `zip` and `unzip`: a heredoc `python3 -` or a
+`… | grep` pipeline would be refused or prompted, and an agent that skipped the gate would extract
+unchecked (issue 182).
 
-Use `casefold`, not `lower`: it is the full Unicode folding a filesystem compares, so `straße` and
-`strasse` are caught as one file — which `lower` keeps apart. The generator applies the same rule
-mechanically and reports a collision found in the store as a validation error, so run it after unpacking
-too; the listing is the gate that prevents the overwrite, and the generator is what catches a store that
-already holds one.
+What the gate refuses, and why each is there:
+
+- **A symlink entry.** It reads each entry's Unix mode from the archive. `unzip -l` prints names and sizes
+  only, so a symlink entry is indistinguishable from a file there.
+- **A damaged member.** It reads every member's bytes back through decompression and the CRC check.
+  The central directory lists a member whose data is corrupt, so names and modes alone clear an
+  archive that extracts as garbage or part-way (issue 184).
+- **A case-folded collision.** On a case-insensitive filesystem (the default on macOS and Windows)
+  `Foo-20260101-0000/x.understanding.md` and `foo-20260101-0000/x.understanding.md` are *one file*: the
+  second extract silently replaces the first, and a parity check afterwards cannot see it because by then
+  the destination is the source. Every incoming path is compared against the target store, not just the
+  other incoming paths, because the destructive case is an incoming unit landing on a *local* one that
+  differs only by case. Folders are compared too, including the **implicit** parents of a file entry: an
+  archive need not carry a separate entry for `Foo-20260101-0000/`, and two file entries under
+  `Foo-20260101-0000/` and `foo-20260101-0000/` have distinct full paths yet extract into one folder. A
+  folder whose name matches a local folder **exactly** is not a collision — the per-slug reconcile table
+  below decides what happens to the units inside it.
+
+A collision against a *local* file or folder names that path; a collision between two entries of the
+**archive** names the other entry, because there is no local path to name. The generated **root**
+`INDEX.md` is exempt on both sides: it is regenerated on every write (publish step 6, and the consume
+step's own regeneration afterwards), so a case fold on it cannot lose knowledge. A nested `INDEX.md`
+(inside a subject folder, or under a top-level folder an archive was wrapped in) is regenerated by
+nothing, so it is checked like any other file (issue 184).
+
+The comparison uses `casefold`, not `lower`: it is the full Unicode folding a filesystem compares, so
+`straße` and `strasse` are caught as one file — which `lower` keeps apart. The generator applies the same
+rule to the store and reports a collision found there as a validation error, so run it after unpacking
+too; the gate prevents the overwrite, and the index run catches a store that already holds one.
 
 Reconcile per incoming slug. The key is the slug, and an incoming copy **keeps its own stamped folder**:
 under LADR-010 the same slug in two folders is a version chain, not an index failure, so there is nothing

@@ -8,8 +8,11 @@ URL shapes, ticket extraction with sources, initiative flag-or-unknown, and the
 console-only contract (no file created, --json parses). stdlib unittest.
 """
 
+from __future__ import annotations
+
 import json
 import os
+import shutil
 import stat
 import subprocess
 import sys
@@ -19,10 +22,14 @@ from pathlib import Path
 
 SKILL = Path(__file__).resolve().parents[1]
 SCRIPT = SKILL / "scripts" / "find_session_metadata.py"
+# The shared synthetic fixture: the redactor, the decision gate and this reporter read one list.
+CREDENTIAL_LIKE = json.loads(
+    (SKILL.parent / "mimisbrunnr-odin-context-memory" / "tests" / "fixtures" / "credential_like.json")
+    .read_text(encoding="utf-8"))
 
 
-def run_with_git(responses: dict, *argv: str,
-                 cwd: str | None = None) -> subprocess.CompletedProcess:
+def run_with_git(responses: dict, *argv: str, cwd: str | None = None,
+                 script: Path = SCRIPT) -> subprocess.CompletedProcess:
     """Run the script with a fake git answering from `responses` keyed by argv tail."""
     tmp = tempfile.mkdtemp()
     # The script runs in `cwd` when given (so a test can observe files it writes there); the fake git
@@ -44,6 +51,8 @@ def run_with_git(responses: dict, *argv: str,
         "        sys.exit(128)\n"
         "    sys.stdout.write('false\\n' if data.get('_bare') else 'true\\n')\n"
         "    sys.exit(0)\n"
+        "if key in data.get('_exit', {}):\n"
+        "    sys.exit(data['_exit'][key])\n"
         "if key in data:\n"
         "    sys.stdout.write(data[key])\n"
         "    sys.exit(0)\n"
@@ -54,7 +63,7 @@ def run_with_git(responses: dict, *argv: str,
     env = dict(os.environ, PATH=tmp + os.pathsep + os.environ.get("PATH", ""))
     try:
         return subprocess.run(
-            [sys.executable, "-B", str(SCRIPT), *argv],
+            [sys.executable, "-B", str(script), *argv],
             capture_output=True, text=True, encoding="utf-8", env=env, cwd=run_cwd,
         )
     finally:
@@ -160,12 +169,249 @@ class TicketTests(unittest.TestCase):
         self.assertEqual(len(hits), 1)
         self.assertEqual(hits[0]["seenIn"], "branch")
 
+    def test_tickets_within_one_subject_keep_first_seen_order(self):
+        # Pattern order would list #456 (the first pattern) before ABC-123 and jira:XYZ-9, although
+        # the subject names them the other way round.
+        result = self._scan("main", "fix ABC-123 then jira:XYZ-9 and #456\n")
+        self.assertEqual(
+            [(t["provider"], t["key"]) for t in result["tickets"]],
+            [("local", "ABC-123"), ("jira", "XYZ-9"), ("github", "456")],
+        )
+
     def test_initiative_flag_or_unknown(self):
         self.assertEqual(self._scan("main", "")["initiative"], "unknown")
         self.assertEqual(
             self._scan("main", "", "--initiative", "mimisbrunnr")["initiative"],
             "mimisbrunnr",
         )
+
+
+class CredentialShapedTicketTests(unittest.TestCase):
+    """Issue 182: `provider:key` accepts any `word:value`, so a credential in a commit subject was printed
+    as a ticket and kvasir's autofill could bind it. Every candidate now passes the capture skill's
+    redactor; a dropped one is counted, never shown."""
+
+    def _scan(self, log: str, *extra: str, script: Path = SCRIPT) -> subprocess.CompletedProcess:
+        proc = run_with_git(
+            {
+                "remote get-url origin": "https://github.com/acme/widgets.git\n",
+                "branch --show-current": "main\n",
+                "log main --format=%s -n 10": log,
+            },
+            *extra,
+            script=script,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return proc
+
+    def test_every_credential_fixture_yields_no_ticket_and_is_never_printed(self):
+        for entry in CREDENTIAL_LIKE["credentials"]:
+            for flags in ((), ("--json",)):
+                with self.subTest(id=entry["id"], gate=entry["gate"], json=bool(flags)):
+                    proc = self._scan(f"chore: rotate {entry['text']} today\n", *flags)
+                    self.assertNotIn(entry["secret"], proc.stdout + proc.stderr)
+                    if flags:
+                        result = json.loads(proc.stdout)
+                        self.assertEqual(result["tickets"], [])
+                        self.assertEqual(result["ticketsWithheld"], 1)
+                        self.assertIsNone(result["ticketsUnavailable"])
+                    else:
+                        self.assertIn("withheld: 1 credential-shaped candidate(s), not shown",
+                                      proc.stdout)
+
+    def test_every_control_is_still_a_ticket(self):
+        for entry in CREDENTIAL_LIKE["controls"]:
+            with self.subTest(id=entry["id"]):
+                provider, key = entry["text"].split(":", 1)
+                result = json.loads(self._scan(f"fix {entry['text']}\n", "--json").stdout)
+                self.assertIn({"provider": provider, "key": key, "seenIn": "commit"},
+                              result["tickets"])
+                self.assertEqual(result["ticketsWithheld"], 0)
+
+    def test_a_bare_key_inside_a_secret_assignment_is_withheld(self):
+        # The candidate alone is an ordinary key; only its subject shows it is a password's value.
+        result = json.loads(self._scan("fix password=PROJ-1234567 leak\n", "--json").stdout)
+        self.assertEqual(result["tickets"], [])
+        self.assertEqual(result["ticketsWithheld"], 1)
+
+    def test_without_the_redactor_no_ticket_is_reported(self):
+        """Fail closed: the reporter installed without the capture skill beside it reports no ticket
+        at all — controls included — and says why, rather than reporting unchecked ones."""
+        with tempfile.TemporaryDirectory() as tmp:
+            lone = Path(tmp) / "skills" / "mimisbrunnr-heimdallr-find-session-metadata" / "scripts"
+            lone.mkdir(parents=True)
+            shutil.copy(SCRIPT, lone / SCRIPT.name)
+            text = CREDENTIAL_LIKE["credentials"][0]["text"]
+            proc = self._scan(f"fix github:182 and {text}\n", "--json", script=lone / SCRIPT.name)
+            result = json.loads(proc.stdout)
+            self.assertEqual(result["tickets"], [])
+            self.assertIn("redactor unavailable", result["ticketsUnavailable"])
+            # The origin path is free text too and fails closed the same way (issue 186).
+            self.assertIsNone(result["repository"])
+            self.assertIn("redactor unavailable", result["repositoryWithheld"])
+            self.assertNotIn(CREDENTIAL_LIKE["credentials"][0]["secret"], proc.stdout + proc.stderr)
+            human = self._scan("fix github:182\n", script=lone / SCRIPT.name).stdout
+            self.assertIn("tickets: unavailable (redactor unavailable", human)
+
+
+class BranchRedactionTests(unittest.TestCase):
+    """Issue 184: the branch name was printed whole while only its ticket candidates were checked, so a
+    credential in a branch name reached the transcript through the `branch` field."""
+
+    def _scan(self, branch: str, *extra: str, script: Path = SCRIPT) -> subprocess.CompletedProcess:
+        proc = run_with_git(
+            {
+                "remote get-url origin": "https://github.com/acme/widgets.git\n",
+                "branch --show-current": branch + "\n",
+                f"log {branch} --format=%s -n 10": "fix #7\n",
+            },
+            *extra,
+            script=script,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return proc
+
+    def test_a_credential_in_the_branch_name_is_never_printed(self):
+        branches = [("assign-" + e["id"], "fix/" + e["text"].replace(":", "=", 1), e["secret"])
+                    for e in CREDENTIAL_LIKE["credentials"] if e["gate"]]
+        branches += [("ticket-" + e["id"], "fix/" + e["text"], e["secret"])
+                     for e in CREDENTIAL_LIKE["credentials"]]
+        for case, branch, secret in branches:
+            for flags in ((), ("--json",)):
+                with self.subTest(case=case, json=bool(flags)):
+                    proc = self._scan(branch, *flags)
+                    self.assertNotIn(secret, proc.stdout + proc.stderr)
+                    if flags:
+                        result = json.loads(proc.stdout)
+                        self.assertIsNone(result["branch"])
+                        self.assertEqual(result["branchWithheld"], "credential-shaped; not shown")
+                        self.assertIn({"provider": "github", "key": "7", "seenIn": "commit"},
+                                      result["tickets"])
+                    else:
+                        self.assertIn("- branch: withheld (credential-shaped; not shown)", proc.stdout)
+
+    def test_an_ordinary_branch_is_still_shown(self):
+        result = json.loads(self._scan("feat/160-node=20-upgrade", "--json").stdout)
+        self.assertEqual(result["branch"], "feat/160-node=20-upgrade")
+        self.assertIsNone(result["branchWithheld"])
+        self.assertIn({"provider": "github", "key": "160", "seenIn": "branch"}, result["tickets"])
+
+    def test_without_the_redactor_the_branch_is_not_shown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lone = Path(tmp) / "skills" / "mimisbrunnr-heimdallr-find-session-metadata" / "scripts"
+            lone.mkdir(parents=True)
+            shutil.copy(SCRIPT, lone / SCRIPT.name)
+            proc = self._scan("feat/160-x", "--json", script=lone / SCRIPT.name)
+            result = json.loads(proc.stdout)
+            self.assertIsNone(result["branch"])
+            self.assertIn("redactor unavailable", result["branchWithheld"])
+            self.assertNotIn("feat/160-x", proc.stdout)
+
+
+class RepositoryRedactionTests(unittest.TestCase):
+    """Issue 186: `parse_repo` drops the host and userinfo but keeps every path segment, so a credential
+    in the origin path was printed as part of the repository — the branch-name defect, one field over."""
+
+    def _scan(self, remote: str, *extra: str, script: Path = SCRIPT) -> subprocess.CompletedProcess:
+        proc = run_with_git(
+            {
+                "remote get-url origin": remote + "\n",
+                "branch --show-current": "main\n",
+                "log main --format=%s -n 10": "fix #7\n",
+            },
+            *extra,
+            script=script,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return proc
+
+    def test_a_credential_in_the_origin_path_is_never_printed(self):
+        for entry in CREDENTIAL_LIKE["credentials"]:
+            remote = "https://git.example/" + entry["text"].replace(":", "/", 1) + "/widgets.git"
+            for flags in ((), ("--json",)):
+                with self.subTest(case=entry["id"], json=bool(flags)):
+                    proc = self._scan(remote, *flags)
+                    self.assertNotIn(entry["secret"], proc.stdout + proc.stderr)
+                    if flags:
+                        result = json.loads(proc.stdout)
+                        self.assertIsNone(result["repository"])
+                        self.assertEqual(result["repositoryWithheld"],
+                                         "credential-shaped origin path; not shown")
+                        self.assertIn({"provider": "github", "key": "7", "seenIn": "commit"},
+                                      result["tickets"])
+                    else:
+                        self.assertIn("- repository: withheld (", proc.stdout)
+
+    def test_an_ordinary_origin_is_still_shown(self):
+        for remote, repo in (("https://github.com/acme/widgets.git", "acme/widgets"),
+                             ("git@gitlab.com:group/sub-group/node-20.git", "group/sub-group/node-20"),
+                             ("https://github.com/generic-automation-and-it/smooth-ai-product-context-memory",
+                              "generic-automation-and-it/smooth-ai-product-context-memory")):
+            with self.subTest(remote=remote):
+                result = json.loads(self._scan(remote, "--json").stdout)
+                self.assertEqual(result["repository"], repo)
+                self.assertIsNone(result["repositoryWithheld"])
+
+    def test_without_the_redactor_the_repository_is_not_shown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lone = Path(tmp) / "skills" / "mimisbrunnr-heimdallr-find-session-metadata" / "scripts"
+            lone.mkdir(parents=True)
+            shutil.copy(SCRIPT, lone / SCRIPT.name)
+            proc = self._scan("https://github.com/acme/widgets.git", "--json", script=lone / SCRIPT.name)
+            result = json.loads(proc.stdout)
+            self.assertIsNone(result["repository"])
+            self.assertIn("redactor unavailable", result["repositoryWithheld"])
+            self.assertNotIn("acme/widgets", proc.stdout)
+
+
+class CommitHistoryTests(unittest.TestCase):
+    """Issue 184: a failed `git log` returned nothing, so a broken read looked exactly like a repository
+    with no ticket commits."""
+
+    BASE = {
+        "remote get-url origin": "https://github.com/acme/widgets.git\n",
+        "branch --show-current": "main\n",
+    }
+
+    def test_a_failed_log_on_a_resolvable_ref_is_disclosed(self):
+        # No `log` response: the fake git exits 1 for it, while the ref still resolves to a commit.
+        responses = dict(self.BASE, **{"rev-parse --verify -q main^{commit}": "0" * 40 + "\n"})
+        proc = run_with_git(responses, "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        result = json.loads(proc.stdout)
+        self.assertEqual(result["tickets"], [])
+        self.assertIn("git log failed", result["commitsUnavailable"])
+        human = run_with_git(responses).stdout
+        self.assertIn("- commits: unavailable (git log failed", human)
+
+    def test_a_readable_history_and_an_unborn_branch_are_not_failures(self):
+        ok = run_with_git(dict(self.BASE, **{"log main --format=%s -n 10": "fix #3\n"}), "--json")
+        self.assertIsNone(json.loads(ok.stdout)["commitsUnavailable"])
+        # Unborn: HEAD is a readable symbolic ref to `main` and `main` has no ref — a genuine empty
+        # history, proved rather than inferred from a second failure.
+        unborn_git = dict(self.BASE, **{"symbolic-ref -q HEAD": "refs/heads/main\n"})
+        unborn = run_with_git(unborn_git, "--json")
+        self.assertIsNone(json.loads(unborn.stdout)["commitsUnavailable"])
+        self.assertNotIn("commits:", run_with_git(unborn_git).stdout)
+
+    def test_a_failed_ref_read_is_not_an_unborn_branch(self):
+        """Issue 190 #14: every non-zero `show-ref` was read as "no such ref", so a ref store git could
+        not read (exit 128) turned a failed `git log` into an empty history. Only exit 1 is absence."""
+        responses = dict(self.BASE, **{"symbolic-ref -q HEAD": "refs/heads/main\n",
+                                       "_exit": {"show-ref --verify -q refs/heads/main": 128}})
+        result = json.loads(run_with_git(responses, "--json").stdout)
+        self.assertIn("git log failed", result["commitsUnavailable"])
+
+    def test_two_failed_reads_are_not_an_empty_history(self):
+        """Issue 188: with git unable to read the repository, both `log` and the ref check failed, and
+        the second failure was read as "unborn". Without positive evidence the log failure is
+        disclosed, including on a detached HEAD."""
+        for responses in (dict(self.BASE),
+                          dict(self.BASE, **{"symbolic-ref -q HEAD": "refs/heads/other\n"}),
+                          dict(self.BASE, **{"branch --show-current": "\n"})):
+            with self.subTest(responses=sorted(responses)):
+                result = json.loads(run_with_git(responses, "--json").stdout)
+                self.assertIn("git log failed", result["commitsUnavailable"])
 
 
 class ContractTests(unittest.TestCase):
@@ -210,6 +456,143 @@ class StabilityTests(unittest.TestCase):
         second = run_with_git(responses, "--json")
         self.assertEqual(first.stdout, second.stdout)
         self.assertEqual(json.loads(first.stdout)["tickets"][0]["key"], "160")
+
+
+def _real_repo(path: Path, remote: str, subject: str, branch: str = "main") -> Path:
+    """A real git checkout with one commit and an `origin` remote (nothing is fetched)."""
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid",
+           "-c", "commit.gpgsign=false", "-c", "core.hooksPath=" + os.devnull,
+           "-c", "init.defaultBranch=" + branch]
+    subprocess.run([*git, "init", "-q", str(path)], check=True, capture_output=True)
+    subprocess.run([*git, "-C", str(path), "remote", "add", "origin", remote], check=True)
+    subprocess.run([*git, "-C", str(path), "commit", "-q", "--allow-empty", "-m", subject],
+                   check=True, capture_output=True)
+    return path
+
+
+@unittest.skipUnless(shutil.which("git"), "git is not on PATH")
+class RepoRootTests(unittest.TestCase):
+    """Issue 182: the scan read whatever checkout the process ran in, so a caller bootstrapping a
+    repository from another working directory bound that other checkout's repo and tickets — and
+    the output carried nothing that could tell the two apart."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        base = Path(self._tmp.name)
+        self.chosen = _real_repo(base / "chosen", "https://github.com/acme/chosen.git",
+                                 "fix #12 in the chosen repo")
+        self.other = _real_repo(base / "other", "https://github.com/acme/other.git",
+                                "fix #99 in the other repo")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _scan(self, *argv: str) -> dict:
+        # HOME is the folder holding every checkout, as a real one sits under the operator's home: a
+        # checkout outside home is withheld (issue 190 #13).
+        proc = subprocess.run([sys.executable, "-B", str(SCRIPT), "--json", *argv],
+                              capture_output=True, text=True, encoding="utf-8", cwd=str(self.other),
+                              env=dict(os.environ, HOME=self._tmp.name))
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return json.loads(proc.stdout)
+
+    def test_repo_root_scans_the_named_checkout_not_the_working_directory(self):
+        result = self._scan("--repo-root", str(self.chosen))
+        self.assertEqual(result["repository"], "acme/chosen")
+        self.assertEqual(result["root"], "~/chosen")
+        self.assertEqual([(t["provider"], t["key"]) for t in result["tickets"]], [("github", "12")])
+
+    def test_without_repo_root_the_root_names_the_working_directory(self):
+        # The default is unchanged, but the report now says which checkout it read, which is what lets
+        # a caller refuse a scan of the wrong repository.
+        result = self._scan()
+        self.assertEqual(result["repository"], "acme/other")
+        self.assertEqual(result["root"], "~/other")
+
+    def _scan_env(self, cwd, *argv, home=None, script=SCRIPT):
+        env = dict(os.environ, HOME=str(home) if home is not None else self._tmp.name)
+        proc = subprocess.run([sys.executable, "-B", str(script), "--json", *argv],
+                              capture_output=True, text=True, encoding="utf-8", cwd=str(cwd), env=env)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return proc
+
+    def test_the_root_under_home_is_shown_without_the_account_folder(self):
+        """Issue 188: the absolute checkout path carried the account's home folder, so every scan printed
+        the operator's account name. Under HOME the path is shown from `~`."""
+        home = Path(self._tmp.name)
+        proc = self._scan_env(self.chosen, home=home)
+        result = json.loads(proc.stdout)
+        self.assertEqual(result["root"], "~/chosen")
+        self.assertIsNone(result["rootWithheld"])
+        self.assertNotIn(os.path.realpath(self._tmp.name), proc.stdout)
+
+    def test_a_checkout_outside_home_is_withheld(self):
+        """Issue 190 #13: outside home there is no `~` to stand for the account part, so the absolute
+        path was printed — another account's name, or a mount named after a person, included."""
+        elsewhere = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, elsewhere, True)
+        proc = self._scan_env(self.chosen, "--repo-root", str(self.chosen), home=elsewhere)
+        result = json.loads(proc.stdout)
+        self.assertIsNone(result["root"])
+        self.assertEqual(result["rootWithheld"], "checkout path outside home; not shown")
+        self.assertTrue(result["rootMatches"], "the comparison needs no displayed path")
+        self.assertNotIn(os.path.realpath(self._tmp.name), proc.stdout)
+
+    def test_a_credential_shaped_checkout_path_is_withheld(self):
+        for entry in CREDENTIAL_LIKE["credentials"]:
+            folder = entry["text"].replace(":", "-", 1).replace("/", "-")
+            if not entry["gate"] and ":" in entry["text"]:
+                folder = entry["text"].split(":", 1)[0] + "/" + entry["text"].split(":", 1)[1]
+            with self.subTest(case=entry["id"]):
+                repo = _real_repo(Path(self._tmp.name) / "creds" / entry["id"] / folder,
+                                  "https://github.com/acme/x.git", "fix #1")
+                proc = self._scan_env(repo)
+                result = json.loads(proc.stdout)
+                self.assertIsNone(result["root"])
+                self.assertEqual(result["rootWithheld"], "credential-shaped checkout path; not shown")
+                self.assertNotIn(entry["secret"], proc.stdout + proc.stderr)
+
+    def test_root_matches_reports_the_comparison_a_caller_needs(self):
+        self.assertTrue(self._scan("--repo-root", str(self.chosen))["rootMatches"])
+        sub = self.chosen / "sub"
+        sub.mkdir()
+        self.assertFalse(self._scan("--repo-root", str(sub))["rootMatches"])
+        self.assertIsNone(self._scan()["rootMatches"])
+
+    def test_without_the_redactor_the_root_is_not_shown(self):
+        lone = Path(self._tmp.name) / "skills" / "mimisbrunnr-heimdallr-find-session-metadata" / "scripts"
+        lone.mkdir(parents=True)
+        shutil.copy(SCRIPT, lone / SCRIPT.name)
+        result = json.loads(self._scan_env(self.chosen, "--repo-root", str(self.chosen),
+                                           script=lone / SCRIPT.name).stdout)
+        self.assertIsNone(result["root"])
+        self.assertIn("redactor unavailable", result["rootWithheld"])
+        self.assertTrue(result["rootMatches"], "the comparison needs no displayed path")
+
+    def test_a_repo_root_that_is_not_a_checkout_is_unavailable(self):
+        proc = subprocess.run(
+            [sys.executable, "-B", str(SCRIPT), "--json", "--repo-root",
+             str(Path(self._tmp.name) / "missing")],
+            capture_output=True, text=True, encoding="utf-8", cwd=str(self.other))
+        self.assertEqual(proc.returncode, 2, proc.stderr)
+        self.assertIn("git unavailable", proc.stderr)
+
+    def test_a_real_unborn_branch_is_an_empty_history_not_a_failure(self):
+        unborn = Path(self._tmp.name) / "unborn"
+        subprocess.run(["git", "-c", "init.defaultBranch=main", "init", "-q", str(unborn)],
+                       check=True, capture_output=True)
+        result = self._scan("--repo-root", str(unborn))
+        self.assertEqual(result["tickets"], [])
+        self.assertIsNone(result["commitsUnavailable"])
+
+    def test_a_real_credential_branch_is_withheld(self):
+        secret = "Hunter2-FAKE-0000"
+        subprocess.run(["git", "-C", str(self.chosen), "checkout", "-q", "-b",
+                        "fix/password=" + secret], check=True, capture_output=True)
+        result = self._scan("--repo-root", str(self.chosen))
+        self.assertIsNone(result["branch"])
+        self.assertNotIn(secret, json.dumps(result))
+        self.assertIsNone(result["commitsUnavailable"])
 
 
 if __name__ == "__main__":

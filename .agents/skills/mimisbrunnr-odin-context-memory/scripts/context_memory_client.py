@@ -25,6 +25,29 @@ ENV_BASE_URL = "CONTEXT_MEMORY_BASE_URL"
 ENV_READ_TOKEN = "CONTEXT_MEMORY_READ_TOKEN"
 ENV_WRITE_TOKEN = "CONTEXT_MEMORY_WRITE_TOKEN"
 
+# Every spelling the write token is carried under in this repository's tooling, folded for comparison.
+# `provision-credentials.sh` writes the Host form `ApiAccess__WriteToken` beside the skill form, so
+# `set -a && source .context/mimisbrunnr.env` exports both; the Host binds configuration keys
+# case-insensitively and reads `:` and `__` alike, and the controller takes `Parameters__api-write-token`.
+# The read client checked the skill form only, so a shell holding just the Host form started a read
+# worker with the write credential in its environment (issue 184).
+WRITE_TOKEN_NAMES = frozenset({
+    "context_memory_write_token",
+    "apiaccess__writetoken",
+    "parameters__api-write-token",
+})
+
+
+def write_tokens_present(environ=None):
+    """The environment names that carry a write token, sorted. Names only — never a value.
+
+    An empty value is not a credential, so it does not count: `KEY=` in a sourced file is how an unset
+    variable is spelled.
+    """
+    environ = os.environ if environ is None else environ
+    return sorted(name for name, value in environ.items()
+                  if value and name.casefold().replace(":", "__") in WRITE_TOKEN_NAMES)
+
 # Static, configurable candidate cap (decision 6). Change this constant to widen or narrow the
 # preflight batch without touching pipeline logic. Mirrors Preflight.MaxCandidates.
 MAX_CANDIDATES = 20
@@ -64,7 +87,9 @@ def load_machine_credentials(*names):
             continue
         key, _, value = line.partition("=")
         key = key.strip()
-        if key in wanted and value and not os.environ.get(key):
+        # Presence, not truthiness: an explicitly set empty value is the operator turning a setting
+        # off, and filling it from the file silently overrode them (review #4).
+        if key in wanted and value and key not in os.environ:
             os.environ[key] = value.strip()
     return path
 
@@ -172,6 +197,44 @@ def _classify_transport_error(exc, timeout=HTTP_TIMEOUT):
     return ClientError(0, "unreachable", str(exc))
 
 
+PROBLEM_TEXT_LIMIT = 600
+
+
+def problem_text(raw):
+    """The actionable part of an error body, never the raw body (issue 186).
+
+    The Host answers a failure with a problem object — `title`, `detail`, field-keyed validation
+    `errors` and a JSON `path` extension — and that is what a reader acts on (a 409's detail names the
+    subject that already exists; a 400 names the field). Anything else in the body, and any body that
+    is not a problem object, is remote text this client did not ask for: echoing it into a diagnostic
+    put whatever the answering process chose to send into the agent transcript. Only those members are
+    kept, as text, bounded; anything else is reported by size only.
+    """
+    text = (raw or "").strip()
+    if not text:
+        return ""
+    try:
+        document = json.loads(text)
+    except ValueError:
+        document = None
+    if not isinstance(document, dict):
+        return f"(a non-problem error body of {len(text)} characters was not shown)"
+    parts = [str(document[key]) for key in ("title", "detail") if isinstance(document.get(key), str)]
+    errors = document.get("errors")
+    if isinstance(errors, dict):
+        for field, messages in errors.items():
+            if isinstance(messages, list):
+                shown = "; ".join(m for m in messages if isinstance(m, str))
+                if shown:
+                    parts.append(f"{field}: {shown}")
+    if isinstance(document.get("path"), str):
+        parts.append(f"at {document['path']}")
+    summary = " — ".join(" ".join(part.split()) for part in parts)
+    if not summary:
+        return "(the error body carried no problem title, detail or errors)"
+    return summary if len(summary) <= PROBLEM_TEXT_LIMIT else summary[:PROBLEM_TEXT_LIMIT] + "…"
+
+
 # A context manager wrapping the read-and-decode, so every transport site shares one handler set
 # instead of repeating the same four `except` lines. `cmd_get_blob` used to carry its own copy, which
 # is exactly how a fix lands in one and misses the other.
@@ -188,7 +251,7 @@ def _read_response(request, timeout=None):
         with _open(request, timeout) as resp:
             return resp.read().decode("utf-8")
     except urllib.error.HTTPError as e:
-        raise ClientError(e.code, e.reason, e.read().decode("utf-8", errors="replace")) from e
+        raise ClientError(e.code, e.reason, problem_text(e.read().decode("utf-8", errors="replace"))) from e
     except urllib.error.URLError as e:
         # A connect-phase timeout arrives wrapped in URLError; the reason carries the timeout.
         raise _classify_transport_error(e.reason, timeout) from e
@@ -224,11 +287,23 @@ def _parse_base(value):
                       f"check {ENV_BASE_URL} for malformed or non-ASCII characters")
 
 
-def base_url():
-    value = os.environ.get(ENV_BASE_URL, DEFAULT_BASE_URL).rstrip("/")
+def base_url(value=None):
+    """The validated store origin: `value` when given, else the environment's.
+
+    One rule for both sources, so an explicit override (`probe --base-url`) cannot skip the loopback,
+    userinfo and shape checks the environment value has to pass.
+    """
+    if value is None:
+        value = os.environ.get(ENV_BASE_URL, DEFAULT_BASE_URL)
+    value = value.rstrip("/")
     parsed = _parse_base(value)
+    # `params` is the `;…` tail of the last path segment, which `urlparse` splits away from `path`, so
+    # `http://localhost:5141/;token=…` passed as a bare origin with the path check alone.
+    # The delimiters themselves are refused, not only what follows them: `urlparse` reports an empty
+    # query for `http://localhost:5141?`, so a bare `?`, `#` or `;` passed as an origin (issue 186/188).
     if parsed.scheme not in ("http", "https") or parsed.username or parsed.password \
-            or parsed.path not in ("", "/") or parsed.query or parsed.fragment:
+            or parsed.path not in ("", "/") or parsed.params or parsed.query or parsed.fragment \
+            or any(mark in value for mark in "?#;"):
         raise ClientError(0, "bad-base-url", "Context-memory base URL must be an HTTP(S) origin")
     if parsed.hostname not in ("localhost", "127.0.0.1", "::1"):
         raise ClientError(0, "bad-base-url", "Context-memory API origin must be loopback")
@@ -352,7 +427,9 @@ def _probe(base):
 
 
 def cmd_probe(args):
-    base = args.base_url or base_url()
+    # Validated before it is used or printed: an unchecked override reached `_probe` and the console
+    # verbatim, userinfo included. A validated origin carries none, so printing it is safe.
+    base = base_url(args.base_url or None)
     if _probe(base):
         print(f"mimisbrunnr-odin-context-memory API reachable at {base}")
         return
@@ -380,11 +457,22 @@ def cmd_decisions_probe(args):
         sys.exit(1)
 
 
-def read_payload(path):
+def read_payload(path, consume=False):
+    """The request body from `path` (stdin when None). See `redact.load_input` for `consume`."""
+    if consume and not path:
+        raise ClientError(0, "bad-input",
+                          "--consume needs --payload: there is no file to remove when reading stdin")
     if path:
-        with open(path, "r", encoding="utf-8") as fh:
-            return json.load(fh)
-    return json.load(sys.stdin)
+        try:
+            redact.require_owner_only(path)
+        except ValueError as error:
+            raise ClientError(0, "bad-input", str(error)) from None
+    return redact.load_input(path, consume)
+
+
+def payload_of(args):
+    """`read_payload` for a parsed command, honouring its `--consume`."""
+    return read_payload(args.payload, consume=getattr(args, "consume", False))
 
 
 def cmd_preflight(args):
@@ -395,7 +483,7 @@ def cmd_preflight(args):
     responses would report chunk-local indices as batch indices and lose cross-chunk
     collisions, so over-cap batches are refused outright — same contract as cmd_set.
     """
-    payload = read_payload(args.payload)
+    payload = payload_of(args)
     if not isinstance(payload, (dict, list)):
         raise ClientError(
             0,
@@ -414,9 +502,57 @@ def cmd_preflight(args):
         )
 
     resp = _request("POST", "/api/context/preflight", {"candidates": candidates})
+    # Both lists are required. Defaulting a missing one to [] would report "no matches" and "no
+    # collisions" for a response that never said so, and the caller would write duplicates on it.
+    candidates_out = resp.get("candidates") if isinstance(resp, dict) else None
+    collisions_out = resp.get("intraBatchCollisions") if isinstance(resp, dict) else None
+    if not isinstance(candidates_out, list) or not isinstance(collisions_out, list):
+        raise ClientError(
+            0,
+            "bad-response",
+            "preflight response must carry 'candidates' and 'intraBatchCollisions' as lists",
+        )
+    # One result per candidate, each with its own index and a `matches` list. A short list, a repeated
+    # or out-of-range index, or a result without `matches` leaves some candidate unanswered, and an
+    # unanswered candidate reads exactly like "no match" — the same duplicate-writing default as above.
+    answered = {item["index"] for item in candidates_out
+                if isinstance(item, dict) and type(item.get("index")) is int
+                and 0 <= item["index"] < len(candidates) and isinstance(item.get("matches"), list)}
+    if len(candidates_out) != len(candidates) or answered != set(range(len(candidates))):
+        raise ClientError(
+            0,
+            "bad-response",
+            f"preflight answered {len(answered)} of {len(candidates)} candidate(s) with an index and "
+            "a 'matches' list; refusing to read the rest as 'no match'",
+        )
+    # The entries inside the lists, too (review 5432012955 #10). A match is acted on by its `uuid` (the
+    # version target) and `groupUuid` (whether that target is in this group); a collision by its two
+    # candidate indices and its `subjectSlug`. A caller skips an entry it cannot read, so a malformed
+    # match or collision vanished and the pair it named was written as unrelated creates.
+    def is_text(value):
+        return isinstance(value, str) and bool(value.strip())
+
+    def is_index(value):
+        return type(value) is int and 0 <= value < len(candidates)
+
+    bad_matches = sum(1 for item in candidates_out for match in item["matches"]
+                      if not (isinstance(match, dict) and is_text(match.get("uuid"))
+                              and is_text(match.get("groupUuid"))))
+    bad_collisions = sum(1 for c in collisions_out
+                         if not (isinstance(c, dict) and is_index(c.get("leftIndex"))
+                                 and is_index(c.get("rightIndex"))
+                                 and c["leftIndex"] != c["rightIndex"] and is_text(c.get("subjectSlug"))))
+    if bad_matches or bad_collisions:
+        raise ClientError(
+            0,
+            "bad-response",
+            f"preflight returned {bad_matches} match(es) without a 'uuid' and 'groupUuid' and "
+            f"{bad_collisions} collision(s) without two distinct in-range indices and a 'subjectSlug'; "
+            "refusing to read them as no match or no collision",
+        )
     out = {
-        "candidates": resp.get("candidates", []),
-        "intra_batch_collisions": resp.get("intraBatchCollisions", []),
+        "candidates": candidates_out,
+        "intra_batch_collisions": collisions_out,
     }
     print(json.dumps(out, indent=2))
     return out
@@ -429,7 +565,7 @@ def cmd_set(args):
     written, so a secret that reaches the server can only be orphaned, never edited out. The
     digest names each rule, the field it altered and the offsets it replaced — never the span's text.
     """
-    payload = read_payload(args.payload)
+    payload = payload_of(args)
     validate_set_payload(payload)
     query = {"dryRun": "true"} if args.dryrun else None
     resp = scrubbed_write("set", "POST", "/api/context/memories", payload, query=query)
@@ -452,9 +588,20 @@ def validate_set_payload(payload):
 
 
 def attach_redaction(resp, hits):
-    """Put the redaction digest on a response object, so no scrub reaches the caller silently."""
-    if hits and isinstance(resp, dict):
+    """Put the redaction digest on a response object, so no scrub reaches the caller silently.
+
+    A response that is not an object — an empty body is `None` — has no field to carry the digest, so
+    it goes to stderr as one JSON line instead, and stdout keeps exactly what the store answered. It used
+    to be dropped (issue 184). Not wrapped: a caller parsing `resolve-group` reads the object it prints,
+    and a wrapper would turn "no group came back" into an object that looks like one — the same reason
+    a raw blob takes the banner branch rather than a field.
+    """
+    if not hits:
+        return resp
+    if isinstance(resp, dict):
         resp["redaction"] = redact.digest(hits)
+    else:
+        print(json.dumps({"redaction": redact.digest(hits)}), file=sys.stderr)
     return resp
 
 
@@ -537,7 +684,9 @@ def framed_recall(payload):
     directly; building it here is what makes "one notice" true rather than aspirational.
     """
     if isinstance(payload, dict):
-        return {RECALL_NOTICE_KEY: RECALL_NOTICE, **payload}
+        # The notice is written last, so a store response carrying its own `recallNotice` cannot
+        # replace the framing with text of its choosing (issue 186).
+        return {**payload, RECALL_NOTICE_KEY: RECALL_NOTICE}
     # A list or scalar result has nowhere to put a top-level field, so it is wrapped in an envelope
     # rather than dropped — silently losing the framing on an unexpected shape is the one outcome this
     # cannot have.
@@ -570,13 +719,46 @@ def print_recall(payload, *, banner=True):
 
 def cmd_query(args):
     """POST /api/context/query. Semantic-dedup recall surface."""
-    payload = read_payload(args.payload)
+    payload = payload_of(args)
     if not isinstance(payload, dict):
         raise ClientError(0, "bad-input", "'query' payload must be an object")
     if "limit" not in payload:
         payload["limit"] = MAX_QUERY_LIMIT
     resp = _request("POST", "/api/context/query", payload)
+    # The store always answers `{"items": [...]}`. An empty body, a non-object or a missing list is an
+    # answer this client cannot read; framing it as a recall presented "nothing found" for a response
+    # that never said so (issue 186). Each row must carry the identity the dedup judgement acts on —
+    # `uuid`, `groupUuid`, `version` — or a row the caller cannot place reads as no match and the next
+    # write duplicates it (consumer review 5438563690 #2). Fixed text: the body is never echoed.
+    if not isinstance(resp, dict) or not isinstance(resp.get("items"), list):
+        raise ClientError(0, "bad-response", "query response must be an object with an 'items' list")
+    if not all(_identified_row(row) for row in resp["items"]):
+        raise ClientError(0, "bad-response", "query response rows must be objects carrying "
+                                             "'uuid', 'groupUuid' and 'version'")
     print_recall(resp)
+    return resp
+
+
+def _identified_row(row):
+    return (isinstance(row, dict) and isinstance(row.get("uuid"), str) and bool(row["uuid"].strip())
+            and isinstance(row.get("groupUuid"), str) and bool(row["groupUuid"].strip())
+            and type(row.get("version")) is int and row["version"] >= 1)
+
+
+def require_lists(resp, command, *fields):
+    """Refuse a read answer that lacks one of its documented collections (issue 186/188).
+
+    Every read route answers an object holding its collections as lists of objects — `items` for
+    versions, labels and initiatives, `paths` for a traversal, `paths` and `items` for a ticket
+    traversal. An empty body, a non-object, or a missing or malformed list was printed as though the
+    store had answered "nothing", which reads as complete coverage. Fixed text, never the body.
+    """
+    if not isinstance(resp, dict) or not all(
+            isinstance(resp.get(field), list) and all(isinstance(row, dict) for row in resp[field])
+            for field in fields):
+        raise ClientError(0, "bad-response",
+                          f"{command} response must be an object with " +
+                          " and ".join(f"a '{field}' list of objects" for field in fields))
     return resp
 
 
@@ -586,6 +768,7 @@ def cmd_get_versions(args):
         memory_versions_path(args.uuid),
         query={"scope": args.scope} if args.scope else None,
     )
+    require_lists(resp, "get-versions", "items")
     print(json.dumps(resp, indent=2))
     return resp
 
@@ -601,53 +784,55 @@ def cmd_get_blob(args):
     if not token:
         raise ClientError(0, "missing-credential", f"{ENV_READ_TOKEN} is required")
     req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"}, method="GET")
-    print(_read_response(req))
+    # Written as received: the body may be hashed or diffed, so no newline is appended.
+    sys.stdout.write(_read_response(req))
 
 
 def cmd_resolve_group(args):
-    resp = scrubbed_write("resolve_group", "POST", "/api/context/groups/resolve", read_payload(args.payload))
+    resp = scrubbed_write("resolve_group", "POST", "/api/context/groups/resolve", payload_of(args))
     print(json.dumps(resp, indent=2))
     return resp
 
 
 def cmd_update_group(args):
-    resp = scrubbed_write("update_group", "PATCH", group_path(args.uuid), read_payload(args.payload))
+    resp = scrubbed_write("update_group", "PATCH", group_path(args.uuid), payload_of(args))
     print(json.dumps(resp, indent=2))
     return resp
 
 
 def cmd_append_description(args):
-    resp = scrubbed_write("append_description", "POST", group_descriptions_path(args.uuid), read_payload(args.payload))
+    resp = scrubbed_write("append_description", "POST", group_descriptions_path(args.uuid), payload_of(args))
     print(json.dumps(resp, indent=2))
     return resp
 
 
 def cmd_create_link(args):
-    resp = scrubbed_write("create_link", "POST", "/api/context/links", read_payload(args.payload))
+    resp = scrubbed_write("create_link", "POST", "/api/context/links", payload_of(args))
     print(json.dumps(resp, indent=2))
     return resp
 
 
 def cmd_labels(args):
-    resp = _request("GET", "/api/context/labels")
+    resp = require_lists(_request("GET", "/api/context/labels"), "labels", "items")
     print(json.dumps(resp, indent=2))
     return resp
 
 
 def cmd_propose_label(args):
-    resp = scrubbed_write("propose_label", "POST", "/api/context/labels", read_payload(args.payload))
+    resp = scrubbed_write("propose_label", "POST", "/api/context/labels", payload_of(args))
     print(json.dumps(resp, indent=2))
     return resp
 
 
 def cmd_initiatives(args):
     resp = _request("GET", "/api/context/initiatives", query={"status": args.status} if args.status else None)
+    require_lists(resp, "initiatives", "items")
     print(json.dumps(resp, indent=2))
     return resp
 
 
 def cmd_upsert_initiative(args):
-    resp = scrubbed_write("upsert_initiative", "POST", "/api/context/initiatives", read_payload(args.payload))
+    resp = scrubbed_write("upsert_initiative", "POST", "/api/context/initiatives", payload_of(args))
     print(json.dumps(resp, indent=2))
     return resp
 
@@ -659,7 +844,7 @@ def cmd_paths(args):
     enriched with a rendered `summary` line (endpoint name + relation chain) so the agent reads the
     path without joining UUIDs itself; the full hop/endpoint data is preserved beneath it.
     """
-    payload = read_payload(args.payload)
+    payload = payload_of(args)
     if not isinstance(payload, dict):
         raise ClientError(0, "bad-input", "'paths' payload must be an object")
     if not isinstance(payload.get("maxDepth"), int) or isinstance(payload.get("maxDepth"), bool) or payload["maxDepth"] < 1:
@@ -672,8 +857,8 @@ def cmd_paths(args):
     if not isinstance(source_uuid, str) or not source_uuid.strip():
         raise ClientError(0, "bad-input", "'paths' requires 'sourceUuid' as a non-empty string")
 
-    resp = _request("POST", "/api/context/paths", payload)
-    for path in resp.get("paths", []):
+    resp = require_lists(_request("POST", "/api/context/paths", payload), "paths", "paths")
+    for path in resp["paths"]:
         path["summary"] = _render_path(path)
     print(json.dumps(resp, indent=2))
     return resp
@@ -727,7 +912,7 @@ def _ticket_identity(value, field):
 
 def cmd_ticket_parent(args):
     """PUT an explicit declaration, or inspect locally without any network call."""
-    payload, hits = scrub_or_refuse(read_payload(args.payload), "ticket_parent")
+    payload, hits = scrub_or_refuse(payload_of(args), "ticket_parent")
     required = {"child", "parent", "expectedParent", "reason", "source"}
     if (not isinstance(payload, dict) or not required <= payload.keys()
             or payload.keys() - required - {"observedAt"}):
@@ -763,14 +948,14 @@ def cmd_ticket_parent(args):
                 "validation": "Local shape only; ownership, cycles and expected parent are unverified."}
     else:
         resp = _request("PUT", "/api/context/tickets/parent", payload)
-    attach_redaction(resp, hits)
+    resp = attach_redaction(resp, hits)
     print(json.dumps(resp, indent=2))
     return resp
 
 
 def cmd_ticket_paths(args):
     """Separate ticket traversal; preserve the entire response, including disclosure."""
-    payload = read_payload(args.payload)
+    payload = payload_of(args)
     allowed = {"anchor", "maxDepth", "direction", "scopeDimension", "kind", "pathLimit", "memoryLimit"}
     if not isinstance(payload, dict) or payload.keys() - allowed:
         raise ClientError(0, "bad-input", "'ticket-paths' requires an object with supported fields")
@@ -788,7 +973,8 @@ def cmd_ticket_paths(args):
     for field, limit in (("scopeDimension", 32), ("kind", 64)):
         if payload.get(field) is not None:
             _ticket_text(payload[field], field, limit)
-    resp = _request("POST", "/api/context/tickets/paths", payload)
+    resp = require_lists(_request("POST", "/api/context/tickets/paths", payload), "ticket-paths",
+                         "paths", "items")
     print(json.dumps(resp, indent=2))
     return resp
 
@@ -796,6 +982,100 @@ def cmd_ticket_paths(args):
 # The store-direction names shared with kvasir and ai-understanding, as aliases of the canonical verbs.
 # Normalised right after parsing so every later check (write-route selection, framing) sees one name.
 COMMAND_ALIASES = {"export": "set", "import": "query"}
+
+
+def add_payload_arguments(parser):
+    """`--payload` plus `--consume`, shared by both clients so the two surfaces cannot drift."""
+    parser.add_argument("--payload", help="JSON file; defaults to stdin")
+    parser.add_argument("--consume", action="store_true",
+                        help="delete the --payload file once it has been read")
+
+
+# Commands whose stdout is a body, not a structured result. Framed with the banner only, so a blob that
+# happens to be valid JSON comes back byte-identical to what the store holds.
+RAW_BODY_COMMANDS = frozenset({"get-blob"})
+
+# Every capture-client subcommand that prints stored content. The read client frames all of its
+# commands at dispatch, but this client printed `get-blob`, `get-versions`, the traversals and the
+# listings unframed, so the same stored text arrived with the recall notice from one client and
+# without it from the other (issue 190). Every read surface frames; this is the capture client's list.
+FRAMED_COMMANDS = frozenset({"query", "get-versions", "get-blob", "paths", "ticket-paths", "labels",
+                             "initiatives"})
+
+
+def run_framed(args):
+    """Run a subcommand and frame whatever it printed.
+
+    Capturing stdout rather than routing each `cmd_*` through `print_recall` is what makes the framing
+    a default rather than a per-subcommand decision: nine call sites each remembering to print a notice
+    is nine chances to add a tenth and forget, and the read client's own subcommand list is the only place
+    that knows which surfaces exist.
+    """
+    import io
+    from contextlib import redirect_stdout
+
+    buffer = io.StringIO()
+    with redirect_stdout(buffer):
+        result = args.func(args)
+    captured = buffer.getvalue()
+    # A raw body goes out exactly as the store returned it — not stripped, no newline appended —
+    # because the caller asked for the body and may hash or diff it. The inner command prints no
+    # banner, so the banner is unconditional here: a body quoting the notice must not suppress it.
+    if getattr(args, "command", None) in RAW_BODY_COMMANDS:
+        if captured:
+            print(BANNER_PREFIX + RECALL_NOTICE)
+            sys.stdout.write(captured)
+        return result
+    raw = captured.strip()
+    if not raw:
+        return result
+    # Single emission comes from this buffer, not from a banner check: whatever the inner layer printed
+    # is captured here and discarded, and only the re-emitted payload reaches stdout. So an inner
+    # `cmd_query` banner never gets out, and `print_recall` is free to print its own on every path
+    # without coordinating with it.
+    payload = _parse_framed_json(raw)
+    # Not JSON — a formatted error, say — takes the banner-and-passthrough path rather than the framed
+    # envelope: there is nothing to carry a field. Raw-body commands returned above for the same reason,
+    # and because a body that happens to be valid JSON must not be re-indented into an envelope.
+    if payload is _NOT_JSON:
+        # The notice check is here only so output that already arrived framed (an inner layer that
+        # printed its own banner) is not given a second one; a repeated notice reads as emphasis and
+        # trains a reader to scroll past it.
+        if RECALL_NOTICE not in raw:
+            print(BANNER_PREFIX + RECALL_NOTICE)
+        print(raw)
+        return result
+    print_recall(payload)
+    return result
+
+
+# Sentinel distinguishing "not JSON" from "JSON that happens to be null", which a bare `None` cannot do.
+_NOT_JSON = object()
+
+
+def _parse_framed_json(raw: str):
+    """Parse stdout that may already carry a banner from an inner framing layer.
+
+    `query` and `deepsearch` are reachable from both the capture client and the read client, and the
+    inner one frames on its own. So the text arriving here can be `banner + JSON`, and parsing the whole
+    thing as JSON fails — which previously fell through to the not-JSON branch and emitted a *second*
+    banner, which reads as emphasis and trains a reader to scroll past it.
+
+    Tried on the whole text first, then from the first brace. The second attempt is what recovers the
+    already-bannered case; it cannot misclassify a raw body, because a body that parses from its first
+    brace would have parsed whole.
+    """
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        pass
+    start = raw.find("{")
+    if start == -1:
+        return _NOT_JSON
+    try:
+        return json.loads(raw[start:])
+    except json.JSONDecodeError:
+        return _NOT_JSON
 
 
 def main():
@@ -811,18 +1091,18 @@ def main():
     p.set_defaults(func=cmd_decisions_probe)
 
     p = sub.add_parser("preflight", help="POST /api/context/preflight (batch, array-in/out)")
-    p.add_argument("--payload", help="JSON file; defaults to stdin")
+    add_payload_arguments(p)
     p.set_defaults(func=cmd_preflight)
 
     p = sub.add_parser("set", aliases=["export"],
                        help="POST /api/context/memories (alias: export, session -> store)")
-    p.add_argument("--payload", help="JSON file; defaults to stdin")
+    add_payload_arguments(p)
     p.add_argument("--dryrun", action="store_true", help="append ?dryRun=true; write nothing")
     p.set_defaults(func=cmd_set)
 
     p = sub.add_parser("query", aliases=["import"],
                        help="POST /api/context/query (semantic-dedup recall; alias: import, store -> session)")
-    p.add_argument("--payload", help="JSON file; defaults to stdin")
+    add_payload_arguments(p)
     p.set_defaults(func=cmd_query)
 
     p = sub.add_parser("get-versions", help="GET /api/context/memories/{uuid}/versions")
@@ -837,28 +1117,28 @@ def main():
     p.set_defaults(func=cmd_get_blob)
 
     p = sub.add_parser("resolve-group", help="POST /api/context/groups/resolve")
-    p.add_argument("--payload", help="JSON file; defaults to stdin")
+    add_payload_arguments(p)
     p.set_defaults(func=cmd_resolve_group)
 
     p = sub.add_parser("update-group", help="PATCH /api/context/groups/{uuid}")
     p.add_argument("uuid")
-    p.add_argument("--payload", help="JSON file; defaults to stdin")
+    add_payload_arguments(p)
     p.set_defaults(func=cmd_update_group)
 
     p = sub.add_parser("append-description", help="POST /api/context/groups/{uuid}/descriptions")
     p.add_argument("uuid")
-    p.add_argument("--payload", help="JSON file; defaults to stdin")
+    add_payload_arguments(p)
     p.set_defaults(func=cmd_append_description)
 
     p = sub.add_parser("create-link", help="POST /api/context/links")
-    p.add_argument("--payload", help="JSON file; defaults to stdin")
+    add_payload_arguments(p)
     p.set_defaults(func=cmd_create_link)
 
     p = sub.add_parser("labels", help="GET /api/context/labels")
     p.set_defaults(func=cmd_labels)
 
     p = sub.add_parser("propose-label", help="POST /api/context/labels")
-    p.add_argument("--payload", help="JSON file; defaults to stdin")
+    add_payload_arguments(p)
     p.set_defaults(func=cmd_propose_label)
 
     p = sub.add_parser("initiatives", help="GET /api/context/initiatives")
@@ -866,20 +1146,20 @@ def main():
     p.set_defaults(func=cmd_initiatives)
 
     p = sub.add_parser("upsert-initiative", help="POST /api/context/initiatives")
-    p.add_argument("--payload", help="JSON file; defaults to stdin")
+    add_payload_arguments(p)
     p.set_defaults(func=cmd_upsert_initiative)
 
     p = sub.add_parser("paths", help="POST /api/context/paths (bounded multi-hop traversal)")
-    p.add_argument("--payload", help="JSON file; defaults to stdin")
+    add_payload_arguments(p)
     p.set_defaults(func=cmd_paths)
 
     p = sub.add_parser("ticket-parent", help="PUT /api/context/tickets/parent (declared hierarchy only)")
-    p.add_argument("--payload", help="JSON file; defaults to stdin")
+    add_payload_arguments(p)
     p.add_argument("--dryrun", action="store_true", help="local inspection only; no request or write")
     p.set_defaults(func=cmd_ticket_parent)
 
     p = sub.add_parser("ticket-paths", help="POST /api/context/tickets/paths (required depth 1..5)")
-    p.add_argument("--payload", help="JSON file; defaults to stdin")
+    add_payload_arguments(p)
     p.set_defaults(func=cmd_ticket_paths)
 
     args = parser.parse_args()
@@ -889,7 +1169,10 @@ def main():
         os.environ[ENV_BASE_URL] = args.base_url
 
     try:
-        args.func(args)
+        if args.command in FRAMED_COMMANDS:
+            run_framed(args)
+        else:
+            args.func(args)
     except ClientError as e:
         print(str(e), file=sys.stderr)
         sys.exit(1)

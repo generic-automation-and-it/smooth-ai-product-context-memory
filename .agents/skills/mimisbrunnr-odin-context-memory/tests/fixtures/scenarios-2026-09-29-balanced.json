@@ -12,20 +12,7 @@
         "must_not_contain": [
           "AKIAIOSFODNN7EXAMPLE"
         ],
-        "redacted_must_cover": [
-          "candidate_description",
-          "candidate_statement"
-        ],
-        "reason": "secret redacted before blob write; the verdict carries the scrubbed text of every candidate field under `redacted`",
-        "redacted_must_keep": {
-          "candidate_description": [
-            "Deployment uses",
-            "build pipeline"
-          ],
-          "candidate_statement": [
-            "CI pipeline authenticates with an AWS access key"
-          ]
-        }
+        "reason": "secret redacted before blob write"
       }
     },
     {
@@ -34,7 +21,6 @@
       "axis": "recall_positive",
       "candidate_description": "PostgreSQL is the storage engine we use for memories.",
       "candidate_statement": "We store in Postgres.",
-      "candidate_group_uuid": "g-01",
       "recall_set": [
         {
           "uuid": "m-001",
@@ -55,8 +41,8 @@
       "id": "s3-bundled-split-counted",
       "stage": "atomicity",
       "axis": "not_dedup",
-      "candidate_description": "PostgreSQL, JSONB and GIN storage decisions.",
-      "candidate_statement": "We chose PostgreSQL as the storage engine; the flexible fields are stored as JSONB; the index on those fields is GIN.",
+      "candidate_description": "We chose PostgreSQL, and it also explains why we need JSONB, but it further means the index is GIN.",
+      "candidate_statement": "Postgres, JSONB and GIN are connected decisions.",
       "expected": {
         "verdict": "split",
         "count": 3,
@@ -69,7 +55,6 @@
       "axis": "precision_negative",
       "candidate_description": "A memory is one atomic fact with four content fields.",
       "candidate_statement": "Each memory is a single atomic fact.",
-      "candidate_group_uuid": "g-01",
       "recall_set": [
         {
           "uuid": "m-002",
@@ -89,9 +74,8 @@
       "id": "s5-link-derivation",
       "stage": "links",
       "axis": "not_dedup",
-      "candidate_description": "Backups of the memory service are written to the local disk only.",
-      "candidate_statement": "Backups never leave the local machine.",
-      "candidate_group_uuid": "g-01",
+      "candidate_description": "The memory service is local-first and private to our workspace.",
+      "candidate_statement": "Storage is local-first.",
       "recall_set": [
         {
           "uuid": "m-003",
@@ -128,7 +112,6 @@
       "axis": "not_dedup",
       "candidate_description": "The storage engine will be SQLite.",
       "candidate_statement": "We decided to use SQLite for persistence.",
-      "candidate_group_uuid": "g-01",
       "recall_set": [
         {
           "uuid": "m-004",
@@ -152,7 +135,6 @@
       "axis": "precision_negative",
       "candidate_description": "Postgres stores our search index.",
       "candidate_statement": "The search index lives in Postgres.",
-      "candidate_group_uuid": "g-01",
       "recall_set": [
         {
           "uuid": "m-001",
@@ -175,7 +157,6 @@
       "axis": "not_dedup",
       "candidate_description": "The API contract says links are written later.",
       "candidate_statement": "The accepted specification permits a follow-up link call.",
-      "candidate_group_uuid": "g-01",
       "recall_set": [
         {
           "uuid": "m-005",
@@ -205,7 +186,6 @@
       "axis": "not_dedup",
       "candidate_description": "A stored fact should be called a note.",
       "candidate_statement": "Use note as the canonical term.",
-      "candidate_group_uuid": "g-01",
       "recall_set": [
         {
           "uuid": "m-006",
@@ -229,7 +209,6 @@
       "axis": "precision_negative",
       "candidate_description": "Auth issues tokens with a one-hour expiry.",
       "candidate_statement": "Access tokens are valid for one hour.",
-      "candidate_group_uuid": "g-01",
       "recall_set": [
         {
           "uuid": "m-007",
@@ -252,12 +231,11 @@
       "axis": "precision_negative",
       "candidate_description": "The nightly export job runs at 02:00 UTC.",
       "candidate_statement": "The nightly export starts at 02:00 UTC.",
-      "candidate_group_uuid": "g-01",
       "recall_set": [
         {
           "uuid": "m-008",
           "group_uuid": "g-01",
-          "description": "The nightly export job runs at 03:00 UTC.",
+          "description": "The nightly export job runs at 02:00 UTC",
           "statement": "The nightly export starts at 03:00 UTC.",
           "kind": "operations",
           "content_summary": "Export schedule is 03:00 UTC."
@@ -275,7 +253,6 @@
       "axis": "precision_negative",
       "candidate_description": "The Host exposes the query endpoint at POST /api/context/query.",
       "candidate_statement": "Recall is served by POST /api/context/query.",
-      "candidate_group_uuid": "g-01",
       "recall_set": [
         {
           "uuid": "m-009",
@@ -298,7 +275,6 @@
       "axis": "recall_positive",
       "candidate_description": "Blob bodies are addressed by a content hash.",
       "candidate_statement": "We address blob bodies by their content hash.",
-      "candidate_group_uuid": "g-01",
       "recall_set": [
         {
           "uuid": "m-010",

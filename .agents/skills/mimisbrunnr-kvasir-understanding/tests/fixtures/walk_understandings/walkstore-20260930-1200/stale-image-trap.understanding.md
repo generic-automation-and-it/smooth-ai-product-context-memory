@@ -8,6 +8,7 @@ provenance:
   learned: 2026-09-30
   session: walk-run-3
   source: a container that answered but served a stale image
+  supersedes: walkstore-20260930-0900
 updated: 2026-09-30
 ---
 

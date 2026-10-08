@@ -9,7 +9,7 @@ alwaysApply: false
 
 # Skill Secret Handling
 
-How any skill under `.agents/skills/` must handle a secret (API key, token, password, connection string). Updated: 2026-10-02
+How any skill under `.agents/skills/` must handle a secret (API key, token, password, connection string). Updated: 2026-10-07
 
 ## The Rule
 
@@ -22,6 +22,16 @@ A skill that needs a secret **MUST delegate to a script that reads the secret fr
 | Documenting the env var **name** the script expects (e.g. `MY_API_KEY`) | Documenting the env var **value** |
 
 The secret value flows: **runtime environment → script → tool**. It is never typed into a file an agent reads, generates, or commits.
+
+### The operator's machine credential file is a runtime source
+
+`~/.mimisbrunnr/credentials` (and its `-read-only` twin) count as the runtime environment, not as a forbidden file, under all of these conditions:
+
+- **The operator writes it, never an agent.** `scripts/run.sh` creates it outside the repository, owner-only (mode 600). No skill writes, prints, copies or commits a value from it.
+- **An exported variable always wins.** A client seeds only the names it needs, and only those not already set — an empty export counts as set, so the operator can turn a value off.
+- **The write credential stays out of ambient environments.** Only the write worker loads it, and only at the authorized checkpoint, in its own shell (`set -a && source ~/.mimisbrunnr/credentials`). A read surface seeds the read token and base URL only, and refuses to start with any write-token spelling present.
+
+This is what keeps reads structurally unable to write (odin LADR-005): with the file removed, the write token could only come from an exported, ambient variable, and the read client's refusal would then stop every recall or have to go. A review finding that flags this file as "not the runtime environment" is answered by this section, not by removing the file.
 
 ## Reference Pattern
 
@@ -37,7 +47,7 @@ Run this when **authoring or reviewing** a skill that touches a secret or launch
 - [ ] Custom config ships placeholders (`{env:VAR}`), never values.
 
 **How the script uses it**
-- [ ] Read from the environment inside a script (`"${VAR:-}"`, `os.environ`); presence checked without printing (`[ -n "${VAR:-}" ]`).
+- [ ] Read from the environment inside a script (`"${VAR:-}"`, `os.environ`), or from the operator's machine credential file under the conditions above; presence checked without printing (`[ -n "${VAR:-}" ]`).
 - [ ] Never a CLI argument, URL userinfo (`https://token@host`) or query string. Use env-auth tools (`gh` reads `GH_TOKEN`), stdin, or a one-shot credential helper. For Git pushes where the exact token matters, use `.github/scripts/git-credential-from-env.sh`: a local probe found `gh auth git-credential` returned a stored token instead of the supplied synthetic `GH_TOKEN`.
 - [ ] A user-supplied URL is **rejected** when it embeds credentials, before it is echoed or cloned.
 - [ ] No `set -x`, `env`/`printenv`, or unredacted stderr from tools that echo URLs or headers around the secret.
@@ -67,6 +77,7 @@ Run this when **authoring or reviewing** a skill that touches a secret or launch
 
 | Date | Change |
 |:-----|:-------|
+| 2026-10-07 | The operator's owner-only machine credential file is named as a runtime source, with its conditions: operator-written, exports win, write credential loaded only at the write checkpoint. Removing it would break the read/write separation (odin LADR-005). Consumer reviews kept flagging it. |
 | 2026-10-02 | Reference Pattern and Current Status rewritten for the MCP removal: the read-only client's startup refusal to `CONTEXT_MEMORY_WRITE_TOKEN` is now the read/write guarantee, alongside the credential split — there is no MCP process boundary left to bound it. |
 | 2026-09-27 | Current Status names `mimisbrunnr-ymir-bootstrap` as a no-secret skill that delegates store access and refuses credential-bearing evidence URLs. |
 | 2026-09-27 | Named the tested one-shot Git helper for exact-token pushes after a local `gh auth git-credential` precedence probe. |

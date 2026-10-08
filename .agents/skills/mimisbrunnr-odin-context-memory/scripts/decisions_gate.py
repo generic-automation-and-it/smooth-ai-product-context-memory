@@ -21,14 +21,16 @@ Design rules that the harness pins, each of which exists because the cheaper ver
 - **Redaction runs before any model call, and fails closed.** An unavailable redactor is
   `redactor-unavailable`, and no request is made. Sending unscrubbed content to a model is the one
   outcome this gate exists to avoid.
-- **The attempt counter is the script's, not the caller's.** A ledger keyed by record identity in a
-  state file bounds the rewrite loop, so an agent cannot reset it by re-asking.
+- **The attempt counter is the script's, not the caller's.** A ledger keyed by a SHA-256 digest of the
+  record identity in a state file bounds the rewrite loop, so an agent cannot reset it by re-asking —
+  and the subject, which can carry personal data, never reaches the file.
 - **The score is a quality signal, never authority.** It never changes status, kind, or approval.
 
 Python 3.9+, stdlib only.
 """
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -43,7 +45,7 @@ from urllib.parse import urlparse
 DEFAULT_BASE_URL = "http://localhost:11434"
 DEFAULT_PATH = "/v1/systemone"
 DEFAULT_MODEL = "nimble"
-DEFAULT_MIN_PROBABILITY = 0.5
+DEFAULT_MIN_PROBABILITY = 0.85
 DEFAULT_MAX_ATTEMPTS = 3
 DEFAULT_TIMEOUT = 30
 DEFAULT_ROLES = "product-owner,designer,developer,tester,business"
@@ -104,7 +106,9 @@ def load_machine_credentials(*names):
             continue
         key, _, value = line.partition("=")
         key = key.strip()
-        if key in wanted and value and not os.environ.get(key):
+        # Presence, not truthiness: an explicitly set empty value is the operator turning a setting
+        # off — `CONTEXT_MEMORY_DECISIONS_ENABLED=` must not be re-enabled from the file (review #4).
+        if key in wanted and value and key not in os.environ:
             os.environ[key] = value.strip()
     return MACHINE_CREDENTIAL_FILE
 
@@ -132,6 +136,10 @@ MAX_LEDGER_ENTRIES = 5000
 # is used here because code, identifiers and punctuation-heavy text tokenize worse than prose and a
 # record that fits at 3.3 chars/token does not fit at 4.
 CHARS_PER_TOKEN = 3
+
+# How long the redactor subprocess may run. A redactor that overruns it is `redactor-unavailable`
+# like any other redactor that cannot run: no request is made.
+REDACTOR_TIMEOUT_SECONDS = 60
 
 
 class GateError(RuntimeError):
@@ -211,12 +219,19 @@ def endpoint_origin(base_url):
     """The scheme://host:port of the endpoint, for reporting. Never any userinfo, never the key."""
     try:
         parsed = urlparse(base_url)
+        # Read inside the handler: `.port` is lazy and raises on `:99999` or `:abc`, which escaped as a
+        # traceback from `probe` and from the end of `score` — before the endpoint guard could refuse it
+        # as `bad-decisions-url` (issue 184).
+        port = parsed.port
     except ValueError:
         return "<unparseable>"
     host = parsed.hostname or "<no-host>"
     if ":" in host and not host.startswith("["):
         host = f"[{host}]"
-    return f"{parsed.scheme}://{host}:{parsed.port}" if parsed.port else f"{parsed.scheme}://{host}"
+    # Only a scheme the guard accepts is shown: `admin:hunter2` parses with scheme `admin`, so a
+    # credential pasted into the variable was echoed back in every report (issue 188).
+    scheme = parsed.scheme if parsed.scheme in ("http", "https") else "<invalid-scheme>"
+    return f"{scheme}://{host}:{port}" if port else f"{scheme}://{host}"
 
 
 def resolve_endpoint(base_url, api_key):
@@ -239,8 +254,17 @@ def resolve_endpoint(base_url, api_key):
         raise GateError("bad-decisions-url",
                         "the decision endpoint URL must not carry userinfo")
     if parsed.scheme not in ("http", "https"):
+        # The scheme is not echoed: `admin:hunter2` parses with scheme `admin` (issue 188).
+        raise GateError("bad-decisions-url", "the decision endpoint must be http or https")
+    if not parsed.hostname:
+        # `http:///v1` and `http://:11434` parse with no host; urllib would then resolve one of its
+        # own choosing, so there is nothing to validate the destination against (issue 188).
+        raise GateError("bad-decisions-url", "the decision endpoint must name a host")
+    if parsed.params or parsed.query or parsed.fragment or any(mark in base_url for mark in "?#;"):
+        # The path is appended after the base, so `;tok=x`, `?k=v` or `#f` would ride along with
+        # every request, or swallow the path. Never echoed: the parameter may be a pasted credential.
         raise GateError("bad-decisions-url",
-                        f"the decision endpoint must be http or https, not {parsed.scheme!r}")
+                        "the decision endpoint URL must not carry ';' parameters, a query or a fragment")
     if parsed.hostname in ("localhost", "127.0.0.1", "::1"):
         return base_url
     if parsed.scheme != "https" or not api_key:
@@ -310,13 +334,29 @@ def load_rubric(roles):
     return rubric.get("version", "unversioned"), [defined[role] for role in roles]
 
 
+def _field_text(value):
+    """A record field as the text the redactor inspects and the model receives.
+
+    A string passes through. Anything else that carries content — a number, a list, a nested map — is
+    serialised to JSON first, so the redactor sees all of it, keys included: a nested
+    `{"password": "…"}` is caught by the quoted-key rule only while the key sits beside its value, and
+    scrubbing leaves one by one would lose that. Before this the non-string value skipped the redactor
+    and reached the model unscrubbed (issue 184). Never iterated: a string is iterable too, and a field
+    walked element by element is how one malformed value becomes several plausible ones.
+    """
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
 def record_state(record):
     """The record as exported, as the model's `state`.
 
     Only the fields a reader would judge value from. Deliberately not the whole payload: a uuid, a
-    timestamp and an internal flag tell the model nothing about whether this is worth keeping.
+    timestamp and an internal flag tell the model nothing about whether this is worth keeping. Every
+    value is text (`_field_text`), so every value passes through the redactor.
     """
-    return {
+    state = {
         "subject": record.get("subject") or record.get("description") or record.get("name") or "",
         "statement": record.get("statement") or record.get("answer") or "",
         "summary": record.get("contentSummary") or record.get("why") or "",
@@ -324,6 +364,7 @@ def record_state(record):
         "kind": record.get("kind") or "",
         "scope": record.get("scope") or record.get("scopeDimension") or "",
     }
+    return {field: _field_text(value) for field, value in state.items()}
 
 
 def redact_records(records):
@@ -352,9 +393,11 @@ def redact_records(records):
         proc = subprocess.run(
             [sys.executable, "-B", str(REDACTOR)],
             input=json.dumps(unique),
-            capture_output=True, text=True, encoding="utf-8", timeout=60,
+            capture_output=True, text=True, encoding="utf-8", timeout=REDACTOR_TIMEOUT_SECONDS,
         )
-    except (OSError, ValueError) as exc:
+    # `SubprocessError` covers `TimeoutExpired`. Uncaught, a hung redactor escaped as a traceback,
+    # which the kvasir caller read as a skipped gate and wrote the record unscored (issue 182).
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
         raise GateError("redactor-unavailable",
                         f"the redactor could not run ({type(exc).__name__}); no request was made")
 
@@ -382,18 +425,28 @@ def redact_records(records):
 
     scrubbed = {}
     findings = {}
-    for position, item in enumerate(results):
+    seen = set()
+    for item in results:
         if not isinstance(item, dict):
             raise GateError("redactor-unavailable",
                             "the redactor returned an unexpected shape; no request was made")
-        # Trust the position we sent rather than a returned index: a redactor that reordered an entry
-        # would otherwise silently scrub one field's content into another's slot.
-        if "redacted" not in item:
-            # Absent is not "unchanged". Defaulting to "" would blank the field, and defaulting to
-            # the original would send it; neither is an inspection, so this refuses.
+        # Pair by the returned `candidate_index`, and require every index exactly once. Pairing by
+        # position trusted the order: a reordered answer put one field's scrubbed text in another's
+        # slot, so a field could be sent carrying text the redactor had never been asked to inspect
+        # in that position (issue 186). Any index that is missing, repeated, out of range or not an
+        # integer means the mapping is untrustworthy, and that refuses.
+        index = item.get("candidate_index")
+        if type(index) is not int or not 0 <= index < len(unique) or index in seen:
             raise GateError("redactor-unavailable",
-                            "a redactor result carried no 'redacted' field; no request was made")
-        scrubbed[unique[position]] = item["redacted"]
+                            "a redactor result carried no usable candidate_index; no request was made")
+        seen.add(index)
+        if not isinstance(item.get("redacted"), str):
+            # Absent is not "unchanged". Defaulting to "" would blank the field, and defaulting to
+            # the original would send it; neither is an inspection, so this refuses — as does a
+            # non-text value, which is not a scrub of the text that was sent.
+            raise GateError("redactor-unavailable",
+                            "a redactor result carried no text 'redacted' field; no request was made")
+        scrubbed[unique[index]] = item["redacted"]
         for finding in item.get("findings") or []:
             if not isinstance(finding, dict):
                 raise GateError("redactor-unavailable",
@@ -405,8 +458,13 @@ def redact_records(records):
     for record in records:
         state = record_state(record)
         for field, value in state.items():
-            if isinstance(value, str) and value in scrubbed:
+            if value in scrubbed:
                 state[field] = scrubbed[value]
+            elif value:
+                # Every non-empty field was sent to the redactor above; one that has no scrubbed
+                # counterpart was never inspected, and an uninspected field is never sent.
+                raise GateError("redactor-unavailable",
+                                f"field {field!r} was not inspected by the redactor; no request was made")
         out.append(state)
     return out, findings
 
@@ -416,17 +474,21 @@ def estimate_tokens(text):
     return math.ceil(len(text) / CHARS_PER_TOKEN)
 
 
-def size_guard(state, roles):
-    """Refuse an oversize record BEFORE the request. Never truncate to fit."""
-    state_text = json.dumps(state, ensure_ascii=False)
-    questions = len(roles)
-    total = estimate_tokens(state_text)
-    body = len(state_text.encode("utf-8"))
+def size_guard(state, roles, model):
+    """Refuse an oversize request BEFORE it is sent. Never truncate to fit.
+
+    Sized on the request body `call_model` sends, not on the record alone: every role's instructions
+    and criteria travel with the record, so a record that fits on its own could still overflow the
+    model's context once the rubric was added (issue 182).
+    """
+    request_text = encode_request(state, roles, model).decode("utf-8")
+    total = estimate_tokens(request_text)
+    body = len(request_text.encode("utf-8"))
     if total > MAX_CONTEXT_TOKENS:
-        return (f"record estimates to ~{total} tokens against a {MAX_CONTEXT_TOKENS}-token context "
-                f"({len(state_text)} chars)")
+        return (f"request estimates to ~{total} tokens against a {MAX_CONTEXT_TOKENS}-token context "
+                f"({len(request_text)} chars, rubric included)")
     if body > MAX_BODY_BYTES:
-        return f"record body is {body} bytes against a {MAX_BODY_BYTES}-byte limit"
+        return f"request body is {body} bytes against a {MAX_BODY_BYTES}-byte limit"
     return None
 
 
@@ -444,6 +506,11 @@ def build_request(state, roles, model):
             for role in roles
         },
     }
+
+
+def encode_request(state, roles, model):
+    """The exact bytes `call_model` sends, shared with `size_guard` so the two cannot disagree."""
+    return json.dumps(build_request(state, roles, model), ensure_ascii=False).encode("utf-8")
 
 
 def _classify(exc, timeout):
@@ -479,11 +546,67 @@ def discrimination(scores):
     return margin, sorted(tied)
 
 
+def request_path(path):
+    """The configured request path, refused unless it can only extend the validated origin.
+
+    The path is appended to a base URL that `resolve_endpoint` has already approved, so it can move the
+    request as surely as the base can: `@other.example/v1` turns `http://localhost:11434` into a URL
+    whose userinfo is `localhost:11434` and whose host is other.example — and the record and the bearer
+    key go with it. Only an absolute path with no authority-bearing character passes. Same rule as
+    muninn's `recall_feedback_path_ok`. The path is never echoed: it is configuration that may carry a
+    pasted credential.
+    """
+    if not path.startswith("/") or path.startswith("//"):
+        raise GateError("bad-decisions-url",
+                        f"{ENV_PATH} must be an absolute path starting with a single '/'")
+    if "@" in path or "\\" in path or any(ch.isspace() or ord(ch) < 0x20 or ord(ch) == 0x7F
+                                           for ch in path):
+        raise GateError("bad-decisions-url",
+                        f"{ENV_PATH} must not carry '@', '\\', whitespace or a control character")
+    if any(mark in path for mark in "?#;"):
+        # A query, fragment or `;` parameter in the path rides along with every request, and a pasted
+        # `?token=…` is the shape a credential most often takes there (issue 188).
+        raise GateError("bad-decisions-url",
+                        f"{ENV_PATH} must not carry a query, a fragment or ';' parameters")
+    return path
+
+
+def _authority(parsed):
+    return parsed.scheme.lower(), parsed.hostname, parsed.port
+
+
+def resolve_url(settings):
+    """The full request URL, asserted to reach the same scheme, host and port as the approved base.
+
+    The path rules above are the first net; this is the second, judged on the joined URL itself, so a
+    path shape the rules did not anticipate still cannot change the destination.
+    """
+    base = resolve_endpoint(settings["base_url"], settings["api_key"])
+    url = base + request_path(settings["path"])
+    try:
+        same = _authority(urlparse(url)) == _authority(urlparse(base))
+    except ValueError:
+        same = False
+    if not same:
+        raise GateError("bad-decisions-url",
+                        f"{ENV_PATH} changes the request's destination; refusing to send")
+    return url
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuse every redirect. The request carries the record and, for a hosted endpoint, the bearer
+    key; urllib would replay both to whatever `Location` names. Same guard as the store client's."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise GateError("redirect-refused",
+                        f"the decision endpoint answered {code} with a redirect; credential-bearing "
+                        "requests do not follow redirects")
+
+
 def call_model(state, roles, settings, rubric_version):
     """Score one record. Returns scores, passing roles, and the rubric version recorded with them."""
-    payload = build_request(state, roles, settings["model"])
-    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    url = resolve_endpoint(settings["base_url"], settings["api_key"]) + settings["path"]
+    body = encode_request(state, roles, settings["model"])
+    url = resolve_url(settings)
 
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
     # Sent only when non-empty: local Ollama needs no key, and an empty Authorization header is a
@@ -492,18 +615,27 @@ def call_model(state, roles, settings, rubric_version):
         headers["Authorization"] = f"Bearer {settings['api_key']}"
 
     request = urllib.request.Request(url, data=body, headers=headers, method="POST")
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
     try:
         with opener.open(request, timeout=settings["timeout"]) as response:
             raw = response.read().decode("utf-8")
     except urllib.error.HTTPError as exc:
         detail = (exc.read().decode("utf-8", errors="replace") or "").strip()
         # A missing model is the one HTTP failure an operator can act on without reading a traceback.
-        if exc.code == 404 or "model" in detail.lower():
+        # Only a 404 — or a 400 whose body names the model as not found — reads as missing. Any
+        # status whose body merely mentions "model" (a 500 from inside the model server, say) was
+        # reported as a missing model, sending the operator to pull a model that was there (review #19).
+        if exc.code == 404 or (exc.code == 400 and re.search(r"model\b.*\bnot found|no such model",
+                                                             detail, re.IGNORECASE)):
             raise GateError("model-missing",
                             f"the decision model is not available ({exc.code})") from None
+        # The body is read only to classify, never echoed: the endpoint may be hosted, and its error
+        # text — which can quote the request, the key's account, or anything else it chooses — went
+        # straight into the report and the export's transcript (issue 186). Its size is the signal.
         raise GateError(f"http-{exc.code}",
-                        detail or "the decision endpoint returned no detail") from None
+                        f"the decision endpoint refused the request (HTTP {exc.code}"
+                        + (f"; a {len(detail)}-character body was not shown)" if detail else ")")
+                        ) from None
     except urllib.error.URLError as exc:
         raise _classify(exc.reason, settings["timeout"]) from None
     except (TimeoutError, socket.timeout) as exc:
@@ -528,9 +660,17 @@ def call_model(state, roles, settings, rubric_version):
         if not isinstance(value, (int, float)) or isinstance(value, bool):
             raise GateError("bad-response",
                             f"role {role['key']!r} carried no numeric `noul`")
-        # Clamped: a probability outside 0..1 is a malformed answer, and letting it through would let a
-        # 1.5 pass a 1.0 bar. Clamping is stated here rather than silently trusted.
-        scores[role["key"]] = max(0.0, min(1.0, float(value)))
+        # Refused, not clamped. `json.loads` accepts `NaN` and `Infinity`, and clamping turned an
+        # `Infinity` (or a 1.5) into a confident 1.0 that passes any bar — a malformed answer reported
+        # as the strongest possible score. A probability outside 0..1 is not a score at all.
+        try:
+            probability = float(value)
+        except OverflowError:
+            probability = math.inf
+        if not math.isfinite(probability) or not 0.0 <= probability <= 1.0:
+            raise GateError("bad-response",
+                            f"role {role['key']!r} carried a `noul` outside 0..1")
+        scores[role["key"]] = probability
 
     passing = [role for role, value in scores.items() if value > settings["min_probability"]]
     return scores, passing, rubric_version
@@ -543,8 +683,50 @@ def ledger_path(state_file):
     return Path(state_file)
 
 
+LEDGER_KEY_PREFIX = "sha256:"
+_LEDGER_KEY = re.compile(r"sha256:[0-9a-f]{64}")
+
+
+def ledger_key(identity):
+    """The on-disk key for a record identity: a SHA-256 digest, never the identity itself.
+
+    The identity is the record's subject, and a subject can carry personal data — a name, an email, a
+    customer. The ledger only needs to recognise the same record again, which a digest does as well as
+    the raw text, so the raw text never has to reach the file.
+    """
+    return LEDGER_KEY_PREFIX + hashlib.sha256(identity.encode("utf-8")).hexdigest()
+
+
+def _merge_entries(first, second):
+    """One entry from two that now share a key: the larger spent count and the better best."""
+    if first is None:
+        return second
+    best_first, best_second = entry_best(first), entry_best(second)
+    best = best_first if best_second is None else best_attempt(best_first, best_second)
+    return {"attempts": max(entry_attempts(first), entry_attempts(second)), "best": best}
+
+
+def migrate_ledger(ledger):
+    """Re-key a ledger written before keys were digests. Returns `(ledger, migrated)`.
+
+    A raw-identity key is hashed rather than dropped: dropping it would reset that record's budget on
+    upgrade, the same silent reset `ledgerReset` exists to expose. Two raw keys never hash alike, but a
+    raw key can meet the digest of itself if an older and a newer gate both wrote this file; those are
+    merged, keeping the larger spent count. The caller rewrites the file whenever `migrated` is true, so
+    the raw subjects leave the disk on the first run after an upgrade.
+    """
+    migrated = {}
+    changed = False
+    for key, value in ledger.items():
+        if not _LEDGER_KEY.fullmatch(key):
+            key = ledger_key(key)
+            changed = True
+        migrated[key] = _merge_entries(migrated.get(key), value)
+    return migrated, changed
+
+
 def read_ledger(state_file):
-    """The ledger, and whether it had to be discarded.
+    """The ledger, whether it had to be discarded, and whether it was re-keyed from raw identities.
 
     A missing or unreadable ledger starts empty rather than refusing: the ledger bounds a convenience
     loop, and a corrupt file must not be a way to make scoring fail permanently. **That choice is
@@ -556,12 +738,16 @@ def read_ledger(state_file):
     try:
         with open(ledger_path(state_file), encoding="utf-8") as handle:
             data = json.load(handle)
-    except OSError:
-        return {}, False
-    except ValueError:
-        return {}, True
+    except FileNotFoundError:
+        return {}, False, False
+    except (OSError, ValueError):
+        # Only a missing file is a first run. A ledger that exists and cannot be read (permissions, a
+        # directory in its place, an I/O error) starts empty too, so it is a reset and is disclosed like a
+        # corrupt one: an `OSError` returned "not discarded" and cleared every spent budget silently
+        # (consumer review 5441621898 #6).
+        return {}, True, False
     if not isinstance(data, dict):
-        return {}, True
+        return {}, True, False
     # An entry is `{"attempts": int, "best": {...} | null}`, because the best attempt has to survive
     # between invocations for the comparison it exists to make. A **bare integer is also accepted** and
     # read as a count with no recorded best, so a ledger written by the earlier count-only format
@@ -569,17 +755,36 @@ def read_ledger(state_file):
     # the exact failure `ledgerReset` exists to make visible.
     for key, value in data.items():
         if not isinstance(key, str):
-            return {}, True
+            return {}, True, False
         if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
             continue
         if not isinstance(value, dict):
-            return {}, True
+            return {}, True, False
         attempts = value.get("attempts")
         if not isinstance(attempts, int) or isinstance(attempts, bool) or attempts < 0:
-            return {}, True
-        if value.get("best") is not None and not isinstance(value.get("best"), dict):
-            return {}, True
-    return data, False
+            return {}, True, False
+        if value.get("best") is not None and not valid_best(value["best"]):
+            return {}, True, False
+    ledger, migrated = migrate_ledger(data)
+    return ledger, False, migrated
+
+
+def _finite_number(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def valid_best(best):
+    """A recorded best attempt in the shape `record_attempt` writes.
+
+    Checking only that it was an object let `{}` or a non-numeric `max` through, and the next scored
+    round raised `KeyError`/`TypeError` in `best_attempt` — a traceback instead of the disclosed reset a
+    damaged ledger gets (review 5432012955 #11).
+    """
+    return (isinstance(best, dict)
+            and type(best.get("attempt")) is int and best["attempt"] >= 1
+            and _finite_number(best.get("max"))
+            and isinstance(best.get("scores"), dict)
+            and all(isinstance(k, str) and _finite_number(v) for k, v in best["scores"].items()))
 
 
 def entry_attempts(value):
@@ -621,7 +826,7 @@ def ledger_cap():
     return value
 
 
-def cap_ledger(ledger, max_entries=None):
+def cap_ledger(ledger, max_entries=None, keep=None):
     """Bound the ledger by dropping the most-spent entries once it grows past the cap.
 
     Nothing else prunes it: an entry is kept precisely because it must remember that its budget is
@@ -629,13 +834,29 @@ def cap_ledger(ledger, max_entries=None):
     20 000-subject session reaches ~430 KB of `{"subject": 3}` lines and keeps growing. Dropping the
     **most-spent** entries is the cheapest way to bound it: those are the records most likely to have
     been written already, and losing the memory of a spent budget is the least harmful entry to lose.
+
+    `keep` is the key being written, and it is never evicted. Without that guarantee, a ledger at the
+    cap evicted the entry it had just counted, so that record restarted at attempt 1 on every round and
+    its budget never ran out (issue 182). Ties are broken by key so the eviction is deterministic.
     """
     if max_entries is None:
         max_entries = ledger_cap()
     if len(ledger) <= max_entries:
         return ledger
-    ordered = sorted(ledger.items(), key=lambda pair: (-entry_attempts(pair[1]), pair[0]))
-    return dict(ordered[:max_entries])
+    ordered = sorted(((key, value) for key, value in ledger.items() if key != keep),
+                     key=lambda pair: (entry_attempts(pair[1]), pair[0]))
+    room = max_entries - (1 if keep in ledger else 0)
+    capped = dict(ordered[:max(room, 0)])
+    if keep in ledger:
+        capped[keep] = ledger[keep]
+    return capped
+
+
+def write_capped_ledger(state_file, ledger, keep):
+    """Cap, write, and return how many entries the cap evicted, so the caller can disclose it."""
+    capped = cap_ledger(ledger, keep=keep)
+    write_ledger(state_file, capped)
+    return len(ledger) - len(capped)
 
 
 def write_ledger(state_file, ledger):
@@ -660,6 +881,14 @@ def record_identity(record, index):
         # A record with no subject cannot be identified across attempts, so it is keyed by position
         # and gets the budget for this call only — reported, so the caller knows it is not durable.
         return f"index:{index}"
+    # A memory is `(group, subject)`, not the subject alone: the same subject captured for two groups is
+    # two memories. Keying by subject alone made them share one attempt budget, so scoring one spent the
+    # other's (issue 186). The group is `groupUuid` when the caller has it, else `group` — whatever
+    # describes it before it exists (kvasir sends the binding the group will be resolved from). A
+    # record carrying neither keeps the subject-only key, so existing ledgers are read unchanged.
+    group = record.get("groupUuid") or record.get("group")
+    if group:
+        return json.dumps({"group": group, "subject": str(subject)}, sort_keys=True, ensure_ascii=False)
     return str(subject)
 
 
@@ -670,11 +899,13 @@ def next_attempt(state_file, identity, max_attempts):
     "improve until it passes" will otherwise re-ask whenever the answer is inconvenient. Once the
     budget is spent, further attempts are refused rather than silently accepted.
 
-    Returns `(attempt, reset)`; `reset` is True when the ledger had to be discarded, which the caller
-    surfaces so a cleared budget is never mistaken for a first attempt.
+    Returns `(attempt, reset, prior_best, evicted)`; `reset` is True when the ledger had to be
+    discarded, which the caller surfaces so a cleared budget is never mistaken for a first attempt, and
+    `evicted` counts the entries the cap dropped on this write.
     """
-    ledger, discarded = read_ledger(state_file)
-    entry = ledger.get(identity)
+    ledger, discarded, migrated = read_ledger(state_file)
+    key = ledger_key(identity)
+    entry = ledger.get(key)
     # Read both parts of the entry BEFORE any write. Two separate writes were the first cut of this,
     # and the second one read back a file the first had already replaced: writing the bare count
     # discards the recorded best, so every rewrite looked like an improvement and the stored `best`
@@ -682,12 +913,17 @@ def next_attempt(state_file, identity, max_attempts):
     prior_best = entry_best(entry)
     used = entry_attempts(entry) if entry is not None else 0
     if used >= max_attempts:
-        return None, discarded, prior_best
+        evicted = 0
+        if migrated:
+            # Nothing else would rewrite the file on this path, and a spent budget is exactly the
+            # entry that stays put — so the raw subjects would outlive the upgrade indefinitely.
+            evicted = write_capped_ledger(state_file, ledger, key)
+        return None, discarded, prior_best, evicted
     # The count is spent whether or not the model answers, so it is written now with the best carried
     # through untouched; `record_attempt` then raises the best without disturbing the count.
-    ledger[identity] = {"attempts": used + 1, "best": prior_best}
-    write_ledger(state_file, cap_ledger(ledger))
-    return used + 1, discarded, prior_best
+    ledger[key] = {"attempts": used + 1, "best": prior_best}
+    evicted = write_capped_ledger(state_file, ledger, key)
+    return used + 1, discarded, prior_best, evicted
 
 
 def record_attempt(state_file, identity, attempt, scores):
@@ -695,27 +931,27 @@ def record_attempt(state_file, identity, attempt, scores):
 
     Written separately from `next_attempt` because the count is spent whether or not the model
     answered — an `unreachable` round must still count against the budget, or a down model would
-    grant unlimited attempts for free.
+    grant unlimited attempts for free. Returns `(best, evicted)`.
     """
-    ledger, _discarded = read_ledger(state_file)
+    ledger, _discarded, _migrated = read_ledger(state_file)
+    key = ledger_key(identity)
     candidate = {"attempt": attempt, "max": max(scores.values()), "scores": scores}
-    entry = ledger.get(identity)
+    entry = ledger.get(key)
     # `next_attempt` may have replaced a dict entry with a bare count, so the best is read from what
     # survives here rather than from the value passed in. Counting up from the surviving count keeps a
     # ledger written in the earlier format converging instead of restarting.
     #
-    # The `is not None` guard is load-bearing, and `next_attempt` already carries the same one. The two
-    # calls are separate reads of the file, and between them `cap_ledger` can evict *this* identity —
-    # at which point `entry` is `None`, `entry_attempts(None)` is `None`, and `max(None, attempt)`
-    # raises `TypeError`. A capped ledger therefore crashed on the very records it had just evicted,
-    # which is why no earlier case reached it: every one of them ran below the cap. Found by the
-    # end-to-end case that finally crosses the cap.
+    # The `is not None` guard is load-bearing. The two calls are separate reads of the file, and an
+    # entry can be gone by the second one — before `keep` existed, `cap_ledger` evicted the very
+    # identity it had just counted, and another process sharing the file can still drop it. Then
+    # `entry_attempts(None)` is `None` and `max(None, attempt)` raises `TypeError`.
     prior = entry_best(entry)
     prior_attempts = entry_attempts(entry) if entry is not None else 0
-    ledger[identity] = {"attempts": max(prior_attempts, attempt),
-                        "best": best_attempt(prior, candidate)}
-    write_ledger(state_file, cap_ledger(ledger))
-    return ledger[identity]["best"]
+    ledger[key] = {"attempts": max(prior_attempts, attempt),
+                   "best": best_attempt(prior, candidate)}
+    best = ledger[key]["best"]
+    evicted = write_capped_ledger(state_file, ledger, key)
+    return best, evicted
 
 
 def best_attempt(previous, candidate):
@@ -759,13 +995,19 @@ def cmd_score(args):
         return 0
 
     rubric_version, roles = load_rubric(settings["roles"])
+    # The endpoint is configuration, not a per-record condition. Checked inside `call_model` only, an
+    # invalid URL became each record's outcome, the gate exited 0, and the export kept every record
+    # unscored and carried on — a misconfigured gate read as a skipped one (issue 190). Checked once
+    # here, before any record is touched, it is a refusal like every other bad setting.
+    resolve_url(settings)
 
     redacted, findings = redact_records(records)
 
     results = []
     ledger_reset = False
+    ledger_evicted = 0
     for index, (original, state) in enumerate(zip(records, redacted)):
-        oversize = size_guard(state, roles)
+        oversize = size_guard(state, roles, settings["model"])
         if oversize:
             # `discrimination` is disclosed on every record, not only the scored ones: a consumer
             # reading `margin` must not KeyError on exactly the records whose outcome it most needs to
@@ -779,9 +1021,10 @@ def cmd_score(args):
             continue
 
         if args.state_file:
-            attempt, this_reset, prior_best = next_attempt(args.state_file,
-                                                       record_identity(original, index),
-                                                       settings["max_attempts"])
+            attempt, this_reset, prior_best, evicted = next_attempt(args.state_file,
+                                                                    record_identity(original, index),
+                                                                    settings["max_attempts"])
+            ledger_evicted += evicted
             # One reset anywhere in the batch is reported, since it is one file and one bound.
             ledger_reset = ledger_reset or this_reset
             if attempt is None:
@@ -815,8 +1058,12 @@ def cmd_score(args):
                         {"attempt": attempt, "scores": scores, "max": max(scores.values())})
         # Persist only once a score exists, so a failed round leaves the best untouched while still
         # having spent its attempt above.
-        stored = record_attempt(args.state_file, record_identity(original, index),
-                                attempt, scores) if args.state_file else best
+        if args.state_file:
+            stored, evicted = record_attempt(args.state_file, record_identity(original, index),
+                                             attempt, scores)
+            ledger_evicted += evicted
+        else:
+            stored = best
         margin, tied = discrimination(scores)
         results.append({
             "index": index, "identity": record_identity(original, index), "attempt": attempt,
@@ -846,6 +1093,9 @@ def cmd_score(args):
     }
     if args.state_file:
         payload["stateFile"] = str(args.state_file)
+        # Always present with a ledger: an evicted entry is a record whose spent budget was forgotten,
+        # so the count says how many budgets this run restarted.
+        payload["ledgerEvicted"] = ledger_evicted
         if ledger_reset:
             # Said plainly, because a cleared ledger means every record's attempt budget starts again
             # — so an `attempt: 1` here is not evidence that this record is new.
@@ -869,7 +1119,7 @@ def cmd_probe(args):
         return 0
 
     try:
-        resolve_endpoint(settings["base_url"], settings["api_key"])
+        resolve_url(settings)
         rubric_version, roles = load_rubric(settings["roles"])
     except GateError as exc:
         report["outcome"] = exc.outcome

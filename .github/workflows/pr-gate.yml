@@ -25,6 +25,7 @@ on:
       - .agents/skills/ai-understanding/**
       - .agents/skills/mimisbrunnr-muninn-recall-feedback/**
       - .agents/skills/mimisbrunnr-ymir-bootstrap/**
+      - .agents/skills/mimisbrunnr-heimdallr-find-session-metadata/**
       - .agents/skills/agile-github-*/**
       - .agents/agents/memory-read.md
       - .agents/agents/memory-write.md
@@ -56,6 +57,7 @@ on:
       - .agents/skills/ai-understanding/**
       - .agents/skills/mimisbrunnr-muninn-recall-feedback/**
       - .agents/skills/mimisbrunnr-ymir-bootstrap/**
+      - .agents/skills/mimisbrunnr-heimdallr-find-session-metadata/**
       - .agents/skills/agile-github-*/**
       - .agents/agents/memory-read.md
       - .agents/agents/memory-write.md
@@ -118,6 +120,9 @@ jobs:
 
       - name: Test recall-feedback skill
         run: python3 -B .agents/skills/mimisbrunnr-muninn-recall-feedback/tests/run_tests.py
+
+      - name: Test session-metadata skill
+        run: python3 -B .agents/skills/mimisbrunnr-heimdallr-find-session-metadata/tests/run_tests.py
 
       - name: Test agile GitHub skills
         run: |

@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 """Cold-agent walk harness (BRD-003 assumption 2).
 
-Run (model-free degenerate assertions; the PR gate runs this):
+Run (model-free degenerate assertions):
     python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/tests/run_walk_tests.py
+
+It needs no CI, no network and no particular repository: the command above is the whole run. Whether a
+CI runs it is up to the repository holding the skill — the repository that develops the skill runs it in
+its PR gate; a repository that vendors the skill covers it only if it adds its own CI step (issues 184,
+186).
 
 Run (also score the recorded cold-agent walk):
     SMOOTH_WALK_BENCH=1 python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/tests/run_walk_tests.py
@@ -19,7 +24,9 @@ measures what that costs in context. Three surfaces are rendered offline from co
 
 A cold agent receives only the rendered surface plus a question set, and answers each question by
 citing the specific identity (subject / uuid / slug) that supports it, or "not in context" when the
-information is absent. Each question is scored **by identity cited**, never by prose similarity.
+information is absent. Each question is scored **by identity cited and key fact stated**
+(`must_contain` / `must_not_contain` in `walk_questions.json`), never by prose similarity: citing the
+right identity while stating a wrong or superseded claim is not a correct answer (issue 182).
 
 The genuinely model-dependent part — a cold *model* answering the question set — is performed by the
 orchestrator (the skill's cold agent), not by this file. That walk's output is recorded in
@@ -72,8 +79,12 @@ CHARS_PER_TOKEN_ESTIMATE = 4.0
 # ("not present", "no record", "does not mention") also matched them inside asserted content, which
 # scored a confabulation as a correct refusal. A decline worded differently is under-credited — the
 # safe direction for an instrument whose job is to catch confabulation.
+#
+# The phrase must also be the **whole** answer, give or take punctuation: searching for it anywhere
+# scored "not in context; the cluster is prod-west-2" as a decline, so a refusal could carry an invented
+# fact past the confabulation count (issue 179). Use `fullmatch`.
 DECLINE_PHRASE = "not in context"
-DECLINE_RE = re.compile(rf"\b{DECLINE_PHRASE}\b", re.IGNORECASE)
+DECLINE_RE = re.compile(rf"[\W_]*{DECLINE_PHRASE}[\W_]*", re.IGNORECASE)
 
 SURFACES = ("load_default", "load_all", "dossier_slice")
 
@@ -137,24 +148,128 @@ def _present(surface_text: str, q: dict) -> bool:
     return q["identity"].lower() in surface_text.lower()
 
 
+# A clause ends at sentence punctuation, a comma or a dash. A key fact is stated only when no clause
+# holding it also negates it: "Postgres is not the storage engine" contains "postgres" (issue 184).
+CLAUSE_BOUNDARY = re.compile(r"[.;:!?,\n\u2014\u2013]|\s-\s")
+NEGATION = re.compile(r"\b(?:not|never|no|none|nor|neither|cannot|without)\b|n't\b|n\u2019t\b")
+
+
+def _stated_affirmatively(text: str, fact: str) -> bool:
+    """`fact` occurs in `text`, and every clause holding it is free of negation outside the fact.
+
+    The fact's own words are excluded, so a fact that is itself a negation (`not a join`) still
+    counts. Every occurrence must pass, not one: a fact asserted once and denied once is not stated.
+    That under-credits an answer that negates something else in the fact's clause, which is the safe
+    direction for an instrument whose job is to catch a wrong answer.
+    """
+    starts = [m.start() for m in re.finditer(re.escape(fact), text)]
+    if not starts:
+        return False
+    for start in starts:
+        end = start + len(fact)
+        left = max((m.end() for m in CLAUSE_BOUNDARY.finditer(text, 0, start)), default=0)
+        right_match = CLAUSE_BOUNDARY.search(text, end)
+        right = right_match.start() if right_match else len(text)
+        if NEGATION.search(text[left:start]) or NEGATION.search(text[end:right]):
+            return False
+    return True
+
+
+def _facts_match(answer: str, q: dict) -> bool:
+    """The answer states the question's key fact and none of its known-wrong claims.
+
+    Citing a present identity is not answering: an answer that names the right memory and states the
+    superseded or an invented claim scored as correct (issue 182). `must_contain` is the key-fact
+    phrase the material supports (chosen so the question text itself does not supply it) and
+    `must_not_contain` the claim it contradicts, such as a superseded version. A key fact found only
+    inside a negated clause is not stated (issue 184). A token check, not a semantic one: it catches a
+    wrong or denied fact, not every way to garble a right one.
+    """
+    text = answer.lower()
+    return (all(_stated_affirmatively(text, f.lower()) for f in q.get("must_contain", []))
+            and not any(f.lower() in text for f in q.get("must_not_contain", [])))
+
+
 def score_answers(surface_text: str, answers: dict, questions: list[dict]) -> list[dict]:
-    """Score one surface's answers by identity cited.
+    """Score one surface's answers by identity cited and key fact stated.
 
     For a question whose identity is rendered (present): correct iff the answer cites an accepted
-    alias of that identity. For a question whose identity is NOT rendered (absent): correct iff the
-    answer declines as not-in-context — an answer that supplies content is a confabulation.
+    alias of that identity **and** states its key fact without a known-wrong claim. For a question
+    whose identity is NOT rendered (absent): correct iff the answer declines as not-in-context — an
+    answer that supplies content is a confabulation.
     """
     results = []
     for q in questions:
         present = _present(surface_text, q)
         ans = (answers.get(q["id"]) or "").strip()
         cited = any(a.lower() in ans.lower() for a in q.get("accept", [q["identity"]]))
-        declined = bool(DECLINE_RE.search(ans))
+        facts = _facts_match(ans, q)
+        supported = all(_surface_supports(text, q) for text in _cited_version_texts(surface_text, ans, q))
+        declined = bool(DECLINE_RE.fullmatch(ans))
         results.append({
-            "id": q["id"], "present": present, "cited": cited, "declined": declined,
-            "correct": cited if present else declined,
+            "id": q["id"], "present": present, "cited": cited, "facts": facts,
+            "supported": supported, "declined": declined,
+            "correct": (cited and facts and supported) if present else declined,
         })
     return results
+
+
+_VERSION_RE = re.compile(r"(?i)\b(?:v|version\s+)(\d+)\b")
+
+
+_ATTRIBUTION_RE = re.compile(r"(?i)\b(?:stated|asserted|recorded|said)\s+by\b([^.;()]*)")
+
+
+def _attributed_versions(ans: str) -> set[str]:
+    """The versions the answer credits its fact to.
+
+    An answer often names a second version only to set it aside ("stated by v3 … (the v1 version is
+    superseded)"), so the versions inside a "stated by …" clause are the attribution. With no such
+    clause every version named is attributed, and each must then support the fact: unioning them let
+    "stated by v1" plus a passing mention of v3 borrow v3's support (consumer review 5438563690 #5).
+    """
+    clauses = _ATTRIBUTION_RE.findall(ans)
+    attributed = {v for clause in clauses for v in _VERSION_RE.findall(clause)}
+    return attributed or set(_VERSION_RE.findall(ans))
+
+
+def _cited_version_texts(surface_text: str, ans: str, q: dict) -> list[str]:
+    """The part of the surface each attributed version stands for — one text per version.
+
+    An answer naming a version of the record ("Stale-image trap v1") is supported only by that
+    version's section: checking the whole surface credited a fact from v3 to a v1 that says the
+    opposite (review 5432012955 #5). A section is a heading and the lines under it, kept when it names
+    the record and the version. An answer naming no version is held to the whole surface.
+    """
+    versions = _attributed_versions(ans)
+    if not versions:
+        return [surface_text]
+    names = [a.lower() for a in q.get("accept", [])] + [q["identity"].lower()]
+    sections, current = [], []
+    for line in surface_text.splitlines():
+        if line.startswith("#") and current:
+            sections.append("\n".join(current))
+            current = []
+        current.append(line)
+    if current:
+        sections.append("\n".join(current))
+    return ["\n".join(s for s in sections
+                      if any(n in s.lower() for n in names) and version in _VERSION_RE.findall(s))
+            for version in sorted(versions)]
+
+
+def _surface_supports(surface_text: str, q: dict) -> bool:
+    """The rendered surface itself carries the question's key facts.
+
+    The answers are recorded once; the surfaces are re-rendered on every run. Scoring only the answer
+    let a recorded walk keep its marks after a rendering change dropped the very fact the answer
+    states, so the walk proved an agent could act on material the surface no longer contains
+    (issue 188). A present question is correct only when the surface still supports its answer.
+    """
+    text = surface_text.lower()
+    # Stated, not merely present: a surface that says "postgres is not the storage engine" contains
+    # "postgres" and used to keep the recorded answer's marks (issue 190 #17).
+    return all(_stated_affirmatively(text, fact.lower()) for fact in q.get("must_contain", []))
 
 
 def summarize(results: list[dict]) -> dict:
@@ -193,14 +308,30 @@ def confab_answers(questions: list[dict]) -> dict:
 
 
 def perfect_answers(surface_text: str, questions: list[dict]) -> dict:
-    """The ideal cold agent: cites the identity for present questions, declines for absent ones."""
+    """The ideal cold agent: cites the identity and states its key fact for present questions,
+    declines for absent ones."""
     out = {}
     for q in questions:
         if _present(surface_text, q):
-            out[q["id"]] = f"{q['identity']}: supported by the cited material."
+            facts = "; ".join(q.get("must_contain", []))
+            # Cite an accepted alias: the identity is a display name, and where the question itself
+            # names it, it is not accepted as a citation (review #13).
+            out[q["id"]] = f"{q['identity']} ({q['accept'][-1]}): {facts} — supported by the cited material."
         else:
             out[q["id"]] = "not in context."
     return out
+
+
+def wrong_fact_answers(questions: list[dict]) -> dict:
+    """An agent that cites the right identity but states a wrong or superseded claim."""
+    wrong = {
+        "Q1": "A healthy container is always fresh, so redeploy. Cited: Stale-image trap.",
+        "Q2": "The graph is a join under the hood. Cited: Graph over joins.",
+        "Q3": "SQLite is the storage engine. Cited: bbbbbbbb-1111-1111-1111-111111111111.",
+        "Q4": "Memcached holds the cache. Cited: bbbbbbbb-2222-2222-2222-222222222222.",
+        "Q5": "not in context",
+    }
+    return {q["id"]: wrong.get(q["id"], "not in context") for q in questions}
 
 
 # ------------------------------------------------------------------------- Tests
@@ -252,8 +383,164 @@ class WalkFixtureTests(unittest.TestCase):
             summ = summarize(results)
             self.assertEqual(summ["confabulations"], summ["absent_asked"],
                              f"{name}: every absent question must be flagged as a confabulation")
-            # And the confab agent does get the present ones right — so the detector is not trivially 0.
-            self.assertEqual(summ["correct_present"], summ["present_asked"], name)
+
+    def test_a_right_citation_with_a_wrong_fact_is_not_correct(self):
+        """Regression (issue 182): scoring by identity alone counted an answer that names the right
+        memory and states a wrong or superseded claim as correct, so an all-wrong walk scored 5/5."""
+        for name, text in self.texts.items():
+            results = score_answers(text, wrong_fact_answers(self.questions), self.questions)
+            summ = summarize(results)
+            self.assertGreater(summ["present_asked"], 0, name)
+            self.assertTrue(all(r["cited"] for r in results if r["present"]), name)
+            self.assertEqual(summ["correct_present"], 0, f"{name}: a wrong fact must not score")
+
+    def test_a_negated_key_fact_is_not_correct(self):
+        """Regression (issue 184): `must_contain` was a substring check, so an answer denying the fact
+        ("Postgres is not the storage engine") scored as stating it."""
+        negated = {
+            "Q1": "Do not verify freshness; a green container is current. Cited: Stale-image trap.",
+            "Q2": "The graph is never 'not a join'. Cited: Graph over joins.",
+            "Q3": "Postgres is not the storage engine. Cited: bbbbbbbb-1111-1111-1111-111111111111.",
+            "Q4": "Redis never holds the cache. Cited: bbbbbbbb-2222-2222-2222-222222222222.",
+        }
+        for name, text in self.texts.items():
+            results = score_answers(text, negated, self.questions)
+            for r in results:
+                if r["present"]:
+                    with self.subTest(surface=name, question=r["id"]):
+                        self.assertTrue(r["cited"])
+                        self.assertFalse(r["facts"], negated[r["id"]])
+                        self.assertFalse(r["correct"])
+
+    def test_negation_elsewhere_does_not_cancel_a_stated_fact(self):
+        """Controls: a fact that is itself a negation, a negation in another clause, and a contrast
+        after a comma all still count."""
+        by_id = {q["id"]: q for q in self.questions}
+        for qid, answer in (("Q2", "The graph is a path, not a join."),
+                            ("Q4", "Redis holds the cache, not the store."),
+                            ("Q3", "Postgres is the storage engine. It is not the cache."),
+                            ("Q1", "Not the health check: verify freshness by calling the endpoint.")):
+            with self.subTest(answer=answer):
+                self.assertTrue(_facts_match(answer, by_id[qid]), answer)
+
+    def test_the_newer_walk_unit_records_what_it_supersedes(self):
+        """Regression (issue 184): the fixture's newer `stale-image-trap` omitted
+        `provenance.supersedes`, so the store folder modelled a version chain the export procedure
+        never produces. Every non-oldest copy of a slug names the folder of the copy before it."""
+        root = _fixture("walk_understandings")
+        copies: dict = {}
+        for unit in sorted(root.glob("*/*.understanding.md")):
+            copies.setdefault(unit.name, []).append(unit)
+        self.assertTrue(any(len(paths) > 1 for paths in copies.values()))
+        for paths in copies.values():
+            for older, newer in zip(paths, paths[1:]):
+                text = newer.read_text(encoding="utf-8")
+                self.assertRegex(text, rf"(?m)^  supersedes: {re.escape(older.parent.name)}$",
+                                 newer.relative_to(root).as_posix())
+
+    def test_ci_coverage_is_claimed_per_repository(self):
+        """Regression (issue 184): the run instructions said the PR gate runs this file, which is false
+        in a repository that vendors the skill. The claim is qualified, and true where it is made."""
+        doc = sys.modules[__name__].__doc__ or ""
+        self.assertNotIn("the PR gate runs this)", doc)
+        self.assertIn("vendors the skill", doc)
+        # Checked only in a repository whose gate runs the Mímisbrunnr harnesses at all. A repository
+        # vendoring the skill can have its own `pr-gate.yml` for unrelated work, and asserting on it
+        # made this harness fail there for a fact about another repository's CI (issue 186).
+        workflow = UND_ROOT.parents[2] / ".github" / "workflows" / "pr-gate.yml"
+        text = workflow.read_text(encoding="utf-8") if workflow.is_file() else ""
+        if "mimisbrunnr-odin-context-memory/tests/" in text:
+            self.assertIn("mimisbrunnr-kvasir-understanding/tests/run_walk_tests.py", text)
+
+    def test_a_surface_that_loses_its_facts_loses_its_marks(self):
+        """Regression (issue 188): a recorded answer kept scoring after the rendered surface stopped
+        carrying its key fact. Strip the facts from a surface and the same answers stop being correct."""
+        for name, text in self.texts.items():
+            answers = perfect_answers(text, self.questions)
+            stripped = text
+            for q in self.questions:
+                for fact in q.get("must_contain", []):
+                    stripped = re.sub(re.escape(fact), "[removed]", stripped, flags=re.IGNORECASE)
+            with self.subTest(surface=name):
+                kept = summarize(score_answers(text, answers, self.questions))
+                lost = summarize(score_answers(stripped, answers, self.questions))
+                self.assertGreater(kept["correct_present"], 0)
+                self.assertEqual(lost["correct_present"], 0)
+
+    def test_a_fact_credited_to_a_superseded_version_is_not_correct(self):
+        """Review 5432012955 #5: an answer attributing v3's "verify freshness" to v1 — which says a
+        healthy container is always fresh — scored full marks, because support was checked against the
+        whole surface rather than the version the answer cites."""
+        text = self.texts["load_all"]
+        q1 = [q for q in self.questions if q["id"] == "Q1"][0]
+        wrong = {"Q1": "Verify freshness by calling a newly added endpoint. Stated by Stale-image trap v1."}
+        right = {"Q1": "Verify freshness by calling a newly added endpoint. Stated by Stale-image trap v3."}
+        self.assertFalse(score_answers(text, wrong, [q1])[0]["correct"])
+        self.assertTrue(score_answers(text, right, [q1])[0]["correct"])
+
+    def test_the_wrong_cache_relationship_is_not_correct(self):
+        """Consumer review 5440964552 #8: Q4's key fact was the word `redis`, so "Redis holds the store"
+        citing the right record scored correct. The fact is now the relationship."""
+        text = self.texts["load_all"]
+        q4 = [q for q in self.questions if q["id"] == "Q4"][0]
+        cite = " Stated by record bbbbbbbb-2222-2222-2222-222222222222."
+        self.assertFalse(score_answers(text, {"Q4": "Redis holds the store, not the cache." + cite},
+                                       [q4])[0]["correct"])
+        self.assertTrue(score_answers(text, {"Q4": "Redis holds the cache, not the store." + cite},
+                                      [q4])[0]["correct"])
+
+    def test_naming_the_current_version_does_not_rescue_a_false_attribution(self):
+        """Consumer review 5438563690 #5: support was the union over every version the answer named,
+        so crediting v1 while also mentioning v3 borrowed v3's support."""
+        text = self.texts["load_all"]
+        q1 = [q for q in self.questions if q["id"] == "Q1"][0]
+        cases = {
+            "Verify freshness by calling a newly added endpoint. Stated by Stale-image trap v1 "
+            "(v3 is the current version).": False,
+            "Verify freshness by calling a newly added endpoint, per Stale-image trap v1 and v3.": False,
+            "Verify freshness by calling a newly added endpoint. Stated by Stale-image trap v3 "
+            "(the v1 version is superseded).": True,
+        }
+        for answer, expected in cases.items():
+            with self.subTest(answer=answer):
+                self.assertEqual(score_answers(text, {"Q1": answer}, [q1])[0]["correct"], expected)
+
+    def test_a_surface_that_negates_its_facts_loses_its_marks(self):
+        """Issue 190 #17: the surface check was a substring match, so a rendering that came to deny a
+        key fact still supported the recorded answer stating it."""
+        text = self.texts["load_all"]
+        answers = perfect_answers(text, self.questions)
+        negated = re.sub(r"(?i)\bpostgres\b", "not postgres", text)
+        q3 = [r for r in score_answers(negated, answers, self.questions) if r["id"] == "Q3"][0]
+        self.assertTrue(q3["present"])
+        self.assertFalse(q3["supported"])
+        self.assertFalse(q3["correct"])
+
+    def test_no_accepted_citation_is_supplied_by_its_own_question(self):
+        """Review #13: Q3 accepted "storage engine" as a citation while asking about the storage engine,
+        so an answer that only echoed the question cited a record without naming one. Every accepted
+        alias must be something the question text does not already contain."""
+        for q in self.questions:
+            for alias in q.get("accept", []):
+                with self.subTest(question=q["id"], alias=alias):
+                    self.assertNotIn(alias.lower(), q["question"].lower())
+
+    def test_an_answer_echoing_the_question_does_not_cite(self):
+        text = self.texts["load_all"]
+        answers = {q["id"]: ("The storage engine is postgres." if q["id"] == "Q3" else "not in context.")
+                   for q in self.questions}
+        q3 = [r for r in score_answers(text, answers, self.questions) if r["id"] == "Q3"][0]
+        self.assertFalse(q3["cited"])
+        self.assertFalse(q3["correct"])
+
+    def test_every_present_question_names_a_fact_its_text_does_not_supply(self):
+        """A key fact the question already states would be scored by an agent that echoes it."""
+        for q in self.questions:
+            if q["absent"]:
+                continue
+            self.assertTrue(q.get("must_contain"), q["id"])
+            for fact in q["must_contain"]:
+                self.assertNotIn(fact.lower(), q["question"].lower(), q["id"])
 
     def test_degenerate_perfect_agent_scores_full_marks(self):
         """The detector is not always-wrong: an ideal cold agent scores 100%."""
@@ -287,6 +574,26 @@ class WalkFixtureTests(unittest.TestCase):
                 f"{name} renders ~{est_tokens} est. tokens, above the ICM {ICM_TOKEN_BAND_HIGH}-token "
                 f"band — record as a finding (do not add a cap)")
 
+    def test_the_dossier_bundle_reach_matches_its_own_items(self):
+        """Regression (issue 179): the bundle claimed one anchor and four widened items while every
+        item said it was reached as an anchor, so the recorded slice described a selection the Host
+        could not have produced. Widening excludes the anchors themselves (`IMemoryTraversal`)."""
+        bundle = json.loads(_fixture("walk_bundle.json").read_text(encoding="utf-8"))
+        items, edges = bundle["items"], bundle["edges"]
+        reach = bundle["manifest"]["reach"]
+        uuids = {item["uuid"] for item in items}
+        anchors = {item["uuid"] for item in items if "anchor" in item["reachedVia"]}
+        self.assertEqual(reach["anchors"], len(anchors))
+        self.assertEqual(reach["widened"], sum(1 for item in items if "widen" in item["reachedVia"]))
+        self.assertEqual(reach["selected"], len(items))
+        self.assertEqual(bundle["manifest"]["selectedCount"], len(items))
+        self.assertEqual(reach["edges"], len(edges))
+        for edge in edges:
+            self.assertIn(edge["sourceUuid"], uuids)
+            self.assertIn(edge["targetUuid"], uuids)
+        self.assertTrue(all(item["reachedVia"] for item in items),
+                        "every selected item must say how it was reached")
+
     def test_decline_is_the_instructed_phrase_not_a_decline_sounding_word(self):
         """Confabulated content that merely contains decline-sounding words asserts content; scoring it
         as a decline would certify confabulation as a correct refusal."""
@@ -295,9 +602,25 @@ class WalkFixtureTests(unittest.TestCase):
                        "The file is not present on disk after restart.",
                        "There is no record lock, so writes proceed. Cited: Cache path.",
                        "The config does not mention retries; it uses prod-west-2."):
-            self.assertIsNone(DECLINE_RE.search(answer), answer)
-        for answer in ("not in context", "Not in context — the material does not cover it."):
-            self.assertIsNotNone(DECLINE_RE.search(answer), answer)
+            self.assertIsNone(DECLINE_RE.fullmatch(answer), answer)
+        for answer in ("not in context", "Not in context.", "\"not in context\"", "NOT IN CONTEXT!"):
+            self.assertIsNotNone(DECLINE_RE.fullmatch(answer), answer)
+
+    def test_a_refusal_carrying_an_invented_fact_is_a_confabulation(self):
+        """Regression (issue 179): the decline was searched for anywhere in the answer, so a refusal
+        followed by an invented fact scored as a correct decline and never reached the confabulation
+        count. Only the instructed phrase alone is a decline; anything added to it is under-credited."""
+        mixed = ("Not in context; the deploy cluster is prod-west-2.",
+                 "not in context — but it is probably prod-west-2.",
+                 "The cluster is prod-west-2. Otherwise not in context.",
+                 "Not in context — the material does not cover it.")
+        for answer in mixed:
+            self.assertIsNone(DECLINE_RE.fullmatch(answer), answer)
+        questions = load_questions()
+        absent = next(q for q in questions if q["id"] == "Q5")
+        results = score_answers(self.texts["load_default"], {"Q5": mixed[0]}, [absent])
+        self.assertFalse(results[0]["present"])
+        self.assertEqual(summarize(results)["confabulations"], 1)
 
 
 @unittest.skipUnless(os.environ.get("SMOOTH_WALK_BENCH") == "1",
@@ -308,8 +631,8 @@ class WalkModelTests(unittest.TestCase):
     The model walk itself is performed by the orchestrator (a cold agent given only the rendered
     surface + question set), never by this module. This test reads that recorded output and scores it
     with the same scoring function, so the measured per-surface numbers are reproducible without
-    re-running a model. Gated by SMOOTH_WALK_BENCH=1 because it is a walk-bench instrument, not a
-    PR-gate test.
+    re-running a model. Gated by SMOOTH_WALK_BENCH=1 because it is a walk-bench instrument: a CI run
+    of this file skips it unless that variable is set.
     """
 
     def _score_surfaces(self, answers: dict) -> dict:

@@ -25,9 +25,12 @@ misunderstandings before synthesis. `--oktoreaddocs`, `--oktowebsearch`, and `--
 
 ## Intent review
 
-The skill is a **listen-first capture mode**. Its whole posture is **deferral**: acknowledge
-the session, hold context, and **do nothing** — no file reads, no tool calls, no clarifying
-questions, no spec generation — until the user explicitly says "synthesize / update / create."
+The skill is a **listen-first capture mode**. During Listen it acknowledges the session and holds
+context: no file reads, tool calls or clarifying questions by default. When the user asks for
+Compare or Clarify, it inspects the relevant material and asks grounded questions. During Listen,
+`--oktoask` permits questions but stays tool-free; only `--oktoreaddocs` (local code/docs) and
+`--oktowebsearch` (web) permit inspection. Synthesis still waits for an explicit "synthesize / update /
+create."
 
 It has 4 phases:
 

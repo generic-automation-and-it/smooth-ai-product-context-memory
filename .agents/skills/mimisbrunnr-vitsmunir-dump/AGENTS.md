@@ -1,5 +1,9 @@
 # mimisbrunnr-vitsmunir-dump — AGENTS.md
 
+> **References.** Every HLD, LADR, NFR, BRD, issue and PR number in this file belongs to the upstream
+> repository, `generic-automation-and-it/smooth-ai-product-context-memory` (`docs/hlds/`, `docs/brd/`),
+> not to a repository this skill is vendored into.
+
 ## TL;DR
 
 Pure-prompt behavioral skill (no scripts): a listen-first capture session whose entire value is in NOT acting — never implement, modify, or synthesize until explicitly asked.
@@ -8,6 +12,7 @@ Pure-prompt behavioral skill (no scripts): a listen-first capture session whose 
 
 - **A braindump is never permission to implement.** Even with all switches on, only *grounding* (reading/searching) is widened — the no-modify rule holds until the user asks to synthesize.
 - **Don't "optimize" the SKILL.md by deduplicating switch semantics.** The switch rules are intentionally restated in Switches, Listen, and Guardrails — reinforcement against the model's drift toward premature questioning/action is the point, not redundancy.
+- **A git-discovered ticket is a suggestion, never a binding.** The Heimdallr reporter runs no earlier than synthesis (or during Listen under `--oktoreaddocs`/`--all`), and every ticket it finds needs the operator's confirmation before it reaches an artifact.
 
 ## Architecture Decisions
 
@@ -17,6 +22,9 @@ Pure-prompt behavioral skill (no scripts): a listen-first capture session whose 
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-06 | **Issue 190 #23/#24.** README no longer says `--oktoask` permits inspection during Listen — it stays tool-free; only `--oktoreaddocs` and `--oktowebsearch` permit it. Synthesis now masks secrets and generalises every personal identifier **before** the artifact is written, and never copies unprocessed braindump content into a file or ticket. Prose contract only: this skill has no automated harness. | issue 190 |
+| 2026-10-06 | README intent review names the Compare / Clarify phase: Listen defers by default, and Compare or Clarify (or `--oktoreaddocs` / `--oktoask`) inspects material and asks grounded questions; synthesis still waits for an explicit request (issue 188). | issue 188 |
+| 2026-10-05 | **Heimdallr autofill moved out of Initialize and stopped binding tickets on its own.** Initialize ran the git-scanning reporter on every session, breaking the tool-free default (LADR-001); the reporter now runs no earlier than synthesis, or during Listen only when `--oktoreaddocs`/`--all` enables grounding. A branch-seen or newest-commit ticket was promoted straight to the binding, so an artifact could be filed against unrelated work; discovered tickets are now listed with their source and need the operator's confirmation — no answer means unbound. Wording only, no script. | issue 179 |
 | 2026-10-03 | **Initialize fills a missing repository/ticket binding from Heimdallr by default** (same skills root, no hardcoded path); tags stay agent-derived keywords; explicit caller values always win. Wording only, no script. | session request |
 | 2026-06-12 | Initial version. | |
 | 2026-09-13 | Added `--all` (enables `--oktoask` `--thinking` `--oktoreaddocs` `--oktowebsearch`). | |

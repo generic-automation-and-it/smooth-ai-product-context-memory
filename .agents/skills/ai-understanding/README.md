@@ -83,7 +83,7 @@ and work best together.
 | Goal | Continue this task | Hand knowledge to a future agent |
 | Content | Task state: todo, files touched, next step, attempts | Only what has no other home — no narrative, no paths, no toolchain |
 | Lifetime | Inside one session | Files, zip, or the Mímisbrunnr store — across sessions, workspaces, repos |
-| Loading | Whole summary always in context | Only units whose question matches, via `INDEX.md` |
+| Loading | Whole summary always in context | Only units whose question matches — or, for an outcome unit with no question, whose description matches — via `INDEX.md` |
 | Controls | None | Reconcile against the index, versions, `confidence`, `recheck`, `--review`, write-time redaction |
 | Trust | Summary reads as fact | Evidence — the system outranks it; a wrong unit is marked `contested` |
 | Repeated use | Summary of a summary drifts | Improved units are rewritten in full; history kept |
@@ -108,7 +108,8 @@ and work best together.
   repository's root `AGENTS.md`.
 
 **Using them together:** let compaction run within a session. Before a clear, compact or handoff, run
-`/ai-understanding` for the knowledge (and `mimisbrunnr-kvasir-understanding dump --currentsession` if the task
-itself needs to continue elsewhere). In the next session, `--import` here or
+`/ai-understanding` for the knowledge (and `mimisbrunnr-kvasir-understanding dump --currentsession --from
+<session-summary-file|->` if the task itself needs to continue elsewhere; without `--from` it writes a blank
+template, not the session). In the next session, `--import` here or
 `mimisbrunnr-kvasir-understanding load <folder>` picks it up. Nothing links compaction to an export today, so
 the hard-won part is lost exactly when compaction fires unless you ask first.

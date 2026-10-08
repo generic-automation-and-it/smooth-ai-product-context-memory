@@ -6,17 +6,25 @@ The judgement half of the contextual-knowledge-export design. The Host API assem
 lifecycle marking, citation, findings, focus, and the closed reconciliation (NFR-04).
 
 This module holds **no write capability to the store.** It has no write operation at all (LADR-08);
-the only thing it writes is the local dossier artefact, at a gitignored path, and only when the CLI is
-explicitly asked to. The store is never touched and no write endpoint is called (NFR-06). It never
+the only files it writes are the dossier artefact and the scratch bundle, each at a gitignored path,
+owner-only, and only when the CLI is explicitly asked to. The store is never touched and no write
+endpoint is called (NFR-06). It never
 calls a model — composition judgement that needs a model is supplied by the caller (the agent / the
 skill) as ``judgements``; this module enforces the deterministic rules around that judgement and
 delivers the invariants the NFRs require.
 
-Usage (fetch a bundle from the Host API, read-only; --base-url is a top-level option):
-    python3 -B dossier_composer.py --base-url http://localhost:5141 bundle --body '{"repo":"kingstown","widenDepth":3}'
+Usage (fetch a bundle from the Host API, read-only; --base-url is a top-level option; --out must be a
+gitignored path and is written 0600):
+    python3 -B dossier_composer.py --base-url http://localhost:5141 bundle --repo kingstown --widen-depth 3
+        --out .context/mimisbrunnr-saga-dossier/scratch/bundle.json
 
-Usage (offline, compose from a previously saved bundle JSON):
-    python3 -B dossier_composer.py compose --bundle bundle.json --focus architecture --out artefact.md
+Usage (preview the selection first — the consent step, LADR-14 — same anchors as bundle):
+    python3 -B dossier_composer.py preview --repo kingstown --widen-depth 3
+
+Usage (offline, compose from a saved bundle plus the agent's judgements; --out must be gitignored):
+    python3 -B dossier_composer.py compose --bundle .context/mimisbrunnr-saga-dossier/scratch/bundle.json
+        --judgements .context/mimisbrunnr-saga-dossier/scratch/judgements.json --focus architecture
+        --out .context/mimisbrunnr-saga-dossier/architecture.md
 """
 
 from __future__ import annotations
@@ -50,11 +58,6 @@ import context_memory_client as _store_client  # noqa: E402
 _ENV_BASE_URL = _store_client.ENV_BASE_URL
 _ENV_READ_TOKEN = _store_client.ENV_READ_TOKEN
 _ENV_WRITE_TOKEN = _store_client.ENV_WRITE_TOKEN
-# The write credential under **both** spellings a shell can set: the sibling's skill-facing name and
-# the Host's own `ApiAccess__WriteToken`. They are one credential in two forms — the provisioner writes
-# both beside each other — so a read-only surface has to refuse both. The Host form is not re-exported
-# by the sibling (it is the server's configuration spelling, not a client one), hence the literal.
-_WRITE_TOKEN_NAMES = (_ENV_WRITE_TOKEN, "ApiAccess__WriteToken")
 _MACHINE_CREDENTIAL_FILE = _store_client.MACHINE_CREDENTIAL_FILE
 
 # Heimdallr session-metadata reporter, resolved relative to this file so the
@@ -84,7 +87,9 @@ def heimdallr_scan() -> dict:
         proc = subprocess.run(
             [sys.executable, "-B", str(HEIMDALLR_SCRIPT), "--json"],
             capture_output=True, text=True, encoding="utf-8", timeout=30)
-    except (OSError, ValueError):
+    # `SubprocessError` covers `TimeoutExpired`: a hung reporter escaped the optional-autofill
+    # fallback as a traceback and killed the caller (issue 186).
+    except (OSError, ValueError, subprocess.SubprocessError):
         return {}
     if proc.returncode != 0:
         return {}
@@ -225,7 +230,13 @@ def validate_bundle(bundle):
     item_ids = [_item_key(i) for i in bundle["items"]]
     _require(len(set(item_ids)) == len(item_ids),
              "bundle: the same item (uuid and version) appears more than once")
-    omitted_ids = {_omitted_key(o) for o in bundle["omitted"]}
+    # The same for omissions: the manifest count tallies every entry while the reconciliation counts
+    # distinct (uuid, version) pairs, so a repeated omission left the arithmetic one short and still
+    # rendered a dossier (issue 184).
+    omitted_keys = [_omitted_key(o) for o in bundle["omitted"]]
+    _require(len(set(omitted_keys)) == len(omitted_keys),
+             "bundle: the same omitted item (uuid and version) appears more than once")
+    omitted_ids = set(omitted_keys)
     _require(not (set(item_ids) & omitted_ids),
              "bundle: an item is listed in both items and omitted")
     # The manifest count is the trustworthy left-hand side: it must equal the bundle's item+omitted
@@ -240,8 +251,21 @@ def validate_bundle(bundle):
 
 
 def _business_key(item):
-    return (item.get("validFrom") or "", item.get("createdOn") or "", item.get("uuid") or "",
-            item.get("version") or 0)
+    # Times compare as instants, not strings: `2026-01-01T10:00:00+02:00` is earlier than
+    # `2026-01-01T09:00:00Z`, but sorts later as text, so an offset capture time broke the tiebreak
+    # (issue 190). A missing value sorts first, as the empty string always did; an unparseable one
+    # keeps its text, after every parsed one.
+    return (_instant_key(item.get("validFrom")), _instant_key(item.get("createdOn")),
+            item.get("uuid") or "", item.get("version") or 0)
+
+
+def _instant_key(value):
+    if not value:
+        return (0, "")
+    parsed = _parse_time(value)
+    if parsed is not None:
+        return (1, parsed.astimezone(dt.timezone.utc).isoformat())
+    return (2, str(value))
 
 
 def topological_order(items, edges):
@@ -288,41 +312,126 @@ def topological_order(items, edges):
     heap = [(_business_key(by_key[key]), key) for key in by_key if indeg[key] == 0]
     heapq.heapify(heap)
     ordered = []
+    emitted = set()
     cycle_findings = []
 
     # Kahn's algorithm with a deterministic tiebreak (LADR-07): business-time validity, then capture
-    # time, then memory identity. The ``heap`` key is exactly that tuple.
-    while heap:
-        _, key = heapq.heappop(heap)
-        ordered.append(by_key[key])
-        successors = adj.get(key, [])
-        for succ in successors:
-            indeg[succ] -= 1
-            if indeg[succ] == 0:
-                heapq.heappush(heap, (_business_key(by_key[succ]), succ))
+    # time, then memory identity. The ``heap`` key is exactly that tuple. A key pushed again after a
+    # forced cycle break is skipped, never emitted twice.
+    def drain():
+        while heap:
+            _, key = heapq.heappop(heap)
+            if key in emitted:
+                continue
+            emitted.add(key)
+            ordered.append(by_key[key])
+            for succ in adj.get(key, []):
+                indeg[succ] -= 1
+                if indeg[succ] == 0 and succ not in emitted:
+                    heapq.heappush(heap, (_business_key(by_key[succ]), succ))
 
-    if len(ordered) != len(by_key):
-        # There is a provenance cycle. Break at a stated point: the un-emitted item with the earliest
-        # identity key is emitted next (stated, not traversal accident), and every un-emitted item is
-        # reported as part of a cycle (LADR-07). Still produce the document.
-        in_cycle = [key for key in by_key if indeg[key] > 0]
-        in_cycle.sort(key=lambda k: _business_key(by_key[k]))
-        cycle_findings.append({
+    drain()
+    if len(ordered) == len(by_key):
+        return ordered, cycle_findings
+
+    # There is a provenance cycle (LADR-07). An un-emitted item is either ON a cycle or only
+    # downstream of one; only the former is reported, because "this rests on a cycle" is not "this is
+    # part of one" (issue 184). The cycles are the cyclic strongly connected components of what the
+    # sort could not emit, and every cycle in the slice lies wholly inside that residue.
+    components = {}
+    findings_by_component = []
+    residual = sorted((k for k in by_key if k not in emitted), key=lambda k: _business_key(by_key[k]))
+    for comp in _strongly_connected(residual, adj):
+        if len(comp) == 1 and comp[0] not in adj[comp[0]]:
+            continue
+        comp.sort(key=lambda k: _business_key(by_key[k]))
+        finding = {
             "category": "provenance-cycle",
             "classification": _OBSERVATION,
             "basis": f"Provenance edges among the selected memories form a cycle involving "
-                    f"{len(in_cycle)} memory(ies); ordering over {', '.join(ORDERING_RELATIONS)} "
+                    f"{len(comp)} memory(ies); ordering over {', '.join(ORDERING_RELATIONS)} "
                     f"left them unorderable.",
             "scope": "the selected material in this bundle",
-            "memories": [{"uuid": k[0], "version": k[1]} for k in in_cycle],
-            "brokenAt": in_cycle[0][0],
-        })
-        # Emit the cycle members in identity order so the sort terminates deterministically; they
-        # remain present (the cycle is a finding, not a dropped item).
-        for key in in_cycle:
-            ordered.append(by_key[key])
+            "memories": [{"uuid": k[0], "version": k[1]} for k in comp],
+            "brokenAt": None,
+            "brokenAtVersion": None,
+        }
+        findings_by_component.append(finding)
+        for k in comp:
+            components[k] = finding
 
+    # Break at a stated point, repeatedly until everything is emitted: among the cycles nothing else
+    # still waits on, the un-emitted member with the earliest business key is emitted next. Choosing
+    # from an upstream-free cycle keeps a downstream cycle behind the one it rests on; what follows a
+    # break is ordered topologically again, so a memory downstream of a cycle still comes after it.
+    while len(ordered) != len(by_key):
+        remaining = [k for k in residual if k not in emitted]
+        sccs = _strongly_connected(remaining, adj)
+        owner = {k: i for i, comp in enumerate(sccs) for k in comp}
+        fed = {owner[s] for k in remaining for s in adj[k] if s in owner and owner[s] != owner[k]}
+        candidates = [k for i, comp in enumerate(sccs) if i not in fed for k in comp]
+        breakpoint_ = min(candidates, key=lambda k: _business_key(by_key[k]))
+        finding = components.get(breakpoint_)
+        if finding is not None and finding["brokenAt"] is None:
+            finding["brokenAt"] = breakpoint_[0]
+            finding["brokenAtVersion"] = breakpoint_[1]
+        heapq.heappush(heap, (_business_key(by_key[breakpoint_]), breakpoint_))
+        drain()
+
+    findings_by_component.sort(key=lambda f: _business_key(by_key[(f["memories"][0]["uuid"],
+                                                                   f["memories"][0]["version"])]))
+    cycle_findings.extend(findings_by_component)
     return ordered, cycle_findings
+
+
+def _strongly_connected(nodes, adj):
+    """Tarjan's strongly connected components of the subgraph induced by ``nodes``, iteratively.
+
+    Membership of a component is unique, so the result does not depend on visit order; callers sort
+    each component themselves.
+    """
+    inside = set(nodes)
+    index, low, on_stack = {}, {}, set()
+    stack, components = [], []
+    counter = 0
+    for root in nodes:
+        if root in index:
+            continue
+        index[root] = low[root] = counter
+        counter += 1
+        stack.append(root)
+        on_stack.add(root)
+        work = [(root, iter([s for s in adj.get(root, []) if s in inside]))]
+        while work:
+            node, successors = work[-1]
+            descended = False
+            for succ in successors:
+                if succ not in index:
+                    index[succ] = low[succ] = counter
+                    counter += 1
+                    stack.append(succ)
+                    on_stack.add(succ)
+                    work.append((succ, iter([s for s in adj.get(succ, []) if s in inside])))
+                    descended = True
+                    break
+                if succ in on_stack:
+                    low[node] = min(low[node], index[succ])
+            if descended:
+                continue
+            work.pop()
+            if work:
+                parent = work[-1][0]
+                low[parent] = min(low[parent], low[node])
+            if low[node] == index[node]:
+                component = []
+                while True:
+                    member = stack.pop()
+                    on_stack.discard(member)
+                    component.append(member)
+                    if member == node:
+                        break
+                components.append(component)
+    return components
 
 
 # ---------------------------------------------------------------------------- lifecycle marking
@@ -477,7 +586,11 @@ def consolidate(items, equivalences, edges, asof=None):
     groups = []
     uncertain = []
     for idx, group in enumerate(equivalences or []):
+        if not isinstance(group, dict):
+            raise ValueError("equivalences: each group must be an object with a 'uuids' list")
         uuids = group.get("uuids") or []
+        if not isinstance(uuids, list) or not all(isinstance(u, str) for u in uuids):
+            raise ValueError("equivalences: a group's 'uuids' must be a list of uuid strings")
         # Validate the caller-supplied equivalence group before applying it (F3). A group must name at
         # least two distinct uuids, every one selected in this bundle — an absent or duplicated uuid
         # would silently consolidate on a subset or render duplicate origin citations.
@@ -559,10 +672,13 @@ def consolidate(items, equivalences, edges, asof=None):
 def _source_signature(item):
     # Same source = same kind + reference (the document the claim came from). Capture time is not
     # part of identity: three captures of one document are re-captures, not independent observations.
-    return tuple(
+    # A set, sorted: the same sources listed in another order, or one listed twice, are the same
+    # provenance. As an ordered tuple, `[A, B]` and `[B, A]` compared unequal and were shown as
+    # independent corroboration (issue 188).
+    return tuple(sorted({
         (s.get("kind") or "", s.get("reference") or "")
         for s in (item.get("sources") or [])
-    )
+    }))
 
 
 def derive_findings(items, edges, asof=None, judgements=None, uncertain=None):
@@ -664,6 +780,8 @@ def derive_findings(items, edges, asof=None, judgements=None, uncertain=None):
     # claims for the same circumstances (scoped exceptions / proposed-vs-shipped are not conflicts);
     # a gap requires one of BR-27's three grounds. Every one carries basis + scope.
     for f in (judgements or {}).get("findings", []) if isinstance(judgements, dict) else []:
+        if not isinstance(f, dict):
+            raise ValueError("findings: each finding must be an object")
         category = f.get("category")
         if category not in FINDING_CATEGORIES:
             raise ValueError(f"unknown finding category '{category}'")
@@ -671,41 +789,72 @@ def derive_findings(items, edges, asof=None, judgements=None, uncertain=None):
         # the composer's to derive, not to override (F4).
         if category not in _CALLER_MERGEABLE_FINDINGS:
             raise ValueError(f"finding category '{category}' is not caller-mergeable")
+        # Shape before any category gate reads the references, so a malformed list is refused with
+        # its shape rather than escaping as an AttributeError from the first `.get`.
+        mems = f.get("memories")
+        mems = [] if mems is None else mems
+        if not isinstance(mems, list) or not all(isinstance(m, dict) for m in mems):
+            raise ValueError(f"{category}: memories must be a list of {{uuid, version}} objects")
+        for m in mems:
+            # Shape before lookup, so a malformed reference is told what is wrong with it rather than
+            # that it is absent. Now that identity is (uuid, version), a versionless reference misses
+            # every key, and "not selected in this bundle" would be a true statement about the wrong
+            # thing.
+            if type(m.get("version")) is not int or m["version"] < 1:
+                raise ValueError(f"{category}: each memory requires a version >= 1")
+            if not isinstance(m.get("uuid"), str) or _item_key(m) not in by_key:
+                raise ValueError(f"{category}: each memory must be selected in this bundle")
         if category == "contradiction":
             _validate_contradiction(f, by_key, edges, asof)
         if category == "gap":
             grounds = f.get("ground")
             if grounds not in ("task", "included-claim", "expectation"):
                 raise ValueError("gap: requires one of BR-27's grounds (task / included-claim / expectation)")
+            # An included-claim gap is about a claim in the slice, so it names that claim. A task or
+            # expectation gap is an answer missing from the slice: no memory supports it, and LADR-13
+            # forbids citing one that does not — so an empty list is the honest reference there.
+            if grounds == "included-claim" and not mems:
+                raise ValueError("gap: an included-claim gap must name the claim it interprets")
+        if category == "near-miss-tag" and not mems:
+            # LADR-10: no evidence means no finding, and the evidence is a supporting memory.
+            raise ValueError("near-miss-tag: requires the supporting memory (uuid/version); "
+                             "no evidence means no finding (LADR-10)")
         basis = f.get("basis")
         if not basis or not str(basis).strip():
             raise ValueError(f"{category}: requires a non-empty basis")
         classification = f.get("classification")
         if classification not in (_OBSERVATION, _ANALYSIS):
             raise ValueError(f"{category}: classification must be observation or analysis")
-        mems = f.get("memories") or []
-        for m in mems:
-            # Shape before lookup, so a malformed reference is told what is wrong with it rather than
-            # that it is absent. Now that identity is (uuid, version), a versionless reference misses
-            # every key, and "not selected in this bundle" would be a true statement about the wrong
-            # thing.
-            if not isinstance(m.get("version"), int) or m["version"] < 1:
-                raise ValueError(f"{category}: each memory requires a version >= 1")
-            if not m.get("uuid") or _item_key(m) not in by_key:
-                raise ValueError(f"{category}: each memory must be selected in this bundle")
-        findings.append({
+        finding = {
             "category": category,
             "classification": classification,
             "basis": str(basis),
             "scope": f.get("scope", scope_text),
             "memories": mems,
-        })
+        }
+        if category == "near-miss-tag":
+            # The evidence qualifications a near-miss carries are part of the finding, not decoration:
+            # dropping them here rendered "relevance is analysis, the record is only proposed, absence
+            # is not store-wide" as a bare claim (issue 186). Kept only in the shapes the helper emits.
+            if isinstance(f.get("observation"), dict):
+                finding["observation"] = f["observation"]
+            if isinstance(f.get("proposedEvidence"), bool):
+                finding["proposedEvidence"] = f["proposedEvidence"]
+            if f.get("basisAuthor") in ("caller", "skill"):
+                finding["basisAuthor"] = f["basisAuthor"]
+            if isinstance(f.get("qualification"), str) and f["qualification"].strip():
+                finding["qualification"] = f["qualification"]
+        findings.append(finding)
 
-    # Deterministic ordering: by category (taxonomy order), then by memory identity.
+    # Deterministic ordering: by category (taxonomy order), then by memory identity. Only an identical
+    # finding collapses: the key is the whole normalized finding. A key of category + memories + basis
+    # merged two findings that differed in scope, classification, observation or qualification, and
+    # reconciliation still reported closed — a finding suppressed silently (consumer review 5438563690
+    # #1); before that, a key without the basis collapsed every memory-less gap into the first.
     seen = set()
     canonical = []
     for f in findings:
-        key = (f["category"], tuple((m["uuid"], m["version"]) for m in f["memories"]))
+        key = json.dumps(f, sort_keys=True, ensure_ascii=False, default=str)
         if key in seen:
             continue
         seen.add(key)
@@ -725,8 +874,11 @@ def _superseded(item, edges):
 
 def _validate_contradiction(f, by_key, edges=None, asof=None):
     mems = f.get("memories") or []
-    if len(mems) < 2:
-        raise ValueError("contradiction: requires at least two memories")
+    # Two *distinct* memories: the same reference listed twice, or two versions of one memory, counted
+    # as two and passed the gate as a contradiction with itself (review #6). Versions of one memory
+    # are supersession, not conflict.
+    if len({m.get("uuid") for m in mems if isinstance(m, dict)}) < 2:
+        raise ValueError("contradiction: requires at least two distinct memories")
     items = [by_key[_item_key(m)] for m in mems if m.get("uuid") and _item_key(m) in by_key]
     if len(items) < 2:
         raise ValueError("contradiction: memories must be selected in this bundle")
@@ -737,12 +889,11 @@ def _validate_contradiction(f, by_key, edges=None, asof=None):
     apps = [_applicability(i) for i in items]
     statuses = {mark_lifecycle(i, edges, asof) for i in items}
     scoped = len(set(apps)) > 1
-    # Lifecycle precondition. A proposed claim and an expired (no-longer-true) claim are both
-    # excluded: like proposed-versus-shipped, current-versus-no-longer-true is not incompatible for
-    # the same circumstances (they hold over different time windows). The derived statuses already
-    # collapse "proposed" and an expired origin here, so both must be checked — the docstring above
-    # states it, and only the literal "proposed" was.
-    lifecycle_differs = bool({LIFECYCLE_PROPOSED, LIFECYCLE_NO_LONGER_TRUE} & statuses)
+    # Lifecycle precondition, compared the way consolidate compares it: the derived lifecycles must
+    # be identical. Proposed-versus-shipped and current-versus-no-longer-true hold over different
+    # circumstances, so a mixed set is refused; two proposals (or two current claims) that disagree
+    # are the same circumstances and are a conflict. Rejecting any proposed member refused that pair.
+    lifecycle_differs = len(statuses) > 1
     if scoped or lifecycle_differs:
         raise ValueError(
             "contradiction: claims differ in applicability or lifecycle, so they are not a conflict "
@@ -859,6 +1010,7 @@ def compose(bundle, focus=UNFOCUSED, judgements=None, asof=None, store_name=STOR
     validate_bundle(bundle)
     if focus not in FOCUSES and focus is not UNFOCUSED:
         raise ValueError(f"unknown focus '{focus}'; must be one of {', '.join(FOCUSES)} or unfocused")
+    _validate_asof(asof)
 
     items = bundle["items"]
     edges = bundle["edges"]
@@ -917,8 +1069,16 @@ def compose(bundle, focus=UNFOCUSED, judgements=None, asof=None, store_name=STOR
     # 6. Findings (LADR-13, NFR-04); focus-invariant in presence.
     findings = derive_findings(items, edges, asof=asof, judgements=judgements, uncertain=uncertain)
 
-    # 7. Reconciliation (NFR-04), closed in the dossier.
+    # 7. Reconciliation (NFR-04), closed in the dossier. Its acceptance criterion is that it closes for
+    #    every dossier: BR-30's "marks incomplete output" is the reached limits, not this arithmetic.
+    #    A validated bundle always closes, so an open one is a composer defect and no dossier is
+    #    produced — rendering "✗ FAILED" exited 0 and handed the reader a document that lost material.
     reconciliation = reconcile(bundle, claims, omitted)
+    if not reconciliation["closed"]:
+        raise ValueError(
+            f"reconciliation did not close: {reconciliation['present']} present + "
+            f"{reconciliation['consolidated']} consolidated + {reconciliation['omitted']} omitted != "
+            f"{reconciliation['selected']} selected; no dossier was produced (NFR-04)")
 
     return Dossier(
         bundle=bundle,
@@ -934,6 +1094,19 @@ def compose(bundle, focus=UNFOCUSED, judgements=None, asof=None, store_name=STOR
     )
 
 
+def _validate_asof(asof):
+    """Refuse an explicitly supplied ``asof`` that does not parse.
+
+    ``_parse_time`` returns ``None`` for an unparseable value and the lifecycle and stale checks fall
+    back to today on ``None``, so a typo silently composed against today while the dossier still showed
+    the typo. Only an absent ``asof`` means today.
+    """
+    if asof is None:
+        return
+    if _parse_time(asof) is None:
+        raise ValueError(f"asof must be a date (YYYY-MM-DD) or ISO-8601 timestamp, got '{asof}'")
+
+
 def _now_iso():
     return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -941,9 +1114,56 @@ def _now_iso():
 # ---------------------------------------------------------------------------- rendering (NFR-05)
 
 
+_LINE_BREAKS = re.compile(r"[\r\n\v\f\x85\u2028\u2029]+")
+_BLOCK_START = re.compile(r"^(?:#{1,6}(?:\s|$)|>|[-+*](?:\s|$)|\d{1,9}[.)](?:\s|$)|`{3}|~{3}|\||=+\s*$|-+\s*$)")
+_TAG_OPEN = re.compile(r"<(?=[A-Za-z/!?])")
+
+
+def _md_inline(value):
+    """Stored or caller text as inline Markdown that cannot leave the line it is placed on.
+
+    A statement is store content; a line break in it ended the cited list item, and what followed —
+    a `## heading`, a `> quote`, a list of instructions — rendered as uncited document structure
+    (review 5432012955 #12). Line breaks become spaces, a leading block marker is escaped, and an HTML
+    tag opener is escaped so a `<details>` cannot hide the rest. The words are unchanged.
+    """
+    text = _LINE_BREAKS.sub(" ", "" if value is None else str(value)).strip()
+    if _BLOCK_START.match(text):
+        text = "\\" + text
+    return _TAG_OPEN.sub(r"\\<", text)
+
+
 def _cite(item):
     return CITATION_FORM.format(
         uuid=item["uuid"], version=item["version"], created_on=item.get("createdOn") or "unknown")
+
+
+def _cycle_break_text(finding):
+    """Where a provenance cycle was broken, so a reader can see which claim was placed first by rule
+    rather than by provenance (issue 188: the break point was computed and never rendered)."""
+    if finding.get("category") != "provenance-cycle" or not finding.get("brokenAt"):
+        return ""
+    version = finding.get("brokenAtVersion")
+    where = f"{finding['brokenAt']} v{version}" if version is not None else finding["brokenAt"]
+    return (f" Broken at {where}: the earliest member by business time was placed first, and "
+            "provenance ordering resumed after it.")
+
+
+def _near_miss_evidence_text(finding):
+    """The observed side of a near-miss finding, rendered beside its analysis (issue 186)."""
+    parts = []
+    observation = finding.get("observation")
+    if isinstance(observation, dict):
+        requested = ", ".join(map(str, observation.get("requestedTags") or [])) or "none"
+        actual = ", ".join(map(str, observation.get("actualTags") or [])) or "none"
+        mode = observation.get("facetMatchMode") or "unknown"
+        parts.append(f"Observed: requested tags [{requested}] ({mode}), record tags [{actual}], "
+                     "no exact tag match")
+    if finding.get("proposedEvidence"):
+        parts.append("the supporting record is proposed, not canon")
+    if finding.get("basisAuthor"):
+        parts.append(f"relevance judged by the {finding['basisAuthor']}")
+    return (" " + "; ".join(parts) + ".") if parts else ""
 
 
 def render(dossier):
@@ -984,6 +1204,8 @@ def render(dossier):
     # Findings-first for the review focus (LADR-12).
     findings_first = dossier.focus == "review"
 
+    items_by_key = {(i.get("uuid"), i.get("version")): i for i in b["items"]}
+
     def emit_findings():
         if not dossier.findings:
             # ``None detected`` is always qualified by the examined scope (LADR-13).
@@ -998,10 +1220,22 @@ def render(dossier):
                 continue
             lines.append(f"### {cat}")
             lines.append("")
+            qualifications = sorted({f["qualification"] for f in by_cat[cat] if f.get("qualification")})
+            for qualification in qualifications:
+                lines.append(f"> **Qualification:** {_md_inline(qualification)}")
+                lines.append("")
             for f in by_cat[cat]:
-                mems = ", ".join(f"{m_['uuid']} v{m_['version']}" for m_ in f.get("memories", []))
-                lines.append(f"- **{f['classification']}** {f['basis']} "
-                             f"— scope: {f['scope']}. Memories: {mems or 'none'}.")
+                # Cited in the claims' own form — uuid, version and capture time — not as a bare
+                # `uuid vN`: a finding is a substantive statement too, and the attribution check
+                # skipped this section, so its references carried no capture time (review #23).
+                mems = ", ".join(_cite(items_by_key.get((m_["uuid"], m_["version"]),
+                                                        {"uuid": m_["uuid"], "version": m_["version"]}))
+                                 for m_ in f.get("memories", []))
+                lines.append(f"- **{f['classification']}** {_md_inline(f['basis'])} "
+                             f"— scope: {_md_inline(f['scope'])}. Memories: {mems or 'none'}."
+                             + (" " + _md_inline(_cycle_break_text(f)) if _cycle_break_text(f) else "")
+                             + (" " + _md_inline(_near_miss_evidence_text(f))
+                                if _near_miss_evidence_text(f) else ""))
             lines.append("")
 
     if findings_first:
@@ -1027,33 +1261,50 @@ def render(dossier):
         origins = claim["origins"]
         primary = origins[0]
         lifecycle = dossier.lifecycle.get(_item_key(primary), LIFECYCLE_UNKNOWN)
-        kind_tag = f" [{primary.get('kind')}]" if primary.get("kind") else ""
-        lines.append(f"### {primary.get('name') or '(untitled)'}{kind_tag}")
+        kind_tag = f" [{_md_inline(primary.get('kind'))}]" if primary.get("kind") else ""
+        lines.append(f"### {_md_inline(primary.get('name')) or '(untitled)'}{kind_tag}")
         lines.append("")
         lines.append(f"**Lifecycle:** {lifecycle}.")
         if claim.get("consolidated"):
-            source_desc = (f"these re-capture one source" if _same_source(origins)
-                           else (f"provenance incomplete for at least one origin — shown as unattributed"
-                                 if not all(o.get("sources") for o in origins)
-                                 else "these are distinct sources, shown as independent observations"))
+            source_desc = ("provenance incomplete for at least one origin — shown as unattributed"
+                           if not all(o.get("sources") for o in origins)
+                           else "these re-capture one source" if _same_source(origins)
+                           # Sharing any source is not independence: `[A, B]` and `[B, C]` both rest on
+                           # B, and were labelled independent observations (issue 190).
+                           else "these share a source, so they are not independent observations"
+                           if _sources_overlap(origins)
+                           else "these are distinct sources, shown as independent observations")
             lines.append(f"> **analysis** — consolidation basis: "
-                         f"{claim.get('equivalenceClass') or 'equivalent restatements'}. "
+                         f"{_md_inline(claim.get('equivalenceClass')) or 'equivalent restatements'}. "
                          f"The {len(origins)} capture(s) share meaning, applicability and lifecycle, so "
                          f"they are presented once with every origin retained. Several captures of one "
                          f"source are not independent corroboration — "
                          f"{source_desc}.")
             lines.append("")
         # The substantive statement, cited (NFR-05). A consolidated claim cites every origin.
-        lines.append(f"- {primary.get('statement') or ''} — {_cite(primary)}")
+        lines.append(f"- {_md_inline(primary.get('statement'))} — {_cite(primary)}")
+        # Each further origin's own words when they differ from the primary's: equivalence is a caller
+        # judgement, and a qualification only a secondary origin states ("…on weekdays") was cited but
+        # never shown, while reconciliation still closed (review 5432012955 #4).
+        shown = _md_inline(primary.get("statement"))
         for other in origins[1:]:
-            lines.append(f"  - also from — {_cite(other)}")
+            words = _md_inline(other.get("statement"))
+            if words and " ".join(words.split()) != " ".join(shown.split()):
+                lines.append(f"  - also stated as: {words} — {_cite(other)}")
+            else:
+                lines.append(f"  - also from — {_cite(other)}")
         for origin in origins:
             if not (origin.get("sources") or []):
                 lines.append(
                     f"  - _{_cite(origin)}: no recorded source or confidence — provenance was never captured._")
-        # Conditions / exceptions preserved verbatim where paraphrase would change meaning (NFR-07).
-        for cond in _conditions(primary):
-            lines.append(f"  - condition: {cond} — {_cite(primary)}")
+        # Conditions / exceptions preserved verbatim where paraphrase would change meaning (NFR-07),
+        # from every origin of a consolidated claim, each cited to the origin that states it.
+        shown_conditions = set()
+        for origin in origins:
+            for cond in _conditions(origin):
+                if cond not in shown_conditions:
+                    shown_conditions.add(cond)
+                    lines.append(f"  - condition: {_md_inline(cond)} — {_cite(origin)}")
         lines.append("")
         if claim.get("depth") == "summary":
             for other in origins[1:]:
@@ -1069,8 +1320,11 @@ def render(dossier):
     lines.append("")
     if dossier.omitted:
         for o in dossier.omitted:
-            name = o.get("name") or o["uuid"]
-            lines.append(f"- {name} — {o['reason']}")
+            # A history bundle can cut one version of a memory and keep another, so the version is
+            # part of what was omitted; the uuid is shown too, since a name is not an identity.
+            ident = f"{o['uuid']} v{o['version']}"
+            label = f"{_md_inline(o['name'])} ({ident})" if o.get("name") else ident
+            lines.append(f"- {label} — {_md_inline(o['reason'])}")
     else:
         lines.append(f"None — nothing selected was omitted. ({len(b['items'])} selected)")
     lines.append("")
@@ -1092,23 +1346,33 @@ def _conditions(item):
     verbatim. It is deliberately not exhaustive — full fidelity is a semantic property (NFR-07
     primary verification is a review), but the invariant is that a condition never *drops*.
     """
-    text = item.get("statement") or ""
     markers = ("only ", " must ", " may not ", " unless ", " except ", " requires ", " allowed ",
                " at least ", " at most ", " prior to ", " after ", " per ", " limit of ")
     found = []
-    for marker in markers:
-        idx = text.lower().find(marker)
-        if idx >= 0:
-            sentence = _sentence_at(text, idx)
-            if sentence and sentence not in found:
-                found.append(sentence)
+    # The body as well as the statement: a condition stated only in the memory's body was dropped, so
+    # a qualified claim rendered as unqualified (issue 190). Every occurrence of a marker counts, not
+    # only the first, for the same reason.
+    for text in (item.get("statement") or "", item.get("bodyText") or ""):
+        lowered = text.lower()
+        for marker in markers:
+            start = 0
+            while (idx := lowered.find(marker, start)) >= 0:
+                sentence = _sentence_at(text, idx)
+                if sentence and sentence not in found:
+                    found.append(sentence)
+                start = idx + len(marker)
     return found
 
 
+# A sentence ends at `.`, `!` or `?` followed by whitespace or the end of the text — never at a decimal
+# point or a version separator, which split "at most 2.5 seconds" into "at most 2." (review #22).
+_SENTENCE_END = re.compile(r"[.!?](?=\s|$)")
+
+
 def _sentence_at(text, idx):
-    start = text.rfind(".", 0, idx) + 1
-    end = text.find(".", idx)
-    end = len(text) if end == -1 else end + 1
+    start = max((m.end() for m in _SENTENCE_END.finditer(text, 0, idx)), default=0)
+    following = _SENTENCE_END.search(text, idx)
+    end = following.end() if following else len(text)
     return text[start:end].strip()
 
 
@@ -1119,6 +1383,11 @@ def _same_source(origins):
     if not all(sigs):
         return False
     return len(set(sigs)) == 1
+
+
+def _sources_overlap(origins):
+    sources = [set(_source_signature(origin)) for origin in origins]
+    return any(left & right for index, left in enumerate(sources) for right in sources[index + 1:])
 
 
 # ---------------------------------------------------------------------------- near-miss-tag
@@ -1141,6 +1410,11 @@ def near_miss_findings(payload):
     report = module.build_report(payload)
     out = []
     for f in report.get("findings", []):
+        # The helper's qualifications travel with each finding: the observed tag mismatch, whether the
+        # supporting record is only proposed, who authored the relevance judgement, and the report's
+        # standing caveat (examined evidence only, absence is not store-wide, mismatch is not synonymy).
+        # Keeping only the explanation sentence rendered an analysis as if it were an established
+        # finding (issue 186).
         out.append({
             "category": "near-miss-tag",
             "classification": f.get("classification", _ANALYSIS),
@@ -1148,6 +1422,9 @@ def near_miss_findings(payload):
             "scope": f.get("scope", ""),
             "memories": [{"uuid": f["memory"]["uuid"], "version": f["memory"]["version"]}],
             "observation": f.get("observation"),
+            "proposedEvidence": f.get("proposedEvidence") is True,
+            "basisAuthor": f.get("basis", {}).get("author"),
+            "qualification": report.get("qualification"),
         })
     return out
 
@@ -1162,22 +1439,67 @@ def _near_miss_helper_path():
 # ---------------------------------------------------------------------------- CLI (read-only)
 
 
-def read_bundle(path_or_url):
-    if path_or_url.startswith("http://") or path_or_url.startswith("https://"):
-        # A saved bundle URL is fetched as JSON — the --bundle argument names a bundle to compose,
-        # not an API base. An API base would be a different mode (fetch a fresh bundle with anchors).
-        import urllib.request
-        with urllib.request.urlopen(path_or_url, timeout=60) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    return json.loads(Path(path_or_url).read_text(encoding="utf-8"))
+def read_bundle(path):
+    """Read a saved bundle file. A URL is refused rather than fetched.
+
+    The URL form fetched store content through a default opener — redirects followed, proxies honoured,
+    any host — beside a transport that otherwise only ever talks to a guarded loopback origin. The only
+    documented way to obtain a bundle is ``bundle --out``, so the URL form was surface without a use
+    (issue 182).
+    """
+    if re.match(r"^[A-Za-z][A-Za-z0-9+.-]*://", path):
+        raise ValueError("--bundle must name a saved bundle file, not a URL; fetch one with "
+                         "`bundle --out .context/mimisbrunnr-saga-dossier/scratch/bundle.json`.")
+    return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+_JUDGEMENT_KEYS = ("equivalences", "findings")
+
+
+def read_judgements(path):
+    """Read the agent's semantic judgements for ``compose`` from a JSON file.
+
+    The shape is the ``judgements`` argument of :func:`compose`: an object with optional
+    ``equivalences`` and ``findings`` lists. Unknown keys are refused, so a misspelt key cannot drop
+    a judgement silently; the entries themselves are validated by the composer's own gates.
+    """
+    data = _read_json_object(path, "--judgements")
+    unknown = sorted(set(data) - set(_JUDGEMENT_KEYS))
+    if unknown:
+        raise ValueError(f"--judgements carries unknown key(s) {unknown}; allowed: "
+                         f"{', '.join(_JUDGEMENT_KEYS)}")
+    for key in _JUDGEMENT_KEYS:
+        if key in data and not isinstance(data[key], list):
+            raise ValueError(f"--judgements '{key}' must be a list")
+        for entry in data.get(key, []):
+            if not isinstance(entry, dict):
+                raise ValueError(f"--judgements '{key}' entries must be objects")
+    # A near-miss-tag is evidence-only (LADR-10): it reaches the dossier from the helper's validated
+    # evidence, never from text the agent wrote, which can name no supporting memory at all.
+    if any(f.get("category") == "near-miss-tag" for f in data.get("findings", [])):
+        raise ValueError("--judgements may not carry a near-miss-tag finding; pass the evidence with "
+                         "--near-miss-evidence so the near_miss_tags helper validates it (LADR-10)")
+    return data
+
+
+def _read_json_object(path, flag):
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{flag} is not valid JSON: {exc.msg} (line {exc.lineno})") from None
+    if not isinstance(data, dict):
+        raise ValueError(f"{flag} must be a JSON object")
+    return data
 
 
 def _assert_loopback(base):
     """The read token is a capability for the whole corpus; send it only to loopback.
 
     The whole first condition of the sibling client's `base_url()` guard, not just the host check:
-    a base carrying credentials, a path, a query or a fragment is not an origin, and accepting one
-    turns a typo into a 404 from a doubled path instead of an actionable refusal.
+    a base carrying credentials, a path, `;params`, a query or a fragment is not an origin, and
+    accepting one turns a typo into a 404 from a doubled path instead of an actionable refusal.
+    `urlparse` splits `;params` off the last path segment, so `http://localhost:5141/;tok=x` has the
+    path `/` and passed the path check while carrying a pasted value into every request URL.
 
     A base `urlparse` cannot parse — an NFKC-confusable character in the netloc, a non-numeric port —
     is refused with the same fixed message. The parser's own error quotes the netloc, userinfo
@@ -1194,8 +1516,12 @@ def _assert_loopback(base):
             or parsed.username
             or parsed.password
             or parsed.path not in ("", "/")
+            or parsed.params
             or parsed.query
-            or parsed.fragment):
+            or parsed.fragment
+            # `urlparse` reports `http://localhost:5141?` as an empty query: the delimiter is refused
+            # itself (issue 188).
+            or any(mark in base for mark in "?#;")):
         raise ValueError(
             "Context-memory API base must be a bare http(s) loopback origin, "
             "e.g. http://localhost:5141 (localhost/127.0.0.1/::1)")
@@ -1214,16 +1540,16 @@ def _resolve_read_credentials(base_url):
     The machine credential file was seeded at import; nothing is reloaded per call, so a caller that
     deliberately cleared the token to prove a refusal is not handed one back. A write token present is
     refused before anything else (read-only, LADR-08 / NFR-06) — a read-only worker that sources it
-    gains write capability. Both spellings are checked because the established read path treats them as
-    one credential: the kvasir client strips `CONTEXT_MEMORY_WRITE_TOKEN` *and* `ApiAccess__WriteToken`
-    from a read subprocess, so a single-spelling check here left the Host form ambient past this
-    refusal. Loopback is asserted before the token is read, so a non-loopback base
+    gains write capability. Every spelling the sibling read client refuses is refused here, through its
+    own `write_tokens_present` (any case, `:` or `__`): a local list of two names let
+    `Parameters__api-write-token` or a case variant stay ambient past this refusal (consumer review
+    5440964552 #1). Loopback is asserted before the token is read, so a non-loopback base
     refuses before any request is considered. A missing token is a ``missing-credential`` error naming
     the variable and the file — never an unauthenticated request that would come back 403.
     """
-    for name in _WRITE_TOKEN_NAMES:
-        if os.environ.get(name):
-            raise ValueError(f"{name} must not be present in a read-only bundle request")
+    present = _store_client.write_tokens_present()
+    if present:
+        raise ValueError(f"{', '.join(present)} must not be present in a read-only bundle request")
     base = (base_url or os.environ.get(_ENV_BASE_URL, "http://localhost:5141")).rstrip("/")
     _assert_loopback(base)
     token = os.environ.get(_ENV_READ_TOKEN)
@@ -1248,8 +1574,10 @@ def _problem_summary(exc):
         return exc.reason or "the server returned an error"
     if isinstance(data, dict):
         shown = data.get("detail") or data.get("title")
-        if shown:
-            return str(shown)
+        if isinstance(shown, str) and shown.strip():
+            # Bounded and on one line, like the capture client's `problem_text` (issue 186).
+            shown = " ".join(shown.split())
+            return shown if len(shown) <= 600 else shown[:600] + "…"
     return exc.reason or "the server returned an error"
 
 
@@ -1260,9 +1588,23 @@ def fetch_bundle_from_api(base_url, body):
     never appears in a committed file. Makes no write and never calls a write endpoint (NFR-06). A
     non-success answers with the server's problem title/detail, never the raw body.
     """
+    payload = _post_read_only(base_url, "/api/context/dossier/bundle", body, "bundle")
+    return payload.get("bundle", payload)
+
+
+def fetch_preview_from_api(base_url, body):
+    """POST the same anchor set to /api/context/dossier/preview (read-only, blob-free).
+
+    The consent step (LADR-14, NFR-03): the practitioner approves, narrows or cancels on the returned
+    selection, volume, reach, cost and limits before the bundle is requested.
+    """
+    return _post_read_only(base_url, "/api/context/dossier/preview", body, "preview")
+
+
+def _post_read_only(base_url, path, body, label):
     base, token = _resolve_read_credentials(base_url)
     req = urllib.request.Request(
-        base + "/api/context/dossier/bundle",
+        base + path,
         data=json.dumps(body).encode("utf-8"),
         headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
         method="POST",
@@ -1273,8 +1615,22 @@ def fetch_bundle_from_api(base_url, body):
             payload = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         raise ValueError(
-            f"bundle request failed ({exc.code} {exc.reason}): {_problem_summary(exc)}") from None
-    return payload.get("bundle", payload)
+            f"{label} request failed ({exc.code} {exc.reason}): {_problem_summary(exc)}") from None
+    return payload
+
+
+def _add_anchor_args(p):
+    p.add_argument("--body", help="JSON anchor set; defaults to a stub")
+    p.add_argument("--repo", help="Anchor: repository owner/repo (explicit flag wins).")
+    p.add_argument("--ticket", help="Anchor: single provider:key ticket.")
+    p.add_argument("--tickets", help="Anchor: comma-separated provider:key tickets.")
+    p.add_argument("--tags", help="Anchor: comma-separated tags (never autofilled).")
+    p.add_argument("--initiative", help="Anchor: initiative name.")
+    p.add_argument("--widen-depth", type=int, default=1,
+                   help="Widen depth (1-5; the contract requires it, default 1).")
+    p.add_argument("--heimdallr", choices=_HEIMDALLR_CHOICES, default="true",
+                   help="Autofill missing repo/ticket anchors from the offline Heimdallr git "
+                        "scan (default true; explicit flags and --body keys always win).")
 
 
 def main(argv=None):
@@ -1282,23 +1638,28 @@ def main(argv=None):
     parser.add_argument("--base-url", help="override " + "CONTEXT_MEMORY_BASE_URL")
     sub = parser.add_subparsers(dest="command", required=True)
 
+    preview_p = sub.add_parser("preview")
+    _add_anchor_args(preview_p)
+    preview_p.set_defaults(func=lambda args: cmd_preview(args))
+
     bundle_p = sub.add_parser("bundle")
-    bundle_p.add_argument("--body", help="JSON anchor set; defaults to a stub")
-    bundle_p.add_argument("--repo", help="Bundle anchor: repository owner/repo (explicit flag wins).")
-    bundle_p.add_argument("--ticket", help="Bundle anchor: single provider:key ticket.")
-    bundle_p.add_argument("--tickets", help="Bundle anchor: comma-separated provider:key tickets.")
-    bundle_p.add_argument("--tags", help="Bundle anchor: comma-separated tags (never autofilled).")
-    bundle_p.add_argument("--initiative", help="Bundle anchor: initiative name.")
-    bundle_p.add_argument("--widen-depth", type=int, default=1,
-                          help="Bundle widen depth (1-5; the contract requires it, default 1).")
-    bundle_p.add_argument("--heimdallr", choices=_HEIMDALLR_CHOICES, default="true",
-                          help="Autofill missing repo/ticket anchors from the offline Heimdallr git "
-                               "scan (default true; explicit flags and --body keys always win).")
+    _add_anchor_args(bundle_p)
+    bundle_p.add_argument("--out", help="write the bundle to this gitignored path (mode 0600), e.g. "
+                                        ".context/mimisbrunnr-saga-dossier/scratch/bundle.json; "
+                                        "stdout if omitted")
     bundle_p.set_defaults(func=lambda args: cmd_bundle(args))
 
     compose_p = sub.add_parser("compose")
-    compose_p.add_argument("--bundle", help="path to a saved bundle JSON, or an http(s) URL")
-    compose_p.add_argument("--out", help="write the artefact to this path (gitignored); stdout if omitted")
+    compose_p.add_argument("--bundle", help="path to a saved bundle JSON")
+    compose_p.add_argument("--judgements",
+                           help="path to the agent's semantic judgements JSON "
+                                "({\"equivalences\": [...], \"findings\": [...]})")
+    compose_p.add_argument("--near-miss-evidence",
+                           help="path to near_miss_tags.py evidence JSON; its findings are the only "
+                                "way a near-miss-tag reaches the dossier from the CLI (LADR-10)")
+    compose_p.add_argument("--out", help="write the artefact to this gitignored path, e.g. "
+                                         ".context/mimisbrunnr-saga-dossier/<name>.md; "
+                                         "stdout if omitted")
     compose_p.add_argument("--focus", choices=list(FOCUSES), help="the focus lens (default: unfocused)")
     compose_p.add_argument("--asof", help="validity window bound (YYYY-MM-DD)")
     compose_p.set_defaults(func=lambda args: cmd_compose(args))
@@ -1405,6 +1766,35 @@ def build_bundle_body(args, body):
     return body
 
 
+def _heimdallr_ticket_disclosure(scan):
+    """One line saying Heimdallr dropped ticket candidates, or None; counts and reason only.
+
+    Reading only `tickets` made a withheld credential-shaped branch ticket, or a scan whose redactor
+    could not load, indistinguishable from "no branch ticket" (issue 182). The withheld values are
+    never in the scan, so none can be printed here.
+    """
+    unavailable = scan.get("ticketsUnavailable")
+    if isinstance(unavailable, str) and unavailable.strip():
+        return f"heimdallr: tickets unavailable ({' '.join(unavailable.split())[:120]})"
+    withheld = scan.get("ticketsWithheld")
+    if isinstance(withheld, int) and not isinstance(withheld, bool) and withheld > 0:
+        return f"heimdallr: {withheld} ticket candidate(s) withheld as credential-shaped"
+    return None
+
+
+def _heimdallr_repository_disclosure(scan):
+    """One line saying Heimdallr withheld the repository, or None; the reason only, never the path.
+
+    A credential-shaped origin path is withheld (`repositoryWithheld`), which leaves the `repo` anchor
+    unfilled; reading only `repository` made that look like a checkout with no origin (issue 186).
+    """
+    reason = scan.get("repositoryWithheld")
+    if isinstance(reason, str) and reason.strip():
+        return (f"heimdallr: repository withheld ({' '.join(reason.split())[:120]}); "
+                "pass --repo to anchor one")
+    return None
+
+
 def _heimdallr_autofill(body):
     """Fill missing repo/ticket/initiative anchors from the offline Heimdallr scan.
 
@@ -1419,10 +1809,17 @@ def _heimdallr_autofill(body):
     scan = heimdallr_scan()
     filled = []
     repo = scan.get("repository")
+    if "repo" not in body:
+        disclosure = _heimdallr_repository_disclosure(scan)
+        if disclosure:
+            print(disclosure, file=sys.stderr)
     if "repo" not in body and isinstance(repo, str) and repo:
         body["repo"] = repo
         filled.append(f"repo {repo}")
     if "ticketProvider" not in body and "ticketKey" not in body:
+        disclosure = _heimdallr_ticket_disclosure(scan)
+        if disclosure:
+            print(disclosure, file=sys.stderr)
         raw = scan.get("tickets")
         branch = []
         if isinstance(raw, list):
@@ -1448,7 +1845,7 @@ def _heimdallr_autofill(body):
     return body, filled
 
 
-def cmd_bundle(args):
+def _anchor_body(args):
     body = json.loads(args.body) if args.body else {}
     if not isinstance(body, dict):
         raise ValueError("--body must be a JSON object of bundle anchors")
@@ -1458,17 +1855,140 @@ def cmd_bundle(args):
         if filled:
             print(f"Heimdallr autofill ({'; '.join(filled)}); explicit flags and --body keys "
                   f"always win. Pass --heimdallr false to disable.", file=sys.stderr)
-    bundle = fetch_bundle_from_api(args.base_url, body)
-    print(json.dumps(bundle, indent=2))
+    return body
+
+
+def cmd_preview(args):
+    preview = fetch_preview_from_api(args.base_url, _anchor_body(args))
+    print(json.dumps(preview, indent=2))
     return 0
 
 
+def cmd_bundle(args):
+    out = getattr(args, "out", None)
+    # The destination is checked before the request, so a refused path costs no store read.
+    target = _require_ignored_destination(out) if out else None
+    bundle = fetch_bundle_from_api(args.base_url, _anchor_body(args))
+    text = json.dumps(bundle, indent=2)
+    if target is not None:
+        _write_private(target, text + "\n")
+        print(f"Wrote bundle to {out}")
+    else:
+        print(text)
+    return 0
+
+
+def _write_private(target, text):
+    """Write ``text`` to ``target`` as an owner-only (0600) file, atomically.
+
+    A bundle carries every selected memory's body, which can hold personal data, and a shell
+    redirect left it at the umask's mode (typically 0644). ``mkstemp`` creates the temporary file
+    0600 in the destination directory, and ``os.replace`` keeps that mode even over an existing,
+    wider-mode file (issue 182).
+    """
+    import tempfile
+    fd, tmp = tempfile.mkstemp(dir=str(target.parent), prefix=f".{target.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        os.replace(tmp, target)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _require_ignored_destination(out):
+    """Resolve ``--out`` and refuse it unless git reports the destination as ignored.
+
+    A dossier and a bundle both carry sensitive store content and the contract is a local gitignored
+    artefact, so a tracked file (README.md) or an un-ignored path must never receive either. `git
+    check-ignore` does not report tracked files as ignored even when a pattern matches them, so one
+    check covers both. The path is resolved first so a symlink in an ignored directory cannot point
+    the write at a tracked file. Outside a git work tree nothing can be verified, so it is refused.
+    """
+    return _require_ignored_path(out, "--out", ".context/mimisbrunnr-saga-dossier/<name>.md",
+                                 "Omit --out to print to stdout.")
+
+
+def _require_ignored_source(path, flag):
+    """Refuse a ``compose`` input the agent wrote unless it sits at a gitignored path.
+
+    The judgements and near-miss evidence files are written with the agent's Write tool, which runs no
+    ignore check, and they quote store content in their bases. Refusing an un-ignored path here keeps
+    them in the scratch directory the workflow deletes, rather than beside tracked files (issue 182).
+    """
+    target = _require_ignored_path(
+        path, flag, f".context/mimisbrunnr-saga-dossier/scratch/<name>.json",
+        "Write it under .context/mimisbrunnr-saga-dossier/scratch/.")
+    _require_owner_only_input(target, flag)
+    return target
+
+
+_SCRATCH_MKDIR = "mkdir -p -m 700 .context/mimisbrunnr-saga-dossier/scratch"
+
+
+def _require_owner_only_input(target, flag):
+    """Refuse an agent-written input other local users can read (issue 184, HLD-005 NFR-01).
+
+    The scratch intermediates are owner-only by NFR-01, but the Write tool creates a file with the
+    umask's mode — 0644 under the usual 022 — and runs no permission step. Either the file or the
+    directory holding it must therefore deny group and other; the documented workflow gets that from
+    the scratch directory, created 0700. A missing file is left to the reader's own error.
+    """
+    if os.name == "nt":
+        return
+    try:
+        file_mode = target.stat().st_mode
+        dir_mode = target.parent.stat().st_mode
+    except OSError:
+        return
+    if file_mode & 0o077 and dir_mode & 0o077:
+        raise ValueError(
+            f"{flag} is readable by other users: neither the file nor its directory is owner-only. "
+            f"Create the scratch directory owner-only ({_SCRATCH_MKDIR}) before writing into it; a "
+            f"scratch directory left from an earlier run must be removed and recreated that way.")
+
+
+def _require_ignored_path(path, flag, example, hint):
+    target = Path(path).expanduser().resolve()
+    if target.is_dir():
+        raise ValueError(f"{flag} names a directory, not a file: {path}")
+    if not target.parent.is_dir():
+        raise ValueError(f"{flag} parent directory does not exist: {target.parent}")
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(target.parent), "check-ignore", "-q", "--", str(target)],
+            capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        proc = None
+    if proc is None or proc.returncode != 0:
+        raise ValueError(
+            f"{flag} must name a gitignored path inside a git work tree "
+            f"(e.g. {example}); {path} is tracked, not ignored, or could not be verified. {hint}")
+    return target
+
+
 def cmd_compose(args):
+    if not args.bundle:
+        raise ValueError("compose requires --bundle PATH (a bundle saved with `bundle --out`)")
+    target = _require_ignored_destination(args.out) if args.out else None
+    judgements = None
+    if args.judgements:
+        judgements = read_judgements(_require_ignored_source(args.judgements, "--judgements"))
+    if args.near_miss_evidence:
+        evidence = _read_json_object(
+            _require_ignored_source(args.near_miss_evidence, "--near-miss-evidence"),
+            "--near-miss-evidence")
+        judgements = dict(judgements or {})
+        judgements["findings"] = list(judgements.get("findings", [])) + near_miss_findings(evidence)
     bundle = read_bundle(args.bundle)
-    dossier = compose(bundle, focus=args.focus, asof=args.asof)
+    dossier = compose(bundle, focus=args.focus, judgements=judgements, asof=args.asof)
     text = render(dossier)
-    if args.out:
-        Path(args.out).write_text(text, encoding="utf-8")
+    if target is not None:
+        _write_private(target, text)
         print(f"Wrote dossier to {args.out}")
     else:
         print(text)

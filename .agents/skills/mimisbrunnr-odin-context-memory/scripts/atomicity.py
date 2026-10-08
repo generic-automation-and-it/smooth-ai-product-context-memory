@@ -16,6 +16,7 @@ import json
 import re
 import sys
 
+from redact import load_input
 # Junction signals that a single record likely asserts more than one *independent* fact.
 #
 # Deliberately excluded, because each marks one fact rather than two:
@@ -37,17 +38,22 @@ _CONTRASTIVE = [
 _ADDITIVE = [
     r"\b(?:also|furthermore|moreover|additionally)\b",
     r",\s*and\b",
-    r"\b(?:that explains|also means)\b",
+    # "also means" is not listed: the `also` above already counts it, and listing it again scored one
+    # "X also means Y" as two junctions — a single clause flagged as a bundle (review 5432012955 #8).
+    r"\bthat explains\b",
     # "both X and Y" is usually one fact about a coordinated pair ("for both capture and
     # retrieval"), so it contributes rather than deciding on its own.
     r"\bboth\b",
+    # A universal quantifier is one claim about a set ("all of the retries are idempotent"). It sat
+    # in the tally tier, so it alone marked a single fact as a bundle (review #18); like "both", it
+    # now only contributes.
+    r"\b(?:all of|each of)\b",
 ]
 _TALLY = [
     # Leading negative lookbehind (not \b) so "local-first" or "v1-first" does not count "first"
     # as an enumerator — a common false positive in product phrasing.
     r"(?<![-\w])(?:first|second|third|fourth|fifth|finally|lastly)\b",
     r"(?:\b\d+\b|\b(?:two|three|four|five|several|many))\s+(?:things?|points?|reasons?|facts?)\b",
-    r"\b(?:all of|each of)\b",
 ]
 _SPLIT = [
     r"\b(?:this|that|the latter|the former)\b",
@@ -107,13 +113,15 @@ def classify(text):
 def main():
     parser = argparse.ArgumentParser(prog="atomicity")
     parser.add_argument("--input", help="JSON file of candidate {description,statement} objects; defaults to stdin")
+    parser.add_argument("--consume", action="store_true",
+                        help="delete the --input file once it has been read")
     args = parser.parse_args()
 
-    if args.input:
-        with open(args.input, "r", encoding="utf-8") as fh:
-            batch = json.load(fh)
-    else:
-        batch = json.load(sys.stdin)
+    try:
+        batch = load_input(args.input, args.consume)
+    except ValueError as error:
+        print(f"atomicity: {error}", file=sys.stderr)
+        sys.exit(1)
 
     if not isinstance(batch, list):
         print("atomicity: expected a JSON array on stdin", file=sys.stderr)

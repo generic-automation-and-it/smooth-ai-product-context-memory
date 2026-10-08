@@ -12,7 +12,8 @@ Three numbers, and the difference between them is the whole point of this file:
             model collapsed instead of creating a second memory. A matcher that matches nothing scores
             0.0 here, which is the only way this number can mean anything.
   precision correct / the predictions the model actually made. The share of claimed collapses that were
-            really collapses, over the dedup-class scenarios it claimed them on.
+            really collapses into the expected memory, over the dedup-class scenarios it claimed them
+            on. A collapse into the wrong target counts against it (`wrong_target`).
   accuracy  correct / every scenario. Reported because the recall used to be this number under the
             name recall, which let a run that missed a scenario outright still print a healthy score.
 
@@ -20,14 +21,16 @@ Verdicts are matched to scenarios by `id`, not by position. Positional matching 
 deleting or reordering a scenario silently misaligned every verdict after it, and because
 `run_tests.py` asserts the committed run scores exactly 1.0/1.0, the harness would then have
 certified the wrong verdicts against the wrong scenarios with no test failing. The blinded input
-therefore carries each scenario's `id` and the model echoes it back.
+therefore carries an identifier for each scenario and the model echoes it back.
 
-What keeps the run blinded is the emitter withholding `expected`, `note` and `axis` — asserted by
-`run_tests.py::SemanticFixtureTests`. The `id` is emitted for pairing, and an id is not a general
-licence to read intent off a string: in this fixture set `s4-cross-group-match-is-not-a-bump` and
-`s8-near-miss-negative` name their own expected verdicts, so anyone reading the repository can see
-the answers. That is a transparency property of a committed evidence file, not a property of the
-blinded input, and it is recorded here rather than papered over with a claim about identifiers.
+That identifier is **opaque** (`opaque_id`: a hash of the scenario id), never the id itself. The ids are
+authored to be read by people — `s4-cross-group-match-is-not-a-bump`, `s8-near-miss-negative` — and the
+model reads the blinded input, so emitting them put the expected verdict in the model's own context
+(issue 179 #39, issue 190 #20). The hash is stable under reordering, so pairing stays by identity, and
+the scorer accepts either form, so a recorded run that echoed the real ids is still scorable. The rest
+of the blinding is the emitter withholding `expected`, `note` and `axis` — all asserted by
+`run_tests.py::SemanticFixtureTests`. `stage` is emitted: it is the question being asked, and the
+verdict shape depends on it.
 
 A verdicts file with no ids at all is refused unless `--allow-legacy-positional` is passed. That flag
 exists only so a superseded dated run stays re-scorable, which is how the 0.9 / 0.8333 figure was
@@ -43,11 +46,16 @@ To re-score a dated run against the fixture it was actually taken against:
 
     python3 tests/fixtures/score_fixtures.py --fixtures tests/fixtures/scenarios-2026-09-29.json \
         --model-verdicts tests/fixtures/model-verdicts-2026-09-17.json --allow-legacy-positional
+    python3 tests/fixtures/score_fixtures.py --fixtures tests/fixtures/scenarios-2026-09-29-balanced.json \
+        --model-verdicts tests/fixtures/model-verdicts-2026-09-29-balanced.json
 """
 
 import argparse
+import hashlib
 import json
+import re
 import sys
+import unicodedata
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -60,8 +68,8 @@ def load_fixtures(path=None):
 
 
 # Expected-side fields compared by equality against the model verdict object when declared.
-# "reason" is authored explanation text, not a criterion; "reason_must_be_nonempty" and
-# "must_not_contain" carry their own assertion semantics below.
+# "reason" is authored explanation text, not a criterion; "reason_must_be_nonempty", "redacted_must_keep",
+# "redacted_must_cover" and "must_not_contain" carry their own assertion semantics below.
 AUX_EQUALITY_FIELDS = ("target_uuid", "link_uuid", "relation", "count", "diverged", "not_product_fact", "authority")
 
 # Which axis of NFR-02's two-axis measurement a scenario exercises. Declared on the fixture rather
@@ -80,11 +88,42 @@ AXIS_VALUES = ("recall_positive", "precision_negative", "not_dedup")
 DEDUP_STAGES = ("dedup", "divergence")
 MERGE_VERDICTS = ("version_bump", "merge")
 
+VERDICT_SHAPE = {
+    "every_stage": "an object with the scenario's `id`, a `verdict` word and a non-empty `reason`",
+    "redact": "also a `redacted` object mapping every candidate_* text field to its scrubbed text",
+}
+
 
 def axis_balance(fixtures):
     positives = [f["id"] for f in fixtures if f.get("axis") == "recall_positive"]
     negatives = [f["id"] for f in fixtures if f.get("axis") == "precision_negative"]
     return positives, negatives
+
+
+def normalised(text):
+    """Case-, whitespace- and invisible-character-insensitive form, so `akia…` or a key split by a
+    space, a line break or a zero-width character still counts as the token."""
+    text = "".join(ch for ch in text if unicodedata.category(ch) != "Cf")
+    return re.sub(r"\s+", "", text).casefold()
+
+
+def rendered_text(value):
+    """Every string a verdict carries, keys included, joined in order.
+
+    Read from the decoded strings rather than from `json.dumps`, which writes a line break or a tab as
+    the two characters `\\n`/`\\t` — not whitespace, so `normalised` left them in place and a key split
+    across lines passed the banned-token check (issue 184)."""
+    if isinstance(value, dict):
+        return "".join(str(key) + rendered_text(item) for key, item in value.items())
+    if isinstance(value, (list, tuple)):
+        return "".join(rendered_text(item) for item in value)
+    return "" if value is None else str(value)
+
+
+def has_reason(got):
+    """A non-blank string `reason`: the shape every verdict is told to carry (`VERDICT_SHAPE`)."""
+    reason = got.get("reason") if isinstance(got, dict) else None
+    return isinstance(reason, str) and bool(reason.strip())
 
 
 def scenario_matches(expected, got):
@@ -96,37 +135,79 @@ def scenario_matches(expected, got):
     for field in AUX_EQUALITY_FIELDS:
         if field in expected and got_dict.get(field) != expected[field]:
             return False
-    if expected.get("reason_must_be_nonempty") and not got_dict.get("reason"):
+    # Every stage, not only the scenarios declaring `reason_must_be_nonempty`: the blinded input
+    # tells the model every verdict carries a non-empty reason, and a reasonless verdict scored as
+    # correct on the thirteen scenarios that did not repeat the rule (issue 184). Every committed run
+    # carries a reason on every verdict, so no recorded figure moves.
+    if not has_reason(got):
         return False
+    # A `scrub` verdict is a claim about content, so the scrubbed content has to be there to be
+    # checked. Without this a bare `scrub` — or a redaction that only lowercased the key — scored as
+    # correct, because the banned-token check only ever saw what the verdict happened to echo
+    # (issue 182).
+    covered = expected.get("redacted_must_cover", [])
+    if covered:
+        redacted = got_dict.get("redacted")
+        if not isinstance(redacted, dict):
+            return False
+        keep = expected.get("redacted_must_keep", {})
+        for field in covered:
+            text = redacted.get(field)
+            if not isinstance(text, str) or not text.strip():
+                return False
+            # Scrubbing is replacing the secret, not dropping the claim around it: a field reduced to
+            # `<redacted>` passed `must_not_contain` as easily as a correct scrub did (issue 186).
+            if any(normalised(token) not in normalised(text) for token in keep.get(field, [])):
+                return False
     banned = expected.get("must_not_contain", [])
     if banned:
-        rendered = json.dumps(got_dict) if isinstance(got, dict) else str(got)
-        if any(token in rendered for token in banned):
+        rendered = normalised(rendered_text(got))
+        if any(normalised(token) in rendered for token in banned):
             return False
     return True
 
 
+def opaque_id(scenario_id):
+    """The identifier the blinded input carries: stable under reordering, and says nothing about the
+    expected verdict, which a human-readable scenario id often does."""
+    return "c-" + hashlib.sha256(scenario_id.encode("utf-8")).hexdigest()[:10]
+
+
 def pair_by_id(fixtures, model, allow_legacy_positional):
-    """Return [(fixture, verdict)] in fixture order, refusing anything that would pair by accident."""
+    """Return [(fixture, verdict)] in fixture order, refusing anything that would pair by accident.
+
+    A verdict may name its scenario by the real id (a recorded run) or by the opaque id the blinded
+    input carried (a run taken since issue 190); both resolve to the same scenario."""
     known = {fixture["id"]: fixture for fixture in fixtures}
     if len(known) != len(fixtures):
         raise SystemExit("score: the fixture contains a duplicate id")
+    aliases = {opaque_id(fixture["id"]): fixture["id"] for fixture in fixtures}
+    if len(aliases) != len(fixtures) or set(aliases) & set(known):
+        raise SystemExit("score: two scenarios share an opaque id")
 
+    identified = [isinstance(entry, dict) and "id" in entry for entry in model]
+    if allow_legacy_positional and not any(identified):
+        return list(zip(fixtures, model)), True
     by_id = {}
     for entry in model:
         if not isinstance(entry, dict) or "id" not in entry:
-            if allow_legacy_positional:
-                return list(zip(fixtures, model)), True
+            if any(identified):
+                # Some verdicts name their scenario and some do not: a run that is neither by-id nor
+                # positional. Falling back to position here let an id-bearing verdict be scored against
+                # whatever scenario sat at its position (issue 186), so a mixed run is always refused.
+                raise SystemExit("score: some verdicts carry an 'id' and some do not; a mixed run "
+                                 "cannot be paired, by id or by position")
             raise SystemExit(
                 "score: a verdict carries no 'id', so it can only be paired by position. Pass "
                 "--allow-legacy-positional to score a superseded dated run taken against an older "
                 "fixture; a new run must echo each scenario's id."
             )
-        if entry["id"] not in known:
+        scenario = aliases.get(entry["id"], entry["id"])
+        if scenario not in known:
             raise SystemExit(f"score: verdict names unknown scenario id {entry['id']!r}")
-        if entry["id"] in by_id:
+        if scenario in by_id:
             raise SystemExit(f"score: scenario id {entry['id']!r} was judged more than once")
-        by_id[entry["id"]] = entry
+        by_id[scenario] = entry
 
     missing = [fixture["id"] for fixture in fixtures if fixture["id"] not in by_id]
     if missing:
@@ -150,13 +231,23 @@ def main():
 
     fixtures = load_fixtures(args.fixtures)
     if args.emit_model_input:
-        # `id` is emitted: it identifies the row without revealing the answer, and without it the
-        # scorer can only pair by position. `expected`, `note` and `axis` stay withheld — `axis`
-        # would tell the model which way the pair is meant to fall.
-        blinded = [{key: value for key, value in fixture.items()
-                    if key not in ("expected", "note", "axis")}
+        # Without the writing group a model cannot tell a same-group bump from a cross-group twin,
+        # and that distinction is what several dedup scenarios score. Refused at emission only, so a
+        # frozen fixture that predates the field stays re-scorable.
+        ungrouped = [fixture["id"] for fixture in fixtures
+                     if fixture.get("recall_set") and not fixture.get("candidate_group_uuid")]
+        if ungrouped:
+            raise SystemExit("score: scenario(s) with a recall set but no candidate_group_uuid: "
+                             + ", ".join(ungrouped))
+        # An opaque id is emitted, never the authored one: without an id the scorer can only pair by
+        # position, and the authored ids name expected verdicts (issue 190 #20). `expected`, `note`
+        # and `axis` stay withheld — `axis` would tell the model which way the pair is meant to fall.
+        blinded = [dict({key: value for key, value in fixture.items()
+                         if key not in ("expected", "note", "axis")}, id=opaque_id(fixture["id"]))
                    for fixture in fixtures]
-        print(json.dumps({"scenarios": blinded}, indent=2))
+        # Output shape, not an answer: a redact-stage verdict is scored on the scrubbed text, so the
+        # model has to be told to return it.
+        print(json.dumps({"verdict_shape": VERDICT_SHAPE, "scenarios": blinded}, indent=2))
         return
 
     with open(args.model_verdicts, "r", encoding="utf-8") as fh:
@@ -204,7 +295,7 @@ def main():
                 "expected": expected["verdict"],
                 "got": got_verdict,
                 "match": ok,
-                "reason_present": bool((got if isinstance(got, dict) else {}).get("reason")),
+                "reason_present": has_reason(got),
             }
         )
 
@@ -228,6 +319,7 @@ def main():
     predicted_positives = 0
     correct_predictions = 0
     over_merge = 0
+    wrong_target = 0
     for fixture, got in pairs:
         if fixture["stage"] not in DEDUP_STAGES:
             continue
@@ -237,8 +329,12 @@ def main():
         should_claim = expected_verdict in MERGE_VERDICTS
         if claimed:
             predicted_positives += 1
-            if should_claim:
+            # A collapse into the wrong memory is not a correct collapse: it overwrites a claim the
+            # candidate never restated. So the full match, target included, is what counts.
+            if should_claim and scenario_matches(fixture["expected"], got):
                 correct_predictions += 1
+            elif should_claim:
+                wrong_target += 1
             else:
                 over_merge += 1
     precision = correct_predictions / predicted_positives if predicted_positives else 1.0
@@ -257,6 +353,7 @@ def main():
             "predicted_positives": predicted_positives,
             "correct_predictions": correct_predictions,
             "over_merge": over_merge,
+            "wrong_target": wrong_target,
         },
         "paired_by": "position (legacy)" if positional else "id",
     }, indent=2))

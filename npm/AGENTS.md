@@ -19,10 +19,16 @@ ignore remains untouched. `package.json` owns the publish allowlist and public c
   `package.json#mimisbrunnrPython` is a declarative mirror of the same floor that nothing reads, so raise
   it in the same change. The floor is enforced only on the npm launchers — a direct
   `python3 <skill>/scripts/*.py` invocation (Claude/Copilot plugin and skill path) bypasses it.
+- `package.json#files` ships three skill `scripts/` folders that resolve each other by sibling path:
+  kvasir's client runs odin's redactor/atomicity/clients and heimdallr's reporter, and heimdallr's
+  reporter screens tickets with odin's `redact.py`. Dropping odin's folder (or `redact.py`) does not
+  break heimdallr's exit code — it reports `ticketsUnavailable` and no tickets — so `npm test` runs the
+  packed heimdallr with `--json --repo-root <checkout>` and asserts `ticketsUnavailable` is `null`.
 
 ## Changelog
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-05 | Recorded the sibling-path dependencies inside the package (kvasir → odin + heimdallr, heimdallr → odin's `redact.py`, the last new in issue 182) and added a packed-heimdallr `--json` run to `scripts/npm-smoke.js`: it asserts `ticketsUnavailable` is `null`, because a missing redactor fails closed with exit 0 and only that field shows it. Mutation-checked: excluding `redact.py` from `files` (with the bin loop disabled, since odin's `--help` imports it first) fails the new assertion. | issue 182 |
 | 2026-09-29 | Recorded the checked Python floor, which shipped without any statement in the file that owns `npm/cli/`: `MIN_PYTHON` in `_run.js` is the single enforced minimum (3.9), every public launcher checks it before spawning a client, and a maintainer editing it or adding a launcher needed a local record of the reason and of the `package.json#mimisbrunnrPython` mirror. The could-not-determine message now derives its version from the constant instead of repeating the literal. | package distribution |
 | 2026-09-21 | Established isolated npm launcher ownership and installed-tarball smoke verification. | package distribution |

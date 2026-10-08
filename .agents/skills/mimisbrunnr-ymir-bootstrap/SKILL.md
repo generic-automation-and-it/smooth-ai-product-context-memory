@@ -39,7 +39,17 @@ At the start, establish:
 - the chosen repository root and verified repository identity (default the Heimdallr
   reporter's `owner/repo` from the same skills root when the caller names none —
   `.agents/skills`, `.claude/skills` or `.codex/skills`, never a hardcoded prefix —
-  plus branch-seen tickets for a next-feature scope; tags stay agent-derived keywords);
+  with branch-seen tickets **proposed**, not bound, for a next-feature scope; tags stay agent-derived
+  keywords). Run the reporter as `find_session_metadata.py --json --repo-root <chosen root>`, never
+  from whatever working directory the session happens to be in, and accept its `repository` and
+  tickets only when its `rootMatches` is `true` (the reporter compares resolved paths itself; its `root` is a
+  display form and may be withheld); otherwise treat the identity as
+  unproven and bind nothing from it. A session's working directory is often a different checkout from
+  the one being bootstrapped, and a scan there reports that checkout's repository and tickets. A
+  matching root proves **where** a ticket was found, not that it belongs to the named feature: a branch
+  carries whatever ticket the last piece of work on it used. So ask the user to confirm each proposed
+  ticket belongs to the named next feature before it enters the capture binding, and bind none they do
+  not confirm;
 - whether the task is baseline-only or includes deeper inspection for one named next feature;
 - any user-approved external evidence sources.
 
@@ -47,7 +57,9 @@ Anchor repository scope to verified local identity such as the repository root, 
 revision. Never record a remote URL containing credentials or tokens, and reject a user-supplied evidence
 source whose URL embeds credentials before echoing, citing, or opening it. If inspected evidence contains a
 secret, cite only its location and show the value as `<REDACTED>` in the preview; never carry it into a
-candidate or a runtime token into any output. Stay inside the selected repository
+candidate or a runtime token into any output. If it contains a personal identifier (a name, email, account
+name or identity number), generalise it to a role or type ("the maintainer", "an email address") before
+building candidates — never carry the value into a candidate, the preview or a handoff. Stay inside the selected repository
 and explicitly supplied external sources. Do not discover or inspect personal vaults, sibling repositories,
 other workspaces, issue trackers, or services merely because they may contain useful context.
 
@@ -123,9 +135,10 @@ bounded batch and disclose what was deferred; never silently chunk the remainder
 Ask only questions whose answers would materially change claim meaning, scope, lifecycle, group placement,
 or authorization. A disputed candidate can be held while uncontested candidates continue.
 
-For each selected noun (the subject of a change-impact note), also ask the owner what points **into** the
-area from outside — configs, CI, scripts, other repositories — and record each inbound referrer on the claim
-it lands on. Nothing in the tree reveals these; they come from the owner. First-order only.
+For each selected noun (the subject of a change-impact note), first look in the bounded repository evidence
+for what points **into** the area — configs, CI, scripts — and cite each visible referrer on the claim it
+lands on. Then ask the owner only about referrers the checkout cannot show (other repositories, external
+jobs). First-order only.
 
 ### 2. Present A Cited Preview
 
@@ -163,8 +176,11 @@ itself does not identify an existing group: ticketless resolution creates a synt
 `resolve-group` has no dry-run. Reuse a known, applicable group or ticket when available. If identity is
 absent, leave it for the writer at the authorized checkpoint. A no-op batch must not create a group.
 
-The full memory-set `--dryrun` requires an already-persisted group. Offer it only when an applicable group
-already exists, or after the user separately authorizes group creation. Never create a group solely to
+The full memory-set `--dryrun` requires an already-persisted group **whose UUID is known**. Offer it only
+when that UUID was found read-only — a ticket `query` returns it only when the group already holds
+memories — or after the user separately authorizes group creation. An existing group with no memories
+has no read-only route to its UUID, so for it, as for a group that does not exist yet, the writer can
+preview only the offline plan and reports the set stage as not tested. Never create a group solely to
 preview a batch. `--dryrun` and `--approve` are mutually exclusive. A dry-run after authorized group
 creation means the memory set is dry but the preceding group mutation is real; disclose that the group can
 remain if capture pauses or fails. Present any dry-run result as a reviewable preview, including creates,

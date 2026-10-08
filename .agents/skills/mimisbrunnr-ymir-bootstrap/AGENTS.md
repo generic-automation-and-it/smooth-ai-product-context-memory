@@ -1,5 +1,10 @@
 # Mímisbrunnr Bootstrap Maintenance Context
 
+> **References.** The `### LADR-NN` decisions below are this skill's own. Every other HLD, LADR, NFR,
+> BRD, issue and PR number in this file belongs to the upstream repository,
+> `generic-automation-and-it/smooth-ai-product-context-memory` (`docs/hlds/`, `docs/brd/`), not to a
+> repository this skill is vendored into.
+
 ## TL;DR
 
 Turns a bounded repository inspection into reviewed, source-backed memory candidates by composing the
@@ -17,7 +22,7 @@ existing `mimisbrunnr-odin-context-memory` contracts. It is not another store cl
   capture, and recall verification were unavailable.
 - The existing context-memory writer remains the sole write authority. Do not add a backend, schema,
   alternate client, helper script, or direct HTTP fallback here.
-- `resolve-group` is a real mutation with no dry-run. A full memory-set dry-run requires a persisted group;
+- `resolve-group` is a real mutation with no dry-run. A full memory-set dry-run requires a persisted group whose UUID is known read-only (the group already holds memories);
   never create one solely to preview, and disclose any separately authorized group creation.
 - The preview and authorization checkpoint must preserve evidence class, lifecycle, provenance, uncertainty,
   and the writer's 20-candidate cap. Capture permission is not canonical `--approve` permission.
@@ -44,7 +49,8 @@ sequenceDiagram
 ```
 
 Without verified protected workers, the sequence stops after the cited offline preview. A persisted group
-is required for a full set dry-run; group creation is a separate real mutation and may remain on failure.
+whose UUID is known read-only (the group already holds memories) is required for a full set dry-run;
+group creation is a separate real mutation and may remain on failure.
 
 ## Architecture Decisions
 
@@ -60,8 +66,11 @@ check excluded the seeded tables while the clear step deleted them. The prompt i
 
 **Decision.** Change-impact and inbound referrers are recorded in the offline cited preview (Step 2) and the
 skill contract (Step 1's discovery questions), not as store candidates or relations. The preview shows, per
-selected noun, **Hits / Does not hit**; discovery asks the owner what points *into* the area from outside.
-First-order only, no transitive waterfalls.
+selected noun, **Hits / Does not hit**; discovery cites the inbound referrers the repository evidence shows
+(configs, CI, scripts) and asks the owner only about those the checkout cannot show. First-order only, no
+transitive waterfalls. *Amended 2026-10-06 (upstream issue 190 #26):* discovery previously asked the owner
+for every referrer, on the claim that the tree reveals none, which the bootstrap evaluation itself
+contradicts by crediting a CI referrer cited from the evidence.
 
 **Rejected (a)** — a claim convention inside `statement`/`contentSummary`: no new structure, but it bundles
 noun + impact + the negative into one fact, and the atomicity gate flags bundled candidates; "does not hit"
@@ -108,15 +117,21 @@ authorization are available. Static validation is packaging evidence only.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
-| 2026-10-03 | **Scope defaults repository identity (and next-feature tickets) to the Heimdallr report** when the caller names none (same skills root, never a hardcoded prefix); tags stay agent-derived keywords. Wording only, no script. | session request |
-| 2026-10-02 | **Runtime gate rewritten for the bash-client workers.** It no longer checks the capability-limited MCP workers; it now confirms the `memory-read`/`memory-write` workers with the read path holding no write capability — the read client's startup refusal plus the write credential never being ambient, and the worker instructed not to source the full credential file. README/AGENTS wording aligned; no MCP fallback language. | MCP removal |
-| 2026-10-01 | Rubric gained a `Change impact` scoring row and the strong-pass bar moved to 12/14 with no zero in change impact. The required-finding text already said a dropped does-not-hit look-alike scores 0, but no table row recorded it, so dropping it cost nothing and still strong-passed. | LADR-01 |
-| 2026-10-01 | LADR-01: change-impact ("Hits / Does not hit") and inbound referrers recorded in the offline cited preview and the skill contract, not the store. Discovery (Step 1) asks the owner what points into the selected area from outside; the preview (Step 2) shows what a change to a noun hits and the look-alike it does not. Rejected the statement-convention and depends_on-relation options because the negative has no store vocabulary and no new relation type is in scope. Contract + documentation only; no schema, relation, or dossier change. | ICM object card "if you change this — hits / does not hit" |
-| 2026-09-27 | AI review fixes: provenance fields `reference`/`capturedAt` corrected to members of the item's `sources` array (`{kind, reference, capturedAt}`) rather than top-level set item fields, which the endpoint rejects with a `400` — `SetMemories.MemoryWrite` has no such properties, they arrive through `SourceInput` (`SKILL.md`, `Non-Negotiables` above). The `System Context` diagram now reviews the preview before store comparison, matching `SKILL.md` steps 2-3 and the "after the human has reviewed the offline preview" gate. Documentation only; no runtime or contract change. | AI PR review |
-| 2026-09-27 | Discovery fenced to git-visible files (`ls-files --cached --others --exclude-standard`) plus named sources; `.context/`, `.env*`, `*.env` never opened, because the provisioned token file sits in the working tree. Credential wording corrected: the skill does not use the tokens, but a sourced env file exports them into the main agent's environment, so no-direct-HTTP is an instruction, not an environment guarantee. | PR #130 credential provisioning |
-| 2026-09-27 | Renamed `mimisbrunnr-bootstrap` → `mimisbrunnr-ymir-bootstrap` (folder, `name:`, slash command, every inventory and link), following the brand + Norse name + action pattern of `mimisbrunnr-vitsmunir-dump`. Ymir: the first being, from whose body the world was shaped — a baseline built from the repository that already exists. No behavioural change. | PR #91 |
-| 2026-09-27 | Aligned with main's skill conventions after sync: `metadata.models` replaced by `effort: xhigh` (shared frontmatter shape, no model); static check now enforces that shape plus a gitleaks scan instead of an external validator that rejects `effort`; secret-handling checklist applied — no env var read, workers alone hold the store tokens, credential-bearing evidence URLs refused, evidence secrets redacted to `<REDACTED>` in the preview. | skill effort migration; skill secret-handling rule |
-| 2026-09-20 | Recorded reproducible fresh-agent preview and unavailable-worker follow-up evidence, with static/manual/live-store boundaries and Python 3.9 compatibility observation. | [manual evaluation](tests/README.md#evaluation-record--2026-09-20) |
-| 2026-09-20 | Added a reproducible blinded manual evaluation corpus, unavailable-worker follow-up, and not-run disposable-store acceptance checklist. | contribution prep |
-| 2026-09-20 | Independent forward test preserved a cutoff conflict, voucher exception, and proposal lifecycle; ignored embedded instructions; unavailable protected workers caused no store calls. | behavioral review |
-| 2026-09-20 | Created bounded repository bootstrap with protected-worker gate, reviewed capture lifecycle, and real-recall verification. | BR-46 local proposal |
+| 2026-10-07 | Full `set --dryrun` offered only when the group UUID is known read-only or after authorized creation; an empty group gets the offline plan. | review 5438563690 |
+| 2026-10-06 | Personal identifiers in evidence are generalised to a role before candidates are built. | issue 190 |
+| 2026-10-06 | Identity check reads Heimdallr's `rootMatches`, since `root` may be withheld. | issue 188 |
+| 2026-10-06 | A branch ticket is proposed and confirmed, never bound unasked: a matching root proves location, not relevance. | issue 186 |
+| 2026-10-06 | Rubric no longer penalises the owner question the workflow requires. | issue 184 |
+| 2026-10-05 | Heimdallr scans the bootstrapped checkout (`--repo-root`), not the process cwd, which can be another repo. | issue 182 |
+| 2026-10-03 | Repository identity defaults to the Heimdallr report when the caller names none. | session request |
+| 2026-10-02 | Runtime gate checks the bash-client workers: read path holds no write capability. | MCP removal |
+| 2026-10-01 | Rubric scores change impact; dropping the does-not-hit look-alike cannot strong-pass. | LADR-01 |
+| 2026-10-01 | Change impact and inbound referrers live in the cited preview, not the store. | LADR-01 |
+| 2026-09-27 | Provenance fields belong in the item's `sources` array; top-level fields are a `400`. | AI PR review |
+| 2026-09-27 | Discovery fenced to git-visible files; `.context/` and `.env*` never opened (token file lives in the tree). | PR #130 |
+| 2026-09-27 | Renamed to `mimisbrunnr-ymir-bootstrap`. | PR #91 |
+| 2026-09-27 | Frontmatter uses `effort`; static check plus gitleaks scan. | skill effort migration |
+| 2026-09-20 | Recorded fresh-agent preview and unavailable-worker evaluation. | manual evaluation |
+| 2026-09-20 | Added blinded manual evaluation corpus. | contribution prep |
+| 2026-09-20 | Forward test: embedded instructions ignored; unavailable workers made no store calls. | behavioral review |
+| 2026-09-20 | Created bounded bootstrap with protected-worker gate and reviewed capture. | BR-46 |
