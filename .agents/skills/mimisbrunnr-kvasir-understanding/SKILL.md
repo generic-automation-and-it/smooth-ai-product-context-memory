@@ -242,8 +242,7 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
   first, because an export of a verbatim transcript splits it into thousands of candidates (a 446 KB
   braindump produced 2220, of which 532 were flagged bundled and batch 1 was refused on a duplicated
   subject).
-  and key learnings) to `.context/mimisbrunnr-understandings/<session-folder>/` as Markdown. The
-  session content is what `--from` supplies (a file, or `-` for stdin). **Generalise personal data
+  The session content is what `--from` supplies (a file, or `-` for stdin). **Generalise personal data
   before the summary exists anywhere**: compose it with every name, email, account name or identity
   number replaced by a role or type ("the reviewer", "an email address"), then pass it on stdin
   (`--from -`) so no unprocessed copy reaches disk — or, if a file is needed, write only the

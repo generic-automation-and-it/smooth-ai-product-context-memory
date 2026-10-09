@@ -1696,6 +1696,7 @@ def _dedup_candidates(candidates: list[dict], group_uuid: str | None, binding: d
             input=json.dumps(payload), capture_output=True, text=True, encoding="utf-8",
         )
     except OSError:
+        print("NOTE: dedup could not be started; no duplicate proposals were made.", file=sys.stderr)
         return 0, 0
     if proc.returncode != 0:
         print(f"NOTE: dedup failed ({proc.stderr.strip()[:200]}); no duplicate proposals were made.",

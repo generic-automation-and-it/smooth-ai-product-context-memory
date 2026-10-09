@@ -179,12 +179,13 @@ recalls the live store via `import` (read token only) and orchestrates the captu
   the `set --dryrun` veto still catches a same-group duplicate before any write. A dry run has no
   resolved group, so its receipt shows the write count and discloses how many candidates matched an
   existing same-subject memory (those whose match is in the export's group would be versioned).
-- **Dedup is exact-subject only: no semantic matching, no derived links.** The match above is the
-  preflight's same-subject match; every `set` carries `links: []`. A paraphrase of an existing memory
+- **Dedup is exact-subject plus opt-in staged proposals, never a merge.** The match above is the
+  preflight's same-subject match; every `set` carries `links: []`. With `CONTEXT_MEMORY_DECISIONS_DEDUP_ENABLED=true`,
+  `_dedup_candidates` runs exact -> lexical -> model stages per chunk and queues `duplicate`-menu proposals
+  for human resolve. A paraphrase of an existing memory
   under another subject, or a relation worth a typed link, needs the judgement the capture skill's
-  Compare-or-Clarify round makes, which this script cannot make, and the staged client-side dedup
-  that would propose it (exact → lexical → decision model, proposals only, no automatic merge) is
-  planned, not implemented. So the agent does it before `--write`: recall each candidate's subject
+  Compare-or-Clarify round makes, which this script cannot make. So the agent does it before `--write`:
+  recall each candidate's subject
   (`import`, or the capture skill's `--import`) and, where a candidate restates or relates to a
   recalled memory, capture it through `mimisbrunnr-odin-context-memory --export` instead, or drop it
   from this input (review 5432012955 #2).
