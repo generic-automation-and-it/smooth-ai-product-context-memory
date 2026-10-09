@@ -2498,7 +2498,7 @@ class DecisionsGateIntegrationTests(unittest.TestCase):
         else:
             os.environ["CONTEXT_MEMORY_DECISIONS_BELOW_THRESHOLD"] = env_below
         try:
-            survivors, note, _held = uc.gate_decisions(
+            survivors, note = uc.gate_decisions(
                 list(candidates if candidates is not None else self.CANDIDATES))
             return survivors, note, seen
         finally:

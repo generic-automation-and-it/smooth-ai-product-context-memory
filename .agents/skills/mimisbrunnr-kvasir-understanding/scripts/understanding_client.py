@@ -1192,19 +1192,19 @@ def _ledger_disclosures(report: dict) -> list[str]:
     return lines
 
 
-def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str, list[tuple[dict, dict]]]:
+def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str]:
     """Score each candidate's role value through the capture skill's decision gate.
 
-    Returns `(survivors, note, held)`. Every failure mode except `redactor-unavailable` and a bad
+    Returns `(survivors, note)`. Every failure mode except `redactor-unavailable` and a bad
     configuration **skips the gate and says why** — a decision model that is down, missing, or
     timing out must never block a capture, and must never be reported as a low score. The two
     refusals are the opposite case: a redactor that cannot run means content nobody could inspect
     would be sent, and a misconfigured threshold or role list means the gate would judge against
     something other than what was configured.
 
-    `held` is the list of `(candidate, verdict)` pairs the gate held below threshold under `hold`,
-    with the verdict carrying the scores a reviewer needs. The capture path queues exactly these to
-    the review queue, rather than re-deriving them from the survivors list.
+    A candidate the gate holds below threshold under `hold` is left out of the survivors and carries
+    the gate's verdict as `_gateVerdict`, which holds the scores a reviewer needs. The capture path
+    queues exactly the candidates that carry it, rather than re-deriving them from the survivors.
 
     The gate runs its own redaction first, so a candidate's text is scrubbed before any model call.
     """
@@ -1213,11 +1213,11 @@ def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str, list[tuple[
     # operator who set ENABLED=true in `~/.mimisbrunnr/credentials` — the file the launcher maintains — was
     # told the gate was disabled while the gate itself would have run.
     if os.environ.get("CONTEXT_MEMORY_DECISIONS_ENABLED", "").lower() != "true":
-        return candidates, "decisions: disabled", []
+        return candidates, "decisions: disabled"
     if not DECISIONS_GATE.is_file():
         print(f"NOTE: the decision gate is enabled but {DECISIONS_GATE} is missing; the gate was "
               "skipped and the export continued.", file=sys.stderr)
-        return candidates, "decisions: skipped (gate script missing)", []
+        return candidates, "decisions: skipped (gate script missing)"
 
     state_file = Path(os.environ.get("MIMIS_DECISIONS_STATE",
                                      ".context/decisions-ledger.json"))
@@ -1234,26 +1234,26 @@ def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str, list[tuple[
         # states. It is never a refusal: nothing about a timeout means content would go uninspected.
         print(f"NOTE: the decision gate did not answer within {GATE_TIMEOUT_SECONDS}s; the gate was "
               "skipped and the export continued.", file=sys.stderr)
-        return candidates, f"decisions: skipped (gate timed out after {GATE_TIMEOUT_SECONDS}s)", []
+        return candidates, f"decisions: skipped (gate timed out after {GATE_TIMEOUT_SECONDS}s)"
     if proc.returncode != 0:
         detail = proc.stderr.strip() or "no detail"
         if '"redactor-unavailable"' in detail:
             print(_GATE_REDACTOR_REFUSAL, file=sys.stderr)
-            return candidates, DECISIONS_REFUSED, []
+            return candidates, DECISIONS_REFUSED
         if '"bad-decisions-config"' in detail or '"bad-decisions-url"' in detail:
             print(f"REFUSED: the decision gate is misconfigured ({detail}). Nothing was written.",
                   file=sys.stderr)
-            return candidates, DECISIONS_REFUSED, []
+            return candidates, DECISIONS_REFUSED
         print(f"NOTE: the decision gate failed ({detail}); the gate was skipped and the export "
               "continued.", file=sys.stderr)
-        return candidates, "decisions: skipped (gate failed)", []
+        return candidates, "decisions: skipped (gate failed)"
 
     try:
         report = json.loads(proc.stdout)
     except ValueError:
         print("NOTE: the decision gate returned unreadable output; the gate was skipped and the "
               "export continued.", file=sys.stderr)
-        return candidates, "decisions: skipped (unreadable output)", []
+        return candidates, "decisions: skipped (unreadable output)"
     if not isinstance(report, dict):
         # Readable JSON of a shape this client cannot interpret — a list, a string, a number — is
         # not the same as unreadable output, and it reached the `.get` calls below as an
@@ -1263,13 +1263,13 @@ def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str, list[tuple[
         # plausible answer and never stop a capture over it.
         print("NOTE: the decision gate returned an unrecognised report shape; the gate was skipped "
               "and the export continued.", file=sys.stderr)
-        return candidates, "decisions: skipped (unrecognised report)", []
+        return candidates, "decisions: skipped (unrecognised report)"
 
     for line in _ledger_disclosures(report):
         print(line, file=sys.stderr)
 
     if report.get("outcome") == "disabled":
-        return candidates, "decisions: disabled", []
+        return candidates, "decisions: disabled"
 
     # The gate's own report is the authority on hold-vs-mark, never this process's environment: the
     # gate resolves the setting from the machine credential file as well, so an operator who set `mark`
@@ -1279,7 +1279,7 @@ def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str, list[tuple[
     if below not in ("hold", "mark"):
         print(f"NOTE: the decision gate reported no usable belowThreshold ({below!r}); the gate was "
               "skipped and the export continued.", file=sys.stderr)
-        return candidates, "decisions: skipped (unrecognised belowThreshold)", []
+        return candidates, "decisions: skipped (unrecognised belowThreshold)"
 
     # **Every candidate survives unless a score says otherwise.** The list is built by walking the
     # gate's verdicts and marking indices, rather than by appending the candidates the verdicts
@@ -1293,7 +1293,7 @@ def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str, list[tuple[
         print(f"NOTE: the decision gate returned no usable 'records' list "
               f"({report.get('outcome')!r}); the gate was skipped and the export continued.",
               file=sys.stderr)
-        return candidates, "decisions: skipped (unrecognised report)", []
+        return candidates, "decisions: skipped (unrecognised report)"
 
     held_indices: set[int] = set()
     held_results: dict[int, dict] = {}
@@ -1344,13 +1344,12 @@ def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str, list[tuple[
 
     survivors = []
     held = []
-    held_verdicts = []
     for index, candidate in enumerate(candidates):
         if index in marked:
             survivors.append(marked[index])
         elif index in held_indices:
             held.append(candidate)
-            held_verdicts.append((candidate, held_results.get(index)))
+            candidate["_gateVerdict"] = held_results.get(index)
         else:
             survivors.append(candidate)
 
@@ -1360,7 +1359,7 @@ def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str, list[tuple[
         note += f", {unscored} not scored and kept (a failed gate is never a low score)"
     if malformed:
         note += f", {malformed} unreadable verdict(s) ignored (the affected records were kept)"
-    return survivors, note, held_verdicts
+    return survivors, note
 
 
 def ticket_inputs(values: list[str], repository: str | None) -> list[dict]:
@@ -1957,7 +1956,9 @@ def cmd_export(args: argparse.Namespace) -> int:
         # The gate's attempt ledger keys a record by its group as well as its subject; the group is
         # not resolved yet, so the binding it will be resolved from stands in for it (issue 186).
         ledger_group = {key: binding.get(key) for key in ("repository", "scope", "initiative", "tickets")}
-        clean, decision_note, held_verdicts = gate_decisions([dict(c, group=ledger_group) for c in clean])
+        gated = [dict(c, group=ledger_group) for c in clean]
+        clean, decision_note = gate_decisions(gated)
+        held_verdicts = [(c, c["_gateVerdict"]) for c in gated if "_gateVerdict" in c]
     else:
         decision_note = probe_decisions(len(clean))
         held_verdicts = []
@@ -1977,279 +1978,6 @@ def cmd_export(args: argparse.Namespace) -> int:
                        evidence, binding, src, session_id):
             queued += 1
 
-
-    # The cap is the capture skill's. An over-cap batch is auto-split into consecutive ≤ MAX_CANDIDATES
-    # chunks, each processed end to end (its own preflight, its own `set --dryrun` veto, its own write),
-    # so the capture path never chunks *silently* and a reader sees the boundary.
-    chunks = [clean[i:i + MAX_CANDIDATES] for i in range(0, len(clean), MAX_CANDIDATES)]
-    total_chunks = len(chunks)
-
-    print(f"Candidates: {len(clean)} to capture; {len(held)} held back by the atomicity gate.")
-    if held:
-        for candidate in held:
-            print(f"  HELD BACK (bundled: {', '.join(candidate['atomicity'].get('signals') or ['?'])}): "
-                  f"{candidate['statement'][:90]}")
-    if queued:
-        print(f"  {queued} held -> review queue {_review_queue_path()}")
-    if held or held_verdicts:
-        print("  A held candidate is never written past the flag. Review the queue, or split/drop it.")
-    if held_verdicts:
-        print(f"  {len(held_verdicts)} also held by the decision gate (below threshold) -> "
-              f"{_review_queue_path()}")
-    if total_chunks > 1:
-        print(f"Split into {total_chunks} batch(es) of at most {MAX_CANDIDATES} candidates: "
-              + ", ".join(str(len(c)) for c in chunks) + ".")
-    if redaction:
-        print("Redaction (detected before send): "
-              + ", ".join(f"{name} x{count}" for name, count in sorted(redaction.items())))
-    print(decision_note)
-    if not any(binding.values()):
-        print("NOTE: no selectors supplied, so no association is made "
-              "(--tickets/--tags/--repository/--scope/--initiative).")
-    if not clean:
-        # Every candidate was held back by the atomicity gate: there is no writable batch. Stopping
-        # here also means a `--write` does not create a group for nothing.
-        print("Nothing to capture: every candidate was held back by the atomicity gate. "
-              "Nothing was written.", file=sys.stderr)
-        return 1
-
-    group, group_state = resolve_group(binding, args.name, args.body, dryrun=not args.write)
-    if args.write:
-        if group is None:
-            print(f"REFUSED: resolve-group failed: {group_state}. Nothing was written.",
-                  file=sys.stderr)
-            return 1
-        group_uuid = group.get("groupUuid") or group.get("uuid") or group.get("Uuid")
-        print(f"Group: {group_uuid}"
-              f"{' (created)' if group.get('created') or group.get('Created') else ' (existing)'}")
-    else:
-        group_uuid = None
-        print(f"Group: would {'resolve or create' if binding['tickets'] else 'create'} for "
-              f"{json.dumps(_group_body(binding, args.name, args.body))}")
-        print(f"Initiative: {initiative_note}")
-
-    total_candidates = 0
-    matched = 0
-    for batch_no, chunk in enumerate(chunks, start=1):
-        multi = total_chunks > 1
-        tag = f" [batch {batch_no}/{total_chunks}]" if multi else ""
-        # Each chunk's preflight runs after the previous chunk's write (for a `--write`), so a
-        # duplicate subject split across chunks is surfaced by the later chunk's preflight and becomes
-        # a version bump; the capture path has no cross-batch transaction, hence the sequential order.
-        rc, out, err = _run_capture_client(
-            WRITE_CLIENT, ["preflight"],
-            {"candidates": [{"description": _subject(c), "kind": KIND_UNDERSTANDING,
-                             "facets": ["understanding"], "groupUuid": group_uuid} for c in chunk]})
-        if rc == 0:
-            preflight = out.strip()
-            version_map = build_version_map(preflight, group_uuid)
-            matched += preflight_match_count(preflight)
-            shown = (preflight if len(preflight) <= 1200
-                     else preflight[:1200] + f"\n  … {len(preflight) - 1200} more character(s) not shown")
-            print((f"Batch {batch_no}/{total_chunks} " if multi else "") + f"Preflight: {shown}")
-        else:
-            # A preflight failure leaves no version map, so a duplicate subject would degrade to a
-            # create. That is fail-safe: the `set --dryrun` veto still catches a subject already in the
-            # group before any write, so a transient preflight-side error must not abort a capture that
-            # needs no version resolution (and one that does refuses at the veto, not silently).
-            print(f"Preflight: unavailable ({err.strip()[:200] or f'exit {rc}'})")
-            version_map = {}
-        # Each chunk preflights its own request, so the preflight indices are request-relative within
-        # this chunk; map by the candidate's position in the chunk, never a global clean-list index.
-        for local_index, candidate in enumerate(chunk):
-            candidate["_versionUuid"] = version_map.get(local_index)
-            # A preflight match is the exact (stage 1) duplicate; stage 2/3 concern only the rest.
-            candidate["_exactMatch"] = bool(version_map.get(local_index))
-        # Stage 2/3 of dedup runs on the candidates the exact preflight did not match. Opt-in (see
-        # `_dedup_candidates`); a proposal is a human decision under the `duplicate` menu, never an
-        # automatic merge, version or skip.
-        dedup_queued, dedup_shown = _dedup_candidates(
-            chunk, group_uuid, binding, src, session_id)
-        if dedup_shown:
-            print(f"Staged dedup: {dedup_shown} duplicate proposal(s), {dedup_queued} queued -> "
-                  f"{_review_queue_path()}")
-        # Two candidates in one chunk sharing a subject is ambiguous input: the capture path refuses two
-        # same-subject creates in one batch, and sending both as version targets would double-version the
-        # same memory. The preflight's intra-batch collision list is the authoritative detector (it uses
-        # the server's slug normalisation, so a case/punctuation-equivalent pair is caught); fall back to
-        # an exact-string check when the preflight did not run.
-        collision_subject = _intra_batch_collision_subject(preflight) if rc == 0 else None
-        if collision_subject is None:
-            subjects = [_subject(c) for c in chunk]
-            if len(set(subjects)) != len(subjects):
-                collision_subject = next(s for s in subjects if subjects.count(s) > 1)
-        if collision_subject:
-            early = ("Earlier batch(es) were already written and remain; " if args.write and batch_no > 1 else "")
-            print(f"REFUSED: two candidates in batch {batch_no} share a subject ('{collision_subject}'); "
-                  f"merge them before exporting. {early}Nothing from this batch was written.",
-                  file=sys.stderr)
-            return 1
-        # Each chunk gets its own capture timestamp so a slow multi-batch write does not stamp every
-        # later batch's memories with the export-start time.
-        now = dt.datetime.now(dt.timezone.utc)
-        items = set_items(chunk, binding, now)
-        if multi:
-            line = f"Batch {batch_no}/{total_chunks}: {len(chunk)} candidate(s)"
-            if args.write:
-                # The version/new split is accurate only when the group is resolved; in a dry run the
-                # group is not, so the receipt discloses the match count instead.
-                count = (sum(1 for i in items if i["uuid"]), sum(1 for i in items if not i["uuid"]))
-                line += f" ({count[0]} version(s), {count[1]} new)"
-            print(line)
-        total_candidates += len(chunk)
-
-        if not args.write:
-            continue
-
-        rc, out, err = _run_capture_client(
-            WRITE_CLIENT, ["set", "--dryrun"], {"groupUuid": group_uuid, "items": items,
-                                                "links": [], "labelsProposed": []})
-        if rc != 0:
-            early = ("Earlier batch(es) were already written and remain; " if batch_no > 1 else "")
-            veto_text = f"{err.strip() or out.strip()}"
-            # A subject-exists veto with no preflight match is the cross-kind 409: the write's
-            # subject-uniqueness check is subject-only, so a same-subject memory of a different kind
-            # refuses even though the kind+facets preflight found nothing. Present the menu instead of
-            # failing without a path.
-            cross_kind = _handle_cross_kind_409(items, chunk, group_uuid, binding, src,
-                                                session_id, veto_text)
-            print(f"REFUSED at the dry-run veto: {veto_text}. {early}No memory from "
-                  f"this batch was written; the group {group_uuid} was already resolved or created and "
-                  f"remains.", file=sys.stderr)
-            if cross_kind:
-                print(f"  The cross-kind candidate(s) above are queued for review -> "
-                      f"{_review_queue_path()}", file=sys.stderr)
-            return 1
-        print(f"\nset --dryrun (the veto point){tag}:\n{out.strip()[:1200]}")
-
-        rc, out, err = _run_capture_client(
-            WRITE_CLIENT, ["set"], {"groupUuid": group_uuid, "items": items,
-                                    "links": [], "labelsProposed": []})
-        if rc != 0:
-            print(f"WRITE FAILED{tag}: {err.strip() or out.strip()}", file=sys.stderr)
-            return 1
-        print(f"\nWROTE{tag}:\n{out.strip()[:1200]}")
-
-    if not args.write:
-        # `set --dryrun` is the veto point, and it needs a resolved `groupUuid` — which a dry run
-        # cannot have, because resolving a group is itself the write that must not happen. So the
-        # offline half of the pipeline runs here (both gates, the cap, the candidate list) and the
-        # server-side half runs at the head of `--write`, before anything is persisted. Saying so is
-        # better than sending a request that can only fail on a null group.
-        print(f"\nDRY RUN — nothing was written, and nothing was created.\n"
-              f"  would write: memory ({total_candidates})"
-              + (f", group ({group_state})" if group_state == "dry-run" else "")
-              + f"\n  would not create: anything under an existing group, because no group was "
-                f"resolved\nThe server-side `set --dryrun` veto runs at the start of `--write`, once "
-              f"a group exists. Re-run with `--write` to capture.")
-        if matched:
-            print(f"  {matched} candidate(s) matched an existing same-subject memory; a `--write` would "
-                  f"version those whose match is in the export's group (a match in another group stays "
-                  f"a separate new memory).")
-        if total_chunks > 1:
-            print("  Note: a multi-batch `--write` is not atomic across batches; a later batch could "
-                  "be refused at its veto after an earlier batch was already written.")
-        print("Decisions and rules captured this way are written as `kind = understanding`, which does "
-              "NOT pass the gated-kind approval: a `decision`/`rule`/`nfr` captured through this path "
-              "is an understanding of one, not approved canon.")
-        return 0
-
-    if total_chunks > 1:
-        print("\nNon-atomic multi-batch write: each batch was written independently, so a failure in a "
-              "later batch leaves earlier batch(es) committed.")
-    print("This is a receipt: the memories are persisted now, so a post-write digest is not an "
-          "opportunity to approve. Pre-write review is `--export` without `--write`.")
-    print("Records written as `kind = understanding`, which does NOT pass the gated-kind approval: "
-          "a `decision`/`rule`/`nfr` captured through this path is an understanding of one, not "
-          "approved canon.")
-    return 0
-    # A held candidate is persisted to the review queue, so it can be reviewed later rather than
-    # vanishing with the session (the defect part A fixes). Queueing is never a blocker — the candidate
-    # is already held, not written — but a candidate that did not land in the queue is reported.
-    session_id = os.environ.get("MIMIS_SESSION", "")
-    queued = 0
-    for candidate in held:
-        signals = candidate.get("atomicity", {}).get("signals") or []
-        if _queue_held(candidate, "atomicity", "held-atomic",
-                       f"bundled ({', '.join(signals) or '?'})",
-                       {"signals": signals}, binding, src, session_id):
-            queued += 1
-
-    # Gate 5 (decision value), only when enabled. Scores are a quality signal, never authority: they
-    # never change status, kind, or approval, and a disabled or absent model skips the gate and says
-    # so rather than blocking the export. A **refusal** is the one outcome that does stop it: the gate
-    # refused because content nobody could inspect would be sent, or because it would judge against
-    # something other than what was configured, and both messages say "Nothing was written" — so
-    # continuing past them wrote records under a refusal the operator had been told had blocked them.
-    # Stopping here is before the group is resolved and before any chunk, so nothing exists to undo.
-    clean, decision_note, held_verdicts = gate_decisions(clean)
-    if decision_note == DECISIONS_REFUSED:
-        print("REFUSED: the decision gate refused this export (the reason is above). Nothing was "
-              "written; fix the gate or export without it.", file=sys.stderr)
-        return 1
-
-    # The gate's below-threshold holds, under `hold`, are held candidates too and go to the same queue.
-    for candidate, result in held_verdicts:
-        evidence = {
-            "scores": result.get("scores") if isinstance(result, dict) else {},
-            "passingRoles": result.get("passingRoles") if isinstance(result, dict) else [],
-            "discrimination": result.get("discrimination") if isinstance(result, dict) else {},
-        }
-        if _queue_held(candidate, "decisions", "below-value", "below the decision-gate threshold",
-                       evidence, binding, src, session_id):
-            queued += 1
-
-    # The cap is the capture skill's. An over-cap batch is auto-split into consecutive ≤ MAX_CANDIDATES
-    # chunks, each processed end to end (its own preflight, its own `set --dryrun` veto, its own write),
-    # so the capture path never chunks *silently* and a reader sees the boundary.
-    chunks = [clean[i:i + MAX_CANDIDATES] for i in range(0, len(clean), MAX_CANDIDATES)]
-    total_chunks = len(chunks)
-
-    # Fresh-store precondition: `resolve-group` answers 404 for an initiative that does not exist.
-    # Fresh-store precondition: `resolve-group` answers 404 for an initiative that does not exist when
-    # it must create the group. Checked before the decision gate, which spends a finite attempt budget
-    # per record: a write this check refuses must not spend it (consumer review 5438563690 #11).
-    initiative = binding["initiative"] or "to-be-decided"
-    exists, why = initiative_exists(initiative)
-    if exists is None:
-        print(f"REFUSED: the initiative read failed ({why}); this is not evidence that "
-              f"'{initiative}' is absent. Nothing was written.", file=sys.stderr)
-        return 1
-    initiative_note = (f"initiative '{initiative}' exists" if exists else
-                      f"initiative '{initiative}' is absent — would create: "
-                      f"context_memory_client.py upsert-initiative "
-                      f"<<<'name': '{initiative}', 'status': 'active'>>>")
-    create_hint = (f"Create it first, then re-run:\n"
-                   f"  echo '{{\"name\": \"{initiative}\", \"status\": \"active\"}}' | "
-                   f"python3 -B {WRITE_CLIENT} upsert-initiative\n")
-    # Only a group that must be created needs the initiative: `resolve-group` returns an existing
-    # ticket-bound group without looking it up, so an absent initiative refuses a ticketless write (which
-    # always creates) here, and a ticket-bound one only if resolution reports it (consumer review
-    # 5438563690 #12).
-    if args.write and not exists and not binding["tickets"]:
-        print(f"REFUSED: initiative '{initiative}' does not exist, and resolve-group answers 404 for "
-              f"it when it creates a group. {create_hint}Nothing was written.", file=sys.stderr)
-        return 1
-
-    # Gate 5 (decision value), only when enabled. Scores are a quality signal, never authority: they
-    # never change status, kind, or approval, and a disabled or absent model skips the gate and says
-    # so rather than blocking the export. A **refusal** is the one outcome that does stop it: the gate
-    # refused because content nobody could inspect would be sent, or because it would judge against
-    # something other than what was configured, and both messages say "Nothing was written" — so
-    # continuing past them wrote records under a refusal the operator had been told had blocked them.
-    # Stopping here is before the group is resolved and before any chunk, so nothing exists to undo.
-    # A dry run probes rather than scores: scoring spends the attempt budget the write needs.
-    if args.write:
-        # The gate's attempt ledger keys a record by its group as well as its subject; the group is
-        # not resolved yet, so the binding it will be resolved from stands in for it (issue 186).
-        ledger_group = {key: binding.get(key) for key in ("repository", "scope", "initiative", "tickets")}
-        clean, decision_note = gate_decisions([dict(c, group=ledger_group) for c in clean])
-    else:
-        decision_note = probe_decisions(len(clean))
-    if decision_note == DECISIONS_REFUSED:
-        print("REFUSED: the decision gate refused this export (the reason is above). Nothing was "
-              "written; fix the gate or export without it.", file=sys.stderr)
-        return 1
 
     # The cap is the capture skill's. An over-cap batch is auto-split into consecutive ≤ MAX_CANDIDATES
     # chunks, each processed end to end (its own preflight, its own `set --dryrun` veto, its own write),
