@@ -1705,9 +1705,11 @@ def _dedup_candidates(candidates: list[dict], group_uuid: str | None, binding: d
     try:
         report = json.loads(proc.stdout)
     except ValueError:
+        print("NOTE: dedup returned unreadable output; no duplicate proposals were made.", file=sys.stderr)
         return 0, 0
     proposals = report.get("proposals") if isinstance(report, dict) else None
     if not isinstance(proposals, list):
+        print("NOTE: dedup returned an unrecognised report shape; no duplicate proposals were made.", file=sys.stderr)
         return 0, 0
 
     queued = 0
