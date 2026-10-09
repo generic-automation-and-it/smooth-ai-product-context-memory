@@ -58,6 +58,9 @@ REDACTOR = _CAPTURE_SCRIPTS / "redact.py"
 ATOMICITY = _CAPTURE_SCRIPTS / "atomicity.py"
 READ_CLIENT = _CAPTURE_SCRIPTS / "context_memory_read_client.py"
 WRITE_CLIENT = _CAPTURE_SCRIPTS / "context_memory_client.py"
+REVIEW_QUEUE = _CAPTURE_SCRIPTS / "review_queue.py"
+DEDUP = _CAPTURE_SCRIPTS / "dedup.py"
+DEDUP_ENABLED = "CONTEXT_MEMORY_DECISIONS_DEDUP_ENABLED"
 # The write-token spellings the read client refuses to start with, folded as it folds them. Kept equal
 # to the capture client's `WRITE_TOKEN_NAMES` by a test rather than imported: importing that module
 # would make its redactor import a startup dependency of this client.
@@ -76,6 +79,12 @@ HEIMDALLR_SCRIPT = (Path(__file__).resolve().parents[2]
 # separate packages, so this client cannot acquire a cross-skill import (the same reason the recall
 # notice is duplicated verbatim and asserted equal by a test).
 MAX_CANDIDATES = 20
+# A dump is a distilled projection of the session's understanding, not the verbatim session. `--from`
+# carrying a raw transcript-sized blob was written through untouched, and an export of that `_session.md`
+# split the whole transcript into thousands of candidates (a 446 KB braindump -> 2220, of which 532 were
+# flagged bundled). The ceiling is generous for a real distilled session (tens of records) but refuses
+# the raw-transcript footgun with a direction to author the understanding first.
+DUMP_MAX_BODY_CHARS = 60000
 # `ai-understanding` records confidence as a qualitative label — `observed`, `verified`, `contested`
 # (VALID_CONFIDENCE in its index script) — while the store holds a 0-100 integer. Passing the label
 # through reached the API as the string "verified", which the server rejected with a 400 whose detail
@@ -1193,6 +1202,10 @@ def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str]:
     would be sent, and a misconfigured threshold or role list means the gate would judge against
     something other than what was configured.
 
+    A candidate the gate holds below threshold under `hold` is left out of the survivors and carries
+    the gate's verdict as `_gateVerdict`, which holds the scores a reviewer needs. The capture path
+    queues exactly the candidates that carry it, rather than re-deriving them from the survivors.
+
     The gate runs its own redaction first, so a candidate's text is scrubbed before any model call.
     """
     # The flag is read the way the gate reads it: seeded from the machine credential file at import,
@@ -1283,6 +1296,7 @@ def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str]:
         return candidates, "decisions: skipped (unrecognised report)"
 
     held_indices: set[int] = set()
+    held_results: dict[int, dict] = {}
     marked: dict[int, dict] = {}
     unscored = 0
     malformed = 0
@@ -1326,6 +1340,7 @@ def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str]:
             marked[index] = candidate
         else:
             held_indices.add(index)
+            held_results[index] = result
 
     survivors = []
     held = []
@@ -1334,6 +1349,7 @@ def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str]:
             survivors.append(marked[index])
         elif index in held_indices:
             held.append(candidate)
+            candidate["_gateVerdict"] = held_results.get(index)
         else:
             survivors.append(candidate)
 
@@ -1552,9 +1568,66 @@ def set_items(candidates: list[dict], binding: dict, now: dt.datetime) -> list[d
     return items
 
 
+def _review_queue_path() -> str:
+    """The queue file this client will write to, matching `review_queue.py`'s resolution exactly.
+
+    Duplicated rather than imported (the two script folders ship as separate packages). The env
+    override and the default must agree with the module the queue writes, or the digest would name a
+    path that is not the one the entries landed in.
+    """
+    return os.path.expanduser(
+        os.environ.get("CONTEXT_MEMORY_REVIEW_QUEUE", "~/.mimisbrunnr/review/queue.jsonl"))
+
+
+
+
+def _queue_held(candidate: dict, held_by: str, conflict_type: str, reason: str,
+                evidence: dict, binding: dict, source: str, session_id: str) -> bool:
+    """Append one held candidate to the review queue. True on success.
+
+    The queue is where a candidate the capture path held back goes so a reviewer can actually act on
+    it later, instead of it vanishing with the session. A queue failure never blocks the capture — the
+    candidate is already held, not written, so the capture's safety is unaffected — but it is
+    reported, because a held candidate that did not land in the queue is one a reviewer will never
+    see.
+    """
+    if not REVIEW_QUEUE.is_file():
+        print(f"NOTE: the review queue ({REVIEW_QUEUE}) is missing; held candidates were not queued.",
+              file=sys.stderr)
+        return False
+    entry = {
+        "conflictType": conflict_type,
+        "heldBy": held_by,
+        "reason": reason,
+        "evidence": evidence,
+        "candidate": candidate,
+        "binding": binding,
+        "source": source,
+        "sessionId": session_id,
+    }
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-B", str(REVIEW_QUEUE), "append"],
+            input=json.dumps(entry), capture_output=True, text=True, encoding="utf-8",
+        )
+    except OSError:
+        print("NOTE: the review queue could not be run; held candidates were not queued.", file=sys.stderr)
+        return False
+    if proc.returncode != 0:
+        detail = proc.stderr.strip() or proc.stdout.strip() or "no detail"
+        print(f"NOTE: the review queue refused a held candidate ({detail}); it was not queued.",
+              file=sys.stderr)
+        return False
+    return True
+
+
+
+
 def _scope_key(scope: str) -> tuple[str, str]:
     dimension, _, identifier = scope.strip().partition(":")
     return dimension.strip(), identifier.strip()
+
+
 
 
 def reconcile_source_scope(candidates: list[dict], binding: dict) -> bool:
@@ -1598,6 +1671,122 @@ def reconcile_source_scope(candidates: list[dict], binding: dict) -> bool:
               "matching --scope. Nothing was written.", file=sys.stderr)
         return False
     return True
+
+
+
+def _dedup_candidates(candidates: list[dict], group_uuid: str | None, binding: dict,
+                      source: str, session_id: str) -> tuple[int, int]:
+    """Stage 2/3 over a chunk, queueing duplicate proposals. Opt-in via `_DEDUP_ENABLED`.
+
+    Returns `(queued, proposals)`. A proposal is a human decision under the `duplicate` menu, never an
+    automatic merge, version or skip — it is surfaced in the review queue for the operator to resolve.
+    The default (`_DEDUP_ENABLED` unset) runs nothing, so an uninstrumented export is unaffected and
+    makes no store query.
+    """
+    if os.environ.get(DEDUP_ENABLED, "").lower() != "true":
+        return 0, 0
+    if not DEDUP.is_file():
+        print(f"NOTE: dedup ({DEDUP}) is missing; no duplicate proposals were made.", file=sys.stderr)
+        return 0, 0
+    payload = {"candidates": candidates, "groupUuid": group_uuid,
+               "repository": binding.get("repository")}
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-B", str(DEDUP), "stage"],
+            input=json.dumps(payload), capture_output=True, text=True, encoding="utf-8",
+        )
+    except OSError:
+        print("NOTE: dedup could not be started; no duplicate proposals were made.", file=sys.stderr)
+        return 0, 0
+    if proc.returncode != 0:
+        print(f"NOTE: dedup failed ({proc.stderr.strip()[:200]}); no duplicate proposals were made.",
+              file=sys.stderr)
+        return 0, 0
+    try:
+        report = json.loads(proc.stdout)
+    except ValueError:
+        print("NOTE: dedup returned unreadable output; no duplicate proposals were made.", file=sys.stderr)
+        return 0, 0
+    proposals = report.get("proposals") if isinstance(report, dict) else None
+    if not isinstance(proposals, list):
+        print("NOTE: dedup returned an unrecognised report shape; no duplicate proposals were made.", file=sys.stderr)
+        return 0, 0
+
+    queued = 0
+    shown = 0
+    degraded = 0
+    for proposal in proposals:
+        index = proposal.get("index") if isinstance(proposal, dict) else None
+        if not isinstance(index, int) or isinstance(index, bool) or not 0 <= index < len(candidates):
+            continue
+        outcome = proposal.get("outcome")
+        if outcome == "unexamined":
+            # A lexical store query that could not run: there are no matches to act on, so it is
+            # disclosed but not queued — a candidate nobody could check is not a duplicate proposal.
+            degraded += 1
+            continue
+        if outcome not in ("proposed", "possible-duplicate", "unexamined (budget)"):
+            continue
+        shown += 1
+        candidate = candidates[index]
+        evidence = {"dedup": outcome, "detail": proposal.get("detail"),
+                    "matches": proposal.get("matches")}
+        if _queue_held(candidate, "dedup", "duplicate", f"staged dedup: {outcome}",
+                       evidence, binding, source, session_id):
+            queued += 1
+    if degraded:
+        print(f"NOTE: {degraded} candidate(s) could not be duplicate-checked (the store query "
+              "failed); they were not queued.", file=sys.stderr)
+    return queued, shown
+
+
+def _handle_cross_kind_409(items: list[dict], candidates: list[dict], group_uuid: str,
+                           binding: dict, source: str, session_id: str, veto_error: str) -> bool:
+    """Re-preflight a `Subject '…' already exists` veto without kind and facets.
+
+    The write's subject-uniqueness check (SetMemories `takenSubjectSlugs`) is subject-only, while the
+    preflight used for the version map matches subject **and** kind **and** facets. So a same-subject
+    memory of a different kind coerced the dry-run veto to refuse even though preflight matched
+    nothing — the subject-exists 409. When the veto carries that signature and the preflight found no
+    holder, this re-preflights on the subject alone to find who holds it, queues the candidate under
+    the `cross-kind-subject` menu with the holder's uuid, and returns True so the caller presents the
+    menu rather than failing without a path. Returns False when it cannot determine a holder.
+    """
+    if "already exists in this group" not in veto_error:
+        return False
+
+    rc, out, err = _run_capture_client(
+        WRITE_CLIENT, ["preflight"],
+        {"candidates": [{"description": (item.get("name") or item.get("description") or str(item)),
+                         "groupUuid": group_uuid} for item in items]})
+    if rc != 0:
+        return False
+    try:
+        preflight = json.loads(out)
+    except ValueError:
+        return False
+    matches = preflight.get("candidates") if isinstance(preflight, dict) else None
+    if not isinstance(matches, list):
+        return False
+
+    found = False
+    for candidate, match in zip(candidates, matches):
+        if not isinstance(match, dict):
+            continue
+        holder = (match.get("match") or match.get("existing") or {}).get("uuid") or \
+            match.get("uuid") or match.get("matchedUuid")
+        holder_kind = (match.get("match") or match.get("existing") or {}).get("kind") or \
+            match.get("kind") or ""
+        if not holder:
+            continue
+        if _queue_held(candidate, "conflict", "cross-kind-subject",
+                       f"subject exists under a different kind in this group",
+                       {"matchedUuid": holder, "matchedKind": holder_kind},
+                       binding, source, session_id):
+            found = True
+            print(f"  CROSS-KIND: subject held by memory {holder}"
+                  f" (kind {holder_kind or '?'}); choices: reclassify, rename, drop")
+    return found
 
 
 def cmd_export(args: argparse.Namespace) -> int:
@@ -1684,6 +1873,7 @@ def cmd_export(args: argparse.Namespace) -> int:
     if not reconcile_source_scope(candidates, binding):
         return 1
 
+
     # Gate 2 (redaction) before anything is built or sent, so the digest can report what would be
     # scrubbed. Every free-text field set_items will send is gated — not just the statement — so a
     # secret in the description or contentSummary is reported here rather than scrubbed downstream and
@@ -1712,6 +1902,25 @@ def cmd_export(args: argparse.Namespace) -> int:
         (held if verdict.get("verdict") == "bundled" else clean).append(candidate)
         candidate["atomicity"] = verdict
 
+    # A held candidate is persisted to the review queue, so it can be reviewed later rather than
+    # vanishing with the session (the defect part A fixes). Queueing is never a blocker — the candidate
+    # is already held, not written — but a candidate that did not land in the queue is reported.
+    session_id = os.environ.get("MIMIS_SESSION", "")
+    queued = 0
+    for candidate in held:
+        signals = candidate.get("atomicity", {}).get("signals") or []
+        if _queue_held(candidate, "atomicity", "held-atomic",
+                       f"bundled ({', '.join(signals) or '?'})",
+                       {"signals": signals}, binding, src, session_id):
+            queued += 1
+
+    # Gate 5 (decision value), only when enabled. Scores are a quality signal, never authority: they
+    # never change status, kind, or approval, and a disabled or absent model skips the gate and says
+    # so rather than blocking the export. A **refusal** is the one outcome that does stop it: the gate
+    # refused because content nobody could inspect would be sent, or because it would judge against
+    # something other than what was configured, and both messages say "Nothing was written" — so
+    # continuing past them wrote records under a refusal the operator had been told had blocked them.
+    # Stopping here is before the group is resolved and before any chunk, so nothing exists to undo.
     # Fresh-store precondition: `resolve-group` answers 404 for an initiative that does not exist when
     # it must create the group. Checked before the decision gate, which spends a finite attempt budget
     # per record: a write this check refuses must not spend it (consumer review 5438563690 #11).
@@ -1737,6 +1946,7 @@ def cmd_export(args: argparse.Namespace) -> int:
               f"it when it creates a group. {create_hint}Nothing was written.", file=sys.stderr)
         return 1
 
+
     # Gate 5 (decision value), only when enabled. Scores are a quality signal, never authority: they
     # never change status, kind, or approval, and a disabled or absent model skips the gate and says
     # so rather than blocking the export. A **refusal** is the one outcome that does stop it: the gate
@@ -1749,13 +1959,28 @@ def cmd_export(args: argparse.Namespace) -> int:
         # The gate's attempt ledger keys a record by its group as well as its subject; the group is
         # not resolved yet, so the binding it will be resolved from stands in for it (issue 186).
         ledger_group = {key: binding.get(key) for key in ("repository", "scope", "initiative", "tickets")}
-        clean, decision_note = gate_decisions([dict(c, group=ledger_group) for c in clean])
+        gated = [dict(c, group=ledger_group) for c in clean]
+        clean, decision_note = gate_decisions(gated)
+        held_verdicts = [(c, c["_gateVerdict"]) for c in gated if "_gateVerdict" in c]
     else:
         decision_note = probe_decisions(len(clean))
+        held_verdicts = []
     if decision_note == DECISIONS_REFUSED:
         print("REFUSED: the decision gate refused this export (the reason is above). Nothing was "
               "written; fix the gate or export without it.", file=sys.stderr)
         return 1
+
+    # The gate's below-threshold holds, under `hold`, are held candidates too and go to the same queue.
+    for candidate, result in held_verdicts:
+        evidence = {
+            "scores": result.get("scores") if isinstance(result, dict) else {},
+            "passingRoles": result.get("passingRoles") if isinstance(result, dict) else [],
+            "discrimination": result.get("discrimination") if isinstance(result, dict) else {},
+        }
+        if _queue_held(candidate, "decisions", "below-value", "below the decision-gate threshold",
+                       evidence, binding, src, session_id):
+            queued += 1
+
 
     # The cap is the capture skill's. An over-cap batch is auto-split into consecutive ≤ MAX_CANDIDATES
     # chunks, each processed end to end (its own preflight, its own `set --dryrun` veto, its own write),
@@ -1768,7 +1993,13 @@ def cmd_export(args: argparse.Namespace) -> int:
         for candidate in held:
             print(f"  HELD BACK (bundled: {', '.join(candidate['atomicity'].get('signals') or ['?'])}): "
                   f"{candidate['statement'][:90]}")
-        print("  A held candidate is never written past the flag. Split it, or drop it.")
+    if queued:
+        print(f"  {queued} held -> review queue {_review_queue_path()}")
+    if held or held_verdicts:
+        print("  A held candidate is never written past the flag. Review the queue, or split/drop it.")
+    if held_verdicts:
+        print(f"  {len(held_verdicts)} also held by the decision gate (below threshold) -> "
+              f"{_review_queue_path()}")
     if total_chunks > 1:
         print(f"Split into {total_chunks} batch(es) of at most {MAX_CANDIDATES} candidates: "
               + ", ".join(str(len(c)) for c in chunks) + ".")
@@ -1833,6 +2064,16 @@ def cmd_export(args: argparse.Namespace) -> int:
         # this chunk; map by the candidate's position in the chunk, never a global clean-list index.
         for local_index, candidate in enumerate(chunk):
             candidate["_versionUuid"] = version_map.get(local_index)
+            # A preflight match is the exact (stage 1) duplicate; stage 2/3 concern only the rest.
+            candidate["_exactMatch"] = bool(version_map.get(local_index))
+        # Stage 2/3 of dedup runs on the candidates the exact preflight did not match. Opt-in (see
+        # `_dedup_candidates`); a proposal is a human decision under the `duplicate` menu, never an
+        # automatic merge, version or skip.
+        dedup_queued, dedup_shown = _dedup_candidates(
+            chunk, group_uuid, binding, src, session_id)
+        if dedup_shown:
+            print(f"Staged dedup: {dedup_shown} duplicate proposal(s), {dedup_queued} queued -> "
+                  f"{_review_queue_path()}")
         # Two candidates in one chunk sharing a subject is ambiguous input: the capture path refuses two
         # same-subject creates in one batch, and sending both as version targets would double-version the
         # same memory. The preflight's intra-batch collision list is the authoritative detector (it uses
@@ -1871,9 +2112,19 @@ def cmd_export(args: argparse.Namespace) -> int:
                                                 "links": [], "labelsProposed": []})
         if rc != 0:
             early = ("Earlier batch(es) were already written and remain; " if batch_no > 1 else "")
-            print(f"REFUSED at the dry-run veto: {err.strip() or out.strip()}. {early}No memory from "
+            veto_text = f"{err.strip() or out.strip()}"
+            # A subject-exists veto with no preflight match is the cross-kind 409: the write's
+            # subject-uniqueness check is subject-only, so a same-subject memory of a different kind
+            # refuses even though the kind+facets preflight found nothing. Present the menu instead of
+            # failing without a path.
+            cross_kind = _handle_cross_kind_409(items, chunk, group_uuid, binding, src,
+                                                session_id, veto_text)
+            print(f"REFUSED at the dry-run veto: {veto_text}. {early}No memory from "
                   f"this batch was written; the group {group_uuid} was already resolved or created and "
                   f"remains.", file=sys.stderr)
+            if cross_kind:
+                print(f"  The cross-kind candidate(s) above are queued for review -> "
+                      f"{_review_queue_path()}", file=sys.stderr)
             return 1
         print(f"\nset --dryrun (the veto point){tag}:\n{out.strip()[:1200]}")
 
@@ -2323,6 +2574,12 @@ def cmd_dump(args: argparse.Namespace) -> int:
             return 2
 
     content = read_input(args.from_file) if args.from_file else ""
+    if len(content) > DUMP_MAX_BODY_CHARS:
+        print(f"REFUSED: --from content is {len(content)} chars, larger than a distilled session "
+              f"projection ({DUMP_MAX_BODY_CHARS}). A dump is the agent's distilled understanding, "
+              "not a raw session transcript — author the understanding (or distill the session) first, "
+              "then re-run --from with it. Nothing was written.", file=sys.stderr)
+        return 1
     findings: dict[str, int] = {}
     if content.strip():
         # A dump exists to be carried to another session or repository, so a secret or a recognisable

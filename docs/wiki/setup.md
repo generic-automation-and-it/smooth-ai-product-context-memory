@@ -66,10 +66,15 @@ no API change. The gate is a quality signal only: a score never changes `status`
 | `CONTEXT_MEMORY_DECISIONS_ROLES` | `product-owner,designer,developer,tester,business` | Rubric roles to ask about |
 | `CONTEXT_MEMORY_DECISIONS_BELOW_THRESHOLD` | `hold` | After the last attempt: `hold` (not exported) or `mark` (exported with `audience:*` tags) |
 | `CONTEXT_MEMORY_DECISIONS_TIMEOUT` | `30` | Seconds per decision request |
+| `CONTEXT_MEMORY_DECISIONS_DEDUP_ENABLED` | `false` | Turn on stage-3 of staged dedup: a model asks, per doubtful pair, whether two statements make the same claim. Off by default (stage 2 lexical candidates are still shown, as "possible duplicate (lexical only)") |
+| `CONTEXT_MEMORY_DECISIONS_DEDUP_MIN_PROBABILITY` | `0.5` | Same-claim threshold — a pair scores **strictly above** it to be proposed as a duplicate |
+| `CONTEXT_MEMORY_DECISIONS_DEDUP_MAX_PAIRS_PER_CANDIDATE` | `3` | Most pairs stage 3 asks the model about per candidate |
+| `CONTEXT_MEMORY_DECISIONS_DEDUP_MAX_PAIRS_PER_BATCH` | `20` | Most pairs stage 3 asks across a batch; beyond it, `unexamined (budget)` is disclosed per candidate |
+| `CONTEXT_MEMORY_DECISIONS_DEDUP_MAX_RESULTS` | `5` | Most lexical candidates stage 2 retrieves per subject |
 
-**Where the settings live.** `scripts/run.sh` writes all ten with their defaults to
+**Where the settings live.** `scripts/run.sh` writes all fifteen with their defaults to
 `~/.mimisbrunnr/credentials` — **add-only**, so turning the gate on survives every restart, which is the
-case a write-every-time rewrite cannot survive. `env-export` publishes the nine non-secret ones to a shell
+case a write-every-time rewrite cannot survive. `env-export` publishes the fourteen non-secret ones to a shell
 profile; the API key is deliberately excluded, because a token written to a terminal that gets scrolled
 back, recorded, or read over a shoulder is disclosed. The read-only credential file stays minimal and
 carries **no** decision settings: a worker that cannot mutate has no use for a decision endpoint, and

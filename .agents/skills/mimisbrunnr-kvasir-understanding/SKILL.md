@@ -235,8 +235,14 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
 ```
 
 - `dump --currentsession` writes the current session's understanding (its Understandings, decisions
-  and key learnings) to `.context/mimisbrunnr-understandings/<session-folder>/` as Markdown. The
-  session content is what `--from` supplies (a file, or `-` for stdin). **Generalise personal data
+  and key learnings) to `.context/mimisbrunnr-understandings/<session-folder>/` as Markdown.
+- **The dump is a distilled projection, not the verbatim session.** `--from` carries the session's
+  *understanding* — the material the agent has already distilled — never a raw session transcript.
+  A `--from` body over `DUMP_MAX_BODY_CHARS` is refused with a direction to author the understanding
+  first, because an export of a verbatim transcript splits it into thousands of candidates (a 446 KB
+  braindump produced 2220, of which 532 were flagged bundled and batch 1 was refused on a duplicated
+  subject).
+  The session content is what `--from` supplies (a file, or `-` for stdin). **Generalise personal data
   before the summary exists anywhere**: compose it with every name, email, account name or identity
   number replaced by a role or type ("the reviewer", "an email address"), then pass it on stdin
   (`--from -`) so no unprocessed copy reaches disk — or, if a file is needed, write only the
