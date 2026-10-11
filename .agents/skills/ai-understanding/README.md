@@ -48,8 +48,9 @@ session — that is the moment the thinking still exists and is about to stop ex
 the way to confirm it rather than just a warning.
 
 Ask for `--export --all` when you want the complete dump. It skips the "which of these should I write?"
-question *and* tells the agent to hold its own bar loosely — a marginal one gets written rather than
-dropped, so you prune afterwards instead of beforehand.
+question *and* re-exports the whole scope as upserts instead of this run's delta — an unchanged unit is
+re-written, not skipped — so you prune afterwards instead of beforehand. It never loosens the qualifying
+bar or bypasses the decision gate (LADR-014).
 
 Sharing is sending someone a zip. The store itself stays local and gitignored — it never travels through
 the repository. Ask for `--publish` (add `--portable-only` to drop anything true only of this repo) and
