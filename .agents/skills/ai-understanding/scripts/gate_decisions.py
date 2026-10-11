@@ -167,7 +167,12 @@ def score(records, ledger=None, env=None, timeout=SCORE_TIMEOUT):
     args = ["score"]
     if ledger is not None:
         args += ["--state-file", str(ledger)]
-    proc = _run_gate(args, stdin=json.dumps(records), env=env, timeout=timeout)
+    try:
+        proc = _run_gate(args, stdin=json.dumps(records), env=env, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        raise GateRefused("timed-out", "gate score timed out")
+    except FileNotFoundError:
+        raise GateRefused("gate-missing", "decisions gate script is missing")
     if proc.returncode != 0:
         # The gate writes {"outcome": ..., "detail": ...} to stderr on a refusal.
         try:

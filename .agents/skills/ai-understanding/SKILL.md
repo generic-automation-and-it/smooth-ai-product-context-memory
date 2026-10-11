@@ -185,7 +185,7 @@ unit and setting it aside is not inheritance. If the run genuinely inherited not
 field back to find units nothing ever inherits, and a store where no unit carries it makes `--review`
 report "nothing flagged" because it has nothing to read.
 
-**Report every candidate under one of the five outcomes**, and give `has another home` the path it
+**Report every candidate under one of the six outcomes**, and give `has another home` the path it
 requires. A silent skip is indistinguishable from a missed export.
 
 ### The value gate (optional)
@@ -199,7 +199,7 @@ units are never scored. The gate is a subprocess CLI copied into this skill's `s
 - **Settings** — the eleven `CONTEXT_MEMORY_DECISIONS_*` keys (`ENABLED`, `BASE_URL`, `PATH`, `MODEL`,
   `API_KEY`, `MIN_PROBABILITY`, `MAX_ATTEMPTS`, `ROLES`, `BELOW_THRESHOLD`, `TIMEOUT`,
   `LEDGER_MAX_ENTRIES`). Read from the process environment first, then `~/.mimisbrunnr/credentials`
-  **if it exists** (decision keys only — never a token), then the built-in defaults. The skill never writes
+  **if it exists** (decision keys only — never a token; `LEDGER_MAX_ENTRIES` env-only), then the built-in defaults. The skill never writes
   that file; Mímisbrunnr's run scripts own it. **The 5 `DEDUP_*` keys are not this skill's** — ignore them.
   Off unless configured: absent settings or a non-`true` flag skips the gate, makes **zero network calls**,
   and the export report says `decisions: not configured` or `decisions: disabled` once.
@@ -227,8 +227,8 @@ units are never scored. The gate is a subprocess CLI copied into this skill's `s
 ### What a run writes
 
 - **A run that produces something writes one new stamped folder** `<subject>-<yyyyMMdd-HHmm>/`, holding
-  **only that run's output** — the `new` and `improved` units. It is not a snapshot of the store, and an
-  unchanged unit is never copied into it.
+  **only that run's output** — the `new` and `improved` units (except under `--all`, which re-exports every in-scope unit as an upsert per LADR-014). It is not a snapshot of the store, and an
+  unchanged unit is never copied into it on the normal delta path.
 - **A run that produces nothing writes nothing and creates no folder.** An export reporting only
   `already known` is a **correct outcome**, not a failure — say so, or agents pad the store to look
   productive. An empty stamped folder is reported as a problem by the generator.
@@ -565,7 +565,7 @@ Propose the promotion; the user decides. Once promoted, the Understanding record
 ## Guardrails
 
 - Writing to a mode's default location, or to an explicit `--path`, needs no approval — the location was already chosen, by default or by the user typing it. Report what was written and where, every time; removing the prompt must not remove the user's chance to notice.
-- Ask before promoting, and before a `--consume` makes an incoming copy the current version of a slug this workspace already holds — both change durable state someone already chose to keep or rely on. A local `--export` writing an `improved` version does **not** ask: it adds a copy and destroys nothing, and the five outcomes are reported. On `--export`, propose the split with `AskUserQuestion` (recommending "write every candidate" first) before writing, unless `--all` was passed — the user's own instruction to skip that ask *and* to re-export the whole scope. With `--dontask`, skip the ask and take the recommended option (write every candidate) as analysed by the AI.
+- Ask before promoting, and before a `--consume` makes an incoming copy the current version of a slug this workspace already holds — both change durable state someone already chose to keep or rely on. A local `--export` writing an `improved` version does **not** ask: it adds a copy and destroys nothing, and the six outcomes are reported. On `--export`, propose the split with `AskUserQuestion` (recommending "write every candidate" first) before writing, unless `--all` was passed — the user's own instruction to skip that ask *and* to re-export the whole scope. With `--dontask`, skip the ask and take the recommended option (write every candidate) as analysed by the AI.
 - A unit the value gate holds is reported only — it is never written and never queued. There is **no review queue** in this skill; Mímisbrunnr's is Mímisbrunnr-only, and the WET rule forbids importing it. A held unit's scores are reported in the export output and go nowhere else.
 - Never edit, overwrite or delete an existing copy of a slug. An improvement is a new complete copy in this run's folder; history is immutable. The **one** exception is striking a credential value that should never have been written — see *Redact before you write*; that is a repair, not a revision.
 - Never write an Understanding in must/never language.
