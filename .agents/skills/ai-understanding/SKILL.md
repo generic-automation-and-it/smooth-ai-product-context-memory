@@ -412,7 +412,7 @@ If it needs must/never language, it is not an Understanding — propose it as a 
 ### Slug reuse is versioning, not a collision
 
 A slug already in the store is **not** a name clash to resolve — it is the address of knowledge you are
-about to revise. The five outcomes are stated once, in *Step one: reconcile with the store* above; this
+about to revise. The six outcomes are stated once, in *Step one: reconcile with the store* above; this
 section only says what reuse means and what it is not.
 
 - **Same question → reuse the slug**, and write the complete improved unit into this run's folder. That
