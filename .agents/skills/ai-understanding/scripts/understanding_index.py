@@ -268,6 +268,12 @@ def read_unit(unit_file: Path, subject: str, root: Path | None = None) -> tuple[
     if isinstance(fields.get("confidence"), str) and fields["confidence"] not in VALID_CONFIDENCE:
         problems.append(f"{where}: confidence '{fields['confidence']}' is not one of {VALID_CONFIDENCE}")
 
+    # The value gate writes optional `audience`/`value`/`decisions` on a scored unit. Absent is the
+    # common case (every existing unit), and absence must not disturb their validation — so present is
+    # checked, absent is ignored. `value` carries the `below-threshold` marker as a scalar.
+    for field, allow_scalar in (("audience", False), ("value", True), ("decisions", False)):
+        problems.extend(_string_list_problems(where, field, fields.get(field), allow_scalar))
+
     problems.extend(inline_sequences(fields, where))
     problems.extend(block_scalars(fields, where))
 
@@ -343,6 +349,45 @@ def _flow_problem(where: str, field: str) -> str:
         f"{where}: '{field}' is written as an inline list — this parser reads block lists only, so "
         f"its [[slug]] entries are never checked; rewrite it as a block list"
     )
+
+
+def _string_list_problems(where: str, field: str, value, allow_scalar: bool) -> list[str]:
+    """A block list of non-empty, non-placeholder strings, reported rather than iterated when it is a
+    scalar.
+
+    `audience` (passing roles) and `decisions` (the gate's per-role scores) are lists. `value` is the
+    `below-threshold` marker the gate writes on a `mark` unit, so it is a single non-empty string
+    (`allow_scalar`); a list there is rejected. Absent (None) means the field is not in play and is
+    never a problem, so a unit written before this field existed validates unchanged. A template
+    placeholder is a defect — a unit rendered from the unfilled template must not read as complete —
+    and a scalar string must never be iterated per character (the `provenance.inherited` defect).
+    """
+    if value is None:
+        return []
+    if isinstance(value, str):
+        if allow_scalar:
+            if placeholder(value):
+                return [f"{where}: '{field}' still holds a template placeholder"]
+            return [] if value.strip() else [f"{where}: '{field}' is present but empty"]
+        return [
+            f"{where}: '{field}' must be a block list of non-empty strings — rewrite it as one, or "
+            f"omit it"
+        ]
+    if isinstance(value, list):
+        if allow_scalar:
+            return [f"{where}: '{field}' must be a single value, not a list"]
+        if not value:
+            return [f"{where}: '{field}' is a block list with no entries"]
+        problems = []
+        for item in value:
+            if not isinstance(item, str) or not item.strip():
+                problems.append(f"{where}: '{field}' holds a non-string or empty entry")
+            elif placeholder(item):
+                problems.append(f"{where}: '{field}' still holds a template placeholder")
+        return problems
+    if allow_scalar:
+        return [f"{where}: '{field}' must be a single value, not a list"]
+    return [f"{where}: '{field}' must be a block list of non-empty strings"]
 
 
 def load_units(store: Path) -> tuple[list[dict], list[dict], list[str]]:
@@ -951,6 +996,38 @@ def review(units: list[dict], superseded: list[dict] | None = None,
     return lines
 
 
+def decisions_column(units: list[dict], env: dict | None = None) -> list[str]:
+    """Advisory best-role/margin for each current unit, scored with the gate settings.
+
+    The `--review --decisions` half of the report. It never changes the exit code and never rewrites a
+    unit; it is skipped (with `decisions:` disclosed) when the gate is not configured. Scored against
+    the gate's own settings, which are read from the environment and the machine credential file.
+    """
+    import gate_decisions as gd
+
+    ok, _reason, note = gd.gate_status(env=env)
+    if not ok:
+        return [f"  {note}"]
+    records = [gd.unit_record(unit) for unit in units]
+    # A fresh ledger per advisory run: the gate bounds attempts per identity, and a reused ledger would
+    # let an earlier run's spent budget make a later `--review --decisions` report stale outcomes.
+    ledger = Path(tempfile.mkdtemp()) / "advisory-ledger.json"
+    try:
+        payload = gd.score(records, ledger=ledger, env=env)
+    except gd.GateRefused as exc:
+        return [f"  decisions: refused ({exc.outcome})"]
+    lines = []
+    for unit, result in zip(units, payload.get("records", [])):
+        if result.get("passed"):
+            scores = result.get("scores") or {}
+            best = max(scores, key=scores.get) if scores else "?"
+            margin = result.get("discrimination", {}).get("margin")
+            lines.append(f"  {unit['slug']}: best {best}, margin {margin}")
+        else:
+            lines.append(f"  {unit['slug']}: no role above the bar")
+    return lines
+
+
 def cell(value) -> str:
     if not isinstance(value, str) or not value:
         return "—"
@@ -1032,7 +1109,8 @@ def main(argv: list[str]) -> int:
             return 2
         return consume_check(Path(rest[0]), Path(rest[1]) if len(rest) == 2 else DEFAULT_STORE)
     wants_review = "--review" in args
-    args = [a for a in args if a != "--review"]
+    wants_decisions = "--decisions" in args
+    args = [a for a in args if a not in ("--review", "--decisions")]
     unknown = [a for a in args if a.startswith("-")]
     if unknown:
         print(f"unknown option: {unknown[0]}\n\n{USAGE}", file=sys.stderr)
@@ -1066,6 +1144,10 @@ def main(argv: list[str]) -> int:
         report = review(units, superseded, unpublished)
         print("\nreview — advisory, does not affect the exit code")
         print("\n".join(report) if report else "    nothing flagged")
+
+    if wants_decisions:
+        print("\ndecisions — advisory, does not affect the exit code")
+        print("\n".join(decisions_column(units)))
 
     for problem in problems:
         print(f"  problem: {problem}", file=sys.stderr)

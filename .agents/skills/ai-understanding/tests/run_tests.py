@@ -310,6 +310,111 @@ class InheritedShapeTests(unittest.TestCase):
         self.assertEqual(self.problems_for(""), [])
 
 
+class DecisionFieldsTests(unittest.TestCase):
+    """The value gate writes optional `audience`/`value`/`decisions`. They must validate as block
+    lists of non-empty strings — a scalar is reported, never iterated per character (the
+    inherited-scalar defect) — must not disturb units written without them, and must not disturb the
+    publish-durability check.
+    """
+
+    def write_decision_unit(self, store: Path, block: str) -> None:
+        folder = store / "proj-20260930-1700"
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / f"alpha{ui.UNIT_SUFFIX}").write_text(
+            UNIT_FRONTMATTER.format(slug="alpha", updated="2026-09-30")
+            .replace("  source: test harness\n", f"  source: test harness\n{block}"),
+            encoding="utf-8")
+
+    def problems_for(self, block: str) -> list[str]:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Path(tmp) / "understandings"
+            self.write_decision_unit(store, block)
+            return ui.load_units(store)[2]
+
+    def test_block_list_audience_is_accepted(self):
+        self.assertEqual(self.problems_for("audience:\n  - developer\n  - tester\n"), [])
+
+    def test_value_scalar_marker_is_accepted(self):
+        # `mark` writes `value: below-threshold` — a scalar, not a list.
+        self.assertEqual(self.problems_for("value: below-threshold\n"), [])
+
+    def test_absent_fields_are_silent(self):
+        # A unit written before these fields existed validates unchanged.
+        self.assertEqual(self.problems_for(""), [])
+
+    def test_scalar_audience_is_reported_not_iterated(self):
+        found = [p for p in self.problems_for("audience: developer\n") if "audience" in p]
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("block list", found[0])
+
+    def test_scalar_decisions_is_reported(self):
+        self.assertTrue(any("decisions" in p for p in self.problems_for("decisions: developer: 0.87\n")))
+
+    def test_pure_function_reports_non_string_and_empty_entries(self):
+        found = ui._string_list_problems("a/b", "audience", [None, ""], allow_scalar=False)
+        self.assertEqual(len(found), 2, found)
+        self.assertTrue(all("non-string or empty" in p for p in found), found)
+
+    def test_template_placeholder_is_reported(self):
+        # A unit rendered from the unfilled template must not read as complete.
+        self.assertTrue(any("placeholder" in p
+                            for p in self.problems_for("audience:\n  - <OPTIONAL. ...>\n")))
+        self.assertTrue(any("placeholder" in p for p in self.problems_for("value: <OPTIONAL. ...>\n")))
+
+    def test_empty_block_list_is_reported(self):
+        # An empty `key:` parses as an empty dict, which is not a block list — the field is present
+        # and malformed, so it is reported.
+        found = [p for p in self.problems_for("audience:\n") if "audience" in p]
+        self.assertTrue(any("block list" in p for p in found), found)
+
+    def test_value_as_a_list_is_reported(self):
+        # `value` is a scalar marker; a block list is the wrong shape.
+        found = [p for p in self.problems_for("value:\n  - below-threshold\n") if "value" in p]
+        self.assertTrue(any("single value" in p for p in found), found)
+
+    def test_decision_fields_do_not_disturb_publish_durability(self):
+        # A unit carrying the gate fields is still judged by the durability guard as a unit; the
+        # new fields are not a validation problem and do not hide it from the archive-membership check.
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Path(tmp) / "understandings"
+            self.write_decision_unit(store, "audience:\n  - developer\nvalue: below-threshold\n")
+            units, _superseded, problems = ui.load_units(store)
+            self.assertEqual(len(units), 1, units)
+            self.assertEqual(problems, [])
+
+
+class DecisionsColumnTests(unittest.TestCase):
+    """`--review --decisions` is advisory: with the gate unconfigured it discloses and makes no call."""
+
+    def test_not_configured_reports_and_is_advisory(self):
+        env = dict(os.environ)
+        for key in list(env):
+            if key.startswith("CONTEXT_MEMORY_DECISIONS_"):
+                env.pop(key)
+        env["CONTEXT_MEMORY_CREDENTIAL_FILE"] = str(Path(tempfile.gettempdir()) / "absent-cred")
+        lines = ui.decisions_column([], env=env)
+        self.assertEqual(lines, ["  decisions: not configured"])
+
+    def test_review_decisions_is_accepted_by_the_cli(self):
+        # `--decisions` is a real flag, not an unknown option, and the advisory discloses when the
+        # gate is unconfigured without changing the exit code. The env is made hermetic first: a live
+        # `~/.mimisbrunnr/credentials` on the runner would otherwise enable the gate and the advisory
+        # would reach the model (issue 182).
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Path(tmp) / "understandings"
+            write_unit(store, "proj-20260930-1700", "alpha")
+            saved_enabled = os.environ.pop("CONTEXT_MEMORY_DECISIONS_ENABLED", None)
+            saved_cf = os.environ.get("CONTEXT_MEMORY_CREDENTIAL_FILE")
+            os.environ["CONTEXT_MEMORY_CREDENTIAL_FILE"] = str(Path(tmp) / "absent")
+            try:
+                rc, out, err = run(["understanding_index.py", str(store), "--review", "--decisions"])
+            finally:
+                if saved_enabled is not None:
+                    os.environ["CONTEXT_MEMORY_DECISIONS_ENABLED"] = saved_enabled
+                if saved_cf is not None:
+                    os.environ["CONTEXT_MEMORY_CREDENTIAL_FILE"] = saved_cf
+            self.assertEqual(rc, 0, err)
+            self.assertIn("decisions:", out)
 class AgentsContextResolutionTests(unittest.TestCase):
     """`agents_context` is a repo-relative path, so the verdict must not depend on the CWD.
 

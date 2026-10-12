@@ -20,31 +20,34 @@ Export and import are about **this session's memory**: export writes what the se
 | Switch | Effect |
 |--------|--------|
 | `--export [--path <dir>]` _(default)_ | **Reconcile against `INDEX.md`**, then write this run's new and improved units to a new `.context/understandings/<subject>-<yyyyMMdd-HHmm>/`, or under `--path` when given. Proposes the split first; writes nothing and creates no folder when nothing changed |
-| `--export --all [--path <dir>]` | Same, but breadth-first: write every candidate without pausing for the user to cut the list, **and hold the qualifying bar loosely** — a marginal candidate is written, not dropped, because the user prunes afterwards |
-| `--export --dontask [--path <dir>]` | Same, but skips the "Export split" ask and takes the recommended option as analysed by the AI. **Does not** widen the qualifying bar — a marginal candidate is still dropped if it does not qualify, unlike `--all` |
+| `--export --all [--path <dir>]` | Same, but skip the split ask **and re-export the whole scope as upserts instead of this run's delta** — an unchanged in-scope unit is re-written, not skipped. **Never loosens the qualifying bar and never bypasses the decision threshold** (LADR-014) |
+| `--export --dontask [--path <dir>]` | Same, but skips the "Export split" ask and takes the recommended option as analysed by the AI. **Does not** re-export the whole scope — it writes this run's delta, exactly as a normal export does |
 | `--import` | Load Understandings whose question matches one the task will make you ask |
 | `--publish [--portable-only] [--path <target>]` | Write every unit to a zip under `.context/understandings-publish/`, or to `--path` when given; `--portable-only` restricts the archive to `scope: portable` units |
 | `--consume <zip> [--path <dir>]` | Unpack a published archive into the working store — `.context/understandings/` by default, or `--path` when given |
 | `--promote <slug>` | Escalate an Understanding to a `*AGENTS.md` context file or a rule |
 | `--index` | Regenerate `INDEX.md` from the store |
-| `--review` | Advisory decay report — what is contested, never inherited, or overdue a re-check |
+| `--review` | Advisory decay report — what is contested, never inherited, or overdue a re-check. With `--decisions`, adds an advisory best-role/margin column scored by the same gate settings |
 
-`--all` applies only to `--export`, where it means two things at once: **skip the cut**, and **widen
-what qualifies**. The second half is the one that gets lost — an agent can honour "never ask" to the
-letter while filtering hard upstream, and still report one unit as a complete export. Under `--all`,
-resolve a marginal candidate toward writing it: the user asked for breadth and prunes what they did not
-want. `--publish`'s scope filter is a separate switch, `--portable-only` — the two are unrelated despite
-the old design overloading `--all` for both.
+`--all` applies only to `--export`, where it means two things at once: **skip the cut**, and **re-export
+the whole scope as upserts** instead of this run's delta. The normal path is a delta — it writes only this
+run's `new`/`improved` units and never a copy of an unchanged unit. `--all` instead re-exports every
+in-scope unit: an unchanged one is re-written as a fresh stamped copy (with `provenance.supersedes`,
+LADR-010), so a sourced scope (a file or directory given as the focus, or the session) is fully refreshed
+rather than shown as a diff. **It never loosens the qualifying bar and it never bypasses the decision
+threshold** (LADR-014): a below-threshold unit is held or marked exactly as in a normal export. `--publish`'s
+scope filter is a separate switch, `--portable-only` — the two are unrelated despite the old design
+overloading `--all` for both.
 
 `--all` does **not** turn proposals into commitments, and it does **not** override the qualifying
 test. An unbuilt recommendation is still a proposal: label it as proposed and record that it was
 not approved or implemented. Toolchain knowledge still goes to its `*AGENTS.md` home, even when
-the user asks for every candidate. Breadth means "show the marginal qualifying residue", not
+the user asks for every candidate. Breadth means "re-export the whole in-scope set", not
 "store everything mentioned in the session".
 
 `--dontask` applies only to `--export`, where it skips the "Export split" `AskUserQuestion` and
 takes the recommended option (write every candidate) as analysed by the AI. Unlike `--all`, it
-does **not** widen the qualifying bar — it only skips the ask.
+does **not** re-export the whole scope — it writes this run's delta, exactly as a normal export does.
 
 `--path` is always the **target** a mode writes to, overriding its default — never a source.
 `--consume`'s source stays positional.
@@ -61,6 +64,10 @@ so the split proposal leads with the units inside it. It narrows nothing by itse
 outside the focus is still proposed, so the user cuts it rather than never seeing it. With no focus given,
 infer the subject from the session as before. The other modes' positional arguments are their own —
 `--consume`'s source and `--promote`'s slug are never read as a focus.
+
+On `--export`, `--scope <path>` optionally names a **file or directory as the source to distill** — the
+default scope is the session. `--all` re-exports the whole scope, so a file/dir scope is what turns
+`--all` into a full re-derivation of that source rather than a session delta.
 
 Single-dash spellings of the long switches (`-all`, `-export`) are accepted as typed — they are
 unambiguous here, and rejecting them would fail a run for a keystroke. An unrecognised switch is not
@@ -151,8 +158,8 @@ between them**, and *What qualifies: nothing with another home* below is what de
 applies — so no candidate ever maps to both, and an absent-index candidate is not `new` until that test
 has been run on it. `has another home` is the exclusion's only reporting slot, and prose does not satisfy
 it: **name the file that holds the knowledge**, or the skip is unauditable and indistinguishable from a
-candidate you forgot. Under `--all` it should be rare — the bar is loose there, and a document that
-covers part of the knowledge is not a claim on the rest.
+candidate you forgot. Under `--all` it should be rare — the re-export covers the whole scope, and a
+document that covers part of the knowledge is not a claim on the rest.
 
 **Judge "same question" generously.** This step decides everything, and judging it strictly is what
 produced three answers to one question under three slugs. The test:
@@ -178,14 +185,50 @@ unit and setting it aside is not inheritance. If the run genuinely inherited not
 field back to find units nothing ever inherits, and a store where no unit carries it makes `--review`
 report "nothing flagged" because it has nothing to read.
 
-**Report every candidate under one of the five outcomes**, and give `has another home` the path it
+**Report every candidate under one of the six outcomes**, and give `has another home` the path it
 requires. A silent skip is indistinguishable from a missed export.
+
+### The value gate (optional)
+
+When the decision settings are present and `CONTEXT_MEMORY_DECISIONS_ENABLED=true`, each `new` and
+`improved` unit is scored for role value **before it is written**. `already known` and `has another home`
+units are never scored. The gate is a subprocess CLI copied into this skill's `scripts/` (`decisions_gate.py`,
+`decisions_rubric.json`, `redact.py`) — a **WET copy** from Mímisbrunnr, so this skill runs where no
+`mimisbrunnr-*` is installed. The wiring is `scripts/gate_decisions.py` (owned here, not copied).
+
+- **Settings** — the eleven `CONTEXT_MEMORY_DECISIONS_*` keys (`ENABLED`, `BASE_URL`, `PATH`, `MODEL`,
+  `API_KEY`, `MIN_PROBABILITY`, `MAX_ATTEMPTS`, `ROLES`, `BELOW_THRESHOLD`, `TIMEOUT`,
+  `LEDGER_MAX_ENTRIES`). Read from the process environment first, then `~/.mimisbrunnr/credentials`
+  **if it exists** (decision keys only — never a token; `LEDGER_MAX_ENTRIES` env-only), then the built-in defaults. The skill never writes
+  that file; Mímisbrunnr's run scripts own it. **The 5 `DEDUP_*` keys are not this skill's** — ignore them.
+  Off unless configured: absent settings or a non-`true` flag skips the gate, makes **zero network calls**,
+  and the export report says `decisions: not configured` or `decisions: disabled` once.
+- **For each new/improved unit:** build a record with `gate_decisions.unit_record(unit)`, send the batch to
+  `gate_decisions.score(records, ledger)` (the gate redacts first and fails closed, and a size-guard holds
+  an oversize unit rather than truncating it), then `gate_decisions.classify(result, belowThreshold,
+  maxAttempts)` returns the action:
+  - `write` — write the unit; `audience:` may be `passingRoles`.
+  - `rewrite` — the unit fell below the bar with budget left. Rewrite under the same contract (no new
+    claims, every condition and boundary kept, slug/question/provenance unchanged) and re-score. The
+    **script** enforces `MAX_ATTEMPTS` via a ledger kept **outside the store** (a temp path sibling
+    sessions wipe); the store must never hold the ledger.
+  - `held` — below the bar after the last attempt, with `BELOW_THRESHOLD=hold`. **Not written.** Reported
+    under the sixth outcome **`held (below value)`** with its scores. **There is no review queue here** —
+    a held unit is reported in the export output and goes nowhere else.
+  - `mark` — below the bar after the last attempt, with `BELOW_THRESHOLD=mark`. Written with frontmatter
+    `value: below-threshold` and the scores under `decisions:`.
+- **`--all` never bypasses the threshold** (LADR-014): a below-threshold unit is held or marked exactly as
+  in a normal export. `--all` only changes scope coverage.
+- A down/unreachable/timed-out or malformed model **skips the gate** for the unit with a classified reason —
+  it never blocks the export and never reads as a low score; the unit is written ungated. `classify`
+  returns `write` with `detail` naming the cause.
+- The gate defaults to a loopback endpoint; a non-loopback URL is accepted only over https with `API_KEY`.
 
 ### What a run writes
 
 - **A run that produces something writes one new stamped folder** `<subject>-<yyyyMMdd-HHmm>/`, holding
-  **only that run's output** — the `new` and `improved` units. It is not a snapshot of the store, and an
-  unchanged unit is never copied into it.
+  **only that run's output** — the `new` and `improved` units (except under `--all`, which re-exports every in-scope unit as an upsert per LADR-014). It is not a snapshot of the store, and an
+  unchanged unit is never copied into it on the normal delta path.
 - **A run that produces nothing writes nothing and creates no folder.** An export reporting only
   `already known` is a **correct outcome**, not a failure — say so, or agents pad the store to look
   productive. An empty stamped folder is reported as a problem by the generator.
@@ -251,11 +294,12 @@ A single session frequently contains more than one durable lesson. Split it — 
 
 When proposing a split, ask with `AskUserQuestion` — recommend **write every candidate** first, with
 cutting specific slugs as the alternative, rather than a prose list a reader could mistake for output.
-**With `--all`, skip the ask entirely and widen the bar** — write every candidate, resolving a marginal
-one toward writing rather than dropping, and report what was written, so the user prunes afterwards
-instead of beforehand. `--all` is a request for breadth: a one-unit export out of a session carrying
-several lessons answers the letter of the switch and defeats its purpose.
-**With `--dontask`, skip the ask but keep the bar** — write every candidate that qualifies under the
+**With `--all`, skip the ask entirely and re-export the whole scope** — write every in-scope unit as an
+upsert (an unchanged one as a fresh stamped copy), and report what was written so the user prunes
+afterwards. `--all` is a request for scope coverage: a one-unit export out of a session carrying
+several lessons answers the letter of the switch and defeats its purpose. `--all` does **not** loosen
+the qualifying bar or bypass the decision threshold (LADR-014).
+**With `--dontask`, skip the ask but keep the scope** — write every candidate that qualifies under the
 normal test, and drop a marginal one exactly as an unflagged export would.
 
 ### Redact before you write
@@ -311,6 +355,9 @@ Frontmatter fields:
 | `agents_context` | Path to the nearest `*AGENTS.md` this bears on, when it concerns a specific code area |
 | `recheck` | **Optional.** One command that re-checks whether this still holds, runnable exactly as written. `--review` prints it beside a staleness flag, which is what makes the flag actionable rather than a nag. Expected on an outcome unit, whose facts decay fastest. It must test the claim, not merely locate the text that describes it; omit it when no executable check exists and say so in **Boundaries** |
 | `skills` | **Optional.** The skill an agent should invoke to act on this knowledge, by bare name — never knowledge *about* a skill, which has another home. Not `[[slug]]` references |
+| `audience` | **Optional.** A role the value gate found above threshold when it scored this unit, as a block list (e.g. `developer`). Written only when the gate ran. Omit the list if no role cleared the bar |
+| `value` | **Optional.** `below-threshold` — set by the value gate when a unit was written under `mark`. A scalar, not a list |
+| `decisions` | **Optional.** One line per role the gate scored (e.g. `developer: 0.87`) — the evidence behind `audience:`/`value:`. Omit absent scoring |
 | `provenance.learned` | Date, absolute |
 | `provenance.session` | Shared by all slugs encoded from one session |
 | `provenance.source` | What produced it — a failure, a doc, an experiment |
@@ -365,7 +412,7 @@ If it needs must/never language, it is not an Understanding — propose it as a 
 ### Slug reuse is versioning, not a collision
 
 A slug already in the store is **not** a name clash to resolve — it is the address of knowledge you are
-about to revise. The five outcomes are stated once, in *Step one: reconcile with the store* above; this
+about to revise. The six outcomes are stated once, in *Step one: reconcile with the store* above; this
 section only says what reuse means and what it is not.
 
 - **Same question → reuse the slug**, and write the complete improved unit into this run's folder. That
@@ -442,6 +489,10 @@ python3 .agents/skills/ai-understanding/scripts/understanding_index.py --review
 | overdue re-check | Run the unit's `recheck` command — the report prints it beside the flag — then read the unit against what it says. Outcome units are flagged after 30 days, knowledge after 90. A flagged unit carrying no `recheck` is reported as carrying none: add one while you are in there |
 | `unpublished` | The store is gitignored and these **current** units are in no archive under `.context/understandings-publish/`, so they would vanish with this workspace. Judged by **membership**, never archive time — a `--portable-only` archive is newer than the `repo-specific` units it left out — and only an archive `--consume` would accept counts — a damaged member, an escaping or symlink entry, or two entries landing on one path makes the whole archive prove nothing, since none of it could be restored. A unit with a local `<slug>.assets/` counts only when every asset file is a restorable member of the same archive, since a unit restored without its repro or diagram is not the unit that was learned. The archived bytes must also be the working copy's — the unit's, discounting only the `provenance.published_from` line and `--portable-only` unbracketing publish itself adds, and every asset's exactly — so a unit redacted in place or an asset refreshed after the last publish is listed again. An archive written elsewhere with `--path` is not seen, so its units stay listed. Run `--publish` to carry them out (LADR-008: the zip is the only durable form). Superseded copies are never listed here: publish archives current versions only, so history is workspace-local by design and a warning `--publish` could never clear would only teach the operator to ignore it. Listed only when the store is gitignored — the guard reports the store's own `git check-ignore` answer, and a tracked store reports nothing |
 
+`--review --decisions` adds an **advisory** best-role and margin column for each current unit, scored with
+the same gate settings. It never changes the exit code and never rewrites a unit; it is skipped (with
+`decisions:` visible) when the gate is not configured.
+
 Advisory only — it never changes the exit code, because none of it is wrong, it is just decaying. Act on it
 when you are already in the store; do not make a project of it. Every run on a gitignored store also
 prints a one-line `warning:` when it holds unpublished units, so the consequence of not publishing is
@@ -514,7 +565,8 @@ Propose the promotion; the user decides. Once promoted, the Understanding record
 ## Guardrails
 
 - Writing to a mode's default location, or to an explicit `--path`, needs no approval — the location was already chosen, by default or by the user typing it. Report what was written and where, every time; removing the prompt must not remove the user's chance to notice.
-- Ask before promoting, and before a `--consume` makes an incoming copy the current version of a slug this workspace already holds — both change durable state someone already chose to keep or rely on. A local `--export` writing an `improved` version does **not** ask: it adds a copy and destroys nothing, and the five outcomes are reported. On `--export`, propose the split with `AskUserQuestion` (recommending "write every candidate" first) before writing, unless `--all` was passed — the user's own instruction to skip that ask *and* to hold the qualifying bar loosely, writing a marginal candidate rather than dropping it. With `--dontask`, skip the ask and take the recommended option (write every candidate) as analysed by the AI.
+- Ask before promoting, and before a `--consume` makes an incoming copy the current version of a slug this workspace already holds — both change durable state someone already chose to keep or rely on. A local `--export` writing an `improved` version does **not** ask: it adds a copy and destroys nothing, and the six outcomes are reported. On `--export`, propose the split with `AskUserQuestion` (recommending "write every candidate" first) before writing, unless `--all` was passed — the user's own instruction to skip that ask *and* to re-export the whole scope. With `--dontask`, skip the ask and take the recommended option (write every candidate) as analysed by the AI.
+- A unit the value gate holds is reported only — it is never written and never queued. There is **no review queue** in this skill; Mímisbrunnr's is Mímisbrunnr-only, and the WET rule forbids importing it. A held unit's scores are reported in the export output and go nowhere else.
 - Never edit, overwrite or delete an existing copy of a slug. An improvement is a new complete copy in this run's folder; history is immutable. The **one** exception is striking a credential value that should never have been written — see *Redact before you write*; that is a repair, not a revision.
 - Never write an Understanding in must/never language.
 - Never let an Understanding contradict a rule without flagging it.
@@ -524,6 +576,7 @@ Propose the promotion; the user decides. Once promoted, the Understanding record
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-11 | **Optional decision (value) gate on `--export`, and `--all` redefined.** When `CONTEXT_MEMORY_DECISIONS_ENABLED=true`, each `new`/`improved` unit is scored for role value before it is written; a below-bar unit is `held (below value)` (not written) under `hold`, or written with `value: below-threshold` under `mark`, with passing roles carried into `audience:`. The gate is a **WET copy** (`decisions_gate.py`, `decisions_rubric.json`, `redact.py` — no `mimisbrunnr-*` import) wired by `gate_decisions.py`. Off unless configured: absent settings make zero network calls and report `decisions: not configured`/`disabled` once. A down/unreachable/timed-out/malformed model skips the gate (never a low score). **`--all` = re-export the whole scope as upserts, and it never bypasses the threshold** (LADR-014 — was "widen the bar"). `--scope <path>` names a file/dir source to distill (default session). `--review --decisions` adds an advisory best-role/margin column. There is **no review queue** — a held unit is reported only. | this PR |
 | 2026-10-01 | **Promotion gained a threshold, and the evidence for it.** `--promote` proposed on any judgement call; it now proposes after the unit has been **inherited in three independent sessions** (`provenance.inherited` on the units a later session exported), or states why it is proposing earlier. Evidence-based, so the user still decides — the threshold gates the *proposal*, not the decision. The same arithmetic was added as guidance for `propose-label` in `mimisbrunnr-odin-context-memory` (a label seen once is a word, three times is vocabulary), and `--review`'s existing `never inherited` flag is named as the other half of the signal. Wording only; no script change and no test tier. **Divergence from the devex template** — this skill is template-owned, so `ai-template-sync` would revert it; upstream it or keep this row. | ICM adoption |
 | 2026-09-19 | Initial version. | |
 | 2026-09-19 | `--export`/`--import` are session↔disk; cross-repo moves became `--publish`/`--consume`. | |
