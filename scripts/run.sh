@@ -160,6 +160,7 @@ require_port_or_reuse() {
   local suffix="$4"
   local name="mimisbrunnr-${installation_id}-${suffix}"
   if docker container inspect "$name" >/dev/null 2>&1 &&
+     [ "$(docker container inspect --format '{{index .Config.Labels "io.smooth-mimisbrunnr.installation"}}' "$name" 2>/dev/null)" = "$installation_id" ] &&
      [ "$(docker container inspect --format '{{.State.Running}}' "$name" 2>/dev/null)" = "true" ]; then
     return 0
   fi
@@ -720,7 +721,7 @@ report_version_drift() {
 # ---------------------------------------------------------------------------------------------
 
 # Replaces any running controller for this installation, so a plain `up` is a restart rather than a
-# failure. The graceful stop is the controller's own: its shutdown trap tears down the four workloads
+# failure. The graceful stop is the controller's own: its shutdown trap tears down the Session host
 # it owns, which is what removes mimisbrunnr-<id>-host, and preserves every volume. Only the
 # controller container is then deleted — never a volume, and never a container this installation does
 # not own.
@@ -927,8 +928,9 @@ status() {
 
 stop() {
   # Graceful stop removes the controller and preserves every data volume and data-root folder.
-  # postgres/blob/seq are Persistent, so they keep running by design — use `reset-dev-stack.sh` to
-  # remove them (or `stop-dev-stack.sh` for the dev container set).
+  # postgres/blob/seq are Persistent, so they keep running by design -- to remove the release
+  # workloads: docker stop/rm mimisbrunnr-${installation_id}-{postgres,blob-well,seq}
+  # (stop-dev-stack.sh / reset-dev-stack.sh only handle the dev mimisbrunnr-* set).
   if docker container inspect "$controller_name" >/dev/null 2>&1; then
     log "stopping $controller_name (postgres/blob/seq keep running by design; volumes and $data_root/$installation_id preserved)"
     docker stop --time 180 "$controller_name" >/dev/null
