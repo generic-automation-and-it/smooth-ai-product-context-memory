@@ -13,10 +13,23 @@ old defect — handlers reaching for provider syntax and filtering in memory.
 ## Decision
 
 **Split** the work at the existing seam: Application owns a pure, total parser
-(string → operator tree → criteria plus a provider-neutral query model); Infrastructure owns
-the translation (query model → `to_tsquery` / `phraseto_tsquery` / `plainto_tsquery`
-expression tree, executed by the database). The handler resolves group/ticket identity and
-the scope plan before either runs, exactly as `QueryMemories.Handler` does today.
+(string → `And`/`Or`/`Not`/`Phrase`/`Prefix`/`Term` operator tree plus criteria; the case
+names are syntactic and carry no `to_tsquery` spelling — only Infrastructure knows
+`|`/`&`/`!`/`:*`); Infrastructure owns the translation (query model →
+`to_tsquery` / `phraseto_tsquery` / `plainto_tsquery` expression tree, executed by the
+database). All twelve `E_*` syntax refusals live in the parser inside the handler (not in
+the FluentValidation validator — the validator keeps today's shape checks; the handler
+maps parser refusal to 400 itself), so refusals never emit HLD-004 recall-feedback (a
+refusal is not a miss — misses are empty retrieval results only). `E_EMPTY_AFTER_NORMALIZATION`
+is detected at translation time (only the provider knows `english` stemming): the
+translator returns the refusal without hitting the tables. Tokenizer (separators incl.
+NBSP/tab/newline, `,`/`.`/`/`/`@` splitting, NFC normalisation, ASCII `"` only — smart
+quotes are lexeme chars) and field-vs-operator precedence (`tag:x` binds as an atom:
+`tag:x foo OR bar` is `(field & foo) | bar`) are pinned at Prototype with the L0/NFR-01
+fixture. L0 asserts the operator tree; a separate Infrastructure fixture asserts the
+`tsquery` text — one layer per fixture. New retrieval shapes map onto the HLD-004 shape
+set explicitly (operator query → `free_text`, field-only → `facet_only` or matching
+scoped shape, traverse → its anchor's shape); no new shape without an HLD-004 amendment.
 
 ## Alternatives Considered
 
@@ -35,8 +48,10 @@ the scope plan before either runs, exactly as `QueryMemories.Handler` does today
 
 ## Open
 
-- Query-model shape (closed discriminated union vs. stringly intermediate): owner generik0
-  at Prototype — trigger: first translator draft.
+- Query-model serialisation review at first translator draft (owner: generik0): confirm no
+  `to_tsquery` spelling leaks into the Application tree.
+- CJK/non-English limitation disclosed at Prototype (owner: generik0): `english` drops
+  CJK tokens — pin whether refusal, empty set, or documented limitation.
 
 ## Related
 

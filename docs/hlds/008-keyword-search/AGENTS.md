@@ -42,7 +42,8 @@ Only decisions whose violation produces wrong code. Full records in [`./ladrs/`]
   built query as a parameter — never interpolate (LADR-02).
 - Snippet options are fixed by the design; headline runs after `LIMIT` so cost tracks the 50/200 ceiling.
 - Anchor `LIMIT` controls traverse input when the flag is set — 5 anchors means 5-anchor widening.
-- A miss (empty set, malformed refusal) is a recorded HLD-004 signal, not an error to absorb.
+- A miss (empty retrieval result) is a recorded HLD-004 signal; a malformed refusal
+  (400, parser never reaches retrieval) is not — refusals carry no feedback emission.
 
 ## Quality Constraints
 
@@ -60,4 +61,5 @@ Measurable NFRs live in [`./nfrs/`](./nfrs/). Constraints that change how code i
 | :---- | :---- | :---- |
 | 2026-10-13 | HLD scaffolded | this HLD |
 | 2026-10-13 | Drafted README (4 goals), LADRs 01–06, NFRs 01–04, C1 + flow + sequence diagrams, guardrails | keyword-search analysis |
-| 2026-10-13 | Ralph loop 10/10 (syntax, injection/scope, rank/traverse, compat/NFR, shape, grammar, plan-honesty, disclosure, degenerate-input): bare=recency vs operators=rank, snippet additive-nullable, closed 12-code refusal enum, field-only valid, value/duplicate rules, branch-only GIN claim, one-round-trip traverse with disclosure + timeout rule, no-default-depth | this HLD |
+| 2026-10-13 | Ralph loop 10/10 (syntax, injection/scope, rank/traverse, compat/NFR, shape, grammar, plan-honesty, disclosure, degenerate-input): bare=recency vs operators=rank, snippet additive-nullable, closed 12-code refusal enum, field-only valid, value/duplicate rules, branch-only GIN claim, one-round-trip traverse with disclosure + timeout rule, no-default-depth | keyword-search analysis |
+| 2026-10-13 | Ralph loop 2 10/10 (grammar, authz-oracles, rank-pinning, traverse-atomicity, wire-compat, NFR-rigor, cross-HLD-drift, PG-semantics, DoS-caps, layering): stale Goal-3 para deleted, 14-code enum (+depth/complexity), phrase-via-composition, hyphen/colon arms picked, rank weights/normalization/max-side pinned, snippet wire rule + dossier/export exclusion, traverse txn/scope-every-hop/timeout-mapping, refusal-is-not-miss, shape-mapping to HLD-004 | this HLD |

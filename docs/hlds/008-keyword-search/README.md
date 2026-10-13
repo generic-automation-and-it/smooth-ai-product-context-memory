@@ -70,13 +70,13 @@ rank — back-compat is absolute for the shipped path. Each hit carries a nullab
 `Snippet` (`ts_headline` over the matched side, subject vs. claim) so the skill's semantic
 judgement — which stays client-side — has evidence beyond the full cheap row. Rank input
 is the same `tsquery` from Goal 1; no separate ranking signal. Existing response fields
-are unchanged; `Snippet` is additive and null when the headline has nothing to mark.
-
-Results order by `ts_rank_cd` first, recency (`ValidFrom desc, uuid, version`) only as the
-tiebreak. Each hit carries a `ts_headline` snippet naming which side matched
-(subject vs. claim) so the skill's semantic judgement — which stays client-side — has
-something to judge beyond the full cheap row. Rank input is the same `tsquery` from Goal 1;
-no separate ranking signal.
+are unchanged; `snippet` (camelCase, always present, nullable) is additive and null when
+the headline has nothing to mark. Rank uses default weights (index vectors are
+weightless — no `setweight`) and default normalization; both-match (subject + claim)
+takes the max side; endpoints carry no snippet. Bare, field-only, and field+bare
+(zero explicit operators) order by recency; any explicit operator branches to rank.
+Dossier-bundle and forensic-export projections exclude `snippet` by name, as do all
+compat/equivalence comparisons and the `deepsearch` dedupe key (uuid/version only).
 
 **Acceptance criteria / DoD**
 
@@ -90,18 +90,22 @@ no separate ranking signal.
 
 Today `deepsearch.py` chains baseline + keyword + depth-one traversals client-side (up to
 ten calls, 400-cap dedupe). This design lets a single request ask for keyword anchors plus
-bounded AGE widening (depth 1–5, the HLD-003 ceiling) in one statement, so the traversal
+bounded AGE widening (depth 1–5, the deliberate HLD-003 ceiling) in one HTTP round trip
+(handler transaction, scope gate on every hop exactly as HLD-003), so the traversal
 starts from the *ranked anchor set* rather than a client-truncated list. Client-side
 `deepsearch` keeps working unchanged; the server composition is the deliberate path for
-new callers.
+new callers. `depth` is required explicitly (no default); the composed call runs under a
+Prototype-measured `SET LOCAL statement_timeout` inside the recall-deadline budget
+(HLD-004 bounds the whole call, timeout is defence-in-depth per HLD-003 — 100 ms is not
+reused as this shape's target).
 
 **Acceptance criteria / DoD**
 
 - A keyword+traverse request returns post-scope, post-`LIMIT` anchor survivors plus
   widened endpoints in one HTTP round trip with disclosed counts (`anchorsEligible` null
   when the anchor phase never answers, `stoppedEarly` vs. `budgetExhausted`,
-  `passesIncomplete`, distinct `endpointsOutsideSelector`) matching the `deepsearch`
-  contract field-for-field (see LADR-05 §Disclosure).
+  `passesIncomplete`, distinct `endpointsOutsideSelector`) as a documented `deepsearch`
+  disclosure subset (see LADR-05 §Disclosure).
 - Traversal honours the same scope plan and group selector as the anchor query; endpoints
   outside the selector are dropped and counted, never leaked.
 - Without the traverse flag the response is wire-compatible with today's query:
@@ -111,10 +115,13 @@ new callers.
 
 > The string is syntax; the criteria are semantics; the database executes both.
 
-Parsing (string → operator tree → criteria + `tsquery`) is pure and lives outside the
-provider. Translation (criteria + `tsquery` → index-matching SQL) lives behind
-`IMemorySearch` in Infrastructure. The handler resolves identity and scope before either
-runs. Nothing caller-supplied reaches statement text; values travel as parameters.
+Parsing (string → operator tree → criteria + provider-neutral query model) is pure and
+lives in Application; only Infrastructure serialises the model to `tsquery` constructors
+and executes it. The handler resolves identity and scope, then runs parse → translate;
+`group:` disagreements (string vs. param vs. ticket group) intersect conjunctively to an
+empty set — never an override. Nothing caller-supplied reaches statement text; the built
+query travels as a bound parameter *and* lexemes are quoted per `tsquery` quoting rules
+(binding alone does not stop operator injection).
 
 This split is what keeps the `english` index pair servable, the `pg_trgm` rejection
 untouched, and every predicate database-executed — the three properties HLD-001 and

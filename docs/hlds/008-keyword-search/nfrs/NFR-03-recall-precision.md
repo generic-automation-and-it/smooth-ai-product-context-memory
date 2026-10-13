@@ -4,9 +4,10 @@
 
 ## Requirement
 
-On the extended fixture (HLD-001's 14 memories / 11 cases plus ≥ 9 new operator cases:
-phrase-narrows, OR-widens, NOT-excludes, prefix-completes, field-narrows), micro-recall
-≥ 0.78 (no regression vs. the shipped `english` decision) and micro-precision ≥ 0.85.
+On the fixed 20-case extended fixture (HLD-001's 11 cases plus 9 new operator cases, no
+additions without re-baselining: 2 phrase-narrows, 2 OR-widens, 2 NOT-excludes, 2
+prefix-completes, 1 field-narrows), micro-recall ≥ 0.78 (no regression vs. the shipped
+`english` decision) and micro-precision ≥ 0.85, micro-averaged per case over the 20.
 Both numbers are Prototype targets, not citations — the HLD-001 figures carry a
 stale-before-quoting banner (post-2026-09-24 predicate change) and are re-measured with
 the new cases before acceptance. The known stem collision (`author`) stays pinned; new
@@ -15,10 +16,12 @@ each named in the evidence.
 
 ## Verification
 
-`SMOOTH_FTS_BENCH=1`-pattern harness over the exact production shape (subject row OR
-current version row), per-case precision/recall micro-aggregated exactly as HLD-001 NFR-02.
-New operator cases recorded with the same per-case highlight format. Re-run before quoting
-numbers (HLD-001 figures are stale relative to the 2026-09-24 predicate change).
+`KeywordRecallBench` (`SMOOTH_FTS_BENCH=1`-pattern) over the exact production shape
+(subject row OR current version row), per-case precision/recall micro-aggregated over
+the 20 exactly as HLD-001 NFR-02. Rank assertion runs on 3 dedicated multi-lexeme rows
+in the same corpus. Evidence artifact:
+`docs/hlds/008-keyword-search/nfrs/NFR-03-evidence.md` (per-case table + aggregates),
+attached at Prototype.
 
 ## Acceptance Criteria
 

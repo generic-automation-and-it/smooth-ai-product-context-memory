@@ -13,11 +13,12 @@ carry the field *name* at most — never a field value, lexeme, phrase, or snipp
 
 ## Verification
 
-Back-compat L1 suite replays today's `FreeTextRecallTests` corpus through the new parser
-with bare strings and asserts set+order equality. Refusal tests assert stable reason codes
-for unknown fields and malformed input. Secret/content scan: log-capture test asserts no
-statement, summary, snippet, or query lexeme beyond identifiers/counts appears in logs;
-feedback-record inspection asserts identifiers only.
+Back-compat: `FreeTextRecallTests` pass unmodified (adapter allowed only outside
+assertions — parser entry, not expected values); bare-vs-structured equivalence in
+`KeywordCompatTests` on the committed 6-memory corpus. Safety: `KeywordRefusalTests`
+(stable codes) and `KeywordRedactionTests` (log/feedback capture over Serilog + OTLP
+spans + feedback records; content token = any query lexeme, phrase, field value, or
+snippet substring, modulo stemming).
 
 ## Acceptance Criteria
 

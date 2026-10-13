@@ -17,11 +17,14 @@ version ASC` with no rank. Operator queries (any explicit `|`/`&`/`!`/phrase/` :
 constructor from LADR-02) order by `ts_rank_cd(vector, query) DESC` with the same
 recency tuple as the deterministic tiebreak, and **project** a nullable `Snippet`
 (`ts_headline('english', …)` over the matched side, subject vs. claim). Rank input is
-the same `tsquery` from LADR-02 — no second signal, no stored rank column. Snippet
-options (`MaxFragments`, `FragmentDelimiter`) are fixed by the design, not
-caller-tunable. Existing columns and projection order are unchanged; `Snippet` is
-additive. Headline input columns are pinned to the subject/claim cheap fields — never
-blob bodies.
+the same `tsquery` from LADR-02 — no second signal, no stored rank column. Rank uses
+default weights (index vectors are weightless — no `setweight`) and default
+normalization; both-match (subject + claim) takes the max side. `Snippet` options
+(`MaxFragments`, `FragmentDelimiter`) are fixed by the design, not caller-tunable.
+Existing columns and projection order are unchanged; `snippet` (camelCase, always
+present, nullable) is additive — null when the headline marks nothing (`ts_headline`
+returns unmarked text, which the translator maps to null). Headline input columns are
+pinned to the subject/claim cheap fields — never blob bodies.
 
 ## Alternatives Considered
 

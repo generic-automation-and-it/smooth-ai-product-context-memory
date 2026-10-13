@@ -16,10 +16,13 @@ bounded: p95 with rank+headline ≤ 2x the re-measured bare-FTS p95 on the decla
 ## Verification
 
 `EXPLAIN (FORMAT TEXT)` with `SET LOCAL enable_seqscan = off` per `tsquery` constructor
-on the single-table branches (extends `FreeTextRecallTests`); full-shape `EXPLAIN`
+on the single-table branches (extends `FreeTextRecallTests`; forcing is justified
+because it distinguishes index-availability from planner choice at fixture scale, and
+the unforced plan is captured alongside informationally); full-shape `EXPLAIN`
 captured informationally at Prototype with no index assertion on the combined OR.
-Latency harness (`SMOOTH_FTS_BENCH=1` pattern, 100 iterations of the representative
-operator query) reports p50/p95 on a declared corpus, concurrency, and host (Aspire
+Latency harness (`KeywordPerfTests`, `SMOOTH_FTS_BENCH=1` pattern, 100 iterations of the
+representative operator query `migration OR rollback -proposed "down step"`
+committed in the fixture) reports p50/p95 plus absolute ms on a declared corpus, concurrency, and host (Aspire
 fixture, `docker.io/apache/age:release_PG17_1.7.0`, arch — same fields as the HLD-001
 method). The HLD-001 0.48 ms figure is stale (post-2026-09-24 predicate change) and is
 not the baseline; the baseline is re-measured at Prototype. Rank/headline cost measured
