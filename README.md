@@ -6,6 +6,14 @@
 
 > Wisdom drawn from **Mímisbrunnr** — not forgotten when the session ends. One eye for a drink; the why stays in the well. Huginn flies the session; Muninn keeps the store. Roots under every product, one well, the reasoning still attached.
 
+## Install
+
+No checkout, no .NET SDK — just `bash`, `docker` and `curl`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/generic-automation-and-it/smooth-ai-product-context-memory/main/scripts/run.sh | bash -s -- up
+```
+
 ## Run it
 
 **No .NET toolchain required.** Two commands, on macOS and Linux:
