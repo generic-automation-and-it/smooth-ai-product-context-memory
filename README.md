@@ -6,6 +6,8 @@
 
 > Wisdom drawn from **Mímisbrunnr** — not forgotten when the session ends. One eye for a drink; the why stays in the well. Huginn flies the session; Muninn keeps the store. Roots under every product, one well, the reasoning still attached.
 
+> **What is special with Mímisbrunnr?** Deliberate capture, no model in the server, append-only versions, index-first retrieval — [how it differs from MemOS, second-brain and session-memory rivals](docs/wiki/what-is-special.md).
+
 ## Install
 
 No checkout, no .NET SDK — just `bash`, `docker` and `curl`:
@@ -498,6 +500,7 @@ relying on the well for it.
 | Topic | Location |
 |---|---|
 | **Business intent & requirements** | [`docs/brd/001-context-memory/`](docs/brd/001-context-memory/) |
+| **What is special** (vs MemOS, second-brain, session-memory rivals) | [`docs/wiki/what-is-special.md`](docs/wiki/what-is-special.md) |
 | AI agent context & coding rules | [`AGENTS.md`](AGENTS.md) · [`.agents/`](.agents/) |
 | Architecture & design | [`docs/wiki/architecture.md`](docs/wiki/architecture.md) |
 | AI tooling setup | [`docs/wiki/ai-tooling.md`](docs/wiki/ai-tooling.md) |
