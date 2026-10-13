@@ -141,13 +141,15 @@ recalls the live store via `import` (read token only) and orchestrates the captu
   is truncated and that is stated. An item carries only `groupUuid`, so tickets and repo filter but are
   **not** shown — resolving them for display would need a second lookup per record, and they already
   narrow the query.
-- **`load`/`export` input is optional; a defaulted input never writes.** Explicit input (positional or
-  `--input`, refused if they disagree or `--input` is empty) is final. With none, the newest session dump
-  is used — newest by `_session.md` mtime, because a re-dump rewrites that file in place and leaves the
-  folder's mtime unchanged — under `dump_root()` (the git top level, else the working directory, also
-  where `dump` writes). It is disclosed as `Input defaulted to …`. `export --write` refuses a defaulted
-  input before reading it: the newest dump in a shared workspace may be another session's, and
-  capturing it would write that session's material under its own recorded binding.
+- **`load`/`export` input is optional; only a provably-this-session default may write.** Explicit input
+  (positional or `--input`, refused if they disagree or `--input` is empty) is final. With none, this
+  session's dump is used when `_dump.json` records the running session id (newest by `_session.md`
+  mtime, because a re-dump rewrites that file in place and leaves the folder's mtime unchanged), else
+  the newest session dump, both under `dump_root()` (the git top level, else the working directory,
+  also where `dump` writes). The default is disclosed as `Input defaulted to …`. `export --write`
+  refuses a defaulted input that is **not** provably this session's before reading it: the newest dump
+  in a shared workspace may be another session's, and capturing it would write that session's material
+  under its own recorded binding.
 - **`export` is a dry run by default and creates nothing.** `resolve-group` has no dry-run mode and its
   handler commits unconditionally, so a dry run resolves no group and reports the group and initiative as
   *would create*, printing the exact commands. A **new** group needs its initiative (`resolve-group`
@@ -298,6 +300,7 @@ recalls the live store via `import` (read token only) and orchestrates the captu
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-13 | **A defaulted input now writes only when it provably is this session's dump.** `dump` records the running session id in `_dump.json` (`session`); a `--input`-less `export --write` matches on it, so a default to this session's dump may capture, while a defaulted dump that does not prove ownership stays dry-run only and refuses `--write` (the previous unconditional refusal). Empty session identity keeps the conservative guard. Harness 212 -> 214. | this change |
 | 2026-10-13 | Export date-only source validity as midnight UTC for the Instant API; preserve local source metadata and explicit timestamp precision. Regression coverage includes nullable end and invalid-date refusal. | HLD-001 LADR-05; UTC instant write fix |
 | 2026-10-07 | No explicit selector can still bind via Heimdallr autofill; no association only when nothing is bound after it (#5). | review 5441621898 |
 | 2026-10-07 | Walk Q4's key fact is the relationship (`redis holds the cache`), not the word `redis`. | review 5440964552 |

@@ -3103,9 +3103,9 @@ def _stub_gate_transport(fake):
 
 
 class InputDefaultTests(unittest.TestCase):
-    """`load`/`export` take an optional input. Explicit input is final; with none, the newest session
-    dump is used, disclosed, and kept off the write path, because in a shared workspace the newest dump
-    can be another session's."""
+    """`load`/`export` take an optional input. Explicit input is final; with none, this session's dump
+    is used when one exists (safe to `--write`), else the newest session dump, which is disclosed and
+    kept off the write path because in a shared workspace the newest dump can be another session's."""
 
     def _args(self, flag=None, positional=None):
         return argparse.Namespace(input_option=flag, input=positional)
@@ -3125,9 +3125,9 @@ class InputDefaultTests(unittest.TestCase):
         return result, err.getvalue()
 
     def test_the_flag_wins_and_equal_flag_and_positional_are_accepted(self):
-        self.assertEqual(self._resolve(self._args(flag="/a"))[0], ("/a", False))
-        self.assertEqual(self._resolve(self._args(positional="/b"))[0], ("/b", False))
-        self.assertEqual(self._resolve(self._args(flag="/a", positional="/a"))[0], ("/a", False))
+        self.assertEqual(self._resolve(self._args(flag="/a"))[0], ("/a", "explicit"))
+        self.assertEqual(self._resolve(self._args(positional="/b"))[0], ("/b", "explicit"))
+        self.assertEqual(self._resolve(self._args(flag="/a", positional="/a"))[0], ("/a", "explicit"))
 
     def test_two_different_inputs_are_refused_not_silently_resolved(self):
         (src, _), err = self._resolve(self._args(flag="/a", positional="/b"))
@@ -3160,11 +3160,20 @@ class InputDefaultTests(unittest.TestCase):
                 self.assertIsNone(uc.current_session_input())
 
     def test_a_defaulted_input_is_disclosed(self):
-        with with_stubbed("current_session_input", lambda: "/dump"):
+        with with_stubbed("session_id", lambda: ""), \
+                with_stubbed("current_session_input", lambda: "/dump"):
             out = io.StringIO()
             with redirect_stdout(out):
-                self.assertEqual(uc.resolve_input(self._args()), ("/dump", True))
+                self.assertEqual(uc.resolve_input(self._args()), ("/dump", "newest"))
         self.assertIn("Input defaulted to the newest session dump: /dump", out.getvalue())
+
+    def test_a_defaulted_input_for_this_session_is_disclosed_as_such(self):
+        with with_stubbed("session_id", lambda: "sid-1"), \
+                with_stubbed("matching_session_input", lambda: "/my-dump"):
+            out = io.StringIO()
+            with redirect_stdout(out):
+                self.assertEqual(uc.resolve_input(self._args()), ("/my-dump", "session"))
+        self.assertIn("Input defaulted to this session's dump: /my-dump", out.getvalue())
 
     def test_load_and_export_refuse_with_no_input_and_no_dump(self):
         with with_stubbed("current_session_input", lambda: None):
@@ -3177,12 +3186,25 @@ class InputDefaultTests(unittest.TestCase):
     def test_export_write_refuses_a_defaulted_input_before_reading_it(self):
         """The newest dump may be another session's; `--write` on a guess would capture it."""
         called = []
-        with with_stubbed("current_session_input", lambda: "/someone-elses-dump"), \
+        with with_stubbed("session_id", lambda: ""), \
+                with_stubbed("current_session_input", lambda: "/someone-elses-dump"), \
                 with_stubbed("read_material", lambda *a: called.append(a) or 2):
             rc, _, err = run(["export", "--write", "--heimdallr", "false"])
         self.assertEqual(rc, 1)
         self.assertIn("--write needs an explicit input", err)
         self.assertEqual(called, [], "nothing may be read once the write is refused")
+
+    def test_export_write_proceeds_on_a_defaulted_input_for_this_session(self):
+        """A dump that records the current session id is provably this session's, so `--write` may
+        capture it — the newest dump still refuses, only the provable one is written."""
+        seen = []
+        with with_stubbed("session_id", lambda: "sid-1"), \
+                with_stubbed("matching_session_input", lambda: "/my-dump"), \
+                with_stubbed("read_material", lambda src, fmt: seen.append(src) or 2):
+            rc, _, err = run(["export", "--write", "--heimdallr", "false"])
+        self.assertEqual(rc, 2)
+        self.assertEqual(seen, ["/my-dump"], "the provable dump is read, not refused")
+        self.assertNotIn("--write needs an explicit input", err)
 
     def test_export_dry_run_proceeds_on_a_defaulted_input(self):
         seen = []
