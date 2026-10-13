@@ -149,6 +149,19 @@ require_port() {
   port_is_free "$1" || die "$2 port $1 is already in use; override it (e.g. $3=25432 ./$(basename "$0") up)"
 }
 
+require_port_or_reuse() {
+  # The release controller keeps postgres/blob/seq Persistent, so on a restart they are already
+  # running and hold their ports legitimately. Require the port free only when THIS installation's
+  # own <suffix> container is NOT up (a fresh start, or a foreign holder) — never refuse a restart
+  # because our own persistent workload is still serving on its port.
+  local name="mimisbrunnr-${installation_id}-${suffix}"
+  if docker container inspect "$name" >/dev/null 2>&1 &&
+     [ "$(docker container inspect --format '{{.State.Running}}' "$name" 2>/dev/null)" = "true" ]; then
+    return 0
+  fi
+  require_port "$1" "$2" "$3"
+}
+
 selinux_enforcing() {
   case "${MIMIS_SELINUX:-auto}" in
     1 | on | true | yes) return 0 ;;
@@ -658,10 +671,12 @@ preflight() {
   require_port "$p_dashboard" dashboard P_DASHBOARD
   require_port "$p_otlp" OTLP P_OTLP
   require_port "$p_host" API P_HOST
-  require_port "$p_postgres" PostgreSQL P_POSTGRES
-  require_port "$p_blob" "blob S3" P_BLOB
-  require_port "$p_blob_console" "blob console" P_BLOB_CONSOLE
-  require_port "$p_seq" Seq P_SEQ
+  # postgres/blob/seq are Persistent (APPHOST_AGENTS.md); a restart reuses the running containers, so
+  # their ports must NOT be required free — only refuse a foreign holder via require_port_or_reuse.
+  require_port_or_reuse "$p_postgres" PostgreSQL P_POSTGRES postgres
+  require_port_or_reuse "$p_blob" "blob S3" P_BLOB blob-well
+  require_port_or_reuse "$p_blob_console" "blob console" P_BLOB_CONSOLE blob-well
+  require_port_or_reuse "$p_seq" Seq P_SEQ seq
 }
 
 # The controller bakes its API image in at build time, and the pipeline publishes only on main pushes
@@ -733,11 +748,13 @@ remove_existing_controller() {
     done
   fi
 
-  # The ports stay bound for a moment after the container goes; wait rather than fail the free-port
-  # check on a race that resolves itself in under a second.
+  # The ports stay bound for a moment after a container goes; wait rather than fail the free-port
+  # check on a race that resolves itself in under a second. postgres/blob/seq are Persistent, so a
+  # restart keeps them running and their ports stay bound — only the controller (dashboard/OTLP) and
+  # the recreated Host free their ports, which is what `preflight` requires free.
   local waited=0
   while [ "$waited" -lt 15 ]; do
-    port_is_free "$p_dashboard" && port_is_free "$p_host" && return 0
+    port_is_free "$p_dashboard" && port_is_free "$p_otlp" && port_is_free "$p_host" && return 0
     sleep 1
     waited=$((waited + 1))
   done

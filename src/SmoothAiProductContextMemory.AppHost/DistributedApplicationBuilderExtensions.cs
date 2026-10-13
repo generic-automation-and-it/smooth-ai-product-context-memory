@@ -88,10 +88,10 @@ internal static class DistributedApplicationBuilderExtensions
 
             postgres = builder.ConfigureReleaseEndpoint(postgres, "tcp", configuration);
 
-            if (!configuration.IsRelease)
-            {
-                postgres = postgres.WithLifetime(ContainerLifetime.Persistent);
-            }
+            // Persistent in every mode (APPHOST_AGENTS.md: "detached memories must survive an AppHost
+            // exit"). Release mode was previously left at the Session default, so a controller restart
+            // removed and recreated postgres; a restart should reuse the running container instead.
+            postgres = postgres.WithLifetime(ContainerLifetime.Persistent);
 
             // The dashboard name follows Mímir's severed head. Keep the physical database as "app":
             // changing it on an existing persistent cluster requires an explicit data migration.
@@ -122,7 +122,7 @@ internal static class DistributedApplicationBuilderExtensions
                     "--label", $"com.docker.compose.service={configuration.BlobContainerName}",
                     "--label", $"{AppHostConfiguration.OwnershipLabel}={configuration.InstallationId}",
                     "--label", $"{AppHostConfiguration.ManagedLabel}=true")
-                .WithLifetime(configuration.IsRelease ? ContainerLifetime.Session : ContainerLifetime.Persistent);
+                .WithLifetime(ContainerLifetime.Persistent);
 
             blob = builder.ConfigureReleaseEndpoint(blob, "s3", configuration);
             blob = builder.ConfigureReleaseEndpoint(blob, "console", configuration);
@@ -147,7 +147,7 @@ internal static class DistributedApplicationBuilderExtensions
                     "--label", $"com.docker.compose.service={configuration.SeqContainerName}",
                     "--label", $"{AppHostConfiguration.OwnershipLabel}={configuration.InstallationId}",
                     "--label", $"{AppHostConfiguration.ManagedLabel}=true")
-                .WithLifetime(configuration.IsRelease ? ContainerLifetime.Session : ContainerLifetime.Persistent);
+                .WithLifetime(ContainerLifetime.Persistent);
 
             return builder.ConfigureReleaseEndpoint(seq, "http", configuration);
         }
