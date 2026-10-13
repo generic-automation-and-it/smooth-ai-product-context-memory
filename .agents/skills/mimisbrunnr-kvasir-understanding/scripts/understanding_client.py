@@ -2412,7 +2412,7 @@ def session_id() -> str:
     newest dump in a shared workspace cannot be attributed to this session.
     """
     for name in ("MIMIS_SESSION", "CONDUCTOR_SESSION_ID", "CLAUDE_CODE_SESSION_ID"):
-        value = os.environ.get(name, "")
+        value = os.environ.get(name, "").strip()
         if value:
             return value
     return ""
@@ -2430,7 +2430,8 @@ def recorded_session(folder: str | Path) -> str:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return ""
-    return data.get("session", "") if isinstance(data, dict) else ""
+    session = data.get("session", "") if isinstance(data, dict) else ""
+    return session if isinstance(session, str) else ""
 
 
 def matching_session_input() -> str | None:
