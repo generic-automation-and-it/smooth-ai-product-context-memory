@@ -153,7 +153,10 @@ require_port_or_reuse() {
   # The release controller keeps postgres/blob/seq Persistent, so on a restart they are already
   # running and hold their ports legitimately. Require the port free only when THIS installation's
   # own <suffix> container is NOT up (a fresh start, or a foreign holder) — never refuse a restart
-  # because our own persistent workload is still serving on its port.
+  # because our own persistent workload is still serving on its port. `$4` is the workload suffix
+  # (postgres/blob-well/seq); previously the unbound var was read and, under `set -u`, crashed every
+  # `up` over a running stack.
+  local suffix="$4"
   local name="mimisbrunnr-${installation_id}-${suffix}"
   if docker container inspect "$name" >/dev/null 2>&1 &&
      [ "$(docker container inspect --format '{{.State.Running}}' "$name" 2>/dev/null)" = "true" ]; then
