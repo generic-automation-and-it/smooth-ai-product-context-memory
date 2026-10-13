@@ -1,3 +1,4 @@
+using NodaTime;
 using SmoothAiProductContextMemory.Domain;
 using SmoothAiProductContextMemory.Domain.Entities;
 
@@ -23,7 +24,7 @@ internal static class TestEntities
             Repo = repo,
             RepoUrl = repoUrl,
             Tickets = tickets ?? [],
-            CreatedOn = DateTimeOffset.UtcNow,
+            CreatedOn = SystemClock.Instance.GetCurrentInstant(),
         };
 
     public static Memory NewMemory(long groupId, string name, string description, string? subjectSlug = null)
@@ -43,7 +44,7 @@ internal static class TestEntities
     }
 
     public static MemoryVersion NewVersion(long memoryId, int version, string statement, bool isCurrent = true,
-        DateTimeOffset? validFrom = null, DateTimeOffset? validUntil = null, string? kind = null,
+        Instant? validFrom = null, Instant? validUntil = null, string? kind = null,
         List<SourceDocument>? sources = null) => new()
         {
             MemoryId = memoryId,
@@ -55,8 +56,8 @@ internal static class TestEntities
             Confidence = 80,
             Status = MemoryVersion.MemoryVersionStatus.Approved,
             Sources = sources ?? [],
-            ValidFrom = validFrom ?? DateTimeOffset.UtcNow.AddDays(-30),
+            ValidFrom = validFrom ?? SystemClock.Instance.GetCurrentInstant().Plus(Duration.FromDays(-30)),
             ValidUntil = validUntil,
-            CreatedOn = DateTimeOffset.UtcNow,
+            CreatedOn = SystemClock.Instance.GetCurrentInstant(),
         };
 }

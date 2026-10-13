@@ -1,3 +1,4 @@
+using NodaTime;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Shouldly;
@@ -39,6 +40,51 @@ public sealed class SetMemoriesHandlerTests(AspireFixture aspire) : HandlerTestB
         versions.Single(v => v.Version == 1).Statement.ShouldBe("Claim 1");
         versions.Single(v => v.IsCurrent).SummaryStamp.ShouldNotBeNull();
         versions.Single(v => v.IsCurrent).SummaryStamp!.Model.ShouldBe("test-model");
+    }
+
+    [Theory]
+    [InlineData(2, true)]
+    [InlineData(-5, false)]
+    public async Task Writes_preserve_absolute_instants_with_non_utc_offsets(int offsetHours, bool hasEnd)
+    {
+        var group = TestEntities.NewGroup();
+        Db.MemoryGroups.Add(group);
+        await Db.SaveChangesAsync(Ct);
+
+        var start = Instant.FromDateTimeOffset(new DateTimeOffset(2026, 10, 13, 16, 0, 0, TimeSpan.FromHours(offsetHours)));
+        Instant? end = hasEnd ? start.Plus(Duration.FromDays(1)) : null;
+        SetMemories.Request request = Write(group.Uuid, "Timestamp subject", "Initial claim");
+        request = request with
+        {
+            Items = [request.Items[0] with { ValidFrom = start, ValidUntil = end }],
+        };
+
+        SetMemories.Handler handler = NewHandler();
+        (await handler.Handle(request with { DryRun = true }, Ct)).Created.ShouldBe(1);
+        SetMemories.Response created = await handler.Handle(request, Ct);
+        created.Created.ShouldBe(1);
+        Guid uuid = created.Items[0].Uuid.ShouldNotBeNull();
+
+        SetMemories.Response updated = await handler.Handle(request with
+        {
+            Items = [request.Items[0] with
+            {
+                Uuid = uuid,
+                Statement = "Updated claim",
+                ValidFrom = start.Plus(Duration.FromHours(1)),
+                ValidUntil = end?.Plus(Duration.FromHours(1)),
+            }],
+        }, Ct);
+        updated.Versioned.ShouldBe(1);
+
+        List<MemoryVersion> versions = await Db.MemoryVersions.AsNoTracking()
+            .OrderBy(v => v.Version).ToListAsync(Ct);
+        versions.Count.ShouldBe(2);
+        versions[0].ValidFrom.ShouldBe(start);
+        versions[0].ValidUntil.ShouldBe(end);
+        versions[1].ValidFrom.ShouldBe(start.Plus(Duration.FromHours(1)));
+        versions[1].ValidUntil.ShouldBe(end?.Plus(Duration.FromHours(1)));
+        versions.Single(v => v.IsCurrent).Version.ShouldBe(2);
     }
 
     [Fact]
@@ -220,7 +266,7 @@ public sealed class SetMemoriesHandlerTests(AspireFixture aspire) : HandlerTestB
 
         SetMemories.MemoryWrite item = Write(group.Uuid, "Sourced", "Claim").Items[0] with
         {
-            Sources = [new("jira", "ACM-1", DateTimeOffset.UtcNow)]
+            Sources = [new("jira", "ACM-1", SystemClock.Instance.GetCurrentInstant())]
         };
         await NewHandler().Handle(Write(group.Uuid, "Sourced", "Claim") with { Items = [item] }, Ct);
 
@@ -522,7 +568,7 @@ public sealed class SetMemoriesHandlerTests(AspireFixture aspire) : HandlerTestB
                     80,
                     "blob-body",
                     null,
-                    DateTimeOffset.UtcNow.AddDays(-1),
+                    SystemClock.Instance.GetCurrentInstant().Plus(Duration.FromDays(-1)),
                     null,
                     "test-model",
                     "prompt-1")

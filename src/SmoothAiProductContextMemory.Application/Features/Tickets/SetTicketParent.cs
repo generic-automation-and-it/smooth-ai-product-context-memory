@@ -1,3 +1,4 @@
+using NodaTime;
 using System.Text.Json.Serialization;
 using FluentValidation;
 using Mediator;
@@ -14,7 +15,7 @@ public static class SetTicketParent
         TicketIdentity? ExpectedParent,
         string Reason,
         string Source,
-        DateTimeOffset? ObservedAt = null) : IRequest<Response>;
+        Instant? ObservedAt = null) : IRequest<Response>;
 
     public sealed record Response(bool Changed);
 

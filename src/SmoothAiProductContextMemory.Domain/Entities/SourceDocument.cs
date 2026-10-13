@@ -1,3 +1,4 @@
+using NodaTime;
 namespace SmoothAiProductContextMemory.Domain.Entities;
 
 /// <summary>
@@ -11,9 +12,9 @@ public sealed class SourceDocument : JsonShapeDocument
 
     public string Reference { get; set; } = string.Empty;
 
-    public DateTimeOffset? CapturedAt { get; set; }
+    public Instant? CapturedAt { get; set; }
 
-    public static SourceDocument Create(string kind, string reference, DateTimeOffset? capturedAt = null) => new()
+    public static SourceDocument Create(string kind, string reference, Instant? capturedAt = null) => new()
     {
         V = CurrentShapeVersion,
         Kind = kind,

@@ -1,3 +1,4 @@
+using NodaTime;
 using FluentValidation;
 using Mediator;
 using SmoothAiProductContextMemory.Application.Abstractions;
@@ -11,7 +12,7 @@ namespace SmoothAiProductContextMemory.Application.Features.RecallFeedback;
 public static class GetNeverRecalledMemories
 {
     public sealed record Request(
-        DateTimeOffset AsOf,
+        Instant AsOf,
         int? Limit = 500) : IRequest<Response>;
 
     public sealed record Response(IReadOnlyList<NeverRecalledRow> Items);

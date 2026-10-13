@@ -1,3 +1,4 @@
+using NodaTime;
 using SmoothAiProductContextMemory.Application.Common.Models;
 
 namespace SmoothAiProductContextMemory.Application.Abstractions;
@@ -10,15 +11,15 @@ public sealed record TicketParentChange(
     TicketIdentity? ExpectedParent,
     string Reason,
     string Source,
-    DateTimeOffset? ObservedAt = null);
+    Instant? ObservedAt = null);
 
 public sealed record TicketHierarchyHop(
     TicketIdentity Parent,
     TicketIdentity Child,
     string Reason,
     string Source,
-    DateTimeOffset? ObservedAt,
-    DateTimeOffset RecordedAt);
+    Instant? ObservedAt,
+    Instant RecordedAt);
 
 public sealed record TicketHierarchyPath(int Depth, IReadOnlyList<TicketHierarchyHop> Hops);
 

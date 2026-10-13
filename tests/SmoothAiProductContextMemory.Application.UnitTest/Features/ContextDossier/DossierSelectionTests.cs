@@ -1,3 +1,4 @@
+using NodaTime;
 using SmoothAiProductContextMemory.Application.Abstractions;
 using SmoothAiProductContextMemory.Application.Common.Models;
 using SmoothAiProductContextMemory.Application.Features.ContextDossier;
@@ -7,7 +8,7 @@ namespace SmoothAiProductContextMemory.Application.UnitTest.Features.ContextDoss
 
 public class DossierSelectionTests
 {
-    private static readonly DateTimeOffset ValidFrom = new(2024, 3, 1, 12, 0, 0, TimeSpan.Zero);
+    private static readonly Instant ValidFrom = Instant.FromDateTimeOffset(new DateTimeOffset(2024, 3, 1, 12, 0, 0, TimeSpan.Zero));
     private static readonly TicketIdentity Ticket = new("github", "org/repo#7");
 
     [Fact]
@@ -40,7 +41,7 @@ public class DossierSelectionTests
         var traversal = new RecordingTraversal();
         DossierAnchor anchor = Anchor(
             repo: "org/repo", ticket: Ticket, kind: kind, status: status, scopeDimension: scope,
-            asOf: new DateTimeOffset(2026, 9, 29, 2, 0, 0, TimeSpan.FromHours(2)));
+            asOf: Instant.FromDateTimeOffset(new DateTimeOffset(2026, 9, 29, 2, 0, 0, TimeSpan.FromHours(2))));
 
         await DossierSelection.ResolveAsync(
             search, traversal, ticketGraph, new EmptyGraph(), anchor, TestContext.Current.CancellationToken);
@@ -86,7 +87,7 @@ public class DossierSelectionTests
         string? kind = null,
         string? status = null,
         string? scopeDimension = null,
-        DateTimeOffset? asOf = null) =>
+        Instant? asOf = null) =>
         new(repo, null, ticket, [], kind, status, scopeDimension, false, asOf, 2, DossierDefaults.ItemLimit);
 
     private static CheapMemory Memory(Guid uuid) =>

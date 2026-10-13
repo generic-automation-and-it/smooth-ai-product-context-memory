@@ -1,3 +1,4 @@
+using NodaTime;
 namespace SmoothAiProductContextMemory.Domain.Entities;
 
 /// <summary>
@@ -26,7 +27,7 @@ public sealed class MemoryGroup
     /// <summary>JSONB array of ticket documents, each carrying its own <c>v</c> shape marker.</summary>
     public List<TicketDocument> Tickets { get; set; } = [];
 
-    public DateTimeOffset CreatedOn { get; set; }
+    public Instant CreatedOn { get; set; }
 
     public ICollection<GroupDescription> Descriptions { get; set; } = [];
 

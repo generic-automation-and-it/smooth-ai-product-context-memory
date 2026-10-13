@@ -2,11 +2,11 @@
 
 ## TL;DR
 
-Pure domain model — entities, aggregate roots, and value objects. Zero external dependencies and no I/O.
+Pure domain model — entities, aggregate roots, and value objects. NodaTime supplies absolute-time value types; no I/O or framework dependencies.
 
 ## Non-Negotiables
 
-- **No outward dependencies.** Domain references no other project and no infrastructure packages (EF Core, ASP.NET, HTTP, serialization). It is the innermost Clean Architecture layer — everything depends on it, it depends on nothing.
+- **No outward dependencies.** Domain references no other project and no infrastructure packages (EF Core, ASP.NET, HTTP, serialization). It is the innermost Clean Architecture layer. NodaTime is permitted solely for immutable absolute-time value types (`Instant`); no clock, timezone or serializer policy lives in Domain.
 - **No I/O or framework concerns.** No persistence, network, logging, or DI registration here — those belong in Infrastructure/Host.
 - **Enforce invariants at construction.** Default for domain types. Guard required state in constructors/factory methods so an entity cannot exist in an invalid state. Value objects are immutable and compared by value. (Context-memory persistence rows are exempt — see the HLD 001 exceptions below.)
 
@@ -33,6 +33,7 @@ they are the design, not drift.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-13 | Domain timestamps now use NodaTime `Instant`; no local/offset-bearing time is retained in the model. NodaTime is the pure value-type dependency exception, not an infrastructure dependency. | HLD-001 LADR-05; UTC instant write fix |
 | 2026-09-19 | Added `understanding` to well-known open kind values; no schema or closed-enum constraint introduced. Its five parts (trigger/knowledge/why/boundaries/provenance) map onto existing fields — `Description`/`Statement`/`ContentSummary`/`ValidUntil`+scope/`Sources`+`ValidFrom`+`CreatedOn` — so no column was added. | HLD-007 LADR-01, LADR-04 |
 | 2026-09-17 | Added `divergence` to well-known open kind values; no schema or closed-enum constraint introduced. | HLD-002 BR-10 closure |
 | 2026-09-13 | ADR-0001/0002/0003 deleted; exceptions section retargeted to HLD 001. | HLD-001 |

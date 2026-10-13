@@ -1,3 +1,5 @@
+using SmoothAiProductContextMemory.Application.Common.Serialization;
+using NodaTime;
 using System.Formats.Tar;
 using System.Text;
 using System.Text.Json;
@@ -16,7 +18,7 @@ public class TarSnapshotArchiveTests
 
     // Matches the archive's own serialization (JsonSerializerDefaults.Web) so manifest
     // round-trips in tests interpret property names the same way the writer produced them.
-    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions Json = InstantJson.Configure(new(JsonSerializerDefaults.Web));
 
     [Fact]
     public async Task WrittenArchive_VerifiesClean_And_RoundTripsCapture()
@@ -503,7 +505,7 @@ public class TarSnapshotArchiveTests
                 new SnapshotTicketVertex("jira", "CHILD"),
             ],
             [
-                new SnapshotTicketEdge("jira", "CHILD", "jira", "PARENT", "depends_on", "api", DateTimeOffset.UtcNow, null),
+                new SnapshotTicketEdge("jira", "CHILD", "jira", "PARENT", "depends_on", "api", SystemClock.Instance.GetCurrentInstant(), null),
             ]);
         var walk = new SnapshotWalkResult([new SnapshotBlob(address, SnapshotBlobState.Ok)], 0, 0);
 
@@ -780,10 +782,10 @@ public class TarSnapshotArchiveTests
     {
         var initiative = new Initiative { Id = 1, Name = "init", Description = "d", Status = "active" };
         var label = new Label { Id = 1, Name = "label", Status = "active" };
-        var group = new MemoryGroup { Id = 1, Uuid = Guid.NewGuid(), ScopeDimension = "product", InitiativeId = 1, CreatedOn = DateTimeOffset.UtcNow };
-        var description = new GroupDescription { Id = 1, GroupId = 1, Version = 1, Name = "g", Body = "b", CreatedOn = DateTimeOffset.UtcNow };
+        var group = new MemoryGroup { Id = 1, Uuid = Guid.NewGuid(), ScopeDimension = "product", InitiativeId = 1, CreatedOn = SystemClock.Instance.GetCurrentInstant() };
+        var description = new GroupDescription { Id = 1, GroupId = 1, Version = 1, Name = "g", Body = "b", CreatedOn = SystemClock.Instance.GetCurrentInstant() };
         var memory = new Memory { Id = 1, Uuid = Guid.NewGuid(), LineageId = Guid.NewGuid(), GroupId = 1, Name = "m", Description = "d", SubjectSlug = "d" };
-        var version = new MemoryVersion { Id = 1, MemoryId = 1, Version = 1, IsCurrent = true, Statement = "s", ContentSummary = "c", BlobAddress = address, Kind = "decision", Confidence = 5, Status = "approved", ValidFrom = DateTimeOffset.UtcNow, CreatedOn = DateTimeOffset.UtcNow };
+        var version = new MemoryVersion { Id = 1, MemoryId = 1, Version = 1, IsCurrent = true, Statement = "s", ContentSummary = "c", BlobAddress = address, Kind = "decision", Confidence = 5, Status = "approved", ValidFrom = SystemClock.Instance.GetCurrentInstant(), CreatedOn = SystemClock.Instance.GetCurrentInstant() };
 
         var capture = new SnapshotCapture(
             [initiative],

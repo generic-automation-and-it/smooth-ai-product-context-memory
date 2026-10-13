@@ -1,3 +1,4 @@
+using NodaTime;
 using Microsoft.EntityFrameworkCore;
 using SmoothAiProductContextMemory.Domain;
 using SmoothAiProductContextMemory.Domain.Entities;
@@ -151,9 +152,9 @@ public sealed class MemoryVersionTests : PersistenceTestBase
         var (_, memory) = await CreateMemoryWithGroupAsync();
 
         var v1 = TestEntities.NewVersion(memory.Id, 1, "Claim", isCurrent: true,
-            validFrom: DateTimeOffset.UtcNow.AddMonths(-3), validUntil: DateTimeOffset.UtcNow.AddMonths(-1),
+            validFrom: SystemClock.Instance.GetCurrentInstant().Minus(Duration.FromDays(90)), validUntil: SystemClock.Instance.GetCurrentInstant().Minus(Duration.FromDays(30)),
             sources: [SourceDocument.Create("ticket", "ACM-1")]);
-        v1.CreatedOn = DateTimeOffset.UtcNow.AddDays(-1);
+        v1.CreatedOn = SystemClock.Instance.GetCurrentInstant().Plus(Duration.FromDays(-1));
 
         Db.MemoryVersions.Add(v1);
         await Db.SaveChangesAsync(Ct);
@@ -165,9 +166,9 @@ public sealed class MemoryVersionTests : PersistenceTestBase
         // drops sub-microsecond ticks and exact equality is not meaningful here.
         var tolerance = TimeSpan.FromSeconds(1);
         loaded.ValidUntil.ShouldNotBeNull();
-        (loaded.ValidFrom - v1.ValidFrom).Duration().ShouldBeLessThanOrEqualTo(tolerance);
-        (loaded.ValidUntil!.Value - v1.ValidUntil!.Value).Duration().ShouldBeLessThanOrEqualTo(tolerance);
-        (loaded.CreatedOn - v1.CreatedOn).Duration().ShouldBeLessThanOrEqualTo(tolerance);
+        (loaded.ValidFrom - v1.ValidFrom).ToTimeSpan().Duration().ShouldBeLessThanOrEqualTo(tolerance);
+        (loaded.ValidUntil!.Value - v1.ValidUntil!.Value).ToTimeSpan().Duration().ShouldBeLessThanOrEqualTo(tolerance);
+        (loaded.CreatedOn - v1.CreatedOn).ToTimeSpan().Duration().ShouldBeLessThanOrEqualTo(tolerance);
     }
 
     [Fact]
@@ -176,14 +177,14 @@ public sealed class MemoryVersionTests : PersistenceTestBase
         var (_, memory) = await CreateMemoryWithGroupAsync();
 
         var v1 = TestEntities.NewVersion(memory.Id, 1, "One", isCurrent: true,
-            sources: [SourceDocument.Create("ticket", "ACM-1", DateTimeOffset.UtcNow.AddDays(-2))]);
+            sources: [SourceDocument.Create("ticket", "ACM-1", SystemClock.Instance.GetCurrentInstant().Plus(Duration.FromDays(-2)))]);
         Db.MemoryVersions.Add(v1);
         await Db.SaveChangesAsync(Ct);
 
         var v2Sources = new List<SourceDocument>
         {
-            SourceDocument.Create("ticket", "ACM-2", DateTimeOffset.UtcNow.AddDays(-1)),
-            SourceDocument.Create("conversation", "session-9", DateTimeOffset.UtcNow),
+            SourceDocument.Create("ticket", "ACM-2", SystemClock.Instance.GetCurrentInstant().Plus(Duration.FromDays(-1))),
+            SourceDocument.Create("conversation", "session-9", SystemClock.Instance.GetCurrentInstant()),
         };
         var v2 = TestEntities.NewVersion(memory.Id, 2, "Two", isCurrent: true, sources: v2Sources);
         await BumpVersionAsync(v1, v2);

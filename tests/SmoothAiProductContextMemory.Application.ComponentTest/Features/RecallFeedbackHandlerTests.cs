@@ -1,3 +1,4 @@
+using NodaTime;
 using Microsoft.Extensions.Logging;
 using Shouldly;
 using SmoothAiProductContextMemory.Application.Abstractions;
@@ -110,7 +111,7 @@ public sealed class RecallFeedbackHandlerTests(AspireFixture aspire) : HandlerTe
                     80,
                     null,
                     null,
-                    DateTimeOffset.UtcNow.AddDays(-1),
+                    SystemClock.Instance.GetCurrentInstant().Plus(Duration.FromDays(-1)),
                     null,
                     null,
                     null),

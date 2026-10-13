@@ -1,3 +1,4 @@
+using NodaTime;
 using System.Text;
 using FluentValidation;
 using Mediator;
@@ -37,8 +38,8 @@ public static class SetMemories
         short Confidence,
         string? Content,
         IReadOnlyList<SourceInput>? Sources,
-        DateTimeOffset ValidFrom,
-        DateTimeOffset? ValidUntil,
+        Instant ValidFrom,
+        Instant? ValidUntil,
         string? SummaryModel,
         string? SummaryPromptVersion,
         Guid? CreateUuid = null);
@@ -593,7 +594,7 @@ public static class SetMemories
                 .ToList() ?? [],
                 ValidFrom = item.ValidFrom,
                 ValidUntil = item.ValidUntil,
-                CreatedOn = DateTimeOffset.UtcNow,
+                CreatedOn = SystemClock.Instance.GetCurrentInstant(),
                 SummaryStamp = string.IsNullOrWhiteSpace(item.SummaryModel)
                 ? null
                 : SummaryStampDocument.Create(item.SummaryModel, item.SummaryPromptVersion ?? string.Empty),

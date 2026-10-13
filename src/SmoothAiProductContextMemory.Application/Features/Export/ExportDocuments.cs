@@ -1,3 +1,4 @@
+using NodaTime;
 using SmoothAiProductContextMemory.Domain.Entities;
 
 namespace SmoothAiProductContextMemory.Application.Features.Export;
@@ -12,7 +13,7 @@ public enum BlobRenderState
 
 public sealed record ExportTicket(string Provider, string Key, string Url);
 
-public sealed record ExportGroupDescription(int Version, string Name, string Body, DateTimeOffset CreatedOn);
+public sealed record ExportGroupDescription(int Version, string Name, string Body, Instant CreatedOn);
 
 public sealed record ExportGroupDocument(
     Guid Uuid,
@@ -26,7 +27,7 @@ public sealed record ExportGroupDocument(
     ExportGroupDescription? CurrentDescription,
     IReadOnlyList<ExportGroupDescription> HistoricalDescriptions);
 
-public sealed record ExportSource(string Kind, string Reference, DateTimeOffset? CapturedAt);
+public sealed record ExportSource(string Kind, string Reference, Instant? CapturedAt);
 
 public sealed record ExportLink(
     string Direction,
@@ -42,9 +43,9 @@ public sealed record ExportVersionBody(
     string Kind,
     string Status,
     short Confidence,
-    DateTimeOffset ValidFrom,
-    DateTimeOffset? ValidUntil,
-    DateTimeOffset CreatedOn,
+    Instant ValidFrom,
+    Instant? ValidUntil,
+    Instant CreatedOn,
     string Statement,
     string ContentSummary,
     IReadOnlyList<ExportSource> Sources,

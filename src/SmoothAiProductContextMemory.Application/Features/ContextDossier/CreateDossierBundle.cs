@@ -1,3 +1,4 @@
+using NodaTime;
 using FluentValidation;
 using Mediator;
 using Microsoft.EntityFrameworkCore;
@@ -26,7 +27,7 @@ public static class CreateDossierBundle
         string? Status,
         string? ScopeDimension,
         bool IncludeHistory,
-        DateTimeOffset? AsOf,
+        Instant? AsOf,
         int WidenDepth) : IRequest<Response>;
 
     public sealed record Response(DossierBundle Bundle);

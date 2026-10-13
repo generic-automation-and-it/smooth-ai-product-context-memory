@@ -1,3 +1,4 @@
+using NodaTime;
 using FluentValidation;
 using Mediator;
 using Microsoft.Extensions.Logging;
@@ -34,7 +35,7 @@ public static class QueryMemories
         string? InitiativeName,
         bool IncludeProposed = false,
         bool CurrentOnly = true,
-        DateTimeOffset? AsOf = null,
+        Instant? AsOf = null,
         int Limit = MemorySearchDefaults.Limit,
         string FacetMatchMode = FacetMatchModeValue.Any) : IRequest<Response>;
 
@@ -74,7 +75,7 @@ public static class QueryMemories
 
             string shape = RecallShapeClassifier.Classify(request);
             Guid retrievalId = Guid.NewGuid();
-            DateTimeOffset occurredOn = DateTimeOffset.UtcNow;
+            Instant occurredOn = SystemClock.Instance.GetCurrentInstant();
 
             bool hasTicket = !string.IsNullOrWhiteSpace(request.TicketProvider)
                 && !string.IsNullOrWhiteSpace(request.TicketKey);

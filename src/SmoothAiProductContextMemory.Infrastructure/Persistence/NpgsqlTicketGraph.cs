@@ -1,3 +1,6 @@
+using SmoothAiProductContextMemory.Application.Common.Serialization;
+using NodaTime;
+using NodaTime.Text;
 using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -87,7 +90,7 @@ public sealed partial class NpgsqlTicketGraph(SmoothAiProductContextMemoryDbCont
                 else
                 {
                     string observed = change.ObservedAt is null ? string.Empty
-                        : $", observedAt: {CypherLiteral.Quote(change.ObservedAt.Value.ToString("O", CultureInfo.InvariantCulture))}";
+                        : $", observedAt: {CypherLiteral.Quote(InstantPattern.ExtendedIso.Format(change.ObservedAt.Value))}";
                     string oldParent = current is null ? string.Empty : "<-[old:TICKET_PARENT]-(:Ticket)";
                     string delete = current is null ? string.Empty : "DELETE old WITH p, c";
                     cypher = $$"""
@@ -96,7 +99,7 @@ public sealed partial class NpgsqlTicketGraph(SmoothAiProductContextMemoryDbCont
                         {{delete}}
                         CREATE (p)-[:TICKET_PARENT {reason: {{CypherLiteral.Quote(change.Reason)}},
                             source: {{CypherLiteral.Quote(change.Source)}},
-                            recordedAt: {{CypherLiteral.Quote(DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture))}}{{observed}}}]->(c)
+                            recordedAt: {{CypherLiteral.Quote(InstantPattern.ExtendedIso.Format(SystemClock.Instance.GetCurrentInstant()))}}{{observed}}}]->(c)
                         RETURN 1
                         """;
                 }
@@ -174,8 +177,8 @@ public sealed partial class NpgsqlTicketGraph(SmoothAiProductContextMemoryDbCont
         var result = new TicketHierarchyHop(new TicketIdentity(reader.GetString(0), reader.GetString(1)), child,
             reader.GetString(2), reader.GetString(3),
             reader.IsDBNull(4) || reader.GetString(4) == "null" ? null
-                : DateTimeOffset.Parse(reader.GetString(4), CultureInfo.InvariantCulture),
-            DateTimeOffset.Parse(reader.GetString(5), CultureInfo.InvariantCulture));
+                : InstantJson.Parse(reader.GetString(4)),
+            InstantJson.Parse(reader.GetString(5)));
         if (await reader.ReadAsync(cancellationToken)) throw MutationConflict();
         return result;
     }

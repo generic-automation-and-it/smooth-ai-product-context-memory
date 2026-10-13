@@ -20,7 +20,7 @@ public class ModelShapeGuardTests
     public void DbContext_exposes_exactly_the_six_entity_types()
     {
         var options = new DbContextOptionsBuilder<SmoothAiProductContextMemoryDbContext>()
-            .UseNpgsql("Host=localhost;Database=throwaway;Username=x;Password=y")
+            .UseNpgsql("Host=localhost;Database=throwaway;Username=x;Password=y", options => options.UseNodaTime())
             .Options;
 
         using var db = new SmoothAiProductContextMemoryDbContext(options);

@@ -23,7 +23,7 @@ public sealed class SmoothAiProductContextMemoryDbContextFactory : IDesignTimeDb
         _dataSource ??= NpgsqlDataSourceFactory.Create(
             Environment.GetEnvironmentVariable(ConnectionStringEnvVar) ?? FallbackConnectionString);
         var options = new DbContextOptionsBuilder<SmoothAiProductContextMemoryDbContext>()
-            .UseNpgsql(_dataSource, npgsql => npgsql.UseSmoothAiProductContextMemoryHistory())
+            .UseNpgsql(_dataSource, npgsql => npgsql.UseNodaTime().UseSmoothAiProductContextMemoryHistory())
             .Options;
 
         return new SmoothAiProductContextMemoryDbContext(options);

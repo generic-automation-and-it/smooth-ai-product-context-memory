@@ -1,3 +1,4 @@
+using NodaTime;
 namespace SmoothAiProductContextMemory.Application.Abstractions;
 
 /// <summary>
@@ -29,7 +30,7 @@ public sealed record RecallFeedbackRecord(
     Guid RetrievalId,
     Guid? MemoryUuid,
     string Shape,
-    DateTimeOffset OccurredOn);
+    Instant OccurredOn);
 
 /// <summary>
 /// Guarded synchronous write of one retrieval's outcome. Failure must never propagate — losing a tuning

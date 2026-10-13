@@ -1,3 +1,4 @@
+using NodaTime;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using SmoothAiProductContextMemory.Application.Abstractions;
@@ -144,9 +145,9 @@ public sealed class TicketTraversalTests(AspireFixture aspire) : PersistenceTest
         var parent = new TicketIdentity(identity, "parent-" + identity);
         var child = new TicketIdentity("child-" + identity, identity);
         await GroupAsync("product", parent, child);
-        var observed = new DateTimeOffset(2026, 9, 1, 12, 0, 0, TimeSpan.FromHours(3));
+        var observed = Instant.FromDateTimeOffset(new DateTimeOffset(2026, 9, 1, 12, 0, 0, TimeSpan.FromHours(3)));
         var change = new TicketParentChange(child, parent, null, reason, identity, observed);
-        DateTimeOffset before = DateTimeOffset.UtcNow;
+        Instant before = SystemClock.Instance.GetCurrentInstant();
         await Graph.ChangeParentAsync(change, Ct);
         TicketTraversalResult result = await Graph.TraverseAsync(new TicketTraversalQuery { Anchor = parent, MaxDepth = 1 }, Ct);
         TicketHierarchyHop hop = result.Paths.Single().Hops.Single();
@@ -155,8 +156,8 @@ public sealed class TicketTraversalTests(AspireFixture aspire) : PersistenceTest
         hop.Reason.ShouldBe(reason);
         hop.Source.ShouldBe(identity);
         hop.ObservedAt.ShouldBe(observed);
-        hop.RecordedAt.ShouldBeInRange(before, DateTimeOffset.UtcNow);
-        hop.RecordedAt.Offset.ShouldBe(TimeSpan.Zero);
+        hop.RecordedAt.ShouldBeInRange(before, SystemClock.Instance.GetCurrentInstant());
+        hop.RecordedAt.ShouldBeGreaterThanOrEqualTo(before);
     }
 
     [Theory]

@@ -1,3 +1,4 @@
+using NodaTime;
 using System.Security.Cryptography;
 using FluentValidation;
 using Mediator;
@@ -76,7 +77,7 @@ public static class SnapshotStore
 
             await metadataStore.WriteAsync(
                 new SnapshotMetadata(
-                    DateTimeOffset.UtcNow,
+                    SystemClock.Instance.GetCurrentInstant(),
                     written.Counts,
                     written.DanglingReferences,
                     written.UnreferencedObjects),

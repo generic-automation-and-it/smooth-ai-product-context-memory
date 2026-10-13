@@ -1,3 +1,4 @@
+using NodaTime;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using SmoothAiProductContextMemory.Domain.Entities;
@@ -27,7 +28,7 @@ public sealed class AppendOnlyTriggerTests : PersistenceTestBase
             Version = 1,
             Name = "Group name",
             Body = "Group body",
-            CreatedOn = DateTimeOffset.UtcNow,
+            CreatedOn = SystemClock.Instance.GetCurrentInstant(),
         });
 
         await Db.SaveChangesAsync(Ct);

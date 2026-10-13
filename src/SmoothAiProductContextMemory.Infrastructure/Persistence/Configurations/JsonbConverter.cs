@@ -1,3 +1,4 @@
+using SmoothAiProductContextMemory.Application.Common.Serialization;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
@@ -13,10 +14,10 @@ namespace SmoothAiProductContextMemory.Infrastructure.Persistence.Configurations
 /// </summary>
 internal static class JsonbConverter
 {
-    private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web)
+    private static readonly JsonSerializerOptions Options = InstantJson.Configure(new(JsonSerializerDefaults.Web)
     {
         PropertyNameCaseInsensitive = true,
-    };
+    });
 
     public static ValueConverter<List<TicketDocument>, string> ForTickets()
         => new(

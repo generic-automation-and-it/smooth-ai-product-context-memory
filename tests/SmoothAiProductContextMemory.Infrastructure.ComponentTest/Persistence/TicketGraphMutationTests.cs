@@ -1,3 +1,5 @@
+using NodaTime;
+using NodaTime.Text;
 using Microsoft.EntityFrameworkCore;
 using SmoothAiProductContextMemory.Application.Abstractions;
 using SmoothAiProductContextMemory.Application.Common.Exceptions;
@@ -14,7 +16,7 @@ public sealed class TicketGraphMutationTests(AspireFixture aspire) : Persistence
     public async Task SetReplaceReparentRemove_EnforcesExpectationsAndPreservesMetadata()
     {
         await SeedAsync("parent", "child", "other");
-        var observed = new DateTimeOffset(2026, 9, 1, 12, 0, 0, TimeSpan.FromHours(3));
+        var observed = Instant.FromDateTimeOffset(new DateTimeOffset(2026, 9, 1, 12, 0, 0, TimeSpan.FromHours(3)));
         var change = Change("child", "parent") with { ObservedAt = observed, Reason = "'quoted' $q$ }::edge \\ reason", Source = "manual\nsource" };
         (await Graph.ChangeParentAsync(change, Ct)).ShouldBeTrue();
         string original = await EdgePropertiesAsync();
@@ -25,8 +27,8 @@ public sealed class TicketGraphMutationTests(AspireFixture aspire) : Persistence
         {
             json.RootElement.GetProperty("reason").GetString().ShouldBe(change.Reason);
             json.RootElement.GetProperty("source").GetString().ShouldBe(change.Source);
-            DateTimeOffset.Parse(json.RootElement.GetProperty("observedAt").GetString()!).ShouldBe(observed);
-            DateTimeOffset.Parse(json.RootElement.GetProperty("recordedAt").GetString()!).Offset.ShouldBe(TimeSpan.Zero);
+            InstantPattern.ExtendedIso.Parse(json.RootElement.GetProperty("observedAt").GetString()!).Value.ShouldBe(observed);
+            json.RootElement.GetProperty("recordedAt").GetString()!.ShouldEndWith("Z");
         }
 
         await Should.ThrowAsync<ConflictException>(() => Graph.ChangeParentAsync(change with { ExpectedParent = Id("other") }, Ct));
@@ -340,7 +342,7 @@ public sealed class TicketGraphMutationTests(AspireFixture aspire) : Persistence
 
     private SmoothAiProductContextMemoryDbContext NewContext() => new(
         new DbContextOptionsBuilder<SmoothAiProductContextMemoryDbContext>()
-            .UseNpgsql(DataSource, options => options.UseSmoothAiProductContextMemoryHistory()).Options);
+            .UseNpgsql(DataSource, options => options.UseNodaTime().UseSmoothAiProductContextMemoryHistory()).Options);
 
     private async Task<bool> AttemptAsync(NpgsqlTicketGraph graph, TicketParentChange change)
     {

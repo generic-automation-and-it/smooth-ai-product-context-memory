@@ -113,7 +113,7 @@ public sealed class SnapshotRestoreRoundTripTests : PersistenceTestBase
         await MigrateAsync(scratchDataSource, Ct);
         await using var scratchDb = new SmoothAiProductContextMemoryDbContext(
             new DbContextOptionsBuilder<SmoothAiProductContextMemoryDbContext>()
-                .UseNpgsql(scratchDataSource, npgsql => npgsql.UseSmoothAiProductContextMemoryHistory())
+                .UseNpgsql(scratchDataSource, npgsql => npgsql.UseNodaTime().UseSmoothAiProductContextMemoryHistory())
                 .Options);
 
         RestoreArchive.Response restore = await new RestoreArchive.Handler(
@@ -165,7 +165,7 @@ public sealed class SnapshotRestoreRoundTripTests : PersistenceTestBase
         await MigrateAsync(targetDataSource, Ct);
         await using var targetDb = new SmoothAiProductContextMemoryDbContext(
             new DbContextOptionsBuilder<SmoothAiProductContextMemoryDbContext>()
-                .UseNpgsql(targetDataSource, npgsql => npgsql.UseSmoothAiProductContextMemoryHistory())
+                .UseNpgsql(targetDataSource, npgsql => npgsql.UseNodaTime().UseSmoothAiProductContextMemoryHistory())
                 .Options);
 
         await using S3BlobStorage targetBlob = CreateBlob("snap-target");
@@ -345,7 +345,7 @@ public sealed class SnapshotRestoreRoundTripTests : PersistenceTestBase
         await MigrateAsync(targetDataSource, Ct);
         await using var targetDb = new SmoothAiProductContextMemoryDbContext(
             new DbContextOptionsBuilder<SmoothAiProductContextMemoryDbContext>()
-                .UseNpgsql(targetDataSource, npgsql => npgsql.UseSmoothAiProductContextMemoryHistory())
+                .UseNpgsql(targetDataSource, npgsql => npgsql.UseNodaTime().UseSmoothAiProductContextMemoryHistory())
                 .Options);
 
         // Seed rows alone: a first restore, not a populated target.
@@ -614,7 +614,7 @@ public sealed class SnapshotRestoreRoundTripTests : PersistenceTestBase
         var services = new ServiceCollection();
         services.AddSingleton(dataSource);
         services.AddDbContext<SmoothAiProductContextMemoryDbContext>(options =>
-            options.UseNpgsql(dataSource, npgsql => npgsql.UseSmoothAiProductContextMemoryHistory()));
+            options.UseNpgsql(dataSource, npgsql => npgsql.UseNodaTime().UseSmoothAiProductContextMemoryHistory()));
         await using ServiceProvider provider = services.BuildServiceProvider();
         await provider.MigrateSmoothAiProductContextMemoryAsync(cancellationToken);
     }

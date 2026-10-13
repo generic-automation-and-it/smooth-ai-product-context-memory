@@ -1,3 +1,4 @@
+using NodaTime;
 using SmoothAiProductContextMemory.Domain.Entities;
 
 namespace SmoothAiProductContextMemory.Application.Common.Models;
@@ -16,9 +17,9 @@ public sealed record CheapMemory(
     short Confidence,
     string ScopeDimension,
     string? ScopeIdentifier,
-    DateTimeOffset ValidFrom,
-    DateTimeOffset? ValidUntil,
+    Instant ValidFrom,
+    Instant? ValidUntil,
     int Version,
     bool IsCurrent,
     IReadOnlyList<SourceDocument> Sources,
-    DateTimeOffset CreatedOn);
+    Instant CreatedOn);

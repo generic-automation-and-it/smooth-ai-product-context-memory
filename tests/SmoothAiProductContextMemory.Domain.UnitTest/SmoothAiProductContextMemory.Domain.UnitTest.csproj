@@ -25,4 +25,7 @@
     </PackageReference>
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="NodaTime.Serialization.SystemTextJson" />
+  </ItemGroup>
 </Project>

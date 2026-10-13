@@ -1,3 +1,4 @@
+using NodaTime;
 using SmoothAiProductContextMemory.Application.Abstractions;
 using SmoothAiProductContextMemory.Application.Features.RecallFeedback;
 
@@ -12,7 +13,7 @@ public class RecallFeedbackQueryHandlerTests
             missRate: new MissRateResult(10, 4, 0.4));
 
         var response = await new GetMissRate.Handler(query).Handle(
-            new GetMissRate.Request(DateTimeOffset.UtcNow.AddDays(-7), DateTimeOffset.UtcNow),
+            new GetMissRate.Request(SystemClock.Instance.GetCurrentInstant().Plus(Duration.FromDays(-7)), SystemClock.Instance.GetCurrentInstant()),
             CancellationToken.None);
 
         response.ShouldBe(new GetMissRate.Response(10, 4, 0.4));
@@ -21,11 +22,11 @@ public class RecallFeedbackQueryHandlerTests
     [Fact]
     public async Task Get_never_recalled_delegates_and_maps_the_result()
     {
-        var row = new NeverRecalledRow(Guid.NewGuid(), DateTimeOffset.UtcNow.AddDays(-30));
+        var row = new NeverRecalledRow(Guid.NewGuid(), SystemClock.Instance.GetCurrentInstant().Plus(Duration.FromDays(-30)));
         var query = new FakeRecallFeedbackQuery(neverRecalled: [row]);
 
         var response = await new GetNeverRecalledMemories.Handler(query).Handle(
-            new GetNeverRecalledMemories.Request(DateTimeOffset.UtcNow),
+            new GetNeverRecalledMemories.Request(SystemClock.Instance.GetCurrentInstant()),
             CancellationToken.None);
 
         response.Items.ShouldBe([row]);

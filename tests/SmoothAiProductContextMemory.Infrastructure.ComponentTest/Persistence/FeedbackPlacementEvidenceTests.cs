@@ -1,3 +1,4 @@
+using NodaTime;
 using System.Diagnostics;
 using System.Globalization;
 using System.Text;
@@ -331,7 +332,7 @@ public sealed class FeedbackPlacementEvidenceTests : PersistenceTestBase
         int RecentlyCapturedListedWithoutGrace,
         long MissRetrievals,
         long TotalRetrievals,
-        DateTimeOffset? LastRecalledAt,
+        Instant? LastRecalledAt,
         bool ResetLeftNoRecords,
         string NeverRecalledPlan,
         string MissRatePlan);
@@ -534,7 +535,7 @@ public sealed class FeedbackPlacementEvidenceTests : PersistenceTestBase
 
     private SmoothAiProductContextMemoryDbContext NewDbContext() =>
         new(new DbContextOptionsBuilder<SmoothAiProductContextMemoryDbContext>()
-            .UseNpgsql(DataSource, npgsql => npgsql.UseSmoothAiProductContextMemoryHistory())
+            .UseNpgsql(DataSource, npgsql => npgsql.UseNodaTime().UseSmoothAiProductContextMemoryHistory())
             .Options);
 
     /// <summary>
@@ -926,7 +927,7 @@ public sealed class FeedbackPlacementEvidenceTests : PersistenceTestBase
         long recentlyListedWithoutGrace = await ScalarAsync(RecentlyCapturedSql(applyGrace: false), null);
 
         (long missRetrievals, long totalRetrievals) = await MissRateAsync();
-        DateTimeOffset? lastRecalled = await LastRecalledAsync(recalled[0]);
+        Instant? lastRecalled = await LastRecalledAsync(recalled[0]);
 
         string neverRecalledPlan = await ExplainAsync(NeverRecalledSql);
         string missRatePlan = await ExplainAsync(MissRateSql);
@@ -1013,14 +1014,14 @@ public sealed class FeedbackPlacementEvidenceTests : PersistenceTestBase
         return (long?)await command.ExecuteScalarAsync(Ct) ?? 0L;
     }
 
-    private async Task<DateTimeOffset?> LastRecalledAsync(Guid uuid)
+    private async Task<Instant?> LastRecalledAsync(Guid uuid)
     {
         await using NpgsqlConnection conn = await DataSource.OpenConnectionAsync(Ct);
         await using var command = new NpgsqlCommand(
             "SELECT max(occurred_on) FROM recall_feedback_probe WHERE memory_uuid = $1;", conn);
         command.Parameters.AddWithValue(uuid);
         object? value = await command.ExecuteScalarAsync(Ct);
-        return value is DateTime instant ? new DateTimeOffset(instant) : null;
+        return value is DateTime instant ? Instant.FromDateTimeOffset(new DateTimeOffset(instant)) : null;
     }
 
     /// <summary>

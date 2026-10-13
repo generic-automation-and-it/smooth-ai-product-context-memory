@@ -1,3 +1,4 @@
+using SmoothAiProductContextMemory.Application.Common.Serialization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -13,7 +14,7 @@ namespace SmoothAiProductContextMemory.Host.IntegrationTest;
 /// </summary>
 public sealed class DossierApiTests(HostWebAppFixture fixture) : IClassFixture<HostWebAppFixture>
 {
-    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions Json = InstantJson.Configure(new(JsonSerializerDefaults.Web));
     private readonly HttpClient _write = fixture.HttpClient;
 
     private CancellationToken Ct => TestContext.Current.CancellationToken;

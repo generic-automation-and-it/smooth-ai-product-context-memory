@@ -1,3 +1,4 @@
+using NodaTime;
 using SmoothAiProductContextMemory.Application.Abstractions;
 using SmoothAiProductContextMemory.Application.Common.Models;
 using SmoothAiProductContextMemory.Application.Common.Retrieval;
@@ -33,7 +34,7 @@ internal sealed record SelectionFilter(
     string? RequiredScopeDimension,
     IReadOnlyList<string> ExcludedScopeDimensions,
     IReadOnlyList<string> HiddenDimensions,
-    DateTimeOffset? AsOf)
+    Instant? AsOf)
 {
     public static SelectionFilter From(DossierAnchor anchor)
     {

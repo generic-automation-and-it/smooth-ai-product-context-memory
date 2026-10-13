@@ -1,3 +1,6 @@
+using NodaTime.Text;
+using SmoothAiProductContextMemory.Application.Common.Serialization;
+using NodaTime;
 using System.Data;
 using System.Globalization;
 using Microsoft.EntityFrameworkCore;
@@ -328,10 +331,10 @@ public sealed class NpgsqlSnapshotRepository(
         {
             string observed = edge.ObservedAt is null
                 ? string.Empty
-                : $", observedAt: {CypherLiteral.Quote(edge.ObservedAt.Value.ToString("O", CultureInfo.InvariantCulture))}";
+                : $", observedAt: {CypherLiteral.Quote(InstantPattern.ExtendedIso.Format(edge.ObservedAt.Value))}";
             string props =
                 $"reason: {CypherLiteral.Quote(edge.Reason)}, source: {CypherLiteral.Quote(edge.Source)}, " +
-                $"recordedAt: {CypherLiteral.Quote(edge.RecordedAt.ToString("O", CultureInfo.InvariantCulture))}{observed}";
+                $"recordedAt: {CypherLiteral.Quote(InstantPattern.ExtendedIso.Format(edge.RecordedAt))}{observed}";
             // Predicate form, mirroring NpgsqlTicketGraph.MutationPredicate: the inline-map anchor
             // compiles to `properties @>` and scans the vertex table. Ticket provider/key equality
             // has dedicated HASH expression indexes, so the predicate form is index-served.
@@ -416,8 +419,8 @@ public sealed class NpgsqlSnapshotRepository(
         var rows = new List<SnapshotTicketEdge>();
         while (await reader.ReadAsync(cancellationToken))
         {
-            DateTimeOffset? observedAt = ReadOptionalAgtypeString(reader, 7) is { } observed
-                ? DateTimeOffset.Parse(observed, CultureInfo.InvariantCulture)
+            Instant? observedAt = ReadOptionalAgtypeString(reader, 7) is { } observed
+                ? InstantJson.Parse(observed)
                 : null;
             rows.Add(new SnapshotTicketEdge(
                 AgtypeArrayReader.ReadAgtypeString(reader, 2),
@@ -426,7 +429,7 @@ public sealed class NpgsqlSnapshotRepository(
                 AgtypeArrayReader.ReadAgtypeString(reader, 1),
                 AgtypeArrayReader.ReadAgtypeString(reader, 4),
                 AgtypeArrayReader.ReadAgtypeString(reader, 5),
-                DateTimeOffset.Parse(AgtypeArrayReader.ReadAgtypeString(reader, 6), CultureInfo.InvariantCulture),
+                InstantJson.Parse(AgtypeArrayReader.ReadAgtypeString(reader, 6)),
                 observedAt));
         }
 
@@ -589,7 +592,7 @@ public sealed class NpgsqlSnapshotRepository(
         var options = new DbContextOptionsBuilder<SmoothAiProductContextMemoryDbContext>()
             .UseNpgsql(dataSource, npgsql =>
             {
-                npgsql.UseSmoothAiProductContextMemoryHistory();
+                npgsql.UseNodaTime().UseSmoothAiProductContextMemoryHistory();
                 // Bounds every EF batch this context emits. Restore is the only writer that uses it,
                 // and unbatched it emitted the whole capture's memory_version rows as one INSERT —
                 // a statement whose cost grows with the archive, which no statement-timeout raise

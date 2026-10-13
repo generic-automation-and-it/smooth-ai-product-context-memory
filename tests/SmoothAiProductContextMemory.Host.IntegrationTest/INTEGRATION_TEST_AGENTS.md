@@ -29,6 +29,7 @@ L2 Host tests exercise real stores; telemetry capture also observes requests fro
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-13 | Added UTC-instant HTTP regression coverage: positive/negative-offset creates and version updates, nullable validity ends, canonical Z output, unzoned-body/date-only-query rejection and OpenAPI date-time schema. | HLD-001 LADR-05; UTC instant write fix |
 | 2026-10-01 | Added `SecretContainmentTests` and its fixture for HLD-002 NFR-01's log assertion. The existing NFR-05 telemetry tests capture at the configured Information level and only the rendered message; this fixture captures every level and every structured property, so a value carried only in a log scope is also seen. | HLD-002 NFR-01 |
 | 2026-10-01 | Added `DossierApiTests`: the first successful L2 call to `/api/context/dossier/bundle` and `/preview`. Every earlier dossier assertion ran at handler level against fake blob storage, so the route binding, the read capability and the MinIO body hydration were never exercised together. | HLD-005 |
 | 2026-09-25 | Added `SnapshotApiTests` and per-fixture snapshot directories in `HostWebAppFixture`; the test would have caught the snapshot filename `FormatException` that made every HTTP snapshot return 500. | HLD-006 |

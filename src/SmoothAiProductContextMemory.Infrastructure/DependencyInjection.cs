@@ -68,7 +68,7 @@ public static class DependencyInjection
         {
             options.UseNpgsql(
                 sp.GetRequiredService<NpgsqlDataSource>(),
-                npgsql => npgsql.UseSmoothAiProductContextMemoryHistory());
+                npgsql => npgsql.UseNodaTime().UseSmoothAiProductContextMemoryHistory());
         });
         services.AddScoped<IApplicationDbContext>(sp =>
             sp.GetRequiredService<SmoothAiProductContextMemoryDbContext>());

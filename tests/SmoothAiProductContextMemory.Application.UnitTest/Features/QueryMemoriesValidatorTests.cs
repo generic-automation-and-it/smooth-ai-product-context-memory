@@ -1,3 +1,4 @@
+using NodaTime;
 using FluentValidation.TestHelper;
 using SmoothAiProductContextMemory.Application.Abstractions;
 using SmoothAiProductContextMemory.Application.Features.Memories;
@@ -62,7 +63,7 @@ public class QueryMemoriesValidatorTests
             ScopeDimension = "product",
             Repo = "kingstown",
             InitiativeName = "to-be-decided",
-            AsOf = DateTimeOffset.UtcNow,
+            AsOf = SystemClock.Instance.GetCurrentInstant(),
             Limit = 25,
         };
 

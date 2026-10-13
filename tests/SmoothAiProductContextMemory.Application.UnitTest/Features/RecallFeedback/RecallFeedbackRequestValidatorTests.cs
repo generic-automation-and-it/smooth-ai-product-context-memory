@@ -1,3 +1,4 @@
+using NodaTime;
 using FluentValidation.TestHelper;
 using SmoothAiProductContextMemory.Application.Features.RecallFeedback;
 
@@ -11,21 +12,21 @@ public class RecallFeedbackRequestValidatorTests
     [Fact]
     public void Miss_rate_rejects_to_before_from()
     {
-        var from = DateTimeOffset.UtcNow;
-        _missRate.TestValidate(new GetMissRate.Request(from, from.AddDays(-1)))
+        var from = SystemClock.Instance.GetCurrentInstant();
+        _missRate.TestValidate(new GetMissRate.Request(from, from.Plus(Duration.FromDays(-1))))
             .ShouldHaveValidationErrorFor(x => x.To);
-        _missRate.TestValidate(new GetMissRate.Request(from, from.AddDays(1)))
+        _missRate.TestValidate(new GetMissRate.Request(from, from.Plus(Duration.FromDays(1))))
             .ShouldNotHaveValidationErrorFor(x => x.To);
     }
 
     [Fact]
     public void Never_recalled_rejects_limit_outside_the_range()
     {
-        _neverRecalled.TestValidate(new GetNeverRecalledMemories.Request(DateTimeOffset.UtcNow, 0))
+        _neverRecalled.TestValidate(new GetNeverRecalledMemories.Request(SystemClock.Instance.GetCurrentInstant(), 0))
             .ShouldHaveValidationErrorFor(x => x.Limit);
-        _neverRecalled.TestValidate(new GetNeverRecalledMemories.Request(DateTimeOffset.UtcNow, 5001))
+        _neverRecalled.TestValidate(new GetNeverRecalledMemories.Request(SystemClock.Instance.GetCurrentInstant(), 5001))
             .ShouldHaveValidationErrorFor(x => x.Limit);
-        _neverRecalled.TestValidate(new GetNeverRecalledMemories.Request(DateTimeOffset.UtcNow, null))
+        _neverRecalled.TestValidate(new GetNeverRecalledMemories.Request(SystemClock.Instance.GetCurrentInstant(), null))
             .ShouldNotHaveValidationErrorFor(x => x.Limit);
     }
 }
