@@ -1,4 +1,7 @@
 {
+  "network": {
+    "allowLocalBinding": true
+  },
   "env": {
     "CLAUDE_CODE_USE_POWERSHELL_TOOL": "1"
   },
