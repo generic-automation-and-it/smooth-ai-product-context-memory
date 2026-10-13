@@ -12,9 +12,10 @@
 # socket. Do not start those four here: the controller owns them, and its ownership, health and
 # lifecycle rules live in its own entrypoint. This script starts and replaces that one container.
 #
-# Running it again stops the running controller (which removes the four workloads), pulls the newest
-# image, and starts a fresh controller. Data volumes and the data-root folders are preserved; only the
-# containers are replaced. As the docs put it, an upgrade is a migration: the new image applies its own
+# Running it again stops the running controller, pulls the newest image, and starts a fresh controller.
+# postgres/blob/seq are Persistent and survive a restart — the recreated controller adopts them by name —
+# so only the Host is replaced. Data volumes and the data-root folders are preserved. As the docs put it,
+# an upgrade is a migration: the new image applies its own
 # migrations at startup, so snapshot a corpus you care about before running this over it.
 #
 # Host layout (data root, so the corpus is a folder you can see, back up and delete):
@@ -147,6 +148,23 @@ port_is_free() {
 # require_port <port> <label> <override-variable>
 require_port() {
   port_is_free "$1" || die "$2 port $1 is already in use; override it (e.g. $3=25432 ./$(basename "$0") up)"
+}
+
+require_port_or_reuse() {
+  # The release controller keeps postgres/blob/seq Persistent, so on a restart they are already
+  # running and hold their ports legitimately. Require the port free only when THIS installation's
+  # own <suffix> container is NOT up (a fresh start, or a foreign holder) — never refuse a restart
+  # because our own persistent workload is still serving on its port. `$4` is the workload suffix
+  # (postgres/blob-well/seq); previously the unbound var was read and, under `set -u`, crashed every
+  # `up` over a running stack.
+  local suffix="$4"
+  local name="mimisbrunnr-${installation_id}-${suffix}"
+  if docker container inspect "$name" >/dev/null 2>&1 &&
+     [ "$(docker container inspect --format '{{index .Config.Labels "io.smooth-mimisbrunnr.installation"}}' "$name" 2>/dev/null)" = "$installation_id" ] &&
+     [ "$(docker container inspect --format '{{.State.Running}}' "$name" 2>/dev/null)" = "true" ]; then
+    return 0
+  fi
+  require_port "$1" "$2" "$3"
 }
 
 selinux_enforcing() {
@@ -658,10 +676,12 @@ preflight() {
   require_port "$p_dashboard" dashboard P_DASHBOARD
   require_port "$p_otlp" OTLP P_OTLP
   require_port "$p_host" API P_HOST
-  require_port "$p_postgres" PostgreSQL P_POSTGRES
-  require_port "$p_blob" "blob S3" P_BLOB
-  require_port "$p_blob_console" "blob console" P_BLOB_CONSOLE
-  require_port "$p_seq" Seq P_SEQ
+  # postgres/blob/seq are Persistent (APPHOST_AGENTS.md); a restart reuses the running containers, so
+  # their ports must NOT be required free — only refuse a foreign holder via require_port_or_reuse.
+  require_port_or_reuse "$p_postgres" PostgreSQL P_POSTGRES postgres
+  require_port_or_reuse "$p_blob" "blob S3" P_BLOB blob-well
+  require_port_or_reuse "$p_blob_console" "blob console" P_BLOB_CONSOLE blob-well
+  require_port_or_reuse "$p_seq" Seq P_SEQ seq
 }
 
 # The controller bakes its API image in at build time, and the pipeline publishes only on main pushes
@@ -701,7 +721,7 @@ report_version_drift() {
 # ---------------------------------------------------------------------------------------------
 
 # Replaces any running controller for this installation, so a plain `up` is a restart rather than a
-# failure. The graceful stop is the controller's own: its shutdown trap tears down the four workloads
+# failure. The graceful stop is the controller's own: its shutdown trap tears down the Session host
 # it owns, which is what removes mimisbrunnr-<id>-host, and preserves every volume. Only the
 # controller container is then deleted — never a volume, and never a container this installation does
 # not own.
@@ -719,25 +739,32 @@ remove_existing_controller() {
   fi
   docker rm "$controller_name" >/dev/null 2>&1 || true
 
-  # A hard kill can leave workloads behind with no controller owning them. They carry this
-  # installation's ownership label, so remove exactly those and nothing else; a foreign container
+  # A hard kill can leave workloads behind with no controller owning them. Only the Host (Session,
+  # recreated each restart) is torn down here; postgres/blob/seq are Persistent (APPHOST_AGENTS.md),
+  # so they survive a restart and the recreated controller adopts them by name — the orphan sweep must
+  # not delete them or the reuse this controller enables is dead on the `up` path. A foreign container
   # occupying one of the names is refused by the controller's own preflight rather than deleted here.
   local leftover
   leftover="$(owned_workload_containers || true)"
   if [ -n "$leftover" ]; then
-    log "removing orphaned workloads: $(printf '%s' "$leftover" | tr '\n' ' ')"
     printf '%s\n' "$leftover" | while IFS= read -r name; do
       [ -n "$name" ] || continue
+      case "$name" in
+        "mimisbrunnr-${installation_id}-host") ;;
+        *) continue ;;
+      esac
       docker stop --time 60 "$name" >/dev/null 2>&1 || true
       docker rm "$name" >/dev/null 2>&1 || true
     done
   fi
 
-  # The ports stay bound for a moment after the container goes; wait rather than fail the free-port
-  # check on a race that resolves itself in under a second.
+  # The ports stay bound for a moment after a container goes; wait rather than fail the free-port
+  # check on a race that resolves itself in under a second. postgres/blob/seq are Persistent, so a
+  # restart keeps them running and their ports stay bound — only the controller (dashboard/OTLP) and
+  # the recreated Host free their ports, which is what `preflight` requires free.
   local waited=0
   while [ "$waited" -lt 15 ]; do
-    port_is_free "$p_dashboard" && port_is_free "$p_host" && return 0
+    port_is_free "$p_dashboard" && port_is_free "$p_otlp" && port_is_free "$p_host" && return 0
     sleep 1
     waited=$((waited + 1))
   done
@@ -900,9 +927,12 @@ status() {
 }
 
 stop() {
-  # Graceful stop removes owned workloads and preserves every data volume and data-root folder.
+  # Graceful stop removes the controller and preserves every data volume and data-root folder.
+  # postgres/blob/seq are Persistent, so they keep running by design -- to remove the release
+  # workloads: docker stop/rm mimisbrunnr-${installation_id}-{postgres,blob-well,seq}
+  # (stop-dev-stack.sh / reset-dev-stack.sh only handle the dev mimisbrunnr-* set).
   if docker container inspect "$controller_name" >/dev/null 2>&1; then
-    log "stopping $controller_name (volumes and $data_root/$installation_id preserved)"
+    log "stopping $controller_name (postgres/blob/seq keep running by design; volumes and $data_root/$installation_id preserved)"
     docker stop --time 180 "$controller_name" >/dev/null
     docker rm "$controller_name" >/dev/null
     log "removed; restart with the same image, id, env file and data root: MIMIS_ID=$installation_id $0 up"

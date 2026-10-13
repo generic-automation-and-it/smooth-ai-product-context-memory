@@ -1811,12 +1811,13 @@ def cmd_export(args: argparse.Namespace) -> int:
     memory — because `resolve-group` has no dry-run mode and would create a group as a side effect
     of asking.
     """
-    src, defaulted = resolve_input(args)
+    src, provenance = resolve_input(args)
     if src is None:
         return 1
-    if defaulted and args.write:
+    if provenance == "newest" and args.write:
         # The newest dump in a shared workspace may be another session's; capturing it would write that
-        # session's material under its own recorded binding. A defaulted input is review-only.
+        # session's material under its own recorded binding. Only a dump that records the current
+        # session id ("session"), or an explicit input, may be written; the rest are review-only.
         print(f"REFUSED: --write needs an explicit input. The defaulted dump ({src}) may belong to "
               "another session; re-run with --input <that folder> --write to capture it. Nothing was "
               "written.", file=sys.stderr)
@@ -2402,34 +2403,92 @@ def current_session_input() -> str | None:
     return str(max(sessions, key=lambda f: f.stat().st_mtime).parent)
 
 
-def resolve_input(args: argparse.Namespace) -> tuple[str | None, bool]:
-    """Resolve ``load``/``export`` input to ``(path, defaulted)``, or print a refusal and return
-    ``(None, False)``.
+def session_id() -> str:
+    """The identity of the session that is running this client, or "".
 
-    An explicit value is final: ``--input`` and the positional may both be given only when they agree,
-    and an empty ``--input`` is refused rather than read as "not given". With neither, the newest
-    session dump is used and ``defaulted`` is True so the caller can disclose it and keep it off the
+    Precedence is ``MIMIS_SESSION`` (the capture path's session id), then the runtime agent-session
+    ids (Conductor, then Claude Code). Empty means no session identity is provable — under which a
+    defaulted input can only dry-run and ``--write`` refuses as before, because without an identity the
+    newest dump in a shared workspace cannot be attributed to this session.
+    """
+    for name in ("MIMIS_SESSION", "CONDUCTOR_SESSION_ID", "CLAUDE_CODE_SESSION_ID"):
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value
+    return ""
+
+
+def recorded_session(folder: str | Path) -> str:
+    """The session a dump recorded in `_dump.json`, or "" when absent, unreadable or empty.
+
+    A dump made before the session field existed records nothing, so it can never prove ownership and
+    stays on the "newest" (review-only) path.
+    """
+    folder = Path(folder)
+    path = (folder.parent if folder.is_file() else folder) / METADATA_FILE
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    session = data.get("session", "") if isinstance(data, dict) else ""
+    return session if isinstance(session, str) else ""
+
+
+def matching_session_input() -> str | None:
+    """The newest dump whose recorded session equals the current session id, or None.
+
+    This is the only default that may be written: the newest dump in a shared workspace may be another
+    session's (see ``current_session_input``), so a defaulted input that does not prove ownership is
+    review-only.
+    """
+    sid = session_id()
+    if not sid:
+        return None
+    base = dump_root()
+    if not base.is_dir():
+        return None
+    sessions = [d for d in base.iterdir() if (d / SESSION_FILE).is_file()]
+    matched = [d for d in sessions if recorded_session(d) == sid]
+    if not matched:
+        return None
+    return str(max(matched, key=lambda d: (d / SESSION_FILE).stat().st_mtime))
+
+
+def resolve_input(args: argparse.Namespace) -> tuple[str | None, str]:
+    """Resolve ``load``/``export`` input to ``(path, provenance)``, or print a refusal and return
+    ``(None, "")``.
+
+    Provenance is ``"explicit"`` (a supplied input), ``"session"`` (defaulted to a dump that records
+    the current session id — safe to write), or ``"newest"`` (defaulted to the newest dump, which may
+    be another session's — dry-run only). An empty provenance means a refusal was printed. An explicit
+    value is final: ``--input`` and the positional may both be given only when they agree, and an empty
+    ``--input`` is refused rather than read as "not given". With neither, this session's dump is used
+    when one exists, else the newest session dump; the caller must keep a ``"newest"`` default off the
     write path.
     """
     flag, positional = args.input_option, args.input
     if flag is not None and not flag.strip():
         print("REFUSED: --input is empty. Pass a path, or omit it to use the current session dump.",
               file=sys.stderr)
-        return None, False
+        return None, ""
     if flag is not None and positional is not None and flag != positional:
         print(f"REFUSED: two different inputs given ({positional!r} and --input {flag!r}). Pass one.",
               file=sys.stderr)
-        return None, False
+        return None, ""
     explicit = flag if flag is not None else positional
     if explicit is not None:
-        return explicit, False
+        return explicit, "explicit"
+    found = matching_session_input()
+    if found is not None:
+        print(f"Input defaulted to this session's dump: {found} (pass --input to choose another).")
+        return found, "session"
     found = current_session_input()
     if found is None:
         print(f"REFUSED: no input given and no session dump under {dump_root()}. Run "
               "`dump --currentsession --from <session>` first, or pass --input.", file=sys.stderr)
-        return None, False
+        return None, ""
     print(f"Input defaulted to the newest session dump: {found} (pass --input to choose another).")
-    return found, True
+    return found, "newest"
 
 
 def dump_metadata_binding(folder: str | Path) -> dict:
@@ -2707,6 +2766,12 @@ def cmd_dump(args: argparse.Namespace) -> int:
         "gatedKindApproval": "decisions and rules captured from a dump are written as "
                              "kind=understanding and do NOT pass gated-kind approval",
     }
+    # A dump records the session that wrote it, so a later `export --write` with no input can default
+    # to this session's dump rather than the newest (which may be another session's). Omitted when no
+    # session identity is provable, so such a dump never matches and stays review-only.
+    sid = session_id()
+    if sid:
+        metadata["session"] = sid
     (folder / METADATA_FILE).write_text(json.dumps(metadata, indent=2, ensure_ascii=False),
                                         encoding="utf-8")
 
@@ -2743,9 +2808,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     load = sub.add_parser("load", help="Render material as cited grounding context (no write).")
     load.add_argument("input", nargs="?", help="Store export, ai-understanding unit or store folder, "
                                                "session dump folder, or a foreign document; - for "
-                                               "stdin. Defaults to the current session when omitted.")
+                                               "stdin. With neither, the newest session dump (this "
+                                               "session's when one exists).")
     load.add_argument("--input", dest="input_option",
-                      help="Explicit input; defaults to the current session when omitted.")
+                      help="Explicit input; with neither, the newest session dump (this session's when "
+                           "one exists).")
     load.add_argument("--format", choices=("store", "understanding", "foreign", "auto"),
                       default="auto")
     load.add_argument("--all", action="store_true", dest="all_kinds",
@@ -2791,9 +2858,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     exp = sub.add_parser("export", help="SESSION -> STORE: orchestrate the capture path "
                                         "(dry run unless --write).")
     exp.add_argument("input", nargs="?", help="Same inputs as load; a dump folder carries its own "
-                                              "binding. Defaults to the current session when omitted.")
+                                              "binding. With neither, the newest session dump (this "
+                                              "session's when one exists).")
     exp.add_argument("--input", dest="input_option",
-                     help="Explicit input; defaults to the current session when omitted.")
+                     help="Explicit input; with neither, the newest session dump (this session's when "
+                          "one exists).")
     exp.add_argument("--write", action="store_true",
                      help="Perform the capture. Without it this is a dry run that creates nothing.")
     exp.add_argument("--tickets", help="Comma-separated ticket keys: #12, github:12, provider:key.")

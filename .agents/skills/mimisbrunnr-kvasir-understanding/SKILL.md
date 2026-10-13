@@ -50,10 +50,11 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
 - `load` reads the input (a store Understanding export, or a foreign document) and renders it as
   **cited grounding context** for the agent. **It writes nothing.**
 - **Input is optional.** Give it as the positional or `--input` (both only if they agree; an empty
-  `--input` is refused). With neither, the skill uses the newest session dump — the
-  `.context/mimisbrunnr-understandings/*` folder, under the repository root, whose `_session.md` was
-  written most recently — and prints `Input defaulted to …`. `dump --currentsession --from <session>`
-  creates that dump. With no dump it refuses and names `dump --currentsession`.
+  `--input` is refused). With neither, the skill uses this session's dump — a folder under
+  `.context/mimisbrunnr-understandings/` (the repository root) whose `_dump.json` records the running
+  session id — else the newest session dump, whichever `_session.md` was written most recently — and
+  prints `Input defaulted to …`. `dump --currentsession --from <session>` creates a dump. With no dump
+  it refuses and names `dump --currentsession`.
 - **Breadth** (store exports only): by default a load returns **only** the understanding-kind records.
   `--all` unions memory **and** understanding — the full context. The breadth default is stated in the
   output, and scoped-memory records that were omitted are listed, never silently dropped.
@@ -132,10 +133,13 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
   recall each candidate's subject (`import`) and, where a candidate paraphrases or relates to a
   recalled memory, capture it through `mimisbrunnr-odin-context-memory --export` instead — its
   Compare-or-Clarify round makes that judgement — or drop it from the input.
-- **Input is optional, as for `load`, but a defaulted input is dry-run only.** The newest dump in a
-  shared workspace can be another session's, so `export --write` with no explicit input refuses before
-  reading anything and asks for `--input <folder> --write`. A dry run on the default proceeds and says
-  which dump it used.
+- **Input is optional, as for `load`. A defaulted input may write only when it provably is this
+  session's.** With neither, this session's dump is used when one exists (its `_dump.json` records the
+  session id), else the newest dump. A defaulted input that is **not** provably this session's is
+  dry-run only: `export --write` with it refuses before reading anything and asks for
+  `--input <folder> --write`, because the newest dump in a shared workspace can be another session's —
+  capturing it would write that session's material under its own recorded binding. A dry run on the
+  default proceeds and says which dump it used.
 
 - **The value gate is optional and off by default.** With `CONTEXT_MEMORY_DECISIONS_ENABLED=true`, each
   candidate is scored for value to each target role by a **local decision model** (no model in the Host or
