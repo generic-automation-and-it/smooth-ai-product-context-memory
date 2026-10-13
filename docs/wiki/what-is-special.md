@@ -3,7 +3,7 @@
 Compares Mímisbrunnr against guidance projects researched during the MVP
 (MemOS, ICM Architect, Utopia, MegaMemory, OpenViking, holoself) and the
 wider session-memory / second-brain landscape (mem0, Zep/Graphiti, Letta,
-Cognee, LangMem, Supermemory, OpenMemory). Researched 2026-10-13.
+Cognee, LangMem, Supermemory, OpenMemory, Obsidian). Researched 2026-10-13.
 
 ## Guidance projects (compared feature-by-feature in-session)
 
@@ -32,6 +32,11 @@ both since delivered). Utopia is recorded as the local Understanding
 | [langchain-ai/langmem](https://github.com/langchain-ai/langmem) | LangGraph memory toolkit | Bring-your-own store | Hot-path tools + background manager | Namespaced semantic search | Agent-managed create/update | Library. MIT |
 | [supermemoryai/supermemory](https://github.com/supermemoryai/supermemory) | Memory+context engine/API | Hosted graph + Postgres | Auto extract + connectors | Hybrid `search()`+`profile()` | Auto supersede/expire | Multi-user/app. MIT repo |
 | [mem0ai/openmemory](https://github.com/mem0ai/openmemory) | Session porter for coding CLIs | Local session files | `port --from/--to` | TUI list, no semantic search | Selective re-export | Single-dev. MIT |
+| [Obsidian](https://obsidian.md/) | Human second brain, local-first notes | Markdown vault on device | Human writes | Keyword search, human browses `[[links]]`/graph/canvas | File edits, 1-yr history via paid Sync | Single human; E2EE Sync + Publish paid. Proprietary |
+
+Complementary, not competing: Obsidian serves human thinking, the well serves
+agent recall. Bridge: dossier output and Understanding markdown (`[[links]]` +
+generated `INDEX.md`) can live in a vault.
 
 ## What is special
 
