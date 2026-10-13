@@ -12,9 +12,10 @@
 # socket. Do not start those four here: the controller owns them, and its ownership, health and
 # lifecycle rules live in its own entrypoint. This script starts and replaces that one container.
 #
-# Running it again stops the running controller (which removes the four workloads), pulls the newest
-# image, and starts a fresh controller. Data volumes and the data-root folders are preserved; only the
-# containers are replaced. As the docs put it, an upgrade is a migration: the new image applies its own
+# Running it again stops the running controller, pulls the newest image, and starts a fresh controller.
+# postgres/blob/seq are Persistent and survive a restart — the recreated controller adopts them by name —
+# so only the Host is replaced. Data volumes and the data-root folders are preserved. As the docs put it,
+# an upgrade is a migration: the new image applies its own
 # migrations at startup, so snapshot a corpus you care about before running this over it.
 #
 # Host layout (data root, so the corpus is a folder you can see, back up and delete):
@@ -737,15 +738,20 @@ remove_existing_controller() {
   fi
   docker rm "$controller_name" >/dev/null 2>&1 || true
 
-  # A hard kill can leave workloads behind with no controller owning them. They carry this
-  # installation's ownership label, so remove exactly those and nothing else; a foreign container
+  # A hard kill can leave workloads behind with no controller owning them. Only the Host (Session,
+  # recreated each restart) is torn down here; postgres/blob/seq are Persistent (APPHOST_AGENTS.md),
+  # so they survive a restart and the recreated controller adopts them by name — the orphan sweep must
+  # not delete them or the reuse this controller enables is dead on the `up` path. A foreign container
   # occupying one of the names is refused by the controller's own preflight rather than deleted here.
   local leftover
   leftover="$(owned_workload_containers || true)"
   if [ -n "$leftover" ]; then
-    log "removing orphaned workloads: $(printf '%s' "$leftover" | tr '\n' ' ')"
     printf '%s\n' "$leftover" | while IFS= read -r name; do
       [ -n "$name" ] || continue
+      case "$name" in
+        "mimisbrunnr-${installation_id}-host") ;;
+        *) continue ;;
+      esac
       docker stop --time 60 "$name" >/dev/null 2>&1 || true
       docker rm "$name" >/dev/null 2>&1 || true
     done
@@ -920,9 +926,11 @@ status() {
 }
 
 stop() {
-  # Graceful stop removes owned workloads and preserves every data volume and data-root folder.
+  # Graceful stop removes the controller and preserves every data volume and data-root folder.
+  # postgres/blob/seq are Persistent, so they keep running by design — use `reset-dev-stack.sh` to
+  # remove them (or `stop-dev-stack.sh` for the dev container set).
   if docker container inspect "$controller_name" >/dev/null 2>&1; then
-    log "stopping $controller_name (volumes and $data_root/$installation_id preserved)"
+    log "stopping $controller_name (postgres/blob/seq keep running by design; volumes and $data_root/$installation_id preserved)"
     docker stop --time 180 "$controller_name" >/dev/null
     docker rm "$controller_name" >/dev/null
     log "removed; restart with the same image, id, env file and data root: MIMIS_ID=$installation_id $0 up"
