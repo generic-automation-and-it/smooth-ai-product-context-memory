@@ -26,6 +26,18 @@ The argument for separation is not elegance. Without it, **correcting a record i
 from the world changing**: a typo fix and a genuine change produce identical evidence, and every
 staleness judgement downstream becomes unreliable.
 
+### Absolute-time representation (2026-10-13)
+
+Both axes and provenance timestamps use NodaTime `Instant`, not local or offset-bearing times.
+An incoming ISO-8601 timestamp with `Z` or an explicit UTC offset is converted to an instant at
+serialization; unzoned/date-only values are rejected rather than interpreted using the server's
+local timezone. JSON and Markdown emit canonical UTC `Z`. Native Npgsql/EF NodaTime mappings keep
+the existing `timestamptz` columns; no data rewrite or schema migration is required.
+
+This closes the write failure where a valid `+02:00` request passed planning but Npgsql rejected
+the retained `DateTimeOffset` during persistence. Read paths, snapshots and JSONB provenance share
+the same absolute-time model, so normalization is not dependent on a particular API caller.
+
 ## Alternatives Considered
 
 - **A single validity axis** — rejected: cannot distinguish correction from change.

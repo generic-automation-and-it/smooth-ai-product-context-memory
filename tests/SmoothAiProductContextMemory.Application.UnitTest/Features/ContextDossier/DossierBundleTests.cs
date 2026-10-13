@@ -1,3 +1,5 @@
+using SmoothAiProductContextMemory.Application.Common.Serialization;
+using NodaTime;
 using System.Reflection;
 using System.Text.Json;
 using SmoothAiProductContextMemory.Application.Common.Models;
@@ -8,8 +10,8 @@ namespace SmoothAiProductContextMemory.Application.UnitTest.Features.ContextDoss
 
 public class DossierBundleTests
 {
-    private static readonly DateTimeOffset ValidFrom = new(2024, 3, 1, 12, 0, 0, TimeSpan.Zero);
-    private static readonly DateTimeOffset CreatedOn = new(2024, 3, 2, 9, 0, 0, TimeSpan.Zero);
+    private static readonly Instant ValidFrom = Instant.FromDateTimeOffset(new DateTimeOffset(2024, 3, 1, 12, 0, 0, TimeSpan.Zero));
+    private static readonly Instant CreatedOn = Instant.FromDateTimeOffset(new DateTimeOffset(2024, 3, 2, 9, 0, 0, TimeSpan.Zero));
 
     [Fact]
     public void Bundle_payload_contains_no_generation_timestamp()
@@ -62,11 +64,11 @@ public class DossierBundleTests
         DossierSelection.CompareByProvenance(first, first).ShouldBe(0);
 
         // Later validity wins before capture time.
-        CheapMemory laterValidity = Memory(a, ValidFrom.AddDays(1), CreatedOn);
+        CheapMemory laterValidity = Memory(a, ValidFrom.Plus(Duration.FromDays(1)), CreatedOn);
         DossierSelection.CompareByProvenance(first, laterValidity).ShouldBeLessThan(0);
 
         // Same validity -> earlier capture wins.
-        CheapMemory laterCapture = Memory(b, ValidFrom, CreatedOn.AddDays(1));
+        CheapMemory laterCapture = Memory(b, ValidFrom, CreatedOn.Plus(Duration.FromDays(1)));
         DossierSelection.CompareByProvenance(Memory(b, ValidFrom, CreatedOn), laterCapture).ShouldBeLessThan(0);
     }
 
@@ -141,7 +143,7 @@ public class DossierBundleTests
         leftBytes.ShouldBe(rightBytes);
     }
 
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions JsonOptions = InstantJson.Configure(new(JsonSerializerDefaults.Web));
 
     private static DossierBundle SampleBundle()
     {
@@ -226,7 +228,7 @@ public class DossierBundleTests
             BodyState: DossierBodyState.Inlined,
             ReachedVia: ["anchor"]);
 
-    private static CheapMemory Memory(Guid uuid, DateTimeOffset validFrom, DateTimeOffset createdOn) =>
+    private static CheapMemory Memory(Guid uuid, Instant validFrom, Instant createdOn) =>
         new(
             Uuid: uuid,
             GroupUuid: Guid.NewGuid(),

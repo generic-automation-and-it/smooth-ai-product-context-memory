@@ -1,3 +1,4 @@
+using NodaTime;
 using Microsoft.Extensions.Logging;
 using SmoothAiProductContextMemory.Application.Common.Models;
 using SmoothAiProductContextMemory.Application.Features.Memories;
@@ -33,7 +34,7 @@ public sealed class PreflightHandlerTests(AspireFixture aspire) : HandlerTestBas
                         80,
                         null,
                         null,
-                        DateTimeOffset.UtcNow,
+                        SystemClock.Instance.GetCurrentInstant(),
                         null,
                         null,
                         null)

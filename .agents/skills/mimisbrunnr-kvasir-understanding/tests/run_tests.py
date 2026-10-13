@@ -145,6 +145,27 @@ FRAMED_STORE_OUTPUT = (
 )
 
 
+class SourceInstantTests(unittest.TestCase):
+    def test_source_dates_are_utc_midnight_in_write_payload(self):
+        candidate = {"description": "Subject", "statement": "Claim",
+                     "validFrom": "2026-10-13", "validUntil": "2026-10-14"}
+        item = uc.set_items([candidate], {}, uc.dt.datetime(2026, 10, 13))[0]
+        self.assertEqual(item["validFrom"], "2026-10-13T00:00:00Z")
+        self.assertEqual(item["validUntil"], "2026-10-14T00:00:00Z")
+        self.assertEqual(candidate["validFrom"], "2026-10-13")
+
+    def test_explicit_timestamp_precision_and_open_end_are_preserved(self):
+        timestamp = "2026-10-13T16:00:00.1234567+02:00"
+        item = uc.set_items([{"description": "Subject", "statement": "Claim",
+                             "validFrom": timestamp}], {}, uc.dt.datetime(2026, 10, 13))[0]
+        self.assertEqual(item["validFrom"], timestamp)
+        self.assertIsNone(item["validUntil"])
+
+    def test_invalid_calendar_date_is_not_repaired(self):
+        with self.assertRaises(ValueError):
+            uc._source_instant("2026-02-30")
+
+
 class LoadTests(unittest.TestCase):
     def test_default_load_creates_no_files(self):
         """NFR-01: a default load writes nothing. The client has no write path at all on `load`."""

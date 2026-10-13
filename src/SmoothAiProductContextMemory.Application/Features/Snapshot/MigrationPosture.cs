@@ -1,3 +1,4 @@
+using NodaTime;
 using SmoothAiProductContextMemory.Application.Abstractions.Snapshot;
 
 namespace SmoothAiProductContextMemory.Application.Features.Snapshot;
@@ -14,8 +15,8 @@ public sealed record MigrationPosture(int PendingMigrationCount, string LastSnap
     public const string NoSnapshotRecorded = "no snapshot recorded";
 
     /// <summary>The last-snapshot text for the startup line: its recency, or the stated absence.</summary>
-    public static string LastSnapshotText(SnapshotMetadata? metadata, DateTimeOffset now) =>
+    public static string LastSnapshotText(SnapshotMetadata? metadata, Instant now) =>
         metadata is null
             ? NoSnapshotRecorded
-            : SnapshotRecency.Format(now - metadata.LastSnapshotAt);
+            : SnapshotRecency.Format((now - metadata.LastSnapshotAt).ToTimeSpan());
 }

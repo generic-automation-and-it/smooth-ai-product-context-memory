@@ -1,3 +1,4 @@
+using NodaTime;
 using SmoothAiProductContextMemory.Application.Abstractions;
 using SmoothAiProductContextMemory.Application.Common.Models;
 using SmoothAiProductContextMemory.Application.Common.Retrieval;
@@ -350,14 +351,14 @@ public sealed class TraversalTests : PersistenceTestBase
         // an AsOf that only the first selection stage applied and the second could contradict by
         // adding a memory the anchor search had excluded. The window predicate is the same one the
         // search uses: valid_from <= asOf and (valid_until is null or valid_until > asOf).
-        var asOf = new DateTimeOffset(2026, 9, 29, 0, 0, 0, TimeSpan.Zero);
+        var asOf = Instant.FromDateTimeOffset(new DateTimeOffset(2026, 9, 29, 0, 0, 0, TimeSpan.Zero));
         MemoryGroup group = await SeedGroupAsync();
         Memory source = await SeedMemoryAsync(group.Id, "Source", "Subject source");
         // Seeded with the window at insert: memory_version is append-only, and its trigger admits
         // only an is_current flip, so a validity window cannot be corrected by an UPDATE afterwards.
-        Memory open = await SeedWindowedAsync(group.Id, "Open", asOf.AddDays(-10), null);
-        Memory closed = await SeedWindowedAsync(group.Id, "Closed", asOf.AddDays(-10), asOf.AddDays(-1));
-        Memory future = await SeedWindowedAsync(group.Id, "Future", asOf.AddDays(1), null);
+        Memory open = await SeedWindowedAsync(group.Id, "Open", asOf.Plus(Duration.FromDays(-10)), null);
+        Memory closed = await SeedWindowedAsync(group.Id, "Closed", asOf.Plus(Duration.FromDays(-10)), asOf.Plus(Duration.FromDays(-1)));
+        Memory future = await SeedWindowedAsync(group.Id, "Future", asOf.Plus(Duration.FromDays(1)), null);
 
         (await Graph.CreateAsync(source.Uuid, open.Uuid, MemoryRelation.RelatesTo, "to open", Ct)).ShouldBeTrue();
         (await Graph.CreateAsync(source.Uuid, closed.Uuid, MemoryRelation.RelatesTo, "to closed", Ct)).ShouldBeTrue();
@@ -377,16 +378,15 @@ public sealed class TraversalTests : PersistenceTestBase
         // An AsOf far in the future still excludes the closed window, while an open-ended one
         // (valid_until is null) is valid at any point — so the filter narrows, it does not empty.
         (await Traversal.WidenAsync(
-            new MemoryWidenQuery { SourceUuids = [source.Uuid], MaxDepth = 1, AsOf = asOf.AddYears(5) }, Ct))
+            new MemoryWidenQuery { SourceUuids = [source.Uuid], MaxDepth = 1, AsOf = asOf.Plus(Duration.FromDays(1825)) }, Ct))
             .Memories.Select(m => m.Uuid).Order()
             .ShouldBe(new[] { open.Uuid, future.Uuid }.Order());
     }
 
-    // A wire AsOf keeps the caller's offset, and Npgsql refuses a DateTimeOffset with a non-zero
-    // offset for a timestamptz parameter. 02:00+02:00 is midnight UTC; a memory valid from 01:00 UTC
+    // Offset-bearing inputs resolve to an Instant before persistence. 02:00+02:00 is midnight UTC; a memory valid from 01:00 UTC
     // is after it, so an offset read as local wall-clock time would wrongly admit it.
-    private static readonly DateTimeOffset UtcInstant = new(2026, 9, 29, 0, 0, 0, TimeSpan.Zero);
-    private static readonly DateTimeOffset SameInstantPlusTwo = new(2026, 9, 29, 2, 0, 0, TimeSpan.FromHours(2));
+    private static readonly Instant UtcInstant = Instant.FromDateTimeOffset(new DateTimeOffset(2026, 9, 29, 0, 0, 0, TimeSpan.Zero));
+    private static readonly Instant SameInstantPlusTwo = Instant.FromDateTimeOffset(new DateTimeOffset(2026, 9, 29, 2, 0, 0, TimeSpan.FromHours(2)));
 
     [Fact]
     public async Task Widen_accepts_an_AsOf_with_a_non_utc_offset_as_the_same_instant()
@@ -394,8 +394,8 @@ public sealed class TraversalTests : PersistenceTestBase
         SameInstantPlusTwo.ShouldBe(UtcInstant);
         MemoryGroup group = await SeedGroupAsync();
         Memory source = await SeedMemoryAsync(group.Id, "Source", "Subject source");
-        Memory open = await SeedWindowedAsync(group.Id, "Open", UtcInstant.AddDays(-10), null);
-        Memory future = await SeedWindowedAsync(group.Id, "Future", UtcInstant.AddHours(1), null);
+        Memory open = await SeedWindowedAsync(group.Id, "Open", UtcInstant.Plus(Duration.FromDays(-10)), null);
+        Memory future = await SeedWindowedAsync(group.Id, "Future", UtcInstant.Plus(Duration.FromHours(1)), null);
         (await Graph.CreateAsync(source.Uuid, open.Uuid, MemoryRelation.RelatesTo, "to open", Ct)).ShouldBeTrue();
         (await Graph.CreateAsync(source.Uuid, future.Uuid, MemoryRelation.RelatesTo, "to future", Ct)).ShouldBeTrue();
 
@@ -409,8 +409,8 @@ public sealed class TraversalTests : PersistenceTestBase
     public async Task Search_accepts_an_AsOf_with_a_non_utc_offset_as_the_same_instant()
     {
         MemoryGroup group = await SeedGroupAsync();
-        Memory open = await SeedWindowedAsync(group.Id, "Open", UtcInstant.AddDays(-10), null);
-        await SeedWindowedAsync(group.Id, "Future", UtcInstant.AddHours(1), null);
+        Memory open = await SeedWindowedAsync(group.Id, "Open", UtcInstant.Plus(Duration.FromDays(-10)), null);
+        await SeedWindowedAsync(group.Id, "Future", UtcInstant.Plus(Duration.FromHours(1)), null);
 
         IReadOnlyList<CheapMemory> searched = await new NpgsqlMemorySearch(Db).SearchAsync(
             new MemorySearchCriteria { GroupUuid = group.Uuid, AsOf = SameInstantPlusTwo }, Ct);
@@ -419,7 +419,7 @@ public sealed class TraversalTests : PersistenceTestBase
     }
 
     private async Task<Memory> SeedWindowedAsync(
-        long groupId, string name, DateTimeOffset validFrom, DateTimeOffset? validUntil)
+        long groupId, string name, Instant validFrom, Instant? validUntil)
     {
         Memory memory = TestEntities.NewMemory(groupId, name, $"Subject {name}");
         Db.Memories.Add(memory);

@@ -36,7 +36,7 @@ public sealed class TicketGraphLifecycleTests(AspireFixture aspire) : Persistenc
 
         await using (var restarted = new SmoothAiProductContextMemoryDbContext(
             new DbContextOptionsBuilder<SmoothAiProductContextMemoryDbContext>()
-                .UseNpgsql(DataSource, options => options.UseSmoothAiProductContextMemoryHistory()).Options))
+                .UseNpgsql(DataSource, options => options.UseNodaTime().UseSmoothAiProductContextMemoryHistory()).Options))
         {
             await restarted.Database.MigrateAsync(Ct);
             MemoryGroup stored = await restarted.MemoryGroups.AsNoTracking().SingleAsync(Ct);
@@ -125,7 +125,7 @@ public sealed class TicketGraphLifecycleTests(AspireFixture aspire) : Persistenc
     {
         await using var other = new SmoothAiProductContextMemoryDbContext(
             new DbContextOptionsBuilder<SmoothAiProductContextMemoryDbContext>()
-                .UseNpgsql(DataSource, options => options.UseSmoothAiProductContextMemoryHistory()).Options);
+                .UseNpgsql(DataSource, options => options.UseNodaTime().UseSmoothAiProductContextMemoryHistory()).Options);
         Db.MemoryGroups.Add(TestEntities.NewGroup(tickets: [Ticket("same")]));
         other.MemoryGroups.Add(TestEntities.NewGroup(tickets: [Ticket("same")]));
         bool[] results = await Task.WhenAll(InsertAsync(Db), InsertAsync(other));
@@ -222,7 +222,7 @@ public sealed class TicketGraphLifecycleTests(AspireFixture aspire) : Persistenc
         await DeclareAsync("child", "parent");
         await using var migrating = new SmoothAiProductContextMemoryDbContext(
             new DbContextOptionsBuilder<SmoothAiProductContextMemoryDbContext>()
-                .UseNpgsql(DataSource, options => options.UseSmoothAiProductContextMemoryHistory()).Options);
+                .UseNpgsql(DataSource, options => options.UseNodaTime().UseSmoothAiProductContextMemoryHistory()).Options);
         await migrating.Database.OpenConnectionAsync(Ct);
         int migrationPid = ((NpgsqlConnection)migrating.Database.GetDbConnection()).ProcessID;
         await using var transaction = await Db.Database.BeginTransactionAsync(Ct);

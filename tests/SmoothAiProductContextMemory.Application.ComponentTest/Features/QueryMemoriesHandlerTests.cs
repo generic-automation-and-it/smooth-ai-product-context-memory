@@ -1,3 +1,4 @@
+using NodaTime;
 using Microsoft.Extensions.Logging;
 using SmoothAiProductContextMemory.Application.Abstractions;
 using SmoothAiProductContextMemory.Application.Features.Memories;
@@ -129,16 +130,16 @@ public sealed class QueryMemoriesHandlerTests(AspireFixture aspire) : HandlerTes
         Db.MemoryGroups.Add(group);
         await Db.SaveChangesAsync(Ct);
 
-        DateTimeOffset now = DateTimeOffset.UtcNow;
+        Instant now = SystemClock.Instance.GetCurrentInstant();
         SetMemories.Request expired = Approved(group.Uuid, "Expired fact");
         expired = expired with
         {
-            Items = [expired.Items[0] with { ValidFrom = now.AddDays(-10), ValidUntil = now.AddDays(-5) }]
+            Items = [expired.Items[0] with { ValidFrom = now.Plus(Duration.FromDays(-10)), ValidUntil = now.Plus(Duration.FromDays(-5)) }]
         };
         await NewSet().Handle(expired, Ct);
 
         SetMemories.Request live = Approved(group.Uuid, "Live fact");
-        live = live with { Items = [live.Items[0] with { ValidFrom = now.AddDays(-1), ValidUntil = null }] };
+        live = live with { Items = [live.Items[0] with { ValidFrom = now.Plus(Duration.FromDays(-1)), ValidUntil = null }] };
         await NewSet().Handle(live, Ct);
 
         QueryMemories.Handler query = NewQuery();
@@ -146,7 +147,7 @@ public sealed class QueryMemoriesHandlerTests(AspireFixture aspire) : HandlerTes
         (await query.Handle(Query() with { AsOf = now }, Ct))
             .Items.Select(i => i.Description).ShouldBe(["Live fact"]);
 
-        (await query.Handle(Query() with { AsOf = now.AddDays(-7) }, Ct))
+        (await query.Handle(Query() with { AsOf = now.Plus(Duration.FromDays(-7)) }, Ct))
             .Items.Select(i => i.Description).ShouldBe(["Expired fact"]);
 
         // No as-of means no temporal narrowing.
@@ -189,7 +190,7 @@ public sealed class QueryMemoriesHandlerTests(AspireFixture aspire) : HandlerTes
         Db.MemoryGroups.Add(group);
         await Db.SaveChangesAsync(Ct);
 
-        var asOf = new DateTimeOffset(2026, 9, 29, 0, 0, 0, TimeSpan.Zero);
+        var asOf = Instant.FromDateTimeOffset(new DateTimeOffset(2026, 9, 29, 0, 0, 0, TimeSpan.Zero));
         SetMemories.Handler set = NewSet();
 
         // v1 valid in the past, v2 valid from the future onwards. At `asOf` neither is "current and
@@ -197,7 +198,7 @@ public sealed class QueryMemoriesHandlerTests(AspireFixture aspire) : HandlerTes
         SetMemories.Request first = Approved(group.Uuid, "Versioned fact", "Old claim");
         first = first with
         {
-            Items = [first.Items[0] with { ValidFrom = asOf.AddDays(-10), ValidUntil = asOf.AddDays(-5) }],
+            Items = [first.Items[0] with { ValidFrom = asOf.Plus(Duration.FromDays(-10)), ValidUntil = asOf.Plus(Duration.FromDays(-5)) }],
         };
         Guid uuid = (await set.Handle(first, Ct)).Items[0].Uuid!.Value;
 
@@ -207,7 +208,7 @@ public sealed class QueryMemoriesHandlerTests(AspireFixture aspire) : HandlerTes
             Items = [second.Items[0] with
             {
                 Uuid = uuid,
-                ValidFrom = asOf.AddDays(1),
+                ValidFrom = asOf.Plus(Duration.FromDays(1)),
                 ValidUntil = null,
             }],
         };
@@ -228,11 +229,11 @@ public sealed class QueryMemoriesHandlerTests(AspireFixture aspire) : HandlerTes
         // A point inside v1's own window still returns nothing under the default CurrentOnly: v1 is
         // no longer current, and the query does not rewind to find it. This is the statement that
         // would fail if the reverted experiment were re-landed.
-        (await query.Handle(Query() with { AsOf = asOf.AddDays(-7) }, Ct)).Items.ShouldBeEmpty();
+        (await query.Handle(Query() with { AsOf = asOf.Plus(Duration.FromDays(-7)) }, Ct)).Items.ShouldBeEmpty();
 
         // Dropping CurrentOnly makes v1 a candidate in its own right, and then its window admits it —
         // so the version is returned because it is valid, not because anything rewound.
-        (await query.Handle(Query() with { AsOf = asOf.AddDays(-7), CurrentOnly = false }, Ct))
+        (await query.Handle(Query() with { AsOf = asOf.Plus(Duration.FromDays(-7)), CurrentOnly = false }, Ct))
             .Items.Select(i => i.Statement).ShouldBe(["Old claim"]);
 
         // And with no AsOf the current version is what comes back, as everywhere else.
@@ -304,7 +305,7 @@ public sealed class QueryMemoriesHandlerTests(AspireFixture aspire) : HandlerTes
                     80,
                     null,
                     null,
-                    DateTimeOffset.UtcNow.AddDays(-1),
+                    SystemClock.Instance.GetCurrentInstant().Plus(Duration.FromDays(-1)),
                     null,
                     null,
                     null)

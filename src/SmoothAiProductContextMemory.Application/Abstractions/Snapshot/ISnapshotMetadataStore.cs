@@ -1,3 +1,4 @@
+using NodaTime;
 namespace SmoothAiProductContextMemory.Application.Abstractions.Snapshot;
 
 /// <summary>
@@ -15,7 +16,7 @@ public interface ISnapshotMetadataStore
 
 /// <summary>The last snapshot's summary. <see cref="SnapshotRecency"/> text is derived by the caller.</summary>
 public sealed record SnapshotMetadata(
-    DateTimeOffset LastSnapshotAt,
+    Instant LastSnapshotAt,
     SnapshotCounts Counts,
     int DanglingReferences,
     int UnreferencedObjects);

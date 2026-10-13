@@ -1,3 +1,4 @@
+using NodaTime;
 using SmoothAiProductContextMemory.Application.Abstractions;
 using SmoothAiProductContextMemory.Application.Common.Models;
 using SmoothAiProductContextMemory.Application.Common.Retrieval;
@@ -18,7 +19,7 @@ public sealed record DossierAnchor(
     string? Status,
     string? ScopeDimension,
     bool IncludeHistory,
-    DateTimeOffset? AsOf,
+    Instant? AsOf,
     int WidenDepth,
     int ItemLimit);
 
@@ -228,7 +229,7 @@ public static class DossierSelection
         string? status,
         string? scopeDimension,
         bool includeHistory,
-        DateTimeOffset? asOf,
+        Instant? asOf,
         int widenDepth)
     {
         TicketIdentity? ticket = null;

@@ -1,3 +1,5 @@
+using SmoothAiProductContextMemory.Application.Common.Serialization;
+using NodaTime;
 using Mediator;
 using Microsoft.AspNetCore.Mvc;
 using SmoothAiProductContextMemory.Application.Features.ContextDossier;
@@ -167,17 +169,17 @@ internal static class ContextEndpoints
         group.MapGet("/recall-feedback/never-recalled", (
             IMediator mediator,
             CancellationToken ct,
-            [FromQuery] DateTimeOffset asOf,
+            [FromQuery] string asOf,
             [FromQuery] int? limit = null) =>
-            mediator.Send(new GetNeverRecalledMemories.Request(asOf, limit ?? 500), ct))
+            mediator.Send(new GetNeverRecalledMemories.Request(ParseInstant(asOf), limit ?? 500), ct))
             .RequireCapability(ApiCapability.Read);
 
         group.MapGet("/recall-feedback/miss-rate", (
             IMediator mediator,
             CancellationToken ct,
-            [FromQuery] DateTimeOffset from,
-            [FromQuery] DateTimeOffset to) =>
-            mediator.Send(new GetMissRate.Request(from, to), ct))
+            [FromQuery] string from,
+            [FromQuery] string to) =>
+            mediator.Send(new GetMissRate.Request(ParseInstant(from), ParseInstant(to)), ct))
             .RequireCapability(ApiCapability.Read);
 
         // Resettable baseline (LADR-04): feedback is disposable, so this is legitimate, not destructive.
@@ -185,4 +187,14 @@ internal static class ContextEndpoints
             mediator.Send(new ResetRecallFeedback.Request(), ct))
             .RequireCapability(ApiCapability.Write);
     }
+
+    private static Instant ParseInstant(string value)
+    {
+        try { return InstantJson.Parse(value); }
+        catch (FormatException)
+        {
+            throw new BadHttpRequestException("Timestamp must include Z or an explicit UTC offset.");
+        }
+    }
+
 }

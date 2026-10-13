@@ -1,3 +1,5 @@
+using SmoothAiProductContextMemory.Application.Common.Serialization;
+using NodaTime;
 using System.Diagnostics;
 using System.Globalization;
 using System.Text;
@@ -145,7 +147,7 @@ public sealed class DossierWorkflowBenchmarkTests(AspireFixture aspire) : Handle
         CreateDossierBundle.Response b = await bundle.Handle(bundleReq, ct);
 
         string payload = JsonSerializer.Serialize(
-            b, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            b, InstantJson.Configure(new JsonSerializerOptions(JsonSerializerDefaults.Web)));
         double payloadKiB = Encoding.UTF8.GetBytes(payload).Length / 1024.0;
 
         int blobReads = blobs is CountingBlobStorage counting ? counting.Reads : 0;
@@ -248,7 +250,7 @@ public sealed class DossierWorkflowBenchmarkTests(AspireFixture aspire) : Handle
             ScopeDimension = MemoryGroup.ScopeDimensionValue.Product,
             InitiativeId = 1,
             Repo = "kingstown",
-            CreatedOn = DateTimeOffset.UtcNow.AddDays(-60),
+            CreatedOn = SystemClock.Instance.GetCurrentInstant().Plus(Duration.FromDays(-60)),
         };
         var programGroup = new MemoryGroup
         {
@@ -256,7 +258,7 @@ public sealed class DossierWorkflowBenchmarkTests(AspireFixture aspire) : Handle
             ScopeDimension = MemoryGroup.ScopeDimensionValue.Program,
             InitiativeId = 1,
             Repo = "kingstown",
-            CreatedOn = DateTimeOffset.UtcNow.AddDays(-60),
+            CreatedOn = SystemClock.Instance.GetCurrentInstant().Plus(Duration.FromDays(-60)),
         };
         Db.MemoryGroups.AddRange(productGroup, programGroup);
         await Db.SaveChangesAsync(Ct);
@@ -286,8 +288,8 @@ public sealed class DossierWorkflowBenchmarkTests(AspireFixture aspire) : Handle
         Db.Memories.AddRange(memories);
         await Db.SaveChangesAsync(Ct);
 
-        DateTimeOffset validFrom = DateTimeOffset.UtcNow.AddDays(-30);
-        DateTimeOffset createdOn = DateTimeOffset.UtcNow.AddDays(-40);
+        Instant validFrom = SystemClock.Instance.GetCurrentInstant().Plus(Duration.FromDays(-30));
+        Instant createdOn = SystemClock.Instance.GetCurrentInstant().Plus(Duration.FromDays(-40));
         foreach (Memory m in memories)
         {
             Db.MemoryVersions.Add(Version(m.Id, 1, isCurrent: true, kind: KindOf(m),
@@ -297,7 +299,7 @@ public sealed class DossierWorkflowBenchmarkTests(AspireFixture aspire) : Handle
             {
                 Db.MemoryVersions.Add(Version(m.Id, 0, isCurrent: false, kind: KindOf(m),
                     status: MemoryVersion.MemoryVersionStatus.Approved,
-                    validFrom: validFrom.AddDays(-60), createdOn: createdOn.AddDays(-50)));
+                    validFrom: validFrom.Plus(Duration.FromDays(-60)), createdOn: createdOn.Plus(Duration.FromDays(-50))));
             }
         }
 
@@ -322,7 +324,7 @@ public sealed class DossierWorkflowBenchmarkTests(AspireFixture aspire) : Handle
 
     private static MemoryVersion Version(
         long memoryId, int version, bool isCurrent, string kind, string status,
-        DateTimeOffset validFrom, DateTimeOffset createdOn) => new()
+        Instant validFrom, Instant createdOn) => new()
         {
             MemoryId = memoryId,
             Version = version,

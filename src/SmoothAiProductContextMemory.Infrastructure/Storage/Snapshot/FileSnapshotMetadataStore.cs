@@ -1,3 +1,4 @@
+using SmoothAiProductContextMemory.Application.Common.Serialization;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 using SmoothAiProductContextMemory.Application.Abstractions.Snapshot;
@@ -9,7 +10,7 @@ namespace SmoothAiProductContextMemory.Infrastructure.Storage.Snapshot;
 public sealed class FileSnapshotMetadataStore(
     IOptions<SnapshotMetadataOptions> options) : ISnapshotMetadataStore
 {
-    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions Json = InstantJson.Configure(new(JsonSerializerDefaults.Web));
 
     private string FilePath => Path.Combine(options.Value.Directory, "snapshot-metadata.json");
 

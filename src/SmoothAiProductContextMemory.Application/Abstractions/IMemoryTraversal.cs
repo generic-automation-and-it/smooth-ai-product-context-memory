@@ -1,3 +1,4 @@
+using NodaTime;
 using SmoothAiProductContextMemory.Application.Common.Models;
 
 namespace SmoothAiProductContextMemory.Application.Abstractions;
@@ -147,7 +148,7 @@ public sealed record MemoryWidenQuery
     /// <c>is_current</c> flip, so historical reconstruction is not available here — see
     /// PERSISTENCE_AGENTS.md.
     /// </remarks>
-    public DateTimeOffset? AsOf { get; init; }
+    public Instant? AsOf { get; init; }
 
     public string? RequiredScopeDimension { get; init; }
 

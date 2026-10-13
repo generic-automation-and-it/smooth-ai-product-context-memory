@@ -1,3 +1,4 @@
+using SmoothAiProductContextMemory.Application.Common.Serialization;
 using System.Text.Json;
 using Npgsql;
 using NpgsqlTypes;
@@ -8,7 +9,7 @@ namespace SmoothAiProductContextMemory.Infrastructure.Persistence;
 
 public sealed partial class NpgsqlTicketGraph
 {
-    private static readonly JsonSerializerOptions TraversalJson = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions TraversalJson = InstantJson.Configure(new(JsonSerializerDefaults.Web));
 
     public async Task<TicketTraversalResult> TraverseAsync(TicketTraversalQuery query, CancellationToken cancellationToken)
     {

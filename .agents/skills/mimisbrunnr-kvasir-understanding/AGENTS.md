@@ -53,6 +53,9 @@ recalls the live store via `import` (read token only) and orchestrates the captu
 
 ## Key Behaviors
 
+- Source calendar dates remain dates during local load, but `set_items` expands `validFrom`/`validUntil` to explicit midnight UTC (`T00:00:00Z`) for the Instant API. Explicit-offset timestamps retain their full fractional precision; invalid calendar dates are never repaired.
+
+
 - **Load, import and export are three acts.** Load = context injection, no write. Import = live store →
   session recall, read token only. Export = session → store orchestration, dry run by default.
 - **`--currentsession` folder name is chosen on output** so another agent can discover it; the dump is
@@ -295,6 +298,7 @@ recalls the live store via `import` (read token only) and orchestrates the captu
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-13 | Export date-only source validity as midnight UTC for the Instant API; preserve local source metadata and explicit timestamp precision. Regression coverage includes nullable end and invalid-date refusal. | HLD-001 LADR-05; UTC instant write fix |
 | 2026-10-07 | No explicit selector can still bind via Heimdallr autofill; no association only when nothing is bound after it (#5). | review 5441621898 |
 | 2026-10-07 | Walk Q4's key fact is the relationship (`redis holds the cache`), not the word `redis`. | review 5440964552 |
 | 2026-10-07 | `SKILL.md` capture order matches the client: redact → atomicity → value gate → group → preflight → `set --dryrun` → write. | issue 200 |

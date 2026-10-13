@@ -23,6 +23,7 @@ internal static class NpgsqlDataSourceFactory
     internal static NpgsqlDataSource Create(string connectionString, int? commandTimeoutSeconds = null)
     {
         var builder = new NpgsqlDataSourceBuilder(connectionString);
+        builder.UseNodaTime();
         builder.ConnectionStringBuilder.NoResetOnClose = true;
         builder.ConnectionStringBuilder.CommandTimeout = commandTimeoutSeconds ?? CommandTimeoutSeconds;
         builder.UsePhysicalConnectionInitializer(AgeSession.Prepare, AgeSession.PrepareAsync);

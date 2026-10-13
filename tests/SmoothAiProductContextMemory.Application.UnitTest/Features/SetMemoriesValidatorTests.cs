@@ -1,3 +1,4 @@
+using NodaTime;
 using FluentValidation.TestHelper;
 using SmoothAiProductContextMemory.Application.Features.Memories;
 using SmoothAiProductContextMemory.Domain;
@@ -28,7 +29,7 @@ public class SetMemoriesValidatorTests
                     200,
                     null,
                     null,
-                    DateTimeOffset.UtcNow,
+                    SystemClock.Instance.GetCurrentInstant(),
                     null,
                     null,
                     null)
@@ -62,7 +63,7 @@ public class SetMemoriesValidatorTests
                     80,
                     null,
                     null,
-                    DateTimeOffset.UtcNow,
+                    SystemClock.Instance.GetCurrentInstant(),
                     null,
                     null,
                     null)
@@ -86,7 +87,7 @@ public class SetMemoriesValidatorTests
     [Fact]
     public void Rejects_overlong_relation_and_inverted_validity()
     {
-        DateTimeOffset now = DateTimeOffset.UtcNow;
+        Instant now = SystemClock.Instance.GetCurrentInstant();
         var request = new SetMemories.Request(
             Guid.NewGuid(),
             [
@@ -104,7 +105,7 @@ public class SetMemoriesValidatorTests
                     null,
                     null,
                     now,
-                    now.AddDays(-1),
+                    now.Plus(Duration.FromDays(-1)),
                     null,
                     null)
             ],
@@ -135,7 +136,7 @@ public class SetMemoriesValidatorTests
                     80,
                     "body",
                     null,
-                    DateTimeOffset.UtcNow,
+                    SystemClock.Instance.GetCurrentInstant(),
                     null,
                     "model",
                     "v1")
@@ -165,7 +166,7 @@ public class SetMemoriesValidatorTests
                     80,
                     null,
                     null,
-                    DateTimeOffset.UtcNow,
+                    SystemClock.Instance.GetCurrentInstant(),
                     null,
                     null,
                     null)
@@ -195,7 +196,7 @@ public class SetMemoriesValidatorTests
                     80,
                     null,
                     null,
-                    DateTimeOffset.UtcNow,
+                    SystemClock.Instance.GetCurrentInstant(),
                     null,
                     null,
                     null)
@@ -264,7 +265,7 @@ public class SetMemoriesValidatorTests
                     80,
                     null,
                     null,
-                    DateTimeOffset.UtcNow,
+                    SystemClock.Instance.GetCurrentInstant(),
                     null,
                     null,
                     null)

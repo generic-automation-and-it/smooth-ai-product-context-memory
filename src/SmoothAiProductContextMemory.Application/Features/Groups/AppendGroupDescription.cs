@@ -1,3 +1,4 @@
+using NodaTime;
 using FluentValidation;
 using Mediator;
 using Microsoft.EntityFrameworkCore;
@@ -50,7 +51,7 @@ public static class AppendGroupDescription
                 Version = next,
                 Name = request.Name,
                 Body = request.Body,
-                CreatedOn = DateTimeOffset.UtcNow,
+                CreatedOn = SystemClock.Instance.GetCurrentInstant(),
             };
 
             db.GroupDescriptions.Add(row);

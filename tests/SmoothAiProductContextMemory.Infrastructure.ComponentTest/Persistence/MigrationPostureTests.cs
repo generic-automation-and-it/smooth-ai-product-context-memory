@@ -1,3 +1,4 @@
+using NodaTime;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
@@ -37,7 +38,7 @@ public sealed class MigrationPostureTests(AspireFixture aspire) : IAsyncLifetime
         var services = new ServiceCollection();
         services.AddSingleton(_dataSource);
         services.AddDbContext<SmoothAiProductContextMemoryDbContext>(options =>
-            options.UseNpgsql(_dataSource, npgsql => npgsql.UseSmoothAiProductContextMemoryHistory()));
+            options.UseNpgsql(_dataSource, npgsql => npgsql.UseNodaTime().UseSmoothAiProductContextMemoryHistory()));
         services.AddSingleton<ISnapshotMetadataStore>(_metadata);
         _provider = services.BuildServiceProvider();
     }
@@ -56,7 +57,7 @@ public sealed class MigrationPostureTests(AspireFixture aspire) : IAsyncLifetime
     public async Task Pending_migrations_with_a_recorded_snapshot_state_its_age()
     {
         _metadata.Metadata = new SnapshotMetadata(
-            DateTimeOffset.UtcNow.AddDays(-3),
+            SystemClock.Instance.GetCurrentInstant().Plus(Duration.FromDays(-3)),
             new SnapshotCounts(0, 0, 0, 0, 0, 0, 0),
             DanglingReferences: 0,
             UnreferencedObjects: 0);

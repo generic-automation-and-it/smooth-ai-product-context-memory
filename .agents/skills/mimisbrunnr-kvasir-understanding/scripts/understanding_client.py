@@ -1534,6 +1534,18 @@ def _merged_tags(binding_tags: list[str], candidate_tags) -> list[str]:
     return tags
 
 
+def _source_instant(value):
+    """A source calendar date denotes midnight UTC, never the machine's local midnight.
+
+    Keep explicit timestamp strings intact, including their fractional precision; the API parses
+    their offset into an Instant. Validate a date before expanding it, without repairing bad input.
+    """
+    if isinstance(value, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        dt.date.fromisoformat(value)
+        return value + "T00:00:00Z"
+    return value
+
+
 def set_items(candidates: list[dict], binding: dict, now: dt.datetime) -> list[dict]:
     """Project candidates onto the write payload's item shape.
 
@@ -1560,8 +1572,8 @@ def set_items(candidates: list[dict], binding: dict, now: dt.datetime) -> list[d
             "confidence": confidence_value(candidate.get("confidence")),
             "content": candidate["statement"],
             "sources": candidate.get("sources") or [],
-            "validFrom": candidate.get("validFrom") or now.strftime("%Y-%m-%dT00:00:00Z"),
-            "validUntil": candidate.get("validUntil"),
+            "validFrom": _source_instant(candidate.get("validFrom")) or now.strftime("%Y-%m-%dT00:00:00Z"),
+            "validUntil": _source_instant(candidate.get("validUntil")),
             "summaryModel": "mimisbrunnr-kvasir-understanding export",
             "summaryPromptVersion": "export-1",
         })

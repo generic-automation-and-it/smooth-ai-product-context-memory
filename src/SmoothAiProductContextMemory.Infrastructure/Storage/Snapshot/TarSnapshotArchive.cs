@@ -1,3 +1,4 @@
+using SmoothAiProductContextMemory.Application.Common.Serialization;
 using System.Formats.Tar;
 using System.Text;
 using System.Text.Json;
@@ -17,7 +18,7 @@ namespace SmoothAiProductContextMemory.Infrastructure.Storage.Snapshot;
 /// </summary>
 public sealed class TarSnapshotArchive : ISnapshotArchive
 {
-    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions Json = InstantJson.Configure(new(JsonSerializerDefaults.Web));
 
     public async Task<SnapshotWriteReport> WriteAsync(
         string destinationPath,

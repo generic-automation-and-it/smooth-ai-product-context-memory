@@ -1,3 +1,5 @@
+using SmoothAiProductContextMemory.Application.Common.Serialization;
+using NodaTime;
 using System.Globalization;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
@@ -22,7 +24,7 @@ namespace SmoothAiProductContextMemory.Infrastructure.Persistence;
 /// </remarks>
 public sealed class NpgsqlMemoryTraversal(SmoothAiProductContextMemoryDbContext db) : IMemoryTraversal
 {
-    private static readonly JsonSerializerOptions TraversalJson = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions TraversalJson = InstantJson.Configure(new(JsonSerializerDefaults.Web));
 
     public async Task<IReadOnlyList<MemoryPath>> FindPathsAsync(
         MemoryPathQuery query,
@@ -120,7 +122,7 @@ public sealed class NpgsqlMemoryTraversal(SmoothAiProductContextMemoryDbContext 
         });
         command.Parameters.Add(new NpgsqlParameter("asOf", NpgsqlDbType.TimestampTz)
         {
-            Value = PostgresInstant.ToUtc(query.AsOf) ?? (object)DBNull.Value,
+            Value = query.AsOf ?? (object)DBNull.Value,
         });
         command.Parameters.Add(new NpgsqlParameter("limit", NpgsqlDbType.Integer) { Value = query.Limit });
 
@@ -372,14 +374,14 @@ public sealed class NpgsqlMemoryTraversal(SmoothAiProductContextMemoryDbContext 
             reader.GetInt16(12),
             reader.GetString(13),
             reader.IsDBNull(14) ? null : reader.GetString(14),
-            reader.GetFieldValue<DateTimeOffset>(15),
-            reader.IsDBNull(16) ? null : reader.GetFieldValue<DateTimeOffset>(16),
+            reader.GetFieldValue<Instant>(15),
+            reader.IsDBNull(16) ? null : reader.GetFieldValue<Instant>(16),
             reader.GetInt32(17),
             reader.GetBoolean(18),
             JsonSerializer.Deserialize<List<SourceDocument>>(
                 reader.GetString(19),
                 TraversalJson) ?? [],
-            reader.GetFieldValue<DateTimeOffset>(20));
+            reader.GetFieldValue<Instant>(20));
 
     private static string Quote(Guid uuid) => Quote(uuid.ToString("D"));
 

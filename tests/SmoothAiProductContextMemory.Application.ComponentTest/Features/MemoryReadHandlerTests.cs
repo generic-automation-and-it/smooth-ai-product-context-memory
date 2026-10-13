@@ -1,3 +1,4 @@
+using NodaTime;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -70,8 +71,8 @@ public sealed class GetMemoryBlobHandlerTests(AspireFixture aspire) : HandlerTes
             Confidence = 50,
             Status = MemoryVersion.MemoryVersionStatus.Proposed,
             BlobAddress = address,
-            ValidFrom = DateTimeOffset.UtcNow,
-            CreatedOn = DateTimeOffset.UtcNow,
+            ValidFrom = SystemClock.Instance.GetCurrentInstant(),
+            CreatedOn = SystemClock.Instance.GetCurrentInstant(),
         });
         await Db.SaveChangesAsync(Ct);
         Db.ChangeTracker.Clear();
@@ -139,8 +140,8 @@ public sealed class GetMemoryVersionsHandlerTests(AspireFixture aspire) : Handle
         Kind = "decision",
         Confidence = 50,
         Status = MemoryVersion.MemoryVersionStatus.Proposed,
-        ValidFrom = DateTimeOffset.UtcNow,
-        CreatedOn = DateTimeOffset.UtcNow,
+        ValidFrom = SystemClock.Instance.GetCurrentInstant(),
+        CreatedOn = SystemClock.Instance.GetCurrentInstant(),
     };
 
     private GetMemoryVersions.Handler NewHandler() =>

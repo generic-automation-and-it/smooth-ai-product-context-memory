@@ -1,3 +1,5 @@
+using NodaTime;
+using NodaTime.Text;
 using System.Globalization;
 using System.Text;
 
@@ -148,7 +150,7 @@ public static class ExportRenderer
         return Finish(builder);
     }
 
-    public static string FormatTimestamp(DateTimeOffset value) => value.ToString("O");
+    public static string FormatTimestamp(Instant value) => InstantPattern.ExtendedIso.Format(value);
 
     private static void WriteVersionBody(StringBuilder builder, ExportVersionBody version, string heading, bool includeMetadataBlock)
     {

@@ -94,6 +94,7 @@ sequenceDiagram
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-13 | Stored times and AsOf are NodaTime instants; dossier JSON uses the shared absolute-time serializer, preserving deterministic canonical UTC payloads. | HLD-001 LADR-05; UTC instant write fix |
 | 2026-09-27 | Record pass: documented the deliberate bounded-reason relationships so a future reader does not "fix" them — `DossierOmissionReason` is exactly the 5 bundle values (no `outside-focus`, which is the blocked skill-side composition's); `limitsHit` is a subset of that same enum (`depth reached`, `cap reached` only), not a separate set. | record pass, HLD-005 NFR-04 |
 | 2026-09-22 | Created — deterministic bundle/preview half of HLD-005 contextual export. Bundle + preview slices, shared selection, new store widening read, two Host endpoints, L0 + L1 tests. | HLD-005 |
 | 2026-09-23 | Added the NFR-03 reference-workflow measurement harness (`DossierWorkflowBenchmarkTests`, `SMOOTH_DOSSIER_BENCH=1`) and the NFR-02 cross-restart byte-equality L1 test. Recorded that the selection caps at 200 (MaxLimit), not the 500 item cap. | HLD-005 NFR-02/NFR-03 |

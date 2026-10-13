@@ -126,6 +126,7 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
 - `export` orchestrates the capture skill end to end — redaction gate, atomicity gate, the optional value
   gate, the auto-split batch cap, group resolution, preflight, and `set --dryrun` as the veto point — and
   **never writes directly**. It is a **dry run by default**; `--write` performs the capture.
+- **Source dates become UTC instants on write.** Date-only `learned`/`updated` validity is sent as midnight UTC (`T00:00:00Z`), not interpreted in the machine timezone. Local load preserves the source date. Explicit timestamp strings retain fractional precision.
 - **Dedup is exact-subject only.** A candidate whose subject already exists in the group becomes a
   version bump; nothing else is matched, and no link is derived (`links: []`). **Before `--write`**,
   recall each candidate's subject (`import`) and, where a candidate paraphrases or relates to a

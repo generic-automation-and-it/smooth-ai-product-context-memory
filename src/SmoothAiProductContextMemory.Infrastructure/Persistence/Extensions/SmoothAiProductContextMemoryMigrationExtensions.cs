@@ -1,3 +1,4 @@
+using NodaTime;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
@@ -31,7 +32,7 @@ public static class SmoothAiProductContextMemoryMigrationExtensions
         SnapshotMetadata? metadata = await metadataStore.ReadAsync(cancellationToken);
         return new MigrationPosture(
             pending,
-            MigrationPosture.LastSnapshotText(metadata, DateTimeOffset.UtcNow));
+            MigrationPosture.LastSnapshotText(metadata, SystemClock.Instance.GetCurrentInstant()));
     }
 
     /// <summary>Applies pending migrations to the database behind this provider.</summary>

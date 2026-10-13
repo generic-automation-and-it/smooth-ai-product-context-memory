@@ -1,3 +1,4 @@
+using NodaTime;
 using FluentValidation;
 using Mediator;
 using Microsoft.Extensions.Logging;
@@ -23,7 +24,7 @@ public static class CreateDossierPreview
         string? Status,
         string? ScopeDimension,
         bool IncludeHistory,
-        DateTimeOffset? AsOf,
+        Instant? AsOf,
         int WidenDepth) : IRequest<Response>;
 
     public sealed record Response(

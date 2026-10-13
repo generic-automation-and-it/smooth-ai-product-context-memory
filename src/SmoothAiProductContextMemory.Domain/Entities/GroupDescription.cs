@@ -1,3 +1,4 @@
+using NodaTime;
 namespace SmoothAiProductContextMemory.Domain.Entities;
 
 /// <summary>
@@ -18,5 +19,5 @@ public sealed class GroupDescription
 
     public string Body { get; set; } = string.Empty;
 
-    public DateTimeOffset CreatedOn { get; set; }
+    public Instant CreatedOn { get; set; }
 }

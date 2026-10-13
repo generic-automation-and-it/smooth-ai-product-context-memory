@@ -1,3 +1,4 @@
+using NodaTime;
 using SmoothAiProductContextMemory.Application.Common.Models;
 
 namespace SmoothAiProductContextMemory.Application.Abstractions;
@@ -63,7 +64,7 @@ public sealed record MemorySearchCriteria
     public string? InitiativeName { get; init; }
 
     /// <summary>Business-time instant the claim must be valid at. Null means no temporal narrowing.</summary>
-    public DateTimeOffset? AsOf { get; init; }
+    public Instant? AsOf { get; init; }
 
     public bool CurrentOnly { get; init; } = true;
 

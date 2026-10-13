@@ -1,3 +1,4 @@
+using NodaTime;
 using SmoothAiProductContextMemory.Domain.Entities;
 
 namespace SmoothAiProductContextMemory.Application.Abstractions.Snapshot;
@@ -31,4 +32,4 @@ public sealed record SnapshotTicketVertex(string Provider, string Key);
 /// <summary>A <c>:TICKET_PARENT</c> ticket edge.</summary>
 public sealed record SnapshotTicketEdge(
     string Provider, string Key, string ParentProvider, string ParentKey,
-    string Reason, string Source, DateTimeOffset RecordedAt, DateTimeOffset? ObservedAt);
+    string Reason, string Source, Instant RecordedAt, Instant? ObservedAt);

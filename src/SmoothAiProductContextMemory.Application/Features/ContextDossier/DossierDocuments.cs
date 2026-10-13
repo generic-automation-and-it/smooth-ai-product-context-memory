@@ -1,3 +1,4 @@
+using NodaTime;
 using SmoothAiProductContextMemory.Application.Abstractions;
 
 namespace SmoothAiProductContextMemory.Application.Features.ContextDossier;
@@ -60,7 +61,7 @@ public sealed record DossierSelectionPlan(
     string? Status,
     string? ScopeDimension,
     bool IncludeHistory,
-    DateTimeOffset? AsOf,
+    Instant? AsOf,
     int WidenDepth,
     string CombinationRule,
     string HistoryPolicy,
@@ -107,7 +108,7 @@ public sealed record DossierManifest(
 public sealed record DossierOmittedItem(Guid Uuid, int Version, string Reason);
 
 /// <summary>One source document citation (NFR-05).</summary>
-public sealed record DossierSource(string Kind, string Reference, DateTimeOffset? CapturedAt);
+public sealed record DossierSource(string Kind, string Reference, Instant? CapturedAt);
 
 public static class DossierBodyState
 {
@@ -138,11 +139,11 @@ public sealed record DossierMemory(
     short Confidence,
     string ScopeDimension,
     string? ScopeIdentifier,
-    DateTimeOffset ValidFrom,
-    DateTimeOffset? ValidUntil,
+    Instant ValidFrom,
+    Instant? ValidUntil,
     int Version,
     bool IsCurrent,
-    DateTimeOffset CreatedOn,
+    Instant CreatedOn,
     IReadOnlyList<DossierSource> Sources,
     string? BodyText,
     string BodyState,
