@@ -134,6 +134,7 @@ button:hover { background: var(--bg); }
 
 /* States */
 .state { padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); }
+.state[data-state="loading"] { color: var(--muted); }
 .state[data-state="empty"], .state[data-state="ok"] { border-color: var(--ok); }
 .state[data-state="error"] { border-color: var(--err); }
 .state[data-state="unreachable"], .state[data-state="timed-out"] { border-color: var(--warn); }

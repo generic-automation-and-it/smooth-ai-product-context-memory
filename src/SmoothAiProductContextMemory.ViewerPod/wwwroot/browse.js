@@ -6,6 +6,7 @@
 // states (NFR-05). A result set equal to the limit surfaces a narrow-your-
 // filters prompt rather than silently truncating or paging (no cursor).
 import { postQuery, getInitiatives } from './api.js';
+import { esc, shortUuid, fmtInstant, plural } from './util.js';
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -59,24 +60,7 @@ const state = {
 };
 
 let currentRows = [];
-
-function esc(value) {
-  return String(value ?? '').replace(/[&<>"']/g, (c) => (
-    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
-  ));
-}
-
-function shortUuid(value) {
-  return value ? String(value).slice(0, 8) : '';
-}
-
-function fmtInstant(value) {
-  if (!value) return '';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? '' : date.toLocaleString(undefined, {
-    dateStyle: 'short', timeStyle: 'short',
-  });
-}
+let requestSeq = 0;
 
 function fmtValidity(memory) {
   const from = memory.validFrom ? fmtInstant(memory.validFrom) : '';
@@ -228,7 +212,7 @@ function selectRow(index) {
 }
 
 function atLimitPrompt(count) {
-  return `Showing ${count} memory(ies) — narrow your filters (ticket / initiative / repo / facet / kind).`;
+  return `Showing ${count} ${plural(count, 'memory', 'memories')} — narrow your filters (ticket / initiative / repo / facet / kind).`;
 }
 
 function renderResult(result) {
@@ -257,7 +241,11 @@ function scheduleReload(delay) {
 async function refresh() {
   updateState();
   renderChips();
+  const seq = ++requestSeq;
+  els.results.querySelector('.limit-note')?.remove();
+  setState('loading', 'Loading memories…');
   const result = await postQuery(buildRequest());
+  if (seq !== requestSeq) return;
   renderResult(result);
 }
 

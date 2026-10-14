@@ -8,6 +8,7 @@
 // browse cap of 200). The Console reads via the query path and never writes
 // feedback itself (NFR-06).
 import { getMissRate, getNeverRecalled } from './api.js';
+import { esc, plural } from './util.js';
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -31,12 +32,6 @@ function isoDateOffset(days) {
 
 function utcInstant(dateValue) {
   return `${dateValue}T00:00:00Z`;
-}
-
-function esc(value) {
-  return String(value ?? '').replace(/[&<>"']/g, (c) => (
-    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
-  ));
 }
 
 function showState(el, name, message) {
@@ -70,7 +65,7 @@ function renderNeverRecalled(result) {
     els.neverState.textContent = 'No memories were never recalled as of that date.';
     return;
   }
-  els.neverState.textContent = `${items.length} memor(ies) never recalled as of that date.`;
+  els.neverState.textContent = `${items.length} ${plural(items.length, 'memory', 'memories')} never recalled as of that date.`;
   els.neverList.innerHTML = items.map((item) => (
     `<li><code>${esc(item.memoryUuid)}</code> · captured ${esc(item.capturedOn)}</li>`
   )).join('');

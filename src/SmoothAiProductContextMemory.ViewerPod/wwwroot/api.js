@@ -35,10 +35,6 @@ export function postQuery(requestBody) {
   return requestJson('/api/context/query', { method: 'POST', body: requestBody });
 }
 
-export function getLabels() {
-  return requestJson('/api/context/labels');
-}
-
 export function getInitiatives(status) {
   const query = status ? `?status=${encodeURIComponent(status)}` : '';
   return requestJson(`/api/context/initiatives${query}`);
