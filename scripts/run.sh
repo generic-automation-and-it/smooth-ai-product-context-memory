@@ -834,7 +834,11 @@ up() {
   printf '  API         http://localhost:%s\n' "$p_host"
   printf '  PostgreSQL  127.0.0.1:%s   blob 127.0.0.1:%s/%s   Seq 127.0.0.1:%s\n' "$p_postgres" "$p_blob" "$p_blob_console" "$p_seq"
   printf '  group       %s\n' "$group_name"
-  [ "$use_data_root" = 1 ] || printf '  volumes     engine-managed named volumes (MIMIS_DATA_ROOT=off)\n'
+  if [ "$use_data_root" = 1 ]; then
+    printf '  data        %s/%s\n' "$data_root" "$installation_id"
+  else
+    printf '  volumes     engine-managed named volumes (MIMIS_DATA_ROOT=off)\n'
+  fi
   echo
   printf '  A bare visit to the dashboard redirects to /login; this URL carries the token:\n'
   # The dashboard prints its login URL seconds after the container starts, so `up` returns before it
