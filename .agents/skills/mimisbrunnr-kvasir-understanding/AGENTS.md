@@ -282,7 +282,7 @@ recalls the live store via `import` (read token only) and orchestrates the captu
   non-integer, boolean or absent keeps its record and is counted malformed; a report with no usable
   `records` list keeps every candidate and discloses itself; a candidate the gate never mentioned is
   kept; and under `mark` both passing and below-threshold records carry `audience:*` tags, while
-  under `hold` none are. `ledgerReset` / `ledgerEvicted` each print their stderr line (singular and plural count, both together) and absent, zero or malformed values print nothing, with the gate's reset prose never echoed. Hold-vs-mark is read from the report's `belowThreshold` (an environment that
+  under `hold` none are. `ledgerReset` / `ledgerEvicted` / `ledgerIndexPurged` each print their stderr line (singular and plural count, both together) and absent, zero or malformed values print nothing, with the gate's reset prose never echoed, plus the pre-spent-ledger regression. Hold-vs-mark is read from the report's `belowThreshold` (an environment that
   disagrees is ignored, an unreadable value keeps everything), the audience tags are asserted in the
   `set` payload itself, and the source-scope rule is pinned end to end (adopted when unbound, a
   conflicting `--scope` refused before any group is resolved). The two refusals (unavailable redactor, misconfigured gate) are driven through
