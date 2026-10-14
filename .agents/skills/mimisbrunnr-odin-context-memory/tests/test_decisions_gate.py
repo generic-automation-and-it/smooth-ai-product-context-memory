@@ -839,6 +839,19 @@ class SubjectLessIdentityTests(GateTestCase):
         self.assertEqual(second["records"][0]["outcome"], "attempts-exhausted")
         self.assertTrue(second["records"][0]["durable"])
 
+    def test_subject_less_batch_scores_when_the_ledger_path_is_unwritable(self):
+        """The repair write must not turn an unwritable ledger path into a traceback for a
+        batch that never needed the file: a directory in the ledger's place still scores."""
+        self.stub.probabilities = {role: 0.9 for role in
+                                   ("product-owner", "designer", "developer", "tester", "business")}
+        state = os.path.join(self.tmp, "ledger-dir")
+        os.mkdir(state)
+        proc, report = self.score(records=self.PROSE, state_file=state)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+        self.assertEqual([r["outcome"] for r in report["records"]], ["scored"] * 3)
+        self.assertTrue(report.get("ledgerReset"), "an unreadable ledger is still disclosed")
+
     def test_has_subject_matches_record_identity(self):
         self.assertFalse(_gate.has_subject({"statement": "no identity fields"}))
         self.assertFalse(_gate.has_subject({"statement": "x", "description": None, "name": ""}))

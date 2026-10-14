@@ -868,6 +868,16 @@ def write_ledger(state_file, ledger):
     os.replace(temp, path)
 
 
+def has_subject(record):
+    """True when the record carries a durable identity: `subject`, else `description`, else `name`.
+
+    The one subject test in this file. `record_identity` keys on it, and the score loop
+    persists a ledger budget only for it — a record with none of those is keyed by batch
+    position and its budget is for the current call only.
+    """
+    return bool(record.get("subject") or record.get("description") or record.get("name"))
+
+
 def record_identity(record, index):
     """A stable identity for a record across rewrites.
 
@@ -876,11 +886,11 @@ def record_identity(record, index):
     treats as the record's identity (the store keys uniqueness on `subject_slug`), so it survives a
     rewrite while a genuinely different record gets its own budget.
     """
-    subject = record.get("subject") or record.get("description") or record.get("name")
-    if not subject:
+    if not has_subject(record):
         # A record with no subject cannot be identified across attempts, so it is keyed by position
         # and gets the budget for this call only — reported, so the caller knows it is not durable.
         return f"index:{index}"
+    subject = record.get("subject") or record.get("description") or record.get("name")
     # A memory is `(group, subject)`, not the subject alone: the same subject captured for two groups is
     # two memories. Keying by subject alone made them share one attempt budget, so scoring one spent the
     # other's (issue 186). The group is `groupUuid` when the caller has it, else `group` — whatever
@@ -892,26 +902,14 @@ def record_identity(record, index):
     return str(subject)
 
 
-def has_subject(record):
-    """True when the record carries a durable identity.
-
-    The same subject test `record_identity` uses: `subject`, else `description`, else
-    `name`. A record with none of those is keyed by batch position and its budget is
-    for the current call only, so it must never read or write the persistent ledger.
-    """
-    return bool(record.get("subject") or record.get("description") or record.get("name"))
-
-
-def positional_ledger_keys(limit=None):
+def positional_ledger_keys():
     """Every ledger key a subject-less record could have written.
 
     `record_identity` keys such a record `index:N`; `ledger_key` hashes it before it
     reaches the file. These keys can only exist because of that bug, so a ledger
     load drops them.
     """
-    if limit is None:
-        limit = MAX_LEDGER_ENTRIES
-    return {ledger_key(f"index:{n}") for n in range(limit)}
+    return {ledger_key(f"index:{n}") for n in range(MAX_LEDGER_ENTRIES)}
 
 
 def purge_positional_entries(ledger):
@@ -919,6 +917,8 @@ def purge_positional_entries(ledger):
 
     Never prints a key: a digest is still an identifier, and the count is the signal.
     """
+    if not ledger:
+        return ledger, 0
     doomed = positional_ledger_keys()
     purged = sum(1 for key in ledger if key in doomed)
     if purged:
@@ -1042,7 +1042,7 @@ def cmd_score(args):
     ledger_evicted = 0
     ledger_index_purged = 0
     if args.state_file:
-        # One-time migration: entries keyed by batch position can only exist because
+        # Repair pass (idempotent): entries keyed by batch position can only exist because
         # subject-less records used to persist their `index:N` identity. Drop them
         # before scoring so a pre-spent position is scorable again, and report the
         # count (never the keys) beside `ledgerEvicted`.
@@ -1053,7 +1053,14 @@ def cmd_score(args):
         if _purged or _migrated or _discarded:
             capped = cap_ledger(_ledger)
             ledger_evicted += len(_ledger) - len(capped)
-            write_ledger(args.state_file, capped)
+            try:
+                write_ledger(args.state_file, capped)
+            except OSError:
+                # The path is unreadable or unwritable (a directory, permissions). The
+                # ledger already reads as discarded, so scoring continues with an empty
+                # in-memory ledger — subject-less records never needed the file, and a
+                # durable record surfaces the same failure on its own write as before.
+                pass
     for index, (original, state) in enumerate(zip(records, redacted)):
         identity = record_identity(original, index)
         # A subject-less record keeps `index:N` for reporting but never touches the
@@ -1090,7 +1097,7 @@ def cmd_score(args):
                     # Same disclosure as an oversize or a failed round: the field is always present, so
                     # a consumer reading it never has to special-case the record that was held.
                     "discrimination": {"margin": 0.0, "tied": []},
-                    "durable": True,
+                    "durable": durable,
                 })
                 continue
         else:
