@@ -73,3 +73,9 @@ Mímisbrunnr is the opposite on each axis — every row a recorded decision:
 11. **One machine, one practitioner, honest limits.** See README
     *Where Mímisbrunnr loses*: no multi-tenant, no real-time multi-agent,
     lexeme-AND not semantic, cross-group dup invisible, nothing deletable.
+12. **Session markers on import and export.** A deliberate import or a successful
+    export marks the session's working point (client-side, ids only, per skill); a
+    default export is a delta since the last marker, so imported or already-exported
+    knowledge is never re-proposed. `export --all` ignores the marker, `--nomarker`
+    leaves it untouched (HLD-007 LADR-11). Rivals deduplicate after the fact; Mímisbrunnr
+    removes the echo before preflight.

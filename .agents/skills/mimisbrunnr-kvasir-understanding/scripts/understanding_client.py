@@ -2315,8 +2315,7 @@ def _mark_export_receipt(args: argparse.Namespace, written: list[dict]) -> None:
         print(_marker.marker_line("empty", sid, 0, verb="export"))
         return
     try:
-        _, status = _marker.record_import("kvasir", sid, harness, "export", False,
-                                          written)
+        _, status = _marker.append_export("kvasir", sid, harness, written)
     except OSError as error:
         print(f"NOTE: session marker not written ({error}).", file=sys.stderr)
         return
@@ -3070,9 +3069,8 @@ def cmd_dump(args: argparse.Namespace) -> int:
         print(_marker.marker_line("none", "", verb="export"))
     else:
         try:
-            _, _dump_status = _marker.record_import("kvasir", _dump_sid, _dump_harness,
-                                                    "export", False, [],
-                                                    folder=folder.name)
+            _, _dump_status = _marker.append_export("kvasir", _dump_sid, _dump_harness,
+                                                   [], folder=folder.name)
         except OSError as error:
             print(f"NOTE: session marker not written ({error}).", file=sys.stderr)
         else:

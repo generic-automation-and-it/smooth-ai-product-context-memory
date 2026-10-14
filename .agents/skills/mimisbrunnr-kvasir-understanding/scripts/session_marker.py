@@ -271,6 +271,22 @@ def record_import(marker_type: str, session: str, harness: str, verb: str,
     return str(mpath), status
 
 
+def append_export(marker_type: str, session: str, harness: str,
+                  items: list[dict] | None = None,
+                  folder: str | None = None, slugs: list[str] | None = None,
+                  path: str | None = None, root: Path | None = None,
+                  at: str | None = None) -> tuple[str, str]:
+    """Append one export receipt entry (E1, E6): only what was actually written.
+
+    Thin wrapper over record_import with verb="export". Call after a confirmed write
+    (never the plan): dry runs, refusals, empty sets and review-queue deferrals pass
+    nothing and therefore record nothing. Returns (path, status) like record_import.
+    """
+    return record_import(marker_type, session, harness, "export", False,
+                         items, None, None, root, at,
+                         folder=folder, slugs=slugs, path=path)
+
+
 def marker_line(status: str, session: str, count: int = 0, verb: str = "import") -> str:
     """One-line receipt. Status from record_import (or 'none').
 

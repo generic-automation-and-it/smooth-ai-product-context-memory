@@ -47,8 +47,9 @@ recall that must mark runs through this client's `query`/`import`.
 | `--session <id>` (`query`/`import`, `set`/`export`, `preflight`) | Explicit session id for the marker (else the harness env chain). |
 
 **Implication rule:** `--approve` is the only switch that widens what the write path *does*; all other
-switches (`--dryrun`, `--deepsearch`, `--import`) change *how much work* is done or *which
-direction*, never *how irreversible* it is. `--dryrun` and `--approve` are mutually exclusive —
+switches (`--dryrun`, `--deepsearch`, `--import`, `--nomarker`) change *how much work* is done, *which
+direction*, or *which state is kept* — never *how irreversible* it is. `--nomarker` may combine
+with `--approve`: the write still lands as approved, but no marker entry is written. `--dryrun` and `--approve` are mutually exclusive —
 `--dryrun` writes nothing, `--approve` is the permission to write. Treat a request for both as an
 error: ask which one is meant.
 

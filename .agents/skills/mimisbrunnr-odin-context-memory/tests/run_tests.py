@@ -4378,6 +4378,27 @@ class SessionMarkerTests(unittest.TestCase):
         self.assertIn("Marker: skipped (nothing written)", err.getvalue())
         self.assertIsNone(sm.load_marker("odin", "ses-odin-i"))
 
+    def test_nomarker_combines_with_approve_orthogonally(self):
+        # Q2: --approve governs write status, --nomarker governs kept state. An approved
+        # gated-kind payload with --nomarker still writes (as approved) but marks nothing.
+        import session_marker as sm
+        os.environ["CLAUDE_CODE_SESSION_ID"] = "ses-odin-j"
+        payload = {"groupUuid": "g-1", "items": [{"description": "Release rule",
+                                                  "statement": "Freeze on Fridays.",
+                                                  "kind": "rule",
+                                                  "status": "approved"}]}
+        args = SimpleNamespace(payload=None, dryrun=False, export_all=False,
+                               session=None, nomarker=True)
+        sent = {}
+        with patch.object(client, "read_payload", return_value=payload), \
+                patch.object(client, "_request",
+                             side_effect=lambda m, p, b=None, query=None: sent.update(body=b) or {"created": 1}), \
+                redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as err:
+            client.cmd_set(args)
+        self.assertEqual(sent["body"]["items"][0]["status"], "approved")
+        self.assertIn("Marker: skipped (--nomarker", err.getvalue())
+        self.assertIsNone(sm.load_marker("odin", "ses-odin-j"))
+
     def test_each_harness_env_var_resolves_in_isolation(self):
         import session_marker as sm
         for name in self.ENV_NAMES:

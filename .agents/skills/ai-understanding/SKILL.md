@@ -462,7 +462,7 @@ only its own. Session id: first non-empty of `CLAUDE_CODE_SESSION_ID`, `CODEX_TH
   `python3 .agents/skills/ai-understanding/scripts/session_marker.py record --type ai-understanding --verb export
   --path "<subject>-<stamp>/<slug>.understanding.md" --slug "<slug>::<question>" ... [--session ID]`
   (repeat `--slug` per unit). The marker follows the receipt: dry runs, refusals and empty
-  exports mark nothing. It prints one `Marker:` line (`set (export, N items)` |
+  exports mark nothing. `--export --nomarker` exports normally but writes no entry. It prints one `Marker:` line (`set (export, N items)` |
   `skipped (--nomarker)` | `skipped (nothing written)` | `none (no session id)`). Use
   `session_marker.py show --type ai-understanding` to read the exclusion set back.
 

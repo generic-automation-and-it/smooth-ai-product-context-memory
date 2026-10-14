@@ -722,7 +722,7 @@ def _mark_send_receipt(args, payload) -> None:
         print(_marker.marker_line("empty", sid, 0, verb="export"), file=sys.stderr)
         return
     try:
-        _, status = _marker.record_import("odin", sid, harness, "export", False, written)
+        _, status = _marker.append_export("odin", sid, harness, written)
     except OSError as error:
         print(f"NOTE: session marker not written ({error}).", file=sys.stderr)
         return
