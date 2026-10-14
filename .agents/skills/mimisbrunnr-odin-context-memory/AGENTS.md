@@ -354,7 +354,10 @@ flowchart LR
   file is rewritten on that same run even when every budget is spent, so raw subjects leave the disk on
   the first `score` after upgrade. A raw key meeting its own digest (an old and a new gate sharing the
   file) merges to the larger count and the better best. The report's `identity` field stays the raw
-  subject: it is stdout to the caller, not persisted.
+  subject: it is stdout to the caller, not persisted. **Subject-less records are scored every call;
+  their budget is not durable:** with no subject they keep the positional `index:N` identity for
+  reporting but skip the ledger entirely, and a load drops pre-existing `index:N` keys reporting
+  the count as `ledgerIndexPurged`.
 - **A qualified vendor prefix is redacted on the prefix alone.** `sk-proj-`/`sk-ant-`/`sk-live-`/
   `sk-test-`/`sk-svcacct-`/`sk-admin-` and `sk_`/`rk_` `live`/`test` keys skip the secret-shape test,
   because their `_`/`-`-separated bodies read as short words to it and passed unredacted. A bare `sk-`
@@ -536,6 +539,7 @@ redaction detector is a stdin→stdout fingerprint script reporting rule names o
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-14 | **Subject-less gate records are scored every call; their budget is not durable.** `decisions_gate.py score` kept the positional `index:N` identity for reporting but persisted it in the attempt ledger, so prose/dump exports went `attempts-exhausted` once the low positions were spent and the gate was silently off. Such records now skip the ledger read/write (scored as attempt 1, `"durable": false`); a load drops pre-existing `index:N` keys and reports the count as `ledgerIndexPurged`. Harness +7 gate cases. | issue 222 |
 | 2026-10-14 | **Credential subshell covers each write-route invocation.** `WRITE_ROUTES` sends the write credential on `preflight` too (persists nothing, authenticates write-only), and the checkpoint runs `preflight`/`set`/`resolve-group`/`upsert-initiative` plus follow-up writes — a single-write wording left the others without a credential. `SKILL.md`, both procedures and the Non-Negotiable now say `each write-route invocation` with the full subcommand list; the harness pins the wording in all four docs. Also fixed a `memory-write.md` reference to `references/write-path.md` and an agents leftover in `README.md`. | PR #221 review |
 | 2026-10-14 | **A success-shaped zero-write `set` answer marks nothing.** When the response carries `created`/`versioned`/`unchanged` counts summing to 0, the export receipt records no entry (`Marker: skipped (nothing written)`) instead of falling back to the request's own uuids; a response with no counts keeps the fallback. | PR #221 review |
 | 2026-10-14 | **Read/write subagents removed (LADR-008, supersedes LADR-005).** `.agents/agents/memory-{read,write}.md` deleted; the skill-local contracts moved to `references/read-path.md` / `references/write-path.md` without agent frontmatter, and the session runs both paths itself. The write credential is loaded only inside a subshell around the single write command, so the read client keeps running in the same session. `SKILL.md` *Where Each Step Runs* rewritten; harness `AgentContractTests` re-pointed at the procedures and gained a no-registration guard. | session request |
