@@ -376,6 +376,11 @@ rewrite scored lower than what came before** — surface that rather than report
 After the last attempt, `BELOW_THRESHOLD=hold` keeps the record out of the store (listed with its scores);
 `mark` exports it with `audience:<role>` tags.
 
+**A record with no subject is scored every call; its budget is not durable.** It keeps the
+positional `index:N` identity for reporting (with `"durable": false`), but it never reads or
+writes the ledger — every call scores it as attempt 1. A ledger holding `index:N` entries from
+before this rule drops them on the next `score` and reports the count as `ledgerIndexPurged`.
+
 **The ledger is capped, and past the cap a spent budget can be forgotten.** It holds at most
 `MAX_LEDGER_ENTRIES` (5 000) records. Past that, each write evicts the **most-spent** entries first and
 never the record being scored, so a record whose budget ran out long ago can be scored again from attempt

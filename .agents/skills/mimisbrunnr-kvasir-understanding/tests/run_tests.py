@@ -2750,6 +2750,40 @@ class DecisionsGateIntegrationTests(unittest.TestCase):
                     self.assertNotIn(text, err.getvalue())
                 self.assertNotIn(reset_text, err.getvalue(), "the gate's prose is never echoed")
 
+    def test_positional_purge_is_disclosed_on_stderr(self):
+        """Issue 222: `ledgerIndexPurged` counts positional `index:N` entries dropped by the
+        subject-less migration. Absent, zero or malformed values print nothing."""
+        records = [{"index": i, "outcome": "scored", "passed": True, "passingRoles": ["developer"]}
+                   for i in range(3)]
+
+        def gate(**extra):
+            out = json.dumps(dict({"outcome": "ok", "belowThreshold": "hold", "records": records},
+                                   **extra))
+            return lambda: _Result(0, out)
+
+        purged_line = "dropped 3 positional index entries"
+        cases = [
+            ({"ledgerIndexPurged": 3}, ["dropped 3 positional index entries"],
+             ["evicted", "restarted empty"]),
+            ({"ledgerIndexPurged": 1}, ["dropped 1 positional index entry left"],
+             ["entries left"]),
+            ({}, [], ["positional index"]),
+            ({"ledgerIndexPurged": 0}, [], ["positional index"]),
+            ({"ledgerIndexPurged": "3"}, [], ["positional index"]),
+            ({"ledgerIndexPurged": True}, [], ["positional index"]),
+            ({"ledgerIndexPurged": -2}, [], ["positional index"]),
+        ]
+        for extra, expected, absent in cases:
+            with self.subTest(extra=extra):
+                err = io.StringIO()
+                with redirect_stderr(err):
+                    survivors, note, _ = self._run_gate(gate(**extra))
+                self.assertEqual(len(survivors), 3)
+                for text in expected:
+                    self.assertIn(text, err.getvalue())
+                for text in absent:
+                    self.assertNotIn(text, err.getvalue())
+
     def test_disabled_keeps_everything_and_calls_nothing(self):
         def explode():
             raise AssertionError("the gate script was spawned while disabled")
@@ -3642,6 +3676,101 @@ class GateEndpointRefusalTests(unittest.TestCase):
             survivors, note = uc.gate_decisions([{"subject": "S", "description": "S",
                                                    "statement": "A claim."}])
         self.assertEqual(note, uc.DECISIONS_REFUSED)
+
+
+class SubjectLessGateRegressionTests(unittest.TestCase):
+    """Issue 222 Part A: prose candidates carry no subject, so a pre-spent positional
+    ledger must not keep them unscored. Driven through the real `export` write path,
+    the real gate script, and a stub decision model."""
+
+    PROSE = ("The retry budget is three attempts, counted by the gate itself.\n\n"
+             "A failed gate keeps the record and says why, never a low score.\n\n"
+             "Redaction runs before any model call and fails closed.\n")
+
+    def _decision_stub(self, probability=0.1):
+        import http.server
+        import threading
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):  # noqa: N802
+                length = int(self.headers.get("Content-Length") or 0)
+                raw = self.rfile.read(length) if length else b""
+                try:
+                    body = json.loads(raw.decode("utf-8"))
+                except ValueError:
+                    body = {}
+                answers = {role: {"noul": probability}
+                           for role in body.get("questions", {})}
+                payload = json.dumps({"answers": answers}).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(payload)
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.shutdown)
+        self.addCleanup(server.server_close)
+        return server
+
+    def test_pre_spent_positional_ledger_still_scores_and_holds_prose(self):
+        import hashlib
+        stub = self._decision_stub(0.1)
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = str(Path(tmp) / "ledger.json")
+            seed = {f"sha256:{hashlib.sha256(f'index:{n}'.encode('utf-8')).hexdigest()}":
+                    {"attempts": 3, "best": None} for n in range(3)}
+            Path(ledger).write_text(json.dumps(seed), encoding="utf-8")
+            src = write(tmp, "notes.md", self.PROSE)
+            originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                         uc.resolve_group, uc._run_capture_client)
+            sent = {"bindings": [], "calls": []}
+            uc.gate_redaction = lambda texts: (list(texts), {})
+            uc.gate_atomicity = lambda c: [{"verdict": "simple", "signals": []} for _ in c]
+            uc.initiative_exists = lambda name: (True, "present")
+
+            def resolve(binding, name, body, dryrun):
+                sent["bindings"].append(dict(binding))
+                return {"groupUuid": "g-1", "created": False}, "ok"
+
+            def capture(script, args, payload):
+                sent["calls"].append((tuple(args), payload))
+                if args[0] == "preflight":
+                    return 0, json.dumps({"candidates": []}), ""
+                return 0, json.dumps({"created": 1, "versioned": 0, "linked": 0,
+                                      "skipped": 0}), ""
+
+            uc.resolve_group = resolve
+            uc._run_capture_client = capture
+            env = {"CONTEXT_MEMORY_DECISIONS_ENABLED": "true",
+                   "CONTEXT_MEMORY_DECISIONS_BASE_URL":
+                       f"http://127.0.0.1:{stub.server_address[1]}",
+                   "CONTEXT_MEMORY_DECISIONS_BELOW_THRESHOLD": "hold",
+                   "CONTEXT_MEMORY_DECISIONS_TIMEOUT": "10",
+                   "MIMIS_DECISIONS_STATE": ledger,
+                   "CONTEXT_MEMORY_REVIEW_QUEUE": str(Path(tmp) / "queue.jsonl")}
+            try:
+                with mock.patch.dict(os.environ, env):
+                    rc, out, err = run(["export", src, "--initiative", "Present",
+                                        "--heimdallr", "false"])
+            finally:
+                (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                 uc.resolve_group, uc._run_capture_client) = originals
+            combined = out + err
+            self.assertEqual(rc, 1, "an export with every record held writes nothing: " + combined)
+            self.assertIn("0 kept, 3 held", combined,
+                          "every prose record must be scored, none kept unscored")
+            self.assertNotIn("not scored", combined)
+            self.assertIn("also held by the decision gate", combined)
+            self.assertEqual([a for a, _ in sent["calls"] if a == ("set",)], [],
+                             "held records must never reach the write")
+            after = json.loads(Path(ledger).read_text(encoding="utf-8"))
+            for n in range(3):
+                key = f"sha256:{hashlib.sha256(f'index:{n}'.encode('utf-8')).hexdigest()}"
+                self.assertNotIn(key, after, "the positional migration must drop the key")
 
 
 class ZeroConfidenceTests(unittest.TestCase):

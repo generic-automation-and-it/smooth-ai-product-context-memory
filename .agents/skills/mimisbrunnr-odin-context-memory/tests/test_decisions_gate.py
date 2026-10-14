@@ -753,6 +753,108 @@ class AttemptLedgerTests(GateTestCase):
         self.assertEqual(json.loads(proc.stdout)["records"][0]["outcome"], "scored")
 
 
+class SubjectLessIdentityTests(GateTestCase):
+    """A record with no subject is keyed by batch position for reporting only.
+
+    Its budget is for the current call: it must never read or write the persistent
+    ledger, so repeated exports of prose/dump material score every record every time
+    instead of going `attempts-exhausted` once the low positions are spent.
+    """
+
+    PROSE = [
+        {"statement": "first prose claim", "description": None},
+        {"statement": "second prose claim", "description": None},
+        {"statement": "third prose claim", "description": None},
+    ]
+
+    def test_subject_less_records_score_every_call_with_attempt_1(self):
+        self.stub.probabilities = {role: 0.9 for role in
+                                   ("product-owner", "designer", "developer", "tester", "business")}
+        state = os.path.join(self.tmp, "ledger.json")
+        for _ in range(4):
+            proc, report = self.score(records=self.PROSE, state_file=state)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual([r["outcome"] for r in report["records"]],
+                             ["scored"] * 3, "no subject-less record may exhaust")
+            self.assertEqual([r["attempt"] for r in report["records"]], [1, 1, 1])
+            self.assertEqual([r["identity"] for r in report["records"]],
+                             ["index:0", "index:1", "index:2"],
+                             "the reported identity stays positional")
+            self.assertEqual([r["durable"] for r in report["records"]],
+                             [False, False, False])
+        self.assertFalse(os.path.exists(state),
+                         "scoring subject-less records must not create a ledger file")
+
+    def test_subject_less_records_leave_the_ledger_untouched(self):
+        self.stub.probabilities = {role: 0.9 for role in
+                                   ("product-owner", "designer", "developer", "tester", "business")}
+        state = os.path.join(self.tmp, "ledger.json")
+        proc, _ = self.score(state_file=state)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        with open(state, encoding="utf-8") as handle:
+            before = handle.read()
+        proc, report = self.score(records=self.PROSE, state_file=state)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual([r["outcome"] for r in report["records"]], ["scored"] * 3)
+        self.assertEqual(report["ledgerIndexPurged"], 0)
+        with open(state, encoding="utf-8") as handle:
+            self.assertEqual(handle.read(), before,
+                             "a subject-less batch must not rewrite the ledger")
+
+    def test_positional_index_keys_are_purged_on_load(self):
+        self.stub.probabilities = {role: 0.9 for role in
+                                   ("product-owner", "designer", "developer", "tester", "business")}
+        state = os.path.join(self.tmp, "ledger.json")
+        ledger = {_gate.ledger_key(f"index:{n}"): {"attempts": 3, "best": None}
+                  for n in range(25)}
+        keep_subject = "A durable record that must survive"
+        ledger[_gate.ledger_key(keep_subject)] = {"attempts": 1, "best": None}
+        with open(state, "w", encoding="utf-8") as handle:
+            json.dump(ledger, handle)
+        proc, report = self.score(records=self.PROSE, state_file=state)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(report["ledgerIndexPurged"], 25)
+        with open(state, encoding="utf-8") as handle:
+            after = json.load(handle)
+        self.assertEqual(after, {_gate.ledger_key(keep_subject): {"attempts": 1, "best": None}},
+                         "only the positional keys go; every other key is untouched")
+        combined = proc.stdout + proc.stderr
+        for n in range(25):
+            self.assertNotIn(_gate.ledger_key(f"index:{n}"), combined,
+                             "a ledger key must never reach the output")
+        self.assertNotIn(keep_subject, combined, "a subject must never reach the output")
+        self.assertEqual([r["outcome"] for r in report["records"]], ["scored"] * 3,
+                         "a pre-spent position is scorable again after the purge")
+
+    def test_subject_keyed_records_keep_the_attempt_budget(self):
+        self.stub.probabilities = {role: 0.1 for role in
+                                   ("product-owner", "designer", "developer", "tester", "business")}
+        state = os.path.join(self.tmp, "ledger.json")
+        first_proc, first = self.score(state_file=state,
+                                       CONTEXT_MEMORY_DECISIONS_MAX_ATTEMPTS="1")
+        self.assertEqual(first["records"][0]["outcome"], "scored")
+        self.assertTrue(first["records"][0]["durable"])
+        _, second = self.score(state_file=state,
+                               CONTEXT_MEMORY_DECISIONS_MAX_ATTEMPTS="1")
+        self.assertEqual(second["records"][0]["outcome"], "attempts-exhausted")
+        self.assertTrue(second["records"][0]["durable"])
+
+    def test_has_subject_matches_record_identity(self):
+        self.assertFalse(_gate.has_subject({"statement": "no identity fields"}))
+        self.assertFalse(_gate.has_subject({"statement": "x", "description": None, "name": ""}))
+        for record in ({"subject": "s"}, {"description": "d"}, {"name": "n"},
+                       {"subject": "", "description": "d"}):
+            self.assertTrue(_gate.has_subject(record), record)
+
+    def test_purge_positional_entries_keeps_other_keys(self):
+        ledger = {_gate.ledger_key("index:0"): {"attempts": 3, "best": None},
+                  _gate.ledger_key("index:4999"): 2,
+                  _gate.ledger_key("a real subject"): {"attempts": 1, "best": None}}
+        cleaned, purged = _gate.purge_positional_entries(dict(ledger))
+        self.assertEqual(purged, 2)
+        self.assertEqual(cleaned, {_gate.ledger_key("a real subject"): {"attempts": 1, "best": None}})
+
+
 class ConfigGuardTests(GateTestCase):
     def test_bad_threshold_is_refused_not_defaulted(self):
         proc = run_gate(["score"], json.dumps([RECORD]),

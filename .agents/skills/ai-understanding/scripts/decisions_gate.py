@@ -892,6 +892,40 @@ def record_identity(record, index):
     return str(subject)
 
 
+def has_subject(record):
+    """True when the record carries a durable identity.
+
+    The same subject test `record_identity` uses: `subject`, else `description`, else
+    `name`. A record with none of those is keyed by batch position and its budget is
+    for the current call only, so it must never read or write the persistent ledger.
+    """
+    return bool(record.get("subject") or record.get("description") or record.get("name"))
+
+
+def positional_ledger_keys(limit=None):
+    """Every ledger key a subject-less record could have written.
+
+    `record_identity` keys such a record `index:N`; `ledger_key` hashes it before it
+    reaches the file. These keys can only exist because of that bug, so a ledger
+    load drops them.
+    """
+    if limit is None:
+        limit = MAX_LEDGER_ENTRIES
+    return {ledger_key(f"index:{n}") for n in range(limit)}
+
+
+def purge_positional_entries(ledger):
+    """Drop bug-written `index:N` entries. Returns `(ledger, purged)`.
+
+    Never prints a key: a digest is still an identifier, and the count is the signal.
+    """
+    doomed = positional_ledger_keys()
+    purged = sum(1 for key in ledger if key in doomed)
+    if purged:
+        ledger = {key: value for key, value in ledger.items() if key not in doomed}
+    return ledger, purged
+
+
 def next_attempt(state_file, identity, max_attempts):
     """How many scoring rounds this record has had, bounded by `max_attempts`.
 
@@ -1006,7 +1040,26 @@ def cmd_score(args):
     results = []
     ledger_reset = False
     ledger_evicted = 0
+    ledger_index_purged = 0
+    if args.state_file:
+        # One-time migration: entries keyed by batch position can only exist because
+        # subject-less records used to persist their `index:N` identity. Drop them
+        # before scoring so a pre-spent position is scorable again, and report the
+        # count (never the keys) beside `ledgerEvicted`.
+        _ledger, _discarded, _migrated = read_ledger(args.state_file)
+        _ledger, _purged = purge_positional_entries(_ledger)
+        ledger_reset = _discarded
+        ledger_index_purged = _purged
+        if _purged or _migrated or _discarded:
+            capped = cap_ledger(_ledger)
+            ledger_evicted += len(_ledger) - len(capped)
+            write_ledger(args.state_file, capped)
     for index, (original, state) in enumerate(zip(records, redacted)):
+        identity = record_identity(original, index)
+        # A subject-less record keeps `index:N` for reporting but never touches the
+        # persistent ledger: it is scored as a first attempt every call, the same
+        # branch the code already uses when there is no ledger at all.
+        durable = has_subject(original)
         oversize = size_guard(state, roles, settings["model"])
         if oversize:
             # `discrimination` is disclosed on every record, not only the scored ones: a consumer
@@ -1014,33 +1067,36 @@ def cmd_score(args):
             # reason about. There is no score here, so the value is the zero a failed round already
             # reports rather than a computed margin that would look like a measurement.
             results.append({
-                "index": index, "identity": record_identity(original, index), "attempt": 0,
+                "index": index, "identity": identity, "attempt": 0,
                 "outcome": "oversize", "detail": oversize, "scores": {}, "passingRoles": [],
                 "passed": False, "best": None, "discrimination": {"margin": 0.0, "tied": []},
+                "durable": durable,
             })
             continue
 
-        if args.state_file:
+        if args.state_file and durable:
             attempt, this_reset, prior_best, evicted = next_attempt(args.state_file,
-                                                                    record_identity(original, index),
+                                                                    identity,
                                                                     settings["max_attempts"])
             ledger_evicted += evicted
             # One reset anywhere in the batch is reported, since it is one file and one bound.
             ledger_reset = ledger_reset or this_reset
             if attempt is None:
                 results.append({
-                    "index": index, "identity": record_identity(original, index),
+                    "index": index, "identity": identity,
                     "attempt": settings["max_attempts"], "outcome": "attempts-exhausted",
                     "detail": f"the {settings['max_attempts']}-attempt budget is spent for this record",
                     "scores": {}, "passingRoles": [], "passed": False, "best": None,
                     # Same disclosure as an oversize or a failed round: the field is always present, so
                     # a consumer reading it never has to special-case the record that was held.
                     "discrimination": {"margin": 0.0, "tied": []},
+                    "durable": True,
                 })
                 continue
         else:
             # No ledger, so no budget and no cross-round comparison: every round is a first round,
-            # which is why `prior_best` is None rather than read from anywhere.
+            # which is why `prior_best` is None rather than read from anywhere. A subject-less
+            # record with a ledger takes this branch too: its budget is not durable.
             attempt = 1
             prior_best = None
 
@@ -1048,9 +1104,10 @@ def cmd_score(args):
             scores, passing, version = call_model(state, roles, settings, rubric_version)
         except GateError as exc:
             results.append({
-                "index": index, "identity": record_identity(original, index), "attempt": attempt,
+                "index": index, "identity": identity, "attempt": attempt,
                 "outcome": exc.outcome, "detail": exc.detail, "scores": {}, "passingRoles": [],
                 "passed": False, "best": None, "discrimination": {"margin": 0.0, "tied": []},
+                "durable": durable,
             })
             continue
 
@@ -1058,15 +1115,15 @@ def cmd_score(args):
                         {"attempt": attempt, "scores": scores, "max": max(scores.values())})
         # Persist only once a score exists, so a failed round leaves the best untouched while still
         # having spent its attempt above.
-        if args.state_file:
-            stored, evicted = record_attempt(args.state_file, record_identity(original, index),
+        if args.state_file and durable:
+            stored, evicted = record_attempt(args.state_file, identity,
                                              attempt, scores)
             ledger_evicted += evicted
         else:
             stored = best
         margin, tied = discrimination(scores)
         results.append({
-            "index": index, "identity": record_identity(original, index), "attempt": attempt,
+            "index": index, "identity": identity, "attempt": attempt,
             "outcome": "scored", "rubricVersion": version, "scores": scores,
             "passingRoles": passing, "passed": bool(passing),
             # How decisively one role beat the field. Disclosed because `passingRoles` alone
@@ -1078,6 +1135,8 @@ def cmd_score(args):
             # rewrite actually improved on the source, which is the thing an agent rewriting to pass
             # needs to know and cannot infer from `best` alone.
             "best": stored, "bestThisRound": best is not prior_best,
+            # A subject-less record is scored every call; its budget is not durable.
+            "durable": durable,
         })
 
     payload = {
@@ -1096,6 +1155,9 @@ def cmd_score(args):
         # Always present with a ledger: an evicted entry is a record whose spent budget was forgotten,
         # so the count says how many budgets this run restarted.
         payload["ledgerEvicted"] = ledger_evicted
+        # Entries dropped by the positional-index migration above: they could only exist
+        # because of this bug, and their removal makes a pre-spent position scorable again.
+        payload["ledgerIndexPurged"] = ledger_index_purged
         if ledger_reset:
             # Said plainly, because a cleared ledger means every record's attempt budget starts again
             # — so an `attempt: 1` here is not evidence that this record is new.
