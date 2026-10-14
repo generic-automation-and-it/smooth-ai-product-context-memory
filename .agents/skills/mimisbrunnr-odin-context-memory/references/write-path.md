@@ -7,8 +7,8 @@ Run the write client, `context_memory_client.py`, on discrete candidate facts an
 Never a raw transcript. The write credential is never ambient: the client seeds only the read token and
 base URL, so `CONTEXT_MEMORY_WRITE_TOKEN` is absent until you load it. Load it only at the authorized
 checkpoint, with the deliberate write step the skill's `SKILL.md` names —
-`set -a && source ~/.mimisbrunnr/credentials && set +a` — and **only inside a subshell around the
-single write command**, so the token never persists in the session's shell, where the read client would
+`set -a && source ~/.mimisbrunnr/credentials && set +a` — and **only inside a subshell around each
+mutating invocation** (`upsert-initiative`, `resolve-group`, `set`), so the token never persists in the session's shell, where the read client would
 then refuse to start:
 
 ```bash

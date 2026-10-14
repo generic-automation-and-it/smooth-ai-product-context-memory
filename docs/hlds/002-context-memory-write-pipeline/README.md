@@ -84,7 +84,7 @@ with a count. A human can audit what happened without reading the store.
   authority-selected winner current; same-subject genuine conflict keeps both claims current under
   separate identities.
 
-### 5. Bulky recall stays outside the working session
+### 5. Bulky recall stays bounded in the working session
 
 Default recall remains bounded and unchanged. `--deepsearch` is explicit and bounded. Both paths run
 in the working session itself — the read/write subagents this section first specified were removed
