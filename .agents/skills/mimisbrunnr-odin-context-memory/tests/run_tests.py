@@ -67,6 +67,15 @@ read_client = _load("context_memory_read_client")
 divergence = _load("divergence")
 authority = _load("authority")
 
+# Marker isolation (HLD-007 LADR-11): query/set/preflight now key markers to the
+# harness session id, which is present in a real agent shell. Without this, cases
+# driving those entry points would write markers into the working repo and later
+# sends would exclude those ids. Marker cases set their own root per case.
+os.environ["SESSION_MARKER_ROOT"] = tempfile.mkdtemp(prefix="odin-markers-")
+for _name in ("CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "OPENCODE_SESSION_ID",
+              "COPILOT_AGENT_SESSION_ID", "PI_SESSION_ID"):
+    os.environ.pop(_name, None)
+
 
 def _run_atomicity(batch):
     """Drive atomicity.py end to end, so the description/statement split is covered, not just classify()."""
@@ -2091,7 +2100,12 @@ class OtherWriteRedactionTests(unittest.TestCase):
                     result = command(args)
                     self.assertEqual(result, answer, "the store's answer must reach the caller unchanged")
                     self.assertEqual(json.loads(out.getvalue()), answer)
-                    digest = json.loads(err.getvalue())["redaction"]
+                    # LADR-11: cmd_set reports the export boundary on stderr beside the
+                    # digest, so the JSON line is selected out rather than parsed whole.
+                    err_lines = [line for line in err.getvalue().splitlines()
+                                 if line.startswith("{")]
+                    self.assertEqual(len(err_lines), 1, err.getvalue())
+                    digest = json.loads(err_lines[0])["redaction"]
                     self.assertTrue(digest and all(entry["locations"] for entry in digest))
                     self.assertEqual(self._planted(err.getvalue() + out.getvalue()), [])
                     for secret in PLANTED_SECRETS:
@@ -2104,7 +2118,11 @@ class OtherWriteRedactionTests(unittest.TestCase):
                 redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as err:
             response = client.cmd_set(SimpleNamespace(payload=None, dryrun=False))
         self.assertTrue(response["redaction"])
-        self.assertEqual(err.getvalue(), "")
+        # LADR-11: the export boundary report and the send receipt share stderr with
+        # the digest; the contract is that nothing else is printed, not that stderr
+        # is empty.
+        self.assertEqual(err.getvalue().strip().splitlines(),
+                         ["Boundary: none", "Marker: none (no session id)"])
 
     def test_ticket_parent_dry_run_previews_the_scrubbed_request(self):
         payload = OTHER_WRITES["ticket_parent"][3]
@@ -4200,6 +4218,184 @@ class DirectionAliasTests(unittest.TestCase):
         readme = (HERE.parent / "README.md").read_text(encoding="utf-8")
         self.assertNotRegex(readme, r"(?i)both clients[^.\n]*`export`")
         self.assertIn("the read-only client accepts `import` only", readme)
+
+
+class SessionMarkerTests(unittest.TestCase):
+    """HLD-007 LADR-11: an odin import marks the working point; export cuts at it."""
+
+    ENV_NAMES = ("CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "OPENCODE_SESSION_ID",
+                 "COPILOT_AGENT_SESSION_ID", "PI_SESSION_ID")
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self._saved = {n: os.environ.get(n) for n in (*self.ENV_NAMES, "SESSION_MARKER_ROOT")}
+        for n in self.ENV_NAMES:
+            os.environ.pop(n, None)
+        os.environ["SESSION_MARKER_ROOT"] = self.tmp.name
+        self.addCleanup(self._restore)
+
+    def _restore(self):
+        for n, v in self._saved.items():
+            if v is None:
+                os.environ.pop(n, None)
+            else:
+                os.environ[n] = v
+
+    def _row(self, uuid, version=1, subject="Storage engine decision"):
+        return {"uuid": uuid, "groupUuid": "g-1", "version": version,
+                "description": subject, "statement": "Postgres stores the index."}
+
+    def _query(self, rows, **flags):
+        payload = {}
+        args = SimpleNamespace(payload=None, nomarker=flags.get("nomarker", False),
+                               session=flags.get("session"))
+        with patch.object(client, "read_payload", return_value=payload), \
+                patch.object(client, "_request", return_value={"items": rows}), \
+                redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as err:
+            client.cmd_query(args)
+        return err.getvalue()
+
+    def _set(self, items, **flags):
+        payload = {"groupUuid": "g-1", "items": items}
+        args = SimpleNamespace(payload=None, dryrun=True,
+                               export_all=flags.get("all", False), session=flags.get("session"))
+        sent = {}
+
+        def fake_request(method, path, body=None, query=None):
+            sent["body"] = body
+            return {"created": 1}
+
+        with patch.object(client, "read_payload", return_value=payload), \
+                patch.object(client, "_request", side_effect=fake_request), \
+                redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as err:
+            client.cmd_set(args)
+        return sent.get("body"), err.getvalue()
+
+    def test_query_marks_and_set_drops_the_echo(self):
+        os.environ["CLAUDE_CODE_SESSION_ID"] = "ses-odin-a"
+        err = self._query([self._row("mem-echo-1", 2)])
+        self.assertIn("Marker: set", err)
+        payload = {"groupUuid": "g-1", "items": [{"uuid": "mem-echo-1",
+                                "description": "Storage engine decision",
+                                "statement": "Postgres stores the index."}]}
+        args = SimpleNamespace(payload=None, dryrun=True, export_all=False, session=None)
+        with patch.object(client, "read_payload", return_value=payload), \
+                patch.object(client, "_request", return_value={"created": 1}), \
+                redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as err:
+            with self.assertRaises(client.ClientError) as raised:
+                client.cmd_set(args)
+        self.assertIn("excluded as echo", str(raised.exception))
+        self.assertIn("Boundary: marker", err.getvalue())
+
+    def test_set_all_ignores_the_marker(self):
+        os.environ["CLAUDE_CODE_SESSION_ID"] = "ses-odin-b"
+        self._query([self._row("mem-all-1", 1)])
+        body, err = self._set([{"uuid": "mem-all-1",
+                                "description": "Storage engine decision",
+                                "statement": "Postgres stores the index."}], all=True)
+        self.assertIsNotNone(body)
+        self.assertEqual(len(body["items"]), 1)
+        self.assertIn("Boundary: ignored (--all)", err)
+
+    def test_changed_imported_item_is_sent_as_a_supersession(self):
+        os.environ["CLAUDE_CODE_SESSION_ID"] = "ses-odin-c"
+        self._query([self._row("mem-ch-1", 1)])
+        body, err = self._set([{"uuid": "mem-ch-1",
+                                "description": "Storage engine v2",
+                                "statement": "CockroachDB now stores the index."}])
+        self.assertIsNotNone(body)
+        self.assertEqual(body["items"][0]["uuid"], "mem-ch-1")
+        self.assertIn("Supersession", err)
+
+    def test_nomarker_recall_flows_into_the_send(self):
+        os.environ["CLAUDE_CODE_SESSION_ID"] = "ses-odin-d"
+        err = self._query([self._row("mem-nm-1", 1)], nomarker=True)
+        self.assertIn("Marker: skipped (--nomarker", err)
+        body, err = self._set([{"uuid": "mem-nm-1",
+                                "description": "Storage engine decision",
+                                "statement": "Postgres stores the index."}])
+        self.assertIsNotNone(body, "a --nomarker recall is history, not an exclusion")
+        self.assertIn("Boundary: none", err)
+
+    def test_odin_send_ignores_the_kvasir_marker(self):
+        import session_marker as sm
+        os.environ["CLAUDE_CODE_SESSION_ID"] = "ses-odin-e"
+        sm.record_import("kvasir", "ses-odin-e", "claude-code", "import", False,
+                         [{"id": "mem-kv-1", "version": 1, "subject": "Kvasir Q?"}])
+        body, err = self._set([{"uuid": "mem-kv-1", "description": "Kvasir Q?",
+                                "statement": "Kvasir text."}])
+        self.assertIsNotNone(body)
+        self.assertEqual(len(body["items"]), 1)
+
+    def test_send_marks_the_receipt_and_a_repeat_echoes(self):
+        import session_marker as sm
+        os.environ["CLAUDE_CODE_SESSION_ID"] = "ses-odin-g"
+        payload = {"groupUuid": "g-1", "items": [{"createUuid": "new-id-1",
+                                                  "description": "Fresh claim",
+                                                  "statement": "CockroachDB stores it."}]}
+        args = SimpleNamespace(payload=None, dryrun=False, export_all=False, session=None)
+        with patch.object(client, "read_payload", return_value=payload), \
+                patch.object(client, "_request", return_value={"created": 1}), \
+                redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as err:
+            client.cmd_set(args)
+        self.assertIn("Marker: set (export,", err.getvalue())
+        marker = sm.load_marker("odin", "ses-odin-g")
+        self.assertEqual(marker["imports"][-1]["verb"], "export")
+        # Re-sending the same uuid + description is now an echo: refused, nothing sent.
+        again = {"groupUuid": "g-1", "items": [{"uuid": "new-id-1",
+                                                "description": "Fresh claim",
+                                                "statement": "CockroachDB stores it."}]}
+        with patch.object(client, "read_payload", return_value=again):
+            with self.assertRaises(client.ClientError):
+                client.cmd_set(SimpleNamespace(payload=None, dryrun=True, export_all=False,
+                                               session=None))
+
+    def test_send_nomarker_writes_but_marks_nothing(self):
+        import session_marker as sm
+        os.environ["CLAUDE_CODE_SESSION_ID"] = "ses-odin-h"
+        payload = {"groupUuid": "g-1", "items": [{"description": "Fresh claim",
+                                                  "statement": "CockroachDB stores it."}]}
+        args = SimpleNamespace(payload=None, dryrun=False, export_all=False,
+                               session=None, nomarker=True)
+        with patch.object(client, "read_payload", return_value=payload), \
+                patch.object(client, "_request", return_value={"created": 1}), \
+                redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as err:
+            client.cmd_set(args)
+        self.assertIn("Marker: skipped (--nomarker", err.getvalue())
+        self.assertIsNone(sm.load_marker("odin", "ses-odin-h"))
+
+    def test_dryrun_marks_nothing(self):
+        import session_marker as sm
+        os.environ["CLAUDE_CODE_SESSION_ID"] = "ses-odin-i"
+        payload = {"groupUuid": "g-1", "items": [{"description": "Fresh claim",
+                                                  "statement": "CockroachDB stores it."}]}
+        args = SimpleNamespace(payload=None, dryrun=True, export_all=False, session=None)
+        with patch.object(client, "read_payload", return_value=payload), \
+                patch.object(client, "_request", return_value={"created": 1}), \
+                redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as err:
+            client.cmd_set(args)
+        self.assertIn("Marker: skipped (nothing written)", err.getvalue())
+        self.assertIsNone(sm.load_marker("odin", "ses-odin-i"))
+
+    def test_each_harness_env_var_resolves_in_isolation(self):
+        import session_marker as sm
+        for name in self.ENV_NAMES:
+            for other in self.ENV_NAMES:
+                os.environ.pop(other, None)
+            os.environ[name] = "ses-odin-env"
+            sid, harness = sm.resolve_session(None)
+            self.assertEqual(sid, "ses-odin-env", name)
+            self.assertTrue(harness)
+
+    def test_marker_holds_references_never_content(self):
+        import session_marker as sm
+        os.environ["CLAUDE_CODE_SESSION_ID"] = "ses-odin-f"
+        self._query([self._row("mem-ref-1", 1)])
+        raw = Path(self.tmp.name, "odin-ses-odin-f.json").read_text(encoding="utf-8")
+        self.assertNotIn("Postgres stores the index", raw)
+        data = json.loads(raw)
+        self.assertEqual(data["type"], "odin")
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 # LADR-11: Imports and exports mark the session's working point; export excludes what was marked
 
-**Status:** Draft
+**Status:** Accepted — implemented 2026-10-14 (evidence below; no Host, API or schema change)
 
 ## Context
 
@@ -104,6 +104,52 @@ last marker.
   hatch. Subagent inheritance of the parent id is verified for Claude Code only and is out of scope here.
 - Recall-feedback "used vs merely returned" (HLD-004) becomes possible from the marker but is a separate
   decision.
+
+## Evidence
+
+Implemented 2026-10-14, client-side only (skill scripts; the store, API and schema are
+unchanged):
+
+- **`session_marker.py`** (WET copy in all three skill script dirs —
+  `mimisbrunnr-kvasir-understanding`, `mimisbrunnr-odin-context-memory`, `ai-understanding` —
+  parity-pinned by each harness): five-name harness env chain
+  (`CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID`, `OPENCODE_SESSION_ID`,
+  `COPILOT_AGENT_SESSION_ID`, `PI_SESSION_ID`) with explicit `--session` override, per-skill
+  JSON markers under `.context/session-markers/<type>-<session-id>.json` (atomic temp + rename),
+  last-marked import as the boundary, marked-wins exclusion, digest-only lineage, and a
+  `record`/`boundary` CLI for agent-driven skills.
+- **Kvasir** (`understanding_client.py`): `load`/`import` gained `--nomarker`/`--session` and
+  print `Marker:`; `export`/`dump` gained `--all`/`--session` and print `Boundary:`. Echo ids
+  are dropped before preflight; a changed imported item is kept as a supersession (mechanical id /
+  exact-subject match). `export --all` keeps its shared-spelling meaning (ignore the marker).
+  Harness `run_tests.py` 221 → 233 (`SessionMarkerTests`, 12 cases covering every acceptance
+  criterion below).
+- **Odin** (`context_memory_client.py`): `query`/`import` gained `--nomarker`/`--session` and
+  mark + `Marker:` on stderr; `set`/`export` gained `--all`/`--session`, drop echo items (same
+  uuid **and** description) and keep changed ones as supersessions; `preflight` gained
+  `--all`/`--session` and discloses exact-subject matches as supersession routing. `Boundary:`
+  on stderr so stdout stays parseable JSON. The read-only client deliberately never marks (it is
+  the shared recall path kvasir `import` shells out to). Harness 248 → 255.
+- **ai-understanding**: `SKILL.md` marker procedure via the `session_marker.py` CLI (`record` on
+  `--import`, `boundary` on `--export`); a default export skips excluded slugs and writes a
+  changed excluded unit as `improved`. Harness +6 `SessionMarkerCLITests`.
+
+Export-marks amendment (same day): `export --nomarker` on kvasir `export`/`dump` and Odin
+`set`/`export` (exports normally, writes no entry); a successful kvasir `export --write`
+appends one entry per completed batch (written version-target uuids / caller createUuids),
+`dump --currentsession` appends its folder, Odin `set` appends sent ids, ai-understanding
+`--export` records `{path, slug}` — the marker follows the receipt, so dry runs, refusals,
+empty and held-back sets mark nothing. Slug/file-identity exclusion (`exclusion_slugs`) covers
+understanding-file re-exports; `export --all` still records. Kvasir harness 233 → 238, Odin
+255 → 258.
+
+Acceptance mapping (worktask criteria): marked import → default export drops echo with
+`Boundary: marker …`; `export --all` ignores with `Boundary: ignored (--all)`; `--nomarker`-only
+behaves as `--all` (`Boundary: none`); marked-wins order-independent; two marked imports move the
+boundary and keep both exclusion sets; per-skill marker files are separate; changed-imported →
+supersession; each env var resolves in isolation and none-set prints `Marker: none`; markers hold
+references only (asserted on keys); existing `load`/`import --all` breadth unchanged (existing
+breadth cases still green).
 
 ## Related
 

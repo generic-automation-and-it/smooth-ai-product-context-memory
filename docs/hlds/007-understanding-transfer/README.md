@@ -93,7 +93,7 @@ A practitioner shares this session's context with another session or repository 
 ### 5. Imports and exports mark the working point; export does not echo it
 
 A session's own work starts at its deliberate import. Export distils that work, not what was imported
-(LADR-11, Draft).
+(LADR-11, Accepted 2026-10-14).
 
 **DoD**
 
@@ -148,7 +148,7 @@ See [`./ladrs/`](./ladrs/). Status legend matches HLD-005: `Draft → Prototype 
 | [LADR-08](./ladrs/LADR-08-load-breadth-is-a-filter.md) | Load breadth is a filter (`--all` union vs understanding-only); not two products | Accepted |
 | [LADR-09](./ladrs/LADR-09-load-reads-ai-understanding-files.md) | Load and import read the ai-understanding `.understanding.md` format (and store folders, newest version per slug) as structured input | Accepted |
 | [LADR-10](./ladrs/LADR-10-store-load-is-a-reported-budget.md) | A store load is a reported budget of whole records: `--max-chars` cuts whole records in source order, lists each cut by identity, never compresses; under budget it is byte-identical | Accepted |
-| [LADR-11](./ladrs/LADR-11-import-marks-the-export-boundary.md) | Imports and exports write a per-skill session marker (client-side, ids only); a default export is a delta since the last marker unless `--all`; `--nomarker` leaves the marker unchanged | Draft |
+| [LADR-11](./ladrs/LADR-11-import-marks-the-export-boundary.md) | Imports and exports write a per-skill session marker (client-side, ids only); a default export is a delta since the last marker unless `--all`; `--nomarker` leaves the marker unchanged | Accepted |
 
 ## Non-Functional Requirements
 

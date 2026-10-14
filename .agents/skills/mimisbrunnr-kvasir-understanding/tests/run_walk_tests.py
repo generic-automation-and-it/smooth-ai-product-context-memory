@@ -67,6 +67,15 @@ sys.path.insert(0, str(UND_ROOT.parent / "mimisbrunnr-saga-dossier" / "scripts")
 import understanding_client as uc  # noqa: E402
 import dossier_composer as dc     # noqa: E402
 
+# Marker isolation (HLD-007 LADR-11): loads key markers to the harness session id,
+# which is present in a real agent shell. Without this, walk cases would write markers
+# into the working repo.
+import tempfile as _tempfile
+os.environ["SESSION_MARKER_ROOT"] = _tempfile.mkdtemp(prefix="walk-markers-")
+for _name in ("CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "OPENCODE_SESSION_ID",
+              "COPILOT_AGENT_SESSION_ID", "PI_SESSION_ID"):
+    os.environ.pop(_name, None)
+
 # The ICM reference band (references/core.md "Token discipline"): 2k-8k tokens per step. A load above
 # the 8k upper bound is a finding, never a cap. 8k tokens is stated here in the band's own terms.
 ICM_TOKEN_BAND_HIGH = 8000

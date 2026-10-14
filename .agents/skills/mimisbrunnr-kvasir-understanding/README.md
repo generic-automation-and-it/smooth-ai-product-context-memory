@@ -21,15 +21,15 @@ session context, and share context across sessions and repositories.
 # Load a store export or a foreign document into context (no write)
 # <input> may be a store export, an ai-understanding .understanding.md unit or store folder, or a dump folder
 python3 .../understanding_client.py load <input> \
-  [--format store|understanding|foreign|auto] [--all] [--asof YYYY-MM-DD] [--max-chars N]
+  [--format store|understanding|foreign|auto] [--all] [--asof YYYY-MM-DD] [--max-chars N] [--nomarker]
 
 # Recall understanding-kind records from the live store into the session (read token only, no write)
 python3 .../understanding_client.py import \
   [--ticket provider:key] [--repository repo] [--initiative NAME] [--scope scope:id] \
-  [--tags tag,...] [--query WORD] [--status STATUS] [--limit N] [--all] [--table]
+  [--tags tag,...] [--query WORD] [--status STATUS] [--limit N] [--all] [--table] [--nomarker]
 
 # Capture material into the store through the capture path (dry run unless --write)
-python3 .../understanding_client.py export <input> [--write] \
+python3 .../understanding_client.py export <input> [--write] [--all] [--nomarker] \
   [--tickets A,1] [--tags tag] [--repository repo] [--scope product:x]
 
 # Dump the current session's context to a discoverable local folder (export, no write)

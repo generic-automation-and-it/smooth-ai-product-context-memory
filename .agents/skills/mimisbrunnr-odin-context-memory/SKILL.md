@@ -24,6 +24,28 @@ client has `import` only; it has no write command to alias.
 | `--approve` | Write gated kinds (`rule`, `nfr`, `decision`) as `approved` instead of `proposed`. **Only usable when the human explicitly confirms.** Without it, a gated `--export` still writes, but with `status: proposed` — excluded or flagged on retrieval until promoted. |
 | `--deepsearch` | Delegates bounded expansion: up to four keyword queries of 25 and five depth-one traversals of 20, with 400 unique UUID/version candidates overall. More inspection, never more authority or irreversibility. |
 
+**Session marker (HLD-007 LADR-11).** A marked `--import`/`query` sets the session's working
+point in `.context/session-markers/odin-<session-id>.json` (references only — ids, versions,
+subjects, or selector + as-of; never content; atomic write). Session id: first non-empty of
+`CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID`, `OPENCODE_SESSION_ID`,
+`COPILOT_AGENT_SESSION_ID`, `PI_SESSION_ID`, else explicit `--session <id>`, else no marker.
+`--nomarker` recalls history that flows into the send; `--all` on `set`/`export` (and
+`preflight`) ignores the marker. `set`/`export` drops echo items (same uuid **and** same
+description) before sending and keeps changed ones as supersessions; `preflight` discloses
+exact-subject matches as supersession routing. `query`/`import` prints `Marker:` and
+`set`/`export`/`preflight` print `Boundary:` — both on **stderr**, so stdout stays parseable
+JSON. A successful `set`/`export` appends the sent ids to the marker and prints
+`Marker: set (export, N items)`; dry runs, refusals and `--nomarker` sends mark nothing. The read-only client (`context_memory_read_client.py`) never writes markers: it is the
+shared recall path (kvasir `import` shells out to it and writes its own marker), so an odin
+recall that must mark runs through this client's `query`/`import`.
+
+| Marker switch | Effect |
+|--------|--------|
+| `--nomarker` (`query`/`import` only) | Recall without setting the boundary; flows into a default send. |
+| `--all` (`set`/`export`, `preflight` only) | Ignore the marker; send/match in full (a successful send still writes its export entry). |
+| `--nomarker` (`set`/`export` only) | Send normally but write no marker entry. |
+| `--session <id>` (`query`/`import`, `set`/`export`, `preflight`) | Explicit session id for the marker (else the harness env chain). |
+
 **Implication rule:** `--approve` is the only switch that widens what the write path *does*; all other
 switches (`--dryrun`, `--deepsearch`, `--import`) change *how much work* is done or *which
 direction*, never *how irreversible* it is. `--dryrun` and `--approve` are mutually exclusive —

@@ -26,6 +26,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 import understanding_index as ui  # noqa: E402
 
+# Marker isolation (HLD-007 LADR-11): session_marker.py keys markers to the harness
+# session id, which is present in a real agent shell. Marker CLI cases below set
+# their own root per case; this keeps any other case hermetic.
+os.environ["SESSION_MARKER_ROOT"] = tempfile.mkdtemp(prefix="ai-markers-")
+for _name in ("CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "OPENCODE_SESSION_ID",
+              "COPILOT_AGENT_SESSION_ID", "PI_SESSION_ID"):
+    os.environ.pop(_name, None)
+
 UNIT_FRONTMATTER = """---
 slug: {slug}
 description: test unit
@@ -1029,6 +1037,92 @@ class ReadmeTests(unittest.TestCase):
         readme = (Path(ui.__file__).resolve().parents[1] / "README.md").read_text(encoding="utf-8")
         row = next(line for line in readme.splitlines() if line.startswith("| Loading |"))
         self.assertIn("description matches", row)
+
+
+MARKER_ENV_NAMES = ("CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "OPENCODE_SESSION_ID",
+                    "COPILOT_AGENT_SESSION_ID", "PI_SESSION_ID")
+MARKER_SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "session_marker.py"
+
+
+class SessionMarkerCLITests(unittest.TestCase):
+    """HLD-007 LADR-11: the ai-understanding marker CLI records the working point."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self._saved = {n: os.environ.get(n) for n in (*MARKER_ENV_NAMES, "SESSION_MARKER_ROOT")}
+        for n in MARKER_ENV_NAMES:
+            os.environ.pop(n, None)
+        os.environ["SESSION_MARKER_ROOT"] = self.tmp.name
+        self.addCleanup(self._restore)
+
+    def _restore(self):
+        for n, v in self._saved.items():
+            if v is None:
+                os.environ.pop(n, None)
+            else:
+                os.environ[n] = v
+
+    def _run(self, *argv):
+        completed = subprocess.run(
+            [sys.executable, "-B", str(MARKER_SCRIPT), *argv],
+            capture_output=True, text=True, timeout=30)
+        return completed.returncode, completed.stdout.strip(), completed.stderr.strip()
+
+    def test_record_then_boundary(self):
+        os.environ["PI_SESSION_ID"] = "ses-ai-1"
+        rc, out, _ = self._run("record", "--type", "ai-understanding",
+                               "--item", "slug-1::What is this?")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("Marker: set", out)
+        rc, out, _ = self._run("boundary", "--type", "ai-understanding")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("Boundary: marker", out)
+        self.assertIn("1 excluded", out)
+
+    def test_nomarker_flows_and_boundary_stays_none(self):
+        os.environ["PI_SESSION_ID"] = "ses-ai-2"
+        rc, out, _ = self._run("record", "--type", "ai-understanding", "--nomarker",
+                               "--item", "slug-9::Why?")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("Marker: skipped (--nomarker", out)
+        rc, out, _ = self._run("boundary", "--type", "ai-understanding")
+        self.assertIn("Boundary: none", out)
+
+    def test_boundary_all_ignores_the_marker(self):
+        os.environ["PI_SESSION_ID"] = "ses-ai-3"
+        self._run("record", "--type", "ai-understanding", "--item", "slug-1::Q?")
+        rc, out, _ = self._run("boundary", "--type", "ai-understanding", "--all")
+        self.assertIn("Boundary: ignored (--all)", out)
+
+    def test_no_session_id_means_no_marker(self):
+        rc, out, _ = self._run("record", "--type", "ai-understanding",
+                               "--item", "slug-1::Q?")
+        self.assertIn("Marker: none (no session id)", out)
+        rc, out, _ = self._run("boundary", "--type", "ai-understanding")
+        self.assertIn("Boundary: none", out)
+
+    def test_marker_holds_references_never_content(self):
+        import json as _json
+        os.environ["CODEX_THREAD_ID"] = "ses-ai-4"
+        self._run("record", "--type", "ai-understanding",
+                  "--item", "slug-1::What is this?")
+        raw = Path(self.tmp.name, "ai-understanding-ses-ai-4.json").read_text(encoding="utf-8")
+        data = _json.loads(raw)
+        self.assertEqual(data["type"], "ai-understanding")
+        for entry in data["imports"]:
+            for item in entry.get("items", []):
+                self.assertEqual(set(item), {"id", "version", "subject"})
+
+    def test_three_copies_stay_identical(self):
+        roots = [MARKER_SCRIPT,
+                 MARKER_SCRIPT.parents[2] / "mimisbrunnr-odin-context-memory"
+                 / "scripts" / "session_marker.py",
+                 MARKER_SCRIPT.parents[2] / "mimisbrunnr-kvasir-understanding"
+                 / "scripts" / "session_marker.py"]
+        bodies = [r.read_text(encoding="utf-8") for r in roots]
+        self.assertEqual(bodies[0], bodies[1])
+        self.assertEqual(bodies[0], bodies[2])
 
 
 if __name__ == "__main__":

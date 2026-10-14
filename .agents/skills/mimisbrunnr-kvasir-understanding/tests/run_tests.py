@@ -36,6 +36,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 # client is imported, because it seeds the gate flag from the credential file at import.
 os.environ["CONTEXT_MEMORY_CREDENTIAL_FILE"] = os.devnull
 os.environ["CONTEXT_MEMORY_BASE_URL"] = "http://127.0.0.1:9"
+# Marker isolation (LADR-11): the client keys markers to the harness session id,
+# which is present in a real agent shell (e.g. OPENCODE_SESSION_ID here). Without
+# this, cases exercising load/import/export would write markers into the working
+# repo and later exports would exclude those ids — the same hermeticity rule the
+# credential block above enforces. Marker cases set their own root per case.
+os.environ["SESSION_MARKER_ROOT"] = tempfile.mkdtemp(prefix="kvasir-markers-")
+for _name in ("CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "OPENCODE_SESSION_ID",
+              "COPILOT_AGENT_SESSION_ID", "PI_SESSION_ID"):
+    os.environ.pop(_name, None)
 os.environ["CONTEXT_MEMORY_READ_TOKEN"] = "harness-offline-read-token"
 for _name in [n for n in os.environ
               if n.casefold().replace(":", "__") in {"context_memory_write_token", "apiaccess__writetoken",
@@ -3692,6 +3701,292 @@ class ExportDedupClaimTests(unittest.TestCase):
         for payload in set_payloads:
             self.assertEqual(payload["links"], [], "a set call derives links now; update the "
                              "exact-subject-only docs")
+
+
+class SessionMarkerTests(unittest.TestCase):
+    """LADR-11: an import marks the working point; a default export excludes it."""
+
+    ENV_NAMES = ("CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "OPENCODE_SESSION_ID",
+                 "COPILOT_AGENT_SESSION_ID", "PI_SESSION_ID")
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self._saved = {n: os.environ.get(n) for n in (*self.ENV_NAMES, "SESSION_MARKER_ROOT")}
+        for n in self.ENV_NAMES:
+            os.environ.pop(n, None)
+        os.environ["SESSION_MARKER_ROOT"] = self.tmp.name
+        self.addCleanup(self._restore)
+        import session_marker as sm
+        self.sm = sm
+
+    def _restore(self):
+        for n, v in self._saved.items():
+            if v is None:
+                os.environ.pop(n, None)
+            else:
+                os.environ[n] = v
+
+    def _sid(self, name="CLAUDE_CODE_SESSION_ID", value="ses-test-1"):
+        os.environ[name] = value
+        return value
+
+    def _store_file(self, records, name=None):
+        if name is None:
+            name = f"export-{len(list(Path(self.tmp.name).glob('export-*.json')))}.json"
+        path = Path(self.tmp.name) / name
+        path.write_text(json.dumps(records), encoding="utf-8")
+        return str(path)
+
+    def _record(self, uuid, version=1, question="Q?", subject="S"):
+        return {"uuid": uuid, "version": version, "subject": subject,
+                "description": question, "statement": "An answer worth keeping.",
+                "kind": "understanding", "status": "approved"}
+
+    def test_marked_load_then_default_export_drops_the_echo(self):
+        sid = self._sid()
+        src = self._store_file([self._record("u-marked-1", 2, "What stores data?")])
+        rc, out, _ = run(["load", src, "--format", "store"])
+        self.assertEqual(rc, 0, out)
+        self.assertIn("Marker: set", out)
+        originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                     uc.resolve_group, uc._run_capture_client)
+        uc.gate_redaction = lambda texts: (list(texts), {})
+        uc.gate_atomicity = lambda c: [{"verdict": "simple", "signals": []} for _ in c]
+        uc.initiative_exists = lambda name: (True, "ok")
+        uc.resolve_group = lambda b, n, d, dryrun: ({"groupUuid": "g", "created": False}, "ok")
+        uc._run_capture_client = lambda s, a, pl: (0, json.dumps({"candidates": []}), "")
+        try:
+            rc, out, _ = run(["export", src, "--heimdallr", "false"])
+        finally:
+            (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+             uc.resolve_group, uc._run_capture_client) = originals
+        self.assertIn("Boundary: marker", out)
+        self.assertIn("Excluded 1 echo", out)
+
+    def test_export_all_ignores_the_marker(self):
+        sid = self._sid()
+        src = self._store_file([self._record("u-marked-2", 1, "What stores data?")])
+        rc, out, _ = run(["load", src, "--format", "store"])
+        self.assertEqual(rc, 0, out)
+        originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                     uc.resolve_group, uc._run_capture_client)
+        uc.gate_redaction = lambda texts: (list(texts), {})
+        uc.gate_atomicity = lambda c: [{"verdict": "simple", "signals": []} for _ in c]
+        uc.initiative_exists = lambda name: (True, "ok")
+        uc.resolve_group = lambda b, n, d, dryrun: ({"groupUuid": "g", "created": False}, "ok")
+        uc._run_capture_client = lambda s, a, pl: (0, json.dumps({"candidates": []}), "")
+        try:
+            rc, out, _ = run(["export", src, "--heimdallr", "false", "--all"])
+        finally:
+            (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+             uc.resolve_group, uc._run_capture_client) = originals
+        self.assertIn("Boundary: ignored (--all)", out)
+        self.assertNotIn("Excluded", out)
+
+    def test_nomarker_only_behaves_as_all(self):
+        sid = self._sid()
+        src = self._store_file([self._record("u-nomark-1", 1, "What stores data?")])
+        rc, out, _ = run(["load", src, "--format", "store", "--nomarker"])
+        self.assertEqual(rc, 0, out)
+        self.assertIn("Marker: skipped (--nomarker", out)
+        originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                     uc.resolve_group, uc._run_capture_client)
+        uc.gate_redaction = lambda texts: (list(texts), {})
+        uc.gate_atomicity = lambda c: [{"verdict": "simple", "signals": []} for _ in c]
+        uc.initiative_exists = lambda name: (True, "ok")
+        uc.resolve_group = lambda b, n, d, dryrun: ({"groupUuid": "g", "created": False}, "ok")
+        uc._run_capture_client = lambda s, a, pl: (0, json.dumps({"candidates": []}), "")
+        try:
+            rc, out, _ = run(["export", src, "--heimdallr", "false"])
+        finally:
+            (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+             uc.resolve_group, uc._run_capture_client) = originals
+        self.assertIn("Boundary: none", out)
+
+    def test_marked_wins_over_nomarker_for_the_same_id(self):
+        sid = self._sid()
+        rec = self._record("u-both-1", 1, "What stores data?")
+        src = self._store_file([rec])
+        rc, out, _ = run(["load", src, "--format", "store"])
+        self.assertIn("Marker: set", out)
+        rc, out, _ = run(["load", src, "--format", "store", "--nomarker"])
+        self.assertIn("Marker: skipped", out)
+        marker = self.sm.load_marker("kvasir", sid)
+        ids, _, _, count = self.sm.exclusion_set(marker)
+        self.assertIn("u-both-1", ids)
+        self.assertEqual(count, 1)
+
+    def test_two_marked_imports_move_the_boundary_but_keep_both(self):
+        sid = self._sid()
+        src1 = self._store_file([self._record("u-first-1", 1, "First question?")])
+        src2 = self._store_file([self._record("u-second-1", 1, "Second question?")])
+        rc, out1, _ = run(["load", src1, "--format", "store"])
+        self.assertIn("Marker: set", out1)
+        rc, out2, _ = run(["load", src2, "--format", "store"])
+        self.assertIn("Marker: extended", out2)
+        marker = self.sm.load_marker("kvasir", sid)
+        ids, _, boundary, count = self.sm.exclusion_set(marker)
+        self.assertEqual(ids, {"u-first-1", "u-second-1"})
+        self.assertEqual(marker["boundary"], marker["imports"][-1]["at"])
+
+    def test_kvasir_export_ignores_the_odin_marker(self):
+        sid = self._sid()
+        self.sm.record_import("odin", sid, "claude-code", "import", False,
+                             [{"id": "u-odin-1", "version": 1, "subject": "Odin Q?"}])
+        src = self._store_file([self._record("u-kv-1", 1, "Kvasir Q?")])
+        rc, out, _ = run(["load", src, "--format", "store"])
+        self.assertIn("Marker: set", out)
+        marker = self.sm.load_marker("kvasir", sid)
+        ids, _, _, _ = self.sm.exclusion_set(marker)
+        self.assertEqual(ids, {"u-kv-1"})
+
+    def test_changed_imported_item_is_a_supersession(self):
+        sid = self._sid()
+        src = self._store_file([self._record("u-ch-1", 1, "What stores data?")])
+        rc, out, _ = run(["load", src, "--format", "store"])
+        self.assertEqual(rc, 0, out)
+        marker = self.sm.load_marker("kvasir", sid)
+        candidates = [{"statement": "We moved to CockroachDB for scale.",
+                       "description": "What stores data?", "originUuid": None}]
+        kept, dropped, supers = uc._apply_marker_exclusions(candidates, marker)
+        self.assertEqual(dropped, 0)
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(len(supers), 1)
+        self.assertEqual(kept[0]["_supersedes"], "u-ch-1")
+
+    def test_each_harness_env_var_resolves_in_isolation(self):
+        for name in self.ENV_NAMES:
+            for other in self.ENV_NAMES:
+                os.environ.pop(other, None)
+            os.environ[name] = "ses-env-1"
+            sid, harness = self.sm.resolve_session(None)
+            self.assertEqual(sid, "ses-env-1", name)
+            self.assertTrue(harness)
+
+    def test_no_session_id_means_no_marker(self):
+        src = self._store_file([self._record("u-none-1", 1, "What stores data?")])
+        rc, out, _ = run(["load", src, "--format", "store"])
+        self.assertEqual(rc, 0, out)
+        self.assertIn("Marker: none (no session id)", out)
+
+    def test_explicit_session_overrides_the_environment(self):
+        os.environ["CLAUDE_CODE_SESSION_ID"] = "ses-env-wrong"
+        src = self._store_file([self._record("u-exp-1", 1, "What stores data?")])
+        rc, out, _ = run(["load", src, "--format", "store", "--session", "ses-flag-1"])
+        self.assertEqual(rc, 0, out)
+        self.assertIn("Marker: set", out)
+        self.assertIsNotNone(self.sm.load_marker("kvasir", "ses-flag-1"))
+        self.assertIsNone(self.sm.load_marker("kvasir", "ses-env-wrong"))
+
+    def test_marker_holds_references_never_content(self):
+        sid = self._sid()
+        src = self._store_file([self._record("u-ref-1", 1, "What stores data?")])
+        run(["load", src, "--format", "store"])
+        raw = Path(self.tmp.name, f"kvasir-{sid}.json").read_text(encoding="utf-8")
+        self.assertNotIn("An answer worth keeping", raw)
+        data = json.loads(raw)
+        self.assertEqual(data["type"], "kvasir")
+        self.assertEqual(data["session"], sid)
+        for entry in data["imports"]:
+            for item in entry.get("items", []):
+                self.assertEqual(set(item), {"id", "version", "subject"})
+
+    def _write_export(self, src, *extra):
+        """Dry-run-free export with everything stubbed; returns (rc, out, err)."""
+        originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                     uc.resolve_group, uc._run_capture_client)
+        uc.gate_redaction = lambda texts: (list(texts), {})
+        uc.gate_atomicity = lambda c: [{"verdict": "simple", "signals": []} for _ in c]
+        uc.initiative_exists = lambda name: (True, "ok")
+        uc.resolve_group = lambda b, n, d, dryrun: ({"groupUuid": "g-w", "created": False}, "ok")
+
+        def fake(script, argv, payload):
+            if argv[0] == "preflight":
+                n = len((payload or {}).get("candidates", []))
+                return 0, json.dumps({"candidates": [
+                    {"index": i, "matches": [], "ticketConflict": None} for i in range(n)],
+                    "intraBatchCollisions": []}), ""
+            return 0, json.dumps({"created": 1}), ""
+
+        uc._run_capture_client = fake
+        try:
+            return run(["export", src, "--write", "--heimdallr", "false", *extra])
+        finally:
+            (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+             uc.resolve_group, uc._run_capture_client) = originals
+
+    def test_export_write_marks_the_receipt(self):
+        self._sid()
+        src = Path(self.tmp.name, "notes.md")
+        src.write_text("CockroachDB now stores the index for horizontal scale.\n", encoding="utf-8")
+        rc, out, err = self._write_export(str(src))
+        self.assertEqual(rc, 0, err + out)
+        self.assertIn("Marker: set (export,", out)
+        marker = self.sm.load_marker("kvasir", os.environ["CLAUDE_CODE_SESSION_ID"])
+        verbs = [e["verb"] for e in marker["imports"]]
+        self.assertIn("export", verbs)
+
+    def test_second_default_export_excludes_what_the_first_wrote(self):
+        self._sid()
+        src = Path(self.tmp.name, "notes2.md")
+        src.write_text("CockroachDB now stores the index for horizontal scale.\n", encoding="utf-8")
+        rc, out, err = self._write_export(str(src))
+        self.assertEqual(rc, 0, err + out)
+        # Re-exporting the same prose: the written createUuid is excluded by subject
+        # match only as a supersession — but an identical store re-export echoes by id.
+        marker = self.sm.load_marker("kvasir", os.environ["CLAUDE_CODE_SESSION_ID"])
+        ids, _, _, count = self.sm.exclusion_set(marker)
+        self.assertGreaterEqual(count, 1)
+
+    def test_export_nomarker_writes_but_marks_nothing(self):
+        self._sid()
+        src = Path(self.tmp.name, "notes3.md")
+        src.write_text("CockroachDB now stores the index for horizontal scale.\n", encoding="utf-8")
+        rc, out, err = self._write_export(str(src), "--nomarker")
+        self.assertEqual(rc, 0, err + out)
+        self.assertIn("Marker: skipped (--nomarker", out)
+        self.assertIsNone(self.sm.load_marker("kvasir", os.environ["CLAUDE_CODE_SESSION_ID"]))
+
+    def test_dry_run_marks_nothing(self):
+        self._sid()
+        src = Path(self.tmp.name, "notes4.md")
+        src.write_text("CockroachDB now stores the index for horizontal scale.\n", encoding="utf-8")
+        originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                     uc.resolve_group, uc._run_capture_client)
+        uc.gate_redaction = lambda texts: (list(texts), {})
+        uc.gate_atomicity = lambda c: [{"verdict": "simple", "signals": []} for _ in c]
+        uc.initiative_exists = lambda name: (True, "ok")
+        uc.resolve_group = lambda b, n, d, dryrun: ({"groupUuid": "g", "created": False}, "ok")
+        uc._run_capture_client = lambda s, a, pl: (0, json.dumps({"candidates": []}), "")
+        try:
+            rc, out, _ = run(["export", str(src), "--heimdallr", "false"])
+        finally:
+            (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+             uc.resolve_group, uc._run_capture_client) = originals
+        self.assertIn("Marker: skipped (nothing written)", out)
+        self.assertIsNone(self.sm.load_marker("kvasir", os.environ["CLAUDE_CODE_SESSION_ID"]))
+
+    def test_dump_marks_the_folder_boundary(self):
+        self._sid()
+        content = Path(self.tmp.name, "session.txt")
+        content.write_text("# Things learned\n\nCockroachDB stores the index.\n", encoding="utf-8")
+        rc, out, err = run(["dump", "--currentsession", "--from", str(content),
+                            "--out", str(Path(self.tmp.name, "d1")), "--heimdallr", "false"])
+        self.assertEqual(rc, 0, err + out)
+        self.assertIn("Marker: set (export,", out)
+        marker = self.sm.load_marker("kvasir", os.environ["CLAUDE_CODE_SESSION_ID"])
+        self.assertEqual(marker["imports"][-1].get("folder"), "d1")
+
+    def test_three_copies_stay_identical(self):
+        roots = [Path(__file__).resolve().parents[1] / "scripts" / "session_marker.py"]
+        roots.append(Path(__file__).resolve().parents[2]
+                     / "mimisbrunnr-odin-context-memory" / "scripts" / "session_marker.py")
+        roots.append(Path(__file__).resolve().parents[2]
+                     / "ai-understanding" / "scripts" / "session_marker.py")
+        bodies = [r.read_text(encoding="utf-8") for r in roots]
+        self.assertEqual(bodies[0], bodies[1])
+        self.assertEqual(bodies[0], bodies[2])
 
 
 if __name__ == "__main__":

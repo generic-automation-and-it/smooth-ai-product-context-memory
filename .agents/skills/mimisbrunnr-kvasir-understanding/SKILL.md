@@ -40,11 +40,41 @@ Use this skill when a practitioner wants to seed an agent with prior knowledge, 
 already written somewhere into the store so it compounds. It is the **load/transfer** counterpart to
 `mimisbrunnr-odin-context-memory` (the sole writer of clean facts).
 
+## Session marker (LADR-11)
+
+A marked `load`/`import` sets the session's working point; a default `export` excludes
+what was marked, so imported context is never re-proposed as new (echo).
+
+- The marker is client-side only: `.context/session-markers/kvasir-<session-id>.json`
+  (atomic write), holding references (ids + versions + subjects, or selector + as-of)
+  — **never memory content**. No Host, API or schema change.
+- Session id: first non-empty of `CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID`,
+  `OPENCODE_SESSION_ID`, `COPILOT_AGENT_SESSION_ID`, `PI_SESSION_ID`, else explicit
+  `--session <id>`, else no marker (the verb still runs and prints `Marker: none`).
+- The **last** marked import is the boundary; every marked import's ids stay excluded.
+  `load`/`import` print one `Marker:` line (`set`, `extended`, `skipped (--nomarker)`,
+  `none`); `export`/`dump` print one `Boundary:` line (`marker <time>, N excluded` |
+  `none` | `ignored (--all)`).
+- `export --all` ignores the marker (whole input/session, skill picks kind as usual).
+  `load`/`import --nomarker` loads history that flows into a default export (ids still
+  logged with `nomarker: true`); an id marked and `--nomarker` stays excluded. No marker
+  (or only `--nomarker`/id-less imports) means default export equals `--all`.
+- A candidate changing an excluded item is exported as a **supersession** of it (version
+  bump with lineage), never dropped and never a new memory. Id-less input
+  (`--format foreign`) is history — no exclusion.
+- **Export marks too (amended LADR-11).** A successful `export --write` appends one entry per
+  completed batch (the written ids — version-target uuid or caller createUuid — so the marker
+  follows the receipt, never the plan); `dump --currentsession` appends its folder. Dry runs,
+  refusals, empty sets and held-back batches mark nothing. `export --nomarker` (and
+  `dump --nomarker`) exports normally but writes no entry. The export digest ends with one
+  `Marker:` line (`set (export, N items)` | `skipped (--nomarker)` | `skipped (nothing written)`
+  | `none (no session id)`).
+
 ## Load (default)
 
 ```bash
 python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding_client.py \
-  load [<input> | --input <path>] [--format store|understanding|foreign|auto] [--all] [--asof YYYY-MM-DD] [--max-chars N]
+  load [<input> | --input <path>] [--format store|understanding|foreign|auto] [--all] [--asof YYYY-MM-DD] [--max-chars N] [--nomarker] [--session ID]
 ```
 
 - `load` reads the input (a store Understanding export, or a foreign document) and renders it as
@@ -87,7 +117,7 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
 python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding_client.py \
   import [--ticket provider:key] [--repository REPO] [--initiative NAME] [--scope scope:id] \
   [--tags TAG,...] [--query WORD] [--status STATUS] [--limit N] [--asof YYYY-MM-DD] \
-  [--all] [--table] [--max-chars N]
+  [--all] [--table] [--max-chars N] [--nomarker] [--session ID]
 ```
 
 - `import` queries the store for `kind = understanding` through the capture skill's **read client**, so
@@ -95,6 +125,7 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
   grounding context — the same frames a store export gets — or as **one row per record** with `--table`.
 - `import` never runs Heimdallr autofill: inbound takes only what the caller binds. An explicit
   `--initiative "Mímisbrunnr-MVP"` recalls the whole initiative even from a ticketed branch.
+- A successful `import` writes the session marker (see above) unless `--nomarker`.
 - **Filters map one-for-one onto the read API's declared fields**, so the server does the narrowing:
   `--ticket provider:key`, `--repository`, `--initiative`, `--scope`, `--tags`, `--query` (free text,
   stemmed AND-of-lexemes — one or two words, not a sentence), `--status`, `--asof` (validity window),
@@ -119,7 +150,7 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
 
 ```bash
 python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding_client.py \
-  export [<input> | --input <path>] [--write] \
+  export [<input> | --input <path>] [--write] [--all] [--nomarker] [--session ID] \
   [--tickets TICKET,...] [--tags TAG,...] [--repository REPO] [--scope scope:id] \
   [--initiative NAME] [--name NAME] [--body TEXT] [--heimdallr true]
 ```
@@ -127,6 +158,8 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
 - `export` orchestrates the capture skill end to end — redaction gate, atomicity gate, the optional value
   gate, the auto-split batch cap, group resolution, preflight, and `set --dryrun` as the veto point — and
   **never writes directly**. It is a **dry run by default**; `--write` performs the capture.
+- A default export drops the session marker's ids and reports `Boundary:`; `export --all`
+  ignores the marker. A candidate changing an excluded item is kept as a supersession.
 - **Source dates become UTC instants on write.** Date-only `learned`/`updated` validity is sent as midnight UTC (`T00:00:00Z`), not interpreted in the machine timezone. Local load preserves the source date. Explicit timestamp strings retain fractional precision.
 - **Dedup is exact-subject only.** A candidate whose subject already exists in the group becomes a
   version bump; nothing else is matched, and no link is derived (`links: []`). **Before `--write`**,
@@ -245,11 +278,13 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
   dump --currentsession --from <session-summary-file|-> [--out .context/mimisbrunnr-understandings/<session-folder>] \
   [--session-name NAME] \
   [--tickets TICKET,...] [--tags TAG,...] [--repository REPO] [--scope scope:id] [--initiative NAME] \
-  [--heimdallr true]
+  [--heimdallr true] [--all] [--nomarker] [--session ID]
 ```
 
 - `dump --currentsession` writes the current session's understanding (its Understandings, decisions
   and key learnings) to `.context/mimisbrunnr-understandings/<session-folder>/` as Markdown.
+  It reports the session marker's `Boundary:` (`--all` reports it ignored); the authored text
+  itself is written as-is.
 - **The dump is a distilled projection, not the verbatim session.** `--from` carries the session's
   *understanding* — the material the agent has already distilled — never a raw session transcript.
   A `--from` body over `DUMP_MAX_BODY_CHARS` is refused with a direction to author the understanding

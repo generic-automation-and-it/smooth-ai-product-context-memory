@@ -108,6 +108,16 @@ recalls the live store via `import` (read token only) and orchestrates the captu
 - **A folder resolves to the newest version of each slug** — stamp suffix `-yyyyMMdd-HHmm` of the parent
   folder, then `updated` — the same precedence `ai-understanding`'s index applies. Older versions are
   counted, not silently dropped.
+- **An import marks the working point; a default export excludes what was marked (LADR-11).**
+  `load`/`import` record ids + versions + subjects (or selector + as-of for `--all` breadth;
+  `--nomarker` logs history that still flows into export) in
+  `.context/session-markers/kvasir-<session-id>.json` — references only, never content, atomic
+  write — and print one `Marker:` line. `export` drops echo ids before preflight, keeps a changed
+  imported item as a supersession (mechanical id / exact-subject match, no model judgement), and
+  prints one `Boundary:` line; `export --all` ignores the marker and `dump --currentsession`
+  reports it. Session id is the five-name harness env chain, else `--session`, else no marker.
+  A successful `export --write` (one entry per completed batch) and `dump` append to the marker —
+  the marker follows the receipt, never the plan; `export --nomarker` writes no entry.
 - **The dump warns when its folder is gitignored.** `.context/` is gitignored, so the default dump
   location does not survive the workspace. The warning is advisory — the dump is still written and the
   exit code is unchanged — and it asks the repo holding the folder (`git check-ignore`, never a text
@@ -311,6 +321,7 @@ recalls the live store via `import` (read token only) and orchestrates the captu
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-14 | **Session marker: imports and exports mark the boundary (LADR-11 + export-marks amendment).** `load`/`import` gain `--nomarker`/`--session` and print `Marker:`; `export`/`dump` gain `--all`/`--nomarker`/`--session` and print `Boundary:`. Markers live per skill under `.context/session-markers/` (store ids + versions + subjects, selector + as-of, or file slugs/folder; never content). A default export drops echo ids/slugs and routes changed-imported candidates to supersession mechanically; `--all` ignores the marker for selection. A successful `export --write` appends one entry per completed batch and `dump` its folder (receipt, never plan); dry runs, refusals, empty and held-back sets mark nothing. Shared `session_marker.py` helper (WET copy in all three skill script dirs, parity-pinned). Harness 221 -> 238. | HLD-007 LADR-11 |
 | 2026-10-14 | **`--write` refuses when the bound initiative is not the resolved group's.** Tickets resolve first and the initiative is create-path-only, so an explicit `--initiative` against an existing ticket-bound group was silently dropped while the export versioned under the old initiative. The resolved reply's `initiativeName` is now compared: mismatch stops before preflight with drop-flag / re-bind-for-WET / `update-group` options (dry run warns when tickets meet a non-default initiative). The refusal names the binding source and the upsert prerequisite; shared group-uuid/created/initiative extractors. Harness 214 -> 221. | session request |
 | 2026-10-13 | **A defaulted input now writes only when it provably is this session's dump.** `dump` records the running session id in `_dump.json` (`session`); a `--input`-less `export --write` matches on it, so a default to this session's dump may capture, while a defaulted dump that does not prove ownership stays dry-run only and refuses `--write` (the previous unconditional refusal). Empty session identity keeps the conservative guard. Harness 212 -> 214. | this change |
 | 2026-10-13 | Export date-only source validity as midnight UTC for the Instant API; preserve local source metadata and explicit timestamp precision. Regression coverage includes nullable end and invalid-date refusal. | HLD-001 LADR-05; UTC instant write fix |
