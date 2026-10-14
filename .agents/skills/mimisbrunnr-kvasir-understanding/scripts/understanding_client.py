@@ -2252,10 +2252,13 @@ def cmd_export(args: argparse.Namespace) -> int:
         print(f"\nWROTE{tag}:\n{out.strip()[:1200]}")
         # The marker follows the receipt, never the plan: one export entry per
         # completed batch, so a partial multi-batch export records exactly what
-        # reached the store (amended LADR-11).
+        # reached the store (amended LADR-11). The version rides along when the
+        # candidate carried one from the store, so the digest can say which version
+        # an export superseded; fresh prose has none to record.
         _mark_export_receipt(args, [{"id": item["uuid"] or item["createUuid"],
+                                     "version": candidate.get("originVersion"),
                                      "subject": item["description"]}
-                                    for item in items
+                                    for candidate, item in zip(chunk, items)
                                     if item["uuid"] or item["createUuid"]])
 
     if not args.write:

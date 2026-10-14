@@ -4196,6 +4196,20 @@ class SessionMarkerTests(unittest.TestCase):
         ids, _, _, _ = self.sm.exclusion_set(marker)
         self.assertIn("u-after-corrupt-1", ids)
 
+    def test_export_receipt_records_the_superseded_version(self):
+        self._sid()
+        src = self._store_file([dict(self._record("u-ver-1", 4, "Versioned Q?"))])
+        src_records = src
+        # Write path needs the full stubbed pipeline; reuse _write_export.
+        rc, out, err = self._write_export(src_records)
+        self.assertEqual(rc, 0, err + out)
+        marker = self.sm.load_marker("kvasir", os.environ["CLAUDE_CODE_SESSION_ID"])
+        exported = [i for e in marker["imports"] if e["verb"] == "export" for i in e["items"]]
+        by_id = {i["id"]: i for i in exported}
+        # The candidate came from a store export at version 4: the receipt says so.
+        versions = {i.get("version") for i in exported}
+        self.assertIn(4, versions)
+
     def test_three_copies_stay_identical(self):
         roots = [Path(__file__).resolve().parents[1] / "scripts" / "session_marker.py"]
         roots.append(Path(__file__).resolve().parents[2]
