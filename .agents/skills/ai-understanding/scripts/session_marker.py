@@ -170,9 +170,11 @@ def boundary_line(marker: dict | None, ignored: bool = False) -> str:
         return "Boundary: none"
     _, _, boundary, count = exclusion_set(marker)
     total = count + len(exclusion_slugs(marker))
-    if not boundary or not total:
+    if not boundary:
         # No marker, or only --nomarker / id-less imports: default export == --all.
         return "Boundary: none"
+    # A boundary with nothing excluded (a selector import that returned no ids, a dump)
+    # still marks the working point, so it is reported rather than shown as none.
     return f"Boundary: marker {boundary}, {total} excluded"
 
 
