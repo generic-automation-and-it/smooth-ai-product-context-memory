@@ -24,7 +24,10 @@ internal sealed partial record AppHostConfiguration(
     string HostImage,
     string ReleaseVersion,
     string EngineKind,
-    string EngineHostAddress)
+    string EngineHostAddress,
+    int ViewerPort,
+    string ViewerImage,
+    bool ViewerEnabled)
 {
     internal string EngineBindAddress { get; init; } = "127.0.0.1";
     internal const string OwnershipLabel = "io.smooth-mimisbrunnr.installation";
@@ -44,6 +47,7 @@ internal sealed partial record AppHostConfiguration(
     internal string BlobDataVolume => VolumeName("blob-well-data");
     internal string SeqDataVolume => VolumeName("seq-data");
     internal string HostContextVolume => VolumeName("host-context");
+    internal string ViewerContainerName => ResourceName("viewer");
 
     internal static AppHostConfiguration Create(IConfiguration configuration)
     {
@@ -97,7 +101,10 @@ internal sealed partial record AppHostConfiguration(
             hostImage,
             configuration["ReleaseConfiguration:Version"] ?? "development",
             engineKind,
-            engineHostAddress)
+            engineHostAddress,
+            GetPort(configuration, "ViewerConfiguration:Port", 5180),
+            GetValue(configuration, "ViewerConfiguration:Image", false, "smooth-ai-product-context-memory-viewer:local"),
+            GetBool(configuration, "ViewerConfiguration:Enabled", !isRelease))
         {
             EngineBindAddress = bindAddress,
         };
@@ -165,6 +172,22 @@ internal sealed partial record AppHostConfiguration(
         }
 
         return value;
+    }
+
+    private static bool GetBool(IConfiguration configuration, string key, bool defaultValue)
+    {
+        string? configuredValue = configuration[key];
+        if (string.IsNullOrWhiteSpace(configuredValue))
+        {
+            return defaultValue;
+        }
+
+        if (bool.TryParse(configuredValue, out bool value))
+        {
+            return value;
+        }
+
+        throw new InvalidOperationException($"{key} must be 'true' or 'false'.");
     }
 
     private static string GetEngineHostAddress(IConfiguration configuration, string engineKind)

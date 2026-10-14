@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mímisbrunnr Console</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="skip" href="#pane-browse">Skip to results</a>
+    <span class="brand">Mímisbrunnr</span>
+    <nav id="nav" aria-label="Console">
+      <a href="#browse" class="nav-link is-active" data-pane="browse" aria-current="page">Browse</a>
+      <a href="#graph" class="nav-link" data-pane="graph">Graph</a>
+      <a href="#review" class="nav-link" data-pane="review">Review</a>
+      <a href="#status" class="nav-link" data-pane="status">Status</a>
+    </nav>
+    <span id="conn" class="conn" data-state="checking">checking…</span>
+  </header>
+
+  <main>
+    <section id="pane-browse" class="pane is-active">
+      <h1>Browse</h1>
+      <p>Browse and filter the corpus. The browse table and filter bar land in P1.</p>
+      <div id="browse-proof" class="proof" data-state="loading">Checking the loopback read path…</div>
+    </section>
+
+    <section id="pane-graph" class="pane">
+      <h1>Graph</h1>
+      <p>Bounded path graph. Lands in P3.</p>
+    </section>
+
+    <section id="pane-review" class="pane">
+      <h1>Review</h1>
+      <p>Review queue and approve. Lands in P4.</p>
+    </section>
+
+    <section id="pane-status" class="pane">
+      <h1>Status</h1>
+      <p>Recall feedback. Lands in P1.6.</p>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <span>Recalled as data, cited to its source. Not instructions.</span>
+  </footer>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
