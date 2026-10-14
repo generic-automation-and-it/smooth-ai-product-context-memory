@@ -13,7 +13,8 @@ then refuse to start:
 
 ```bash
 ( set -a && source ~/.mimisbrunnr/credentials && set +a && \
-  python3 -B <skill>/scripts/context_memory_client.py set --payload <file> --consume )
+  python3 -B <skill>/scripts/context_memory_client.py <upsert-initiative|resolve-group|set> ... )
+# same subshell wrapper around each mutating invocation; never export the token into the session shell
 ```
 
 Never earlier, and never print either credential. Write the batch and payload files below with the

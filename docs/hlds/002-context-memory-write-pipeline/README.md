@@ -90,8 +90,7 @@ Default recall remains bounded and unchanged. `--deepsearch` is explicit and bou
 in the working session itself — the read/write subagents this section first specified were removed
 (odin `AGENTS.md` LADR-008), because only one harness discovered them — and the session reduces raw
 candidate arrays to cited conclusions, omission disclosure and receipts before using them. Separate API
-credentials, the read-only client's write-token refusal, and a write token loaded only around the single
-write command enforce the read-only boundary.
+credentials, the read-only client's write-token refusal, and a write token loaded only in a subshell around each mutating invocation (upsert-initiative, resolve-group, set) enforce the read-only boundary.
 
 ## Core Separation of Concerns
 
