@@ -4399,6 +4399,38 @@ class SessionMarkerTests(unittest.TestCase):
         self.assertIn("Marker: skipped (--nomarker", err.getvalue())
         self.assertIsNone(sm.load_marker("odin", "ses-odin-j"))
 
+    def test_receipt_prefers_server_confirmed_uuids(self):
+        # Finding 3: a create without a caller uuid used to go unrecorded.
+        import session_marker as sm
+        os.environ["CLAUDE_CODE_SESSION_ID"] = "ses-odin-k"
+        payload = {"groupUuid": "g-1", "items": [{"description": "Fresh claim",
+                                                  "statement": "CockroachDB stores it."}]}
+        args = SimpleNamespace(payload=None, dryrun=False, export_all=False, session=None)
+        answer = {"created": 1, "items": [{"uuid": "srv-uuid-1", "versioned": False}]}
+        with patch.object(client, "read_payload", return_value=payload), \
+                patch.object(client, "_request", return_value=answer), \
+                redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            client.cmd_set(args)
+        marker = sm.load_marker("odin", "ses-odin-k")
+        ids, _, _, _ = sm.exclusion_set(marker)
+        self.assertIn("srv-uuid-1", ids)
+
+    def test_receipt_falls_back_when_the_response_is_not_positional(self):
+        import session_marker as sm
+        os.environ["CLAUDE_CODE_SESSION_ID"] = "ses-odin-m"
+        payload = {"groupUuid": "g-1", "items": [{"createUuid": "cli-uuid-9",
+                                                  "description": "Fresh claim",
+                                                  "statement": "CockroachDB stores it."}]}
+        args = SimpleNamespace(payload=None, dryrun=False, export_all=False, session=None)
+        answer = {"created": 1, "items": []}
+        with patch.object(client, "read_payload", return_value=payload), \
+                patch.object(client, "_request", return_value=answer), \
+                redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            client.cmd_set(args)
+        marker = sm.load_marker("odin", "ses-odin-m")
+        ids, _, _, _ = sm.exclusion_set(marker)
+        self.assertIn("cli-uuid-9", ids)
+
     def test_each_harness_env_var_resolves_in_isolation(self):
         import session_marker as sm
         for name in self.ENV_NAMES:

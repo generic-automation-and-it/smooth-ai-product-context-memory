@@ -577,7 +577,7 @@ def cmd_set(args):
     query = {"dryRun": "true"} if args.dryrun else None
     resp = scrubbed_write("set", "POST", "/api/context/memories", payload, query=query)
     print(json.dumps(resp, indent=2))
-    _mark_send_receipt(args, payload)
+    _mark_send_receipt(args, payload, resp)
     return resp
 
 
@@ -686,13 +686,34 @@ def _apply_export_marker(args, payload):
     return payload
 
 
-def _mark_send_receipt(args, payload) -> None:
+def _response_uuids(resp) -> list:
+    """Server-assigned/confirmed uuids per sent item, positionally.
+
+    `set` answers `Items: [{Uuid, …}]` in request order. Returns the uuid at each
+    position, or None where the response has no usable one — the caller falls back
+    to the request's own uuid/createUuid. Length mismatch means the response is not
+    positional, so no response uuid is trusted.
+    """
+    if not isinstance(resp, dict):
+        return []
+    rows = resp.get("items")
+    if not isinstance(rows, list):
+        return []
+    out = []
+    for row in rows:
+        ident = row.get("uuid") if isinstance(row, dict) else None
+        out.append(ident if isinstance(ident, str) and ident else None)
+    return out
+
+
+def _mark_send_receipt(args, payload, resp=None) -> None:
     """Append one export entry for a successful send and print the Marker: line.
 
     The marker follows the receipt, never the plan (amended LADR-11): dry runs,
     refusals (which raise before reaching here) and `--nomarker` sends mark
-    nothing. Records the sent items' store identities (version-target uuid or
-    caller createUuid) with their subjects — references only. Stderr, so stdout
+    nothing. Records store identities with their subjects — references only — preferring
+    the uuids the server's response confirms (a create without a caller uuid would
+    otherwise go unrecorded and be proposed again). Stderr, so stdout
     stays parseable JSON.
     """
     if bool(getattr(args, "dryrun", False)):
@@ -712,11 +733,16 @@ def _mark_send_receipt(args, payload) -> None:
     if not sid:
         print(_marker.marker_line("none", "", verb="export"), file=sys.stderr)
         return
+    sent = [item for item in payload.get("items", []) if isinstance(payload, dict)] or []
+    confirmed = _response_uuids(resp)
+    if confirmed and len(confirmed) != len(sent):
+        confirmed = []
     written = []
-    for item in payload.get("items", []) if isinstance(payload, dict) else []:
+    for position, item in enumerate(sent):
         if not isinstance(item, dict):
             continue
-        ident = item.get("uuid") or item.get("createUuid")
+        ident = (confirmed[position] if confirmed else None) or item.get("uuid") \
+            or item.get("createUuid")
         if isinstance(ident, str) and ident:
             written.append({"id": ident, "subject": item.get("description") or ""})
     if not written:
