@@ -378,7 +378,9 @@ After the last attempt, `BELOW_THRESHOLD=hold` keeps the record out of the store
 
 **A record with no subject is scored every call; its budget is not durable.** It keeps the
 positional `index:N` identity for reporting (with `"durable": false`), but it never reads or
-writes the ledger — every call scores it as attempt 1. A ledger holding `index:N` entries from
+writes the ledger — every call scores it as attempt 1. Rewriting one to pass is not
+attempt-bounded either: each rewrite scores as attempt 1, so `MAX_ATTEMPTS` does not apply
+to records without a subject. A ledger holding `index:N` entries from
 before this rule drops them on the next `score` and reports the count as `ledgerIndexPurged`.
 
 **The ledger is capped, and past the cap a spent budget can be forgotten.** It holds at most
