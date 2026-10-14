@@ -48,14 +48,27 @@ the complement (silent widening).
 - Repeat rule by cardinality: single-valued (`status`, `kind`, `repo`, `initiative`,
   `group`) — any repeat refuses (`E_DUPLICATE_FIELD`), even identical. Multi-valued
   (`tag`, `facet`) — repeats accumulate per `FacetMatchMode` (default `Any`/OR);
-  identical values dedupe pre-translation. Cross-field conflicts (e.g.
+  identical values dedupe pre-translation on the ordinal post-quote-strip key
+  (case- and whitespace-sensitive; trim applies to the emptiness test only). Cross-field conflicts (e.g.
   `status:proposed` plus an explicit include-proposed flag) resolve per the lifecycle
-  controls, never silently.
-- Value rule: `status:` is closed to `{proposed, approved}`, else
-  `E_INVALID_FIELD_VALUE`. `kind:` is open vocabulary — any non-empty value passes as an
-  exact match. `group:` is a strict uuid parse, else `E_INVALID_FIELD_VALUE`.
-  `tag`/`facet`/`repo`/`initiative` must be non-empty after trimming quotes, else
-  `E_EMPTY_VALUE`.
+  controls: the explicit predicate wins and the flag is ignored for that query, never
+  silently widened. Saved searches (persisted query strings) are deferred — they need a
+  store this HLD refuses to add; reopen when repeated-string reuse is evidenced in
+  HLD-004 feedback (owner: generik0).
+- Value rule: values are exact and case-sensitive (ordinal), matching the structured
+  path's `==` / `&&` / `@>` with no fold, `ILIKE`, or `lower()` — `Repo:MyRepo` ≠
+  `myrepo` (zero rows, never refusal). `status:` is closed to lowercase
+  `{proposed, approved}`, else `E_INVALID_FIELD_VALUE` (`status:Approved` refuses,
+  never folds). `kind:` is open vocabulary, exact literal, never tokenized —
+  `kind:"my kind"` passes the whole string to `==`. `group:` is a strict
+  `Guid.TryParse` (any spelling; canonicalisation immaterial post-parse), else
+  `E_INVALID_FIELD_VALUE`. `tag`/`facet`/`repo`/`initiative` must be non-empty after
+  trimming quotes, else `E_EMPTY_VALUE`. A comma is a literal value char, never a
+  separator: `tag:a,b` is the single exact tag `"a,b"`; multi-value form is repeats
+  (`tag:a tag:b`). Apostrophes and smart quotes are lexeme chars per the LADR-01
+  tokenizer; `o'clock` never splits. Future `group:`-by-name resolution, if ever,
+  happens handler-side after parsing — the pure parser keeps refusing non-uuid
+  (LADR-01 layering).
 - Refusal reasons are a closed enum and carry the field *name* at most — never the field
   value, lexeme, phrase, or snippet (NFR-04).
 - Quoted multiword values (`repo:"my repo"`) need the same tokenizer as FTS lexemes;

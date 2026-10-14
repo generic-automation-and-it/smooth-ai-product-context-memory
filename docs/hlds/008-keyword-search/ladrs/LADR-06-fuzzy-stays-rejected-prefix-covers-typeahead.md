@@ -9,7 +9,10 @@ now under a stale-before-quoting banner after the 2026-09-24 predicate change) w
 extension, two extra GIN indexes, and threshold-sensitive semantics — and **rejected** it, with a
 reopening threshold: HLD-004 recall-feedback data showing repeated misses on misspelled
 queries that stemming cannot serve. Keyword search re-raises the question because
-Obsidian tolerates typos. Nothing in the miss data has yet met that threshold.
+Obsidian tolerates typos. Note: the HLD-004 reopening-evidence note (2026-09-20)
+records the threshold MET on two observed misses (`postgress replication`,
+`kubernetess`) — the rejection still stands until HLD-001 reruns its fixture with
+those cases added and re-measures; this HLD does not pre-empt that rerun.
 
 ## Decision
 
@@ -29,7 +32,11 @@ harness rerun with those cases added).
 ## Consequences
 
 - Misspelled queries still miss; the miss is recorded by recall-feedback (HLD-04) and
-  becomes the evidence that could reopen this decision — the honest loop.
+  becomes the evidence that could reopen this decision — the honest loop. Watcher and
+  cadence follow the HLD-004 rule (no dashboards/alerting): occasional human review via
+  the `mimisbrunnr-muninn-recall-feedback` skill, on demand — a cluster is ≥ 2 observed
+  misses on misspelled/surface-variant queries stemming cannot serve, each triggering
+  the HLD-001 harness rerun with those cases added.
 - No new extension, migration, or index in this HLD.
 
 ## Related

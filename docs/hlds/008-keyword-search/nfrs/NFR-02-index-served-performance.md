@@ -21,13 +21,15 @@ on the single-table branches (extends `FreeTextRecallTests`; forcing is justifie
 because it distinguishes index-availability from planner choice at fixture scale, and
 the unforced plan is captured alongside informationally); full-shape `EXPLAIN`
 captured informationally at Prototype with no index assertion on the combined OR.
-Latency harness (`KeywordPerfTests`, `SMOOTH_FTS_BENCH=1` pattern, 100 iterations of the
-representative operator query `migration OR rollback -proposed "schema migrations"`
-committed in the fixture) reports p50/p95 plus absolute ms on a declared corpus, concurrency, and host (Aspire
-fixture, `docker.io/apache/age:release_PG17_1.7.0`, arch — same fields as the HLD-001
-method). The HLD-001 0.48 ms figure is stale (post-2026-09-24 predicate change) and is
-not the baseline; the baseline is re-measured at Prototype. Rank/headline cost measured
-snippet-non-null vs. snippet-null.
+Latency harness (`KeywordPerfTests`, `SMOOTH_FTS_BENCH=1` pattern, 100 iterations each)
+runs the representative operator query `migration OR rollback -proposed "schema
+migrations"` plus the committed adversarial list — short-prefix floor (`a*`, `e*`,
+stopword-prefix collapse `the*`), max-OR at the Prototype-fixed arm cap, max-nesting at
+the Prototype-fixed paren-depth cap — and reports p50/p95 plus absolute ms on a declared
+corpus, concurrency, and host (Aspire fixture, `docker.io/apache/age:release_PG17_1.7.0`,
+arch — same fields as the HLD-001 method). The HLD-001 0.48 ms figure is stale
+(post-2026-09-24 predicate change) and is not the baseline; the baseline is re-measured
+at Prototype. Rank/headline cost measured snippet-non-null vs. snippet-null.
 
 ## Acceptance Criteria
 
@@ -39,6 +41,9 @@ snippet-non-null vs. snippet-null.
 - [ ] Composed keyword+traverse timing reported separately against the HLD-003
   methodology; the 100 ms ticket-traversal budget is not reused as this shape's target
   without a re-measurement clause.
+- [ ] Prototype exit blocked until `SET LOCAL statement_timeout` is measured and pinned
+  (value + measurer + corpus recorded here); the odin 60 s deadline is the ceiling, not
+  the value.
 
 ## Applies To
 

@@ -64,9 +64,17 @@ absent, and the shape is therefore a documented subset, not field-for-field equa
 - One round trip replaces up to ten for the composed path; the odin skill's recall
   deadline (`RECALL_DEADLINE_SECONDS`, its LADR-006) bounds the whole call.
 - Anchor `LIMIT` now controls traverse input — callers asking for 5 anchors get 5-anchor
-  widening, which must be documented, not discovered. A traverse anchor cap below the
-  page `LIMIT` is set at Prototype if the LIMIT×depth explosion breaches the timeout
-  budget.
+  widening, which must be documented, not discovered. At Prototype, if the `LIMIT`×depth
+  worst case (page `LIMIT` up to 200 × depth 5) breaches the Prototype-measured
+  `statement_timeout`, set a traverse anchor cap below the page `LIMIT` and disclose via
+  `anchorsEligible`/`anchorsOmittedByCap`.
+- Route table: new callers use the server flag (read client exposes `query --traverse
+  --depth` passthrough); `deepsearch.py` stays as the compat fallback and maps to a
+  single composed call when the flag set is reachable — dedupe key stays uuid/version
+  (snippet excluded by name) on every path.
+- Dossier reuse is rank-ordered transport only: a future HLD-005 consumer re-sorts topo
+  on consume (rank ≠ topo); the re-sort adapter is a Prototype exit criterion, and a
+  backlinks pane (presentation consumer) defers to that trigger (owner: generik0).
 - Dossier selection (HLD-005) can consume the same statement shape later without a new
   traversal semantic.
 

@@ -29,7 +29,15 @@ quotes are lexeme chars) and field-vs-operator precedence (`tag:x` binds as an a
 fixture. L0 asserts the operator tree; a separate Infrastructure fixture asserts the
 `tsquery` text — one layer per fixture. New retrieval shapes map onto the HLD-004 shape
 set explicitly (operator query → `free_text`, field-only → `facet_only` or matching
-scoped shape, traverse → its anchor's shape); no new shape without an HLD-004 amendment.
+scoped shape, traverse → its anchor's shape; CHECK gains no new value without an
+HLD-004 amendment), classified by a pure overload
+`RecallShapeClassifier.Classify(ParsedKeywordQuery parsed, bool hasTraverse)` on the
+Application-owned parse result (operator tree + field map + `HasExplicitOperator`) —
+the `Request`-only overload delegates with `hasOperators: false`, and the handler calls
+post-parse. The seam itself is extended, not split: `MemorySearchCriteria` gains a
+nullable `KeywordQuery StructuredQuery = null` (null = bare path, zero churn for the
+handler, dossier, and ticket-graph callers) behind the single `SearchAsync`; no second
+`IMemorySearch` method forks the GIN predicate plumbing.
 
 ## Alternatives Considered
 

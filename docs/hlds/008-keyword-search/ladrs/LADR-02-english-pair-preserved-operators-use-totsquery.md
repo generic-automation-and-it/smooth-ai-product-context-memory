@@ -27,7 +27,9 @@ quotes (`"OR"`) is a literal lexeme, never an operator.
 
 `-` is `NOT` only in token-start position (string start, whitespace, or `(`) directly
 attached to an atom (`-x`, `-(a b)`). An interior hyphen (`foo-bar`, `well-known`) is a
-literal lexeme, sanitised, never split. `-` followed by space, `--x`, `-*`, `*foo`,
+literal lexeme, sanitised, never split. Detached or doubled minus (`- foo`, `--x`) is
+`E_DANGLING_OPERATOR`; every `*`-form (`*` alone, `*foo`, `foo**`, `-*`, `(*)`, `"*"`,
+`"phrase"*`) is `E_LONE_PREFIX`. `-` followed by space, `--x`, `-*`, `*foo`,
 `foo**`, `**`, `(*)`, `"*"`, and `"phrase"*` are refusals (`E_DANGLING_OPERATOR` /
 `E_LONE_PREFIX`), never silent drops. `()` and `( )` are `E_EMPTY_GROUP`; leading,
 trailing, or doubled operators (`OR a`, `a OR`, `a OR OR b`, lone `NOT`/`-`, `a AND`)
@@ -56,6 +58,10 @@ removal), so `the*` degrades/refuses per the collapse rule, never served as pref
 - **`websearch_to_tsquery` as the whole syntax** — rejected: bakes in Google-style
   semantics (quoted phrase, `-`, `OR`) but removes grouping control and field sugar, and
   hides the constructor choice the plan test must pin.
+- **Regex (`/…/`)** — rejected: a new matching regime outside the `english` GIN pair,
+  unservable by the shipped indexes (sequential scan).
+- **Match-case / diacritics toggles** — rejected: each needs a second config or the
+  `unaccent` extension plus new indexes — the one-side-decoupling failure class.
 - **Per-branch configuration** — rejected: the exact silent-decoupling failure the plan
   test exists to catch.
 

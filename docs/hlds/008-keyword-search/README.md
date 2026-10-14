@@ -121,9 +121,10 @@ and 100 ms is not reused as this shape's target).
 
 Parsing (string → operator tree → criteria + provider-neutral query model) is pure and
 lives in Application; only Infrastructure serialises the model to `tsquery` constructors
-and executes it. The handler resolves identity and scope, then runs parse → translate;
-`group:` disagreements (string vs. param vs. ticket group) intersect conjunctively to an
-empty set — never an override. Nothing caller-supplied reaches statement text; the built
+and executes it. Normative order: parse → resolve scope/identity → merge `field:value`
+conjunctively (string-vs-param-vs-ticket `group:` intersects, never overrides) →
+translate. Refusal-before-lookup: malformed input never touches the ticket lookup nor
+emits feedback. Nothing caller-supplied reaches statement text; the built
 query travels as a bound parameter *and* lexemes are quoted per `tsquery` quoting rules
 (binding alone does not stop operator injection).
 
@@ -138,9 +139,16 @@ HLD-003 exist to protect.
 - Parsing stays total and deterministic: same string, same `tsquery`, same set — the skill
   judges relevance, the API only retrieves.
 - We will deliberately **not** add vectors, server-side semantic judgement, fuzzy
-  (`pg_trgm`) matching, auto-capture, or in-place correction. Each is refused by a
-  recorded decision (`what-is-special` #1/#2/#3/#5: auto-capture, model-in-Host,
-  vectors, in-place correction).
+  (`pg_trgm`) matching, auto-capture, in-place correction, regex (`/.../ ` needs a
+  sequential scan outside the `english` GIN regime), match-case or diacritics toggles
+  (each needs a second config/index — the silent-decoupling failure), caller-tunable
+  sort (ordering is fixed: bare = recency, operator = rank + recency tiebreak), or new
+  scope predicates beyond the closed seven (`path:`/`file:`/`section:`/`task:` refuse
+  as `E_UNKNOWN_FIELD`). Each is refused by a recorded decision (`what-is-special`
+  #1/#2/#3/#5: auto-capture, model-in-Host, vectors, in-place correction; LADRs
+  02/03/04 for the syntax-level refusals). Saved searches (needs a store) and a
+  backlinks pane (presentation consumer) are deferred, not refused — see LADR-03 and
+  LADR-05 Opens.
 - A miss stays a signal (HLD-004 recall-feedback), not an error to hide with threshold
   magic.
 
