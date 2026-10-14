@@ -1,4 +1,4 @@
-# LADR-11: An import marks the session's working point; export excludes what was marked
+# LADR-11: Imports and exports mark the session's working point; export excludes what was marked
 
 **Status:** Draft
 
@@ -52,6 +52,31 @@ An import writes a **session marker**; export uses it as a **boundary** by id ex
 - **Lifetime.** No TTL and no automatic clearing; session length is unknown. Cleanup is manual.
 - **Lineage** ("derived from X v3") appears in the export digest only — nothing is persisted.
 
+### Export is a marker source (amended 2026-10-14)
+
+A long session exports at several checkpoints. If only imports mark, each checkpoint re-offers what the
+previous one already wrote. So export marks too, and every default export becomes a **delta** since the
+last marker.
+
+- **Export marks.** A successful export appends `{verb: "export", at, items}` to the same per-skill marker:
+  kvasir `export --write` and `dump --currentsession`, Odin `--export`, `ai-understanding --export`.
+- **Boundary.** Still the last marker — of **any** verb, import or export.
+- **Exclusion.** Exported ids join the exclusion set. A later in-session change to an exported item is a
+  supersession of the version just written, by the same mechanical preflight match.
+- **`export --nomarker`** exports normally but writes no entry: boundary and exclusions are unchanged. For a
+  one-off share or snapshot that must not break the delta series. Symmetric with `import --nomarker`, and
+  orthogonal to Odin `--approve` (one governs kept state, the other write status).
+- **Nothing written, nothing marked.** `--dryrun`, kvasir `export` without `--write`, a refused export
+  (redaction fail-closed, veto), an empty candidate set, and a review-queue deferral write no entry.
+- **The marker follows the receipt.** A partial export records only what was actually written, never the
+  plan (HLD-002 LADR-07).
+- **`export --all`** ignores the marker for selecting candidates but still writes an export entry;
+  `--all --nomarker` is a full re-export with no state change.
+- **Identity per target.** Store exports record `{id, version}`; `dump` records `{folder, slugs}`;
+  `ai-understanding --export` records `{path, slug}`.
+- **Digest.** Prints `Marker: set (export, N items)` | `skipped (--nomarker)` | `skipped (nothing written)`
+  | `none (no session id)`.
+
 ## Alternatives Considered
 
 - **A session-start index pushed by a hook** — rejected: the deliberate import already is the index,
@@ -65,10 +90,15 @@ An import writes a **session marker**; export uses it as a **boundary** by id ex
 - **A separate flag name for "ignore marker"** (`--whole-session`) — rejected: naming symmetry with
   `load`/`import --all` was preferred over distinct spellings.
 - **Persisted lineage** (edge or version column) — deferred: digest-only until a consumer needs it.
+- **Import-only markers** — rejected on amendment: multi-checkpoint sessions re-propose earlier exports.
+- **Marking from the export plan** — rejected: a refused or partial write would exclude ids that never
+  reached the store, silently losing them from every later export.
+- **A separate LADR for export marking** — rejected: one boundary concept, one record.
 
 ## Consequences
 
 - Echo is removed at the source; dedup keeps its role as the safety net with fewer near-duplicates.
+- Checkpointed capture is incremental: a second default export proposes nothing the first one wrote.
 - Import stays read-only against the store (NFR-01 unaffected); the marker is a local file.
 - Env-var names are an undocumented contract in most harnesses and may change; `--session` is the escape
   hatch. Subagent inheritance of the parent id is verified for Claude Code only and is out of scope here.
@@ -78,7 +108,8 @@ An import writes a **session marker**; export uses it as a **boundary** by id ex
 ## Related
 
 - **LADR-02** — load vs import, the verbs that now write a marker.
-- **LADR-07** — `dump --currentsession` respects the marker and `--all`.
+- **LADR-07** — `dump --currentsession` respects the marker and `--all`, and marks on success.
+- **HLD-002 LADR-07** — the digest is a receipt; the export marker records the receipt.
 - **LADR-08** — `--all` breadth on load/import; the shared spelling on export.
 - **HLD-002 LADR-04** — semantic dedup; amended to receive the exclusion set.
 - **NFR-01** — no store write on load/import; unchanged.

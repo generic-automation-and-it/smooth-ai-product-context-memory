@@ -90,7 +90,7 @@ A practitioner shares this session's context with another session or repository 
 - The dump is an export; it writes nothing to the store (NFR-01).
 - Another session or repository can load the dumped folder, regardless of whether it is the originating repo.
 
-### 5. An import marks the working point; export does not echo it
+### 5. Imports and exports mark the working point; export does not echo it
 
 A session's own work starts at its deliberate import. Export distils that work, not what was imported
 (LADR-11, Draft).
@@ -102,6 +102,8 @@ A session's own work starts at its deliberate import. Export distils that work, 
 - A default export excludes marked ids; `export --all` ignores the marker; `--nomarker` imports are
   session history and flow into export.
 - A changed imported item is exported as a supersession, never dropped.
+- A successful export marks too, so the next default export is a delta; `export --nomarker` leaves the
+  marker unchanged; an export that writes nothing marks nothing; the marker records only what was written.
 
 ## Core Separation of Concerns
 
@@ -146,7 +148,7 @@ See [`./ladrs/`](./ladrs/). Status legend matches HLD-005: `Draft → Prototype 
 | [LADR-08](./ladrs/LADR-08-load-breadth-is-a-filter.md) | Load breadth is a filter (`--all` union vs understanding-only); not two products | Accepted |
 | [LADR-09](./ladrs/LADR-09-load-reads-ai-understanding-files.md) | Load and import read the ai-understanding `.understanding.md` format (and store folders, newest version per slug) as structured input | Accepted |
 | [LADR-10](./ladrs/LADR-10-store-load-is-a-reported-budget.md) | A store load is a reported budget of whole records: `--max-chars` cuts whole records in source order, lists each cut by identity, never compresses; under budget it is byte-identical | Accepted |
-| [LADR-11](./ladrs/LADR-11-import-marks-the-export-boundary.md) | An import writes a per-skill session marker (client-side, ids only); export excludes marked ids unless `--all`; `--nomarker` imports flow into export | Draft |
+| [LADR-11](./ladrs/LADR-11-import-marks-the-export-boundary.md) | Imports and exports write a per-skill session marker (client-side, ids only); a default export is a delta since the last marker unless `--all`; `--nomarker` leaves the marker unchanged | Draft |
 
 ## Non-Functional Requirements
 

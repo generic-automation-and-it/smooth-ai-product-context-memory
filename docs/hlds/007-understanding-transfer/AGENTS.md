@@ -73,7 +73,9 @@ See [./ladrs/](./ladrs/). Accepted: LADR-01, 02, 03, 04, 06, 07, 08, 09, 10. Dra
 - **Selectors bind, they don't filter reading** (LADR-08 keeps breadth and selectors orthogonal).
 - **Import marks, export excludes (Draft).** A marked import writes `.context/session-markers/<type>-<session-id>.json`
   (ids only, one per skill); a default export drops those ids, `export --all` ignores the marker,
-  `--nomarker` imports flow into export. Session id comes from the harness env var chain (LADR-11).
+  `--nomarker` imports flow into export. A successful export marks too, so the next export is a delta;
+  `export --nomarker` leaves the marker unchanged; nothing written means nothing marked. Session id comes
+  from the harness env var chain (LADR-11).
 
 ## Test References
 
@@ -120,6 +122,7 @@ See [./ladrs/](./ladrs/). Accepted: LADR-01, 02, 03, 04, 06, 07, 08, 09, 10. Dra
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-14 | **LADR-11 amended (Draft): export is a marker source.** A successful export appends its written ids to the per-skill marker, so each default export is a delta since the last import or export; `export --nomarker` leaves the marker unchanged (combinable with Odin `--approve`); dry-run, refused, empty and review-queue-deferred exports mark nothing; the marker follows the write receipt, never the plan. | LADR-11; HLD-002 LADR-04, LADR-07 |
 | 2026-10-14 | **LADR-11 added (Draft): an import marks the session's working point; export excludes what was marked.** Per-skill client-side marker (`kvasir`/`odin`/`ai-understanding`) keyed by the harness session id (`CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID`, `OPENCODE_SESSION_ID`, `COPILOT_AGENT_SESSION_ID`, `PI_SESSION_ID`, or `--session`), references only. Last marked import is the boundary; `export --all` ignores it (shared spelling with `load`/`import --all`); `import --nomarker` flows into export; changed imported items become supersessions by mechanical preflight match. Session-start auto-index rejected. No Host/API/schema change. | LADR-11; HLD-002 LADR-04 |
 | 2026-10-01 | **LADR-10 added: a store load is a reported budget of whole records.** A load's breadth was controlled (LADR-08) but its size was not — a real `--all` corpus rendered in full. One `--max-chars` (default 12000) now applies to both surfaces; on a store export it cuts whole records in source order, lists each cut record by identity with the budget as the reason, and states the cap, rendered size and count cut beside breadth. No record is ever truncated or summarised to fit. `max_chars=None` is byte-identical to an under-budget render, which is the acceptance property; the walk harness re-run at the default is unchanged (1682 / 2006 / 2238 chars), so the cap bounds the pathological corpus, not a representative one. The dossier is out of scope (its omission reasons are a fixed bounded set). | LADR-10; BRD-003 BR-42 |
 | 2026-09-26 | README status row corrected to match the row below and the BRD-003 README: it read "value assumptions 1–2 carried open pending usage evidence", which contradicted the recorded outcome and led an agent orienting here to treat assumption 2 as still open. Now reads assumption 1 carried open, assumption 2 validated with a stated boundary. | BRD-003 §8 |

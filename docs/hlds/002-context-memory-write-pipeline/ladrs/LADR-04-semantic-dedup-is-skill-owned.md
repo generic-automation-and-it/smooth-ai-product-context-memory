@@ -62,7 +62,8 @@ negative pairs, not asserted as "deduplication held".
 - Text search stems (`english` configuration) since HLD-001's recall-tuning measurement; this widens candidate recall only — the equivalence decision stays here, in the skill.
 - Testing must be adversarial, including negative controls, or it measures nothing.
 - **Exclusion set from the session marker (amended 2026-10-14, Draft — HLD-007 LADR-11).** Preflight
-  receives the ids a marked import brought into the session and drops them from the candidate set before
+  receives the ids a marked import brought into the session, and the ids a marked export already
+  wrote, and drops them from the candidate set before
   matching. A candidate that matches an excluded item by id or exact subject is routed to a supersession
   of that item mechanically — no model judgement. Dedup stays the safety net for everything else; the
   marker only removes the echo it would otherwise have to catch.
