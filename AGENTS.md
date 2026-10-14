@@ -92,6 +92,7 @@ One-liners; full detail in git history and the linked PRs/issues.
 
 | Date | Change | Ref |
 |---|---|---|
+| 2026-10-15 | **Phase P2 (detail + provenance) lands in the viewer SPA** — selecting a browse row opens a reader pane (two-pane/slide-over) with the LADR-07 evidence frame, provenance, version history, and on-demand blob (`?scope=` passed); selection persists in `?uuid`. Frontend only. | Phase P2 worktask |
 | 2026-10-15 | **Phase P1 (browse + filters) land in the viewer SPA** — browse table, 1:1 filter bar, active-filter chips, honest-limit prompt, distinct states; Status recall-feedback view with required date controls. Frontend only in `src/SmoothAiProductContextMemory.ViewerPod/wwwroot/`; no Host/API change. | Phase P1 worktask |
 | 2026-10-14 | **Added viewer pod foundation (Phase A)** — new `src/SmoothAiProductContextMemory.ViewerPod/` (Caddy + Python bridge stub + no-build SPA) registered in the AppHost as `mimir-viewer`; the loopback entry for the Mímisbrunnr Console (HLD-009/BRD-004). Root changelog is the record home (no localized file covers the pod; APPHOST_AGENTS.md updated alongside for the wiring). | Phase A worktask |
 | 2026-10-13 | **Added `docs/wiki/what-is-special.md`** (rival comparison + differentiators) and linked it from README above Install. Root changelog is the record home (no localized file covers `docs/wiki/`). | this PR |

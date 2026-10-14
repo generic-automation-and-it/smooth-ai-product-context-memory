@@ -7,6 +7,7 @@
 // filters prompt rather than silently truncating or paging (no cursor).
 import { postQuery, getInitiatives } from './api.js';
 import { esc, shortUuid, fmtInstant, plural } from './util.js';
+import { openDetail, maybeOpenFromUrl } from './detail.js';
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -209,6 +210,7 @@ function selectRow(index) {
     if (selected) row.setAttribute('aria-selected', 'true');
     else row.removeAttribute('aria-selected');
   });
+  openDetail(currentRows[index]);
 }
 
 function atLimitPrompt(count) {
@@ -326,4 +328,5 @@ export async function initBrowse() {
     }
   }
   await refresh();
+  maybeOpenFromUrl(currentRows);
 }

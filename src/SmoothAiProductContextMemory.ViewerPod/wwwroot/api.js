@@ -35,6 +35,23 @@ export function postQuery(requestBody) {
   return requestJson('/api/context/query', { method: 'POST', body: requestBody });
 }
 
+export function getMemoryVersions(uuid, scope) {
+  const query = scope ? `?scope=${encodeURIComponent(scope)}` : '';
+  return requestJson(`/api/context/memories/${uuid}/versions${query}`);
+}
+
+export async function getMemoryBlob(uuid, version, scope) {
+  const query = scope ? `?scope=${encodeURIComponent(scope)}` : '';
+  try {
+    const response = await fetch(`/api/context/memories/${uuid}/versions/${version}/blob${query}`);
+    const text = await response.text();
+    return { ok: response.ok, status: response.status, text };
+  } catch (error) {
+    if (error && error.name === 'AbortError') return { timedOut: true };
+    return { unreachable: true };
+  }
+}
+
 export function getInitiatives(status) {
   const query = status ? `?status=${encodeURIComponent(status)}` : '';
   return requestJson(`/api/context/initiatives${query}`);

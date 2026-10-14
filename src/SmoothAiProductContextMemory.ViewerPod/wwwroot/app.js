@@ -6,6 +6,7 @@
 // no Authorization header; Caddy injects the read token (LADR-02).
 import { initBrowse } from './browse.js';
 import { initStatus } from './status.js';
+import { initDetail } from './detail.js';
 
 let statusInitialized = false;
 
@@ -31,4 +32,5 @@ nav.addEventListener('click', (event) => {
   }
 });
 
+initDetail();
 initBrowse();

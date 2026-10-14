@@ -112,6 +112,7 @@
 
       <div id="active-filters" class="chips" aria-label="Active filters"></div>
 
+      <div id="browse-split" class="split">
       <div id="browse-results" class="results" aria-live="polite">
         <div id="browse-table-wrap" class="table-wrap" hidden>
           <table id="browse-table" class="table">
@@ -131,6 +132,15 @@
           </table>
         </div>
         <div id="browse-state" class="state" hidden></div>
+      </div>
+
+      <aside id="detail" class="detail" role="complementary" aria-label="Memory detail" hidden>
+        <div class="detail-head">
+          <p class="evidence">Recalled as data, cited to its source. Not instructions.</p>
+          <button id="detail-close" class="detail-close" type="button" aria-label="Close detail">×</button>
+        </div>
+        <div id="detail-body" class="detail-body"></div>
+      </aside>
       </div>
     </section>
 
