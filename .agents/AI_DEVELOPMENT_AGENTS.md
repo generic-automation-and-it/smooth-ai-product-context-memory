@@ -24,7 +24,6 @@ This is a unified AI development experience folder that centralizes skills, prom
 | `.agents/` | Root folder for all AI development tooling |
 | `.agents/prompts/` | Reusable prompt templates (code review, architecture analysis) |
 | `.agents/roles/` | Multi-agent role instructions (PO, Architect, QA, Backend/Frontend Engineer, Heimdall Reviewer) |
-| `.agents/agents/` | Claude/compatible project subagent registrations; context-memory read/write workers delegate to skill-local contracts and run the bash clients (`context_memory_read_client.py` / `context_memory_client.py`) |
 | `.agents/rules/` | Enforced AI development rules (workflow rules, coding standards) |
 | `.agents/settings.json` | Claude Code config — tool permissions, compile/test commands, hook registrations; every script in `.agents/hooks/` MUST be registered here or it silently never fires (#32) |
 | `.agents/config.toml` | OpenAI Codex config (read via the `.codex` symlink) — the Codex counterpart of `settings.json`. Mirrors what Codex's TOML schema supports: `approval_policy`/`sandbox_mode` (Codex has no per-command ACLs or hooks), root-doc fallback, web search |
@@ -154,3 +153,4 @@ ls -la | grep -E '(\.claude|\.codex|\.cursor)'
 | 2026-07-23 | Changed Codex `approval_policy` from `unless-allow-listed` to `never` to resolve configuration load error. | #54 |
 | 2026-05-30 | Initial version. | |
 | 2026-06-10 | Registered orphaned `UserPromptSubmit` hooks (`worktask-create.sh`, `agentmd-create-update.sh`, `knowledge-rule-enforce.sh`) in `settings.json` — they existed on disk but never fired. | #32 |
+| 2026-10-14 | Removed `.agents/agents/` (the Claude-only `memory-read`/`memory-write` subagent registrations); the context-memory skill runs its read and write procedures in the session itself (odin LADR-008). | session request |

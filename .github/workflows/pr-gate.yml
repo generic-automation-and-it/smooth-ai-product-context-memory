@@ -27,8 +27,6 @@ on:
       - .agents/skills/mimisbrunnr-ymir-bootstrap/**
       - .agents/skills/mimisbrunnr-heimdallr-find-session-metadata/**
       - .agents/skills/agile-github-*/**
-      - .agents/agents/memory-read.md
-      - .agents/agents/memory-write.md
       - .github/actions/**
       - .github/scripts/**
       - .github/workflows/pr-gate.yml
@@ -59,8 +57,6 @@ on:
       - .agents/skills/mimisbrunnr-ymir-bootstrap/**
       - .agents/skills/mimisbrunnr-heimdallr-find-session-metadata/**
       - .agents/skills/agile-github-*/**
-      - .agents/agents/memory-read.md
-      - .agents/agents/memory-write.md
       - .github/actions/**
       - .github/scripts/**
       - .github/workflows/pr-gate.yml

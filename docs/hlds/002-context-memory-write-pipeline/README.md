@@ -86,10 +86,12 @@ with a count. A human can audit what happened without reading the store.
 
 ### 5. Bulky recall stays outside the working session
 
-Default recall remains bounded and unchanged. `--deepsearch` is explicit and bounded; both default and
-deep paths run in delegated read/write contexts. The working session receives cited conclusions,
-omission disclosure and receipts rather than raw candidate arrays. Separate API credentials enforce
-the read-only worker boundary.
+Default recall remains bounded and unchanged. `--deepsearch` is explicit and bounded. Both paths run
+in the working session itself — the read/write subagents this section first specified were removed
+(odin `AGENTS.md` LADR-008), because only one harness discovered them — and the session reduces raw
+candidate arrays to cited conclusions, omission disclosure and receipts before using them. Separate API
+credentials, the read-only client's write-token refusal, and a write token loaded only around the single
+write command enforce the read-only boundary.
 
 ## Core Separation of Concerns
 

@@ -50,7 +50,7 @@ in one batch sharing a subject, neither yet written, so neither is visible to th
 - **Specify each concern independently** — rejected: ordering would emerge by accident, and three of the five are only correct in one position.
 - **Per-record preflight** — rejected: misses intra-batch collisions entirely.
 - **Unbounded or per-candidate semantic recall** — rejected: cost multiplies with batch size and raw
-  rows flood the working session. Stage 3 recall is batched, bounded and delegated.
+  rows flood the working session. Stage 3 recall is batched and bounded (it was also delegated until odin LADR-008 removed the subagents; the session now reduces the rows itself).
 - **Let the skill sequence the write** — rejected: the version flip and insert must share one transaction, which only the API can guarantee.
 
 ## Consequences

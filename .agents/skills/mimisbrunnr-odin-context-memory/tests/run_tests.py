@@ -441,16 +441,16 @@ class RecallFramingTests(unittest.TestCase):
         self.assertNotIn(client.RECALL_NOTICE, out.getvalue())
         self.assertNotIn("statement", out.getvalue())
 
-    def test_the_read_worker_contract_carries_the_framing(self):
+    def test_the_read_path_carries_the_framing(self):
         """The agent has to be told the same thing the client now prints.
 
-        A notice in stdout that the worker's own instructions never mention is a notice the worker may
-        reasonably treat as boilerplate. The contract is also the only place that can say what to *do*
-        with a record whose statement reads like an instruction — which is the whole point of framing it.
+        A notice in stdout that the read procedure never mentions is a notice the agent may reasonably
+        treat as boilerplate. The procedure is also the only place that can say what to *do* with a
+        record whose statement reads like an instruction — which is the whole point of framing it.
         """
-        contract = (SCRIPTS.parent / "agents" / "memory-read.md").read_text(encoding="utf-8")
+        contract = (SCRIPTS.parent / "references" / "read-path.md").read_text(encoding="utf-8")
         self.assertIn("recallNotice", contract,
-                      "the read worker is not told to read the framing its own responses carry")
+                      "the read path is not told to read the framing its own responses carry")
         self.assertIn("uuid/version", contract,
                       "the contract must say how to report a suspicious record — quoted, with identity")
 
@@ -3317,28 +3317,41 @@ class SemanticFixtureTests(unittest.TestCase):
 
 
 class AgentContractTests(unittest.TestCase):
-    AGENTS = HERE.parent / "agents"
+    """The read and write procedures the session follows (LADR-008: no read/write subagents)."""
+    REFS = HERE.parent / "references"
+    READ = REFS / "read-path.md"
+    WRITE = REFS / "write-path.md"
     MUTATIONS = ("set", "create-link", "resolve-group", "update-group", "append-description",
                  "propose-label", "upsert-initiative", "ticket-parent")
 
-    def test_read_agent_grants_only_read_client(self):
-        text = (self.AGENTS / "memory-read.md").read_text(encoding="utf-8")
+    def test_read_path_uses_only_the_read_client(self):
+        text = self.READ.read_text(encoding="utf-8")
         self.assertIn("context_memory_read_client.py", text)
         self.assertNotIn("context_memory_client.py", text)
         for mutation in self.MUTATIONS:
             self.assertNotIn(mutation, text)
         self.assertIn(client.ENV_WRITE_TOKEN, text)
-
-        registration = (HERE.parents[2] / "agents" / "memory-read.md").read_text(encoding="utf-8")
-        # Issue 188 (issue 181 finding 30 again): "the write credential is never ambient" told the
-        # worker a write token could not be in its environment, while sourcing the credential file
-        # exports one and the read client then refuses to start. Launching without one is the step.
-        flat = " ".join(registration.split())
+        # Issue 188 (issue 181 finding 30 again): sourcing the credential file exports a write token
+        # and the read client then refuses to start, so running it without one is the instruction.
+        flat = " ".join(text.split())
         self.assertIn("no write-token spelling in its environment", flat)
-        self.assertNotIn("the write credential is never ambient", flat)
-        self.assertIn("context_memory_read_client.py", registration)
-        self.assertNotIn("context_memory_client.py", registration)
-        self.assertIn(client.ENV_WRITE_TOKEN, registration)
+
+    def test_no_read_or_write_subagent_is_registered_or_named(self):
+        """LADR-008: the registrations worked in one harness only, so the skill names no agent to spawn.
+
+        Guards both halves: no registration file for these workers in the host repository's agents
+        folder, and no instruction in the skill's own documents to delegate to one."""
+        for name in ("memory-read.md", "memory-write.md"):
+            self.assertFalse((HERE.parents[2] / "agents" / name).exists(), name)
+        for path in (HERE.parent / "SKILL.md", HERE.parent / "README.md", self.READ, self.WRITE):
+            with self.subTest(document=path.name):
+                text = path.read_text(encoding="utf-8")
+                self.assertNotRegex(text, r"`memory-(read|write)`")
+                self.assertNotIn("Spawn project agents", text)
+        for path in (self.READ, self.WRITE):
+            with self.subTest(procedure=path.name):
+                self.assertFalse(path.read_text(encoding="utf-8").startswith("---"),
+                                 "a procedure must not carry agent frontmatter")
 
     def test_read_client_refuses_environment_with_write_credential(self):
         completed = subprocess.run(
@@ -3384,54 +3397,42 @@ class AgentContractTests(unittest.TestCase):
                    client.ENV_READ_TOKEN: "r", "CONTEXT_MEMORY_WRITE_TOKEN_FILE": "/x"}
         self.assertEqual(client.write_tokens_present(environ), [])
 
-    def test_agents_and_orchestration_contract_exist(self):
-        read = (self.AGENTS / "memory-read.md").read_text(encoding="utf-8")
-        write = (self.AGENTS / "memory-write.md").read_text(encoding="utf-8")
+    def test_read_and_write_procedures_exist(self):
+        read = self.READ.read_text(encoding="utf-8")
+        write = self.WRITE.read_text(encoding="utf-8")
         skill = (HERE.parent / "SKILL.md").read_text(encoding="utf-8")
         for marker in ("lookup", "grounding", "ALSO IN STORE"):
             self.assertIn(marker, read)
         for stage in ("Preflight", "Redact", "Dedupe / derive links", "Atomicity check", "Write"):
             self.assertIn(stage, write)
+        self.assertIn("context_memory_client.py", write)
         self.assertIn("Where Each Step Runs", skill)
-        self.assertIn("Never call the store client", skill)
-        registration = (HERE.parents[2] / "agents" / "memory-write.md").read_text(encoding="utf-8")
-        self.assertIn("context_memory_client.py", registration)
-        self.assertNotIn("context_memory_read_client.py", registration)
+        self.assertIn("references/read-path.md", skill)
+        self.assertIn("references/write-path.md", skill)
 
     WRITE_STEP = "set -a && source ~/.mimisbrunnr/credentials && set +a"
 
-    @staticmethod
-    def _tools(text):
-        """The `tools:` block list of an agent file's frontmatter."""
-        front = text.split("---", 2)[1]
-        block = re.search(r"^tools:\n((?:[ \t]+-[^\n]*\n)+)", front, re.MULTILINE)
-        return [line.strip()[1:].strip() for line in block.group(1).splitlines()] if block else []
+    def test_the_write_path_writes_batches_with_the_file_tool(self):
+        """The capture procedure writes its batch file with the file tool — never `echo` or a heredoc
+        (issue 184). With no agent tool grant to rely on, the procedure itself must say so."""
+        text = " ".join(self.WRITE.read_text(encoding="utf-8").split())
+        self.assertIn("written with the file tool", text)
+        self.assertIn("never an `echo`/heredoc", text)
 
-    def test_both_write_registrations_grant_the_tool_the_capture_procedure_needs(self):
-        """The capture procedure has the worker write its batch file with the file tool — never `echo`
-        or a heredoc — but neither write registration granted `Write`, so a runtime honouring the grant
-        left the worker only the shell channels the procedure forbids (issue 184)."""
-        for path in (self.AGENTS / "memory-write.md", HERE.parents[2] / "agents" / "memory-write.md"):
-            with self.subTest(path=str(path)):
-                text = path.read_text(encoding="utf-8")
-                self.assertIn("Write", self._tools(text))
-                self.assertIn("Bash", self._tools(text))
-
-    def test_no_write_registration_assumes_the_write_credential_is_ambient(self):
-        """Both registrations said the runtime supplies both credentials, while the client seeds only
-        the read token and the write token is deliberately never ambient — so the worker had no step
-        that loads it (issue 184; issue 181's finding 31 again). Each must name the deliberate write
-        step, and that step must be the one the operator documentation gives."""
+    def test_the_write_path_loads_the_credential_only_around_the_write(self):
+        """The write token is never ambient (issue 184; issue 181's finding 31 again), and with no
+        separate write agent it must also never persist in the session's shell, where the read client
+        would then refuse to start (LADR-008). The step is the one SKILL.md documents, run in a subshell."""
         # The skill's own SKILL.md, not the host repository's root README: a repository vendoring the
         # skill has its own README, so the old check passed here and failed in every consumer (issue 186).
         skill = " ".join((HERE.parent / "SKILL.md").read_text(encoding="utf-8").split())
-        self.assertIn(self.WRITE_STEP, skill, "the registrations must cite the documented step")
-        for path in (self.AGENTS / "memory-write.md", HERE.parents[2] / "agents" / "memory-write.md"):
-            with self.subTest(path=str(path)):
-                text = " ".join(path.read_text(encoding="utf-8").split())
-                self.assertNotRegex(text, r"(?i)runtime supplies both")
-                self.assertIn(self.WRITE_STEP, text)
-                self.assertIn("never ambient", text)
+        self.assertIn(self.WRITE_STEP, skill, "the write path must cite the documented step")
+        text = " ".join(self.WRITE.read_text(encoding="utf-8").split())
+        self.assertNotRegex(text, r"(?i)runtime supplies both")
+        self.assertIn(self.WRITE_STEP, text)
+        self.assertIn("never ambient", text)
+        self.assertIn("( " + self.WRITE_STEP, text, "the write step must run inside a subshell")
+        self.assertIn("subshell around the single write command", skill)
 
     def test_every_capture_procedure_removes_personal_data_before_the_first_file(self):
         """Issue 188, fixed as a class: the text at every site that writes a batch told the agent to clean
@@ -3441,8 +3442,7 @@ class AgentContractTests(unittest.TestCase):
         documents = {
             "SKILL.md": HERE.parent / "SKILL.md",
             "AGENTS.md": HERE.parent / "AGENTS.md",
-            "agents/memory-write.md": self.AGENTS / "memory-write.md",
-            "registration": HERE.parents[2] / "agents" / "memory-write.md",
+            "references/write-path.md": self.WRITE,
         }
         for name, path in documents.items():
             with self.subTest(document=name):
@@ -3464,8 +3464,7 @@ class AgentContractTests(unittest.TestCase):
         documents = {
             "SKILL.md": HERE.parent / "SKILL.md",
             "AGENTS.md": HERE.parent / "AGENTS.md",
-            "agents/memory-write.md": self.AGENTS / "memory-write.md",
-            "registration": HERE.parents[2] / "agents" / "memory-write.md",
+            "references/write-path.md": self.WRITE,
         }
         for name, path in documents.items():
             with self.subTest(document=name):
@@ -3479,7 +3478,7 @@ class AgentContractTests(unittest.TestCase):
         yet cannot run `set --dryrun`, and its payload cannot be the one the real write reuses. The
         initiative prerequisite applies on the create path only."""
         skill = " ".join((HERE.parent / "SKILL.md").read_text(encoding="utf-8").split())
-        worker = " ".join((self.AGENTS / "memory-write.md").read_text(encoding="utf-8").split())
+        worker = " ".join(self.WRITE.read_text(encoding="utf-8").split())
         agents = " ".join((HERE.parent / "AGENTS.md").read_text(encoding="utf-8").split())
         # Review 5430979214 #20: an existing group with no memories has no read-only `groupUuid`
         # either, so it gets the offline preview too, in both the skill and the worker.
@@ -3508,8 +3507,7 @@ class AgentContractTests(unittest.TestCase):
         unignored."""
         documents = {
             "SKILL.md": HERE.parent / "SKILL.md",
-            "agents/memory-write.md": self.AGENTS / "memory-write.md",
-            "registration": HERE.parents[2] / "agents" / "memory-write.md",
+            "references/write-path.md": self.WRITE,
         }
         for name, path in documents.items():
             with self.subTest(document=name):
@@ -3523,8 +3521,8 @@ class AgentContractTests(unittest.TestCase):
         bounded is where the copy can travel — the docs called the folder "gitignored", which only this
         repository's `.gitignore` makes true. Both procedures must have the folder ignore itself first."""
         skill = " ".join((HERE.parent / "SKILL.md").read_text(encoding="utf-8").split())
-        worker = " ".join((self.AGENTS / "memory-write.md").read_text(encoding="utf-8").split())
-        for name, text in (("SKILL.md", skill), ("memory-write.md", worker)):
+        worker = " ".join(self.WRITE.read_text(encoding="utf-8").split())
+        for name, text in (("SKILL.md", skill), ("write-path.md", worker)):
             with self.subTest(document=name):
                 self.assertIn("`.context/mimisbrunnr-scratch/.gitignore` holding", text)
                 self.assertRegex(text, r"\.gitignore` holding (the single line )?`\*`")
@@ -3542,7 +3540,7 @@ class AgentContractTests(unittest.TestCase):
         self.assertIn("`resolve-group`", flat)
         self.assertIn("Under `--dryrun` no group is resolved", flat)
         # The first pipeline stage of the worker contract comes after the resolution step.
-        worker = (self.AGENTS / "memory-write.md").read_text(encoding="utf-8")
+        worker = self.WRITE.read_text(encoding="utf-8")
         self.assertLess(worker.index("resolve-group"), worker.index("1. **Preflight**"))
 
 

@@ -93,10 +93,11 @@ Targets and verification live in [./nfrs/](./nfrs/). Three shape how code is wri
   `paths` request under the scope the caller granted, never folded into this recall. A traversal the API
   refuses with 403 is a disclosed `forbidden` pass (`anchorsForbidden`, kept out of
   `anchorsOmittedByCap`); it no longer aborts the recall and discards the completed baseline.
-- Read and write execution are delegated. Main-thread orchestration receives cited conclusions and
-  receipts, never raw result arrays. Read-only capability is enforced by separate API read/write
-  credentials and a read-only client surface; agent prose/frontmatter is defence in depth, not the
-  security boundary.
+- Read and write execution run in the working session; the delegated read/write subagents were removed
+  (odin `AGENTS.md` LADR-008, 2026-10-14). The session reduces raw result arrays to cited conclusions and
+  receipts before use. Read-only capability is enforced by separate API read/write credentials, a
+  read-only client that refuses to start with a write token present, and a write token loaded only in a
+  subshell around the single write command; prompt text is not the security boundary.
 - Candidate recall is stemmed since the storage side moved its text-search configuration to `english` on measured evidence; trigram similarity was measured and rejected (see [HLD-001 NFR-02 recall-tuning measurements](../001-context-memory-storage/nfrs/NFR-02-recall-tuning-measurements.md)). Semantic equivalence judgement stays skill-owned regardless.
 - Any column added to a history table must extend the append-only trigger's equality list **in the same migration**, or it becomes silently mutable through an otherwise legal version-bump update.
 
@@ -104,6 +105,7 @@ Targets and verification live in [./nfrs/](./nfrs/). Three shape how code is wri
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-14 | Delegated read/write execution reversed: no subagents, the session runs both paths (odin LADR-008). README §5 and this file amended; the boundary stays with the credentials and the read client. | session request |
 | 2026-10-14 | LADR-04 exclusion-set bullet extended: ids a marked export already wrote are excluded too, so each default export is a delta. | HLD-007 LADR-11 |
 | 2026-10-14 | LADR-04 amended (Accepted 2026-10-14 with HLD-007 LADR-11): preflight receives the session marker's exclusion set and routes a candidate matching an excluded imported item to a supersession mechanically; dedup remains the safety net. | HLD-007 LADR-11 |
 | 2026-10-06 | Issue 186: odin's capture content channel is recorded as LADR-007 in the skill's `AGENTS.md` (write-before-redact is the only available channel; the copy is bounded — owner-only, self-ignoring, consumed, cleaned up), and the attempt ledger keys a record by group as well as subject, matching memory identity `(group, subject)`. | issue 186 |

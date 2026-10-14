@@ -1,33 +1,36 @@
----
-name: memory-write
-description: Delegated Mimisbrunnr capture pipeline with write capability.
-tools:
-  - Bash
-  - Write
----
+# Write Path
 
-# Memory Write
+How the session captures into the store at the authorized `--export` (or `--dryrun`) checkpoint. There
+is no separate write agent: the session that runs the skill follows this procedure itself.
 
-Run the write client, `context_memory_client.py`. Receive discrete candidate facts and target metadata.
-Never accept a raw transcript. The write credential is never ambient: the client seeds only the read
-token and base URL, so `CONTEXT_MEMORY_WRITE_TOKEN` is absent until you load it. Load it only at the
-authorized `--export` (or `--dryrun`) checkpoint, in this worker's shell, with the deliberate write step
-the skill's `SKILL.md` names — `set -a && source ~/.mimisbrunnr/credentials && set +a` — and never
-earlier. Never print either credential. The `Write` tool is for the batch and payload files below and
-nothing else.
+Run the write client, `context_memory_client.py`, on discrete candidate facts and target metadata.
+Never a raw transcript. The write credential is never ambient: the client seeds only the read token and
+base URL, so `CONTEXT_MEMORY_WRITE_TOKEN` is absent until you load it. Load it only at the authorized
+checkpoint, with the deliberate write step the skill's `SKILL.md` names —
+`set -a && source ~/.mimisbrunnr/credentials && set +a` — and **only inside a subshell around the
+single write command**, so the token never persists in the session's shell, where the read client would
+then refuse to start:
+
+```bash
+( set -a && source ~/.mimisbrunnr/credentials && set +a && \
+  python3 -B <skill>/scripts/context_memory_client.py set --payload <file> --consume )
+```
+
+Never earlier, and never print either credential. Write the batch and payload files below with the
+file tool and nothing else.
 
 ## Pipeline
 
-Before stage 1, turn the main thread's proposed group binding into a group — this is the only place a
-group or initiative is created. On the create path run `upsert-initiative` first (a missing initiative
+Before stage 1, turn the proposed group binding into a group — this is the only place a group or
+initiative is created. On the create path run `upsert-initiative` first (a missing initiative
 is a `404` from `resolve-group`), then `resolve-group`, and carry its `groupUuid` into every preflight
 candidate and the `set` request. **After `resolve-group`, compare its `initiativeName` against the
 proposed initiative: on mismatch stop the checkpoint** — tickets resolve first and the initiative is
 create-path-only, so the reply names the initiative the write would actually land under. Offer the
 caller the three honest options (drop the initiative and capture there; re-bind to tickets that
 resolve nowhere for WET duplicates under the new initiative; `update-group` re-point to move the
-group), and write nothing until it chooses. Under `--dryrun` run neither. Unless the main thread passed a
-`groupUuid` it found read-only (a ticket `query` returns one only when the group already holds memories) —
+group), and write nothing until it chooses. Under `--dryrun` run neither. Unless the session found a
+`groupUuid` read-only (a ticket `query` returns one only when the group already holds memories) —
 for a group that does not exist yet, or an existing group with no memories — report the group and
 initiative as *would create* and preview the plan offline: `set --dryrun` needs a `groupUuid`, so say
 the set stage was not tested rather than claiming a full dry run.
@@ -81,6 +84,7 @@ current and retains existing loser in history. If existing wins, two ordered ver
 candidate loser, then restore existing winner as current; API accepts ordered repeated targets in one
 transaction. Report authority and losing-position retention in digest.
 
-Return only bounded clarification needs followed by digest: created, versioned, linked, diverged,
-skipped(atomicity), skipped(duplicate-link), labels-proposed, authority applied, and statuses. Raw recall
-rows never leave this delegated context.
+Finish with only bounded clarification needs followed by the digest: created, versioned, linked,
+diverged, skipped(atomicity), skipped(duplicate-link), labels-proposed, authority applied, and
+statuses. Recall rows used for dedup and link judgement are working material: reduce them to the
+judgement, never paste them into the digest.

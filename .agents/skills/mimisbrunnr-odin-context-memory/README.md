@@ -62,8 +62,8 @@ and exposed token counts separately.
 
 ### Where it saves
 
-- **Retrieval is bounded by default.** `memory-read` consumes candidate rows in isolated context and
-  returns cited conclusions plus omission disclosure; blobs remain drill-down only.
+- **Retrieval is bounded by default.** The read path reduces candidate rows to cited conclusions plus
+  omission disclosure before they are used; blobs remain drill-down only.
 - **It replaces ossified prompt re-explanation.** The cost that recurs every session is re-explaining
   context to a stateless model. A retrieved memory carries the reasoning forward without re-derivation.
   This is the amortized saving — paid at write, recovered across many reads.

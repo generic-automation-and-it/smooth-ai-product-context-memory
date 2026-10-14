@@ -16,15 +16,16 @@ an unrelated coding question is not consent to bootstrap or write memory.
 
 Before any store comparison, dry-run, capture, or recall test:
 
-1. Load `../mimisbrunnr-odin-context-memory/SKILL.md` and its `agents/memory-read.md` and
-   `agents/memory-write.md` worker contracts.
-2. Confirm through a runtime probe or known effective configuration that the runtime provides the
-   `memory-read` and `memory-write` workers described by those contracts, and that the read path holds no
-   write capability: the read worker runs only `context_memory_read_client.py`, which exposes no write
-   subcommand and refuses to start with `CONTEXT_MEMORY_WRITE_TOKEN` present. A worker name or
-   registration file alone is not proof, and prompt instructions or ordinary shared subagents do not
-   provide secret isolation.
-3. Fail closed if the dependency or either protected worker is unavailable.
+1. Load `../mimisbrunnr-odin-context-memory/SKILL.md` and its read and write procedures,
+   `references/read-path.md` and `references/write-path.md`. This session follows them itself; there
+   are no read or write subagents.
+2. Confirm the read path holds no write capability by running it:
+   `python3 -B ../mimisbrunnr-odin-context-memory/scripts/context_memory_read_client.py probe`, from a
+   shell with no write-token spelling in its environment. The read client exposes no write subcommand
+   and refuses to start with `CONTEXT_MEMORY_WRITE_TOKEN` (or the Host's `ApiAccess__WriteToken`) present,
+   so a successful probe is the proof. Prompt instructions alone do not provide secret isolation.
+3. Fail closed if the dependency is missing, the probe refuses because a write token is in the
+   environment, or the store is unreachable.
 
 In the fail-closed path, perform only offline repository discovery and produce the source-backed preview.
 Do not call HTTP clients, helper scripts, or another workaround to reach the store. Do not
@@ -158,9 +159,9 @@ into, and the obvious-but-wrong look-alike it does **not** touch. First-order on
 
 ### 3. Compare In A Supported Runtime
 
-After the human has reviewed the offline preview, use the protected workers for bounded comparison when
-available and requested. A preview-only request makes no store calls even in a supported runtime. The
-protected writer owns preflight, redaction, within-group deduplication (identity is `(group, uuid)`, so a
+After the human has reviewed the offline preview, follow the odin read path for bounded comparison when
+the runtime gate passed and comparison is requested. A preview-only request makes no store calls even in a
+supported runtime. The odin write path owns preflight, redaction, within-group deduplication (identity is `(group, uuid)`, so a
 same-subject memory in another group is a separate memory to link, not a version), link derivation,
 atomicity, lifecycle handling, and receipt composition. Do not reproduce, bypass, or weaken that pipeline.
 
@@ -197,15 +198,16 @@ canonical approval, gated `rule`, `nfr`, and `decision` records are written as `
 does not require a second questionnaire. Ask only when the user requests or ambiguously implies approved
 canon. Defaulting capture permission to canonical approval is forbidden.
 
-Delegate the exact reviewed candidates and identities to `memory-write`; it is the sole authority on the
-write path. Preserve its fixed pipeline and current read/write contracts. Do not directly call clients,
-scripts, or HTTP as a substitute. Report the worker's receipt, partial failure, conflict, and skip
+Run the exact reviewed candidates and identities through the odin write path
+(`references/write-path.md`); it is the sole authority on the write path. Preserve its fixed pipeline and
+current read/write procedures. Do not call other clients, scripts, or HTTP as a substitute. Report the
+write path's receipt, partial failure, conflict, and skip
 counts accurately; never claim intended operations succeeded.
 
 ### 5. Verify Through Real Recall
 
-After a successful capture, delegate one or more realistic questions to `memory-read` that represent how a
-future task would need the baseline or next-feature context. Verify that the returned cited conclusions
+After a successful capture, ask one or more realistic questions along the odin read path that represent
+how a future task would need the baseline or next-feature context. Verify that the returned cited conclusions
 preserve scope, lifecycle, exceptions, and uncertainty. Treat recall gaps as gaps: do not widen scope,
 reseed duplicates, or silently add new claims. Any remediation requires a new preview and review cycle.
 
@@ -227,4 +229,4 @@ State:
 - any unavailable stage and the reason;
 - whether anything was written, including a group created before a paused or failed memory set.
 
-Do not claim success when the protected-worker gate prevented comparison, capture, or recall verification.
+Do not claim success when the runtime gate prevented comparison, capture, or recall verification.

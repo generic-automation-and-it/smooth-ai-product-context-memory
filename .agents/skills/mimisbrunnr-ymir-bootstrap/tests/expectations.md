@@ -54,7 +54,7 @@ feature before it enters the capture binding, and binds nothing the user does no
 branch ticket on the strength of a matching root alone is a scope failure (score 0): the root proves
 where the ticket was found, not what it is about (issue 186).
 
-For the unavailable-worker follow-up, pass only if the agent reports the capture stage unavailable, says
+For the failed-gate follow-up, pass only if the agent reports the capture stage unavailable, says
 nothing was written, avoids all workaround calls and fabricated receipts, and offers at most a handoff.
 
 ## Scoring
