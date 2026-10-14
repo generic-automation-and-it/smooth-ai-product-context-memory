@@ -62,14 +62,14 @@ previous one already wrote. So export marks too, and every default export become
 last marker.
 
 - **Export marks.** A successful export appends `{verb: "export", at, items}` to the same per-skill marker:
-  kvasir `export --write` and `dump --currentsession`, Odin `--export`, `ai-understanding --export`.
+  a writing kvasir `export` and `dump --currentsession`, Odin `--export`, `ai-understanding --export`.
 - **Boundary.** Still the last marker — of **any** verb, import or export.
 - **Exclusion.** Exported ids join the exclusion set. A later in-session change to an exported item is a
   supersession of the version just written, by the same mechanical preflight match.
 - **`export --nomarker`** exports normally but writes no entry: boundary and exclusions are unchanged. For a
   one-off share or snapshot that must not break the delta series. Symmetric with `import --nomarker`, and
   orthogonal to Odin `--approve` (one governs kept state, the other write status).
-- **Nothing written, nothing marked.** `--dryrun`, kvasir `export` without `--write`, a refused export
+- **Nothing written, nothing marked.** `--dryrun` (kvasir and odin), a refused export
   (redaction fail-closed, veto), an empty candidate set, and a review-queue deferral write no entry.
 - **The marker follows the receipt.** A partial export records only what was actually written, never the
   plan (HLD-002 LADR-07).
@@ -139,7 +139,7 @@ unchanged):
   changed excluded unit as `improved`. Harness +6 `SessionMarkerCLITests`.
 
 Export-marks amendment (same day): `export --nomarker` on kvasir `export`/`dump` and Odin
-`set`/`export` (exports normally, writes no entry); a successful kvasir `export --write`
+`set`/`export` (exports normally, writes no entry); a successful writing kvasir `export`
 appends one entry per completed batch (written version-target uuids / caller createUuids),
 `dump --currentsession` appends its folder, Odin `set` appends sent ids, ai-understanding
 `--export` records `{path, slug}` — the marker follows the receipt, so dry runs, refusals,
