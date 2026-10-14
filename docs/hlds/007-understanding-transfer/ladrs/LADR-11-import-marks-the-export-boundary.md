@@ -75,8 +75,9 @@ last marker.
   plan (HLD-002 LADR-07).
 - **`export --all`** ignores the marker for selecting candidates but still writes an export entry;
   `--all --nomarker` is a full re-export with no state change.
-- **Identity per target.** Store exports record `{id, version}`; `dump` records `{folder, slugs}`;
-  `ai-understanding --export` records `{path, slug}`.
+- **Identity per target.** Store exports record `{id, version}`; `dump` records `{folder}`
+  (authored prose carries no slugs — a later export of that content is covered by the export's
+  own receipt, not the dump entry); `ai-understanding --export` records `{path, slug}`.
 - **Digest.** Prints `Marker: set (export, N items)` | `skipped (--nomarker)` | `skipped (nothing written)`
   | `none (no session id)`.
 
