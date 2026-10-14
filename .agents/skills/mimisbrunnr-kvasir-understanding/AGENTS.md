@@ -159,6 +159,10 @@ recalls the live store via `import` (read token only) and orchestrates the captu
   `upsert-initiative`. **Accepted cost:** that ticket-bound refusal comes after scoring, because only
   the mutating `resolve-group` can tell an existing group from a new one, and it must stay after the
   gate's refusal point.
+- **An initiative bound against a resolved group from another initiative refuses the write.**
+  Tickets resolve first and the initiative is create-path-only, so the resolved reply's
+  `initiativeName` is compared against the binding: a mismatch stops with the drop-flag /
+  re-bind / `update-group` options (nothing written, group remains). Harness 214 -> 219.
 - **Every gate is a gate.** A redactor or atomicity detector that cannot run or returns an unknown
   verdict, or a post-`--write`
   `set --dryrun` refusal, stops with nothing written rather than bypassing the boundary. The
@@ -300,6 +304,7 @@ recalls the live store via `import` (read token only) and orchestrates the captu
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-14 | **`--write` refuses when the bound initiative is not the resolved group's.** Tickets resolve first and the initiative is create-path-only, so an explicit `--initiative` against an existing ticket-bound group was silently dropped while the export versioned under the old initiative. The resolved reply's `initiativeName` is now compared: mismatch stops before preflight with drop-flag / re-bind-for-WET / `update-group` options (dry run warns when tickets meet an initiative). Harness 214 -> 219. | session request |
 | 2026-10-13 | **A defaulted input now writes only when it provably is this session's dump.** `dump` records the running session id in `_dump.json` (`session`); a `--input`-less `export --write` matches on it, so a default to this session's dump may capture, while a defaulted dump that does not prove ownership stays dry-run only and refuses `--write` (the previous unconditional refusal). Empty session identity keeps the conservative guard. Harness 212 -> 214. | this change |
 | 2026-10-13 | Export date-only source validity as midnight UTC for the Instant API; preserve local source metadata and explicit timestamp precision. Regression coverage includes nullable end and invalid-date refusal. | HLD-001 LADR-05; UTC instant write fix |
 | 2026-10-07 | No explicit selector can still bind via Heimdallr autofill; no association only when nothing is bound after it (#5). | review 5441621898 |

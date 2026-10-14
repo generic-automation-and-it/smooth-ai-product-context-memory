@@ -964,6 +964,102 @@ class ExportOrchestrationTests(unittest.TestCase):
         self.assertIn("set", called)
         self.assertIn("g-existing", out)
 
+    def _export_against_group(self, argv, group):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
+            original = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                        uc.resolve_group, uc._run_capture_client, uc.gate_decisions)
+            uc.gate_redaction = lambda texts: (list(texts), {})
+            uc.gate_atomicity = lambda c: [{"verdict": "simple", "signals": []} for _ in c]
+            uc.initiative_exists = lambda name: (True, "ok")
+            uc.resolve_group = lambda b, n, d, dryrun: (None if dryrun else group,
+                                                        "dry-run" if dryrun else "ok")
+            uc.gate_decisions = lambda c: (c, "Decision gate: disabled.")
+            called = []
+
+            def capture(script, args, payload):
+                called.append(args[0])
+                if args[0] == "preflight":
+                    return 0, json.dumps({"candidates": [{"index": 0, "matches": [],
+                                                          "ticketConflict": None}]}), ""
+                return 0, json.dumps({"created": 1, "versioned": 0, "linked": 0, "skipped": 0}), ""
+
+            uc._run_capture_client = capture
+            try:
+                rc, out, err = run(["export", src, "--write", "--heimdallr", "false"] + argv)
+            finally:
+                (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                 uc.resolve_group, uc._run_capture_client, uc.gate_decisions) = original
+        return rc, out, err, called
+
+    def test_mismatched_initiative_refuses_before_preflight(self):
+        """An explicit initiative naming anything but the resolved group's is silently
+        dropped by resolve-group, so the write must stop: otherwise it versions memories
+        under the old initiative while the caller believes it started a new one."""
+        rc, _, err, called = self._export_against_group(
+            ["--tickets", "github:214", "--initiative", "Mímisbrunnr-Search"],
+            {"groupUuid": "g-old", "created": False, "initiativeName": "Mímisbrunnr-MVP"})
+        self.assertEqual(rc, 1)
+        self.assertIn("REFUSED", err)
+        self.assertIn("Mímisbrunnr-Search", err)
+        self.assertIn("Mímisbrunnr-MVP", err)
+        self.assertIn("update-group", err)
+        self.assertNotIn("preflight", called)
+        self.assertNotIn("set", called)
+
+    def test_matching_initiative_writes(self):
+        """The control: the same binding with the group's own initiative must pass."""
+        rc, out, err, called = self._export_against_group(
+            ["--tickets", "github:214", "--initiative", "Mímisbrunnr-MVP"],
+            {"groupUuid": "g-old", "created": False, "initiativeName": "Mímisbrunnr-MVP"})
+        self.assertEqual(rc, 0, err)
+        self.assertIn("set", called)
+        self.assertIn("g-old", out)
+
+    def test_created_group_skips_the_mismatch_check(self):
+        """A created group always carries the bound initiative — nothing to mismatch."""
+        rc, _, err, called = self._export_against_group(
+            ["--initiative", "Mímisbrunnr-Search"],
+            {"groupUuid": "g-new", "created": True, "initiativeName": "Mímisbrunnr-Search"})
+        self.assertEqual(rc, 0, err)
+        self.assertIn("set", called)
+
+    def test_dry_run_warns_when_tickets_meet_an_initiative(self):
+        """A dry run resolves nothing, so it cannot know the group's initiative — but it
+        can say the binding order, or the --write refusal lands unexplained."""
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
+            original = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                        uc.resolve_group, uc._run_capture_client)
+            uc.gate_redaction = lambda texts: (list(texts), {})
+            uc.gate_atomicity = lambda c: [{"verdict": "simple", "signals": []} for _ in c]
+            uc.initiative_exists = lambda name: (True, "ok")
+            uc.resolve_group = lambda b, n, d, dryrun: (None, "dry-run")
+            uc._run_capture_client = lambda s, a, p: (0, "{}", "")
+            try:
+                rc, out, _ = run(["export", src, "--tickets", "github:214",
+                                  "--initiative", "Mímisbrunnr-Search", "--heimdallr", "false"])
+            finally:
+                (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                 uc.resolve_group, uc._run_capture_client) = original
+        self.assertEqual(rc, 0)
+        self.assertIn("tickets resolve first", out)
+
+    def test_mismatch_checker_unit_rules(self):
+        self.assertIsNone(uc.check_initiative_mismatch({}, {"initiativeName": "A"}))
+        self.assertIsNone(uc.check_initiative_mismatch(
+            {"initiative": "A"}, {"created": True, "initiativeName": "B"}))
+        self.assertIsNone(uc.check_initiative_mismatch(
+            {"initiative": "A"}, {"created": False, "initiativeName": "A"}))
+        self.assertIsNone(uc.check_initiative_mismatch(
+            {"initiative": "A"}, {"created": False}))
+        hit = uc.check_initiative_mismatch(
+            {"initiative": "B"}, {"groupUuid": "g", "created": False,
+                                  "InitiativeName": "A"})
+        self.assertIn("REFUSED", hit)
+        self.assertIn("'B'", hit)
+        self.assertIn("'A'", hit)
+
     def test_a_new_ticket_group_with_an_absent_initiative_names_the_command(self):
         rc, _, err, _, called = self._export_with_absent_initiative(
             ["--tickets", "#157"], lambda b, n, d, dryrun: (None, "HTTP 404"))

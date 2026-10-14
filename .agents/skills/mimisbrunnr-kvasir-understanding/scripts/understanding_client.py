@@ -1418,6 +1418,43 @@ def resolve_group(binding: dict, name: str | None, body: str | None,
     return (group if isinstance(group, dict) else None), "ok"
 
 
+def check_initiative_mismatch(binding: dict, group: dict) -> str | None:
+    """Refusal text when the bound initiative is not the resolved group's.
+
+    `resolve-group` returns an existing ticket-bound group without looking the
+    initiative up, so an explicit `--initiative` naming anything but the group's
+    own is silently dropped on the write path — the export versions memories
+    under the old initiative while the caller believes it started a new one. A
+    created group always carries the bound initiative, so only an existing group
+    can mismatch. Returns the refusal body, or None when there is nothing to
+    refuse. The group dict is the resolve-group reply in any key casing.
+    """
+    wanted = binding.get("initiative")
+    if not wanted:
+        return None
+    if not isinstance(group, dict):
+        return None
+    if group.get("created") or group.get("Created"):
+        return None
+    got = group.get("initiativeName", group.get("InitiativeName", group.get("initiative")))
+    if not isinstance(got, str) or not got:
+        return None
+    if got == wanted:
+        return None
+    group_uuid = group.get("groupUuid") or group.get("uuid") or group.get("Uuid") or "?"
+    return (
+        f"REFUSED: --initiative '{wanted}' does not match the resolved group's "
+        f"initiative '{got}' (group {group_uuid}). Tickets resolve first: an existing "
+        f"ticket-bound group is returned as-is and the initiative is never looked up, "
+        f"so writing now would version memories under '{got}', not '{wanted}'. "
+        f"Either re-run without --initiative to capture into '{got}', re-bind to "
+        f"tickets that resolve nowhere (a new group under '{wanted}' — same subjects "
+        f"become new memories, never version bumps), or re-point the group first with "
+        f"update-group. Nothing was written; the group {group_uuid} was already "
+        f"resolved and remains."
+    )
+
+
 def initiative_exists(name: str) -> tuple[bool, str]:
     """Whether the named initiative is already in the store. A read, so a dry run may use it.
 
@@ -2041,11 +2078,19 @@ def cmd_export(args: argparse.Namespace) -> int:
         group_uuid = group.get("groupUuid") or group.get("uuid") or group.get("Uuid")
         print(f"Group: {group_uuid}"
               f"{' (created)' if group.get('created') or group.get('Created') else ' (existing)'}")
+        mismatch = check_initiative_mismatch(binding, group)
+        if mismatch is not None:
+            print(mismatch, file=sys.stderr)
+            return 1
     else:
         group_uuid = None
         print(f"Group: would {'resolve or create' if binding['tickets'] else 'create'} for "
               f"{json.dumps(_group_body(binding, args.name, args.body))}")
         print(f"Initiative: {initiative_note}")
+        if binding["tickets"] and binding["initiative"]:
+            print(f"NOTE: tickets resolve first — if they hit an existing group under "
+                  f"another initiative, --initiative '{binding['initiative']}' is ignored "
+                  f"and --write refuses; drop it to capture there, or re-bind for a new group.")
 
     total_candidates = 0
     matched = 0
