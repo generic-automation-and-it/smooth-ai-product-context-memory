@@ -8,13 +8,16 @@ Never a raw transcript. The write credential is never ambient: the client seeds 
 base URL, so `CONTEXT_MEMORY_WRITE_TOKEN` is absent until you load it. Load it only at the authorized
 checkpoint, with the deliberate write step the skill's `SKILL.md` names —
 `set -a && source ~/.mimisbrunnr/credentials && set +a` — and **only inside a subshell around each
-mutating invocation** (`upsert-initiative`, `resolve-group`, `set`), so the token never persists in the session's shell, where the read client would
+write-route invocation** (`preflight`, `set`, `resolve-group`, `upsert-initiative`, `update-group`,
+`append-description`, `create-link`, `propose-label`, `ticket-parent` — the `WRITE_ROUTES` set in
+`context_memory_client.py`; `preflight` persists nothing but still authenticates write-only), so the
+token never persists in the session's shell, where the read client would
 then refuse to start:
 
 ```bash
 ( set -a && source ~/.mimisbrunnr/credentials && set +a && \
-  python3 -B <skill>/scripts/context_memory_client.py <upsert-initiative|resolve-group|set> ... )
-# same subshell wrapper around each mutating invocation; never export the token into the session shell
+  python3 -B <skill>/scripts/context_memory_client.py <preflight|set|resolve-group|upsert-initiative|update-group|append-description|create-link|propose-label|ticket-parent> ... )
+# same subshell wrapper around each write-route invocation; never export the token into the session shell
 ```
 
 Never earlier, and never print either credential. Write the batch and payload files below with the

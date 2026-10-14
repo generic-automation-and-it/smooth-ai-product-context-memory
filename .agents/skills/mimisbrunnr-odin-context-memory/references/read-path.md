@@ -11,8 +11,8 @@ subcommand and refuses to start if a write token is present in the environment â
 construction. That structural guarantee, plus the store's per-request
 scope enforcement, is what read-only access rests on â€” keep it. Run the read client from a shell with
 no write-token spelling in its environment: the client seeds the read token and base URL itself, the
-write credential is deliberately never ambient, and the write path loads it only inside the subshell
-around its own write command (see `write-path.md`). So do not `source` the full credential file in the
+write credential is deliberately never ambient, and the write path loads it only inside a subshell
+around each write-route invocation (see `write-path.md`). So do not `source` the full credential file in the
 session's shell, and never reach for the write client to read.
 
 ## Input

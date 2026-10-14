@@ -26,7 +26,7 @@ conditional exporter, never a second writer.
   read client (`context_memory_read_client.py`) has no write subcommand and refuses to start with a write
   token present — `CONTEXT_MEMORY_WRITE_TOKEN`, the Host's `ApiAccess__WriteToken` or the controller's
   `Parameters__api-write-token`, any case, `:` read as `__`; the write credential is never ambient and is
-  loaded only inside a subshell around the single write command at the authorized checkpoint; and the
+  loaded only inside a subshell around each write-route invocation at the authorized checkpoint; and the
   store rejects a read credential on a write route. Prompt text alone is not a security boundary.
 - **Raw store rows are working material, never the answer.** The read path reduces them to a lookup,
   grounding brief or digest before use; the write path receives discrete facts, never a transcript.
@@ -220,7 +220,7 @@ flowchart LR
   second copy that drifted. *Decision:* remove the registrations and the delegation. The two contracts
   become the procedures `references/read-path.md` and `references/write-path.md`, which the session
   follows itself. The read/write separation the workers provided moves to the shell: the write
-  credential is loaded only inside a subshell around the single write command, so it never persists
+  credential is loaded only inside a subshell around each write-route invocation, so it never persists
   where the read client runs. *Consequence:* one behaviour in every harness, and the guarantees that
   were real (read client refusal, non-ambient write token, store-side capability check) are unchanged.
   **Accepted cost:** raw recall rows now pass through the session's own context, so a large recall
@@ -536,12 +536,13 @@ redaction detector is a stdin→stdout fingerprint script reporting rule names o
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-14 | **Credential subshell covers each write-route invocation.** `WRITE_ROUTES` sends the write credential on `preflight` too (persists nothing, authenticates write-only), and the checkpoint runs `preflight`/`set`/`resolve-group`/`upsert-initiative` plus follow-up writes — a single-write wording left the others without a credential. `SKILL.md`, both procedures and the Non-Negotiable now say `each write-route invocation` with the full subcommand list; the harness pins the wording in all four docs. Also fixed a `memory-write.md` reference to `references/write-path.md` and an agents leftover in `README.md`. | PR #221 review |
 | 2026-10-14 | **A success-shaped zero-write `set` answer marks nothing.** When the response carries `created`/`versioned`/`unchanged` counts summing to 0, the export receipt records no entry (`Marker: skipped (nothing written)`) instead of falling back to the request's own uuids; a response with no counts keeps the fallback. | PR #221 review |
 | 2026-10-14 | **Read/write subagents removed (LADR-008, supersedes LADR-005).** `.agents/agents/memory-{read,write}.md` deleted; the skill-local contracts moved to `references/read-path.md` / `references/write-path.md` without agent frontmatter, and the session runs both paths itself. The write credential is loaded only inside a subshell around the single write command, so the read client keeps running in the same session. `SKILL.md` *Where Each Step Runs* rewritten; harness `AgentContractTests` re-pointed at the procedures and gained a no-registration guard. | session request |
 | 2026-10-14 | **Export receipt prefers server-confirmed uuids** (falls back to request uuid/createUuid when the response is not positional); **corrupt marker quarantined** to `<name>.corrupt-<stamp>` with a stderr warning instead of silent replace. | ai-review 3, 4 |
 
 | 2026-10-14 | **Session marker: import marks the export boundary (HLD-007 LADR-11).** `query`/`import` gain `--nomarker`/`--session`, write the odin marker and print `Marker:` on stderr; `set`/`export` gain `--all`/`--nomarker`/`--session`, drop echo items (same uuid and description) before sending, keep changed ones as supersessions, and append sent ids on success (`Marker: set (export, …)`; dry runs, refusals and `--nomarker` sends mark nothing); `preflight` gains `--all`/`--session` and discloses exact-subject matches as supersession routing. `Boundary:` on stderr; stdout stays parseable JSON. The read-only client never marks (shared recall path). Harness 248 -> 258. | HLD-007 LADR-11 |
-| 2026-10-14 | **Checkpoint stops when the proposed initiative is not the resolved group's.** Tickets resolve first and the initiative is create-path-only (`resolve-group` returns an existing ticket-bound group without looking it up), so an initiative naming anything but the group's own was silently dropped while the write versioned under the old one. SKILL.md checkpoint and `memory-write.md` compare the reply `initiativeName` and offer drop / re-bind-for-WET / `update-group` re-point. Kvasir `export` enforces the same gate in code (`initiative_mismatch_refusal`, harness 214 -> 221). | session request |
+| 2026-10-14 | **Checkpoint stops when the proposed initiative is not the resolved group's.** Tickets resolve first and the initiative is create-path-only (`resolve-group` returns an existing ticket-bound group without looking it up), so an initiative naming anything but the group's own was silently dropped while the write versioned under the old one. SKILL.md checkpoint and `references/write-path.md` compare the reply `initiativeName` and offer drop / re-bind-for-WET / `update-group` re-point. Kvasir `export` enforces the same gate in code (`initiative_mismatch_refusal`, harness 214 -> 221). | session request |
 | 2026-10-07 | Only a missing ledger is a first run; an unreadable one is a disclosed `ledgerReset` (#6). Calibration: two undefined correlations agree (#9). `--dryrun` writes no memory or group but its queries still leave server-side recall feedback (#7). | review 5441621898 |
 | 2026-10-07 | Calibration counts hold-side role clearing as bleed; recorded runs have no false positive, so their figures stand. | review 5440964552 |
 | 2026-10-07 | Deepsearch's malformed-row rule names `version`; workers point at `SKILL.md` for the credential load (`AGENTS.md` never named it); the read client's refusal names all three write-token spellings. | issue 200 |

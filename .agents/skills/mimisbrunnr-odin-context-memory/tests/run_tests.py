@@ -3422,7 +3422,10 @@ class AgentContractTests(unittest.TestCase):
     def test_the_write_path_loads_the_credential_only_around_the_write(self):
         """The write token is never ambient (issue 184; issue 181's finding 31 again), and with no
         separate write agent it must also never persist in the session's shell, where the read client
-        would then refuse to start (LADR-008). The step is the one SKILL.md documents, run in a subshell."""
+        would then refuse to start (LADR-008). The step is the one SKILL.md documents, run in a subshell
+        around each write-route invocation (preflight, set, resolve-group, upsert-initiative,
+        update-group, append-description, create-link, propose-label, ticket-parent) — a single-write
+        wording would leave the other checkpoint writes without a credential."""
         # The skill's own SKILL.md, not the host repository's root README: a repository vendoring the
         # skill has its own README, so the old check passed here and failed in every consumer (issue 186).
         skill = " ".join((HERE.parent / "SKILL.md").read_text(encoding="utf-8").split())
@@ -3432,7 +3435,13 @@ class AgentContractTests(unittest.TestCase):
         self.assertIn(self.WRITE_STEP, text)
         self.assertIn("never ambient", text)
         self.assertIn("( " + self.WRITE_STEP, text, "the write step must run inside a subshell")
-        self.assertIn("subshell around the single write command", skill)
+        self.assertIn("subshell around each write-route invocation", skill)
+        self.assertIn("subshell around each write-route invocation", text)
+        agents = " ".join((HERE.parent / "AGENTS.md").read_text(encoding="utf-8").split())
+        self.assertIn("subshell around each", agents,
+                      "the AGENTS.md non-negotiable must carry the same each-invocation wording")
+        read = " ".join(self.READ.read_text(encoding="utf-8").split())
+        self.assertIn("subshell around each write-route invocation", read)
 
     def test_every_capture_procedure_removes_personal_data_before_the_first_file(self):
         """Issue 188, fixed as a class: the text at every site that writes a batch told the agent to clean

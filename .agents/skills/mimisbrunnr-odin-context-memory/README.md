@@ -76,7 +76,7 @@ and exposed token counts separately.
 
 ### Where it does *not* save — the caveat
 
-- **Aggregate token spend may rise.** Read and write agents each establish context. Gain is main-context
+- **Aggregate token spend may rise.** Read and write paths each establish context. Gain is main-context
   longevity and enforced read capability, not guaranteed lower total tokens.
 
 - **A wrong dedup decision is expensive and silent.** If the skill misses a semantic match, it writes a
