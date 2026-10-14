@@ -993,7 +993,7 @@ class ExportOrchestrationTests(unittest.TestCase):
         return rc, out, err, called
 
     def test_mismatched_initiative_refuses_before_preflight(self):
-        """An explicit initiative naming anything but the resolved group's is silently
+        """A bound initiative naming anything but the resolved group's is silently
         dropped by resolve-group, so the write must stop: otherwise it versions memories
         under the old initiative while the caller believes it started a new one."""
         rc, _, err, called = self._export_against_group(
@@ -1045,20 +1045,39 @@ class ExportOrchestrationTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("tickets resolve first", out)
 
-    def test_mismatch_checker_unit_rules(self):
-        self.assertIsNone(uc.check_initiative_mismatch({}, {"initiativeName": "A"}))
-        self.assertIsNone(uc.check_initiative_mismatch(
-            {"initiative": "A"}, {"created": True, "initiativeName": "B"}))
-        self.assertIsNone(uc.check_initiative_mismatch(
-            {"initiative": "A"}, {"created": False, "initiativeName": "A"}))
-        self.assertIsNone(uc.check_initiative_mismatch(
-            {"initiative": "A"}, {"created": False}))
-        hit = uc.check_initiative_mismatch(
+    def test_mismatch_refusal_unit_rules(self):
+        hit = lambda b, g, s=uc.INITIATIVE_SOURCE_FLAG, e=True: uc.initiative_mismatch_refusal(b, g, s, e)
+        self.assertIsNone(hit({}, {"initiativeName": "A"}))
+        self.assertIsNone(hit({"initiative": "A"},
+                              {"created": True, "initiativeName": "B"}))
+        self.assertIsNone(hit({"initiative": "A"},
+                              {"created": False, "initiativeName": "A"}))
+        self.assertIsNone(hit({"initiative": "A"}, {"created": False}))
+        refusal = hit({"initiative": "B"},
+                      {"groupUuid": "g", "created": False, "InitiativeName": "A"})
+        self.assertIn("REFUSED", refusal)
+        self.assertIn("--initiative 'B'", refusal)
+        self.assertIn("'A'", refusal)
+        self.assertIn("update-group", refusal)
+
+    def test_mismatch_names_the_binding_source(self):
+        """The refusal must blame the dump metadata or autofill, not a flag never passed."""
+        group = {"groupUuid": "g", "created": False, "initiativeName": "A"}
+        dumped = uc.initiative_mismatch_refusal({"initiative": "B"}, group, uc.INITIATIVE_SOURCE_DUMP, True)
+        self.assertIn("dump's recorded initiative 'B'", dumped)
+        filled = uc.initiative_mismatch_refusal({"initiative": "B"}, group, uc.INITIATIVE_SOURCE_HEIMDALLR, True)
+        self.assertIn("autofilled initiative 'B'", filled)
+
+    def test_mismatch_names_upsert_when_the_wanted_initiative_is_absent(self):
+        """Following the re-bind advice verbatim must not 404: name the upsert first."""
+        refusal = uc.initiative_mismatch_refusal(
+            {"initiative": "Absent"}, {"groupUuid": "g", "created": False,
+                                       "initiativeName": "A"}, uc.INITIATIVE_SOURCE_FLAG, False)
+        self.assertIn("upsert-initiative", refusal)
+        present = uc.initiative_mismatch_refusal(
             {"initiative": "B"}, {"groupUuid": "g", "created": False,
-                                  "InitiativeName": "A"})
-        self.assertIn("REFUSED", hit)
-        self.assertIn("'B'", hit)
-        self.assertIn("'A'", hit)
+                                  "initiativeName": "A"}, uc.INITIATIVE_SOURCE_FLAG, True)
+        self.assertNotIn("upsert-initiative", present)
 
     def test_a_new_ticket_group_with_an_absent_initiative_names_the_command(self):
         rc, _, err, _, called = self._export_with_absent_initiative(

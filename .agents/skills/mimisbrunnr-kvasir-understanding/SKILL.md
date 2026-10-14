@@ -174,7 +174,7 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
 - **Fresh-store precondition:** an initiative must already exist; `resolve-group` answers `404` for a
   missing one. A `--write` refuses with the `upsert-initiative` command when it is absent; a dry run
   reports it as *would create* rather than creating it.
-- **An explicit initiative that is not the resolved group's refuses the write.** Tickets resolve
+- **A bound initiative that is not the resolved group's refuses the write.** Tickets resolve
   first: when they hit an existing group, `resolve-group` returns it without looking the initiative
   up, so `--initiative X` against a group owned by Y would silently version memories under Y while
   the caller believes it started X. `--write` refuses with the three honest options (drop the flag
