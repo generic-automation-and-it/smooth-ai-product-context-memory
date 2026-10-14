@@ -97,7 +97,7 @@ which hold in every harness.
   controller's `Parameters__api-write-token`, any case, `:` read as `__`).
 - The write credential is never ambient. Load it with the deliberate write step
   (`set -a && source ~/.mimisbrunnr/credentials && set +a`) **only inside a subshell around each
-  mutating invocation** (`upsert-initiative`, `resolve-group`, `set`), so it never persists in the session's shell and the read client keeps running there.
+  mutating invocation** (any persisting write — the `scrubbed_write` set named in the skill AGENTS.md), so it never persists in the session's shell and the read client keeps running there.
   API authorization is the capability boundary.
 - Raw recall rows are working material. Reduce them to the bounded outputs the read path defines
   (lookup, grounding, digest) before answering; never paste them back to the user.
