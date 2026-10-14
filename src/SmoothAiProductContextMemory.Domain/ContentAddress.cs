@@ -1,13 +1,13 @@
 using System.Security.Cryptography;
 
-namespace SmoothAiProductContextMemory.Infrastructure.Storage;
+namespace SmoothAiProductContextMemory.Domain;
 
 /// <summary>
 /// Content-addressed key derived from the SHA-256 of the raw (uncompressed) content. The on-disk
 /// object key is a sharded prefix of the first four hex characters plus the full hash, which keeps a
 /// huge flat namespace from landing in one directory while still referencing the address directly.
 /// </summary>
-public static class Sha256ContentAddress
+public static class ContentAddress
 {
     public static string Compute(byte[] content)
     {

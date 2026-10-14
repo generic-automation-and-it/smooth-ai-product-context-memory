@@ -9,9 +9,9 @@ using Npgsql;
 using NpgsqlTypes;
 using SmoothAiProductContextMemory.Application.Abstractions;
 using SmoothAiProductContextMemory.Application.Abstractions.Snapshot;
+using SmoothAiProductContextMemory.Domain;
 using SmoothAiProductContextMemory.Domain.Entities;
 using SmoothAiProductContextMemory.Infrastructure.Persistence.Configurations;
-using SmoothAiProductContextMemory.Infrastructure.Storage;
 using SmoothAiProductContextMemory.Infrastructure.Storage.Snapshot;
 
 namespace SmoothAiProductContextMemory.Infrastructure.Persistence;
@@ -244,7 +244,7 @@ public sealed class NpgsqlSnapshotRepository(
             {
                 using var buffer = new MemoryStream();
                 await content.Content.CopyToAsync(buffer, cancellationToken);
-                string actual = Sha256ContentAddress.Compute(buffer.ToArray());
+                string actual = ContentAddress.Compute(buffer.ToArray());
                 blobs.Add(new SnapshotBlob(
                     address,
                     string.Equals(actual, address, StringComparison.Ordinal)
