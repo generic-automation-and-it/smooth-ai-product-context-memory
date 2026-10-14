@@ -706,6 +706,21 @@ def _response_uuids(resp) -> list:
     return out
 
 
+def _response_wrote_nothing(resp) -> bool:
+    """True when a success-shaped `set` answer reports zero persisted items.
+
+    The marker follows the receipt: `created`/`versioned`/`unchanged` all leave the
+    item in the store, `skipped` does not. Only a response that carries at least one
+    of those counts can prove "nothing written"; one with no counts stays on the
+    request-identity fallback.
+    """
+    if not isinstance(resp, dict):
+        return False
+    counts = [resp.get(key) for key in ("created", "versioned", "unchanged")
+              if type(resp.get(key)) is int]
+    return bool(counts) and sum(counts) == 0
+
+
 def _mark_send_receipt(args, payload, resp=None) -> None:
     """Append one export entry for a successful send and print the Marker: line.
 
@@ -732,6 +747,9 @@ def _mark_send_receipt(args, payload, resp=None) -> None:
         return
     if not sid:
         print(_marker.marker_line("none", "", verb="export"), file=sys.stderr)
+        return
+    if _response_wrote_nothing(resp):
+        print(_marker.marker_line("empty", sid, 0, verb="export"), file=sys.stderr)
         return
     sent = [item for item in payload.get("items", []) if isinstance(payload, dict)] or []
     confirmed = _response_uuids(resp)

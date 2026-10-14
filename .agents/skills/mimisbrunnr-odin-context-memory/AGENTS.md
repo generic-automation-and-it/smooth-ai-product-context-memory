@@ -536,6 +536,7 @@ redaction detector is a stdin→stdout fingerprint script reporting rule names o
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-14 | **A success-shaped zero-write `set` answer marks nothing.** When the response carries `created`/`versioned`/`unchanged` counts summing to 0, the export receipt records no entry (`Marker: skipped (nothing written)`) instead of falling back to the request's own uuids; a response with no counts keeps the fallback. | PR #221 review |
 | 2026-10-14 | **Read/write subagents removed (LADR-008, supersedes LADR-005).** `.agents/agents/memory-{read,write}.md` deleted; the skill-local contracts moved to `references/read-path.md` / `references/write-path.md` without agent frontmatter, and the session runs both paths itself. The write credential is loaded only inside a subshell around the single write command, so the read client keeps running in the same session. `SKILL.md` *Where Each Step Runs* rewritten; harness `AgentContractTests` re-pointed at the procedures and gained a no-registration guard. | session request |
 | 2026-10-14 | **Export receipt prefers server-confirmed uuids** (falls back to request uuid/createUuid when the response is not positional); **corrupt marker quarantined** to `<name>.corrupt-<stamp>` with a stderr warning instead of silent replace. | ai-review 3, 4 |
 

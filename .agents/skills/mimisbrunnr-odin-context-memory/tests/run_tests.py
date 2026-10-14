@@ -4429,6 +4429,23 @@ class SessionMarkerTests(unittest.TestCase):
         ids, _, _, _ = sm.exclusion_set(marker)
         self.assertIn("cli-uuid-9", ids)
 
+    def test_success_shaped_zero_write_answer_records_nothing(self):
+        # A 200 that reports created 0 / versioned 0 persisted nothing: the marker
+        # follows that receipt, not the request's own createUuid.
+        import session_marker as sm
+        os.environ["CLAUDE_CODE_SESSION_ID"] = "ses-odin-z"
+        payload = {"groupUuid": "g-1", "items": [{"createUuid": "cli-uuid-0",
+                                                  "description": "Fresh claim",
+                                                  "statement": "CockroachDB stores it."}]}
+        args = SimpleNamespace(payload=None, dryrun=False, export_all=False, session=None)
+        answer = {"created": 0, "versioned": 0, "skipped": 1, "items": []}
+        with patch.object(client, "read_payload", return_value=payload), \
+                patch.object(client, "_request", return_value=answer), \
+                redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as err:
+            client.cmd_set(args)
+        self.assertIn("Marker: skipped (nothing written)", err.getvalue())
+        self.assertIsNone(sm.load_marker("odin", "ses-odin-z"))
+
     def test_each_harness_env_var_resolves_in_isolation(self):
         import session_marker as sm
         for name in self.ENV_NAMES:
