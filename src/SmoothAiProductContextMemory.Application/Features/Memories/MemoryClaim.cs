@@ -27,7 +27,7 @@ public sealed record MemoryClaim(
     short Confidence,
     IReadOnlyList<SourceRef> Sources,
     Instant? ValidUntil,
-    string? ContentAddress)
+    string? BlobAddress)
 {
     public static MemoryClaim FromWrite(SetMemories.MemoryWrite write) => new(
         write.Statement,
@@ -39,7 +39,7 @@ public sealed record MemoryClaim(
         write.ValidUntil is { } validUntil ? TruncateToMicroseconds(validUntil) : null,
         string.IsNullOrEmpty(write.Content)
             ? null
-            : SmoothAiProductContextMemory.Domain.ContentAddress.Compute(Encoding.UTF8.GetBytes(write.Content)));
+            : ContentAddress.Compute(Encoding.UTF8.GetBytes(write.Content)));
 
     public static MemoryClaim FromVersion(MemoryVersion version) => new(
         version.Statement,
@@ -61,7 +61,7 @@ public sealed record MemoryClaim(
         && left.Confidence == right.Confidence
         && SourcesEqual(left.Sources, right.Sources)
         && left.ValidUntil == right.ValidUntil
-        && string.Equals(left.ContentAddress, right.ContentAddress, StringComparison.Ordinal);
+        && string.Equals(left.BlobAddress, right.BlobAddress, StringComparison.Ordinal);
 
     private static bool SourcesEqual(IReadOnlyList<SourceRef> left, IReadOnlyList<SourceRef> right)
     {

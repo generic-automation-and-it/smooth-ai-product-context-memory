@@ -57,6 +57,8 @@ public static class SetMemories
     /// <see cref="Uuid"/> is stable on dry-run when the caller supplied <c>createUuid</c>; legacy
     /// creates keep a null dry-run identity and mint it only during persistence.
     /// </summary>
+    /// <summary>One item's per-item result. <see cref="Versioned"/> and <see cref="Unchanged"/>
+    /// are never both true — an item is either a new version, an unchanged no-op, or a create.</summary>
     public sealed record ItemResult(Guid? Uuid, string? BlobAddress, bool Versioned, bool Unchanged = false);
 
     public sealed record Response(
@@ -288,7 +290,7 @@ public static class SetMemories
                             versionTarget.Memory.Id,
                             versionTarget.Current,
                             versionTarget.NextVersion,
-                            versionTarget.LastClaim.ContentAddress));
+                            versionTarget.LastClaim.BlobAddress));
                         continue;
                     }
 

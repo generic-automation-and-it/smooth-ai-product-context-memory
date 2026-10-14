@@ -101,7 +101,7 @@ sequenceDiagram
     end
 
     W-->>S: Bounded clarification needs + digest only
-    S-->>H: Receipt — created / versioned / linked / diverged / skipped / labels-proposed
+    S-->>H: Receipt — created / versioned / unchanged / linked / diverged / skipped / labels-proposed
 ```
 
 **Read this for three properties the ordering encodes:**
