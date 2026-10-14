@@ -233,8 +233,8 @@ recalls the live store via `import` (read token only) and orchestrates the captu
   belowThreshold)` — never a guessed `hold`. Under `mark` the `audience:*` tags reach the write:
   `set_items` sends the binding's tags followed by the candidate's own.
 - **The gate's ledger disclosures reach stderr.** `_ledger_disclosures` turns a truthy `ledgerReset`
-  (a prose string from the gate, never echoed) or `ledgerEvicted > 0` into one fixed-wording stderr line
-  each, since both mean a spent attempt budget was forgotten and an exhausted record can be scored
+  (a prose string from the gate, never echoed), `ledgerEvicted > 0` or `ledgerIndexPurged > 0` into one fixed-wording stderr line
+  each, since each means a spent attempt budget was forgotten and an exhausted record can be scored
   again. Absent, `0`, `false` and malformed values (a string count, a boolean, a negative, a list,
   whitespace) print nothing and never stop the export (issue 182).
 - **A store-export record keeps its source scope.** The group's scope comes from the binding, so
