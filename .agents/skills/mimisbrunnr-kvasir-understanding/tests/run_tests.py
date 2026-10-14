@@ -4181,6 +4181,21 @@ class SessionMarkerTests(unittest.TestCase):
         self.assertEqual(len(sels), 1)
         self.assertTrue(sels[0].get("all_kinds"))
 
+    def test_corrupt_marker_is_quarantined_not_silently_replaced(self):
+        sid = self._sid()
+        bad = Path(self.tmp.name, f"kvasir-{sid}.json")
+        bad.write_text("{ not json", encoding="utf-8")
+        src = self._store_file([self._record("u-after-corrupt-1", 1, "After Q?")])
+        rc, out, err = run(["load", src, "--format", "store"])
+        self.assertEqual(rc, 0, out)
+        asides = list(Path(self.tmp.name).glob(f"kvasir-{sid}.json.corrupt-*"))
+        self.assertEqual(len(asides), 1, "the unreadable file must be moved aside")
+        self.assertIn("WARNING", err + out)
+        self.assertIn("moved aside", err + out)
+        marker = self.sm.load_marker("kvasir", sid)
+        ids, _, _, _ = self.sm.exclusion_set(marker)
+        self.assertIn("u-after-corrupt-1", ids)
+
     def test_three_copies_stay_identical(self):
         roots = [Path(__file__).resolve().parents[1] / "scripts" / "session_marker.py"]
         roots.append(Path(__file__).resolve().parents[2]

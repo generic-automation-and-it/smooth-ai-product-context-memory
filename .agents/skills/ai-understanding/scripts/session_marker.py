@@ -33,6 +33,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -231,6 +232,20 @@ def record_import(marker_type: str, session: str, harness: str, verb: str,
 
     existed = mpath.is_file()
     marker = load_marker(marker_type, session, root) if existed else None
+    if existed and marker is None:
+        # Fail closed: an unreadable marker still names real exclusions, so it is
+        # moved aside (never silently replaced) and the loss is said aloud. The new
+        # entry starts fresh; the old file stays next to it for inspection.
+        aside = mpath.with_name(
+            mpath.name + ".corrupt-"
+            + dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ"))
+        try:
+            os.replace(mpath, aside)
+        except OSError:
+            pass
+        print(f"WARNING: session marker {mpath} unreadable; moved aside to {aside} "
+              f"and starting fresh (earlier exclusions no longer apply).",
+              file=sys.stderr)
     if marker is None:
         marker = {
             "type": marker_type,
