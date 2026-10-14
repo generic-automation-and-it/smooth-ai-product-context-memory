@@ -551,6 +551,154 @@ public sealed class SetMemoriesHandlerTests(AspireFixture aspire) : HandlerTestB
         memories.Single(m => m.Uuid == secondUuid).Statements.ShouldBe(["Second claim"]);
     }
 
+    [Fact]
+    public async Task Re_sending_identical_claim_is_unchanged_not_a_new_version()
+    {
+        var group = TestEntities.NewGroup();
+        Db.MemoryGroups.Add(group);
+        await Db.SaveChangesAsync(Ct);
+
+        SetMemories.Handler handler = NewHandler();
+        Guid uuid = (await handler.Handle(Write(group.Uuid, "Subject", "Claim 1"), Ct)).Items[0].Uuid.ShouldNotBeNull();
+
+        SetMemories.Response second = await handler.Handle(Write(group.Uuid, "Subject", "Claim 1", uuid), Ct);
+
+        second.Created.ShouldBe(0);
+        second.Versioned.ShouldBe(0);
+        second.Unchanged.ShouldBe(1);
+        second.Items[0].Versioned.ShouldBeFalse();
+        second.Items[0].Unchanged.ShouldBeTrue();
+
+        long memoryId = await Db.Memories.AsNoTracking().Where(m => m.Uuid == uuid).Select(m => m.Id).SingleAsync(Ct);
+        MemoryVersion[] versions = await Db.MemoryVersions.AsNoTracking()
+            .Where(v => v.MemoryId == memoryId).ToArrayAsync(Ct);
+        versions.Length.ShouldBe(1);
+        versions.Single().Version.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Version_item_differing_only_in_tags_is_unchanged()
+    {
+        var group = TestEntities.NewGroup();
+        Db.MemoryGroups.Add(group);
+        await Db.SaveChangesAsync(Ct);
+
+        SetMemories.Handler handler = NewHandler();
+        Guid uuid = (await handler.Handle(Write(group.Uuid, "Subject", "Claim 1"), Ct)).Items[0].Uuid.ShouldNotBeNull();
+
+        SetMemories.Response response = await handler.Handle(
+            Write(group.Uuid, "Subject", "Claim 1", uuid) with
+            {
+                Items = [Write(group.Uuid, "Subject", "Claim 1", uuid).Items[0] with { Tags = ["different-tag"] }],
+            },
+            Ct);
+
+        response.Versioned.ShouldBe(0);
+        response.Unchanged.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Ordered_batch_with_unchanged_first_creates_two_versions()
+    {
+        var group = TestEntities.NewGroup();
+        Db.MemoryGroups.Add(group);
+        await Db.SaveChangesAsync(Ct);
+
+        SetMemories.Handler handler = NewHandler();
+        Guid uuid = (await handler.Handle(Write(group.Uuid, "Subject", "Claim A"), Ct)).Items[0].Uuid.ShouldNotBeNull();
+
+        SetMemories.Request batch = new(
+            group.Uuid,
+            [
+                Write(group.Uuid, "Subject", "Claim A", uuid).Items[0],
+                Write(group.Uuid, "Subject", "Claim B", uuid).Items[0],
+                Write(group.Uuid, "Subject", "Claim A", uuid).Items[0],
+            ],
+            null,
+            null);
+
+        SetMemories.Response written = await handler.Handle(batch, Ct);
+        written.Versioned.ShouldBe(2);
+        written.Unchanged.ShouldBe(1);
+
+        long memoryId = await Db.Memories.AsNoTracking().Where(m => m.Uuid == uuid).Select(m => m.Id).SingleAsync(Ct);
+        MemoryVersion[] versions = await Db.MemoryVersions.AsNoTracking()
+            .Where(v => v.MemoryId == memoryId).OrderBy(v => v.Version).ToArrayAsync(Ct);
+        versions.Select(v => v.Statement).ShouldBe(["Claim A", "Claim B", "Claim A"]);
+        versions.Single(v => v.IsCurrent).Version.ShouldBe(3);
+    }
+
+    [Fact]
+    public async Task Two_identical_new_claims_in_one_batch_create_one_version()
+    {
+        var group = TestEntities.NewGroup();
+        Db.MemoryGroups.Add(group);
+        await Db.SaveChangesAsync(Ct);
+
+        SetMemories.Handler handler = NewHandler();
+        Guid uuid = (await handler.Handle(Write(group.Uuid, "Subject", "Claim X"), Ct)).Items[0].Uuid.ShouldNotBeNull();
+
+        SetMemories.Request batch = new(
+            group.Uuid,
+            [
+                Write(group.Uuid, "Subject", "Claim A", uuid).Items[0],
+                Write(group.Uuid, "Subject", "Claim A", uuid).Items[0],
+            ],
+            null,
+            null);
+
+        SetMemories.Response written = await handler.Handle(batch, Ct);
+        written.Versioned.ShouldBe(1);
+        written.Unchanged.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Dry_run_reports_unchanged_with_null_addresses_and_writes_nothing()
+    {
+        var group = TestEntities.NewGroup();
+        Db.MemoryGroups.Add(group);
+        await Db.SaveChangesAsync(Ct);
+
+        SetMemories.Handler handler = NewHandler();
+        Guid uuid = (await handler.Handle(Write(group.Uuid, "Subject", "Claim 1"), Ct)).Items[0].Uuid.ShouldNotBeNull();
+
+        SetMemories.Response dry = await handler.Handle(
+            Write(group.Uuid, "Subject", "Claim 1", uuid) with { DryRun = true }, Ct);
+
+        dry.Unchanged.ShouldBe(1);
+        dry.Items[0].BlobAddress.ShouldBeNull();
+        dry.Items[0].Uuid.ShouldBe(uuid);
+        (await Db.MemoryVersions.AsNoTracking().CountAsync(Ct)).ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Item_result_never_reports_versioned_and_unchanged_together()
+    {
+        var group = TestEntities.NewGroup();
+        Db.MemoryGroups.Add(group);
+        await Db.SaveChangesAsync(Ct);
+
+        SetMemories.Handler handler = NewHandler();
+        Guid uuid = (await handler.Handle(Write(group.Uuid, "Subject", "Claim A"), Ct)).Items[0].Uuid.ShouldNotBeNull();
+
+        SetMemories.Response written = await handler.Handle(
+            new(
+                group.Uuid,
+                [
+                    Write(group.Uuid, "Subject", "Claim A", uuid).Items[0],
+                    Write(group.Uuid, "Subject", "Claim B", uuid).Items[0],
+                    Write(group.Uuid, "Subject", "Claim A", uuid).Items[0],
+                ],
+                null,
+                null),
+            Ct);
+
+        foreach (SetMemories.ItemResult item in written.Items)
+        {
+            (item.Versioned && item.Unchanged).ShouldBeFalse();
+        }
+    }
+
     private static SetMemories.Request Write(Guid groupUuid, string description, string statement, Guid? uuid = null) =>
         new(
             groupUuid,

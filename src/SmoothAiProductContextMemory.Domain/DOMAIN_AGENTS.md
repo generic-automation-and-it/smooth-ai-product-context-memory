@@ -27,12 +27,15 @@ they are the design, not drift.
   constraints doing the real work.
 - **Value objects still hold.** `Slug` is a pure static value helper with no state and guards its own
   input; the immutability and value-comparison rule is unchanged for anything that is genuinely a value
-  object.
+  object. `ContentAddress` joins it as the second sanctioned pure static helper — the SHA-256 content
+  hash/address derivation that Infrastructure's blob and snapshot stores, and Application's claim
+  comparer, all share.
 
 ## Changelog
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-14 | `ContentAddress` added as the home of the content hash/address derivation, moved out of Infrastructure's `Sha256ContentAddress` so the pure function has one name and one layer. | version-bug |
 | 2026-10-13 | Domain timestamps now use NodaTime `Instant`; no local/offset-bearing time is retained in the model. NodaTime is the pure value-type dependency exception, not an infrastructure dependency. | HLD-001 LADR-05; UTC instant write fix |
 | 2026-09-19 | Added `understanding` to well-known open kind values; no schema or closed-enum constraint introduced. Its five parts (trigger/knowledge/why/boundaries/provenance) map onto existing fields — `Description`/`Statement`/`ContentSummary`/`ValidUntil`+scope/`Sources`+`ValidFrom`+`CreatedOn` — so no column was added. | HLD-007 LADR-01, LADR-04 |
 | 2026-09-17 | Added `divergence` to well-known open kind values; no schema or closed-enum constraint introduced. | HLD-002 BR-10 closure |

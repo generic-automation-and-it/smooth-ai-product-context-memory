@@ -8,8 +8,8 @@
 
 A **session/store bridge** for a Mímisbrunnr **Understanding**. `load` injects a file or folder into the
 agent's context with **no store write**; `import` queries the store itself (`kind = understanding`) back
-into the session, read token only; `export` orchestrates the capture path (dry run by default, and a dry
-run creates nothing); `dump --currentsession` writes the session to a local folder for
+into the session, read token only; `export` orchestrates the capture path (writes by default like the capture
+skill's `--export`; `--dryrun` creates nothing); `dump --currentsession` writes the session to a local folder for
 cross-session/cross-repo reuse. It is the load/transfer counterpart to `mimisbrunnr-odin-context-memory` (the
 sole writer of clean facts).
 
@@ -40,7 +40,7 @@ sole writer of clean facts).
 
 The skill reads store exports and foreign material into an agent's context (default, no write);
 recalls the live store via `import` (read token only) and orchestrates the capture path via `export`
-(dry run by default); it dumps the session to a local folder. The store, DB and wire are unchanged.
+(writes by default, `--dryrun` to preview); it dumps the session to a local folder. The store, DB and wire are unchanged.
 
 ## Architecture Decisions
 
@@ -57,7 +57,7 @@ recalls the live store via `import` (read token only) and orchestrates the captu
 
 
 - **Load, import and export are three acts.** Load = context injection, no write. Import = live store →
-  session recall, read token only. Export = session → store orchestration, dry run by default.
+  session recall, read token only. Export = session → store orchestration, writes by default (`--dryrun` previews).
 - **`--currentsession` folder name is chosen on output** so another agent can discover it; the dump is
   gitignored (`.context/`) and is an export.
 - **Selectors bind, they don't filter reading.** `--tickets`/`--tags`/`--repository`/`--scope`
@@ -108,6 +108,17 @@ recalls the live store via `import` (read token only) and orchestrates the captu
 - **A folder resolves to the newest version of each slug** — stamp suffix `-yyyyMMdd-HHmm` of the parent
   folder, then `updated` — the same precedence `ai-understanding`'s index applies. Older versions are
   counted, not silently dropped.
+- **An import marks the working point; a default export excludes what was marked (LADR-11).**
+  `load`/`import` record ids + versions + subjects (plus selector + as-of on `--all`/selector-wide
+  imports for replay;
+  `--nomarker` logs history that still flows into export) in
+  `.context/session-markers/kvasir-<session-id>.json` — references only, never content, atomic
+  write — and print one `Marker:` line. `export` drops echo ids before preflight, keeps a changed
+  imported item as a supersession (mechanical id / exact-subject match, no model judgement), and
+  prints one `Boundary:` line; `export --all` ignores the marker and `dump --currentsession`
+  reports it. Session id is the five-name harness env chain, else `--session`, else no marker.
+  A successful writing `export` (one entry per completed batch) and `dump` append to the marker —
+  the marker follows the receipt, never the plan; `export --nomarker` writes no entry.
 - **The dump warns when its folder is gitignored.** `.context/` is gitignored, so the default dump
   location does not survive the workspace. The warning is advisory — the dump is still written and the
   exit code is unchanged — and it asks the repo holding the folder (`git check-ignore`, never a text
@@ -146,15 +157,16 @@ recalls the live store via `import` (read token only) and orchestrates the captu
   session's dump is used when `_dump.json` records the running session id (newest by `_session.md`
   mtime, because a re-dump rewrites that file in place and leaves the folder's mtime unchanged), else
   the newest session dump, both under `dump_root()` (the git top level, else the working directory,
-  also where `dump` writes). The default is disclosed as `Input defaulted to …`. `export --write`
+  also where `dump` writes). The default is disclosed as `Input defaulted to …`. A writing `export`
   refuses a defaulted input that is **not** provably this session's before reading it: the newest dump
   in a shared workspace may be another session's, and capturing it would write that session's material
   under its own recorded binding.
-- **`export` is a dry run by default and creates nothing.** `resolve-group` has no dry-run mode and its
+- **`export` writes by default; `export --dryrun` creates nothing.** `--write`, the old opt-in, is
+  accepted as a deprecated no-op with a stderr note, and `--dryrun` wins when both are given. `resolve-group` has no dry-run mode and its
   handler commits unconditionally, so a dry run resolves no group and reports the group and initiative as
   *would create*, printing the exact commands. A **new** group needs its initiative (`resolve-group`
   answers `404` otherwise); an existing ticket-bound group is returned without one. So an absent
-  initiative refuses a ticketless `--write` (always a create) before the decision gate spends any
+  initiative refuses a ticketless write (always a create) before the decision gate spends any
   attempt, while a ticket-bound one proceeds and refuses only if `resolve-group` fails, naming
   `upsert-initiative`. **Accepted cost:** that ticket-bound refusal comes after scoring, because only
   the mutating `resolve-group` can tell an existing group from a new one, and it must stay after the
@@ -171,15 +183,15 @@ recalls the live store via `import` (read token only) and orchestrates the captu
   Follow-ups (not this change): enforce server- or sole-client-side (`initiativeIgnored` /
   409), guard `update-group` re-point the same way, per-chunk re-resolve. Harness 214 -> 221.
 - **Every gate is a gate.** A redactor or atomicity detector that cannot run or returns an unknown
-  verdict, or a post-`--write`
-  `set --dryrun` refusal, stops with nothing written rather than bypassing the boundary. The
+  verdict, or a write's
+  `set --dryrun` veto refusal, stops with nothing written rather than bypassing the boundary. The
   `MAX_CANDIDATES` (20) cap is **not** a refusal: an over-cap batch auto-splits into consecutive ≤20
   chunks, each processed end to end (its own preflight, its own `set --dryrun` veto, its own write), so
-  a 25-candidate export becomes `Batch 1/2: 20` + `Batch 2/2: 5`. A multi-chunk `--write` is not atomic
+  a 25-candidate export becomes `Batch 1/2: 20` + `Batch 2/2: 5`. A multi-chunk write is not atomic
   across chunks (the capture path has no cross-batch transaction) and is disclosed. A decision or rule
   captured this way is written as `kind = understanding`, which does not pass the gated-kind approval.
 - **A candidate whose subject already exists in the export's group is a version bump, not a create.**
-  Each chunk preflights its own request (after the previous chunk's write, for a `--write`), and a
+  Each chunk preflights its own request (after the previous chunk's write, for a write), and a
   match in the export's group feeds its `uuid` back as the item's `uuid` (version target, mutually
   exclusive with `createUuid`). A
   same-subject memory in another group is a separate memory and never a version target — memory
@@ -200,7 +212,7 @@ recalls the live store via `import` (read token only) and orchestrates the captu
   `_dedup_candidates` runs exact -> lexical -> model stages per chunk and queues `duplicate`-menu proposals
   for human resolve. A paraphrase of an existing memory
   under another subject, or a relation worth a typed link, needs the judgement the capture skill's
-  Compare-or-Clarify round makes, which this script cannot make. So the agent does it before `--write`:
+  Compare-or-Clarify round makes, which this script cannot make. So the agent does it before writing:
   recall each candidate's subject
   (`import`, or the capture skill's `--import`) and, where a candidate restates or relates to a
   recalled memory, capture it through `mimisbrunnr-odin-context-memory --export` instead, or drop it
@@ -211,7 +223,7 @@ recalls the live store via `import` (read token only) and orchestrates the captu
   That is the worktask AC4 gap: content-based dedup would need the current statement in the preflight
   or a server-side skip on identical content — both out of this client's scope. A *changed* claim is a
   genuine version bump (AC2); only the byte-identical no-op version is the residue.
-- **A dry-run export probes the decision gate; only `--write` scores.** Scoring spends each record's attempt budget in the gate's ledger, and an exhausted budget comes back `attempts-exhausted`, which keeps the record unscored — so repeated previews used to turn the write's gate into a no-op. `probe_decisions` runs `decisions_gate.py probe` (content-free, no ledger) and reports `decisions: not scored (dry run …)`; a `bad-decisions-config`/`bad-decisions-url` probe outcome is still `DECISIONS_REFUSED`, and every other probe outcome is disclosed, never a refusal (issue 182). `probe` never runs the redactor, so `probe_decisions` first checks that the gate's sibling `redact.py` exists — the gate's own first redaction check — and refuses with the write path's `redactor-unavailable` message when it does not; a redactor present but failing on the records is still found only by the write. Skipping scoring is deliberate and unlike the capture skill's `set --dryrun`, which repeats the judgement work.
+- **A dry-run export probes the decision gate; only a write scores.** Scoring spends each record's attempt budget in the gate's ledger, and an exhausted budget comes back `attempts-exhausted`, which keeps the record unscored — so repeated previews used to turn the write's gate into a no-op. `probe_decisions` runs `decisions_gate.py probe` (content-free, no ledger) and reports `decisions: not scored (dry run …)`; a `bad-decisions-config`/`bad-decisions-url` probe outcome is still `DECISIONS_REFUSED`, and every other probe outcome is disclosed, never a refusal (issue 182). `probe` never runs the redactor, so `probe_decisions` first checks that the gate's sibling `redact.py` exists — the gate's own first redaction check — and refuses with the write path's `redactor-unavailable` message when it does not; a redactor present but failing on the records is still found only by the write. Skipping scoring is deliberate and unlike the capture skill's `set --dryrun`, which repeats the judgement work.
 - **Heimdallr's ticket screening is disclosed, never dropped.** When a ticket autofill is attempted, `heimdallr_ticket_disclosure` prints one stderr line for `ticketsWithheld` (`heimdallr: N ticket candidate(s) withheld as credential-shaped; …`) or `ticketsUnavailable` (`heimdallr: tickets unavailable (<reason>)`) — count or reason only; the withheld values are never in the scan. The autofilled commit ticket is the newest one *reported*, which is older than the newest commit when a newer candidate was withheld (issue 182). A `commitsUnavailable` reason (a failed `git log`) adds `heimdallr: commit history unavailable (<reason>); only branch tickets were considered`, so a broken read never looks like work with no ticket (issue 184).
 - **The decision gate's report decides hold vs mark, not this client's environment.** The gate
   resolves `CONTEXT_MEMORY_DECISIONS_BELOW_THRESHOLD` from the machine credential file as well as the
@@ -249,7 +261,7 @@ recalls the live store via `import` (read token only) and orchestrates the captu
   across runs, and a budget below the smallest record narrows to zero rather than truncating; foreign
   material cited as data with truncation disclosed; `import` is a read only — it queries the store,
   binds nothing on its own and never writes (NFR-02), while the retired `import --store` capture
-  spelling refuses; `export` without `--write` is a dry run carrying selectors and bundle flags while
+  spelling refuses; `export --dryrun` is a dry run carrying selectors and bundle flags while
   writing nothing; "nothing bound after autofill ⇒ no association"; the dump → load round trip (LADR-07); `.understanding.md` units and store folders read as structured
   input with newest-version-per-slug, including import from a dump folder (LADR-09); the dump's
   redaction and its fail-closed refusal on a missing, non-zero-exit or malformed-output redactor; the
@@ -261,8 +273,8 @@ recalls the live store via `import` (read token only) and orchestrates the captu
   filter, `--all` breadth by omitting `kind`, filters mapped to declared fields, three-outcome
   classification, `--table` rows under the framing notice, the framed banner parsed in the shared place
   that also backs `load`, and the old `--store` spelling deprecated with a message); `export` orchestrates
-  the capture path with `--write` off by default, and the dry runs create no initiative, no group and no
-  memory (the resolve is a read `initiative_exists`, never `resolve-group`), a missing initiative on a ticketless `--write` refuses
+  the capture path (writing by default, `--dryrun` to preview), and the dry runs create no initiative, no group and no
+  memory (the resolve is a read `initiative_exists`, never `resolve-group`), a missing initiative on a ticketless write refuses
   with the upsert command, the 20-candidate cap and atomicity-holdback are enforced, and a failing
   redactor or atomicity detector is a refusal, not a flag. Dump coverage gained the generated-header
   fence, structured `_dump.json` binding, and UTC-with-offset `Generated:`. Decision-gate coverage
@@ -278,7 +290,7 @@ recalls the live store via `import` (read token only) and orchestrates the captu
   `REFUSED` on stderr, and that the capture client is never reached; a paired control holds the other
   half — an unreachable, timed-out, 5xx or unrecognised gate must still write, because a down decision
   model must never block a capture.
-  `DecisionsGateDryRunAndTimeoutTests` drives the real `export` with only the gate subprocess faked: a dry run calls `probe` and never `score`, a `--write` still scores, a misconfigured probe (stdout or stderr) refuses the dry run with the capture client never reached, an unreachable probe is disclosed and not refused, a stub gate with no `redact.py` beside it refuses the dry run before `probe` is spawned (control: the same stub with its redactor probes normally), and a pretty-printed `redactor-unavailable` from a redactor timeout inside the gate refuses the write with nothing resolved or written.
+  `DecisionsGateDryRunAndTimeoutTests` drives the real `export` with only the gate subprocess faked: a dry run calls `probe` and never `score`, a write still scores, a misconfigured probe (stdout or stderr) refuses the dry run with the capture client never reached, an unreachable probe is disclosed and not refused, a stub gate with no `redact.py` beside it refuses the dry run before `probe` is spawned (control: the same stub with its redactor probes normally), and a pretty-printed `redactor-unavailable` from a redactor timeout inside the gate refuses the write with nothing resolved or written.
   Run: `python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/tests/run_tests.py`. The PR gate runs it.
 - **Cold-agent walk harness:** `tests/run_walk_tests.py` — proves an agent with no memory can **act** on
   what `load`/`--all`/the dossier slice produce (BRD-003 assumption 2), and measures what that costs in
@@ -311,6 +323,10 @@ recalls the live store via `import` (read token only) and orchestrates the captu
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-14 | **Export receipts record `originVersion`** where the candidate carried one, so the digest can say which version was superseded; fresh prose records none. | ai-review 7 |
+
+| 2026-10-14 | **`export` writes by default; `--dryrun` previews (replaces the `--write` opt-in).** Aligns kvasir with the capture skill's `--export`/`--dryrun`: a bare `export` runs every gate and writes, `export --dryrun` stops before anything is written and creates nothing. `--write` is accepted as a deprecated no-op with a stderr note (deprecated, not repurposed — the `--store`/`--heimdallr` precedent); with `--dryrun` beside it, `--dryrun` wins. The defaulted-input refusal is unchanged and now applies to a bare `export`, pointing at `--input` or `--dryrun`. Note: until the value-gate subject-less identity fix lands, a prose/dump write is kept unscored. | issue 222 |
+| 2026-10-14 | **Session marker: imports and exports mark the boundary (LADR-11 + export-marks amendment).** `load`/`import` gain `--nomarker`/`--session` and print `Marker:`; `export`/`dump` gain `--all`/`--nomarker`/`--session` and print `Boundary:`. Markers live per skill under `.context/session-markers/` (store ids + versions + subjects, selector + as-of, or file slugs/folder; never content). A default export drops echo ids/slugs and routes changed-imported candidates to supersession mechanically; `--all` ignores the marker for selection. A successful `export --write` appends one entry per completed batch and `dump` its folder (receipt, never plan); dry runs, refusals, empty and held-back sets mark nothing. Shared `session_marker.py` helper (WET copy in all three skill script dirs, parity-pinned). Harness 221 -> 238. | HLD-007 LADR-11 |
 | 2026-10-14 | **`--write` refuses when the bound initiative is not the resolved group's.** Tickets resolve first and the initiative is create-path-only, so an explicit `--initiative` against an existing ticket-bound group was silently dropped while the export versioned under the old initiative. The resolved reply's `initiativeName` is now compared: mismatch stops before preflight with drop-flag / re-bind-for-WET / `update-group` options (dry run warns when tickets meet a non-default initiative). The refusal names the binding source and the upsert prerequisite; shared group-uuid/created/initiative extractors. Harness 214 -> 221. | session request |
 | 2026-10-13 | **A defaulted input now writes only when it provably is this session's dump.** `dump` records the running session id in `_dump.json` (`session`); a `--input`-less `export --write` matches on it, so a default to this session's dump may capture, while a defaulted dump that does not prove ownership stays dry-run only and refuses `--write` (the previous unconditional refusal). Empty session identity keeps the conservative guard. Harness 212 -> 214. | this change |
 | 2026-10-13 | Export date-only source validity as midnight UTC for the Instant API; preserve local source metadata and explicit timestamp precision. Regression coverage includes nullable end and invalid-date refusal. | HLD-001 LADR-05; UTC instant write fix |

@@ -18,15 +18,38 @@ client has `import` only; it has no write command to alias.
 | Switch | Effect |
 |--------|--------|
 | _(none)_ | Silent accumulate during work; no write until the `--export` checkpoint. |
-| `--import` | Store → session (recall) through `memory-read`: the `query` command, aliased `import`. Read token only. |
-| `--export` | Session → store (capture) at the end-of-task checkpoint through `memory-write`: the full write pipeline ending in `set`, aliased `export`. Input is the facts accumulated during the session; this skill reads no dump file — to capture a dump, use `mimisbrunnr-kvasir-understanding export --input <folder>`. |
+| `--import` | Store → session (recall) along the read path ([references/read-path.md](references/read-path.md)): the `query` command, aliased `import`. Read token only. |
+| `--export` | Session → store (capture) at the end-of-task checkpoint along the write path ([references/write-path.md](references/write-path.md)): the full write pipeline ending in `set`, aliased `export`. Input is the facts accumulated during the session; this skill reads no dump file — to capture a dump, use `mimisbrunnr-kvasir-understanding export --input <folder>`. |
 | `--dryrun` | When the target **`groupUuid` is known read-only** — Initialize's ticket `query` returned it, which happens only when the group exists **and already holds memories** — run the full write pipeline (preflight, redaction detection, dedup, link derivation, atomicity, ticket-uniqueness, `set --dryrun`) and produce the digest **without writing any memory, link, group or initiative** — the preflight and recall `query` calls it makes still leave server-side recall feedback (HLD-004 LADR-01), which is tuning data, not capture. Otherwise — a group that does not exist yet, or an existing group with no memories, whose `groupUuid` no read-only call can return (`resolve-group` would create or commit) — `set` cannot run, so the dry run previews the plan offline and says the set stage was not tested. Report what *would* be created / versioned / linked / skipped. **This is the only pre-write veto point when the `groupUuid` is known** — see Finalization Output. |
 | `--approve` | Write gated kinds (`rule`, `nfr`, `decision`) as `approved` instead of `proposed`. **Only usable when the human explicitly confirms.** Without it, a gated `--export` still writes, but with `status: proposed` — excluded or flagged on retrieval until promoted. |
-| `--deepsearch` | Delegates bounded expansion: up to four keyword queries of 25 and five depth-one traversals of 20, with 400 unique UUID/version candidates overall. More inspection, never more authority or irreversibility. |
+| `--deepsearch` | Runs bounded expansion: up to four keyword queries of 25 and five depth-one traversals of 20, with 400 unique UUID/version candidates overall. More inspection, never more authority or irreversibility. |
+
+**Session marker (HLD-007 LADR-11).** A marked `--import`/`query` sets the session's working
+point in `.context/session-markers/odin-<session-id>.json` (references only — ids, versions,
+subjects, or selector + as-of; never content; atomic write). Session id: first non-empty of
+`CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID`, `OPENCODE_SESSION_ID`,
+`COPILOT_AGENT_SESSION_ID`, `PI_SESSION_ID`, else explicit `--session <id>`, else no marker.
+`--nomarker` recalls history that flows into the send; `--all` on `set`/`export` (and
+`preflight`) ignores the marker. `set`/`export` drops echo items (same uuid **and** same
+description) before sending and keeps changed ones as supersessions; `preflight` discloses
+exact-subject matches as supersession routing. `query`/`import` prints `Marker:` and
+`set`/`export`/`preflight` print `Boundary:` — both on **stderr**, so stdout stays parseable
+JSON. A successful `set`/`export` appends the sent ids to the marker and prints
+`Marker: set (export, N items)`; dry runs, refusals and `--nomarker` sends mark nothing. The read-only client (`context_memory_read_client.py`) never writes markers: it is the
+shared recall path (kvasir `import` shells out to it and writes its own marker), so an odin
+recall that must mark runs through this client's `query`/`import`.
+
+| Marker switch | Effect |
+|--------|--------|
+| `--nomarker` (`query`/`import` only) | Recall without setting the boundary; flows into a default send. |
+| `--all` (`set`/`export`, `preflight` only) | Ignore the marker; send/match in full (a successful send still writes its export entry). |
+| `--nomarker` (`set`/`export` only) | Send normally but write no marker entry. |
+| `--session <id>` (`query`/`import`, `set`/`export`, `preflight`) | Explicit session id for the marker (else the harness env chain). |
 
 **Implication rule:** `--approve` is the only switch that widens what the write path *does*; all other
-switches (`--dryrun`, `--deepsearch`, `--import`) change *how much work* is done or *which
-direction*, never *how irreversible* it is. `--dryrun` and `--approve` are mutually exclusive —
+switches (`--dryrun`, `--deepsearch`, `--import`, `--nomarker`) change *how much work* is done, *which
+direction*, or *which state is kept* — never *how irreversible* it is. `--nomarker` may combine
+with `--approve`: the write still lands as approved, but no marker entry is written. `--dryrun` and `--approve` are mutually exclusive —
 `--dryrun` writes nothing, `--approve` is the permission to write. Treat a request for both as an
 error: ask which one is meant.
 
@@ -38,9 +61,10 @@ below it. The client normalises a sub-second fraction before parsing `observedAt
 it.
 
 **Cost note:** provider invocations and logical per-fact judgements are different units. A harness may
-batch many summary, keyword, dedup and link judgements into one invocation. Delegation may raise total
-token spend because each agent establishes context; its benefit is main-context longevity and a
-structural read boundary. `--dryrun` performs the same judgement work as write but no persistence.
+batch many summary, keyword, dedup and link judgements into one invocation. Both paths run in the
+session itself (there are no read/write subagents), so raw recall rows pass through the session's
+context: the read path reduces them to a bounded answer before it is used. `--dryrun` performs the same
+judgement work as write but no persistence.
 
 # Context Memory
 
@@ -59,22 +83,26 @@ During work, accumulate candidate facts silently.
 
 ## Where Each Step Runs
 
-| Main thread (interactive) | Delegated context (bounded, isolated) |
-|---|---|
-| Resolve intent and target; accumulate discrete facts; ask bounded human clarifications; select `--dryrun`/`--approve`; present final cited answer or digest | `memory-read`: all query/history/blob/path operations and relevance reduction. `memory-write`: all five write stages, including candidate recall, judgement, redaction, payload creation and set. |
+The session runs both paths itself. There are no read or write subagents: a separate agent was a
+Claude-only mechanism, and the guarantees that matter are carried by the clients and the credentials,
+which hold in every harness.
 
-**Never call the store client, redaction helper, atomicity helper, deep-search helper, or divergence
-helper directly from the main thread.** Raw recall arrays stay inside `memory-read` or `memory-write`.
-Main thread receives cited conclusions, omission disclosure, bounded clarification needs, and receipts.
-Read worker holds only `CONTEXT_MEMORY_READ_TOKEN`; write worker also holds
-`CONTEXT_MEMORY_WRITE_TOKEN`, which is never ambient — it loads it itself at the authorized checkpoint
-with the deliberate write step (`set -a && source ~/.mimisbrunnr/credentials && set +a`) and needs the
-`Write` tool for its scratch batch files. API authorization is the capability boundary.
-Spawn project agents `memory-read` and `memory-write`. `memory-read` runs only the read-only client
-`context_memory_read_client.py`, which exposes no write operation and refuses to start with
-any write-token spelling present (`CONTEXT_MEMORY_WRITE_TOKEN`, the Host's `ApiAccess__WriteToken`,
-or the controller's `Parameters__api-write-token`, any case, `:` read as `__`); `memory-write` runs
-`context_memory_client.py`.
+| Path | Procedure | Client | Credential |
+|---|---|---|---|
+| Read: query, history, blob, paths, deepsearch, relevance reduction | [references/read-path.md](references/read-path.md) | `context_memory_read_client.py` | `CONTEXT_MEMORY_READ_TOKEN` only |
+| Write: all five write stages, including candidate recall, judgement, redaction, payload creation and `set` | [references/write-path.md](references/write-path.md) | `context_memory_client.py` | `CONTEXT_MEMORY_WRITE_TOKEN`, loaded only at the authorized checkpoint |
+
+- `context_memory_read_client.py` exposes no write operation and refuses to start with any write-token
+  spelling present (`CONTEXT_MEMORY_WRITE_TOKEN`, the Host's `ApiAccess__WriteToken`, or the
+  controller's `Parameters__api-write-token`, any case, `:` read as `__`).
+- The write credential is never ambient. Load it with the deliberate write step
+  (`set -a && source ~/.mimisbrunnr/credentials && set +a`) **only inside a subshell around each
+  write-route invocation** (any subcommand taking the write credential — `preflight`, `set`,
+  `resolve-group`, `upsert-initiative`, `update-group`, `append-description`, `create-link`,
+  `propose-label`, `ticket-parent`; see `write-path.md`), so it never persists in the session's shell and the read client keeps running there.
+  API authorization is the capability boundary.
+- Raw recall rows are working material. Reduce them to the bounded outputs the read path defines
+  (lookup, grounding, digest) before answering; never paste them back to the user.
 
 ## Session Phases
 
@@ -93,7 +121,7 @@ automatic form of this. Tags are never autofilled: derive them from the material
 
 - **There is no read-only group lookup.** The API has no group read route, and `resolve-group` commits
   unconditionally — calling it to "look up" a group creates one. The only read-only evidence available
-  here is through `memory-read`: `initiatives` says whether the named initiative exists, and a `query`
+  here is along the read path: `initiatives` says whether the named initiative exists, and a `query`
   filtered by `ticketProvider`/`ticketKey` shows the owning group's `groupUuid` when that group already
   holds memories. Anything else stays a proposal (repo, ticket, initiative, scope) carried to the
   checkpoint.
@@ -105,7 +133,7 @@ automatic form of this. Tags are never autofilled: derive them from the material
 - An unnamed initiative is proposed as the seeded `to-be-decided` sentinel.
 - If the target is ambiguous, still begin accumulating; do not block the session.
 
-**At the `--export` checkpoint, before preflight,** `memory-write` turns the proposal into a group:
+**At the `--export` checkpoint, before preflight,** the write path turns the proposal into a group:
 
 - **Fresh-store precondition: on the create path, an initiative must exist before `resolve-group`.**
   `resolve-group` answers `404` for an initiative that is not in the store **when it has to create the
@@ -142,8 +170,8 @@ checkpoint**, not as one merged record. A compound record is a red flag, not a s
 ### 3. Compare Or Clarify (Pre-Write Round)
 
 At the `--export` (or `--dryrun`) checkpoint — **after** the group binding is resolved (the checkpoint
-step at the end of Phase 1) and before anything is written — delegate **one bounded clarification
-round** to `memory-write`. It never runs during work: preflight needs the target `groupUuid` (item 3 and
+step at the end of Phase 1) and before anything is written — run **one bounded clarification
+round** along the write path. It never runs during work: preflight needs the target `groupUuid` (item 3 and
 the in-group test of item 1), and that does not exist until `resolve-group` has run, which is itself a
 write and so waits for the checkpoint. This round begins with
 **stage 1 (preflight)** of the write pipeline below and performs cross-group read-before-write. Submit the whole batch at once
@@ -181,8 +209,8 @@ single bounded pass; do not drip questions per candidate.
 
 ### 4. Write (Set At Checkpoint)
 
-Only when the user issues an explicit `--export` at the end-of-task checkpoint, delegate discrete facts to
-`memory-write`:
+Only when the user issues an explicit `--export` at the end-of-task checkpoint, run the write path on
+discrete facts:
 
 - Run the pipeline in this fixed order: **preflight → redact → dedupe/derive-links → atomicity-check →
   write**. Phase 3 above *is* the preflight; do not run it twice.
@@ -216,7 +244,7 @@ stale, not an alternative reading.
 | Order | Stage | What it does |
 |---|---|---|
 | 1 | **Preflight** | Batched exact cross-group subject/ticket backstops plus intra-batch collision detection. Array-in/array-out; writes and judges nothing. |
-| 2 | **Redact** | Detect secrets/tokens/connection strings in the captured content and scrub them **before** the blob write. Content addressing makes a blob immutable — a leaked secret cannot be edited out later, only orphaned. Redaction must precede the blob write. Every persisting write — `set`, `resolve-group`, `update-group`, `append-description`, `create-link`, `ticket-parent`, `propose-label`, `upsert-initiative`, CLI and worker alike — scrubs its free-text fields automatically (keys matched case-insensitively, as the Host binds them; ticket identities are never rewritten), so this is a gate, not a step you may skip. The record of what was scrubbed goes to the digest as `redaction: [{rule_name, hit_count, locations: [{field, start, end}]}]` — `field` is the request path (`items[0].statement`), `start`/`end` the replaced code-point offsets in your own text — so no scrub is silent; if a location covers prose rather than a secret, fix the wording and re-run. Offsets only: content is never logged. |
+| 2 | **Redact** | Detect secrets/tokens/connection strings in the captured content and scrub them **before** the blob write. Content addressing makes a blob immutable — a leaked secret cannot be edited out later, only orphaned. Redaction must precede the blob write. Every persisting write — `set`, `resolve-group`, `update-group`, `append-description`, `create-link`, `ticket-parent`, `propose-label`, `upsert-initiative`, scrubs its free-text fields automatically (keys matched case-insensitively, as the Host binds them; ticket identities are never rewritten), so this is a gate, not a step you may skip. The record of what was scrubbed goes to the digest as `redaction: [{rule_name, hit_count, locations: [{field, start, end}]}]` — `field` is the request path (`items[0].statement`), `start`/`end` the replaced code-point offsets in your own text — so no scrub is silent; if a location covers prose rather than a secret, fix the wording and re-run. Offsets only: content is never logged. |
 | 3 | **Dedupe / derive links** | The cross-group subject match and link derivation, applied to the write decision from the preflight. Locate existing subjects; the result decides version-bump vs new-memory vs skip **qualified by group**: a match inside this group is a version bump, a match in another group is a new memory here plus a typed link (a foreign `uuid` target is a `404`, never a bump). |
 | 4 | **Atomicity check** | Confirm each record is one atomic fact. Split bundled candidates; route the unprocessable remainder to `skipped`. |
 | 5 | **Write** | Single transactional `set`. Version bump ordering: flip the old `is_current` to `false` *before* inserting the new current, both **in one transaction**, or a failure between them strands zero current versions. |
@@ -298,7 +326,7 @@ a secret sits on disk; it is never how personal data is removed — that happene
 | Script | Invocation | Pipeline stage | What it does (and does NOT do) |
 |---|---|---|---|
 | `context_memory_client.py` | `python3 .../context_memory_client.py <subcommand>` | 1 (preflight), 3 (dedup/links), 5 (write) | Base-URL resolution + health probe, all HTTP calls, JSON assembly from a payload file or stdin, over-cap batch refusal at the **20-candidate cap** (preflight and set both refuse; indices are request-relative, so batches are never silently chunked). Subcommands: `probe`, `preflight`, `set` (with `--dryrun`), `query`, `get-versions`, `get-blob`, `resolve-group`, `update-group`, `append-description`, `create-link`, `paths`, `ticket-parent` (with local `--dryrun`), `ticket-paths`, `labels`, `propose-label`, `initiatives`, `upsert-initiative`. |
-| `context_memory_read_client.py` | `python3 .../context_memory_read_client.py <subcommand>` | Read delegation | Read-only CLI surface: `probe`, `query`, `deepsearch`, `get-versions`, `get-blob`, `paths`, `ticket-paths`, `labels`, `initiatives`. Requires only `CONTEXT_MEMORY_READ_TOKEN`, and **refuses to start when a write token is present** in the environment — `CONTEXT_MEMORY_WRITE_TOKEN` or the Host's `ApiAccess__WriteToken`, in any case — so the read surface can never mutate, by construction. |
+| `context_memory_read_client.py` | `python3 .../context_memory_read_client.py <subcommand>` | Read path | Read-only CLI surface: `probe`, `query`, `deepsearch`, `get-versions`, `get-blob`, `paths`, `ticket-paths`, `labels`, `initiatives`. Requires only `CONTEXT_MEMORY_READ_TOKEN`, and **refuses to start when a write token is present** in the environment — `CONTEXT_MEMORY_WRITE_TOKEN`, the Host's `ApiAccess__WriteToken`, or the controller's `Parameters__api-write-token`, in any case, `:` read as `__` — so the read surface can never mutate, by construction. |
 | `redact.py` | `python3 .../redact.py --input <batch-file> --consume` | 2 (redact) | Fingerprint secret detection, stdin→stdout. Emits redacted content plus per-candidate findings `{rule_name, hit_count, spans: [{start, end}]}`. **Reports rule names and character offsets only** — never the matched text, never the content around it. A key whose name says secret (`password`, `secret`, `api_key`, `access_key`, a qualified `*_TOKEN`) is redacted on any value of 8+ characters; a neutral key (`key`, `sort_key`, bare `token`, `credential`, `auth`, `bearer`, `session`, `cookie`) only when the value itself is secret-shaped (an unbroken 16+ character run mixing letters and digits), so `sort key = created_on` passes untouched but a generated-looking session ID (`session = ses_…`) is scrubbed; `pwd` is taken on the name at 8+ characters unless its value is a working directory (`/srv/app`, `C:\app`, `$HOME/x`, `%USERPROFILE%`) or quoted prose, and on any value inside a `;` connection string (`…;Pwd=x;`). `redact.is_credential_key(name)` is the shared name-only test other skills import. Redact-and-flag (LADR-003): a **found** secret is flagged, never a rejection of the record. An **unavailable scrubber** is the opposite case — every persisting write calls it automatically and refuses if it cannot run, so the gate never fails open. That refusal arrives as `redactor-unavailable` and is **terminal: do not retry it.** It names the failure, never the content, so it is safe to surface. |
 | `atomicity.py` | `python3 .../atomicity.py --input <batch-file> --consume` | 4 (atomicity) | Conservative bundle detector, stdin→stdout. Flags `simple` / `bundled` per candidate. It is a detector only — the split-vs-skip decision and the routing of the unprocessable remainder stay here, in the agent's judgement (LADR-002). |
 | `deepsearch.py` | `python3 .../deepsearch.py` | 3 (opt-in recall) | Baseline 200 plus bounded keyword/traversal passes, stable UUID/version dedupe, 400 aggregate cap and saturation disclosure. Bounded by the one recall deadline: a timed-out or deadline-stopped pass ends the chain but keeps the completed passes, disclosing `stoppedEarly`, `budgetExhausted` and `passesIncomplete`. Under a group/ticket selector with a scope, traversal endpoints outside the selected group are dropped and counted once each (`endpointsOutsideSelector`); an anchor the store refuses (403) is a disclosed `forbidden` pass (`anchorsForbidden`, not counted in `anchorsOmittedByCap`), not a failed recall. An incomplete answer (empty body, truncated JSON, missing list, row without a `uuid`) is a disclosed `malformed` pass (`passesMalformed`), never a completed empty one. |
@@ -363,7 +391,7 @@ five without being worthless. Adding a role, or exempting a scope or kind, is an
 
 The **semantic dedup** decision is a two-call composition, never a single preflight:
 
-1. **Recall inside `memory-write`** — `context_memory_client.py query` with `{"facets": [...], "kind": ..., "includeProposed": true, "currentOnly": true, "limit": 200}`. Do **not** pass the candidate description as free-text: `/query` free-text is AND-of-all-lexemes (stemmed, `english` configuration), so a natural-language candidate still defeats recall — stemming forgives inflections, not sentence structure. Raw result rows never return to the main thread.
+1. **Recall on the write path** — `context_memory_client.py query` with `{"facets": [...], "kind": ..., "includeProposed": true, "currentOnly": true, "limit": 200}`. Do **not** pass the candidate description as free-text: `/query` free-text is AND-of-all-lexemes (stemmed, `english` configuration), so a natural-language candidate still defeats recall — stemming forgives inflections, not sentence structure. Reduce the raw rows to the judgement; never paste them into the digest.
    - **Facet/tag match is ANY by default** — a query returns rows carrying *any* of the requested facets, so a batch's facet set unifies disjoint rows (the recall union rather than an empty set). Containment (only rows carrying *every* requested facet) is opt-in via `"facetMatchMode": "all"`; do not use it for recall, it is the deliberate-narrowing form.
 2. **Judge** — compare each recalled row's cheap fields to the candidate and decide, per pair, `version_bump` (send the matched row's `uuid` in `set` **— only if that row is in the request's `groupUuid`; a cross-group match is `new_memory` plus a typed link, because a foreign `uuid` target is a `404`**) / `new_memory` / `skip`. This LLM judgement is where the semantic equivalence (e.g. *"we store in Postgres"* vs *"PostgreSQL is the storage engine"*) is resolved.
 3. `/preflight` contributes only the **exact-match backstop**, **intra-batch collisions**, and **ticket-uniqueness conflicts**. It judges nothing. Candidate recall for the semantic step comes from `/query`, not `/preflight`.
@@ -555,8 +583,8 @@ client-side feedback writes, and do not treat a partial deepsearch as if the sto
 
 ## Retrieval (`get`)
 
-- Delegate to `memory-read`; main thread receives lookup answer or grounding brief, never raw rows.
-- Read agent evaluates cheap fields: `name`, `description` (subject), `statement` (claim),
+- Follow the read path; the answer is a lookup answer or grounding brief, never raw rows.
+- Evaluate cheap fields: `name`, `description` (subject), `statement` (claim),
   `content_summary`, `kind`, `facets`, `tags`, `status`, `confidence`, scope, and validity range.
 - **Blob content is touched only on drill-down**, proxied through the API so scope enforcement cannot
   be bypassed.

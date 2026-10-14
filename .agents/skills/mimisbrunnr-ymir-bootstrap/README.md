@@ -17,14 +17,11 @@ The offline path needs a local repository and this skill available to the agent 
 project-local availability is recommended for each selected repository. It produces a cited candidate
 preview and writes nothing.
 
-Store comparison, capture, and recall verification additionally need the sibling capture skill plus its
-configured and verified memory read and write workers (the read worker holding no write capability),
-described by
-[the canonical capture skill](../mimisbrunnr-odin-context-memory/README.md). In the packaged/runtime check for
-this contribution, those protected Codex workers were not verified: preview behavior was tested, while live
-capture and recall remain untested. This is a statement about the checked environment, not a claim that all
-Codex versions lack worker support. Without verified workers, the skill stops after preview; it does not use
-a direct client fallback.
+Store comparison, capture, and recall verification additionally need the sibling capture skill, described
+by [the canonical capture skill](../mimisbrunnr-odin-context-memory/README.md), and a store its read client
+can reach from a shell holding no write token. The skill checks this with the read client's `probe`; when
+it fails, the skill stops after preview and does not use another client as a fallback. Preview behavior was
+tested; live capture and recall remain untested.
 
 ## Start a bootstrap
 
@@ -114,7 +111,7 @@ candidates and coverage gaps; a bounded baseline is never “complete repository
 
 ## Troubleshooting
 
-- **Only a preview is produced:** protected workers were not verified. This is the safe expected fallback.
+- **Only a preview is produced:** the runtime gate failed (no odin skill, no reachable store, or a write token in the shell). This is the safe expected fallback.
 - **No full dry-run is offered:** there is no applicable group with a read-only-known UUID (including an existing empty group), and group creation was not separately authorized.
 - **Recall returns `NOT FOUND` after capture:** confirm the actual write receipt, stored status, and effective
   recall filters before attributing the result to proposed-lifecycle filtering. Until then, the recall gap

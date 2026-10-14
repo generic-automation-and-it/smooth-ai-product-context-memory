@@ -62,8 +62,8 @@ and exposed token counts separately.
 
 ### Where it saves
 
-- **Retrieval is bounded by default.** `memory-read` consumes candidate rows in isolated context and
-  returns cited conclusions plus omission disclosure; blobs remain drill-down only.
+- **Retrieval is bounded by default.** The read path reduces candidate rows to cited conclusions plus
+  omission disclosure before they are used; blobs remain drill-down only.
 - **It replaces ossified prompt re-explanation.** The cost that recurs every session is re-explaining
   context to a stateless model. A retrieved memory carries the reasoning forward without re-derivation.
   This is the amortized saving — paid at write, recovered across many reads.
@@ -76,7 +76,7 @@ and exposed token counts separately.
 
 ### Where it does *not* save — the caveat
 
-- **Aggregate token spend may rise.** Read and write agents each establish context. Gain is main-context
+- **Aggregate token spend may rise.** Read and write paths each establish context. Gain is main-context
   longevity and enforced read capability, not guaranteed lower total tokens.
 
 - **A wrong dedup decision is expensive and silent.** If the skill misses a semantic match, it writes a

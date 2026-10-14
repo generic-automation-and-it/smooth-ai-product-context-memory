@@ -36,6 +36,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 # client is imported, because it seeds the gate flag from the credential file at import.
 os.environ["CONTEXT_MEMORY_CREDENTIAL_FILE"] = os.devnull
 os.environ["CONTEXT_MEMORY_BASE_URL"] = "http://127.0.0.1:9"
+# Marker isolation (LADR-11): the client keys markers to the harness session id,
+# which is present in a real agent shell (e.g. OPENCODE_SESSION_ID here). Without
+# this, cases exercising load/import/export would write markers into the working
+# repo and later exports would exclude those ids — the same hermeticity rule the
+# credential block above enforces. Marker cases set their own root per case.
+os.environ["SESSION_MARKER_ROOT"] = tempfile.mkdtemp(prefix="kvasir-markers-")
+for _name in ("CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "OPENCODE_SESSION_ID",
+              "COPILOT_AGENT_SESSION_ID", "PI_SESSION_ID"):
+    os.environ.pop(_name, None)
 os.environ["CONTEXT_MEMORY_READ_TOKEN"] = "harness-offline-read-token"
 for _name in [n for n in os.environ
               if n.casefold().replace(":", "__") in {"context_memory_write_token", "apiaccess__writetoken",
@@ -737,7 +746,7 @@ class InitiativeLookupTests(unittest.TestCase):
 
     Found live: the endpoint answers `items`, the first implementation read `initiatives`, and the
     effect was a *live* initiative reported as absent — a dry run printing a spurious `would create`
-    and a `--write` refusing against a store that already had it. A fixture per shape, plus the
+    and a write refusing against a store that already had it. A fixture per shape, plus the
     negative case, is what keeps that from recurring silently.
     """
 
@@ -859,7 +868,7 @@ class ExportOrchestrationTests(unittest.TestCase):
             before = set(os.listdir(tmp))
 
             def body(calls, verdicts, created):
-                rc, out, _ = run(["export", src, "--tickets", "#157", "--repository", "org/repo"])
+                rc, out, _ = run(["export", "--dryrun", src, "--tickets", "#157", "--repository", "org/repo"])
                 self.assertEqual(rc, 0)
                 invoked = [argv[0] for _, argv, _ in calls]
                 self.assertNotIn("resolve-group", invoked)
@@ -883,7 +892,7 @@ class ExportOrchestrationTests(unittest.TestCase):
             seen = []
             uc._run_capture_client = lambda s, a, p: (seen.append(a[0]), (0, "{}", ""))[1]
             try:
-                rc, out, _ = run(["export", src, "--initiative", "Absent"])
+                rc, out, _ = run(["export", "--dryrun", src, "--initiative", "Absent"])
             finally:
                 (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
                  uc.resolve_group, uc._run_capture_client) = original
@@ -905,7 +914,7 @@ class ExportOrchestrationTests(unittest.TestCase):
             called = []
             uc._run_capture_client = lambda s, a, p: (called.append(a[0]), (0, "{}", ""))[1]
             try:
-                rc, _, err = run(["export", src, "--write", "--initiative", "Absent"])
+                rc, _, err = run(["export", src, "--initiative", "Absent"])
             finally:
                 (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
                  uc.resolve_group, uc._run_capture_client) = original
@@ -937,7 +946,7 @@ class ExportOrchestrationTests(unittest.TestCase):
             try:
                 # Heimdallr off: an autofilled branch or commit ticket would make every case
                 # ticket-bound and the result depend on this checkout's git history.
-                rc, out, err = run(["export", src, "--write", "--initiative", "Absent",
+                rc, out, err = run(["export", src, "--initiative", "Absent",
                                     "--heimdallr", "false"] + argv)
             finally:
                 (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
@@ -986,7 +995,7 @@ class ExportOrchestrationTests(unittest.TestCase):
 
             uc._run_capture_client = capture
             try:
-                rc, out, err = run(["export", src, "--write", "--heimdallr", "false"] + argv)
+                rc, out, err = run(["export", src, "--heimdallr", "false"] + argv)
             finally:
                 (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
                  uc.resolve_group, uc._run_capture_client, uc.gate_decisions) = original
@@ -1026,7 +1035,7 @@ class ExportOrchestrationTests(unittest.TestCase):
 
     def test_dry_run_warns_when_tickets_meet_an_initiative(self):
         """A dry run resolves nothing, so it cannot know the group's initiative — but it
-        can say the binding order, or the --write refusal lands unexplained."""
+        can say the binding order, or the write refusal lands unexplained."""
         with tempfile.TemporaryDirectory() as tmp:
             src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
             original = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
@@ -1037,7 +1046,7 @@ class ExportOrchestrationTests(unittest.TestCase):
             uc.resolve_group = lambda b, n, d, dryrun: (None, "dry-run")
             uc._run_capture_client = lambda s, a, p: (0, "{}", "")
             try:
-                rc, out, _ = run(["export", src, "--tickets", "github:214",
+                rc, out, _ = run(["export", "--dryrun", src, "--tickets", "github:214",
                                   "--initiative", "Mímisbrunnr-Search", "--heimdallr", "false"])
             finally:
                 (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
@@ -1098,7 +1107,7 @@ class ExportOrchestrationTests(unittest.TestCase):
             uc.resolve_group = lambda b, n, d, dryrun: (None, "dry-run")
             uc._run_capture_client = lambda s, a, p: (0, "{}", "")
             try:
-                rc, _, err = run(["export", src, "--write", "--initiative", "X"])
+                rc, _, err = run(["export", src, "--initiative", "X"])
             finally:
                 (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
                  uc.resolve_group, uc._run_capture_client) = originals
@@ -1108,7 +1117,7 @@ class ExportOrchestrationTests(unittest.TestCase):
 
     def test_dry_run_export_also_refuses_when_the_initiative_read_fails(self):
         """A dry run that cannot read the initiative aborts before the preview, so it must report the
-        same refusal as `--write` rather than a silent success exit 0."""
+        same refusal as a write rather than a silent success exit 0."""
         with tempfile.TemporaryDirectory() as tmp:
             src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
             originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
@@ -1119,7 +1128,7 @@ class ExportOrchestrationTests(unittest.TestCase):
             uc.resolve_group = lambda b, n, d, dryrun: (None, "dry-run")
             uc._run_capture_client = lambda s, a, p: (0, "{}", "")
             try:
-                rc, _, err = run(["export", src, "--initiative", "X"])
+                rc, _, err = run(["export", "--dryrun", src, "--initiative", "X"])
             finally:
                 (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
                  uc.resolve_group, uc._run_capture_client) = originals
@@ -1212,7 +1221,7 @@ class ExportOrchestrationTests(unittest.TestCase):
             src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
 
             def body(calls, verdicts, created):
-                run(["export", src, "--write", "--tickets", "#157"])
+                run(["export", src, "--tickets", "#157"])
                 invoked = [argv for _, argv, _ in calls]
                 self.assertIn(("set", "--dryrun"), invoked)
                 self.assertIn(("set",), invoked)
@@ -1231,7 +1240,7 @@ class ExportOrchestrationTests(unittest.TestCase):
             def body(calls, verdicts, created):
                 verdicts[:] = [{"verdict": "bundled", "signals": ["discourse"]},
                                {"verdict": "simple", "signals": []}]
-                rc, out, _ = run(["export", src])
+                rc, out, _ = run(["export", "--dryrun", src])
                 self.assertEqual(rc, 0)
                 self.assertIn("1 held back by the atomicity gate", out)
                 self.assertIn("HELD BACK", out)
@@ -1263,7 +1272,7 @@ class ExportOrchestrationTests(unittest.TestCase):
             def body(calls, verdicts, created):
                 verdicts[:] = [{"verdict": "bundled", "signals": ["discourse"]},
                                {"verdict": "simple", "signals": []}]
-                rc, out, _ = run(["export", src])
+                rc, out, _ = run(["export", "--dryrun", src])
                 self.assertEqual(rc, 0)
                 self.assertIn("-> review queue", out)
                 self.assertTrue(queue.is_file(), "a held candidate must be persisted to the queue")
@@ -1314,7 +1323,7 @@ class ExportOrchestrationTests(unittest.TestCase):
                     return 0, json.dumps({}), ""
 
                 uc._run_capture_client = client
-                rc, out, err = run(["export", src, "--write", "--initiative", "Present"])
+                rc, out, err = run(["export", src, "--initiative", "Present"])
                 self.assertEqual(rc, 1)
                 self.assertIn("CROSS-KIND", out)
                 self.assertIn("reclassify, rename, drop", out)
@@ -1337,7 +1346,7 @@ class ExportOrchestrationTests(unittest.TestCase):
             def body(calls, verdicts, created):
                 verdicts[:] = [{"verdict": "simple", "signals": []}
                                for _ in range(uc.MAX_CANDIDATES + 5)]
-                rc, out, _ = run(["export", src])
+                rc, out, _ = run(["export", "--dryrun", src])
                 self.assertEqual(rc, 0)
                 self.assertIn("Split into 2 batch(es)", out)
                 self.assertIn("Batch 1/2: 20 candidate(s)", out)
@@ -1350,7 +1359,7 @@ class ExportOrchestrationTests(unittest.TestCase):
             self._with_gates(body)
 
     def test_over_cap_write_writes_every_chunk(self):
-        """A `--write` writes every chunk, each with its own item batch; the cap is never a refusal."""
+        """A write writes every chunk, each with its own item batch; the cap is never a refusal."""
         with tempfile.TemporaryDirectory() as tmp:
             src = write(tmp, "many.md", "\n\n".join(
                 f"- Candidate number {n} carries a distinct fact worth storing."
@@ -1359,7 +1368,7 @@ class ExportOrchestrationTests(unittest.TestCase):
             def body(calls, verdicts, created):
                 verdicts[:] = [{"verdict": "simple", "signals": []}
                                for _ in range(uc.MAX_CANDIDATES + 5)]
-                rc, _, err = run(["export", src, "--write"])
+                rc, _, err = run(["export", src])
                 self.assertEqual(rc, 0, err)
                 set_calls = [p for _, argv, p in calls
                              if argv and argv[0] == "set" and len(argv) == 1]
@@ -1367,6 +1376,55 @@ class ExportOrchestrationTests(unittest.TestCase):
                 self.assertEqual([len(p["items"]) for p in set_calls], [20, 5])
 
             self._with_gates(body)
+
+    def test_export_writes_by_default_and_dryrun_writes_nothing(self):
+        """Write is the default, as on the capture skill; `--dryrun` stops before any write."""
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "one.md", "- The graph store was chosen for provenance paths.")
+
+            def sets(calls):
+                return [p for _, argv, p in calls if argv and argv[0] == "set" and len(argv) == 1]
+
+            def default(calls, verdicts, created):
+                verdicts[:] = [{"verdict": "simple", "signals": []}]
+                rc, _, err = run(["export", src])
+                self.assertEqual(rc, 0, err)
+                self.assertEqual(len(sets(calls)), 1)
+
+            def dryrun(calls, verdicts, created):
+                verdicts[:] = [{"verdict": "simple", "signals": []}]
+                rc, out, err = run(["export", src, "--dryrun"])
+                self.assertEqual(rc, 0, err)
+                self.assertEqual(sets(calls), [])
+                self.assertIn("DRY RUN", out)
+
+            self._with_gates(default)
+            self._with_gates(dryrun)
+
+    def test_deprecated_write_flag_is_named_and_dryrun_wins(self):
+        """`--write` was the old opt-in: accepted, named as deprecated, never stronger than --dryrun."""
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "one.md", "- The graph store was chosen for provenance paths.")
+
+            def sets(calls):
+                return [p for _, argv, p in calls if argv and argv[0] == "set" and len(argv) == 1]
+
+            def write_only(calls, verdicts, created):
+                verdicts[:] = [{"verdict": "simple", "signals": []}]
+                rc, _, err = run(["export", src, "--write"])
+                self.assertEqual(rc, 0, err)
+                self.assertIn("--write is deprecated", err)
+                self.assertEqual(len(sets(calls)), 1)
+
+            def both(calls, verdicts, created):
+                verdicts[:] = [{"verdict": "simple", "signals": []}]
+                rc, _, err = run(["export", src, "--write", "--dryrun"])
+                self.assertEqual(rc, 0, err)
+                self.assertIn("--dryrun wins", err)
+                self.assertEqual(sets(calls), [])
+
+            self._with_gates(write_only)
+            self._with_gates(both)
 
     def test_a_failing_redactor_is_a_refusal_not_a_flag(self):
         """Content that cannot be inspected must not be sent; this is the one gate that fails closed."""
@@ -1378,7 +1436,7 @@ class ExportOrchestrationTests(unittest.TestCase):
             called = []
             uc._run_capture_client = lambda s, a, p: (called.append(a[0]), (0, "{}", ""))[1]
             try:
-                rc, _, err = run(["export", src, "--write"])
+                rc, _, err = run(["export", src])
             finally:
                 (uc.gate_redaction, uc.gate_atomicity, uc._run_capture_client) = original
             self.assertEqual(rc, 1)
@@ -1395,7 +1453,7 @@ class ExportOrchestrationTests(unittest.TestCase):
             called = []
             uc._run_capture_client = lambda s, a, p: (called.append(a[0]), (0, "{}", ""))[1]
             try:
-                rc, _, err = run(["export", src, "--write"])
+                rc, _, err = run(["export", src])
             finally:
                 (uc.gate_redaction, uc.gate_atomicity, uc._run_capture_client) = original
             self.assertEqual(rc, 1)
@@ -1411,7 +1469,7 @@ class ExportOrchestrationTests(unittest.TestCase):
                 uc.gate_redaction = lambda texts: ([t.replace("graph", "<redacted>") for t in texts],
                                                   {"github-token": 1})
                 try:
-                    rc, out, _ = run(["export", src])
+                    rc, out, _ = run(["export", "--dryrun", src])
                 finally:
                     uc.gate_redaction = original
                 self.assertIn("github-token x1", out)
@@ -1425,7 +1483,7 @@ class ExportOrchestrationTests(unittest.TestCase):
             src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
 
             def body(calls, verdicts, created):
-                rc, out, _ = run(["export", src])
+                rc, out, _ = run(["export", "--dryrun", src])
                 self.assertIn("gated-kind approval", out)
 
             self._with_gates(body)
@@ -1501,7 +1559,7 @@ class ExportVersionBumpTests(unittest.TestCase):
 
             uc._run_capture_client = record
             try:
-                rc, _, err = run(["export", src, "--write"])
+                rc, _, err = run(["export", src])
             finally:
                 (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
                  uc.resolve_group, uc._run_capture_client) = originals
@@ -1534,7 +1592,7 @@ class ExportVersionBumpTests(unittest.TestCase):
 
             uc._run_capture_client = record
             try:
-                rc, _, err = run(["export", src, "--write"])
+                rc, _, err = run(["export", src])
             finally:
                 (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
                  uc.resolve_group, uc._run_capture_client) = originals
@@ -1581,7 +1639,7 @@ class ExportVersionBumpTests(unittest.TestCase):
 
             uc._run_capture_client = record
             try:
-                rc, _, err = run(["export", src, "--write"])
+                rc, _, err = run(["export", src])
             finally:
                 (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
                  uc.resolve_group, uc._run_capture_client) = originals
@@ -1616,7 +1674,7 @@ class ExportVersionBumpTests(unittest.TestCase):
 
             uc._run_capture_client = record
             try:
-                rc, out, _ = run(["export", src, "--write"])
+                rc, out, _ = run(["export", src])
             finally:
                 (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
                  uc.resolve_group, uc._run_capture_client) = originals
@@ -1643,7 +1701,7 @@ class ExportVersionBumpTests(unittest.TestCase):
             uc.resolve_group = lambda b, n, d, dryrun: ({"groupUuid": "g", "created": False}, "ok")
             uc._run_capture_client = lambda s, a, p: (0, json.dumps({"candidates": []}), "")
             try:
-                rc, _, err = run(["export", src, "--write"])
+                rc, _, err = run(["export", src])
             finally:
                 (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
                  uc.resolve_group, uc._run_capture_client) = originals
@@ -1675,7 +1733,7 @@ class ExportVersionBumpTests(unittest.TestCase):
                     {"index": 0, "matches": [{"uuid": "u1", "groupUuid": "g-other"}],
                      "ticketConflict": None}]}), "")
             try:
-                rc, out, _ = run(["export", src, "--heimdallr", "false"])
+                rc, out, _ = run(["export", "--dryrun", src, "--heimdallr", "false"])
             finally:
                 (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
                  uc.resolve_group, uc._run_capture_client) = originals
@@ -1709,7 +1767,7 @@ class ExportVersionBumpTests(unittest.TestCase):
                 0, json.dumps({"candidates": [], "intra_batch_collisions": [
                     {"leftIndex": 0, "rightIndex": 1, "subjectSlug": "graph-store"}]}), "")
             try:
-                rc, _, err = run(["export", src, "--write"])
+                rc, _, err = run(["export", src])
             finally:
                 (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
                  uc.resolve_group, uc._run_capture_client) = originals
@@ -1731,7 +1789,7 @@ class ImportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
             before = set(os.listdir(tmp))
-            rc, out, _ = run(["export", src, "--tickets", "ABC-1,ABC-2",
+            rc, out, _ = run(["export", "--dryrun", src, "--tickets", "ABC-1,ABC-2",
                               "--tags", "storage,graph", "--repository", "kingstown",
                               "--scope", "product:memory"])
             self.assertEqual(rc, 0)
@@ -1741,7 +1799,7 @@ class ImportTests(unittest.TestCase):
     def test_export_without_selectors_states_no_association(self):
         with tempfile.TemporaryDirectory() as tmp:
             src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
-            _, out, _ = run(["export", src, "--heimdallr", "false"])
+            _, out, _ = run(["export", "--dryrun", src, "--heimdallr", "false"])
             self.assertIn("no selectors supplied", out)
 
     def test_store_export_import_uses_the_stored_statements(self):
@@ -2476,7 +2534,7 @@ class HeimdallrAutofillTests(unittest.TestCase):
     def test_export_default_fills_repo_and_branch_ticket_only(self):
         with tempfile.TemporaryDirectory() as tmp:
             src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
-            _, out, _ = run(["export", src])
+            _, out, _ = run(["export", "--dryrun", src])
             self.assertIn("Heimdallr autofill", out)
             self.assertIn("repository org/repo", out)
             # Branch ticket only: the stale commit ticket must not bind.
@@ -2486,7 +2544,7 @@ class HeimdallrAutofillTests(unittest.TestCase):
     def test_export_explicit_flags_win_over_heimdallr(self):
         with tempfile.TemporaryDirectory() as tmp:
             src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
-            _, out, _ = run(["export", src, "--repository", "other/repo",
+            _, out, _ = run(["export", "--dryrun", src, "--repository", "other/repo",
                              "--tickets", "github:1"])
             self.assertNotIn("Heimdallr autofill", out)
             self.assertIn('"repo": "other/repo"', out)
@@ -2498,7 +2556,7 @@ class HeimdallrAutofillTests(unittest.TestCase):
         # caller's value.
         with tempfile.TemporaryDirectory() as tmp:
             src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
-            _, out, _ = run(["export", src, "--initiative", "Mímisbrunnr-MVP",
+            _, out, _ = run(["export", "--dryrun", src, "--initiative", "Mímisbrunnr-MVP",
                              "--repository", "other/repo"])
             self.assertIn("tickets github:160", out)
             autofill_line = out.splitlines()[0]
@@ -2518,7 +2576,7 @@ class HeimdallrAutofillTests(unittest.TestCase):
     def test_export_opt_out_disables_autofill(self):
         with tempfile.TemporaryDirectory() as tmp:
             src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
-            _, out, _ = run(["export", src, "--heimdallr", "false"])
+            _, out, _ = run(["export", "--dryrun", src, "--heimdallr", "false"])
             self.assertNotIn("Heimdallr autofill", out)
             self.assertIn("no selectors supplied", out)
 
@@ -2548,19 +2606,19 @@ class HeimdallrAutofillTests(unittest.TestCase):
             uc.heimdallr_scan = lambda s=scan: s
             with self.subTest(expected=expected), tempfile.TemporaryDirectory() as tmp:
                 src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
-                _, out, err = run(["export", src])
+                _, out, err = run(["export", "--dryrun", src])
                 self.assertIn(expected, err)
                 self.assertNotIn("heimdallr:", out)
                 _, _, err = run(["dump", "--currentsession", "--out", str(Path(tmp) / "d")])
                 self.assertIn(expected, err)
                 # An explicit ticket means no autofill was attempted, so nothing to disclose.
-                _, _, err = run(["export", src, "--tickets", "github:1"])
+                _, _, err = run(["export", "--dryrun", src, "--tickets", "github:1"])
                 self.assertNotIn("heimdallr:", err)
         uc.heimdallr_scan = lambda: {"repository": "org/repo", "initiative": "unknown",
                                      "tickets": [], "ticketsWithheld": 0, "ticketsUnavailable": None}
         with tempfile.TemporaryDirectory() as tmp:
             src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
-            _, _, err = run(["export", src])
+            _, _, err = run(["export", "--dryrun", src])
         self.assertNotIn("heimdallr:", err)
 
     def test_a_withheld_repository_is_disclosed_and_left_unbound(self):
@@ -2571,12 +2629,12 @@ class HeimdallrAutofillTests(unittest.TestCase):
                                      "repositoryWithheld": "credential-shaped origin path; not shown"}
         with tempfile.TemporaryDirectory() as tmp:
             src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
-            _, out, err = run(["export", src])
+            _, out, err = run(["export", "--dryrun", src])
             self.assertIn("heimdallr: repository withheld (credential-shaped origin path", err)
             self.assertNotIn("Heimdallr autofill (repository", out)
             _, _, err = run(["dump", "--currentsession", "--out", str(Path(tmp) / "d")])
             self.assertIn("heimdallr: repository withheld", err)
-            _, _, err = run(["export", src, "--repository", "org/repo", "--tickets", "github:1",
+            _, _, err = run(["export", "--dryrun", src, "--repository", "org/repo", "--tickets", "github:1",
                              "--initiative", "x"])
             self.assertNotIn("heimdallr:", err)
 
@@ -2837,7 +2895,7 @@ class DecisionsGateIntegrationTests(unittest.TestCase):
                 previous = os.environ.get("CONTEXT_MEMORY_DECISIONS_ENABLED")
                 os.environ["CONTEXT_MEMORY_DECISIONS_ENABLED"] = "true"
                 try:
-                    rc, _, err = run(["export", src, "--write", "--initiative", "Present"])
+                    rc, _, err = run(["export", src, "--initiative", "Present"])
                 finally:
                     if previous is None:
                         os.environ.pop("CONTEXT_MEMORY_DECISIONS_ENABLED", None)
@@ -2872,7 +2930,7 @@ class DecisionsGateIntegrationTests(unittest.TestCase):
                 previous = os.environ.get("CONTEXT_MEMORY_DECISIONS_ENABLED")
                 os.environ["CONTEXT_MEMORY_DECISIONS_ENABLED"] = "true"
                 try:
-                    rc, _, err = run(["export", src, "--write", "--initiative", "Present"])
+                    rc, _, err = run(["export", src, "--initiative", "Present"])
                 finally:
                     if previous is None:
                         os.environ.pop("CONTEXT_MEMORY_DECISIONS_ENABLED", None)
@@ -2928,7 +2986,7 @@ class ExportTagsAndScopeTests(unittest.TestCase):
     """What the write payload carries: the gate's audience tags (issue 179) and the source scope."""
 
     def _export(self, src, argv, gate=None):
-        """Run `export --write` with every gate and the capture client stubbed; return what was sent."""
+        """Run a writing `export` with every gate and the capture client stubbed; return what was sent."""
         originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
                      uc.resolve_group, uc._run_capture_client, uc.gate_decisions)
         sent = {"bindings": [], "calls": []}
@@ -2953,7 +3011,7 @@ class ExportTagsAndScopeTests(unittest.TestCase):
         previous = os.environ.get("CONTEXT_MEMORY_DECISIONS_ENABLED")
         os.environ["CONTEXT_MEMORY_DECISIONS_ENABLED"] = "true" if gate is not None else "false"
         try:
-            rc, out, err = run(["export", src, "--write", "--initiative", "Present",
+            rc, out, err = run(["export", src, "--initiative", "Present",
                                 "--heimdallr", "false"] + argv)
         finally:
             if previous is None:
@@ -3077,7 +3135,7 @@ def _Result(rc, out, err=""):
 
 class DecisionsGateDryRunAndTimeoutTests(unittest.TestCase):
     """Issue 182. A dry run scored through the gate, which spends each record's attempt budget: three
-    previews exhausted it and the `--write` kept every record unscored. A dry run now runs the gate's
+    previews exhausted it and the write kept every record unscored. A dry run now runs the gate's
     content-free `probe` instead. And a redactor timeout inside the gate must stay a refusal."""
 
     def _run_export(self, gate_answer, write_flag):
@@ -3102,9 +3160,9 @@ class DecisionsGateDryRunAndTimeoutTests(unittest.TestCase):
             previous = os.environ.get("CONTEXT_MEMORY_DECISIONS_ENABLED")
             os.environ["CONTEXT_MEMORY_DECISIONS_ENABLED"] = "true"
             try:
-                argv = ["export", src, "--initiative", "Present", "--heimdallr", "false"]
+                argv = ["export", "--dryrun", src, "--initiative", "Present", "--heimdallr", "false"]
                 if write_flag:
-                    argv.append("--write")
+                    argv.remove("--dryrun")
                 rc, out, err = run(argv)
             finally:
                 if previous is None:
@@ -3219,7 +3277,7 @@ def _stub_gate_transport(fake):
 
 class InputDefaultTests(unittest.TestCase):
     """`load`/`export` take an optional input. Explicit input is final; with none, this session's dump
-    is used when one exists (safe to `--write`), else the newest session dump, which is disclosed and
+    is used when one exists (safe to write), else the newest session dump, which is disclosed and
     kept off the write path because in a shared workspace the newest dump can be another session's."""
 
     def _args(self, flag=None, positional=None):
@@ -3292,40 +3350,40 @@ class InputDefaultTests(unittest.TestCase):
 
     def test_load_and_export_refuse_with_no_input_and_no_dump(self):
         with with_stubbed("current_session_input", lambda: None):
-            for argv in (["load"], ["export", "--heimdallr", "false"]):
+            for argv in (["load"], ["export", "--dryrun", "--heimdallr", "false"]):
                 with self.subTest(argv=argv):
                     rc, _, err = run(argv)
                     self.assertEqual(rc, 1)
                     self.assertIn("dump --currentsession", err)
 
     def test_export_write_refuses_a_defaulted_input_before_reading_it(self):
-        """The newest dump may be another session's; `--write` on a guess would capture it."""
+        """The newest dump may be another session's; a write on a guess would capture it."""
         called = []
         with with_stubbed("session_id", lambda: ""), \
                 with_stubbed("current_session_input", lambda: "/someone-elses-dump"), \
                 with_stubbed("read_material", lambda *a: called.append(a) or 2):
-            rc, _, err = run(["export", "--write", "--heimdallr", "false"])
+            rc, _, err = run(["export", "--heimdallr", "false"])
         self.assertEqual(rc, 1)
-        self.assertIn("--write needs an explicit input", err)
+        self.assertIn("writing needs an explicit input", err)
         self.assertEqual(called, [], "nothing may be read once the write is refused")
 
     def test_export_write_proceeds_on_a_defaulted_input_for_this_session(self):
-        """A dump that records the current session id is provably this session's, so `--write` may
+        """A dump that records the current session id is provably this session's, so a write may
         capture it — the newest dump still refuses, only the provable one is written."""
         seen = []
         with with_stubbed("session_id", lambda: "sid-1"), \
                 with_stubbed("matching_session_input", lambda: "/my-dump"), \
                 with_stubbed("read_material", lambda src, fmt: seen.append(src) or 2):
-            rc, _, err = run(["export", "--write", "--heimdallr", "false"])
+            rc, _, err = run(["export", "--heimdallr", "false"])
         self.assertEqual(rc, 2)
         self.assertEqual(seen, ["/my-dump"], "the provable dump is read, not refused")
-        self.assertNotIn("--write needs an explicit input", err)
+        self.assertNotIn("writing needs an explicit input", err)
 
     def test_export_dry_run_proceeds_on_a_defaulted_input(self):
         seen = []
         with with_stubbed("current_session_input", lambda: "/dump"), \
                 with_stubbed("read_material", lambda src, fmt: seen.append(src) or 2):
-            run(["export", "--heimdallr", "false"])
+            run(["export", "--dryrun", "--heimdallr", "false"])
         self.assertEqual(seen, ["/dump"])
 
     def test_dump_root_falls_back_to_the_working_directory_outside_git(self):
@@ -3445,7 +3503,7 @@ class CaptureScriptAnswerShapeTests(unittest.TestCase):
             uc.subprocess.run = lambda *a, **k: self._Done(json.dumps(
                 {"results": [{"candidate_index": 0, "verdict": "simple", "signals": []}]}))
             try:
-                rc, _, err = run(["export", src, "--write"])
+                rc, _, err = run(["export", src])
             finally:
                 (uc.gate_redaction, uc._run_capture_client, uc.subprocess.run) = original
             self.assertEqual(rc, 1)
@@ -3603,7 +3661,7 @@ class DontAskSwitchTests(unittest.TestCase):
     """Review #11: SKILL.md documents `--dontask` as accepted, but every subcommand rejected it."""
 
     def test_every_subcommand_accepts_dontask(self):
-        for argv in (["load", "x", "--dontask"], ["import", "--dontask"], ["export", "x", "--dontask"],
+        for argv in (["load", "x", "--dontask"], ["import", "--dontask"], ["export", "--dryrun", "x", "--dontask"],
                      ["dump", "--currentsession", "--dontask"]):
             with self.subTest(argv=argv):
                 self.assertTrue(uc.parse_args(argv).dontask)
@@ -3647,7 +3705,7 @@ class DumpHandoffDocsTests(unittest.TestCase):
 class ExportDedupClaimTests(unittest.TestCase):
     """Review 5432012955 #2: the docs said export runs "dedup/link" while it sends `links: []` and
     matches subjects exactly. Semantic dedup is planned, not implemented, so the docs must not claim it
-    and must tell the agent to recall before `--write`."""
+    and must tell the agent to recall before writing."""
 
     def test_the_docs_claim_only_exact_subject_dedup(self):
         root = Path(__file__).resolve().parents[1]
@@ -3658,7 +3716,7 @@ class ExportDedupClaimTests(unittest.TestCase):
                 self.assertNotIn("semantic dedup skips", text)
                 self.assertIn("exact-subject dedup", " ".join(text.split()))
         skill = " ".join((root / "SKILL.md").read_text(encoding="utf-8").split())
-        self.assertIn("**Before `--write`**, recall each candidate's subject", skill)
+        self.assertIn("**Before writing**, recall each candidate's subject", skill)
 
     def test_the_write_sends_no_derived_links(self):
         """The claim the docs now make, held against the payloads an export actually sends: every
@@ -3682,7 +3740,7 @@ class ExportDedupClaimTests(unittest.TestCase):
 
             uc._run_capture_client = record
             try:
-                rc, _, err = run(["export", src, "--write"])
+                rc, _, err = run(["export", src])
             finally:
                 (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
                  uc.resolve_group, uc._run_capture_client) = originals
@@ -3692,6 +3750,524 @@ class ExportDedupClaimTests(unittest.TestCase):
         for payload in set_payloads:
             self.assertEqual(payload["links"], [], "a set call derives links now; update the "
                              "exact-subject-only docs")
+
+
+class SessionMarkerTests(unittest.TestCase):
+    """LADR-11: an import marks the working point; a default export excludes it."""
+
+    ENV_NAMES = ("CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "OPENCODE_SESSION_ID",
+                 "COPILOT_AGENT_SESSION_ID", "PI_SESSION_ID")
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self._saved = {n: os.environ.get(n) for n in (*self.ENV_NAMES, "SESSION_MARKER_ROOT")}
+        for n in self.ENV_NAMES:
+            os.environ.pop(n, None)
+        os.environ["SESSION_MARKER_ROOT"] = self.tmp.name
+        self.addCleanup(self._restore)
+        import session_marker as sm
+        self.sm = sm
+
+    def _restore(self):
+        for n, v in self._saved.items():
+            if v is None:
+                os.environ.pop(n, None)
+            else:
+                os.environ[n] = v
+
+    def _sid(self, name="CLAUDE_CODE_SESSION_ID", value="ses-test-1"):
+        os.environ[name] = value
+        return value
+
+    def _store_file(self, records, name=None):
+        if name is None:
+            name = f"export-{len(list(Path(self.tmp.name).glob('export-*.json')))}.json"
+        path = Path(self.tmp.name) / name
+        path.write_text(json.dumps(records), encoding="utf-8")
+        return str(path)
+
+    def _record(self, uuid, version=1, question="Q?", subject="S"):
+        return {"uuid": uuid, "version": version, "subject": subject,
+                "description": question, "statement": "An answer worth keeping.",
+                "kind": "understanding", "status": "approved"}
+
+    def test_marked_load_then_default_export_drops_the_echo(self):
+        sid = self._sid()
+        src = self._store_file([self._record("u-marked-1", 2, "What stores data?")])
+        rc, out, _ = run(["load", src, "--format", "store"])
+        self.assertEqual(rc, 0, out)
+        self.assertIn("Marker: set", out)
+        originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                     uc.resolve_group, uc._run_capture_client)
+        uc.gate_redaction = lambda texts: (list(texts), {})
+        uc.gate_atomicity = lambda c: [{"verdict": "simple", "signals": []} for _ in c]
+        uc.initiative_exists = lambda name: (True, "ok")
+        uc.resolve_group = lambda b, n, d, dryrun: ({"groupUuid": "g", "created": False}, "ok")
+        uc._run_capture_client = lambda s, a, pl: (0, json.dumps({"candidates": []}), "")
+        try:
+            rc, out, _ = run(["export", "--dryrun", src, "--heimdallr", "false"])
+        finally:
+            (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+             uc.resolve_group, uc._run_capture_client) = originals
+        self.assertIn("Boundary: marker", out)
+        self.assertIn("Excluded 1 echo", out)
+
+    def test_export_all_ignores_the_marker(self):
+        sid = self._sid()
+        src = self._store_file([self._record("u-marked-2", 1, "What stores data?")])
+        rc, out, _ = run(["load", src, "--format", "store"])
+        self.assertEqual(rc, 0, out)
+        originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                     uc.resolve_group, uc._run_capture_client)
+        uc.gate_redaction = lambda texts: (list(texts), {})
+        uc.gate_atomicity = lambda c: [{"verdict": "simple", "signals": []} for _ in c]
+        uc.initiative_exists = lambda name: (True, "ok")
+        uc.resolve_group = lambda b, n, d, dryrun: ({"groupUuid": "g", "created": False}, "ok")
+        uc._run_capture_client = lambda s, a, pl: (0, json.dumps({"candidates": []}), "")
+        try:
+            rc, out, _ = run(["export", "--dryrun", src, "--heimdallr", "false", "--all"])
+        finally:
+            (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+             uc.resolve_group, uc._run_capture_client) = originals
+        self.assertIn("Boundary: ignored (--all)", out)
+        self.assertNotIn("Excluded", out)
+
+    def test_nomarker_only_behaves_as_all(self):
+        sid = self._sid()
+        src = self._store_file([self._record("u-nomark-1", 1, "What stores data?")])
+        rc, out, _ = run(["load", src, "--format", "store", "--nomarker"])
+        self.assertEqual(rc, 0, out)
+        self.assertIn("Marker: skipped (--nomarker", out)
+        originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                     uc.resolve_group, uc._run_capture_client)
+        uc.gate_redaction = lambda texts: (list(texts), {})
+        uc.gate_atomicity = lambda c: [{"verdict": "simple", "signals": []} for _ in c]
+        uc.initiative_exists = lambda name: (True, "ok")
+        uc.resolve_group = lambda b, n, d, dryrun: ({"groupUuid": "g", "created": False}, "ok")
+        uc._run_capture_client = lambda s, a, pl: (0, json.dumps({"candidates": []}), "")
+        try:
+            rc, out, _ = run(["export", "--dryrun", src, "--heimdallr", "false"])
+        finally:
+            (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+             uc.resolve_group, uc._run_capture_client) = originals
+        self.assertIn("Boundary: none", out)
+
+    def test_marked_wins_over_nomarker_for_the_same_id(self):
+        sid = self._sid()
+        rec = self._record("u-both-1", 1, "What stores data?")
+        src = self._store_file([rec])
+        rc, out, _ = run(["load", src, "--format", "store"])
+        self.assertIn("Marker: set", out)
+        rc, out, _ = run(["load", src, "--format", "store", "--nomarker"])
+        self.assertIn("Marker: skipped", out)
+        marker = self.sm.load_marker("kvasir", sid)
+        ids, _, _, count = self.sm.exclusion_set(marker)
+        self.assertIn("u-both-1", ids)
+        self.assertEqual(count, 1)
+
+    def test_two_marked_imports_move_the_boundary_but_keep_both(self):
+        sid = self._sid()
+        src1 = self._store_file([self._record("u-first-1", 1, "First question?")])
+        src2 = self._store_file([self._record("u-second-1", 1, "Second question?")])
+        rc, out1, _ = run(["load", src1, "--format", "store"])
+        self.assertIn("Marker: set", out1)
+        rc, out2, _ = run(["load", src2, "--format", "store"])
+        self.assertIn("Marker: extended", out2)
+        marker = self.sm.load_marker("kvasir", sid)
+        ids, _, boundary, count = self.sm.exclusion_set(marker)
+        self.assertEqual(ids, {"u-first-1", "u-second-1"})
+        self.assertEqual(marker["boundary"], marker["imports"][-1]["at"])
+
+    def test_kvasir_export_ignores_the_odin_marker(self):
+        sid = self._sid()
+        self.sm.record_import("odin", sid, "claude-code", "import", False,
+                             [{"id": "u-odin-1", "version": 1, "subject": "Odin Q?"}])
+        src = self._store_file([self._record("u-kv-1", 1, "Kvasir Q?")])
+        rc, out, _ = run(["load", src, "--format", "store"])
+        self.assertIn("Marker: set", out)
+        marker = self.sm.load_marker("kvasir", sid)
+        ids, _, _, _ = self.sm.exclusion_set(marker)
+        self.assertEqual(ids, {"u-kv-1"})
+
+    def test_changed_imported_item_is_a_supersession(self):
+        sid = self._sid()
+        src = self._store_file([self._record("u-ch-1", 1, "What stores data?")])
+        rc, out, _ = run(["load", src, "--format", "store"])
+        self.assertEqual(rc, 0, out)
+        marker = self.sm.load_marker("kvasir", sid)
+        candidates = [{"statement": "We moved to CockroachDB for scale.",
+                       "description": "What stores data?", "originUuid": None}]
+        kept, dropped, supers = uc._apply_marker_exclusions(candidates, marker)
+        self.assertEqual(dropped, 0)
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(len(supers), 1)
+        self.assertEqual(kept[0]["_supersedes"], "u-ch-1")
+
+    def test_each_harness_env_var_resolves_in_isolation(self):
+        for name in self.ENV_NAMES:
+            for other in self.ENV_NAMES:
+                os.environ.pop(other, None)
+            os.environ[name] = "ses-env-1"
+            sid, harness = self.sm.resolve_session(None)
+            self.assertEqual(sid, "ses-env-1", name)
+            self.assertTrue(harness)
+
+    def test_no_session_id_means_no_marker(self):
+        src = self._store_file([self._record("u-none-1", 1, "What stores data?")])
+        rc, out, _ = run(["load", src, "--format", "store"])
+        self.assertEqual(rc, 0, out)
+        self.assertIn("Marker: none (no session id)", out)
+
+    def test_explicit_session_overrides_the_environment(self):
+        os.environ["CLAUDE_CODE_SESSION_ID"] = "ses-env-wrong"
+        src = self._store_file([self._record("u-exp-1", 1, "What stores data?")])
+        rc, out, _ = run(["load", src, "--format", "store", "--session", "ses-flag-1"])
+        self.assertEqual(rc, 0, out)
+        self.assertIn("Marker: set", out)
+        self.assertIsNotNone(self.sm.load_marker("kvasir", "ses-flag-1"))
+        self.assertIsNone(self.sm.load_marker("kvasir", "ses-env-wrong"))
+
+    def test_marker_holds_references_never_content(self):
+        sid = self._sid()
+        src = self._store_file([self._record("u-ref-1", 1, "What stores data?")])
+        run(["load", src, "--format", "store"])
+        raw = Path(self.tmp.name, f"kvasir-{sid}.json").read_text(encoding="utf-8")
+        self.assertNotIn("An answer worth keeping", raw)
+        data = json.loads(raw)
+        self.assertEqual(data["type"], "kvasir")
+        self.assertEqual(data["session"], sid)
+        for entry in data["imports"]:
+            for item in entry.get("items", []):
+                self.assertEqual(set(item), {"id", "version", "subject"})
+
+    def _write_export(self, src, *extra):
+        """Dry-run-free export with everything stubbed; returns (rc, out, err)."""
+        originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                     uc.resolve_group, uc._run_capture_client)
+        uc.gate_redaction = lambda texts: (list(texts), {})
+        uc.gate_atomicity = lambda c: [{"verdict": "simple", "signals": []} for _ in c]
+        uc.initiative_exists = lambda name: (True, "ok")
+        uc.resolve_group = lambda b, n, d, dryrun: ({"groupUuid": "g-w", "created": False}, "ok")
+
+        def fake(script, argv, payload):
+            if argv[0] == "preflight":
+                n = len((payload or {}).get("candidates", []))
+                return 0, json.dumps({"candidates": [
+                    {"index": i, "matches": [], "ticketConflict": None} for i in range(n)],
+                    "intraBatchCollisions": []}), ""
+            return 0, json.dumps({"created": 1}), ""
+
+        uc._run_capture_client = fake
+        try:
+            return run(["export", src, "--heimdallr", "false", *extra])
+        finally:
+            (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+             uc.resolve_group, uc._run_capture_client) = originals
+
+    def test_export_write_marks_the_receipt(self):
+        self._sid()
+        src = Path(self.tmp.name, "notes.md")
+        src.write_text("CockroachDB now stores the index for horizontal scale.\n", encoding="utf-8")
+        rc, out, err = self._write_export(str(src))
+        self.assertEqual(rc, 0, err + out)
+        self.assertIn("Marker: set (export,", out)
+        marker = self.sm.load_marker("kvasir", os.environ["CLAUDE_CODE_SESSION_ID"])
+        verbs = [e["verb"] for e in marker["imports"]]
+        self.assertIn("export", verbs)
+
+    def test_second_default_export_excludes_what_the_first_wrote(self):
+        self._sid()
+        src = Path(self.tmp.name, "notes2.md")
+        src.write_text("CockroachDB now stores the index for horizontal scale.\n", encoding="utf-8")
+        rc, out, err = self._write_export(str(src))
+        self.assertEqual(rc, 0, err + out)
+        # Re-exporting the same prose: the written createUuid is excluded by subject
+        # match only as a supersession — but an identical store re-export echoes by id.
+        marker = self.sm.load_marker("kvasir", os.environ["CLAUDE_CODE_SESSION_ID"])
+        ids, _, _, count = self.sm.exclusion_set(marker)
+        self.assertGreaterEqual(count, 1)
+
+    def test_export_nomarker_writes_but_marks_nothing(self):
+        self._sid()
+        src = Path(self.tmp.name, "notes3.md")
+        src.write_text("CockroachDB now stores the index for horizontal scale.\n", encoding="utf-8")
+        rc, out, err = self._write_export(str(src), "--nomarker")
+        self.assertEqual(rc, 0, err + out)
+        self.assertIn("Marker: skipped (--nomarker", out)
+        self.assertIsNone(self.sm.load_marker("kvasir", os.environ["CLAUDE_CODE_SESSION_ID"]))
+
+    def test_dry_run_marks_nothing(self):
+        self._sid()
+        src = Path(self.tmp.name, "notes4.md")
+        src.write_text("CockroachDB now stores the index for horizontal scale.\n", encoding="utf-8")
+        originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                     uc.resolve_group, uc._run_capture_client)
+        uc.gate_redaction = lambda texts: (list(texts), {})
+        uc.gate_atomicity = lambda c: [{"verdict": "simple", "signals": []} for _ in c]
+        uc.initiative_exists = lambda name: (True, "ok")
+        uc.resolve_group = lambda b, n, d, dryrun: ({"groupUuid": "g", "created": False}, "ok")
+        uc._run_capture_client = lambda s, a, pl: (0, json.dumps({"candidates": []}), "")
+        try:
+            rc, out, _ = run(["export", "--dryrun", str(src), "--heimdallr", "false"])
+        finally:
+            (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+             uc.resolve_group, uc._run_capture_client) = originals
+        self.assertIn("Marker: skipped (nothing written)", out)
+        self.assertIsNone(self.sm.load_marker("kvasir", os.environ["CLAUDE_CODE_SESSION_ID"]))
+
+    def test_dump_marks_the_folder_boundary(self):
+        self._sid()
+        content = Path(self.tmp.name, "session.txt")
+        content.write_text("# Things learned\n\nCockroachDB stores the index.\n", encoding="utf-8")
+        rc, out, err = run(["dump", "--currentsession", "--from", str(content),
+                            "--out", str(Path(self.tmp.name, "d1")), "--heimdallr", "false"])
+        self.assertEqual(rc, 0, err + out)
+        self.assertIn("Marker: set (export,", out)
+        marker = self.sm.load_marker("kvasir", os.environ["CLAUDE_CODE_SESSION_ID"])
+        self.assertEqual(marker["imports"][-1].get("folder"), "d1")
+
+    def _dry_export(self, src):
+        originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                     uc.resolve_group, uc._run_capture_client)
+        uc.gate_redaction = lambda texts: (list(texts), {})
+        uc.gate_atomicity = lambda c: [{"verdict": "simple", "signals": []} for _ in c]
+        uc.initiative_exists = lambda name: (True, "ok")
+        uc.resolve_group = lambda b, n, d, dryrun: ({"groupUuid": "g", "created": False}, "ok")
+        uc._run_capture_client = lambda s, a, pl: (0, json.dumps({"candidates": []}), "")
+        try:
+            return run(["export", "--dryrun", str(src), "--heimdallr", "false"])
+        finally:
+            (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+             uc.resolve_group, uc._run_capture_client) = originals
+
+    def test_second_export_is_a_delta_since_the_first(self):
+        # Id path: re-exporting a store export of what A wrote echoes by id.
+        self._sid()
+        first = Path(self.tmp.name, "first.md")
+        first.write_text("CockroachDB now stores the index for horizontal scale.\n", encoding="utf-8")
+        rc, out, err = self._write_export(str(first))
+        self.assertEqual(rc, 0, err + out)
+        marker = self.sm.load_marker("kvasir", os.environ["CLAUDE_CODE_SESSION_ID"])
+        boundary = marker["boundary"]
+        written = [i for e in marker["imports"] if e["verb"] == "export" for i in e["items"]]
+        self.assertTrue(written, "export A must record its receipt")
+        replay = Path(self.tmp.name, "replay.json")
+        replay.write_text(json.dumps([{
+            "uuid": written[0]["id"], "version": 1, "subject": "Replayed write",
+            "description": written[0].get("subject") or "Replayed write",
+            "statement": "CockroachDB now stores the index for horizontal scale.",
+            "kind": "understanding", "status": "approved"}]), encoding="utf-8")
+        rc, out, _ = self._dry_export(str(replay))
+        self.assertIn(f"Boundary: marker {boundary}", out)
+        self.assertIn("Excluded 1 echo", out)
+
+    def test_same_prose_returns_as_a_supersession_not_a_create(self):
+        # Subject path: id-less prose cannot echo by id, so the same subject is kept
+        # as a supersession (preflight versions it) — never proposed as new.
+        self._sid()
+        first = Path(self.tmp.name, "first.md")
+        first.write_text("CockroachDB now stores the index for horizontal scale.\n", encoding="utf-8")
+        rc, out, err = self._write_export(str(first))
+        self.assertEqual(rc, 0, err + out)
+        marker = self.sm.load_marker("kvasir", os.environ["CLAUDE_CODE_SESSION_ID"])
+        rc, out, _ = self._dry_export(str(first))
+        self.assertIn(f"Boundary: marker {marker['boundary']}", out)
+        self.assertIn("Supersession", out)
+
+    def test_nomarker_export_breaks_no_delta_series(self):
+        self._sid()
+        mid = Path(self.tmp.name, "mid.md")
+        mid.write_text("CockroachDB now stores the index for horizontal scale.\n", encoding="utf-8")
+        rc, out, err = self._write_export(str(mid), "--nomarker")
+        self.assertEqual(rc, 0, err + out)
+        marker = self.sm.load_marker("kvasir", os.environ["CLAUDE_CODE_SESSION_ID"])
+        self.assertIsNone(marker, "a --nomarker export writes no entry at all")
+        # The same prose is still proposed: nothing excluded it.
+        originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                     uc.resolve_group, uc._run_capture_client)
+        uc.gate_redaction = lambda texts: (list(texts), {})
+        uc.gate_atomicity = lambda c: [{"verdict": "simple", "signals": []} for _ in c]
+        uc.initiative_exists = lambda name: (True, "ok")
+        uc.resolve_group = lambda b, n, d, dryrun: ({"groupUuid": "g", "created": False}, "ok")
+        uc._run_capture_client = lambda s, a, pl: (0, json.dumps({"candidates": []}), "")
+        try:
+            rc, out, _ = run(["export", "--dryrun", str(mid), "--heimdallr", "false"])
+        finally:
+            (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+             uc.resolve_group, uc._run_capture_client) = originals
+        self.assertIn("Candidates: 1 to capture", out)
+
+    def test_partial_write_records_only_what_reached_the_store(self):
+        self._sid()
+        many = Path(self.tmp.name, "many.md")
+        many.write_text("\n\n".join(
+            f"Candidate fact number {i:02d} about the store recall path behavior." for i in range(21)
+        ) + "\n", encoding="utf-8")
+        originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                     uc.resolve_group, uc._run_capture_client)
+        uc.gate_redaction = lambda texts: (list(texts), {})
+        uc.gate_atomicity = lambda c: [{"verdict": "simple", "signals": []} for _ in c]
+        uc.initiative_exists = lambda name: (True, "ok")
+        uc.resolve_group = lambda b, n, d, dryrun: ({"groupUuid": "g-w", "created": False}, "ok")
+        real_sets = []
+
+        def fake(script, argv, payload):
+            if argv[0] == "preflight":
+                n = len((payload or {}).get("candidates", []))
+                return 0, json.dumps({"candidates": [
+                    {"index": i, "matches": [], "ticketConflict": None} for i in range(n)],
+                    "intraBatchCollisions": []}), ""
+            if argv == ["set", "--dryrun"]:
+                return 0, json.dumps({"created": 1}), ""
+            real_sets.append(len((payload or {}).get("items", [])))
+            if len(real_sets) == 1:
+                return 0, json.dumps({"created": 20}), ""
+            return 1, "", "boom: second batch refused"
+
+        uc._run_capture_client = fake
+        try:
+            rc, out, err = run(["export", str(many), "--heimdallr", "false"])
+        finally:
+            (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+             uc.resolve_group, uc._run_capture_client) = originals
+        self.assertEqual(rc, 1, out + err)
+        self.assertEqual(real_sets, [20, 1])
+        marker = self.sm.load_marker("kvasir", os.environ["CLAUDE_CODE_SESSION_ID"])
+        ids, _, _, count = self.sm.exclusion_set(marker)
+        self.assertEqual(count, 20, "only the completed batch is recorded")
+
+    def test_changed_exported_item_returns_as_a_supersession(self):
+        self._sid()
+        v1 = Path(self.tmp.name, "v1.md")
+        v1.write_text("Alpha fact about the store engine read path and recall deadline behavior one.\n",
+                      encoding="utf-8")
+        rc, out, err = self._write_export(str(v1))
+        self.assertEqual(rc, 0, err + out)
+        v2 = Path(self.tmp.name, "v2.md")
+        v2.write_text("Alpha fact about the store engine read path and recall deadline behavior two revised.\n",
+                      encoding="utf-8")
+        originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                     uc.resolve_group, uc._run_capture_client)
+        uc.gate_redaction = lambda texts: (list(texts), {})
+        uc.gate_atomicity = lambda c: [{"verdict": "simple", "signals": []} for _ in c]
+        uc.initiative_exists = lambda name: (True, "ok")
+        uc.resolve_group = lambda b, n, d, dryrun: ({"groupUuid": "g", "created": False}, "ok")
+        uc._run_capture_client = lambda s, a, pl: (0, json.dumps({"candidates": []}), "")
+        try:
+            rc, out, _ = run(["export", "--dryrun", str(v2), "--heimdallr", "false"])
+        finally:
+            (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+             uc.resolve_group, uc._run_capture_client) = originals
+        self.assertIn("Supersession", out)
+        self.assertIn("Candidates: 1 to capture", out)
+
+    def test_all_writes_but_all_nomarker_leaves_no_trace(self):
+        self._sid()
+        src = Path(self.tmp.name, "aw.md")
+        src.write_text("CockroachDB now stores the index for horizontal scale.\n", encoding="utf-8")
+        rc, out, err = self._write_export(str(src), "--all")
+        self.assertEqual(rc, 0, err + out)
+        self.assertIn("Boundary: ignored (--all)", out)
+        before = Path(self.tmp.name, f"kvasir-{os.environ['CLAUDE_CODE_SESSION_ID']}.json"
+                      ).read_bytes()
+        rc, out, err = self._write_export(str(src), "--all", "--nomarker")
+        self.assertEqual(rc, 0, err + out)
+        after = Path(self.tmp.name, f"kvasir-{os.environ['CLAUDE_CODE_SESSION_ID']}.json"
+                     ).read_bytes()
+        self.assertEqual(before, after, "--all --nomarker must leave the marker byte-identical")
+
+    def test_parked_candidate_marks_nothing_and_stays_proposed(self):
+        self._sid()
+        src = Path(self.tmp.name, "parked.md")
+        src.write_text("CockroachDB now stores the index for horizontal scale.\n", encoding="utf-8")
+        originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                     uc.resolve_group, uc._run_capture_client, uc._queue_held)
+        uc.gate_redaction = lambda texts: (list(texts), {})
+        uc.gate_atomicity = lambda c: [{"verdict": "bundled", "signals": [";"] } for _ in c]
+        uc.initiative_exists = lambda name: (True, "ok")
+        uc.resolve_group = lambda b, n, d, dryrun: ({"groupUuid": "g", "created": False}, "ok")
+        uc._run_capture_client = lambda s, a, pl: (0, json.dumps({"candidates": []}), "")
+        uc._queue_held = lambda *a, **k: True
+        try:
+            rc, out, err = run(["export", "--dryrun", str(src), "--heimdallr", "false"])
+            first = (rc, out)
+            rc, out, _ = run(["export", "--dryrun", str(src), "--heimdallr", "false"])
+        finally:
+            (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+             uc.resolve_group, uc._run_capture_client, uc._queue_held) = originals
+        self.assertEqual(first[0], 1, first[1])
+        self.assertIsNone(self.sm.load_marker("kvasir", os.environ["CLAUDE_CODE_SESSION_ID"]),
+                          "a parked candidate is not written, so it marks nothing")
+        self.assertIn("Candidates: 0 to capture; 1 held back", out,
+                      "the next export still proposes it")
+
+    def test_all_breadth_records_ids_for_exclusion(self):
+        # D9 note 2026-10-14: a selector-wide import records ids AND the selector —
+        # ids alone make its exclusion live.
+        sid = self._sid()
+        src = self._store_file([self._record("u-all-1", 1, "All Q?")])
+        rc, out, _ = run(["load", src, "--format", "store", "--all"])
+        self.assertEqual(rc, 0, out)
+        marker = self.sm.load_marker("kvasir", sid)
+        ids, _, _, count = self.sm.exclusion_set(marker)
+        self.assertIn("u-all-1", ids)
+        sels = [e.get("selector") for e in marker["imports"] if e.get("selector")]
+        self.assertTrue(sels and all(s.get("all_kinds") for s in sels))
+
+    def test_only_an_explicit_all_is_recorded_as_all_kinds(self):
+        sid = self._sid()
+        src = self._store_file([self._record("u-sel-1", 1, "Selective Q?")])
+        rc, _, _ = run(["load", src, "--format", "store"])
+        self.assertEqual(rc, 0)
+        marker = self.sm.load_marker("kvasir", sid)
+        sels = [e.get("selector") for e in marker["imports"] if e.get("selector")]
+        self.assertEqual(sels, [], "a selective load records ids, no selector")
+        rc, _, _ = run(["load", src, "--format", "store", "--all"])
+        self.assertEqual(rc, 0)
+        marker = self.sm.load_marker("kvasir", sid)
+        sels = [e.get("selector") for e in marker["imports"] if e.get("selector")]
+        self.assertEqual(len(sels), 1)
+        self.assertTrue(sels[0].get("all_kinds"))
+
+    def test_corrupt_marker_is_quarantined_not_silently_replaced(self):
+        sid = self._sid()
+        bad = Path(self.tmp.name, f"kvasir-{sid}.json")
+        bad.write_text("{ not json", encoding="utf-8")
+        src = self._store_file([self._record("u-after-corrupt-1", 1, "After Q?")])
+        rc, out, err = run(["load", src, "--format", "store"])
+        self.assertEqual(rc, 0, out)
+        asides = list(Path(self.tmp.name).glob(f"kvasir-{sid}.json.corrupt-*"))
+        self.assertEqual(len(asides), 1, "the unreadable file must be moved aside")
+        self.assertIn("WARNING", err + out)
+        self.assertIn("moved aside", err + out)
+        marker = self.sm.load_marker("kvasir", sid)
+        ids, _, _, _ = self.sm.exclusion_set(marker)
+        self.assertIn("u-after-corrupt-1", ids)
+
+    def test_export_receipt_records_the_superseded_version(self):
+        self._sid()
+        src = self._store_file([dict(self._record("u-ver-1", 4, "Versioned Q?"))])
+        src_records = src
+        # Write path needs the full stubbed pipeline; reuse _write_export.
+        rc, out, err = self._write_export(src_records)
+        self.assertEqual(rc, 0, err + out)
+        marker = self.sm.load_marker("kvasir", os.environ["CLAUDE_CODE_SESSION_ID"])
+        exported = [i for e in marker["imports"] if e["verb"] == "export" for i in e["items"]]
+        by_id = {i["id"]: i for i in exported}
+        # The candidate came from a store export at version 4: the receipt says so.
+        versions = {i.get("version") for i in exported}
+        self.assertIn(4, versions)
+
+    def test_three_copies_stay_identical(self):
+        roots = [Path(__file__).resolve().parents[1] / "scripts" / "session_marker.py"]
+        roots.append(Path(__file__).resolve().parents[2]
+                     / "mimisbrunnr-odin-context-memory" / "scripts" / "session_marker.py")
+        roots.append(Path(__file__).resolve().parents[2]
+                     / "ai-understanding" / "scripts" / "session_marker.py")
+        bodies = [r.read_text(encoding="utf-8") for r in roots]
+        self.assertEqual(bodies[0], bodies[1])
+        self.assertEqual(bodies[0], bodies[2])
 
 
 if __name__ == "__main__":

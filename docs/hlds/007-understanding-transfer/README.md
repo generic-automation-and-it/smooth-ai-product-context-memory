@@ -6,7 +6,7 @@
 | **Owner** | generik0 |
 | **Tracker** | Understanding |
 | **Business authority** | [BRD-003 — Understanding](../../brd/003-understanding-transfer/) (`BR-38` … `BR-45`), extending [BRD-001](../../brd/001-context-memory/) |
-| **Last updated** | 2026-09-26 |
+| **Last updated** | 2026-10-14 |
 
 > Discovery / prototyping HLD. Delivers **intent + spec** — what we are building and why, the decisions
 > behind it, and the quality bar it must meet. No implementation plan; execution is tracked in the
@@ -90,6 +90,22 @@ A practitioner shares this session's context with another session or repository 
 - The dump is an export; it writes nothing to the store (NFR-01).
 - Another session or repository can load the dumped folder, regardless of whether it is the originating repo.
 
+### 5. Imports and exports mark the working point; export does not echo it
+
+A session's own work starts at its deliberate import. Export distils that work, not what was imported
+(LADR-11, Accepted 2026-10-14).
+
+**DoD**
+
+- A marked import records references, never content (ids for store items; folder/slugs for a dump;
+  path/slug for an ai-understanding unit), in a per-skill, client-side marker keyed by the harness
+  session id; the last marked import is the boundary.
+- A default export excludes marked ids; `export --all` ignores the marker; `--nomarker` imports are
+  session history and flow into export.
+- A changed imported item is exported as a supersession, never dropped.
+- A successful export marks too, so the next default export is a delta; `export --nomarker` leaves the
+  marker unchanged; an export that writes nothing marks nothing; the marker records only what was written.
+
 ## Core Separation of Concerns
 
 > The load skill reads; the capture skill writes; the skill never writes directly.
@@ -133,6 +149,7 @@ See [`./ladrs/`](./ladrs/). Status legend matches HLD-005: `Draft → Prototype 
 | [LADR-08](./ladrs/LADR-08-load-breadth-is-a-filter.md) | Load breadth is a filter (`--all` union vs understanding-only); not two products | Accepted |
 | [LADR-09](./ladrs/LADR-09-load-reads-ai-understanding-files.md) | Load and import read the ai-understanding `.understanding.md` format (and store folders, newest version per slug) as structured input | Accepted |
 | [LADR-10](./ladrs/LADR-10-store-load-is-a-reported-budget.md) | A store load is a reported budget of whole records: `--max-chars` cuts whole records in source order, lists each cut by identity, never compresses; under budget it is byte-identical | Accepted |
+| [LADR-11](./ladrs/LADR-11-import-marks-the-export-boundary.md) | Imports and exports write a per-skill session marker (client-side, references only — ids / folder-slugs / path-slug); a default export is a delta since the last marker unless `--all`; `--nomarker` leaves the marker unchanged | Accepted |
 
 ## Non-Functional Requirements
 

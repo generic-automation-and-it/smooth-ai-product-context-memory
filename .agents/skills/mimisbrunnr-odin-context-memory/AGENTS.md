@@ -19,20 +19,17 @@ conditional exporter, never a second writer.
 
 ## Non-Negotiables
 
-- **Main thread never consumes raw store rows.** Retrieval and pre-write recall run in delegated
-  read/write contexts. Read execution receives only the read API credential and read-only client;
-  write execution receives discrete facts, never a transcript. API credentials enforce capability;
-  prompt text alone is not a security boundary.
-- **Project agent registrations live in `.agents/agents/` for Claude-compatible runtimes.** Skill-local
-  files hold detailed worker contracts; project registrations make workers discoverable and point at
-  them. There is no MCP boundary, so the no-write guarantee is carried by the read-only client and the
-  credential split rather than by a tool grant — treat a registration file or worker name as
-  insufficient: delegation is supported only when the runtime grants both workers and the read worker's
-  environment holds no write credential. The read worker runs only `context_memory_read_client.py` (no
-  write subcommand, refuses to start with a write token present — `CONTEXT_MEMORY_WRITE_TOKEN`, the Host's
-  `ApiAccess__WriteToken` or the controller's `Parameters__api-write-token`, any case, `:` read as `__`); the write worker runs
-  `context_memory_client.py`. The write credential is never ambient — sourcing the full credential file
-  is the deliberate write step, so a read worker that never sources it holds no write capability.
+- **No read or write subagents (LADR-008).** The session runs the read path
+  (`references/read-path.md`) and the write path (`references/write-path.md`) itself. Do not
+  reintroduce agent registrations or delegation: they worked in one harness only, and they were never
+  the security boundary. That boundary is the clients and the credentials, and it holds everywhere: the
+  read client (`context_memory_read_client.py`) has no write subcommand and refuses to start with a write
+  token present — `CONTEXT_MEMORY_WRITE_TOKEN`, the Host's `ApiAccess__WriteToken` or the controller's
+  `Parameters__api-write-token`, any case, `:` read as `__`; the write credential is never ambient and is
+  loaded only inside a subshell around each write-route invocation at the authorized checkpoint; and the
+  store rejects a read credential on a write route. Prompt text alone is not a security boundary.
+- **Raw store rows are working material, never the answer.** The read path reduces them to a lookup,
+  grounding brief or digest before use; the write path receives discrete facts, never a transcript.
 
 - **Never write mid-work.** Accumulate candidates silently during work; write only at the explicit
   end-of-task checkpoint (`set`). This is the manual-trigger design (D29), not a per-fact flush.
@@ -115,7 +112,7 @@ flowchart LR
 
 ## Architecture Decisions
 
-- **LADR-005** (2026-09, accepted): Separate read and write execution contexts. *Context:* baseline
+- **LADR-005** (2026-09, **superseded by LADR-008**): Separate read and write execution contexts. *Context:* baseline
   recall may return 200 rows and consume the task's working context; broad shell grants cannot prove a
   read worker cannot mutate. *Decision:* delegate raw recall, expose a read-only client, and enforce
   read/write credentials at the API. Lookup and grounding return bounded cited conclusions plus
@@ -213,6 +210,25 @@ flowchart LR
   review re-raising this finding against a new call site should check that site against this LADR: a
   site that writes a batch without these bounds is a defect, the channel itself is not.
 
+- **LADR-008** (2026-10-14, accepted, supersedes LADR-005): No read or write subagents. *Context:*
+  LADR-005 delegated recall and capture to two agents (`memory-read`, `memory-write`) registered in
+  `.agents/agents/`. Only Claude Code discovered them (through the `.claude` → `.agents` symlink);
+  OpenCode reads agents from `.opencode/agents/` in another format, Codex had no registration, and the
+  plugin marketplace ships skills only, so every other harness and every plugin install ran a skill
+  that named workers which did not exist. The registrations also pinned `model: sonnet`/`opus`, against
+  the repository's "effort, never a model" rule, and repeated parts of the skill-local contracts, a
+  second copy that drifted. *Decision:* remove the registrations and the delegation. The two contracts
+  become the procedures `references/read-path.md` and `references/write-path.md`, which the session
+  follows itself. The read/write separation the workers provided moves to the shell: the write
+  credential is loaded only inside a subshell around each write-route invocation, so it never persists
+  where the read client runs. *Consequence:* one behaviour in every harness, and the guarantees that
+  were real (read client refusal, non-ambient write token, store-side capability check) are unchanged.
+  **Accepted cost:** raw recall rows now pass through the session's own context, so a large recall
+  spends main-context tokens the worker used to absorb; the bounded output shapes and the 200-row recall
+  cap limit it. **Rejected alternative:** keep the Claude registrations and add OpenCode copies, a third
+  format of the same contract to keep in step. **Rejected alternative:** keep them with `effort:`
+  instead of `model:`, which fixes the pin but not the harness gap.
+
 ## Key Behaviors
 
 - **The bundle detector scores claims, not prose.** `atomicity.py` reads the **statement**; a description is a subject label and coordination inside it is not a second claim. A reason clause (`because`, `so that`) and a noun-phrase `and` are one fact, so neither counts as a junction — scoring them made the signal fire on 12/12 candidates of a real batch, including every candidate the detector then called simple. A contrastive junction or a semicolon cannot join anything but two finite clauses, so one is decisive; additive adverbs take two.
@@ -278,7 +294,7 @@ flowchart LR
   offline and cannot run `set --dryrun`; its real `set` payload is built after the authorised write
   creates the group, so the reuse-the-dry-run-payload rule applies to an existing group only. Hence **Initialize only proposes the binding**
   (read-only `initiatives` and ticket-filtered `query` are the only lookups; the API has no group read
-  route) and `memory-write` runs `upsert-initiative`/`resolve-group` at the authorized `--export`
+  route) and the write path runs `upsert-initiative`/`resolve-group` at the authorized `--export`
   checkpoint, before preflight — otherwise starting a session would be a mid-work write.
 - **A recall has one foreground deadline, and deepsearch degrades by whole passes at it.** The cap is
   `RECALL_DEADLINE_SECONDS` (60 s); `CONTEXT_MEMORY_RECALL_DEADLINE` may **shorten** it and any other
@@ -355,7 +371,7 @@ flowchart LR
   `scopeDimension`/`scopeIdentifier` is refused rather than composed as a same-scope conflict.
 - **Candidate content reaches the offline scripts through a file, never a command line.** The
   invocations take `--input <batch-file>` (or `< <batch-file>`), written with the agent's file tool
-  under `.context/mimisbrunnr-scratch/` — whose own `.gitignore` (`*`) the worker writes first, because
+  under `.context/mimisbrunnr-scratch/` — whose own `.gitignore` (`*`) the write path writes first, because
   `.context/` is only ignored in repositories that say so (issue 184) — so captured text never sits in argv, shell
   history or a quoted `echo` — and never in an environment variable either, which every child inherits.
   That file is the one unredacted copy on disk, so `redact.py`, `atomicity.py` and every client
@@ -406,7 +422,7 @@ flowchart LR
    caps, deduplication and omission disclosure; `divergence.py` composition, pair idempotency,
    recursion rejection and wrapper/write scope agreement; preflight's refusal of a response missing
    either list; `get-blob` byte-for-byte output through both clients; `authority.py` ordered version composition; read-client fail-closed
-   capability boundaries; project agent registrations; ticket transport/guards/dry-run/lossless
+   capability boundaries; the read/write path procedures and the absence of agent registrations; ticket transport/guards/dry-run/lossless
    disclosure; blinded semantic-fixture emission/scoring; `TransportFailureTests`, which drives a **real
    stalled socket** to prove a hung store is classified `timed-out` rather than escaping as a
    `TimeoutError` traceback, returns within the budget (elapsed ≤ `HTTP_TIMEOUT` + tolerance), and that a
@@ -520,7 +536,13 @@ redaction detector is a stdin→stdout fingerprint script reporting rule names o
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
-| 2026-10-14 | **Checkpoint stops when the proposed initiative is not the resolved group's.** Tickets resolve first and the initiative is create-path-only (`resolve-group` returns an existing ticket-bound group without looking it up), so an initiative naming anything but the group's own was silently dropped while the write versioned under the old one. SKILL.md checkpoint and `memory-write.md` compare the reply `initiativeName` and offer drop / re-bind-for-WET / `update-group` re-point. Kvasir `export` enforces the same gate in code (`initiative_mismatch_refusal`, harness 214 -> 221). | session request |
+| 2026-10-14 | **Credential subshell covers each write-route invocation.** `WRITE_ROUTES` sends the write credential on `preflight` too (persists nothing, authenticates write-only), and the checkpoint runs `preflight`/`set`/`resolve-group`/`upsert-initiative` plus follow-up writes — a single-write wording left the others without a credential. `SKILL.md`, both procedures and the Non-Negotiable now say `each write-route invocation` with the full subcommand list; the harness pins the wording in all four docs. Also fixed a `memory-write.md` reference to `references/write-path.md` and an agents leftover in `README.md`. | PR #221 review |
+| 2026-10-14 | **A success-shaped zero-write `set` answer marks nothing.** When the response carries `created`/`versioned`/`unchanged` counts summing to 0, the export receipt records no entry (`Marker: skipped (nothing written)`) instead of falling back to the request's own uuids; a response with no counts keeps the fallback. | PR #221 review |
+| 2026-10-14 | **Read/write subagents removed (LADR-008, supersedes LADR-005).** `.agents/agents/memory-{read,write}.md` deleted; the skill-local contracts moved to `references/read-path.md` / `references/write-path.md` without agent frontmatter, and the session runs both paths itself. The write credential is loaded only inside a subshell around the single write command, so the read client keeps running in the same session. `SKILL.md` *Where Each Step Runs* rewritten; harness `AgentContractTests` re-pointed at the procedures and gained a no-registration guard. | session request |
+| 2026-10-14 | **Export receipt prefers server-confirmed uuids** (falls back to request uuid/createUuid when the response is not positional); **corrupt marker quarantined** to `<name>.corrupt-<stamp>` with a stderr warning instead of silent replace. | ai-review 3, 4 |
+
+| 2026-10-14 | **Session marker: import marks the export boundary (HLD-007 LADR-11).** `query`/`import` gain `--nomarker`/`--session`, write the odin marker and print `Marker:` on stderr; `set`/`export` gain `--all`/`--nomarker`/`--session`, drop echo items (same uuid and description) before sending, keep changed ones as supersessions, and append sent ids on success (`Marker: set (export, …)`; dry runs, refusals and `--nomarker` sends mark nothing); `preflight` gains `--all`/`--session` and discloses exact-subject matches as supersession routing. `Boundary:` on stderr; stdout stays parseable JSON. The read-only client never marks (shared recall path). Harness 248 -> 258. | HLD-007 LADR-11 |
+| 2026-10-14 | **Checkpoint stops when the proposed initiative is not the resolved group's.** Tickets resolve first and the initiative is create-path-only (`resolve-group` returns an existing ticket-bound group without looking it up), so an initiative naming anything but the group's own was silently dropped while the write versioned under the old one. SKILL.md checkpoint and `references/write-path.md` compare the reply `initiativeName` and offer drop / re-bind-for-WET / `update-group` re-point. Kvasir `export` enforces the same gate in code (`initiative_mismatch_refusal`, harness 214 -> 221). | session request |
 | 2026-10-07 | Only a missing ledger is a first run; an unreadable one is a disclosed `ledgerReset` (#6). Calibration: two undefined correlations agree (#9). `--dryrun` writes no memory or group but its queries still leave server-side recall feedback (#7). | review 5441621898 |
 | 2026-10-07 | Calibration counts hold-side role clearing as bleed; recorded runs have no false positive, so their figures stand. | review 5440964552 |
 | 2026-10-07 | Deepsearch's malformed-row rule names `version`; workers point at `SKILL.md` for the credential load (`AGENTS.md` never named it); the read client's refusal names all three write-token spellings. | issue 200 |

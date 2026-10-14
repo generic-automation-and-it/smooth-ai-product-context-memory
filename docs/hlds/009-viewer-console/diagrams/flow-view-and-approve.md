@@ -41,7 +41,7 @@ sequenceDiagram
     Caddy->>Bridge: approve
     Bridge->>Capture: redact -> atomicity -> dedup -> set --dryrun
     Capture-->>Bridge: digest / veto
-    Bridge->>Capture: set --write (only if human approved)
+    Bridge->>Capture: set (only if human approved)
     Capture-->>Bridge: write result
     Bridge-->>Caddy: outcome
     Caddy-->>SPA: result

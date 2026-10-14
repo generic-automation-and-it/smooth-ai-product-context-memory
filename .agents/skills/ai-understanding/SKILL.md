@@ -3,6 +3,7 @@ name: ai-understanding
 description: Export this session's hard-won knowledge into Understandings under .context/understandings/<subject>-<yyyyMMdd-HHmm>/<slug>.understanding.md (one file per unit, grouped into a subject folder stamped with when it was created), import matching ones back at task start, and publish/consume them across workspaces as a zip. Trigger on "export the understandings", "make an Understanding of this", "encode this", "what did we learn", "/ai-understanding", or when a session resolved something that cost real effort and would cost the same again. Not a session log and not code documentation.
 allowed-tools:
   - Bash(python3 .agents/skills/ai-understanding/scripts/understanding_index.py:*)
+  - Bash(python3 .agents/skills/ai-understanding/scripts/session_marker.py:*)
   - Bash(zip:*)
   - Bash(unzip:*)
   - Read
@@ -22,7 +23,7 @@ Export and import are about **this session's memory**: export writes what the se
 | `--export [--path <dir>]` _(default)_ | **Reconcile against `INDEX.md`**, then write this run's new and improved units to a new `.context/understandings/<subject>-<yyyyMMdd-HHmm>/`, or under `--path` when given. Proposes the split first; writes nothing and creates no folder when nothing changed |
 | `--export --all [--path <dir>]` | Same, but skip the split ask **and re-export the whole scope as upserts instead of this run's delta** — an unchanged in-scope unit is re-written, not skipped. **Never loosens the qualifying bar and never bypasses the decision threshold** (LADR-014) |
 | `--export --dontask [--path <dir>]` | Same, but skips the "Export split" ask and takes the recommended option as analysed by the AI. **Does not** re-export the whole scope — it writes this run's delta, exactly as a normal export does |
-| `--import` | Load Understandings whose question matches one the task will make you ask |
+| `--import [--nomarker]` | Load Understandings whose question matches one the task will make you ask; a marked import sets the session marker (below) |
 | `--publish [--portable-only] [--path <target>]` | Write every unit to a zip under `.context/understandings-publish/`, or to `--path` when given; `--portable-only` restricts the archive to `scope: portable` units |
 | `--consume <zip> [--path <dir>]` | Unpack a published archive into the working store — `.context/understandings/` by default, or `--path` when given |
 | `--promote <slug>` | Escalate an Understanding to a `*AGENTS.md` context file or a rule |
@@ -432,6 +433,38 @@ After any write, regenerate the index:
 ```bash
 python3 .agents/skills/ai-understanding/scripts/understanding_index.py
 ```
+
+### Session marker (HLD-007 LADR-11)
+
+A marked `--import` sets the session's working point; a default `--export` excludes what was
+marked, so imported Understandings are never re-proposed as new. The marker is client-side only:
+`.context/session-markers/ai-understanding-<session-id>.json` (references — slug ids and subjects,
+or selector + as-of — never unit bodies; no Host change). One marker per skill; this export reads
+only its own. Session id: first non-empty of `CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID`,
+`OPENCODE_SESSION_ID`, `COPILOT_AGENT_SESSION_ID`, `PI_SESSION_ID`, else `--session <id>`
+(passed as `--session` to the commands below), else no marker.
+
+- On `--import`, record what was loaded (unless `--nomarker`):
+  `python3 .agents/skills/ai-understanding/scripts/session_marker.py record --type ai-understanding --verb import
+  --item "<slug>::<question>" ... [--session ID]` (repeat `--item` per unit; `--selector`
+  with a JSON object for a selector-wide import instead of ids). It prints one `Marker:` line
+  (`set`, `extended`, `skipped (--nomarker)`, `none`).
+- `--import --nomarker` loads history that flows into a default `--export` (still logged with
+  `nomarker: true`); an id both marked and `--nomarker` stays excluded. No marker (or only
+  `--nomarker`/id-less imports) means a default export behaves as `--all`.
+- On `--export`, print the boundary first:
+  `python3 .agents/skills/ai-understanding/scripts/session_marker.py boundary --type ai-understanding [--all] [--session ID]`
+  (`marker <time>, N excluded` | `none` | `ignored (--all)`). A default export skips units whose
+  slug is in the exclusion set; a unit that changes an excluded one is written as an `improved`
+  version of that slug (supersession), never dropped and never a new slug. `--export --all`
+  ignores the marker (still the whole-scope re-export of LADR-014, never a looser bar).
+- On a successful `--export`, record what was written (unless `--nomarker`):
+  `python3 .agents/skills/ai-understanding/scripts/session_marker.py record --type ai-understanding --verb export
+  --path "<subject>-<stamp>/<slug>.understanding.md" --slug "<slug>::<question>" ... [--session ID]`
+  (repeat `--slug` per unit). The marker follows the receipt: dry runs, refusals and empty
+  exports mark nothing. `--export --nomarker` exports normally but writes no entry. It prints one `Marker:` line (`set (export, N items)` |
+  `skipped (--nomarker)` | `skipped (nothing written)` | `none (no session id)`). Use
+  `session_marker.py show --type ai-understanding` to read the exclusion set back.
 
 ## Import (`--import`)
 
