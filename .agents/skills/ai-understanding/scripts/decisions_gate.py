@@ -30,6 +30,7 @@ Python 3.9+, stdlib only.
 """
 
 import argparse
+import datetime
 import hashlib
 import json
 import math
@@ -926,6 +927,30 @@ def purge_positional_entries(ledger):
     return ledger, purged
 
 
+def quarantine_unreadable_ledger(state_file):
+    """Move an unreadable ledger aside for inspection. Best effort, never fatal.
+
+    Same rule as the session marker's corrupt-file quarantine: a reset says the budgets
+    restart, but the old bytes may be worth forensics, so they stay next to the fresh
+    file instead of being replaced silently. Returns the aside path, or None when there
+    was nothing to move (missing file, a directory, or an unmovable path).
+    """
+    path = ledger_path(state_file)
+    if not path.is_file():
+        return None
+    aside = path.with_name(
+        path.name + ".corrupt-"
+        + datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ"))
+    try:
+        os.replace(path, aside)
+    except OSError:
+        return None
+    print(f"WARNING: attempt ledger {path} unreadable; moved aside to {aside} "
+          f"and starting fresh (earlier attempt budgets no longer apply).",
+          file=sys.stderr)
+    return aside
+
+
 def next_attempt(state_file, identity, max_attempts):
     """How many scoring rounds this record has had, bounded by `max_attempts`.
 
@@ -1051,6 +1076,8 @@ def cmd_score(args):
         ledger_reset = _discarded
         ledger_index_purged = _purged
         if _purged or _migrated or _discarded:
+            if _discarded:
+                quarantine_unreadable_ledger(args.state_file)
             capped = cap_ledger(_ledger)
             ledger_evicted += len(_ledger) - len(capped)
             try:

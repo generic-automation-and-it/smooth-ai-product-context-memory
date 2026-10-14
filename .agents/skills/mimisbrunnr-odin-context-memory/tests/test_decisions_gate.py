@@ -1203,6 +1203,26 @@ class LedgerIntegrityTests(GateTestCase):
                       "a discarded ledger must be reported, not silently replaced")
         self.assertIn("begins again", report["ledgerReset"])
 
+    def test_a_corrupt_ledger_is_quarantined_before_the_fresh_write(self):
+        """The reset discloses that budgets restart, but the old bytes may be worth
+        forensics — like the session marker's corrupt-file quarantine, they stay next
+        to the fresh file instead of being replaced silently."""
+        import glob
+        self.stub.probabilities = dict(self.LOW)
+        state = os.path.join(self.tmp, "ledger.json")
+        with open(state, "w", encoding="utf-8") as handle:
+            handle.write("{ truncated")
+        proc, report = self.score(state_file=state, CONTEXT_MEMORY_DECISIONS_MAX_ATTEMPTS="1")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(report["records"][0]["outcome"], "scored")
+        aside = glob.glob(state + ".corrupt-*")
+        self.assertEqual(len(aside), 1, "the unreadable file must be moved aside once")
+        with open(aside[0], encoding="utf-8") as handle:
+            self.assertEqual(handle.read(), "{ truncated")
+        self.assertIn("moved aside", proc.stderr)
+        with open(state, encoding="utf-8") as handle:
+            json.load(handle)
+
     def test_an_unreadable_ledger_is_reported(self):
         """Consumer review 5441621898 #6: an existing ledger that cannot be opened read as a first run,
         so the spent budgets were cleared with no `ledgerReset`. A write-only file is unreadable but
