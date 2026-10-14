@@ -6,9 +6,10 @@ never memory content, in a per-skill client-side file keyed by the harness sessi
 
     .context/session-markers/<type>-<session-id>.json   type in kvasir|odin|ai-understanding
 
-The last marked import is the boundary; every marked import's ids stay excluded.
-A default export drops those ids before preflight; ``export --all`` ignores the marker;
-``--nomarker`` imports are session history and flow into export. A candidate that
+The last marker of any verb (import or export) is the boundary; every marked
+entry's ids stay excluded. A default export drops those ids before preflight;
+``export --all`` ignores the marker for selection (a successful write still records);
+``--nomarker`` entries are session history and flow into export. A candidate that
 changes an excluded item is a supersession, never dropped.
 
 Session id resolution (first non-empty wins, else explicit ``--session``, else no marker):
@@ -246,7 +247,8 @@ def record_import(marker_type: str, session: str, harness: str, verb: str,
         marker["boundary"] = now
         status = "extended" if existed and any(
             isinstance(e, dict) and not e.get("nomarker") and
-            (e.get("items") or e.get("selector"))
+            (e.get("items") or e.get("selector") or e.get("folder")
+             or e.get("slugs") or e.get("path"))
             for e in marker.get("imports", [])[:-1]
         ) else "set"
     elif nomarker:
@@ -254,7 +256,12 @@ def record_import(marker_type: str, session: str, harness: str, verb: str,
     else:
         status = "history"
 
+    # Owner-only like the scratch folder: session ids are not secrets, but they sit
+    # in these filenames, so other accounts get no read. Repair unconditionally
+    # (mkdir -m sets the mode only on creation); a chmod failure raises before
+    # anything is written, so a marker is never left exposed.
     mpath.parent.mkdir(parents=True, exist_ok=True)
+    os.chmod(mpath.parent, 0o700)
     fd, tmp = tempfile.mkstemp(dir=str(mpath.parent), prefix=mpath.name + ".",
                                suffix=".tmp")
     try:
@@ -299,7 +306,7 @@ def marker_line(status: str, session: str, count: int = 0, verb: str = "import")
             return f"Marker: {status} (export, {count} item(s))"
         if status == "skipped":
             return "Marker: skipped (--nomarker; boundary and exclusions unchanged)"
-        if status == "empty":
+        if status in ("empty", "history"):
             return "Marker: skipped (nothing written)"
         return "Marker: none (no session id)"
     if status == "set":

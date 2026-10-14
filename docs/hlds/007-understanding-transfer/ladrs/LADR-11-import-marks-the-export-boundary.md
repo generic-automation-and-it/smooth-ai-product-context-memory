@@ -35,6 +35,9 @@ An import writes a **session marker**; export uses it as a **boundary** by id ex
   own marker. No Host, API or schema change.
 - **What.** References only — `{id, version}` per item, or `{selector, as_of}` for a selector-wide import
   (replayable because the store is append-only). **Never memory content.**
+  (Implementation note 2026-10-14: "or" reads as "in addition" — a selector-wide import
+  records its ids *and* its selector. Ids serve present exclusion; without them the marker
+  would move the boundary but exclude nothing. The selector serves future replay.)
 - **Boundary.** The **last** marked import is the boundary. Every marked import's ids stay excluded.
 - **Default export** removes excluded ids from the candidate set before preflight and reports
   `Boundary: marker <time>, N excluded`.
@@ -122,8 +125,8 @@ unchanged):
   print `Marker:`; `export`/`dump` gained `--all`/`--session` and print `Boundary:`. Echo ids
   are dropped before preflight; a changed imported item is kept as a supersession (mechanical id /
   exact-subject match). `export --all` keeps its shared-spelling meaning (ignore the marker).
-  Harness `run_tests.py` 221 → 233 (`SessionMarkerTests`, 12 cases covering every acceptance
-  criterion below).
+  The boundary is the last marker of any verb. Harness `run_tests.py` 221 → 233
+  (`SessionMarkerTests`, 12 cases covering every acceptance criterion below).
 - **Odin** (`context_memory_client.py`): `query`/`import` gained `--nomarker`/`--session` and
   mark + `Marker:` on stderr; `set`/`export` gained `--all`/`--session`, drop echo items (same
   uuid **and** description) and keep changed ones as supersessions; `preflight` gained

@@ -46,8 +46,9 @@ A marked `load`/`import` sets the session's working point; a default `export` ex
 what was marked, so imported context is never re-proposed as new (echo).
 
 - The marker is client-side only: `.context/session-markers/kvasir-<session-id>.json`
-  (atomic write), holding references (ids + versions + subjects, or selector + as-of)
-  — **never memory content**. No Host, API or schema change.
+  (atomic write), holding references (ids + versions + subjects, plus selector + as-of
+  on `--all`/selector-wide imports for replay) — **never memory content**. No Host, API or
+  schema change.
 - Session id: first non-empty of `CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID`,
   `OPENCODE_SESSION_ID`, `COPILOT_AGENT_SESSION_ID`, `PI_SESSION_ID`, else explicit
   `--session <id>`, else no marker (the verb still runs and prints `Marker: none`).
@@ -55,7 +56,8 @@ what was marked, so imported context is never re-proposed as new (echo).
   `load`/`import` print one `Marker:` line (`set`, `extended`, `skipped (--nomarker)`,
   `none`); `export`/`dump` print one `Boundary:` line (`marker <time>, N excluded` |
   `none` | `ignored (--all)`).
-- `export --all` ignores the marker (whole input/session, skill picks kind as usual).
+- `export --all` ignores the marker for selecting candidates (whole input/session, skill
+  picks kind as usual); a successful `--write` still records its export entry.
   `load`/`import --nomarker` loads history that flows into a default export (ids still
   logged with `nomarker: true`); an id marked and `--nomarker` stays excluded. No marker
   (or only `--nomarker`/id-less imports) means default export equals `--all`.

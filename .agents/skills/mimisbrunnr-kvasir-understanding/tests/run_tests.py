@@ -4153,6 +4153,34 @@ class SessionMarkerTests(unittest.TestCase):
         self.assertIn("Candidates: 0 to capture; 1 held back", out,
                       "the next export still proposes it")
 
+    def test_all_breadth_records_ids_for_exclusion(self):
+        # D9 note 2026-10-14: a selector-wide import records ids AND the selector —
+        # ids alone make its exclusion live.
+        sid = self._sid()
+        src = self._store_file([self._record("u-all-1", 1, "All Q?")])
+        rc, out, _ = run(["load", src, "--format", "store", "--all"])
+        self.assertEqual(rc, 0, out)
+        marker = self.sm.load_marker("kvasir", sid)
+        ids, _, _, count = self.sm.exclusion_set(marker)
+        self.assertIn("u-all-1", ids)
+        sels = [e.get("selector") for e in marker["imports"] if e.get("selector")]
+        self.assertTrue(sels and all(s.get("all_kinds") for s in sels))
+
+    def test_only_an_explicit_all_is_recorded_as_all_kinds(self):
+        sid = self._sid()
+        src = self._store_file([self._record("u-sel-1", 1, "Selective Q?")])
+        rc, _, _ = run(["load", src, "--format", "store"])
+        self.assertEqual(rc, 0)
+        marker = self.sm.load_marker("kvasir", sid)
+        sels = [e.get("selector") for e in marker["imports"] if e.get("selector")]
+        self.assertEqual(sels, [], "a selective load records ids, no selector")
+        rc, _, _ = run(["load", src, "--format", "store", "--all"])
+        self.assertEqual(rc, 0)
+        marker = self.sm.load_marker("kvasir", sid)
+        sels = [e.get("selector") for e in marker["imports"] if e.get("selector")]
+        self.assertEqual(len(sels), 1)
+        self.assertTrue(sels[0].get("all_kinds"))
+
     def test_three_copies_stay_identical(self):
         roots = [Path(__file__).resolve().parents[1] / "scripts" / "session_marker.py"]
         roots.append(Path(__file__).resolve().parents[2]

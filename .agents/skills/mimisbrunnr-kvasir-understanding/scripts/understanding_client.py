@@ -2294,13 +2294,15 @@ def cmd_export(args: argparse.Namespace) -> int:
     return 0
 
 
-def _mark_export_receipt(args: argparse.Namespace, written: list[dict]) -> None:
+def _mark_export_receipt(args: argparse.Namespace, written: list[dict],
+                           folder: str | None = None) -> None:
     """Append one export entry for actually-written items and print the Marker: line.
 
     The marker follows the receipt (HLD-002 LADR-07), never the plan: only items a
     successful `set` accepted are recorded, one entry per completed batch, so a partial
     multi-batch export records exactly what reached the store. `--nomarker` writes
-    nothing; without a session id there is nothing to key on.
+    nothing; without a session id there is nothing to key on. A dump passes its folder
+    (no ids — authored prose) to move the boundary without adding exclusions.
     """
     sid, harness = _marker_session(args)
     if bool(getattr(args, "nomarker", False)):
@@ -2309,13 +2311,14 @@ def _mark_export_receipt(args: argparse.Namespace, written: list[dict]) -> None:
     if not sid:
         print(_marker.marker_line("none", "", verb="export"))
         return
-    if not written:
+    if not written and folder is None:
         # Dry runs, empty sets and held-back batches write nothing, so they mark
         # nothing — but the digest still says so.
         print(_marker.marker_line("empty", sid, 0, verb="export"))
         return
     try:
-        _, status = _marker.append_export("kvasir", sid, harness, written)
+        _, status = _marker.append_export("kvasir", sid, harness, written,
+                                          folder=folder)
     except OSError as error:
         print(f"NOTE: session marker not written ({error}).", file=sys.stderr)
         return
@@ -2586,24 +2589,30 @@ def _mark_import(args: argparse.Namespace, verb: str, records: list[dict] | None
     sel: dict | None = None
     as_of: str | None = None
     if records is not None and not nomarker:
+        # Ids are always recorded when known: they are the live exclusion set, and a
+        # selector-wide import with no ids would exclude nothing (Boundary: none).
+        # The selector rides alongside for future append-only replay (LADR-11 D9 note
+        # 2026-10-14: "instead" read as "in addition" — ids serve present exclusion).
+        for record in records:
+            try:
+                parts = five_parts(record)
+            except (AttributeError, TypeError):
+                continue
+            if parts.get("uuid"):
+                items.append({"id": parts["uuid"], "version": parts.get("version"),
+                              "subject": parts.get("question") or parts.get("subject") or ""})
         if all_kinds or selector is not None:
             sel = dict(selector or {})
-            sel.setdefault("all_kinds", True)
+            # Breadth is what was asked, not a default: only an explicit --all marks
+            # the selector as all-kinds. A selective import keeps its filters as-is.
+            if all_kinds:
+                sel["all_kinds"] = True
             sel.setdefault("source", source_kind)
             as_of = dt.date.today().isoformat()
-        else:
-            for record in records:
-                try:
-                    parts = five_parts(record)
-                except (AttributeError, TypeError):
-                    continue
-                if parts.get("uuid"):
-                    items.append({"id": parts["uuid"], "version": parts.get("version"),
-                                  "subject": parts.get("question") or parts.get("subject") or ""})
-            if not items:
-                # Id-less import (foreign-shaped, understanding-file units): history.
-                print(_marker.marker_line("history", sid))
-                return
+        if not items and sel is None:
+            # Id-less import (foreign-shaped, understanding-file units): history.
+            print(_marker.marker_line("history", sid))
+            return
     if nomarker:
         # Log ids for lineage without moving the boundary (D5).
         for record in records or []:
@@ -3062,19 +3071,7 @@ def cmd_dump(args: argparse.Namespace) -> int:
     print(dump_boundary)
     # A successful dump marks too (amended LADR-11): the folder entry moves the boundary
     # so the next default export starts after it. No ids — a dump carries authored prose.
-    _dump_sid, _dump_harness = _marker_session(args)
-    if bool(getattr(args, "nomarker", False)):
-        print(_marker.marker_line("skipped", _dump_sid, 0, verb="export"))
-    elif not _dump_sid:
-        print(_marker.marker_line("none", "", verb="export"))
-    else:
-        try:
-            _, _dump_status = _marker.append_export("kvasir", _dump_sid, _dump_harness,
-                                                   [], folder=folder.name)
-        except OSError as error:
-            print(f"NOTE: session marker not written ({error}).", file=sys.stderr)
-        else:
-            print(_marker.marker_line(_dump_status, _dump_sid, 0, verb="export"))
+    _mark_export_receipt(args, [], folder=folder.name)
     print("This is an export. The store was not changed.")
     if git_ignored(folder):
         print("warning: this dump folder is gitignored and will not survive the workspace — "

@@ -1114,6 +1114,12 @@ class SessionMarkerCLITests(unittest.TestCase):
             for item in entry.get("items", []):
                 self.assertEqual(set(item), {"id", "version", "subject"})
 
+    def test_empty_export_receipt_reports_nothing_written(self):
+        os.environ["PI_SESSION_ID"] = "ses-ai-5"
+        rc, out, _ = self._run("record", "--type", "ai-understanding", "--verb", "export")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("Marker: skipped (nothing written)", out)
+
     def test_three_copies_stay_identical(self):
         roots = [MARKER_SCRIPT,
                  MARKER_SCRIPT.parents[2] / "mimisbrunnr-odin-context-memory"

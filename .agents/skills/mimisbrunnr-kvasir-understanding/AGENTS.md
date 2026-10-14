@@ -109,7 +109,8 @@ recalls the live store via `import` (read token only) and orchestrates the captu
   folder, then `updated` — the same precedence `ai-understanding`'s index applies. Older versions are
   counted, not silently dropped.
 - **An import marks the working point; a default export excludes what was marked (LADR-11).**
-  `load`/`import` record ids + versions + subjects (or selector + as-of for `--all` breadth;
+  `load`/`import` record ids + versions + subjects (plus selector + as-of on `--all`/selector-wide
+  imports for replay;
   `--nomarker` logs history that still flows into export) in
   `.context/session-markers/kvasir-<session-id>.json` — references only, never content, atomic
   write — and print one `Marker:` line. `export` drops echo ids before preflight, keeps a changed

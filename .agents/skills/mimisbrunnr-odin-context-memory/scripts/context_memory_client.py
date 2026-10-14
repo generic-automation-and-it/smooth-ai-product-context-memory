@@ -7,6 +7,7 @@ and prints the response JSON on stdout. Nothing is ever logged that leaks memory
 """
 
 import argparse
+import datetime as dt
 import json
 import os
 import re
@@ -910,9 +911,10 @@ def _mark_query(args, payload, items: list) -> None:
                                        "scopeDimension", "scopeIdentifier")
                if payload.get(k) not in (None, [], "")}
         if sel:
-            import datetime as _dt
+            # Kept alongside the ids (LADR-11 D9 note 2026-10-14): ids serve present
+            # exclusion, the selector serves future append-only replay.
             selector = sel
-            as_of = _dt.date.today().isoformat()
+            as_of = dt.date.today().isoformat()
     if not rows and selector is None:
         _write_marker_notice("history", sid)
         return
