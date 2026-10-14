@@ -323,6 +323,7 @@ recalls the live store via `import` (read token only) and orchestrates the captu
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-14 | **Input-resolution fixtures stub `dump_root`.** `matching_session_input` runs before the stubbed newest-dump lookup against the real workspace root, so a live session-matching dump shadowed three fixtures (a live run's own dump matched); the session-sensitive cases now resolve inside an empty stubbed root, plus a regression test pinning it. Test-only; product behavior unchanged. | issue 224 |
 | 2026-10-14 | **Gate positional-index purge reaches the operator.** `_ledger_disclosures` prints one stderr line for the gate's `ledgerIndexPurged` count (fixed wording, count only); absent, zero or malformed values print nothing. Regression: a write-path prose export against a pre-spent `index:N` ledger now scores (and under `hold` holds below-threshold) instead of keeping all unscored. | issue 222 |
 | 2026-10-14 | **Export receipts record `originVersion`** where the candidate carried one, so the digest can say which version was superseded; fresh prose records none. | ai-review 7 |
 

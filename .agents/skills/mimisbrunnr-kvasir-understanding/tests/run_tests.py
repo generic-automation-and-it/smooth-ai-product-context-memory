@@ -3383,7 +3383,12 @@ class InputDefaultTests(unittest.TestCase):
         self.assertIn("Input defaulted to this session's dump: /my-dump", out.getvalue())
 
     def test_load_and_export_refuse_with_no_input_and_no_dump(self):
-        with with_stubbed("current_session_input", lambda: None):
+        # dump_root is stubbed to an absent path: matching/current must see no dumps
+        # at all, never the real workspace root (a live session-matching dump there
+        # once shadowed these fixtures through the unstubbed matching lookup).
+        with tempfile.TemporaryDirectory() as tmp, \
+                with_stubbed("dump_root", lambda: Path(tmp) / "absent"), \
+                with_stubbed("current_session_input", lambda: None):
             for argv in (["load"], ["export", "--dryrun", "--heimdallr", "false"]):
                 with self.subTest(argv=argv):
                     rc, _, err = run(argv)
@@ -3415,10 +3420,33 @@ class InputDefaultTests(unittest.TestCase):
 
     def test_export_dry_run_proceeds_on_a_defaulted_input(self):
         seen = []
-        with with_stubbed("current_session_input", lambda: "/dump"), \
+        # dump_root stubbed to an empty root: the unstubbed matching lookup must find
+        # nothing, so the stubbed newest-dump default below is what gets read.
+        with tempfile.TemporaryDirectory() as tmp, \
+                with_stubbed("dump_root", lambda: Path(tmp)), \
+                with_stubbed("current_session_input", lambda: "/dump"), \
                 with_stubbed("read_material", lambda src, fmt: seen.append(src) or 2):
             run(["export", "--dryrun", "--heimdallr", "false"])
         self.assertEqual(seen, ["/dump"])
+
+    def test_input_resolution_never_leaves_the_stubbed_dump_root(self):
+        """The shape that broke these fixtures: a session-matching dump in the real
+        workspace root won through the unstubbed matching lookup ahead of every stub.
+        With dump_root stubbed, only the stubbed root is consulted — a decoy matching
+        the stubbed session resolves from there, and the real root is never read."""
+        with tempfile.TemporaryDirectory() as tmp:
+            decoy = Path(tmp) / "mine"
+            decoy.mkdir()
+            (decoy / uc.SESSION_FILE).write_text("# s\n\nA fact worth storing.\n",
+                                                 encoding="utf-8")
+            (decoy / uc.METADATA_FILE).write_text(json.dumps({"session": "sid-live"}),
+                                                  encoding="utf-8")
+            seen = []
+            with with_stubbed("session_id", lambda: "sid-live"), \
+                    with_stubbed("dump_root", lambda: Path(tmp)), \
+                    with_stubbed("read_material", lambda src, fmt: seen.append(src) or 2):
+                run(["export", "--dryrun", "--heimdallr", "false"])
+            self.assertEqual(seen, [str(decoy)])
 
     def test_dump_root_falls_back_to_the_working_directory_outside_git(self):
         with tempfile.TemporaryDirectory() as tmp:
