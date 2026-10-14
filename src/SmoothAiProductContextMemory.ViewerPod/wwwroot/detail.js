@@ -16,7 +16,7 @@ const els = {
   close: $('#detail-close'),
 };
 
-let selectedUuid = null;
+let currentMemory = null;
 
 function fmtValidity(memory) {
   const from = memory.validFrom ? fmtInstant(memory.validFrom) : '';
@@ -78,6 +78,12 @@ function bodyError(message) {
   return `<section class="detail-section" data-body><div class="body-head"><h3>Body</h3></div><p class="state" data-state="error">${esc(message)}</p></section>`;
 }
 
+function setBlobSection(html) {
+  const existing = els.body.querySelector('.detail-section[data-body]');
+  if (existing) existing.outerHTML = html;
+  else els.body.insertAdjacentHTML('beforeend', html);
+}
+
 export function initDetail() {
   els.close.addEventListener('click', closeDetail);
   document.addEventListener('keydown', (event) => {
@@ -85,34 +91,35 @@ export function initDetail() {
   });
   els.body.addEventListener('click', (event) => {
     const versionButton = event.target.closest('.version-load');
-    if (versionButton) { loadVersion(Number(versionButton.dataset.version)); return; }
-    if (event.target.closest('#body-toggle')) {
+    if (versionButton) {
+      if (currentMemory) loadVersion(currentMemory, Number(versionButton.dataset.version));
+      return;
+    }
+    const toggle = event.target.closest('#body-toggle');
+    if (toggle) {
       const blob = els.body.querySelector('#detail-blob');
-      if (blob) blob.hidden = !blob.hidden;
+      if (blob) {
+        blob.hidden = !blob.hidden;
+        toggle.textContent = blob.hidden ? 'Show body' : 'Hide body';
+      }
     }
   });
 }
 
-async function loadVersion(version) {
-  const memory = currentMemory;
-  if (!memory) return;
+async function loadVersion(memory, version) {
   const result = await getMemoryBlob(memory.uuid, version, memory.scopeDimension);
+  if (currentMemory?.uuid !== memory.uuid) return;
   let html;
   if (result.timedOut) html = bodyError('The body request timed out.');
   else if (result.unreachable) html = bodyError('The Console cannot reach the API.');
   else if (!result.ok) html = bodyError(`HTTP ${result.status}`);
   else html = renderBody(result.text, version);
-  const existing = els.body.querySelector('.detail-section[data-body]');
-  if (existing) existing.outerHTML = html;
-  else els.body.insertAdjacentHTML('beforeend', html);
+  setBlobSection(html);
 }
-
-let currentMemory = null;
 
 export function openDetail(memory) {
   if (!memory) return;
   currentMemory = memory;
-  selectedUuid = memory.uuid;
   els.pane.hidden = false;
   const url = new URL(window.location.href);
   url.searchParams.set('uuid', memory.uuid);
@@ -120,17 +127,18 @@ export function openDetail(memory) {
 
   els.body.innerHTML = renderStatic(memory);
 
+  const opened = memory;
   getMemoryVersions(memory.uuid, memory.scopeDimension).then((versionsResult) => {
+    if (currentMemory?.uuid !== opened.uuid) return;
     if (versionsResult.ok && Array.isArray(versionsResult.data?.items)) {
       els.body.insertAdjacentHTML('beforeend', renderVersions(versionsResult.data.items));
     }
-    loadVersion(memory.version);
+    loadVersion(opened, opened.version);
   });
 }
 
 function closeDetail() {
-  if (selectedUuid === null) return;
-  selectedUuid = null;
+  if (!currentMemory) return;
   currentMemory = null;
   els.pane.hidden = true;
   els.body.innerHTML = '';

@@ -42,13 +42,17 @@ export function getMemoryVersions(uuid, scope) {
 
 export async function getMemoryBlob(uuid, version, scope) {
   const query = scope ? `?scope=${encodeURIComponent(scope)}` : '';
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT);
   try {
-    const response = await fetch(`/api/context/memories/${uuid}/versions/${version}/blob${query}`);
+    const response = await fetch(`/api/context/memories/${uuid}/versions/${version}/blob${query}`, { signal: controller.signal });
     const text = await response.text();
     return { ok: response.ok, status: response.status, text };
   } catch (error) {
     if (error && error.name === 'AbortError') return { timedOut: true };
     return { unreachable: true };
+  } finally {
+    clearTimeout(timer);
   }
 }
 
