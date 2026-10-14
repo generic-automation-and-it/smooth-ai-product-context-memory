@@ -112,7 +112,13 @@ automatic form of this. Tags are never autofilled: derive them from the material
   group**; when the supplied tickets already resolve to an existing group it never looks the initiative
   up, so no upsert is needed. Run `upsert-initiative` first only on the create path.
 - Then `resolve-group` with the proposed binding; its `groupUuid` is the `groupUuid` every preflight
-  candidate and the `set` request carry.
+  candidate and the `set` request carry. **Compare its reply `initiativeName` against the proposed
+  initiative: a mismatch stops the checkpoint** — tickets resolve first and the initiative is
+  create-path-only, so writing on would version under the old initiative while the caller believes
+  it started a new one. Same three options as the kvasir export (drop the initiative / re-bind to
+  non-resolving tickets for WET duplicates / `update-group` re-point). Follow-up: enforce in
+   code (server `initiativeIgnored` / 409 or sole-client gate) — this rule is agent-followed
+   prose here, untested by the odin harness.
 - **`resolve-group` is not dry-runnable.** A `--dryrun` checkpoint must call neither command; it reports
   the group and initiative as *would create*, exactly as `mimisbrunnr-kvasir-understanding --export`
   does. That is a plan preview, not a reusable `set --dryrun` payload: build the `set` payload with the
