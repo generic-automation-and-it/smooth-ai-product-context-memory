@@ -92,6 +92,7 @@ One-liners; full detail in git history and the linked PRs/issues.
 
 | Date | Change | Ref |
 |---|---|---|
+| 2026-10-14 | **Review gate + config gained Mistral Large 4** on `go-openai` (preset `OpenCode Mistral Large 4`). Listed in OpenCode docs but not yet served by `zen/go/v1`, so it fails until OpenCode enables it on Go. | this PR |
 | 2026-10-14 | **Added HLD-010 (In Discovery)** — one model for shared skill code (shared folder inside the plugin, WET + parity across it); B1 decision record for the Part B move. | issue 222 |
 | 2026-10-14 | **`what-is-special.md` gained the session-markers item** (import + export mark the working point; default export is a delta; rivals deduplicate after the fact). | this PR |
 | 2026-10-14 | **`what-is-special.md` gained CortexDB + OKF Agent Memory rows**; all stated licenses verified against GitHub. | this PR |

@@ -63,6 +63,9 @@
         "kimi-k2.6": {
           "name": "Kimi K2.6"
         },
+        "mistral-large-4": {
+          "name": "Mistral Large 4"
+        },
         "deepseek-v4-pro": {
           "name": "DeepSeek V4 Pro"
         },
