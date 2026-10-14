@@ -92,6 +92,7 @@ One-liners; full detail in git history and the linked PRs/issues.
 
 | Date | Change | Ref |
 |---|---|---|
+| 2026-10-14 | **`what-is-special.md` gained CortexDB + OKF Agent Memory rows**; all stated licenses verified against GitHub. | this PR |
 | 2026-10-13 | **Added `docs/wiki/what-is-special.md`** (rival comparison + differentiators) and linked it from README above Install. Root changelog is the record home (no localized file covers `docs/wiki/`). | this PR |
 | 2026-10-13 | **Minimized this file.** Changelog rows condensed to one-liners; CI/CD, layout, and test sections trimmed. | PR #208 |
 | 2026-10-13 | **Enabled local network binding for agents** (`network.allowLocalBinding` in `.agents/settings.json`). Root changelog is the record home (no localized file covers agent settings). | PR #208 |
