@@ -14,8 +14,9 @@ mirrors resolve the shared path with no copy step.
 ## Verification
 
 Per route, with evidence: installed plugin tree inspected for the shared scripts (as in
-B0); `npm pack --dry-run` output lists the folder and a launcher import runs; mirror
-resolution asserted by same-inode check. Any route dropping the folder fails its check.
+B0); `npm pack --dry-run` output lists the folder and a launcher import runs (launchers
+resolve scripts relative to the package root, so the allowlisted shared path must hold
+there too); mirror resolution asserted by same-inode check. Any route dropping the folder fails its check.
 
 ## Acceptance Criteria
 

@@ -24,6 +24,12 @@ just stops). Measured inventory, 2026-10-14:
 | ymir-bootstrap | documented `SKILL.md` command path (agent-executed, no script import) | odin `context_memory_read_client.py probe` |
 | ai-understanding | WET copies only (separate plugin — see LADR-02) | `decisions_gate.py`, `decisions_rubric.json`, `redact.py`, `session_marker.py` |
 
+A third mechanism is a mirrored constant, not a file: kvasir and saga-dossier each carry
+their own `MAX_CANDIDATES = 20`, commented as the capture skill's cap "mirrored rather
+than imported". It is not a peer reach and not a copy — changing the cap is a two-file
+edit today. Disposition: stays mirrored and comment-pinned; if the cap ever changes, the
+change rides with it explicitly rather than through this move.
+
 ## Decision
 
 **Adopt** one shared folder, `.agents/skills/_mimisbrunnr-shared/scripts/`, holding every
@@ -34,12 +40,14 @@ copies collapse into the shared one; ai-understanding keeps its copies (LADR-02)
 compatibility shims are left at the old peer paths.
 
 Evidence the folder ships on every route (B0, measured 2026-10-14 with Claude Code
-2.1.286, corroborated on 2.1.280): a throwaway clone carrying a dummy
+2.1.286): a throwaway clone carrying a dummy
 `_mimisbrunnr-shared/scripts/probe.py` installed cleanly, the plugin cache held the whole
 repository, the probe file was present in the installed tree, a kvasir-relative
 `parents[2] / "_mimisbrunnr-shared"` resolved from both skill trees, and the probe ran.
-The real GitHub-URL `source` was not run; it is expected to clone the whole repository
-the same way.
+The whole-repo-copy premise was corroborated on 2.1.280 during the Part M install check
+(both plugins install; every manifest entry resolves); the probe-resolution half was not
+re-run there. The real GitHub-URL `source` was not run; it is expected to clone the whole
+repository the same way.
 
 ## Alternatives Considered
 
