@@ -6,8 +6,8 @@
 
 The operator suite parses deterministically: a committed 40-case fixture (bare words,
 implicit-AND, explicit `OR`, `-`/`NOT`, `( )` grouping, `"phrase"`, `prefix*`, mixed
-combinations, plus 12 malformed inputs) passes at 1.0 — every well-formed case yields the
-specified `tsquery` shape, every malformed case is refused with a stable reason code from
+combinations, plus 14 malformed inputs) passes at 1.0 — every well-formed case yields the
+specified operator-tree shape, every malformed case is refused with a stable reason code from
 the closed set: `E_EMPTY_QUERY`, `E_EMPTY_GROUP`, `E_DANGLING_OPERATOR`,
 `E_UNBALANCED_PAREN`, `E_UNTERMINATED_QUOTE`, `E_LONE_PREFIX`, `E_UNKNOWN_FIELD`,
 `E_EMPTY_VALUE`, `E_DUPLICATE_FIELD`, `E_INVALID_FIELD_VALUE`,
@@ -17,7 +17,7 @@ the closed set: `E_EMPTY_QUERY`, `E_EMPTY_GROUP`, `E_DANGLING_OPERATOR`,
 ## Verification
 
 `KeywordParserTests` (L0, no database) assert the operator-tree output per case
-(`docs/hlds/008-keyword-search/nfrs/NFR-01-fixture.md` at Prototype: 40 well-formed =
+(`docs/hlds/008-keyword-search/nfrs/NFR-01-fixture.md`, Prototype deliverable: 40 well-formed =
 8 bare/implicit-AND, 6 OR, 6 NOT/exclusion, 6 grouping, 6 phrase, 4 prefix, 4 mixed —
 plus 14 malformed, one per refusal code); `KeywordSearchTests` (L1) assert the
 end-to-end set semantics against the seeded corpus. Tree determinism is asserted by 10x

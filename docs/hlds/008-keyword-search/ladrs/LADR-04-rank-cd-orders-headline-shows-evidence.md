@@ -12,14 +12,17 @@ same evidence without pulling blob bodies.
 
 ## Decision
 
-**Order** by query kind: bare-text queries keep `ORDER BY ValidFrom desc, uuid ASC,
+**Order** by query kind: bare-text queries (including field-only and field+bare with
+zero explicit operators — no `tsquery` predicate, nothing to rank) keep `ORDER BY
+ValidFrom desc, uuid ASC,
 version ASC` with no rank. Operator queries (any explicit `|`/`&`/`!`/phrase/` :*`
 constructor from LADR-02) order by `ts_rank_cd(vector, query) DESC` with the same
-recency tuple as the deterministic tiebreak, and **project** a nullable `Snippet`
+recency tuple as the deterministic tiebreak, and **project** a nullable `snippet`
 (`ts_headline('english', …)` over the matched side, subject vs. claim). Rank input is
 the same `tsquery` from LADR-02 — no second signal, no stored rank column. Rank uses
-default weights (index vectors are weightless — no `setweight`) and default
-normalization; both-match (subject + claim) takes the max side. `Snippet` options
+default weights (index lexemes all carry the default weight D — uniform, no `setweight`)
+and default normalization 0 (`{0.1, 0.2, 0.4, 1.0}` document-length weights apply as-is);
+both-match (subject + claim) takes the max side. `snippet` options
 (`MaxFragments`, `FragmentDelimiter`) are fixed by the design, not caller-tunable.
 Existing columns and projection order are unchanged; `snippet` (camelCase, always
 present, nullable) is additive — null when the headline marks nothing (`ts_headline`
@@ -40,7 +43,7 @@ pinned to the subject/claim cheap fields — never blob bodies.
   for a fixed query never changes with rank.
 - `ts_headline` runs per returned row only (post-`LIMIT`), so its cost is bounded by the
   existing 50/200 ceiling.
-- Snippet text is memory content: it inherits the no-content-in-logs rule (HLD-001) and is
+- `snippet` text is memory content: it inherits the no-content-in-logs rule (HLD-001) and is
   excluded from recall-feedback payloads (identifiers only).
 
 ## Related

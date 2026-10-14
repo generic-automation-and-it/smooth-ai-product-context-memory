@@ -12,7 +12,8 @@ traversal (depth 1–5) in one statement with the scope plan pushed in.
 
 ## Decision
 
-**Offer** a server-side composition flag: one HTTP round trip (handler transaction;
+**Offer** a server-side composition flag: one HTTP round trip (handler transaction at
+READ COMMITTED;
 anchor phase then widen phase, one snapshot iff a single composed statement proves out
 at Prototype — otherwise two statements, one transaction, documented as such) in which
 the ranked keyword anchor set (Goals 1–3, with the caller's `LIMIT`) feeds the HLD-003
@@ -29,8 +30,9 @@ slot (negative control). Without the flag, existing fields are unchanged plus nu
 `E_INVALID_DEPTH`) when the flag is set — there is no default depth (HLD-003 rejected
 one). Endpoints inherit anchor rank order (multi-parent takes the best anchor rank;
 ties break by endpoint uuid). The composed call runs under `SET LOCAL statement_timeout`
-(Prototype-measured value; HLD-004 recall deadline bounds the whole call and wins on
-conflict — timeout is defence-in-depth, never primary) with whole-records-only
+(Prototype-measured value; the odin skill's `RECALL_DEADLINE_SECONDS`, 60 s client-side
+per its LADR-006, bounds the whole call and wins on conflict — timeout is
+defence-in-depth, never primary) with whole-records-only
 semantics: query-cancel maps to `stoppedEarly` (traverse incomplete, anchors kept) vs.
 `budgetExhausted` (wall clock spent); non-timeout AGE errors after successful anchors
 keep the anchors and disclose the traverse as incomplete; partially widened rows are
@@ -59,8 +61,8 @@ absent, and the shape is therefore a documented subset, not field-for-field equa
 
 ## Consequences
 
-- One round trip replaces up to ten for the composed path; the recall deadline still bounds
-  the whole call (HLD-004 LADR-01 pattern).
+- One round trip replaces up to ten for the composed path; the odin skill's recall
+  deadline (`RECALL_DEADLINE_SECONDS`, its LADR-006) bounds the whole call.
 - Anchor `LIMIT` now controls traverse input — callers asking for 5 anchors get 5-anchor
   widening, which must be documented, not discovered. A traverse anchor cap below the
   page `LIMIT` is set at Prototype if the LIMIT×depth explosion breaches the timeout

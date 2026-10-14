@@ -31,7 +31,7 @@ stay intact.
 
 ### 1. One string expresses what today takes ten calls
 
-An agent or operator writes `migration OR rollback -proposed "down step" tag:schema`
+An agent or operator writes `migration OR rollback -proposed "schema migrations" tag:schema`
 instead of issuing a baseline plus four keyword passes and filtering in memory. The string
 supports implicit-AND (`a b`), explicit `OR`, `-`/`NOT` exclusion, `( )` grouping, `"phrase"`,
 and trailing-`*` prefix. Bare words keep today's `plainto_tsquery` behaviour so existing
@@ -63,18 +63,21 @@ filter semantic. Unknown fields are refused, not ignored.
 
 ### 3. Relevance outranks recency on operator queries; bare keeps recency
 
-Operator queries (any explicit `OR`, `-`/`NOT`, `( )`, `"phrase"`, or `prefix*`) order by
-`ts_rank_cd` first, recency (`ValidFrom desc, uuid, version`) as the deterministic
-tiebreak. Bare-text queries keep today's order (`ValidFrom desc, uuid, version`) with no
-rank — back-compat is absolute for the shipped path. Each hit carries a nullable
-`Snippet` (`ts_headline` over the matched side, subject vs. claim) so the skill's semantic
+Operator queries (any explicit `AND`, `OR`, `-`/`NOT`, `( )`, `"phrase"`, or `prefix*`)
+order by `ts_rank_cd` first, recency (`ValidFrom desc, uuid, version`) as the deterministic
+tiebreak. Bare-text queries — including implicit-AND multi-word input (`a b`, which stays
+`plainto_tsquery`) and field-only / field+bare queries with zero explicit operators — keep
+today's order (`ValidFrom desc, uuid, version`) with no rank — back-compat is absolute
+for the shipped path. Each hit carries a nullable
+`snippet` (`ts_headline` over the matched side, subject vs. claim) so the skill's semantic
 judgement — which stays client-side — has evidence beyond the full cheap row. Rank input
 is the same `tsquery` from Goal 1; no separate ranking signal. Existing response fields
 are unchanged; `snippet` (camelCase, always present, nullable) is additive and null when
-the headline has nothing to mark. Rank uses default weights (index vectors are
-weightless — no `setweight`) and default normalization; both-match (subject + claim)
-takes the max side; endpoints carry no snippet. Bare, field-only, and field+bare
-(zero explicit operators) order by recency; any explicit operator branches to rank.
+the headline has nothing to mark. Rank uses default weights (index lexemes all carry
+the default weight D — uniform, no `setweight`) and default normalization 0; both-match
+(subject + claim) takes the max side; endpoints carry no snippet. Bare, field-only, and
+field+bare (zero explicit operators) order by recency; any explicit operator branches
+to rank.
 Dossier-bundle and forensic-export projections exclude `snippet` by name, as do all
 compat/equivalence comparisons and the `deepsearch` dedupe key (uuid/version only).
 
@@ -83,7 +86,7 @@ compat/equivalence comparisons and the `deepsearch` dedupe key (uuid/version onl
 - On a seeded rank fixture of operator queries (multi-lexeme vs. single-lexeme vs.
   stem-only candidates) the multi-lexeme exact row orders first regardless of `ValidFrom`;
   bare-text order is unchanged from today.
-- Snippet marks the matched lexemes on the matched side, is nullable, and never includes blob bodies.
+- snippet marks the matched lexemes on the matched side, is nullable, and never includes blob bodies.
 - Rank changes ordering only; the result *set* for a fixed query is unchanged by ranking.
 
 ### 4. Keyword anchors compose with graph traversal server-side
@@ -96,20 +99,21 @@ starts from the *ranked anchor set* rather than a client-truncated list. Client-
 `deepsearch` keeps working unchanged; the server composition is the deliberate path for
 new callers. `depth` is required explicitly (no default); the composed call runs under a
 Prototype-measured `SET LOCAL statement_timeout` inside the recall-deadline budget
-(HLD-004 bounds the whole call, timeout is defence-in-depth per HLD-003 — 100 ms is not
-reused as this shape's target).
+(the odin skill's `RECALL_DEADLINE_SECONDS`, 60 s client-side per its LADR-006 — it
+bounds the whole call and wins on conflict; timeout is defence-in-depth per HLD-003,
+and 100 ms is not reused as this shape's target).
 
 **Acceptance criteria / DoD**
 
 - A keyword+traverse request returns post-scope, post-`LIMIT` anchor survivors plus
-  widened endpoints in one HTTP round trip with disclosed counts (`anchorsEligible` null
-  when the anchor phase never answers, `stoppedEarly` vs. `budgetExhausted`,
-  `passesIncomplete`, distinct `endpointsOutsideSelector`) as a documented `deepsearch`
+  widened endpoints in one HTTP round trip with disclosed counts (`anchorsEligible` and
+  `anchorsOmittedByCap` null when the anchor phase never answers, `stoppedEarly` vs.
+  `budgetExhausted`, `deadlineSeconds`, `passesIncomplete`, distinct `endpointsOutsideSelector`) as a documented `deepsearch`
   disclosure subset (see LADR-05 §Disclosure).
 - Traversal honours the same scope plan and group selector as the anchor query; endpoints
   outside the selector are dropped and counted, never leaked.
 - Without the traverse flag the response is wire-compatible with today's query:
-  existing fields unchanged, plus nullable `Snippet`; no traverse fields unless set.
+  existing fields unchanged, plus nullable `snippet`; no traverse fields unless set.
 
 ## Core Separation of Concerns
 
@@ -135,7 +139,8 @@ HLD-003 exist to protect.
   judges relevance, the API only retrieves.
 - We will deliberately **not** add vectors, server-side semantic judgement, fuzzy
   (`pg_trgm`) matching, auto-capture, or in-place correction. Each is refused by a
-  recorded decision (`what-is-special` #2/#3/#5).
+  recorded decision (`what-is-special` #1/#2/#3/#5: auto-capture, model-in-Host,
+  vectors, in-place correction).
 - A miss stays a signal (HLD-004 recall-feedback), not an error to hide with threshold
   magic.
 
@@ -156,7 +161,7 @@ single decision — a horizontal concern spanning this HLD. See [`./ladrs/`](./l
 | [LADR-02](./ladrs/LADR-02-english-pair-preserved-operators-use-totsquery.md) | `english` index/query pair preserved; operators use `to_tsquery` family | Draft |
 | [LADR-03](./ladrs/LADR-03-field-sugar-maps-onto-existing-criteria-conjunctively.md) | `field:value` sugar maps onto existing criteria, conjunctively | Draft |
 | [LADR-04](./ladrs/LADR-04-rank-cd-orders-headline-shows-evidence.md) | `ts_rank_cd` orders, `ts_headline` shows evidence | Draft |
-| [LADR-05](./ladrs/LADR-05-keyword-plus-traverse-composes-in-one-statement.md) | Keyword anchors + bounded traverse compose in one round trip | Draft |
+| [LADR-05](./ladrs/LADR-05-keyword-plus-traverse-composes-in-one-round-trip.md) | Keyword anchors + bounded traverse compose in one round trip | Draft |
 | [LADR-06](./ladrs/LADR-06-fuzzy-stays-rejected-prefix-covers-typeahead.md) | Fuzzy stays rejected; prefix covers typeahead | Draft |
 
 ## Non-Functional Requirements

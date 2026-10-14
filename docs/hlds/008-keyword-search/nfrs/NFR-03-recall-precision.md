@@ -20,8 +20,8 @@ each named in the evidence.
 (subject row OR current version row), per-case precision/recall micro-aggregated over
 the 20 exactly as HLD-001 NFR-02. Rank assertion runs on 3 dedicated multi-lexeme rows
 in the same corpus. Evidence artifact:
-`docs/hlds/008-keyword-search/nfrs/NFR-03-evidence.md` (per-case table + aggregates),
-attached at Prototype.
+`docs/hlds/008-keyword-search/nfrs/NFR-03-evidence.md` (Prototype deliverable: per-case
+table + aggregates), attached at Prototype.
 
 ## Acceptance Criteria
 

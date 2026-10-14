@@ -17,7 +17,7 @@ old defect — handlers reaching for provider syntax and filtering in memory.
 names are syntactic and carry no `to_tsquery` spelling — only Infrastructure knows
 `|`/`&`/`!`/`:*`); Infrastructure owns the translation (query model →
 `to_tsquery` / `phraseto_tsquery` / `plainto_tsquery` expression tree, executed by the
-database). All twelve `E_*` syntax refusals live in the parser inside the handler (not in
+database). All fourteen `E_*` syntax refusals live in the parser inside the handler (not in
 the FluentValidation validator — the validator keeps today's shape checks; the handler
 maps parser refusal to 400 itself), so refusals never emit HLD-004 recall-feedback (a
 refusal is not a miss — misses are empty retrieval results only). `E_EMPTY_AFTER_NORMALIZATION`

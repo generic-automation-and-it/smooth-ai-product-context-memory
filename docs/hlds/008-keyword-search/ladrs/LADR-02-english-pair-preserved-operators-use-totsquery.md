@@ -38,15 +38,18 @@ but matches the complement (silent widening). Complexity is bounded: max query l
 max terms/OR-arms, max paren depth, and min prefix length are fixed at Prototype with
 `E_QUERY_TOO_COMPLEX`; single-char high-frequency prefixes (`a*`, `e*`) are the
 adversarial case the perf harness must include. There is no fallback to
-`plainto_tsquery` on the malformed path.
+`plainto_tsquery` on the malformed path. Implicit-AND multi-word input with zero
+explicit operators (`a b`) stays on the bare path (`plainto_tsquery`, recency order) —
+the `&` mapping applies only once an explicit operator is present; bare-vs-operator
+ordering (LADR-04) keys on explicit operators, not on the translated constructor.
 
 An interior hyphen is quoted as one lexeme (`'foo-bar'`), never stripped to `foobar` or
 split. Native `tsquery` phrase/distance input (`a<->b`, `a<2>b`) is refused
 (`E_DANGLING_OPERATOR`), never silently rewritten to AND. A non-field colon (`12:30`,
 URLs) is refused (`E_UNKNOWN_FIELD`), never silently spaced — determinism requires one
-arm. Prefix stopwords (`the:*`) are served as prefix (stopword removal does not apply
-to `:*` terms) rather than refused; the earlier collapse example is corrected to bare
-`the` only.
+arm. An empty string is `E_EMPTY_QUERY`. Prefix stopwords collapse like bare ones
+(live: `to_tsquery('english','the:*')` yields empty — prefix does not bypass stopword
+removal), so `the*` degrades/refuses per the collapse rule, never served as prefix.
 
 ## Alternatives Considered
 

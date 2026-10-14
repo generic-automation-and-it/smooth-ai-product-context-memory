@@ -36,7 +36,7 @@ flowchart TD
     Q --> T{Translator\nInfrastructure}
     T --> F[FTS + filters\nindex-served SQL]
     F --> K[Rank ts_rank_cd\ntiebreak recency]
-    K --> H[Snippet ts_headline\npost-LIMIT]
+    K --> H[snippet ts_headline\npost-LIMIT]
     H --> W{Traverse flag?}
     W -->|no| OUT[Ranked hits]
     W -->|yes| G[Bounded AGE widen\ndepth 1-5, scope-pushed]

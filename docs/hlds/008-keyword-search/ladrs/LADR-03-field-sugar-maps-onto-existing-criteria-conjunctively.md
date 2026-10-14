@@ -26,11 +26,13 @@ refuses with `E_UNKNOWN_FIELD` / `E_EMPTY_VALUE` — never a partial-field match
 names are lowercase-only; `TAG:x` is `E_UNKNOWN_FIELD`. `tag : foo` is refused, not folded.
 
 A field-only query (≥ 1 field, zero FTS lexemes) is valid: the translator emits criteria
-predicates with no `tsquery` predicate, never `plainto_tsquery('')`. A stopword-collapse
+predicates with no `tsquery` predicate, never `plainto_tsquery('')` (live: empty yields
+`''`, which matches nothing — omitting is correct). A stopword-collapse
 (`the`, `"to be"`, `the*` → empty after `english` normalisation) with ≥ 1 field degrades
 to field-only; without fields it refuses (`E_EMPTY_AFTER_NORMALIZATION`). A query with no
 positive term (`-foo`, `NOT foo`, `-(a OR b)` without a field predicate) refuses
-(`E_NO_POSITIVE_TERM`) — `!!foo` over the corpus would be silent widening.
+(`E_NO_POSITIVE_TERM`) — `to_tsquery('!foo')` is PG-valid (live: `!'foo'`) but matches
+the complement (silent widening).
 
 ## Alternatives Considered
 
