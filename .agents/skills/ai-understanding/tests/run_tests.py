@@ -1120,6 +1120,32 @@ class SessionMarkerCLITests(unittest.TestCase):
         self.assertEqual(rc, 0, out)
         self.assertIn("Marker: skipped (nothing written)", out)
 
+    def test_slug_and_path_identity_round_trip(self):
+        import json as _json
+        os.environ["PI_SESSION_ID"] = "ses-ai-6"
+        rc, out, _ = self._run("record", "--type", "ai-understanding", "--verb", "export",
+                               "--slug", "unit-a::What is unit a?",
+                               "--path", "subject-20261014-1200/unit-a.understanding.md")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("Marker: set (export", out)
+        rc, out, _ = self._run("boundary", "--type", "ai-understanding")
+        self.assertIn("Boundary: marker", out)
+        self.assertIn("1 excluded", out)
+        data = _json.loads(Path(self.tmp.name, "ai-understanding-ses-ai-6.json")
+                           .read_text(encoding="utf-8"))
+        entry = data["imports"][-1]
+        self.assertEqual(entry["slugs"], ["unit-a"])
+        self.assertEqual(entry["path"], "subject-20261014-1200/unit-a.understanding.md")
+
+    def test_selector_import_with_no_ids_still_reports_its_boundary(self):
+        os.environ["PI_SESSION_ID"] = "ses-ai-7"
+        rc, out, _ = self._run("record", "--type", "ai-understanding",
+                               "--selector", '{"query": "marker"}', "--as-of", "2026-10-14")
+        self.assertEqual(rc, 0, out)
+        rc, out, _ = self._run("boundary", "--type", "ai-understanding")
+        self.assertIn("Boundary: marker", out)
+        self.assertIn("0 excluded", out)
+
     def test_three_copies_stay_identical(self):
         roots = [MARKER_SCRIPT,
                  MARKER_SCRIPT.parents[2] / "mimisbrunnr-odin-context-memory"
