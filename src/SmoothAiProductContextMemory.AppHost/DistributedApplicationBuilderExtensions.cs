@@ -35,21 +35,13 @@ internal static class DistributedApplicationBuilderExtensions
             var apiReadToken = builder.AddParameter("api-read-token", secret: true);
             var apiWriteToken = builder.AddParameter("api-write-token", secret: true);
 
-            if (configuration.UseProject)
+            var hostEndpoint = configuration.UseProject
+                ? builder.AddHostProject(database, blob, seq, apiReadToken, apiWriteToken, configuration).GetEndpoint("http")
+                : builder.AddHostContainer(database, blob, seq, apiReadToken, apiWriteToken, configuration).GetEndpoint("http");
+
+            if (configuration.ViewerEnabled)
             {
-                var host = builder.AddHostProject(database, blob, seq, apiReadToken, apiWriteToken, configuration);
-                if (configuration.ViewerEnabled)
-                {
-                    builder.AddViewerPod(host.GetEndpoint("http"), apiReadToken, configuration);
-                }
-            }
-            else
-            {
-                var host = builder.AddHostContainer(database, blob, seq, apiReadToken, apiWriteToken, configuration);
-                if (configuration.ViewerEnabled)
-                {
-                    builder.AddViewerPod(host.GetEndpoint("http"), apiReadToken, configuration);
-                }
+                builder.AddViewerPod(hostEndpoint, apiReadToken, configuration);
             }
 
             return builder;

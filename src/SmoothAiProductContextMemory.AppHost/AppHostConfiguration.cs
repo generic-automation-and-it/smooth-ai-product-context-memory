@@ -109,7 +109,7 @@ internal sealed partial record AppHostConfiguration(
             EngineBindAddress = bindAddress,
         };
 
-        if (isRelease && new[] { result.PostgresPort, result.BlobPort, result.BlobConsolePort, result.SeqPort, result.HostPort }.Distinct().Count() != 5)
+        if (isRelease && new[] { result.PostgresPort, result.BlobPort, result.BlobConsolePort, result.SeqPort, result.HostPort, result.ViewerPort }.Distinct().Count() != 6)
         {
             throw new InvalidOperationException("Release workload ports must be distinct.");
         }

@@ -27,6 +27,9 @@ LABEL org.opencontainers.image.source="https://github.com/generic-automation-and
       org.opencontainers.image.title="SmoothAiProductContextMemory Viewer Pod" \
       org.opencontainers.image.description="Loopback Mímisbrunnr Console: Caddy + Python bridge + static SPA."
 
+# Fail the build on a bridge syntax error rather than at container start.
+RUN python3 -m py_compile /bridge/bridge.py && rm -rf /bridge/__pycache__
+
 # Caddy's default storage/autosave dirs are owned by root; pre-create them for
 # the caddy user so startup does not log permission-denied warnings.
 RUN chmod +x /entrypoint.sh \
