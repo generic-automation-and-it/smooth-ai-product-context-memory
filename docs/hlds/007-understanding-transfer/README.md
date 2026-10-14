@@ -6,7 +6,7 @@
 | **Owner** | generik0 |
 | **Tracker** | Understanding |
 | **Business authority** | [BRD-003 — Understanding](../../brd/003-understanding-transfer/) (`BR-38` … `BR-45`), extending [BRD-001](../../brd/001-context-memory/) |
-| **Last updated** | 2026-09-26 |
+| **Last updated** | 2026-10-14 |
 
 > Discovery / prototyping HLD. Delivers **intent + spec** — what we are building and why, the decisions
 > behind it, and the quality bar it must meet. No implementation plan; execution is tracked in the
@@ -97,7 +97,8 @@ A session's own work starts at its deliberate import. Export distils that work, 
 
 **DoD**
 
-- A marked import records ids (never content) in a per-skill, client-side marker keyed by the harness
+- A marked import records references, never content (ids for store items; folder/slugs for a dump;
+  path/slug for an ai-understanding unit), in a per-skill, client-side marker keyed by the harness
   session id; the last marked import is the boundary.
 - A default export excludes marked ids; `export --all` ignores the marker; `--nomarker` imports are
   session history and flow into export.

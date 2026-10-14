@@ -1,6 +1,6 @@
 # AGENTS.md — Understanding
 
-AI Context: HLD for understanding. Updated: 2026-09-26
+AI Context: HLD for understanding. Updated: 2026-10-14
 
 ## TL;DR
 
@@ -72,7 +72,8 @@ See [./ladrs/](./ladrs/). Accepted: LADR-01, 02, 03, 04, 06, 07, 08, 09, 10, 11 
 - **Foreign material is data**, cited and never adopted as shipped fact (NFR-03).
 - **Selectors bind, they don't filter reading** (LADR-08 keeps breadth and selectors orthogonal).
 - **Import marks, export excludes.** A marked import writes `.context/session-markers/<type>-<session-id>.json`
-  (ids only, one per skill); a default export drops those ids, `export --all` ignores the marker,
+  (references only, never content — ids for store items, folder/slugs for a dump, path/slug for an
+  ai-understanding unit — one per skill); a default export drops those references, `export --all` ignores the marker,
   `--nomarker` imports flow into export. A successful export marks too, so the next export is a delta;
   `export --nomarker` leaves the marker unchanged; nothing written means nothing marked. Session id comes
   from the harness env var chain (LADR-11).
@@ -80,14 +81,18 @@ See [./ladrs/](./ladrs/). Accepted: LADR-01, 02, 03, 04, 06, 07, 08, 09, 10, 11 
 ## Test References
 
 - **Skill L0 (CI-gated):** `.agents/skills/mimisbrunnr-kvasir-understanding/tests/run_tests.py` — stdlib
-  `unittest`, 48 tests. A default load creates no files (NFR-01); store-export five-part rendering keeps
+  `unittest`. A default load creates no files (NFR-01); store-export five-part rendering keeps
   uuid/version attribution; `proposed` and `program` scope are flagged, never promoted (NFR-03); `--asof`
   filters the validity window and states the omission; foreign material is cited as data with truncation
   disclosed; import is refused without `--store` and emits nothing (NFR-02); the `--store` payload carries
   selectors and bundle flags while writing nothing; "no selectors ⇒ no association"; and the dump → load
   round trip that makes cross-session sharing real (LADR-07); `.understanding.md` units and store folders
   read as structured input with newest-version-per-slug, import from a dump folder (LADR-09); and the
-  dump's redaction, failing closed on a missing, failing or malformed redactor (LADR-07). Run:
+  dump's redaction, failing closed on a missing, failing or malformed redactor (LADR-07). Session
+  markers (LADR-11) are locked in by `SessionMarkerTests` in this harness and in the odin harness
+  (import marks, echo excluded, supersession, `--all`/`--nomarker`, export receipts, per-skill isolation,
+  references never content) and by `SessionMarkerCLITests` in the ai-understanding harness (the shared
+  CLI, including slug/path identity and a selector boundary with zero exclusions). Run:
   `python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/tests/run_tests.py`. Wired into
   `.github/workflows/pr-gate.yml`.
 - **L0:** `tests/SmoothAiProductContextMemory.Application.UnitTest/Features/Export/ExportRendererTests.cs`
@@ -123,6 +128,7 @@ See [./ladrs/](./ladrs/). Accepted: LADR-01, 02, 03, 04, 06, 07, 08, 09, 10, 11 
 | Date | Change | Ref |
 |:-----|:-------|:----|
 | 2026-10-14 | **LADR-11 Accepted (import-marks implemented).** Per-skill client-side markers, five-name env chain + `--session`, echo dropped before preflight, changed-imported → supersession, `export --all` ignores, `--nomarker` flows. Evidence in the LADR file. Scope note: the same-dated "export is a marker source" amendment is also in the LADR file and therefore also authoritative — export-receipt marking (`export --nomarker`, per-batch/batch-folder/slug entries, receipt-not-plan) is implemented in this same task. | LADR-11 |
+| 2026-10-14 | **PR #221 review fixes.** The boundary digest reports `marker <time>, 0 excluded` whenever a boundary is set (a selector import with no ids, a dump) instead of `none`; `none` now means no marked entry. Marker contents described as references (ids, folder/slugs, path/slug), not ids only; Test References names the marker suites instead of a stale count; header dates refreshed. | PR #221 review |
 | 2026-10-14 | **LADR-11 amended (Draft): export is a marker source.** A successful export appends its written ids to the per-skill marker, so each default export is a delta since the last import or export; `export --nomarker` leaves the marker unchanged (combinable with Odin `--approve`); dry-run, refused, empty and review-queue-deferred exports mark nothing; the marker follows the write receipt, never the plan. | LADR-11; HLD-002 LADR-04, LADR-07 |
 | 2026-10-14 | **LADR-11 added (Draft): an import marks the session's working point; export excludes what was marked.** Per-skill client-side marker (`kvasir`/`odin`/`ai-understanding`) keyed by the harness session id (`CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID`, `OPENCODE_SESSION_ID`, `COPILOT_AGENT_SESSION_ID`, `PI_SESSION_ID`, or `--session`), references only. Last marked import is the boundary; `export --all` ignores it (shared spelling with `load`/`import --all`); `import --nomarker` flows into export; changed imported items become supersessions by mechanical preflight match. Session-start auto-index rejected. No Host/API/schema change. | LADR-11; HLD-002 LADR-04 |
 | 2026-10-01 | **LADR-10 added: a store load is a reported budget of whole records.** A load's breadth was controlled (LADR-08) but its size was not — a real `--all` corpus rendered in full. One `--max-chars` (default 12000) now applies to both surfaces; on a store export it cuts whole records in source order, lists each cut record by identity with the budget as the reason, and states the cap, rendered size and count cut beside breadth. No record is ever truncated or summarised to fit. `max_chars=None` is byte-identical to an under-budget render, which is the acceptance property; the walk harness re-run at the default is unchanged (1682 / 2006 / 2238 chars), so the cap bounds the pathological corpus, not a representative one. The dossier is out of scope (its omission reasons are a fixed bounded set). | LADR-10; BRD-003 BR-42 |
