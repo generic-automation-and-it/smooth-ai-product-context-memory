@@ -7,7 +7,7 @@ export writes it, and a dump writes the session to a local folder. All switches 
 |---|---|---|---|
 | `load` | file/folder → session | no | no |
 | `import` | store → session | yes (read token only) | no |
-| `export` | session → store | yes | only with `--write` |
+| `export` | session → store | yes | yes, unless `--dryrun` |
 | `dump --currentsession` | session → local folder | no | no |
 
 # mimisbrunnr-kvasir-understanding
@@ -28,8 +28,8 @@ python3 .../understanding_client.py import \
   [--ticket provider:key] [--repository repo] [--initiative NAME] [--scope scope:id] \
   [--tags tag,...] [--query WORD] [--status STATUS] [--limit N] [--all] [--table] [--nomarker]
 
-# Capture material into the store through the capture path (dry run unless --write)
-python3 .../understanding_client.py export <input> [--write] [--all] [--nomarker] \
+# Capture material into the store through the capture path (writes unless --dryrun)
+python3 .../understanding_client.py export <input> [--dryrun] [--all] [--nomarker] \
   [--tickets A,1] [--tags tag] [--repository repo] [--scope product:x]
 
 # Dump the current session's context to a discoverable local folder (export, no write)
@@ -44,12 +44,12 @@ python3 .../understanding_client.py dump --currentsession --from <session-file|-
   no write capability — and renders the recalled records as cited grounding context (HLD-007 LADR-11).
 - **Export funnels through the capture path.** `export [<input> | --input <path>]` hands material to the existing capture
   path — atomicity, redaction, exact-subject dedup (no semantic matching or derived links; recall first
-  and route a paraphrase through the capture skill) — never a direct write, and it dry-runs unless `--write` is
-  passed (HLD-007 LADR-03). An over-20-candidate batch auto-splits into consecutive ≤20 chunks, each
+  and route a paraphrase through the capture skill) — never a direct write; it writes by default and `--dryrun`
+  stops before anything is written (HLD-007 LADR-03). An over-20-candidate batch auto-splits into consecutive ≤20 chunks, each
   processed end to end, and a candidate whose subject already exists in the target group is sent as a
   version bump rather than a create that 409s.
 - **Input is optional, but a guessed input never writes.** With no input, `load` and a dry-run `export`
-  use the newest session dump and say so; `export --write` refuses until the input is given explicitly,
+  use the newest session dump and say so; a writing `export` refuses until the input is given explicitly,
   because in a shared workspace the newest dump may be another session's.
 - **The session dump is an export.** `--currentsession` writes to
   `.context/mimisbrunnr-understandings/<session-folder>/`, with a fitting folder name reported on output so another
@@ -97,7 +97,7 @@ another session or repository can `load` it.
 | Durability | Gone with the session | Local dump or folder; `export` for the durable store |
 
 **Pros:** knowledge survives the session and crosses repositories; loading is selective and cited;
-nothing is written to the store unless `export --write` is passed; the dump fails closed if redaction cannot run.
+nothing reaches the store without a deliberate `export`, and `export --dryrun` previews it; the dump fails closed if redaction cannot run.
 
 **Cons:** nothing happens automatically — someone must dump, load, import or export; the dump is a
 projection that re-dumping replaces, so hand edits are lost; loading an `ai-understanding` unit is lossy
@@ -107,5 +107,5 @@ and the quality of what is loaded is only as good as what `ai-understanding` cur
 **Using them together:** keep compaction for in-session continuity; before a clear or handoff, export
 with `ai-understanding` (knowledge) or `dump --currentsession --from <session-summary-file|->` (task
 continuity — without `--from` it writes a blank template); in the next session,
-`load` the folder, `import` what the store already holds, and `export --write` only units that have
+`load` the folder, `import` what the store already holds, and `export` only units that have
 earned a place in the store.

@@ -20,10 +20,10 @@ so the same word means the same direction in both skills (LADR-11) — the previ
         binding recorded as structured metadata beside it. An export, not a write; redacted before it
         reaches disk, and the folder name is reported so another session can discover it.
 
-    export <input> [--write] [binding]                          # the live store
+    export <input> [--dryrun] [binding]                         # the live store
         Orchestrate the capture skill end to end: redaction gate, atomicity gate, batch cap, group
-        resolution, preflight, and `set --dryrun` as the veto point. A dry run by default, and a dry
-        run creates no initiative, no group and no memory. `--write` performs the capture.
+        resolution, preflight, and `set --dryrun` as the veto point, then write. `--dryrun` stops
+        before anything is written: it creates no initiative, no group and no memory.
 
 The old `import <input> --store` spelling — which prepared a capture payload — is now `export`, and
 the old spelling prints a deprecation rather than being silently repurposed.
@@ -899,7 +899,7 @@ def cmd_import(args: argparse.Namespace) -> int:
         print("DEPRECATED: `import <input> --store` prepared a capture payload. That direction is "
               "now `export`; `import` reads the store INTO the session. Nothing was written.\n"
               "  to review:  understanding_client.py export <input>\n"
-              "  to capture: understanding_client.py export <input> --write",
+              "  to capture: understanding_client.py export <input>",
               file=sys.stderr)
         return 1
     if args.heimdallr is not None:
@@ -907,7 +907,7 @@ def cmd_import(args: argparse.Namespace) -> int:
               "what the caller passes, so a session on a ticketed branch recalls the whole "
               "initiative. It is an `export`/`dump` switch. Nothing was written.\n"
               "  to review:  understanding_client.py export <input>\n"
-              "  to capture: understanding_client.py export <input> --write\n"
+              "  to capture: understanding_client.py export <input>\n"
               "  to dump:    understanding_client.py dump --currentsession --from <session-summary-file|->",
               file=sys.stderr)
         return 1
@@ -1128,7 +1128,7 @@ def probe_decisions(count: int) -> str:
     """The dry-run counterpart of `gate_decisions`: check the gate without scoring anything.
 
     Scoring spends each record's attempt budget in the gate's ledger, so a dry run that scored
-    exhausted it: after three previews a `--write` saw `attempts-exhausted` for every record, which
+    exhausted it: after three previews a write saw `attempts-exhausted` for every record, which
     keeps the record unscored — the gate bypassed by previewing it (issue 182). `probe` checks the
     configuration, endpoint and model with a content-free request and writes no ledger. A
     misconfigured gate is still a refusal here, so the dry run says what the write would say.
@@ -1141,14 +1141,14 @@ def probe_decisions(count: int) -> str:
     if os.environ.get(DECISIONS_ENABLED, "").lower() != "true":
         return "decisions: disabled"
     if not DECISIONS_GATE.is_file():
-        print(f"NOTE: the decision gate is enabled but {DECISIONS_GATE} is missing; a --write would "
+        print(f"NOTE: the decision gate is enabled but {DECISIONS_GATE} is missing; a write would "
               "skip it.", file=sys.stderr)
         return "decisions: skipped (gate script missing)"
     if not (DECISIONS_GATE.parent / "redact.py").is_file():
         print(_GATE_REDACTOR_REFUSAL, file=sys.stderr)
         return DECISIONS_REFUSED
     not_scored = (f"decisions: not scored (dry run; scoring spends the gate's attempt budget) — "
-                  f"a --write scores {count} candidate(s) and may hold some")
+                  f"a write scores {count} candidate(s) and may hold some")
     try:
         proc = subprocess.run(
             [sys.executable, "-B", str(DECISIONS_GATE), "probe"],
@@ -1177,7 +1177,7 @@ def probe_decisions(count: int) -> str:
         return "decisions: disabled"
     if outcome == "ok":
         return f"{not_scored}; gate probe ok"
-    return f"{not_scored}; gate probe: {outcome or 'unreadable'} — a --write would skip the gate"
+    return f"{not_scored}; gate probe: {outcome or 'unreadable'} — a write would skip the gate"
 
 
 def _ledger_disclosures(report: dict) -> list[str]:
@@ -1501,7 +1501,7 @@ def initiative_exists(name: str) -> tuple[bool, str]:
     Reads the collection under **every** name the endpoint might use (`items`, `initiatives`, or a
     bare array) rather than one. Guessing wrong here is not a cosmetic miss: it reports a live
     initiative as absent, and the consequence is a dry run that prints a spurious `would create` and a
-    `--write` that refuses against a store that already has it.
+    write that refuses against a store that already has it.
     """
     if name == "to-be-decided":
         return True, "the seeded default sentinel needs no upsert"
@@ -1569,7 +1569,7 @@ def preflight_match_count(preflight_output: str) -> int:
     """Number of candidates the preflight matched to an existing memory (across any group).
 
     A dry run has no resolved group, so it cannot say which matches are in the export's group — hence a
-    count, not a version/new split. The receipt uses it to disclose that a ``--write`` would version
+    count, not a version/new split. The receipt uses it to disclose that a write would version
     those whose match is in the export's group.
     """
     try:
@@ -1879,7 +1879,7 @@ def _handle_cross_kind_409(items: list[dict], candidates: list[dict], group_uuid
 
 
 def cmd_export(args: argparse.Namespace) -> int:
-    """SESSION -> STORE. Orchestrate the capture path; write nothing unless `--write`.
+    """SESSION -> STORE. Orchestrate the capture path and write; `--dryrun` writes nothing.
 
     The order is the capture skill's, and every stage is a gate rather than a step: the redaction and
     atomicity gates run first and can hold candidates back, an over-cap batch auto-splits into
@@ -1895,9 +1895,9 @@ def cmd_export(args: argparse.Namespace) -> int:
         # The newest dump in a shared workspace may be another session's; capturing it would write that
         # session's material under its own recorded binding. Only a dump that records the current
         # session id ("session"), or an explicit input, may be written; the rest are review-only.
-        print(f"REFUSED: --write needs an explicit input. The defaulted dump ({src}) may belong to "
-              "another session; re-run with --input <that folder> --write to capture it. Nothing was "
-              "written.", file=sys.stderr)
+        print(f"REFUSED: writing needs an explicit input. The defaulted dump ({src}) may belong to "
+              "another session; re-run with --input <that folder> to capture it, or add --dryrun to "
+              "preview it. Nothing was written.", file=sys.stderr)
         return 1
     material = read_material(src, "auto")
     if isinstance(material, int):
@@ -2116,7 +2116,7 @@ def cmd_export(args: argparse.Namespace) -> int:
               "(--tickets/--tags/--repository/--scope/--initiative).")
     if not clean:
         # Every candidate was held back by the atomicity gate: there is no writable batch. Stopping
-        # here also means a `--write` does not create a group for nothing.
+        # here also means a write does not create a group for nothing.
         print("Nothing to capture: every candidate was held back by the atomicity gate. "
               "Nothing was written.", file=sys.stderr)
         _mark_export_receipt(args, [])
@@ -2146,7 +2146,7 @@ def cmd_export(args: argparse.Namespace) -> int:
                 and binding["initiative"] != "to-be-decided"):
             print(f"NOTE: tickets resolve first — if they hit an existing group under "
                   f"another initiative, the bound initiative '{binding['initiative']}' is "
-                  f"ignored and --write refuses; drop it to capture there, re-bind for a "
+                  f"ignored and the write refuses; drop it to capture there, re-bind for a "
                   f"new group, or re-point with update-group.")
 
     total_candidates = 0
@@ -2154,7 +2154,7 @@ def cmd_export(args: argparse.Namespace) -> int:
     for batch_no, chunk in enumerate(chunks, start=1):
         multi = total_chunks > 1
         tag = f" [batch {batch_no}/{total_chunks}]" if multi else ""
-        # Each chunk's preflight runs after the previous chunk's write (for a `--write`), so a
+        # Each chunk's preflight runs after the previous chunk's write (for a write), so a
         # duplicate subject split across chunks is surfaced by the later chunk's preflight and becomes
         # a version bump; the capture path has no cross-batch transaction, hence the sequential order.
         rc, out, err = _run_capture_client(
@@ -2265,20 +2265,20 @@ def cmd_export(args: argparse.Namespace) -> int:
         # `set --dryrun` is the veto point, and it needs a resolved `groupUuid` — which a dry run
         # cannot have, because resolving a group is itself the write that must not happen. So the
         # offline half of the pipeline runs here (both gates, the cap, the candidate list) and the
-        # server-side half runs at the head of `--write`, before anything is persisted. Saying so is
+        # server-side half runs at the head of a write, before anything is persisted. Saying so is
         # better than sending a request that can only fail on a null group.
         print(f"\nDRY RUN — nothing was written, and nothing was created.\n"
               f"  would write: memory ({total_candidates})"
               + (f", group ({group_state})" if group_state == "dry-run" else "")
               + f"\n  would not create: anything under an existing group, because no group was "
-                f"resolved\nThe server-side `set --dryrun` veto runs at the start of `--write`, once "
-              f"a group exists. Re-run with `--write` to capture.")
+                f"resolved\nThe server-side `set --dryrun` veto runs at the start of a write, once "
+              f"a group exists. Re-run without `--dryrun` to capture.")
         if matched:
-            print(f"  {matched} candidate(s) matched an existing same-subject memory; a `--write` would "
+            print(f"  {matched} candidate(s) matched an existing same-subject memory; a write would "
                   f"version those whose match is in the export's group (a match in another group stays "
                   f"a separate new memory).")
         if total_chunks > 1:
-            print("  Note: a multi-batch `--write` is not atomic across batches; a later batch could "
+            print("  Note: a multi-batch write is not atomic across batches; a later batch could "
                   "be refused at its veto after an earlier batch was already written.")
         print("Decisions and rules captured this way are written as `kind = understanding`, which does "
               "NOT pass the gated-kind approval: a `decision`/`rule`/`nfr` captured through this path "
@@ -2290,7 +2290,7 @@ def cmd_export(args: argparse.Namespace) -> int:
         print("\nNon-atomic multi-batch write: each batch was written independently, so a failure in a "
               "later batch leaves earlier batch(es) committed.")
     print("This is a receipt: the memories are persisted now, so a post-write digest is not an "
-          "opportunity to approve. Pre-write review is `--export` without `--write`.")
+          "opportunity to approve. Pre-write review is `export --dryrun`.")
     print("Records written as `kind = understanding`, which does NOT pass the gated-kind approval: "
           "a `decision`/`rule`/`nfr` captured through this path is an understanding of one, not "
           "approved canon.")
@@ -2553,7 +2553,7 @@ def session_id() -> str:
 
     Precedence is ``MIMIS_SESSION`` (the capture path's session id), then the runtime agent-session
     ids (Conductor, then Claude Code). Empty means no session identity is provable — under which a
-    defaulted input can only dry-run and ``--write`` refuses as before, because without an identity the
+    defaulted input can only dry-run and a write refuses as before, because without an identity the
     newest dump in a shared workspace cannot be attributed to this session.
     """
     for name in ("MIMIS_SESSION", "CONDUCTOR_SESSION_ID", "CLAUDE_CODE_SESSION_ID"):
@@ -3031,7 +3031,7 @@ def cmd_dump(args: argparse.Namespace) -> int:
         "- A projection of this session's context. Generated, never maintained; regenerate rather "
         "than edit.",
         f"- Load it with: `understanding_client.py load <this folder>`",
-        f"- Export it with: `understanding_client.py export <this folder> --write`",
+        f"- Export it with: `understanding_client.py export <this folder>`",
         GENERATED_FENCE[1],
         "",
         content.strip() if content.strip() else SESSION_TEMPLATE,
@@ -3048,7 +3048,7 @@ def cmd_dump(args: argparse.Namespace) -> int:
         "gatedKindApproval": "decisions and rules captured from a dump are written as "
                              "kind=understanding and do NOT pass gated-kind approval",
     }
-    # A dump records the session that wrote it, so a later `export --write` with no input can default
+    # A dump records the session that wrote it, so a later writing `export` with no input can default
     # to this session's dump rather than the newest (which may be another session's). Omitted when no
     # session identity is provable, so such a dump never matches and stays review-only.
     sid = session_id()
@@ -3153,15 +3153,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                      help="Explicit session id for the marker (else the harness env chain).")
 
     exp = sub.add_parser("export", help="SESSION -> STORE: orchestrate the capture path "
-                                        "(dry run unless --write).")
+                                        "(writes unless --dryrun).")
     exp.add_argument("input", nargs="?", help="Same inputs as load; a dump folder carries its own "
                                               "binding. With neither, the newest session dump (this "
                                               "session's when one exists).")
     exp.add_argument("--input", dest="input_option",
                      help="Explicit input; with neither, the newest session dump (this session's when "
                           "one exists).")
-    exp.add_argument("--write", action="store_true",
-                     help="Perform the capture. Without it this is a dry run that creates nothing.")
+    exp.add_argument("--dryrun", action="store_true",
+                     help="Run every gate and the preview, then stop before anything is written: no "
+                          "initiative, no group, no memory.")
+    exp.add_argument("--write", action="store_true", dest="write_deprecated",
+                     help=argparse.SUPPRESS)
     exp.add_argument("--tickets", help="Comma-separated ticket keys: #12, github:12, provider:key.")
     exp.add_argument("--tags", help="Comma-separated tags/facets to bind.")
     exp.add_argument("--repository", help="Repository to associate with the group.")
@@ -3214,7 +3217,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                              help="Skip interactive questions and take the recommended option "
                                   "(none exist yet; accepted for forward compatibility).")
 
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.command == "export":
+        # Write is the default, as on the capture skill; `--write` was the old opt-in and now means
+        # nothing, so it is accepted and named rather than refused (deprecated, not repurposed).
+        if args.write_deprecated:
+            print("NOTE: --write is deprecated: export writes by default; use --dryrun to preview "
+                  "without writing." + (" --dryrun wins." if args.dryrun else ""), file=sys.stderr)
+        args.write = not args.dryrun
+    return args
 
 
 def main(argv: list[str] | None = None) -> int:

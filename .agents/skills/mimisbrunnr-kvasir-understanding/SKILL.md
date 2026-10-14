@@ -15,7 +15,7 @@ sends session material through the capture path to the live store. All switches 
 |---|---|---|---|
 | **Load** | file/folder → session | no | no |
 | **Import** | store → session | yes (read token only) | no |
-| **Export** | session → store | yes | only with `--write` |
+| **Export** | session → store | yes | yes, unless `--dryrun` |
 | **Dump** (`--currentsession`) | session → local folder | no | no |
 
 `--dontask` skips interactive questions (e.g. "Export split") and takes the recommended option as
@@ -28,7 +28,7 @@ Move Mímisbrunnr **Understanding** knowledge between a session and the store. *
 folder or transcript into the session's context, writing nothing. **`import`** queries the store itself
 (`kind = understanding`) back into the session, read token only. **`export`** sends session material to
 the store through the capture path (redact → atomicity → initiative check → optional value gate → group resolution →
-preflight with exact-subject dedup → `set --dryrun` veto → write), never as a direct write, and dry-runs by default so a dry run creates nothing. **`dump`** writes the session's
+preflight with exact-subject dedup → `set --dryrun` veto → write), never as a direct write. It writes by default, like the capture skill's `--export`; `--dryrun` stops before anything is written. **`dump`** writes the session's
 understanding to a local folder for offline transfer.
 
 Requires **Python 3.9 or newer**; the npm launcher (`npm/cli/_run.js`) checks the floor and refuses
@@ -57,14 +57,14 @@ what was marked, so imported context is never re-proposed as new (echo).
   `none`); `export`/`dump` print one `Boundary:` line (`marker <time>, N excluded` |
   `none` | `ignored (--all)`).
 - `export --all` ignores the marker for selecting candidates (whole input/session, skill
-  picks kind as usual); a successful `--write` still records its export entry.
+  picks kind as usual); a successful write still records its export entry.
   `load`/`import --nomarker` loads history that flows into a default export (ids still
   logged with `nomarker: true`); an id marked and `--nomarker` stays excluded. No marker
   (or only `--nomarker`/id-less imports) means default export equals `--all`.
 - A candidate changing an excluded item is exported as a **supersession** of it (version
   bump with lineage), never dropped and never a new memory. Id-less input
   (`--format foreign`) is history — no exclusion.
-- **Export marks too (amended LADR-11).** A successful `export --write` appends one entry per
+- **Export marks too (amended LADR-11).** A successful writing `export` appends one entry per
   completed batch (the written ids — version-target uuid or caller createUuid — so the marker
   follows the receipt, never the plan); `dump --currentsession` appends its folder. Dry runs,
   refusals, empty sets and held-back batches mark nothing. `export --nomarker` (and
@@ -152,27 +152,29 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
 
 ```bash
 python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding_client.py \
-  export [<input> | --input <path>] [--write] [--all] [--nomarker] [--session ID] \
+  export [<input> | --input <path>] [--dryrun] [--all] [--nomarker] [--session ID] \
   [--tickets TICKET,...] [--tags TAG,...] [--repository REPO] [--scope scope:id] \
   [--initiative NAME] [--name NAME] [--body TEXT] [--heimdallr true]
 ```
 
 - `export` orchestrates the capture skill end to end — redaction gate, atomicity gate, the optional value
   gate, the auto-split batch cap, group resolution, preflight, and `set --dryrun` as the veto point — and
-  **never writes directly**. It is a **dry run by default**; `--write` performs the capture.
+  **never writes directly**. It **writes by default**; `--dryrun` runs every gate and the preview, then
+  stops before anything is written. The old `--write` opt-in is accepted as a deprecated no-op and says
+  so; with `--dryrun` beside it, `--dryrun` wins.
 - A default export drops the session marker's ids and reports `Boundary:`; `export --all`
   ignores the marker. A candidate changing an excluded item is kept as a supersession.
 - **Source dates become UTC instants on write.** Date-only `learned`/`updated` validity is sent as midnight UTC (`T00:00:00Z`), not interpreted in the machine timezone. Local load preserves the source date. Explicit timestamp strings retain fractional precision.
 - **Dedup is exact-subject only.** A candidate whose subject already exists in the group becomes a
-  version bump; nothing else is matched, and no link is derived (`links: []`). **Before `--write`**,
+  version bump; nothing else is matched, and no link is derived (`links: []`). **Before writing**,
   recall each candidate's subject (`import`) and, where a candidate paraphrases or relates to a
   recalled memory, capture it through `mimisbrunnr-odin-context-memory --export` instead — its
   Compare-or-Clarify round makes that judgement — or drop it from the input.
 - **Input is optional, as for `load`. A defaulted input may write only when it provably is this
   session's.** With neither, this session's dump is used when one exists (its `_dump.json` records the
   session id), else the newest dump. A defaulted input that is **not** provably this session's is
-  dry-run only: `export --write` with it refuses before reading anything and asks for
-  `--input <folder> --write`, because the newest dump in a shared workspace can be another session's —
+  dry-run only: a writing `export` with it refuses before reading anything and asks for
+  `--input <folder>` (or `--dryrun` to preview), because the newest dump in a shared workspace can be another session's —
   capturing it would write that session's material under its own recorded binding. A dry run on the
   default proceeds and says which dump it used.
 
@@ -198,21 +200,21 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
   [`mimisbrunnr-odin-context-memory` → Value Gate](../mimisbrunnr-odin-context-memory/SKILL.md).
   **A dry run never scores.** Scoring spends each record's attempt budget in the gate's ledger, so a
   dry run runs the gate's content-free `probe` instead and reports `decisions: not scored (dry run …)`
-  — its write count is therefore an upper bound, since the `--write` may hold some. A misconfigured
+  — its write count is therefore an upper bound, since the write may hold some. A misconfigured
   gate, or one whose `redact.py` is missing, is refused on the dry run too. The probe never runs the
-  redactor, so a redactor that is present but fails on the records is found only by the `--write`,
+  redactor, so a redactor that is present but fails on the records is found only by the write,
   which refuses. Skipping scoring is deliberate and differs from the capture skill's `set --dryrun`,
   which repeats the judgement work: here the attempt budget is kept for the write.
 - **A dry run creates nothing** — no initiative, no group, no memory. `resolve-group` has no dry-run mode
   and its handler commits unconditionally, so a dry run resolves nothing and reports the group and the
   initiative as *would create*, printing the exact commands.
 - **Fresh-store precondition:** an initiative must already exist; `resolve-group` answers `404` for a
-  missing one. A `--write` refuses with the `upsert-initiative` command when it is absent; a dry run
+  missing one. A write refuses with the `upsert-initiative` command when it is absent; a dry run
   reports it as *would create* rather than creating it.
 - **A bound initiative that is not the resolved group's refuses the write.** Tickets resolve
   first: when they hit an existing group, `resolve-group` returns it without looking the initiative
   up, so `--initiative X` against a group owned by Y would silently version memories under Y while
-  the caller believes it started X. `--write` refuses with the three honest options (drop the flag
+  the caller believes it started X. The write refuses with the three honest options (drop the flag
   and capture into Y; re-bind to tickets that resolve nowhere for a new group under X — same
   subjects become new memories, never version bumps; re-point the group with `update-group`). A
   dry run binds no group and cannot know its initiative, so it warns whenever tickets and an
@@ -228,10 +230,10 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
   differs from theirs, are refused with nothing sent — export each scope separately with a matching
   `--scope`.
 - **Every gate is a gate.** A redactor that cannot run, an atomicity detector that cannot run, or a
-  post-`--write` `set --dryrun` refusal all stop with nothing written rather than bypassing the boundary.
+  write's `set --dryrun` veto refusal all stop with nothing written rather than bypassing the boundary.
   The `MAX_CANDIDATES` (20) cap is not a refusal: an over-cap batch auto-splits into consecutive ≤20
   chunks, each processed end to end (its own preflight, its own `set --dryrun` veto, its own write) and
-  reported as `Batch k/N: n candidate(s)`; a multi-chunk `--write` is disclosed as non-atomic across
+  reported as `Batch k/N: n candidate(s)`; a multi-chunk write is disclosed as non-atomic across
   chunks. A candidate whose subject already exists in the export's group is sent as a **version bump**
   (the preflight match's `uuid`, mutually exclusive with `createUuid`) rather than a create that 409s;
   a same-subject memory in another group is never versioned into it.
