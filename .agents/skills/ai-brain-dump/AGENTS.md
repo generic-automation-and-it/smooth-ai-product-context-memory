@@ -8,8 +8,9 @@ Read [`SKILL.md`](./SKILL.md) first — switches, phases and guardrails live the
 
 - **Don't deduplicate the switch rules in SKILL.md.** They are restated on purpose in Modes & Switches,
   Listen and Guardrails — the repetition counters the model's drift toward premature questions and action.
-- **A switch change edits three tables.** The switch table lives in SKILL.md, this skill's `README.md`
-  (with cost) and `.agents/skills/README.md` → ai-brain-dump switches; updating one leaves the others stale.
+- **A switch change edits two tables.** The switch table lives in SKILL.md and this skill's `README.md`
+  (with cost); updating one leaves the other stale. (There is no third table: the central
+  `.agents/skills/README.md` carries no per-skill switch section for this skill.)
 
 ## Changelog
 
