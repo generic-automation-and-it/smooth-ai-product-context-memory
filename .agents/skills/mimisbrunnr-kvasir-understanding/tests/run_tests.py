@@ -1908,7 +1908,7 @@ class ProposedPersistenceTests(unittest.TestCase):
             uc.initiative_exists = lambda name: (True, "present")
             uc.resolve_group = lambda b, n, d, dryrun: (None, "dry-run")
             calls = []
-            uc._run_capture_client = lambda s, a, p: (calls.append(a[0]), (0, "{}", ""))[1]
+            uc._run_capture_client = lambda s, a, p: (calls.append(tuple(a)), (0, "{}", ""))[1]
             env = {"CONTEXT_MEMORY_DECISIONS_ENABLED": "false",
                    "CONTEXT_MEMORY_REVIEW_QUEUE": str(Path(tmp) / "queue.jsonl")}
             try:
@@ -1919,7 +1919,8 @@ class ProposedPersistenceTests(unittest.TestCase):
                  uc.resolve_group, uc._run_capture_client) = originals
             combined = out + err
             self.assertEqual(rc, 1, "an all-held dry run writes nothing: " + combined)
-            self.assertNotIn(("set",), [tuple(c) if isinstance(c, list) else c for c in calls])
+            self.assertEqual([a for a in calls if a[0] == "set"], [],
+                             "a dry run reaches no store write")
             self.assertIn("would propose: up to 1 held as Status=proposed", combined)
 
 
