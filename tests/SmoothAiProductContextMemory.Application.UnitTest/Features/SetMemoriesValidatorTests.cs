@@ -59,7 +59,7 @@ public class SetMemoriesValidatorTests
                     MemoryVersion.KindValue.Decision,
                     null,
                     null,
-                    MemoryVersion.MemoryVersionStatus.Approved,
+                    MemoryVersion.MemoryVersionStatus.Proposed,
                     80,
                     null,
                     null,
@@ -100,7 +100,7 @@ public class SetMemoriesValidatorTests
                     MemoryVersion.KindValue.Decision,
                     null,
                     null,
-                    MemoryVersion.MemoryVersionStatus.Approved,
+                    MemoryVersion.MemoryVersionStatus.Proposed,
                     80,
                     null,
                     null,
@@ -132,7 +132,7 @@ public class SetMemoriesValidatorTests
                     MemoryVersion.KindValue.Decision,
                     ["architecture"],
                     ["tag"],
-                    MemoryVersion.MemoryVersionStatus.Approved,
+                    MemoryVersion.MemoryVersionStatus.Proposed,
                     80,
                     "body",
                     null,
@@ -162,7 +162,7 @@ public class SetMemoriesValidatorTests
                     MemoryVersion.KindValue.Decision,
                     null,
                     null,
-                    MemoryVersion.MemoryVersionStatus.Approved,
+                    MemoryVersion.MemoryVersionStatus.Proposed,
                     80,
                     null,
                     null,
@@ -192,7 +192,7 @@ public class SetMemoriesValidatorTests
                     MemoryVersion.KindValue.Decision,
                     null,
                     null,
-                    MemoryVersion.MemoryVersionStatus.Approved,
+                    MemoryVersion.MemoryVersionStatus.Proposed,
                     80,
                     null,
                     null,
@@ -248,6 +248,54 @@ public class SetMemoriesValidatorTests
             .ShouldNotHaveAnyValidationErrors();
     }
 
+    /// <summary>LADR-11: Status=approved is a transition, not a create. The validator requires Uuid and forbids CreateUuid when Status=approved.</summary>
+    [Fact]
+    public void Rejects_approved_without_uuid()
+    {
+        SetMemories.Request request = ValidRequest() with
+        {
+            Items = [ValidRequest().Items[0] with
+            {
+                Status = MemoryVersion.MemoryVersionStatus.Approved,
+                Uuid = null,
+            }],
+        };
+
+        _validator.TestValidate(request).ShouldHaveValidationErrorFor("Items[0]");
+    }
+
+    [Fact]
+    public void Rejects_approved_with_create_uuid()
+    {
+        SetMemories.Request request = ValidRequest() with
+        {
+            Items = [ValidRequest().Items[0] with
+            {
+                Status = MemoryVersion.MemoryVersionStatus.Approved,
+                Uuid = null,
+                CreateUuid = Guid.NewGuid(),
+            }],
+        };
+
+        _validator.TestValidate(request).ShouldHaveValidationErrorFor("Items[0]");
+    }
+
+    [Fact]
+    public void Accepts_approved_with_uuid()
+    {
+        SetMemories.Request request = ValidRequest() with
+        {
+            Items = [ValidRequest().Items[0] with
+            {
+                Status = MemoryVersion.MemoryVersionStatus.Approved,
+                Uuid = Guid.NewGuid(),
+                CreateUuid = null,
+            }],
+        };
+
+        _validator.TestValidate(request).ShouldNotHaveAnyValidationErrors();
+    }
+
     private static SetMemories.Request ValidRequest() =>
         new(
             Guid.NewGuid(),
@@ -261,7 +309,7 @@ public class SetMemoriesValidatorTests
                     MemoryVersion.KindValue.Decision,
                     null,
                     null,
-                    MemoryVersion.MemoryVersionStatus.Approved,
+                    MemoryVersion.MemoryVersionStatus.Proposed,
                     80,
                     null,
                     null,

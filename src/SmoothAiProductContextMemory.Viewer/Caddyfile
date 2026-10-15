@@ -21,8 +21,16 @@
 		}
 	}
 
-	# /bridge/* → the Python bridge. Stub until P4 (review queue + approve).
-	handle /bridge/* {
+	# /bridge/{review-queue,dedup-preview} → P4a bridge (read-only, no write token).
+	handle /bridge/review-queue /bridge/dedup-preview {
 		reverse_proxy 127.0.0.1:5181
+	}
+
+	# /bridge/{approve,reject,amend,health} → P4b bridge (write, write token required).
+	# P4b's import-time guard refuses to start without one; a misconfigured
+	# orchestrator that injects the write token into P4a still fails P4a's
+	# guard. NFR-02 by process isolation.
+	handle /bridge/approve /bridge/reject /bridge/amend /bridge/health {
+		reverse_proxy 127.0.0.1:5182
 	}
 }

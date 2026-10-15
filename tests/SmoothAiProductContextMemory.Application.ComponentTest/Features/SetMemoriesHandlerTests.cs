@@ -712,7 +712,7 @@ public sealed class SetMemoriesHandlerTests(AspireFixture aspire) : HandlerTestB
                     MemoryVersion.KindValue.Decision,
                     ["architecture"],
                     ["tag"],
-                    MemoryVersion.MemoryVersionStatus.Approved,
+                    MemoryVersion.MemoryVersionStatus.Proposed,
                     80,
                     "blob-body",
                     null,
@@ -723,4 +723,86 @@ public sealed class SetMemoriesHandlerTests(AspireFixture aspire) : HandlerTestB
             ],
             null,
             null);
+
+    /// <summary>LADR-11: an approve is a version-bump with Status=approved on a Proposed version. v1 stays proposed, v2 becomes approved.</summary>
+    [Fact]
+    public async Task Approved_transition_creates_v2_with_approved_status()
+    {
+        var group = TestEntities.NewGroup();
+        Db.MemoryGroups.Add(group);
+        await Db.SaveChangesAsync(Ct);
+        Db.ChangeTracker.Clear();
+
+        SetMemories.Response created = await NewHandler().Handle(
+            Write(group.Uuid, "Approved transition subject", "Initial proposed claim"), Ct);
+        Guid uuid = created.Items[0].Uuid!.Value;
+
+        SetMemories.Request approve = Write(group.Uuid, "Approved transition subject", "Approved claim", uuid) with
+        {
+            Items = [Write(group.Uuid, "Approved transition subject", "Approved claim", uuid).Items[0] with
+            {
+                Status = MemoryVersion.MemoryVersionStatus.Approved,
+            }],
+        };
+        SetMemories.Response approved = await NewHandler().Handle(approve, Ct);
+        approved.Versioned.ShouldBe(1);
+
+        MemoryVersion[] versions = await Db.MemoryVersions.AsNoTracking()
+            .Where(v => v.Memory!.GroupId == group.Id)
+            .OrderBy(v => v.Version)
+            .ToArrayAsync(Ct);
+        versions.Length.ShouldBe(2);
+        versions[0].Status.ShouldBe(MemoryVersion.MemoryVersionStatus.Proposed);
+        versions[0].IsCurrent.ShouldBeFalse();
+        versions[1].Status.ShouldBe(MemoryVersion.MemoryVersionStatus.Approved);
+        versions[1].IsCurrent.ShouldBeTrue();
+    }
+
+    /// <summary>LADR-11: an approved memory can be revised into a new approved version (append-only), and a same-content re-approve is a no-op.</summary>
+    [Fact]
+    public async Task Approved_revision_creates_new_approved_version()
+    {
+        var group = TestEntities.NewGroup();
+        Db.MemoryGroups.Add(group);
+        await Db.SaveChangesAsync(Ct);
+        Db.ChangeTracker.Clear();
+
+        SetMemories.Response created = await NewHandler().Handle(
+            Write(group.Uuid, "Re-approve subject", "Initial proposed claim"), Ct);
+        Guid uuid = created.Items[0].Uuid!.Value;
+
+        SetMemories.Request firstApprove = Write(group.Uuid, "Re-approve subject", "Approve", uuid) with
+        {
+            Items = [Write(group.Uuid, "Re-approve subject", "Approve", uuid).Items[0] with
+            {
+                Status = MemoryVersion.MemoryVersionStatus.Approved,
+            }],
+        };
+        await NewHandler().Handle(firstApprove, Ct);
+
+        // A different claim on the already-approved memory is a revision: a new
+        // approved version, not a conflict (the capture path re-captures
+        // approved memories as new versions).
+        SetMemories.Request revision = Write(group.Uuid, "Re-approve subject", "Approve again", uuid) with
+        {
+            Items = [Write(group.Uuid, "Re-approve subject", "Approve again", uuid).Items[0] with
+            {
+                Status = MemoryVersion.MemoryVersionStatus.Approved,
+            }],
+        };
+        SetMemories.Response revised = await NewHandler().Handle(revision, Ct);
+        revised.Versioned.ShouldBe(1);
+
+        // A same-claim re-approve is a no-op (Unchanged), never a new version.
+        SetMemories.Request noop = Write(group.Uuid, "Re-approve subject", "Approve again", uuid) with
+        {
+            Items = [Write(group.Uuid, "Re-approve subject", "Approve again", uuid).Items[0] with
+            {
+                Status = MemoryVersion.MemoryVersionStatus.Approved,
+            }],
+        };
+        SetMemories.Response noopResp = await NewHandler().Handle(noop, Ct);
+        noopResp.Versioned.ShouldBe(0);
+        noopResp.Unchanged.ShouldBe(1);
+    }
 }
