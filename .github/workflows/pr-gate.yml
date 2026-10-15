@@ -153,34 +153,8 @@ jobs:
       # repo-relative path — both become dead references in every vendoring repository.
       - name: Check vendored skills are self-contained (HLD-010 NFR-05)
         run: |
-          python3 - <<'EOF'
-          import re, sys
-          from pathlib import Path
-          skills = Path(".agents/skills").resolve()
-          owned = ["_mimisbrunnr-shared", "ai-understanding", "ai-brain-dump",
-                   *sorted(p.name for p in skills.glob("mimisbrunnr-*"))]
-          link = re.compile(r"\]\(([^)#\s]+)(?:#[^)]*)?\)")
-          rule = re.compile(r"`(?:\.github/instructions|\.agents/rules)/[^`]*\.instructions\.md`")
-          hits = []
-          for name in owned:
-              for doc in sorted((skills / name).rglob("*.md")) + sorted((skills / name).rglob("*.yaml")):
-                  where = doc.relative_to(skills.parent.parent)
-                  for number, line in enumerate(doc.read_text(encoding="utf-8").splitlines(), 1):
-                      if line.lstrip().startswith("|"):
-                          continue
-                      for target in link.findall(line):
-                          if re.match(r"[a-z]+:", target) or target.startswith("/"):
-                              continue
-                          if not (doc.parent / target).resolve().is_relative_to(skills):
-                              hits.append(f"{where}:{number}: link leaves .agents/skills: {target}")
-                      for match in rule.findall(line):
-                          hits.append(f"{where}:{number}: repo-relative rule path: {match}")
-          if hits:
-              print("::error::HLD-010 NFR-05 — an installer-owned skill references this repository's tree")
-              print("\n".join(hits))
-              sys.exit(1)
-          print("vendored skills are self-contained (HLD-010 NFR-05)")
-          EOF
+          python3 scripts/check_vendored_skills.py
+          python3 -B -m unittest discover -s scripts -p 'test_check_vendored_skills.py' -v
 
       # Without --postgres only the Docker-free transport checks run; the disposable-container
       # fixture stays an operator-run check (scripts/AGENTS.md).

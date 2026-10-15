@@ -21,12 +21,14 @@ outside table rows (changelog and history entries, which record their date):
 
 ## Verification
 
-A PR-gate step ("Check vendored skills are self-contained") walks every `*.md` and `*.yaml` in those
+A PR-gate step runs `scripts/check_vendored_skills.py`: it walks every `*.md` and `*.yaml` in those
 folders, resolves each relative link against its file, and fails the job when one leaves `.agents/skills/`
-or when a backticked rule path appears. The CI-claim wording is reviewed per change; it is not mechanically
-checkable without false positives.
+or when a backticked rule path appears. Its owned set mirrors `is_owned_skill` in
+`scripts/install-skills.sh`; `scripts/test_check_vendored_skills.py` runs the installer's own function
+against the script's and fails on drift. The CI-claim wording is reviewed per change; it is not
+mechanically checkable without false positives.
 
-Measured 2026-10-15: the step passes on the tree; planting `[x](../../../docs/hlds/)` and a backticked
+Measured 2026-10-15: the script passes on the tree; planting `[x](../../../docs/hlds/)` and a backticked
 `.github/instructions/skills/…` path into `mimisbrunnr-ymir-bootstrap/README.md` fails it with both hits
 named. Python 3.9 and 3.13 agree.
 
