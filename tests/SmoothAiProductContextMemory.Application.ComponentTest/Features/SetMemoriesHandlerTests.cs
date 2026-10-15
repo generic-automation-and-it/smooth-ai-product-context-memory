@@ -799,6 +799,20 @@ public sealed class SetMemoriesHandlerTests(AspireFixture aspire) : HandlerTestB
         SetMemories.Response revised = await NewHandler().Handle(revision, Ct);
         revised.Versioned.ShouldBe(1);
 
+        // LADR-11: the revision must be stored as an approved version, not slip
+        // back to proposed. v1 proposed, v2 approved, v3 approved (current).
+        MemoryVersion[] afterRevision = await Db.MemoryVersions.AsNoTracking()
+            .Where(v => v.Memory!.GroupId == group.Id)
+            .OrderBy(v => v.Version)
+            .ToArrayAsync(Ct);
+        afterRevision.Length.ShouldBe(3);
+        afterRevision[0].Status.ShouldBe(MemoryVersion.MemoryVersionStatus.Proposed);
+        afterRevision[0].IsCurrent.ShouldBeFalse();
+        afterRevision[1].Status.ShouldBe(MemoryVersion.MemoryVersionStatus.Approved);
+        afterRevision[1].IsCurrent.ShouldBeFalse();
+        afterRevision[2].Status.ShouldBe(MemoryVersion.MemoryVersionStatus.Approved);
+        afterRevision[2].IsCurrent.ShouldBeTrue();
+
         // A same-claim re-approve is a no-op (Unchanged), never a new version.
         SetMemories.Request noop = Write(group.Uuid, "Re-approve subject", "Approve again", uuid) with
         {
