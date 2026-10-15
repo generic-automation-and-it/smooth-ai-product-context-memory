@@ -15,7 +15,7 @@ public class AppHostConfigurationTests
         AppHostConfiguration result = AppHostConfiguration.Create(configuration);
 
         result.ViewerEnabled.ShouldBeTrue();
-        result.ViewerPort.ShouldBe(5180);
+        result.ViewerPort.ShouldBe(5441);
         result.ViewerImage.ShouldBe("smooth-ai-product-context-memory-viewer:local");
         result.ViewerContainerName.ShouldBe("mimisbrunnr-viewer");
     }

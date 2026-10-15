@@ -83,7 +83,7 @@ must remain isolated from the test fixture and development installation.
 | Seq | `saga-seq` (volume `mimisbrunnr-seq-data`) | `5341` | `mimisbrunnr-seq` |
 | API project (default) | `host-working-tree` | `5141` http / `7141` https | n/a (host process) |
 | API image (opt-in) | `host-published-image` (`HostConfiguration:UseProject=false`) | `5141` | `mimisbrunnr-host` |
-| Viewer Console | `mimir-viewer` | `5180` (pod) | `mimisbrunnr-viewer` |
+| Viewer Console | `mimir-viewer` | `5441` (pod) | `mimisbrunnr-viewer` |
 
 Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgres` — see
 `tests/SmoothAiProductContextMemory.TestFramework/TEST_FRAMEWORK_AGENTS.md`.
@@ -109,7 +109,7 @@ Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgr
   no-build SPA, injects the read token, proxies `/api` to the Host) plus the Python bridge stub.
   `ViewerConfiguration:Image` (default `smooth-ai-product-context-memory-viewer:local`) must be built
   (`docker build src/SmoothAiProductContextMemory.ViewerPod`) before a dev run, and
-  `ViewerConfiguration:Port` (5180) is the pod port.
+  `ViewerConfiguration:Port` (5441, the `5141 + "mimi"` ASCII offset) is the pod's published port.
 - MinIO credentials are committed in `appsettings.Development.json` (local dev only, firewall-isolated).
   Bucket creation is lazy: the storage adapter ensures the bucket exists on first write, so no separate
   `mc`/init container is required. The dev bucket is `smooth-mimisbrunnr-memory-well`; renaming it
@@ -274,7 +274,8 @@ Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgr
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
-| 2026-10-14 | **Added the Viewer Console pod (Phase A of HLD-009/BRD-004).** A `mimir-viewer` container running Caddy + Python bridge stub + the no-build SPA, injected with the read token and proxying `/api` to the Host resource. Config `ViewerConfiguration:Enabled` (dev default on, release default off), `ViewerConfiguration:Port` (5180), `ViewerConfiguration:Image` (default `smooth-ai-product-context-memory-viewer:local`). | HLD-009, BRD-004 | Release `reset` removed only three volumes, so `mimisbrunnr-<id>-host-context` — and the snapshot record in it — survived, and a fresh installation inherited the old "last snapshot" age; its ownership was never checked either. It is now created labelled, checked and reset, with DCP-created unlabelled copies adopted so existing installations still start. A bind mount at `/var/lib/mimisbrunnr-data` puts all four volumes under `<root>/<id>/`; reset wipes their contents. Found live: Docker Desktop names one folder `/Users/…` or `/host_mnt/Users/…` depending on the client, which made reset refuse and strand a smoke installation's workloads until the prefix was normalised. `docker.md` gained the data-root section and the controller's group labels (without them the dashboard container is ungrouped). | this PR |
+| 2026-10-15 | **Workload ports shifted by the "mimi" ASCII offset (+300) in `run.sh`; viewer port set to 5441.** `ViewerConfiguration:Port` default moved 5180 → 5441 (`5141 + "mimi"`). `run.sh` default external ports for postgres/blob/seq shifted 5432/9000/9001/5341 → 5732/9300/9301/5641 so a local postgres/minio/seq on the standard ports does not collide; the API stays on 5141 (the base-URL-linked port). | port scheme |
+| 2026-10-14 | **Added the Viewer Console pod (Phase A of HLD-009/BRD-004).** | HLD-009, BRD-004 |
 | 2026-10-02 | **`docker.md`'s `host-context` volume name corrected to the AppHost constant.** The standalone `snapshot`/`restore` commands — and the new upgrade step — mounted `mimisbrunnr-context`, a volume this repo never creates. The Host mounts `HostContextVolume` = `mimisbrunnr-host-context` (dev) / `mimisbrunnr-{installation-id}-host-context` (release). Docker auto-creates a named volume, so the command *succeeded* while writing `snapshot-metadata.json` where the Host never reads it — and the new startup migration line then reported `no snapshot recorded` for a backup just taken. All three occurrences now name the real volume, and the standalone section states both forms. LADR-003 keeps these names in sync with the C# constants; this was the docs drifting from them, not the constants. | HLD-006 |
 | 2026-10-01 | Controller entrypoint switched from `sh` to `bash` so the hyphenated `Parameters__api-*-token` env names reach the AppHost; without them the token parameters never resolve and the host container is never created. Detail in `scripts/AGENTS.md`. | publish smoke failures since 2026-09-17 |
 | 2026-09-27 | Test-fixture port-collision note narrowed to Postgres + MinIO; Redis (`16379`) and WireMock (`19091`) removed from the test dependency set alongside their unused containers. | PR #130 |

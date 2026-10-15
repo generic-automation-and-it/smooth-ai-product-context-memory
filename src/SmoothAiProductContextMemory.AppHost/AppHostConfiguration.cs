@@ -102,7 +102,7 @@ internal sealed partial record AppHostConfiguration(
             configuration["ReleaseConfiguration:Version"] ?? "development",
             engineKind,
             engineHostAddress,
-            GetPort(configuration, "ViewerConfiguration:Port", 5180),
+            GetPort(configuration, "ViewerConfiguration:Port", 5441),
             GetValue(configuration, "ViewerConfiguration:Image", false, "smooth-ai-product-context-memory-viewer:local"),
             GetBool(configuration, "ViewerConfiguration:Enabled", !isRelease))
         {
