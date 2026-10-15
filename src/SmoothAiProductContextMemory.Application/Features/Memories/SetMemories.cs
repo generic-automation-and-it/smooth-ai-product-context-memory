@@ -57,11 +57,14 @@ public static class SetMemories
     /// <see cref="Uuid"/> is stable on dry-run when the caller supplied <c>createUuid</c>; legacy
     /// creates keep a null dry-run identity and mint it only during persistence.
     /// </summary>
-    public sealed record ItemResult(Guid? Uuid, string? BlobAddress, bool Versioned);
+    /// <summary>One item's per-item result. <see cref="Versioned"/> and <see cref="Unchanged"/>
+    /// are never both true — an item is either a new version, an unchanged no-op, or a create.</summary>
+    public sealed record ItemResult(Guid? Uuid, string? BlobAddress, bool Versioned, bool Unchanged = false);
 
     public sealed record Response(
         int Created,
         int Versioned,
+        int Unchanged,
         int Linked,
         int Diverged,
         int Skipped,
@@ -131,6 +134,7 @@ public static class SetMemories
     {
         Create,
         Version,
+        Unchanged,
     }
 
     private sealed record PlannedItem(
@@ -140,7 +144,8 @@ public static class SetMemories
         Guid? Uuid,
         long? MemoryId,
         MemoryVersion? CurrentVersion,
-        int? NextVersion);
+        int? NextVersion,
+        string? MatchedBlobAddress = null);
 
     private sealed record PlannedLink(LinkWrite Write, bool Skip);
 
@@ -175,9 +180,10 @@ public static class SetMemories
                 : await PersistAsync(plan, cancellationToken);
 
             logger.LogInformation(
-                "Set memories completed. Created: {Created} Versioned: {Versioned} Linked: {Linked} Diverged: {Diverged} Skipped: {Skipped} DryRun: {DryRun}",
+                "Set memories completed. Created: {Created} Versioned: {Versioned} Unchanged: {Unchanged} Linked: {Linked} Diverged: {Diverged} Skipped: {Skipped} DryRun: {DryRun}",
                 response.Created,
                 response.Versioned,
+                response.Unchanged,
                 response.Linked,
                 response.Diverged,
                 response.Skipped,
@@ -197,7 +203,7 @@ public static class SetMemories
         {
             var items = new List<PlannedItem>(request.Items.Count);
             var plannedSlugs = new HashSet<string>(StringComparer.Ordinal);
-            var plannedVersionTargets = new Dictionary<Guid, (Memory Memory, MemoryVersion Current, int NextVersion)>();
+            var plannedVersionTargets = new Dictionary<Guid, (Memory Memory, MemoryVersion Current, int NextVersion, MemoryClaim LastClaim)>();
             var plannedCreateUuids = new HashSet<Guid>();
 
             // The plan resolves every write against stored state in one pass. The per-item checks below
@@ -269,7 +275,23 @@ public static class SetMemories
                             throw new ConflictException($"Memory '{target}' has no current version.");
                         }
 
-                        versionTarget = (memory, current, current.Version + 1);
+                        versionTarget = (memory, current, current.Version + 1, MemoryClaim.FromVersion(current));
+                    }
+
+                    MemoryClaim incoming = MemoryClaim.FromWrite(item);
+                    if (MemoryClaim.Same(incoming, versionTarget.LastClaim))
+                    {
+                        logger.LogDebug("Planned version unchanged. Index: {Index}", index);
+                        items.Add(new PlannedItem(
+                            ItemMode.Unchanged,
+                            item,
+                            slug,
+                            target,
+                            versionTarget.Memory.Id,
+                            versionTarget.Current,
+                            versionTarget.NextVersion,
+                            versionTarget.LastClaim.BlobAddress));
+                        continue;
                     }
 
                     logger.LogDebug("Planned version bump. Index: {Index} NextVersion: {Version}", index, versionTarget.NextVersion);
@@ -284,7 +306,8 @@ public static class SetMemories
                     plannedVersionTargets[target] = (
                         versionTarget.Memory,
                         versionTarget.Current,
-                        versionTarget.NextVersion + 1);
+                        versionTarget.NextVersion + 1,
+                        incoming);
                     continue;
                 }
 
@@ -421,24 +444,29 @@ public static class SetMemories
         }
 
         /// <summary>The dry-run verdict — plan counts and resolved identities, with no blob.</summary>
-        private static Response Predict(WritePlan plan) =>
-            new(
-                Counts(plan).Created,
-                Counts(plan).Versioned,
+        private static Response Predict(WritePlan plan)
+        {
+            (int created, int versioned, int unchanged, int diverged, int labels) = Counts(plan);
+            return new(
+                created,
+                versioned,
+                unchanged,
                 plan.Links.Count(l => !l.Skip),
-                Counts(plan).Diverged,
+                diverged,
                 plan.Links.Count(l => l.Skip),
-                Counts(plan).LabelsProposed,
-                [.. plan.Items.Select(i => new ItemResult(i.Uuid, null, i.Mode == ItemMode.Version))]);
+                labels,
+                [.. plan.Items.Select(i => new ItemResult(i.Uuid, null, i.Mode == ItemMode.Version, i.Mode == ItemMode.Unchanged))]);
+        }
 
         /// <summary>
         /// The count fields shared by the dry-run and the persisted response. Kept in one place so a
         /// new item mode or kind cannot silently diverge between the predict and persist paths.
         /// </summary>
-        private static (int Created, int Versioned, int Diverged, int LabelsProposed) Counts(WritePlan plan) =>
+        private static (int Created, int Versioned, int Unchanged, int Diverged, int LabelsProposed) Counts(WritePlan plan) =>
             (
                 plan.Items.Count(i => i.Mode == ItemMode.Create),
                 plan.Items.Count(i => i.Mode == ItemMode.Version),
+                plan.Items.Count(i => i.Mode == ItemMode.Unchanged),
                 plan.Items.Count(i => i.Mode == ItemMode.Create && i.Write.Kind == MemoryVersion.KindValue.Divergence),
                 plan.LabelsToInsert.Count);
 
@@ -451,6 +479,11 @@ public static class SetMemories
             var addresses = new Dictionary<int, string>();
             for (int index = 0; index < plan.Items.Count; index++)
             {
+                if (plan.Items[index].Mode == ItemMode.Unchanged)
+                {
+                    continue;
+                }
+
                 string? address = await StoreBlobAsync(plan.Items[index].Write.Content, cancellationToken);
                 if (address is not null)
                 {
@@ -469,9 +502,13 @@ public static class SetMemories
                     PlannedItem item = plan.Items[index];
                     string? address = addresses.GetValueOrDefault(index);
 
-                    results.Add(item.Mode == ItemMode.Create
-                        ? CreateNew(plan.Group, item, address)
-                        : await VersionExistingAsync(item, address, currentVersions, cancellationToken));
+                    results.Add(item.Mode switch
+                    {
+                        ItemMode.Create => CreateNew(plan.Group, item, address),
+                        ItemMode.Version => await VersionExistingAsync(item, address, currentVersions, cancellationToken),
+                        ItemMode.Unchanged => new ItemResult(item.Uuid, item.MatchedBlobAddress, false, true),
+                        _ => throw new ArgumentOutOfRangeException(nameof(item.Mode), item.Mode, null),
+                    });
                 }
 
                 foreach (string name in plan.LabelsToInsert)
@@ -485,27 +522,20 @@ public static class SetMemories
                 int skipped = plan.Links.Count(l => l.Skip);
                 foreach (PlannedLink link in plan.Links.Where(l => !l.Skip))
                 {
-                    bool created = await graph.CreateAsync(
+                    bool linkCreated = await graph.CreateAsync(
                         link.Write.SourceUuid,
                         link.Write.TargetUuid,
                         link.Write.Relation,
                         link.Write.Reason,
                         cancellationToken);
-                    linked += created ? 1 : 0;
-                    skipped += created ? 0 : 1;
+                    linked += linkCreated ? 1 : 0;
+                    skipped += linkCreated ? 0 : 1;
                 }
 
                 await transaction.CommitAsync(cancellationToken);
 
-                (int Created, int Versioned, int Diverged, int LabelsProposed) counts = Counts(plan);
-                return new Response(
-                    counts.Created,
-                    counts.Versioned,
-                    linked,
-                    counts.Diverged,
-                    skipped,
-                    counts.LabelsProposed,
-                    results);
+                (int created, int versioned, int unchanged, int diverged, int labels) = Counts(plan);
+                return new Response(created, versioned, unchanged, linked, diverged, skipped, labels, results);
             }
             catch
             {

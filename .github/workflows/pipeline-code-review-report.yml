@@ -123,6 +123,7 @@ on:
           - 'OpenCode Kimi K2.6'
           - 'OpenCode MiMo V2.5'
           - 'OpenCode MiMo V2.5 Pro'
+          - 'OpenCode Mistral Large 4'
           - 'OpenCode MiniMax M3'
           - 'OpenCode MiniMax M2.7'
           - 'OpenCode MiniMax M2.5'
@@ -479,14 +480,14 @@ jobs:
             (inputs.model_preset == 'Anthropic Claude Sonnet 4.6' && 'ANTHROPIC') ||
             (inputs.model_preset == 'Anthropic Claude Haiku 4.5' && 'ANTHROPIC') ||
             (inputs.model_preset == 'OpenAI GPT-5.5' && 'OPENAI') ||
-            ((inputs.model_preset == 'OpenCode DeepSeek V4 Pro' || inputs.model_preset == 'OpenCode DeepSeek V4 Flash' || inputs.model_preset == 'OpenCode GLM-5.2' || inputs.model_preset == 'OpenCode GLM-5.1' || inputs.model_preset == 'OpenCode Grok 4.5' || inputs.model_preset == 'OpenCode Hy3' || inputs.model_preset == 'OpenCode Kimi K3' || inputs.model_preset == 'OpenCode Kimi K2.7 Code' || inputs.model_preset == 'OpenCode Kimi K2.6' || inputs.model_preset == 'OpenCode MiMo V2.5' || inputs.model_preset == 'OpenCode MiMo V2.5 Pro') && 'OPENCODE-GO-OPENAI') ||
+            ((inputs.model_preset == 'OpenCode DeepSeek V4 Pro' || inputs.model_preset == 'OpenCode DeepSeek V4 Flash' || inputs.model_preset == 'OpenCode GLM-5.2' || inputs.model_preset == 'OpenCode GLM-5.1' || inputs.model_preset == 'OpenCode Grok 4.5' || inputs.model_preset == 'OpenCode Hy3' || inputs.model_preset == 'OpenCode Kimi K3' || inputs.model_preset == 'OpenCode Kimi K2.7 Code' || inputs.model_preset == 'OpenCode Kimi K2.6' || inputs.model_preset == 'OpenCode MiMo V2.5' || inputs.model_preset == 'OpenCode MiMo V2.5 Pro' || inputs.model_preset == 'OpenCode Mistral Large 4') && 'OPENCODE-GO-OPENAI') ||
             ((inputs.model_preset == 'OpenCode MiniMax M3' || inputs.model_preset == 'OpenCode MiniMax M2.7' || inputs.model_preset == 'OpenCode MiniMax M2.5' || inputs.model_preset == 'OpenCode Qwen3.8 Max' || inputs.model_preset == 'OpenCode Qwen3.7 Max' || inputs.model_preset == 'OpenCode Qwen3.7 Plus' || inputs.model_preset == 'OpenCode Qwen3.6 Plus') && 'OPENCODE-GO-ANTHROPIC') ||
             ((inputs.model_preset == 'OpenRouter DeepSeek V4 Pro' || inputs.model_preset == 'OpenRouter Qwen3.7 Plus' || inputs.model_preset == 'OpenRouter GLM-5.1' || inputs.model_preset == 'OpenRouter MiniMax M3') && 'OPEN_ROUTER') ||
             vars.OPENCODE_REVIEW_REPORT_PROVIDER || 'OPENCODE-GO-OPENAI' }}
           OPENCODE_REVIEW_REPORT_PROVIDER_ID: ${{
             ((inputs.model_preset == 'Anthropic Claude Opus 4.8' || inputs.model_preset == 'Anthropic Claude Sonnet 4.6' || inputs.model_preset == 'Anthropic Claude Haiku 4.5') && 'anthropic') ||
             (inputs.model_preset == 'OpenAI GPT-5.5' && 'openai') ||
-            ((inputs.model_preset == 'OpenCode DeepSeek V4 Pro' || inputs.model_preset == 'OpenCode DeepSeek V4 Flash' || inputs.model_preset == 'OpenCode GLM-5.2' || inputs.model_preset == 'OpenCode GLM-5.1' || inputs.model_preset == 'OpenCode Grok 4.5' || inputs.model_preset == 'OpenCode Hy3' || inputs.model_preset == 'OpenCode Kimi K3' || inputs.model_preset == 'OpenCode Kimi K2.7 Code' || inputs.model_preset == 'OpenCode Kimi K2.6' || inputs.model_preset == 'OpenCode MiMo V2.5' || inputs.model_preset == 'OpenCode MiMo V2.5 Pro') && 'go-openai') ||
+            ((inputs.model_preset == 'OpenCode DeepSeek V4 Pro' || inputs.model_preset == 'OpenCode DeepSeek V4 Flash' || inputs.model_preset == 'OpenCode GLM-5.2' || inputs.model_preset == 'OpenCode GLM-5.1' || inputs.model_preset == 'OpenCode Grok 4.5' || inputs.model_preset == 'OpenCode Hy3' || inputs.model_preset == 'OpenCode Kimi K3' || inputs.model_preset == 'OpenCode Kimi K2.7 Code' || inputs.model_preset == 'OpenCode Kimi K2.6' || inputs.model_preset == 'OpenCode MiMo V2.5' || inputs.model_preset == 'OpenCode MiMo V2.5 Pro' || inputs.model_preset == 'OpenCode Mistral Large 4') && 'go-openai') ||
             ((inputs.model_preset == 'OpenCode MiniMax M3' || inputs.model_preset == 'OpenCode MiniMax M2.7' || inputs.model_preset == 'OpenCode MiniMax M2.5' || inputs.model_preset == 'OpenCode Qwen3.8 Max' || inputs.model_preset == 'OpenCode Qwen3.7 Max' || inputs.model_preset == 'OpenCode Qwen3.7 Plus' || inputs.model_preset == 'OpenCode Qwen3.6 Plus') && 'go-anthropic') ||
             ((inputs.model_preset == 'OpenRouter DeepSeek V4 Pro' || inputs.model_preset == 'OpenRouter Qwen3.7 Plus' || inputs.model_preset == 'OpenRouter GLM-5.1' || inputs.model_preset == 'OpenRouter MiniMax M3') && 'openrouter') ||
             (vars.OPENCODE_REVIEW_REPORT_PROVIDER == 'COPILOT' && 'github-copilot') ||
@@ -529,6 +530,7 @@ jobs:
             (inputs.model_preset == 'OpenCode Kimi K2.6' && 'kimi-k2.6') ||
             (inputs.model_preset == 'OpenCode MiMo V2.5' && 'mimo-v2.5') ||
             (inputs.model_preset == 'OpenCode MiMo V2.5 Pro' && 'mimo-v2.5-pro') ||
+            (inputs.model_preset == 'OpenCode Mistral Large 4' && 'mistral-large-4') ||
             (inputs.model_preset == 'OpenCode MiniMax M3' && 'minimax-m3') ||
             (inputs.model_preset == 'OpenCode MiniMax M2.7' && 'minimax-m2.7') ||
             (inputs.model_preset == 'OpenCode MiniMax M2.5' && 'minimax-m2.5') ||
@@ -541,7 +543,7 @@ jobs:
             (inputs.model_preset == 'OpenRouter GLM-5.1' && 'z-ai/glm-5.1') ||
             (inputs.model_preset == 'OpenRouter MiniMax M3' && 'minimax/minimax-m3') ||
             inputs.model || vars.OPENCODE_REVIEW_REPORT_MODEL_PRIMARY || 'glm-5.2' }}
-          # Mirror the 24-row mapping for SECONDARY and ORCHESTRATOR
+          # Mirror the 27-row mapping for SECONDARY and ORCHESTRATOR
           # (the canonical workflow pins the same model across all three
           # tiers per preset). Without this, a `workflow_dispatch` that picks a
           # preset from one family would leave SECONDARY and ORCHESTRATOR on the
@@ -571,6 +573,7 @@ jobs:
             (inputs.model_preset == 'OpenCode Kimi K2.6' && 'kimi-k2.6') ||
             (inputs.model_preset == 'OpenCode MiMo V2.5' && 'mimo-v2.5') ||
             (inputs.model_preset == 'OpenCode MiMo V2.5 Pro' && 'mimo-v2.5-pro') ||
+            (inputs.model_preset == 'OpenCode Mistral Large 4' && 'mistral-large-4') ||
             (inputs.model_preset == 'OpenCode MiniMax M3' && 'minimax-m3') ||
             (inputs.model_preset == 'OpenCode MiniMax M2.7' && 'minimax-m2.7') ||
             (inputs.model_preset == 'OpenCode MiniMax M2.5' && 'minimax-m2.5') ||
@@ -600,6 +603,7 @@ jobs:
             (inputs.model_preset == 'OpenCode Kimi K2.6' && 'kimi-k2.6') ||
             (inputs.model_preset == 'OpenCode MiMo V2.5' && 'mimo-v2.5') ||
             (inputs.model_preset == 'OpenCode MiMo V2.5 Pro' && 'mimo-v2.5-pro') ||
+            (inputs.model_preset == 'OpenCode Mistral Large 4' && 'mistral-large-4') ||
             (inputs.model_preset == 'OpenCode MiniMax M3' && 'minimax-m3') ||
             (inputs.model_preset == 'OpenCode MiniMax M2.7' && 'minimax-m2.7') ||
             (inputs.model_preset == 'OpenCode MiniMax M2.5' && 'minimax-m2.5') ||

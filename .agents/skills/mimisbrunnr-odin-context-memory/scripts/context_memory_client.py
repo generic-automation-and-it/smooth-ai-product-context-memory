@@ -7,6 +7,7 @@ and prints the response JSON on stdout. Nothing is ever logged that leaks memory
 """
 
 import argparse
+import datetime as dt
 import json
 import os
 import re
@@ -19,6 +20,7 @@ import urllib.request
 from urllib.parse import urlparse
 
 import redact
+import session_marker as _marker
 
 DEFAULT_BASE_URL = "http://localhost:5141"
 ENV_BASE_URL = "CONTEXT_MEMORY_BASE_URL"
@@ -501,6 +503,10 @@ def cmd_preflight(args):
             "Split into multiple checkpoints.",
         )
 
+    marker, boundary = _load_export_marker(args)
+    print(boundary, file=sys.stderr)
+    if marker is not None:
+        _disclose_marker_matches(candidates, marker)
     resp = _request("POST", "/api/context/preflight", {"candidates": candidates})
     # Both lists are required. Defaulting a missing one to [] would report "no matches" and "no
     # collisions" for a response that never said so, and the caller would write duplicates on it.
@@ -566,10 +572,12 @@ def cmd_set(args):
     digest names each rule, the field it altered and the offsets it replaced — never the span's text.
     """
     payload = payload_of(args)
+    payload = _apply_export_marker(args, payload)
     validate_set_payload(payload)
     query = {"dryRun": "true"} if args.dryrun else None
     resp = scrubbed_write("set", "POST", "/api/context/memories", payload, query=query)
     print(json.dumps(resp, indent=2))
+    _mark_send_receipt(args, payload, resp)
     return resp
 
 
@@ -585,6 +593,26 @@ def validate_set_payload(payload):
             f"Batch has {len(payload['items'])} items; cap is {MAX_CANDIDATES}. "
             "Split into multiple checkpoints.",
         )
+
+
+def _disclose_marker_matches(candidates: list, marker: dict) -> None:
+    """Stderr routing advice: candidates exactly matching the exclusion set.
+
+    A candidate matching an excluded item by exact subject is a supersession of
+    that item (D8) — send it with its uuid version target (or let the match
+    version it), never as a new memory and never dropped. Mechanical (D14);
+    digest-only, stdout untouched.
+    """
+    _, subjects, _, _ = _marker.exclusion_set(marker)
+    if not subjects:
+        return
+    for index, candidate in enumerate(candidates):
+        if not isinstance(candidate, dict):
+            continue
+        subject = candidate.get("description") or ""
+        if subject and subject in subjects:
+            print(f"candidate {index} matches excluded {subjects[subject]} by exact "
+                  f"subject — route as a supersession of it.", file=sys.stderr)
 
 
 def attach_redaction(resp, hits):
@@ -603,6 +631,147 @@ def attach_redaction(resp, hits):
     else:
         print(json.dumps({"redaction": redact.digest(hits)}), file=sys.stderr)
     return resp
+
+
+def _apply_export_marker(args, payload):
+    """Drop echo items per the odin marker; keep changed ones as supersessions.
+
+    - uuid in the exclusion set AND same description: echo of the import,
+      dropped before anything is sent (D3).
+    - uuid in the set but a different description, or no uuid with an excluded
+      subject: a changed imported item — kept as a supersession (D8); the
+      version target (uuid) or the preflight match routes it, never a new copy.
+    Mechanical id / exact-subject match only (D14). Digest-only lineage.
+    """
+    marker, boundary = _load_export_marker(args)
+    print(boundary, file=sys.stderr)
+    if marker is None or not isinstance(payload, dict):
+        return payload
+    ids, subjects, _, _ = _marker.exclusion_set(marker)
+    if not ids or not isinstance(payload.get("items"), list):
+        return payload
+    id_subject = {}
+    for entry in marker.get("imports") or []:
+        if not isinstance(entry, dict) or entry.get("nomarker"):
+            continue
+        for item in entry.get("items") or []:
+            if isinstance(item, dict) and item.get("id"):
+                id_subject.setdefault(item["id"], item.get("subject") or "")
+    kept, dropped, supers = [], 0, []
+    for item in payload["items"]:
+        if not isinstance(item, dict):
+            kept.append(item)
+            continue
+        target = item.get("uuid")
+        subject = item.get("description") or ""
+        if isinstance(target, str) and target and target in ids:
+            if subject == id_subject.get(target, None) and subject:
+                dropped += 1
+                continue
+            supers.append(subject or target)
+        elif subject and subject in subjects:
+            supers.append(subject)
+        kept.append(item)
+    if dropped:
+        print(f"Excluded {dropped} echo item(s) imported earlier in this session "
+              f"(not re-sent).", file=sys.stderr)
+    for subject in supers:
+        print(f"Supersession: '{subject}' changes an imported item — sent as a "
+              f"version bump, never dropped.", file=sys.stderr)
+    if not kept and dropped:
+        raise ClientError(0, "bad-input",
+                          "every item was excluded as echo of this session's marked "
+                          "import; nothing to send")
+    payload["items"] = kept
+    return payload
+
+
+def _response_uuids(resp) -> list:
+    """Server-assigned/confirmed uuids per sent item, positionally.
+
+    `set` answers `Items: [{Uuid, …}]` in request order. Returns the uuid at each
+    position, or None where the response has no usable one — the caller falls back
+    to the request's own uuid/createUuid. Length mismatch means the response is not
+    positional, so no response uuid is trusted.
+    """
+    if not isinstance(resp, dict):
+        return []
+    rows = resp.get("items")
+    if not isinstance(rows, list):
+        return []
+    out = []
+    for row in rows:
+        ident = row.get("uuid") if isinstance(row, dict) else None
+        out.append(ident if isinstance(ident, str) and ident else None)
+    return out
+
+
+def _response_wrote_nothing(resp) -> bool:
+    """True when a success-shaped `set` answer reports zero persisted items.
+
+    The marker follows the receipt: `created`/`versioned`/`unchanged` all leave the
+    item in the store, `skipped` does not. Only a response that carries at least one
+    of those counts can prove "nothing written"; one with no counts stays on the
+    request-identity fallback.
+    """
+    if not isinstance(resp, dict):
+        return False
+    counts = [resp.get(key) for key in ("created", "versioned", "unchanged")
+              if type(resp.get(key)) is int]
+    return bool(counts) and sum(counts) == 0
+
+
+def _mark_send_receipt(args, payload, resp=None) -> None:
+    """Append one export entry for a successful send and print the Marker: line.
+
+    The marker follows the receipt, never the plan (amended LADR-11): dry runs,
+    refusals (which raise before reaching here) and `--nomarker` sends mark
+    nothing. Records store identities with their subjects — references only — preferring
+    the uuids the server's response confirms (a create without a caller uuid would
+    otherwise go unrecorded and be proposed again). Stderr, so stdout
+    stays parseable JSON.
+    """
+    if bool(getattr(args, "dryrun", False)):
+        sid, _ = _marker_session(args)
+        if bool(getattr(args, "nomarker", False)):
+            print(_marker.marker_line("skipped", sid, 0, verb="export"), file=sys.stderr)
+        elif not sid:
+            print(_marker.marker_line("none", "", verb="export"), file=sys.stderr)
+        else:
+            print(_marker.marker_line("empty", sid, 0, verb="export"), file=sys.stderr)
+        return
+    nomarker = bool(getattr(args, "nomarker", False))
+    sid, harness = _marker_session(args)
+    if nomarker:
+        print(_marker.marker_line("skipped", sid, 0, verb="export"), file=sys.stderr)
+        return
+    if not sid:
+        print(_marker.marker_line("none", "", verb="export"), file=sys.stderr)
+        return
+    if _response_wrote_nothing(resp):
+        print(_marker.marker_line("empty", sid, 0, verb="export"), file=sys.stderr)
+        return
+    sent = [item for item in payload.get("items", []) if isinstance(payload, dict)] or []
+    confirmed = _response_uuids(resp)
+    if confirmed and len(confirmed) != len(sent):
+        confirmed = []
+    written = []
+    for position, item in enumerate(sent):
+        if not isinstance(item, dict):
+            continue
+        ident = (confirmed[position] if confirmed else None) or item.get("uuid") \
+            or item.get("createUuid")
+        if isinstance(ident, str) and ident:
+            written.append({"id": ident, "subject": item.get("description") or ""})
+    if not written:
+        print(_marker.marker_line("empty", sid, 0, verb="export"), file=sys.stderr)
+        return
+    try:
+        _, status = _marker.append_export("odin", sid, harness, written)
+    except OSError as error:
+        print(f"NOTE: session marker not written ({error}).", file=sys.stderr)
+        return
+    print(_marker.marker_line(status, sid, len(written), verb="export"), file=sys.stderr)
 
 
 def scrubbed_write(operation, method, path, payload, query=None):
@@ -736,6 +905,7 @@ def cmd_query(args):
         raise ClientError(0, "bad-response", "query response rows must be objects carrying "
                                              "'uuid', 'groupUuid' and 'version'")
     print_recall(resp)
+    _mark_query(args, payload, resp["items"])
     return resp
 
 
@@ -743,6 +913,75 @@ def _identified_row(row):
     return (isinstance(row, dict) and isinstance(row.get("uuid"), str) and bool(row["uuid"].strip())
             and isinstance(row.get("groupUuid"), str) and bool(row["groupUuid"].strip())
             and type(row.get("version")) is int and row["version"] >= 1)
+
+
+def _marker_session(args) -> tuple[str, str]:
+    """Marker session (id, harness): explicit --session wins, else the harness env chain."""
+    return _marker.resolve_session(getattr(args, "session", None))
+
+
+def _write_marker_notice(status: str, session: str, count: int = 0) -> None:
+    """The Marker: line goes to stderr: stdout stays parseable JSON."""
+    print(_marker.marker_line(status, session, count), file=sys.stderr)
+
+
+def _mark_query(args, payload, items: list) -> None:
+    """Write the odin marker for a query/import and print the Marker: line.
+
+    Items are response rows ({uuid, version, subject}); the request payload's
+    selectors travel as {selector, as_of} alongside them (D9). Id-less answers
+    are history. --nomarker logs without moving the boundary (D5).
+    """
+    nomarker = bool(getattr(args, "nomarker", False))
+    sid, harness = _marker_session(args)
+    if not sid:
+        _write_marker_notice("none", "")
+        return
+    rows = []
+    for row in items or []:
+        if not isinstance(row, dict):
+            continue
+        ident = row.get("uuid")
+        if isinstance(ident, str) and ident:
+            version = row.get("version")
+            rows.append({"id": ident,
+                         "version": version if type(version) is int else None,
+                         "subject": row.get("description") or row.get("subject") or ""})
+    selector = None
+    as_of = None
+    if isinstance(payload, dict):
+        sel = {k: payload[k] for k in ("ticketProvider", "ticketKey", "repo",
+                                       "initiativeName", "kind", "facets", "tags",
+                                       "scopeDimension", "scopeIdentifier")
+               if payload.get(k) not in (None, [], "")}
+        if sel:
+            # Kept alongside the ids (LADR-11 D9 note 2026-10-14): ids serve present
+            # exclusion, the selector serves future append-only replay.
+            selector = sel
+            as_of = dt.date.today().isoformat()
+    if not rows and selector is None:
+        _write_marker_notice("history", sid)
+        return
+    try:
+        _, status = _marker.record_import("odin", sid, harness, "import",
+                                          nomarker, rows, selector, as_of)
+    except OSError as error:
+        print(f"NOTE: session marker not written ({error}).", file=sys.stderr)
+        return
+    marker = _marker.load_marker("odin", sid)
+    _, _, _, count = _marker.exclusion_set(marker)
+    _write_marker_notice(status if not nomarker else "skipped", sid, count)
+
+
+def _load_export_marker(args):
+    """(marker_or_None, boundary_line) for set/export and preflight."""
+    if bool(getattr(args, "export_all", False)):
+        return None, _marker.boundary_line(None, ignored=True)
+    sid, _ = _marker_session(args)
+    if not sid:
+        return None, _marker.boundary_line(None)
+    marker = _marker.load_marker("odin", sid)
+    return marker, _marker.boundary_line(marker)
 
 
 def require_lists(resp, command, *fields):
@@ -1092,17 +1331,34 @@ def main():
 
     p = sub.add_parser("preflight", help="POST /api/context/preflight (batch, array-in/out)")
     add_payload_arguments(p)
+    p.add_argument("--all", action="store_true", dest="export_all",
+                   help="Ignore the session marker in the Boundary report.")
+    p.add_argument("--session",
+                   help="Explicit session id whose marker is reported (else the harness env chain).")
     p.set_defaults(func=cmd_preflight)
 
     p = sub.add_parser("set", aliases=["export"],
                        help="POST /api/context/memories (alias: export, session -> store)")
     add_payload_arguments(p)
     p.add_argument("--dryrun", action="store_true", help="append ?dryRun=true; write nothing")
+    p.add_argument("--all", action="store_true", dest="export_all",
+                   help="Ignore the session marker and send the payload in full.")
+    p.add_argument("--nomarker", action="store_true",
+                   help="Send normally but write no marker entry: boundary and exclusions "
+                        "are unchanged.")
+    p.add_argument("--session",
+                   help="Explicit session id whose marker bounds this send "
+                        "(else the harness env chain).")
     p.set_defaults(func=cmd_set)
 
     p = sub.add_parser("query", aliases=["import"],
                        help="POST /api/context/query (semantic-dedup recall; alias: import, store -> session)")
     add_payload_arguments(p)
+    p.add_argument("--nomarker", action="store_true",
+                   help="Recall without setting the export boundary; the material is session "
+                        "history and flows into a default export.")
+    p.add_argument("--session",
+                   help="Explicit session id for the marker (else the harness env chain).")
     p.set_defaults(func=cmd_query)
 
     p = sub.add_parser("get-versions", help="GET /api/context/memories/{uuid}/versions")

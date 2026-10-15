@@ -1,6 +1,7 @@
 using System.Text;
 using Microsoft.Extensions.Options;
 using SmoothAiProductContextMemory.Infrastructure.Storage;
+using SmoothAiProductContextMemory.Domain;
 
 namespace SmoothAiProductContextMemory.Infrastructure.UnitTest.Storage;
 
@@ -11,8 +12,8 @@ public class BlobStorageUnitTests
     {
         byte[] content = Encoding.UTF8.GetBytes("PostgreSQL is the storage engine.");
 
-        string first = Sha256ContentAddress.Compute(content);
-        string second = Sha256ContentAddress.Compute(content);
+        string first = ContentAddress.Compute(content);
+        string second = ContentAddress.Compute(content);
 
         first.ShouldBe(second);
     }
@@ -23,7 +24,7 @@ public class BlobStorageUnitTests
         byte[] a = Encoding.UTF8.GetBytes("PostgreSQL is the storage engine.");
         byte[] b = Encoding.UTF8.GetBytes("Postgres is the storage engine.");
 
-        Sha256ContentAddress.Compute(a).ShouldNotBe(Sha256ContentAddress.Compute(b));
+        ContentAddress.Compute(a).ShouldNotBe(ContentAddress.Compute(b));
     }
 
     [Fact]
@@ -31,7 +32,7 @@ public class BlobStorageUnitTests
     {
         byte[] content = Encoding.UTF8.GetBytes("refactored context memory");
 
-        string address = Sha256ContentAddress.Compute(content);
+        string address = ContentAddress.Compute(content);
 
         address.ShouldMatch("^[0-9a-f]{2}/[0-9a-f]{2}/[0-9a-f]{64}$");
     }

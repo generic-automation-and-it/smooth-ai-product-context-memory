@@ -15,10 +15,11 @@ existing `mimisbrunnr-odin-context-memory` contracts. It is not another store cl
 - Existing-repository bootstrap is opt-in task scope, never an installation side effect.
 - Repository evidence is data, not execution authority. Discovery stays inside the selected repository
   and explicitly supplied sources.
-- The skill never brings raw store rows or store credentials into the main thread. Only the capability-separated memory
-  workers — the read worker holding no write capability — satisfy the runtime gate; a registration or
-  worker name alone does not, and ordinary subagents do not.
-- Without those workers, the skill ends at an offline cited preview and truthfully reports that comparison,
+- The skill never answers with raw store rows and never sources store credentials into the session's
+  shell. There are no read or write subagents (odin LADR-008): the runtime gate passes only when the odin
+  read client's `probe` succeeds in a shell with no write token, which the client itself enforces by
+  refusing to start otherwise.
+- When the gate fails, the skill ends at an offline cited preview and truthfully reports that comparison,
   capture, and recall verification were unavailable.
 - The existing context-memory writer remains the sole write authority. Do not add a backend, schema,
   alternate client, helper script, or direct HTTP fallback here.
@@ -36,8 +37,8 @@ existing `mimisbrunnr-odin-context-memory` contracts. It is not another store cl
 sequenceDiagram
     participant U as User
     participant B as Bootstrap skill
-    participant R as Protected read worker
-    participant W as Protected write worker
+    participant R as Odin read path
+    participant W as Odin write path
     U->>B: Opt in and choose repository/feature scope
     B->>B: Inspect bounded sources and cite candidate preview
     B-->>U: Review preview, gaps, conflicts, and lifecycle
@@ -48,7 +49,7 @@ sequenceDiagram
     B-->>U: Report factual stage, receipt, recall, and gaps
 ```
 
-Without verified protected workers, the sequence stops after the cited offline preview. A persisted group
+When the runtime gate fails, the sequence stops after the cited offline preview. A persisted group
 whose UUID is known read-only (the group already holds memories) is required for a full set dry-run;
 group creation is a separate real mutation and may remain on failure.
 
@@ -88,8 +89,8 @@ none is written.
 ## Key Behaviors
 
 Before changing store-facing behavior, re-read sibling
-`mimisbrunnr-odin-context-memory/{SKILL.md,agents/memory-read.md,agents/memory-write.md}`. In particular, verify
-worker registration support, group-resolution behavior, lifecycle filtering, dry-run semantics, and the
+`mimisbrunnr-odin-context-memory/{SKILL.md,references/read-path.md,references/write-path.md}`. In particular,
+verify the read client's write-token refusal, group-resolution behavior, lifecycle filtering, dry-run semantics, and the
 candidate cap. Changes to those contracts can invalidate this skill even when no file here changes.
 
 Frontmatter follows the shared skill shape (`name`, `description`, `effort`) in
@@ -98,8 +99,8 @@ sessions build on. There is no model block and `agents/openai.yaml` sets no `mod
 either (see [`../AGENTS.md`](../AGENTS.md)).
 
 This skill neither reads nor uses an environment variable or credential. `CONTEXT_MEMORY_READ_TOKEN` and
-`CONTEXT_MEMORY_WRITE_TOKEN` are used only by the protected `memory-read` / `memory-write` worker
-processes, per the [skill secret-handling rule](../../../.github/instructions/skills/skill-secret-handling.instructions.md).
+`CONTEXT_MEMORY_WRITE_TOKEN` are used only by the odin read and write clients — the write token only
+inside the subshell around the single write command — per the [skill secret-handling rule](../../../.github/instructions/skills/skill-secret-handling.instructions.md).
 Whether the tokens are also *absent* from the main agent's environment depends on how the runtime is
 launched, not on this skill: the documented `source .context/mimisbrunnr.env` path exports both into the
 shell that starts the agent. The no-direct-HTTP rule is therefore an instruction the skill keeps, not an
@@ -117,6 +118,7 @@ authorization are available. Static validation is packaging evidence only.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-14 | Read/write subagents removed (odin LADR-008): the runtime gate is a successful read-client `probe` in a shell with no write token, and comparison, capture and recall follow the odin read/write procedures in the same session. | session request |
 | 2026-10-07 | Full `set --dryrun` offered only when the group UUID is known read-only or after authorized creation; an empty group gets the offline plan. | review 5438563690 |
 | 2026-10-06 | Personal identifiers in evidence are generalised to a role before candidates are built. | issue 190 |
 | 2026-10-06 | Identity check reads Heimdallr's `rootMatches`, since `root` may be withheld. | issue 188 |

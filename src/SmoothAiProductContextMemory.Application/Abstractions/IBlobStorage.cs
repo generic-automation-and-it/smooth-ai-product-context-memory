@@ -1,3 +1,5 @@
+using SmoothAiProductContextMemory.Domain;
+
 namespace SmoothAiProductContextMemory.Application.Abstractions;
 
 /// <summary>
@@ -13,7 +15,10 @@ namespace SmoothAiProductContextMemory.Application.Abstractions;
 /// </summary>
 public interface IBlobStorage
 {
-    /// <summary>Stores content and returns its content address.</summary>
+    /// <summary>
+    /// Stores content and returns its content address. The returned address is
+    /// <see cref="ContentAddress.Compute(byte[])"/> of the stored bytes.
+    /// </summary>
     Task<string> StoreAsync(Stream content, string? contentType = null, CancellationToken cancellationToken = default);
 
     /// <summary>Retrieves content by address, or <see langword="null"/> when no object exists.</summary>

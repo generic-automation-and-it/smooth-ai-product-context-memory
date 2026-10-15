@@ -67,6 +67,15 @@ read_client = _load("context_memory_read_client")
 divergence = _load("divergence")
 authority = _load("authority")
 
+# Marker isolation (HLD-007 LADR-11): query/set/preflight now key markers to the
+# harness session id, which is present in a real agent shell. Without this, cases
+# driving those entry points would write markers into the working repo and later
+# sends would exclude those ids. Marker cases set their own root per case.
+os.environ["SESSION_MARKER_ROOT"] = tempfile.mkdtemp(prefix="odin-markers-")
+for _name in ("CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "OPENCODE_SESSION_ID",
+              "COPILOT_AGENT_SESSION_ID", "PI_SESSION_ID"):
+    os.environ.pop(_name, None)
+
 
 def _run_atomicity(batch):
     """Drive atomicity.py end to end, so the description/statement split is covered, not just classify()."""
@@ -432,16 +441,16 @@ class RecallFramingTests(unittest.TestCase):
         self.assertNotIn(client.RECALL_NOTICE, out.getvalue())
         self.assertNotIn("statement", out.getvalue())
 
-    def test_the_read_worker_contract_carries_the_framing(self):
+    def test_the_read_path_carries_the_framing(self):
         """The agent has to be told the same thing the client now prints.
 
-        A notice in stdout that the worker's own instructions never mention is a notice the worker may
-        reasonably treat as boilerplate. The contract is also the only place that can say what to *do*
-        with a record whose statement reads like an instruction — which is the whole point of framing it.
+        A notice in stdout that the read procedure never mentions is a notice the agent may reasonably
+        treat as boilerplate. The procedure is also the only place that can say what to *do* with a
+        record whose statement reads like an instruction — which is the whole point of framing it.
         """
-        contract = (SCRIPTS.parent / "agents" / "memory-read.md").read_text(encoding="utf-8")
+        contract = (SCRIPTS.parent / "references" / "read-path.md").read_text(encoding="utf-8")
         self.assertIn("recallNotice", contract,
-                      "the read worker is not told to read the framing its own responses carry")
+                      "the read path is not told to read the framing its own responses carry")
         self.assertIn("uuid/version", contract,
                       "the contract must say how to report a suspicious record — quoted, with identity")
 
@@ -2091,7 +2100,12 @@ class OtherWriteRedactionTests(unittest.TestCase):
                     result = command(args)
                     self.assertEqual(result, answer, "the store's answer must reach the caller unchanged")
                     self.assertEqual(json.loads(out.getvalue()), answer)
-                    digest = json.loads(err.getvalue())["redaction"]
+                    # LADR-11: cmd_set reports the export boundary on stderr beside the
+                    # digest, so the JSON line is selected out rather than parsed whole.
+                    err_lines = [line for line in err.getvalue().splitlines()
+                                 if line.startswith("{")]
+                    self.assertEqual(len(err_lines), 1, err.getvalue())
+                    digest = json.loads(err_lines[0])["redaction"]
                     self.assertTrue(digest and all(entry["locations"] for entry in digest))
                     self.assertEqual(self._planted(err.getvalue() + out.getvalue()), [])
                     for secret in PLANTED_SECRETS:
@@ -2104,7 +2118,11 @@ class OtherWriteRedactionTests(unittest.TestCase):
                 redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as err:
             response = client.cmd_set(SimpleNamespace(payload=None, dryrun=False))
         self.assertTrue(response["redaction"])
-        self.assertEqual(err.getvalue(), "")
+        # LADR-11: the export boundary report and the send receipt share stderr with
+        # the digest; the contract is that nothing else is printed, not that stderr
+        # is empty.
+        self.assertEqual(err.getvalue().strip().splitlines(),
+                         ["Boundary: none", "Marker: none (no session id)"])
 
     def test_ticket_parent_dry_run_previews_the_scrubbed_request(self):
         payload = OTHER_WRITES["ticket_parent"][3]
@@ -3299,28 +3317,41 @@ class SemanticFixtureTests(unittest.TestCase):
 
 
 class AgentContractTests(unittest.TestCase):
-    AGENTS = HERE.parent / "agents"
+    """The read and write procedures the session follows (LADR-008: no read/write subagents)."""
+    REFS = HERE.parent / "references"
+    READ = REFS / "read-path.md"
+    WRITE = REFS / "write-path.md"
     MUTATIONS = ("set", "create-link", "resolve-group", "update-group", "append-description",
                  "propose-label", "upsert-initiative", "ticket-parent")
 
-    def test_read_agent_grants_only_read_client(self):
-        text = (self.AGENTS / "memory-read.md").read_text(encoding="utf-8")
+    def test_read_path_uses_only_the_read_client(self):
+        text = self.READ.read_text(encoding="utf-8")
         self.assertIn("context_memory_read_client.py", text)
         self.assertNotIn("context_memory_client.py", text)
         for mutation in self.MUTATIONS:
             self.assertNotIn(mutation, text)
         self.assertIn(client.ENV_WRITE_TOKEN, text)
-
-        registration = (HERE.parents[2] / "agents" / "memory-read.md").read_text(encoding="utf-8")
-        # Issue 188 (issue 181 finding 30 again): "the write credential is never ambient" told the
-        # worker a write token could not be in its environment, while sourcing the credential file
-        # exports one and the read client then refuses to start. Launching without one is the step.
-        flat = " ".join(registration.split())
+        # Issue 188 (issue 181 finding 30 again): sourcing the credential file exports a write token
+        # and the read client then refuses to start, so running it without one is the instruction.
+        flat = " ".join(text.split())
         self.assertIn("no write-token spelling in its environment", flat)
-        self.assertNotIn("the write credential is never ambient", flat)
-        self.assertIn("context_memory_read_client.py", registration)
-        self.assertNotIn("context_memory_client.py", registration)
-        self.assertIn(client.ENV_WRITE_TOKEN, registration)
+
+    def test_no_read_or_write_subagent_is_registered_or_named(self):
+        """LADR-008: the registrations worked in one harness only, so the skill names no agent to spawn.
+
+        Guards both halves: no registration file for these workers in the host repository's agents
+        folder, and no instruction in the skill's own documents to delegate to one."""
+        for name in ("memory-read.md", "memory-write.md"):
+            self.assertFalse((HERE.parents[2] / "agents" / name).exists(), name)
+        for path in (HERE.parent / "SKILL.md", HERE.parent / "README.md", self.READ, self.WRITE):
+            with self.subTest(document=path.name):
+                text = path.read_text(encoding="utf-8")
+                self.assertNotRegex(text, r"`memory-(read|write)`")
+                self.assertNotIn("Spawn project agents", text)
+        for path in (self.READ, self.WRITE):
+            with self.subTest(procedure=path.name):
+                self.assertFalse(path.read_text(encoding="utf-8").startswith("---"),
+                                 "a procedure must not carry agent frontmatter")
 
     def test_read_client_refuses_environment_with_write_credential(self):
         completed = subprocess.run(
@@ -3366,54 +3397,51 @@ class AgentContractTests(unittest.TestCase):
                    client.ENV_READ_TOKEN: "r", "CONTEXT_MEMORY_WRITE_TOKEN_FILE": "/x"}
         self.assertEqual(client.write_tokens_present(environ), [])
 
-    def test_agents_and_orchestration_contract_exist(self):
-        read = (self.AGENTS / "memory-read.md").read_text(encoding="utf-8")
-        write = (self.AGENTS / "memory-write.md").read_text(encoding="utf-8")
+    def test_read_and_write_procedures_exist(self):
+        read = self.READ.read_text(encoding="utf-8")
+        write = self.WRITE.read_text(encoding="utf-8")
         skill = (HERE.parent / "SKILL.md").read_text(encoding="utf-8")
         for marker in ("lookup", "grounding", "ALSO IN STORE"):
             self.assertIn(marker, read)
         for stage in ("Preflight", "Redact", "Dedupe / derive links", "Atomicity check", "Write"):
             self.assertIn(stage, write)
+        self.assertIn("context_memory_client.py", write)
         self.assertIn("Where Each Step Runs", skill)
-        self.assertIn("Never call the store client", skill)
-        registration = (HERE.parents[2] / "agents" / "memory-write.md").read_text(encoding="utf-8")
-        self.assertIn("context_memory_client.py", registration)
-        self.assertNotIn("context_memory_read_client.py", registration)
+        self.assertIn("references/read-path.md", skill)
+        self.assertIn("references/write-path.md", skill)
 
     WRITE_STEP = "set -a && source ~/.mimisbrunnr/credentials && set +a"
 
-    @staticmethod
-    def _tools(text):
-        """The `tools:` block list of an agent file's frontmatter."""
-        front = text.split("---", 2)[1]
-        block = re.search(r"^tools:\n((?:[ \t]+-[^\n]*\n)+)", front, re.MULTILINE)
-        return [line.strip()[1:].strip() for line in block.group(1).splitlines()] if block else []
+    def test_the_write_path_writes_batches_with_the_file_tool(self):
+        """The capture procedure writes its batch file with the file tool — never `echo` or a heredoc
+        (issue 184). With no agent tool grant to rely on, the procedure itself must say so."""
+        text = " ".join(self.WRITE.read_text(encoding="utf-8").split())
+        self.assertIn("written with the file tool", text)
+        self.assertIn("never an `echo`/heredoc", text)
 
-    def test_both_write_registrations_grant_the_tool_the_capture_procedure_needs(self):
-        """The capture procedure has the worker write its batch file with the file tool — never `echo`
-        or a heredoc — but neither write registration granted `Write`, so a runtime honouring the grant
-        left the worker only the shell channels the procedure forbids (issue 184)."""
-        for path in (self.AGENTS / "memory-write.md", HERE.parents[2] / "agents" / "memory-write.md"):
-            with self.subTest(path=str(path)):
-                text = path.read_text(encoding="utf-8")
-                self.assertIn("Write", self._tools(text))
-                self.assertIn("Bash", self._tools(text))
-
-    def test_no_write_registration_assumes_the_write_credential_is_ambient(self):
-        """Both registrations said the runtime supplies both credentials, while the client seeds only
-        the read token and the write token is deliberately never ambient — so the worker had no step
-        that loads it (issue 184; issue 181's finding 31 again). Each must name the deliberate write
-        step, and that step must be the one the operator documentation gives."""
+    def test_the_write_path_loads_the_credential_only_around_the_write(self):
+        """The write token is never ambient (issue 184; issue 181's finding 31 again), and with no
+        separate write agent it must also never persist in the session's shell, where the read client
+        would then refuse to start (LADR-008). The step is the one SKILL.md documents, run in a subshell
+        around each write-route invocation (preflight, set, resolve-group, upsert-initiative,
+        update-group, append-description, create-link, propose-label, ticket-parent) — a single-write
+        wording would leave the other checkpoint writes without a credential."""
         # The skill's own SKILL.md, not the host repository's root README: a repository vendoring the
         # skill has its own README, so the old check passed here and failed in every consumer (issue 186).
         skill = " ".join((HERE.parent / "SKILL.md").read_text(encoding="utf-8").split())
-        self.assertIn(self.WRITE_STEP, skill, "the registrations must cite the documented step")
-        for path in (self.AGENTS / "memory-write.md", HERE.parents[2] / "agents" / "memory-write.md"):
-            with self.subTest(path=str(path)):
-                text = " ".join(path.read_text(encoding="utf-8").split())
-                self.assertNotRegex(text, r"(?i)runtime supplies both")
-                self.assertIn(self.WRITE_STEP, text)
-                self.assertIn("never ambient", text)
+        self.assertIn(self.WRITE_STEP, skill, "the write path must cite the documented step")
+        text = " ".join(self.WRITE.read_text(encoding="utf-8").split())
+        self.assertNotRegex(text, r"(?i)runtime supplies both")
+        self.assertIn(self.WRITE_STEP, text)
+        self.assertIn("never ambient", text)
+        self.assertIn("( " + self.WRITE_STEP, text, "the write step must run inside a subshell")
+        self.assertIn("subshell around each write-route invocation", skill)
+        self.assertIn("subshell around each write-route invocation", text)
+        agents = " ".join((HERE.parent / "AGENTS.md").read_text(encoding="utf-8").split())
+        self.assertIn("subshell around each", agents,
+                      "the AGENTS.md non-negotiable must carry the same each-invocation wording")
+        read = " ".join(self.READ.read_text(encoding="utf-8").split())
+        self.assertIn("subshell around each write-route invocation", read)
 
     def test_every_capture_procedure_removes_personal_data_before_the_first_file(self):
         """Issue 188, fixed as a class: the text at every site that writes a batch told the agent to clean
@@ -3423,8 +3451,7 @@ class AgentContractTests(unittest.TestCase):
         documents = {
             "SKILL.md": HERE.parent / "SKILL.md",
             "AGENTS.md": HERE.parent / "AGENTS.md",
-            "agents/memory-write.md": self.AGENTS / "memory-write.md",
-            "registration": HERE.parents[2] / "agents" / "memory-write.md",
+            "references/write-path.md": self.WRITE,
         }
         for name, path in documents.items():
             with self.subTest(document=name):
@@ -3446,8 +3473,7 @@ class AgentContractTests(unittest.TestCase):
         documents = {
             "SKILL.md": HERE.parent / "SKILL.md",
             "AGENTS.md": HERE.parent / "AGENTS.md",
-            "agents/memory-write.md": self.AGENTS / "memory-write.md",
-            "registration": HERE.parents[2] / "agents" / "memory-write.md",
+            "references/write-path.md": self.WRITE,
         }
         for name, path in documents.items():
             with self.subTest(document=name):
@@ -3461,7 +3487,7 @@ class AgentContractTests(unittest.TestCase):
         yet cannot run `set --dryrun`, and its payload cannot be the one the real write reuses. The
         initiative prerequisite applies on the create path only."""
         skill = " ".join((HERE.parent / "SKILL.md").read_text(encoding="utf-8").split())
-        worker = " ".join((self.AGENTS / "memory-write.md").read_text(encoding="utf-8").split())
+        worker = " ".join(self.WRITE.read_text(encoding="utf-8").split())
         agents = " ".join((HERE.parent / "AGENTS.md").read_text(encoding="utf-8").split())
         # Review 5430979214 #20: an existing group with no memories has no read-only `groupUuid`
         # either, so it gets the offline preview too, in both the skill and the worker.
@@ -3490,8 +3516,7 @@ class AgentContractTests(unittest.TestCase):
         unignored."""
         documents = {
             "SKILL.md": HERE.parent / "SKILL.md",
-            "agents/memory-write.md": self.AGENTS / "memory-write.md",
-            "registration": HERE.parents[2] / "agents" / "memory-write.md",
+            "references/write-path.md": self.WRITE,
         }
         for name, path in documents.items():
             with self.subTest(document=name):
@@ -3505,8 +3530,8 @@ class AgentContractTests(unittest.TestCase):
         bounded is where the copy can travel — the docs called the folder "gitignored", which only this
         repository's `.gitignore` makes true. Both procedures must have the folder ignore itself first."""
         skill = " ".join((HERE.parent / "SKILL.md").read_text(encoding="utf-8").split())
-        worker = " ".join((self.AGENTS / "memory-write.md").read_text(encoding="utf-8").split())
-        for name, text in (("SKILL.md", skill), ("memory-write.md", worker)):
+        worker = " ".join(self.WRITE.read_text(encoding="utf-8").split())
+        for name, text in (("SKILL.md", skill), ("write-path.md", worker)):
             with self.subTest(document=name):
                 self.assertIn("`.context/mimisbrunnr-scratch/.gitignore` holding", text)
                 self.assertRegex(text, r"\.gitignore` holding (the single line )?`\*`")
@@ -3524,7 +3549,7 @@ class AgentContractTests(unittest.TestCase):
         self.assertIn("`resolve-group`", flat)
         self.assertIn("Under `--dryrun` no group is resolved", flat)
         # The first pipeline stage of the worker contract comes after the resolution step.
-        worker = (self.AGENTS / "memory-write.md").read_text(encoding="utf-8")
+        worker = self.WRITE.read_text(encoding="utf-8")
         self.assertLess(worker.index("resolve-group"), worker.index("1. **Preflight**"))
 
 
@@ -4200,6 +4225,254 @@ class DirectionAliasTests(unittest.TestCase):
         readme = (HERE.parent / "README.md").read_text(encoding="utf-8")
         self.assertNotRegex(readme, r"(?i)both clients[^.\n]*`export`")
         self.assertIn("the read-only client accepts `import` only", readme)
+
+
+class SessionMarkerTests(unittest.TestCase):
+    """HLD-007 LADR-11: an odin import marks the working point; export cuts at it."""
+
+    ENV_NAMES = ("CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "OPENCODE_SESSION_ID",
+                 "COPILOT_AGENT_SESSION_ID", "PI_SESSION_ID")
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self._saved = {n: os.environ.get(n) for n in (*self.ENV_NAMES, "SESSION_MARKER_ROOT")}
+        for n in self.ENV_NAMES:
+            os.environ.pop(n, None)
+        os.environ["SESSION_MARKER_ROOT"] = self.tmp.name
+        self.addCleanup(self._restore)
+
+    def _restore(self):
+        for n, v in self._saved.items():
+            if v is None:
+                os.environ.pop(n, None)
+            else:
+                os.environ[n] = v
+
+    def _row(self, uuid, version=1, subject="Storage engine decision"):
+        return {"uuid": uuid, "groupUuid": "g-1", "version": version,
+                "description": subject, "statement": "Postgres stores the index."}
+
+    def _query(self, rows, **flags):
+        payload = {}
+        args = SimpleNamespace(payload=None, nomarker=flags.get("nomarker", False),
+                               session=flags.get("session"))
+        with patch.object(client, "read_payload", return_value=payload), \
+                patch.object(client, "_request", return_value={"items": rows}), \
+                redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as err:
+            client.cmd_query(args)
+        return err.getvalue()
+
+    def _set(self, items, **flags):
+        payload = {"groupUuid": "g-1", "items": items}
+        args = SimpleNamespace(payload=None, dryrun=True,
+                               export_all=flags.get("all", False), session=flags.get("session"))
+        sent = {}
+
+        def fake_request(method, path, body=None, query=None):
+            sent["body"] = body
+            return {"created": 1}
+
+        with patch.object(client, "read_payload", return_value=payload), \
+                patch.object(client, "_request", side_effect=fake_request), \
+                redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as err:
+            client.cmd_set(args)
+        return sent.get("body"), err.getvalue()
+
+    def test_query_marks_and_set_drops_the_echo(self):
+        os.environ["CLAUDE_CODE_SESSION_ID"] = "ses-odin-a"
+        err = self._query([self._row("mem-echo-1", 2)])
+        self.assertIn("Marker: set", err)
+        payload = {"groupUuid": "g-1", "items": [{"uuid": "mem-echo-1",
+                                "description": "Storage engine decision",
+                                "statement": "Postgres stores the index."}]}
+        args = SimpleNamespace(payload=None, dryrun=True, export_all=False, session=None)
+        with patch.object(client, "read_payload", return_value=payload), \
+                patch.object(client, "_request", return_value={"created": 1}), \
+                redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as err:
+            with self.assertRaises(client.ClientError) as raised:
+                client.cmd_set(args)
+        self.assertIn("excluded as echo", str(raised.exception))
+        self.assertIn("Boundary: marker", err.getvalue())
+
+    def test_set_all_ignores_the_marker(self):
+        os.environ["CLAUDE_CODE_SESSION_ID"] = "ses-odin-b"
+        self._query([self._row("mem-all-1", 1)])
+        body, err = self._set([{"uuid": "mem-all-1",
+                                "description": "Storage engine decision",
+                                "statement": "Postgres stores the index."}], all=True)
+        self.assertIsNotNone(body)
+        self.assertEqual(len(body["items"]), 1)
+        self.assertIn("Boundary: ignored (--all)", err)
+
+    def test_changed_imported_item_is_sent_as_a_supersession(self):
+        os.environ["CLAUDE_CODE_SESSION_ID"] = "ses-odin-c"
+        self._query([self._row("mem-ch-1", 1)])
+        body, err = self._set([{"uuid": "mem-ch-1",
+                                "description": "Storage engine v2",
+                                "statement": "CockroachDB now stores the index."}])
+        self.assertIsNotNone(body)
+        self.assertEqual(body["items"][0]["uuid"], "mem-ch-1")
+        self.assertIn("Supersession", err)
+
+    def test_nomarker_recall_flows_into_the_send(self):
+        os.environ["CLAUDE_CODE_SESSION_ID"] = "ses-odin-d"
+        err = self._query([self._row("mem-nm-1", 1)], nomarker=True)
+        self.assertIn("Marker: skipped (--nomarker", err)
+        body, err = self._set([{"uuid": "mem-nm-1",
+                                "description": "Storage engine decision",
+                                "statement": "Postgres stores the index."}])
+        self.assertIsNotNone(body, "a --nomarker recall is history, not an exclusion")
+        self.assertIn("Boundary: none", err)
+
+    def test_odin_send_ignores_the_kvasir_marker(self):
+        import session_marker as sm
+        os.environ["CLAUDE_CODE_SESSION_ID"] = "ses-odin-e"
+        sm.record_import("kvasir", "ses-odin-e", "claude-code", "import", False,
+                         [{"id": "mem-kv-1", "version": 1, "subject": "Kvasir Q?"}])
+        body, err = self._set([{"uuid": "mem-kv-1", "description": "Kvasir Q?",
+                                "statement": "Kvasir text."}])
+        self.assertIsNotNone(body)
+        self.assertEqual(len(body["items"]), 1)
+
+    def test_send_marks_the_receipt_and_a_repeat_echoes(self):
+        import session_marker as sm
+        os.environ["CLAUDE_CODE_SESSION_ID"] = "ses-odin-g"
+        payload = {"groupUuid": "g-1", "items": [{"createUuid": "new-id-1",
+                                                  "description": "Fresh claim",
+                                                  "statement": "CockroachDB stores it."}]}
+        args = SimpleNamespace(payload=None, dryrun=False, export_all=False, session=None)
+        with patch.object(client, "read_payload", return_value=payload), \
+                patch.object(client, "_request", return_value={"created": 1}), \
+                redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as err:
+            client.cmd_set(args)
+        self.assertIn("Marker: set (export,", err.getvalue())
+        marker = sm.load_marker("odin", "ses-odin-g")
+        self.assertEqual(marker["imports"][-1]["verb"], "export")
+        # Re-sending the same uuid + description is now an echo: refused, nothing sent.
+        again = {"groupUuid": "g-1", "items": [{"uuid": "new-id-1",
+                                                "description": "Fresh claim",
+                                                "statement": "CockroachDB stores it."}]}
+        with patch.object(client, "read_payload", return_value=again):
+            with self.assertRaises(client.ClientError):
+                client.cmd_set(SimpleNamespace(payload=None, dryrun=True, export_all=False,
+                                               session=None))
+
+    def test_send_nomarker_writes_but_marks_nothing(self):
+        import session_marker as sm
+        os.environ["CLAUDE_CODE_SESSION_ID"] = "ses-odin-h"
+        payload = {"groupUuid": "g-1", "items": [{"description": "Fresh claim",
+                                                  "statement": "CockroachDB stores it."}]}
+        args = SimpleNamespace(payload=None, dryrun=False, export_all=False,
+                               session=None, nomarker=True)
+        with patch.object(client, "read_payload", return_value=payload), \
+                patch.object(client, "_request", return_value={"created": 1}), \
+                redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as err:
+            client.cmd_set(args)
+        self.assertIn("Marker: skipped (--nomarker", err.getvalue())
+        self.assertIsNone(sm.load_marker("odin", "ses-odin-h"))
+
+    def test_dryrun_marks_nothing(self):
+        import session_marker as sm
+        os.environ["CLAUDE_CODE_SESSION_ID"] = "ses-odin-i"
+        payload = {"groupUuid": "g-1", "items": [{"description": "Fresh claim",
+                                                  "statement": "CockroachDB stores it."}]}
+        args = SimpleNamespace(payload=None, dryrun=True, export_all=False, session=None)
+        with patch.object(client, "read_payload", return_value=payload), \
+                patch.object(client, "_request", return_value={"created": 1}), \
+                redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as err:
+            client.cmd_set(args)
+        self.assertIn("Marker: skipped (nothing written)", err.getvalue())
+        self.assertIsNone(sm.load_marker("odin", "ses-odin-i"))
+
+    def test_nomarker_combines_with_approve_orthogonally(self):
+        # Q2: --approve governs write status, --nomarker governs kept state. An approved
+        # gated-kind payload with --nomarker still writes (as approved) but marks nothing.
+        import session_marker as sm
+        os.environ["CLAUDE_CODE_SESSION_ID"] = "ses-odin-j"
+        payload = {"groupUuid": "g-1", "items": [{"description": "Release rule",
+                                                  "statement": "Freeze on Fridays.",
+                                                  "kind": "rule",
+                                                  "status": "approved"}]}
+        args = SimpleNamespace(payload=None, dryrun=False, export_all=False,
+                               session=None, nomarker=True)
+        sent = {}
+        with patch.object(client, "read_payload", return_value=payload), \
+                patch.object(client, "_request",
+                             side_effect=lambda m, p, b=None, query=None: sent.update(body=b) or {"created": 1}), \
+                redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as err:
+            client.cmd_set(args)
+        self.assertEqual(sent["body"]["items"][0]["status"], "approved")
+        self.assertIn("Marker: skipped (--nomarker", err.getvalue())
+        self.assertIsNone(sm.load_marker("odin", "ses-odin-j"))
+
+    def test_receipt_prefers_server_confirmed_uuids(self):
+        # Finding 3: a create without a caller uuid used to go unrecorded.
+        import session_marker as sm
+        os.environ["CLAUDE_CODE_SESSION_ID"] = "ses-odin-k"
+        payload = {"groupUuid": "g-1", "items": [{"description": "Fresh claim",
+                                                  "statement": "CockroachDB stores it."}]}
+        args = SimpleNamespace(payload=None, dryrun=False, export_all=False, session=None)
+        answer = {"created": 1, "items": [{"uuid": "srv-uuid-1", "versioned": False}]}
+        with patch.object(client, "read_payload", return_value=payload), \
+                patch.object(client, "_request", return_value=answer), \
+                redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            client.cmd_set(args)
+        marker = sm.load_marker("odin", "ses-odin-k")
+        ids, _, _, _ = sm.exclusion_set(marker)
+        self.assertIn("srv-uuid-1", ids)
+
+    def test_receipt_falls_back_when_the_response_is_not_positional(self):
+        import session_marker as sm
+        os.environ["CLAUDE_CODE_SESSION_ID"] = "ses-odin-m"
+        payload = {"groupUuid": "g-1", "items": [{"createUuid": "cli-uuid-9",
+                                                  "description": "Fresh claim",
+                                                  "statement": "CockroachDB stores it."}]}
+        args = SimpleNamespace(payload=None, dryrun=False, export_all=False, session=None)
+        answer = {"created": 1, "items": []}
+        with patch.object(client, "read_payload", return_value=payload), \
+                patch.object(client, "_request", return_value=answer), \
+                redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            client.cmd_set(args)
+        marker = sm.load_marker("odin", "ses-odin-m")
+        ids, _, _, _ = sm.exclusion_set(marker)
+        self.assertIn("cli-uuid-9", ids)
+
+    def test_success_shaped_zero_write_answer_records_nothing(self):
+        # A 200 that reports created 0 / versioned 0 persisted nothing: the marker
+        # follows that receipt, not the request's own createUuid.
+        import session_marker as sm
+        os.environ["CLAUDE_CODE_SESSION_ID"] = "ses-odin-z"
+        payload = {"groupUuid": "g-1", "items": [{"createUuid": "cli-uuid-0",
+                                                  "description": "Fresh claim",
+                                                  "statement": "CockroachDB stores it."}]}
+        args = SimpleNamespace(payload=None, dryrun=False, export_all=False, session=None)
+        answer = {"created": 0, "versioned": 0, "skipped": 1, "items": []}
+        with patch.object(client, "read_payload", return_value=payload), \
+                patch.object(client, "_request", return_value=answer), \
+                redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as err:
+            client.cmd_set(args)
+        self.assertIn("Marker: skipped (nothing written)", err.getvalue())
+        self.assertIsNone(sm.load_marker("odin", "ses-odin-z"))
+
+    def test_each_harness_env_var_resolves_in_isolation(self):
+        import session_marker as sm
+        for name in self.ENV_NAMES:
+            for other in self.ENV_NAMES:
+                os.environ.pop(other, None)
+            os.environ[name] = "ses-odin-env"
+            sid, harness = sm.resolve_session(None)
+            self.assertEqual(sid, "ses-odin-env", name)
+            self.assertTrue(harness)
+
+    def test_marker_holds_references_never_content(self):
+        import session_marker as sm
+        os.environ["CLAUDE_CODE_SESSION_ID"] = "ses-odin-f"
+        self._query([self._row("mem-ref-1", 1)])
+        raw = Path(self.tmp.name, "odin-ses-odin-f.json").read_text(encoding="utf-8")
+        self.assertNotIn("Postgres stores the index", raw)
+        data = json.loads(raw)
+        self.assertEqual(data["type"], "odin")
 
 
 if __name__ == "__main__":

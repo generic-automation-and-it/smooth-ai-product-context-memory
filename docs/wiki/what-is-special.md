@@ -3,7 +3,8 @@
 Compares Mímisbrunnr against guidance projects researched during the MVP
 (MemOS, ICM Architect, Utopia, MegaMemory, OpenViking, holoself) and the
 wider session-memory / second-brain landscape (mem0, Zep/Graphiti, Letta,
-Cognee, LangMem, Supermemory, OpenMemory, Obsidian). Researched 2026-10-13.
+Cognee, LangMem, Supermemory, OpenMemory, CortexDB, OKF Agent Memory,
+Obsidian). Researched 2026-10-13; CortexDB and OKF added 2026-10-14.
 
 ## Guidance projects (compared feature-by-feature in-session)
 
@@ -32,6 +33,8 @@ both since delivered). Utopia is recorded as the local Understanding
 | [langchain-ai/langmem](https://github.com/langchain-ai/langmem) | LangGraph memory toolkit | Bring-your-own store | Hot-path tools + background manager | Namespaced semantic search | Agent-managed create/update | Library. MIT |
 | [supermemoryai/supermemory](https://github.com/supermemoryai/supermemory) | Memory+context engine/API | Hosted graph + Postgres | Auto extract + connectors | Hybrid `search()`+`profile()` | Auto supersede/expire | Multi-user/app. MIT repo |
 | [mem0ai/openmemory](https://github.com/mem0ai/openmemory) | Session porter for coding CLIs | Local session files | `port --from/--to` | TUI list, no semantic search | Selective re-export | Single-dev. MIT |
+| [liliang-cn/cortexdb](https://github.com/liliang-cn/cortexdb) | Embedded memory + knowledge-graph library (Go) | One SQLite file (or Postgres+pgvector); RDF/SPARQL graph | Explicit `remember` + optional auto session distillation by a model | FTS5 + vector + hybrid + graph, auto-recall hook; lexical mode without embeddings | Replace by slug; outdated memories marked superseded, kept | Local file or shared gRPC brain. MIT |
+| [okf-memory/okf-agent-memory](https://github.com/okf-memory/okf-agent-memory) | Git-native agent memory on the OKF v0.2 format | Markdown+YAML bundle in repo, no DB | Agent writes via CLI/skill, search-before-write, `generated`/`verified` trust tiers | In-memory BM25 + link graph, scope shadowing | `okf update` in place; history via git | Project/vendor/user/system layers, optional encrypted hub sync. MIT |
 | [Obsidian](https://obsidian.md/) | Human second brain, local-first notes | Markdown vault on device | Human writes | Keyword search, human browses `[[links]]`/graph/canvas | File edits, 1-yr history via paid Sync | Single human; E2EE Sync + Publish paid. Proprietary |
 
 Complementary, not competing: Obsidian serves human thinking, the well serves
@@ -70,3 +73,9 @@ Mímisbrunnr is the opposite on each axis — every row a recorded decision:
 11. **One machine, one practitioner, honest limits.** See README
     *Where Mímisbrunnr loses*: no multi-tenant, no real-time multi-agent,
     lexeme-AND not semantic, cross-group dup invisible, nothing deletable.
+12. **Session markers on import and export.** A deliberate import or a successful
+    export marks the session's working point (client-side, ids only, per skill); a
+    default export is a delta since the last marker, so imported or already-exported
+    knowledge is never re-proposed. `export --all` ignores the marker, `--nomarker`
+    leaves it untouched (HLD-007 LADR-11). Rivals deduplicate after the fact; Mímisbrunnr
+    removes the echo before preflight.

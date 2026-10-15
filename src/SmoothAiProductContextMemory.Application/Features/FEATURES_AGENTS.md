@@ -78,7 +78,7 @@ sequenceDiagram
     else write
         Handler->>Blob: StoreAsync (before tx)
         Handler->>Db: tx flip is_current, insert memories, then AGE links
-        Handler-->>Skill: digest with uuid + blobAddress
+        Handler-->>Skill: digest with uuid + blobAddress (created/versioned/unchanged)
     end
     Skill->>Host: POST /api/context/query
     Host->>Handler: QueryMemories
@@ -158,12 +158,23 @@ sequenceDiagram
 - A `set` request accepts at most 200 items; larger batches are a `400` — the write-side sibling of the read `limit` cap.
 - A `set` request accepts at most 400 links, and each link reason is capped at 4000 characters; larger values are a `400` on dry-run and write.
 - `asOf` narrows to claims valid at a business-time instant. Absent means no temporal narrowing.
-- API digest is a persist receipt: `created` / `versioned` / `linked` / `diverged` / `skipped` / `labelsProposed`; `diverged` is a mechanical count of newly created divergence-kind records. Skill composes the human digest.
+- API digest is a persist receipt: `created` / `versioned` / `unchanged` / `linked` / `diverged` / `skipped` / `labelsProposed`; `diverged` is a mechanical count of newly created divergence-kind records. Skill composes the human digest.
 - API persists `status` as given — no re-gate by kind.
 - **Subject uniqueness is checked before the write, not only by the index.** A create whose `subject_slug` already exists in the group is a `409` telling the caller to send a version bump — on the dry run too. Two items in one batch sharing a subject is the same `409`.
 - **Repeated version targets are ordered, not rejected.** They support BR-10 authority resolution in one
   transaction: an existing winner can retain the incoming loser as an intermediate historical version,
   then become current again. Planned version numbers and persistence order must remain identical.
+- **An identical version is a no-op.** Re-sending the current claim — same statement, summary, kind,
+  status, confidence, sources, valid-until and content address — plans `ItemMode.Unchanged`: no row, no
+  blob upload, no `is_current` flip, and the receipt reports `unchanged`. The comparer is `MemoryClaim`
+  (Application), D1: `ValidFrom` and `SummaryStamp` are deliberately outside the claim because kvasir
+  restamps `validFrom` each run, so a re-export on a later day still writes nothing. Accepted costs,
+  recorded with D1: a `ValidFrom`-only correction can no longer be a version; a version item differing
+  only in name/description/tags/facets reports `Unchanged` (those were already ignored on a version, so
+  the report is now honest). Accepted concurrency: the plan reads the current version before the
+  transaction, so a concurrent bump between plan and commit is not detected for an unchanged item — the
+  caller's claim equals the version it saw, and the other writer's version stands. A status change or any
+  single claim-field change is a real version.
 - **A version target is group-scoped; a link endpoint is deliberately not.** `MemoryWrite.Uuid` is resolved
   against the request's group, so another group's memory is a `404` — cross-group subject matches are
   written as a new memory here, never as a version bump. `externalUuids` are intentionally corpus-wide so
@@ -225,6 +236,7 @@ sequenceDiagram
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-14 | `SetMemories` now compares an incoming version target's claim against the claim it would follow; an identical re-send plans `ItemMode.Unchanged` and writes no row (D1: `ValidFrom`/`SummaryStamp` outside the claim; `MemoryClaim` comparer). `Response`/`ItemResult` gained `unchanged`; `IBlobStorage`'s content address documented as `ContentAddress.Compute`. | version-bug |
 | 2026-10-13 | Memory validity, provenance, capture, recall-feedback and snapshot times are `Instant` values. `InstantJson` accepts ISO-8601 Z/explicit-offset inputs, converts immediately to absolute instants, emits canonical UTC Z, and rejects date-only/unzoned values. JSONB, snapshots and traversal deserialization share it. | HLD-001 LADR-05; UTC instant write fix |
 | 2026-09-28 | **Corrected the preflight description this file added earlier the same day.** The rows below described preflight's group-unfiltered subject query as an *outstanding half* that "should carry the same group filter", and called the preflight/`SetMemories` disagreement a live seam. Both claims are wrong, and the first was an instruction to break something. `Preflight` judges nothing — it returns `Match` rows carrying both `Uuid` and `GroupUuid`, so the caller holds everything needed to classify; the only site that emits a `version_bump` target is the skill's semantic-dedup Judge, which already qualifies it by the request's `groupUuid`. The asymmetric recall is therefore the **design**: a same-subject memory in another group is what the caller needs to see in order to link the twin, and the group constraint lives on the versioning target, one step downstream. Group-filtering the subject query would remove cross-group link derivation and push that work onto `/query` for no correctness gain. Residual risk is a model misjudging group membership, and that fails safe — `BuildPlanAsync` throws before `PersistAsync`, so the batch aborts with no blob and no row touched, and `--dryrun` is the pre-write veto. Both bullets now carry a do-not-narrow it clause for the same reason the skill's stage-3 wording does. No behaviour changed. | PR #135 |
 | 2026-09-28 | Memory identity **decided: group-scoped**, making the shipped code authoritative over HLD-002 rather than the reverse. Goal 2, LADR-01 and LADR-04 are amended to state `(group, uuid)` identity, and NFR-02's cross-group evidence is **withdrawn** (unproducible by the shipped path) with its status line saying so. The accepted cost is recorded: a cross-group duplicate is invisible to the store. **Still open and now the operationally significant half:** `Preflight` matches subjects across all groups while `SetMemories` refuses a cross-group uuid, so the pre-write veto point can recommend a versioning candidate the write then `404`s. No behaviour changed. | HLD-002 LADR-01, LADR-04, NFR-02 |

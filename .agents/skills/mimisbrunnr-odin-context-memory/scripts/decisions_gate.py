@@ -30,6 +30,7 @@ Python 3.9+, stdlib only.
 """
 
 import argparse
+import datetime
 import hashlib
 import json
 import math
@@ -868,6 +869,16 @@ def write_ledger(state_file, ledger):
     os.replace(temp, path)
 
 
+def has_subject(record):
+    """True when the record carries a durable identity: `subject`, else `description`, else `name`.
+
+    The one subject test in this file. `record_identity` keys on it, and the score loop
+    persists a ledger budget only for it — a record with none of those is keyed by batch
+    position and its budget is for the current call only.
+    """
+    return bool(record.get("subject") or record.get("description") or record.get("name"))
+
+
 def record_identity(record, index):
     """A stable identity for a record across rewrites.
 
@@ -876,11 +887,11 @@ def record_identity(record, index):
     treats as the record's identity (the store keys uniqueness on `subject_slug`), so it survives a
     rewrite while a genuinely different record gets its own budget.
     """
-    subject = record.get("subject") or record.get("description") or record.get("name")
-    if not subject:
+    if not has_subject(record):
         # A record with no subject cannot be identified across attempts, so it is keyed by position
         # and gets the budget for this call only — reported, so the caller knows it is not durable.
         return f"index:{index}"
+    subject = record.get("subject") or record.get("description") or record.get("name")
     # A memory is `(group, subject)`, not the subject alone: the same subject captured for two groups is
     # two memories. Keying by subject alone made them share one attempt budget, so scoring one spent the
     # other's (issue 186). The group is `groupUuid` when the caller has it, else `group` — whatever
@@ -890,6 +901,54 @@ def record_identity(record, index):
     if group:
         return json.dumps({"group": group, "subject": str(subject)}, sort_keys=True, ensure_ascii=False)
     return str(subject)
+
+
+def positional_ledger_keys():
+    """Every ledger key a subject-less record could have written.
+
+    `record_identity` keys such a record `index:N`; `ledger_key` hashes it before it
+    reaches the file. These keys can only exist because of that bug, so a ledger
+    load drops them.
+    """
+    return {ledger_key(f"index:{n}") for n in range(MAX_LEDGER_ENTRIES)}
+
+
+def purge_positional_entries(ledger):
+    """Drop bug-written `index:N` entries. Returns `(ledger, purged)`.
+
+    Never prints a key: a digest is still an identifier, and the count is the signal.
+    """
+    if not ledger:
+        return ledger, 0
+    doomed = positional_ledger_keys()
+    purged = sum(1 for key in ledger if key in doomed)
+    if purged:
+        ledger = {key: value for key, value in ledger.items() if key not in doomed}
+    return ledger, purged
+
+
+def quarantine_unreadable_ledger(state_file):
+    """Move an unreadable ledger aside for inspection. Best effort, never fatal.
+
+    Same rule as the session marker's corrupt-file quarantine: a reset says the budgets
+    restart, but the old bytes may be worth forensics, so they stay next to the fresh
+    file instead of being replaced silently. Returns the aside path, or None when there
+    was nothing to move (missing file, a directory, or an unmovable path).
+    """
+    path = ledger_path(state_file)
+    if not path.is_file():
+        return None
+    aside = path.with_name(
+        path.name + ".corrupt-"
+        + datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ"))
+    try:
+        os.replace(path, aside)
+    except OSError:
+        return None
+    print(f"WARNING: attempt ledger {path} unreadable; moved aside to {aside} "
+          f"and starting fresh (earlier attempt budgets no longer apply).",
+          file=sys.stderr)
+    return aside
 
 
 def next_attempt(state_file, identity, max_attempts):
@@ -1006,7 +1065,35 @@ def cmd_score(args):
     results = []
     ledger_reset = False
     ledger_evicted = 0
+    ledger_index_purged = 0
+    if args.state_file:
+        # Repair pass (idempotent): entries keyed by batch position can only exist because
+        # subject-less records used to persist their `index:N` identity. Drop them
+        # before scoring so a pre-spent position is scorable again, and report the
+        # count (never the keys) beside `ledgerEvicted`.
+        _ledger, _discarded, _migrated = read_ledger(args.state_file)
+        _ledger, _purged = purge_positional_entries(_ledger)
+        ledger_reset = _discarded
+        ledger_index_purged = _purged
+        if _purged or _migrated or _discarded:
+            if _discarded:
+                quarantine_unreadable_ledger(args.state_file)
+            capped = cap_ledger(_ledger)
+            ledger_evicted += len(_ledger) - len(capped)
+            try:
+                write_ledger(args.state_file, capped)
+            except OSError:
+                # The path is unreadable or unwritable (a directory, permissions). The
+                # ledger already reads as discarded, so scoring continues with an empty
+                # in-memory ledger — subject-less records never needed the file, and a
+                # durable record surfaces the same failure on its own write as before.
+                pass
     for index, (original, state) in enumerate(zip(records, redacted)):
+        identity = record_identity(original, index)
+        # A subject-less record keeps `index:N` for reporting but never touches the
+        # persistent ledger: it is scored as a first attempt every call, the same
+        # branch the code already uses when there is no ledger at all.
+        durable = has_subject(original)
         oversize = size_guard(state, roles, settings["model"])
         if oversize:
             # `discrimination` is disclosed on every record, not only the scored ones: a consumer
@@ -1014,33 +1101,36 @@ def cmd_score(args):
             # reason about. There is no score here, so the value is the zero a failed round already
             # reports rather than a computed margin that would look like a measurement.
             results.append({
-                "index": index, "identity": record_identity(original, index), "attempt": 0,
+                "index": index, "identity": identity, "attempt": 0,
                 "outcome": "oversize", "detail": oversize, "scores": {}, "passingRoles": [],
                 "passed": False, "best": None, "discrimination": {"margin": 0.0, "tied": []},
+                "durable": durable,
             })
             continue
 
-        if args.state_file:
+        if args.state_file and durable:
             attempt, this_reset, prior_best, evicted = next_attempt(args.state_file,
-                                                                    record_identity(original, index),
+                                                                    identity,
                                                                     settings["max_attempts"])
             ledger_evicted += evicted
             # One reset anywhere in the batch is reported, since it is one file and one bound.
             ledger_reset = ledger_reset or this_reset
             if attempt is None:
                 results.append({
-                    "index": index, "identity": record_identity(original, index),
+                    "index": index, "identity": identity,
                     "attempt": settings["max_attempts"], "outcome": "attempts-exhausted",
                     "detail": f"the {settings['max_attempts']}-attempt budget is spent for this record",
                     "scores": {}, "passingRoles": [], "passed": False, "best": None,
                     # Same disclosure as an oversize or a failed round: the field is always present, so
                     # a consumer reading it never has to special-case the record that was held.
                     "discrimination": {"margin": 0.0, "tied": []},
+                    "durable": durable,
                 })
                 continue
         else:
             # No ledger, so no budget and no cross-round comparison: every round is a first round,
-            # which is why `prior_best` is None rather than read from anywhere.
+            # which is why `prior_best` is None rather than read from anywhere. A subject-less
+            # record with a ledger takes this branch too: its budget is not durable.
             attempt = 1
             prior_best = None
 
@@ -1048,9 +1138,10 @@ def cmd_score(args):
             scores, passing, version = call_model(state, roles, settings, rubric_version)
         except GateError as exc:
             results.append({
-                "index": index, "identity": record_identity(original, index), "attempt": attempt,
+                "index": index, "identity": identity, "attempt": attempt,
                 "outcome": exc.outcome, "detail": exc.detail, "scores": {}, "passingRoles": [],
                 "passed": False, "best": None, "discrimination": {"margin": 0.0, "tied": []},
+                "durable": durable,
             })
             continue
 
@@ -1058,15 +1149,15 @@ def cmd_score(args):
                         {"attempt": attempt, "scores": scores, "max": max(scores.values())})
         # Persist only once a score exists, so a failed round leaves the best untouched while still
         # having spent its attempt above.
-        if args.state_file:
-            stored, evicted = record_attempt(args.state_file, record_identity(original, index),
+        if args.state_file and durable:
+            stored, evicted = record_attempt(args.state_file, identity,
                                              attempt, scores)
             ledger_evicted += evicted
         else:
             stored = best
         margin, tied = discrimination(scores)
         results.append({
-            "index": index, "identity": record_identity(original, index), "attempt": attempt,
+            "index": index, "identity": identity, "attempt": attempt,
             "outcome": "scored", "rubricVersion": version, "scores": scores,
             "passingRoles": passing, "passed": bool(passing),
             # How decisively one role beat the field. Disclosed because `passingRoles` alone
@@ -1078,6 +1169,8 @@ def cmd_score(args):
             # rewrite actually improved on the source, which is the thing an agent rewriting to pass
             # needs to know and cannot infer from `best` alone.
             "best": stored, "bestThisRound": best is not prior_best,
+            # A subject-less record is scored every call; its budget is not durable.
+            "durable": durable,
         })
 
     payload = {
@@ -1096,6 +1189,9 @@ def cmd_score(args):
         # Always present with a ledger: an evicted entry is a record whose spent budget was forgotten,
         # so the count says how many budgets this run restarted.
         payload["ledgerEvicted"] = ledger_evicted
+        # Entries dropped by the positional-index migration above: they could only exist
+        # because of this bug, and their removal makes a pre-spent position scorable again.
+        payload["ledgerIndexPurged"] = ledger_index_purged
         if ledger_reset:
             # Said plainly, because a cleared ledger means every record's attempt budget starts again
             # — so an `attempt: 1` here is not evidence that this record is new.

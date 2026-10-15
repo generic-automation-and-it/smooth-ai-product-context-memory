@@ -20,10 +20,10 @@ so the same word means the same direction in both skills (LADR-11) — the previ
         binding recorded as structured metadata beside it. An export, not a write; redacted before it
         reaches disk, and the folder name is reported so another session can discover it.
 
-    export <input> [--write] [binding]                          # the live store
+    export <input> [--dryrun] [binding]                         # the live store
         Orchestrate the capture skill end to end: redaction gate, atomicity gate, batch cap, group
-        resolution, preflight, and `set --dryrun` as the veto point. A dry run by default, and a dry
-        run creates no initiative, no group and no memory. `--write` performs the capture.
+        resolution, preflight, and `set --dryrun` as the veto point, then write. `--dryrun` stops
+        before anything is written: it creates no initiative, no group and no memory.
 
 The old `import <input> --store` spelling — which prepared a capture payload — is now `export`, and
 the old spelling prints a deprecation rather than being silently repurposed.
@@ -46,6 +46,8 @@ import subprocess
 import sys
 import uuid
 from pathlib import Path
+
+import session_marker as _marker
 
 KIND_UNDERSTANDING = "understanding"
 DUMP_MARKER = ".mimisbrunnr-kvasir-understanding-dump"
@@ -676,7 +678,7 @@ def cmd_load(args: argparse.Namespace) -> int:
     material = read_material(src, args.format)
     if isinstance(material, int):
         return material
-    src, _, records, body, notes = material
+    src, source_kind, records, body, notes = material
 
     lines = ["# Loaded material — cited grounding context", ""]
     lines += [f"- {note}" for note in notes]
@@ -695,6 +697,7 @@ def cmd_load(args: argparse.Namespace) -> int:
                          "it was not used.")
     lines += ["", DATA_NOTICE]
     print("\n".join(lines))
+    _mark_import(args, "load", records, source_kind)
     return 0
 
 
@@ -896,7 +899,7 @@ def cmd_import(args: argparse.Namespace) -> int:
         print("DEPRECATED: `import <input> --store` prepared a capture payload. That direction is "
               "now `export`; `import` reads the store INTO the session. Nothing was written.\n"
               "  to review:  understanding_client.py export <input>\n"
-              "  to capture: understanding_client.py export <input> --write",
+              "  to capture: understanding_client.py export <input>",
               file=sys.stderr)
         return 1
     if args.heimdallr is not None:
@@ -904,7 +907,7 @@ def cmd_import(args: argparse.Namespace) -> int:
               "what the caller passes, so a session on a ticketed branch recalls the whole "
               "initiative. It is an `export`/`dump` switch. Nothing was written.\n"
               "  to review:  understanding_client.py export <input>\n"
-              "  to capture: understanding_client.py export <input> --write\n"
+              "  to capture: understanding_client.py export <input>\n"
               "  to dump:    understanding_client.py dump --currentsession --from <session-summary-file|->",
               file=sys.stderr)
         return 1
@@ -941,6 +944,7 @@ def cmd_import(args: argparse.Namespace) -> int:
         print("NO RECORDS MATCHED: the store answered, and there is nothing under these filters. "
               "This is an empty result, not a failure — widen the filters (`--all`, drop `--query`) "
               "if you expected memory.")
+        _mark_import(args, "import", [], "store-export", selector=filters)
         return 0
 
     lines = ["# Recalled from the store — cited grounding context", ""]
@@ -954,6 +958,7 @@ def cmd_import(args: argparse.Namespace) -> int:
                               max_chars=args.max_chars)
         lines += ["", DATA_NOTICE]
     print("\n".join(lines))
+    _mark_import(args, "import", records, "store-export", selector=filters)
     return 0
 
 
@@ -1123,7 +1128,7 @@ def probe_decisions(count: int) -> str:
     """The dry-run counterpart of `gate_decisions`: check the gate without scoring anything.
 
     Scoring spends each record's attempt budget in the gate's ledger, so a dry run that scored
-    exhausted it: after three previews a `--write` saw `attempts-exhausted` for every record, which
+    exhausted it: after three previews a write saw `attempts-exhausted` for every record, which
     keeps the record unscored — the gate bypassed by previewing it (issue 182). `probe` checks the
     configuration, endpoint and model with a content-free request and writes no ledger. A
     misconfigured gate is still a refusal here, so the dry run says what the write would say.
@@ -1136,14 +1141,14 @@ def probe_decisions(count: int) -> str:
     if os.environ.get(DECISIONS_ENABLED, "").lower() != "true":
         return "decisions: disabled"
     if not DECISIONS_GATE.is_file():
-        print(f"NOTE: the decision gate is enabled but {DECISIONS_GATE} is missing; a --write would "
+        print(f"NOTE: the decision gate is enabled but {DECISIONS_GATE} is missing; a write would "
               "skip it.", file=sys.stderr)
         return "decisions: skipped (gate script missing)"
     if not (DECISIONS_GATE.parent / "redact.py").is_file():
         print(_GATE_REDACTOR_REFUSAL, file=sys.stderr)
         return DECISIONS_REFUSED
     not_scored = (f"decisions: not scored (dry run; scoring spends the gate's attempt budget) — "
-                  f"a --write scores {count} candidate(s) and may hold some")
+                  f"a write scores {count} candidate(s) and may hold some")
     try:
         proc = subprocess.run(
             [sys.executable, "-B", str(DECISIONS_GATE), "probe"],
@@ -1172,17 +1177,20 @@ def probe_decisions(count: int) -> str:
         return "decisions: disabled"
     if outcome == "ok":
         return f"{not_scored}; gate probe ok"
-    return f"{not_scored}; gate probe: {outcome or 'unreadable'} — a --write would skip the gate"
+    return f"{not_scored}; gate probe: {outcome or 'unreadable'} — a write would skip the gate"
 
 
 def _ledger_disclosures(report: dict) -> list[str]:
     """Stderr lines for the gate's attempt-ledger disclosures; fixed wording and a count only.
 
-    `ledgerReset` (a prose string when the ledger was unreadable and started empty) and
-    `ledgerEvicted` (entries the 5000-entry cap dropped) both mean a spent attempt budget was
-    forgotten, so an exhausted record could be scored again. Reading only the verdicts lost both
-    (issue 182). The gate's reset text is not echoed: the fact is what matters, and a value this
-    client cannot interpret is ignored rather than trusted or crashed on.
+    `ledgerReset` (a prose string when the ledger was unreadable and started empty),
+    `ledgerEvicted` (entries the 5000-entry cap dropped) and `ledgerIndexPurged`
+    (positional `index:N` entries left by the subject-less ledger bug) all mean a spent
+    attempt budget was forgotten, so an exhausted record could be scored again. Reading
+    only the verdicts lost the first two (issue 182); the third is the migration that
+    makes a pre-spent batch position scorable again. The gate's reset text is not
+    echoed: the fact is what matters, and a value this client cannot interpret is
+    ignored rather than trusted or crashed on.
     """
     lines = []
     reset = report.get("ledgerReset")
@@ -1194,6 +1202,11 @@ def _ledger_disclosures(report: dict) -> list[str]:
         noun = "entry" if evicted == 1 else "entries"
         lines.append(f"decisions: attempt ledger evicted {evicted} {noun} past its cap; those "
                      "records' attempt budgets restart")
+    purged = report.get("ledgerIndexPurged")
+    if isinstance(purged, int) and not isinstance(purged, bool) and purged > 0:
+        noun = "entry" if purged == 1 else "entries"
+        lines.append(f"decisions: attempt ledger dropped {purged} positional index {noun} left by "
+                     "a prior bug; those positions are scorable again")
     return lines
 
 
@@ -1496,7 +1509,7 @@ def initiative_exists(name: str) -> tuple[bool, str]:
     Reads the collection under **every** name the endpoint might use (`items`, `initiatives`, or a
     bare array) rather than one. Guessing wrong here is not a cosmetic miss: it reports a live
     initiative as absent, and the consequence is a dry run that prints a spurious `would create` and a
-    `--write` that refuses against a store that already has it.
+    write that refuses against a store that already has it.
     """
     if name == "to-be-decided":
         return True, "the seeded default sentinel needs no upsert"
@@ -1564,7 +1577,7 @@ def preflight_match_count(preflight_output: str) -> int:
     """Number of candidates the preflight matched to an existing memory (across any group).
 
     A dry run has no resolved group, so it cannot say which matches are in the export's group — hence a
-    count, not a version/new split. The receipt uses it to disclose that a ``--write`` would version
+    count, not a version/new split. The receipt uses it to disclose that a write would version
     those whose match is in the export's group.
     """
     try:
@@ -1874,7 +1887,7 @@ def _handle_cross_kind_409(items: list[dict], candidates: list[dict], group_uuid
 
 
 def cmd_export(args: argparse.Namespace) -> int:
-    """SESSION -> STORE. Orchestrate the capture path; write nothing unless `--write`.
+    """SESSION -> STORE. Orchestrate the capture path and write; `--dryrun` writes nothing.
 
     The order is the capture skill's, and every stage is a gate rather than a step: the redaction and
     atomicity gates run first and can hold candidates back, an over-cap batch auto-splits into
@@ -1890,9 +1903,9 @@ def cmd_export(args: argparse.Namespace) -> int:
         # The newest dump in a shared workspace may be another session's; capturing it would write that
         # session's material under its own recorded binding. Only a dump that records the current
         # session id ("session"), or an explicit input, may be written; the rest are review-only.
-        print(f"REFUSED: --write needs an explicit input. The defaulted dump ({src}) may belong to "
-              "another session; re-run with --input <that folder> --write to capture it. Nothing was "
-              "written.", file=sys.stderr)
+        print(f"REFUSED: writing needs an explicit input. The defaulted dump ({src}) may belong to "
+              "another session; re-run with --input <that folder> to capture it, or add --dryrun to "
+              "preview it. Nothing was written.", file=sys.stderr)
         return 1
     material = read_material(src, "auto")
     if isinstance(material, int):
@@ -1950,12 +1963,23 @@ def cmd_export(args: argparse.Namespace) -> int:
               + "; an explicit flag overrides it.")
 
     print(f"EXPORT PREPARED from {src} ({source_kind}) — via mimisbrunnr-odin-context-memory, the sole writer.")
+    marker, boundary = _export_boundary(args)
+    print(boundary)
+    if marker is not None:
+        candidates, echo_dropped, supersessions = _apply_marker_exclusions(candidates, marker)
+        if echo_dropped:
+            print(f"Excluded {echo_dropped} echo candidate(s) imported earlier in this session "
+                  f"(not re-proposed).")
+        for candidate in supersessions:
+            print(f"Supersession: '{_subject(candidate)}' changes imported "
+                  f"{candidate.get('_supersedes')} — exported as a version bump, never dropped.")
     for note in notes:
         print(note)
     for note in skips:
         print(note)
     if not candidates:
         print("Nothing to export: no candidate carried a usable claim. Nothing was written.")
+        _mark_export_receipt(args, [])
         return 1
 
     if not reconcile_source_scope(candidates, binding):
@@ -2100,9 +2124,10 @@ def cmd_export(args: argparse.Namespace) -> int:
               "(--tickets/--tags/--repository/--scope/--initiative).")
     if not clean:
         # Every candidate was held back by the atomicity gate: there is no writable batch. Stopping
-        # here also means a `--write` does not create a group for nothing.
+        # here also means a write does not create a group for nothing.
         print("Nothing to capture: every candidate was held back by the atomicity gate. "
               "Nothing was written.", file=sys.stderr)
+        _mark_export_receipt(args, [])
         return 1
 
     group, group_state = resolve_group(binding, args.name, args.body, dryrun=not args.write)
@@ -2129,7 +2154,7 @@ def cmd_export(args: argparse.Namespace) -> int:
                 and binding["initiative"] != "to-be-decided"):
             print(f"NOTE: tickets resolve first — if they hit an existing group under "
                   f"another initiative, the bound initiative '{binding['initiative']}' is "
-                  f"ignored and --write refuses; drop it to capture there, re-bind for a "
+                  f"ignored and the write refuses; drop it to capture there, re-bind for a "
                   f"new group, or re-point with update-group.")
 
     total_candidates = 0
@@ -2137,7 +2162,7 @@ def cmd_export(args: argparse.Namespace) -> int:
     for batch_no, chunk in enumerate(chunks, start=1):
         multi = total_chunks > 1
         tag = f" [batch {batch_no}/{total_chunks}]" if multi else ""
-        # Each chunk's preflight runs after the previous chunk's write (for a `--write`), so a
+        # Each chunk's preflight runs after the previous chunk's write (for a write), so a
         # duplicate subject split across chunks is surfaced by the later chunk's preflight and becomes
         # a version bump; the capture path has no cross-batch transaction, hence the sequential order.
         rc, out, err = _run_capture_client(
@@ -2233,40 +2258,82 @@ def cmd_export(args: argparse.Namespace) -> int:
             print(f"WRITE FAILED{tag}: {err.strip() or out.strip()}", file=sys.stderr)
             return 1
         print(f"\nWROTE{tag}:\n{out.strip()[:1200]}")
+        # The marker follows the receipt, never the plan: one export entry per
+        # completed batch, so a partial multi-batch export records exactly what
+        # reached the store (amended LADR-11). The version rides along when the
+        # candidate carried one from the store, so the digest can say which version
+        # an export superseded; fresh prose has none to record.
+        _mark_export_receipt(args, [{"id": item["uuid"] or item["createUuid"],
+                                     "version": candidate.get("originVersion"),
+                                     "subject": item["description"]}
+                                    for candidate, item in zip(chunk, items)
+                                    if item["uuid"] or item["createUuid"]])
 
     if not args.write:
         # `set --dryrun` is the veto point, and it needs a resolved `groupUuid` — which a dry run
         # cannot have, because resolving a group is itself the write that must not happen. So the
         # offline half of the pipeline runs here (both gates, the cap, the candidate list) and the
-        # server-side half runs at the head of `--write`, before anything is persisted. Saying so is
+        # server-side half runs at the head of a write, before anything is persisted. Saying so is
         # better than sending a request that can only fail on a null group.
         print(f"\nDRY RUN — nothing was written, and nothing was created.\n"
               f"  would write: memory ({total_candidates})"
               + (f", group ({group_state})" if group_state == "dry-run" else "")
               + f"\n  would not create: anything under an existing group, because no group was "
-                f"resolved\nThe server-side `set --dryrun` veto runs at the start of `--write`, once "
-              f"a group exists. Re-run with `--write` to capture.")
+                f"resolved\nThe server-side `set --dryrun` veto runs at the start of a write, once "
+              f"a group exists. Re-run without `--dryrun` to capture.")
         if matched:
-            print(f"  {matched} candidate(s) matched an existing same-subject memory; a `--write` would "
+            print(f"  {matched} candidate(s) matched an existing same-subject memory; a write would "
                   f"version those whose match is in the export's group (a match in another group stays "
                   f"a separate new memory).")
         if total_chunks > 1:
-            print("  Note: a multi-batch `--write` is not atomic across batches; a later batch could "
+            print("  Note: a multi-batch write is not atomic across batches; a later batch could "
                   "be refused at its veto after an earlier batch was already written.")
         print("Decisions and rules captured this way are written as `kind = understanding`, which does "
               "NOT pass the gated-kind approval: a `decision`/`rule`/`nfr` captured through this path "
               "is an understanding of one, not approved canon.")
+        _mark_export_receipt(args, [])
         return 0
 
     if total_chunks > 1:
         print("\nNon-atomic multi-batch write: each batch was written independently, so a failure in a "
               "later batch leaves earlier batch(es) committed.")
     print("This is a receipt: the memories are persisted now, so a post-write digest is not an "
-          "opportunity to approve. Pre-write review is `--export` without `--write`.")
+          "opportunity to approve. Pre-write review is `export --dryrun`.")
     print("Records written as `kind = understanding`, which does NOT pass the gated-kind approval: "
           "a `decision`/`rule`/`nfr` captured through this path is an understanding of one, not "
           "approved canon.")
     return 0
+
+
+def _mark_export_receipt(args: argparse.Namespace, written: list[dict],
+                           folder: str | None = None) -> None:
+    """Append one export entry for actually-written items and print the Marker: line.
+
+    The marker follows the receipt (HLD-002 LADR-07), never the plan: only items a
+    successful `set` accepted are recorded, one entry per completed batch, so a partial
+    multi-batch export records exactly what reached the store. `--nomarker` writes
+    nothing; without a session id there is nothing to key on. A dump passes its folder
+    (no ids — authored prose) to move the boundary without adding exclusions.
+    """
+    sid, harness = _marker_session(args)
+    if bool(getattr(args, "nomarker", False)):
+        print(_marker.marker_line("skipped", sid, 0, verb="export"))
+        return
+    if not sid:
+        print(_marker.marker_line("none", "", verb="export"))
+        return
+    if not written and folder is None:
+        # Dry runs, empty sets and held-back batches write nothing, so they mark
+        # nothing — but the digest still says so.
+        print(_marker.marker_line("empty", sid, 0, verb="export"))
+        return
+    try:
+        _, status = _marker.append_export("kvasir", sid, harness, written,
+                                          folder=folder)
+    except OSError as error:
+        print(f"NOTE: session marker not written ({error}).", file=sys.stderr)
+        return
+    print(_marker.marker_line(status, sid, len(written), verb="export"))
 
 
 def export_candidates(records: list[dict] | None, body: str) -> tuple[list[dict], list[str]]:
@@ -2287,6 +2354,7 @@ def export_candidates(records: list[dict] | None, body: str) -> tuple[list[dict]
                 empty += 1
                 continue
             candidates.append({"statement": parts["answer"], "description": parts["question"],
+                               "slug": record.get("slug"),
                                "contentSummary": summary_with_boundaries(parts),
                                "validFrom": parts["validFrom"] or None,
                                "validUntil": parts["validUntil"] or None,
@@ -2493,7 +2561,7 @@ def session_id() -> str:
 
     Precedence is ``MIMIS_SESSION`` (the capture path's session id), then the runtime agent-session
     ids (Conductor, then Claude Code). Empty means no session identity is provable — under which a
-    defaulted input can only dry-run and ``--write`` refuses as before, because without an identity the
+    defaulted input can only dry-run and a write refuses as before, because without an identity the
     newest dump in a shared workspace cannot be attributed to this session.
     """
     for name in ("MIMIS_SESSION", "CONDUCTOR_SESSION_ID", "CLAUDE_CODE_SESSION_ID"):
@@ -2501,6 +2569,143 @@ def session_id() -> str:
         if value:
             return value
     return ""
+
+
+# ------------------------------------------------------------------ session marker (LADR-11)
+
+
+def _marker_session(args: argparse.Namespace) -> tuple[str, str]:
+    """The marker session (id, harness): explicit ``--session`` wins, else the
+    five-name harness env chain. Empty id means no marker (import still works)."""
+    explicit = getattr(args, "session", None)
+    return _marker.resolve_session(explicit)
+
+
+def _mark_import(args: argparse.Namespace, verb: str, records: list[dict] | None,
+                 source_kind: str, selector: dict | None = None) -> None:
+    """Write the session marker for a load/import and print the ``Marker:`` line.
+
+    ``records`` are store-shaped (five_parts-able) or understanding-file units;
+    foreign material (records None) is id-less history. ``--all`` breadth or a
+    selector-wide import records {selector, as_of} instead of ids (D9).
+    Only ids + versions + subjects are stored — never content (D1).
+    """
+    nomarker = bool(getattr(args, "nomarker", False))
+    sid, harness = _marker_session(args)
+    if not sid:
+        print(_marker.marker_line("none", ""))
+        return
+    all_kinds = bool(getattr(args, "all_kinds", False))
+    items: list[dict] = []
+    sel: dict | None = None
+    as_of: str | None = None
+    if records is not None and not nomarker:
+        # Ids are always recorded when known: they are the live exclusion set, and a
+        # selector-wide import with no ids would exclude nothing (Boundary: none).
+        # The selector rides alongside for future append-only replay (LADR-11 D9 note
+        # 2026-10-14: "instead" read as "in addition" — ids serve present exclusion).
+        for record in records:
+            try:
+                parts = five_parts(record)
+            except (AttributeError, TypeError):
+                continue
+            if parts.get("uuid"):
+                items.append({"id": parts["uuid"], "version": parts.get("version"),
+                              "subject": parts.get("question") or parts.get("subject") or ""})
+        if all_kinds or selector is not None:
+            sel = dict(selector or {})
+            # Breadth is what was asked, not a default: only an explicit --all marks
+            # the selector as all-kinds. A selective import keeps its filters as-is.
+            if all_kinds:
+                sel["all_kinds"] = True
+            sel.setdefault("source", source_kind)
+            as_of = dt.date.today().isoformat()
+        if not items and sel is None:
+            # Id-less import (foreign-shaped, understanding-file units): history.
+            print(_marker.marker_line("history", sid))
+            return
+    if nomarker:
+        # Log ids for lineage without moving the boundary (D5).
+        for record in records or []:
+            try:
+                parts = five_parts(record)
+            except (AttributeError, TypeError):
+                continue
+            if parts.get("uuid"):
+                items.append({"id": parts["uuid"], "version": parts.get("version"),
+                              "subject": parts.get("question") or parts.get("subject") or ""})
+        try:
+            _marker.record_import("kvasir", sid, harness, verb, True, items,
+                                  selector or None, None)
+        except OSError as error:
+            print(f"NOTE: session marker not written ({error}).", file=sys.stderr)
+        print(_marker.marker_line("skipped", sid))
+        return
+    try:
+        _, status = _marker.record_import("kvasir", sid, harness, verb, False,
+                                          items, sel, as_of)
+    except OSError as error:
+        print(f"NOTE: session marker not written ({error}).", file=sys.stderr)
+        return
+    marker = _marker.load_marker("kvasir", sid)
+    _, _, _, count = _marker.exclusion_set(marker)
+    print(_marker.marker_line(status, sid, count))
+
+
+def _export_boundary(args: argparse.Namespace) -> tuple[dict | None, str]:
+    """Load this session's kvasir marker for a default export.
+
+    Returns (marker_or_None, boundary_line). ``export --all`` ignores the
+    marker; no session id (or a marker with no exclusions) behaves as --all (D7).
+    """
+    if bool(getattr(args, "export_all", False)):
+        return None, _marker.boundary_line(None, ignored=True)
+    sid, _ = _marker_session(args)
+    if not sid:
+        return None, _marker.boundary_line(None)
+    marker = _marker.load_marker("kvasir", sid)
+    return marker, _marker.boundary_line(marker)
+
+
+def _apply_marker_exclusions(candidates: list[dict],
+                             marker: dict | None) -> tuple[list[dict], int, list[dict]]:
+    """Split candidates into (kept, echo_dropped, supersessions) per the marker.
+
+    - originUuid in the exclusion set: echo of the import, dropped.
+    - subject exactly matching an excluded subject: a changed imported item,
+      kept as a supersession (version bump with lineage), never dropped (D8).
+    Mechanical: id or exact-subject match only, no model judgement (D14).
+    """
+    if marker is None:
+        return candidates, 0, []
+    ids, subjects, _, _ = _marker.exclusion_set(marker)
+    slugs = _marker.exclusion_slugs(marker)
+    if not ids and not slugs:
+        return candidates, 0, []
+    kept, supers = [], []
+    dropped = 0
+    for candidate in candidates:
+        origin = candidate.get("originUuid")
+        if isinstance(origin, str) and origin and origin in ids:
+            dropped += 1
+            continue
+        slug = candidate.get("slug")
+        if isinstance(slug, str) and slug and slug in slugs:
+            dropped += 1
+            continue
+        subj = _subject(candidate)
+        if subj and subj in subjects:
+            candidate["_supersedes"] = subjects[subj]
+            candidate["_supersession"] = True
+            sources = candidate.get("sources")
+            lineage = {"kind": "supersedes", "reference": subjects[subj]}
+            if isinstance(sources, list):
+                candidate["sources"] = [*sources, lineage]
+            supers.append(candidate)
+            kept.append(candidate)
+            continue
+        kept.append(candidate)
+    return kept, dropped, supers
 
 
 def recorded_session(folder: str | Path) -> str:
@@ -2834,7 +3039,7 @@ def cmd_dump(args: argparse.Namespace) -> int:
         "- A projection of this session's context. Generated, never maintained; regenerate rather "
         "than edit.",
         f"- Load it with: `understanding_client.py load <this folder>`",
-        f"- Export it with: `understanding_client.py export <this folder> --write`",
+        f"- Export it with: `understanding_client.py export <this folder>`",
         GENERATED_FENCE[1],
         "",
         content.strip() if content.strip() else SESSION_TEMPLATE,
@@ -2851,7 +3056,7 @@ def cmd_dump(args: argparse.Namespace) -> int:
         "gatedKindApproval": "decisions and rules captured from a dump are written as "
                              "kind=understanding and do NOT pass gated-kind approval",
     }
-    # A dump records the session that wrote it, so a later `export --write` with no input can default
+    # A dump records the session that wrote it, so a later writing `export` with no input can default
     # to this session's dump rather than the newest (which may be another session's). Omitted when no
     # session identity is provable, so such a dump never matches and stays review-only.
     sid = session_id()
@@ -2873,6 +3078,11 @@ def cmd_dump(args: argparse.Namespace) -> int:
         print("REDACTED before writing: "
               + ", ".join(f"{name} x{count}" for name, count in sorted(findings.items())))
     print(f"Discover this folder by name: {folder.name}")
+    _, dump_boundary = _export_boundary(args)
+    print(dump_boundary)
+    # A successful dump marks too (amended LADR-11): the folder entry moves the boundary
+    # so the next default export starts after it. No ids — a dump carries authored prose.
+    _mark_export_receipt(args, [], folder=folder.name)
     print("This is an export. The store was not changed.")
     if git_ignored(folder):
         print("warning: this dump folder is gitignored and will not survive the workspace — "
@@ -2908,6 +3118,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     load.add_argument("--max-chars", type=int, default=DEFAULT_MAX_CHARS,
                       help=f"Render cap (default {DEFAULT_MAX_CHARS}): a store export cuts whole "
                            "records and lists them; foreign material truncates.")
+    load.add_argument("--nomarker", action="store_true",
+                      help="Load without setting the export boundary; the material is session "
+                           "history and flows into a default export.")
+    load.add_argument("--session",
+                      help="Explicit session id for the marker (else the harness env chain).")
 
     imp = sub.add_parser("import", help="STORE -> SESSION: recall Understandings from the store "
                                        "into the session as cited context or a table (read only).")
@@ -2939,17 +3154,25 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                      help=f"Render budget (default {DEFAULT_MAX_CHARS}); cuts whole records.")
     imp.add_argument("--all", action="store_true", dest="all_kinds",
                      help="Breadth: memory AND understanding, not just understanding-kind.")
+    imp.add_argument("--nomarker", action="store_true",
+                     help="Recall without setting the export boundary; the material is session "
+                          "history and flows into a default export.")
+    imp.add_argument("--session",
+                     help="Explicit session id for the marker (else the harness env chain).")
 
     exp = sub.add_parser("export", help="SESSION -> STORE: orchestrate the capture path "
-                                        "(dry run unless --write).")
+                                        "(writes unless --dryrun).")
     exp.add_argument("input", nargs="?", help="Same inputs as load; a dump folder carries its own "
                                               "binding. With neither, the newest session dump (this "
                                               "session's when one exists).")
     exp.add_argument("--input", dest="input_option",
                      help="Explicit input; with neither, the newest session dump (this session's when "
                           "one exists).")
-    exp.add_argument("--write", action="store_true",
-                     help="Perform the capture. Without it this is a dry run that creates nothing.")
+    exp.add_argument("--dryrun", action="store_true",
+                     help="Run every gate and the preview, then stop before anything is written: no "
+                          "initiative, no group, no memory.")
+    exp.add_argument("--write", action="store_true", dest="write_deprecated",
+                     help=argparse.SUPPRESS)
     exp.add_argument("--tickets", help="Comma-separated ticket keys: #12, github:12, provider:key.")
     exp.add_argument("--tags", help="Comma-separated tags/facets to bind.")
     exp.add_argument("--repository", help="Repository to associate with the group.")
@@ -2961,6 +3184,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                      help="Autofill missing --tickets/--repository/--initiative from the offline "
                           "Heimdallr git scan (default true; explicit flags and the dump metadata "
                           "always win; tags are never autofilled).")
+    exp.add_argument("--all", action="store_true", dest="export_all",
+                     help="Ignore the session marker and export the input or current session in "
+                          "full; the skill decides memory vs Understanding as usual.")
+    exp.add_argument("--nomarker", action="store_true",
+                     help="Export normally but write no marker entry: boundary and exclusions "
+                          "are unchanged (a one-off share that must not break the delta series).")
+    exp.add_argument("--session",
+                     help="Explicit session id whose marker bounds a default export "
+                          "(else the harness env chain).")
 
     dump = sub.add_parser("dump", help="Dump this session's context to a local folder (export).")
     dump.add_argument("--currentsession", action="store_true")
@@ -2977,6 +3209,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     dump.add_argument("--heimdallr", choices=_HEIMDALLR_CHOICES, default="true",
                       help="Autofill missing --tickets/--repository/--initiative from the offline "
                            "Heimdallr git scan (default true; explicit flags always win).")
+    dump.add_argument("--all", action="store_true", dest="export_all",
+                      help="Ignore the session marker in the Boundary report (a dump writes the "
+                           "authored session text as-is).")
+    dump.add_argument("--nomarker", action="store_true",
+                      help="Write the dump without appending a marker entry.")
+    dump.add_argument("--session",
+                      help="Explicit session id for the Boundary report (else the harness env chain).")
 
     # Documented in SKILL.md as accepted for forward compatibility, but no parser took it, so the
     # documented spelling failed with "unrecognized arguments" (review #11). A no-op until an
@@ -2986,7 +3225,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                              help="Skip interactive questions and take the recommended option "
                                   "(none exist yet; accepted for forward compatibility).")
 
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.command == "export":
+        # Write is the default, as on the capture skill; `--write` was the old opt-in and now means
+        # nothing, so it is accepted and named rather than refused (deprecated, not repurposed).
+        if args.write_deprecated:
+            print("NOTE: --write is deprecated: export writes by default; use --dryrun to preview "
+                  "without writing." + (" --dryrun wins." if args.dryrun else ""), file=sys.stderr)
+        args.write = not args.dryrun
+    return args
 
 
 def main(argv: list[str] | None = None) -> int:

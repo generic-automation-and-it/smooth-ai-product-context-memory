@@ -5,6 +5,7 @@ using Minio.DataModel;
 using Minio.DataModel.Args;
 using Minio.Exceptions;
 using SmoothAiProductContextMemory.Application.Abstractions;
+using SmoothAiProductContextMemory.Domain;
 
 namespace SmoothAiProductContextMemory.Infrastructure.Storage;
 
@@ -47,7 +48,7 @@ public sealed class S3BlobStorage : IBlobStorage, IBlobCatalog, IAsyncDisposable
         ArgumentNullException.ThrowIfNull(content);
 
         byte[] raw = await ReadAllAsync(content, cancellationToken);
-        string address = Sha256ContentAddress.Compute(raw);
+        string address = ContentAddress.Compute(raw);
         string objectKey = ToObjectKey(address);
 
         if (await ObjectExistsAsync(objectKey, cancellationToken))

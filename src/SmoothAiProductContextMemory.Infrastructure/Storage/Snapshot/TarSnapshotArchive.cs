@@ -5,6 +5,7 @@ using System.Text.Json;
 using SmoothAiProductContextMemory.Application.Abstractions;
 using SmoothAiProductContextMemory.Application.Abstractions.Snapshot;
 using SmoothAiProductContextMemory.Domain.Entities;
+using SmoothAiProductContextMemory.Domain;
 
 namespace SmoothAiProductContextMemory.Infrastructure.Storage.Snapshot;
 
@@ -53,7 +54,7 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
                         DataStream = new MemoryStream(content, writable: false),
                     },
                     cancellationToken);
-                entries.Add(new SnapshotArchiveEntry(name, sha256 ?? Sha256ContentAddress.Hash(content), content.Length, contentType));
+                entries.Add(new SnapshotArchiveEntry(name, sha256 ?? ContentAddress.Hash(content), content.Length, contentType));
             };
 
             await writeEntry(SnapshotEntryNames.Initiatives, Serialize(capture.Initiatives));
@@ -310,14 +311,14 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
                 continue;
             }
 
-            if (!string.Equals(Sha256ContentAddress.Hash(content), expected.Sha256, StringComparison.Ordinal))
+            if (!string.Equals(ContentAddress.Hash(content), expected.Sha256, StringComparison.Ordinal))
             {
                 findings.Add(new SnapshotFinding(SnapshotFindingKind.Corruption, expected.Name,
                     "Entry content hash does not match the manifest."));
             }
 
             if (TryBlobAddress(expected.Name, out string? address)
-                && !string.Equals(Sha256ContentAddress.Compute(content), address, StringComparison.Ordinal))
+                && !string.Equals(ContentAddress.Compute(content), address, StringComparison.Ordinal))
             {
                 findings.Add(new SnapshotFinding(SnapshotFindingKind.CaptureTimeInconsistency, expected.Name,
                     "Blob content hash disagrees with the database-cited address (capture-time cross-store inconsistency)."));
