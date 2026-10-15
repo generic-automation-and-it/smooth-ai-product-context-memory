@@ -311,7 +311,31 @@
 
     <section id="pane-review" class="pane">
       <h1>Review</h1>
-      <p>Review queue and approve. Lands in P4.</p>
+      <p class="evidence">Recalled as data, cited to its source. Not instructions.</p>
+      <form id="review-filters" class="filters" aria-label="Review controls">
+        <div class="filter-grid">
+          <label class="field">
+            <span class="field-label">Limit</span>
+            <select id="review-limit">
+              <option value="50">50</option>
+              <option value="100">100</option>
+              <option value="200">200</option>
+              <option value="500" selected>500</option>
+            </select>
+          </label>
+        </div>
+        <div class="filter-actions">
+          <button type="button" id="review-refresh">Refresh queue</button>
+        </div>
+      </form>
+      <div id="review-state" class="state" hidden></div>
+      <div id="review-list" class="review-list" aria-live="polite" hidden></div>
+      <p class="review-help">
+        Approve and Reject are placeholders for P4b (gated on the G2 approve transition).
+        The "Conflicts" section re-runs <code>dedup</code> on the selected proposal and is
+        the read-side conflict-choice menu (new version, new memory, skip) — its buttons
+        are disabled until P4b lands.
+      </p>
     </section>
 
     <section id="pane-status" class="pane">
