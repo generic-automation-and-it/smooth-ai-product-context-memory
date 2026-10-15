@@ -6,7 +6,7 @@
 # it refuses to start without one.
 #
 # Routes:
-#   GET  /bridge/health            liveness; declares p4b-write phase + write-token presence
+#   GET  /bridge/p4b-health        liveness; declares p4b-write phase + write-token presence
 #   POST /bridge/approve           two-phase: dryrun digest, then confirm + write
 #   POST /bridge/reject            record the decision; no write
 #   POST /bridge/amend             re-send the proposal with Status=proposed on existing Uuid
@@ -66,7 +66,7 @@ def _alias_env():
     if _BASE_URL_ALIAS in os.environ and _BASE_URL_NAME not in os.environ:
         os.environ[_BASE_URL_NAME] = os.environ[_BASE_URL_ALIAS]
     if (_WRITE_TOKEN_ALIAS in os.environ
-            and "CONTEXT_MEMORY_WRITE_TOKEN" not in os.environ
+            and not os.environ.get("CONTEXT_MEMORY_WRITE_TOKEN")
             and os.environ.get(_WRITE_TOKEN_ALIAS)):
         os.environ["CONTEXT_MEMORY_WRITE_TOKEN"] = os.environ[_WRITE_TOKEN_ALIAS]
 
