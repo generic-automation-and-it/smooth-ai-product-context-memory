@@ -16,6 +16,8 @@ internal static class DistributedApplicationBuilderExtensions
     private const string SeqConnectionStringName = "seq";
     private const string HostReadinessPath = "/health";
     private const string BlobBucketName = "smooth-mimisbrunnr-memory-well";
+    private const string ViewerResourceName = "mimir-viewer";
+    private const int ViewerContainerPort = 5180;
     private const string PostgresImageRegistry = "docker.io";
     private const string PostgresImage = "apache/age";
     private const string PostgresImageTag = "release_PG17_1.7.0";
@@ -33,7 +35,14 @@ internal static class DistributedApplicationBuilderExtensions
             var apiReadToken = builder.AddParameter("api-read-token", secret: true);
             var apiWriteToken = builder.AddParameter("api-write-token", secret: true);
 
-            builder.AddHostProject(database, blob, seq, apiReadToken, apiWriteToken, configuration);
+            var hostEndpoint = configuration.UseProject
+                ? builder.AddHostProject(database, blob, seq, apiReadToken, apiWriteToken, configuration).GetEndpoint("http")
+                : builder.AddHostContainer(database, blob, seq, apiReadToken, apiWriteToken, configuration).GetEndpoint("http");
+
+            if (configuration.ViewerEnabled)
+            {
+                builder.AddViewer(hostEndpoint, apiReadToken, configuration);
+            }
 
             return builder;
         }
@@ -152,7 +161,7 @@ internal static class DistributedApplicationBuilderExtensions
             return builder.ConfigureReleaseEndpoint(seq, "http", configuration);
         }
 
-        private void AddHostProject(
+        private IResourceBuilder<ProjectResource> AddHostProject(
             IResourceBuilder<PostgresDatabaseResource> database,
             IResourceBuilder<ContainerResource> blob,
             IResourceBuilder<IResourceWithConnectionString> seq,
@@ -162,11 +171,10 @@ internal static class DistributedApplicationBuilderExtensions
         {
             if (!configuration.UseProject)
             {
-                builder.AddHostContainer(database, blob, seq, apiReadToken, apiWriteToken, configuration);
-                return;
+                throw new InvalidOperationException("AddHostProject requires HostConfiguration:UseProject=true.");
             }
 
-            builder.AddProject<Projects.SmoothAiProductContextMemory_Host>(HostLaunchMode.WorkingTreeResourceName)
+            return builder.AddProject<Projects.SmoothAiProductContextMemory_Host>(HostLaunchMode.WorkingTreeResourceName)
                 .WithReference(database, connectionName: HostConnectionStringName)
                 .WithReference(seq, connectionName: SeqConnectionStringName)
                 .WithEnvironment("BlobStorage__Endpoint", blob.GetEndpoint("s3"))
@@ -181,7 +189,7 @@ internal static class DistributedApplicationBuilderExtensions
                 .WaitFor(seq);
         }
 
-        private void AddHostContainer(
+        private IResourceBuilder<ContainerResource> AddHostContainer(
             IResourceBuilder<PostgresDatabaseResource> database,
             IResourceBuilder<ContainerResource> blob,
             IResourceBuilder<IResourceWithConnectionString> seq,
@@ -223,6 +231,31 @@ internal static class DistributedApplicationBuilderExtensions
                 .WaitFor(seq);
 
             builder.ConfigureReleaseEndpoint(host, "http", configuration);
+            return host;
+        }
+
+        private void AddViewer(
+            EndpointReference hostEndpoint,
+            IResourceBuilder<ParameterResource> apiReadToken,
+            AppHostConfiguration configuration)
+        {
+            ContainerImageReference imageReference = ContainerImageReference.Parse(configuration.ViewerImage);
+            IResourceBuilder<ContainerResource> viewer = imageReference.Tag is null
+                ? builder.AddContainer(ViewerResourceName, imageReference.Image)
+                : builder.AddContainer(ViewerResourceName, imageReference.Image, imageReference.Tag);
+
+            viewer
+                .WithHttpEndpoint(port: configuration.ViewerPort, targetPort: ViewerContainerPort, name: "http")
+                .WithContainerName(configuration.ViewerContainerName)
+                .WithEnvironment("API_READ_TOKEN", apiReadToken)
+                .WithEnvironment("HOST_BASE_URL", hostEndpoint)
+                .WithContainerRuntimeArgs(
+                    "--label", $"com.docker.compose.project={configuration.DockerDesktopGroupName}",
+                    "--label", $"com.docker.compose.service={configuration.ViewerContainerName}",
+                    "--label", $"{AppHostConfiguration.OwnershipLabel}={configuration.InstallationId}",
+                    "--label", $"{AppHostConfiguration.ManagedLabel}=true");
+
+            builder.ConfigureReleaseEndpoint(viewer, "http", configuration);
         }
 
         private IResourceBuilder<T> ConfigureReleaseEndpoint<T>(

@@ -1,6 +1,6 @@
 # AGENTS.md — Viewer Console (HLD)
 
-AI Context: HLD for the viewer/management UI. Updated: 2026-10-13
+AI Context: HLD for the viewer/management UI. Updated: 2026-10-15
 
 ## TL;DR
 
@@ -72,5 +72,8 @@ The high-impact ones — see [`./ladrs/`](./ladrs/) for detail:
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-15 | **Phase P2 implemented (detail + provenance).** Selecting a browse row opens a reader pane (two-pane on wide / slide-over on narrow): the LADR-07 evidence frame, subject/kind/status/confidence/version, statement + summary, provenance (sources, scope pill, group, validity), distinct facet/tag chips, version history, and the blob body fetched on demand with `?scope=` passed on both the versions and blob reads so the row count matches the rows read. Selected element persists in the `?uuid` query string; Esc closes. No edit/delete. | PR #229 |
+| 2026-10-15 | **Phase P1 implemented (browse + filters).** Browse pane gains the dense table (Subject/Kind/Status/Version/Validity/Scope/Lineage/Created), the 1:1 filter bar (debounced query, facets any/all, tags, kind/status, ticket pair, initiative, repo, group-pin, validity current/as-of, limit), removable active-filter chips + clear all, the honest-limit prompt, and distinct empty/unreachable/timed-out/error states. Status pane surfaces recall-feedback (never-recalled + miss-rate) with required date controls (G5 clamp). Filtering is server-side (LADR-06); the cheap list never carries a blob body (NFR-05). No Host/API change. | PR #229 |
+| 2026-10-14 | **Phase A implemented (viewer pod foundation).** | PR #229 |
 | 2026-10-13 | Gap/bug/architecture loop: corrected the browse limit to query defaults (50 / max 200); rewrote the graph view to the real `/paths` path-chain contract (each `PathResult` = hops ending at a `CheapMemory` endpoint; intermediate hops are uuid refs) and to `/tickets/paths`' `Disclosure` + limit flags; made the review queue an explicit store-derived query (`Status = proposed`) with conflict choices reproduced by re-running dedup; added LADR-09 (Python bridge) and LADR-10 (queue derived / conflicts reproduced); added a Known-gaps section (G1 proposal persistence, G2 approve transition, G3 node labelling, G4 initiative/label endpoints, G5 recall-feedback limits); added same-origin/no-CORS, as-of-UTC and loopback correctness notes. | HLD-009 |
 | 2026-10-13 | Created — HLD-009 Viewer Console. Renumbered from an initial 008 to avoid colliding with the existing `008-keyword-search` (In Discovery). Draft; LADRs/NFRs all Draft. Business authority BRD-004. | HLD-009 |

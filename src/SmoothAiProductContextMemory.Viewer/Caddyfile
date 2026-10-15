@@ -1,0 +1,28 @@
+# Mímisbrunnr Console — Caddy proxy (viewer pod).
+#
+# Caddy binds all interfaces *inside the container* so the Aspire/DCP proxy on
+# the internal network can reach it. Loopback enforcement is the host-side
+# published port (NFR-01), not a bind restriction here.
+{
+	admin off
+}
+
+:5180 {
+	root * /srv/spa
+	encode zstd gzip
+	file_server
+
+	# /api/* → Host. The read token is injected by Caddy (LADR-02); the SPA sends
+	# no Authorization header, and a client-supplied one must never override it.
+	handle /api/* {
+		reverse_proxy {$HOST_BASE_URL} {
+			header_up Host {upstream_hostport}
+			header_up Authorization "Bearer {$API_READ_TOKEN}"
+		}
+	}
+
+	# /bridge/* → the Python bridge. Stub until P4 (review queue + approve).
+	handle /bridge/* {
+		reverse_proxy 127.0.0.1:5181
+	}
+}

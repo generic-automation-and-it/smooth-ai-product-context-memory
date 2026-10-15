@@ -57,13 +57,14 @@ machine_credentials="${MIMIS_MACHINE_CREDENTIALS:-$data_home/credentials}"
 machine_credentials_read_only="${machine_credentials%.env}-read-only"
 data_root_setting="${MIMIS_DATA_ROOT:-}"
 
-# The documented release ports (docker.md): API 5141, PostgreSQL 5432, blob 9000/9001, Seq 5341,
-# dashboard 15278. They are also what provision-credentials.sh writes into CONTEXT_MEMORY_BASE_URL and
-# what the context-memory client defaults to, so moving them here would break every skill and
-# client the moment a controller was started. An earlier draft shifted them all by +20000 to dodge a
-# dev AppHost that may be running; that made the launcher correct in isolation and wrong in use, and it
-# is the reason a provisioned credential file could not reach the stack it was provisioned for.
-# MIMIS_SHIFT_PORTS=1 restores the old offsets for the rare side-by-side case.
+# The API port stays on 5141: provision-credentials.sh writes it into CONTEXT_MEMORY_BASE_URL and the
+# context-memory client defaults to it, so moving it would break every skill and client once a
+# controller started. The workload ports (postgres/blob/seq) are shifted from their documented defaults
+# by the "mimi" ASCII offset (+300 = M=77, I=73), so a local postgres/minio/seq on the standard ports
+# (5432/9000/5341) does not collide with a controller. An earlier draft shifted everything by +20000,
+# which made the launcher correct in isolation and wrong in use (a provisioned credential file could not
+# reach the stack it was provisioned for). MIMIS_SHIFT_PORTS=1 restores those old offsets for the rare
+# side-by-side case.
 if [ "${MIMIS_SHIFT_PORTS:-0}" = 1 ]; then
   p_host="${P_HOST:-25141}"
   p_postgres="${P_POSTGRES:-25432}"
@@ -77,10 +78,10 @@ if [ "${MIMIS_SHIFT_PORTS:-0}" = 1 ]; then
   p_otlp="${P_OTLP:-29075}"
 else
   p_host="${P_HOST:-5141}"
-  p_postgres="${P_POSTGRES:-5432}"
-  p_blob="${P_BLOB:-9000}"
-  p_blob_console="${P_BLOB_CONSOLE:-9001}"
-  p_seq="${P_SEQ:-5341}"
+  p_postgres="${P_POSTGRES:-5732}"
+  p_blob="${P_BLOB:-9300}"
+  p_blob_console="${P_BLOB_CONSOLE:-9301}"
+  p_seq="${P_SEQ:-5641}"
   p_dashboard="${P_DASHBOARD:-15278}"
   p_otlp="${P_OTLP:-19075}"
 fi

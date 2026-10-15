@@ -8,6 +8,27 @@ public class AppHostConfigurationTests
     private const string DigestImage = "ghcr.io/generic-automation-and-it/smooth-ai-product-context-memory@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
     [Fact]
+    public void Development_enables_viewer_pod_with_default_image_and_port()
+    {
+        IConfiguration configuration = new ConfigurationBuilder().Build();
+
+        AppHostConfiguration result = AppHostConfiguration.Create(configuration);
+
+        result.ViewerEnabled.ShouldBeTrue();
+        result.ViewerPort.ShouldBe(5441);
+        result.ViewerImage.ShouldBe("smooth-ai-product-context-memory-viewer:local");
+        result.ViewerContainerName.ShouldBe("mimisbrunnr-viewer");
+    }
+
+    [Fact]
+    public void Release_disables_viewer_pod_by_default()
+    {
+        AppHostConfiguration result = AppHostConfiguration.Create(BuildConfiguration(ReleaseValues()));
+
+        result.ViewerEnabled.ShouldBeFalse();
+    }
+
+    [Fact]
     public void Development_mode_preserves_existing_defaults()
     {
         IConfiguration configuration = new ConfigurationBuilder().Build();
