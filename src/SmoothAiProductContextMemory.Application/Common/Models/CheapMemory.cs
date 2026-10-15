@@ -22,4 +22,14 @@ public sealed record CheapMemory(
     int Version,
     bool IsCurrent,
     IReadOnlyList<SourceDocument> Sources,
-    Instant CreatedOn);
+    Instant CreatedOn)
+{
+    /// <summary>
+    /// Set only when the query carries <c>productName</c>: <c>"initiative"</c> when the memory's group
+    /// initiative is linked to the product, <c>"repo"</c> when only its repo is. Null otherwise.
+    /// </summary>
+    public string? ProductMatch { get; init; }
+
+    /// <summary>True when the group's initiative is linked to more than one product. Only set with <c>productName</c>.</summary>
+    public bool SharedInitiative { get; init; }
+}

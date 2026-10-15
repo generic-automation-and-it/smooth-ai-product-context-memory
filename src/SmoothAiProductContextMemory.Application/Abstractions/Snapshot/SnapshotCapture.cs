@@ -18,7 +18,12 @@ public sealed record SnapshotCapture(
     IReadOnlyList<SnapshotVertex> Vertices,
     IReadOnlyList<SnapshotEdge> Edges,
     IReadOnlyList<SnapshotTicketVertex> TicketVertices,
-    IReadOnlyList<SnapshotTicketEdge> TicketEdges);
+    IReadOnlyList<SnapshotTicketEdge> TicketEdges,
+    IReadOnlyList<SnapshotProductVertex> ProductVertices,
+    IReadOnlyList<SnapshotNamedVertex> InitiativeVertices,
+    IReadOnlyList<SnapshotNamedVertex> RepoVertices,
+    IReadOnlyList<SnapshotProductInitiativeEdge> ProductInitiativeEdges,
+    IReadOnlyList<SnapshotProductRepoEdge> ProductRepoEdges);
 
 /// <summary>A <c>Memory</c> graph vertex — carries only its <c>memory_uuid</c> (LADR-02, HLD-003).</summary>
 public sealed record SnapshotVertex(Guid MemoryUuid);
@@ -33,3 +38,17 @@ public sealed record SnapshotTicketVertex(string Provider, string Key);
 public sealed record SnapshotTicketEdge(
     string Provider, string Key, string ParentProvider, string ParentKey,
     string Reason, string Source, Instant RecordedAt, Instant? ObservedAt);
+
+/// <summary>A <c>Product</c> graph vertex (HLD-003 LADR-10).</summary>
+public sealed record SnapshotProductVertex(string Name, string? Description, string Status);
+
+/// <summary>An identity-only <c>Initiative</c> or <c>Repo</c> graph vertex — carries only <c>name</c>.</summary>
+public sealed record SnapshotNamedVertex(string Name);
+
+/// <summary>A <c>:HAS_INITIATIVE</c> edge from a product to an initiative.</summary>
+public sealed record SnapshotProductInitiativeEdge(
+    string ProductName, string InitiativeName, string Reason, string Source, Instant DeclaredAt);
+
+/// <summary>A <c>:HAS_REPO</c> edge from a product to a repo.</summary>
+public sealed record SnapshotProductRepoEdge(
+    string ProductName, string RepoName, string Reason, string Source, Instant DeclaredAt);

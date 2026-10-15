@@ -58,5 +58,10 @@ public sealed record RestoreResults(
     int Edges,
     int TicketVertices,
     int TicketEdges,
+    int ProductVertices,
+    int InitiativeVertices,
+    int RepoVertices,
+    int ProductInitiativeEdges,
+    int ProductRepoEdges,
     int TraversalPathCount,
     bool Committed);

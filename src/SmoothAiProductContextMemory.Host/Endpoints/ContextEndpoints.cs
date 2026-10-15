@@ -9,6 +9,7 @@ using SmoothAiProductContextMemory.Application.Features.Labels;
 using SmoothAiProductContextMemory.Application.Features.Links;
 using SmoothAiProductContextMemory.Application.Features.Memories;
 using SmoothAiProductContextMemory.Application.Features.Preflight;
+using SmoothAiProductContextMemory.Application.Features.ProductNames;
 using SmoothAiProductContextMemory.Application.Features.RecallFeedback;
 using SmoothAiProductContextMemory.Application.Features.Snapshot;
 using SmoothAiProductContextMemory.Application.Features.Tickets;
@@ -182,6 +183,49 @@ internal static class ContextEndpoints
         group.MapPost("/initiatives", (UpsertInitiative.Request body, IMediator mediator, CancellationToken ct) =>
             mediator.Send(body, ct))
             .RequireCapability(ApiCapability.Write);
+
+        // Product-name registry (HLD-003 LADR-10). The linking routes are PUT (idempotent), the unlink
+        // is POST (DELETE semantics, D7). Dry run is a query flag that flows into the request the same
+        // way SetMemories does, so the veto is a single source of truth.
+        group.MapGet("/product-names", (IMediator mediator, CancellationToken ct) =>
+            mediator.Send(new GetProductNames.Request(), ct))
+            .RequireCapability(ApiCapability.Read);
+
+        group.MapPost("/product-names", (UpsertProductName.Request body, IMediator mediator, CancellationToken ct) =>
+            mediator.Send(body, ct))
+            .RequireCapability(ApiCapability.Write);
+
+        group.MapPut("/product-names/initiatives", (
+            [FromBody] LinkProductInitiative.Request body,
+            IMediator mediator,
+            CancellationToken ct,
+            [FromQuery] bool dryRun = false) =>
+            mediator.Send(body with { DryRun = dryRun || body.DryRun }, ct))
+            .RequireCapability(ApiCapability.Write);
+
+        group.MapPost("/product-names/initiatives/unlink", (
+            [FromBody] UnlinkProductInitiative.Request body,
+            IMediator mediator,
+            CancellationToken ct,
+            [FromQuery] bool dryRun = false) =>
+            mediator.Send(body with { DryRun = dryRun || body.DryRun }, ct))
+            .RequireCapability(ApiCapability.Write);
+
+        group.MapPut("/product-names/repos", (
+            [FromBody] LinkProductRepo.Request body,
+            IMediator mediator,
+            CancellationToken ct,
+            [FromQuery] bool dryRun = false) =>
+            mediator.Send(body with { DryRun = dryRun || body.DryRun }, ct))
+            .RequireCapability(ApiCapability.Write);
+
+        group.MapGet("/product-names/links", (
+            IMediator mediator,
+            CancellationToken ct,
+            [FromQuery] string? productName = null,
+            [FromQuery] string? initiativeName = null) =>
+            mediator.Send(new GetProductLinks.Request(productName, initiativeName), ct))
+            .RequireCapability(ApiCapability.Read);
 
         // Practitioner tuning surface (HLD-004 NFR-03). Consumed occasionally by a human; not the
         // retrieval path, and never pulls raw feedback into retrieval. identity/count/time only.
