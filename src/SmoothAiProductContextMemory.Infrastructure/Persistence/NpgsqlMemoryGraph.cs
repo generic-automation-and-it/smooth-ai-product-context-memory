@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore.Storage;
 using NodaTime;
 using Npgsql;
 using SmoothAiProductContextMemory.Application.Abstractions;
+using SmoothAiProductContextMemory.Application.Common.Exceptions;
 
 namespace SmoothAiProductContextMemory.Infrastructure.Persistence;
 
@@ -187,14 +188,29 @@ public sealed class NpgsqlMemoryGraph(SmoothAiProductContextMemoryDbContext db) 
 
         // The Memory vertex is MERGEd on demand; the Ticket vertex must already exist — the group
         // membership trigger owns it, and the write path validated ownership before this call. MATCH
-        // (not MERGE) on the ticket so a reference can never invent an unowned ticket vertex.
+        // (not MERGE) on the ticket so a reference can never invent an unowned ticket vertex. The
+        // ticket anchor is a property predicate, not an inline map: the map form compiles to
+        // `properties @>` and sequentially scans, while the predicate is served by the Ticket
+        // provider/key indexes (LADR-06) — the same reason AboutExistsAsync is written that way.
+        // MERGE keeps its inline map, as LADR-06 prescribes for the create side.
         string cypher = $$"""
-            MATCH (t:{{AgeSession.TicketLabel}} {provider: {{Quote(provider)}}, key: {{Quote(key)}}})
+            MATCH (t:{{AgeSession.TicketLabel}})
+            WHERE t.provider = {{Quote(provider)}}
+              AND t.key = {{Quote(key)}}
             MERGE (s:{{AgeSession.VertexLabel}} {memory_uuid: {{Quote(memoryUuid)}}})
             CREATE (s)-[:{{AgeSession.AboutEdgeLabel}} {reason: {{Quote(reason)}}, declaredAt: {{Quote(SystemClock.Instance.GetCurrentInstant().ToString())}}}]->(t)
             RETURN 1
             """;
-        await ExecuteScalarAsync(cypher, cancellationToken);
+        // Zero rows means the ticket vertex is gone — released concurrently between the ownership
+        // check and this write. Reporting success would count an edge that was never created, so the
+        // write fails loudly instead; `false` is reserved for "already present".
+        string? written = await ExecuteScalarAsync(cypher, cancellationToken);
+        if (written is null)
+        {
+            throw new ConflictException(
+                $"Ticket '{provider}:{key}' is no longer an owned ticket; the reference was not created.");
+        }
+
         return true;
     }
 

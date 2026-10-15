@@ -67,36 +67,81 @@ public static class AddTicketReferences
                 throw new NotFoundException($"Memory '{missing}' was not found.");
             }
 
-            int created = 0;
-            int alreadyPresent = 0;
+            // A repeated identity in the request is one edge, so it is counted once — the same dedupe
+            // SetMemories applies to its request-level references.
+            var tickets = new List<TicketReferenceInput>(request.Tickets.Count);
+            var seen = new HashSet<(string Provider, string Key)>();
+            foreach (TicketReferenceInput ticket in request.Tickets)
+            {
+                if (seen.Add((ticket.Provider, ticket.Key)))
+                {
+                    tickets.Add(ticket);
+                }
+            }
+
+            // Resolve each distinct ticket's owner once, and validate every (memory, ticket) pair
+            // before any edge is written, so a refusal is never a partial write the caller must undo.
+            var ownerIds = new Dictionary<(string Provider, string Key), long>(tickets.Count);
+            foreach (TicketReferenceInput ticket in tickets)
+            {
+                MemoryGroup? owner = await TicketLookup.FindGroupByTicketAsync(
+                    db, ticket.Provider, ticket.Key, cancellationToken);
+                if (owner is null)
+                {
+                    throw new NotFoundException($"Ticket '{ticket.Provider}:{ticket.Key}' was not found.");
+                }
+
+                ownerIds[(ticket.Provider, ticket.Key)] = owner.Id;
+            }
+
             foreach (Memory memory in memories)
             {
-                foreach (TicketReferenceInput ticket in request.Tickets)
+                foreach (TicketReferenceInput ticket in tickets)
                 {
-                    MemoryGroup? owner = await TicketLookup.FindGroupByTicketAsync(
-                        db, ticket.Provider, ticket.Key, cancellationToken);
-                    if (owner is null)
-                    {
-                        throw new NotFoundException($"Ticket '{ticket.Provider}:{ticket.Key}' was not found.");
-                    }
-
-                    if (owner.Id == memory.GroupId)
+                    if (ownerIds[(ticket.Provider, ticket.Key)] == memory.GroupId)
                     {
                         throw new ConflictException(
                             $"Ticket '{ticket.Provider}:{ticket.Key}' is owned by the memory's group; referencing an owned ticket is not required.");
                     }
+                }
+            }
 
-                    bool edgeCreated = await graph.CreateAboutAsync(
-                        memory.Uuid, ticket.Provider, ticket.Key, request.Reason, cancellationToken);
-                    if (edgeCreated)
+            int created = 0;
+            int alreadyPresent = 0;
+
+            // One transaction for the whole batch: an edge write that fails part-way rolls back the
+            // edges already created, so the request is atomic — the same guarantee SetMemories gives
+            // its references, which ride the memory write transaction.
+            await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+            try
+            {
+                foreach (Memory memory in memories)
+                {
+                    foreach (TicketReferenceInput ticket in tickets)
                     {
-                        created++;
-                    }
-                    else
-                    {
-                        alreadyPresent++;
+                        bool edgeCreated = await graph.CreateAboutAsync(
+                            memory.Uuid,
+                            ticket.Provider,
+                            ticket.Key,
+                            ticket.Reason ?? request.Reason,
+                            cancellationToken);
+                        if (edgeCreated)
+                        {
+                            created++;
+                        }
+                        else
+                        {
+                            alreadyPresent++;
+                        }
                     }
                 }
+
+                await transaction.CommitAsync(cancellationToken);
+            }
+            catch
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                throw;
             }
 
             logger.LogInformation(
