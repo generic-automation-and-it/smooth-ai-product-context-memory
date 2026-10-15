@@ -78,6 +78,7 @@ Hosted on **GitHub** at `https://github.com/generic-automation-and-it/smooth-ai-
 | Semantic memory | Labelled knowledge, primary store for retrieval by label/ticket, facets and full-text lexemes; free prose matches lexeme-AND, not similarity (see [`README.md`](README.md), *Where Mímisbrunnr loses*) |
 | Episodic memory | Timestamped record of when/where a context was captured |
 | Procedural memory | Persisted agent/user preferences and learned behaviors |
+| Product name | Graph registry of products linked to initiatives and repos; unrelated to the `product` scope dimension |
 
 ## Changelog
 

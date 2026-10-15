@@ -158,6 +158,13 @@ sequenceDiagram
 
 ## Key Behaviors
 
+- **`product-name` is a graph registry, not the `product` scope.** `POST /product-names` upserts,
+  `PUT /product-names/initiatives` and `PUT /product-names/repos` link, `POST .../initiatives/unlink`
+  removes, `GET /product-names` lists, `GET /product-names/links` reads one hop. `/query productName`
+  resolves through the graph (unknown product → 404) and applies the affinity as one OR predicate
+  (`initiative IN (...) OR repo IN (...)`) in SQL before the row ceiling; items carry `productMatch`
+  (`initiative`/`repo`) and `sharedInitiative`. SetMemories links a declared `ProductName` to the
+  group's initiative in the same transaction. Scope dimension `product` is untouched.
 - Retrieval defaults to **current-only** and **excludes `proposed`**. History is `GET .../versions`. Empty query is `200 []`. `limit` defaults to 50 and is capped at 200 — an uncapped read floods the caller's context.
 - A `set` request accepts at most 200 items; larger batches are a `400` — the write-side sibling of the read `limit` cap.
 - A `set` request accepts at most 400 links, and each link reason is capped at 4000 characters; larger values are a `400` on dry-run and write.
@@ -239,6 +246,8 @@ sequenceDiagram
 ## Changelog
 
 | Date | Change | Ref |
+|:-----|:-------|:----|
+| 2026-10-15 | Added the product-name registry (HLD-003 LADR-10): `Features/ProductNames/*` handlers, `/query productName` graph resolution with `productMatch`/`sharedInitiative`, and `SetMemories` product linking. Scope dimension `product` untouched. | HLD-003 LADR-10 |
 |:-----|:-------|:----|
 | 2026-10-15 | Added `Memories/GetMemory` — the cheap fields of a memory's **current** version, read by identity (`uuid` + optional `scopeDimension`, `NotFoundException` on an unknown uuid). It exists because a traversal returns uuid references for every intermediate hop and no other read can address a uuid: `POST /query` has no uuid predicate and `GET .../versions` returns the whole chain. It stays a *cheap* read (no blob, no version history) and carries the same scope rule as the blob and version-history proxies — a uuid in a path chain is not authority to read a dimension the scope rule hides. Its consumer is the Console graph's click-to-label hop read (HLD-009 P3). | HLD-009 P3 |
 | 2026-10-14 | `SetMemories` now compares an incoming version target's claim against the claim it would follow; an identical re-send plans `ItemMode.Unchanged` and writes no row (D1: `ValidFrom`/`SummaryStamp` outside the claim; `MemoryClaim` comparer). `Response`/`ItemResult` gained `unchanged`; `IBlobStorage`'s content address documented as `ContentAddress.Compute`. | version-bug |

@@ -162,6 +162,18 @@ is the current design authority, superseding HLD-003 LADR-02 before any ticket m
   preserves original acceptance and dated post-review revalidation without threshold relaxation;
   the final full-suite repeat after query fixes passed with 429 tests, 4 gated benchmark skips and zero failures.
 
+### Product-name registry - implemented and accepted
+
+- `20261015160000_AddProductGraph` creates the `Product`, `Initiative`, `Repo` vertex labels and the
+  `HAS_INITIATIVE`/`HAS_REPO` edge labels plus HASH `name` indexes (and a properties GIN on `Product`).
+  `Product` is graph-native; `Initiative` and `Repo` are identity-only (`name`), the LADR-08 exception
+  applied to new entities. No relational table, no group column (HLD-003 LADR-10).
+- `NpgsqlProductGraph` enforces the uniqueness the graph cannot express under transaction advisory lock
+  `(734921, 3)`: one product per name (case-folded collisions refused), one incoming `HAS_REPO` per repo,
+  one edge per pair. `MERGE`/`MATCH` use property predicates for lookups, mirroring LADR-06.
+- Snapshot/restore and the archive format (v3 → v4) carry the product labels in the same change; an older
+  archive is refused at the manifest version gate, consistent with prior version bumps.
+
 ## Test References
 
 - Ticket coverage: `TicketGraphLifecycleTests`, `TicketGraphMutationTests`, `TicketTraversalTests`;

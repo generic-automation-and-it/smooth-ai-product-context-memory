@@ -144,6 +144,24 @@ and grants no scope consent (D2). Releasing the last owner of a referenced ticke
   reference twice yields one edge.
 - Deleting a memory removes its `ABOUT` edges; releasing the last owner of a referenced ticket is refused.
 
+### 7. Product names are a graph-only registry
+
+**Implemented by this change.** [LADR-10](./ladrs/LADR-10-product-names-are-graph-only-registry.md)
+models products as a graph-only `product-name` registry: a `Product` vertex links many-to-many to
+identity-only `Initiative` vertices and optionally one-to-many to `Repo` vertices via `HAS_INITIATIVE` /
+`HAS_REPO` edges. No relational table, no group column; unrelated to the `product` scope dimension.
+An initiative linked to more than one product is disclosed as shared; `/query productName` is a 404 for an
+unregistered product and items report `productMatch`/`sharedInitiative`.
+
+**Acceptance criteria / DoD**
+
+- A product links to initiatives (many-to-many) and optionally to repos (one product per repo).
+- An unknown `product-name` is refused on link, on `set` (nothing written) and on `/query` (404);
+  case-folded and padded names are refused.
+- `/query productName` returns exactly the memories of the product's initiatives/repos, AND-ed with other
+  filters and bounded after SQL resolution; items carry `productMatch` and `sharedInitiative`.
+- Snapshot → verify → restore keeps every new vertex and edge; the archive format version was bumped.
+
 ## Core Separation of Concerns
 
 > AGE holds relationships. Relational tables hold entities. Neither takes the other's job.
@@ -176,7 +194,7 @@ question tables answer badly, and is given nothing else.
 
 ## Architecture Decisions (LADRs)
 
-LADRs 01–03 are strategic (*what* and *why*); 04–07 are tactical (*how*); 08 replaces 02 for the ticket extension, and 09 adds a memory→ticket reference edge. Each is a single
+LADRs 01–03 are strategic (*what* and *why*); 04–07 are tactical (*how*); 08 replaces 02 for the ticket extension, 09 adds a memory→ticket reference edge, and 10 adds the product-name registry. Each is a single
 decision — a horizontal concern spanning this HLD. See [`./ladrs/`](./ladrs/).
 
 | LADR | Decision | Status |
@@ -190,6 +208,7 @@ decision — a horizontal concern spanning this HLD. See [`./ladrs/`](./ladrs/).
 | [LADR-07](./ladrs/LADR-07-every-traversal-carries-its-bound.md) | The depth bound is a `required` property of the query type | Accepted |
 | [LADR-08](./ladrs/LADR-08-captured-ticket-hierarchy.md) | Identity-only tickets and practitioner-declared current-state hierarchy | Accepted; implemented, release gates passed |
 | [LADR-09](./ladrs/LADR-09-memory-references-ticket.md) | Memory references a ticket it does not own, via a declared `ABOUT` edge | Accepted; owner-approved, implemented by this change |
+| [LADR-10](./ladrs/LADR-10-product-names-are-graph-only-registry.md) | Product names are a graph-only registry linked to initiatives and repos | Accepted; owner-approved, implemented by this change |
 
 ## Non-Functional Requirements
 
