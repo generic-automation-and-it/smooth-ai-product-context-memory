@@ -215,7 +215,7 @@ def validate_bundle(bundle):
     for omitted in bundle["omitted"]:
         _require(isinstance(omitted, dict) and omitted.get("uuid") and omitted.get("reason"),
                  "omitted: requires uuid and reason")
-        _require(isinstance(omitted.get("version"), int) and omitted["version"] >= 1,
+        _require(type(omitted.get("version")) is int and omitted["version"] >= 1,
                  f"omitted {omitted['uuid']}: version requires a positive integer")
         _require(omitted["reason"] in OMISSION_REASONS,
                  f"unknown omission reason '{omitted['reason']}'")
