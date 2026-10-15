@@ -339,6 +339,8 @@ class RecallFramingTests(unittest.TestCase):
             "get-blob": ([uuid, "1"], {}),
             "labels": ([], {}),
             "initiatives": ([], {}),
+            "product-names": ([], {}),
+            "product-links": ([], {}),
             "paths": ([], {"sourceUuid": uuid, "maxDepth": 2}),
             "ticket-paths": ([], {"anchor": {"provider": "github", "key": "1"}, "maxDepth": 2}),
         }

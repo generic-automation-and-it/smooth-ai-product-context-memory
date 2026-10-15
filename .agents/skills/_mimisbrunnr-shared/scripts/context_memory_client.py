@@ -1286,7 +1286,7 @@ RAW_BODY_COMMANDS = frozenset({"get-blob"})
 # listings unframed, so the same stored text arrived with the recall notice from one client and
 # without it from the other (issue 190). Every read surface frames; this is the capture client's list.
 FRAMED_COMMANDS = frozenset({"query", "get-versions", "get-blob", "paths", "ticket-paths", "labels",
-                             "initiatives"})
+                             "initiatives", "product-names", "product-links"})
 
 
 def run_framed(args):
@@ -1447,6 +1447,14 @@ def main():
     p = sub.add_parser("initiatives", help="GET /api/context/initiatives")
     p.add_argument("--status", help="active or archived")
     p.set_defaults(func=cmd_initiatives)
+
+    p = sub.add_parser("product-names", help="GET /api/context/product-names")
+    p.set_defaults(func=cmd_product_names)
+
+    p = sub.add_parser("product-links", help="GET /api/context/product-names/links")
+    p.add_argument("--product-name")
+    p.add_argument("--initiative-name")
+    p.set_defaults(func=cmd_product_links)
 
     p = sub.add_parser("upsert-initiative", help="POST /api/context/initiatives")
     add_payload_arguments(p)
