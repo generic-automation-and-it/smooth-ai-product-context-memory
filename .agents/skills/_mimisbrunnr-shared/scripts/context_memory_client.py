@@ -1134,13 +1134,18 @@ def cmd_product_names(args):
 
 
 def cmd_product_links(args):
+    product_name = getattr(args, "product_name", None)
+    initiative_name = getattr(args, "initiative_name", None)
+    if bool(product_name) == bool(initiative_name):
+        raise ClientError(0, "bad-input",
+                          "'product-links' requires exactly one of '--product-name' or '--initiative-name'")
     query = {}
-    if getattr(args, "product_name", None):
-        query["productName"] = args.product_name
-    if getattr(args, "initiative_name", None):
-        query["initiativeName"] = args.initiative_name
+    if product_name:
+        query["productName"] = product_name
+    if initiative_name:
+        query["initiativeName"] = initiative_name
     resp = require_lists(
-        _request("GET", "/api/context/product-names/links", query=query or None), "product-links", "items")
+        _request("GET", "/api/context/product-names/links", query=query), "product-links", "items")
     print(json.dumps(resp, indent=2))
     return resp
 

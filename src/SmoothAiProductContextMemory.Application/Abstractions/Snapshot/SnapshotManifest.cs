@@ -94,8 +94,9 @@ public static class SnapshotFormat
     // field existed (v2, field absent→null) would restore bodies as application/octet-stream, so
     // they carry the same refusal semantics as v2.
     // v4: product-name graph members (Product/Initiative/Repo vertices and HAS_INITIATIVE/HAS_REPO
-    // edges) were added to the archive and SnapshotCounts. An older archive restores zero product
-    // links and says so (HLD-003 LADR-10).
+    // edges) were added to the archive and SnapshotCounts. Archives written before those members
+    // existed (v3, members absent) would restore zero product links, so they are refused at the
+    // manifest version gate (HLD-003 LADR-10).
     public const int Version = 4;
 }
 

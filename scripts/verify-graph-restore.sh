@@ -71,7 +71,7 @@ SRC_PN_REPO="$(count_label "$SOURCE_DB" Repo)"
 SRC_HAS_INIT="$(count_label "$SOURCE_DB" HAS_INITIATIVE)"
 SRC_HAS_REPO="$(count_label "$SOURCE_DB" HAS_REPO)"
 echo "   product-name vertices: product=$SRC_PN_VERTICES initiatives=$SRC_PN_INIT repos=$SRC_PN_REPO | HAS_INITIATIVE=$SRC_HAS_INIT HAS_REPO=$SRC_HAS_REPO"
-if [ "$SRC_EDGES" -eq 0 ]; then
+if [ "$SRC_EDGES" -eq 0 ] && [ "$SRC_HAS_INIT" -eq 0 ] && [ "$SRC_HAS_REPO" -eq 0 ]; then
     echo "FAIL: source has zero edges — a restore check against an empty graph proves nothing" >&2
     echo "      populate relationships first, then re-run" >&2
     exit 1
