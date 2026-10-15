@@ -85,6 +85,7 @@ One-liners; full detail in git history and the linked PRs/issues.
 
 | Date | Change | Ref |
 |---|---|---|
+| 2026-10-15 | **README `Install` split into Service vs Client Skills Installation** — one one-liner each (`run.sh`, `install-skills.sh`), skills side linking to the full explanation. Root changelog is the record home (no localized file covers `README.md`). | PR #246 |
 | 2026-10-15 | **Phase P3 (graph) lands in the viewer SPA** — bounded force layout of `/paths` path chains, explicit root, `maxDepth` always sent, edge-type narrowing server-side, click-to-label hops via a new read-only `GET /memories/{uuid}` (hop uuids had no addressable endpoint). Ticket graph surface with its disclosure and cap flags. No write path. | HLD-009 |
 | 2026-10-15 | **Dropped the project-config refusal from the CI OpenCode credential guard** — the shipped root `opencode.json` made it exit 65 on every clean tree; symlink-target resolution stays; `docs/wiki/ci.md` updated. Root changelog is the record home (no localized file covers `.github/scripts/`). | this PR |
 | 2026-10-15 | **Tersed this file** (prose compressed, `Test Framework` merged into `Build / Test`, rules table replaced by a pointer to the new index) and **added `.agents/rules/AGENTS.md`** — an index of every rule file, split by folder, with the frontmatter fields (`description`, `globs`, `paths`, `applyTo`, `alwaysApply`) as columns. Changelog untouched. | this PR |
