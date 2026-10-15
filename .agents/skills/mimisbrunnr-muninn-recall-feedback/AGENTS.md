@@ -14,7 +14,7 @@ records. Output is identity, count and time only.
 ## Non-Negotiables
 
 - **The loopback guard gates the request; it does not merely report.** The check is a shell
-  **function**, not a `( ... )` subshell, and it is the last statement before the token is read. A
+  **function**, not a `( ... )` subshell, and it runs before the request: the token is read into a local early, but nothing reaches `curl` until the guard, the path check and the empty-token check have all passed. A
   subshell's `exit 1` returns to a caller that never tested it, so the three `curl` commands that
   followed it ran regardless of what the guard decided — the guard was decorative. If you refactor the
   smoke check, keep the refusal and the send on one code path.
@@ -80,7 +80,7 @@ records. Output is identity, count and time only.
   scheme `admin`, and a token pasted into the wrong variable parses as a hostname. `params` must be
   checked separately because `urlparse` moves `;…` out of `path`, so `http://localhost:5141/;tok=x`
   otherwise reads as a bare origin.
-- **A base the parser cannot read is refused with a fixed message.** `urlsplit` raises `ValueError`
+- **A base the parser cannot read is refused with a fixed message.** `urlparse` raises `ValueError`
   for an NFKC-confusable netloc character, a non-numeric port or an unbalanced IPv6 bracket, and the
   message quotes the netloc — userinfo included. The guard's stderr is the caller's stderr, so that
   error must never escape the `try`; the sibling composer closes the same hole at
@@ -116,6 +116,7 @@ records. Output is identity, count and time only.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-15 | The guard-order Non-Negotiable now describes the script (token read early, nothing sent before the guard approves) and names `urlparse`, the parser it uses. | consumer review 5538013336 |
 | 2026-10-15 | CI claim scoped to upstream's PR gate, with the manual command for a vendoring repository; the capability bullet names the real commands (`never-recalled`, `miss-rate`, `reset`), not `verify`. | consumer review 5535929651 |
 | 2026-10-07 | Token storage between shells is operator machine config (provisioned env file, managed `~/.zshrc` block); the skill writes no value anywhere. | review 5440964552 |
 | 2026-10-07 | `SKILL.md` lists `::1` among accepted loopback hosts. | issue 200 |

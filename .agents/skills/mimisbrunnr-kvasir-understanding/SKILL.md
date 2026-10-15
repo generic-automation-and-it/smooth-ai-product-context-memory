@@ -46,7 +46,7 @@ already written somewhere into the store so it compounds. It is the **load/trans
 A marked `load`/`import` sets the session's working point; a default `export` excludes
 what was marked, so imported context is never re-proposed as new (echo).
 
-- The marker is client-side only: `.context/session-markers/kvasir-<session-id>.json`
+- The marker is client-side only: `.context/session-markers/kvasir-<session-id>.json` (an ID with characters outside `A-Za-z0-9._-` gets a short digest suffix so distinct IDs never share a file)
   (atomic write), holding references (ids + versions + subjects, plus selector + as-of
   on `--all`/selector-wide imports for replay) — **never memory content**. No Host, API or
   schema change.
@@ -163,8 +163,10 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
 
 - `export` orchestrates the capture skill end to end — redaction gate, atomicity gate, the optional value
   gate, the auto-split batch cap, group resolution, preflight, and `set --dryrun` as the veto point — and
-  **never writes directly**. It **writes by default**; `--dryrun` runs every gate and the preview, then
-  stops before anything is written. The old `--write` opt-in is accepted as a deprecated no-op and says
+  **never writes directly**. It **writes by default**; `--dryrun` runs the offline gates and the preview, then
+  stops before anything is written **to the store** — the server-side `set --dryrun` veto needs a resolved
+  group and runs at the start of a writing export, not in the preview, and held candidates are still
+  appended to the local review queue. The old `--write` opt-in is accepted as a deprecated no-op and says
   so; with `--dryrun` beside it, `--dryrun` wins.
 - A default export drops the session marker's ids and reports `Boundary:`; `export --all`
   ignores the marker. A candidate changing an excluded item is kept as a supersession.

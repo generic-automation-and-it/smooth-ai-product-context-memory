@@ -7,7 +7,8 @@ Run the write client, `context_memory_client.py`, on discrete candidate facts an
 Never a raw transcript. The write credential is never ambient: the client seeds only the read token and
 base URL, so `CONTEXT_MEMORY_WRITE_TOKEN` is absent until you load it. Load it only at the authorized
 checkpoint, with the deliberate write step the skill's `SKILL.md` names —
-`set -a && source ~/.mimisbrunnr/credentials && set +a` — and **only inside a subshell around each
+`set -a && source ~/.mimisbrunnr/credentials && set +a` (source the file `CONTEXT_MEMORY_CREDENTIAL_FILE`
+names instead, when it is set — it is the file the clients read) — and **only inside a subshell around each
 write-route invocation** (`preflight`, `set`, `resolve-group`, `upsert-initiative`, `update-group`,
 `append-description`, `create-link`, `propose-label`, `ticket-parent` — the `WRITE_ROUTES` set in
 `context_memory_client.py`; `preflight` persists nothing but still authenticates write-only), so the
