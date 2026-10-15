@@ -509,6 +509,7 @@ relying on the well for it.
 | Container images & durability (`snapshot`/`verify`/`restore`) | [`docs/wiki/docker.md`](docs/wiki/docker.md) |
 | Setup & credentials (tokens, name mapping, provisioning) | [`docs/wiki/setup.md`](docs/wiki/setup.md) |
 | One-command controller launcher (`run.sh` / `.ps1`) | [`scripts/CONTROLLER_LAUNCHER.md`](scripts/CONTROLLER_LAUNCHER.md) |
+| Installing/updating the skills (`install-skills.sh` / `.ps1`) | [`scripts/SKILLS_INSTALLER.md`](scripts/SKILLS_INSTALLER.md) |
 | Architecture decisions & NFRs | [`docs/hlds/`](docs/hlds/) |
 
 ---

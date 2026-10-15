@@ -194,6 +194,12 @@ jobs:
       - name: Test controller launcher
         run: bash scripts/test-run-launcher.sh
 
+      # install-skills.ps1 is skipped here: pwsh 7 is not on the runner image, and the harness says so
+      # rather than passing quietly. It is exercised locally on macOS/Linux with pwsh present, and the
+      # PowerShell-only formatting and ConvertFrom-Json paths are the part a green Linux run cannot cover.
+      - name: Test skills installer
+        run: bash scripts/test-install-skills.sh
+
       - name: Test Aspire test runner
         run: bash .github/actions/aspire-test-with-coverage/test-run.sh
 
