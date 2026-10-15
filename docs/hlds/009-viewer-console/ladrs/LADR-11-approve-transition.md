@@ -58,9 +58,10 @@ The subprocess helper is implemented in P4b, not G2.
 
 Implemented 2026-10-15 (G2 closed).
 
-- `SetMemories.Validator`: unchanged — `Status` must be `proposed` or `approved`, no extra rule.
+- SetMemories: unchanged `Status` rule (`proposed`/`approved`), no extra validator or handler guard.
 - Tests: `SetMemoriesValidatorTests.Accepts_approved_create_without_uuid`,
   `Accepts_approved_version_bump_with_uuid`;
   `SetMemoriesHandlerTests.Approved_transition_creates_v2_with_approved_status`,
   `Approved_revision_creates_new_approved_version`.
-- Bridge subprocess helper + write routes pending in P4b.
+- Bridge subprocess helper + write routes **delivered** in P4b (`bridge_p4b.py`; see the HLD AGENTS.md
+  P4b row).

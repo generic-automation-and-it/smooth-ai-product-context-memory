@@ -11,8 +11,9 @@ drives the capture pipeline rather than reimplementing it; the browser holds no 
 
 ## Non-Negotiables
 
-- **The bridge calls the capture scripts; it is never a writer and never a judge.** The "sole writer"
-  invariant (HLD-002) and the no-model rule (HLD-005 §2.6) hold (LADR-03).
+- **The P4a bridge never holds the write token and never writes; the P4b bridge writes only by
+  driving the capture `set` pipeline (never a judge).** The "sole writer" invariant (HLD-002) and the
+  no-model rule (HLD-005 §2.6) hold (LADR-03). Neither bridge reimplements a capture gate.
 - **Read is ambient, write is never ambient.** Caddy injects the read token into the `/api` proxy; the
   write token is server-side and used only on an explicit approve (LADR-02, NFR-02).
 - **Loopback only** (NFR-01). Published on loopback only; the container binds all interfaces so the Aspire/DCP proxy can reach it.
@@ -52,6 +53,9 @@ The high-impact ones — see [`./ladrs/`](./ladrs/) for detail:
 - **LADR-09** — the bridge is a Python service that imports the capture client and reuses its gates.
 - **LADR-10** — the review queue is derived from the store (proposed status); conflict choices and the
   dry-run digest are reproduced by re-running dedup.
+- **LADR-11** — the Console approve is a gated `set` version-bump with `Status=approved` on the existing
+  `Uuid`; no separate transition endpoint, and no Host guard for `approved` (a fresh approved create is
+  the capture path's normal shape; `proposed` is reserved for gate-held candidates).
 
 ## Key Behaviors
 
