@@ -375,6 +375,10 @@ WRITE_ROUTES = frozenset({
     ("PUT", "/api/context/tickets/parent"),
     ("POST", "/api/context/labels"),
     ("POST", "/api/context/initiatives"),
+    ("POST", "/api/context/product-names"),
+    ("PUT", "/api/context/product-names/initiatives"),
+    ("PUT", "/api/context/product-names/repos"),
+    ("POST", "/api/context/product-names/initiatives/unlink"),
 })
 WRITE_ROUTE_TEMPLATES = (
     ("PATCH", re.compile(r"/api/context/groups/" + _UUID_PATTERN)),
@@ -1076,6 +1080,48 @@ def cmd_upsert_initiative(args):
     return resp
 
 
+def cmd_upsert_product_name(args):
+    resp = scrubbed_write("upsert_product_name", "POST", "/api/context/product-names", payload_of(args))
+    print(json.dumps(resp, indent=2))
+    return resp
+
+
+def cmd_link_product_initiative(args):
+    resp = scrubbed_write("link_product_initiative", "PUT", "/api/context/product-names/initiatives", payload_of(args))
+    print(json.dumps(resp, indent=2))
+    return resp
+
+
+def cmd_link_product_repo(args):
+    resp = scrubbed_write("link_product_repo", "PUT", "/api/context/product-names/repos", payload_of(args))
+    print(json.dumps(resp, indent=2))
+    return resp
+
+
+def cmd_unlink_product_initiative(args):
+    resp = scrubbed_write(
+        "unlink_product_initiative", "POST", "/api/context/product-names/initiatives/unlink", payload_of(args))
+    print(json.dumps(resp, indent=2))
+    return resp
+
+
+def cmd_product_names(args):
+    resp = _request("GET", "/api/context/product-names")
+    print(json.dumps(resp, indent=2))
+    return resp
+
+
+def cmd_product_links(args):
+    query = {}
+    if getattr(args, "product_name", None):
+        query["productName"] = args.product_name
+    if getattr(args, "initiative_name", None):
+        query["initiativeName"] = args.initiative_name
+    resp = _request("GET", "/api/context/product-names/links", query=query or None)
+    print(json.dumps(resp, indent=2))
+    return resp
+
+
 def cmd_paths(args):
     """POST /api/context/paths. Bounded multi-hop traversal from a source memory.
 
@@ -1404,6 +1450,22 @@ def main():
     p = sub.add_parser("upsert-initiative", help="POST /api/context/initiatives")
     add_payload_arguments(p)
     p.set_defaults(func=cmd_upsert_initiative)
+
+    p = sub.add_parser("upsert-product-name", help="POST /api/context/product-names")
+    add_payload_arguments(p)
+    p.set_defaults(func=cmd_upsert_product_name)
+
+    p = sub.add_parser("link-product-initiative", help="PUT /api/context/product-names/initiatives")
+    add_payload_arguments(p)
+    p.set_defaults(func=cmd_link_product_initiative)
+
+    p = sub.add_parser("link-product-repo", help="PUT /api/context/product-names/repos")
+    add_payload_arguments(p)
+    p.set_defaults(func=cmd_link_product_repo)
+
+    p = sub.add_parser("unlink-product-initiative", help="POST /api/context/product-names/initiatives/unlink")
+    add_payload_arguments(p)
+    p.set_defaults(func=cmd_unlink_product_initiative)
 
     p = sub.add_parser("paths", help="POST /api/context/paths (bounded multi-hop traversal)")
     add_payload_arguments(p)
