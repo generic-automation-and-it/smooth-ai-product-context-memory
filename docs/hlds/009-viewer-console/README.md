@@ -6,7 +6,7 @@
 | **Owner** | generik0 |
 | **Tracker** | Viewer Console |
 | **Business authority** | [BRD-004 — Mímisbrunnr Console](../../brd/004-viewer-console/) (`BR-46` … `BR-53`), extending [BRD-001](../../brd/001-context-memory/) |
-| **Last updated** | 2026-10-13 |
+| **Last updated** | 2026-10-15 |
 
 > Discovery / prototyping HLD. Delivers **intent + spec** — what we are building and why, the decisions
 > behind it, and the quality bar it must meet. No implementation plan; execution is tracked in the

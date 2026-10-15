@@ -21,7 +21,7 @@ drives the capture pipeline rather than reimplementing it; the browser holds no 
 - **The graph is bounded** — depth ≤ the store's declared max, with an edge cap (LADR-05, NFR-05). It is
   not a graph database; it must not over-promise a rich network.
 - **An intermediate hop is a uuid, and one read labels it.** `/paths` returns uuid references for every
-  hop but the endpoint, and `POST /query` has no uuid predicate, so `GET /memories/{uuid}` (current
+  hop but the endpoint, and `POST /query` has no uuid predicate, so `GET /api/context/memories/{uuid}` (current
   version, cheap fields, scope-gated) is what the graph calls — once per click, never per node at render.
 - **No-build SPA** (LADR-04). Vendored libs, no Node toolchain, served by Caddy.
 
