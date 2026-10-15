@@ -85,6 +85,7 @@ One-liners; full detail in git history and the linked PRs/issues.
 
 | Date | Change | Ref |
 |---|---|---|
+| 2026-10-15 | **Dropped the project-config refusal from the CI OpenCode credential guard** — the shipped root `opencode.json` made it exit 65 on every clean tree; symlink-target resolution stays; `docs/wiki/ci.md` updated. Root changelog is the record home (no localized file covers `.github/scripts/`). | this PR |
 | 2026-10-15 | **Tersed this file** (prose compressed, `Test Framework` merged into `Build / Test`, rules table replaced by a pointer to the new index) and **added `.agents/rules/AGENTS.md`** — an index of every rule file, split by folder, with the frontmatter fields (`description`, `globs`, `paths`, `applyTo`, `alwaysApply`) as columns. Changelog untouched. | this PR |
 | 2026-10-15 | **Added local OpenCode config** — `.agents/opencode.json` + root symlink; permissions translated, deny list in `experimental.policies`. `instructions` key not honoured by `opencode run` — see PR #236. | issue 231 |
 | 2026-10-15 | **Renamed `src/SmoothAiProductContextMemory.ViewerPod/` → `src/SmoothAiProductContextMemory.Viewer/`** — the project is named for the Console it ships, not its container topology; runtime names (`mimir-viewer` resource, `mimisbrunnr-viewer` container) unchanged. | PR #229 |

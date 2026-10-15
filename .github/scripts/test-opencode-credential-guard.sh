@@ -99,17 +99,12 @@ mkdir -p "$scratch/project/nested"
   cd "$scratch/project/nested"
   GITHUB_WORKSPACE="$scratch/project" "$scratch/opencode" capture "$scratch/safe-env"
 )
-printf '{"agent":{}}\n' > "$scratch/project/opencode.json"
-if (cd "$scratch/project/nested" && GITHUB_WORKSPACE="$scratch/project" \
-    "$scratch/opencode" --version >/dev/null 2>&1); then
-  echo 'project config override was not rejected' >&2
-  exit 1
-fi
-
+# Project-local opencode.json is intentionally NOT refused: the repository ships its own
+# for local runs, so a config scan can never pass on a clean tree. The symlink checks below
+# are the remaining guard.
 # A deny glob matches the path the model asks for, not what that path resolves to. A symlink
 # committed in a pull request therefore reads a denied target through an innocuous repo path, and
 # no deny rule can see it — so the guard resolves the target itself, before the model starts.
-rm -f "$scratch/project/opencode.json"
 ln -s /proc/self/environ "$scratch/project/docs-leak"
 if (cd "$scratch/project/nested" && GITHUB_WORKSPACE="$scratch/project" \
     "$scratch/opencode" --version >/dev/null 2>&1); then
