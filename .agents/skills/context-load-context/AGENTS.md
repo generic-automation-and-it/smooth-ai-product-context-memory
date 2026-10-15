@@ -1,16 +1,19 @@
-# context-load-context — AGENTS.md
+# AGENTS.md - context-load-context
 
 ## TL;DR
 
-Pure-prompt Phase 0 gate: discovers and loads `*AGENTS.md` files by domain glob, and BLOCKS (with create/search/manual/bypass options) when none exist — the block is the feature, not an error path.
+Read [`SKILL.md`](./SKILL.md) first — discovery, the BLOCK prompt and creation steps live there.
 
-## Key Behaviors
+## Non-Negotiables
 
-- This skill is the interactive front-end of the workflow's Phase 0; the *automatic* path is the `load-agents-context` PostToolUse hook (see `context-load-agents-context/`). Changes to discovery conventions (file naming, template location) must be mirrored in both.
-- Created files come from `.agents/templates/TEMPLATE_AGENTS.md` and are deliberately left minimal — population happens in Phase 8 (Bragi), so don't "improve" creation to pre-fill sections.
+- **The `*AGENTS.md` naming and template path are shared, not owned here.** The same pattern drives the
+  `context-load-agents-context` script's `find` and the knowledge rule's glob, and
+  `.agents/templates/TEMPLATE_AGENTS.md` is the creation template this skill names. Changing either
+  here alone splits interactive and automatic loading.
 
 ## Changelog
 
 | Date | Change | Ref |
-|:-----|:-------|:----|
-| 2026-06-12 | Initial version. | |
+| :---- | :---- | :---- |
+| 2026-06-12 | Initial version | — |
+| 2026-10-15 | Cut to HLD shape: SKILL.md pointer + non-SKILL.md traps only | — |

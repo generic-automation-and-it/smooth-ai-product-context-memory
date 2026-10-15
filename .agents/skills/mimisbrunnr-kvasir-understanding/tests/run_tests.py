@@ -4026,7 +4026,7 @@ class ExportDedupClaimTests(unittest.TestCase):
 
     def test_the_docs_claim_only_exact_subject_dedup(self):
         root = Path(__file__).resolve().parents[1]
-        for name in ("SKILL.md", "README.md", "AGENTS.md"):
+        for name in ("SKILL.md", "README.md"):
             text = (root / name).read_text(encoding="utf-8")
             with self.subTest(doc=name):
                 self.assertNotIn("dedup/link", text)

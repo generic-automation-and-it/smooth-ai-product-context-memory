@@ -1185,11 +1185,11 @@ class AtomicityTests(unittest.TestCase):
             "The cache also means faster reads, and it moreover cuts cost.")["verdict"], "bundled")
 
     def test_the_redaction_guarantee_is_stated_for_recognised_secrets_only(self):
-        """Review 5432012955 #6: LADR-003 said the stored blob "never" contains a leaked secret, which
-        the Non-Negotiable above it forbids — the gate is on recognition, not on secrets."""
+        """Review 5432012955 #6: LADR-003 said the stored blob "never" contains a leaked secret — the gate
+        is on recognition, not on secrets."""
         agents = " ".join((HERE.parent / "AGENTS.md").read_text(encoding="utf-8").split())
         self.assertNotIn("the stored blob and DB never contain it", agents)
-        self.assertIn("a leaked secret the rules **recognise** is scrubbed before write", agents)
+        self.assertIn("a secret no rule recognises is stored as written", agents)
 
     def test_every_documented_harness_command_is_runnable(self):
         """Review 5432012955 #15: a documented command carried a `…` placeholder for its path."""
@@ -3466,7 +3466,6 @@ class AgentContractTests(unittest.TestCase):
         exists; none may present cleanup as what removes it."""
         documents = {
             "SKILL.md": HERE.parent / "SKILL.md",
-            "AGENTS.md": HERE.parent / "AGENTS.md",
             "references/write-path.md": self.WRITE,
         }
         for name, path in documents.items():
@@ -3488,7 +3487,6 @@ class AgentContractTests(unittest.TestCase):
         scratch folder, which `mkdir -m` leaves at whatever mode it has."""
         documents = {
             "SKILL.md": HERE.parent / "SKILL.md",
-            "AGENTS.md": HERE.parent / "AGENTS.md",
             "references/write-path.md": self.WRITE,
         }
         for name, path in documents.items():
@@ -3504,15 +3502,12 @@ class AgentContractTests(unittest.TestCase):
         initiative prerequisite applies on the create path only."""
         skill = " ".join((HERE.parent / "SKILL.md").read_text(encoding="utf-8").split())
         worker = " ".join(self.WRITE.read_text(encoding="utf-8").split())
-        agents = " ".join((HERE.parent / "AGENTS.md").read_text(encoding="utf-8").split())
         # Review 5430979214 #20: an existing group with no memories has no read-only `groupUuid`
         # either, so it gets the offline preview too, in both the skill and the worker.
         self.assertIn("a group that does not exist yet, or an existing group with no memories", skill)
         self.assertIn("`set` cannot run", skill)
         self.assertIn("for a group that does not exist yet, or an existing group with no memories", worker)
         self.assertIn("after creation supplies its `groupUuid`", worker)
-        self.assertIn("on the create path an initiative must exist first", agents)
-        self.assertNotIn("and an initiative must exist first.**", agents)
 
     def test_the_default_prompt_writes_only_on_an_explicit_export(self):
         """Issue 186 (issue 179 finding 23, issue 181 again): the default prompt told an agent to write

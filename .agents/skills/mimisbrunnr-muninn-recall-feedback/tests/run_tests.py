@@ -512,11 +512,9 @@ class RecallFeedbackCommandLineTests(FakeCurlCase):
     def test_older_curl_guidance_keeps_a_failing_exit(self):
         """Consumer review 5438563690 #8: the docs said to drop `--fail-with-body` on older curl, which
         makes a 403 exit 0. The fallback is `--fail`."""
-        for doc in ("SKILL.md", "AGENTS.md"):
-            text = " ".join((SKILL / doc).read_text(encoding="utf-8").split())
-            with self.subTest(doc=doc):
-                self.assertNotIn("drop that one flag", text)
-                self.assertIn("`--fail`", text)
+        text = " ".join((SKILL / "SKILL.md").read_text(encoding="utf-8").split())
+        self.assertNotIn("drop that one flag", text)
+        self.assertIn("`--fail`", text)
 
     def test_miss_rate_sends_both_dates(self):
         result = self.run_cli("miss-rate", "--from", "2030-01-01", "--to", "2030-01-08")
