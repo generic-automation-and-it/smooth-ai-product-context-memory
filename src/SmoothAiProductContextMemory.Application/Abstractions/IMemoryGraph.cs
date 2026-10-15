@@ -32,6 +32,27 @@ public interface IMemoryGraph
     Task<IReadOnlyList<MemoryRelationship>> ListEdgesAsync(
         IReadOnlyCollection<Guid> uuids,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// True when the memory already carries the <c>ABOUT</c> edge to the ticket.
+    /// </summary>
+    Task<bool> AboutExistsAsync(
+        Guid memoryUuid,
+        string provider,
+        string key,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Declares <c>(Memory)-[:ABOUT]->(Ticket)</c> when absent. The Memory vertex is created on demand;
+    /// the Ticket vertex must already exist (the group membership trigger owns it). Returns
+    /// <see langword="false"/> on duplicate.
+    /// </summary>
+    Task<bool> CreateAboutAsync(
+        Guid memoryUuid,
+        string provider,
+        string key,
+        string reason,
+        CancellationToken cancellationToken);
 }
 
 public sealed record MemoryRelationship(Guid SourceUuid, Guid TargetUuid, string Relation, string Reason);

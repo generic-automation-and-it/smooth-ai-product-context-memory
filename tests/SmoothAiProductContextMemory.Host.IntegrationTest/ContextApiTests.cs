@@ -746,6 +746,7 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
         // Mutating: create, supersede, link, register, trigger, reset.
         ["POST /api/context/preflight"] = ApiCapability.Write,
         ["POST /api/context/memories"] = ApiCapability.Write,
+        ["POST /api/context/memories/ticket-references"] = ApiCapability.Write,
         ["POST /api/context/links"] = ApiCapability.Write,
         ["POST /api/context/groups/resolve"] = ApiCapability.Write,   // may create a group
         ["PATCH /api/context/groups/{uuid:guid}"] = ApiCapability.Write,

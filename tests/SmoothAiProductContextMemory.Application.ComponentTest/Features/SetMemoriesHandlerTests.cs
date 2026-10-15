@@ -467,6 +467,12 @@ public sealed class SetMemoriesHandlerTests(AspireFixture aspire) : HandlerTestB
 
         public Task<IReadOnlyList<MemoryRelationship>> ListEdgesAsync(IReadOnlyCollection<Guid> uuids, CancellationToken cancellationToken) =>
             inner.ListEdgesAsync(uuids, cancellationToken);
+
+        public Task<bool> AboutExistsAsync(Guid memoryUuid, string provider, string key, CancellationToken cancellationToken) =>
+            inner.AboutExistsAsync(memoryUuid, provider, key, cancellationToken);
+
+        public Task<bool> CreateAboutAsync(Guid memoryUuid, string provider, string key, string reason, CancellationToken cancellationToken) =>
+            inner.CreateAboutAsync(memoryUuid, provider, key, reason, cancellationToken);
     }
 
     private SetMemories.Handler NewHandler() =>
