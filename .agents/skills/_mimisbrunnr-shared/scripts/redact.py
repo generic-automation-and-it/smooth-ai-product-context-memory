@@ -481,6 +481,10 @@ WRITE_SPECS = {
     "ticket_parent": {"reason": TEXT, "source": TEXT},
     "propose_label": {"name": TEXT},
     "upsert_initiative": {"name": TEXT, "description": TEXT},
+    "upsert_product_name": {"name": TEXT, "description": TEXT},
+    "link_product_initiative": {"name": TEXT, "initiativeName": TEXT, "reason": TEXT, "source": TEXT},
+    "link_product_repo": {"name": TEXT, "repo": TEXT, "reason": TEXT, "source": TEXT},
+    "unlink_product_initiative": {"name": TEXT, "initiativeName": TEXT},
 }
 
 
