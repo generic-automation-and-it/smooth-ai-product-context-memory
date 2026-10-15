@@ -4,7 +4,7 @@ Guidance for AI coding agents in SmoothAiProductContextMemory.
 
 ## Overview
 
-Persistent memory service for AI agents: stores summarized, labelled context (linked to issue/ticket numbers) for retrieval across long gaps. HTTP Docker API + an agent skill for get/set.
+Persistent memory service for AI agents: summarized, labelled context (linked to issue/ticket numbers) retrieved across long gaps. HTTP Docker API + an agent skill for get/set.
 
 **Tech stack:** .NET 10 · ASP.NET Core · Clean Architecture (Domain / Application / Infrastructure / Host) · EF Core + PostgreSQL with Apache AGE · Mediator (source-gen CQRS) · xunit.v3
 
@@ -12,9 +12,9 @@ Persistent memory service for AI agents: stores summarized, labelled context (li
 
 ## AI Context Files
 
-`AGENTS.md` and `*AGENTS.md` are first-class AI-coder context — read like `CLAUDE.md`, not optional reference. Layered domain → sub-domain → feature → technology; read every level that governs code you touch, nearest `*AGENTS.md` most authoritative. Keep `*AGENTS.md` synced with code; every PR updates at least one. Prefer local context over adding to this root file — avoid restating the same plan at multiple levels. Changelog entries follow the same rule: record a change in the **nearest localized `*AGENTS.md`'s** changelog, not the root's — the root `## Changelog` is only for changes that are global to the solution or to this root file itself; when no localized `*AGENTS.md` exists for the touched area, the root changelog is that change's home (announcing a newly created doc area counts as solution-global).
+`AGENTS.md` / `*AGENTS.md` are first-class AI-coder context — read like `CLAUDE.md`. Layered domain → sub-domain → feature → technology; read every level that governs code you touch, nearest `*AGENTS.md` most authoritative. Keep `*AGENTS.md` synced with code; every PR updates at least one. Prefer local context over adding to this root file. Changelog entries follow the same rule: record in the **nearest localized `*AGENTS.md`'s** changelog, not the root's — the root `## Changelog` is only for solution-global changes or changes to this root file; with no localized `*AGENTS.md` for the touched area, the root changelog is its home (announcing a newly created doc area counts as solution-global).
 
-Planned work tracked as worktasks under `.context/work-tasks/` (gitignored). Use `/create worktask`. **Never reference worktask IDs (e.g. `WT-04`) in delivered artefacts** — code, comments, `*AGENTS.md`, HLDs, changelogs. Worktasks are short-lived and gitignored; cite the durable authority instead (HLD, LADR, NFR, PR, issue).
+Planned work: worktasks under `.context/work-tasks/` (gitignored), via `/create worktask`. **Never reference worktask IDs (e.g. `WT-04`) in delivered artefacts** — code, comments, `*AGENTS.md`, HLDs, changelogs. Cite the durable authority instead (HLD, LADR, NFR, PR, issue).
 
 ## Repository Layout
 
@@ -31,15 +31,9 @@ Planned work tracked as worktasks under `.context/work-tasks/` (gitignored). Use
 
 ## Rules
 
-Rules live under `.agents/rules/` as `*.instructions.md`, auto-loaded every session by Claude Code / Cursor / Copilot / Codex (symlinks in `.agents/AI_DEVELOPMENT_AGENTS.md`). Scoping is **per-file** frontmatter: `paths` (Claude), `globs`+`alwaysApply` (Cursor), `applyTo` (Copilot). Category subfolders are organizational only — they don't change loading. One exception: prompt-scoped rules may be deferred for Claude and re-injected on demand by a `UserPromptSubmit` hook (e.g. `code-review-standards`). See `.agents/rules/meta/rules.instructions.md`.
+Rules live under `.agents/rules/` as `*.instructions.md`, auto-loaded every session by Claude Code / Cursor / Copilot / Codex (symlinks in `.agents/AI_DEVELOPMENT_AGENTS.md`). Scoping is **per-file** frontmatter: `paths` (Claude), `globs`+`alwaysApply` (Cursor), `applyTo` (Copilot). Category subfolders are organizational only — they don't change loading. Exception: prompt-scoped rules may be deferred for Claude and re-injected by a `UserPromptSubmit` hook (e.g. `code-review-standards`). Convention: `.agents/rules/meta/rules.instructions.md`.
 
-| Category | Folder | Contents |
-|----------|--------|----------|
-| _(cross-cutting)_ | `.agents/rules/` | `ai-workflow-rules`, `code-review-standards` (hook-deferred), `project-overview`, `clean-code`, `solid-principles` |
-| git | `.agents/rules/git/` | `git-policy`, `pr-standards` |
-| skills | `.agents/rules/skills/` | `skill-secret-handling` (secret values stay out of model-visible and committed text) |
-| meta | `.agents/rules/meta/` | `rules` (file convention), `knowledge-conventional-contexts-quality` (AGENTS.md quality), `understandings` (rules vs AGENTS.md vs Understandings, and which wins) |
-| backend (`**/*.cs`) | `.agents/rules/backend/` | api-mediator-validation, architecture-slices, backend-logging-conventions, external-api-clients, migrations, readonly-collections |
+**Index of all rules, split by folder with frontmatter fields as columns: `.agents/rules/AGENTS.md`.**
 
 ## Build / Test
 
@@ -57,13 +51,11 @@ dotnet run --project src/SmoothAiProductContextMemory.Host -- verify <archive>  
 dotnet run --project src/SmoothAiProductContextMemory.Host -- restore <archive> [--force]  # restore + printed reconciliation
 ```
 
-Evidence harnesses (each skipped without its env var): `SMOOTH_FTS_BENCH=1` recall-tuning, `SMOOTH_FEEDBACK_BENCH=1` feedback-placement, `SMOOTH_SNAPSHOT_BENCH=1` snapshot timing, `SMOOTH_DOSSIER_BENCH=1` dossier timing, `SMOOTH_NFR_BENCH=1` NFR-01..03, `SMOOTH_AGE_BENCH=1` traversal benchmarks, `SMOOTH_WALK_BENCH=1` cold-agent walk — see the `*_BENCH` filter lines in git history. Skill harnesses: `python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/tests/run_tests.py`, `.../run_walk_tests.py`, `.../mimisbrunnr-odin-context-memory/tests/run_tests.py`, `.../test_review_and_dedup.py`. Ops scripts: `seed-graph-sample.sh`, `verify-graph-restore.sh` (NFR-03), `verify-graph-preupgrade.sh` (NFR-04), `check-ticket-ownership.sh`, `smoke-apphost-container.sh`, `stop-dev-stack.sh` (keep data) vs `reset-dev-stack.sh` (destroy volumes).
+Evidence harnesses (skipped without their env var): `SMOOTH_FTS_BENCH=1` recall-tuning, `SMOOTH_FEEDBACK_BENCH=1` feedback-placement, `SMOOTH_SNAPSHOT_BENCH=1` snapshot timing, `SMOOTH_DOSSIER_BENCH=1` dossier timing, `SMOOTH_NFR_BENCH=1` NFR-01..03, `SMOOTH_AGE_BENCH=1` traversal benchmarks, `SMOOTH_WALK_BENCH=1` cold-agent walk — see the `*_BENCH` filter lines in git history. Skill harnesses: `python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/tests/run_tests.py`, `.../run_walk_tests.py`, `.../mimisbrunnr-odin-context-memory/tests/run_tests.py`, `.../test_review_and_dedup.py`. Ops scripts: `seed-graph-sample.sh`, `verify-graph-restore.sh` (NFR-03), `verify-graph-preupgrade.sh` (NFR-04), `check-ticket-ownership.sh`, `smoke-apphost-container.sh`, `stop-dev-stack.sh` (keep data) vs `reset-dev-stack.sh` (destroy volumes).
 
 Target one test project (`dotnet test tests/<Project>`) or `ls tests/` to list. Gotchas: first dashboard visit needs the printed `/login?t=...` URL; AppHost exit does not stop the stack (`mimisbrunnr-{postgres,blob-well,seq}` are Persistent — load-bearing, not a leak); never glob `mimisbrunnr-*` (also matches `mimisbrunnr-testcontainer-*`).
 
-## Test Framework
-
-xunit.v3 · Shouldly. Tiers (drive test placement): **L0** `*.UnitTest` (no I/O); **L1** component (real isolated Postgres via Aspire); **L2** `*.IntegrationTest` (full stack). Fixtures in `tests/SmoothAiProductContextMemory.TestFramework/`; AGE image pinned `docker.io/apache/age:release_PG17_1.7.0` (pairing: `docs/hlds/003-graph-edges-on-age/nfrs/NFR-04-version-pairing.md`). Full contract: `docs/wiki/testing.md`.
+**Test framework:** xunit.v3 · Shouldly. Tiers (drive test placement): **L0** `*.UnitTest` (no I/O); **L1** component (real isolated Postgres via Aspire); **L2** `*.IntegrationTest` (full stack). Fixtures in `tests/SmoothAiProductContextMemory.TestFramework/`; AGE image pinned `docker.io/apache/age:release_PG17_1.7.0` (pairing: `docs/hlds/003-graph-edges-on-age/nfrs/NFR-04-version-pairing.md`). Full contract: `docs/wiki/testing.md`.
 
 ## CI/CD
 
@@ -73,14 +65,14 @@ xunit.v3 · Shouldly. Tiers (drive test placement): **L0** `*.UnitTest` (no I/O)
 
 ## Git Constraints
 
-Hosted on **GitHub** at `https://github.com/generic-automation-and-it/smooth-ai-product-context-memory`. Use `gh` for PR/repo ops. PR template: `.github/pull_request_template.md`. There is no `CODEOWNERS` file — code review is via PR review, and the org is `generic-automation-and-it`. Commit/PR formats and branch naming: `.agents/rules/git/`.
+Hosted on **GitHub** at `https://github.com/generic-automation-and-it/smooth-ai-product-context-memory`. Use `gh` for PR/repo ops. PR template: `.github/pull_request_template.md`. No `CODEOWNERS` — code review is via PR review; org is `generic-automation-and-it`. Commit/PR formats and branch naming: `.agents/rules/git/`.
 
 ## Glossary
 
 | Term | Description |
 |---|---|
 | Context | Summarized, labelled unit of knowledge stored for later retrieval |
-| Understanding | A distilled, self-contained unit of hard-won knowledge — the transferable skill that remains after the experience is discarded. Stored as a memory of `kind = understanding` (BRD-003) |
+| Understanding | Distilled, self-contained unit of hard-won knowledge — the transferable skill that remains after the experience is discarded. Stored as a memory of `kind = understanding` (BRD-003) |
 | Label | Tag (e.g. issue/ticket number) linking/retrieving related contexts |
 | Semantic memory | Labelled knowledge, primary store for retrieval by label/ticket, facets and full-text lexemes; free prose matches lexeme-AND, not similarity (see [`README.md`](README.md), *Where Mímisbrunnr loses*) |
 | Episodic memory | Timestamped record of when/where a context was captured |
@@ -92,7 +84,8 @@ One-liners; full detail in git history and the linked PRs/issues.
 
 | Date | Change | Ref |
 |---|---|---|
-| 2026-10-15 | **Local OpenCode config landed (issue 231)** — `.agents/opencode.json` (v2 schema) with root `opencode.json` symlinked to it; Claude `settings.json` permissions allow/ask translated to v2 `permissions` (ordered, **last match wins** — the analysis's "first match wins" was wrong); the deny list lives in `experimental.policies` as `action: "permission"` with `shell:<cmd>` resources — the build's own literal, since `tool.use` is advertised in the docs but not implemented in 2.0.16/2.0.21. Skills left to the v2 allow-all default (no `skill` rules). WebFetch domain restriction is expressible as `webfetch` URL rules. Verified live on both builds: denied command returns `Blocked by configuration policy` on 2.0.16 and 2.0.21; positive control (`git status`) runs; `OPENCODE_DISABLE_PROJECT_CONFIG=1` removes the policy. **Open finding:** the `instructions` key is parsed but not honoured by `opencode run` on either build (project or global config, relative or absolute entry) — AGENTS.md discovery is the only ambient-instruction path in the build; `opencode debug config` also serves stale config from the background service, so `--standalone` runs are the reliable check. | issue 231 |
+| 2026-10-15 | **Tersed this file** (prose compressed, `Test Framework` merged into `Build / Test`, rules table replaced by a pointer to the new index) and **added `.agents/rules/AGENTS.md`** — an index of every rule file, split by folder, with the frontmatter fields (`description`, `globs`, `paths`, `applyTo`, `alwaysApply`) as columns. Changelog untouched. | this PR |
+| 2026-10-15 | **Added local OpenCode config** — `.agents/opencode.json` + root symlink; permissions translated, deny list in `experimental.policies`. `instructions` key not honoured by `opencode run` — see PR #236. | issue 231 |
 | 2026-10-14 | **HLD-010 B2 landed — one shared script folder inside the `mimisbrunnr` plugin.** Every script used by more than one skill now lives at `.agents/skills/_mimisbrunnr-shared/scripts/` and is referenced by that path; no skill reaches into a peer's folder, and the PR gate greps to keep it that way (NFR-01). Kvasir's WET `decisions_rubric.json` and `session_marker.py` copies were deleted; `ai-understanding`'s WET copies stay (separate plugin, LADR-02) and its parity harness now compares against the shared original. The npm allowlist carries the shared folder and the odin launcher points into it; the marketplace and both symlinked mirrors resolve it with no copy step, re-verified in a clean-profile install with the real move in place. HLD-010 promoted to *Accepted — implemented*. | issue 222 |
 | 2026-10-14 | **Review gate + config gained Mistral Large 4** on `go-openai` (preset `OpenCode Mistral Large 4`). Listed in OpenCode docs but not yet served by `zen/go/v1`, so it fails until OpenCode enables it on Go. | this PR |
 | 2026-10-14 | **Added HLD-010 (In Discovery)** — one model for shared skill code (shared folder inside the plugin, WET + parity across it); B1 decision record for the Part B move. | issue 222 |
