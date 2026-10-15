@@ -171,7 +171,7 @@ function renderTable() {
     const lineage = row.ticketProvider
       ? `${shortUuid(row.groupUuid)} · ${esc(row.ticketProvider)}:${esc(row.ticketKey)}`
       : shortUuid(row.groupUuid);
-    return `<tr class="browse-row" data-index="${index}" tabindex="0">
+    return `<tr class="browse-row" data-index="${index}" tabindex="0" role="row">
       <td>${esc(row.name)}</td>
       <td>${esc(row.kind)}</td>
       <td>${esc(row.status)}</td>
