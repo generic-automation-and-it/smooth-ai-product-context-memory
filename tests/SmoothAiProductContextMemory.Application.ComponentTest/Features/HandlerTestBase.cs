@@ -36,6 +36,8 @@ public abstract class HandlerTestBase(AspireFixture aspire) : IAsyncLifetime
 
     protected IMemoryGraph Graph { get; private set; } = default!;
 
+    protected IProductGraph ProductGraph { get; private set; } = default!;
+
     protected ILoggerFactory Loggers { get; private set; } = default!;
 
     protected CancellationToken Ct => TestContext.Current.CancellationToken;
@@ -65,6 +67,7 @@ public abstract class HandlerTestBase(AspireFixture aspire) : IAsyncLifetime
         Db = new SmoothAiProductContextMemoryDbContext(options);
         Search = new NpgsqlMemorySearch(Db);
         Graph = new NpgsqlMemoryGraph(Db);
+        ProductGraph = new NpgsqlProductGraph(Db);
         Loggers = LoggerFactory.Create(b => b.SetMinimumLevel(LogLevel.Debug));
 
         var blobOptions = Microsoft.Extensions.Options.Options.Create(new BlobStorageOptions

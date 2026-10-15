@@ -213,10 +213,10 @@ public sealed class UnderstandingTransferStoreTests(AspireFixture aspire) : Hand
     }
 
     private SetMemories.Handler NewSet() =>
-        new(AppDb, Graph, Blob, ErrorMapper, Loggers.CreateLogger<SetMemories.Handler>());
+        new(AppDb, Graph, Blob, ErrorMapper, ProductGraph, Loggers.CreateLogger<SetMemories.Handler>());
 
     private QueryMemories.Handler NewQuery() =>
-        new(AppDb, Search, new NoopRecallFeedback(), Loggers.CreateLogger<QueryMemories.Handler>());
+        new(AppDb, Search, new NoopRecallFeedback(), ProductGraph, Loggers.CreateLogger<QueryMemories.Handler>());
 
     private ExportStore.Handler NewExport(IBlobStorage blobs) =>
         new(AppDb, Graph, blobs, new FileSystemMarkdownExportSink(NullLogger<FileSystemMarkdownExportSink>.Instance),

@@ -291,7 +291,7 @@ public sealed class TicketReferenceHandlerTests(AspireFixture aspire) : HandlerT
     private static string Key(string prefix) => $"{prefix}-{Guid.NewGuid():N}";
 
     private SetMemories.Handler NewSetHandler() =>
-        new(AppDb, Graph, Blob, ErrorMapper, Loggers.CreateLogger<SetMemories.Handler>());
+        new(AppDb, Graph, Blob, ErrorMapper, ProductGraph, Loggers.CreateLogger<SetMemories.Handler>());
 
     private AddTicketReferences.Handler NewReferenceHandler() =>
         new(AppDb, Graph, Loggers.CreateLogger<AddTicketReferences.Handler>());

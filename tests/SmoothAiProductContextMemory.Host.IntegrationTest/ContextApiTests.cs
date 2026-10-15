@@ -115,10 +115,61 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
             .StatusCode.ShouldBe(HttpStatusCode.Forbidden);
         (await read.PostAsJsonAsync("/api/context/initiatives", new { }, Ct))
             .StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        (await read.PostAsJsonAsync("/api/context/product-names", new { }, Ct))
+            .StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        (await read.PutAsJsonAsync("/api/context/product-names/initiatives", new { }, Ct))
+            .StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        (await read.PostAsJsonAsync("/api/context/product-names/initiatives/unlink", new { }, Ct))
+            .StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        (await read.PutAsJsonAsync("/api/context/product-names/repos", new { }, Ct))
+            .StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        (await read.GetAsync("/api/context/product-names", Ct))
+            .StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await read.GetAsync("/api/context/product-names/links?productName=x", Ct))
+            .StatusCode.ShouldBeOneOf(HttpStatusCode.OK, HttpStatusCode.NotFound);
         (await read.GetAsync($"/api/context/recall-feedback/miss-rate?from={WebUtility.UrlEncode(DateTimeOffset.UtcNow.ToString("O"))}&to={WebUtility.UrlEncode(DateTimeOffset.UtcNow.ToString("O"))}", Ct))
             .StatusCode.ShouldBe(HttpStatusCode.OK);
         (await read.PostAsJsonAsync("/api/context/recall-feedback/reset", new { }, Ct))
             .StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+    }
+
+    [Fact]
+    public async Task Product_name_round_trip_through_http()
+    {
+        string suffix = Guid.NewGuid().ToString("N");
+        string product = $"prod-{suffix}";
+        string initiative = $"ini-{suffix}";
+
+        (await _http.PostAsJsonAsync("/api/context/initiatives", new { name = initiative }, Ct))
+            .StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await _http.PostAsJsonAsync("/api/context/product-names", new { name = product }, Ct))
+            .StatusCode.ShouldBe(HttpStatusCode.OK);
+
+        using HttpResponseMessage link = await _http.PutAsJsonAsync(
+            "/api/context/product-names/initiatives",
+            new { productName = product, initiativeName = initiative, reason = "e2e" },
+            Ct);
+        link.StatusCode.ShouldBe(HttpStatusCode.OK);
+
+        using HttpResponseMessage links = await _http.GetAsync($"/api/context/product-names/links?productName={product}", Ct);
+        links.StatusCode.ShouldBe(HttpStatusCode.OK);
+        JsonElement linksBody = await links.Content.ReadFromJsonAsync<JsonElement>(Json, Ct);
+        linksBody.GetProperty("items").EnumerateArray()
+            .Select(i => i.GetProperty("initiativeName").GetString())
+            .ShouldContain(initiative);
+
+        using HttpResponseMessage list = await _http.GetAsync("/api/context/product-names", Ct);
+        list.StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await list.Content.ReadFromJsonAsync<JsonElement>(Json, Ct)).GetProperty("items").EnumerateArray()
+            .Select(i => i.GetProperty("name").GetString())
+            .ShouldContain(product);
+
+        // An unregistered product is refused on linking.
+        using HttpResponseMessage refused = await _http.PutAsJsonAsync(
+            "/api/context/product-names/initiatives",
+            new { productName = "does-not-exist", initiativeName = initiative, reason = "no" },
+            Ct);
+        refused.StatusCode.ShouldBe(HttpStatusCode.NotFound);
     }
 
     [Fact]
@@ -145,6 +196,12 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
             (HttpMethod.Post, "/api/context/labels"),
             (HttpMethod.Get, "/api/context/initiatives"),
             (HttpMethod.Post, "/api/context/initiatives"),
+            (HttpMethod.Get, "/api/context/product-names"),
+            (HttpMethod.Post, "/api/context/product-names"),
+            (HttpMethod.Put, "/api/context/product-names/initiatives"),
+            (HttpMethod.Post, "/api/context/product-names/initiatives/unlink"),
+            (HttpMethod.Put, "/api/context/product-names/repos"),
+            (HttpMethod.Get, "/api/context/product-names/links"),
             (HttpMethod.Get, $"/api/context/recall-feedback/never-recalled?asOf={WebUtility.UrlEncode(DateTimeOffset.UtcNow.ToString("O"))}"),
             (HttpMethod.Get, $"/api/context/recall-feedback/miss-rate?from={WebUtility.UrlEncode(DateTimeOffset.UtcNow.ToString("O"))}&to={WebUtility.UrlEncode(DateTimeOffset.UtcNow.ToString("O"))}"),
             (HttpMethod.Post, "/api/context/recall-feedback/reset"),
@@ -730,6 +787,12 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
         ["POST /api/context/labels"] = ApiCapability.Write,   // proposing a label writes a draft row
         ["GET /api/context/initiatives"] = ApiCapability.Read,
         ["POST /api/context/initiatives"] = ApiCapability.Write,
+        ["GET /api/context/product-names"] = ApiCapability.Read,
+        ["POST /api/context/product-names"] = ApiCapability.Write,
+        ["PUT /api/context/product-names/initiatives"] = ApiCapability.Write,
+        ["POST /api/context/product-names/initiatives/unlink"] = ApiCapability.Write,
+        ["PUT /api/context/product-names/repos"] = ApiCapability.Write,
+        ["GET /api/context/product-names/links"] = ApiCapability.Read,
         ["POST /api/context/query"] = ApiCapability.Read,
         ["POST /api/context/paths"] = ApiCapability.Read,
         ["POST /api/context/tickets/paths"] = ApiCapability.Read,

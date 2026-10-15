@@ -401,7 +401,7 @@ public class TarSnapshotArchiveTests
             ],
             0,
             0);
-        var capture = new SnapshotCapture([], [], [], [], [], [], [], [], [], []);
+        var capture = new SnapshotCapture([], [], [], [], [], [], [], [], [], [], [], [], [], [], []);
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
         var tokensSeen = new List<CancellationToken>();
 
@@ -507,7 +507,8 @@ public class TarSnapshotArchiveTests
             ],
             [
                 new SnapshotTicketEdge("jira", "CHILD", "jira", "PARENT", "depends_on", "api", SystemClock.Instance.GetCurrentInstant(), null),
-            ]);
+            ],
+            [], [], [], [], []);
         var walk = new SnapshotWalkResult([new SnapshotBlob(address, SnapshotBlobState.Ok)], 0, 0);
 
         await _archive.WriteAsync(path, capture, walk, (_, _) => Task.FromResult((Body, ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
@@ -798,7 +799,8 @@ public class TarSnapshotArchiveTests
             [new SnapshotVertex(memory.Uuid)],
             [new SnapshotEdge(memory.Uuid, memory.Uuid, "relates_to", "reason")],
             [],
-            []);
+            [],
+            [], [], [], [], []);
 
         var walk = new SnapshotWalkResult([new SnapshotBlob(address, state)], state == SnapshotBlobState.Missing ? 1 : 0, 0);
         return (capture, walk);

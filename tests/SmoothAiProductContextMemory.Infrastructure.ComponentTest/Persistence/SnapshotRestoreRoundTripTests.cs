@@ -359,7 +359,7 @@ public sealed class SnapshotRestoreRoundTripTests : PersistenceTestBase
         await Should.ThrowAsync<InvalidOperationException>(() => Repository.RestoreAsync(
             target.ConnectionString,
             EmptyCapture,
-            new SnapshotCounts(0, 0, 0, 0, 0, 0, 0),
+            new SnapshotCounts(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
             overrideNonEmpty: false,
             Ct));
 
@@ -460,7 +460,7 @@ public sealed class SnapshotRestoreRoundTripTests : PersistenceTestBase
             Task<RestoreResults> restore = budgeted.RestoreAsync(
                 target.ConnectionString,
                 EmptyCapture,
-                new SnapshotCounts(0, 0, 0, 0, 0, 0, 0),
+                new SnapshotCounts(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
                 overrideNonEmpty: false,
                 Ct);
             Task finished = await Task.WhenAny(restore, Task.Delay(TimeSpan.FromSeconds(30), Ct));
@@ -522,7 +522,7 @@ public sealed class SnapshotRestoreRoundTripTests : PersistenceTestBase
         RestoreResults restored = await Repository.RestoreAsync(
             target.ConnectionString,
             EmptyCapture,
-            new SnapshotCounts(0, 0, 0, 0, 0, 0, 0),
+            new SnapshotCounts(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
             overrideNonEmpty: false,
             Ct);
 
@@ -545,7 +545,7 @@ public sealed class SnapshotRestoreRoundTripTests : PersistenceTestBase
     }
 
     /// <summary>A capture with nothing in it: enough shape for the refusal, which is all these use.</summary>
-    private static SnapshotCapture EmptyCapture => new([], [], [], [], [], [], [], [], [], []);
+    private static SnapshotCapture EmptyCapture => new([], [], [], [], [], [], [], [], [], [], [], [], [], [], []);
 
     private async Task<(int Memories, int Versions, int Vertices, int Edges, int TicketVertices, int TicketEdges, string Address)> SeedCorpusAsync()
     {
