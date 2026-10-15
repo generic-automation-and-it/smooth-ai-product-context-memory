@@ -245,11 +245,11 @@ class Handler(BaseHTTPRequestHandler):
         return data
 
     def do_GET(self):
-        if self.path == "/bridge/health":
+        if self.path == "/bridge/p4b-health":
             self._reply(200, {
                 "status": "ok",
                 "phase": "p4b-write",
-                "routes": ["/bridge/health", "/bridge/approve", "/bridge/reject", "/bridge/amend"],
+                "routes": ["/bridge/p4b-health", "/bridge/approve", "/bridge/reject", "/bridge/amend"],
                 "writeTokenPresent": bool(client.write_tokens_present()),
             })
             return
@@ -278,6 +278,10 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(uuid, str) or not uuid.strip():
             self._reply(400, {"error": "bad-input", "detail": "uuid is required"})
             return
+        overrides = body.get("overrides") or {}
+        if not isinstance(overrides, dict):
+            self._reply(400, {"error": "bad-input", "detail": "overrides must be an object"})
+            return
         try:
             memory = _fetch_current_version(uuid.strip(), scope)
         except (client.ClientError, OSError, ValueError) as exc:
@@ -289,7 +293,7 @@ class Handler(BaseHTTPRequestHandler):
             self._reply(502, {"error": "memory-missing-group", "detail": "memory had no groupUuid"})
             return
         # LADR-11: the transition is `set` with Status=approved on the existing Uuid.
-        payload = _build_set_payload(memory, group_uuid, body.get("overrides"))
+        payload = _build_set_payload(memory, group_uuid, overrides)
         payload["items"][0]["status"] = "approved"
         try:
             dryrun_resp = _run_capture_set(payload, dryrun=True)
@@ -310,16 +314,24 @@ class Handler(BaseHTTPRequestHandler):
         # Confirm step: re-run dryrun, compare to the fingerprint the SPA acknowledged.
         # A mismatch means the proposal changed between digest and confirm (another
         # amend, an automated export, etc.) — refuse and let the SPA re-confirm.
-        if digest_fingerprint:
-            current_fp = _fingerprint(dryrun_resp)
-            if current_fp != digest_fingerprint:
-                _log(f"approve confirm: stale digest ({uuid})")
-                self._reply(409, {
-                    "error": "digest-stale",
-                    "detail": "the proposal changed between digest and confirm; please re-confirm",
-                    "currentDigestFingerprint": current_fp,
-                })
-                return
+        # F1 (P4b.2 veto): a confirm without the digest fingerprint would skip the
+        # stale check and write a proposal the human never saw the digest for. The
+        # fingerprint is the veto receipt; it is mandatory on confirm.
+        if not digest_fingerprint:
+            self._reply(400, {
+                "error": "bad-input",
+                "detail": "digestFingerprint is required when confirm is true",
+            })
+            return
+        current_fp = _fingerprint(dryrun_resp)
+        if current_fp != digest_fingerprint:
+            _log(f"approve confirm: stale digest ({uuid})")
+            self._reply(409, {
+                "error": "digest-stale",
+                "detail": "the proposal changed between digest and confirm; please re-confirm",
+                "currentDigestFingerprint": current_fp,
+            })
+            return
         try:
             written = _run_capture_set(payload, dryrun=False)
         except (RuntimeError, subprocess.TimeoutExpired) as exc:
