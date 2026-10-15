@@ -18,14 +18,14 @@ content), drives it through the capture pipeline's `set` invocation, and the sto
 `MemoryVersion` row at `NextVersion` via the existing `VersionExistingAsync` path. v1 (proposed)
 becomes superseded; v2 (approved) is the new current. Append-only preserved.
 
-**Host defense in depth.** `SetMemories.Validator` refuses any item where `Status = approved` and
-`Uuid is null` or `CreateUuid is not null`. This prevents a fresh-memory `approved` write from any path —
-direct, bridge, or future automation — because an approved version can only ever be a version-bump on a
-stored `Uuid`. The handler needs no second guard: a `proposed`→`approved` bump is the approve
-transition, and a same-`Uuid` `approved`→`approved` bump with a different claim is a legitimate revision
-of an approved memory (the capture path re-captures approved memories as new versions). A same-claim
-re-approve is a no-op, handled by the existing `MemoryClaim.Same` short-circuit. **The validator rule is
-the sole defense; Applies to every path.**
+**No validator special-case.** `Status` is validated only as `proposed` or `approved`, exactly as
+before. A fresh approved memory is the capture path's *normal create* shape — `set_items` defaults
+`status=approved` on a create (Uuid null, CreateUuid set), and the store's memory lifecycle is
+approved-by-default, with `proposed` reserved for gate-held candidates awaiting review. Forbidding an
+approved create would break the capture path and every integration test that seeds approved memories.
+The approve transition (proposed → approved) is therefore just a version-bump with `Status=approved`
+on the existing Uuid, which the standard `set` path already accepts. **LADR-11 adds no Host guard; it
+records the transition model and the bridge plumbing only.**
 
 **Gates re-run on the current body.** The bridge re-builds the `MemoryWrite` from whatever is
 current in the review surface, including any post-amend edits. The approve is not a state transition
@@ -58,9 +58,9 @@ The subprocess helper is implemented in P4b, not G2.
 
 Implemented 2026-10-15 (G2 closed).
 
-- `SetMemories.Validator`: rejects `Status=approved` without `Uuid` (and forbids `CreateUuid`).
-- Tests: `SetMemoriesValidatorTests.Rejects_approved_without_uuid`,
-  `Rejects_approved_with_create_uuid`, `Accepts_approved_with_uuid`;
+- `SetMemories.Validator`: unchanged — `Status` must be `proposed` or `approved`, no extra rule.
+- Tests: `SetMemoriesValidatorTests.Accepts_approved_create_without_uuid`,
+  `Accepts_approved_version_bump_with_uuid`;
   `SetMemoriesHandlerTests.Approved_transition_creates_v2_with_approved_status`,
   `Approved_revision_creates_new_approved_version`.
 - Bridge subprocess helper + write routes pending in P4b.

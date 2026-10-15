@@ -248,9 +248,11 @@ public class SetMemoriesValidatorTests
             .ShouldNotHaveAnyValidationErrors();
     }
 
-    /// <summary>LADR-11: Status=approved is a transition, not a create. The validator requires Uuid and forbids CreateUuid when Status=approved.</summary>
+    /// <summary>LADR-11: `approved` is a Status value like any other; a fresh approved create is the
+    /// capture path's normal shape (set_items defaults status=approved on a create). The validator does
+    /// not special-case it — the proposed->approved transition is a version-bump, not a validator rule.</summary>
     [Fact]
-    public void Rejects_approved_without_uuid()
+    public void Accepts_approved_create_without_uuid()
     {
         SetMemories.Request request = ValidRequest() with
         {
@@ -261,27 +263,11 @@ public class SetMemoriesValidatorTests
             }],
         };
 
-        _validator.TestValidate(request).ShouldHaveValidationErrorFor("Items[0]");
+        _validator.TestValidate(request).ShouldNotHaveAnyValidationErrors();
     }
 
     [Fact]
-    public void Rejects_approved_with_create_uuid()
-    {
-        SetMemories.Request request = ValidRequest() with
-        {
-            Items = [ValidRequest().Items[0] with
-            {
-                Status = MemoryVersion.MemoryVersionStatus.Approved,
-                Uuid = null,
-                CreateUuid = Guid.NewGuid(),
-            }],
-        };
-
-        _validator.TestValidate(request).ShouldHaveValidationErrorFor("Items[0]");
-    }
-
-    [Fact]
-    public void Accepts_approved_with_uuid()
+    public void Accepts_approved_version_bump_with_uuid()
     {
         SetMemories.Request request = ValidRequest() with
         {

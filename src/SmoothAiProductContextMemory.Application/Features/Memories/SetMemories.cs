@@ -93,15 +93,6 @@ public static class SetMemories
                     .Must(s => s is MemoryVersion.MemoryVersionStatus.Proposed
                         or MemoryVersion.MemoryVersionStatus.Approved)
                     .WithMessage("Status must be proposed or approved.");
-                // LADR-11: Status=approved is a transition, not a create.
-                // A fresh memory with Status=approved would skip the proposed
-                // stage. The bridge (P4b) re-sends a stored proposed as a
-                // version-bump with Status=approved; this rule is the Host
-                // defense in depth against a malformed direct write.
-                item.RuleFor(i => i)
-                    .Must(i => i.Status != MemoryVersion.MemoryVersionStatus.Approved
-                        || (i.Uuid is not null && i.CreateUuid is null))
-                    .WithMessage("Status=approved is a transition: Uuid is required and CreateUuid is forbidden.");
                 item.RuleFor(i => i.Confidence).InclusiveBetween((short)0, (short)100);
                 item.RuleFor(i => i.Uuid)
                     .NotEqual(Guid.Empty)
