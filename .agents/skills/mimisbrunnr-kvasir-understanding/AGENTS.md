@@ -36,10 +36,11 @@ These IDs are HLD-007's; `SKILL.md`, the README, the scripts and the tests cite 
 - **Status:** Accepted · **Date:** 2026-09-19
 - **Decision:** the dump is an export, not a store write, and is redacted before it is written.
 
-### LADR-09 — Load and import read `.understanding.md` units and store folders
+### LADR-09 — `load` reads `.understanding.md` units and store folders
 
 - **Status:** Accepted · **Date:** 2026-09-19
-- **Decision:** a unit file and a store folder are structured input, not foreign prose.
+- **Decision:** a unit file and a store folder are structured input, not foreign prose. `load` is the
+  verb that reads them; `import` queries the live store and refuses a path (LADR-11).
 
 ### LADR-11 — Store-facing verbs match `ai-understanding`
 
@@ -135,6 +136,7 @@ These IDs are HLD-007's; `SKILL.md`, the README, the scripts and the tests cite 
 | 2026-10-14 | `--write` refuses when the bound initiative is not the resolved group's | — |
 | 2026-10-15 | consumer review 5538013336: Held candidates that differ only by case or punctuation no longer… | — |
 | 2026-10-15 | Review-loop simplifications | — |
+| 2026-10-15 | Consumer review 5539567320: LADR-09 names `load` as the file-reading verb (`import` queries the live store); marker tests resolve paths with `marker_path` | — |
 | 2026-10-15 | Consumer review 5535929651: `load`/`import` mark only the records they rendered (`render_store_records` / `render_table_records`), not… | — |
 | 2026-10-15 | G1: `export` persists held candidates as `Status = proposed` | — |
 | 2026-10-15 | Cut to HLD shape: SKILL.md pointer + non-SKILL.md traps only | — |
