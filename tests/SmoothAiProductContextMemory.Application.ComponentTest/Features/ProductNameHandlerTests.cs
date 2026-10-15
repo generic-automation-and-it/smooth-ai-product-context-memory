@@ -50,14 +50,17 @@ public sealed class ProductNameHandlerTests(AspireFixture aspire) : HandlerTestB
     {
         Initiative alpha = await NewInitiativeAsync("alpha");
         Initiative beta = await NewInitiativeAsync("beta");
+        Initiative gamma = await NewInitiativeAsync("gamma");
         MemoryGroup alphaGroup = await NewGroupWithInitiativeAsync(alpha);
         MemoryGroup betaGroup = await NewGroupWithInitiativeAsync(beta);
         MemoryGroup otherAlpha = await NewGroupWithInitiativeAsync(alpha);
         MemoryGroup unrelatedGroup = await NewGroupWithInitiativeAsync(beta);
+        MemoryGroup gammaGroup = await NewGroupWithInitiativeAsync(gamma);
         await WriteApprovedAsync(alphaGroup.Uuid, "Alpha memory");
         await WriteApprovedAsync(betaGroup.Uuid, "Beta memory");
         await WriteApprovedAsync(otherAlpha.Uuid, "Other alpha memory");
         await WriteApprovedAsync(unrelatedGroup.Uuid, "Unrelated beta memory");
+        await WriteApprovedAsync(gammaGroup.Uuid, "Gamma memory");
 
         await RegisterAsync("gmail");
         await LinkInitiativeAsync("gmail", "alpha");
@@ -69,6 +72,9 @@ public sealed class ProductNameHandlerTests(AspireFixture aspire) : HandlerTestB
 
         response.Items.Select(i => i.Description).OrderBy(x => x)
             .ShouldBe(new[] { "Alpha memory", "Beta memory", "Other alpha memory", "Unrelated beta memory" }, ignoreOrder: true);
+        // gamma is not linked to gmail, so a query that ignored productName and returned everything
+        // would fail this assertion — it pins the affinity to the graph resolution.
+        response.Items.Select(i => i.Description).ShouldNotContain("Gamma memory");
         // Every returned memory's group initiative (alpha or beta) is linked to gmail, so all match by
         // initiative; neither initiative is shared here (only gmail links them), so none is shared.
         response.Items.ShouldAllBe(i => i.ProductMatch == "initiative");
