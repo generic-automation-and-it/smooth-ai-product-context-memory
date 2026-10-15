@@ -5,7 +5,7 @@
 | **Status** | Accepted |
 | **Owner** | generik0 |
 | **Tracker** | Context-memory V2 |
-| **Last updated** | 2026-09-15 |
+| **Last updated** | 2026-10-15 |
 
 > **Memory graph delivered and accepted.** The original decisions and four quality requirements were accepted
 > each against committed evidence: integrity and the relationship contract at the cutover, traversal

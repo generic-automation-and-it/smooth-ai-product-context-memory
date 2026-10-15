@@ -3,7 +3,7 @@
 **Status:** Accepted, owner-approved (2026-10-15); implemented by this change — release gates pending.
 **Owner:** generik0
 **Decision date:** 2026-10-15
-**Supersedes:** HLD-005 [LADR-11](./LADR-11-no-writer-derives-anchor-edges.md) for this one edge only.
+**Supersedes:** HLD-005 [LADR-11](../../005-contextual-export/ladrs/LADR-11-no-writer-derives-anchor-edges.md) for this one edge only.
 
 ## Context
 
@@ -84,7 +84,9 @@ the twin link is the drift signal.
 - `IMemoryGraph` gains the `ABOUT` reference operations (create, exists, and the reference-uuid lookup
   the read path uses); `NpgsqlMemoryGraph` implements them on the same AGE session and transaction.
   API read/write, snapshot/restore, the kvasir/odin clients and the benchmark carry the new edge.
-- This supersedes HLD-005 LADR-11's tag half for `ABOUT` only; the rest of LADR-11 is unchanged.
+- This carves out a narrow exception to HLD-005 LADR-11's practitioner-declared ticket-hierarchy
+  writer rule for `ABOUT` only; the rest of LADR-11 — including the **Blocked** tag half, which still
+  permits no tag edges at all — is unchanged.
 
 ## Implementation
 
