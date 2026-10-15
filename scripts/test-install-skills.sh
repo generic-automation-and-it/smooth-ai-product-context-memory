@@ -452,6 +452,8 @@ done
 if [ "$have_pwsh" = 1 ]; then
   sh_names=""; ps_names=""; sh_flags=""; ps_flags=""
   for runner in sh ps1; do
+    # alpha/beta are unowned, so their flags are always empty and comparing them proves nothing.
+    # ai-brain-dump is owned: toggling it to false exercises real flag preservation on both ports.
     root="$(make_root "parity-$runner" alpha beta)"
     if [ "$runner" = sh ]; then run_sh "$root" >/dev/null 2>&1; else run_ps1 "$root" >/dev/null 2>&1; fi
     python3 - "$root/_mimisbrunnr-shared/installation.json" <<'PYEOF'
@@ -459,13 +461,13 @@ import json, sys
 path = sys.argv[1]
 data = json.load(open(path))
 for entry in data["skills"]:
-    if entry["name"] == "alpha":
+    if entry["name"] == "ai-brain-dump":
         entry["installed"] = False
 json.dump(data, open(path, "w"), indent=2)
 PYEOF
     if [ "$runner" = sh ]; then run_sh "$root" >/dev/null 2>&1; else run_ps1 "$root" >/dev/null 2>&1; fi
     names="$(manifest_names "$root")"
-    flags="$(manifest_flag "$root" alpha)/$(manifest_flag "$root" beta)"
+    flags="$(manifest_flag "$root" ai-brain-dump)/$(manifest_flag "$root" mimisbrunnr-odin-context-memory)"
     if [ "$runner" = sh ]; then sh_names="$names"; sh_flags="$flags"; else ps_names="$names"; ps_flags="$flags"; fi
   done
   [ "$sh_names" = "$ps_names" ] \
