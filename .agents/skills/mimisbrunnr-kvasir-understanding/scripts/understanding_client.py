@@ -1607,37 +1607,27 @@ def preflight_match_count(preflight_output: str) -> int:
     return sum(1 for r in results if isinstance(r, dict) and r.get("matches"))
 
 
-def _later_colliding_indices(preflight_output: str) -> set[int]:
-    """The candidate indices a preflight collision marks as the later twin of an earlier candidate.
-
-    The server compares subjects by slug, so a case- or punctuation-equivalent pair collides where an
-    exact-string compare sees two subjects — and `set` refuses the whole batch for one such pair.
-    """
+def _intra_batch_collisions(preflight_output: str) -> list[dict]:
+    """The preflight's intra-batch collisions. The server computes them with the same slug normalisation
+    it uses for memory identity, so they are the authoritative same-subject-within-a-batch detector — an
+    exact-string compare misses a case- or punctuation-equivalent pair, which `set` then refuses."""
     try:
         collisions = (json.loads(preflight_output) or {}).get("intra_batch_collisions") or []
     except (ValueError, AttributeError):
-        return set()
-    return {max(c["leftIndex"], c["rightIndex"]) for c in collisions
-            if isinstance(c, dict) and isinstance(c.get("leftIndex"), int)
-            and isinstance(c.get("rightIndex"), int)}
+        return []
+    return [c for c in collisions if isinstance(c, dict)]
 
 
 def _intra_batch_collision_subject(preflight_output: str) -> str | None:
-    """The ``subjectSlug`` of the first intra-batch collision, or None.
+    """The ``subjectSlug`` of the first intra-batch collision, or None."""
+    return next((c["subjectSlug"] for c in _intra_batch_collisions(preflight_output)
+                 if c.get("subjectSlug")), None)
 
-    The server computes collisions with the same slug normalisation it uses for memory identity, so this
-    is the authoritative same-subject-within-a-chunk detector — an exact-string compare would miss a
-    case/punctuation-equivalent pair, which the server would then double-version.
-    """
-    try:
-        data = json.loads(preflight_output)
-        collisions = (data or {}).get("intra_batch_collisions") or []
-    except (ValueError, AttributeError):
-        return None
-    for collision in collisions:
-        if isinstance(collision, dict) and collision.get("subjectSlug"):
-            return collision["subjectSlug"]
-    return None
+
+def _later_colliding_indices(preflight_output: str) -> set[int]:
+    """The candidate indices that are the later twin of an earlier candidate in a collision."""
+    return {max(c["leftIndex"], c["rightIndex"]) for c in _intra_batch_collisions(preflight_output)
+            if isinstance(c.get("leftIndex"), int) and isinstance(c.get("rightIndex"), int)}
 
 
 def _merged_tags(binding_tags: list[str], candidate_tags) -> list[str]:
