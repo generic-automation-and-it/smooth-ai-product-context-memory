@@ -19,6 +19,10 @@ layer (off by default), so it never lands in the Host or in bridge logic.
 - No second runtime for the gates; single source of truth (Python).
 - The bridge is thin — it calls the capture pipeline and returns its outcome.
 - The value-gate model (when enabled) is invoked, not contained, so the no-model rule holds.
+- The scripts enter the image as a build artifact: the viewer `Dockerfile` builds from the repo root
+  and copies the shared script folder to `/bridge/capture/` (`PYTHONPATH` set; root `.dockerignore`
+  re-includes only that folder). Nothing is edited inside the image, so HLD-010 single-source holds.
+  Decided 2026-10-15 (HLD-009 F2); the stub bridge does not import them yet.
 
 ## Status
 

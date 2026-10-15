@@ -35,6 +35,25 @@ export function postQuery(requestBody) {
   return requestJson('/api/context/query', { method: 'POST', body: requestBody });
 }
 
+// The current version's cheap fields, by identity. What a graph hop needs to be labelled:
+// a traversal returns uuid references for every hop but the endpoint, and the query endpoint
+// has no uuid predicate. Cheap fields only — never the body.
+export function getMemory(uuid, scope) {
+  const query = scope ? `?scope=${encodeURIComponent(scope)}` : '';
+  return requestJson(`/api/context/memories/${uuid}${query}`);
+}
+
+// Bounded traversal: `maxDepth` is required on the body (1–5), so the view always sends it —
+// there is no server default and an omitted bound would be a bound the practitioner never chose.
+export function postPaths(requestBody) {
+  return requestJson('/api/context/paths', { method: 'POST', body: requestBody });
+}
+
+// Separate surface: practitioner-declared ticket hierarchy, with its own disclosure and cap flags.
+export function postTicketPaths(requestBody) {
+  return requestJson('/api/context/tickets/paths', { method: 'POST', body: requestBody });
+}
+
 export function getMemoryVersions(uuid, scope) {
   const query = scope ? `?scope=${encodeURIComponent(scope)}` : '';
   return requestJson(`/api/context/memories/${uuid}/versions${query}`);

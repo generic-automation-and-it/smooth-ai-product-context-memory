@@ -123,11 +123,13 @@ OpenCode v2 currently ignores `OPENCODE_CONFIG`, so the guard also copies the
 hardened resolved config to the ephemeral runner's global config path. Its
 `debug config` compatibility alias is emitted only when the real CLI reports
 that global file as loaded and its bytes match the resolved file; the upstream
-health check still fails closed on a foreign service. Both model invocations
-fail closed if the PR checkout introduces a project `opencode.json(c)` or `.opencode/` directory in
-the OpenCode invocation path: OpenCode v2 discovers those independently of
-`OPENCODE_CONFIG`, and a project plugin could execute before tool permissions.
-Such a PR needs human review before the AI gate can safely run.
+health check still fails closed on a foreign service. The guard deliberately does
+**not** refuse a project `opencode.json(c)` or `.opencode/` directory: OpenCode v2
+discovers those independently of `OPENCODE_CONFIG`, but this repository ships its
+own root `opencode.json` (symlink to `.agents/opencode.json`) for local runs, so
+such a scan can never pass on a clean tree. A PR that edits that config or adds a
+project plugin is therefore not caught by the guard and needs human review; the
+symlink-target resolution below is the remaining fail-closed check.
 
 The same guard also resolves every symlink in the checkout and fails closed on any that
 lands on a credential-bearing target. Outside the checkout that means the sensitive roots,

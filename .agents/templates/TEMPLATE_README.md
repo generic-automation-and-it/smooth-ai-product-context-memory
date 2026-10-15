@@ -29,7 +29,7 @@ This guide explains how to create and maintain `*AGENTS.md` context files for AI
 │   └── workflows/
 │       └── {workflow}.AGENTS.md             # CI/CD workflow context
 │
-└── CLAUDE.md                                # Root project context
+└── AGENTS.md                                # Root project context
 ```
 
 ## Placement Rules

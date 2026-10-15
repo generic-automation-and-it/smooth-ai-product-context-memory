@@ -208,6 +208,33 @@ button:hover { background: var(--bg); }
   }
 }
 
+/* Graph view (P3) */
+.graph-header { color: var(--muted); font-size: 13px; margin: 12px 0 8px; }
+.graph-wrap { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+.graph-wrap h2 { font-size: 14px; margin: 14px 0 6px; }
+.graph-wrap h2:first-child { margin-top: 0; }
+.legend { list-style: none; display: flex; flex-wrap: wrap; gap: 14px; margin: 0 0 10px; padding: 0; font-size: 13px; }
+.legend li { display: flex; align-items: center; gap: 6px; }
+.legend-swatch { width: 26px; display: inline-block; }
+.legend-colour { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+.legend-empty { color: var(--muted); }
+.graph-canvas { overflow: auto; border: 1px solid var(--border); border-radius: 6px; background: #fbfbfc; }
+.graph-canvas svg { display: block; width: 100%; height: auto; min-width: 640px; }
+.graph-canvas .node, .graph-canvas .edge { cursor: pointer; }
+.graph-canvas .node:focus-visible, .graph-canvas .edge:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.node-label { font-size: 11px; fill: var(--fg); }
+.edge-relation { font-size: 10px; fill: var(--muted); }
+.edge-detail { font-size: 13px; color: var(--fg); min-height: 18px; margin: 8px 0 0; }
+.graph-help { font-size: 12px; color: var(--muted); margin: 8px 0 0; }
+.chain-arrow { color: var(--muted); }
+.chain-reasons { font-size: 12px; color: var(--muted); }
+.ticket-graph { margin-top: 28px; }
+.ticket-graph h2 { font-size: 16px; }
+.ticket-result { margin-top: 12px; }
+.ticket-result h3 { font-size: 13px; margin: 14px 0 6px; }
+.disclosure { font-size: 13px; color: var(--muted); margin: 0 0 6px; }
+.flag { font-size: 13px; color: var(--warn); margin: 0 0 10px; }
+
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }

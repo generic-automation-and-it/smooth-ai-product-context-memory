@@ -39,6 +39,18 @@ internal static class ContextEndpoints
             mediator.Send(body, ct))
             .RequireCapability(ApiCapability.Read);
 
+        // The cheap fields of one memory's current version, by identity. A traversal returns uuid
+        // references for intermediate hops, and the query endpoint has no uuid predicate, so this is the
+        // only read that can label a graph node. It carries the same scope rule as the proxies below:
+        // holding a uuid is not authority to read the dimension the scope rule hides.
+        group.MapGet("/memories/{uuid:guid}", (
+            Guid uuid,
+            IMediator mediator,
+            CancellationToken ct,
+            [FromQuery] string? scope = null) =>
+            mediator.Send(new GetMemory.Request(uuid, scope), ct))
+            .RequireCapability(ApiCapability.Read);
+
         group.MapGet("/memories/{uuid:guid}/versions", (
             Guid uuid,
             IMediator mediator,
