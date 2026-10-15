@@ -1,0 +1,258 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": [
+    ".github/instructions/*.instructions.md",
+    ".github/instructions/**/*.instructions.md"
+  ],
+  "permissions": [
+    {
+      "action": "external_directory",
+      "resource": "*",
+      "effect": "allow"
+    },
+    {
+      "action": "read",
+      "resource": "*",
+      "effect": "allow"
+    },
+    {
+      "action": "edit",
+      "resource": "*",
+      "effect": "allow"
+    },
+    {
+      "action": "shell",
+      "resource": "*",
+      "effect": "ask"
+    },
+    {
+      "action": "shell",
+      "resource": "cat *",
+      "effect": "allow"
+    },
+    {
+      "action": "shell",
+      "resource": "curl *",
+      "effect": "allow"
+    },
+    {
+      "action": "shell",
+      "resource": "docker-compose *",
+      "effect": "allow"
+    },
+    {
+      "action": "shell",
+      "resource": "dotnet ef migrations add *",
+      "effect": "allow"
+    },
+    {
+      "action": "shell",
+      "resource": "dotnet tool install *",
+      "effect": "allow"
+    },
+    {
+      "action": "shell",
+      "resource": "dotnet tool restore *",
+      "effect": "allow"
+    },
+    {
+      "action": "shell",
+      "resource": "env",
+      "effect": "allow"
+    },
+    {
+      "action": "shell",
+      "resource": "gh api *",
+      "effect": "allow"
+    },
+    {
+      "action": "shell",
+      "resource": "gh pr edit *",
+      "effect": "allow"
+    },
+    {
+      "action": "shell",
+      "resource": "gh pr reviews *",
+      "effect": "allow"
+    },
+    {
+      "action": "shell",
+      "resource": "gh pr view *",
+      "effect": "allow"
+    },
+    {
+      "action": "shell",
+      "resource": "gh run view *",
+      "effect": "allow"
+    },
+    {
+      "action": "shell",
+      "resource": "az *",
+      "effect": "allow"
+    },
+    {
+      "action": "shell",
+      "resource": "git grep *",
+      "effect": "allow"
+    },
+    {
+      "action": "shell",
+      "resource": "git stash *",
+      "effect": "allow"
+    },
+    {
+      "action": "shell",
+      "resource": "git status *",
+      "effect": "allow"
+    },
+    {
+      "action": "shell",
+      "resource": "git diff *",
+      "effect": "allow"
+    },
+    {
+      "action": "shell",
+      "resource": "git pull *",
+      "effect": "allow"
+    },
+    {
+      "action": "shell",
+      "resource": "git reset *",
+      "effect": "allow"
+    },
+    {
+      "action": "shell",
+      "resource": "node *",
+      "effect": "allow"
+    },
+    {
+      "action": "shell",
+      "resource": "powershell.exe *",
+      "effect": "allow"
+    },
+    {
+      "action": "shell",
+      "resource": "python3 *",
+      "effect": "allow"
+    },
+    {
+      "action": "shell",
+      "resource": "ren *",
+      "effect": "allow"
+    },
+    {
+      "action": "shell",
+      "resource": "rmdir *",
+      "effect": "allow"
+    },
+    {
+      "action": "shell",
+      "resource": "sqlcmd *",
+      "effect": "allow"
+    },
+    {
+      "action": "shell",
+      "resource": "where *",
+      "effect": "allow"
+    },
+    {
+      "action": "shell",
+      "resource": "yamllint *",
+      "effect": "allow"
+    },
+    {
+      "action": "shell",
+      "resource": "gh pr close *",
+      "effect": "ask"
+    },
+    {
+      "action": "webfetch",
+      "resource": "https://github.com/*",
+      "effect": "allow"
+    },
+    {
+      "action": "webfetch",
+      "resource": "https://www.conventionalcommits.org/*",
+      "effect": "allow"
+    }
+  ],
+  "experimental": {
+    "policies": [
+      {
+        "action": "permission",
+        "resource": "shell:gh pr merge*--delete-branch*",
+        "effect": "deny"
+      },
+      {
+        "action": "permission",
+        "resource": "shell:gh pr merge*-d*",
+        "effect": "deny"
+      },
+      {
+        "action": "permission",
+        "resource": "shell:gh api*DELETE*refs/heads*",
+        "effect": "deny"
+      },
+      {
+        "action": "permission",
+        "resource": "shell:gh api*DELETE*git/refs*",
+        "effect": "deny"
+      },
+      {
+        "action": "permission",
+        "resource": "shell:dotnet ef database update *",
+        "effect": "deny"
+      },
+      {
+        "action": "permission",
+        "resource": "shell:sqlcmd*INSERT*",
+        "effect": "deny"
+      },
+      {
+        "action": "permission",
+        "resource": "shell:sqlcmd*insert*",
+        "effect": "deny"
+      },
+      {
+        "action": "permission",
+        "resource": "shell:sqlcmd*UPDATE*",
+        "effect": "deny"
+      },
+      {
+        "action": "permission",
+        "resource": "shell:sqlcmd*update*",
+        "effect": "deny"
+      },
+      {
+        "action": "permission",
+        "resource": "shell:sqlcmd*DELETE*",
+        "effect": "deny"
+      },
+      {
+        "action": "permission",
+        "resource": "shell:sqlcmd*delete*",
+        "effect": "deny"
+      },
+      {
+        "action": "permission",
+        "resource": "shell:sqlcmd*DROP*",
+        "effect": "deny"
+      },
+      {
+        "action": "permission",
+        "resource": "shell:sqlcmd*drop*",
+        "effect": "deny"
+      },
+      {
+        "action": "permission",
+        "resource": "shell:sqlcmd*TRUNCATE*",
+        "effect": "deny"
+      },
+      {
+        "action": "permission",
+        "resource": "shell:sqlcmd*truncate*",
+        "effect": "deny"
+      }
+    ]
+  }
+}
