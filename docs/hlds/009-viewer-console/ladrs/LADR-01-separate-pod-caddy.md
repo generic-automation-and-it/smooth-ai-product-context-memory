@@ -12,6 +12,11 @@ Deploy the Console as its own **viewer pod** fronted by **Caddy**. Caddy serves 
 loopback entry, reverse-proxies `/api` to the Host, and injects the read token. The viewer pod also runs a
 small bridge that drives the capture pipeline.
 
+Loopback here means the *published* port, not the in-container bind: Caddy listens on all container
+interfaces (`:5180`) so the Aspire/DCP proxy can reach it, and the AppHost publishes that port on
+loopback only (NFR-01). A `bind 127.0.0.1` inside the container would cut the pod off from its own
+proxy with no security gain.
+
 ## Consequences
 
 - The Host image stays pure (no UI bundle, no proxy).
