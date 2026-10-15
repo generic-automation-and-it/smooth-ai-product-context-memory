@@ -244,6 +244,18 @@ internal static class DistributedApplicationBuilderExtensions
                 ? builder.AddContainer(ViewerResourceName, imageReference.Image)
                 : builder.AddContainer(ViewerResourceName, imageReference.Image, imageReference.Tag);
 
+            if (!configuration.IsRelease)
+            {
+                // Build the viewer image from its Dockerfile so `dotnet run AppHost` spins the pod up
+                // without a pre-built :local tag. The Dockerfile needs the repository-root context (it
+                // COPYs the shared capture scripts and the Viewer source). Paths are resolved from the
+                // AppHost project directory, which is the working directory under `dotnet run`.
+                string appHostDirectory = Directory.GetCurrentDirectory();
+                viewer = viewer.WithDockerfile(
+                    contextPath: Path.GetFullPath(Path.Combine(appHostDirectory, "..", "..")),
+                    dockerfilePath: Path.GetFullPath(Path.Combine(appHostDirectory, "..", "SmoothAiProductContextMemory.Viewer", "Dockerfile")));
+            }
+
             viewer
                 .WithHttpEndpoint(port: configuration.ViewerPort, targetPort: ViewerContainerPort, name: "http")
                 .WithContainerName(configuration.ViewerContainerName)

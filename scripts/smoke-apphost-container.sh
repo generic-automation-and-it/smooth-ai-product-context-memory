@@ -49,7 +49,7 @@ engine() {
 
 existing_containers="$(engine container ls --all --format '{{.Names}}')"
 existing_volumes="$(engine volume ls --format '{{.Name}}')"
-for suffix in controller host postgres blob-well seq; do
+for suffix in controller host postgres blob-well seq viewer; do
   if printf '%s\n' "$existing_containers" | grep -Fxq "mimisbrunnr-${installation_id}-${suffix}"; then
     echo "Smoke refuses pre-existing installation containers; choose a unique INSTALLATION_ID." >&2
     exit 1
@@ -236,7 +236,7 @@ wait_for_reconciled_health() {
 }
 
 assert_owned_resources() {
-  for suffix in postgres blob-well seq host; do
+  for suffix in postgres blob-well seq host viewer; do
     name="mimisbrunnr-${installation_id}-${suffix}"
     owner="$(engine inspect --format '{{ index .Config.Labels "io.smooth-mimisbrunnr.installation" }}' "$name")"
     managed="$(engine inspect --format '{{ index .Config.Labels "io.smooth-mimisbrunnr.managed" }}' "$name")"
@@ -330,7 +330,7 @@ assert_fixture
 echo "Initial API, blob, graph, and ownership checks passed."
 
 engine stop --timeout 180 "$controller_name" >/dev/null
-for suffix in postgres blob-well seq host; do
+for suffix in postgres blob-well seq host viewer; do
   if engine inspect "mimisbrunnr-${installation_id}-${suffix}" >/dev/null 2>&1; then
     echo "owned workload survived graceful controller stop" >&2
     exit 1
