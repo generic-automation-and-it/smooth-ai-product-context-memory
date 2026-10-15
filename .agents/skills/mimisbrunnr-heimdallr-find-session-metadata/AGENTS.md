@@ -16,6 +16,7 @@ Read [`SKILL.md`](./SKILL.md) first — what the reporter prints, its withholdin
 
 | Date | Change | Ref |
 | :---- | :---- | :---- |
+| 2026-10-15 | Ralph loop: `REFUSED_DIRS` (never read) removed and `parse_repo` simplified | — |
 | 2026-10-03 | `provider:KEY` no longer re-emits `local:KEY` | — |
 | 2026-10-03 | Repository keeps every path segment (`group/subgroup/repo`), not the last two | — |
 | 2026-10-03 | Autofill is outbound only | — |

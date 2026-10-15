@@ -261,7 +261,14 @@ def _read_response(request, timeout=None):
         with _open(request, timeout) as resp:
             return resp.read().decode("utf-8")
     except urllib.error.HTTPError as e:
-        raise ClientError(e.code, e.reason, problem_text(e.read().decode("utf-8", errors="replace"))) from e
+        # Reading the error body is itself a transport call and can fail the same way the request
+        # did. A failure here must still be classified, never raised past the handler that exists to
+        # classify it — so an unreadable error body degrades to the status line it arrived with.
+        try:
+            detail = problem_text(e.read().decode("utf-8", errors="replace"))
+        except OSError:
+            detail = ""
+        raise ClientError(e.code, e.reason, detail) from e
     except urllib.error.URLError as e:
         # A connect-phase timeout arrives wrapped in URLError; the reason carries the timeout.
         raise _classify_transport_error(e.reason, timeout) from e
@@ -583,7 +590,10 @@ def cmd_set(args):
     payload = _apply_export_marker(args, payload)
     validate_set_payload(payload)
     query = {"dryRun": "true"} if args.dryrun else None
-    resp = scrubbed_write("set", "POST", "/api/context/memories", payload, query=query)
+    # The receipt records what was SENT. `scrub_or_refuse` returns a copy, so the caller's payload
+    # still holds every span the redactor removed; writing the marker from it would put an unscrubbed
+    # description on disk under a redaction the request itself passed.
+    payload, resp = scrubbed_send("set", "POST", "/api/context/memories", payload, query=query)
     print(json.dumps(resp, indent=2))
     _mark_send_receipt(args, payload, resp)
     return resp
@@ -729,6 +739,12 @@ def _response_wrote_nothing(resp) -> bool:
     return bool(counts) and sum(counts) == 0
 
 
+def _export_receipt(status, sid, count=0) -> None:
+    """The one place the export receipt reaches stderr. Every `Marker:` line in
+    `_mark_send_receipt` goes through it, so a status rename is one edit."""
+    print(_marker.marker_line(status, sid, count, verb="export"), file=sys.stderr)
+
+
 def _mark_send_receipt(args, payload, resp=None) -> None:
     """Append one export entry for a successful send and print the Marker: line.
 
@@ -742,24 +758,24 @@ def _mark_send_receipt(args, payload, resp=None) -> None:
     if bool(getattr(args, "dryrun", False)):
         sid, _ = _marker_session(args)
         if bool(getattr(args, "nomarker", False)):
-            print(_marker.marker_line("skipped", sid, 0, verb="export"), file=sys.stderr)
+            _export_receipt("skipped", sid)
         elif not sid:
-            print(_marker.marker_line("none", "", verb="export"), file=sys.stderr)
+            _export_receipt("none", "")
         else:
-            print(_marker.marker_line("empty", sid, 0, verb="export"), file=sys.stderr)
+            _export_receipt("empty", sid)
         return
     nomarker = bool(getattr(args, "nomarker", False))
     sid, harness = _marker_session(args)
     if nomarker:
-        print(_marker.marker_line("skipped", sid, 0, verb="export"), file=sys.stderr)
+        _export_receipt("skipped", sid)
         return
     if not sid:
-        print(_marker.marker_line("none", "", verb="export"), file=sys.stderr)
+        _export_receipt("none", "")
         return
     if _response_wrote_nothing(resp):
-        print(_marker.marker_line("empty", sid, 0, verb="export"), file=sys.stderr)
+        _export_receipt("empty", sid)
         return
-    sent = [item for item in payload.get("items", []) if isinstance(payload, dict)] or []
+    sent = [item for item in (payload.get("items") or []) if isinstance(item, dict)]
     confirmed = _response_uuids(resp)
     if confirmed and len(confirmed) != len(sent):
         confirmed = []
@@ -772,24 +788,36 @@ def _mark_send_receipt(args, payload, resp=None) -> None:
         if isinstance(ident, str) and ident:
             written.append({"id": ident, "subject": item.get("description") or ""})
     if not written:
-        print(_marker.marker_line("empty", sid, 0, verb="export"), file=sys.stderr)
+        _export_receipt("empty", sid)
         return
     try:
         _, status = _marker.append_export("odin", sid, harness, written)
     except OSError as error:
         print(f"NOTE: session marker not written ({error}).", file=sys.stderr)
         return
-    print(_marker.marker_line(status, sid, len(written), verb="export"), file=sys.stderr)
+    _export_receipt(status, sid, len(written))
+
+
+def scrubbed_send(operation, method, path, payload, query=None):
+    """Scrub `payload` for `operation`, send it, and hand back the scrubbed payload and the response.
+
+    The scrubbed payload is returned alongside the response because the caller may keep something
+    client-side of the bytes it sent — the `set` receipt writes each item's subject into the session
+    marker — and that record must describe the sent payload, not the caller's original. Scrubbing
+    once, here, is what keeps the request and the receipt in step.
+    """
+    payload, hits = scrub_or_refuse(payload, operation)
+    return payload, attach_redaction(_request(method, path, payload, query=query), hits)
 
 
 def scrubbed_write(operation, method, path, payload, query=None):
     """Scrub `payload` for `operation`, send it, and attach the redaction digest to the response.
 
     The single route every persisting write takes, so a new write subcommand is gated by
-    calling this rather than by remembering to call the scrubber.
+    calling this rather than by remembering to call the scrubber. A caller that records what it
+    sent calls `scrubbed_send`, which is this route with the scrubbed payload returned too.
     """
-    payload, hits = scrub_or_refuse(payload, operation)
-    return attach_redaction(_request(method, path, payload, query=query), hits)
+    return scrubbed_send(operation, method, path, payload, query=query)[1]
 
 
 def scrub_or_refuse(payload, operation="set"):
@@ -1108,7 +1136,7 @@ def cmd_paths(args):
     payload = payload_of(args)
     if not isinstance(payload, dict):
         raise ClientError(0, "bad-input", "'paths' payload must be an object")
-    if not isinstance(payload.get("maxDepth"), int) or isinstance(payload.get("maxDepth"), bool) or payload["maxDepth"] < 1:
+    if type(payload.get("maxDepth")) is not int or payload["maxDepth"] < 1:
         raise ClientError(
             0,
             "bad-input",
@@ -1283,9 +1311,8 @@ def run_framed(args):
     # because the caller asked for the body and may hash or diff it. The inner command prints no
     # banner, so the banner is unconditional here: a body quoting the notice must not suppress it.
     if getattr(args, "command", None) in RAW_BODY_COMMANDS:
-        if captured:
-            print(BANNER_PREFIX + RECALL_NOTICE)
-            sys.stdout.write(captured)
+        print(BANNER_PREFIX + RECALL_NOTICE)
+        sys.stdout.write(captured)
         return result
     raw = captured.strip()
     if not raw:
@@ -1451,7 +1478,10 @@ def main():
             run_framed(args)
         else:
             args.func(args)
-    except ClientError as e:
+    except (ClientError, ValueError) as e:
+        # `ValueError` too, and for the same reason the read client's `main` catches it: the shared
+        # `cmd_*` functions are dispatched from both entry points, so a decode or validation failure
+        # that the read surface reports cleanly must not reach an agent as a traceback here.
         print(str(e), file=sys.stderr)
         sys.exit(1)
 

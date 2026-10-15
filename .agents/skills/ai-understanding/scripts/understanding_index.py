@@ -213,7 +213,14 @@ def read_unit(unit_file: Path, subject: str, root: Path | None = None) -> tuple[
     slug = slug_of(unit_file)
     where = f"{subject}/{unit_file.name}"
 
-    fields = parse_frontmatter(unit_file.read_text(encoding="utf-8"))
+    try:
+        text = unit_file.read_text(encoding="utf-8")
+    except UnicodeDecodeError as error:
+        # A validator that raises on malformed input reports nothing about the file it was handed,
+        # which is the one job it has. The unit is reported and skipped; the run continues.
+        return None, [f"{where} is not valid UTF-8 ({error.reason} at byte {error.start}); "
+                      f"re-save it as UTF-8"]
+    fields = parse_frontmatter(text)
     if not fields:
         return None, [f"{where} has no frontmatter"]
 
@@ -1066,21 +1073,33 @@ def decisions_column(units: list[dict], env: dict | None = None) -> list[str]:
         return [f"  {note}"]
     records = [gd.unit_record(unit) for unit in units]
     # A fresh ledger per advisory run: the gate bounds attempts per identity, and a reused ledger would
-    # let an earlier run's spent budget make a later `--review --decisions` report stale outcomes.
-    ledger = Path(tempfile.mkdtemp()) / "advisory-ledger.json"
-    try:
-        payload = gd.score(records, ledger=ledger, env=env)
-    except gd.GateRefused as exc:
-        return [f"  decisions: refused ({exc.outcome})"]
+    # let an earlier run's spent budget make a later `--review --decisions` report stale outcomes. The
+    # directory is a context manager, not `mkdtemp`: a review agent runs this on every report and each
+    # orphaned directory would otherwise accumulate for the life of the workspace.
+    with tempfile.TemporaryDirectory() as ledger_dir:
+        try:
+            payload = gd.score(records, ledger=Path(ledger_dir) / "advisory-ledger.json", env=env)
+        except gd.GateRefused as exc:
+            return [f"  decisions: refused ({exc.outcome})"]
+    # An error payload carries no records at all, and a short one silently drops the tail. Both leave
+    # the header printed above an empty column, so the outcome is disclosed rather than swallowed.
+    if payload.get("outcome") == "error" or len(payload.get("records") or []) != len(units):
+        detail = payload.get("detail") or (
+            f"the gate returned {len(payload.get('records') or [])} record(s) for {len(units)} unit(s)")
+        return [f"  decisions: not reported ({detail})"]
     lines = []
-    for unit, result in zip(units, payload.get("records", [])):
+    for unit, result in zip(units, payload["records"]):
+        label = unit.get("slug") or unit.get("description") or "<no slug>"
         if result.get("passed"):
             scores = result.get("scores") or {}
             best = max(scores, key=scores.get) if scores else "?"
             margin = result.get("discrimination", {}).get("margin")
-            lines.append(f"  {unit['slug']}: best {best}, margin {margin}")
+            lines.append(f"  {label}: best {best}, margin {margin}")
         else:
-            lines.append(f"  {unit['slug']}: no role above the bar")
+            # A gate that refused to score (held, attempts exhausted, oversize) is not a unit that
+            # scored below the bar, and `classify` already draws that line. Report which it was.
+            reason = result.get("detail") or "no role above the bar"
+            lines.append(f"  {label}: {reason}")
     return lines
 
 
@@ -1132,7 +1151,7 @@ def render(units: list[dict]) -> str:
     return "\n".join(lines)
 
 
-USAGE = f"""usage: understanding_index.py [store-dir] [--review]
+USAGE = f"""usage: understanding_index.py [store-dir] [--review] [--decisions]
        understanding_index.py --consume-check <zip> [store-dir]
        understanding_index.py --stamp
 
@@ -1141,6 +1160,8 @@ A slug repeated across stamped folders is a version chain: the newest stamp is i
 older copies stay on disk unlisted and exempt from validation.
 Defaults to {DEFAULT_STORE}. --review adds an advisory decay report, including an `unpublished`
 section when the store is gitignored. A gitignored store also prints a one-line durability warning.
+--decisions is read-only and takes effect with --review: it adds a `decisions` column scored by the
+decision gate, and says so when the gate is not configured or a unit could not be scored.
 
 --consume-check lists <zip> without extracting it and refuses the whole archive on an escaping path,
 a symlink entry or a case-folded collision with another entry or with the target store.

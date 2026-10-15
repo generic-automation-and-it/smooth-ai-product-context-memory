@@ -4345,7 +4345,7 @@ class SessionMarkerTests(unittest.TestCase):
         sid = self._sid()
         src = self._store_file([self._record("u-ref-1", 1, "What stores data?")])
         run(["load", src, "--format", "store"])
-        raw = Path(self.tmp.name, f"kvasir-{sid}.json").read_text(encoding="utf-8")
+        raw = self.sm.marker_path("kvasir", sid, Path(self.tmp.name)).read_text(encoding="utf-8")
         self.assertNotIn("An answer worth keeping", raw)
         data = json.loads(raw)
         self.assertEqual(data["type"], "kvasir")
@@ -4582,12 +4582,12 @@ class SessionMarkerTests(unittest.TestCase):
         rc, out, err = self._write_export(str(src), "--all")
         self.assertEqual(rc, 0, err + out)
         self.assertIn("Boundary: ignored (--all)", out)
-        before = Path(self.tmp.name, f"kvasir-{os.environ['CLAUDE_CODE_SESSION_ID']}.json"
-                      ).read_bytes()
+        before = self.sm.marker_path("kvasir", os.environ["CLAUDE_CODE_SESSION_ID"],
+                                   Path(self.tmp.name)).read_bytes()
         rc, out, err = self._write_export(str(src), "--all", "--nomarker")
         self.assertEqual(rc, 0, err + out)
-        after = Path(self.tmp.name, f"kvasir-{os.environ['CLAUDE_CODE_SESSION_ID']}.json"
-                     ).read_bytes()
+        after = self.sm.marker_path("kvasir", os.environ["CLAUDE_CODE_SESSION_ID"],
+                                  Path(self.tmp.name)).read_bytes()
         self.assertEqual(before, after, "--all --nomarker must leave the marker byte-identical")
 
     def test_parked_candidate_marks_nothing_and_stays_proposed(self):
@@ -4645,12 +4645,12 @@ class SessionMarkerTests(unittest.TestCase):
 
     def test_corrupt_marker_is_quarantined_not_silently_replaced(self):
         sid = self._sid()
-        bad = Path(self.tmp.name, f"kvasir-{sid}.json")
+        bad = self.sm.marker_path("kvasir", sid, Path(self.tmp.name))
         bad.write_text("{ not json", encoding="utf-8")
         src = self._store_file([self._record("u-after-corrupt-1", 1, "After Q?")])
         rc, out, err = run(["load", src, "--format", "store"])
         self.assertEqual(rc, 0, out)
-        asides = list(Path(self.tmp.name).glob(f"kvasir-{sid}.json.corrupt-*"))
+        asides = list(Path(self.tmp.name).glob(f"{bad.name}.corrupt-*"))
         self.assertEqual(len(asides), 1, "the unreadable file must be moved aside")
         self.assertIn("WARNING", err + out)
         self.assertIn("moved aside", err + out)

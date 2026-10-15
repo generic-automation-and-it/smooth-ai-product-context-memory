@@ -23,7 +23,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-REFUSED_DIRS = (".context/", ".env", ".env.", ".envrc")
 # Branch names carry the number as a path segment (feat/160-...), not a # shorthand.
 BRANCH_TICKET = re.compile(r"/(\d{1,7})(?=[-/]|$)")
 TICKET_PATTERNS = (
@@ -171,8 +170,7 @@ def parse_repo(url: str) -> str | None:
     match = re.search(r"([A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+)$", text)
     if not match:
         return None
-    repo = match.group(1)
-    return repo if "/" in repo and " " not in repo else None
+    return match.group(1)
 
 
 def _credential_shaped(redactor, provider: str, candidate: str, start: int, end: int,

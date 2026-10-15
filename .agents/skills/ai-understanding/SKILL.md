@@ -450,8 +450,10 @@ below) wins; else the first non-empty of `CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD
 - On `--import`, record what was loaded (unless `--nomarker`):
   `python3 .agents/skills/ai-understanding/scripts/session_marker.py record --type ai-understanding --verb import
   --slug "<slug>::<question>" ... [--session ID]` (repeat `--slug` per unit — a file's identity is its
-  slug; `--item` is the store's `id[:version[:subject]]` and excludes nothing here; `--selector`
-  with a JSON object for a selector-wide import instead of slugs). It prints one `Marker:` line
+  slug, and the export's exclusion is by slug, so a unit recorded any other way is re-proposed as new;
+  `--item` is the store's `id[:version[:subject]]` and excludes nothing here; `--selector` with a JSON
+  object records the filter, not the units, so it supplements the per-unit `--slug` and never replaces
+  it). It prints one `Marker:` line
   (`set`, `extended`, `skipped (--nomarker)`, `none`).
 - `--import --nomarker` loads history that flows into a default `--export` (still logged with
   `nomarker: true`); an id both marked and `--nomarker` stays excluded. No marker (or only

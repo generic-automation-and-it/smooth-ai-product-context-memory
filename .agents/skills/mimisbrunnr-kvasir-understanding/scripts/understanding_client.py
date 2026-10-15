@@ -850,7 +850,7 @@ def render_table(records: list[dict], all_kinds: bool, asof: dt.date | None,
         answer = parts["answer"] or ""
         if len(answer) > TABLE_ANSWER_CHARS:
             answer = answer[:TABLE_ANSWER_CHARS - 1] + "…"
-        scope = "/".join(x for x in (parts["scope"],) if x) or "-"
+        scope = parts["scope"] or "-"
         row = (f"| {_cell(parts['subject'])} | {_cell(answer)} | {_cell(parts['kind'])} | "
                f"{_cell(parts['status'])} | {_cell(parts['confidence'])} | {_cell(scope)} | "
                f"{_short(parts['uuid'])} v{parts['version'] or '-'} | "
@@ -1249,7 +1249,7 @@ def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str]:
     # environment winning. Reading `os.environ` directly here tested only the process environment, so an
     # operator who set ENABLED=true in `~/.mimisbrunnr/credentials` — the file the launcher maintains — was
     # told the gate was disabled while the gate itself would have run.
-    if os.environ.get("CONTEXT_MEMORY_DECISIONS_ENABLED", "").lower() != "true":
+    if os.environ.get(DECISIONS_ENABLED, "").lower() != "true":
         return candidates, "decisions: disabled"
     if not DECISIONS_GATE.is_file():
         print(f"NOTE: the decision gate is enabled but {DECISIONS_GATE} is missing; the gate was "
@@ -1703,7 +1703,7 @@ def _review_queue_path() -> str:
 
 
 def _queue_held(candidate: dict, held_by: str, conflict_type: str, reason: str,
-                evidence: dict, binding: dict, source: str, session_id: str) -> bool:
+                evidence: dict, binding: dict, source: str, held_session: str) -> bool:
     """Append one held candidate to the review queue. True on success.
 
     The queue is where a candidate the capture path held back goes so a reviewer can actually act on
@@ -1724,7 +1724,7 @@ def _queue_held(candidate: dict, held_by: str, conflict_type: str, reason: str,
         "candidate": candidate,
         "binding": binding,
         "source": source,
-        "sessionId": session_id,
+        "sessionId": held_session,
     }
     try:
         proc = subprocess.run(
@@ -1796,7 +1796,7 @@ def reconcile_source_scope(candidates: list[dict], binding: dict) -> bool:
 
 
 def _dedup_candidates(candidates: list[dict], group_uuid: str | None, binding: dict,
-                      source: str, session_id: str) -> tuple[int, int]:
+                      source: str, held_session: str) -> tuple[int, int]:
     """Stage 2/3 over a chunk, queueing duplicate proposals. Opt-in via `_DEDUP_ENABLED`.
 
     Returns `(queued, proposals)`. A proposal is a human decision under the `duplicate` menu, never an
@@ -1853,7 +1853,7 @@ def _dedup_candidates(candidates: list[dict], group_uuid: str | None, binding: d
         evidence = {"dedup": outcome, "detail": proposal.get("detail"),
                     "matches": proposal.get("matches")}
         if _queue_held(candidate, "dedup", "duplicate", f"staged dedup: {outcome}",
-                       evidence, binding, source, session_id):
+                       evidence, binding, source, held_session):
             queued += 1
     if degraded:
         print(f"NOTE: {degraded} candidate(s) could not be duplicate-checked (the store query "
@@ -1862,7 +1862,7 @@ def _dedup_candidates(candidates: list[dict], group_uuid: str | None, binding: d
 
 
 def _handle_cross_kind_409(items: list[dict], candidates: list[dict], group_uuid: str,
-                           binding: dict, source: str, session_id: str, veto_error: str) -> bool:
+                           binding: dict, source: str, held_session: str, veto_error: str) -> bool:
     """Re-preflight a `Subject '…' already exists` veto without kind and facets.
 
     The write's subject-uniqueness check (SetMemories `takenSubjectSlugs`) is subject-only, while the
@@ -1903,7 +1903,7 @@ def _handle_cross_kind_409(items: list[dict], candidates: list[dict], group_uuid
         if _queue_held(candidate, "conflict", "cross-kind-subject",
                        f"subject exists under a different kind in this group",
                        {"matchedUuid": holder, "matchedKind": holder_kind},
-                       binding, source, session_id):
+                       binding, source, held_session):
             found = True
             print(f"  CROSS-KIND: subject held by memory {holder}"
                   f" (kind {holder_kind or '?'}); choices: reclassify, rename, drop")
@@ -2131,13 +2131,17 @@ def cmd_export(args: argparse.Namespace) -> int:
     # A held candidate is persisted to the review queue, so it can be reviewed later rather than
     # vanishing with the session (the defect part A fixes). Queueing is never a blocker — the candidate
     # is already held, not written — but a candidate that did not land in the queue is reported.
-    session_id = os.environ.get("MIMIS_SESSION", "")
+    # `sessionId` is resolved ONCE, through the same resolver the marker uses, so one session has one
+    # identity in both places. Reading `MIMIS_SESSION` alone was a third rule: it left a candidate held
+    # under Conductor or Claude Code with no session attribution, and binding it to a local called
+    # `session_id` shadowed the module-level resolver for the rest of this function.
+    held_session, _ = _marker_session(args)
     queued = 0
     for candidate in held:
         signals = candidate.get("atomicity", {}).get("signals") or []
         if _queue_held(candidate, "atomicity", "held-atomic",
                        f"bundled ({', '.join(signals) or '?'})",
-                       {"signals": signals}, binding, src, session_id):
+                       {"signals": signals}, binding, src, held_session):
             queued += 1
 
     # Gate 5 (decision value), only when enabled. Scores are a quality signal, never authority: they
@@ -2204,7 +2208,7 @@ def cmd_export(args: argparse.Namespace) -> int:
             "discrimination": result.get("discrimination") if isinstance(result, dict) else {},
         }
         if _queue_held(candidate, "decisions", "below-value", "below the decision-gate threshold",
-                       evidence, binding, src, session_id):
+                       evidence, binding, src, held_session):
             queued += 1
 
 
@@ -2319,7 +2323,7 @@ def cmd_export(args: argparse.Namespace) -> int:
         # `_dedup_candidates`); a proposal is a human decision under the `duplicate` menu, never an
         # automatic merge, version or skip.
         dedup_queued, dedup_shown = _dedup_candidates(
-            chunk, group_uuid, binding, src, session_id)
+            chunk, group_uuid, binding, src, held_session)
         if dedup_shown:
             print(f"Staged dedup: {dedup_shown} duplicate proposal(s), {dedup_queued} queued -> "
                   f"{_review_queue_path()}")
@@ -2367,7 +2371,7 @@ def cmd_export(args: argparse.Namespace) -> int:
             # refuses even though the kind+facets preflight found nothing. Present the menu instead of
             # failing without a path.
             cross_kind = _handle_cross_kind_409(items, chunk, group_uuid, binding, src,
-                                                session_id, veto_text)
+                                                held_session, veto_text)
             print(f"REFUSED at the dry-run veto: {veto_text}. {early}No memory from "
                   f"this batch was written; the group {group_uuid} was already resolved or created and "
                   f"remains.", file=sys.stderr)
@@ -2843,7 +2847,6 @@ def _apply_marker_exclusions(candidates: list[dict],
         subj = _subject(candidate)
         if subj and subj in subjects:
             candidate["_supersedes"] = subjects[subj]
-            candidate["_supersession"] = True
             sources = candidate.get("sources")
             lineage = {"kind": "supersedes", "reference": subjects[subj]}
             if isinstance(sources, list):
@@ -3061,7 +3064,7 @@ def git_ignored(path: Path) -> bool:
             ["git", "-C", str(path.parent), "check-ignore", "-q", "--", path.name],
             capture_output=True,
         )
-    except (FileNotFoundError, OSError):
+    except OSError:
         return False
     return proc.returncode == 0
 
