@@ -1146,15 +1146,15 @@ class SessionMarkerCLITests(unittest.TestCase):
         self.assertIn("Boundary: marker", out)
         self.assertIn("0 excluded", out)
 
-    def test_three_copies_stay_identical(self):
+    def test_the_copy_matches_the_shared_original(self):
+        """HLD-010 LADR-02: this plugin's marker is a deliberate WET copy, and the original is now the
+        one shared script folder (LADR-01). The copy direction is shared folder -> plugin, so drift
+        fails here naming the side that changed."""
         roots = [MARKER_SCRIPT,
-                 MARKER_SCRIPT.parents[2] / "mimisbrunnr-odin-context-memory"
-                 / "scripts" / "session_marker.py",
-                 MARKER_SCRIPT.parents[2] / "mimisbrunnr-kvasir-understanding"
+                 MARKER_SCRIPT.parents[2] / "_mimisbrunnr-shared"
                  / "scripts" / "session_marker.py"]
         bodies = [r.read_text(encoding="utf-8") for r in roots]
         self.assertEqual(bodies[0], bodies[1])
-        self.assertEqual(bodies[0], bodies[2])
 
 
 if __name__ == "__main__":

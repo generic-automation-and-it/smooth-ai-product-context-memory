@@ -1,6 +1,6 @@
 # LADR-01: Shared scripts live in `_mimisbrunnr-shared/scripts/`; no skill reaches into a peer
 
-**Status:** Draft
+**Status:** Accepted
 
 <!-- Status lifecycle: Draft → Prototype → Accepted. Also: "Superseded by LADR-MM", "Deprecated". -->
 
@@ -24,11 +24,20 @@ just stops). Measured inventory, 2026-10-14:
 | ymir-bootstrap | documented `SKILL.md` command path (agent-executed, no script import) | odin `context_memory_read_client.py probe` |
 | ai-understanding | WET copies only (separate plugin — see LADR-02) | `decisions_gate.py`, `decisions_rubric.json`, `redact.py`, `session_marker.py` |
 
-A third mechanism is a mirrored constant, not a file: kvasir and saga-dossier each carry
-their own `MAX_CANDIDATES = 20`, commented as the capture skill's cap "mirrored rather
-than imported". It is not a peer reach and not a copy — changing the cap is a two-file
+A third mechanism is a mirrored constant, not a file: kvasir carries its own
+`MAX_CANDIDATES = 20`, commented as the capture skill's cap "mirrored rather
+than imported". saga-dossier was measured alongside it and carries **no** such
+mirror — only kvasir does. It is not a peer reach and not a copy — changing the cap is a two-file
 edit today. Disposition: stays mirrored and comment-pinned; if the cap ever changes, the
 change rides with it explicitly rather than through this move.
+
+> **Shipped 2026-10-14 (B2).** The inventory above is the pre-move measurement. After the move
+> every row resolves into `_mimisbrunnr-shared/scripts/` — including the Heimdallr reporter, which
+> kvasir and saga-dossier reached by sibling path — and kvasir's WET `decisions_rubric.json` and
+> `session_marker.py` collapsed into the shared copy, because the reason they existed for (two
+> separately shipped script folders) no longer holds. The mirrored constant kept its stated
+> disposition with the reason rewritten: a shared-folder reference is the rule for files, and a
+> constant is not a file. saga-dossier was re-measured and carries no `MAX_CANDIDATES` mirror.
 
 ## Decision
 
@@ -73,7 +82,12 @@ repository the same way.
 
 ## Open
 
-- Re-run B0 against the real GitHub-URL `source` before this moves past Draft (owner: whoever runs B2; trigger: first B2 execution).
+- **The real GitHub-URL `source` is still untested.** The 2026-10-14 B0 run and the post-move
+  verification both pointed `source` at `./` in a throwaway clone (never in this repository). Both
+  confirmed the plugin cache holds the whole repository — B0 with a dummy `probe.py`, the post-move
+  run with the real `_mimisbrunnr-shared/scripts/` contents and a reporter that resolved its redactor
+  through them. A GitHub-URL `source` is expected to clone the whole repository the same way; the
+  claim is inference, not evidence, and stays here until someone runs it.
 
 ## Related
 

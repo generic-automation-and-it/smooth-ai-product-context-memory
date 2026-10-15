@@ -92,6 +92,7 @@ One-liners; full detail in git history and the linked PRs/issues.
 
 | Date | Change | Ref |
 |---|---|---|
+| 2026-10-14 | **HLD-010 B2 landed — one shared script folder inside the `mimisbrunnr` plugin.** Every script used by more than one skill now lives at `.agents/skills/_mimisbrunnr-shared/scripts/` and is referenced by that path; no skill reaches into a peer's folder, and the PR gate greps to keep it that way (NFR-01). Kvasir's WET `decisions_rubric.json` and `session_marker.py` copies were deleted; `ai-understanding`'s WET copies stay (separate plugin, LADR-02) and its parity harness now compares against the shared original. The npm allowlist carries the shared folder and the odin launcher points into it; the marketplace and both symlinked mirrors resolve it with no copy step, re-verified in a clean-profile install with the real move in place. HLD-010 promoted to *Accepted — implemented*. | issue 222 |
 | 2026-10-14 | **Review gate + config gained Mistral Large 4** on `go-openai` (preset `OpenCode Mistral Large 4`). Listed in OpenCode docs but not yet served by `zen/go/v1`, so it fails until OpenCode enables it on Go. | this PR |
 | 2026-10-14 | **Added HLD-010 (In Discovery)** — one model for shared skill code (shared folder inside the plugin, WET + parity across it); B1 decision record for the Part B move. | issue 222 |
 | 2026-10-14 | **`what-is-special.md` gained the session-markers item** (import + export mark the working point; default export is a delta; rivals deduplicate after the fact). | this PR |

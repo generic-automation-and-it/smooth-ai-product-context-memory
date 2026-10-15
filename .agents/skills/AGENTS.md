@@ -4,10 +4,13 @@
 
 First-party AI agent skills. They legitimately run shell, `gh`/`git`, and template file operations. This repository no longer has the former SkillSpector gate or baseline; review security-sensitive skill changes directly and run a local secret scan.
 
+`_mimisbrunnr-shared/` is the one exception to "one directory per skill": it holds the scripts used by more than one `mimisbrunnr-*` skill and is **not** a skill (no `SKILL.md`, never loaded as one). See [`_mimisbrunnr-shared/AGENTS.md`](_mimisbrunnr-shared/AGENTS.md) and [HLD-010](../docs/hlds/010-skills-distribution/).
+
 ## Non-Negotiables
 
 - **Secrets go through the environment, never into text.** Any skill needing a secret MUST follow `.github/instructions/skills/skill-secret-handling.instructions.md`: a script reads the value from a runtime environment variable; the value never appears in `SKILL.md`, prompts, agent YAML, README, or any committed file. Local context-memory and dossier clients consume runtime API tokens.
 - **Review actual capabilities.** If a security scanner flags legitimate skill behavior (shelling out to `gh`, swapping a symlink, refreshing a template directory), investigate and document it; do not gut a skill to silence a finding.
+- **No skill script reaches into a peer skill's folder.** Inside the `mimisbrunnr` plugin, shared code lives in `_mimisbrunnr-shared/scripts/` and is referenced by path from there; a WET copy is a file in its own plugin, never a reference across the boundary (HLD-010 LADR-01 / LADR-02). The PR gate greps for the peer reach (NFR-01).
 
 ## Architecture Decisions
 
@@ -30,6 +33,7 @@ First-party AI agent skills. They legitimately run shell, `gh`/`git`, and templa
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-14 | **`_mimisbrunnr-shared/` created (HLD-010 B2).** One shared script folder for every script used by more than one `mimisbrunnr-*` skill, referenced by path and never reached into as a peer; kvasir's WET `decisions_rubric.json` and `session_marker.py` copies deleted, three consumers rewired, and the folder given its own `AGENTS.md`. The skills-area rule "no skill script reaches into a peer skill's folder" is now a Non-Negotiable and a PR-gate grep (NFR-01). | HLD-010 LADR-01, issue 222 |
 | 2026-10-02 | The parent-ownership paragraph in `README.md` no longer lists `ai-understanding` among the skills "kept byte-identical" to `smooth-devex-template`. It was the last file still asserting the claim the marketplace Non-Negotiable had just been rewritten to deny — the skill carries four accepted local divergences (case-folded collision check, `context_root()`, the `--promote` threshold, the durability guard), so an agent running `/ai-template-sync` read the catalogue first and would have reverted them. The exception now names the divergences' changelog and the `ai-template-sync` consequence. Documentation only. | PR review |
 | 2026-09-27 | `mimisbrunnr-ymir-bootstrap` added at `effort: xhigh` in `README.md` → Effort. The Naming & Ordering table gained the two skills it was missing (`ai-understanding`, `mimisbrunnr-saga-dossier`), and the Quick Reference bootstrap row dropped its one-off link to match its siblings. | skill effort migration |
 | 2026-09-27 | Synced template PR #85's secret-handling checklist, marked the removed SkillSpector gate historical, and documented the local runtime-token consumers. | template PR #85 |

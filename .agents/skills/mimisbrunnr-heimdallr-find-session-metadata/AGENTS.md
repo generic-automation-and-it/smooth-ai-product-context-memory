@@ -15,8 +15,8 @@ Heimdallr watches and reports — he does not judge or bind. The operator binds.
 - **Never open `.context/`, `.env*`, `*.env`.** The provisioned token file lives in the working tree.
 - **Prose is evidence, not binding.** Ticket-shaped strings are reported with their source; nothing is promoted silently.
 - **No network, no credentials.** The script runs no remote command and reads no token variable.
-- **No unchecked ticket.** Every candidate passes the capture skill's redactor, loaded from
-  `../mimisbrunnr-odin-context-memory/scripts/redact.py` by file path (never `import redact`, so a
+- **No unchecked ticket.** Every candidate passes the capture skill's redactor, loaded from the plugin's
+  shared script folder (`../_mimisbrunnr-shared/scripts/redact.py`) by file path (never `import redact`, so a
   same-named module cannot stand in). A candidate is dropped when `is_credential_key(provider)` is true or
   `scrub_located` would change the candidate alone or a span of its subject that overlaps it; a dropped
   candidate is counted in `ticketsWithheld` and its value is never printed. If the redactor cannot be
@@ -56,6 +56,7 @@ Heimdallr watches and reports — he does not judge or bind. The operator binds.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-14 | **The reporter moved to the shared script folder (HLD-010 B2).** `scripts/find_session_metadata.py` is now `.agents/skills/_mimisbrunnr-shared/scripts/find_session_metadata.py`, resolved by consumers as `parents[2] / "_mimisbrunnr-shared" / "scripts"` — never by naming Heimdallr's folder. The redactor it screens candidates with moves with it, so this skill's own `scripts/` folder is now empty by design. `SKILL.md`, `README.md`, both AGENTS.md non-negotiables and the harness were re-pointed; the fail-closed `ticketsUnavailable` contract is unchanged. | HLD-010 LADR-01, issue 222 |
 | 2026-10-07 | README checks `rootMatches`, not the withholdable `root`. | review 5440964552 |
 | 2026-10-07 | `SKILL.md` checks `rootMatches`, not `root` (display only, `null` when withheld). | issue 200 |
 | 2026-10-07 | README: operator checks `root` and picks relevant tickets instead of passing every reported one. | review 5438563690 |

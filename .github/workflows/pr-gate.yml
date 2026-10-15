@@ -19,6 +19,7 @@ on:
       - scripts/**
       - npm/**
       - package.json
+      - .agents/skills/_mimisbrunnr-shared/**
       - .agents/skills/mimisbrunnr-odin-context-memory/**
       - .agents/skills/mimisbrunnr-kvasir-understanding/**
       - .agents/skills/mimisbrunnr-saga-dossier/**
@@ -49,6 +50,7 @@ on:
       - scripts/**
       - npm/**
       - package.json
+      - .agents/skills/_mimisbrunnr-shared/**
       - .agents/skills/mimisbrunnr-odin-context-memory/**
       - .agents/skills/mimisbrunnr-kvasir-understanding/**
       - .agents/skills/mimisbrunnr-saga-dossier/**
@@ -127,6 +129,22 @@ jobs:
         run: |
           python3 -B .agents/skills/agile-github-breakdown/scripts/test_skill_scripts.py
           python3 -B .agents/skills/agile-github-task-from-diff/scripts/test_create_github_task_from_diff.py
+
+      # HLD-010 NFR-01: zero peer-skill path references in shipped skill scripts. Inside the plugin
+      # the only legitimate shared-code target is `_mimisbrunnr-shared/scripts/`; across a plugin
+      # boundary a copy is a file, never a reference. A reintroduced peer path fails here the day it
+      # lands, rather than surfacing at runtime on a consumer's least-tested path.
+      - name: Check no peer-skill script reach (HLD-010 NFR-01)
+        run: |
+          set -uo pipefail
+          peers='mimisbrunnr-(odin-context-memory|kvasir-understanding|saga-dossier|heimdallr-find-session-metadata|ymir-bootstrap|vitsmunir-dump|muninn-recall-feedback)/scripts/'
+          hits="$(grep -rnE "parents\[2\] */ *\"mimisbrunnr-|${peers}" .agents/skills/*/scripts --include='*.py' --include='*.sh' || true)"
+          if [ -n "$hits" ]; then
+            echo "::error::HLD-010 NFR-01 — a shipped skill script reaches into a peer skill's folder"
+            printf '%s\n' "$hits"
+            exit 1
+          fi
+          echo "no peer-skill script reach (HLD-010 NFR-01)"
 
       # Without --postgres only the Docker-free transport checks run; the disposable-container
       # fixture stays an operator-run check (scripts/AGENTS.md).

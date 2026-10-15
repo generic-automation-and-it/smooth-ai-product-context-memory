@@ -20,7 +20,7 @@ Before any store comparison, dry-run, capture, or recall test:
    `references/read-path.md` and `references/write-path.md`. This session follows them itself; there
    are no read or write subagents.
 2. Confirm the read path holds no write capability by running it:
-   `python3 -B ../mimisbrunnr-odin-context-memory/scripts/context_memory_read_client.py probe`, from a
+   `python3 -B ../_mimisbrunnr-shared/scripts/context_memory_read_client.py probe`, from a
    shell with no write-token spelling in its environment. The read client exposes no write subcommand
    and refuses to start with `CONTEXT_MEMORY_WRITE_TOKEN` (or the Host's `ApiAccess__WriteToken`) present,
    so a successful probe is the proof. Prompt instructions alone do not provide secret isolation.

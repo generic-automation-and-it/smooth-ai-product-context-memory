@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | In Discovery |
+| **Status** | Accepted — implemented |
 | **Owner** | generik0 |
 | **Tracker** | [issue 222](https://github.com/generic-automation-and-it/smooth-ai-product-context-memory/issues/222) (Part B) |
 | **Last updated** | 2026-10-14 |
@@ -11,6 +11,11 @@
 > building and why, the decisions behind it, and the quality bar it must meet. It does
 > **not** contain an implementation plan; execution (phasing, sub-issues, sequencing) is
 > tracked in the issue/work tracker.
+>
+> **Accepted — implemented** (2026-10-14): the B2 move landed. `_mimisbrinnr-shared/scripts/`
+> exists and holds the shared code, the three peer reaches are gone, `ai-understanding`'s
+> parity harness compares against the shared copy, `package.json#files` carries the folder,
+> and the PR gate greps for a reintroduced peer path (NFR-01).
 
 ## Intent
 
@@ -119,9 +124,9 @@ must preserve. Each is a single decision — a horizontal concern spanning this 
 
 | LADR | Decision | Status |
 |------|----------|--------|
-| [LADR-01](./ladrs/LADR-01-shared-folder-inside-the-plugin.md) | Shared scripts live in `_mimisbrunnr-shared/scripts/`; no skill reaches into a peer | Draft |
-| [LADR-02](./ladrs/LADR-02-wet-copies-across-plugins.md) | Across plugins, WET copies with parity tests; `ai-understanding` stays standalone | Draft |
-| [LADR-03](./ladrs/LADR-03-odin-owns-the-contract.md) | Odin stays the documented owner; one read client, one write client, refusal intact | Draft |
+| [LADR-01](./ladrs/LADR-01-shared-folder-inside-the-plugin.md) | Shared scripts live in `_mimisbrunnr-shared/scripts/`; no skill reaches into a peer | Accepted |
+| [LADR-02](./ladrs/LADR-02-wet-copies-across-plugins.md) | Across plugins, WET copies with parity tests; `ai-understanding` stays standalone | Accepted |
+| [LADR-03](./ladrs/LADR-03-odin-owns-the-contract.md) | Odin stays the documented owner; one read client, one write client, refusal intact | Accepted |
 
 ## Non-Functional Requirements
 
@@ -130,7 +135,7 @@ target, a verification mechanism, and acceptance criteria. See [`./nfrs/`](./nfr
 
 | NFR | Attribute | Target (summary) | Status |
 |-----|-----------|------------------|--------|
-| [NFR-01](./nfrs/NFR-01-no-peer-reaches.md) | Coupling | Zero peer-skill path references in shipped scripts | Draft |
-| [NFR-02](./nfrs/NFR-02-copy-parity.md) | Consistency | Every WET copy byte-identical to the shared source; parity harness green | Draft |
-| [NFR-03](./nfrs/NFR-03-client-singularity-and-refusal.md) | Security | Exactly one read + one write client; read refuses any write-token spelling | Draft |
-| [NFR-04](./nfrs/NFR-04-shared-folder-on-every-route.md) | Portability | Marketplace, npm, and both mirrors all resolve the shared folder | Draft |
+| [NFR-01](./nfrs/NFR-01-no-peer-reaches.md) | Coupling | Zero peer-skill path references in shipped scripts | Accepted |
+| [NFR-02](./nfrs/NFR-02-copy-parity.md) | Consistency | Every WET copy byte-identical to the shared source; parity harness green | Accepted |
+| [NFR-03](./nfrs/NFR-03-client-singularity-and-refusal.md) | Security | Exactly one read + one write client; read refuses any write-token spelling | Accepted |
+| [NFR-04](./nfrs/NFR-04-shared-folder-on-every-route.md) | Portability | Marketplace, npm, and both mirrors all resolve the shared folder | Accepted |

@@ -16,8 +16,13 @@ console. Offline, read-only, no store call, no secret read.
 From the repository root:
 
 ```bash
-python3 -B .agents/skills/mimisbrunnr-heimdallr-find-session-metadata/scripts/find_session_metadata.py [--json] [--initiative NAME] [--repo-root DIR]
+python3 -B .agents/skills/_mimisbrunnr-shared/scripts/find_session_metadata.py [--json] [--initiative NAME] [--repo-root DIR]
 ```
+
+The reporter is shared by more than one `mimisbrunnr-*` skill, so it lives in the plugin's shared
+script folder rather than in this skill's own ([HLD-010](../../../docs/hlds/010-skills-distribution/),
+LADR-01). From another skill, resolve it as `parents[2] / "_mimisbrunnr-shared" / "scripts"` — never
+by naming this skill's folder.
 
 `--repo-root DIR` scans that checkout (`git -C DIR`) instead of the working directory. Use it whenever the
 repository you are binding is not the one the session runs in, and check `rootMatches` before accepting
@@ -48,7 +53,8 @@ display only and is `null` when withheld.
 - **Never open `.context/`, `.env*` or `*.env`.** The provisioned token file lives in the working tree; discovery stays on git output.
 - **Prose is evidence, not binding.** A ticket-shaped string in a commit message is reported with its source; nothing is promoted to a binding without the operator.
 - **Credential-shaped candidates are withheld.** `provider:key` matches any `word:value`, so every candidate
-  passes the capture skill's redactor (`mimisbrunnr-odin-context-memory/scripts/redact.py`): one whose
+  passes the capture skill's redactor (`_mimisbrunnr-shared/scripts/redact.py`, loaded from the plugin's
+  shared script folder by file path — never `import redact`, so a same-named module cannot stand in): one whose
   provider is a credential word (`password`, `token`, `API_KEY` …), or whose text — alone or in its subject —
   the redactor would change, is dropped and only counted. The branch name is withheld (`branchWithheld`) when
   the redactor would change it or a candidate inside it was dropped. Without the redactor no ticket, no branch name, and no repository is reported.

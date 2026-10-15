@@ -16,9 +16,14 @@ then refuse to start:
 
 ```bash
 ( set -a && source ~/.mimisbrunnr/credentials && set +a && \
-  python3 -B <skill>/scripts/context_memory_client.py <preflight|set|resolve-group|upsert-initiative|update-group|append-description|create-link|propose-label|ticket-parent> ... )
+  python3 -B <skills-root>/_mimisbrunnr-shared/scripts/context_memory_client.py <preflight|set|resolve-group|upsert-initiative|update-group|append-description|create-link|propose-label|ticket-parent> ... )
 # same subshell wrapper around each write-route invocation; never export the token into the session shell
 ```
+
+The write client lives in the plugin's shared script folder
+([HLD-010](../../../docs/hlds/010-skills-distribution/), LADR-01), so `<skills-root>` is
+`.agents/skills`, `.claude/skills` or `.codex/skills` — whichever this tree exposes. Never name a peer
+skill's folder to reach it.
 
 Never earlier, and never print either credential. Write the batch and payload files below with the
 file tool and nothing else.

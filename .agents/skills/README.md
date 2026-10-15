@@ -4,6 +4,8 @@ Self-contained skills for Claude Code, GitHub Copilot, and OpenAI Codex providin
 
 Skills live **flat**, one directory per skill directly under `.agents/skills/`. Each folder name is **category-prefixed** (`agile-`, `ai-`, `context-`, `git-`, `mimisbrunnr-`) so the listing groups by category when sorted. The prefix is the only grouping mechanism — there are no category subfolders (Claude Code discovers skills exactly one level under `.claude/skills/`).
 
+The one folder here that is **not** a skill is `_mimisbrunnr-shared/`: it holds the scripts used by more than one `mimisbrunnr-*` skill and carries no `SKILL.md`, so no loader lists it and it has no slash command. A `mimisbrunnr-*` skill references it by path; no skill reaches into a peer skill's folder ([`_mimisbrunnr-shared/AGENTS.md`](_mimisbrunnr-shared/AGENTS.md), [HLD-010](../docs/hlds/010-skills-distribution/)).
+
 ## Quick Reference
 
 | Skill | Purpose | Usage |
@@ -166,6 +168,8 @@ Skills are flat under `.agents/skills/`; the category lives in the folder-name p
 | _(none)_ | `create-hld`, `manage-rule-system` |
 
 A skill's folder name MUST equal its `name:` frontmatter (this is the slash-command name). When adding a skill, pick the prefix of its category and keep the folder one level under `.agents/skills/`.
+
+`_mimisbrunnr-shared/` appears in no row of the table above and must never gain one: it has no `name:`, no `SKILL.md` and no slash command.
 
 ## About Skills
 

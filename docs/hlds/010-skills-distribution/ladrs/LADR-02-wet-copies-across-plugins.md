@@ -1,6 +1,6 @@
 # LADR-02: Across plugins, WET copies with parity tests; `ai-understanding` stays standalone
 
-**Status:** Draft
+**Status:** Accepted
 
 <!-- Status lifecycle: Draft → Prototype → Accepted. Also: "Superseded by LADR-MM", "Deprecated". -->
 

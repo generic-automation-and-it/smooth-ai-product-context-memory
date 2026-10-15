@@ -120,7 +120,7 @@ That's the whole setup for reading. The clients find the credential automaticall
 `source`, no per-repository secret. Verify with:
 
 ```bash
-python3 .agents/skills/mimisbrunnr-odin-context-memory/scripts/context_memory_client.py probe
+python3 .agents/skills/_mimisbrunnr-shared/scripts/context_memory_client.py probe
 ```
 
 **Writing costs one deliberate step**, because a write credential is deliberately never ambient:

@@ -541,7 +541,7 @@ class StoreImportTests(unittest.TestCase):
         # Parsed, not imported: importing the client seeds the operator's machine credentials into
         # this process at import, which would make the suite read real configuration.
         import ast
-        tree = ast.parse((uc._CAPTURE_SCRIPTS / "context_memory_client.py").read_text(encoding="utf-8"))
+        tree = ast.parse((uc._SHARED_SCRIPTS / "context_memory_client.py").read_text(encoding="utf-8"))
         names = None
         for node in tree.body:
             if isinstance(node, ast.Assign) and any(
@@ -4416,15 +4416,22 @@ class SessionMarkerTests(unittest.TestCase):
         versions = {i.get("version") for i in exported}
         self.assertIn(4, versions)
 
-    def test_three_copies_stay_identical(self):
-        roots = [Path(__file__).resolve().parents[1] / "scripts" / "session_marker.py"]
-        roots.append(Path(__file__).resolve().parents[2]
-                     / "mimisbrunnr-odin-context-memory" / "scripts" / "session_marker.py")
-        roots.append(Path(__file__).resolve().parents[2]
-                     / "ai-understanding" / "scripts" / "session_marker.py")
-        bodies = [r.read_text(encoding="utf-8") for r in roots]
-        self.assertEqual(bodies[0], bodies[1])
-        self.assertEqual(bodies[0], bodies[2])
+    def test_the_shared_marker_is_the_only_copy_inside_the_plugin(self):
+        """HLD-010 LADR-01/LADR-02: inside the plugin the session marker has exactly one home, the
+        shared script folder, and no skill keeps a copy beside itself. Across the plugin boundary
+        `ai-understanding` keeps its own byte-identical copy (LADR-02), so a drift on either side
+        still fails here with the side that changed named."""
+        skills = Path(__file__).resolve().parents[2]
+        shared = skills / "_mimisbrunnr-shared" / "scripts" / "session_marker.py"
+        self.assertTrue(shared.is_file(), f"the shared session marker is missing at {shared}")
+        nested = [p for p in (skills / "mimisbrunnr-odin-context-memory" / "scripts",
+                              skills / "mimisbrunnr-kvasir-understanding" / "scripts")
+                  if (p / "session_marker.py").is_file()]
+        self.assertEqual(nested, [], f"a nested session_marker.py copy exists at {nested}")
+        twin = skills / "ai-understanding" / "scripts" / "session_marker.py"
+        self.assertEqual(shared.read_text(encoding="utf-8"), twin.read_text(encoding="utf-8"),
+                         "the ai-understanding copy has drifted from the shared marker; re-copy it "
+                         "from the shared folder (LADR-02: the copy direction is shared -> plugin)")
 
 
 if __name__ == "__main__":

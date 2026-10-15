@@ -1,6 +1,6 @@
 # LADR-03: Odin stays the documented owner; one read client, one write client, refusal intact
 
-**Status:** Draft
+**Status:** Accepted
 
 <!-- Status lifecycle: Draft → Prototype → Accepted. Also: "Superseded by LADR-MM", "Deprecated". -->
 
