@@ -520,6 +520,35 @@ public class TarSnapshotArchiveTests
     }
 
     [Fact]
+    public async Task ProductNameGraph_RoundTrip()
+    {
+        string path = TempArchive();
+        string address = ContentAddress.Compute(Body);
+        var capture = new SnapshotCapture(
+            [], [], [], [], [], [], [], [], [], [],
+            [new SnapshotProductVertex("gmail", "Google mail", "active")],
+            [new SnapshotNamedVertex("alpha")],
+            [new SnapshotNamedVertex("acme/widgets")],
+            [new SnapshotProductInitiativeEdge("gmail", "alpha", "bundles", "api", SystemClock.Instance.GetCurrentInstant())],
+            [new SnapshotProductRepoEdge("gmail", "acme/widgets", "repo", "api", SystemClock.Instance.GetCurrentInstant())]);
+        var walk = new SnapshotWalkResult([new SnapshotBlob(address, SnapshotBlobState.Ok)], 0, 0);
+
+        await _archive.WriteAsync(path, capture, walk, (_, _) => Task.FromResult((Body, ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
+
+        SnapshotCapture round = (await _archive.ReadAsync(path, TestContext.Current.CancellationToken)).Capture;
+        round.ProductVertices.Count.ShouldBe(1);
+        round.ProductVertices[0].Name.ShouldBe("gmail");
+        round.ProductVertices[0].Description.ShouldBe("Google mail");
+        round.ProductVertices[0].Status.ShouldBe("active");
+        round.InitiativeVertices.Single().Name.ShouldBe("alpha");
+        round.RepoVertices.Single().Name.ShouldBe("acme/widgets");
+        round.ProductInitiativeEdges.Single().ProductName.ShouldBe("gmail");
+        round.ProductInitiativeEdges.Single().InitiativeName.ShouldBe("alpha");
+        round.ProductRepoEdges.Single().ProductName.ShouldBe("gmail");
+        round.ProductRepoEdges.Single().RepoName.ShouldBe("acme/widgets");
+    }
+
+    [Fact]
     public async Task Verify_Reports_ANullManifestEntry_As_NotCleanWithoutThrowing()
     {
         // A JSON null element in the manifest's entry list deserialises to a null SnapshotArchiveEntry,
