@@ -16,6 +16,8 @@ No checkout, no .NET SDK — just `bash`, `docker` and `curl`:
 curl -fsSL https://raw.githubusercontent.com/generic-automation-and-it/smooth-ai-product-context-memory/main/scripts/run.sh | bash -s -- up
 ```
 
+Agent skills: `curl -fsSL https://raw.githubusercontent.com/generic-automation-and-it/smooth-ai-product-context-memory/main/scripts/install-skills.sh | bash` — details: [Use it in another repository](#use-it-in-another-repository).
+
 ## Run it
 
 **No .NET toolchain required.** Two commands, on macOS and Linux:
