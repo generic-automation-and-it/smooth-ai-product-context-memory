@@ -1106,7 +1106,7 @@ def cmd_unlink_product_initiative(args):
 
 
 def cmd_product_names(args):
-    resp = _request("GET", "/api/context/product-names")
+    resp = require_lists(_request("GET", "/api/context/product-names"), "product-names", "items")
     print(json.dumps(resp, indent=2))
     return resp
 
@@ -1117,7 +1117,8 @@ def cmd_product_links(args):
         query["productName"] = args.product_name
     if getattr(args, "initiative_name", None):
         query["initiativeName"] = args.initiative_name
-    resp = _request("GET", "/api/context/product-names/links", query=query or None)
+    resp = require_lists(
+        _request("GET", "/api/context/product-names/links", query=query or None), "product-links", "items")
     print(json.dumps(resp, indent=2))
     return resp
 

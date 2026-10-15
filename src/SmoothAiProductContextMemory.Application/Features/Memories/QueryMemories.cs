@@ -233,7 +233,11 @@ public static class QueryMemories
 
             return [.. items.Select(item =>
             {
-                MemoryGroup group = groupsByUuid[item.GroupUuid];
+                if (!groupsByUuid.TryGetValue(item.GroupUuid, out MemoryGroup? group))
+                {
+                    return item with { ProductMatch = null, SharedInitiative = false };
+                }
+
                 string? initiativeName = initiativeNames.GetValueOrDefault(group.InitiativeId);
                 string? productMatch = initiativeName is not null && initiativeSet.Contains(initiativeName)
                     ? "initiative"
