@@ -138,11 +138,16 @@ def gate_status(env=None, timeout=None):
 def unit_record(unit):
     """A unit as the gate record. `record_state` reads subject/statement/summary/boundaries/kind/
     scope; a unit's description -> subject, answer -> statement, why -> summary, scope -> scope.
-    The rest of the unit (question, confidence, slug) is not judged and is not sent."""
+    The rest of the unit (question, confidence, slug) is not judged and is not sent.
+
+    The summary is emitted under `contentSummary`, which is the key `record_state` actually reads:
+    it looks for `contentSummary` and `why`, never `summary`, so a record carrying `summary` dropped
+    the unit's rationale in transit — and every rubric role judges rationale.
+    """
     return {
         "subject": unit.get("description") or unit.get("name") or "",
         "statement": unit.get("answer") or unit.get("statement") or "",
-        "summary": unit.get("why") or unit.get("summary") or "",
+        "contentSummary": unit.get("why") or unit.get("summary") or "",
         "boundaries": unit.get("boundaries") or "",
         "kind": "",
         "scope": unit.get("scope") or "",
@@ -164,9 +169,7 @@ def score(records, ledger=None, env=None, timeout=SCORE_TIMEOUT):
     """
     if ledger is None:
         ledger = DEFAULT_LEDGER
-    args = ["score"]
-    if ledger is not None:
-        args += ["--state-file", str(ledger)]
+    args = ["score", "--state-file", str(ledger)]
     try:
         proc = _run_gate(args, stdin=json.dumps(records), env=env, timeout=timeout)
     except subprocess.TimeoutExpired:

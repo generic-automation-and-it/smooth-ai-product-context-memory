@@ -275,8 +275,16 @@ def record_import(marker_type: str, session: str, harness: str, verb: str,
             + dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ"))
         try:
             os.replace(mpath, aside)
-        except OSError:
-            pass
+        except OSError as error:
+            # Fail closed rather than warn and proceed. The unreadable marker still names real
+            # exclusions, and the write below replaces the file, so continuing would destroy them
+            # while claiming they had been preserved for inspection. A move that cannot happen is a
+            # refusal, and the refusal must not assert a move that did not occur.
+            raise OSError(
+                f"session marker {mpath} is unreadable and could not be moved aside to {aside} "
+                f"({error}); nothing was recorded and the file is untouched — inspect or move it, "
+                f"then re-run"
+            ) from error
         print(f"WARNING: session marker {mpath} unreadable; moved aside to {aside} "
               f"and starting fresh (earlier exclusions no longer apply).",
               file=sys.stderr)

@@ -422,10 +422,18 @@ def append(entry):
 
 
 def _find(id_value):
+    """The live hold for `id_value`, or None.
+
+    The LAST entry record carrying the id, not the first: a candidate held again after it was
+    resolved appends a second record under the same id, and `_entries_and_state` closes the latest.
+    Returning the older record would let a reviewer act on a stale conflict type and menu while the
+    resolution they write lands on the newer hold.
+    """
+    found = None
     for record in _read_entries():
         if record.get("kind") == "entry" and record.get("id") == id_value:
-            return record
-    return None
+            found = record
+    return found
 
 
 def _resolutions(id_value):
@@ -531,7 +539,8 @@ def cmd_resolve(args):
         print(f"resolved {entry['id']} as {args.choice}: route through the capture path's export "
               "with its dry-run veto (see SKILL.md) — never a direct queue write.")
     else:
-        extra = " (the entry stays in the queue)" if args.choice == "park" else ""
+        extra = " (the record stays on disk as history; a hold you resolve no longer counts " \
+                "toward the cap)" if args.choice == "park" else ""
         print(f"resolved {entry['id']} as {args.choice}; nothing was written to the store{extra}.")
     return 0
 

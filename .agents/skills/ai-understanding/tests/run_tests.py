@@ -18,6 +18,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 import zipfile
 from contextlib import redirect_stdout, redirect_stderr
 from pathlib import Path
@@ -25,6 +26,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 import understanding_index as ui  # noqa: E402
+import gate_decisions as gd  # noqa: E402
 
 # Marker isolation (HLD-007 LADR-11): session_marker.py keys markers to the harness
 # session id, which is present in a real agent shell. Marker CLI cases below set
@@ -459,6 +461,35 @@ class DecisionsColumnTests(unittest.TestCase):
                     os.environ["CONTEXT_MEMORY_CREDENTIAL_FILE"] = saved_cf
             self.assertEqual(rc, 0, err)
             self.assertIn("decisions:", out)
+
+    def test_a_non_utf8_unit_is_reported_not_raised(self):
+        """A validator that raises on malformed input reports nothing about the file it was handed,
+        which is the one job it has. A latin-1 byte in a hand-edited unit aborted the whole run with a
+        traceback, so `INDEX.md` was never written and stderr named no unit."""
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Path(tmp) / "understandings"
+            folder = store / "proj-20260930-1700"
+            folder.mkdir(parents=True)
+            unit = folder / "broken.understanding.md"
+            unit.write_bytes("---\nslug: broken\ndescription: caf\xe9 crash\n---\n\nbody\n"
+                             .encode("latin-1"))
+            write_unit(store, "proj-20260930-1700", "alpha")
+            rc, out, err = run(["understanding_index.py", str(store)])
+            self.assertNotIn("Traceback", err)
+            self.assertIn("not valid UTF-8", out + err)
+            self.assertIn("broken.understanding.md", out + err)
+            self.assertTrue((store / "INDEX.md").is_file(), "the run continues and writes the index")
+
+    def test_a_unit_without_a_slug_is_reported_not_a_keyerror(self):
+        """`read_unit` tolerates an absent slug as a validation problem, so the unit still reaches
+        the advisory column — which indexed `unit['slug']` directly and raised `KeyError`."""
+        unit = {"description": "A unit whose frontmatter has no slug", "scope": "portable"}
+        scored = {"outcome": "ok", "records": [{"passed": True, "scores": {"engineer": 1.0},
+                                                "discrimination": {"margin": 0.2}}]}
+        with unittest.mock.patch.object(gd, "gate_status", return_value=(True, "", "configured")), \
+                unittest.mock.patch.object(gd, "score", return_value=scored):
+            lines = ui.decisions_column([unit])
+        self.assertEqual(lines, ["  A unit whose frontmatter has no slug: best engineer, margin 0.2"])
 class AgentsContextResolutionTests(unittest.TestCase):
     """`agents_context` is a repo-relative path, so the verdict must not depend on the CWD.
 
@@ -1148,6 +1179,34 @@ class SessionMarkerCLITests(unittest.TestCase):
         self.assertIn("Marker: set", out)
         marker = sm.load_marker("ai-understanding", "ses-ai-slug", Path(self.tmp.name))
         self.assertEqual(sm.exclusion_slugs(marker), {"slug-1"})
+
+    def test_a_marker_that_cannot_be_moved_aside_is_refused_not_overwritten(self):
+        """The unreadable marker still names real exclusions. When the move-aside fails, the old code
+        swallowed the failure, printed a message claiming the file HAD been moved aside, and then
+        replaced it — destroying the exclusions while reporting them preserved."""
+        import session_marker as sm
+        root = Path(self.tmp.name)
+        path = sm.marker_path("ai-understanding", "ses-ai-stuck", root)
+        path.write_text("{nope", encoding="utf-8")
+        real_replace = os.replace
+
+        def refuse_move(src, dst, *a, **kw):
+            if str(src) == str(path):
+                raise PermissionError("read-only file system")
+            return real_replace(src, dst, *a, **kw)
+
+        os.replace = refuse_move
+        try:
+            with self.assertRaises(OSError) as raised:
+                sm.record_import("ai-understanding", "ses-ai-stuck", "claude-code", "import",
+                                 False, [{"slug": "slug-1", "subject": "Q?"}], None, None, root)
+        finally:
+            os.replace = real_replace
+        self.assertIn("could not be moved aside", str(raised.exception))
+        self.assertNotIn("unreadable; moved aside to", str(raised.exception),
+                         "the message must not claim a move that did not happen")
+        self.assertEqual(path.read_text(encoding="utf-8"), "{nope",
+                         "the unreadable marker is left untouched")
 
     def test_an_unreadable_marker_refuses_the_default_boundary(self):
         """A corrupt marker is not an absent one: `boundary` refuses (exit 2); `--all` still answers."""

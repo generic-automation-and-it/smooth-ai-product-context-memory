@@ -100,6 +100,19 @@ def _number(name, fallback, cast):
                          f"{name} must be a number; refusing to run with a different value") from None
 
 
+def _at_least_one(env_name, default, kind, label):
+    """A numeric setting bounded at 1, refused rather than defaulted.
+
+    The timeout belongs here too: an unbounded socket budget is not a transport fact to discover
+    mid-run, it is a misconfiguration that would otherwise be reported as `unreachable` — the same
+    misreport this module refuses to manufacture for every other setting.
+    """
+    value = _number(env_name, default, kind)
+    if value < 1:
+        raise DedupError("bad-dedup-config", f"{env_name} must be at least 1 ({label})")
+    return value
+
+
 def config():
     """Every dedup setting resolved from the environment, and the decision endpoint settings reused
     from `decisions_gate`'s env names and defaults. A malformed numeric setting is refused, never
@@ -113,17 +126,11 @@ def config():
     if not 0.0 <= min_probability <= 1.0:
         raise DedupError("bad-dedup-config",
                          f"{ENV_DEDUP_MIN_PROBABILITY} must be between 0 and 1")
-    max_pairs_per_candidate = _number(ENV_DEDUP_MAX_PAIRS_PER_CANDIDATE,
-                                      DEFAULT_MAX_PAIRS_PER_CANDIDATE, int)
-    if max_pairs_per_candidate < 1:
-        raise DedupError("bad-dedup-config",
-                         f"{ENV_DEDUP_MAX_PAIRS_PER_CANDIDATE} must be at least 1")
-    max_pairs_per_batch = _number(ENV_DEDUP_MAX_PAIRS_PER_BATCH, DEFAULT_MAX_PAIRS_PER_BATCH, int)
-    if max_pairs_per_batch < 1:
-        raise DedupError("bad-dedup-config", f"{ENV_DEDUP_MAX_PAIRS_PER_BATCH} must be at least 1")
-    max_results = _number(ENV_DEDUP_MAX_RESULTS, DEFAULT_MAX_RESULTS, int)
-    if max_results < 1:
-        raise DedupError("bad-dedup-config", f"{ENV_DEDUP_MAX_RESULTS} must be at least 1")
+    max_pairs_per_candidate = _at_least_one(ENV_DEDUP_MAX_PAIRS_PER_CANDIDATE,
+                                            DEFAULT_MAX_PAIRS_PER_CANDIDATE, int, "per candidate")
+    max_pairs_per_batch = _at_least_one(ENV_DEDUP_MAX_PAIRS_PER_BATCH,
+                                        DEFAULT_MAX_PAIRS_PER_BATCH, int, "per batch")
+    max_results = _at_least_one(ENV_DEDUP_MAX_RESULTS, DEFAULT_MAX_RESULTS, int, "lexical results")
 
     return {
         "enabled": dedup_enabled(),
@@ -135,7 +142,7 @@ def config():
         "path": os.environ.get(gate.ENV_PATH, gate.DEFAULT_PATH).strip() or gate.DEFAULT_PATH,
         "model": os.environ.get(gate.ENV_MODEL, gate.DEFAULT_MODEL).strip() or gate.DEFAULT_MODEL,
         "api_key": os.environ.get(gate.ENV_API_KEY, "").strip(),
-        "timeout": _number(gate.ENV_TIMEOUT, gate.DEFAULT_TIMEOUT, int),
+        "timeout": _at_least_one(gate.ENV_TIMEOUT, gate.DEFAULT_TIMEOUT, int, "timeout"),
     }
 
 
@@ -367,9 +374,7 @@ def stage(candidates, group_uuid=None, repository=None, query_fn=None, model_fn=
         # Stage 3, only on the doubtful pairs, only up to the per-candidate budget.
         scored = []
         for existing in results[:settings["max_pairs_per_candidate"]]:
-            if remaining <= 0:
-                break
-            if not settings["enabled"]:
+            if remaining <= 0 or not settings["enabled"]:
                 break
             remaining -= 1
             budget_used += 1
@@ -402,8 +407,6 @@ def stage(candidates, group_uuid=None, repository=None, query_fn=None, model_fn=
             # the failure and show the lexical candidates, exactly as a fully-disabled model.
             proposals.append({"index": index, "outcome": "possible-duplicate",
                               "detail": f"model {failed[0]['outcome']}", "matches": results})
-        elif not scored:
-            proposals.append({"index": index, "outcome": "unexamined (budget)", "matches": results})
         elif not_attempted:
             # A per-candidate or batch cap left matches the model never saw; "none" would claim them.
             proposals.append({"index": index, "outcome": "possible-duplicate",

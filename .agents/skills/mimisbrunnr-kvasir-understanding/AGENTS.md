@@ -53,6 +53,7 @@ These IDs are HLD-007's; `SKILL.md`, the README, the scripts and the tests cite 
 
 | Date | Change | Ref |
 | :---- | :---- | :---- |
+| 2026-10-15 | Ralph loop: the queue record's session comes from the marker's resolver, not a third one; the write-only `_supersession` flag is gone | — |
 | 2026-09-19 | `--all` with `--asof` counts both omission reasons separately | — |
 | 2026-09-19 | Store-export import is understanding-only | — |
 | 2026-09-19 | Hard-wrapped prose is not split per physical line | — |

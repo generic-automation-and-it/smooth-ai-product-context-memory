@@ -15,6 +15,7 @@ Read [`SKILL.md`](./SKILL.md) first — preview, bundle, compose, focus, finding
 
 | Date | Change | Ref |
 | :---- | :---- | :---- |
+| 2026-10-15 | Ralph loop: `version: true` is refused as the near-miss path already refuses it; a non-object bundle answer is a refusal; five dead symbols removed | — |
 | 2026-09-23 | Composer, invocation contract and L0 harness implemented | — |
 | 2026-09-24 | NFR-05 attribution test can no longer pass vacuously | #99 |
 | 2026-09-26 | README rewritten for humans | — |

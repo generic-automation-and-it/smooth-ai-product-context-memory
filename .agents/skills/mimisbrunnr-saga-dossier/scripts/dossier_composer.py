@@ -39,7 +39,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Optional
 from urllib.parse import urlparse
 import subprocess
 
@@ -144,8 +144,6 @@ LIFECYCLE_PROPOSED = "proposed"
 LIFECYCLE_SUPERSEDED = "superseded"
 LIFECYCLE_NO_LONGER_TRUE = "no-longer-true"
 LIFECYCLE_UNKNOWN = "unknown"
-LIFECYCLE_VALUES = (LIFECYCLE_CURRENT, LIFECYCLE_PROPOSED, LIFECYCLE_SUPERSEDED,
-                    LIFECYCLE_NO_LONGER_TRUE, LIFECYCLE_UNKNOWN)
 
 # The relations that carry ordering meaning (LADR-07). ``relates_to`` and unknown relations connect
 # without ordering — including them manufactures cycles.
@@ -208,7 +206,7 @@ def validate_bundle(bundle):
         _require(isinstance(item, dict) and item.get("uuid"), "item: requires a uuid")
         for f in ("statement", "kind", "status", "version", "createdOn", "validFrom"):
             _require(f in item, f"item {item.get('uuid')}: missing '{f}'")
-        _require(isinstance(item.get("version"), int) and item["version"] >= 1,
+        _require(type(item.get("version")) is int and item["version"] >= 1,
                  f"item {item['uuid']}: version requires a positive integer")
         _require(isinstance(item.get("sources"), list), f"item {item['uuid']}: sources requires a list")
     for edge in bundle["edges"]:
@@ -554,10 +552,6 @@ def _parse_time(value):
 
 def _applicability(item):
     return (item.get("scopeDimension") or "", item.get("scopeIdentifier") or "")
-
-
-def _lifecycle_sig(item):
-    return item.get("status")
 
 
 def consolidate(items, equivalences, edges, asof=None):
@@ -921,9 +915,8 @@ def _focus_relevance(item, focus):
     if focus is None:
         return True, "full"
     affinity = _focus_affinity(focus)
-    if focus == "review":
-        # review surfaces everything (findings-first); no outside-focus for review.
-        return True, "full"
+    # `review` reaches here through the empty affinity and returns "full", which is the comment it
+    # used to carry: review surfaces everything (findings-first); no outside-focus for review.
     if not affinity:
         return True, "full"
     return (item.get("kind") or "") in affinity, "summary"
@@ -1023,7 +1016,7 @@ def compose(bundle, focus=UNFOCUSED, judgements=None, asof=None, store_name=STOR
 
     # 2. Consolidation (LADR-05).
     equivalence_proposals = judgements.get("equivalences", [])
-    present_claims, groups, uncertain = consolidate(items, equivalence_proposals, edges, asof)
+    present_claims, _groups, uncertain = consolidate(items, equivalence_proposals, edges, asof)
 
     # 3. Build the omitted list: carry the bundle's own omissions forward (they already have bounded
     #    reasons) and add the lens's outside-focus omissions.
@@ -1590,6 +1583,14 @@ def fetch_bundle_from_api(base_url, body):
     non-success answers with the server's problem title/detail, never the raw body.
     """
     payload = _post_read_only(base_url, "/api/context/dossier/bundle", body, "bundle")
+    # A non-object body (a JSON list, or a bare string, from a proxy or a wrong endpoint) has no
+    # `.get`. Letting that escape as AttributeError would hand the operator a traceback instead of the
+    # refusal every other failure on this path produces.
+    if not isinstance(payload, dict):
+        raise ValueError(
+            f"bundle answer is a {type(payload).__name__}, not an object; this endpoint's answer "
+            f"cannot be read as a bundle"
+        )
     return payload.get("bundle", payload)
 
 

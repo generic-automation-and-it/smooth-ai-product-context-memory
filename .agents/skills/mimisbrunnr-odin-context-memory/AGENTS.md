@@ -71,6 +71,7 @@ Read [`SKILL.md`](./SKILL.md) first — the five-stage write pipeline, modes, sw
 
 | Date | Change | Ref |
 | :---- | :---- | :---- |
+| 2026-10-15 | Ralph loop: four fixes in the shared capture client and queue, verified by the odin and queue suites | — |
 | 2026-09-10 | Five-stage pipeline with preflight first | — |
 | 2026-09-10 | Contract-coherence pass | — |
 | 2026-09-12 | Requirements recorded | #17 |
