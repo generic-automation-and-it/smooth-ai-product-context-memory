@@ -109,7 +109,18 @@ internal sealed partial record AppHostConfiguration(
             EngineBindAddress = bindAddress,
         };
 
-        if (isRelease && new[] { result.PostgresPort, result.BlobPort, result.BlobConsolePort, result.SeqPort, result.HostPort, result.ViewerPort }.Distinct().Count() != 6)
+        if (isRelease && result.ViewerEnabled && !ContainerImageReference.IsDigestPinned(result.ViewerImage))
+        {
+            throw new InvalidOperationException("Release mode requires ViewerConfiguration:Image to use an immutable sha256 digest when the viewer is enabled.");
+        }
+
+        var ports = new System.Collections.Generic.List<int> { result.PostgresPort, result.BlobPort, result.BlobConsolePort, result.SeqPort, result.HostPort };
+        if (result.ViewerEnabled)
+        {
+            ports.Add(result.ViewerPort);
+        }
+
+        if (isRelease && ports.Distinct().Count() != ports.Count)
         {
             throw new InvalidOperationException("Release workload ports must be distinct.");
         }

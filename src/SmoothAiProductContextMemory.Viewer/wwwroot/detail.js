@@ -17,6 +17,7 @@ const els = {
 };
 
 let currentMemory = null;
+let blobSeq = 0;
 
 function fmtValidity(memory) {
   const from = memory.validFrom ? fmtInstant(memory.validFrom) : '';
@@ -107,8 +108,9 @@ export function initDetail() {
 }
 
 async function loadVersion(memory, version) {
+  const seq = ++blobSeq;
   const result = await getMemoryBlob(memory.uuid, version, memory.scopeDimension);
-  if (currentMemory?.uuid !== memory.uuid) return;
+  if (currentMemory?.uuid !== memory.uuid || seq !== blobSeq) return;
   let html;
   if (result.timedOut) html = bodyError('The body request timed out.');
   else if (result.unreachable) html = bodyError('The Console cannot reach the API.');
