@@ -1,6 +1,6 @@
 # AGENTS.md - Shared Skill Code Distribution
 
-AI Context: HLD for Shared Skill Code Distribution. Updated: 2026-10-14
+AI Context: HLD for Shared Skill Code Distribution. Updated: 2026-10-15
 
 > AI-coder context for this HLD. Architecture diagrams live in [`./diagrams/`](./diagrams/),
 > decisions in [`./ladrs/`](./ladrs/), quality spec in [`./nfrs/`](./nfrs/). This file is
@@ -40,10 +40,12 @@ Measurable NFRs live in [`./nfrs/`](./nfrs/). Constraints that change how code i
 
 - Every packaging manifest names the shared folder; a route that drops it breaks all consumers at once.
 - Ledger keys stay digests and subjects stay out of files through the move — the privacy rule moves with the code, not just the code.
+- Installer-owned skills are vendored verbatim: outside table rows, no link leaves `.agents/skills/`, no rule is cited by a repo-relative path, and a CI claim names upstream's gate (NFR-05, PR-gate check).
 
 ## Changelog
 
 | Date | Change | Ref |
 | :---- | :---- | :---- |
+| 2026-10-15 | **NFR-05 added: vendored copies are self-contained.** Consumer review 5535929651 found 15 dead references in a vendored copy — HLD/BRD links into `docs/`, rule paths under this repository's rules folders, skills-root `README.md` links, and "the PR gate runs this" claims. All are now absolute upstream URLs or upstream-scoped wording, and a PR-gate step fails on a reintroduced out-of-tree link or rule path. | consumer review 5535929651 |
 | 2026-10-14 | **B2 landed; HLD promoted to Accepted — implemented.** `.agents/skills/_mimisbrunnr-shared/scripts/` now holds nine scripts plus `conflict_menus.json` moved out of odin's folder, the Heimdallr reporter moved out of its own skill's, and kvasir's WET `decisions_rubric.json` / `session_marker.py` collapsed into the shared copy. The three peer reaches are gone (heimdallr's redactor, kvasir's client, saga-dossier's composer), `ai-understanding`'s parity harness compares against the shared copy, `package.json#files` carries the folder, and the PR gate gained a peer-reach grep. NFR-04 was re-verified on all three routes with the real move in a clean-profile marketplace install, an `npm pack`/install smoke, and the symlinked mirrors. | issue 222 |
 | 2026-10-14 | HLD authored (B1 decision record: rule, B0 evidence, inventory, invariants) | issue 222 |
