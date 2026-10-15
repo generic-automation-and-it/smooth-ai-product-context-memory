@@ -1,20 +1,20 @@
-# context-load-agents-context — AGENTS.md
+# AGENTS.md - context-load-agents-context
 
 ## TL;DR
 
-Hook + skill wrapper around `scripts/load-agents-context.sh`; full design rationale (six LADRs, sequence diagram, transfer checklist) lives in `references/design.md` — read it before modifying the script.
+Read [`SKILL.md`](./SKILL.md) first — invocation, hook registration and runtime guarantees live there; LADRs and internals in [`references/design.md`](./references/design.md).
 
 ## Non-Negotiables
 
-- **The script must always exit 0.** It runs as a `PostToolUse` hook; a non-zero exit blocks the user's Read/Edit/Write. Swallow all file-operation failures.
-- **Never emit files from auto-loaded rule dirs** (`.agents/rules/`, `.claude/rules/`, `.cursor/rules/`, `.github/instructions/`) — they're already in context; re-emitting doubles their token cost.
-
-## Key Behaviors
-
-- Session dedup canonicalises physical paths, so the same AGENTS.md reached via `.claude/...` and `.agents/...` symlinks is emitted once — breaking canonicalisation silently doubles context injection.
+- **The rule-dir list appears twice in the script.** `is_auto_loaded_dir()` and the skill-on-path `case`
+  already differ (`.ai/rules/` only in the first). Adding or removing a rule dir updates both.
+- **The hook wrapper fails silently.** `.agents/hooks/load-agents-context.sh` exits 0 when the script is
+  not executable, so a lost exec bit or a moved script disables context loading with no error. Keep
+  `scripts/load-agents-context.sh` `+x` and the wrapper path in step with it.
 
 ## Changelog
 
 | Date | Change | Ref |
-|:-----|:-------|:----|
-| 2026-06-12 | Initial version. | |
+| :---- | :---- | :---- |
+| 2026-06-12 | Initial version | — |
+| 2026-10-15 | Cut to HLD shape: SKILL.md pointer + non-SKILL.md traps only | — |

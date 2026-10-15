@@ -1,16 +1,18 @@
-# git-sync — AGENTS.md
+# AGENTS.md - git-sync
 
 ## TL;DR
 
-`scripts/safe-sync.sh` does the deterministic fetch+merge and reports via sentinels; the agent only interprets them — resolution policy stays in SKILL.md, plumbing stays in the script.
+Read [`SKILL.md`](./SKILL.md) first — the `safe-sync.sh` sentinel contract, both modes and the resolution strategy live there.
 
 ## Non-Negotiables
 
-- **`MERGE_ERROR` is not a conflict.** Dirty tree, missing ref, or failing hook (exit 2) must never be "resolved" — report and stop. Only `MERGE_CONFLICTS` (exit 1) enters resolution, and only in `--fix` mode.
-- **Conflicts are intentionally left unmerged in the working tree** so either the user (default mode) or the agent (`--fix`) resolves from the same state. Don't add `--abort` cleanup to the script.
+- **Never add `git merge --abort` to `scripts/safe-sync.sh`.** Conflicts stay unmerged in the
+  working tree on purpose: Mode 2 (`--fix`) resolves from that state, and Mode 1 hands the same
+  state to the user. An abort on conflict silently disables `--fix`.
 
 ## Changelog
 
 | Date | Change | Ref |
-|:-----|:-------|:----|
-| 2026-06-12 | Initial version. | |
+| :---- | :---- | :---- |
+| 2026-06-12 | Initial version | — |
+| 2026-10-15 | Cut to HLD shape: SKILL.md pointer + non-SKILL.md traps only | — |
