@@ -94,7 +94,7 @@ EOF
 gitleaks dir . --no-banner
 ```
 
-The frontmatter check enforces the shared skill shape in [`../../README.md`](../../README.md#effort); an
+The frontmatter check enforces the shared skill shape in [upstream `.agents/skills/README.md`](https://github.com/generic-automation-and-it/smooth-ai-product-context-memory/blob/main/.agents/skills/README.md#effort); an
 external validator that rejects the top-level `effort` key does not govern this repository. Also check local
 Markdown links. Passing these checks does not satisfy the manual evaluation above.
 

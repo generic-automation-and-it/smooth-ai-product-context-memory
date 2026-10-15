@@ -16,8 +16,8 @@ sole writer of clean facts).
 ## Non-Negotiables
 
 - **A load writes nothing.** A load changes nothing in the store.
-- **Never write directly.** `export` funnels through the capture path (preflight → redact →
-  exact-subject dedup → atomicity → write), not a direct `set`. It performs **no semantic matching and
+- **Never write directly.** `export` funnels through the capture path (redact → atomicity →
+  preflight with exact-subject dedup → `set --dryrun` veto → write; the full order is in `SKILL.md`), not a direct `set`. It performs **no semantic matching and
   no link derivation** (see Key Behaviors); never describe it as the full judgement pipeline. `import` is read-only — read token only, and the read client
   refuses to run with a write token present.
 - **The store-facing verbs match `ai-understanding`.** `export` is session → store, `import` is store →
@@ -124,7 +124,8 @@ recalls the live store via `import` (read token only) and orchestrates the captu
   exit code is unchanged — and it asks the repo holding the folder (`git check-ignore`, never a text
   search, since the same folder may be tracked in another repo) rather than assuming.
 - **The dump redacts before writing and fails closed.** It shells out to
-  `../_mimisbrunnr-shared/scripts/redact.py` over stdin (never argv). Both the client and the redactor
+  `<skills-root>/_mimisbrunnr-shared/scripts/redact.py` over stdin (never argv) — resolved from the
+  skills root, never from this skill's `scripts/` folder. Both the client and the redactor
   ship in the same shared script folder, so the relative path holds under every skills root and in the
   npm package.
 - **The dump also redacts personal data with a fixed shape, after the secret pass.**
@@ -292,7 +293,7 @@ recalls the live store via `import` (read token only) and orchestrates the captu
   half — an unreachable, timed-out, 5xx or unrecognised gate must still write, because a down decision
   model must never block a capture.
   `DecisionsGateDryRunAndTimeoutTests` drives the real `export` with only the gate subprocess faked: a dry run calls `probe` and never `score`, a write still scores, a misconfigured probe (stdout or stderr) refuses the dry run with the capture client never reached, an unreachable probe is disclosed and not refused, a stub gate with no `redact.py` beside it refuses the dry run before `probe` is spawned (control: the same stub with its redactor probes normally), and a pretty-printed `redactor-unavailable` from a redactor timeout inside the gate refuses the write with nothing resolved or written.
-  Run: `python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/tests/run_tests.py`. The PR gate runs it.
+  Run: `python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/tests/run_tests.py`. Upstream's PR gate runs it; a repository that vendors this skill is not gated by it — run the command yourself.
 - **Cold-agent walk harness:** `tests/run_walk_tests.py` — proves an agent with no memory can **act** on
   what `load`/`--all`/the dossier slice produce (BRD-003 assumption 2), and measures what that costs in
   context. It renders three offline surfaces from committed fixtures, scores each question by **identity cited and key fact stated** (subject/uuid/slug plus the
@@ -303,7 +304,7 @@ recalls the live store via `import` (read token only) and orchestrates the captu
   every present question was answered, every absent one declined and nothing confabulated, and prints the
   report. Those assertions are the gate — checking only the question count passed for an agent that
   confabulates every answer — and a companion test scores a deliberately confabulating walk to show the
-  gate rejects it. The file never calls a model, so this repository's PR gate runs it: the scorer and degenerate
+  gate rejects it. The file never calls a model, so upstream's PR gate runs it: the scorer and degenerate
   assertions are checked on every PR, the recorded-walk gate only under the env var. A repository that
   vendors the skill gets that coverage only if its own CI adds the step, and the run instructions say
   so (issue 184). A key fact counts only when no clause holding it negates it outside the fact's own
@@ -324,6 +325,7 @@ recalls the live store via `import` (read token only) and orchestrates the captu
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-15 | **Consumer review 5535929651.** `load`/`import` mark only the records they rendered (`render_store_records` / `render_table_records`), not ones cut by kind, `--asof` or budget; a loaded Understanding file marks its slug; `_persist_proposed` splits held candidates into ≤ `MAX_CANDIDATES` batches with a preflight, veto and write each; a default `export` refuses an unreadable marker. Docs: capture order (redact first), the redactor resolved from the skills root, the current-session `export` input rule, Heimdallr's default-on autofill, the implemented session-id order, upstream HLD/BRD links, and CI claims scoped to upstream. Harness +4. | consumer review 5535929651 |
 | 2026-10-15 | **G1: `export` persists held candidates as `Status = proposed`.** An atomicity-held or decision-held candidate reaches the store as a proposed memory (full fields, own preflight + `set --dryrun` veto first, after the clean chunks), so the Console review queue can see it; the queue-file append stays as the local audit/CLI trail. Only pure creates persist — in-group preflight matches, same-subject held twins, dedup duplicates and cross-kind holders stay queued (a version bump would flip current to proposed). All-held writes now resolve the group and persist instead of refusing; dry runs preview `would propose: up to N`. Failures are NOTEs, never export refusals. One pre-existing case pinned the old all-held refusal and now pins the new contract; 5 new `ProposedPersistenceTests` (persist-after-veto, match stays queued, pair persists once, preflight-down keeps queued, dry run proposes nothing). Harness 254 -> 259. | HLD-009 G1 |
 | 2026-10-14 | **The shared-code move reached this client (HLD-010 B2 / LADR-01).** Every shared script this client reaches is now resolved through `parents[2] / "_mimisbrunnr-shared" / "scripts"` — the redactor, atomicity, both capture clients, the review queue, dedup, the decision gate and the Heimdallr reporter. The two WET copies it carried (`decisions_rubric.json`, `session_marker.py`) were **deleted**: the shared folder removes the "two script folders ship separately" reason they existed for, so a copy here is now drift rather than a necessity. `session_marker` imports from the shared folder via `sys.path`; `MAX_CANDIDATES` stays mirrored with its rationale rewritten, per LADR-01's stated disposition. The `three_copies_stay_identical` harness case became `the_shared_marker_is_the_only_copy_inside_the_plugin`, which also pins the `ai-understanding` WET copy against the shared original (LADR-02). | HLD-010 LADR-01, issue 222 |
 | 2026-10-14 | **Input-resolution fixtures stub `dump_root`.** `matching_session_input` runs before the stubbed newest-dump lookup against the real workspace root, so a live session-matching dump shadowed three fixtures (a live run's own dump matched); the session-sensitive cases now resolve inside an empty stubbed root, plus a regression test pinning it. Test-only; product behavior unchanged. | issue 224 |

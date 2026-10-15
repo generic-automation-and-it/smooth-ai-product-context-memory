@@ -65,7 +65,7 @@ records. Output is identity, count and time only.
 - **No header file exists to clean up.** The header travels through a pipe, so there is no temp file,
   no `EXIT` trap and no window in which a `SIGKILL` leaves the token on disk. Every refusal returns
   from the calling function before the pipe starts.
-- **`verify`/`reset` need different capabilities**: the two read queries take
+- **The read queries and `reset` need different capabilities**: `never-recalled` and `miss-rate` take
   `CONTEXT_MEMORY_READ_TOKEN`, reset takes `CONTEXT_MEMORY_WRITE_TOKEN` (which includes read). Values
   are runtime-only and are never written to a file, prompt or commit.
 - **A non-loopback base URL is refused, not retargeted.** The base is *parsed* and its resolved host
@@ -105,14 +105,17 @@ records. Output is identity, count and time only.
   echoed, `guard` sends nothing, and sourcing runs nothing; and `SKILL.md` runs the executable script
   (all four commands documented, no `source`, no inline copy), its queries carry no literal date,
   refuse to send with the placeholder and send the operator's window when filled. Runs on macOS bash 3.2 and GNU bash.
-- **CI runs this harness, and a red harness is a gate failure.** `.github/workflows/pr-gate.yml`'s
-  `python-harnesses` job ("Test recall-feedback skill") runs it on both the 3.9 and 3.12 legs.
-  Run it locally whenever the script changes — the gate runs the same command.
+- **Upstream's CI runs this harness, and there a red harness is a gate failure.** Upstream
+  `.github/workflows/pr-gate.yml`'s `python-harnesses` job ("Test recall-feedback skill") runs it on both
+  the 3.9 and 3.12 legs. A repository that vendors this skill is not gated by it: run
+  `python3 -B .agents/skills/mimisbrunnr-muninn-recall-feedback/tests/run_tests.py` whenever the script
+  changes.
 
 ## Changelog
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-15 | CI claim scoped to upstream's PR gate, with the manual command for a vendoring repository; the capability bullet names the real commands (`never-recalled`, `miss-rate`, `reset`), not `verify`. | consumer review 5535929651 |
 | 2026-10-07 | Token storage between shells is operator machine config (provisioned env file, managed `~/.zshrc` block); the skill writes no value anywhere. | review 5440964552 |
 | 2026-10-07 | `SKILL.md` lists `::1` among accepted loopback hosts. | issue 200 |
 | 2026-10-07 | Dates checked against the calendar, not just the shape (`2030-02-30` refused); older-curl fallback is `--fail`, never dropping it — without one a 403 exits 0. | review 5438563690 |

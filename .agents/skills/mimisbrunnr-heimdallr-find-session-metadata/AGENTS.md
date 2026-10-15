@@ -1,5 +1,9 @@
 # mimisbrunnr-heimdallr-find-session-metadata — AGENTS.md
 
+> **References.** Every HLD, LADR, NFR, BRD, issue and PR number in this file, and every PR-gate or CI
+> claim, belongs to the upstream repository, `generic-automation-and-it/smooth-ai-product-context-memory`,
+> not to a repository this skill is vendored into.
+
 ## TL;DR
 
 Offline console reporter for the three values an `export` binds by: tickets, repository,
@@ -50,12 +54,13 @@ Heimdallr watches and reports — he does not judge or bind. The operator binds.
 
 - `tests/run_tests.py` — stdlib unittest, fake `git` on `PATH` (real `git` for `RepoRootTests`). Covers repo parsing (https/ssh/scp shapes, unprovable), ticket extraction (branch `#123`, `provider:key`, bare `ABC-123`, dedupe with source, first-seen order within one subject), initiative default/flag, and the console-only contract (no file created, `--json` parses). `CredentialShapedTicketTests` iterates the shared `mimisbrunnr-odin-context-memory/tests/fixtures/credential_like.json`: every credential entry (redactor-gated or not) yields no ticket and its secret appears in neither the human nor the `--json` output, every control is still a ticket, a bare key inside a `password=` assignment is withheld, and a copy of the script with no redactor beside it reports no ticket and `ticketsUnavailable`. `RepositoryRedactionTests` puts every `credential_like.json` entry into an origin path (both outputs), keeps ordinary origins visible, and withholds the repository with no redactor beside the script. `BranchRedactionTests` puts every credential fixture in the branch name (as an assignment and as a ticket shape) and requires `branch: null`, `branchWithheld`, the secret in neither output, and the commit tickets intact; an ordinary branch is still shown, and with no redactor the branch is not shown. `CommitHistoryTests` requires `commitsUnavailable` when `git log` fails on a resolvable ref, and none for a readable history or an unborn branch. `RepoRootTests` builds two real checkouts and asserts `--repo-root` scans the named one, `root` names the checkout read, a non-checkout root exits 2, a real unborn branch is an empty history rather than a failure, and a real `fix/password=…` branch is withheld.
 - Run: `python3 -B .agents/skills/mimisbrunnr-heimdallr-find-session-metadata/tests/run_tests.py`.
-- **CI runs this harness** — `.github/workflows/pr-gate.yml` `python-harnesses` ("Test session-metadata skill") on the 3.9 and 3.12 legs. The harness itself must stay 3.9-importable: it carries `from __future__ import annotations` for its `str | None` hints.
+- **Upstream's CI runs this harness** — upstream `.github/workflows/pr-gate.yml` `python-harnesses` ("Test session-metadata skill") on the 3.9 and 3.12 legs. A repository that vendors this skill is not gated by it: run `python3 -B .agents/skills/mimisbrunnr-heimdallr-find-session-metadata/tests/run_tests.py` yourself. The harness itself must stay 3.9-importable: it carries `from __future__ import annotations` for its `str | None` hints.
 
 ## Changelog
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-15 | CI claim scoped to upstream's PR gate, with the manual command for a vendoring repository; README/SKILL HLD-010 links are absolute upstream URLs (the README's was also one level short). | consumer review 5535929651 |
 | 2026-10-14 | **The reporter moved to the shared script folder (HLD-010 B2).** `scripts/find_session_metadata.py` is now `.agents/skills/_mimisbrunnr-shared/scripts/find_session_metadata.py`, resolved by consumers as `parents[2] / "_mimisbrunnr-shared" / "scripts"` — never by naming Heimdallr's folder. The redactor it screens candidates with moves with it, so this skill's own `scripts/` folder is now empty by design. `SKILL.md`, `README.md`, both AGENTS.md non-negotiables and the harness were re-pointed; the fail-closed `ticketsUnavailable` contract is unchanged. | HLD-010 LADR-01, issue 222 |
 | 2026-10-07 | README checks `rootMatches`, not the withholdable `root`. | review 5440964552 |
 | 2026-10-07 | `SKILL.md` checks `rootMatches`, not `root` (display only, `null` when withheld). | issue 200 |

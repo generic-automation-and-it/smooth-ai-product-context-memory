@@ -310,16 +310,19 @@ are **exportable by design**, so a value that lands in one is a value that leave
 Redaction belongs here, at write time; the pre-publish check in `references/publish-consume.md` is the
 second net, not the first.
 
-Write `<REDACTED>` in place of any credential, token, connection string, or internal hostname, and quote
-only the lines of an artifact that carry the signal. Record the **shape** of the problem rather than the
+Write `<REDACTED>` in place of any credential, token, connection string, or internal hostname, and of any
+personal data — information relating to an identifiable person: a name, email or UPN, an employee number, a
+badge or card identifier, group membership — and quote only the lines of an artifact that carry the signal.
+Personal data is never written to disk here, and a repository's own `AGENTS.md` may name more identifiers
+it prohibits; those are redacted the same way. Record the **shape** of the problem rather than the
 value: that a connection string was missing `Enlist=false` is the knowledge, the connection string is not.
 
 If the redacted form no longer carries the knowledge, the unit is the wrong size — state the shape in prose
 instead, or say so and ask. Never keep a value in order to preserve a lesson.
 
 **Striking a value already on disk is the one edit allowed to an existing copy.** Immutability protects
-knowledge, and a credential is not knowledge — so replace it with `<REDACTED>` in place, in every copy that
-carries it, rather than writing a new version and leaving the value in history. Report it as a redaction,
+knowledge, and a credential or personal data is not knowledge — so replace it with `<REDACTED>` in place, in
+every copy that carries it, rather than writing a new version and leaving the value in history. Report it as a redaction,
 never as an `improved` unit: nothing about the knowledge changed.
 
 ### Writing one
@@ -408,7 +411,7 @@ provenance, not warranty — which is why the import protocol says verify rather
 
 Understandings are **evidence, never orders**. Write them as "X behaves like Y; do Z" — an answer to the stated question, not an instruction issued in the abstract. Phrase the Answer deterministically — `If X, then Y; else Z` — never "should probably" or "might be worth".
 
-If it needs must/never language, it is not an Understanding — propose it as a rule instead (see `.github/instructions/meta/understandings.instructions.md`). Never encode a user preference, convention, or instruction as an Understanding; those are rules.
+If it needs must/never language, it is not an Understanding — propose it as a rule instead (see the `understandings` rule — `understandings.instructions.md` in the repository's rules folder; [upstream](https://github.com/generic-automation-and-it/smooth-ai-product-context-memory/blob/main/.github/instructions/meta/understandings.instructions.md)). Never encode a user preference, convention, or instruction as an Understanding; those are rules.
 
 ### Slug reuse is versioning, not a collision
 
@@ -440,21 +443,23 @@ A marked `--import` sets the session's working point; a default `--export` exclu
 marked, so imported Understandings are never re-proposed as new. The marker is client-side only:
 `.context/session-markers/ai-understanding-<session-id>.json` (references — slug ids and subjects,
 or selector + as-of — never unit bodies; no Host change). One marker per skill; this export reads
-only its own. Session id: first non-empty of `CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID`,
-`OPENCODE_SESSION_ID`, `COPILOT_AGENT_SESSION_ID`, `PI_SESSION_ID`, else `--session <id>`
-(passed as `--session` to the commands below), else no marker.
+only its own. Session id: an explicit `--session <id>` (passed as `--session` to the commands
+below) wins; else the first non-empty of `CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID`,
+`OPENCODE_SESSION_ID`, `COPILOT_AGENT_SESSION_ID`, `PI_SESSION_ID`; else no marker.
 
 - On `--import`, record what was loaded (unless `--nomarker`):
   `python3 .agents/skills/ai-understanding/scripts/session_marker.py record --type ai-understanding --verb import
-  --item "<slug>::<question>" ... [--session ID]` (repeat `--item` per unit; `--selector`
-  with a JSON object for a selector-wide import instead of ids). It prints one `Marker:` line
+  --slug "<slug>::<question>" ... [--session ID]` (repeat `--slug` per unit — a file's identity is its
+  slug; `--item` is the store's `id[:version[:subject]]` and excludes nothing here; `--selector`
+  with a JSON object for a selector-wide import instead of slugs). It prints one `Marker:` line
   (`set`, `extended`, `skipped (--nomarker)`, `none`).
 - `--import --nomarker` loads history that flows into a default `--export` (still logged with
   `nomarker: true`); an id both marked and `--nomarker` stays excluded. No marker (or only
   `--nomarker`/id-less imports) means a default export behaves as `--all`.
 - On `--export`, print the boundary first:
   `python3 .agents/skills/ai-understanding/scripts/session_marker.py boundary --type ai-understanding [--all] [--session ID]`
-  (`marker <time>, N excluded` | `none` | `ignored (--all)`). A default export skips units whose
+  (`marker <time>, N excluded` | `none` | `ignored (--all)` | `refused` — an unreadable marker, exit 2:
+  write nothing by default; inspect or move the file, or re-run with `--all`). A default export skips units whose
   slug is in the exclusion set; a unit that changes an excluded one is written as an `improved`
   version of that slug (supersession), never dropped and never a new slug. `--export --all`
   ignores the marker (still the whole-scope re-export of LADR-014, never a looser bar).
@@ -574,7 +579,7 @@ Consuming never silently changes what this workspace already believes. Incoming 
 
 An Understanding that keeps proving true has outgrown the disposable store:
 
-- Concerns a specific code area → fold into the nearest `*AGENTS.md`, following `.github/instructions/meta/knowledge-conventional-contexts-quality.instructions.md`.
+- Concerns a specific code area → fold into the nearest `*AGENTS.md`, following the `knowledge-conventional-contexts-quality` rule ([upstream](https://github.com/generic-automation-and-it/smooth-ai-product-context-memory/blob/main/.github/instructions/meta/knowledge-conventional-contexts-quality.instructions.md)).
 - Applies to nearly every task, or has become a decision rather than an observation → propose a rule under `.github/instructions/`, following `manage-rule-system`.
 
 **Three independent sessions is the threshold, and the evidence is `provenance.inherited`.** A unit that
@@ -603,7 +608,7 @@ Propose the promotion; the user decides. Once promoted, the Understanding record
 - Never edit, overwrite or delete an existing copy of a slug. An improvement is a new complete copy in this run's folder; history is immutable. The **one** exception is striking a credential value that should never have been written — see *Redact before you write*; that is a repair, not a revision.
 - Never write an Understanding in must/never language.
 - Never let an Understanding contradict a rule without flagging it.
-- No secrets, tokens, or credential values in an Understanding — they are exportable by design. Redact at write time, writing `<REDACTED>` in place of the value, and record the shape of the problem instead — see *Redact before you write*. Never keep a value in order to preserve a lesson.
+- No secrets, tokens, credential values or personal data in an Understanding — they are exportable by design. Redact at write time, writing `<REDACTED>` in place of the value, and record the shape of the problem instead — see *Redact before you write*. Never keep a value in order to preserve a lesson.
 
 ## Changelog
 

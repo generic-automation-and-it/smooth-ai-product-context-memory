@@ -11,7 +11,7 @@ python3 -B .agents/skills/_mimisbrunnr-shared/scripts/find_session_metadata.py [
 ```
 
 The reporter is shared by more than one `mimisbrunnr-*` skill, so it lives in the plugin's shared
-script folder rather than in this skill's own ([HLD-010](../../docs/hlds/010-skills-distribution/),
+script folder rather than in this skill's own ([HLD-010](https://github.com/generic-automation-and-it/smooth-ai-product-context-memory/tree/main/docs/hlds/010-skills-distribution/),
 LADR-01). This folder is where Heimdallr's own contract (`SKILL.md`, `AGENTS.md`) lives.
 
 | Field | Source |
