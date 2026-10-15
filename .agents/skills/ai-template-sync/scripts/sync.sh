@@ -131,7 +131,6 @@ if has_tool claude; then
   echo "==> Section B: Claude Code symlinks"
   ln -sf .agents .claude
   ln -sf .agents .cursor
-  ln -sf AGENTS.md CLAUDE.md
   ln -sf AGENTS.md GEMINI.md
 fi
 

@@ -118,7 +118,7 @@ Skip if user chose **Global overwrite**.
 | Category | Files / paths |
 |----------|--------------|
 | Base scaffold | `.agents/**` (all files recursively) · `AGENTS.md` |
-| Claude Code | `.claude` (symlink) · `CLAUDE.md` (symlink) · `GEMINI.md` (symlink) |
+| Claude Code | `.claude` (symlink) · `GEMINI.md` (symlink) |
 | Codex | `.codex` (symlink) |
 | Copilot | `.github/copilot-instructions.md` · `.github/instructions` (**real directory** — holds the rule files; `.agents/rules` symlinks to it) |
 | Setup scripts | `.agents/setup/scripts/agents-setup.sh` · `.agents/setup/scripts/agents-setup.ps1` · `.agents/setup/scripts/agents-terminals.sh` · `.agents/setup/scripts/agents-terminals.ps1` |
@@ -178,7 +178,7 @@ executes them. It is idempotent and supports two overwrite modes — `global` (c
 
 What each section does (now inside the script):
 - **A — `.agents/` base tree**: `rsync` (global = overwrite, none = `--ignore-existing`); never deletes landing-only files.
-- **B — Claude Code**: `.claude`→`.agents`, `CLAUDE.md`/`GEMINI.md`→`AGENTS.md` symlinks + `git config core.symlinks true`.
+- **B — Claude Code**: `.claude`→`.agents`, `GEMINI.md`→`AGENTS.md` symlinks + `git config core.symlinks true`.
 - **C — Codex**: `.codex`→`.agents` symlink.
 - **D — Copilot**: copies the real `.github/instructions/` dir, re-points `.agents/rules` symlink at it, copies `copilot-instructions.md`.
 - **E — .NET**: copies `Directory.*.props`, `NuGet.Config`, `*.slnx`, `src/`, `tests/` only when absent. **Rename `Project.*` → `<ActualProjectName>` afterwards** (the script prints this reminder; the rename itself is the agent's job).
