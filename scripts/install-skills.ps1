@@ -81,8 +81,10 @@ function Test-OwnedSkill {
     # The only skills this installer manages. Everything else that happens to sit in a skills root -
     # local coding skills, operator experiments - is somebody else's to update and is never touched.
     param([string] $Name)
-    if ($Name -like 'mimisbrunnr-*') { return $true }
-    if ($Name -eq 'ai-understanding' -or $Name -eq 'ai-brain-dump') { return $true }
+    # Case-SENSITIVE match, mirroring the bash gate: on a case-sensitive filesystem `Mimisbrunnr-X`
+    # is a different folder, and matching it here while bash refuses it is a cross-port divergence.
+    if ($Name -clike 'mimisbrunnr-*') { return $true }
+    if ($Name -ceq 'ai-understanding' -or $Name -ceq 'ai-brain-dump') { return $true }
     return $false
 }
 
