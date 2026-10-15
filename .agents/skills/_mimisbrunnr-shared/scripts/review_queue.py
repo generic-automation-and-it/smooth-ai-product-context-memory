@@ -45,7 +45,6 @@ MENUS = SCRIPTS / "conflict_menus.json"
 REDACTOR = SCRIPTS / "redact.py"
 
 
-
 class QueueError(RuntimeError):
     """A refusal that names its own cause. Never carries candidate content."""
 
@@ -145,9 +144,7 @@ def redact_value(value):
     """
     texts = []
     _collect_strings(value, texts)
-    if not texts:
-        return _rebuild(value, iter(()))
-    return _rebuild(value, iter(redact_texts(texts)))
+    return _rebuild(value, iter(redact_texts(texts) if texts else ()))
 
 
 def _collect_strings(value, out):

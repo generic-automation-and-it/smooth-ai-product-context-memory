@@ -164,15 +164,6 @@ def size_guard(state):
     return None
 
 
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    """Refuse every redirect, as the gate does: urllib would replay the body and bearer key to `Location`."""
-
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        raise DedupError("redirect-refused",
-                         f"the decision endpoint answered {code} with a redirect; credential-bearing "
-                         "requests do not follow redirects")
-
-
 def _classify(exc, timeout):
     """A transport failure named, never a probability. Same distinction as the gate."""
     if isinstance(exc, (TimeoutError, socket.timeout)):
@@ -215,12 +206,12 @@ def model_pair(candidate, existing, settings):
     request = urllib.request.Request(url, data=body, headers=headers, method="POST")
     # Same transport guards as the gate: the request carries redacted record content and, for a hosted
     # endpoint, the bearer key, so it follows no redirect and never echoes an error body.
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), gate._NoRedirect)
     try:
         with opener.open(request, timeout=settings["timeout"]) as response:
             raw = response.read().decode("utf-8")
-    except DedupError:
-        raise
+    except gate.GateError as exc:
+        raise DedupError(exc.outcome, exc.detail) from None
     except urllib.error.HTTPError as exc:
         detail = (exc.read().decode("utf-8", errors="replace") or "").strip()
         if exc.code == 404 or (exc.code == 400 and re.search(r"model\b.*\bnot found|no such model",
@@ -396,29 +387,29 @@ def stage(candidates, group_uuid=None, repository=None, query_fn=None, model_fn=
         proposed = [s for s in scored if s.get("reusable")]
         # Any pair without a verdict is a named failure — the outcome list is not closed (every
         # `http-*` status, a refused redirect, a redaction refusal), so it is judged by absence.
-        transport_failed = [s for s in scored if "reusable" not in s]
-        unjudged = len(results) - len(scored)
+        failed = [s for s in scored if "reusable" not in s]
+        not_attempted = len(results) - len(scored)
         if proposed:
             proposals.append({
                 "index": index, "outcome": "proposed", "detail": f"{len(proposed)} pair(s) match",
                 "matches": proposed,
             })
-        elif transport_failed:
+        elif failed:
             # A pair the model never judged must not let the candidate read as "no duplicate"; disclose
-            # the transport reason and show the lexical candidates, exactly as a fully-disabled model.
+            # the failure and show the lexical candidates, exactly as a fully-disabled model.
             proposals.append({"index": index, "outcome": "possible-duplicate",
-                              "detail": f"model {transport_failed[0]['outcome']}", "matches": results})
-        elif unjudged and scored:
+                              "detail": f"model {failed[0]['outcome']}", "matches": results})
+        elif not scored:
+            proposals.append({"index": index, "outcome": "unexamined (budget)", "matches": results})
+        elif not_attempted:
             # A per-candidate or batch cap left matches the model never saw; "none" would claim them.
             proposals.append({"index": index, "outcome": "possible-duplicate",
-                              "detail": f"{len(scored)} pair(s) judged not duplicate; {unjudged} lexical "
+                              "detail": f"{len(scored)} pair(s) judged not duplicate; {not_attempted} lexical "
                                         "match(es) not judged (budget)",
                               "matches": results})
-        elif scored:
+        else:
             proposals.append({"index": index, "outcome": "none",
                               "detail": f"{len(scored)} pair(s) judged not duplicate", "matches": scored})
-        else:
-            proposals.append({"index": index, "outcome": "unexamined (budget)", "matches": results})
 
     return proposals
 

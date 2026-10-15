@@ -4,8 +4,8 @@ AI Context: the one shared script folder for the `mimisbrunnr` plugin. Decided i
 [HLD-010](https://github.com/generic-automation-and-it/smooth-ai-product-context-memory/tree/main/docs/hlds/010-skills-distribution/) (LADR-01); the cross-plugin counterpart is
 LADR-02.
 
-> **References.** Every HLD, LADR, NFR, BRD, issue and PR number in this file belongs to the
-> upstream repository, `generic-automation-and-it/smooth-ai-product-context-memory`
+> **References.** Every HLD, LADR, NFR, BRD, issue and PR number in this file, and every PR-gate or CI claim,
+> belongs to the upstream repository, `generic-automation-and-it/smooth-ai-product-context-memory`
 > (`docs/hlds/`, `docs/brd/`), not to a repository this skill is vendored into.
 
 ## TL;DR

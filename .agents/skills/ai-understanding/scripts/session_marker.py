@@ -462,7 +462,11 @@ def _cli_show(argv: list[str]) -> int:
     if not sid:
         print("{}")
         return 0
-    marker = load_marker(args.type, sid)
+    try:
+        marker = read_marker(args.type, sid)
+    except MarkerUnreadable as error:
+        print(unreadable_line(error), file=sys.stderr)
+        return 2
     print(json.dumps(marker or {}, indent=2, ensure_ascii=False))
     return 0
 

@@ -450,14 +450,7 @@ def _render_record(parts: dict) -> list[str]:
 
 def render_store(records: list[dict], src: str, asof: dt.date | None,
                  all_kinds: bool = False,
-                 max_chars: int | None = DEFAULT_MAX_CHARS) -> list[str]:
-    """Render store records as cited context; see `render_store_records`."""
-    return render_store_records(records, src, asof, all_kinds, max_chars)[0]
-
-
-def render_store_records(records: list[dict], src: str, asof: dt.date | None,
-                         all_kinds: bool = False,
-                         max_chars: int | None = DEFAULT_MAX_CHARS) -> tuple[list[str], list[dict]]:
+                 max_chars: int | None = DEFAULT_MAX_CHARS) -> tuple[list[str], list[dict]]:
     """Render store records as cited context, cutting whole records to fit `max_chars`.
 
     Returns the lines and the records actually rendered: the session marker records only those, since
@@ -703,10 +696,10 @@ def cmd_load(args: argparse.Namespace) -> int:
 
     lines = ["# Loaded material — cited grounding context", ""]
     lines += [f"- {note}" for note in notes]
-    rendered = records
+    rendered = None
     if records is not None:
-        store_lines, rendered = render_store_records(records, src, args.asof, all_kinds=args.all_kinds,
-                                                     max_chars=args.max_chars)
+        store_lines, rendered = render_store(records, src, args.asof, all_kinds=args.all_kinds,
+                                              max_chars=args.max_chars)
         lines += store_lines
     else:
         lines += render_foreign(body, src, args.max_chars)
@@ -835,13 +828,7 @@ def query_filters(args: argparse.Namespace, all_kinds: bool) -> dict:
 
 
 def render_table(records: list[dict], all_kinds: bool, asof: dt.date | None,
-                 max_chars: int | None) -> list[str]:
-    """The table lines; see `render_table_records`."""
-    return render_table_records(records, all_kinds, asof, max_chars)[0]
-
-
-def render_table_records(records: list[dict], all_kinds: bool, asof: dt.date | None,
-                         max_chars: int | None) -> tuple[list[str], list[dict]]:
+                 max_chars: int | None) -> tuple[list[str], list[dict]]:
     """One row per record: subject, answer, kind, status, confidence, scope, memory · version, captured.
 
     A table is an **overview**, not the rendered records. The answer cell is truncated so a column
@@ -982,11 +969,11 @@ def cmd_import(args: argparse.Namespace) -> int:
     if args.table:
         # The notice frames the table before a reader skims it; on the prose path it closes the block.
         lines += ["", DATA_NOTICE]
-        table_lines, rendered = render_table_records(records, all_kinds, args.asof, args.max_chars)
+        table_lines, rendered = render_table(records, all_kinds, args.asof, args.max_chars)
         lines += table_lines
     else:
-        store_lines, rendered = render_store_records(records, "the store", args.asof,
-                                                     all_kinds=all_kinds, max_chars=args.max_chars)
+        store_lines, rendered = render_store(records, "the store", args.asof,
+                                              all_kinds=all_kinds, max_chars=args.max_chars)
         lines += store_lines
         lines += ["", DATA_NOTICE]
     print("\n".join(lines))
@@ -1953,8 +1940,6 @@ def _persist_proposed(args: argparse.Namespace, candidates: list[dict], group_uu
 def _persist_proposed_batch(args: argparse.Namespace, candidates: list[dict], group_uuid: str,
                             binding: dict, seen: set[str]) -> tuple[int, int]:
     """One ≤ MAX_CANDIDATES batch of `_persist_proposed`. `seen` carries subjects across batches."""
-    if not candidates:
-        return 0, 0
     now = dt.datetime.now(dt.timezone.utc)
     rc, out, err = _run_capture_client(
         WRITE_CLIENT, ["preflight"],
@@ -2751,12 +2736,7 @@ def _mark_import(args: argparse.Namespace, verb: str, records: list[dict] | None
         # selector-wide import with no ids would exclude nothing (Boundary: none).
         # The selector rides alongside for future append-only replay (LADR-11 D9 note
         # 2026-10-14: "instead" read as "in addition" — ids serve present exclusion).
-        for record in records:
-            try:
-                parts = five_parts(record)
-            except (AttributeError, TypeError):
-                continue
-            items.extend(_marker_item(record, parts))
+        items = _marker_items(records)
         if all_kinds or selector is not None:
             sel = dict(selector or {})
             # Breadth is what was asked, not a default: only an explicit --all marks
@@ -2771,12 +2751,7 @@ def _mark_import(args: argparse.Namespace, verb: str, records: list[dict] | None
             return
     if nomarker:
         # Log ids for lineage without moving the boundary (D5).
-        for record in records or []:
-            try:
-                parts = five_parts(record)
-            except (AttributeError, TypeError):
-                continue
-            items.extend(_marker_item(record, parts))
+        items = _marker_items(records or [])
         try:
             _marker.record_import("kvasir", sid, harness, verb, True, items,
                                   selector or None, None)
@@ -2795,20 +2770,25 @@ def _mark_import(args: argparse.Namespace, verb: str, records: list[dict] | None
     print(_marker.marker_line(status, sid, count))
 
 
-def _marker_item(record: dict, parts: dict) -> list[dict]:
-    """The marker reference for one loaded record: its store id, else an Understanding file's slug.
+def _marker_items(records: list[dict]) -> list[dict]:
+    """The marker reference for each loaded record: its store id, else an Understanding file's slug.
 
     A file unit has a slug and no uuid; recorded as id-less history it excluded nothing, so a default
     export proposed the unit the session had just loaded. The slug is the file identity the export
     already excludes by (LADR-11 "Identity per target").
     """
-    subject = parts.get("question") or parts.get("subject") or ""
-    if parts.get("uuid"):
-        return [{"id": parts["uuid"], "version": parts.get("version"), "subject": subject}]
-    slug = record.get("slug") if isinstance(record, dict) else None
-    if isinstance(slug, str) and slug:
-        return [{"slug": slug, "subject": subject}]
-    return []
+    items: list[dict] = []
+    for record in records:
+        try:
+            parts = five_parts(record)
+        except (AttributeError, TypeError):
+            continue
+        subject = parts.get("question") or parts.get("subject") or ""
+        if parts.get("uuid"):
+            items.append({"id": parts["uuid"], "version": parts.get("version"), "subject": subject})
+        elif isinstance(record.get("slug"), str) and record["slug"]:
+            items.append({"slug": record["slug"], "subject": subject})
+    return items
 
 
 def _export_boundary(args: argparse.Namespace) -> tuple[dict | None, str]:

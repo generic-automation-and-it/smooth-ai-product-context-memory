@@ -1140,7 +1140,6 @@ class SessionMarkerCLITests(unittest.TestCase):
 
     def test_an_import_recorded_by_slug_is_excluded_by_slug(self):
         """The documented import form records a file identity the export excludes (review #9/#13)."""
-        sys.path.insert(0, str(MARKER_SCRIPT.parent))
         import session_marker as sm
         os.environ["PI_SESSION_ID"] = "ses-ai-slug"
         rc, out, _ = self._run("record", "--type", "ai-understanding", "--verb", "import",
@@ -1160,6 +1159,9 @@ class SessionMarkerCLITests(unittest.TestCase):
         rc, out, _ = self._run("boundary", "--type", "ai-understanding", "--all")
         self.assertEqual(rc, 0, out)
         self.assertIn("Boundary: ignored (--all)", out)
+        rc, out, err = self._run("show", "--type", "ai-understanding")
+        self.assertEqual(rc, 2, "show must not read a corrupt marker as an empty one")
+        self.assertIn("unreadable", err)
 
     def test_marker_holds_references_never_content(self):
         import json as _json

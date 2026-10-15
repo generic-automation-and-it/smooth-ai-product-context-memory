@@ -294,8 +294,8 @@ class LoadTests(unittest.TestCase):
         cut nothing for material that fits. The CLI default then emits no `Budget:` line at all.
         """
         records = uc.parse_store_export(json.dumps(STORE_EXPORT))
-        uncapped = uc.render_store(records, "export.json", None, max_chars=None)
-        capped = uc.render_store(records, "export.json", None, max_chars=uc.DEFAULT_MAX_CHARS)
+        uncapped = uc.render_store(records, "export.json", None, max_chars=None)[0]
+        capped = uc.render_store(records, "export.json", None, max_chars=uc.DEFAULT_MAX_CHARS)[0]
         self.assertEqual(capped, uncapped)
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -3968,7 +3968,7 @@ class ZeroConfidenceTests(unittest.TestCase):
     def test_a_zero_confidence_record_is_flagged(self):
         record = {"uuid": "11111111-1111-1111-1111-111111111111", "version": 1, "subject": "S",
                   "statement": "A claim.", "kind": "understanding", "confidence": 0}
-        rendered = "\n".join(uc.render_store([record], "the store", None, all_kinds=True))
+        rendered = "\n".join(uc.render_store([record], "the store", None, all_kinds=True)[0])
         self.assertIn("confidence: 0", rendered)
         candidates, _ = uc.export_candidates([record], "")
         self.assertEqual(candidates[0]["confidence"], 0)
