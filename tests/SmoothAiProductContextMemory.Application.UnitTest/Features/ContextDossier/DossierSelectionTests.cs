@@ -171,5 +171,11 @@ public class DossierSelectionTests
 
         public Task<IReadOnlyList<MemoryRelationship>> ListEdgesAsync(IReadOnlyCollection<Guid> uuids, CancellationToken cancellationToken) =>
             Task.FromResult<IReadOnlyList<MemoryRelationship>>([]);
+
+        public Task<bool> AboutExistsAsync(Guid memoryUuid, string provider, string key, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<bool> CreateAboutAsync(Guid memoryUuid, string provider, string key, string reason, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
     }
 }
