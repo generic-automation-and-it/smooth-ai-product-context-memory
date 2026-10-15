@@ -108,7 +108,7 @@ function renderChips() {
   if (state.initiativeName) chips.push({ label: 'Initiative', value: state.initiativeName, remove: () => { state.initiativeName = ''; els.initiative.value = ''; } });
   if (state.repo) chips.push({ label: 'Repo', value: state.repo, remove: () => { state.repo = ''; els.repo.value = ''; } });
   if (state.groupUuid) chips.push({ label: 'Group', value: state.groupUuid, remove: () => { state.groupUuid = ''; } });
-  if (state.validity === 'asof' && state.asOf) chips.push({ label: 'As of', value: state.asOf, remove: () => { state.validity = 'current'; state.asOf = ''; document.querySelector('input[name="validity"][value="current"]').checked = true; } });
+  if (state.validity === 'asof' && state.asOf) chips.push({ label: 'As of', value: state.asOf, remove: () => { state.validity = 'current'; state.asOf = ''; els.asof.value = ''; els.asof.hidden = true; document.querySelector('input[name="validity"][value="current"]').checked = true; } });
 
   els.chips.innerHTML = chips.map((c, i) => (
     `<span class="chip" role="listitem">${esc(c.label)}: ${esc(c.value)}` +
