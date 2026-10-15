@@ -67,7 +67,8 @@ what was marked, so imported context is never re-proposed as new (echo).
 - **Export marks too (amended LADR-11).** A successful writing `export` appends one entry per
   completed batch (the written ids — version-target uuid or caller createUuid — so the marker
   follows the receipt, never the plan); `dump --currentsession` appends its folder. Dry runs,
-  refusals, empty sets and held-back batches mark nothing. `export --nomarker` (and
+  refusals, empty sets and queue-only held batches mark nothing; a batch that persisted proposed
+  rows marks those ids like any other write. `export --nomarker` (and
   `dump --nomarker`) exports normally but writes no entry. The export digest ends with one
   `Marker:` line (`set (export, N items)` | `skipped (--nomarker)` | `skipped (nothing written)`
   | `none (no session id)`).
@@ -237,6 +238,17 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
   chunks. A candidate whose subject already exists in the export's group is sent as a **version bump**
   (the preflight match's `uuid`, mutually exclusive with `createUuid`) rather than a create that 409s;
   a same-subject memory in another group is never versioned into it.
+- **Held candidates persist as `Status = proposed` (G1).** An atomicity-held or decision-held
+  candidate is not only queued to the local review-queue file — on a write it is also persisted to
+  the store with `Status = proposed` (full candidate fields, its own preflight plus the
+  `set --dryrun` veto first), so the Console review queue (a store query) can see it. Only pure
+  creates persist: a preflight match in the export's group, or a same-subject twin inside the held
+  batch, stays queue-file-only — a version bump would flip that memory's current version to
+  proposed and hide approved canon from default reads. Dedup `duplicate` proposals and cross-kind
+  holders are definitionally duplicates and stay queued for the same reason. Persistence runs after
+  the clean chunks, so a subject the chunks just wrote preflights as a match. A dry run persists
+  nothing and previews `would propose: up to N held`. A proposed-write failure is a NOTE, never a
+  refusal of the export.
 - **The digest states the gated-kind limit.** A decision or rule captured this way is written as
   `kind = understanding`, which does **not** pass the gated-kind approval.
 
