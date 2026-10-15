@@ -139,3 +139,4 @@ target, a verification mechanism, and acceptance criteria. See [`./nfrs/`](./nfr
 | [NFR-02](./nfrs/NFR-02-copy-parity.md) | Consistency | Every WET copy byte-identical to the shared source; parity harness green | Accepted |
 | [NFR-03](./nfrs/NFR-03-client-singularity-and-refusal.md) | Security | Exactly one read + one write client; read refuses any write-token spelling | Accepted |
 | [NFR-04](./nfrs/NFR-04-shared-folder-on-every-route.md) | Portability | Marketplace, npm, and both mirrors all resolve the shared folder | Accepted |
+| [NFR-05](./nfrs/NFR-05-vendored-copies-are-self-contained.md) | Portability | A vendored copy carries no link or rule path into this repository's tree | Accepted |

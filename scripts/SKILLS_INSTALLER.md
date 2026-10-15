@@ -41,10 +41,13 @@ never asked for is not an install. Set `SKILLS_ROOT` to install somewhere else.
 In this repository `.claude/skills` and `.codex/skills` are symlinks to `.agents/skills`, so all three
 paths resolve to the same tree and the first match is the real one.
 
-**2. Reconcile the manifest.** The catalogue is the **union** of the skills the clone source offers and
-the skills already on disk. Deriving it from disk alone would make a first install into an empty folder a
-no-op — nothing on disk means nothing to install, and the operator's very first run would leave them with
-an empty folder and a manifest listing nothing.
+**2. Reconcile the manifest — for the owned skills only.** The installer manages exactly nine skills:
+the seven `mimisbrunnr-*` skills plus `ai-understanding` and `ai-brain-dump`. The catalogue is the
+**owned union** of what the clone source offers and what is already on disk. Anything else in the
+target tree — local coding skills, operator experiments — is left untouched and never enters the
+manifest. Deriving the catalogue from disk alone would make a first install into an empty folder a
+no-op — nothing on disk means nothing to install, and the operator's very first run would leave them
+with an empty folder and a manifest listing nothing.
 
 State lives in `<root>/_mimisbrunnr-shared/installation.json`:
 
@@ -52,23 +55,25 @@ State lives in `<root>/_mimisbrunnr-shared/installation.json`:
 {
   "updated": "2026-10-15T13:10:22Z",
   "skills": [
-    { "name": "ai-terse", "installed": true },
-    { "name": "git-sync", "installed": false }
+    { "name": "ai-brain-dump", "installed": true },
+    { "name": "mimisbrunnr-odin-context-memory", "installed": false }
   ]
 }
 ```
 
 | Skill | Result |
 |---|---|
-| in the catalogue, new to the manifest | added as `installed: true` |
-| in the catalogue, already in the manifest | keeps its existing flag, `true` **or** `false` |
-| in the manifest, in neither the source nor disk | removed from the manifest |
+| owned, in the catalogue, new to the manifest | added as `installed: true` |
+| owned, in the catalogue, already in the manifest | keeps its existing flag, `true` **or** `false` |
+| in the manifest, no longer owned or on disk | removed from the manifest |
+| not owned (on disk, in the source, or hand-written into the manifest) | never listed, never copied |
 | manifest will not parse | **run fails**, file left untouched |
 | no manifest at all | created from the catalogue, every entry `installed: true` |
 
-**3. Update only the `installed: true` skills.** The repo is shallow-cloned once and those folders are
-copied over the existing ones. A skill marked `false` is never touched, so a local edit inside one
-survives every run until you set its flag back.
+**3. Update only the owned skills marked `installed: true`.** The repo is shallow-cloned once and those
+folders are copied over the existing ones. A skill marked `false` is never touched, so a local edit
+inside one survives every run until you set its flag back. A skill outside the owned set is never
+copied even when a hand-edited manifest asks for it.
 
 **4. Refresh `_mimisbrunnr-shared`.** That folder is not a skill and never appears in the manifest, but
 every installed skill that calls a shared script is broken without it — so it refreshes on every run,
@@ -89,7 +94,7 @@ import json
 p = '.agents/skills/_mimisbrunnr-shared/installation.json'
 d = json.load(open(p))
 for s in d['skills']:
-    if s['name'] == 'git-sync':
+    if s['name'] == 'mimisbrunnr-odin-context-memory':
         s['installed'] = False
 json.dump(d, open(p, 'w'), indent=2)
 EOF
@@ -122,10 +127,10 @@ or move the change somewhere the installer does not own.
 bash scripts/test-install-skills.sh
 ```
 
-38 cases across both ports, no network and no container engine needed: the clone source is the checkout
+42 cases across both ports, no network and no container engine needed: the clone source is the checkout
 itself (`SKILLS_REPO` pointed at the repo, `SKILLS_BRANCH` at the current branch), so a harness that
 reached GitHub would be red for reasons unrelated to the code. Runs in the PR gate. Verified green on
-macOS (bash 3.2 with `pwsh` present — 38/38) and on GNU/Linux in `ubuntu:24.04` (18/18, `pwsh` absent).
+macOS (bash 3.2 with `pwsh` present — 42/42) and on GNU/Linux in `ubuntu:24.04` (20/20, `pwsh` absent).
 
 The `ps1` cases and the cross-port parity cases are **skipped with a stated reason** when `pwsh` is not
 installed — which is the case on the `ubuntu-latest` gate runner. They are exercised locally where `pwsh`

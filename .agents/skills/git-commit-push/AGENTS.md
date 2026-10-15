@@ -1,18 +1,18 @@
-# git-commit-push — AGENTS.md
+# AGENTS.md - git-commit-push
 
 ## TL;DR
 
-Middle of the git skill chain: delegates committing to `git-commit` (`effort: low` sub-agent), then pushes via `scripts/push.sh`, which owns upstream tracking, the nothing-to-push case, and `--issue`-driven branch rename.
+Read [`SKILL.md`](./SKILL.md) first — delegation to `git-commit`, branch-rename derivation and arguments live there.
 
-## Key Behaviors
+## Non-Negotiables
 
-- `scripts/push.sh --rename <branch>` renames and pushes with `--set-upstream` in one step; the *derivation* of the conforming branch name (`<type>/<issue>-slug`) stays with the agent — the script never invents names.
-- "Nothing to commit or push" is a graceful no-op by contract, not an error — `git-commit-push-pr` relies on this to update a PR description without new commits.
-- `--autonomous` and `--issue` are pass-through arguments: `--autonomous` forwards down to `git-commit`; `--issue` is consumed here (rename) but its number is re-derived upstream by `git-commit-push-pr` from the branch name.
+- **`scripts/push.sh` exits 0 when there is nothing to push.** `git-commit-push-pr` runs this skill
+  first even when it only rewrites an existing PR's description; a non-zero "nothing to push" exit
+  breaks that update path.
 
 ## Changelog
 
 | Date | Change | Ref |
-|:-----|:-------|:----|
-| 2026-06-12 | Initial version. Push/rename plumbing moved from SKILL.md prose into `scripts/push.sh` (relocated from git-commit-push-pr, extended with `--rename`). | |
-| 2026-09-27 | Synced to `smooth-devex-template` PR #84: `models:` replaced by `effort: medium`; the `git-commit` sub-agent is invoked at its frontmatter `effort` (`low`) on the session's model. | |
+| :---- | :---- | :---- |
+| 2026-06-12 | Initial version | — |
+| 2026-10-15 | Cut to HLD shape: SKILL.md pointer + non-SKILL.md traps only | — |

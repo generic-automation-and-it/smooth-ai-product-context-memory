@@ -59,7 +59,7 @@ public class SetMemoriesValidatorTests
                     MemoryVersion.KindValue.Decision,
                     null,
                     null,
-                    MemoryVersion.MemoryVersionStatus.Approved,
+                    MemoryVersion.MemoryVersionStatus.Proposed,
                     80,
                     null,
                     null,
@@ -100,7 +100,7 @@ public class SetMemoriesValidatorTests
                     MemoryVersion.KindValue.Decision,
                     null,
                     null,
-                    MemoryVersion.MemoryVersionStatus.Approved,
+                    MemoryVersion.MemoryVersionStatus.Proposed,
                     80,
                     null,
                     null,
@@ -132,7 +132,7 @@ public class SetMemoriesValidatorTests
                     MemoryVersion.KindValue.Decision,
                     ["architecture"],
                     ["tag"],
-                    MemoryVersion.MemoryVersionStatus.Approved,
+                    MemoryVersion.MemoryVersionStatus.Proposed,
                     80,
                     "body",
                     null,
@@ -162,7 +162,7 @@ public class SetMemoriesValidatorTests
                     MemoryVersion.KindValue.Decision,
                     null,
                     null,
-                    MemoryVersion.MemoryVersionStatus.Approved,
+                    MemoryVersion.MemoryVersionStatus.Proposed,
                     80,
                     null,
                     null,
@@ -192,7 +192,7 @@ public class SetMemoriesValidatorTests
                     MemoryVersion.KindValue.Decision,
                     null,
                     null,
-                    MemoryVersion.MemoryVersionStatus.Approved,
+                    MemoryVersion.MemoryVersionStatus.Proposed,
                     80,
                     null,
                     null,
@@ -248,6 +248,40 @@ public class SetMemoriesValidatorTests
             .ShouldNotHaveAnyValidationErrors();
     }
 
+    /// <summary>LADR-11: `approved` is a Status value like any other; a fresh approved create is the
+    /// capture path's normal shape (set_items defaults status=approved on a create). The validator does
+    /// not special-case it — the proposed->approved transition is a version-bump, not a validator rule.</summary>
+    [Fact]
+    public void Accepts_approved_create_without_uuid()
+    {
+        SetMemories.Request request = ValidRequest() with
+        {
+            Items = [ValidRequest().Items[0] with
+            {
+                Status = MemoryVersion.MemoryVersionStatus.Approved,
+                Uuid = null,
+            }],
+        };
+
+        _validator.TestValidate(request).ShouldNotHaveAnyValidationErrors();
+    }
+
+    [Fact]
+    public void Accepts_approved_version_bump_with_uuid()
+    {
+        SetMemories.Request request = ValidRequest() with
+        {
+            Items = [ValidRequest().Items[0] with
+            {
+                Status = MemoryVersion.MemoryVersionStatus.Approved,
+                Uuid = Guid.NewGuid(),
+                CreateUuid = null,
+            }],
+        };
+
+        _validator.TestValidate(request).ShouldNotHaveAnyValidationErrors();
+    }
+
     private static SetMemories.Request ValidRequest() =>
         new(
             Guid.NewGuid(),
@@ -261,7 +295,7 @@ public class SetMemoriesValidatorTests
                     MemoryVersion.KindValue.Decision,
                     null,
                     null,
-                    MemoryVersion.MemoryVersionStatus.Approved,
+                    MemoryVersion.MemoryVersionStatus.Proposed,
                     80,
                     null,
                     null,

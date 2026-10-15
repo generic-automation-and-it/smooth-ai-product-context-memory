@@ -27,8 +27,9 @@ COPY src/SmoothAiProductContextMemory.Viewer/Caddyfile /etc/caddy/Caddyfile
 COPY src/SmoothAiProductContextMemory.Viewer/entrypoint.sh /entrypoint.sh
 COPY src/SmoothAiProductContextMemory.Viewer/wwwroot/ /srv/spa/
 COPY src/SmoothAiProductContextMemory.Viewer/bridge/ /bridge/
-# The capture gates the P4 bridge drives (LADR-09). Present but unimported until
-# P4: the Phase-A stub stays stdlib-only and never touches the store (NFR-02).
+# The capture gates the P4 bridges drive (LADR-09). Both P4a and P4b import
+# the capture client; P4a as a read-side seam, P4b for the write path
+# (subprocess per write to avoid stdout contamination).
 COPY .agents/skills/_mimisbrunnr-shared/scripts/ /bridge/capture/
 ENV PYTHONPATH=/bridge/capture
 
@@ -37,12 +38,12 @@ LABEL org.opencontainers.image.source="https://github.com/generic-automation-and
       org.opencontainers.image.revision="${REVISION}" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.title="SmoothAiProductContextMemory Viewer Pod" \
-      org.opencontainers.image.description="Loopback Mímisbrunnr Console: Caddy + Python bridge + static SPA."
+      org.opencontainers.image.description="Loopback Mímisbrunnr Console: Caddy + Python bridges (P4a read + P4b write) + static SPA."
 
 # Fail the build on a Python syntax error rather than at container start.
-RUN python3 -m py_compile /bridge/bridge.py /bridge/capture/*.py \
+RUN python3 -m py_compile /bridge/bridge.py /bridge/bridge_p4b.py /bridge/capture/*.py \
     && rm -rf /bridge/__pycache__ /bridge/capture/__pycache__ \
-    && chown -R caddy:caddy /bridge/capture
+    && chown -R caddy:caddy /bridge /bridge/capture
 
 # Caddy's default storage/autosave dirs are owned by root; pre-create them for
 # the caddy user so startup does not log permission-denied warnings.

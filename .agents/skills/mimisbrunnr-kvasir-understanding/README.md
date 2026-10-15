@@ -49,8 +49,9 @@ python3 .../understanding_client.py dump --currentsession --from <session-file|-
   processed end to end, and a candidate whose subject already exists in the target group is sent as a
   version bump rather than a create that 409s.
 - **Input is optional, but a guessed input never writes.** With no input, `load` and a dry-run `export`
-  use the newest session dump and say so; a writing `export` refuses until the input is given explicitly,
-  because in a shared workspace the newest dump may be another session's.
+  use the newest session dump and say so. A writing `export` with no input accepts a dump this session
+  provably made (its `_dump.json` records the current session id) and refuses only an unproven newest
+  dump, because in a shared workspace that may be another session's — give the input explicitly then.
 - **The session dump is an export.** `--currentsession` writes to
   `.context/mimisbrunnr-understandings/<session-folder>/`, with a fitting folder name reported on output so another
   agent can discover it (HLD-007 LADR-07). It changes nothing in the store. Recognised secrets, emails
@@ -60,8 +61,8 @@ python3 .../understanding_client.py dump --currentsession --from <session-file|-
 - **ai-understanding files are structured input.** A `.understanding.md` unit, or a whole store folder
   (newest version per slug), loads as question/answer/why/boundaries rather than raw prose (HLD-007 LADR-09).
 
-Business authority: [BRD-003](../../../docs/brd/003-understanding-transfer/). Design:
-[HLD-007](../../../docs/hlds/007-understanding-transfer/).
+Business authority: [BRD-003](https://github.com/generic-automation-and-it/smooth-ai-product-context-memory/tree/main/docs/brd/003-understanding-transfer/). Design:
+[HLD-007](https://github.com/generic-automation-and-it/smooth-ai-product-context-memory/tree/main/docs/hlds/007-understanding-transfer/).
 
 ## Test
 

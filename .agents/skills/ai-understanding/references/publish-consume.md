@@ -52,13 +52,15 @@ The **second** net, not the first: redaction happens at write time (`SKILL.md`, 
 because a value that reaches a unit is already one `--publish` away from leaving the workspace. This check
 catches what that step missed, and it catches units written before the step existed.
 
-Before anything leaves the workspace, confirm no unit carries a credential, token, connection string, or
-internal hostname. Where one does, strike it in the **working copy** before archiving: the archive is
+Before anything leaves the workspace, confirm no unit carries a credential, token, connection string,
+internal hostname, or personal data (a name, email or UPN, an employee number, a badge or card identifier,
+group membership, or any identifier the repository's own `AGENTS.md` prohibits on disk). Where one does, strike it in the **working copy** before archiving: the archive is
 generated from the store, so fixing the store fixes every archive after it. That edit is the one exception
-to immutability (`SKILL.md`, *Redact before you write*) — a credential is not knowledge, so it is repaired
+to immutability (`SKILL.md`, *Redact before you write*) — a credential or personal data is not knowledge, so it is repaired
 in place rather than superseded, which would leave the value on disk. Record the shape of the problem, not
 the value. See
-`.github/instructions/skills/skill-secret-handling.instructions.md`.
+the `skill-secret-handling` rule
+([upstream](https://github.com/generic-automation-and-it/smooth-ai-product-context-memory/blob/main/.github/instructions/skills/skill-secret-handling.instructions.md)).
 
 ## Consume
 

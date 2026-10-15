@@ -1,49 +1,24 @@
-# ai-review — Maintenance Context
+# AGENTS.md - ai-review
 
 ## TL;DR
 
-Vendored copy of the `/ai-review` consumer skill from `generic-automation-and-it/smooth-ai-report-review`. It *parses* an AI PR review and applies per-issue fix/skip decisions; it does **not** generate the review. Treat this directory as a mirror of upstream — fixes belong upstream, not here.
+Read [`SKILL.md`](./SKILL.md) first — modes, source routing, result routing and guardrails live there.
 
 ## Non-Negotiables
 
-- **Do not hand-edit the skill logic here to fix bugs.** This is a downstream copy. Changes made locally diverge from upstream and are lost on the next sync. File the fix in the upstream repo, then re-copy.
-- **Only the `ai-review` consumer skill is installed.** The review *generator* (`ai-review-report` skill + its scripts) is intentionally NOT copied — it runs remotely via the reusable GitHub Actions workflow (`.github/workflows/pipeline-code-review-report.yml`, pinned to an upstream reusable-workflow SHA). Do not copy the generator tree in to "complete" the install.
-- **Script-path duality:** `SKILL.md` references `.agents/skills/ai-review/scripts/copilot-review.sh` for this copy-install. The `${CLAUDE_PLUGIN_ROOT}/...` variant in `SKILL.md` applies only when the skill runs from the upstream Claude Code plugin (`smooth-ai-review`) — not here. Keep the copy-install path permitted in `.agents/settings.json`.
-
-## System Context
-
-```mermaid
-C4Context
-  System(consumer, "ai-review (this skill)", "Parses a posted review; applies fix/skip; routes results")
-  System_Ext(gha, "pipeline-code-review-report.yml@<pinned-sha>", "Remote reusable GHA that GENERATES the review on a PR")
-  System_Ext(analyse, "pipeline-ai-analyse.yml", "Companion low/medium self-fix loop")
-  System_Ext(gh, "GitHub PR", "Review threads / PR description / comments")
-  Rel(gha, gh, "posts AI review")
-  Rel(analyse, gh, "reads latest gate review, pushes safe fixes, posts summary")
-  Rel(consumer, gh, "reads review, replies/resolves threads or appends AI Review Notes")
-```
-
-Two halves, deliberately split: the remote GHA produces the review report on a PR; this local skill consumes it. The user drives the consumer with `/ai-review <pr>` (analyse) then `/ai-review <pr> 1=fix 2=skip` (execute).
-
-The companion `.github/workflows/pipeline-ai-analyse.yml` runs after `PR Code Review Report` completes. Its guard reads the latest gate-authored review, extracts only 🟡 Medium and 🔵 Low findings, invokes fetched upstream `ai-analyse` tooling, pushes any safe auto-fixes, and posts an `ai-analyse auto-fix summary`. The loop is bounded by `OPENCODE_ANALYSE_MAX_INCREMENTAL` so repeated incremental reviews cannot run forever.
-
-## Key Behaviors
-
-- **Mode auto-detect:** any `N=fix`/`N=skip` arg → execute; otherwise analyse. Analyse always STOPS and never auto-executes.
-- **Source routing:** auto-detects Copilot vs other via `copilot-review.sh detect <pr>`. Copilot → reply/resolve each linked review thread + post a summary comment. Other → append the fix/skip table to AI Review Notes **and** write every skipped item into the PR description's Skip Areas / Known Issues bullets (verify bullets after edit before completion).
-- **All deterministic GitHub plumbing** (detect/threads/reply/resolve/summary) lives in `scripts/copilot-review.sh`; the skill keeps only the judgment (parsing + fix/skip + reply text).
-- **Critical/High marker commit:** when a processed review contains any 🔴/🟠 finding (fixed or skipped), execute must include `/ai-review` as the last line of every fix commit body AND produce the final empty commit `ci: /ai-review — processed review responses` as a re-verification safety net.
+- **This directory mirrors `smooth-ai-report-review`; its SKILL.md stays byte-identical, including the
+  `switches:` list.** A local fix diverges and is lost on the next sync: file it upstream, then re-copy.
+- **Only the consumer skill is installed.** The review generator (`ai-review-report`) runs remotely through
+  the reusable workflow in `pipeline-code-review-report.yml`; do not copy its tree in to "complete" the install.
 
 ## Changelog
 
 | Date | Change | Ref |
-|:-----|:-------|:----|
-| 2026-06-20 | Vendored `/ai-review` consumer skill from smooth-ai-report-review; generator kept remote via thin caller workflow. | |
-| 2026-07-05 | Documented the companion self-fix workflow that consumes low/medium review findings and posts an auto-fix summary. | |
-| 2026-07-25 | Synced to upstream `/ai-review` updates: non-Copilot skip-bullet propagation/verification and mandatory critical/high marker-commit behavior. | #78 |
-| 2026-07-25 | Synced to upstream: require `/ai-review` in every fix commit message body when Critical/High findings exist; empty commit remains as re-verification safety net. | #84 |
-| 2026-09-19 | The PR template finally provides the section this skill writes into. It previously carried a `**Known Issues:**` bold line nested inside `## AI Review Notes` — not a heading at all, and invisible to `extract-review-notes.sh`, which keys on a top-level `^## Skip Areas`. The skip bullets the Source-routing behavior above depends on therefore reached no prompt, and every skipped finding was re-raised. Now a sibling `## Skip Areas / Known Issues` section, verified by round-trip. | #82, PR #83 |
-| 2026-09-19 | Re-synced `SKILL.md` and `scripts/copilot-review.sh` to upstream `main`, which had drifted ahead of this copy: LADR-067/068 in `SKILL.md` forbid renumbering a review's own identifier (`R1)`, `T1)`, …) as `#1` in a skip bullet — GitHub autolinks `#`+digits to an issue, silently detaching the bullet from the identifier the next round matches on — and require bolding it so it isn't swallowed as list markup; `copilot-review.sh` gained a script-scoped `CLEANUP_TMPFILES` EXIT trap (function-local traps ran after locals left scope, causing false CI failures and a temp-file leak). `agents/openai.yaml` and `git-commit-review-push`'s files were already current. | |
-| 2026-09-27 | `models:` replaced by `effort: medium`; skills no longer pick a model per provider, and `agents/openai.yaml` lost its `model:` line. Local divergence from the upstream mirror — a re-sync must not restore the `models:` block. | |
-| 2026-09-27 | That re-sync prohibition was promoted out of this changelog into Non-Negotiables, so the "re-copy" rule that triggers a re-sync sits next to the guard that constrains it. The changelog row above is kept as the dated record. | |
-| 2026-09-27 | Synced to upstream `smooth-ai-report-review` PR #167: the per-tool `models` frontmatter block became `effort: high` (review analysis, fix/skip judgment and multi-file fixes) and `agents/openai.yaml` dropped `model:`. Skills no longer switch model per tool or provider. `SKILL.md` is byte-identical to upstream `main`, so the "re-sync must not restore `models:`" Non-Negotiable added by the two rows above is retired — a plain re-copy is correct again. | upstream PR #167 |
+| :---- | :---- | :---- |
+| 2026-06-20 | Vendored `/ai-review` consumer skill from smooth-ai-report-review | — |
+| 2026-07-05 | Documented the companion self-fix workflow that consumes low/medium review findings and posts an auto-fix… | — |
+| 2026-09-19 | The PR template finally provides the section this skill writes into | #82 |
+| 2026-09-19 | Re-synced `SKILL.md` and `scripts/copilot-review.sh` to upstream `main`, which had drifted ahead of this copy | — |
+| 2026-09-27 | `models:` replaced by `effort: medium` | #122 |
+| 2026-09-27 | That re-sync prohibition was promoted out of this changelog into Non-Negotiables, so the "re-copy"… | #122 |
+| 2026-10-15 | Cut to HLD shape: SKILL.md pointer + non-SKILL.md traps only | — |

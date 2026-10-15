@@ -29,6 +29,7 @@ No secrets here: session ids are not secrets but are not logged beyond the
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 import os
 import re
@@ -92,6 +93,11 @@ def marker_path(marker_type: str, session: str, root: Path | None = None) -> Pat
     if marker_type not in MARKER_TYPES:
         raise ValueError(f"unknown marker type {marker_type!r}")
     safe = _SAFE_SESSION_RE.sub("_", session).strip("._") or "session"
+    if safe != session:
+        # Sanitising folds distinct IDs together (`a/b` and `a_b`), and one marker file would then
+        # exclude another session's imports. A digest of the original keeps them apart; an ID that
+        # needed no change keeps its plain name, so existing markers stay where they were.
+        safe = f"{safe}-{hashlib.sha256(session.encode('utf-8')).hexdigest()[:8]}"
     base = root if root is not None else marker_root()
     return base / f"{marker_type}-{safe}.json"
 
@@ -107,9 +113,35 @@ def load_marker(marker_type: str, session: str,
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    if not isinstance(data, dict) or data.get("type") != marker_type:
+    if not isinstance(data, dict) or data.get("type") != marker_type or data.get("session") != session:
         return None
     return data
+
+
+class MarkerUnreadable(ValueError):
+    """A marker file exists but does not read as this type's marker. ``str()`` is its path."""
+
+
+def read_marker(marker_type: str, session: str,
+                root: Path | None = None) -> dict | None:
+    """``load_marker`` for a default selection: a missing marker is None, an unreadable one raises.
+
+    ``load_marker`` reads both as None, and a default export that took an unreadable marker for an
+    absent one reported ``Boundary: none`` and re-proposed everything the session imported. The file
+    still names real exclusions, so selection refuses instead (``unreadable_line``); ``--all`` is the
+    explicit way past it.
+    """
+    marker = load_marker(marker_type, session, root)
+    path = marker_path(marker_type, session, root)
+    if marker is None and path.is_file():
+        raise MarkerUnreadable(str(path))
+    return marker
+
+
+def unreadable_line(error: MarkerUnreadable) -> str:
+    """The refusal a default export prints for an unreadable marker."""
+    return (f"Boundary: refused (session marker {error} is unreadable, so a default export cannot "
+            f"tell what this session imported; inspect or move the file, or pass --all to send in full)")
 
 
 def exclusion_set(marker: dict | None) -> tuple[set[str], dict[str, str], str, int]:
@@ -417,7 +449,12 @@ def _cli_boundary(argv: list[str]) -> int:
     if not sid:
         print(boundary_line(None))
         return 0
-    print(boundary_line(load_marker(args.type, sid)))
+    try:
+        marker = read_marker(args.type, sid)
+    except MarkerUnreadable as error:
+        print(unreadable_line(error))
+        return 2
+    print(boundary_line(marker))
     return 0
 
 
@@ -431,7 +468,11 @@ def _cli_show(argv: list[str]) -> int:
     if not sid:
         print("{}")
         return 0
-    marker = load_marker(args.type, sid)
+    try:
+        marker = read_marker(args.type, sid)
+    except MarkerUnreadable as error:
+        print(unreadable_line(error), file=sys.stderr)
+        return 2
     print(json.dumps(marker or {}, indent=2, ensure_ascii=False))
     return 0
 

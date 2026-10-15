@@ -61,7 +61,7 @@ reads it the same way yours does.
 ## The rest
 
 - **`SKILL.md`** — the full contract, written for the agent rather than for you.
-- **`.agents/rules/meta/understandings.instructions.md`** — governance: how Understandings differ from
+- **`understandings.instructions.md`** in the repository's rules folder ([upstream](https://github.com/generic-automation-and-it/smooth-ai-product-context-memory/blob/main/.github/instructions/meta/understandings.instructions.md)) — governance: how Understandings differ from
   rules and from `AGENTS.md`, and which wins when they disagree. Scoped to `**/*understanding.md`, so it
   attaches when an Understanding is opened rather than loading every session; `SKILL.md` points to it at
   the export decisions it governs.

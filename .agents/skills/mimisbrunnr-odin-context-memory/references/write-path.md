@@ -7,7 +7,8 @@ Run the write client, `context_memory_client.py`, on discrete candidate facts an
 Never a raw transcript. The write credential is never ambient: the client seeds only the read token and
 base URL, so `CONTEXT_MEMORY_WRITE_TOKEN` is absent until you load it. Load it only at the authorized
 checkpoint, with the deliberate write step the skill's `SKILL.md` names —
-`set -a && source ~/.mimisbrunnr/credentials && set +a` — and **only inside a subshell around each
+`set -a && source ~/.mimisbrunnr/credentials && set +a` (source the file `CONTEXT_MEMORY_CREDENTIAL_FILE`
+names instead, when it is set — it is the file the clients read) — and **only inside a subshell around each
 write-route invocation** (`preflight`, `set`, `resolve-group`, `upsert-initiative`, `update-group`,
 `append-description`, `create-link`, `propose-label`, `ticket-parent` — the `WRITE_ROUTES` set in
 `context_memory_client.py`; `preflight` persists nothing but still authenticates write-only), so the
@@ -21,7 +22,7 @@ then refuse to start:
 ```
 
 The write client lives in the plugin's shared script folder
-([HLD-010](../../../docs/hlds/010-skills-distribution/), LADR-01), so `<skills-root>` is
+([HLD-010](https://github.com/generic-automation-and-it/smooth-ai-product-context-memory/tree/main/docs/hlds/010-skills-distribution/), LADR-01), so `<skills-root>` is
 `.agents/skills`, `.claude/skills` or `.codex/skills` — whichever this tree exposes. Never name a peer
 skill's folder to reach it.
 
@@ -51,6 +52,11 @@ Run exactly once in fixed order:
 3. **Dedupe / derive links**: judge subject matches and links from bounded recall.
 4. **Atomicity check**: one memory per fact; split or skip bundled claims.
 5. **Write**: one transactional `set`; API owns version ordering, identities, and graph writes.
+6. **Held candidates**: a candidate held by atomicity, the value gate or staged dedup is appended to the
+   review queue, and a pure create among them is captured separately as `Status = proposed` — its own
+   preflight, its own `set --dryrun` veto, then its own `set` (`SKILL.md` → *A held candidate is also
+   persisted*). An in-group match, a same-subject twin, a dedup duplicate or a cross-kind holder stays
+   queue-file-only.
 
 **Before creating any batch or payload file, mask and generalise every personal identifier** — any
 personal data within the meaning of the GDPR (information relating to an identified or identifiable

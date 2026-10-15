@@ -20,6 +20,7 @@ Python 3.9+, stdlib only.
 """
 
 import argparse
+import contextlib
 import datetime
 import hashlib
 import json
@@ -27,6 +28,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 DEFAULT_QUEUE = "~/.mimisbrunnr/review/queue.jsonl"
@@ -40,16 +42,14 @@ DEFAULT_CAP = 1000
 DIR_MODE = 0o700
 FILE_MODE = 0o600
 
+# A held write waits this long for another writer, and a lock file older than the stale age is a dead
+# writer's — a queue write takes milliseconds, so neither bound is ever reached by a live one.
+LOCK_WAIT_SECONDS = 10
+LOCK_STALE_SECONDS = 30
+
 SCRIPTS = Path(__file__).resolve().parent
 MENUS = SCRIPTS / "conflict_menus.json"
 REDACTOR = SCRIPTS / "redact.py"
-
-# Fields of a held candidate that a secret could hide in. Every one is scrubbed before the line is
-# written, so the queue carries no value the candidate's own redaction missed.
-CANDIDATE_TEXT_FIELDS = (
-    "subject", "description", "statement", "contentSummary", "boundaries",
-    "tags", "facets", "kind", "scope", "name", "answer", "why",
-)
 
 
 class QueueError(RuntimeError):
@@ -131,29 +131,62 @@ def is_capture_choice(conflict_type, choice, _menus=None):
 
 
 def redact_candidate(candidate):
-    """Scrub every free-text field of a candidate, or refuse.
+    """Scrub every string a candidate carries, at any depth, or refuse."""
+    if not isinstance(candidate, dict):
+        raise QueueError("bad-candidate", "a held candidate must be an object")
+    return redact_value(candidate)
+
+
+def redact_value(value):
+    """Scrub every string leaf of `value` — dict values and list entries at any depth — or refuse.
+
+    A named field list missed lists (`tags`, `facets`), nested objects and the entry's own `reason` and
+    `evidence`, so a secret in any of them reached the queue verbatim. Every persisted string is a leaf
+    here, which is the only list that cannot drift from the record's shape. Keys are structure and are
+    not scrubbed.
 
     The redactor answers positionally over stdin, so content never reaches a process table. Fails
     closed: a redactor that cannot run means the queue cannot guarantee no secret is on disk, and the
     queue's whole value is that it is safe to leave on a machine that is not this checkout.
     """
-    if not isinstance(candidate, dict):
-        raise QueueError("bad-candidate", "a held candidate must be an object")
+    texts = []
+    _collect_strings(value, texts)
+    return _rebuild(value, iter(redact_texts(texts) if texts else ()))
+
+
+def _collect_strings(value, out):
+    if isinstance(value, str):
+        if value:
+            out.append(value)
+    elif isinstance(value, dict):
+        for item in value.values():
+            _collect_strings(item, out)
+    elif isinstance(value, list):
+        for item in value:
+            _collect_strings(item, out)
+
+
+def _rebuild(value, scrubbed):
+    """`value` with each non-empty string replaced, in `_collect_strings` order, by the next scrubbed one."""
+    if isinstance(value, str):
+        return next(scrubbed) if value else value
+    if isinstance(value, dict):
+        return {key: _rebuild(item, scrubbed) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_rebuild(item, scrubbed) for item in value]
+    return value
+
+
+def redact_texts(texts):
+    """The redactor's scrubbed form of each text, positionally, or a `QueueError`. No entry is written on refusal."""
     if not REDACTOR.is_file():
         raise QueueError("redactor-unavailable", "the redactor script is missing; no entry was written")
-
-    texts = [candidate[field] for field in CANDIDATE_TEXT_FIELDS
-             if isinstance(candidate.get(field), str) and candidate[field]]
-    if not texts:
-        candidate = dict(candidate)
-        return candidate
-
     try:
         proc = subprocess.run(
             [sys.executable, "-B", str(REDACTOR)],
             input=json.dumps(texts), capture_output=True, text=True, encoding="utf-8", timeout=60,
         )
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
         raise QueueError("redactor-unavailable",
                          f"the redactor could not run ({type(exc).__name__}); no entry was written")
 
@@ -170,18 +203,13 @@ def redact_candidate(candidate):
                          f"the redactor returned {len(results) if isinstance(results, list) else 'a non-list'} "
                          f"result(s) for {len(texts)} field(s); no entry was written")
 
-    scrubbed = {}
-    for field, redacted in zip(texts, results):
-        if not isinstance(redacted, dict) or "redacted" not in redacted:
+    scrubbed = []
+    for redacted in results:
+        if not isinstance(redacted, dict) or not isinstance(redacted.get("redacted"), str):
             raise QueueError("redactor-unavailable",
-                             "a redactor result carried no 'redacted' field; no entry was written")
-        scrubbed[field] = redacted["redacted"]
-
-    out = dict(candidate)
-    for field in CANDIDATE_TEXT_FIELDS:
-        if isinstance(candidate.get(field), str) and candidate[field] in scrubbed:
-            out[field] = scrubbed[candidate[field]]
-    return out
+                             "a redactor result carried no 'redacted' text; no entry was written")
+        scrubbed.append(redacted["redacted"])
+    return scrubbed
 
 
 def entry_cap():
@@ -219,28 +247,39 @@ def entry_id(source, candidate):
 
 
 def _read_entries():
-    """Every record in the queue as a list of dicts. A missing file is empty, not an error."""
+    """Every record in the queue as a list of dicts. A missing file is empty, not an error.
+
+    A line that is not a JSON object refuses the read. Skipping it hid a lost candidate from `list`,
+    `show` and the unresolved count, so the cap could admit another hold while a held one was gone, and
+    acting on a guess would resolve the wrong candidate.
+    """
     path = queue_path()
     if not path.is_file():
         return []
     entries = []
     with open(path, encoding="utf-8") as handle:
-        for line in handle:
+        for number, line in enumerate(handle, 1):
             line = line.strip()
             if not line:
                 continue
             try:
-                entries.append(json.loads(line))
+                record = json.loads(line)
             except ValueError:
-                # A corrupt line is reported, not read as data; the record it was is one we cannot act
-                # on, and acting on a guess would resolve the wrong candidate.
-                continue
+                record = None
+            if not isinstance(record, dict):
+                raise QueueError("corrupt-queue",
+                                 f"line {number} of {path} is not a queue record; inspect or move the file "
+                                 "before holding or resolving anything else")
+            entries.append(record)
     return entries
 
 
 def entry_count():
-    """The number of unresolved entry records (kind=entry). Resolutions are records, not entries."""
-    return sum(1 for record in _read_entries() if record.get("kind") == "entry")
+    """The number of unresolved entries. Resolutions are records, not entries, and a resolved entry no
+    longer counts — the cap message tells a reviewer to resolve entries to make room, so it must."""
+    records = _read_entries()
+    resolved = {record.get("id") for record in records if record.get("kind") == "resolution"}
+    return sum(1 for record in records if record.get("kind") == "entry" and record.get("id") not in resolved)
 
 
 def _ensure_permissions(path):
@@ -259,6 +298,64 @@ def _ensure_permissions(path):
         pass
 
 
+@contextlib.contextmanager
+def _queue_lock():
+    """Serialise every read-modify-write of the queue across processes.
+
+    A write copies the whole file and replaces it, so two writers that each read the same copy would
+    each report success while the later replacement erased the earlier record. An exclusively-created
+    lock file is portable (no fcntl/msvcrt split) and is the same on every platform the skills run on.
+    """
+    path = queue_path()
+    path.parent.mkdir(mode=DIR_MODE, parents=True, exist_ok=True)
+    lock = path.with_name(path.name + ".lock")
+    deadline = time.monotonic() + LOCK_WAIT_SECONDS
+    while True:
+        try:
+            os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, FILE_MODE))
+            break
+        except FileExistsError:
+            if _lock_is_stale(lock):
+                with contextlib.suppress(FileNotFoundError):
+                    os.unlink(lock)
+            elif time.monotonic() > deadline:
+                raise QueueError("queue-busy", f"another process holds {lock}; no entry was written") from None
+            else:
+                time.sleep(0.05)
+    try:
+        yield
+    finally:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(lock)
+
+
+def _lock_is_stale(lock):
+    try:
+        return time.time() - lock.stat().st_mtime > LOCK_STALE_SECONDS
+    except FileNotFoundError:
+        return False
+
+
+def _write_record(record):
+    """Append one record to the queue by temp-file replace. The caller holds `_queue_lock`."""
+    path = queue_path()
+    fd, temp = tempfile.mkstemp(dir=str(path.parent), prefix=".queue-")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            if path.is_file():
+                with open(path, encoding="utf-8") as existing:
+                    for line in existing:
+                        handle.write(line)
+            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+        os.chmod(temp, FILE_MODE)
+        os.replace(temp, path)
+        _ensure_permissions(path)
+    except OSError:
+        with contextlib.suppress(OSError):
+            os.unlink(temp)
+        raise
+
+
 def append(entry):
     """Append one held candidate to the queue. Returns the entry id. Refuses past the cap.
 
@@ -274,6 +371,8 @@ def append(entry):
     choices = choices_for(conflict_type, menus)
 
     candidate = redact_candidate(entry.get("candidate") or {})
+    reason = redact_value(entry.get("reason") or "")
+    evidence = redact_value(entry.get("evidence") or {})
     source = entry.get("source") or ""
     record = {
         "kind": "entry",
@@ -281,8 +380,8 @@ def append(entry):
         "heldAt": entry.get("heldAt") or datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "heldBy": entry.get("heldBy") or "conflict",
         "conflictType": conflict_type,
-        "reason": entry.get("reason") or "",
-        "evidence": entry.get("evidence") or {},
+        "reason": reason,
+        "evidence": evidence,
         "candidate": candidate,
         "binding": entry.get("binding") or {},
         "source": source,
@@ -290,32 +389,16 @@ def append(entry):
         "menu": choices,
     }
 
-    if entry_count() + 1 > entry_cap():
-        # Refused, not truncated: a queue that silently drops its oldest held candidate would lose the
-        # very record a reviewer was about to act on.
-        raise QueueError("queue-full",
-                         f"the review queue holds {entry_count()} entry(ies); the {entry_cap()}-entry "
-                         "cap is reached. Review or resolve the queue before adding more.")
-
-    path = queue_path()
-    path.parent.mkdir(mode=DIR_MODE, parents=True, exist_ok=True)
-    fd, temp = tempfile.mkstemp(dir=str(path.parent), prefix=".queue-")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            if path.is_file():
-                with open(path, encoding="utf-8") as existing:
-                    for line in existing:
-                        handle.write(line)
-            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
-        os.chmod(temp, FILE_MODE)
-        os.replace(temp, path)
-        _ensure_permissions(path)
-    except OSError:
-        try:
-            os.unlink(temp)
-        except OSError:
-            pass
-        raise
+    with _queue_lock():
+        open_entries = entry_count()
+        if open_entries + 1 > entry_cap():
+            # Refused, not truncated: a queue that silently drops its oldest held candidate would lose
+            # the very record a reviewer was about to act on.
+            raise QueueError("queue-full",
+                             f"the review queue holds {open_entries} unresolved entry(ies); the "
+                             f"{entry_cap()}-entry cap is reached. Review or resolve the queue before "
+                             "adding more.")
+        _write_record(record)
     return record["id"]
 
 
@@ -406,23 +489,20 @@ def cmd_resolve(args):
     if args.edit:
         try:
             with open(args.edit, encoding="utf-8") as handle:
-                resolution["edited"] = handle.read()
+                edited = handle.read()
         except OSError as exc:
             print(f"REFUSED: the edit file could not be read ({type(exc).__name__})", file=sys.stderr)
             return 1
+        # An edited rewrite is persisted beside the entry, so it takes the entry's redaction contract:
+        # scrubbed, or the resolution is refused.
+        try:
+            resolution["edited"] = redact_value(edited)
+        except QueueError as exc:
+            print(f"REFUSED: {exc.detail}", file=sys.stderr)
+            return 1
 
-    path = queue_path()
-    path.parent.mkdir(mode=DIR_MODE, parents=True, exist_ok=True)
-    fd, temp = tempfile.mkstemp(dir=str(path.parent), prefix=".queue-")
-    with os.fdopen(fd, "w", encoding="utf-8") as handle:
-        if path.is_file():
-            with open(path, encoding="utf-8") as existing:
-                for line in existing:
-                    handle.write(line)
-        handle.write(json.dumps(resolution, ensure_ascii=False) + "\n")
-    os.chmod(temp, FILE_MODE)
-    os.replace(temp, path)
-    _ensure_permissions(path)
+    with _queue_lock():
+        _write_record(resolution)
 
     if is_capture_choice(entry["conflictType"], args.choice):
         print(f"resolved {entry['id']} as {args.choice}: route through the capture path's export "

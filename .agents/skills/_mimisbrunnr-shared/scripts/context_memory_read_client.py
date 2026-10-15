@@ -52,7 +52,9 @@ def main():
 
     command = sub.add_parser("probe")
     command.set_defaults(func=client.cmd_probe)
-    for name, function in (("query", client.cmd_query), ("paths", client.cmd_paths),
+    # `query` is the unmarked variant: this is the shared recall path, and it never writes a session
+    # marker — a caller that must mark (odin's marked import, kvasir `import`) does so itself.
+    for name, function in (("query", client.cmd_query_unmarked), ("paths", client.cmd_paths),
                            ("ticket-paths", client.cmd_ticket_paths)):
         command = sub.add_parser(name, aliases=["import"] if name == "query" else [])
         client.add_payload_arguments(command)
