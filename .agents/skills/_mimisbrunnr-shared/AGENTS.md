@@ -1,11 +1,11 @@
 # _mimisbrunnr-shared — AI Context
 
 AI Context: the one shared script folder for the `mimisbrunnr` plugin. Decided in
-[HLD-010](../../../docs/hlds/010-skills-distribution/) (LADR-01); the cross-plugin counterpart is
+[HLD-010](https://github.com/generic-automation-and-it/smooth-ai-product-context-memory/tree/main/docs/hlds/010-skills-distribution/) (LADR-01); the cross-plugin counterpart is
 LADR-02.
 
-> **References.** Every HLD, LADR, NFR, BRD, issue and PR number in this file belongs to the
-> upstream repository, `generic-automation-and-it/smooth-ai-product-context-memory`
+> **References.** Every HLD, LADR, NFR, BRD, issue and PR number in this file, and every PR-gate or CI claim,
+> belongs to the upstream repository, `generic-automation-and-it/smooth-ai-product-context-memory`
 > (`docs/hlds/`, `docs/brd/`), not to a repository this skill is vendored into.
 
 ## TL;DR
@@ -78,11 +78,11 @@ cost the skill its own script folder.
   `.codex/skills` are symlinks to `.agents/skills`, so they resolve it with no copy step. A route
   that drops the folder breaks every consumer at once — loudly, not silently. Both routes were
   measured on 2026-10-14 with the real move in place; see
-  [NFR-04](../../../docs/hlds/010-skills-distribution/nfrs/NFR-04-shared-folder-on-every-route.md).
+  [NFR-04](https://github.com/generic-automation-and-it/smooth-ai-product-context-memory/blob/main/docs/hlds/010-skills-distribution/nfrs/NFR-04-shared-folder-on-every-route.md).
 
 ## Contexts
 
-- [`../../../docs/hlds/010-skills-distribution/AGENTS.md`](../../../docs/hlds/010-skills-distribution/AGENTS.md) — the design this folder implements.
+- [Upstream HLD-010 `AGENTS.md`](https://github.com/generic-automation-and-it/smooth-ai-product-context-memory/blob/main/docs/hlds/010-skills-distribution/AGENTS.md) — the design this folder implements.
 - [`../mimisbrunnr-odin-context-memory/AGENTS.md`](../mimisbrunnr-odin-context-memory/AGENTS.md) — the capture contract's owner.
 - [`../AGENTS.md`](../AGENTS.md) — the skills area this folder sits in.
 
@@ -92,4 +92,6 @@ cost the skill its own script folder.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-15 | Review-loop simplifications: `dedup.py` reuses the gate's redirect guard instead of a second copy and orders its outcomes by what happened to the candidate; `session_marker.py show` reports an unreadable marker (exit 2) instead of printing an empty object; both `session_marker.py` copies stay byte-identical. | review loop |
+| 2026-10-15 | **Consumer review 5535929651 closed in the shared scripts.** `dedup.py` judges the joined URL (`gate.resolve_url`), refuses redirects, never echoes an HTTP error body, refuses a `noul` outside 0..1 instead of clamping, parses the read client's framed `items` answer, and keeps a candidate `possible-duplicate` while any match is unjudged or any pair has no verdict. `deepsearch.py` requires `groupUuid` on every row. `review_queue.py` scrubs every string leaf of the candidate, `reason` and `evidence`, scrubs `resolve --edit` text, and caps on unresolved entries. `session_marker.py` gains `read_marker`/`MarkerUnreadable`: a default export refuses an unreadable marker (`boundary` exits 2) — re-copied byte-identical to `ai-understanding`. The read client's `query` uses `cmd_query_unmarked` and writes no marker. HLD/NFR links are absolute upstream URLs. Finding 25 (partly skipped `set` receipts) skipped: the server's `Skipped` counts links, every item persists. | consumer review 5535929651 |
 | 2026-10-14 | **Folder created; B2 move landed.** Nine scripts plus `conflict_menus.json` moved out of `mimisbrunnr-odin-context-memory/scripts/` and heimdallr's `find_session_metadata.py` out of its own skill's folder; kvasir's WET `session_marker.py` and `decisions_rubric.json` collapsed into the shared copy rather than staying behind as second copies. Three consumers rewired (heimdallr's redactor, kvasir's client, saga-dossier's composer), odin's own script table split, and this file created so the folder has its own context. | HLD-010 LADR-01, issue 222 |

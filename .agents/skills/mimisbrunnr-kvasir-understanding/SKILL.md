@@ -9,7 +9,8 @@ effort: high  # judgement on understanding vs scoped fact, and capture-path funn
 The four operations are **never conflated**. The verbs share a direction with `ai-understanding`, not a
 target: `ai-understanding --import` reads local Understanding files into the session, while Kvasir
 `import` queries the live store; `ai-understanding --export` writes local files, while Kvasir `export`
-sends session material through the capture path to the live store. All switches are **off by default**.
+sends session material through the capture path to the live store. Switches default per verb, as
+documented under each — most are off, but Heimdallr autofill is **on** for `export` and `dump`.
 
 | Operation | Direction | Reads store? | Writes store? |
 |---|---|---|---|
@@ -49,9 +50,11 @@ what was marked, so imported context is never re-proposed as new (echo).
   (atomic write), holding references (ids + versions + subjects, plus selector + as-of
   on `--all`/selector-wide imports for replay) — **never memory content**. No Host, API or
   schema change.
-- Session id: first non-empty of `CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID`,
-  `OPENCODE_SESSION_ID`, `COPILOT_AGENT_SESSION_ID`, `PI_SESSION_ID`, else explicit
-  `--session <id>`, else no marker (the verb still runs and prints `Marker: none`).
+- Session id: an explicit `--session <id>` wins; else the first non-empty of
+  `CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID`, `OPENCODE_SESSION_ID`, `COPILOT_AGENT_SESSION_ID`,
+  `PI_SESSION_ID`; else no marker (the verb still runs and prints `Marker: none`).
+- An unreadable marker is not an absent one: a default `export` refuses (`Boundary: refused …`,
+  nothing sent) until the file is inspected or moved, or `--all` is passed.
 - The **last** marked import is the boundary; every marked import's ids stay excluded.
   `load`/`import` print one `Marker:` line (`set`, `extended`, `skipped (--nomarker)`,
   `none`); `export`/`dump` print one `Boundary:` line (`marker <time>, N excluded` |
@@ -325,7 +328,7 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
 - The dump is written to the gitignored `.context/` tree, so it is not committed.
 - **The content is redacted before the file is written**, by the shared `redact.py` (the capture
   skill's redactor, reached through the plugin's shared script folder — see
-  [HLD-010](../../docs/hlds/010-skills-distribution/)), and the rule names hit are reported. If the redactor cannot run, the dump is refused and
+  [HLD-010](https://github.com/generic-automation-and-it/smooth-ai-product-context-memory/tree/main/docs/hlds/010-skills-distribution/)), and the rule names hit are reported. If the redactor cannot run, the dump is refused and
   nothing is written. This is the second net; the first is never pasting a credential into a dump.
 - **Personal data is redacted too, but only what has a shape.** A personal-data pass after the secret
   pass replaces email addresses and UPN-style `user@domain` identifiers (rule `email-address`; an SSH

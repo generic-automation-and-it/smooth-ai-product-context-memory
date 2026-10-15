@@ -450,8 +450,11 @@ def _render_record(parts: dict) -> list[str]:
 
 def render_store(records: list[dict], src: str, asof: dt.date | None,
                  all_kinds: bool = False,
-                 max_chars: int | None = DEFAULT_MAX_CHARS) -> list[str]:
+                 max_chars: int | None = DEFAULT_MAX_CHARS) -> tuple[list[str], list[dict]]:
     """Render store records as cited context, cutting whole records to fit `max_chars`.
+
+    Returns the lines and the records actually rendered: the session marker records only those, since
+    a record cut by kind, window or budget never reached the session and must not be excluded from it.
 
     The budget bounds the **rendered records**, not the header or the closing notice. Records render in
     the source's own order — a store export's array order, or the newest-version-per-slug order a folder
@@ -465,7 +468,7 @@ def render_store(records: list[dict], src: str, asof: dt.date | None,
 
     A cut is a **narrowing**, never a compression: no record is ever truncated or summarised to fit.
     """
-    blocks: list[tuple[dict, list[str]]] = []
+    blocks: list[tuple[dict, dict, list[str]]] = []
     non_kind = out_of_window = 0
     for record in records:
         parts = five_parts(record)
@@ -475,19 +478,21 @@ def render_store(records: list[dict], src: str, asof: dt.date | None,
         if not in_window(parts, asof):
             out_of_window += 1
             continue
-        blocks.append((parts, _render_record(parts)))
+        blocks.append((record, parts, _render_record(parts)))
 
     rendered: list[list[str]] = []
+    rendered_records: list[dict] = []
     cut: list[dict] = []
     used = 0
     stopped = False
-    for parts, block in blocks:
+    for record, parts, block in blocks:
         cost = len("\n".join(block)) + (1 if rendered else 0)
         if stopped or (max_chars is not None and used + cost > max_chars):
             stopped = True
             cut.append(parts)
             continue
         rendered.append(block)
+        rendered_records.append(record)
         used += cost
 
     out = [line for block in rendered for line in block]
@@ -508,7 +513,7 @@ def render_store(records: list[dict], src: str, asof: dt.date | None,
     if cut:
         header.append("- Cut for budget: "
                       + "; ".join(_record_identity(parts) for parts in cut) + ".")
-    return header + out
+    return header + out, rendered_records
 
 
 def parse_frontmatter(body: str) -> tuple[dict, str] | None:
@@ -691,9 +696,11 @@ def cmd_load(args: argparse.Namespace) -> int:
 
     lines = ["# Loaded material — cited grounding context", ""]
     lines += [f"- {note}" for note in notes]
+    rendered = None
     if records is not None:
-        lines += render_store(records, src, args.asof, all_kinds=args.all_kinds,
-                              max_chars=args.max_chars)
+        store_lines, rendered = render_store(records, src, args.asof, all_kinds=args.all_kinds,
+                                              max_chars=args.max_chars)
+        lines += store_lines
     else:
         lines += render_foreign(body, src, args.max_chars)
         if args.asof is not None:
@@ -706,7 +713,7 @@ def cmd_load(args: argparse.Namespace) -> int:
                          "it was not used.")
     lines += ["", DATA_NOTICE]
     print("\n".join(lines))
-    _mark_import(args, "load", records, source_kind)
+    _mark_import(args, "load", rendered, source_kind)
     return 0
 
 
@@ -821,7 +828,7 @@ def query_filters(args: argparse.Namespace, all_kinds: bool) -> dict:
 
 
 def render_table(records: list[dict], all_kinds: bool, asof: dt.date | None,
-                 max_chars: int | None) -> list[str]:
+                 max_chars: int | None) -> tuple[list[str], list[dict]]:
     """One row per record: subject, answer, kind, status, confidence, scope, memory · version, captured.
 
     A table is an **overview**, not the rendered records. The answer cell is truncated so a column
@@ -830,7 +837,7 @@ def render_table(records: list[dict], all_kinds: bool, asof: dt.date | None,
     looks complete in a way prose does not. Nothing is dropped: the budget still cuts whole records,
     and the cut ones are listed.
     """
-    rows, cut, non_kind, out_of_window = [], [], 0, 0
+    rows, rendered_records, cut, non_kind, out_of_window = [], [], [], 0, 0
     used = len(DATA_NOTICE) + 200
     for record in records:
         parts = five_parts(record)
@@ -853,6 +860,7 @@ def render_table(records: list[dict], all_kinds: bool, asof: dt.date | None,
             cut.append(parts)
             continue
         rows.append(row)
+        rendered_records.append(record)
         used += cost
 
     out = [
@@ -875,7 +883,7 @@ def render_table(records: list[dict], all_kinds: bool, asof: dt.date | None,
     if cut:
         lines.append(f"- {len(cut)} record(s) cut for the {max_chars}-character budget: "
                      + "; ".join(_record_identity(p) for p in cut) + ".")
-    return out + lines
+    return out + lines, rendered_records
 
 
 def _cell(text: str) -> str:
@@ -961,13 +969,15 @@ def cmd_import(args: argparse.Namespace) -> int:
     if args.table:
         # The notice frames the table before a reader skims it; on the prose path it closes the block.
         lines += ["", DATA_NOTICE]
-        lines += render_table(records, all_kinds, args.asof, args.max_chars)
+        table_lines, rendered = render_table(records, all_kinds, args.asof, args.max_chars)
+        lines += table_lines
     else:
-        lines += render_store(records, "the store", args.asof, all_kinds=all_kinds,
-                              max_chars=args.max_chars)
+        store_lines, rendered = render_store(records, "the store", args.asof,
+                                              all_kinds=all_kinds, max_chars=args.max_chars)
+        lines += store_lines
         lines += ["", DATA_NOTICE]
     print("\n".join(lines))
-    _mark_import(args, "import", records, "store-export", selector=filters)
+    _mark_import(args, "import", rendered, "store-export", selector=filters)
     return 0
 
 
@@ -1912,9 +1922,24 @@ def _persist_proposed(args: argparse.Namespace, candidates: list[dict], group_uu
     Returns (proposed, queued_only). Never raises: persistence is additive to an export whose main
     write already succeeded, so a failure is a NOTE and the candidates stay queued — never a refusal
     that undoes or blocks the export.
+
+    Split into consecutive ≤ MAX_CANDIDATES batches, each with its own preflight, veto and write, as the
+    clean export is: one over-cap request was refused by the capture client's preflight, and every held
+    candidate silently stayed out of the Console review queue.
     """
-    if not candidates:
-        return 0, 0
+    proposed = queued_only = 0
+    seen: set[str] = set()
+    for start in range(0, len(candidates), MAX_CANDIDATES):
+        batch_proposed, batch_queued = _persist_proposed_batch(
+            args, candidates[start:start + MAX_CANDIDATES], group_uuid, binding, seen)
+        proposed += batch_proposed
+        queued_only += batch_queued
+    return proposed, queued_only
+
+
+def _persist_proposed_batch(args: argparse.Namespace, candidates: list[dict], group_uuid: str,
+                            binding: dict, seen: set[str]) -> tuple[int, int]:
+    """One ≤ MAX_CANDIDATES batch of `_persist_proposed`. `seen` carries subjects across batches."""
     now = dt.datetime.now(dt.timezone.utc)
     rc, out, err = _run_capture_client(
         WRITE_CLIENT, ["preflight"],
@@ -1925,7 +1950,7 @@ def _persist_proposed(args: argparse.Namespace, candidates: list[dict], group_uu
               f"{len(candidates)} held stayed in the review queue file.", file=sys.stderr)
         return 0, len(candidates)
     version_map = build_version_map(out, group_uuid)
-    persist, seen = [], set()
+    persist = []
     queued_only = 0
     for index, candidate in enumerate(candidates):
         subject = _subject(candidate)
@@ -2041,7 +2066,11 @@ def cmd_export(args: argparse.Namespace) -> int:
               + "; an explicit flag overrides it.")
 
     print(f"EXPORT PREPARED from {src} ({source_kind}) — via mimisbrunnr-odin-context-memory, the sole writer.")
-    marker, boundary = _export_boundary(args)
+    try:
+        marker, boundary = _export_boundary(args)
+    except _marker.MarkerUnreadable as error:
+        print(f"REFUSED: {_marker.unreadable_line(error)}", file=sys.stderr)
+        return 1
     print(boundary)
     if marker is not None:
         candidates, echo_dropped, supersessions = _apply_marker_exclusions(candidates, marker)
@@ -2707,14 +2736,7 @@ def _mark_import(args: argparse.Namespace, verb: str, records: list[dict] | None
         # selector-wide import with no ids would exclude nothing (Boundary: none).
         # The selector rides alongside for future append-only replay (LADR-11 D9 note
         # 2026-10-14: "instead" read as "in addition" — ids serve present exclusion).
-        for record in records:
-            try:
-                parts = five_parts(record)
-            except (AttributeError, TypeError):
-                continue
-            if parts.get("uuid"):
-                items.append({"id": parts["uuid"], "version": parts.get("version"),
-                              "subject": parts.get("question") or parts.get("subject") or ""})
+        items = _marker_items(records)
         if all_kinds or selector is not None:
             sel = dict(selector or {})
             # Breadth is what was asked, not a default: only an explicit --all marks
@@ -2724,19 +2746,12 @@ def _mark_import(args: argparse.Namespace, verb: str, records: list[dict] | None
             sel.setdefault("source", source_kind)
             as_of = dt.date.today().isoformat()
         if not items and sel is None:
-            # Id-less import (foreign-shaped, understanding-file units): history.
+            # Id-less, slug-less import (foreign-shaped): history.
             print(_marker.marker_line("history", sid))
             return
     if nomarker:
         # Log ids for lineage without moving the boundary (D5).
-        for record in records or []:
-            try:
-                parts = five_parts(record)
-            except (AttributeError, TypeError):
-                continue
-            if parts.get("uuid"):
-                items.append({"id": parts["uuid"], "version": parts.get("version"),
-                              "subject": parts.get("question") or parts.get("subject") or ""})
+        items = _marker_items(records or [])
         try:
             _marker.record_import("kvasir", sid, harness, verb, True, items,
                                   selector or None, None)
@@ -2755,18 +2770,40 @@ def _mark_import(args: argparse.Namespace, verb: str, records: list[dict] | None
     print(_marker.marker_line(status, sid, count))
 
 
+def _marker_items(records: list[dict]) -> list[dict]:
+    """The marker reference for each loaded record: its store id, else an Understanding file's slug.
+
+    A file unit has a slug and no uuid; recorded as id-less history it excluded nothing, so a default
+    export proposed the unit the session had just loaded. The slug is the file identity the export
+    already excludes by (LADR-11 "Identity per target").
+    """
+    items: list[dict] = []
+    for record in records:
+        try:
+            parts = five_parts(record)
+        except (AttributeError, TypeError):
+            continue
+        subject = parts.get("question") or parts.get("subject") or ""
+        if parts.get("uuid"):
+            items.append({"id": parts["uuid"], "version": parts.get("version"), "subject": subject})
+        elif isinstance(record.get("slug"), str) and record["slug"]:
+            items.append({"slug": record["slug"], "subject": subject})
+    return items
+
+
 def _export_boundary(args: argparse.Namespace) -> tuple[dict | None, str]:
     """Load this session's kvasir marker for a default export.
 
     Returns (marker_or_None, boundary_line). ``export --all`` ignores the
     marker; no session id (or a marker with no exclusions) behaves as --all (D7).
+    An unreadable marker raises ``MarkerUnreadable``: it is not an absent one.
     """
     if bool(getattr(args, "export_all", False)):
         return None, _marker.boundary_line(None, ignored=True)
     sid, _ = _marker_session(args)
     if not sid:
         return None, _marker.boundary_line(None)
-    marker = _marker.load_marker("kvasir", sid)
+    marker = _marker.read_marker("kvasir", sid)
     return marker, _marker.boundary_line(marker)
 
 
@@ -3181,7 +3218,12 @@ def cmd_dump(args: argparse.Namespace) -> int:
         print("REDACTED before writing: "
               + ", ".join(f"{name} x{count}" for name, count in sorted(findings.items())))
     print(f"Discover this folder by name: {folder.name}")
-    _, dump_boundary = _export_boundary(args)
+    try:
+        _, dump_boundary = _export_boundary(args)
+    except _marker.MarkerUnreadable as error:
+        # A dump selects nothing by the marker; the line is reported, and the receipt below moves the
+        # unreadable file aside.
+        dump_boundary = _marker.unreadable_line(error)
     print(dump_boundary)
     # A successful dump marks too (amended LADR-11): the folder entry moves the boundary
     # so the next default export starts after it. No ids — a dump carries authored prose.

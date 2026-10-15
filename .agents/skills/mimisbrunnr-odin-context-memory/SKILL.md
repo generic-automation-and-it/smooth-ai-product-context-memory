@@ -26,9 +26,11 @@ client has `import` only; it has no write command to alias.
 
 **Session marker (HLD-007 LADR-11).** A marked `--import`/`query` sets the session's working
 point in `.context/session-markers/odin-<session-id>.json` (references only — ids, versions,
-subjects, or selector + as-of; never content; atomic write). Session id: first non-empty of
-`CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID`, `OPENCODE_SESSION_ID`,
-`COPILOT_AGENT_SESSION_ID`, `PI_SESSION_ID`, else explicit `--session <id>`, else no marker.
+subjects, or selector + as-of; never content; atomic write). Session id: an explicit
+`--session <id>` wins; else the first non-empty of `CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID`,
+`OPENCODE_SESSION_ID`, `COPILOT_AGENT_SESSION_ID`, `PI_SESSION_ID`; else no marker. An unreadable
+marker refuses a default `set`/`export`/`preflight` (`marker-unreadable`) until the file is inspected
+or moved, or `--all` is passed — it still names real exclusions, so it is never read as absent.
 `--nomarker` recalls history that flows into the send; `--all` on `set`/`export` (and
 `preflight`) ignores the marker. `set`/`export` drops echo items (same uuid **and** same
 description) before sending and keeps changed ones as supersessions; `preflight` discloses
@@ -258,7 +260,7 @@ stale, not an alternative reading.
 ## Deterministic Components
 
 The judgement below uses thin scripts from the plugin's shared script folder,
-`.agents/skills/_mimisbrunnr-shared/scripts/` ([HLD-010](../../docs/hlds/010-skills-distribution/)
+`.agents/skills/_mimisbrunnr-shared/scripts/` ([HLD-010](https://github.com/generic-automation-and-it/smooth-ai-product-context-memory/tree/main/docs/hlds/010-skills-distribution/)
 LADR-01). Every script more than one skill uses lives there and is reached by that path — never by
 naming a peer skill's folder. This skill owns the capture contract (sole authority on the write path,
 HLD-002); the folder is only where the code lives. The two composition helpers that belong to this
@@ -296,8 +298,8 @@ with its file-write tool — never `echo`, `printf` or a heredoc — under the g
 content (the very secrets the redactor is about to find) into the command, shell history and process
 list, and lets a quote inside a fact rewrite the command. The same applies to `--payload` files for the
 client. Environment variables are not a content channel either: a child process inherits them, and they
-are readable from the process table on the same account. See
-`.agents/rules/skills/skill-secret-handling.instructions.md`.
+are readable from the process table on the same account. See the `skill-secret-handling` rule
+([upstream](https://github.com/generic-automation-and-it/smooth-ai-product-context-memory/blob/main/.github/instructions/skills/skill-secret-handling.instructions.md)).
 
 **The folder is owner-only and ignores itself before the first batch file is written.** Create it with
 `mkdir -p -m 700 .context/mimisbrunnr-scratch`, and **if it already exists, repair it first**:
@@ -638,8 +640,8 @@ dedup and filter surface, traversal (`paths`) is for following actual written ed
 
 ## Declared Ticket Hierarchy
 
-Authority: [HLD-002 LADR-08](../../../docs/hlds/002-context-memory-write-pipeline/ladrs/LADR-08-practitioner-declared-ticket-hierarchy.md)
-and [HLD-003 LADR-08](../../../docs/hlds/003-graph-edges-on-age/ladrs/LADR-08-captured-ticket-hierarchy.md).
+Authority: [HLD-002 LADR-08](https://github.com/generic-automation-and-it/smooth-ai-product-context-memory/blob/main/docs/hlds/002-context-memory-write-pipeline/ladrs/LADR-08-practitioner-declared-ticket-hierarchy.md)
+and [HLD-003 LADR-08](https://github.com/generic-automation-and-it/smooth-ai-product-context-memory/blob/main/docs/hlds/003-graph-edges-on-age/ladrs/LADR-08-captured-ticket-hierarchy.md).
 
 - Accumulate **explicit practitioner declarations only**, then carry them into the authorized
   end-of-task `--export` checkpoint. No parent inference from spelling, shared groups, memory claims/links,
@@ -722,8 +724,8 @@ and [HLD-003 LADR-08](../../../docs/hlds/003-graph-edges-on-age/ladrs/LADR-08-ca
 
 ## Evidence-only Near Misses
 
-Authority: [HLD-005 LADR-10](../../../docs/hlds/005-contextual-export/ladrs/LADR-10-tag-anchors-have-no-graph-representation.md)
-and [NFR-04](../../../docs/hlds/005-contextual-export/nfrs/NFR-04-completeness.md). This is narrow,
+Authority: [HLD-005 LADR-10](https://github.com/generic-automation-and-it/smooth-ai-product-context-memory/blob/main/docs/hlds/005-contextual-export/ladrs/LADR-10-tag-anchors-have-no-graph-representation.md)
+and [NFR-04](https://github.com/generic-automation-and-it/smooth-ai-product-context-memory/blob/main/docs/hlds/005-contextual-export/nfrs/NFR-04-completeness.md). This is narrow,
 read-only reporting, **not** the full dossier feature, tag identity, synonym support or a tag graph.
 
 1. Freeze the original API query as `originalQuery`, selected UUID/versions and all disclosure/cap

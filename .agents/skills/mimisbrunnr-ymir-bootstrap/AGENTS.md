@@ -1,7 +1,8 @@
 # Mímisbrunnr Bootstrap Maintenance Context
 
 > **References.** The `### LADR-NN` decisions below are this skill's own. Every other HLD, LADR, NFR,
-> BRD, issue and PR number in this file belongs to the upstream repository,
+> BRD, issue and PR number in this file, and every PR-gate or CI claim,
+> belongs to the upstream repository,
 > `generic-automation-and-it/smooth-ai-product-context-memory` (`docs/hlds/`, `docs/brd/`), not to a
 > repository this skill is vendored into.
 
@@ -94,13 +95,13 @@ verify the read client's write-token refusal, group-resolution behavior, lifecyc
 candidate cap. Changes to those contracts can invalidate this skill even when no file here changes.
 
 Frontmatter follows the shared skill shape (`name`, `description`, `effort`) in
-[`../README.md`](../README.md#effort): `effort: xhigh`, because the baseline is stored knowledge later
+[upstream `.agents/skills/README.md`](https://github.com/generic-automation-and-it/smooth-ai-product-context-memory/blob/main/.agents/skills/README.md#effort): `effort: xhigh`, because the baseline is stored knowledge later
 sessions build on. There is no model block and `agents/openai.yaml` sets no `model:` — do not reintroduce
-either (see [`../AGENTS.md`](../AGENTS.md)).
+either (see [upstream `.agents/skills/AGENTS.md`](https://github.com/generic-automation-and-it/smooth-ai-product-context-memory/blob/main/.agents/skills/AGENTS.md)).
 
 This skill neither reads nor uses an environment variable or credential. `CONTEXT_MEMORY_READ_TOKEN` and
 `CONTEXT_MEMORY_WRITE_TOKEN` are used only by the odin read and write clients — the write token only
-inside the subshell around the single write command — per the [skill secret-handling rule](../../../.github/instructions/skills/skill-secret-handling.instructions.md).
+inside a credential subshell around each write-route invocation (`preflight`, `set`, `resolve-group`, `upsert-initiative` and any follow-up write) — per the [skill secret-handling rule](https://github.com/generic-automation-and-it/smooth-ai-product-context-memory/blob/main/.github/instructions/skills/skill-secret-handling.instructions.md) (upstream).
 Whether the tokens are also *absent* from the main agent's environment depends on how the runtime is
 launched, not on this skill: the documented `source .context/mimisbrunnr.env` path exports both into the
 shell that starts the agent. The no-direct-HTTP rule is therefore an instruction the skill keeps, not an
@@ -118,6 +119,7 @@ authorization are available. Static validation is packaging evidence only.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-15 | Credential wording matches odin's: a subshell around each write-route invocation, not the single write command. Effort, skills-area and secret-handling references, and the BR-46 link, are absolute upstream URLs. | consumer review 5535929651 |
 | 2026-10-14 | The runtime gate runs the read client from the plugin's shared script folder (`../_mimisbrunnr-shared/scripts/context_memory_read_client.py`) — HLD-010 B2 moved it out of odin's folder, so a gate still naming odin's `scripts/` path would fail closed against a path that no longer exists. Wording only; no behaviour change. | HLD-010 LADR-01, issue 222 |
 | 2026-10-14 | Read/write subagents removed (odin LADR-008): the runtime gate is a successful read-client `probe` in a shell with no write token, and comparison, capture and recall follow the odin read/write procedures in the same session. | session request |
 | 2026-10-07 | Full `set --dryrun` offered only when the group UUID is known read-only or after authorized creation; an empty group gets the offline plan. | review 5438563690 |

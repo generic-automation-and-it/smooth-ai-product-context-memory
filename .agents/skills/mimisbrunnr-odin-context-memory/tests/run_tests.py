@@ -2340,6 +2340,7 @@ class DeepSearchTests(unittest.TestCase):
         "items not a list": {"items": "00000000-0000-4000-8000-000000000001"},
         "row not an object": {"items": ["00000000-0000-4000-8000-000000000001"]},
         "row without a uuid": {"items": [{"version": 1}]},
+        "row without a groupUuid": {"items": [{"uuid": "00000000-0000-4000-8000-000000000001", "version": 1}]},
     }
 
     def test_an_incomplete_baseline_answer_is_disclosed_never_a_completed_empty_pass(self):
@@ -2471,7 +2472,7 @@ class DeepSearchTests(unittest.TestCase):
         self.assertFalse(result["disclosure"]["possiblyOmitted"])
     @staticmethod
     def row(index):
-        return {"uuid": f"00000000-0000-4000-8000-{index:012d}", "version": 1}
+        return {"uuid": f"00000000-0000-4000-8000-{index:012d}", "groupUuid": "group-1", "version": 1}
 
 
 class RecallDeadlineTests(unittest.TestCase):
@@ -2618,7 +2619,7 @@ class RecallDeadlineTests(unittest.TestCase):
 
     @staticmethod
     def row(index):
-        return {"uuid": f"00000000-0000-4000-8000-{index:012d}", "version": 1}
+        return {"uuid": f"00000000-0000-4000-8000-{index:012d}", "groupUuid": "group-1", "version": 1}
 
 
 class DivergenceTests(unittest.TestCase):
@@ -4213,7 +4214,7 @@ class DirectionAliasTests(unittest.TestCase):
 
         buffer = io.StringIO()
         with _no_write_tokens(), patch.object(sys, "argv", ["read", "import"]), \
-                patch.object(client, "cmd_query", side_effect=fake_query), redirect_stdout(buffer):
+                patch.object(client, "cmd_query_unmarked", side_effect=fake_query), redirect_stdout(buffer):
             rc = read_client.main()
         self.assertEqual(rc, 0)
         self.assertEqual(seen, ["query"])
@@ -4328,6 +4329,34 @@ class SessionMarkerTests(unittest.TestCase):
                                 "statement": "Postgres stores the index."}])
         self.assertIsNotNone(body, "a --nomarker recall is history, not an exclusion")
         self.assertIn("Boundary: none", err)
+
+    def test_the_read_client_query_writes_no_marker(self):
+        """The read client is the shared recall path and never marks (SKILL.md, Session marker)."""
+        import session_marker as sm
+        os.environ["CLAUDE_CODE_SESSION_ID"] = "ses-odin-read"
+        args = SimpleNamespace(payload=None, command="query", nomarker=False, session=None)
+        with patch.object(client, "read_payload", return_value={}), \
+                patch.object(client, "_request", return_value={"items": [self._row("mem-read-1")]}), \
+                redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as err:
+            client.cmd_query_unmarked(args)
+        self.assertNotIn("Marker:", err.getvalue())
+        self.assertIsNone(sm.load_marker("odin", "ses-odin-read"))
+        self.assertFalse(sm.marker_path("odin", "ses-odin-read").exists())
+
+    def test_an_unreadable_marker_refuses_a_default_send(self):
+        """A corrupt marker still names real exclusions: a default send refuses, `--all` proceeds."""
+        import session_marker as sm
+        os.environ["CLAUDE_CODE_SESSION_ID"] = "ses-odin-corrupt"
+        path = sm.marker_path("odin", "ses-odin-corrupt")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{not json", encoding="utf-8")
+        with self.assertRaises(client.ClientError) as raised:
+            self._set([{"uuid": "mem-c-1", "description": "d", "statement": "s"}])
+        self.assertIn("unreadable", str(raised.exception))
+        body, err = self._set([{"uuid": "mem-c-1", "description": "d", "statement": "s"}], all=True)
+        self.assertIsNotNone(body)
+        self.assertIn("Boundary: ignored (--all)", err)
+        self.assertEqual(path.read_text(encoding="utf-8"), "{not json", "the refusal leaves the file as found")
 
     def test_odin_send_ignores_the_kvasir_marker(self):
         import session_marker as sm

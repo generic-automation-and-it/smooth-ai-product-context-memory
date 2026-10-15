@@ -104,6 +104,7 @@ jobs:
           python3 -B .agents/skills/mimisbrunnr-odin-context-memory/tests/run_tests.py
           python3 -B .agents/skills/mimisbrunnr-odin-context-memory/tests/measure_cost.py
           python3 -B .agents/skills/mimisbrunnr-odin-context-memory/tests/test_decisions_gate.py
+          python3 -B .agents/skills/mimisbrunnr-odin-context-memory/tests/test_review_and_dedup.py
 
       - name: Test understanding skill
         run: |
@@ -145,6 +146,15 @@ jobs:
             exit 1
           fi
           echo "no peer-skill script reach (HLD-010 NFR-01)"
+
+      # HLD-010 NFR-05: the installer-owned skills are copied verbatim into other repositories, where
+      # this repository's docs/, rules and workflows do not exist. Outside table rows (changelog and
+      # history), a link may not resolve outside .agents/skills and a rule may not be cited by its
+      # repo-relative path — both become dead references in every vendoring repository.
+      - name: Check vendored skills are self-contained (HLD-010 NFR-05)
+        run: |
+          python3 scripts/check_vendored_skills.py
+          python3 -B -m unittest discover -s scripts -p 'test_check_vendored_skills.py' -v
 
       # Without --postgres only the Docker-free transport checks run; the disposable-container
       # fixture stays an operator-run check (scripts/AGENTS.md).

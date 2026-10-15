@@ -131,8 +131,8 @@ fi
 # only on the Linux CI runner and could not be checked locally before a change like this one.
 needed_keys=$'\n'
 add_provider_key() {
-  local key_name
-  case "$1" in
+  local variable="$1" selector="$2" key_name hint=""
+  case "$selector" in
     GEMINI) key_name=OPENCODE_GEMINI_API_KEY ;;
     COPILOT) key_name=OPENCODE_COPILOT_API_KEY ;;
     OPENAI) key_name=OPENCODE_OPENAI_API_KEY ;;
@@ -141,7 +141,13 @@ add_provider_key() {
     OPENCODE-GO-ANTHROPIC) key_name=OPENCODE_GO_ANTHROPIC_API_KEY ;;
     OPEN_ROUTER) key_name=OPENCODE_OPENROUTER_API_KEY ;;
     '') return ;;
-    *) echo "unsupported OpenCode provider selector: $1" >&2; exit 64 ;;
+    *)
+      # The underscore spelling of a Go selector is the usual slip, and the resolver rejects it too.
+      case "$selector" in OPENCODE_GO_*) hint=" (did you mean '${selector//_/-}'?)" ;; esac
+      echo "unsupported OpenCode provider selector in $variable: '$selector'$hint; expected one of" \
+           "GEMINI, COPILOT, OPENAI, ANTHROPIC, OPENCODE-GO-OPENAI, OPENCODE-GO-RESPONSES," \
+           "OPENCODE-GO-ANTHROPIC, OPEN_ROUTER" >&2
+      exit 64 ;;
   esac
   needed_keys+="$key_name"$'\n'
 }
@@ -149,8 +155,8 @@ add_provider_key() {
 # The v2 background service starts during the health check, before individual
 # model calls. It must retain the review fallback key and, when different, the
 # analyse primary key for that service's lifetime. No other provider key enters.
-add_provider_key "${OPENCODE_REVIEW_REPORT_PROVIDER:-}"
-add_provider_key "${OPENCODE_ANALYSE_PROVIDER:-}"
+add_provider_key OPENCODE_REVIEW_REPORT_PROVIDER "${OPENCODE_REVIEW_REPORT_PROVIDER:-}"
+add_provider_key OPENCODE_ANALYSE_PROVIDER "${OPENCODE_ANALYSE_PROVIDER:-}"
 
 while IFS= read -r name; do
   case "$needed_keys" in

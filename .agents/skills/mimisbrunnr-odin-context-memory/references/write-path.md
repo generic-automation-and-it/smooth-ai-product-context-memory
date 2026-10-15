@@ -21,7 +21,7 @@ then refuse to start:
 ```
 
 The write client lives in the plugin's shared script folder
-([HLD-010](../../../docs/hlds/010-skills-distribution/), LADR-01), so `<skills-root>` is
+([HLD-010](https://github.com/generic-automation-and-it/smooth-ai-product-context-memory/tree/main/docs/hlds/010-skills-distribution/), LADR-01), so `<skills-root>` is
 `.agents/skills`, `.claude/skills` or `.codex/skills` — whichever this tree exposes. Never name a peer
 skill's folder to reach it.
 
@@ -51,6 +51,11 @@ Run exactly once in fixed order:
 3. **Dedupe / derive links**: judge subject matches and links from bounded recall.
 4. **Atomicity check**: one memory per fact; split or skip bundled claims.
 5. **Write**: one transactional `set`; API owns version ordering, identities, and graph writes.
+6. **Held candidates**: a candidate held by atomicity, the value gate or staged dedup is appended to the
+   review queue, and a pure create among them is captured separately as `Status = proposed` — its own
+   preflight, its own `set --dryrun` veto, then its own `set` (`SKILL.md` → *A held candidate is also
+   persisted*). An in-group match, a same-subject twin, a dedup duplicate or a cross-kind holder stays
+   queue-file-only.
 
 **Before creating any batch or payload file, mask and generalise every personal identifier** — any
 personal data within the meaning of the GDPR (information relating to an identified or identifiable

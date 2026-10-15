@@ -887,8 +887,20 @@ def print_recall(payload, *, banner=True):
 
 
 def cmd_query(args):
-    """POST /api/context/query. Semantic-dedup recall surface."""
+    """POST /api/context/query, then mark the session's import boundary (HLD-007 LADR-11)."""
     payload = payload_of(args)
+    resp = _query(payload)
+    _mark_query(args, payload, resp["items"])
+    return resp
+
+
+def cmd_query_unmarked(args):
+    """POST /api/context/query with no marker write — the read client's surface, which never marks."""
+    return _query(payload_of(args))
+
+
+def _query(payload):
+    """POST /api/context/query. Semantic-dedup recall surface."""
     if not isinstance(payload, dict):
         raise ClientError(0, "bad-input", "'query' payload must be an object")
     if "limit" not in payload:
@@ -905,7 +917,6 @@ def cmd_query(args):
         raise ClientError(0, "bad-response", "query response rows must be objects carrying "
                                              "'uuid', 'groupUuid' and 'version'")
     print_recall(resp)
-    _mark_query(args, payload, resp["items"])
     return resp
 
 
@@ -980,7 +991,10 @@ def _load_export_marker(args):
     sid, _ = _marker_session(args)
     if not sid:
         return None, _marker.boundary_line(None)
-    marker = _marker.load_marker("odin", sid)
+    try:
+        marker = _marker.read_marker("odin", sid)
+    except _marker.MarkerUnreadable as error:
+        raise ClientError(0, "marker-unreadable", _marker.unreadable_line(error)) from None
     return marker, _marker.boundary_line(marker)
 
 

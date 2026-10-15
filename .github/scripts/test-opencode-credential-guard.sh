@@ -94,6 +94,24 @@ if OPENCODE_REVIEW_REPORT_PROVIDER=UNKNOWN "$scratch/opencode" --version >/dev/n
   exit 1
 fi
 
+# The refusal names the variable that held the bad value and, for the underscore spelling of a Go
+# selector, the spelling the resolver accepts — a log line with only the value sent a run looking
+# for the wrong variable.
+set +e
+slip="$(OPENCODE_ANALYSE_PROVIDER=OPENCODE_GO_OPENAI "$scratch/opencode" --version 2>&1 >/dev/null)"
+slip_status=$?
+set -e
+[ "$slip_status" -eq 64 ] || { echo "underscore Go selector exited $slip_status, expected 64" >&2; exit 1; }
+case "$slip" in
+  *"in OPENCODE_ANALYSE_PROVIDER: 'OPENCODE_GO_OPENAI'"*"did you mean 'OPENCODE-GO-OPENAI'?"*) ;;
+  *) echo "selector refusal did not name the variable and the fix: $slip" >&2; exit 1 ;;
+esac
+for accepted in GEMINI COPILOT OPENAI ANTHROPIC OPENCODE-GO-OPENAI OPENCODE-GO-RESPONSES \
+                OPENCODE-GO-ANTHROPIC OPEN_ROUTER; do
+  OPENCODE_ANALYSE_PROVIDER="$accepted" "$scratch/opencode" --version >/dev/null 2>&1 \
+    || { echo "documented selector $accepted was rejected" >&2; exit 1; }
+done
+
 mkdir -p "$scratch/project/nested"
 (
   cd "$scratch/project/nested"

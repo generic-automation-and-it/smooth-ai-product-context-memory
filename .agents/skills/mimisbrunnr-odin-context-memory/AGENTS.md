@@ -1,7 +1,8 @@
 # mimisbrunnr-odin-context-memory — AGENTS.md
 
-> **References.** Every HLD, LADR, NFR, BRD, issue and PR number in this file belongs to the upstream
-> repository, `generic-automation-and-it/smooth-ai-product-context-memory` (`docs/hlds/`, `docs/brd/`),
+> **References.** Every HLD, LADR, NFR, BRD, issue and PR number in this file, and every PR-gate or CI claim,
+> belongs to the upstream repository,
+> `generic-automation-and-it/smooth-ai-product-context-memory` (`docs/hlds/`, `docs/brd/`),
 > not to a repository this skill is vendored into.
 
 ## TL;DR
@@ -453,14 +454,21 @@ flowchart LR
    rather than a clean zero); and
    `near_miss_tags.py` schema/scope/basis/
    bounds/output/no-I/O guarantees.
-   Run: `python3 -B .agents/skills/mimisbrunnr-odin-context-memory/tests/run_tests.py`. The PR gate runs it and
-   `tests/measure_cost.py` (reproducible structural cost evidence) in the same step.
+   Run: `python3 -B .agents/skills/mimisbrunnr-odin-context-memory/tests/run_tests.py`. Upstream's PR gate runs it
+   and `tests/measure_cost.py` (reproducible structural cost evidence) in the same step; a repository that
+   vendors this skill is not gated by it — run both yourself.
 - **Decision-gate harness:** `tests/test_decisions_gate.py`
   (`python3 -B .agents/skills/mimisbrunnr-odin-context-memory/tests/test_decisions_gate.py`).
   Most cases drive the gate against a loopback stub server; `RequestPathGuardTests`, `RedirectGuardTests`
   and `LedgerPrivacyTests` are socket-free and pin the host-moving-path refusal, the redirect refusal
   through the real opener (an in-memory 307 transport) and the digest-keyed ledger with its raw-key
   migration.
+- **Review-queue and staged-dedup harness:** `tests/test_review_and_dedup.py`
+  (`python3 -B .agents/skills/mimisbrunnr-odin-context-memory/tests/test_review_and_dedup.py`), run by
+  upstream's PR gate since 2026-10-15. Loopback stubs pin dedup's transport guards (joined-URL authority,
+  redirect refusal, an unechoed error body, a `noul` outside 0..1 refused), the framed `items` parse, and
+  that an unjudged or failed pair never reads as "no duplicate"; the queue cases pin scrubbing of every
+  string leaf, `resolve --edit` text and a fail-closed redactor, and the cap on unresolved entries.
 - **Deterministic near-miss fixtures:** `tests/fixtures/near_miss_tags.json` exercises grounded mismatch,
   exact match, ANY overlap, irrelevant evidence, unsupported plausible synonym and empty tags. Its evidence
   contains the original API query, scope-bound approval entry, and explicit approved lifecycle status.
@@ -477,7 +485,7 @@ flowchart LR
   `score_fixtures.py --emit-model-input` output; the source fixture contains expected answers and is
   scorer-only. A run where the model reads `scenarios.json` is circular and invalid evidence.
   **The judgement itself is not CI-gated, but the harness is:** `run_tests.py::SemanticFixtureTests`
-  invokes the scorer twice and the PR gate runs `run_tests.py` — once to prove the blinded emitter
+  invokes the scorer twice and upstream's PR gate runs `run_tests.py` — once to prove the blinded emitter
   withholds `expected`/`note`/`axis`, and once to assert the **committed** verdicts file scores exactly
   recall 1.0 / precision 1.0. So a stale expectation is not inert: it is *certified*. A fixture whose
   expected verdict contradicts the shipped contract will not fail a test, it will make the recorded run
@@ -547,12 +555,13 @@ redaction detector is a stdin→stdout fingerprint script reporting rule names o
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-15 | **Consumer review 5535929651.** `SKILL.md` states the implemented session-id order (`--session` first) and the unreadable-marker refusal; `read-path.md` says the read client never marks and routes a marked import to the capture client; `write-path.md` gains the held-candidate `Status = proposed` step; the secret-handling and HLD references are upstream links; Test References scope CI claims to upstream. Harness: `run_tests.py` +2 (read client writes no marker, unreadable marker refuses a default send) and a `groupUuid`-less deepsearch row; `test_review_and_dedup.py` +11 (redirect, host-moving path, unechoed error body, out-of-range `noul`, framed `items`, unjudged matches, open failure set, nested/edit redaction, fail-closed redactor, unresolved cap) and now runs in the PR gate — it was never wired in. 265 + 174 + 30 green on 3.9 and 3.13. | consumer review 5535929651 |
 | 2026-10-15 | **G1: held candidates persist as `Status = proposed`.** The queued-not-dropped rule gains its store half: a held-back candidate is written with `Status = proposed` (full fields, own preflight + veto, creates only), which is what the Console review queue reads; the queue-file append stays as the local trail. This extends the existing approval-gating rule (status, not persistence) to held candidates; kvasir `export` enforces the same in code with harness 254 -> 259. | HLD-009 G1 |
 | 2026-10-14 | **The shared scripts moved out of this skill's folder (HLD-010 B2 / LADR-01).** `context_memory_client.py`, `context_memory_read_client.py`, `redact.py`, `atomicity.py`, `deepsearch.py`, `dedup.py`, `review_queue.py`, `conflict_menus.json`, `decisions_gate.py`, `decisions_rubric.json`, `session_marker.py` and `near_miss_tags.py` moved to `.agents/skills/_mimisbrunnr-shared/scripts/`, which kvasir, saga-dossier, heimdallr and ymir-bootstrap now reference by path instead of reaching into this skill. `authority.py` and `divergence.py` stayed, because nothing outside this skill imports them. The harnesses (`run_tests.py`, `test_decisions_gate.py`, `test_review_and_dedup.py`, `score_decisions_calibration.py`) resolve both folders, the two-module `_load` split is pinned by an explicit `scripts` argument, and `test_both_rubric_copies_are_identical` became `test_no_skill_inside_the_plugin_carries_a_nested_rubric_copy` — the copy it watched was deleted, so the pin is now the absence of one. All 263 + 174 + 19 cases green. | HLD-010 LADR-01, issue 222 |
 | 2026-10-14 | **Subject-less gate records are scored every call; their budget is not durable.** `decisions_gate.py score` kept the positional `index:N` identity for reporting but persisted it in the attempt ledger, so prose/dump exports went `attempts-exhausted` once the low positions were spent and the gate was silently off. Such records now skip the ledger read/write (scored as attempt 1, `"durable": false`); a load drops pre-existing `index:N` keys and reports the count as `ledgerIndexPurged`. Harness +7 gate cases. | issue 222 |
 | 2026-10-14 | **Credential subshell covers each write-route invocation.** `WRITE_ROUTES` sends the write credential on `preflight` too (persists nothing, authenticates write-only), and the checkpoint runs `preflight`/`set`/`resolve-group`/`upsert-initiative` plus follow-up writes — a single-write wording left the others without a credential. `SKILL.md`, both procedures and the Non-Negotiable now say `each write-route invocation` with the full subcommand list; the harness pins the wording in all four docs. Also fixed a `memory-write.md` reference to `references/write-path.md` and an agents leftover in `README.md`. | PR #221 review |
 | 2026-10-14 | **A success-shaped zero-write `set` answer marks nothing.** When the response carries `created`/`versioned`/`unchanged` counts summing to 0, the export receipt records no entry (`Marker: skipped (nothing written)`) instead of falling back to the request's own uuids; a response with no counts keeps the fallback. | PR #221 review |
-| 2026-10-14 | **Read/write subagents removed (LADR-008, supersedes LADR-005).** `.agents/agents/memory-{read,write}.md` deleted; the skill-local contracts moved to `references/read-path.md` / `references/write-path.md` without agent frontmatter, and the session runs both paths itself. The write credential is loaded only inside a subshell around the single write command, so the read client keeps running in the same session. `SKILL.md` *Where Each Step Runs* rewritten; harness `AgentContractTests` re-pointed at the procedures and gained a no-registration guard. | session request |
+| 2026-10-14 | **Read/write subagents removed (LADR-008, supersedes LADR-005).** `.agents/agents/memory-{read,write}.md` deleted; the skill-local contracts moved to `references/read-path.md` / `references/write-path.md` without agent frontmatter, and the session runs both paths itself. The write credential is loaded only inside a credential subshell (since widened to each write-route invocation, row above), so the read client keeps running in the same session. `SKILL.md` *Where Each Step Runs* rewritten; harness `AgentContractTests` re-pointed at the procedures and gained a no-registration guard. | session request |
 | 2026-10-14 | **Export receipt prefers server-confirmed uuids** (falls back to request uuid/createUuid when the response is not positional); **corrupt marker quarantined** to `<name>.corrupt-<stamp>` with a stderr warning instead of silent replace. | ai-review 3, 4 |
 
 | 2026-10-14 | **Session marker: import marks the export boundary (HLD-007 LADR-11).** `query`/`import` gain `--nomarker`/`--session`, write the odin marker and print `Marker:` on stderr; `set`/`export` gain `--all`/`--nomarker`/`--session`, drop echo items (same uuid and description) before sending, keep changed ones as supersessions, and append sent ids on success (`Marker: set (export, …)`; dry runs, refusals and `--nomarker` sends mark nothing); `preflight` gains `--all`/`--session` and discloses exact-subject matches as supersession routing. `Boundary:` on stderr; stdout stays parseable JSON. The read-only client never marks (shared recall path). Harness 248 -> 258. | HLD-007 LADR-11 |

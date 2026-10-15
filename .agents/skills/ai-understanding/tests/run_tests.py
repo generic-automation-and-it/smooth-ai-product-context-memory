@@ -268,6 +268,42 @@ class CaseCollisionTests(unittest.TestCase):
             self.assertIn("case-insensitive", err)
 
 
+class DateAndPlaceholderTests(unittest.TestCase):
+    """`updated` and `provenance.learned` are ISO calendar dates, and a template placeholder left in any
+    field the explicit checks do not cover still fails validation (consumer review 5535929651 #33/#34)."""
+
+    def problems_for(self, unit_text: str) -> list[str]:
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "understandings" / "proj-20260930-1700"
+            folder.mkdir(parents=True)
+            (folder / f"alpha{ui.UNIT_SUFFIX}").write_text(unit_text, encoding="utf-8")
+            return ui.load_units(Path(tmp) / "understandings")[2]
+
+    def unit(self, updated="2026-09-30", learned="2026-09-30", extra=""):
+        return (UNIT_FRONTMATTER.format(slug="alpha", updated=updated)
+                .replace(f"  learned: {updated}\n", f"  learned: {learned}\n")
+                .replace("---\n# Answer", f"{extra}---\n# Answer"))
+
+    def test_a_clean_unit_has_no_problem(self):
+        self.assertEqual(self.problems_for(self.unit()), [])
+
+    def test_malformed_dates_are_reported(self):
+        for updated, learned, field in (("2026-13-01", "2026-09-30", "'updated'"),
+                                        ("20260930", "2026-09-30", "'updated'"),
+                                        ("2026-09-30", "2026-02-30", "'provenance.learned'")):
+            with self.subTest(updated=updated, learned=learned):
+                found = [p for p in self.problems_for(self.unit(updated, learned)) if "ISO date" in p]
+                self.assertEqual(len(found), 1, found)
+                self.assertIn(field, found[0])
+
+    def test_a_placeholder_in_an_optional_field_is_reported(self):
+        for extra in ("agents_context: <repo-relative path>\n",
+                      "links:\n  - <[[slug]] of a related unit>\n"):
+            with self.subTest(extra=extra):
+                found = [p for p in self.problems_for(self.unit(extra=extra)) if "template placeholder" in p]
+                self.assertEqual(len(found), 1, found)
+
+
 class InheritedShapeTests(unittest.TestCase):
     """`provenance.inherited` must be a block list; any other present shape is a validation problem.
 
@@ -1101,6 +1137,31 @@ class SessionMarkerCLITests(unittest.TestCase):
         self.assertIn("Marker: none (no session id)", out)
         rc, out, _ = self._run("boundary", "--type", "ai-understanding")
         self.assertIn("Boundary: none", out)
+
+    def test_an_import_recorded_by_slug_is_excluded_by_slug(self):
+        """The documented import form records a file identity the export excludes (review #9/#13)."""
+        import session_marker as sm
+        os.environ["PI_SESSION_ID"] = "ses-ai-slug"
+        rc, out, _ = self._run("record", "--type", "ai-understanding", "--verb", "import",
+                               "--slug", "slug-1::What is this?")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("Marker: set", out)
+        marker = sm.load_marker("ai-understanding", "ses-ai-slug", Path(self.tmp.name))
+        self.assertEqual(sm.exclusion_slugs(marker), {"slug-1"})
+
+    def test_an_unreadable_marker_refuses_the_default_boundary(self):
+        """A corrupt marker is not an absent one: `boundary` refuses (exit 2); `--all` still answers."""
+        os.environ["PI_SESSION_ID"] = "ses-ai-corrupt"
+        Path(self.tmp.name, "ai-understanding-ses-ai-corrupt.json").write_text("{nope", encoding="utf-8")
+        rc, out, _ = self._run("boundary", "--type", "ai-understanding")
+        self.assertEqual(rc, 2, out)
+        self.assertIn("Boundary: refused", out)
+        rc, out, _ = self._run("boundary", "--type", "ai-understanding", "--all")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("Boundary: ignored (--all)", out)
+        rc, out, err = self._run("show", "--type", "ai-understanding")
+        self.assertEqual(rc, 2, "show must not read a corrupt marker as an empty one")
+        self.assertIn("unreadable", err)
 
     def test_marker_holds_references_never_content(self):
         import json as _json
