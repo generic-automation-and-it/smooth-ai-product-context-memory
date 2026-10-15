@@ -150,7 +150,7 @@ recalls the live store via `import` (read token only) and orchestrates the captu
   `import --heimdallr` is therefore **parsed and refused with a pointer to `export`/`dump`**, exactly
   as `--store` is — do not "clean up" the accepted flag, it is what turns a dead argparse error into
   a reason the caller can act on.
-- **`--import --table` is an overview, and it does not resolve the group's tickets or repo.** One row per
+- **`import --table` is an overview, and it does not resolve the group's tickets or repo.** One row per
   record (Subject, Answer, Kind, Status, Confidence, Scope, Memory · version, Captured); the answer cell
   is truncated and that is stated. An item carries only `groupUuid`, so tickets and repo filter but are
   **not** shown — resolving them for display would need a second lookup per record, and they already
@@ -255,7 +255,7 @@ recalls the live store via `import` (read token only) and orchestrates the captu
 
 ## Test References
 
-- **Committed L0 harness (CI-gated):** `tests/run_tests.py` — stdlib `unittest`, no external
+- **Committed L0 harness (CI-gated upstream; a vendoring repository runs it itself):** `tests/run_tests.py` — stdlib `unittest`, no external
   runner. A default load creates no files (NFR-01); store-export five-part rendering keeps uuid/version
   attribution; `proposed`/`program` scope flagged, never promoted (NFR-03); `--asof` filters the validity
   window and states the omission; the store-load cap — an under-budget render is byte-identical to
@@ -326,6 +326,7 @@ recalls the live store via `import` (read token only) and orchestrates the captu
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-15 | **consumer review 5538013336.** Held candidates that differ only by case or punctuation no longer fail the proposed-write veto for their whole batch: `_persist_proposed_batch` drops the later twin of each preflight `intra_batch_collisions` entry. Docs: a dry run defers the server-side veto and still appends to the local review queue; `import --table`; the harness docstring says `export` writes by default. | consumer review 5538013336 |
 | 2026-10-15 | Review-loop simplifications: `render_store` / `render_table` return `(lines, rendered)` instead of a wrapper pair, and one `_marker_items` replaces two copies of the marker-reference loop. Every skill `AGENTS.md` reference notice now covers PR-gate and CI claims. | review loop |
 | 2026-10-15 | **Consumer review 5535929651.** `load`/`import` mark only the records they rendered (`render_store_records` / `render_table_records`), not ones cut by kind, `--asof` or budget; a loaded Understanding file marks its slug; `_persist_proposed` splits held candidates into ≤ `MAX_CANDIDATES` batches with a preflight, veto and write each; a default `export` refuses an unreadable marker. Docs: capture order (redact first), the redactor resolved from the skills root, the current-session `export` input rule, Heimdallr's default-on autofill, the implemented session-id order, upstream HLD/BRD links, and CI claims scoped to upstream. Harness +4. | consumer review 5535929651 |
 | 2026-10-15 | **G1: `export` persists held candidates as `Status = proposed`.** An atomicity-held or decision-held candidate reaches the store as a proposed memory (full fields, own preflight + `set --dryrun` veto first, after the clean chunks), so the Console review queue can see it; the queue-file append stays as the local audit/CLI trail. Only pure creates persist — in-group preflight matches, same-subject held twins, dedup duplicates and cross-kind holders stay queued (a version bump would flip current to proposed). All-held writes now resolve the group and persist instead of refusing; dry runs preview `would propose: up to N`. Failures are NOTEs, never export refusals. One pre-existing case pinned the old all-held refusal and now pins the new contract; 5 new `ProposedPersistenceTests` (persist-after-veto, match stays queued, pair persists once, preflight-down keeps queued, dry run proposes nothing). Harness 254 -> 259. | HLD-009 G1 |

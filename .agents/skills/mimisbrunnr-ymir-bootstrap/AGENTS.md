@@ -119,6 +119,7 @@ authorization are available. Static validation is packaging evidence only.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-15 | The failed-gate test prompt uses neutral wording: the probe also refuses for a write token or a missing dependency, not only an unreachable store. | consumer review 5538013336 |
 | 2026-10-15 | Credential wording matches odin's: a subshell around each write-route invocation, not the single write command. Effort, skills-area and secret-handling references, and the BR-46 link, are absolute upstream URLs. | consumer review 5535929651 |
 | 2026-10-14 | The runtime gate runs the read client from the plugin's shared script folder (`../_mimisbrunnr-shared/scripts/context_memory_read_client.py`) — HLD-010 B2 moved it out of odin's folder, so a gate still naming odin's `scripts/` path would fail closed against a path that no longer exists. Wording only; no behaviour change. | HLD-010 LADR-01, issue 222 |
 | 2026-10-14 | Read/write subagents removed (odin LADR-008): the runtime gate is a successful read-client `probe` in a shell with no write token, and comparison, capture and recall follow the odin read/write procedures in the same session. | session request |

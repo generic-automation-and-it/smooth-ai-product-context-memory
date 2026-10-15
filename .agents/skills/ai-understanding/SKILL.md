@@ -441,7 +441,7 @@ python3 .agents/skills/ai-understanding/scripts/understanding_index.py
 
 A marked `--import` sets the session's working point; a default `--export` excludes what was
 marked, so imported Understandings are never re-proposed as new. The marker is client-side only:
-`.context/session-markers/ai-understanding-<session-id>.json` (references — slug ids and subjects,
+`.context/session-markers/ai-understanding-<session-id>.json` (an ID with characters outside `A-Za-z0-9._-` gets a short digest suffix so distinct IDs never share a file; references — slug ids and subjects,
 or selector + as-of — never unit bodies; no Host change). One marker per skill; this export reads
 only its own. Session id: an explicit `--session <id>` (passed as `--session` to the commands
 below) wins; else the first non-empty of `CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID`,

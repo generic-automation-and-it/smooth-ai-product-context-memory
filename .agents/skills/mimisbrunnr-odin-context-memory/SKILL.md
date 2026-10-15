@@ -25,7 +25,7 @@ client has `import` only; it has no write command to alias.
 | `--deepsearch` | Runs bounded expansion: up to four keyword queries of 25 and five depth-one traversals of 20, with 400 unique UUID/version candidates overall. More inspection, never more authority or irreversibility. |
 
 **Session marker (HLD-007 LADR-11).** A marked `--import`/`query` sets the session's working
-point in `.context/session-markers/odin-<session-id>.json` (references only — ids, versions,
+point in `.context/session-markers/odin-<session-id>.json` (an ID with characters outside `A-Za-z0-9._-` gets a short digest suffix so distinct IDs never share a file; references only — ids, versions,
 subjects, or selector + as-of; never content; atomic write). Session id: an explicit
 `--session <id>` wins; else the first non-empty of `CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID`,
 `OPENCODE_SESSION_ID`, `COPILOT_AGENT_SESSION_ID`, `PI_SESSION_ID`; else no marker. An unreadable
@@ -35,8 +35,9 @@ or moved, or `--all` is passed — it still names real exclusions, so it is neve
 `preflight`) ignores the marker. `set`/`export` drops echo items (same uuid **and** same
 description) before sending and keeps changed ones as supersessions; `preflight` discloses
 exact-subject matches as supersession routing. `query`/`import` prints `Marker:` and
-`set`/`export`/`preflight` print `Boundary:` — both on **stderr**, so stdout stays parseable
-JSON. A successful `set`/`export` appends the sent ids to the marker and prints
+`set`/`export`/`preflight` print `Boundary:` — both on **stderr**, so a marker never changes stdout.
+`set`/`export`/`preflight` stdout is plain JSON; recall (`query`/`import`) keeps its `> …` notice line
+before the JSON, so parse recall output from its first `{` (`references/read-path.md`). A successful `set`/`export` appends the sent ids to the marker and prints
 `Marker: set (export, N items)`; dry runs, refusals and `--nomarker` sends mark nothing. The read-only client (`context_memory_read_client.py`) never writes markers: it is the
 shared recall path (kvasir `import` shells out to it and writes its own marker), so an odin
 recall that must mark runs through this client's `query`/`import`.
@@ -98,7 +99,8 @@ which hold in every harness.
   spelling present (`CONTEXT_MEMORY_WRITE_TOKEN`, the Host's `ApiAccess__WriteToken`, or the
   controller's `Parameters__api-write-token`, any case, `:` read as `__`).
 - The write credential is never ambient. Load it with the deliberate write step
-  (`set -a && source ~/.mimisbrunnr/credentials && set +a`) **only inside a subshell around each
+  (`set -a && source ~/.mimisbrunnr/credentials && set +a`; the file `CONTEXT_MEMORY_CREDENTIAL_FILE`
+  names instead, when set) **only inside a subshell around each
   write-route invocation** (any subcommand taking the write credential — `preflight`, `set`,
   `resolve-group`, `upsert-initiative`, `update-group`, `append-description`, `create-link`,
   `propose-label`, `ticket-parent`; see `write-path.md`), so it never persists in the session's shell and the read client keeps running there.

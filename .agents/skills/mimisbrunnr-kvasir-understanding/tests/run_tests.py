@@ -5,7 +5,7 @@ Run: python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/tests/run_tests.
 
 Covers the guarantees that matter: a default load writes nothing (NFR-01), `import` reads the live store
 under the read token and writes nothing (NFR-02), loaded material is cited as data (NFR-03), `export`
-dry-runs by default and creates nothing, and the session dump produces a discoverable folder without
+writes by default and `--dryrun` creates nothing, and the session dump produces a discoverable folder without
 touching the store (LADR-07).
 """
 
@@ -4171,6 +4171,33 @@ class SessionMarkerTests(unittest.TestCase):
         self.assertEqual(rc, 1, out + err)
         self.assertIn("Boundary: refused", err)
         self.assertEqual(calls, [], "nothing reaches the capture client")
+
+    def test_case_equivalent_held_subjects_do_not_veto_the_batch(self):
+        """The server collides subjects by slug. Two held candidates that differ only by case used to reach
+        `set --dryrun` together and fail the veto for the whole batch, unrelated candidates included."""
+        held = [{"subject": "Cache Policy", "statement": "First."},
+                {"subject": "cache policy", "statement": "Second."},
+                {"subject": "Unrelated", "statement": "Third."}]
+        calls = []
+
+        def capture(script, argv, payload):
+            calls.append((tuple(argv), payload))
+            if argv[0] == "preflight":
+                return 0, json.dumps({"candidates": [], "intra_batch_collisions": [
+                    {"leftIndex": 0, "rightIndex": 1, "subjectSlug": "cache-policy"}]}), ""
+            return 0, json.dumps({"created": len(payload["items"])}), ""
+
+        original = uc._run_capture_client
+        uc._run_capture_client = capture
+        try:
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                proposed, queued = uc._persist_proposed(
+                    SimpleNamespace(nomarker=True, session=None), held, "g-1", {"tags": ""})
+        finally:
+            uc._run_capture_client = original
+        self.assertEqual((proposed, queued), (2, 1))
+        sent = [item["statement"] for a, p in calls if a == ("set",) for item in p["items"]]
+        self.assertEqual(sent, ["First.", "Third."], "the later twin stays queue-file-only")
 
     def test_held_candidates_are_persisted_in_capped_batches(self):
         """Over MAX_CANDIDATES held candidates split into batches, each with its own preflight, veto and

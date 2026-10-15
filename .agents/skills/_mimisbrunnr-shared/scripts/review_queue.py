@@ -20,6 +20,7 @@ Python 3.9+, stdlib only.
 """
 
 import argparse
+import contextlib
 import datetime
 import hashlib
 import json
@@ -27,6 +28,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 DEFAULT_QUEUE = "~/.mimisbrunnr/review/queue.jsonl"
@@ -39,6 +41,11 @@ DEFAULT_CAP = 1000
 
 DIR_MODE = 0o700
 FILE_MODE = 0o600
+
+# A held write waits this long for another writer, and a lock file older than the stale age is a dead
+# writer's — a queue write takes milliseconds, so neither bound is ever reached by a live one.
+LOCK_WAIT_SECONDS = 10
+LOCK_STALE_SECONDS = 30
 
 SCRIPTS = Path(__file__).resolve().parent
 MENUS = SCRIPTS / "conflict_menus.json"
@@ -240,22 +247,30 @@ def entry_id(source, candidate):
 
 
 def _read_entries():
-    """Every record in the queue as a list of dicts. A missing file is empty, not an error."""
+    """Every record in the queue as a list of dicts. A missing file is empty, not an error.
+
+    A line that is not a JSON object refuses the read. Skipping it hid a lost candidate from `list`,
+    `show` and the unresolved count, so the cap could admit another hold while a held one was gone, and
+    acting on a guess would resolve the wrong candidate.
+    """
     path = queue_path()
     if not path.is_file():
         return []
     entries = []
     with open(path, encoding="utf-8") as handle:
-        for line in handle:
+        for number, line in enumerate(handle, 1):
             line = line.strip()
             if not line:
                 continue
             try:
-                entries.append(json.loads(line))
+                record = json.loads(line)
             except ValueError:
-                # A corrupt line is reported, not read as data; the record it was is one we cannot act
-                # on, and acting on a guess would resolve the wrong candidate.
-                continue
+                record = None
+            if not isinstance(record, dict):
+                raise QueueError("corrupt-queue",
+                                 f"line {number} of {path} is not a queue record; inspect or move the file "
+                                 "before holding or resolving anything else")
+            entries.append(record)
     return entries
 
 
@@ -281,6 +296,64 @@ def _ensure_permissions(path):
         # A best-effort hardening; the queue is still written, but the mode is reported rather than
         # silently trusted. The caller sees the refusal surface if it matters.
         pass
+
+
+@contextlib.contextmanager
+def _queue_lock():
+    """Serialise every read-modify-write of the queue across processes.
+
+    A write copies the whole file and replaces it, so two writers that each read the same copy would
+    each report success while the later replacement erased the earlier record. An exclusively-created
+    lock file is portable (no fcntl/msvcrt split) and is the same on every platform the skills run on.
+    """
+    path = queue_path()
+    path.parent.mkdir(mode=DIR_MODE, parents=True, exist_ok=True)
+    lock = path.with_name(path.name + ".lock")
+    deadline = time.monotonic() + LOCK_WAIT_SECONDS
+    while True:
+        try:
+            os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, FILE_MODE))
+            break
+        except FileExistsError:
+            if _lock_is_stale(lock):
+                with contextlib.suppress(FileNotFoundError):
+                    os.unlink(lock)
+            elif time.monotonic() > deadline:
+                raise QueueError("queue-busy", f"another process holds {lock}; no entry was written") from None
+            else:
+                time.sleep(0.05)
+    try:
+        yield
+    finally:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(lock)
+
+
+def _lock_is_stale(lock):
+    try:
+        return time.time() - lock.stat().st_mtime > LOCK_STALE_SECONDS
+    except FileNotFoundError:
+        return False
+
+
+def _write_record(record):
+    """Append one record to the queue by temp-file replace. The caller holds `_queue_lock`."""
+    path = queue_path()
+    fd, temp = tempfile.mkstemp(dir=str(path.parent), prefix=".queue-")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            if path.is_file():
+                with open(path, encoding="utf-8") as existing:
+                    for line in existing:
+                        handle.write(line)
+            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+        os.chmod(temp, FILE_MODE)
+        os.replace(temp, path)
+        _ensure_permissions(path)
+    except OSError:
+        with contextlib.suppress(OSError):
+            os.unlink(temp)
+        raise
 
 
 def append(entry):
@@ -316,33 +389,16 @@ def append(entry):
         "menu": choices,
     }
 
-    open_entries = entry_count()
-    if open_entries + 1 > entry_cap():
-        # Refused, not truncated: a queue that silently drops its oldest held candidate would lose the
-        # very record a reviewer was about to act on.
-        raise QueueError("queue-full",
-                         f"the review queue holds {open_entries} unresolved entry(ies); the {entry_cap()}-entry "
-                         "cap is reached. Review or resolve the queue before adding more.")
-
-    path = queue_path()
-    path.parent.mkdir(mode=DIR_MODE, parents=True, exist_ok=True)
-    fd, temp = tempfile.mkstemp(dir=str(path.parent), prefix=".queue-")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            if path.is_file():
-                with open(path, encoding="utf-8") as existing:
-                    for line in existing:
-                        handle.write(line)
-            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
-        os.chmod(temp, FILE_MODE)
-        os.replace(temp, path)
-        _ensure_permissions(path)
-    except OSError:
-        try:
-            os.unlink(temp)
-        except OSError:
-            pass
-        raise
+    with _queue_lock():
+        open_entries = entry_count()
+        if open_entries + 1 > entry_cap():
+            # Refused, not truncated: a queue that silently drops its oldest held candidate would lose
+            # the very record a reviewer was about to act on.
+            raise QueueError("queue-full",
+                             f"the review queue holds {open_entries} unresolved entry(ies); the "
+                             f"{entry_cap()}-entry cap is reached. Review or resolve the queue before "
+                             "adding more.")
+        _write_record(record)
     return record["id"]
 
 
@@ -445,18 +501,8 @@ def cmd_resolve(args):
             print(f"REFUSED: {exc.detail}", file=sys.stderr)
             return 1
 
-    path = queue_path()
-    path.parent.mkdir(mode=DIR_MODE, parents=True, exist_ok=True)
-    fd, temp = tempfile.mkstemp(dir=str(path.parent), prefix=".queue-")
-    with os.fdopen(fd, "w", encoding="utf-8") as handle:
-        if path.is_file():
-            with open(path, encoding="utf-8") as existing:
-                for line in existing:
-                    handle.write(line)
-        handle.write(json.dumps(resolution, ensure_ascii=False) + "\n")
-    os.chmod(temp, FILE_MODE)
-    os.replace(temp, path)
-    _ensure_permissions(path)
+    with _queue_lock():
+        _write_record(resolution)
 
     if is_capture_choice(entry["conflictType"], args.choice):
         print(f"resolved {entry['id']} as {args.choice}: route through the capture path's export "

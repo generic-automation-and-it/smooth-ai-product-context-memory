@@ -303,7 +303,7 @@ def main():
     except (ValueError, client.ClientError) as error:
         print(f"Deep search failed: {error}", file=sys.stderr)
         return 1
-    print(json.dumps(result, indent=2))
+    client.print_recall(result)
     return 0
 
 
