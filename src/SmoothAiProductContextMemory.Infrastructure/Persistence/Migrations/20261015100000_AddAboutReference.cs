@@ -67,36 +67,45 @@ public sealed class AddAboutReference : Migration
             -- has incoming ABOUT edges, refuse the release (raise, like the ownership-conflict path) so a
             -- memory -> ticket reference is never lost silently. The guard runs before the DETACH DELETE.
             CREATE OR REPLACE FUNCTION public.ticket_graph_membership() RETURNS trigger AS $fn$
-            DECLARE ticket jsonb;
+            DECLARE
+                t_provider text;
+                t_key text;
             BEGIN
                 PERFORM pg_advisory_xact_lock(734921, 1);
                 IF TG_OP <> 'DELETE' THEN
-                    FOR ticket IN SELECT DISTINCT value FROM jsonb_array_elements(NEW.tickets) LOOP
+                    -- Iterate the two text fields, not the jsonb element. The field-iteration form
+                    -- is robust to the loop variable's runtime type and removes the `->>` calls that
+                    -- the original used on a `FOR ticket IN SELECT jsonb_array_elements(...)` loop.
+                    FOR t_provider, t_key IN
+                        SELECT DISTINCT value->>'provider', value->>'key'
+                        FROM jsonb_array_elements(NEW.tickets) LOOP
                         IF EXISTS (
                             SELECT 1 FROM public.memory_group g
                             WHERE g.id <> NEW.id AND EXISTS (
                                 SELECT 1 FROM jsonb_array_elements(g.tickets) t
-                                WHERE t->>'provider' = ticket->>'provider' AND t->>'key' = ticket->>'key')) THEN
+                                WHERE t->>'provider' = t_provider AND t->>'key' = t_key)) THEN
                             RAISE EXCEPTION 'Ticket ownership conflicts' USING ERRCODE = '23505';
                         END IF;
                         PERFORM public.ticket_graph_cypher(
                             format('MERGE (v:Ticket {provider: %s, key: %s}) RETURN 1',
-                                to_json(ticket->>'provider')::text, to_json(ticket->>'key')::text));
+                                to_json(t_provider)::text, to_json(t_key)::text));
                     END LOOP;
                 END IF;
                 IF TG_OP <> 'INSERT' THEN
-                    FOR ticket IN SELECT DISTINCT value FROM jsonb_array_elements(OLD.tickets) LOOP
+                    FOR t_provider, t_key IN
+                        SELECT DISTINCT value->>'provider', value->>'key'
+                        FROM jsonb_array_elements(OLD.tickets) LOOP
                         IF NOT EXISTS (
                             SELECT 1 FROM public.memory_group g WHERE EXISTS (
                                 SELECT 1 FROM jsonb_array_elements(g.tickets) t
-                                WHERE t->>'provider' = ticket->>'provider' AND t->>'key' = ticket->>'key')) THEN
-                            IF public.ticket_graph_about_count(ticket->>'provider', ticket->>'key') > 0 THEN
+                                WHERE t->>'provider' = t_provider AND t->>'key' = t_key)) THEN
+                            IF public.ticket_graph_about_count(t_provider, t_key) > 0 THEN
                                 RAISE EXCEPTION 'Ticket % cannot be released: it has memory references',
-                                    ticket->>'provider' || ':' || ticket->>'key' USING ERRCODE = '23505';
+                                    t_provider || ':' || t_key USING ERRCODE = '23505';
                             END IF;
                             PERFORM public.ticket_graph_cypher(
                                 format('MATCH (v:Ticket) WHERE v.provider = %s AND v.key = %s DETACH DELETE v RETURN 1',
-                                    to_json(ticket->>'provider')::text, to_json(ticket->>'key')::text));
+                                    to_json(t_provider)::text, to_json(t_key)::text));
                         END IF;
                     END LOOP;
                 END IF;
