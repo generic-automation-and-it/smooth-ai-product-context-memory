@@ -60,7 +60,10 @@ public static class LinkProductRepo
 
             if (request.DryRun)
             {
-                return new Response(request.ProductName, request.Repo, conflict is null, conflict, true);
+                // A change happens only when the repo is free; an already-linked-to-this-product repo
+                // is a no-op, and a repo owned by another product is a refusal, not a change.
+                bool wouldChange = currentOwner is null;
+                return new Response(request.ProductName, request.Repo, wouldChange, conflict, true);
             }
 
             if (conflict is not null)
@@ -71,6 +74,15 @@ public static class LinkProductRepo
 
             RepoLinkResult result = await graph.LinkRepoAsync(
                 request.ProductName, request.Repo, request.Reason, request.Source ?? "api", cancellationToken);
+
+            // The pre-check above runs without the advisory lock, so a concurrent link to another
+            // product can land between it and the locked write. That write reports the true owner; a
+            // non-null owner here is a conflict, not a silent no-op.
+            if (result.ExistingProductName is not null)
+            {
+                throw new ConflictException(
+                    $"Repo '{request.Repo}' is already linked to product '{result.ExistingProductName}'. Unlink it there or pick another product.");
+            }
 
             bool changed = result.Created;
             logger.LogInformation("Link product repo completed. Changed: {Changed}", changed);

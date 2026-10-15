@@ -1,7 +1,9 @@
 using FluentValidation;
 using Mediator;
+using Microsoft.EntityFrameworkCore;
 using SmoothAiProductContextMemory.Application.Abstractions;
 using SmoothAiProductContextMemory.Application.Common.Exceptions;
+using SmoothAiProductContextMemory.Application.Common.Persistence;
 
 namespace SmoothAiProductContextMemory.Application.Features.ProductNames;
 
@@ -37,7 +39,9 @@ public static class GetProductLinks
         }
     }
 
-    public sealed class Handler(IProductGraph graph) : IRequestHandler<Request, Response>
+    public sealed class Handler(
+        IApplicationDbContext db,
+        IProductGraph graph) : IRequestHandler<Request, Response>
     {
         public async ValueTask<Response> Handle(Request request, CancellationToken cancellationToken)
         {
@@ -64,6 +68,14 @@ public static class GetProductLinks
             }
 
             string initiativeName = request.InitiativeName!;
+            // An unregistered initiative is a 404, matching the productName direction — a typo never
+            // reads as "nothing captured for this initiative".
+            if (!await db.Initiatives.AnyAsync(i => i.Name == initiativeName, cancellationToken))
+            {
+                throw new NotFoundException(
+                    $"Initiative '{initiativeName}' is not registered. Register it with 'upsert-initiative' first.");
+            }
+
             IReadOnlyList<string> products = await graph.GetProductsForInitiativeAsync(
                 initiativeName, cancellationToken);
             return new Response(

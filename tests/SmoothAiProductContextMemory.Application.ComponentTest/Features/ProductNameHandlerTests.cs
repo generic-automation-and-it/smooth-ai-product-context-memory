@@ -102,10 +102,36 @@ public sealed class ProductNameHandlerTests(AspireFixture aspire) : HandlerTestB
             await NewLinks().Handle(new GetProductLinks.Request(ProductName: "nope"), Ct));
 
         await Should.ThrowAsync<NotFoundException>(async () =>
+            await NewLinks().Handle(new GetProductLinks.Request(InitiativeName: "orphan"), Ct));
+
+        await Should.ThrowAsync<NotFoundException>(async () =>
             await NewQuery().Handle(Query("nope"), Ct));
 
         await Should.ThrowAsync<NotFoundException>(async () =>
             await NewLinkInitiative().Handle(new LinkProductInitiative.Request("nope", "alpha", "reason"), Ct));
+    }
+
+    [Fact]
+    public async Task Repo_link_dry_run_reports_no_change_for_same_product_and_conflict_for_other()
+    {
+        await RegisterAsync("gmail");
+        await RegisterAsync("drive");
+        await LinkRepoAsync("gmail", "acme/widgets");
+
+        // Already linked to this product: dry run predicts no change, and the write is a no-op.
+        LinkProductRepo.Response same = await NewLinkRepo().Handle(
+            new LinkProductRepo.Request("gmail", "acme/widgets", "reason", DryRun: true), Ct);
+        same.Changed.ShouldBeFalse();
+        same.ConflictProductName.ShouldBeNull();
+
+        // Another product owns the repo: dry run reports the conflict, write refuses.
+        LinkProductRepo.Response conflictDry = await NewLinkRepo().Handle(
+            new LinkProductRepo.Request("drive", "acme/widgets", "reason", DryRun: true), Ct);
+        conflictDry.Changed.ShouldBeFalse();
+        conflictDry.ConflictProductName.ShouldBe("gmail");
+
+        await Should.ThrowAsync<ConflictException>(async () =>
+            await LinkRepoAsync("drive", "acme/widgets"));
     }
 
     [Fact]
@@ -258,7 +284,7 @@ public sealed class ProductNameHandlerTests(AspireFixture aspire) : HandlerTestB
         new(ProductGraph, Loggers.CreateLogger<UpsertProductName.Handler>());
 
     private GetProductLinks.Handler NewLinks() =>
-        new(ProductGraph);
+        new(AppDb, ProductGraph);
 
     private LinkProductInitiative.Handler NewLinkInitiative() =>
         new(AppDb, ProductGraph, Loggers.CreateLogger<LinkProductInitiative.Handler>());
