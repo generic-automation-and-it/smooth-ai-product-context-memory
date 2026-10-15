@@ -15,7 +15,7 @@ drives the capture pipeline rather than reimplementing it; the browser holds no 
   invariant (HLD-002) and the no-model rule (HLD-005 §2.6) hold (LADR-03).
 - **Read is ambient, write is never ambient.** Caddy injects the read token into the `/api` proxy; the
   write token is server-side and used only on an explicit approve (LADR-02, NFR-02).
-- **Loopback only** (NFR-01). No network-accessible bind.
+- **Loopback only** (NFR-01). Published on loopback only; the container binds all interfaces so the Aspire/DCP proxy can reach it.
 - **Browse filters map 1:1 onto the query API** — no client-side re-filtering after materialisation
   (LADR-06). Filtering in the browser would defeat the server indexes.
 - **The graph is bounded** — depth ≤ the store's declared max, with an edge cap (LADR-05, NFR-05). It is

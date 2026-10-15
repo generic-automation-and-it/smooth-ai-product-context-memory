@@ -3,7 +3,7 @@
 | Attribute | Boundary |
 |---|---|
 | **Attribute** | Boundary / network reach |
-| **Target** | The Console binds loopback only |
+| **Target** | The Console is reachable on loopback only |
 | **Status** | Draft |
 
 The viewer pod and Caddy bind all interfaces *inside the container* (`:5180`) so the
