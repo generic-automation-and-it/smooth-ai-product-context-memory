@@ -2333,6 +2333,17 @@ class DeepSearchTests(unittest.TestCase):
 
     # Issue 184: each shape below is an answer that is not a complete page. Before the fix every one of
     # them was read as "no rows" and reported as a completed pass — full coverage the recall never got.
+    def test_the_standalone_entry_point_frames_what_it_prints(self):
+        """`deepsearch.py` run directly returned recalled records with no recallNotice."""
+        out = io.StringIO()
+        with patch.object(sys, "stdin", io.StringIO("{}")), \
+                patch.object(deepsearch, "execute", return_value={"items": [], "disclosure": {}}), \
+                redirect_stdout(out):
+            self.assertEqual(deepsearch.main(), 0)
+        printed = out.getvalue()
+        self.assertIn(client.RECALL_NOTICE, printed)
+        self.assertIn(client.RECALL_NOTICE_KEY, json.loads(printed[printed.index("{"):]))
+
     INCOMPLETE_QUERY_ANSWERS = {
         "empty body": None,
         "not an object": [],

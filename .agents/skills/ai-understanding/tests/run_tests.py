@@ -1163,6 +1163,34 @@ class SessionMarkerCLITests(unittest.TestCase):
         self.assertEqual(rc, 2, "show must not read a corrupt marker as an empty one")
         self.assertIn("unreadable", err)
 
+    def test_distinct_session_ids_never_share_a_marker(self):
+        """`team/a` and `team_a` sanitise alike; one file would exclude another session's imports."""
+        os.environ["PI_SESSION_ID"] = "team/a"
+        self._run("record", "--type", "ai-understanding", "--slug", "slug-1::Q?")
+        os.environ["PI_SESSION_ID"] = "team_a"
+        rc, out, _ = self._run("boundary", "--type", "ai-understanding")
+        self.assertIn("Boundary: none", out)
+        names = [p.name for p in Path(self.tmp.name).glob("ai-understanding-*.json")]
+        self.assertEqual(len(names), 1, names)
+        self.assertRegex(names[0], r"^ai-understanding-team_a-[0-9a-f]{8}\.json$")
+
+    def test_an_id_that_needs_no_sanitising_keeps_its_plain_marker_name(self):
+        os.environ["PI_SESSION_ID"] = "ses-plain-1"
+        self._run("record", "--type", "ai-understanding", "--slug", "slug-1::Q?")
+        self.assertTrue(Path(self.tmp.name, "ai-understanding-ses-plain-1.json").is_file())
+
+    def test_a_marker_recorded_for_another_session_is_refused_not_read(self):
+        """The stored session is checked on load, so a file that landed under the wrong name is not
+        trusted as this session's boundary."""
+        os.environ["PI_SESSION_ID"] = "ses-owner"
+        self._run("record", "--type", "ai-understanding", "--slug", "slug-1::Q?")
+        shutil.copy(Path(self.tmp.name, "ai-understanding-ses-owner.json"),
+                    Path(self.tmp.name, "ai-understanding-ses-other.json"))
+        os.environ["PI_SESSION_ID"] = "ses-other"
+        rc, out, _ = self._run("boundary", "--type", "ai-understanding")
+        self.assertEqual(rc, 2, out)
+        self.assertIn("Boundary: refused", out)
+
     def test_marker_holds_references_never_content(self):
         import json as _json
         os.environ["CODEX_THREAD_ID"] = "ses-ai-4"

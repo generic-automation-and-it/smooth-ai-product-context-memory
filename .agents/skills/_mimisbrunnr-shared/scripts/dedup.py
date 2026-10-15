@@ -37,6 +37,7 @@ from pathlib import Path
 # from the machine credential file (its own import-time side effect), and it does not import the
 # redactor at module scope, so it is safe here — the redactor runs over stdin as a subprocess, never as
 # a startup dependency.
+import context_memory_client as client
 import decisions_gate as gate
 
 SCRIPTS = Path(__file__).resolve().parent
@@ -183,16 +184,15 @@ def model_pair(candidate, existing, settings):
 
     candidate_state, existing_state = redact_pair(candidate, existing)
 
-    state = {"candidate": candidate_state, "existing": existing_state}
-    oversize = size_guard(state)
-    if oversize:
-        raise DedupError("oversize", oversize)
-
     payload = {
         "model": settings["model"],
-        "state": state,
+        "state": {"candidate": candidate_state, "existing": existing_state},
         "questions": {DEDUP_QUESTION_KEY: DEDUP_QUESTION},
     }
+    # The request is what is bounded, not the pair inside it: the model name and the question ride along.
+    oversize = size_guard(payload)
+    if oversize:
+        raise DedupError("oversize", oversize)
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     try:
         url = gate.resolve_url(settings)
@@ -301,9 +301,12 @@ def _store_lexical_query(terms, group_uuid, repository, limit):
         "currentOnly": True,
         "limit": limit,
     }
+    # The read client refuses to start with a write token in its environment, and an export run carries
+    # one at its write checkpoint — without this every lookup would read as unexamined.
     proc = subprocess.run(
         [sys.executable, "-B", str(READ_CLIENT), "query", "--payload"],
         input=json.dumps(payload), capture_output=True, text=True, encoding="utf-8",
+        env=client.without_write_tokens(),
     )
     if proc.returncode != 0:
         return None

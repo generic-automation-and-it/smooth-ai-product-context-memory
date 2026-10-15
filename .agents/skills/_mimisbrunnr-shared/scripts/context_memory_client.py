@@ -50,6 +50,14 @@ def write_tokens_present(environ=None):
     return sorted(name for name, value in environ.items()
                   if value and name.casefold().replace(":", "__") in WRITE_TOKEN_NAMES)
 
+def without_write_tokens(environ=None):
+    """A copy of the environment minus every spelling of the write token, matched the way the read client
+    refuses them (case-insensitive, `:` read as `__`) — for a child process that must run read-only."""
+    environ = os.environ if environ is None else environ
+    return {name: value for name, value in environ.items()
+            if name.casefold().replace(":", "__") not in WRITE_TOKEN_NAMES}
+
+
 # Static, configurable candidate cap (decision 6). Change this constant to widen or narrow the
 # preflight batch without touching pipeline logic. Mirrors Preflight.MaxCandidates.
 MAX_CANDIDATES = 20

@@ -1607,6 +1607,21 @@ def preflight_match_count(preflight_output: str) -> int:
     return sum(1 for r in results if isinstance(r, dict) and r.get("matches"))
 
 
+def _later_colliding_indices(preflight_output: str) -> set[int]:
+    """The candidate indices a preflight collision marks as the later twin of an earlier candidate.
+
+    The server compares subjects by slug, so a case- or punctuation-equivalent pair collides where an
+    exact-string compare sees two subjects — and `set` refuses the whole batch for one such pair.
+    """
+    try:
+        collisions = (json.loads(preflight_output) or {}).get("intra_batch_collisions") or []
+    except (ValueError, AttributeError):
+        return set()
+    return {max(c["leftIndex"], c["rightIndex"]) for c in collisions
+            if isinstance(c, dict) and isinstance(c.get("leftIndex"), int)
+            and isinstance(c.get("rightIndex"), int)}
+
+
 def _intra_batch_collision_subject(preflight_output: str) -> str | None:
     """The ``subjectSlug`` of the first intra-batch collision, or None.
 
@@ -1916,7 +1931,8 @@ def _persist_proposed(args: argparse.Namespace, candidates: list[dict], group_uu
 
     Only pure creates persist. A preflight match in the export's group stays queue-file-only: a
     version bump would flip that memory's current version to proposed and hide approved canon from
-    default reads. Same-subject pairs within the batch collapse the same way. The `set --dryrun`
+    default reads. Same-subject pairs within the batch collapse the same way — by the preflight's own
+    slug-normalised collisions, not only by exact string. The `set --dryrun`
     veto runs first, so a held candidate gets the same pre-write check as a clean one.
 
     Returns (proposed, queued_only). Never raises: persistence is additive to an export whose main
@@ -1950,11 +1966,12 @@ def _persist_proposed_batch(args: argparse.Namespace, candidates: list[dict], gr
               f"{len(candidates)} held stayed in the review queue file.", file=sys.stderr)
         return 0, len(candidates)
     version_map = build_version_map(out, group_uuid)
+    later_twins = _later_colliding_indices(out)
     persist = []
     queued_only = 0
     for index, candidate in enumerate(candidates):
         subject = _subject(candidate)
-        if index in version_map or subject in seen:
+        if index in version_map or index in later_twins or subject in seen:
             queued_only += 1
             continue
         seen.add(subject)

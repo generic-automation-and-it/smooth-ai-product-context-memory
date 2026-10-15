@@ -17,6 +17,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -209,6 +210,58 @@ class ReviewQueueTests(unittest.TestCase):
         self.assertEqual(rq.entry_count(), 0)
         rq.append(self._entry(candidate={"subject": "Another", "statement": "a second held fact"}))
         self.assertEqual(rq.entry_count(), 1)
+
+    def test_concurrent_appends_lose_no_held_candidate(self):
+        """Each append copies the file and replaces it; unserialised, the later replace erased the earlier
+        record while both callers reported success."""
+        count = 8
+        barrier = threading.Barrier(count)
+        errors = []
+
+        def hold(index):
+            try:
+                barrier.wait()
+                rq.append(self._entry(candidate={"subject": f"Subject {index}", "statement": f"Claim {index}."}))
+            except Exception as exc:  # noqa: BLE001 — surfaced through the assertion below
+                errors.append(exc)
+
+        threads = [threading.Thread(target=hold, args=(i,)) for i in range(count)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(errors, [])
+        subjects = {json.loads(line)["candidate"]["subject"]
+                    for line in self.queue.read_text(encoding="utf-8").splitlines()}
+        self.assertEqual(subjects, {f"Subject {i}" for i in range(count)})
+        self.assertFalse(self.queue.with_name(self.queue.name + ".lock").exists(), "the lock is released")
+
+    def test_a_held_lock_refuses_the_write_and_a_stale_one_is_cleared(self):
+        lock = self.queue.with_name(self.queue.name + ".lock")
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        lock.write_text("", encoding="utf-8")
+        with patch.object(rq, "LOCK_WAIT_SECONDS", 0.2):
+            with self.assertRaises(rq.QueueError) as ctx:
+                rq.append(self._entry())
+        self.assertEqual(ctx.exception.outcome, "queue-busy")
+        self.assertFalse(self.queue.exists(), "a refused write leaves the queue as found")
+        old = time.time() - rq.LOCK_STALE_SECONDS - 5
+        os.utime(lock, (old, old))
+        rq.append(self._entry())
+        self.assertEqual(len(self.queue.read_text(encoding="utf-8").splitlines()), 1)
+
+    def test_a_corrupt_line_refuses_every_read_and_write(self):
+        """A skipped line hid a lost candidate and let the cap admit another hold."""
+        rq.append(self._entry())
+        with open(self.queue, "a", encoding="utf-8") as handle:
+            handle.write("{not json\n[1, 2]\n")
+        for action in (rq.entry_count, lambda: rq.append(self._entry(reason="another"))):
+            with self.subTest(action=getattr(action, "__name__", "append")):
+                with self.assertRaises(rq.QueueError) as ctx:
+                    action()
+                self.assertEqual(ctx.exception.outcome, "corrupt-queue")
+        self.assertNotEqual(self._run(["list"]), 0)
+        self.assertEqual(len(self.queue.read_text(encoding="utf-8").splitlines()), 3, "nothing was rewritten")
 
     def test_queue_file_is_600_and_outside_the_checkout(self):
         """Mode 600 and under the redirected path, never inside the repo tree."""
@@ -451,6 +504,41 @@ class DedupStageTests(unittest.TestCase):
                 proposals = dedup.stage([candidate], query_fn=query, model_fn=model,
                                         settings=self._settings(enabled=True))
                 self.assertEqual(proposals[0]["outcome"], "possible-duplicate")
+
+    def test_the_size_guard_bounds_the_request_not_the_pair(self):
+        """The model name and the question ride along with the pair; a pair just under the limit used to
+        pass a guard that then let a larger request out."""
+        candidate = {"subject": "Storage engine", "statement": "Postgres chosen for AGE"}
+        existing = {"uuid": "u1", "subject": "Storage"}
+        redacted = dedup.redact_pair(candidate, existing)
+        pair_bytes = len(json.dumps({"candidate": redacted[0], "existing": redacted[1]},
+                                    ensure_ascii=False).encode("utf-8"))
+        stub = Stub([0.9])
+        self.addCleanup(stub.close)
+        settings = self._settings(enabled=True, base_url=stub.url())
+        with patch.object(dedup, "MAX_BODY_BYTES", pair_bytes + 50):
+            with self.assertRaises(dedup.DedupError) as ctx:
+                dedup.model_pair(candidate, existing, settings)
+        self.assertEqual(ctx.exception.outcome, "oversize")
+        self.assertEqual(stub.requests, [], "an oversize request is never sent")
+
+    def test_the_lexical_lookup_runs_without_the_write_token(self):
+        """The read client refuses to start with a write token present; an export carries one."""
+        framed = "> notice\n" + json.dumps({"items": [{"uuid": "u1", "groupUuid": "g1", "version": 1}]})
+        seen = {}
+
+        def fake_run(argv, **kwargs):
+            seen.update(kwargs)
+            return subprocess.CompletedProcess(argv, 0, stdout=framed, stderr="")
+
+        env = {"CONTEXT_MEMORY_WRITE_TOKEN": "w", "ApiAccess__WriteToken": "w", "apiaccess:writetoken": "w",
+               "KEEP_ME": "1"}
+        with patch.dict(os.environ, env), patch.object(dedup.subprocess, "run", side_effect=fake_run):
+            rows = dedup._store_lexical_query(["storage"], None, "repo", 5)
+        self.assertEqual(len(rows), 1)
+        for name in ("CONTEXT_MEMORY_WRITE_TOKEN", "ApiAccess__WriteToken", "apiaccess:writetoken"):
+            self.assertNotIn(name, seen["env"])
+        self.assertEqual(seen["env"]["KEEP_ME"], "1")
 
     def test_an_exact_match_is_left_to_stage_one(self):
         """A candidate the exact stage already matched is reported as `exact`, not re-evaluated."""

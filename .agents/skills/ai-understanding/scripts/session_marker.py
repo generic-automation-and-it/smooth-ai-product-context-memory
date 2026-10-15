@@ -29,6 +29,7 @@ No secrets here: session ids are not secrets but are not logged beyond the
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 import os
 import re
@@ -92,6 +93,11 @@ def marker_path(marker_type: str, session: str, root: Path | None = None) -> Pat
     if marker_type not in MARKER_TYPES:
         raise ValueError(f"unknown marker type {marker_type!r}")
     safe = _SAFE_SESSION_RE.sub("_", session).strip("._") or "session"
+    if safe != session:
+        # Sanitising folds distinct IDs together (`a/b` and `a_b`), and one marker file would then
+        # exclude another session's imports. A digest of the original keeps them apart; an ID that
+        # needed no change keeps its plain name, so existing markers stay where they were.
+        safe = f"{safe}-{hashlib.sha256(session.encode('utf-8')).hexdigest()[:8]}"
     base = root if root is not None else marker_root()
     return base / f"{marker_type}-{safe}.json"
 
@@ -107,7 +113,7 @@ def load_marker(marker_type: str, session: str,
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    if not isinstance(data, dict) or data.get("type") != marker_type:
+    if not isinstance(data, dict) or data.get("type") != marker_type or data.get("session") != session:
         return None
     return data
 
