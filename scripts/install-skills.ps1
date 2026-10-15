@@ -11,15 +11,21 @@
 
       1. Finds the skills root in order: .agents/skills -> .claude/skills -> .codex/skills, and errors
          when none exists. It never creates one: a folder the operator did not ask for is not an install.
-      2. Reads <root>/_mimisbrunnr-shared/installation.json.
-         - Missing  -> creates it with every skill on disk, installed:true, UTC timestamp.
-         - Present  -> syncs: adds new skills, drops skills no longer on disk, keeps every
+      2. Installs only the skills owned here: `mimisbrunnr-*`, `ai-understanding`, `ai-brain-dump`
+         (plus `_mimisbrunnr-shared/`, which is infrastructure, not a skill). Anything else on disk -
+         local coding skills, operator experiments - is left untouched and never enters the manifest.
+      3. Reads <root>/_mimisbrunnr-shared/installation.json.
+         - Missing  -> creates it from the owned catalogue, installed:true, UTC timestamp.
+         - Present  -> syncs: adds new owned skills, drops skills no longer owned or on disk, keeps every
                        installed flag the operator already set. A corrupt file is a hard error,
                        never a silent reset of the whole manifest.
-      3. Updates only the skills marked installed:true, cloning the repo once and copying those folders
-         (plus the shared scripts folder) out of it.
-      4. Writes the updated installation.json back with a fresh UTC timestamp - after the update, so
+      4. Updates only the owned skills marked installed:true, cloning the repo once and copying those
+         folders (plus the shared scripts folder) out of it.
+      5. Writes the updated installation.json back with a fresh UTC timestamp - after the update, so
          refreshing the shared folder cannot clobber the manifest that update read.
+
+    The owned set lives in `Test-OwnedSkill` below AND in the bash port's `is_owned_skill`.
+    The two must match; `test-install-skills.sh` holds them to each other (parity cases).
 
     Dependencies: PowerShell 7, git. No Python and no bash.
 
@@ -71,10 +77,22 @@ function Find-SkillsRoot {
 # 2. List skills on disk (dirs with SKILL.md, excluding _mimisbrunnr-shared)
 # ---------------------------------------------------------------------------
 
+function Test-OwnedSkill {
+    # The only skills this installer manages. Everything else that happens to sit in a skills root -
+    # local coding skills, operator experiments - is somebody else's to update and is never touched.
+    param([string] $Name)
+    # Case-SENSITIVE match, mirroring the bash gate: on a case-sensitive filesystem `Mimisbrunnr-X`
+    # is a different folder, and matching it here while bash refuses it is a cross-port divergence.
+    if ($Name -clike 'mimisbrunnr-*') { return $true }
+    if ($Name -ceq 'ai-understanding' -or $Name -ceq 'ai-brain-dump') { return $true }
+    return $false
+}
+
 function Get-DiskSkills {
     param([string] $Root)
     @(Get-ChildItem -LiteralPath $Root -Directory |
         Where-Object { $_.Name -ne '_mimisbrunnr-shared' } |
+        Where-Object { Test-OwnedSkill -Name $_.Name } |
         Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'SKILL.md') -PathType Leaf } |
         Select-Object -ExpandProperty Name |
         Sort-Object)
@@ -100,11 +118,12 @@ function Read-InstallationJson {
 }
 
 function Get-CatalogSkills {
-    # Every folder carrying a SKILL.md, minus the shared folder.
+    # Every owned folder carrying a SKILL.md, minus the shared folder.
     param([string] $Root)
     if (-not (Test-Path -LiteralPath $Root -PathType Container)) { return @() }
     @(Get-ChildItem -LiteralPath $Root -Directory |
         Where-Object { $_.Name -ne '_mimisbrunnr-shared' } |
+        Where-Object { Test-OwnedSkill -Name $_.Name } |
         Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'SKILL.md') -PathType Leaf } |
         Select-Object -ExpandProperty Name)
 }
@@ -122,11 +141,12 @@ function Build-InstallationJson {
         [object[]] $ExistingSkills
     )
 
-    # The catalogue is the union: what the source offers, plus anything already on disk. Deriving the
+    # The catalogue is the owned union: what the source offers, plus anything already on disk,
+    # intersected with the owned set (both lists arrive pre-filtered by Test-OwnedSkill). Deriving the
     # manifest from disk alone makes a first install into an empty skills folder a no-op - there is
     # nothing on disk, so there is nothing to install, and the operator's very first run leaves them with
-    # an empty folder and a manifest listing nothing. A skill the operator added by hand is in neither
-    # the source nor the manifest, and dropping it would delete state the operator owns.
+    # an empty folder and a manifest listing nothing. A non-owned skill is somebody else's to manage:
+    # it stays on disk, it just never enters this manifest.
     $catalog = @($DiskSkills + $SourceSkills | Sort-Object -Unique)
 
     $existingMap = @{}
@@ -237,6 +257,12 @@ function Update-InstalledSkills {
 
     $repoSkills = Join-Path $script:TempRepo '.agents/skills'
     foreach ($name in $installedNames) {
+        # Defense in depth: the manifest only ever names owned skills, but a hand-edited manifest could name
+        # anything. Never copy a folder this installer does not own.
+        if (-not (Test-OwnedSkill -Name $name)) {
+            Write-Info "WARNING: $name is not owned here - left on disk untouched"
+            continue
+        }
         $source = Join-Path $repoSkills $name
         if (Test-Path -LiteralPath $source -PathType Container) {
             $dest = Join-Path $SkillsRoot $name

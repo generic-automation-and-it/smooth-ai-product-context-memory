@@ -121,6 +121,8 @@ curl -fsSL https://raw.githubusercontent.com/generic-automation-and-it/smooth-ai
 irm https://raw.githubusercontent.com/generic-automation-and-it/smooth-ai-product-context-memory/main/scripts/install-skills.ps1 | iex
 ```
 
+It installs the nine skills owned here — the seven `mimisbrunnr-*` skills plus `ai-understanding` and `ai-brain-dump` — and nothing else. Local skills of your own are left alone and never enter the manifest.
+
 Two other routes, if one fits you better:
 
 | | |
