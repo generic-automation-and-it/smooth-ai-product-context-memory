@@ -6,7 +6,7 @@
 // states (NFR-05). A result set equal to the limit surfaces a narrow-your-
 // filters prompt rather than silently truncating or paging (no cursor).
 import { postQuery, getInitiatives } from './api.js';
-import { esc, shortUuid, fmtInstant, plural } from './util.js';
+import { esc, shortUuid, fmtInstant, plural, fmtValidity } from './util.js';
 import { openDetail, maybeOpenFromUrl } from './detail.js';
 
 const $ = (selector) => document.querySelector(selector);
@@ -62,12 +62,6 @@ const state = {
 
 let currentRows = [];
 let requestSeq = 0;
-
-function fmtValidity(memory) {
-  const from = memory.validFrom ? fmtInstant(memory.validFrom) : '';
-  if (!memory.validUntil) return from ? `${from} → open` : 'open';
-  return `${from} → ${fmtInstant(memory.validUntil)}`;
-}
 
 function collectOptions() {
   const kinds = new Set();

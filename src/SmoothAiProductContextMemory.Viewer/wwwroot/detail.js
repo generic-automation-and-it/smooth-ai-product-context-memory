@@ -6,7 +6,7 @@
 // (NFR-05). Both the versions and blob reads pass the element's scope dimension,
 // or the scope rule hides the very dimensions this pane is showing.
 import { getMemoryVersions, getMemoryBlob } from './api.js';
-import { esc, fmtInstant, plural } from './util.js';
+import { esc, fmtInstant, plural, fmtValidity } from './util.js';
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -18,12 +18,6 @@ const els = {
 
 let currentMemory = null;
 let blobSeq = 0;
-
-function fmtValidity(memory) {
-  const from = memory.validFrom ? fmtInstant(memory.validFrom) : '';
-  if (!memory.validUntil) return from ? `${from} → open` : 'open';
-  return `${from} → ${fmtInstant(memory.validUntil)}`;
-}
 
 function chipRow(items, label) {
   if (!items || items.length === 0) return '';
