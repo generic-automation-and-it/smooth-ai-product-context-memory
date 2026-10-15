@@ -18,9 +18,8 @@ selected proposal to reproduce them, rather than reading them back. They are not
 
 - No new Host resource for the queue; it is queryable via existing fields.
 - Conflict choices stay single-source (capture-time judgement, reproduced).
-- The approve transition (proposed → approved) still needs a store capability — either an explicit
-  transition or a `set` version-bump with `Status = approved`. Whether one exists is a P4 dependency to
-  confirm, not an assumption.
+- The approve transition (proposed → approved) is a gated `set` version-bump with `Status = approved`
+  on the existing `Uuid`; v1 (proposed) is superseded by v2 (approved). See [LADR-11](./LADR-11-approve-transition.md).
 - G1 decided 2026-10-15 for the automated export: kvasir `export` persists atomicity/decision-held
   candidates as `Status = proposed` (own preflight + veto, creates only; duplicates stay queued),
   so the store-derived queue has rows to read. The queue-file append stays as the local trail.
