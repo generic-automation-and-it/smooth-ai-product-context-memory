@@ -69,7 +69,7 @@ public static class LinkProductRepo
             if (conflict is not null)
             {
                 throw new ConflictException(
-                    $"Repo '{request.Repo}' is already linked to product '{conflict}'. Unlink it there or pick another product.");
+                    $"Repo '{request.Repo}' is already linked to product '{conflict}'.");
             }
 
             RepoLinkResult result = await graph.LinkRepoAsync(
@@ -81,7 +81,7 @@ public static class LinkProductRepo
             if (result.ExistingProductName is not null)
             {
                 throw new ConflictException(
-                    $"Repo '{request.Repo}' is already linked to product '{result.ExistingProductName}'. Unlink it there or pick another product.");
+                    $"Repo '{request.Repo}' is already linked to product '{result.ExistingProductName}'.");
             }
 
             bool changed = result.Created;
