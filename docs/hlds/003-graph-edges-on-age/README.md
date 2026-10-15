@@ -5,7 +5,7 @@
 | **Status** | Accepted |
 | **Owner** | generik0 |
 | **Tracker** | Context-memory V2 |
-| **Last updated** | 2026-09-15 |
+| **Last updated** | 2026-10-15 |
 
 > **Memory graph delivered and accepted.** The original decisions and four quality requirements were accepted
 > each against committed evidence: integrity and the relationship contract at the cutover, traversal
@@ -127,6 +127,23 @@ requested depth 5 was tested on a three-deep hierarchy, not a five-deep fixture.
   counts. Existing memory NFR-02 budgets stay intact; hub-active actual composed ticket traversal
   requires p95 <= 100 ms. Ticket-only Down warns of declaration loss, preserving `LINKS` and JSONB.
 
+### 6. A memory may reference a ticket it does not own
+
+**Implemented by this change.** [LADR-09](./ladrs/LADR-09-memory-references-ticket.md) permits a
+declared **`(Memory)-[:ABOUT]->(Ticket)`** edge, so a second initiative can capture a WET copy of
+material a shared ticket belongs to and still reach it under that ticket. Ticket ownership never
+moves and is never shared; the reference is graph-only (LADR-03), declared never inferred (LADR-11),
+and grants no scope consent (D2). Releasing the last owner of a referenced ticket is refused.
+
+**Acceptance criteria / DoD**
+
+- A memory references a ticket it does not own; the referenced ticket keeps its vertex and its one owner.
+- `query --ticket X` returns the owner group's memories ∪ the referencing memories, each tagged
+  `ticketMatch: owner | reference`; `--initiative` of one side returns only that side.
+- A reference is refused when the ticket is unowned or owned by the writing group; creating the same
+  reference twice yields one edge.
+- Deleting a memory removes its `ABOUT` edges; releasing the last owner of a referenced ticket is refused.
+
 ## Core Separation of Concerns
 
 > AGE holds relationships. Relational tables hold entities. Neither takes the other's job.
@@ -146,6 +163,8 @@ question tables answer badly, and is given nothing else.
 
 - The graph is an **index over relationships**, never a second home for data.
 - A Memory vertex without its relational row, or a Ticket without exactly one live JSONB-owning group, is a defect.
+- A Ticket that still has incoming `ABOUT` edges is **never** released by its last owner — the ownership
+  change is refused, so a memory→ticket reference is never lost silently (LADR-09 D1).
 - We will deliberately **not** synchronize an authoritative tracker or mirror repository structure. LADR-08 allows only captured practitioner-declared ticket hierarchy, with unverified upstream freshness and incomplete coverage disclosed. No tag graph is approved.
 - We will deliberately **not** adopt a separate graph server. The extension model is the reason this is affordable.
 
@@ -157,7 +176,7 @@ question tables answer badly, and is given nothing else.
 
 ## Architecture Decisions (LADRs)
 
-LADRs 01–03 are strategic (*what* and *why*); 04–07 are tactical (*how*); 08 replaces 02 for the ticket extension. Each is a single
+LADRs 01–03 are strategic (*what* and *why*); 04–07 are tactical (*how*); 08 replaces 02 for the ticket extension, and 09 adds a memory→ticket reference edge. Each is a single
 decision — a horizontal concern spanning this HLD. See [`./ladrs/`](./ladrs/).
 
 | LADR | Decision | Status |
@@ -170,6 +189,7 @@ decision — a horizontal concern spanning this HLD. See [`./ladrs/`](./ladrs/).
 | [LADR-06](./ladrs/LADR-06-anchor-lookups-use-property-predicates.md) | Anchor lookups are property predicates over a btree; `MERGE` keeps the inline map over a GIN | Accepted |
 | [LADR-07](./ladrs/LADR-07-every-traversal-carries-its-bound.md) | The depth bound is a `required` property of the query type | Accepted |
 | [LADR-08](./ladrs/LADR-08-captured-ticket-hierarchy.md) | Identity-only tickets and practitioner-declared current-state hierarchy | Accepted; implemented, release gates passed |
+| [LADR-09](./ladrs/LADR-09-memory-references-ticket.md) | Memory references a ticket it does not own, via a declared `ABOUT` edge | Accepted; owner-approved, implemented by this change |
 
 ## Non-Functional Requirements
 

@@ -23,7 +23,9 @@ Python 3.9+, stdlib only.
 
 import argparse
 import json
+import math
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -35,6 +37,7 @@ from pathlib import Path
 # from the machine credential file (its own import-time side effect), and it does not import the
 # redactor at module scope, so it is safe here — the redactor runs over stdin as a subprocess, never as
 # a startup dependency.
+import context_memory_client as client
 import decisions_gate as gate
 
 SCRIPTS = Path(__file__).resolve().parent
@@ -151,14 +154,14 @@ def estimate_tokens(text):
 
 
 def size_guard(state):
-    """Refuse an oversize pair before the request. Never truncate to fit."""
+    """Refuse an oversize request before sending. Never truncate to fit."""
     text = json.dumps(state, ensure_ascii=False)
     total = estimate_tokens(text)
     body = len(text.encode("utf-8"))
     if total > gate.MAX_CONTEXT_TOKENS:
-        return f"pair estimates to ~{total} tokens against a {gate.MAX_CONTEXT_TOKENS}-token context"
+        return f"request estimates to ~{total} tokens against a {gate.MAX_CONTEXT_TOKENS}-token context"
     if body > MAX_BODY_BYTES:
-        return f"pair body is {body} bytes against a {MAX_BODY_BYTES}-byte limit"
+        return f"request body is {body} bytes against a {MAX_BODY_BYTES}-byte limit"
     return None
 
 
@@ -181,33 +184,43 @@ def model_pair(candidate, existing, settings):
 
     candidate_state, existing_state = redact_pair(candidate, existing)
 
-    state = {"candidate": candidate_state, "existing": existing_state}
-    oversize = size_guard(state)
-    if oversize:
-        raise DedupError("oversize", oversize)
-
     payload = {
         "model": settings["model"],
-        "state": state,
+        "state": {"candidate": candidate_state, "existing": existing_state},
         "questions": {DEDUP_QUESTION_KEY: DEDUP_QUESTION},
     }
+    # The request is what is bounded, not the pair inside it: the model name and the question ride along.
+    oversize = size_guard(payload)
+    if oversize:
+        raise DedupError("oversize", oversize)
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    url = gate.resolve_endpoint(settings["base_url"], settings["api_key"]) + settings["path"]
+    try:
+        url = gate.resolve_url(settings)
+    except gate.GateError as exc:
+        raise DedupError(exc.outcome, exc.detail) from None
 
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
     if settings["api_key"]:
         headers["Authorization"] = f"Bearer {settings['api_key']}"
 
     request = urllib.request.Request(url, data=body, headers=headers, method="POST")
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    # Same transport guards as the gate: the request carries redacted record content and, for a hosted
+    # endpoint, the bearer key, so it follows no redirect and never echoes an error body.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), gate._NoRedirect)
     try:
         with opener.open(request, timeout=settings["timeout"]) as response:
             raw = response.read().decode("utf-8")
+    except gate.GateError as exc:
+        raise DedupError(exc.outcome, exc.detail) from None
     except urllib.error.HTTPError as exc:
         detail = (exc.read().decode("utf-8", errors="replace") or "").strip()
-        if exc.code == 404 or "model" in detail.lower():
+        if exc.code == 404 or (exc.code == 400 and re.search(r"model\b.*\bnot found|no such model",
+                                                             detail, re.IGNORECASE)):
             raise DedupError("model-missing", f"the decision model is not available ({exc.code})") from None
-        raise DedupError(f"http-{exc.code}", detail or "the decision endpoint returned no detail") from None
+        raise DedupError(f"http-{exc.code}",
+                         f"the decision endpoint refused the request (HTTP {exc.code}"
+                         + (f"; a {len(detail)}-character body was not shown)" if detail else ")")
+                         ) from None
     except urllib.error.URLError as exc:
         raise _classify(exc.reason, settings["timeout"]) from None
     except OSError as exc:
@@ -224,7 +237,14 @@ def model_pair(candidate, existing, settings):
     value = answer.get("noul") if isinstance(answer, dict) else None
     if not isinstance(value, (int, float)) or isinstance(value, bool):
         raise DedupError("bad-response", f"the {DEDUP_QUESTION_KEY!r} response carried no numeric `noul`")
-    probability = max(0.0, min(1.0, float(value)))
+    # Refused, not clamped — the gate's rule: an `Infinity` or a 1.5 clamped to 1.0 is a malformed answer
+    # reported as the most confident duplicate there is.
+    try:
+        probability = float(value)
+    except OverflowError:
+        probability = math.inf
+    if not math.isfinite(probability) or not 0.0 <= probability <= 1.0:
+        raise DedupError("bad-response", f"the {DEDUP_QUESTION_KEY!r} response carried a `noul` outside 0..1")
     return {
         "reusable": probability > settings["min_probability"],
         "probability": probability,
@@ -281,17 +301,34 @@ def _store_lexical_query(terms, group_uuid, repository, limit):
         "currentOnly": True,
         "limit": limit,
     }
+    # The read client refuses to start with a write token in its environment, and an export run carries
+    # one at its write checkpoint — without this every lookup would read as unexamined.
     proc = subprocess.run(
         [sys.executable, "-B", str(READ_CLIENT), "query", "--payload"],
         input=json.dumps(payload), capture_output=True, text=True, encoding="utf-8",
+        env=client.without_write_tokens(),
     )
     if proc.returncode != 0:
         return None
+    return parse_query_items(proc.stdout)
+
+
+def parse_query_items(stdout):
+    """The `items` list of a framed read-client `query`, or None when it cannot be read.
+
+    The read client prints its recall banner before the JSON, so the object is parsed from its first
+    brace. The answer's list is `items`; anything else is unreadable rather than "no match", because a
+    caller that read a missing list as empty would report a duplicate as none.
+    """
+    start = stdout.find("{")
+    if start == -1:
+        return None
     try:
-        out = json.loads(proc.stdout)
+        out = json.loads(stdout[start:])
     except ValueError:
         return None
-    return out.get("records") or out.get("memories") or []
+    items = out.get("items") if isinstance(out, dict) else None
+    return items if isinstance(items, list) else None
 
 
 def stage(candidates, group_uuid=None, repository=None, query_fn=None, model_fn=None, settings=None):
@@ -351,24 +388,31 @@ def stage(candidates, group_uuid=None, repository=None, query_fn=None, model_fn=
             continue
 
         proposed = [s for s in scored if s.get("reusable")]
-        transport_failed = [s for s in scored
-                            if s.get("outcome") in ("unreachable", "timed-out", "http-500", "disabled",
-                                                    "model-missing", "bad-response", "oversize")]
+        # Any pair without a verdict is a named failure — the outcome list is not closed (every
+        # `http-*` status, a refused redirect, a redaction refusal), so it is judged by absence.
+        failed = [s for s in scored if "reusable" not in s]
+        not_attempted = len(results) - len(scored)
         if proposed:
             proposals.append({
                 "index": index, "outcome": "proposed", "detail": f"{len(proposed)} pair(s) match",
                 "matches": proposed,
             })
-        elif transport_failed:
+        elif failed:
             # A pair the model never judged must not let the candidate read as "no duplicate"; disclose
-            # the transport reason and show the lexical candidates, exactly as a fully-disabled model.
+            # the failure and show the lexical candidates, exactly as a fully-disabled model.
             proposals.append({"index": index, "outcome": "possible-duplicate",
-                              "detail": f"model {transport_failed[0]['outcome']}", "matches": results})
-        elif scored:
+                              "detail": f"model {failed[0]['outcome']}", "matches": results})
+        elif not scored:
+            proposals.append({"index": index, "outcome": "unexamined (budget)", "matches": results})
+        elif not_attempted:
+            # A per-candidate or batch cap left matches the model never saw; "none" would claim them.
+            proposals.append({"index": index, "outcome": "possible-duplicate",
+                              "detail": f"{len(scored)} pair(s) judged not duplicate; {not_attempted} lexical "
+                                        "match(es) not judged (budget)",
+                              "matches": results})
+        else:
             proposals.append({"index": index, "outcome": "none",
                               "detail": f"{len(scored)} pair(s) judged not duplicate", "matches": scored})
-        else:
-            proposals.append({"index": index, "outcome": "unexamined (budget)", "matches": results})
 
     return proposals
 

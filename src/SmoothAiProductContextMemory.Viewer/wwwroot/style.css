@@ -238,3 +238,26 @@ button:hover { background: var(--bg); }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }
+
+/* Review pane (P4a). */
+.review-help { color: var(--muted); font-size: 12px; margin-top: 10px; }
+.review-list { display: flex; flex-direction: column; gap: 12px; }
+.review-card { border: 1px solid var(--border); border-radius: 8px; background: var(--panel); padding: 12px 14px; }
+.review-card-head h2 { margin: 0 0 4px; font-size: 16px; }
+.review-meta { display: flex; flex-wrap: wrap; gap: 8px; color: var(--muted); font-size: 12px; margin: 0 0 8px; }
+.review-kind, .review-status { border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; }
+.review-statement { margin: 0 0 8px; }
+.review-binding { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+.review-card-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.review-conflicts-pane { border-top: 1px dashed var(--border); padding-top: 8px; }
+.review-conflicts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.review-conflict { border: 1px solid var(--border); border-radius: 6px; background: var(--bg); padding: 8px 10px; }
+.review-conflict-summary { margin: 0 0 4px; }
+.review-conflict-kind { color: var(--muted); margin-left: 6px; font-size: 12px; }
+.review-conflict-uuid { color: var(--muted); margin-left: 6px; font-size: 12px; }
+.review-conflict-statement { margin: 0 0 4px; font-size: 13px; }
+.review-conflict-outcome { margin: 0 0 6px; color: var(--muted); font-size: 12px; }
+.review-conflict-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.review-no-conflict { color: var(--muted); margin: 0; }
+.review-loading, .review-error { color: var(--muted); margin: 0; font-size: 12px; }
+button:disabled { opacity: .55; cursor: not-allowed; }

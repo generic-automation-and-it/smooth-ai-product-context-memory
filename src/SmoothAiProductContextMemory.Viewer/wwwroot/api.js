@@ -87,3 +87,13 @@ export function getNeverRecalled(asOf, limit) {
 export function getMissRate(from, to) {
   return requestJson(`/api/context/recall-feedback/miss-rate?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
 }
+
+// P4a: the review queue and the dedup preview. Same-origin; the bridge holds
+// the read token. The SPA sends no Authorization header.
+export function getReviewQueue(limit = 500) {
+  return requestJson(`/bridge/review-queue?limit=${limit}`);
+}
+
+export function postDedupPreview(requestBody) {
+  return requestJson('/bridge/dedup-preview', { method: 'POST', body: requestBody });
+}

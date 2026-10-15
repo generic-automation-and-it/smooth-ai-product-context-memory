@@ -1185,11 +1185,11 @@ class AtomicityTests(unittest.TestCase):
             "The cache also means faster reads, and it moreover cuts cost.")["verdict"], "bundled")
 
     def test_the_redaction_guarantee_is_stated_for_recognised_secrets_only(self):
-        """Review 5432012955 #6: LADR-003 said the stored blob "never" contains a leaked secret, which
-        the Non-Negotiable above it forbids — the gate is on recognition, not on secrets."""
+        """Review 5432012955 #6: LADR-003 said the stored blob "never" contains a leaked secret — the gate
+        is on recognition, not on secrets."""
         agents = " ".join((HERE.parent / "AGENTS.md").read_text(encoding="utf-8").split())
         self.assertNotIn("the stored blob and DB never contain it", agents)
-        self.assertIn("a leaked secret the rules **recognise** is scrubbed before write", agents)
+        self.assertIn("a secret no rule recognises is stored as written", agents)
 
     def test_every_documented_harness_command_is_runnable(self):
         """Review 5432012955 #15: a documented command carried a `…` placeholder for its path."""
@@ -2333,6 +2333,17 @@ class DeepSearchTests(unittest.TestCase):
 
     # Issue 184: each shape below is an answer that is not a complete page. Before the fix every one of
     # them was read as "no rows" and reported as a completed pass — full coverage the recall never got.
+    def test_the_standalone_entry_point_frames_what_it_prints(self):
+        """`deepsearch.py` run directly returned recalled records with no recallNotice."""
+        out = io.StringIO()
+        with patch.object(sys, "stdin", io.StringIO("{}")), \
+                patch.object(deepsearch, "execute", return_value={"items": [], "disclosure": {}}), \
+                redirect_stdout(out):
+            self.assertEqual(deepsearch.main(), 0)
+        printed = out.getvalue()
+        self.assertIn(client.RECALL_NOTICE, printed)
+        self.assertIn(client.RECALL_NOTICE_KEY, json.loads(printed[printed.index("{"):]))
+
     INCOMPLETE_QUERY_ANSWERS = {
         "empty body": None,
         "not an object": [],
@@ -2340,6 +2351,7 @@ class DeepSearchTests(unittest.TestCase):
         "items not a list": {"items": "00000000-0000-4000-8000-000000000001"},
         "row not an object": {"items": ["00000000-0000-4000-8000-000000000001"]},
         "row without a uuid": {"items": [{"version": 1}]},
+        "row without a groupUuid": {"items": [{"uuid": "00000000-0000-4000-8000-000000000001", "version": 1}]},
     }
 
     def test_an_incomplete_baseline_answer_is_disclosed_never_a_completed_empty_pass(self):
@@ -2471,7 +2483,7 @@ class DeepSearchTests(unittest.TestCase):
         self.assertFalse(result["disclosure"]["possiblyOmitted"])
     @staticmethod
     def row(index):
-        return {"uuid": f"00000000-0000-4000-8000-{index:012d}", "version": 1}
+        return {"uuid": f"00000000-0000-4000-8000-{index:012d}", "groupUuid": "group-1", "version": 1}
 
 
 class RecallDeadlineTests(unittest.TestCase):
@@ -2618,7 +2630,7 @@ class RecallDeadlineTests(unittest.TestCase):
 
     @staticmethod
     def row(index):
-        return {"uuid": f"00000000-0000-4000-8000-{index:012d}", "version": 1}
+        return {"uuid": f"00000000-0000-4000-8000-{index:012d}", "groupUuid": "group-1", "version": 1}
 
 
 class DivergenceTests(unittest.TestCase):
@@ -3454,7 +3466,6 @@ class AgentContractTests(unittest.TestCase):
         exists; none may present cleanup as what removes it."""
         documents = {
             "SKILL.md": HERE.parent / "SKILL.md",
-            "AGENTS.md": HERE.parent / "AGENTS.md",
             "references/write-path.md": self.WRITE,
         }
         for name, path in documents.items():
@@ -3476,7 +3487,6 @@ class AgentContractTests(unittest.TestCase):
         scratch folder, which `mkdir -m` leaves at whatever mode it has."""
         documents = {
             "SKILL.md": HERE.parent / "SKILL.md",
-            "AGENTS.md": HERE.parent / "AGENTS.md",
             "references/write-path.md": self.WRITE,
         }
         for name, path in documents.items():
@@ -3492,15 +3502,12 @@ class AgentContractTests(unittest.TestCase):
         initiative prerequisite applies on the create path only."""
         skill = " ".join((HERE.parent / "SKILL.md").read_text(encoding="utf-8").split())
         worker = " ".join(self.WRITE.read_text(encoding="utf-8").split())
-        agents = " ".join((HERE.parent / "AGENTS.md").read_text(encoding="utf-8").split())
         # Review 5430979214 #20: an existing group with no memories has no read-only `groupUuid`
         # either, so it gets the offline preview too, in both the skill and the worker.
         self.assertIn("a group that does not exist yet, or an existing group with no memories", skill)
         self.assertIn("`set` cannot run", skill)
         self.assertIn("for a group that does not exist yet, or an existing group with no memories", worker)
         self.assertIn("after creation supplies its `groupUuid`", worker)
-        self.assertIn("on the create path an initiative must exist first", agents)
-        self.assertNotIn("and an initiative must exist first.**", agents)
 
     def test_the_default_prompt_writes_only_on_an_explicit_export(self):
         """Issue 186 (issue 179 finding 23, issue 181 again): the default prompt told an agent to write
@@ -4213,7 +4220,7 @@ class DirectionAliasTests(unittest.TestCase):
 
         buffer = io.StringIO()
         with _no_write_tokens(), patch.object(sys, "argv", ["read", "import"]), \
-                patch.object(client, "cmd_query", side_effect=fake_query), redirect_stdout(buffer):
+                patch.object(client, "cmd_query_unmarked", side_effect=fake_query), redirect_stdout(buffer):
             rc = read_client.main()
         self.assertEqual(rc, 0)
         self.assertEqual(seen, ["query"])
@@ -4328,6 +4335,34 @@ class SessionMarkerTests(unittest.TestCase):
                                 "statement": "Postgres stores the index."}])
         self.assertIsNotNone(body, "a --nomarker recall is history, not an exclusion")
         self.assertIn("Boundary: none", err)
+
+    def test_the_read_client_query_writes_no_marker(self):
+        """The read client is the shared recall path and never marks (SKILL.md, Session marker)."""
+        import session_marker as sm
+        os.environ["CLAUDE_CODE_SESSION_ID"] = "ses-odin-read"
+        args = SimpleNamespace(payload=None, command="query", nomarker=False, session=None)
+        with patch.object(client, "read_payload", return_value={}), \
+                patch.object(client, "_request", return_value={"items": [self._row("mem-read-1")]}), \
+                redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as err:
+            client.cmd_query_unmarked(args)
+        self.assertNotIn("Marker:", err.getvalue())
+        self.assertIsNone(sm.load_marker("odin", "ses-odin-read"))
+        self.assertFalse(sm.marker_path("odin", "ses-odin-read").exists())
+
+    def test_an_unreadable_marker_refuses_a_default_send(self):
+        """A corrupt marker still names real exclusions: a default send refuses, `--all` proceeds."""
+        import session_marker as sm
+        os.environ["CLAUDE_CODE_SESSION_ID"] = "ses-odin-corrupt"
+        path = sm.marker_path("odin", "ses-odin-corrupt")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{not json", encoding="utf-8")
+        with self.assertRaises(client.ClientError) as raised:
+            self._set([{"uuid": "mem-c-1", "description": "d", "statement": "s"}])
+        self.assertIn("unreadable", str(raised.exception))
+        body, err = self._set([{"uuid": "mem-c-1", "description": "d", "statement": "s"}], all=True)
+        self.assertIsNotNone(body)
+        self.assertIn("Boundary: ignored (--all)", err)
+        self.assertEqual(path.read_text(encoding="utf-8"), "{not json", "the refusal leaves the file as found")
 
     def test_odin_send_ignores_the_kvasir_marker(self):
         import session_marker as sm

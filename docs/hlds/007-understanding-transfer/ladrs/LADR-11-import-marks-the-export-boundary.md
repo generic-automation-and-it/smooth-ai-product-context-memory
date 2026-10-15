@@ -52,6 +52,14 @@ An import writes a **session marker**; export uses it as a **boundary** by id ex
 - **Changed imported items** are not dropped: preflight matches a candidate against the exclusion set by
   id or exact subject, mechanically, and proposes a **supersession** of that item. No model judgement.
 - **Id-less input** (`load --format foreign`) is session history — no exclusion.
+  (Implementation notes 2026-10-15, consumer review 5535929651: an Understanding **file** unit has a
+  slug and no id, so it records `{slug}` and is excluded by slug — recorded as history it excluded
+  nothing. A load or import marks only the records it **rendered**; one cut by kind, `--asof` or the
+  character budget never reached the session and is not excluded. The read-only client never marks.)
+- **Unreadable marker** (implementation note 2026-10-15). A marker file that exists but does not parse is
+  not an absent one — it still names real exclusions. A default export, `set` or `preflight` refuses
+  (`Boundary: refused …`) until the file is inspected or moved, or `--all` is passed; an import that
+  writes a new entry still moves the unreadable file aside and says so.
 - **Lifetime.** No TTL and no automatic clearing; session length is unknown. Cleanup is manual.
 - **Lineage** ("derived from X v3") appears in the export digest only — nothing is persisted.
 

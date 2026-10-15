@@ -7,8 +7,8 @@ future product or engineering work. It is useful when source already contains im
 constraints, and decisions that should be recalled without re-deriving them every session.
 
 Bootstrap is an explicit repository task. Installing the skill, opening a repository, or asking for an
-ordinary code review does not opt a project in. [BR-46](../../../docs/brd/001-context-memory/) is a local
-proposal pending upstream acceptance; it permits this narrow project-bootstrap case without turning the
+ordinary code review does not opt a project in. [BR-46](https://github.com/generic-automation-and-it/smooth-ai-product-context-memory/tree/main/docs/brd/001-context-memory/) (upstream) is a
+proposal pending acceptance; it permits this narrow project-bootstrap case without turning the
 product into a general historical-ingestion system.
 
 ## What you need

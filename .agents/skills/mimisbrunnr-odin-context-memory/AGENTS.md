@@ -1,693 +1,180 @@
-# mimisbrunnr-odin-context-memory — AGENTS.md
-
-> **References.** Every HLD, LADR, NFR, BRD, issue and PR number in this file belongs to the upstream
-> repository, `generic-automation-and-it/smooth-ai-product-context-memory` (`docs/hlds/`, `docs/brd/`),
-> not to a repository this skill is vendored into.
+# AGENTS.md - mimisbrunnr-odin-context-memory
 
 ## TL;DR
 
-The sole authority on the write path. Runs a fixed
-five-stage pipeline (**preflight → redact → dedupe/derive-links → atomicity → write**), the last stage
-being a single server-side transactional `set`; the skill performs the semantic deduplication, link
-derivation, redaction and atomicity checks the database cannot express as constraints. The read/load
-sibling (`mimisbrunnr-kvasir-understanding`) injects material into agent context and — only through its
-`export [--input <path>]` verb (the old `import --store` spelling is deprecated and refuses) — hands
-material to a **narrower** capture path: preflight, redaction, exact-subject dedup, atomicity and write.
-It performs none of this skill's semantic matching or link derivation (every `set` it sends carries
-`links: []`), so a paraphrase or a relation needs this skill's own `--export`. It is a reader +
-conditional exporter, never a second writer.
+Read [`SKILL.md`](./SKILL.md) first — the five-stage write pipeline, modes, switches and the path/credential table live there; scripts are in `_mimisbrunnr-shared/scripts/`.
 
 ## Non-Negotiables
 
-- **No read or write subagents (LADR-008).** The session runs the read path
-  (`references/read-path.md`) and the write path (`references/write-path.md`) itself. Do not
-  reintroduce agent registrations or delegation: they worked in one harness only, and they were never
-  the security boundary. That boundary is the clients and the credentials, and it holds everywhere: the
-  read client (`context_memory_read_client.py`) has no write subcommand and refuses to start with a write
-  token present — `CONTEXT_MEMORY_WRITE_TOKEN`, the Host's `ApiAccess__WriteToken` or the controller's
-  `Parameters__api-write-token`, any case, `:` read as `__`; the write credential is never ambient and is
-  loaded only inside a subshell around each write-route invocation at the authorized checkpoint; and the
-  store rejects a read credential on a write route. Prompt text alone is not a security boundary.
-- **Raw store rows are working material, never the answer.** The read path reduces them to a lookup,
-  grounding brief or digest before use; the write path receives discrete facts, never a transcript.
-
-- **Never write mid-work.** Accumulate candidates silently during work; write only at the explicit
-  end-of-task checkpoint (`set`). This is the manual-trigger design (D29), not a per-fact flush.
-- **Don't "optimize" the SKILL.md by deduplicating the restatements.** The atomicity discipline and the
-  cross-group subject-matching rule are each restated at three points in SKILL.md (Listen, the pre-write
-  round, and the pipeline table). This is **deliberate reinforcement, not redundancy**. Three trials all
-  demonstrated the model bundling compound records under pressure and stopping self-policing; two trials
-  independently named semantic subject-matching the top write-path risk. Repeating these two rules at
-  each phase is the countermeasure to that drift. Removing any one restatement reduces the reinforcement.
-- **Never invent the write sequence.** The version-bump ordering (flip old `is_current` off *before*
-  inserting the new current, both in one transaction) and the `SET LOCAL` bypass idiom for cascade
-  deletes are pinned by `PERSISTENCE_AGENTS.md`. The skill follows them exactly; it does not re-derive
-  them. See LADR-001.
-- **Never expose or touch `is_current`.** `set` is a single server-side endpoint that owns the current
-  flag. If the skill can mutate `is_current` directly it will sequence the bump and, on a failure
-  between the two round-trips, leave a memory with **zero** current versions — a state no constraint
-  forbids and nothing detects.
-- **No scrub is silent.** The write digest names the rule, the field path and the replaced offsets of
-  every redaction, never the replaced text. A neutral key name (`sort key`, `partition key`,
-  `idempotency key`, bare `token`) is not evidence of a secret; do not widen the neutral-key rule back to
-  "any 8+ character value", which rewrote ordinary statements.
-- **Redaction precedes the blob write.** Content addressing (upstream `generic-automation-and-it/smooth-ai-product-context-memory` HLD-001, storage) makes a blob immutable and its
-  hash stable. A leaked secret cannot be edited out afterwards, only orphaned. This ordering is
-  non-negotiable.
-- **The redaction gate is a gate on *recognition*, not on secrets.** Every persisting write (`set` and
-  the seven group/link/label/initiative/ticket writes) scrubs automatically through
-  `scrubbed_write` and refuses to write when the scrubber cannot run, so it can never fail open — but `redact.py` matches
-  fixed-shape fingerprints (cloud/vendor key prefixes, JWTs, PEM private-key blocks, URL userinfo,
-  `Authorization`/`Bearer` credentials, assignments to a key whose name says secret, `pwd` unless its
-  value is a working directory or quoted prose, and assignments to a neutral key — `key`, `token`,
-  `credential`, `auth`, `bearer`, `session`, `cookie` — only when the value is itself secret-shaped, so a
-  generated-looking session ID such as `session = ses_…` **is** scrubbed while `session: 2026-10-05
-  standup` is not; the full list is at the top of `redact.py`). A bare high-entropy value, an unlabelled base64 blob, an unusual vendor token format or
-  a password in prose passes through untouched. Describe this control as *"recognisable secrets are
-  gated, and the gate never fails open"*; **do not** describe it as "sensitive material never reaches
-  storage", which overstates it. Widening the rule set is the lever, and that is a deliberate separate
-  decision. `redact.py` carries the same statement at its top.
-- **Subject matching reads across groups, but a version bump is scoped to the writing group.** A memory's
-  identity is `(group, uuid)`, decided 2026-09-28 with HLD-002 amended to match. The recall is
-  deliberately cross-group so a same-subject memory elsewhere is *seen*; only a match inside the
-  request's `groupUuid` may be bumped, and a cross-group match becomes a new memory plus a typed link.
-  The database's unique `(group_id, subject_slug)` is an exact-match backstop only, and a cross-group
-  duplicate is neither detected nor merged — the accepted cost. **Do not "fix" the unqualified
-  "deduplication is cross-group" wording this replaced by widening the version-target lookup**; that
-  would reintroduce cross-group lock ordering and is a design change, not a bug fix.
-- **The registry is advisory.** `memory.facets` has no FK to `label` by design (upstream `generic-automation-and-it/smooth-ai-product-context-memory` HLD-001, storage). The skill
-  proposes new labels; it must not treat the registry as a closed set.
-- **Blobs are never deleted on the write path.** Content addressing means identical bytes share one
-  address, and `IBlobStorage` has no refcount or enumeration. `DeleteAsync` on a redaction orphan can
-  destroy content a different version still references. "Orphan" means *drop the DB reference only*;
-  leaked-secret purge is out-of-band, not skill work.
-- **Programme knowledge is never citable as shipped product behaviour.** Scope is enforced at
-  retrieval, but the write path must set the correct scope on the group so the retrieval rule has
-  something to enforce.
-- **Ticket hierarchy is practitioner-declared only.** Carry explicit set/reparent/remove declarations
-  into the authorized capture checkpoint, with exact provider/key identities and explicit expected
-  parent. Never infer from spelling, groups, claims, memory links or tracker polling. Memory status
-  approval is not hierarchy authorization; read-only findings never invoke the writer.
-- **Near-miss tags use only supplied, approved examined evidence.** No extra query, synonym heuristic,
-  registry scan, hidden/global vocabulary, automatic broadening or write. UUID/version allowlist and
-  exact scope dimension/identifier binding plus grounded caller/skill analysis are mandatory. Original
-  API query `tags`/`facetMatchMode` are the only predicate source; matching tags or no relevance evidence
-  produce no finding. Evidence approval is not canon: preserve lifecycle status and flag proposed records.
-
-## System Context
-
-The skill is a thin client over the HTTP API (upstream PR #14), which is the only thing that touches PostgreSQL and
-blob storage. The skill owns judgement; the API owns mechanics. Semantic subject uniqueness and
-write-time AI work remain skill-owned. Exact ticket ownership now also has a trigger-enforced check
-under the shared transaction advisory lock, without a normalized ownership table or key rewriting.
-
-```mermaid
-flowchart LR
-    A[Agent / Human] -->|capture candidates| B[mimisbrunnr-odin-context-memory skill]
-    B -->|"set (preflight + one transaction)"| C[HTTP API]
-    C --> D[(PostgreSQL)]
-    C --> E[(MinIO blob)]
-    B -->|"get (cheap fields, drill-down)"| C
-```
+- **SKILL.md restates the atomicity and cross-group subject-matching rules at three points on purpose** —
+  Listen, the pre-write round and the pipeline table. Don't deduplicate them: trials showed the model
+  bundling compound records again once a restatement was removed.
+- **Recall is cross-group; a version bump is not.** Subject recall reads across groups so a same-subject
+  memory elsewhere is seen; only a match inside the request's `groupUuid` may be bumped, and a cross-group
+  match becomes a new memory plus a typed link. Don't widen the version-target lookup to "fix" an
+  unqualified "deduplication is cross-group" wording — it reintroduces cross-group lock ordering.
+- **Env vars and who receives them.** `context_memory_read_client.py` reads only `CONTEXT_MEMORY_READ_TOKEN`
+  and refuses to start if any write-token spelling is set. `context_memory_client.py` reads
+  `CONTEXT_MEMORY_WRITE_TOKEN` for write routes only, loaded inside a subshell around each write-route
+  invocation. `decisions_gate.py` reads `CONTEXT_MEMORY_DECISIONS_*` and sends
+  `CONTEXT_MEMORY_DECISIONS_API_KEY` only as its bearer header. `CONTEXT_MEMORY_BASE_URL` is not a secret.
 
 ## Architecture Decisions
 
-- **LADR-005** (2026-09, **superseded by LADR-008**): Separate read and write execution contexts. *Context:* baseline
-  recall may return 200 rows and consume the task's working context; broad shell grants cannot prove a
-  read worker cannot mutate. *Decision:* delegate raw recall, expose a read-only client, and enforce
-  read/write credentials at the API. Lookup and grounding return bounded cited conclusions plus
-  matched-but-not-surfaced disclosure. *Consequence:* aggregate token spend may rise, but main-context
-  longevity improves and the read boundary is structural when runtimes keep the write credential absent.
+### LADR-002 — Link derivation shares the pre-write round with dedup
 
-- **LADR-001** (2026-09, accepted): Version-bump ordering is pinned by the persistence layer, not the
-  skill. *Context:* `memory_version` is append-only with a partial unique index over `is_current` and a
-  `BEFORE UPDATE OR DELETE` trigger permitting exactly one legal UPDATE (the `is_current` pointer
-  transfer). *Decision:* the skill never sequences the bump; it calls one transactional `set` that flips
-  the old current off and inserts the new current atomically. *Consequence:* removing the transaction
-  or letting the skill drive `is_current` can strand a memory with zero current versions — a state no
-  constraint forbids.
+- **Status:** Accepted · **Date:** 2026-09
+- **Decision:** link derivation and cross-group dedup need the same bounded semantic recall; preflight is
+  array-in/array-out so it sees intra-batch collisions (two candidates sharing a subject). Derived links are
+  reported in the digest, never derived silently.
+- **Consequence:** `set` writes links in the same transaction, so a plain-`set` digest is a receipt, not a
+  veto — `--dryrun` is the only pre-write veto. Never reword it as "surfaced for veto".
 
-- **LADR-002** (2026-09, accepted): Link derivation is batched with deduplication in the pre-write
-  round (D47). *Context:* three trials produced zero typed links, so `MemoryLink` would stay empty
-  forever and R10 decorative. *Decision:* both link derivation and cross-group dedup need the same
-  bounded semantic recall, while preflight separately supplies exact subject/ticket facts and
-  detects **intra-batch**
-  collisions (two candidates in the same batch sharing a subject — neither is written yet, so a
-  per-record preflight misses it). Derived links are reported in the digest, never derived silently, and
-  are inspectable before anything lands via `--dryrun`. *Consequence:* the preflight must be
-  array-in/array-out, not per-record. **Note the limit:** `set` writes the links in the same transaction
-  as the memories, so a plain-`set` digest is a receipt, not a veto gate — `--dryrun` is the only pre-write
-  veto point. Do not reword this as "surfaced for veto"; that implies an approval round that does not exist.
+### LADR-003 — Redaction is redact-and-flag, not reject
 
-- **LADR-003** (2026-09, accepted): Redaction failure mode is redact-and-flag, not reject. *Context:* a
-  captured memory that leaks a secret still carries value; rejecting it loses the knowledge. *Decision:*
-  detect (fingerprint-based) and scrub the sensitive span, record what was scrubbed in the digest. The
-  record is digest-only — content is never logged (PERSISTENCE_AGENTS quality constraint). *Consequence:*
-  a leaked secret the rules **recognise** is scrubbed before write, so the stored blob and DB do not
-  hold that value, and the digest is the only trace of it. A secret no rule recognises is stored as
-  written (see the Non-Negotiable *The redaction gate is a gate on recognition*).
+- **Status:** Accepted · **Date:** 2026-09
+- **Decision:** fingerprint-detect and scrub the span, record the rule, field and offsets in the digest;
+  content is never logged.
+- **Consequence:** a secret no rule recognises is stored as written. Describe the gate as "recognisable
+  secrets are gated", never "sensitive material never reaches storage".
 
-- **LADR-004** (2026-09, accepted): The skill-facing contract exposes `uuid`, never the surrogate
-  `bigint`, for memory/group identity. *Context:* the surrogate is an internal FK join key; `uuid` is
-  the logical identity that is stable across versions and groups. *Decision:* all skill inputs/outputs
-  use `uuid`. *Consequence:* the skill cannot accidentally key on a row that a version bump re-points.
+### LADR-005 — Separate read and write execution contexts — superseded by LADR-008
 
-- **LADR-006** (2026-10, accepted): A recall has one foreground deadline, and deepsearch degrades by
-  whole passes at it. *Context:* the read path told `timed-out` from `unreachable` but bounded nothing:
-  deepsearch chains up to ten calls with no overall limit, and a single timed-out pass aborted the run
-  and discarded every pass already completed, so a hung store could cost five minutes and return
-  nothing — an absence of evidence shaped exactly like an empty result. *Decision:* `RECALL_DEADLINE_SECONDS`
-  (60 s) caps one recall command; `CONTEXT_MEMORY_RECALL_DEADLINE` may shorten it and any other value is
-  refused with `bad-deadline`, never clamped. Each read's socket timeout is `min(HTTP_TIMEOUT, deadline)`;
-  a write keeps `HTTP_TIMEOUT`, because a write is not a recall. deepsearch checks the deadline before
-  each pass, uses the remaining budget as that pass's socket timeout, and on a timeout stops the chain
-  while keeping the completed passes — whole records only — disclosing `deadlineSeconds`, `stoppedEarly`
-  (any pass incomplete), `budgetExhausted` (the wall clock was spent — distinct from a pass hanging) and
-  `passesIncomplete`; `anchorsEligible`/`anchorsOmittedByCap` are `null` when the baseline never
-  answered, because the traversal set is then unknown, not empty. A traversal the store refuses (403) is
-  a fourth pass status, `forbidden` (a malformed answer is a fifth, `malformed`, handled the same way and
-  counted in `passesMalformed`): it does **not** stop the chain, is listed in `passesIncomplete`,
-  counted in `anchorsForbidden` and kept out of `anchorsOmittedByCap`. Under a group/ticket selector with
-  a scope, endpoints outside the selected groups are dropped and counted once each in
-  `endpointsOutsideSelector` (issue 182). *Consequence:* a recall is bounded and its shortfall is reported,
-  so a partial result can never read as the whole store. The deadline is a client-side rendering/handling
-  concern only: no Host change, no new network dependency (BR-16), and recall feedback stays server-side
-  (HLD-004 LADR-01), so the contract states that a client giving up can leave a server-recorded outcome
-  the agent never received. **Rejected alternative:** clamp an out-of-range deadline to the cap —
-  rejected because a silently adjusted budget is one the operator trusts and the system does not honour,
-  the restore statement-budget defect. **Rejected alternative:** abort deepsearch on the first timed-out
-  pass (the pre-change behaviour) — rejected because it discards completed work and returns nothing where
-  it could return something labelled partial.
-- **LADR-007** (2026-10, accepted): The capture batch is written to disk **before** redaction, and that
-  copy is bounded rather than removed. *Context:* reviews in issues 182, 184 and 186 each re-raised
-  "writes unredacted candidate content to disk before redaction" against a different call site. The
-  redactor needs the unredacted text as its input, and an agent can hand a script text through exactly
-  three channels — a file, the command line, or the environment. *Decision:* the file, written with the
-  file tool under `.context/mimisbrunnr-scratch/`, and every exposure of that one copy bounded at every
-  site that writes or reads it: the folder is created owner-only (`mkdir -p -m 700`) and every reader
-  (`redact.load_input`, so `redact.py`, `atomicity.py` and both clients' `--payload`) refuses a file that
-  neither it nor its folder makes owner-only; the folder ignores itself (`.gitignore` holding `*`) before
-  the first batch, so it cannot be committed even where `.context/` is not ignored; each file is consumed
-  on read (`--consume`, except the `set --dryrun` payload the real write reuses); and the folder is
-  removed after the real write and on refusal, failure or abandonment. **Personal data is not in that
-  file at all:** every personal identifier — personal data as the GDPR defines it — is masked and
-  generalised before the first batch is written: the value dropped, a person named by role and a value by
-  its type, until no one can be singled out, and a fact meaningless once generalised is not captured
-  (issue 188). Cleanup after the fact was never a way to meet a no-personal-data-on-disk rule, and
-  redaction never removes personal data. Secrets get the same treatment:
-  the agent masks every one it recognises as `<REDACTED>` before the file is written, so the redactor on
-  the file is the mechanical second check rather than the first step (issue 190). An existing scratch
-  folder is repaired to 0700 before use, since `mkdir -m` sets the mode only on a folder it creates.
-  *Consequence:* the residual exposure is one owner-only, unignorable file that holds at most a secret
-  judgement missed and the mechanical check is about to catch, for the length of a checkpoint, and nothing
-  personal reaches the store. **Rejected alternative:** argv or a heredoc
-  — rejected because a command line is readable by every account through the process table for the
-  call's duration, is kept in shell history and the tool transcript, and lets a quote in a fact rewrite
-  the command. **Rejected alternative:** an environment variable — rejected because every child process
-  inherits it and the process table exposes it to the same account. **Rejected alternative:** a scratch
-  folder outside the checkout — rejected for now because an agent's file tool is not guaranteed write
-  access outside the workspace; the owner-only mode gives the same protection from other accounts. A
-  review re-raising this finding against a new call site should check that site against this LADR: a
-  site that writes a batch without these bounds is a defect, the channel itself is not.
+- **Status:** Superseded by LADR-008 · **Date:** 2026-09
+- **Decision:** delegate recall and capture to two agents with a read-only client and API-enforced
+  read/write credentials.
+- **Consequence:** the read client's refusal and the store-side capability check outlived it.
 
-- **LADR-008** (2026-10-14, accepted, supersedes LADR-005): No read or write subagents. *Context:*
-  LADR-005 delegated recall and capture to two agents (`memory-read`, `memory-write`) registered in
-  `.agents/agents/`. Only Claude Code discovered them (through the `.claude` → `.agents` symlink);
-  OpenCode reads agents from `.opencode/agents/` in another format, Codex had no registration, and the
-  plugin marketplace ships skills only, so every other harness and every plugin install ran a skill
-  that named workers which did not exist. The registrations also pinned `model: sonnet`/`opus`, against
-  the repository's "effort, never a model" rule, and repeated parts of the skill-local contracts, a
-  second copy that drifted. *Decision:* remove the registrations and the delegation. The two contracts
-  become the procedures `references/read-path.md` and `references/write-path.md`, which the session
-  follows itself. The read/write separation the workers provided moves to the shell: the write
-  credential is loaded only inside a subshell around each write-route invocation, so it never persists
-  where the read client runs. *Consequence:* one behaviour in every harness, and the guarantees that
-  were real (read client refusal, non-ambient write token, store-side capability check) are unchanged.
-  **Accepted cost:** raw recall rows now pass through the session's own context, so a large recall
-  spends main-context tokens the worker used to absorb; the bounded output shapes and the 200-row recall
-  cap limit it. **Rejected alternative:** keep the Claude registrations and add OpenCode copies, a third
-  format of the same contract to keep in step. **Rejected alternative:** keep them with `effort:`
-  instead of `model:`, which fixes the pin but not the harness gap.
+### LADR-007 — The capture batch is written to disk before redaction, and that copy is bounded
 
-## Key Behaviors
+- **Status:** Accepted · **Date:** 2026-10
+- **Decision:** the redactor needs the unredacted text as input, and an agent can hand a script text through a
+  file, argv or the environment — so a file under `.context/mimisbrunnr-scratch/`, with every exposure of it
+  bounded: owner-only folder, self-ignoring `.gitignore`, `--consume` on read, folder removed after the real
+  write. Personal data and recognised secrets are masked before the file is written.
+- **Consequence:** a review re-raising "unredacted content on disk" against a new call site checks that site
+  against these bounds — a site without them is the defect, the channel is not. Rejected: argv or a heredoc
+  (process table, shell history, quotes rewrite the command); an environment variable (every child inherits
+  it); a folder outside the checkout (the file tool may not write there).
 
-- **The scripts live in the plugin's shared folder; the contract still lives here.** Every script more
-  than one skill uses — both clients, the redactor, atomicity, deepsearch, dedup, the review queue and
-  its menus, the decision gate and its rubric, the session marker and the near-miss helper — is at
-  `.agents/skills/_mimisbrunnr-shared/scripts/` and referenced by that path (HLD-010 LADR-01). Only
-  `authority.py` and `divergence.py`, which nothing outside this skill imports, stay in this skill's own
-  `scripts/`. The skill remains the sole authority on the write path and the documented owner of the
-  capture contract: location is packaging, ownership is contract (LADR-03). A consumer that reaches into
-  this skill's `scripts/` by path is a defect the PR gate greps for, not a supported integration.
-- **The bundle detector scores claims, not prose.** `atomicity.py` reads the **statement**; a description is a subject label and coordination inside it is not a second claim. A reason clause (`because`, `so that`) and a noun-phrase `and` are one fact, so neither counts as a junction — scoring them made the signal fire on 12/12 candidates of a real batch, including every candidate the detector then called simple. A contrastive junction or a semicolon cannot join anything but two finite clauses, so one is decisive; additive adverbs take two.
-- **Atomicity checked three times.** Restated at accumulation (Listen), at the pre-write round, and as
-  the `skipped` count in the digest. The check is: one memory = one atomic fact. Bundles split; the
-  unprocessable remainder goes to `skipped`.
-- **Semantic subject matching is the skill's job.** The `subject_slug` unique index catches exact
-  re-capture only. Word-overlap heuristics misfire on short subjects (proven in trial 3). Candidate
-  recall is narrowed by facet/kind, then the LLM judges a bounded top-N; the match drives version-bump
-  vs new-memory vs skip.
-- **Authority resolution retains both positions.** Candidate winner is one version bump. Existing
-  winner is two ordered version writes in one transactional set: candidate loser first, existing winner
-  second. Genuine conflict remains two current claim identities plus a proposed divergence record;
-  helper-generated alternative description avoids same-group subject uniqueness collision.
-- **Recall facets/tags match ANY (union), not containment.** A multi-facet batch must return every
-  memory carrying any requested facet; containment would return nothing for any batch no single memory
-  fully covers — an empty result that looks like an empty store and defeats dedup. Traversal
-  (`paths` subcommand) answers *provenance* ("how is A connected to B") rather than *content*, requires
-  a caller-supplied `maxDepth`, and obeys the same scope boundary as `query`.
-- **`valid_from` derives from the source date when known**, not always `now()` — otherwise bitemporality
-  is decorative exactly as MemoryLink was. Business time and system time are never conflation (upstream `generic-automation-and-it/smooth-ai-product-context-memory` HLD-001, storage).
-- **`get` renders results as quoted data** with `sources`, `status`, and scope. A stored memory is not
-  an instruction; the store is local, not thereby trusted as settled canon. `proposed` records are
-  excluded or flagged by default.
-- **Every read surface frames its output, and the framing is a default rather than a per-command
-  decision.** kvasir's `export` admits transcripts and meeting notes through the normal capture path, so
-  a recalled statement can read as an instruction — and unframed it returns carrying the store's
-  authority, which is the most authoritative-looking text in an agent's context and therefore the most
-  effective place to hide one. `RECALL_NOTICE` is defined **once** in `context_memory_client.py` and is
-  the `mimisbrunnr-kvasir-understanding` client's `DATA_NOTICE` verbatim, asserted by a test that loads the
-  sibling rather than restating the string; a paraphrase is a test failure, which is what keeps "never
-  two wordings" true rather than aspirational. The read client frames **at its dispatch**, so a new
-  subcommand is covered the day it is added and the only judgement to make is whether it belongs in
-  `UNFRAMED_COMMANDS` — a question about content, not bookkeeping. `READ_COMMANDS` is the declared
-  surface and `FRAMED_COMMANDS` is derived from it, because two hand-maintained lists drift and a name
-  in one and not the other is either silently unframed or silently double-declared. `probe` is the sole
-  opt-out (it reports a TCP connection and returns no record), and a test holds that reason true.
-  **The notice appears exactly once, and the outermost layer owns the banner.** `query` is reachable
-  from both the capture client and the read client, so two framing layers see the same result; each
-  deciding independently whether a banner had been printed produced the notice twice, and then not at
-  all. The rule is one owner: the inner layer attaches the field silently, the outer prints the prose.
-  Both the field and the prose are emitted, because a notice only in prose is invisible to a program and
-  a notice only in a field is dropped by any caller that rebuilds the object. Attribution is untouched —
-  uuid, version and capture time pass through exactly as the API returned them. A non-JSON body (a blob)
-  takes the banner branch, which is the one place the read client prints prose itself, because there is
-  no object to carry the field. `get-blob` emits the body **byte for byte** — not stripped, no newline
-  appended, both clients — after an unconditional banner, so a caller hashing or diffing it sees what the
-  store holds and a body quoting the notice cannot suppress it.
-- **The read client refuses to start with a write token present.** It requires only
-  `CONTEXT_MEMORY_READ_TOKEN` and exits at startup if any write-token spelling is set
-  (`client.WRITE_TOKEN_NAMES`: `CONTEXT_MEMORY_WRITE_TOKEN`, `ApiAccess__WriteToken`,
-  `Parameters__api-write-token`, case-insensitive, `:` read as `__`), naming the variable, never its value,
-  so a read surface can never mutate, by construction. An orchestrating skill that shells out to it
-  (mimisbrunnr-kvasir-understanding `import`) strips every one of those spellings from the subprocess
-  environment, matched the same way, rather than relying on the caller to `unset` it (issue 184).
-- **`resolve-group` is not dry-runnable, and on the create path an initiative must exist first.** Its
-  handler commits unconditionally — calling it to "look up" a group creates one — so a dry run resolves
-  nothing and reports the group and initiative as *would create*. When it has to **create** the group, a
-  missing initiative is a `404`, so `upsert-initiative` runs first; when the binding's tickets already
-  resolve to an existing group it never looks the initiative up (issue 188 corrected the "always"). A
-  capture orchestration refuses with that command rather than creating the initiative itself. Because
-  `set` requires an existing `groupUuid`, a dry run for a group that does not exist yet previews the plan
-  offline and cannot run `set --dryrun`; its real `set` payload is built after the authorised write
-  creates the group, so the reuse-the-dry-run-payload rule applies to an existing group only. Hence **Initialize only proposes the binding**
-  (read-only `initiatives` and ticket-filtered `query` are the only lookups; the API has no group read
-  route) and the write path runs `upsert-initiative`/`resolve-group` at the authorized `--export`
-  checkpoint, before preflight — otherwise starting a session would be a mid-work write.
-- **A recall has one foreground deadline, and deepsearch degrades by whole passes at it.** The cap is
-  `RECALL_DEADLINE_SECONDS` (60 s); `CONTEXT_MEMORY_RECALL_DEADLINE` may **shorten** it and any other
-  value is refused with `bad-deadline`, never clamped — a budget that silently becomes something else is
-  worse than none (the restore statement-budget defect: a server raised its budget while the client
-  obeyed its own, so the effective budget was the smaller of two values nobody compared). Each read's
-  socket timeout is `min(HTTP_TIMEOUT, deadline)`, so a shortened deadline bounds a single `query`; a
-  **write** keeps `HTTP_TIMEOUT`, so a malformed read-path setting cannot refuse a capture. Before #146 a
-  hung store escaped as a bare `TimeoutError` traceback; the classification and the deadline are
-  deliberately separate — the first says *what happened*, the second says *how long the whole command
-  may take*. deepsearch checks the deadline before each pass and uses the remaining budget as that
-  pass's socket timeout, so a hung store cannot stretch a ten-call chain into ten separate timeouts. On a
-  timed-out pass, or once the deadline is spent, it **stops the chain and keeps the passes already
-  completed** — never a partial record — disclosing `deadlineSeconds`, `stoppedEarly` (any pass
-  incomplete) and `budgetExhausted` (the wall clock was spent — *not* the same as a pass hanging) and
-  `passesIncomplete`, with every pass carrying a `status` of `completed` / `timed-out` / `not-run` /
-  `forbidden` / `malformed` (an answer missing its list, a row without `uuid`/`groupUuid`/`version`, or an unparseable
-  body: no rows taken, listed in `passesIncomplete`, counted in `passesMalformed`, sets
-  `possiblyOmitted`, does not stop the chain; a malformed baseline leaves the anchor counters `null` —
-  issue 184); the anchor counters are `null` when the baseline never answered. A `forbidden` traversal
-  (403, the anchor's group lies outside the requested scope) does not stop the chain: it is listed in
-  `passesIncomplete`, counted in `anchorsForbidden` and not in `anchorsOmittedByCap`, since it was
-  attempted, not capped. Under a group/ticket selector with a scope, `/paths` endpoints outside the
-  baseline's groups are never merged; `endpointsOutsideSelector` counts the distinct ones, and reaching
-  them is a separate, deliberate `paths` read rather than part of this recall. Recall
-  feedback stays server-side (HLD-004 LADR-01), so a client that gives up can leave a server-recorded
-  outcome the agent never received; that is a stated boundary, not a client-side fix.
-- **Approval gating governs `status`, not persistence.** `kind ∈ {rule, nfr, decision}` are **written**
-  with `status: proposed` unless `--approve` is passed; they are not withheld from the store. Retrieval
-  excludes or flags `proposed`, and promotion to `approved` is a later version bump. This is the "ask
-  about what is not reversible" rule applied to *canon*: becoming citable is the irreversible step, not
-  being recorded. A contract that instead withholds the write loses the fact if the session ends before
-  approval — that reading is wrong wherever it appears.
-- **Summary/keyword generation** is a write-time LLM call (R13). The caller does not hand-specify
-  kind/facets/tags/scope/summary/keywords — the skill derives them. On generation failure, store
-  unsummarised and flag for backfill; do not silently reject the fact.
-- **Group resolution:** a ticket belongs to at most one group. Untracked work gets a synthetic
-  `local:<guid>` ticket; no empty-ticket group is ever created.
-- **Separate ticket commands:** `ticket-parent` sends PUT `/api/context/tickets/parent`; local
-  `--dryrun` shares shape validation but makes no network call and does not claim server validation.
-  `ticket-paths` sends POST `/api/context/tickets/paths`, requires depth 1..5, sends direction and
-  path/memory caps explicitly (outbound and 50 each by default, caps 1..200). Ticket identity grants no
-  scope consent. Render the whole response, including disclosure, on empty/capped results. Never retry
-  errors with broader scope or a changed expected parent. API owns ownership/cycles and atomic mutation;
-  hierarchy is current state, not history, and separate from the memory-set transaction.
-- **The decision gate's request and ledger never leak what they carry.** `decisions_gate.py` sends a
-  redacted record — every field as text: a non-string field is JSON-serialised before redaction and a
-  non-empty field without a scrubbed counterpart refuses `redactor-unavailable` (issue 184) — and, for a hosted endpoint, a bearer key, so three guards hold: the configured
-  `CONTEXT_MEMORY_DECISIONS_PATH` must be absolute with a single leading `/` and no `@`, `\`, whitespace
-  or control character (muninn's `recall_feedback_path_ok` rule), and the joined URL's scheme, host and
-  port must equal the validated base's — `bad-decisions-url` otherwise, the path never echoed; the
-  opener installs a `_NoRedirect` handler, so a 3xx is a `redirect-refused` outcome, not a replay of the
-  record and key to `Location`; and the attempt ledger is keyed by `sha256:<hex>` of the record
-  identity, never the subject, because a subject can carry personal data and the ledger is a file on
-  disk (`.context/decisions-ledger.json` by default). **Migration:** a ledger written with raw-subject
-  keys is re-keyed by hashing on read — not dropped, which would silently reset every budget — and the
-  file is rewritten on that same run even when every budget is spent, so raw subjects leave the disk on
-  the first `score` after upgrade. A raw key meeting its own digest (an old and a new gate sharing the
-  file) merges to the larger count and the better best. The report's `identity` field stays the raw
-  subject: it is stdout to the caller, not persisted. **Subject-less records are scored every call;
-  their budget is not durable:** with no subject they keep the positional `index:N` identity for
-  reporting but skip the ledger entirely, and a load drops pre-existing `index:N` keys reporting
-  the count as `ledgerIndexPurged`.
-- **A qualified vendor prefix is redacted on the prefix alone.** `sk-proj-`/`sk-ant-`/`sk-live-`/
-  `sk-test-`/`sk-svcacct-`/`sk-admin-` and `sk_`/`rk_` `live`/`test` keys skip the secret-shape test,
-  because their `_`/`-`-separated bodies read as short words to it and passed unredacted. A bare `sk-`
-  keeps the shape test: it is ambiguous with prose such as `sk-learn-compatible-…`.
-- **Preflight requires both response lists, and an answer for every candidate.** A response without
-  `candidates` and `intraBatchCollisions` as lists is `bad-response` and prints nothing; defaulting either
-  to `[]` reads as "no matches, no collisions", the answer that writes a duplicate. The same holds per
-  candidate: `candidates` must hold exactly one result per request candidate, every index `0..n-1`
-  present once as an integer (not a boolean), each with a `matches` list — a short list, a repeated,
-  missing or out-of-range index, or a result without `matches` leaves a candidate unanswered, which reads
-  as "no match", so it is `bad-response` too.
-- **A divergence's write must state the wrapper's scope or none.** `divergence.py` compares the
-  wrapper's scope with the existing claim's, so a `candidate.write` carrying a different
-  `scopeDimension`/`scopeIdentifier` is refused rather than composed as a same-scope conflict.
-- **Candidate content reaches the offline scripts through a file, never a command line.** The
-  invocations take `--input <batch-file>` (or `< <batch-file>`), written with the agent's file tool
-  under `.context/mimisbrunnr-scratch/` — whose own `.gitignore` (`*`) the write path writes first, because
-  `.context/` is only ignored in repositories that say so (issue 184) — so captured text never sits in argv, shell
-  history or a quoted `echo` — and never in an environment variable either, which every child inherits.
-  That file is the one unredacted copy on disk, so `redact.py`, `atomicity.py` and every client
-  `--payload` take `--consume` (unlink once parsed; refused without a file; an unparseable file is left
-  for the caller). **`set --dryrun` is the exception:** its payload is the one the real write reuses
-  unchanged, so it is kept until the real `set --payload <file> --consume`. The folder is removed after
-  the real write and on failure or abandonment; `decisions_gate.py score < <batch-file>` cannot consume
-  its stdin, so that copy depends on the cleanup.
-- **`probe --base-url` is validated like the environment value.** `base_url(value)` applies one
-  loopback/userinfo/shape rule to an explicit override and to `CONTEXT_MEMORY_BASE_URL`, so the override
-  cannot reach `_probe` or the console unchecked; a refusal is the fixed-text `bad-base-url`.
-- **Ticket shape guards match deterministic wire limits.** Identity strings max 512 and reason/source
-  max 4000 UTF-16 code units, including surrogate pairs for non-BMP characters; NUL/invalid Unicode fail.
-  No trimming/truncation. Shared checks apply to write/dry-run and traversal anchors; traversal filter
-  strings are capped at 32/64 units. `observedAt` requires extended ISO with uppercase T/Z or colon offset,
-  optional seconds and 1..16 fractional digits, offset at most 14:00, valid calendar and UTC years 1..9999.
-  Preserve the original timestamp string; local parsing must not round/truncate what goes on the wire.
-- **Expected parent precedes no-op, not replay.** The server checks the expectation before comparing
-  parent/reason/source/observedAt. An identical state with expected current parent returns
-  `changed: false`; replaying an old null expectation after initial set conflicts. No replay token
-  exists. Never treat uncertain transport outcomes as successful no-ops or silently alter expectations.
-- **Coverage stays qualified:** undeclared upstream hierarchy was not followed; freshness is unverified.
-  Ticket paths are not memory provenance paths. No hidden IDs/counts or inferred missing parents.
-- **`near_miss_tags.py` is offline stdin/stdout validation, not semantic detection.** The strict payload
-  carries scope-bound approval references, frozen `originalQuery`, UUID/version/tags/statements/status/
-  actual scope, caller/skill analysis with an exact supporting quote, selected references and disclosure.
-  Query `facetMatchMode` alone controls tags (omission means ANY; explicit null/unknown mode fails).
-  Legacy `criteria`, independent tag modes and unknown query fields fail; non-tag API fields are preserved,
-  not evaluated. References must resolve within approved examined records and match approved actual scope.
-  Customer/program scope requires an identifier. Mixed-scope evidence requires its own explicit approval,
-  not consent inferred from query or set name. Findings retain actual scope/status and flag proposed
-  evidence without dropping or promoting it. It separates observed failed exact predicates from relevance,
-  preserves original query/selection/disclosure, sorts by UUID/version, and qualifies absence/caps/non-tag
-  exclusion. Rejects input above 1 MiB, 200 records/analyses/references or 200 tags per list without
-  partial output. These are local safety limits, not HLD-005 dossier caps; authorization truth and
-  semantic quality remain skill-owned. Full dossier and tag identity/synonyms remain unimplemented here.
+### LADR-008 — No read or write subagents
 
-## Test References
-
-- **Committed L0 harness (CI-gatable):** `.agents/skills/mimisbrunnr-odin-context-memory/tests/run_tests.py` — stdlib
-   `unittest` (no external runner). Unit-tests `redact.py` secret containment (`SecretShapeCoverageTests`: a 38-shape positive corpus,
-   PEM and repeated-prefix linear-time guards; `RedactionPrecisionTests`: an ordinary-prose corpus that
-   must pass byte-identical and located digests; case-insensitive keys; `OtherWriteRedactionTests`:
-   every persisting write tool); `atomicity.py` bundle
-   detection; `context_memory_client.py` path-segment, exact-route credential, loopback, unparseable-base-URL,
-   `probe --base-url` override (validated like the environment value, never printed with userinfo)
-   and redirect guards — the last two through the client's real opener, not the handler in isolation; `deepsearch.py`
-   caps, deduplication and omission disclosure; `divergence.py` composition, pair idempotency,
-   recursion rejection and wrapper/write scope agreement; preflight's refusal of a response missing
-   either list; `get-blob` byte-for-byte output through both clients; `authority.py` ordered version composition; read-client fail-closed
-   capability boundaries; the read/write path procedures and the absence of agent registrations; ticket transport/guards/dry-run/lossless
-   disclosure; blinded semantic-fixture emission/scoring; `TransportFailureTests`, which drives a **real
-   stalled socket** to prove a hung store is classified `timed-out` rather than escaping as a
-   `TimeoutError` traceback, returns within the budget (elapsed ≤ `HTTP_TIMEOUT` + tolerance), and that a
-   refused connection stays `unreachable` (the control that makes the first assertion meaningful — a fix
-   classifying every transport error as `timed-out` passes one and fails the other) — including the
-   blob fetch, which is driven through the same classified path; `RecallFramingTests`, which recalls a
-   record whose statement is a verbatim prompt injection through every registered read subcommand **via
-   the client's real `main()`**, requiring the shared
-   notice plus intact attribution on each — driving the real entry point rather than the framing helper,
-   because an earlier version passed with the whole fix reverted; `RecallDeadlineTests`,
-   which pins the deadline config (defaults to the cap, shortens, refuses out-of-range/non-integer with
-   `bad-deadline` rather than clamping, refuses before transport), the single-call bound (a shortened
-   deadline reaches `_open` as the socket timeout), and deepsearch's degradation (a timed-out pass keeps
-   the completed passes and reports `stoppedEarly` without `budgetExhausted`, names the rest in
-   `passesIncomplete`, a chain of slow passes stops at the wall clock between passes and reports
-   `budgetExhausted`, and a baseline timeout reports `anchorsEligible`/`anchorsOmittedByCap` as `null`
-   rather than a clean zero); and
-   `near_miss_tags.py` schema/scope/basis/
-   bounds/output/no-I/O guarantees.
-   Run: `python3 -B .agents/skills/mimisbrunnr-odin-context-memory/tests/run_tests.py`. The PR gate runs it and
-   `tests/measure_cost.py` (reproducible structural cost evidence) in the same step.
-- **Decision-gate harness:** `tests/test_decisions_gate.py`
-  (`python3 -B .agents/skills/mimisbrunnr-odin-context-memory/tests/test_decisions_gate.py`).
-  Most cases drive the gate against a loopback stub server; `RequestPathGuardTests`, `RedirectGuardTests`
-  and `LedgerPrivacyTests` are socket-free and pin the host-moving-path refusal, the redirect refusal
-  through the real opener (an in-memory 307 transport) and the digest-keyed ledger with its raw-key
-  migration.
-- **Deterministic near-miss fixtures:** `tests/fixtures/near_miss_tags.json` exercises grounded mismatch,
-  exact match, ANY overlap, irrelevant evidence, unsupported plausible synonym and empty tags. Its evidence
-  contains the original API query, scope-bound approval entry, and explicit approved lifecycle status.
-  Harness additionally checks default ANY/explicit ALL against API-shaped queries, duplicate mode rejection,
-  mixed-status/scope findings, scope-binding failures, empty evidence, case-sensitive predicates, invalid
-  UUID/version/scope/basis, executable stdin/stdout, rejection without partial output, preserved query/
-  selection/disclosure, stable order and zero network/file access. Ticket tests include UTF-16 boundaries,
-  NUL/Unicode rejection and timestamp wire/calendar/offset guards in transport and dry-run. These tests
-  validate plumbing, not LLM judgement or live API behavior.
-- **On-demand LLM-eval fixtures, scored in CI but model-judged only on demand:**
-  `.agents/skills/mimisbrunnr-odin-context-memory/tests/fixtures/scenarios.json` plus `score_fixtures.py`. Authored
-  positive/negative scenarios for the semantic-dedup, atomicity, link and divergence stages, scored
-  for recall AND precision against a countable expected-verdict set. Give the model only
-  `score_fixtures.py --emit-model-input` output; the source fixture contains expected answers and is
-  scorer-only. A run where the model reads `scenarios.json` is circular and invalid evidence.
-  **The judgement itself is not CI-gated, but the harness is:** `run_tests.py::SemanticFixtureTests`
-  invokes the scorer twice and the PR gate runs `run_tests.py` — once to prove the blinded emitter
-  withholds `expected`/`note`/`axis`, and once to assert the **committed** verdicts file scores exactly
-  recall 1.0 / precision 1.0. So a stale expectation is not inert: it is *certified*. A fixture whose
-  expected verdict contradicts the shipped contract will not fail a test, it will make the recorded run
-  look perfect.
-- **Verdicts pair by `id`, not by position.** The emitter emits an **opaque** id per scenario
-  (`opaque_id`, a hash of the authored id) and the scorer refuses a verdicts file whose entries carry
-  no id unless `--allow-legacy-positional` is passed. The scorer accepts the opaque or the authored id,
-  so a recorded run that echoed authored ids stays scorable. The authored ids are not emitted because
-  they name expected verdicts (`s4-cross-group-match-is-not-a-bump`, `s8-near-miss-negative`) and the
-  model reads the blinded input — an earlier note here called that a property of the committed file
-  only, which was wrong (issue 190 #20). The emitter also withholds `expected`, `note` and `axis`;
-  `stage` stays, since it is the question asked and sets the verdict shape. All asserted by the harness.
-  Pairing matters because positional pairing meant that
-  inserting, deleting or reordering a scenario silently misaligned every verdict after it, and the
-  1.0/1.0 assertion above would then have certified the wrong verdicts against the wrong scenarios
-  **with no test failing**. `test_reordering_the_verdicts_does_not_change_the_score` is the property
-  positional pairing could not have. **Appending is no longer the only safe edit** — adding, inserting
-  or reordering is fine; a new *run* is still required, since a run's verdicts are a record of one
-  model's judgements on one day.
-- **Each run is a new dated file** (`model-verdicts-<date>.json`, with a qualifier when one day holds
-  two runs); a previous run is a record of what the model said that day and is never edited in place,
-  so a superseded run stays available for re-scoring. A dated run is only re-scorable against the
-  fixture it was taken against, so freeze that too (`scenarios-<date>.json`) — otherwise re-scoring a
-  ten-verdict run against today's fourteen-scenario fixture is a length error, not a measurement.
-  `scenarios-2026-09-29.json` is the frozen set behind the two historical runs, which re-score as
-  **accuracy 0.9 / precision 0.5** (2026-09-17 — once misquoted as recall 0.9 / precision 0.8333, an
-  accuracy figure under recall's name over an inflated precision denominator) and **1.0 / 1.0**
-  (2026-09-29); neither declares `axis`, so neither measures recall. `scenarios-2026-09-29-balanced.json`
-  is the frozen set behind the balanced run (recall / precision / accuracy 1.0), frozen when the live
-  fixture's model input gained `candidate_group_uuid` and a three-claim atomicity statement — the
-  committed-run assertions score against it, never against the live file.
-- **Every scenario with a recall set declares `candidate_group_uuid`**, the group the candidate is
-  written into, and the emitter refuses to emit one without it: a same-group bump and a cross-group
-  twin are indistinguishable otherwise, so `s4` scored a judgement the input never made answerable.
-  Precision counts a claimed collapse as correct only on the full match, target included; a bump into
-  the wrong memory is reported as `wrong_target`, not credited.
-- **Every scenario declares its `axis`** — `recall_positive`, `precision_negative` or `not_dedup` — and
-  the scorer and harness both refuse a set with fewer negative controls than positive pairs. Declared
-  rather than inferred from the expected verdict word, because a scenario expecting `new_memory` for a
-  reason unrelated to matching would otherwise inflate the negative count, and a matcher that matches
-  nothing scores perfect precision. `axis` is withheld from the blinded input: it would tell the model
-  which way the pair is meant to fall.
-- The skill's test approach is specified in `docs/hlds/002-context-memory-write-pipeline/nfrs/NFR-02-deduplication-accuracy.md`. These
-  are not this repo's L0/L1/L2 tiers, which apply to the C# API (PR #14).
-- **Shared credential fixture:** `tests/fixtures/credential_like.json` is the one synthetic list of
-  credential-shaped `provider:key` strings read by `CredentialLikeFixtureTests` (redactor), the gate's
-  request-body and ledger tests, and the Heimdallr harness — so the three consumers cannot drift. Also
-  added for issue 182: `ScratchInputConsumeTests` (`--consume`), `RedactorTimeoutTests`, and the gate
-  cases run against a private copy of the gate (`tearDownModule` fails if a shipped file changed).
-  Issue 184 added `DeepSearchTests` malformed-answer cases, the non-object redaction digest in
-  `OtherWriteRedactionTests`, the gate's malformed-port and non-string-field cases, and
-  `CalibrationIsolationTests` (the calibration ignores the operator's decision settings).
-
-## Requirements
-
-Approved (2026-09-12) implementation plan for making this contract executable
-against the HTTP API (PR #14). No C# changes. The plan detail and decision set live in the gitignored working
- specification. Key decisions: semantic dedup composed from
-`/query` recall (facets+kind, no free-text, `includeProposed:true`, `limit:200`) + LLM judgement,
-with `/preflight` as exact-match backstop + intra-batch + ticket-uniqueness only (amends HLD 002 (write pipeline)'s
-"Write preflight" API row); digest renders `skipped(atomicity)` separately from `skipped(duplicate-link)`;
-redaction detector is a stdin→stdout fingerprint script reporting rule names only; 20-candidate cap
- as a static configurable setting. Divergence creates a proposed record plus transactional
- contradiction links and reports a real count.
+- **Status:** Accepted — supersedes LADR-005 · **Date:** 2026-10-14
+- **Decision:** the session runs `references/read-path.md` and `references/write-path.md` itself; the write
+  credential is loaded only inside a subshell around each write-route invocation. The registrations worked in
+  one harness only and pinned a model against the repository's effort rule.
+- **Consequence:** one behaviour in every harness. Accepted cost: raw recall rows pass through the session's
+  context (bounded by the output shapes and the 200-row recall cap). Rejected: Claude registrations plus
+  OpenCode copies (a third format to keep in step); keeping them with `effort:` (fixes the pin, not the gap).
 
 ## Changelog
 
 | Date | Change | Ref |
-|:-----|:-------|:----|
-| 2026-10-15 | **G1: held candidates persist as `Status = proposed`.** The queued-not-dropped rule gains its store half: a held-back candidate is written with `Status = proposed` (full fields, own preflight + veto, creates only), which is what the Console review queue reads; the queue-file append stays as the local trail. This extends the existing approval-gating rule (status, not persistence) to held candidates; kvasir `export` enforces the same in code with harness 254 -> 259. | HLD-009 G1 |
-| 2026-10-14 | **The shared scripts moved out of this skill's folder (HLD-010 B2 / LADR-01).** `context_memory_client.py`, `context_memory_read_client.py`, `redact.py`, `atomicity.py`, `deepsearch.py`, `dedup.py`, `review_queue.py`, `conflict_menus.json`, `decisions_gate.py`, `decisions_rubric.json`, `session_marker.py` and `near_miss_tags.py` moved to `.agents/skills/_mimisbrunnr-shared/scripts/`, which kvasir, saga-dossier, heimdallr and ymir-bootstrap now reference by path instead of reaching into this skill. `authority.py` and `divergence.py` stayed, because nothing outside this skill imports them. The harnesses (`run_tests.py`, `test_decisions_gate.py`, `test_review_and_dedup.py`, `score_decisions_calibration.py`) resolve both folders, the two-module `_load` split is pinned by an explicit `scripts` argument, and `test_both_rubric_copies_are_identical` became `test_no_skill_inside_the_plugin_carries_a_nested_rubric_copy` — the copy it watched was deleted, so the pin is now the absence of one. All 263 + 174 + 19 cases green. | HLD-010 LADR-01, issue 222 |
-| 2026-10-14 | **Subject-less gate records are scored every call; their budget is not durable.** `decisions_gate.py score` kept the positional `index:N` identity for reporting but persisted it in the attempt ledger, so prose/dump exports went `attempts-exhausted` once the low positions were spent and the gate was silently off. Such records now skip the ledger read/write (scored as attempt 1, `"durable": false`); a load drops pre-existing `index:N` keys and reports the count as `ledgerIndexPurged`. Harness +7 gate cases. | issue 222 |
-| 2026-10-14 | **Credential subshell covers each write-route invocation.** `WRITE_ROUTES` sends the write credential on `preflight` too (persists nothing, authenticates write-only), and the checkpoint runs `preflight`/`set`/`resolve-group`/`upsert-initiative` plus follow-up writes — a single-write wording left the others without a credential. `SKILL.md`, both procedures and the Non-Negotiable now say `each write-route invocation` with the full subcommand list; the harness pins the wording in all four docs. Also fixed a `memory-write.md` reference to `references/write-path.md` and an agents leftover in `README.md`. | PR #221 review |
-| 2026-10-14 | **A success-shaped zero-write `set` answer marks nothing.** When the response carries `created`/`versioned`/`unchanged` counts summing to 0, the export receipt records no entry (`Marker: skipped (nothing written)`) instead of falling back to the request's own uuids; a response with no counts keeps the fallback. | PR #221 review |
-| 2026-10-14 | **Read/write subagents removed (LADR-008, supersedes LADR-005).** `.agents/agents/memory-{read,write}.md` deleted; the skill-local contracts moved to `references/read-path.md` / `references/write-path.md` without agent frontmatter, and the session runs both paths itself. The write credential is loaded only inside a subshell around the single write command, so the read client keeps running in the same session. `SKILL.md` *Where Each Step Runs* rewritten; harness `AgentContractTests` re-pointed at the procedures and gained a no-registration guard. | session request |
-| 2026-10-14 | **Export receipt prefers server-confirmed uuids** (falls back to request uuid/createUuid when the response is not positional); **corrupt marker quarantined** to `<name>.corrupt-<stamp>` with a stderr warning instead of silent replace. | ai-review 3, 4 |
-
-| 2026-10-14 | **Session marker: import marks the export boundary (HLD-007 LADR-11).** `query`/`import` gain `--nomarker`/`--session`, write the odin marker and print `Marker:` on stderr; `set`/`export` gain `--all`/`--nomarker`/`--session`, drop echo items (same uuid and description) before sending, keep changed ones as supersessions, and append sent ids on success (`Marker: set (export, …)`; dry runs, refusals and `--nomarker` sends mark nothing); `preflight` gains `--all`/`--session` and discloses exact-subject matches as supersession routing. `Boundary:` on stderr; stdout stays parseable JSON. The read-only client never marks (shared recall path). Harness 248 -> 258. | HLD-007 LADR-11 |
-| 2026-10-14 | **Checkpoint stops when the proposed initiative is not the resolved group's.** Tickets resolve first and the initiative is create-path-only (`resolve-group` returns an existing ticket-bound group without looking it up), so an initiative naming anything but the group's own was silently dropped while the write versioned under the old one. SKILL.md checkpoint and `references/write-path.md` compare the reply `initiativeName` and offer drop / re-bind-for-WET / `update-group` re-point. Kvasir `export` enforces the same gate in code (`initiative_mismatch_refusal`, harness 214 -> 221). | session request |
-| 2026-10-07 | Only a missing ledger is a first run; an unreadable one is a disclosed `ledgerReset` (#6). Calibration: two undefined correlations agree (#9). `--dryrun` writes no memory or group but its queries still leave server-side recall feedback (#7). | review 5441621898 |
-| 2026-10-07 | Calibration counts hold-side role clearing as bleed; recorded runs have no false positive, so their figures stand. | review 5440964552 |
-| 2026-10-07 | Deepsearch's malformed-row rule names `version`; workers point at `SKILL.md` for the credential load (`AGENTS.md` never named it); the read client's refusal names all three write-token spellings. | issue 200 |
-| 2026-10-07 | `query` refuses rows without `uuid`/`groupUuid`/`version`; deepsearch counts keyword-found groups as selected; Kvasir's narrower capture path named. | review 5438563690 |
-| 2026-10-06 | Preflight entries are checked, not just the lists: an unreadable match read as "none" and wrote a duplicate. A malformed ledger `best` is a disclosed reset. | review 5432012955 |
-| 2026-10-06 | Credential loaders read presence, not truthiness, so an empty override is honoured. | issue 190, review 5430979214 |
-| 2026-10-06 | Persisted values pass both redaction steps; every read surface frames recalled text; a bad gate endpoint refuses. | issue 190 |
-| 2026-10-06 | No personal data in scratch files, across every instruction that writes one. | issue 188 |
-| 2026-10-06 | Fixed by defect class: write-before-redact bounded (LADR-007, owner-only scratch), session-ID keys redacted, remote text never echoed, malformed responses refused. | issue 186 |
-| 2026-10-06 | Host spelling of the write token refused; non-string gate fields and incomplete deepsearch pages handled. | issue 184 |
-| 2026-10-06 | Every verdict needs a reason; a key split by a line break or invisible character still fails the scrub; calibration ignores the operator's env. | issue 184 |
-| 2026-10-05 | `pwd` no longer rewrites working directories; the dry-run payload is the one written. | issue 182 |
-| 2026-10-05 | Truncated keys, credential-word keys, `;params` base URLs and deepsearch's group selector closed. | issue 182 |
-| 2026-10-05 | Redactor timeout is `redactor-unavailable`, not a traceback the caller read as "skipped"; ledger cap keeps the key being written. | issue 182 |
-| 2026-10-05 | A malformed probability no longer passes the gate; calibration cannot certify what it did not score. | issue 179 |
-| 2026-10-05 | Qualified `sk-proj-` keys redact on prefix; a missing preflight list is `bad-response`, not "no matches"; blobs byte-faithful. | issue 179 |
-| 2026-10-05 | Attempt ledger keyed by hash, not the raw subject (personal data on disk). | issue 179 |
-| 2026-10-05 | `export`/`import` are real command aliases; `--input` removed. | PR #178 review |
-| 2026-10-05 | Store-direction switches named to match kvasir/ai-understanding. | session request |
-| 2026-10-05 | Test names must match what the body proves. | decision gate ledger cap |
-| 2026-10-05 | Ledger cap tested on the write path; crossing it crashed on just-evicted records. | decision gate ledger cap |
-| 2026-10-05 | Gate harness isolated from the operator's credentials file. | gate harness isolation |
-| 2026-10-04 | `discrimination` on every record, not only scored ones. | decision gate disclosure |
-| 2026-10-04 | An unexplained kvasir harness failure recorded, not dismissed. | kvasir harness flake |
-| 2026-10-04 | Shipped threshold `0.85`; determinism asserted, not claimed. | decision gate threshold |
-| 2026-10-04 | "Saturates toward yes" was wrong; a labelled fixture holds the numbers. | decision gate calibration |
-| 2026-10-04 | Gate loads machine-credential settings, not only `os.environ`. | decision gate credential loading |
-| 2026-10-04 | Best-attempt tie-break was dead code (`best_attempt(None, …)`). | decision gate best attempt |
-| 2026-10-04 | Ledger bounded; a discarded ledger resets the budget with disclosure. | decision gate attempt ledger |
-| 2026-10-04 | A malformed rubric refuses instead of raising. | decision gate rubric validation |
-| 2026-10-04 | Redaction mapping fails closed in both directions. | decision gate redaction |
-| 2026-10-04 | Optional, off-by-default value gate added, client-side only. | decision gate |
-| 2026-10-03 | SKILL.md opt-out note names only kvasir `export`/`dump`. | session request |
-| 2026-10-03 | Malformed `--payload` is a classified error; fail-closed redaction. | redaction gate |
-| 2026-10-03 | Initialize defaults to Heimdallr when nothing is bound. | session request |
-| 2026-10-02 | MCP layer removed; workers run the bash clients. | MCP removal |
-| 2026-10-02 | `resolve-group` has no dry-run, so a dry run resolves nothing. | kvasir export |
-| 2026-10-01 | One foreground recall deadline; deepsearch degrades by whole passes. | HLD-004 LADR-01 |
-| 2026-10-01 | Proxy and redirect guards tested where installed, not in isolation. | HLD-002 NFR-01 |
-| 2026-10-01 | Unparseable base URL is `bad-base-url`, not a traceback printing userinfo. | HLD-002 NFR-01 |
-| 2026-10-01 | Every persisting write is scrubbed, not just `set`. | BR-03; HLD-002 NFR-01 |
-| 2026-10-01 | Scrubber matches keys case-insensitively, as the Host binds them. | BR-03; HLD-002 NFR-01 |
-| 2026-10-01 | Redaction covers this repo's own secret shapes; quoted values don't leak their tail; PEM rule linear. | BR-03; HLD-002 NFR-01 |
-| 2026-10-01 | Generic secret rule no longer rewrites prose; every scrub reports where. | BR-03; HLD-002 NFR-01 |
-| 2026-10-01 | `uuid`/`version` path segments validated before any URL; write credential chosen by exact route. | HLD-002 NFR-01 |
-| 2026-10-01 | Every read surface frames recalled memory as untrusted data, from one notice. | HLD-007 |
-| 2026-10-01 | Mid-response socket reset classified; framing drift guard no longer circular. | PR review |
-| 2026-10-01 | Hung store is `timed-out`, distinct from `unreachable`. | MemOS adoption |
-| 2026-10-01 | Digest names a human action; `propose-label` needs three sightings. | ICM adoption |
-| 2026-09-29 | Redaction gate closed: a gate on recognition, not on secrets. | HLD-002 LADR-03, NFR-02 |
-| 2026-09-29 | Fixtures encoded the overturned cross-group rule and CI certified it. | HLD-002 NFR-02 |
-| 2026-09-28 | Memory identity is group-scoped. | HLD-002 LADR-01, LADR-04 |
-| 2026-09-27 | Judge step: a same-subject match versions only within the group. | SKILL.md |
-| 2026-09-20 | "Sole interface" claim retired from living docs. | PR #86 review |
-| 2026-09-19 | Narrowed to "sole authority on the write path". | HLD-007 LADR-03 |
-| 2026-09-17 | Test References: PR gate runs `run_tests.py` and `measure_cost.py`. | pr-gate.yml |
-| 2026-09-17 | Delivered read/write worker contracts, bounded deepsearch, createUuid payloads. | HLD-002 closure |
-| 2026-09-17 | Authority resolution and divergence storage added. | BR-10 closure |
-| 2026-09-17 | Delegated read/write execution approved. | HLD-002 delta closure |
-| 2026-09-16 | `/query` free text is AND-of-all-lexemes under `english` stemming. | HLD-001 storage delta |
-| 2026-09-15 | Near-miss query frozen to `tags` + `facetMatchMode`. | HLD-005 LADR-10/13 |
-| 2026-09-14 | Strict expected-parent-before-no-op; no replay token. | HLD-002 LADR-08 |
-| 2026-09-14 | `ticket-parent` PUT and bounded `ticket-paths` added. | HLD-002 LADR-08 |
-| 2026-09-14 | `## Request Bodies` documented; `facetMatchMode` spelling corrected. | e2e-dogfood |
-| 2026-09-14 | Brand-prefixed. |  |
-| 2026-09-13 | Unknown request fields are a 400, so a misspelling never defaults silently. | BUG-03 |
-| 2026-09-13 | Facet/tag recall matches ANY by default; containment would hide memories. | BUG-02, BUG-04 |
-| 2026-09-10 | Created. | HLD 002 |
-| 2026-09-10 | Five-stage pipeline with preflight first. | HLD 002 contract review |
-| 2026-09-12 | Requirements recorded. | PR #17 |
-| 2026-09-12 | Skill implemented (client, redactor, 20-candidate cap). | PR #17 |
-| 2026-09-30 | Scorer printed accuracy as recall; historical figures corrected. | HLD-002 NFR-02 |
-| 2026-10-05 | **A held candidate is now queued, not printed and dropped.** The capture path's gates (atomicity `kvasir export`, the decision gate below threshold, staged dedup) append every candidate they hold to `~/.mimisbrunnr/review/queue.jsonl` (mode 600, outside every checkout, overridable by `CONTEXT_MEMORY_REVIEW_QUEUE`) via the new `review_queue.py` (`review list/show/resolve`); a resolve accepts only a closed-menu choice from `conflict_menus.json`. Staged dedup (`dedup.py`: exact → kind-agnostic lexical → Nimble `noul` on doubtful pairs, reusing the decision transport) produces a `duplicate` proposal, never a merge. New `CONTEXT_MEMORY_DECISIONS_DEDUP_*` settings, add-only in `run.sh`. No Host change, no vectors; the human veto stays. Harness +19 cases. | this PR |
-| 2026-10-05 | **`export`/`import` are now real command aliases, and the `--input` switch is gone.** The row below added `--import`/`--export`/`--input` to the Switches table as wording only, so the table described commands neither client had, and an `--input` that "defaults to the current session dump" when this skill's capture reads no dump at all. The write client now accepts `export` (runs `set`) and `import` (runs `query`); the read client accepts `import` only, since it has no write command. Both normalise the alias to the canonical name right after parsing, so write-route selection and recall framing never see a second spelling — `DirectionAliasTests` pins the routing and that an aliased recall is still framed. `--input` was removed: capturing a dump is `mimisbrunnr-kvasir-understanding export --input`. Checkpoint wording in SKILL.md now says `--export`. Harness 156 -> 159. | PR #178 review |
-| 2026-10-05 | **The store-direction switches are named to match `kvasir`/`ai-understanding`.** The SKILL.md Switches table gained `--import` (store → session, recall) and `--export` (session → store, capture) as the aligned direction names, plus `--input` (defaults to the current session dump), replacing the get/set wording for the direction. The low-level client verbs (`set`, `query`, `get-versions`) stay as the plumbing the directions route through. Wording-only; the write path is unchanged. | session request |
-| 2026-10-05 | **`test_the_write_path_applies_the_cap` asserted a name its body did not earn, and the full review caught it.** The docstring claimed "the cap must be reached on the real write path, or `cap_ledger` is merely a helper nobody calls", while every line called `cap_ledger` directly and asserted on a file the case had just written by hand — so it proved the helper bounds a dictionary and nothing whatever about `record_attempt` using it. That gap is now closed properly by `test_the_ledger_is_capped_end_to_end`, which crosses the cap through the gate itself. Rather than delete it, it is kept at a name and scope it can defend — `test_cap_ledger_bounds_a_ledger_built_at_the_shipped_limit` — and gained the under-the-bound case that shows the cap is a ceiling rather than a target. A second case whose name asserts wiring it does not exercise is the same defect in different clothing, and a reader scanning names would have believed the wiring twice while it was proved zero times. | decision gate ledger cap |
-| 2026-10-05 | **The ledger cap was never tested on the write path, and crossing it for real crashed the gate on the records it had just evicted.** The review finding was correct and the evidence was worse than untested: `test_the_ledger_is_capped_end_to_end` wrote 55 subjects against a shipped cap of 5000, and its own comment said so. **Deleting `cap_ledger` from `record_attempt` left all ten ledger tests green** — verified, not assumed — while the ledger grew without bound, which is the one defect the cap exists to prevent. Its comment claimed the batch was "sized to exceed `MAX_LEDGER_ENTRIES` deliberately", so the wrong reasoning was recorded as settled. Two changes. **(1) The cap is now exercised, not asserted.** Reaching 5000 over HTTP costs one subprocess round trip per record, so the bound is unreachable in a suite that finishes; the cap is read per call from `ledger_cap()` with an injectable override, validated in `config()` alongside every other setting, and the end-to-end case crosses **20** through the identical code path a production run takes. `cap_ledger`'s `max_entries` is now `None`-defaulted so the helper and the write path cannot disagree about the bound. The override is **inert when unset** (a case asserts it resolves to the shipped 5000) and a malformed value is **refused, not clamped**, on the same rule as every other numeric setting. **(2) Crossing the cap found a latent crash.** `record_attempt` read the entry as `entry_attempts(entry)` with no `None` guard, while `next_attempt` carries one. The two are separate reads of the file, and between them `cap_ledger` can evict *this* identity — so `entry` is `None`, `entry_attempts(None)` is `None`, and `max(None, attempt)` raises `TypeError`. **A capped ledger crashed on exactly the records it had just evicted**, and no earlier case could reach it because every one ran below the cap. Guard added, with the mechanism stated. **Mutations verified:** removing the cap from `record_attempt` fails the end-to-end case `21 != 20`; dropping the eviction guard fails it too; clamping instead of refusing fails the malformed-cap case. A first attempt at the cap mutation edited the wrong one of the two `cap_ledger` call sites and passed — recorded because a mutation targeting the wrong line proves nothing and reads exactly like a passing test. 98 -> 104. | decision gate ledger cap |
-| 2026-10-05 | **The gate harness was not hermetic: every case silently read the operator's real `~/.mimisbrunnr/credentials`, and on CI one case reached for a decision model that does not exist there.** Three failures, one cause. `run_gate` scrubbed `CONTEXT_MEMORY_DECISIONS_*` from the **environment** but never redirected `CONTEXT_MEMORY_CREDENTIAL_FILE`, and the gate seeds its settings from that file **at import** — so the one file on the machine describing the machine's real decision configuration reached every subprocess this suite spawned. The three symptoms shared the cause and none of them looked like it. (1) CI: `test_only_the_named_keys_are_seeded` passed **only** the credential file, so `BASE_URL` fell back to its documented default of `http://localhost:11434` and the assertion was really "a decision model answered somewhere on the developer's machine" — green here because Ollama is running, `unreachable` on the gate because CI has no Ollama. Its docstring claimed the endpoint came from the harness stub; it never did, and the case now passes the stub explicitly. (2) The same case was **named for the exclusion and never asserted it**: reaching `ok` only proves the named flag was read, so a loader seeding every key in the file would have passed. It now asserts the unlisted key stays out, driven in a **subprocess** — loading the gate in-process was the obvious alternative and it leaked, because the loader runs at import, so the unlisted key landed in `os.environ` for the rest of the process and the sibling loader-agreement test — which passes that same name as a *wanted* key and relies on "a value already in the environment wins" — then diverged. One test's environment became another's input. (3) Locally: a case setting the flag to the empty string read as **enabled**, because the operator's file said `true` and an empty value does not count as "already set", so the loader seeded it behind the case's back; and cases whose stub endpoint was overridden by the file's `BASE_URL` reached for a real model and stalled. The fix is one `setdefault` redirecting the file pointer at a path that does not exist, unless a case names its own, plus `HarnessIsolationTests` (3 cases) asserting the isolation rather than assuming it — including that the isolation path itself does not exist, so a future edit dropping the `setdefault` cannot pass on a machine that happens to have no credential file. **This is the same class as the credential-file defect this skill already fixed in `run.sh`** — a harness that redirected the home but not the derived path, and wrote to the operator's real files. A hermetic suite is one whose result depends on the code under test and not on who is running it. | gate harness isolation | 98 -> 101 |
-| 2026-10-04 | **`discrimination` is now on every record, not only the scored ones.** The block was added beside `passingRoles` so a downstream `audience:*` tag could be read for how much it was worth, and the failed round was given `{"margin": 0.0, "tied": []}` for exactly that reason — a consumer must not `KeyError` on the records whose outcome it most needs to reason about. Two paths were missed: **`oversize`** and **`attempts-exhausted`**, both of which are *held* rather than kept by the client, so a consumer reading `margin` uniformly broke on precisely the records whose disposition it had to explain. Both now carry the same zero the failed round does. **Recorded rather than fixed: the ledger cap's eviction direction contradicts its own documentation.** `cap_ledger` sorts by `-entry_attempts` and keeps the first `max_entries`, so it **keeps the most-spent entries and drops the in-flight ones** — the reverse of the docstring's and this file's "drop the most-spent entries first, since losing the memory of a spent budget is the least harmful entry to lose". Two committed cases pin the shipped direction (`test_the_cap_drops_the_most_spent_entries` asserts the *highest* counts survive, under a name that says the opposite; `test_a_record_the_cap_evicted_can_be_scored_again` asserts the least-spent entry is the one evicted), so the code is not accidentally untested and the defect is a **policy contradiction between the docs and the harness**, not a bug in either alone. Which side is authoritative is a decision about which loss is worse, it changes behaviour for a 5 000-entry session, and resolving it means rewriting those cases — deliberately left open rather than picked here. | decision gate disclosure |
-
-| 2026-10-04 | **One unexplained kvasir harness run, recorded rather than dismissed.** `mimisbrunnr-kvasir-understanding/tests/run_tests.py` reported `FAILED (failures=2)` in **44.5 s** in a single run; seven subsequent runs were `OK` in ~6 s, and the failing test names were not captured because the run's output was not teed to a file. The 44 s figure is the useful clue -- it is close to `HTTP_TIMEOUT` (30 s) plus overhead, which is the shape of a test that reached a store instead of a stub. **Two candidate classes were checked and both are hermetic:** `HeimdallrAutofillTests` stubs `initiative_exists` to a definite absent answer -- the same defect this skill already fixed and recorded once -- and `DecisionsGateIntegrationTests` replaces `subprocess.run`, so no subprocess is spawned. A crude static scan flagged seven classes as touching export with no store stub, but it matches the word `export` in flag names and is not evidence of anything; it is recorded here so nobody mistakes it for a finding. **No cause is claimed.** The next occurrence should tee the output to a file before diagnosing, because the failing names are the whole of the evidence and were lost. Nothing in this branch touches that harness's store paths. | kvasir harness flake |
-| 2026-10-04 | **The shipped default is now `0.85`, determinism is an assertion rather than a claim, and `passingRoles` finally says how much to trust it.** (1) The threshold an operator had set on their own machine was never shipped, so the gate behaved one way for them and another for everyone else; `MIN_PROBABILITY` moves `0.5` -> `0.85` in the defaults table and in the wiki inventory, and the calibration fixture was **re-recorded at the new bar rather than left describing the old one** — a recorded run certifying a configuration we no longer ship is precisely what `CalibrationEvidenceTests` exists to prevent. It cost nothing in verdicts and something real in attribution, both now recorded: `0.85` sits **inside** the bimodal gap (hold-side max `0.205`, pass-side min `0.961`), so precision and recall stay at **1.00/1.00** and only the roles clearing the bar fall, `27/30 -> 24/30`. The `0.5` run is kept alongside it as `atBar05` so the comparison is permanent rather than a claim. The launcher harness asserts key *presence*, not the literal value, so no assertion pinned the old number. (2) Determinism was measured by hand three times and then written down as prose, which is how a measured property decays into folklore — and it is the property the entire calibration rests on, since without it a threshold cannot be pinned and two runs cannot be told apart. `--check-determinism` now scores the whole fixture three times and **fails** if the runs differ, naming the first divergent record; three passes verified identical. (3) **A real disclosure gap:** `passingRoles` becomes `audience:*` tags in the sibling's `mark` path, and on its own it cannot distinguish three roles scoring exactly `1.00000` from three that each cleared the bar on merit — measured, 3 of 21 records tie exactly and mean best-role is `0.99`, so saturation at the top is the normal case. Every scored record now carries `discrimination: {margin, tied}`: the gap from the top role to the next, and every role tied at the top. It **never affects a verdict** — `passing` is still computed from raw scores alone — and that is the property the tests pin. Note what the margin is *not*: five roles at `1.0` is a five-way tie with margin `0.0`, not a unanimous sweep of `1.0`; the first version of that test asserted the sweep and was wrong. Six tests (`DiscriminationDisclosureTests`, 92 -> 98) cover the tie, the clear winner, the single-role case, the failed round (which discloses `0.0` rather than omitting the field, so a consumer cannot KeyError on exactly the records whose outcome it most needs to reason about), and the never-changes-a-verdict property. **Three mutations verified:** hardcoding the margin fails 4, reporting only the top role fails 2, and folding the margin into `passing` fails exactly the safety case. | decision gate threshold, determinism, discrimination |
-| 2026-10-04 | **The claim that the model "saturates toward yes" was wrong, and a labelled fixture now holds the numbers that say so.** The gate's rubric, threshold and five roles were argued from impression, and impression produced three confident claims this work then measured and contradicted: that the model saturates, that the rubric needed tightening, and that the vendor's fitted temperature should be applied. A committed 21-record fixture — a junk-to-specific gradient across six domains, opaque ids so a blinded run cannot read its own answer — scored against the **shipped gate**, not a reimplementation, gives **precision 1.00 / recall 1.00**, mean best-role **0.14** on the six hold-side records against **0.99** on the fifteen stating a checkable fact. The scores are **bimodal** (nothing between 0.23 and 0.97), so any bar in that band returns identical verdicts and the threshold is not a sensitive knob. Two rubric rewrites both **regressed** to precision 0.94 — enumerating concrete nouns lost `business` on a non-numeric business rule (1.00 → 0.10), and narrowing criteria lost six expected roles — and the mechanism is that **`instructions` carry the framing while `criteria` only refine it**: the second variant's *instructions* asked a more permissive question than the original's, and `tester` duly rose 0.22 → 0.83 on a vague record whose criteria had got narrower. A single `choice` question was measured as an attribution alternative and was **not** better (13 of 15 labelled records against 14), though it is the model's strongest type and its `no-role` escape fires correctly on junk. The vendor's fitted `T=2.179` is a **trap for a gate**: for a binary answer the logit gap is exactly recoverable from the returned probability, so applying it is trivial, and it raises junk 0.14 → 0.31 while separation falls 0.85 → 0.62 — it was fitted so probabilities match correctness *rates*, which is not the same property as *separating*. Two `Software` caveats worth carrying: the model's `Software` training category has **zero** held-out examples, so its published accuracy says nothing about this gate's actual domain, and its Boolean accuracy is 80.2% — so a `0.85` bar sits **above** the model's own agreement rate on the question type this gate uses. Only shipped change: `product-owner` and `business` criteria de-overlapped (PO no longer claims "a business rule", business no longer claims "a user-facing capability"), version `1` → `2` in **both** copies. It is a marginal win and is recorded as one — separation +0.013, correlation 0.94 → 0.92, gate verdicts unchanged — because `r=0.92` proves the correlation is the model handling two adjacent questions, not shared vocabulary. Role attribution remains the weak half: `tester` clears 15 of 21 and carries almost no negative information. Eleven new tests (`CalibrationEvidenceTests`, model-free, 81 → 92) hold the recorded run's **shape** and above all its **pin** — a recorded run may never certify a rubric it did not score, which is this skill's own documented `SemanticFixtureTests` defect where positional pairing made a 1.0/1.0 assertion certify the wrong verdicts with nothing failing. **Four mutations verified:** moving the shipped rubric version, renaming a fixture id to name its own verdict, breaking the recorded confusion matrix, and moving the recorded bar off the measured gap each fail exactly one case. `score_decisions_calibration.py` is on-demand tooling needing a local decision model, so CI never runs it. | decision gate calibration |
-| 2026-10-04 | **The gate read only `os.environ`, so the settings `run.sh` publishes were invisible to it on every platform.** The worktask required the skills to load these "through `load_machine_credentials()` … **no new loader**", and that was never wired: `decisions_gate.py` and kvasir's `gate_decisions` both read the environment directly. Proven against the real credential file — `CONTEXT_MEMORY_DECISIONS_ENABLED=true` in `~/.mimisbrunnr/credentials` still reported `decisions: disabled` with a clean process environment. The consequence is worse than an inconvenience: `CONTEXT_MEMORY_READ_TOKEN` and `CONTEXT_MEMORY_BASE_URL` **are** auto-loaded from that same file, so the decision settings were the only ones in the skill that its own operator tooling could not reach, and the feature could not be turned on without hand-exporting all ten. **This is not the `run.ps1` gap it was first recorded as** — that script's `env-export --profile` writes `CONTEXT_MEMORY_*` into a PowerShell profile and was never the problem; the defect was on the reading side and platform-independent. The loader is **duplicated, not imported**: `context_memory_client` does `import redact` at module scope, so importing it made the redactor a startup dependency of the gate, and the first version of the fix broke four redactor tests because each substituted stub executed at import and consumed the gate's own stdin. That is the arrangement the two capture clients already use for the recall notice — one contract, kept identical, with a test asserting the two agree instead of one importing the other. Harness 76 -> 81, including that agreement test. kvasir seeds **only** the non-secret `ENABLED` flag, so no credential-bearing value is pulled into a client that deliberately holds none; the gate subprocess loads the remaining nine. | decision gate credential loading |
-| 2026-10-04 | **"Best attempt" was never actually compared across rounds — the worktask's tie-break was dead code.** `best_attempt()` was called as `best_attempt(None, …)` on every round, so the reported `best` was always the *current* attempt and the "highest max-role probability, ties to the earliest" rule never ran. The cause is structural: each `score` invocation is a separate process and the ledger stored only a **count**, so there was nothing to compare against. An entry is now `{"attempts": int, "best": {...} | null}` and carries the best between rounds, with `bestThisRound` added so an agent rewriting to pass can see whether the rewrite actually beat the source rather than inferring it from `best`. **The count-only format is still accepted**, so a ledger written by the earlier build does not get discarded — that would reset every budget on upgrade, the exact failure `ledgerReset` exists to make visible. Fixing it surfaced **two ordering bugs, both of which made every rewrite look like an improvement**: `next_attempt` wrote the bare count *over* the entry holding the best, and `record_attempt` then read back the integer it had just written. A ledger entry is now read once and written once, preserving both parts. Also `prior_best` was only bound inside the `if args.state_file:` branch, so a run **without** a ledger raised `NameError` — caught by nine previously-passing tests the moment the variable became load-bearing. The cap case was re-sized at the same time: crossing the real 5 000-entry cap end-to-end costs one subprocess round trip per record and took the suite from ~44s to **306s**, so the bound is now proved with `cap_ledger` at 4× the limit plus one small end-to-end case proving the cap is wired into the write path. Harness 69 -> 76; reverting to `best_attempt(None, …)` fails 1, dropping `prior_best` from the write fails 2. | decision gate best attempt |
-| 2026-10-04 | **The attempt ledger grew without bound, and a discarded one reset the budget silently.** Two defects in the one piece of persistent state. (1) `read_ledger` returned an empty ledger on a corrupt or unreadable file with **no signal at all** — the deliberate choice (a corrupt file must not make scoring fail permanently) was invisible, so truncating the file cleared every record's attempt budget and the next call scored as though `attempt: 1`. Verified by writing a ledger, spending the budget, truncating, and watching the budget start over. The bound is only as trustworthy as the disclosure that it was reset, so `score` now emits `ledgerReset` naming what happened and that every budget begins again; a first run against a missing file is **not** reported as a reset, since that would make the signal useless. A ledger holding a value that is not a small non-negative integer is treated as not-a-ledger and discarded the same way. (2) **Nothing ever pruned it.** An entry is retained precisely to remember its budget is spent, so a session accumulates one line per distinct subject it has ever scored — 20 000 subjects reaches ~430 KB and keeps going. `MAX_LEDGER_ENTRIES` (5 000) caps it, dropping the **most-spent** entries first, since losing the memory of a spent budget is the least harmful entry to lose; the eviction is bounded, and the tie-break is by key so it is deterministic rather than dependent on dict order. **A cap test that never crosses the cap is not a cap test:** the first version of `test_the_ledger_is_capped_end_to_end` used 30 subjects, comfortably under 5 000, so *deleting the cap entirely left the suite green* — the mutation check is what exposed it. The fixture now exceeds the cap, and a second pure-function case holds the bound at 4× the limit, past what any HTTP round trip could carry. Harness 60 -> 69; making the reset silent again fails 3, and removing the cap fails the end-to-end case. | decision gate attempt ledger | `load_rubric()` built its role map with `entry.get("key")` and read `instructions`/`criteria` straight off the dict, so a role entry that was not an object raised `AttributeError` and one missing `instructions` or a `criteria` branch raised `KeyError` — both escaping `main`'s `GateError` handler as a stack trace. That is the same defect class this skill already fixed for a base URL that quoted its own userinfo, and the rubric is precisely the file an operator is expected to edit when adding a role, so it is the likeliest place for a hand-edit to go wrong. Every field is now checked before use — entry is an object, `key` and `instructions` are non-blank strings, `criteria` is an object, and both the `true` and `false` branches carry a description — each naming the offending role, or its position where there is no key to name. A `noul` question missing its `false` description is refused rather than sent half-specified, which is the same "a budget that silently becomes something other than what was asked for" rule the recall deadline follows. Two controls came with the cases: **the shipped rubric is asserted valid**, since a validator that rejects the file we ship is not a validator, and **the two rubric copies are asserted byte-identical**, since the kvasir copy exists precisely because the two script folders ship separately and there is no cross-skill import to keep them in step — a divergence would mean the two skills ask about different roles for the same record, which is the drift the copy's own comment warns about and nothing else would catch. Harness 47 -> 60; reverting to the unguarded loader fails 11, and drifting the kvasir copy fails the identity case. | decision gate rubric validation |
-| 2026-10-04 | **A malformed rubric raised a traceback instead of a refusal, and the loader now validates every field it reads.** `load_rubric()` built its role map with `entry.get("key")` and read `instructions`/`criteria` straight off the dict, so a role entry that was not an object raised `AttributeError` and one missing `instructions` or a `criteria` branch raised `KeyError` — both escaping `main`'s `GateError` handler as a stack trace. That is the same defect class this skill already fixed for a base URL that quoted its own userinfo, and the rubric is precisely the file an operator is expected to edit when adding a role, so it is the likeliest place for a hand-edit to go wrong. Every field is now checked before use — entry is an object, `key` and `instructions` are non-blank strings, `criteria` is an object, and both the `true` and `false` branches carry a description — each naming the offending role, or its position where there is no key to name. A `noul` question missing its `false` description is refused rather than sent half-specified, which is the same "a budget that silently becomes something other than what was asked for" rule the recall deadline follows. Two controls came with the cases: **the shipped rubric is asserted valid**, since a validator that rejects the file we ship is not a validator, and **the two rubric copies are asserted byte-identical**, since the kvasir copy exists precisely because the two script folders ship separately and there is no cross-skill import to keep them in step — a divergence would mean the two skills ask about different roles for the same record, which is the drift the copy's own comment warns about and nothing else would catch. Harness 47 -> 60; reverting to the unguarded loader fails 11, and drifting the kvasir copy fails the identity case. | decision gate rubric validation |
-| 2026-10-04 | **The gate's redaction mapping failed open in the under-reporting direction, and is now refused in both.** Found by re-reading the code, not by a test: the guard caught a redactor returning **more** results than candidates and left the opposite case unguarded. A redactor that dropped one entry left that field unmapped, so it kept its **unscrubbed** value, the model received it, and the record was scored as though the gate had inspected it — verified against a stub redactor that drops the last result, which put `password=hunter2secretvalue` in front of the model with outcome `scored`. That is precisely the outcome the gate exists to prevent, reached through a path the fail-closed rule did not cover. An arity mismatch in **either** direction now refuses, because a mapping from "what we sent" to "what came back" that does not line up cannot be trusted to have inspected anything. Two adjacent silent defaults went with it: a result missing `redacted` defaulted to `""` (silently blanking the field) — neither an empty default nor the original is an inspection, so it refuses; and a non-object finding is refused rather than skipped, since a malformed finding means the digest cannot be trusted to report what was scrubbed. **The shipped redactor is 1:1 and never produced these shapes, which is exactly why no test caught it** — all five new cases swap in a stub redactor, and the class is named `RedactorArityTests` to record that the arity guard is the property, not the shipped script's behaviour. Also removed an O(n²) `record_state()` call inside the target-collection loop. Harness 42 -> 47; reverting the guard fails exactly the 3 cases that target it. | decision gate redaction fail-closed |
-| 2026-10-04 | **An optional, off-by-default value gate (`decisions_gate.py` + `decisions_rubric.json`), client-side only.** With `CONTEXT_MEMORY_DECISIONS_ENABLED=true`, each exported record is scored by a **local decision model** for value to each of five roles; it passes if any role clears `MIN_PROBABILITY`, otherwise the agent may rewrite it and it is re-scored up to `MAX_ATTEMPTS`. **No model in Application or Host, no API change** — the whole gate is a client-side script, and an operator who never sets the flag runs exactly as before with no model installed. Three properties are the design, not implementation detail, and each is pinned by a test: **one independent `noul` question per role, never a single `choice` across roles** (a `choice` makes probabilities sum to 1, so a record valuable to *both* Developer and Tester scores ~0.45 each and fails a 0.5 bar — splitting one useful record in half and calling it worthless); **a failed gate is never a low score** (`unreachable`, `timed-out`, `http-<code>`, `bad-response`, `oversize` all keep the record and disclose why — a down model must never block a capture, and a hung one must never read as worthless); **redaction before any model call, failing closed** (an unavailable redactor means *no request is made*, since sending unscrubbed content is the one outcome the gate exists to prevent). The **attempt counter is the script's**, held in a ledger keyed by record identity in the file passed as `--state-file`, so an agent re-asking after an inconvenient answer buys nothing; the identity is the **subject**, not a content hash, because a rewrite changes content by definition and a content-keyed ledger would treat every attempt as a new record and never fire. **Open decisions, recorded not solved:** roles beyond the five (ops/platform, agent-facing) and exemptions for `self`-scope and outcome records — the role list is product-facing, so ops and agent-facing knowledge can score low on all five without being worthless, and adding a role or exempting a scope is a **data change** to `decisions_rubric.json`; the `hold` vs `mark` default; whether passing roles become `audience:*` tags; and the **threshold is uncalibrated** — 0.5 is a starting value, and a `noul` probability is not a measure of how often the answer is right, so the vendor's own guidance is to test any threshold on your own data. `decisions_rubric.json` is **copied** into the kvasir skill (the two script folders ship as separate packages, so no cross-skill import) — **the two copies must not drift, so an edit belongs in both**. 42 model-free tests in `tests/test_decisions_gate.py`, driven against a loopback stub server so no Ollama is needed; wired into the PR gate. **Three mutations verified:** collapsing the five `noul`s into one `choice` (27 failures), reporting transport failures as a 0.0 score (7), and dropping the ledger (3). The tests also caught a real bug in the gate itself: the redactor answers positionally (`candidate_index`), not by echoing content back, so a lookup keyed on a returned `original` field never matched and **nothing would ever have been scrubbed**. | decision gate |
-| 2026-10-03 | **SKILL.md wording narrowed to the kvasir `export`/`dump` verbs.** Kvasir `import` lost Heimdallr (inbound takes only what the caller binds), so the `--heimdallr false` opt-out note no longer names all kvasir verbs. Initialize guidance unchanged: still Heimdallr-backed when the caller binds nothing. | session request |
-| 2026-10-03 | Two client hardening fixes. (1) `context_memory_read_client` `main` now catches `ValueError` alongside `ClientError`, so a malformed `--payload` or a `deepsearch` payload without a `baseline` reports a clean one-line message instead of a raw traceback — matching the standalone `deepsearch.py` entry point, which already caught `(ValueError, ClientError)`. (2) `scrub_or_refuse` refuses a non-object write payload with a `bad-input` `ClientError` instead of letting the scrubber's unchanged-non-dict-return path send it unscrubbed — only `set` validated shape first, so the other persisting write commands could bypass the fail-closed gate. Pinned by a new harness test. | redaction gate, fail-closed |
-| 2026-10-03 | **Initialize defaults to Heimdallr when the caller binds nothing.** SKILL.md directs the agent to run the sibling Heimdallr reporter (same skills root, no hardcoded path) for repository + branch-seen tickets (else newest commit ticket); `unknown` initiative fills nothing, tags stay agent-derived. No client change (payload-based verbs). | session request |
-| 2026-10-02 | **Removed the MCP layer; the workers now run the bash clients.** Deleted `.mcp.json`, `scripts/launch-mcp.sh`, `scripts/memory_read_mcp.py`, `scripts/memory_write_mcp.py`, and the `.github/agents/*.agent.md` Copilot registrations. `memory-read` runs `context_memory_read_client.py` and `memory-write` runs `context_memory_client.py`; both project registrations and the skill-local contracts follow. The no-write guarantee moves from the MCP process boundary to three properties that survive without it: the read client exposes no write subcommand, it refuses to start with `CONTEXT_MEMORY_WRITE_TOKEN` present, and the write credential is never ambient (sourcing the full credential file is the deliberate write step). The read worker is instructed never to source that file, and the store still rejects a read credential on a write route. Harness tests: the four MCP-only properties carry over to their CLI equivalents — write-token refusal (`test_read_client_refuses_environment_with_write_credential`), the set cap before transport (`test_set_enforces_checkpoint_cap_before_transport`), blob-fetch classification (`test_the_blob_fetch_path_shares_the_classification`), and set-digest locations (`test_set_digest_names_the_field_and_offsets_of_every_scrub`). | MCP removal |
-| 2026-10-02 | **Recorded the fresh-store preconditions and the read surface's token refusal.** `resolve-group` has no dry-run mode and commits unconditionally, so a dry run must resolve nothing and report the group and initiative as *would create*; a missing initiative is a `404`, so `upsert-initiative` runs first. The read client refuses to start with `CONTEXT_MEMORY_WRITE_TOKEN` present, and an orchestrating skill that shells out to it strips the write token from the subprocess environment. Docs only — no behaviour change. | mimisbrunnr-kvasir-understanding export/import |
-| 2026-10-02 | **The MCP read server now frames its output, classifies its blob fetch, and its deepsearch disclosure stops overstating.** A review of the shipped work found five gaps. (1) `memory_read_mcp.py` returned raw values with no framing — the read worker's *only* path to the store is this server (its grant is `mcp__mimisbrunnr-read__*`), so the CLI framing the contract promised was unreachable from it; `handle` now frames every content-returning tool through `context_memory_client.framed_recall` (extracted from `print_recall`, so there is still one wording and one shape), with `probe` the derived opt-out and a test that drives `read_mcp.handle` for every tool. (2) `_get_blob` called `client._open` directly, taking the default socket timeout and skipping classification — a hung store surfaced as a bare `timed out` after 30 s; it now routes through `_read_response`, so it is deadline-bounded and classified `timed-out`. (3) A baseline timeout left `anchorsEligible`/`anchorsOmittedByCap` at `0`, which reads as "nothing to traverse"; they are now `null` when the baseline never answered. (4) `deadlineReached` set on a *pass* timeout (wall clock nowhere near the cap) is renamed `stoppedEarly`, with a separate `budgetExhausted` for the wall clock; `passesNotRun` (which named the pass that did run) is renamed `passesIncomplete`. (5) `TransportFailureTests` now asserts elapsed ≤ budget (the acceptance criterion), and `CONTEXT_MEMORY_RECALL_DEADLINE` is documented in `docs/wiki/setup.md`. Harness 161 -> 165. | review of #149; HLD-004 LADR-01 |
-| 2026-10-01 | **A recall now has one foreground deadline, and deepsearch degrades by whole passes at it.** The read path already told `timed-out` apart from `unreachable` (#146), but nothing bounded a *command*: deepsearch could chain a baseline, four keyword and five traversal calls with no overall limit, and a single timed-out pass aborted the run and discarded every pass already completed — so a five-minute hang returned nothing. `RECALL_DEADLINE_SECONDS` (60 s) is the cap; `CONTEXT_MEMORY_RECALL_DEADLINE` may shorten it and any other value is refused with `bad-deadline`, never clamped. Each read's socket timeout is `min(HTTP_TIMEOUT, deadline)`, so a shortened deadline bounds a single `query`; a write keeps `HTTP_TIMEOUT`, so a malformed read-path setting cannot refuse a capture. deepsearch checks the deadline before each pass, uses the remaining budget as that pass's socket timeout, and on a timeout stops the chain while keeping the completed passes — whole records only — disclosing `deadlineSeconds`, `deadlineReached` and `passesNotRun`, with each pass carrying a `status`. Recall feedback stays server-side (HLD-004 LADR-01), so the contract states that a client giving up can leave a server-recorded outcome the agent never received. **The harness found a second-module trap while writing the tests:** `deepsearch` was loaded before `sys.modules["context_memory_client"]` was aliased, so it held its own `ClientError` and a raised timeout was invisible to its handler — `_load` now registers each module before exec, which fixes the class for every sibling import rather than patching one. Harness 153 -> 161; both the deadline refusal and the partial-return path mutation-checked. | MemOS adoption; HLD-004 LADR-01; BR-16 |
-| 2026-10-01 | **The proxy and redirect guards are tested where they are installed.** `test_redirects_are_refused` exercised `_NoRedirect` in isolation, so dropping it — or the `ProxyHandler({})` — from `_open`'s `build_opener` call left every test green while a 302 forwarded `Authorization` and an environment proxy saw it. Two tests now pin the real opener: one spies on `build_opener` and asserts both handlers reach it with an empty proxy map and the HTTP timeout, and one drives a loopback server answering 302 through `_request` and asserts `redirect-refused` with exactly one request served. Test References updated for the redaction and path-guard classes added today. Harness 151 -> 153; both handler removals mutation-checked. | HLD-002 NFR-01 |
-| 2026-10-01 | **An unparseable base URL is a classified `bad-base-url` refusal, not a traceback that prints its userinfo.** `urlsplit` rejects an NFKC-confusable character in the netloc (`http://user:s3cret@local＃host:5141`) with a `ValueError` that quotes the whole netloc, and only `ClientError` was caught, so the credential in the URL reached stderr in a traceback. `base_url()` and `_probe` now parse through `_parse_base`, which also forces the port parse and raises fixed text outside the handler so nothing chains the original message. Covered for both CLIs end to end (exit 1, no traceback, no userinfo) and for the rendered exception chain. The dossier composer's loopback guard carries the same fix. | HLD-002 NFR-01; `.agents/rules/skills/skill-secret-handling.instructions.md` |
-| 2026-10-01 | **Every persisting write is scrubbed, not just `set`.** `resolve-group`, `update-group`, `append-description`, `create-link`, `ticket-parent`, `propose-label` and `upsert-initiative` posted their bodies raw from both the CLI and the write MCP, so a secret in a group description — an **append-only** table — a link reason, a label or initiative name, or a ticket declaration's reason/source reached storage unexamined. Each now routes through one `scrubbed_write`, with its free-text fields declared per operation in `redact.WRITE_SPECS`; the same fail-closed `redactor-unavailable` refusal and the same located digest apply, and an operation missing from the table refuses rather than passing through. Ticket identities (`provider`/`key`, `child`/`parent`/`expectedParent`) are deliberately not rewritten — they are matched exactly against stored rows — while a ticket's `url` is scrubbed. `ticket-parent --dryrun` previews the scrubbed request. Preflight persists nothing and stays unscrubbed. Harness 143 -> 149: a distinct planted secret per field per tool, declared independently of the spec, so dropping a field from the spec fails the test. | BR-03; HLD-002 NFR-01 |
-| 2026-10-01 | **The scrubber matches request keys case-insensitively, as the Host binds them.** `scrub_set_payload` compared keys exact-case, so `{"items":[{"Content":"token=…","Statement":"password=…"}]}` posted both secrets verbatim while the Host's case-insensitive JSON binding stored them in the same columns as `content`/`statement`. The walk is now one declarative spec (`TEXT` leaves, lists, nested objects) folded upper-then-casefold, which can only match more keys than an ordinal ignore-case comparison, never fewer; duplicate-case keys (`content` and `Content` in one item) are each scrubbed, and the digest path keeps the caller's own spelling (`items[0].Content`). Harness 139 -> 143; mutation-checked by restoring exact-case lookup. | BR-03; HLD-002 NFR-01 |
-| 2026-10-01 | **The redaction fingerprints cover the shapes this repository itself produces, quoted values no longer leak their tail, and the PEM rule is linear.** Fifteen of a 25-shape probe passed unscrubbed, including the provisioner's own `ApiAccess__WriteToken=` line and `"password": "correct horse battery staple"`, whose quoted branch stopped at the first space and stored `horse battery staple`. Added: `ASIA…` session keys, `github_pat_…`, `sk-`/`sk-proj-`/`sk-ant-`/`sk_live_` keys, JWTs, URL userinfo, `Authorization:` and bare `Bearer` credentials, quoted JSON keys, camelCase and env-style key names (suffix match on `secret`/`password`/`passphrase`/`api_key`/`access_key`/a qualified `token`), quoted values with spaces in every assignment rule, and every PEM private-key label (`ENCRYPTED`, `OPENSSH`, `PGP … BLOCK`) including an unterminated block, which takes the BEGIN line plus the base64 and `Header:` lines after it and never the prose that follows. **The PEM body may no longer contain `-----`**, so an unterminated BEGIN stops at the next marker: the old `.*?` DOTALL was quadratic in the number of unterminated markers. Writing the wider set surfaced three more quadratic paths (an unbounded URL scheme, `=` inside the assignment value class, and a `\b` anchor inside a token class containing `-`) and an O(n) overlap scan; each is fixed and held by a timing test (2 000 unterminated markers + 100 000 characters of prose, and seven repeated-prefix inputs, all under 0.5 s). Vendor-shaped test values are assembled at runtime so no literal in the corpus resembles a live credential. Harness 132 -> 139. | BR-03; HLD-002 NFR-01 |
-| 2026-10-01 | **The generic secret rule no longer rewrites ordinary prose, and every scrub is reported with where it happened.** `generic-secret-assignment` fired on bare `key`/`token` followed by `:`/`=` and 8+ characters, so `sort key = created_on`, `partition key: groupUuid`, `idempotency key = order-123` and `token=CONTEXT_MEMORY_READ_TOKEN` were silently stored as `<redacted>`. It is now two tiers: a key whose name says secret (`password`, `passwd`, `secret`, `api_key`, `access_key`, `private_key`, a qualified `*_TOKEN`/`*Token`) is redacted on any 8+ value, and a neutral key (`key`, `*_key`, bare `token`, `credential`) only when the value is secret-shaped — an unbroken 16+ character run mixing letters and digits, which identifiers, UUIDs and timestamps are not. Rules now match the original text in priority order with overlap resolution, so offsets are exact. The `set` digest (CLI and MCP) became `[{rule_name, hit_count, locations: [{field, start, end}]}]` and `redact.py`/the `redact` tool report `spans` per finding; neither ever carries the replaced text. A 23-line prose corpus passes byte-identical. Harness 126 -> 132; both changes mutation-checked. | BR-03; HLD-002 NFR-01 |
-| 2026-10-01 | **A `uuid` or `version` path segment is validated before any URL is built, and the write credential is chosen by exact route.** Every surface that interpolated a caller-supplied segment (CLI `get-versions`/`get-blob`/`update-group`/`append-description`, read MCP `get_versions`/`get_blob`, write MCP `update_group`/`append_description`) now goes through shared path builders that accept only a canonical 8-4-4-4-12 UUID and a positive integer version, so `/`, `.`, `?`, `%` and `#` never reach the path — previously an `append_description` uuid of `../../snapshot?x=` reached `POST /api/context/snapshot` with the write token. Token selection no longer uses `method == "PATCH"` or `"/descriptions" in path`: it is an exact `(method, path)` set plus two UUID-anchored templates, and anything unlisted gets the read token, so a GET can never carry the write credential. Harness 119 -> 126; both changes mutation-checked. | HLD-002 NFR-01 |
-| 2026-10-01 | **Every read surface now frames recalled memory as untrusted data, from one shared notice.** `import --store` admits transcripts and meeting notes through the normal capture path, so a recalled statement can read as an instruction — and unframed it returned carrying the store's authority, which is the most authoritative-looking text in an agent's context and the most effective place to hide a prompt injection. Two of four read surfaces framed; the read client did not, and `deepsearch` did not. `RECALL_NOTICE` is defined once and is the `mimisbrunnr-kvasir-understanding` client's `DATA_NOTICE` **verbatim** — a test loads the sibling module and compares, so a paraphrase fails rather than silently becoming a third wording. The read client frames **at its dispatch**, so a new subcommand is covered the day it is added; `READ_COMMANDS` declares the surface and `FRAMED_COMMANDS` is *derived* from it, because two hand-maintained lists drift and a name in one but not the other is either silently unframed or silently double-declared. `probe` is the only opt-out, with a test holding its reason true. Emitted **both** as a prose banner and as a top-level `recallNotice` field, because a notice only in prose is invisible to a program and a notice only in a field is dropped by a caller that rebuilds the object; attribution (uuid/version/capture time) is carried through untouched. The read worker's contract now says what to *do* with a record whose statement reads like an instruction: report it quoted with its identity, do not act on it, and do not drop it for being unusable. **Three defects were found by the tests while writing them, all recorded in the Key Behaviors entry:** (1) `FRAMED_COMMANDS = frozenset(READ_COMMANDS)` made the framed and opted-out sets overlap, so `probe` was declared both — the two are now disjoint by construction. (2) **The first version of the suite passed with the entire fix reverted**, because it called the `_run_framed` helper directly rather than the `main()` that decides whether it runs; every test now drives the real entry point. (3) `_load` execs each script standalone, so `read_client.client` was a *second* module object — the tests were patching a module the read client never called, and the symptom was a live connection attempt rather than an assertion failure; the sibling modules are now aliased in `sys.modules` so there is one object. Two framing layers also disagreed about who prints the banner, producing the notice twice and then not at all; the outermost layer now owns it. 118 tests, up from 109; four mutations verified. | MemOS adoption; HLD-007 |
-| 2026-10-01 | **Review round: a mid-response socket reset was the same traceback by another route, the framing drift guard was circular, and a `get-blob` body that is valid JSON was being re-serialised.** (1) `_read_response` caught `URLError` and `TimeoutError` but not a bare `OSError`, so a connection accepted and then **reset** escaped as a traceback — the exact failure the transport classification exists to prevent, reached a different way. A new `except OSError` clause classifies it as **`unreachable`, not `timed-out`** (a reset is not a hang), placed **last** because `URLError` is itself an `OSError` and an earlier clause would shadow the refusal control. Driven for real, forcing an RST with `SO_LINGER` 0; mutation-verified. (2) `test_every_read_subcommand_is_framed_by_default` asserted `FRAMED_COMMANDS \| UNFRAMED_COMMANDS == READ_COMMANDS`, which is **true for any values of either set** because `FRAMED` is *defined* as `READ - UNFRAMED` — so it stayed green with the entire MCP surface unframed, the silent pass its own comment claims to prevent. It now cross-checks the CLI's surface against `read_mcp.TOOLS`, an independent declaration. (3) `_parse_framed_json` treated any output containing `{` as a JSON candidate, so a `get-blob` body that happens to be valid JSON was parsed, re-indented and merged with `recallNotice` instead of returned byte-faithful; `RAW_BODY_COMMANDS` makes the discriminator the **command**, not the text. (4) Dead `_printed_json` deleted — no caller, and its "banner is the first line" assumption is exactly what `_split_banner` replaced. (5) Two comments describing banner-suppression detection were corrected: single emission comes from `_run_framed` **discarding the captured buffer**, and `banner=False` has no call site — the comments named a mechanism that does not exist. 121 tests, up from 118. | PR review |
-| 2026-10-01 | **A hung store raised a bare `TimeoutError` traceback instead of a classified error, and `timed-out` is now distinct from `unreachable`.** `urllib.error.URLError` covers the connect phase, but a read that times out on an already-established socket raises `TimeoutError` — a subclass of `OSError`, so the `URLError` handler never saw it. Reproduced against a real stalled socket before fixing: `_request` and `cmd_get_blob` both died with `TimeoutError: timed out` and a traceback, which is the shape a hung store produces and the case an agent most needs to recognise. The two outcomes are kept apart deliberately: `unreachable` means nothing is listening, `timed-out` means something accepted the connection and went quiet, and the caller's response differs. Collapsing them reports a slow or overloaded store as a dead one. Four tests drive a real socket rather than a mock — the defect is that the timeout arrives on an unanticipated path, so a mocked `URLError` reproduces the case that already worked and passes against the unfixed client. Three mutations verified, including the tempting wrong fix (classify every transport error as `timed-out`, which passes the hang test and fails the refusal control). **The duplicated `except` block was the clean-code defect:** `cmd_get_blob` carried its own copy of all four handlers, which is how a fix lands in one and misses the other — so both sites now share `_read_response`, and a fourth mutation reintroducing the copy is caught. `SKILL.md` gained a **Transport Failures** section, because the skill documented no error states at all and the agent is the party that must act on them; it names the three outcomes and states that `timed-out` must never be read as an empty result, which is the expensive direction — indistinguishable from a correct answer. 109 tests green. The budget itself (`HTTP_TIMEOUT`) is unchanged at 30s; this is the correctness half of the deadline work, not the cap. | MemOS adoption |
-| 2026-10-01 | **The digest's human step named an action, and `propose-label` gained a threshold.** "Review the digest" was not an instruction anyone could perform, so the one moment a person audits what the model decided had no stated task. `## Finalization Output` now carries a table mapping the shape of the digest to the one check to name — held-back atomicity splits, proposed gated kinds, diverged pairs, above-threshold label proposals, or a clean batch — with the rule that **one** check goes in the digest adjacent to its counts, because a list of five is the same as "review". The advisory-registry guardrail gained the same three-occurrence arithmetic `--promote` uses: a label seen once is a word, three independent captures is vocabulary, and proposing below that requires naming the near-synonym it duplicates. Wording only, no script change, so no test tier applies; the committed L0 harness is unchanged. | ICM adoption |
-| 2026-09-29 | **The redaction gate closed, and it is a gate on recognition rather than on secrets.** `set` now scrubs every free-text field through `redact.scrub_set_payload` before the request is built and refuses the write if the scrubber cannot run, so `redact.py` is no longer a tool an operator may skip and the gate cannot fail open — a write that cannot be scrubbed is not written. The boundary is stated rather than implied: the rules are fixed-shape fingerprints (`AKIA…`, `gh[pousr]_…`, PEM blocks, `secret=`/`token:`/`password=` assignments), so a value matching no rule still passes, and "recognisable secrets are gated" is the claim, never "sensitive material never reaches storage". `scenarios.json` gained `axis` per scenario (2 recall positives / 5 precision negatives, asserted by the harness), the frozen `scenarios-2026-09-29.json` and the balanced run were added, and verdicts now pair by `id` with `--allow-legacy-positional` reserved for superseded runs. | HLD-002 LADR-03, NFR-02 |
-| 2026-09-29 | **The semantic-dedup fixture set still encoded the overturned rule, and CI was certifying it.** Fixture `s4-cross-group-version-bump` expected a same-subject match in `g-99` to yield `version_bump` against `m-002` — which the shipped group-scoped identity forbids, since a foreign `uuid` target is a `404`. The committed verdicts run recorded the model doing exactly that, and `run_tests.py::SemanticFixtureTests` asserts the committed run scores recall **and** precision of exactly 1.0, so the defect was certified rather than caught. Re-scoring that run against the corrected expectation gives 0.9 / 0.8333. The fixture is now `s4-cross-group-match-is-not-a-bump` expecting `new_memory` (a new memory plus a typed link to the twin), a new `model-verdicts-2026-09-29.json` carries the corrected run at 1.0 / 1.0, and the **09-17 verdicts file is left on disk unedited** — it is the record of that run, not a configuration, so it stays available for re-scoring. Two claims in this file were also wrong and are corrected above: the fixture set is **not** "not CI-gated" (the scorer is invoked twice by `run_tests.py`, which the PR gate runs), and `score_fixtures.py` matches verdicts to scenarios by **position**, so inserting or reordering a scenario silently misaligns them and the 1.0/1.0 assertion then certifies the wrong verdicts against the wrong scenarios. | HLD-002 NFR-02 |
-| 2026-09-28 | **Memory identity decided group-scoped**, with HLD-002 amended to match, so the two files that stated the overturned rule as rationale now state the shipped rule. The **behaviour contract was already correct** and is unchanged: recall reads across groups, a match inside the writing group is a version bump, a cross-group match is a new memory plus a typed link (the 2026-09-27 rows already qualified every `uuid`-emitting site). What changed is the two rationale sentences — the non-negotiable "Deduplication is cross-group … a per-group check misses it" and the `SKILL.md` Listen-stage restatement, which asserted a within-group check as a defect. They now separate the two things the old wording conflated: the read is cross-group, the *versioning target* is group-scoped, and a cross-group duplicate is an accepted cost rather than a bug. The non-negotiable gained an explicit "do not widen the version-target lookup" clause, because the old wording reads as an instruction to do exactly that. The deliberate triple restatement of the rule is preserved — only its wording changed. | HLD-002 LADR-01, LADR-04 |
-| 2026-09-27 | Qualified the cross-group dedup restatement at the `SKILL.md` semantic-dedup **Judge** step (the only site that instructs the model to emit a recalled row's `uuid` as a `version_bump` target) with the same group rule the `set` body states: a same-subject match is a version bump **only inside the request's `groupUuid`**, and a cross-group match is a new memory plus a typed link, because a foreign `uuid` target is a `404` (group-scoped version-target lookup in `SetMemories.cs`). The recall query that feeds that step is deliberately cross-group, so the unqualified wording produced a guaranteed `404`. | `SKILL.md` |
-| 2026-09-27 | Qualified both cross-group dedup restatements (`SKILL.md` stage-3 item 1 and the write-pipeline table's stage-3 row) with the group rule already stated in the `set` body: a same-subject match is a version bump **only inside the writing group**, and a cross-group match is a new memory plus a typed link. Unqualified, both restatements instructed a `uuid` target the server 404s (group-scoped version-target lookup in `SetMemories.cs`). Restatements kept — they are the drift countermeasure, not redundancy. | `SKILL.md` |
-| 2026-09-26 | `SKILL.md`/`README.md` re-laid out switches-first: the switch table now opens each file ahead of the H1, matching `mimisbrunnr-vitsmunir-dump` and `mimisbrunnr-kvasir-understanding`. In-body pointers updated; no behavioural or contract change. | PR #108 |
-| 2026-09-20 | Replaced the outdated universal Codex custom-agent limitation with the current `.codex/agents/*.toml` capability and kept the actual safety gate on verified effective MCP/tool grants; no runtime configuration was added. | [OpenAI Codex subagents documentation](https://learn.chatgpt.com/docs/agent-configuration/subagents) |
-| 2026-09-20 | The "sole interface to the store" claim retired from the five remaining living docs (`SKILL.md` prose + description, `README.md`, `.agents/skills/README.md`, `docs/wiki/architecture.md`, `AGENTS.md` root table) — `mimisbrunnr-kvasir-understanding` is a reader + conditional importer, so this skill is the sole **authority on the write path**, not the sole interface. The prior row's narrowing is now fully propagated instead of landing in `AGENTS.md` only. | PR #86 review |
-| 2026-09-19 | Narrowed "sole interface" to "sole authority on the write path" and noted the read/load sibling (`mimisbrunnr-kvasir-understanding`) as a reader + conditional importer that hands `--store` material to this capture path. | HLD-007 LADR-03; BRD-003 |
-| 2026-09-17 | Test References corrected: the PR-gate skill step runs both `run_tests.py` and `measure_cost.py`, not `run_tests.py` alone. | `.github/workflows/pr-gate.yml` |
-| 2026-09-17 | Both stdio MCP servers answer malformed JSON with a JSON-RPC parse error (-32700) and non-object messages with Invalid Request (-32600) instead of crashing the worker; parsing is shared through `memory_read_mcp.respond`. | code review |
-| 2026-09-17 | Delivered memory-read/memory-write contracts, read-only client, bounded deepsearch, divergence composition/loop guard, createUuid payloads, cost evidence and deterministic PR gate. | HLD-002 closure |
-| 2026-09-17 | Added executable authority resolution, exact-subject divergence storage, and Copilot custom-agent registrations; Codex custom-agent limitation documented. | BR-10 closure |
-| 2026-09-17 | Approved delegated read/write execution, API-backed capability separation, bounded deep search, transactional create UUIDs and proposed divergence contract. | HLD-002 delta closure |
-| 2026-09-16 | SKILL.md recall rationale updated for stemmed full-text recall: `/query` free-text is now AND-of-all-lexemes under the `english` configuration - stemming forgives inflections, not sentence structure, so natural-language free-text still defeats recall. | HLD-001 storage delta |
-| 2026-09-15 | Replaced unmerged near-miss criteria schema with frozen original API query (`tags` + sole `facetMatchMode`, default ANY); bound approved UUID/version evidence to actual scope and retained status/scope with explicit proposed flag. Added shared ticket UTF-16 length/NUL/Unicode guards and wire-compatible timestamp validation without normalization. Updated fixtures/docs; Python harness 42 passing tests including positive/negative offline regressions. No retrieval, compatibility shim or C# changes. | HLD-005 LADR-10/13, NFR-04; HLD-002 LADR-08 |
-| 2026-09-14 | Synced documentation to strict expected-parent-before-no-op behavior, no operation replay token, selected capped path endpoint/anchor memory association and trigger-backed exact ownership. No scripts changed by this sync; ticket performance gate remains open and targeted tests do not imply release acceptance. | HLD-002 LADR-08; HLD-003 LADR-08 |
-| 2026-09-14 | Added exact-identity `ticket-parent` PUT with explicit nullable parent/expectedParent, source metadata and no-network local dry-run; bounded `ticket-paths` POST preserves the complete response/disclosure. Documented declaration-only checkpoint/approval rules, conflict handling, scope consent and partial/stale hierarchy coverage. Added offline bounded `near_miss_tags.py`, strict approved-evidence schema, grounded analysis/observed mismatch separation, unchanged selection/disclosure, positive/negative fixtures and transport/output/no-I/O tests. Python harness: 34 passing tests; live API integration and LLM relevance quality not measured. HLD docs owned by parallel work left untouched. | HLD-002 LADR-08; HLD-003 LADR-08; HLD-005 LADR-10, NFR-04 |
-| 2026-09-14 | SKILL.md gained `## Request Bodies` — the wire contract per subcommand, previously documented nowhere and guessable only from `/openapi/v1.json`. Corrected `facetsMatchMode` → `facetMatchMode` (the documented spelling was rejected as an unknown property). `atomicity.py` scores the statement, not description+statement, and no longer counts reason clauses or noun-phrase `and` as claim junctions. | e2e-dogfood |
-| 2026-09-14 | Brand-prefixed to `mimisbrunnr-context-memory`. | |
-| 2026-09-13 | The API rejects unknown request fields as a 400, so a misspelled payload field never silently defaults; `update-group` accepts `tickets` as an additive, idempotent, cross-group-unique merge. | BUG-03 |
-| 2026-09-13 | `/query` recall: facet/tag match is ANY by default (rows carrying any requested facet), containment (`all`) opt-in — matches the recall union the dedup step needs. `paths` subcommand added (bounded multi-hop traversal, `maxDepth` required, scope enforced); SKILL.md gained `## Traversal` guidance on when to traverse vs query. | BUG-02, BUG-04 |
-| 2026-09-10 | Created — contract for the sole interface to the context-memory store; fixed write pipeline; cross-group dedup, atomicity and secret-redaction ownership. | HLD 002 (write pipeline) |
-| 2026-09-10 | Contract-coherence pass. Pipeline numbering pinned to five stages with **preflight as stage 1** (SKILL.md previously specified four, starting at redact). Approval gating resolved to *write-as-`proposed`* — SKILL.md previously said "do not write", which contradicted this file and the retrieval rule that excludes `proposed` records. Digest reclassified as a post-write receipt with `--dryrun` named as the only pre-write veto point (LADR-002 previously implied a veto round that `set`'s single transaction cannot provide). Intra-batch collision, source-date `valid_from`, and the summary model/prompt stamp added to SKILL.md, which the executing agent reads. | HLD 002 contract review |
-| 2026-09-12 | `## Requirements` added — approved implementation plan (skill executable against the HTTP API; no C#). Key decisions recorded (semantic dedup via `/query` recall + LLM judgement; digest `skipped` segregation; redaction rule-name digest; 20-cap static setting; divergence non-collapse). | PR #17 |
-| 2026-09-12 | **Skill implemented (no C#).** Added `scripts/context_memory_client.py` (14 subcommands, base-URL + health probe, `MAX_CANDIDATES`=20 cap, `--dryrun`), `scripts/redact.py` (stdin→stdout, rule-name digest, true-positive rules), `scripts/atomicity.py` (conservative bundle detector). SKILL.md gained deterministic component and scope contracts; digest skip segregation added. Test home: committed L0 harness plus on-demand fixtures. CI wiring landed during HLD-002 closure on 2026-09-17. | PR #17 |
-| 2026-09-30 | **The scorer measured accuracy and printed it under the name recall, and the two historical figures it produced were wrong.** `recall = correct / total` over all fourteen scenarios, so a matcher that collapsed *nothing* scored 0.857; a matcher that collapsed everything scored 0.2 precision on its own claims but the old precision divided by every dedup-class scenario whether or not the model claimed anything on it, so five scenarios that cannot over-merge diluted the denominator and flattered the score. Recall is now over the scenarios declared `recall_positive`, precision over the collapses the model actually claimed, and `accuracy` is reported under its own name because that is what the old `recall` was. A fixture declaring no positive pair now yields `recall: null` rather than `0.0` — a frozen pre-`axis` fixture cannot measure recall, and printing 0.0 there invites "the model had zero recall" where the truth is "this was never a recall measurement". **Two quoted figures are corrected rather than left to be re-derived:** the 2026-09-17 run is `accuracy 0.9 / precision 0.5` and was previously quoted as `recall 0.9 / precision 0.8333`. The 2026-09-29-balanced run is 1.0 / 1.0 / 1.0 either way, which is *that run re-scored* under corrected denominators rather than a fresh run — correcting an instrument does not re-ask the model, and the evidence document keeps the two facts separable. Second: the balance refusal was reachable past, because `--fixtures` switched it off together with the positional pairing — so any frozen fixture could be scored with no negative controls at all, the exact condition NFR-02 exists to prevent, one extra flag away. Balance is a property of the fixture, not of the run, and is now checked for every run that is not a re-score of a superseded dated one. Third: **the "an identifier is not an answer" claim is removed rather than repeated.** It was the stated justification for emitting `id` in the blinded input, and it is not true of this fixture set, where `s4-cross-group-match-is-not-a-bump` and `s8-near-miss-negative` name their own expected verdicts — so anyone reading the repository can see the answers. What keeps a run blinded is the emitter withholding `expected`, `note` and `axis`, which the harness asserts. No id-scrubbing was added: that claim was a transparency property of a committed evidence file, misfiled as a property of the input. Harness 98 -> 105, each of the three changes mutation-checked. | HLD-002 NFR-02 |
+| :---- | :---- | :---- |
+| 2026-09-10 | Five-stage pipeline with preflight first | — |
+| 2026-09-10 | Contract-coherence pass | — |
+| 2026-09-12 | Requirements recorded | #17 |
+| 2026-09-12 | Skill implemented (client, redactor, 20-candidate cap) | #17 |
+| 2026-09-12 | Skill implemented (no C#): Added `scripts/context_memory_client.py` (14 subcommands, base-URL + health probe, `MAX_CANDIDATES`=20 cap… | #17 |
+| 2026-09-13 | Unknown request fields are a 400, so a misspelling never defaults silently | — |
+| 2026-09-13 | Facet/tag recall matches ANY by default | — |
+| 2026-09-13 | The API rejects unknown request fields as a 400, so a misspelled payload field… | — |
+| 2026-09-13 | `/query` recall | — |
+| 2026-09-14 | Strict expected-parent-before-no-op | — |
+| 2026-09-14 | `ticket-parent` PUT and bounded `ticket-paths` added | — |
+| 2026-09-14 | `## Request Bodies` documented | — |
+| 2026-09-14 | Added exact-identity `ticket-parent` PUT with explicit nullable parent/expectedParent, source metadata and no-network local dry-run | — |
+| 2026-09-14 | SKILL.md gained `## Request Bodies` | — |
+| 2026-09-15 | Near-miss query frozen to `tags` + `facetMatchMode` | — |
+| 2026-09-16 | `/query` free text is AND-of-all-lexemes under `english` stemming | — |
+| 2026-09-16 | SKILL.md recall rationale updated for stemmed full-text recall | — |
+| 2026-09-17 | Delivered read/write worker contracts, bounded deepsearch, createUuid payloads | #70 |
+| 2026-09-17 | Authority resolution and divergence storage added | #70 |
+| 2026-09-17 | Delegated read/write execution approved | #70 |
+| 2026-09-17 | Both stdio MCP servers answer malformed JSON with a JSON-RPC parse error (-32700) and… | #70 |
+| 2026-09-17 | Delivered memory-read/memory-write contracts, read-only client, bounded deepsearch, divergence composition/loop guard, createUuid payloads, cost evidence… | #70 |
+| 2026-09-19 | Narrowed to "sole authority on the write path" | — |
+| 2026-09-20 | "Sole interface" claim retired from living docs | #86 |
+| 2026-09-20 | Replaced the outdated universal Codex custom-agent limitation with the current `.codex/agents/*.toml` capability and kept… | #86 |
+| 2026-09-27 | Judge step | — |
+| 2026-09-28 | Memory identity is group-scoped | — |
+| 2026-09-29 | Redaction gate closed | #135 |
+| 2026-09-29 | Fixtures encoded the overturned cross-group rule and CI certified it | #135 |
+| 2026-09-29 | The semantic-dedup fixture set still encoded the overturned rule, and CI was certifying it | #135 |
+| 2026-09-30 | Scorer printed accuracy as recall | — |
+| 2026-10-01 | One foreground recall deadline | — |
+| 2026-10-01 | Proxy and redirect guards tested where installed, not in isolation | — |
+| 2026-10-01 | Unparseable base URL is `bad-base-url`, not a traceback printing userinfo | — |
+| 2026-10-01 | Every persisting write is scrubbed, not just `set` | — |
+| 2026-10-01 | Scrubber matches keys case-insensitively, as the Host binds them | — |
+| 2026-10-01 | Redaction covers this repo's own secret shapes | — |
+| 2026-10-01 | Generic secret rule no longer rewrites prose | — |
+| 2026-10-01 | `uuid`/`version` path segments validated before any URL | — |
+| 2026-10-01 | Every read surface frames recalled memory as untrusted data, from one notice | — |
+| 2026-10-01 | Mid-response socket reset classified | — |
+| 2026-10-01 | Hung store is `timed-out`, distinct from `unreachable` | — |
+| 2026-10-01 | Digest names a human action | — |
+| 2026-10-01 | An unparseable base URL is a classified `bad-base-url` refusal, not a traceback that prints… | — |
+| 2026-10-01 | The redaction fingerprints cover the shapes this repository itself produces, quoted values no longer… | — |
+| 2026-10-01 | A hung store raised a bare `TimeoutError` traceback instead of a classified error, and… | — |
+| 2026-10-02 | MCP layer removed | — |
+| 2026-10-02 | `resolve-group` has no dry-run, so a dry run resolves nothing | — |
+| 2026-10-02 | Recorded the fresh-store preconditions and the read surface's token refusal | — |
+| 2026-10-02 | The MCP read server now frames its output, classifies its blob fetch, and its… | #149 |
+| 2026-10-03 | SKILL.md opt-out note names only kvasir `export`/`dump` | — |
+| 2026-10-03 | Malformed `--payload` is a classified error | — |
+| 2026-10-03 | Initialize defaults to Heimdallr when nothing is bound | — |
+| 2026-10-03 | Two client hardening fixes | — |
+| 2026-10-04 | `discrimination` on every record, not only scored ones | — |
+| 2026-10-04 | An unexplained kvasir harness failure recorded, not dismissed | — |
+| 2026-10-04 | Shipped threshold `0.85` | — |
+| 2026-10-04 | "Saturates toward yes" was wrong | — |
+| 2026-10-04 | Gate loads machine-credential settings, not only `os.environ` | — |
+| 2026-10-04 | Best-attempt tie-break was dead code (`best_attempt(None, …)`) | — |
+| 2026-10-04 | Ledger bounded | — |
+| 2026-10-04 | A malformed rubric refuses instead of raising | — |
+| 2026-10-04 | Redaction mapping fails closed in both directions | — |
+| 2026-10-04 | Optional, off-by-default value gate added, client-side only | — |
+| 2026-10-04 | The shipped default is now `0.85`, determinism is an assertion rather than a claim… | — |
+| 2026-10-04 | The gate read only `os.environ`, so the settings `run.sh` publishes were invisible to it… | — |
+| 2026-10-04 | "Best attempt" was never actually compared across rounds — the worktask's tie-break was dead… | — |
+| 2026-10-04 | The attempt ledger grew without bound, and a discarded one reset the budget silently | — |
+| 2026-10-04 | A malformed rubric raised a traceback instead of a refusal, and the loader now… | — |
+| 2026-10-04 | The gate's redaction mapping failed open in the under-reporting direction, and is now refused… | — |
+| 2026-10-05 | `pwd` no longer rewrites working directories | #182 |
+| 2026-10-05 | Truncated keys, credential-word keys, `;params` base URLs and deepsearch's group selector closed | #182 |
+| 2026-10-05 | Redactor timeout is `redactor-unavailable`, not a traceback the caller read as "skipped" | #182 |
+| 2026-10-05 | A malformed probability no longer passes the gate | #179 |
+| 2026-10-05 | Attempt ledger keyed by hash, not the raw subject (personal data on disk) | #179 |
+| 2026-10-05 | `export`/`import` are real command aliases | #178 |
+| 2026-10-05 | Store-direction switches named to match kvasir/ai-understanding | — |
+| 2026-10-05 | Test names must match what the body proves | — |
+| 2026-10-05 | Ledger cap tested on the write path | — |
+| 2026-10-05 | Gate harness isolated from the operator's credentials file | — |
+| 2026-10-05 | A held candidate is now queued, not printed and dropped | — |
+| 2026-10-05 | The store-direction switches are named to match `kvasir`/`ai-understanding` | — |
+| 2026-10-05 | `test_the_write_path_applies_the_cap` asserted a name its body did not earn, and the full review caught… | — |
+| 2026-10-05 | The gate harness was not hermetic: every case silently read the operator's real `~/.mimisbrunnr/credentials`… | — |
+| 2026-10-06 | Preflight entries are checked, not just the lists | — |
+| 2026-10-06 | Credential loaders read presence, not truthiness, so an empty override is honoured | #190 |
+| 2026-10-06 | Persisted values pass both redaction steps | #190 |
+| 2026-10-06 | No personal data in scratch files, across every instruction that writes one | #188 |
+| 2026-10-06 | Fixed by defect class | #186 |
+| 2026-10-06 | Host spelling of the write token refused | #184 |
+| 2026-10-06 | Every verdict needs a reason | #184 |
+| 2026-10-07 | Only a missing ledger is a first run | — |
+| 2026-10-07 | Calibration counts hold-side role clearing as bleed | — |
+| 2026-10-07 | Deepsearch's malformed-row rule names `version` | #200 |
+| 2026-10-07 | `query` refuses rows without `uuid`/`groupUuid`/`version` | — |
+| 2026-10-14 | The shared scripts moved out of this skill's folder (HLD-010 B2 / LADR-01) | #222 |
+| 2026-10-14 | Subject-less gate records are scored every call; their budget is not durable | #222 |
+| 2026-10-14 | Credential subshell covers each write-route invocation | #221 |
+| 2026-10-14 | A success-shaped zero-write `set` answer marks nothing | #221 |
+| 2026-10-14 | Read/write subagents removed (LADR-008, supersedes LADR-005) | — |
+| 2026-10-14 | Export receipt prefers server-confirmed uuids | — |
+| 2026-10-14 | Session marker: import marks the export boundary (HLD-007 LADR-11) | — |
+| 2026-10-14 | Checkpoint stops when the proposed initiative is not the resolved group's | — |
+| 2026-10-15 | consumer review 5538013336: Docs only: recall stdout keeps its notice line before the JSON… | — |
+| 2026-10-15 | Consumer review 5535929651: `SKILL.md` states the implemented session-id order (`--session` first) and the unreadable-marker… | — |
+| 2026-10-15 | G1: held candidates persist as `Status = proposed` | — |
+| 2026-10-15 | Cut to HLD shape: SKILL.md pointer + non-SKILL.md traps only | — |

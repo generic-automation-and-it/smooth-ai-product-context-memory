@@ -36,9 +36,11 @@ def _rows(response, field, endpoint=False):
         if not all(isinstance(path, dict) and isinstance(path.get("endpoint"), dict) for path in rows):
             return None
         rows = [path["endpoint"] for path in rows]
-    # A row is identified by uuid **and** version: merging and dedupe key on both, so a versionless row
-    # could not be placed and was counted as a completed pass all the same (issue 188).
-    if not all(isinstance(row, dict) and isinstance(row.get("uuid"), str) and row["uuid"]
+    # A row is identified by uuid, groupUuid **and** version — the identity the query client requires
+    # (`_identified_row`): merging and dedupe key on uuid and version, and the group is what a caller
+    # acts on, so a row missing any of them could not be placed and was counted as a completed pass.
+    if not all(isinstance(row, dict) and isinstance(row.get("uuid"), str) and row["uuid"].strip()
+               and isinstance(row.get("groupUuid"), str) and row["groupUuid"].strip()
                and type(row.get("version")) is int and row["version"] > 0
                for row in rows):
         return None
@@ -301,7 +303,7 @@ def main():
     except (ValueError, client.ClientError) as error:
         print(f"Deep search failed: {error}", file=sys.stderr)
         return 1
-    print(json.dumps(result, indent=2))
+    client.print_recall(result)
     return 0
 
 

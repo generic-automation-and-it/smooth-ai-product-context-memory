@@ -329,3 +329,10 @@ export async function initBrowse() {
   await refresh();
   maybeOpenFromUrl(currentRows);
 }
+
+// Cross-pane re-entry: refresh rows and open the URL-selected memory, but
+// never re-wire controls (initBrowse is for the first activation only).
+export async function reopenFromUrl() {
+  await refresh();
+  maybeOpenFromUrl(currentRows);
+}

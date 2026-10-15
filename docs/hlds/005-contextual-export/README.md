@@ -188,7 +188,7 @@ without it. It is not a deferred decision — it is a decision with a missing in
 | [LADR-08](./ladrs/LADR-08-read-only-dossier-skill.md) | A read-only dossier skill; `mimisbrunnr-odin-context-memory` narrows to sole *writer* | Draft |
 | [LADR-09](./ladrs/LADR-09-ticket-anchors-have-no-graph-representation.md) | Captured ticket hierarchy under HLD-003 LADR-08 | Accepted; implemented, release gates passed |
 | [LADR-10](./ladrs/LADR-10-tag-anchors-have-no-graph-representation.md) | Tag anchors as graph vertices | **Blocked** |
-| [LADR-11](./ladrs/LADR-11-no-writer-derives-anchor-edges.md) | Practitioner-declared ticket hierarchy under HLD-002 LADR-08; tag writer unresolved | Ticket half implemented and accepted; tag half **Blocked** |
+| [LADR-11](./ladrs/LADR-11-no-writer-derives-anchor-edges.md) | Practitioner-declared ticket hierarchy under HLD-002 LADR-08; tag writer unresolved | Ticket half implemented and accepted; tag half **Blocked**; narrow `ABOUT` (memory→ticket) exception owned by HLD-003 LADR-09 |
 | [LADR-12](./ladrs/LADR-12-focus-is-a-composition-lens.md) | Focus is a composition lens over one unfocused bundle | Draft |
 | [LADR-13](./ladrs/LADR-13-findings-carry-a-basis-and-a-scope.md) | Every finding carries a stated basis and is scoped to the examined material | Draft |
 | [LADR-14](./ladrs/LADR-14-preview-and-composition-bind-to-one-selection.md) | Preview and composition bind to one recorded selection | Draft |

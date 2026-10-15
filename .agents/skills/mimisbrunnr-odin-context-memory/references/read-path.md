@@ -15,6 +15,11 @@ write credential is deliberately never ambient, and the write path loads it only
 around each write-route invocation (see `write-path.md`). So do not `source` the full credential file in the
 session's shell, and never reach for the write client to read.
 
+The read client never writes a session marker, so every read here is **unmarked**. A **marked** Odin
+import — one that must move the session's export boundary — is not a read-path step: it is the capture
+client's `query`/`import` (`SKILL.md` → *Session marker*), which takes the read token only and writes
+the marker.
+
 ## Input
 
 - `mode`: `lookup` or `grounding`
