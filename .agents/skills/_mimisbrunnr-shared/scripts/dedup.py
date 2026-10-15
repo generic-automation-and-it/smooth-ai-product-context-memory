@@ -154,14 +154,14 @@ def estimate_tokens(text):
 
 
 def size_guard(state):
-    """Refuse an oversize pair before the request. Never truncate to fit."""
+    """Refuse an oversize request before sending. Never truncate to fit."""
     text = json.dumps(state, ensure_ascii=False)
     total = estimate_tokens(text)
     body = len(text.encode("utf-8"))
     if total > gate.MAX_CONTEXT_TOKENS:
-        return f"pair estimates to ~{total} tokens against a {gate.MAX_CONTEXT_TOKENS}-token context"
+        return f"request estimates to ~{total} tokens against a {gate.MAX_CONTEXT_TOKENS}-token context"
     if body > MAX_BODY_BYTES:
-        return f"pair body is {body} bytes against a {MAX_BODY_BYTES}-byte limit"
+        return f"request body is {body} bytes against a {MAX_BODY_BYTES}-byte limit"
     return None
 
 
