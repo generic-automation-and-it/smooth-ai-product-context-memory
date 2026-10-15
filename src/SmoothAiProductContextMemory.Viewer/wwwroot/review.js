@@ -9,7 +9,7 @@
 // new version / new memory / skip — reproduced, not persisted. Approve and
 // Reject are P4b's work (gated on G2); they render disabled.
 import { getReviewQueue, postDedupPreview } from './api.js';
-import { esc, shortUuid, fmtInstant, fmtValidity, plural } from './util.js';
+import { esc, shortUuid, fmtValidity } from './util.js';
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -23,6 +23,7 @@ const els = {
 let currentRows = [];
 let requestSeq = 0;
 const conflictsByUuid = new Map();
+const conflictSeqByUuid = new Map();
 
 function setState(stateName, message) {
   els.list.hidden = true;
@@ -61,7 +62,7 @@ function outcomeLabel(outcome) {
 function choiceMenu(proposal) {
   const matches = Array.isArray(proposal.matches) ? proposal.matches : [];
   if (!matches.length) {
-    return `<p class="review-no-conflict">No conflicts found. Safe to keep as a new version.</p>`;
+    return `<p class="review-no-conflict">No conflicts found.</p>`;
   }
   return matches.map((match, index) => {
     const existing = match.existing || {};
@@ -72,7 +73,7 @@ function choiceMenu(proposal) {
         <span class="review-conflict-uuid">${shortUuid(existing.uuid)}</span>
       </p>
       <p class="review-conflict-statement">${esc(existing.statement || '')}</p>
-      <p class="review-conflict-outcome">${esc(outcomeLabel(match.outcome || match.reusable ? 'proposed' : 'none'))}</p>
+      <p class="review-conflict-outcome">${esc(outcomeLabel(match.outcome))}</p>
       <div class="review-conflict-actions" role="group" aria-label="Conflict choice ${index + 1}">
         <button type="button" class="review-choice" data-choice="new-version" data-uuid="${esc(existing.uuid || '')}" disabled>New version</button>
         <button type="button" class="review-choice" data-choice="new-memory" data-uuid="${esc(existing.uuid || '')}" disabled>New memory</button>
@@ -89,7 +90,7 @@ function renderRow(memory) {
     ? (conflicts.error
         ? `<p class="review-error">Dedup preview failed: ${esc(conflicts.error)}.</p>`
         : `<ul class="review-conflicts" aria-label="Conflicts">${conflicts.proposals.map(choiceMenu).join('')}</ul>`)
-    : `<p class="review-loading">Loading conflict preview…</p>`;
+    : `<p class="review-help">Click "Show conflicts" to re-run dedup on this proposal.</p>`;
 
   return `<article class="review-card" data-uuid="${esc(memory.uuid)}" role="article">
     <header class="review-card-head">
@@ -120,33 +121,38 @@ function renderList() {
   els.state.hidden = true;
   els.list.hidden = false;
   els.list.innerHTML = currentRows.map(renderRow).join('');
-  els.list.querySelectorAll('.review-open-browse').forEach((button) => {
-    button.addEventListener('click', () => {
-      const uuid = button.dataset.uuid;
-      window.location.hash = '#browse';
-      window.location.search = `?uuid=${encodeURIComponent(uuid)}`;
-    });
-  });
   els.list.querySelectorAll('.review-conflicts-toggle').forEach((button) => {
     button.addEventListener('click', () => loadConflicts(button.dataset.uuid));
   });
   els.list.querySelectorAll('.review-open').forEach((button) => {
-    button.addEventListener('click', () => {
-      const uuid = button.dataset.uuid;
-      if (!uuid) return;
-      window.location.hash = '#browse';
-      window.location.search = `?uuid=${encodeURIComponent(uuid)}`;
-    });
+    button.addEventListener('click', () => openInBrowse(button.dataset.uuid));
+  });
+  els.list.querySelectorAll('.review-open-browse').forEach((button) => {
+    button.addEventListener('click', () => openInBrowse(button.dataset.uuid));
   });
 }
 
+function openInBrowse(uuid) {
+  if (!uuid) return;
+  // `pushState` so the cross-pane listener in app.js activates Browse and
+  // triggers `reopenFromUrl` (rows + open detail). No page reload.
+  const url = new URL(window.location.href);
+  url.hash = 'browse';
+  url.searchParams.set('uuid', uuid);
+  window.history.pushState({}, '', url);
+  window.dispatchEvent(new PopStateEvent('popstate'));
+}
+
 async function loadConflicts(uuid) {
+  const seq = (conflictSeqByUuid.get(uuid) || 0) + 1;
+  conflictSeqByUuid.set(uuid, seq);
   const memory = currentRows.find((row) => row.uuid === uuid);
   const scope = memory && memory.scopeDimension
     ? `${memory.scopeDimension}${memory.scopeIdentifier ? `:${memory.scopeIdentifier}` : ''}`
     : '';
   conflictsByUuid.set(uuid, null);
   const result = await postDedupPreview({ uuid, scope });
+  if (conflictSeqByUuid.get(uuid) !== seq) return;  // a newer request superseded this one
   if (result.timedOut) {
     conflictsByUuid.set(uuid, { error: 'timed out' });
   } else if (result.unreachable) {
@@ -167,14 +173,6 @@ function renderResult(result) {
   currentRows = items;
   if (items.length === 0) { setState('empty', 'No proposed memories are awaiting review.'); return; }
   renderList();
-  // Lazy-load the conflict preview for each row, in order. Serialised so a
-  // slow first request never overlaps a faster later one (the same sequence
-  // guard P1 uses — see LADR-10 consequences).
-  (async () => {
-    for (const row of currentRows) {
-      await loadConflicts(row.uuid);
-    }
-  })();
 }
 
 async function refresh() {

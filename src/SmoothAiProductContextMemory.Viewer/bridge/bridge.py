@@ -17,7 +17,6 @@
 # keeps a misconfigured orchestrator from quietly making the bridge writeable.
 # The check runs before the library import — the capture client's import-time
 # `load_machine_credentials` is the trigger.
-import argparse
 import json
 import os
 import subprocess
@@ -85,11 +84,9 @@ import context_memory_client as client  # noqa: E402
 import dedup as dedup_module  # noqa: E402
 
 _QUEUE_DEFAULT_LIMIT = 500
-_DEDUP_TIMEOUT = 90
-
-
-def _namespace(**kwargs):
-    return argparse.Namespace(**kwargs)
+# Cap the per-blob read subprocess. The capture client's HTTP timeout is 30s;
+# a blob read that exceeds this hung the bridge's HTTP handler indefinitely.
+_BLOB_TIMEOUT = 30
 
 
 def _review_queue_payload(limit):
@@ -109,12 +106,14 @@ def _review_queue_payload(limit):
 
 
 def _load_queue(limit):
-    resp = client.cmd_query(_namespace(payload=_review_queue_payload(limit)))
+    # Direct _request call rather than `cmd_query`: the library function
+    # `print`s the response to stdout, which would contaminate the HTTP body
+    # the bridge is about to write. _request is the no-side-effects seam.
+    resp = client._request("POST", "/api/context/query",
+                           payload=_review_queue_payload(limit))
     if not isinstance(resp, dict):
         raise ValueError("query response was not a JSON object")
     items = resp.get("items")
-    if items is None:
-        items = resp.get("memories") or []
     if not isinstance(items, list):
         raise ValueError("query response had no items list")
     return items
@@ -137,13 +136,13 @@ def _reconstruct_candidate(memory, blob_text):
 
 
 def _fetch_versions(uuid, scope):
-    """Cheap current-version read via the capture client's `cmd_get_versions`.
+    """Cheap current-version read via `_request` (no stdout side effects).
 
-    Returns the response object (with an `items` list) parsed by the
-    read-side command. A non-dict answer or a missing `items` raises.
+    `cmd_get_versions` `print`s the response; the bridge's HTTP body is on
+    stdout too, so library-call reuse would contaminate the body.
     """
-    args = _namespace(uuid=uuid, scope=scope)
-    resp = client.cmd_get_versions(args)
+    query = {"scope": scope} if scope else None
+    resp = client._request("GET", client.memory_versions_path(uuid), query=query)
     if not isinstance(resp, dict):
         raise ValueError("versions read returned a non-object response")
     return resp
@@ -159,7 +158,8 @@ def _fetch_blob(uuid, version, scope):
             uuid, str(version)]
     if scope:
         argv.extend(["--scope", scope])
-    proc = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8")
+    proc = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8",
+                          timeout=_BLOB_TIMEOUT)
     if proc.returncode != 0:
         return ""
     out = proc.stdout
@@ -236,7 +236,7 @@ class Handler(BaseHTTPRequestHandler):
                 "writeTokenPresent": bool(client.write_tokens_present()),
             })
             return
-        if self.path.startswith("/bridge/review-queue"):
+        if self.path == "/bridge/review-queue" or self.path.startswith("/bridge/review-queue?"):
             self._handle_review_queue()
             return
         self._reply(404, {"error": "not-found", "route": self.path})
@@ -288,7 +288,7 @@ class Handler(BaseHTTPRequestHandler):
             _log(f"dedup-preview: refused ({exc.status_text})")
             self._reply(502, {"error": "store-refused", "detail": exc.status_text, "status": exc.status})
             return
-        except (OSError, ValueError) as exc:
+        except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
             _log(f"dedup-preview: failed ({type(exc).__name__})")
             self._reply(503, {"error": "dedup-failed", "detail": type(exc).__name__})
             return
