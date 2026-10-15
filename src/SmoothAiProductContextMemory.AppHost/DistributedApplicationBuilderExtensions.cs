@@ -17,7 +17,7 @@ internal static class DistributedApplicationBuilderExtensions
     private const string HostReadinessPath = "/health";
     private const string BlobBucketName = "smooth-mimisbrunnr-memory-well";
     private const string ViewerResourceName = "mimir-viewer";
-    private const int ViewerPodPort = 5180;
+    private const int ViewerContainerPort = 5180;
     private const string PostgresImageRegistry = "docker.io";
     private const string PostgresImage = "apache/age";
     private const string PostgresImageTag = "release_PG17_1.7.0";
@@ -41,7 +41,7 @@ internal static class DistributedApplicationBuilderExtensions
 
             if (configuration.ViewerEnabled)
             {
-                builder.AddViewerPod(hostEndpoint, apiReadToken, configuration);
+                builder.AddViewer(hostEndpoint, apiReadToken, configuration);
             }
 
             return builder;
@@ -234,7 +234,7 @@ internal static class DistributedApplicationBuilderExtensions
             return host;
         }
 
-        private void AddViewerPod(
+        private void AddViewer(
             EndpointReference hostEndpoint,
             IResourceBuilder<ParameterResource> apiReadToken,
             AppHostConfiguration configuration)
@@ -245,7 +245,7 @@ internal static class DistributedApplicationBuilderExtensions
                 : builder.AddContainer(ViewerResourceName, imageReference.Image, imageReference.Tag);
 
             viewer
-                .WithHttpEndpoint(port: configuration.ViewerPort, targetPort: ViewerPodPort, name: "http")
+                .WithHttpEndpoint(port: configuration.ViewerPort, targetPort: ViewerContainerPort, name: "http")
                 .WithContainerName(configuration.ViewerContainerName)
                 .WithEnvironment("API_READ_TOKEN", apiReadToken)
                 .WithEnvironment("HOST_BASE_URL", hostEndpoint)

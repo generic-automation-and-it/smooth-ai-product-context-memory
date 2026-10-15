@@ -108,7 +108,7 @@ Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgr
   published viewer image is not yet released). The `mimir-viewer` container runs Caddy (serves the
   no-build SPA, injects the read token, proxies `/api` to the Host) plus the Python bridge stub.
   `ViewerConfiguration:Image` (default `smooth-ai-product-context-memory-viewer:local`) must be built
-  (`docker build src/SmoothAiProductContextMemory.ViewerPod`) before a dev run, and
+  (`docker build src/SmoothAiProductContextMemory.Viewer`) before a dev run, and
   `ViewerConfiguration:Port` (5441, the `5141 + "mimi"` ASCII offset) is the pod's published port.
 - MinIO credentials are committed in `appsettings.Development.json` (local dev only, firewall-isolated).
   Bucket creation is lazy: the storage adapter ensures the bucket exists on first write, so no separate
