@@ -86,14 +86,8 @@ class WriteTokenGuardTests(unittest.TestCase):
         self.assertNotIn("refusing to start", err)
 
     def test_p4b_refuses_without_write_token(self):
-        # All canonical env names absent.
-        env = {
-            "PYTHONPATH": _stage_bridge() and str(Path(tempfile.gettempdir())),
-            "CONTEXT_MEMORY_BASE_URL": "http://127.0.0.1:9",
-            "CONTEXT_MEMORY_READ_TOKEN": "harness-read-token",
-            "CONTEXT_MEMORY_CREDENTIAL_FILE": os.devnull,
-        }
-        # Re-stage properly (the expression above is a hack; do it cleanly).
+        # All canonical env names absent. Stage cleanly once — the previous
+        # `_stage_bridge() and ...` boolean hack abandoned a temp dir.
         tmp = _stage_bridge()
         env = {
             "PYTHONPATH": str(tmp / "capture") + os.pathsep + str(tmp / "bridge"),
@@ -147,10 +141,10 @@ class WriteTokenGuardTests(unittest.TestCase):
 
 
 class RouteShapeTests(unittest.TestCase):
-    """LADR-11 + worktask DoD: the routes the SPA hits are `/bridge/approve`,
-    `/bridge/reject`, `/bridge/amend`, and `/bridge/health`. Anything else is
-    404. P4a's routes (`/bridge/review-queue`, `/bridge/dedup-preview`) must
-    not appear on P4b.
+    """LADR-11 + worktask DoD: the routes P4b serves are `/bridge/approve`,
+    `/bridge/reject`, `/bridge/amend`, and `/bridge/p4b-health`. Anything else is
+    404. P4a's routes (`/bridge/review-queue`, `/bridge/dedup-preview`) and P4a's
+    `/bridge/health` must not appear on P4b.
     """
 
     def _import_bridge(self):
@@ -168,8 +162,9 @@ class RouteShapeTests(unittest.TestCase):
         )
         # Simpler: just check the source for the route strings.
         bridge_src = (BRIDGE_DIR / "bridge_p4b.py").read_text(encoding="utf-8")
-        for path in ("/bridge/approve", "/bridge/reject", "/bridge/amend", "/bridge/health"):
+        for path in ("/bridge/approve", "/bridge/reject", "/bridge/amend", "/bridge/p4b-health"):
             self.assertIn(path, bridge_src, msg=f"{path} not registered in P4b")
+        self.assertNotIn("'/bridge/health'", bridge_src, msg="/bridge/health belongs to P4a")
 
     def test_p4b_does_not_register_p4a_routes(self):
         bridge_src = (BRIDGE_DIR / "bridge_p4b.py").read_text(encoding="utf-8")

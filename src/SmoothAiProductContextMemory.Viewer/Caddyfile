@@ -21,16 +21,18 @@
 		}
 	}
 
-	# /bridge/{review-queue,dedup-preview} → P4a bridge (read-only, no write token).
-	handle /bridge/review-queue /bridge/dedup-preview {
+	# /bridge/{review-queue,dedup-preview,health} → P4a bridge (read-only, no write token).
+	handle /bridge/review-queue /bridge/dedup-preview /bridge/health {
 		reverse_proxy 127.0.0.1:5181
 	}
 
-	# /bridge/{approve,reject,amend,health} → P4b bridge (write, write token required).
+	# /bridge/{approve,reject,amend,p4b-health} → P4b bridge (write, write token required).
 	# P4b's import-time guard refuses to start without one; a misconfigured
 	# orchestrator that injects the write token into P4a still fails P4a's
-	# guard. NFR-02 by process isolation.
-	handle /bridge/approve /bridge/reject /bridge/amend /bridge/health {
+	# guard. NFR-02 by process isolation. /bridge/health stays on P4a so a
+	# monitor probing the gateway sees the read phase; P4b declares its own
+	# phase on /bridge/p4b-health.
+	handle /bridge/approve /bridge/reject /bridge/amend /bridge/p4b-health {
 		reverse_proxy 127.0.0.1:5182
 	}
 }
