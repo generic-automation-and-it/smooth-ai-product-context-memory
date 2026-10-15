@@ -177,4 +177,5 @@ Read [`SKILL.md`](./SKILL.md) first — the five-stage write pipeline, modes, sw
 | 2026-10-15 | consumer review 5538013336: Docs only: recall stdout keeps its notice line before the JSON… | — |
 | 2026-10-15 | Consumer review 5535929651: `SKILL.md` states the implemented session-id order (`--session` first) and the unreadable-marker… | — |
 | 2026-10-15 | G1: held candidates persist as `Status = proposed` | — |
+| 2026-10-15 | Consumer review 5539567320: the `set` receipt records the scrubbed subject, so a redacted description no longer reaches the marker file on disk in the clear | — |
 | 2026-10-15 | Cut to HLD shape: SKILL.md pointer + non-SKILL.md traps only | — |

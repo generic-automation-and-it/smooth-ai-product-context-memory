@@ -274,12 +274,31 @@ def _read_entries():
     return entries
 
 
+def _entries_and_state(records):
+    """Every entry record in queue order, each paired with whether its hold is still open.
+
+    A resolution closes the hold it FOLLOWS, not every record that happens to share its id: a
+    candidate held again after it was resolved is open again, so it lists as open and its new hold
+    counts toward the cap. Records are tracked by position, because a re-held candidate appends a
+    second entry record under the same id and only the latest one is the live hold.
+    """
+    states = []
+    open_holds = {}
+    for record in _read_entries():
+        kind = record.get("kind")
+        ident = record.get("id")
+        if kind == "resolution" and ident in open_holds:
+            states[open_holds.pop(ident)][1] = False
+        elif kind == "entry":
+            states.append([record, True])
+            open_holds[ident] = len(states) - 1
+    return states
+
+
 def entry_count():
     """The number of unresolved entries. Resolutions are records, not entries, and a resolved entry no
     longer counts — the cap message tells a reviewer to resolve entries to make room, so it must."""
-    records = _read_entries()
-    resolved = {record.get("id") for record in records if record.get("kind") == "resolution"}
-    return sum(1 for record in records if record.get("kind") == "entry" and record.get("id") not in resolved)
+    return sum(1 for _, is_open in _entries_and_state(_read_entries()) if is_open)
 
 
 def _ensure_permissions(path):
@@ -432,23 +451,27 @@ def cmd_append(args):
     return 0
 
 
+def _entry_row(entry, is_open):
+    """The state and subject of one listed entry, shared by the table and the plain rendering."""
+    return ("open" if is_open else "resolved",
+            (entry.get("candidate") or {}).get("subject") or "<no subject>")
+
+
 def cmd_list(args):
-    entries = [r for r in _read_entries() if r.get("kind") == "entry"]
+    entries = _entries_and_state(_read_entries())
     if args.held_by:
-        entries = [e for e in entries if e.get("heldBy") == args.held_by]
+        entries = [(entry, is_open) for entry, is_open in entries if entry.get("heldBy") == args.held_by]
 
     if args.table:
-        for entry in entries:
-            resolved = "resolved" if _resolutions(entry["id"]) else "open"
-            subject = (entry.get("candidate") or {}).get("subject") or "<no subject>"
-            print(f"{entry['id']}\t{entry['heldBy']}\t{entry.get('heldAt')}\t{resolved}\t{subject}")
+        for entry, is_open in entries:
+            state, subject = _entry_row(entry, is_open)
+            print(f"{entry['id']}\t{entry['heldBy']}\t{entry.get('heldAt')}\t{state}\t{subject}")
         return 0
 
     print(f"{len(entries)} held candidate(s) -> {queue_path()}")
-    for entry in entries:
-        resolved = "resolved" if _resolutions(entry["id"]) else "open"
-        subject = (entry.get("candidate") or {}).get("subject") or "<no subject>"
-        print(f"  [{entry['id']}] {entry.get('heldBy')} / {entry.get('conflictType')} / {resolved} "
+    for entry, is_open in entries:
+        state, subject = _entry_row(entry, is_open)
+        print(f"  [{entry['id']}] {entry.get('heldBy')} / {entry.get('conflictType')} / {state} "
               f"({entry.get('heldAt')}): {subject}")
         print(f"    choices: {', '.join(entry.get('menu') or [])}")
     return 0

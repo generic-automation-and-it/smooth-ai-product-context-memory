@@ -583,7 +583,10 @@ def cmd_set(args):
     payload = _apply_export_marker(args, payload)
     validate_set_payload(payload)
     query = {"dryRun": "true"} if args.dryrun else None
-    resp = scrubbed_write("set", "POST", "/api/context/memories", payload, query=query)
+    # The receipt records what was SENT. `scrub_or_refuse` returns a copy, so the caller's payload
+    # still holds every span the redactor removed; writing the marker from it would put an unscrubbed
+    # description on disk under a redaction the request itself passed.
+    payload, resp = scrubbed_send("set", "POST", "/api/context/memories", payload, query=query)
     print(json.dumps(resp, indent=2))
     _mark_send_receipt(args, payload, resp)
     return resp
@@ -782,14 +785,26 @@ def _mark_send_receipt(args, payload, resp=None) -> None:
     print(_marker.marker_line(status, sid, len(written), verb="export"), file=sys.stderr)
 
 
+def scrubbed_send(operation, method, path, payload, query=None):
+    """Scrub `payload` for `operation`, send it, and hand back the scrubbed payload and the response.
+
+    The scrubbed payload is returned alongside the response because the caller may keep something
+    client-side of the bytes it sent — the `set` receipt writes each item's subject into the session
+    marker — and that record must describe the sent payload, not the caller's original. Scrubbing
+    once, here, is what keeps the request and the receipt in step.
+    """
+    payload, hits = scrub_or_refuse(payload, operation)
+    return payload, attach_redaction(_request(method, path, payload, query=query), hits)
+
+
 def scrubbed_write(operation, method, path, payload, query=None):
     """Scrub `payload` for `operation`, send it, and attach the redaction digest to the response.
 
     The single route every persisting write takes, so a new write subcommand is gated by
-    calling this rather than by remembering to call the scrubber.
+    calling this rather than by remembering to call the scrubber. A caller that records what it
+    sent calls `scrubbed_send`, which is this route with the scrubbed payload returned too.
     """
-    payload, hits = scrub_or_refuse(payload, operation)
-    return attach_redaction(_request(method, path, payload, query=query), hits)
+    return scrubbed_send(operation, method, path, payload, query=query)[1]
 
 
 def scrub_or_refuse(payload, operation="set"):
