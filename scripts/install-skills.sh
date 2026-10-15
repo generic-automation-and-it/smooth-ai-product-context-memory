@@ -64,6 +64,11 @@ find_skills_root() {
 # The only skills this installer manages. Everything else that happens to sit in a skills root —
 # local coding skills, operator experiments — is somebody else's to update and is never touched.
 is_owned_skill() {
+  # Skill names are single path components (list_disk_skills emits basenames). A name carrying a
+  # separator or `..` never matches anything real, but the update loop concatenates manifest names
+  # into paths for rm/cp — so reject it here rather than letting a hand-edited manifest aim those
+  # commands outside the skills root.
+  case "$1" in *[/]* | *..*) return 1 ;; esac
   case "$1" in
     mimisbrunnr-*) return 0 ;;
     ai-understanding | ai-brain-dump) return 0 ;;
