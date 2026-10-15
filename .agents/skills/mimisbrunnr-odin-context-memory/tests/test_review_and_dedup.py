@@ -20,7 +20,7 @@ import threading
 import unittest
 from pathlib import Path
 
-SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
+SCRIPTS = Path(__file__).resolve().parents[2] / "_mimisbrunnr-shared" / "scripts"
 
 # Hermetic before any import: the dedup module imports `decisions_gate`, which seeds settings from the
 # machine credential file at import. Point it at a path that cannot exist so the harness never reads the

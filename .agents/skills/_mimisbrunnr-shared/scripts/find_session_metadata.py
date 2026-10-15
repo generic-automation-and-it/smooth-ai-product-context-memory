@@ -36,9 +36,10 @@ TICKET_PATTERNS = (
 )
 
 
-# The capture skill's redactor, found beside this skill the way the other Mímisbrunnr clients find it;
-# both script folders ship together in the npm package and the Claude plugin.
-REDACTOR = (Path(__file__).resolve().parents[2] / "mimisbrunnr-odin-context-memory" / "scripts"
+# The redactor from the one shared script folder every Mímisbrunnr skill references (HLD-010
+# LADR-01): two levels up is the skills root, then the shared folder. Never a peer skill's
+# folder. Both the reporter and the redactor ship together in the npm package and the Claude plugin.
+REDACTOR = (Path(__file__).resolve().parents[2] / "_mimisbrunnr-shared" / "scripts"
             / "redact.py")
 REDACTOR_UNAVAILABLE = "redactor unavailable; no unchecked ticket is reported"
 BRANCH_CREDENTIAL_SHAPED = "credential-shaped; not shown"

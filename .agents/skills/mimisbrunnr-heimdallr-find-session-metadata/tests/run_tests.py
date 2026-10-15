@@ -21,7 +21,10 @@ import unittest
 from pathlib import Path
 
 SKILL = Path(__file__).resolve().parents[1]
-SCRIPT = SKILL / "scripts" / "find_session_metadata.py"
+# HLD-010 LADR-01: the reporter is shared by more than one skill, so it lives in the plugin's shared
+# script folder — two levels up is the skills root, then the shared folder, never a peer skill's.
+SHARED = SKILL.parent / "_mimisbrunnr-shared" / "scripts"
+SCRIPT = SHARED / "find_session_metadata.py"
 # The shared synthetic fixture: the redactor, the decision gate and this reporter read one list.
 CREDENTIAL_LIKE = json.loads(
     (SKILL.parent / "mimisbrunnr-odin-context-memory" / "tests" / "fixtures" / "credential_like.json")
@@ -238,7 +241,7 @@ class CredentialShapedTicketTests(unittest.TestCase):
         """Fail closed: the reporter installed without the capture skill beside it reports no ticket
         at all — controls included — and says why, rather than reporting unchecked ones."""
         with tempfile.TemporaryDirectory() as tmp:
-            lone = Path(tmp) / "skills" / "mimisbrunnr-heimdallr-find-session-metadata" / "scripts"
+            lone = Path(tmp) / "skills" / "_mimisbrunnr-shared" / "scripts"
             lone.mkdir(parents=True)
             shutil.copy(SCRIPT, lone / SCRIPT.name)
             text = CREDENTIAL_LIKE["credentials"][0]["text"]
@@ -298,7 +301,7 @@ class BranchRedactionTests(unittest.TestCase):
 
     def test_without_the_redactor_the_branch_is_not_shown(self):
         with tempfile.TemporaryDirectory() as tmp:
-            lone = Path(tmp) / "skills" / "mimisbrunnr-heimdallr-find-session-metadata" / "scripts"
+            lone = Path(tmp) / "skills" / "_mimisbrunnr-shared" / "scripts"
             lone.mkdir(parents=True)
             shutil.copy(SCRIPT, lone / SCRIPT.name)
             proc = self._scan("feat/160-x", "--json", script=lone / SCRIPT.name)
@@ -354,7 +357,7 @@ class RepositoryRedactionTests(unittest.TestCase):
 
     def test_without_the_redactor_the_repository_is_not_shown(self):
         with tempfile.TemporaryDirectory() as tmp:
-            lone = Path(tmp) / "skills" / "mimisbrunnr-heimdallr-find-session-metadata" / "scripts"
+            lone = Path(tmp) / "skills" / "_mimisbrunnr-shared" / "scripts"
             lone.mkdir(parents=True)
             shutil.copy(SCRIPT, lone / SCRIPT.name)
             proc = self._scan("https://github.com/acme/widgets.git", "--json", script=lone / SCRIPT.name)
@@ -560,7 +563,7 @@ class RepoRootTests(unittest.TestCase):
         self.assertIsNone(self._scan()["rootMatches"])
 
     def test_without_the_redactor_the_root_is_not_shown(self):
-        lone = Path(self._tmp.name) / "skills" / "mimisbrunnr-heimdallr-find-session-metadata" / "scripts"
+        lone = Path(self._tmp.name) / "skills" / "_mimisbrunnr-shared" / "scripts"
         lone.mkdir(parents=True)
         shutil.copy(SCRIPT, lone / SCRIPT.name)
         result = json.loads(self._scan_env(self.chosen, "--repo-root", str(self.chosen),

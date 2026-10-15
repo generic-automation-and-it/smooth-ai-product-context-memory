@@ -47,7 +47,16 @@ import sys
 import uuid
 from pathlib import Path
 
-import session_marker as _marker
+# Every script used by more than one Mímisbrunnr skill lives in one shared folder each skill
+# references (HLD-010 LADR-01). Two levels up is the skills root — `.agents/skills`,
+# `.claude/skills`, `.codex/skills`, or the npm layout — and from there the shared folder, never a
+# peer skill's. The shared folder sits on `sys.path` so the shared helpers (the session marker here)
+# import from it rather than being copied into this skill.
+_SHARED_SCRIPTS = Path(__file__).resolve().parents[2] / "_mimisbrunnr-shared" / "scripts"
+if str(_SHARED_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SHARED_SCRIPTS))
+
+import session_marker as _marker  # noqa: E402  (imported from the shared folder above)
 
 KIND_UNDERSTANDING = "understanding"
 DUMP_MARKER = ".mimisbrunnr-kvasir-understanding-dump"
@@ -55,13 +64,12 @@ SESSION_FILE = "_session.md"
 METADATA_FILE = "_dump.json"
 UNIT_SUFFIX = ".understanding.md"
 _SKILL_SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
-_CAPTURE_SCRIPTS = Path(__file__).resolve().parents[2] / "mimisbrunnr-odin-context-memory" / "scripts"
-REDACTOR = _CAPTURE_SCRIPTS / "redact.py"
-ATOMICITY = _CAPTURE_SCRIPTS / "atomicity.py"
-READ_CLIENT = _CAPTURE_SCRIPTS / "context_memory_read_client.py"
-WRITE_CLIENT = _CAPTURE_SCRIPTS / "context_memory_client.py"
-REVIEW_QUEUE = _CAPTURE_SCRIPTS / "review_queue.py"
-DEDUP = _CAPTURE_SCRIPTS / "dedup.py"
+REDACTOR = _SHARED_SCRIPTS / "redact.py"
+ATOMICITY = _SHARED_SCRIPTS / "atomicity.py"
+READ_CLIENT = _SHARED_SCRIPTS / "context_memory_read_client.py"
+WRITE_CLIENT = _SHARED_SCRIPTS / "context_memory_client.py"
+REVIEW_QUEUE = _SHARED_SCRIPTS / "review_queue.py"
+DEDUP = _SHARED_SCRIPTS / "dedup.py"
 DEDUP_ENABLED = "CONTEXT_MEMORY_DECISIONS_DEDUP_ENABLED"
 # The write-token spellings the read client refuses to start with, folded as it folds them. Kept equal
 # to the capture client's `WRITE_TOKEN_NAMES` by a test rather than imported: importing that module
@@ -74,12 +82,13 @@ WRITE_TOKEN_NAMES = frozenset({
 # Heimdallr session-metadata reporter, resolved relative to this file so the lookup
 # holds under any skills root (.agents/skills, .claude/skills, .codex/skills, npm
 # layout): two levels up is the skills root, never a hardcoded prefix.
-HEIMDALLR_SCRIPT = (Path(__file__).resolve().parents[2]
-                    / "mimisbrunnr-heimdallr-find-session-metadata"
-                    / "scripts" / "find_session_metadata.py")
-# The capture skill's static batch cap. Mirrored rather than imported: the two script folders ship as
-# separate packages, so this client cannot acquire a cross-skill import (the same reason the recall
-# notice is duplicated verbatim and asserted equal by a test).
+HEIMDALLR_SCRIPT = _SHARED_SCRIPTS / "find_session_metadata.py"
+# The capture skill's static batch cap. Mirrored rather than imported, by decision (HLD-010 LADR-01):
+# a shared-folder reference inside the plugin is the rule for *files*, and this constant is not a
+# file. It stays pinned here beside the shared client's, so changing the cap is a deliberate two-file
+# edit that both copies ride together rather than an import that would silently re-couple the two.
+# (The recall notice is duplicated verbatim for a different, still-live reason: importing
+# `context_memory_client` would make its redactor import a startup dependency of this client.)
 MAX_CANDIDATES = 20
 # Where a bound initiative came from: an explicit flag wins over dump metadata, which wins
 # over Heimdallr autofill. Tracked so the mismatch refusal blames the actual source.
@@ -1041,7 +1050,7 @@ def gate_atomicity(candidates: list[dict]) -> list[dict] | None:
     return results
 
 
-DECISIONS_GATE = _CAPTURE_SCRIPTS / "decisions_gate.py"
+DECISIONS_GATE = _SHARED_SCRIPTS / "decisions_gate.py"
 DECISIONS_ENABLED = "CONTEXT_MEMORY_DECISIONS_ENABLED"
 # The one note `gate_decisions` returns for a refusal rather than a skip. It is a named constant because
 # `cmd_export` has to act on it: a refusal says "Nothing was written", so a refusal that only labelled the

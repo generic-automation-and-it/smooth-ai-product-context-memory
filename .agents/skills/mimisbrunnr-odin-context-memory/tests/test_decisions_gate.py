@@ -29,7 +29,7 @@ import unittest
 from unittest import mock
 from pathlib import Path
 
-SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
+SCRIPTS = Path(__file__).resolve().parents[2] / "_mimisbrunnr-shared" / "scripts"
 GATE = SCRIPTS / "decisions_gate.py"
 REDACTOR = SCRIPTS / "redact.py"
 RUBRIC = SCRIPTS / "decisions_rubric.json"
@@ -231,9 +231,10 @@ def run_gate(args, stdin_text, env_extra=None, timeout=300, gate=GATE):
 
 def gate_copy(test, redactor=None, rubric=None):
     """A private copy of the gate and its two data files, for cases that need a different redactor or
-    rubric. The gate finds both beside itself, so a case swaps them in the copy — never in `scripts/`.
-    Swapping the shipped files in place raced with any concurrent run of a suite reading them, and a
-    restore from a backup taken mid-swap left a stub as the shipped `redact.py` (issue 182).
+    rubric. The gate finds both beside itself, so a case swaps them in the copy — never in the shared
+    script folder. Swapping the shipped files in place raced with any concurrent run of a suite
+    reading them, and a restore from a backup taken mid-swap left a stub as the shipped `redact.py`
+    (issue 182).
 
     `redactor`: replacement source, or `False` to leave none. `rubric`: replacement body."""
     root = Path(tempfile.mkdtemp())
@@ -1134,7 +1135,7 @@ class RedactorArityTests(GateTestCase):
     )
 
     def _reversed(self, mutate="rows.reverse()"):
-        real = str(Path(__file__).resolve().parents[1] / "scripts" / "redact.py")
+        real = str(REDACTOR)
         return self._REVERSED.format(real=real, mutate=mutate)
 
     def test_a_reordered_answer_is_paired_by_candidate_index(self):
@@ -1939,14 +1940,20 @@ class RubricValidationTests(GateTestCase):
             self.assertTrue(entry["criteria"].get("true"))
             self.assertTrue(entry["criteria"].get("false"))
 
-    def test_both_rubric_copies_are_identical(self):
-        """The kvasir copy exists because the two script folders ship separately, so there is no
-        cross-skill import to keep them in step — a divergence would mean the two skills ask about
-        different roles for the same record."""
-        twin = SCRIPTS.parents[1] / "mimisbrunnr-kvasir-understanding" / "scripts" / "decisions_rubric.json"
-        self.assertTrue(twin.is_file(), f"the kvasir rubric copy is missing at {twin}")
-        self.assertEqual(RUBRIC.read_text(encoding="utf-8"), twin.read_text(encoding="utf-8"),
-                         "the two rubric copies have drifted; an edit belongs in both")
+    def test_no_skill_inside_the_plugin_carries_a_nested_rubric_copy(self):
+        """HLD-010 LADR-01: the rubric has one home, the shared script folder, and no skill inside the
+        plugin copies it beside itself. The copy existed only because the two script folders shipped
+        separately and there was no cross-skill import; the shared folder removes that reason, so a
+        nested copy is drift waiting to happen rather than a necessity. `ai-understanding` is a
+        different plugin and keeps its own copy (LADR-02)."""
+        twins = [
+            SCRIPTS.parents[1] / skill / "scripts" / "decisions_rubric.json"
+            for skill in ("mimisbrunnr-kvasir-understanding", "mimisbrunnr-odin-context-memory")
+        ]
+        for twin in twins:
+            self.assertFalse(twin.is_file(),
+                             f"a nested rubric copy exists at {twin}; the shared folder is the only "
+                             "home inside the plugin")
 
 
 class CalibrationEvidenceTests(unittest.TestCase):

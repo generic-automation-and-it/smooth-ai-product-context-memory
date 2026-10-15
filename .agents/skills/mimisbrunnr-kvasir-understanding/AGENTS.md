@@ -124,8 +124,9 @@ recalls the live store via `import` (read token only) and orchestrates the captu
   exit code is unchanged — and it asks the repo holding the folder (`git check-ignore`, never a text
   search, since the same folder may be tracked in another repo) rather than assuming.
 - **The dump redacts before writing and fails closed.** It shells out to
-  `../mimisbrunnr-odin-context-memory/scripts/redact.py` over stdin (never argv). Both script folders ship
-  together in the npm package, so the relative path holds there too.
+  `../_mimisbrunnr-shared/scripts/redact.py` over stdin (never argv). Both the client and the redactor
+  ship in the same shared script folder, so the relative path holds under every skills root and in the
+  npm package.
 - **The dump also redacts personal data with a fixed shape, after the secret pass.**
   `redact_personal_data` replaces email addresses and UPN-style `user@domain` identifiers (one rule,
   `email-address` → `<redacted-email>`) and its findings join the secret findings in the one
@@ -323,6 +324,7 @@ recalls the live store via `import` (read token only) and orchestrates the captu
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-14 | **The shared-code move reached this client (HLD-010 B2 / LADR-01).** Every shared script this client reaches is now resolved through `parents[2] / "_mimisbrunnr-shared" / "scripts"` — the redactor, atomicity, both capture clients, the review queue, dedup, the decision gate and the Heimdallr reporter. The two WET copies it carried (`decisions_rubric.json`, `session_marker.py`) were **deleted**: the shared folder removes the "two script folders ship separately" reason they existed for, so a copy here is now drift rather than a necessity. `session_marker` imports from the shared folder via `sys.path`; `MAX_CANDIDATES` stays mirrored with its rationale rewritten, per LADR-01's stated disposition. The `three_copies_stay_identical` harness case became `the_shared_marker_is_the_only_copy_inside_the_plugin`, which also pins the `ai-understanding` WET copy against the shared original (LADR-02). | HLD-010 LADR-01, issue 222 |
 | 2026-10-14 | **Input-resolution fixtures stub `dump_root`.** `matching_session_input` runs before the stubbed newest-dump lookup against the real workspace root, so a live session-matching dump shadowed three fixtures (a live run's own dump matched); the session-sensitive cases now resolve inside an empty stubbed root, plus a regression test pinning it. Test-only; product behavior unchanged. | issue 224 |
 | 2026-10-14 | **Gate positional-index purge reaches the operator.** `_ledger_disclosures` prints one stderr line for the gate's `ledgerIndexPurged` count (fixed wording, count only); absent, zero or malformed values print nothing. Regression: a write-path prose export against a pre-spent `index:N` ledger now scores (and under `hold` holds below-threshold) instead of keeping all unscored. | issue 222 |
 | 2026-10-14 | **Export receipts record `originVersion`** where the candidate carried one, so the digest can say which version was superseded; fresh prose records none. | ai-review 7 |

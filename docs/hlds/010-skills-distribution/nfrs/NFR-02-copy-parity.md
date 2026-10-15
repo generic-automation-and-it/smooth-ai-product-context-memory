@@ -1,6 +1,6 @@
 # NFR-02: Copy parity
 
-**Status:** Draft
+**Status:** Accepted
 
 <!-- One file per quality attribute. This NFR is a horizontal concern spanning the whole HLD. Status lifecycle: Draft → Prototype → Accepted. -->
 
@@ -12,9 +12,11 @@ where a plugin carries them), and the parity harness comparing them is green.
 
 ## Verification
 
-`md5` equality of each copy pair plus the parity harness
-(`parity_decisions_gate.py` and the session-marker parity pin) run green; any drift
-fails naming the side that changed.
+`ai-understanding`'s parity harness (`tests/parity_decisions_gate.py`) imports the shared gate and
+the WET copy and compares rubric bytes, constants, env-name sets, request JSON, classified outcomes
+and redaction on the shared secret corpus; `tests/run_tests.py` pins `session_marker.py`'s copy
+against the shared original. Both are green. A one-character drift in any copy fails exactly its
+parity case — the harness proves its own sensitivity on the rubric bytes.
 
 ## Acceptance Criteria
 

@@ -143,7 +143,8 @@ Bounded taxonomy, fixed before first export: `gap`, `contradiction`, `equivalenc
   specific unwired decision may still be a basis-carrying `gap`; never infer it from a missing edge.
 - `near-miss-tag` is evidence-only (LADR-10): supporting UUID/version, concrete basis, examined scope,
   observation/analysis classification. No extra search, no hidden IDs/counts, no claim about unseen
-  exclusions. **No evidence means no finding.** Reuse `mimisbrunnr-odin-context-memory/scripts/near_miss_tags.py`,
+  exclusions. **No evidence means no finding.** Reuse the shared `near_miss_tags.py` (the capture skill's
+  helper, now reached through the plugin's shared script folder under HLD-010 LADR-01),
   reached from the CLI only as `compose --near-miss-evidence`; `--judgements` refuses the category.
 - Every finding names its memories by identity + version, carries basis + scope. `None detected` is
   always qualified by examined scope.
@@ -216,6 +217,7 @@ Tests: `tests/run_tests.py`.
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-14 | **Every shared dependency is reached through the plugin's shared script folder (HLD-010 B2 / LADR-01).** `_ODIN_SCRIPTS` became `_SHARED_SCRIPTS` for the store-client import (which carries the credential loader, re-exported names and write-token refusal) and for the Heimdallr reporter; `_near_miss_helper_path()` resolves there too. No peer-skill path remains in this module, so the PR-gate grep (NFR-01) is clean. Read-only posture unchanged: the composer still has no write operation. | HLD-010 LADR-01, issue 222 |
 | 2026-10-07 | Approval compares `selection` and `selectedCount`: `selection` holds anchors, not memories, so a same-count store change is undetectable (snapshot id proposed, not implemented) (#8). | review 5441621898 |
 | 2026-10-07 | Bundle guard reuses odin's `write_tokens_present` (a two-name list let `Parameters__api-write-token` and case variants through); README points to the upstream HLD; C4 + sequence diagrams. | review 5440964552 |
 | 2026-10-07 | `SKILL.md` drops a stale harness test count. | issue 200 |

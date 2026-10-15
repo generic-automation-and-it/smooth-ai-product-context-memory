@@ -7,8 +7,12 @@ this scanner does for a session before an export binds it.
 Offline, read-only, no store call. The operator binds; this skill only reports.
 
 ```bash
-python3 -B .agents/skills/mimisbrunnr-heimdallr-find-session-metadata/scripts/find_session_metadata.py [--json] [--initiative NAME] [--repo-root DIR]
+python3 -B .agents/skills/_mimisbrunnr-shared/scripts/find_session_metadata.py [--json] [--initiative NAME] [--repo-root DIR]
 ```
+
+The reporter is shared by more than one `mimisbrunnr-*` skill, so it lives in the plugin's shared
+script folder rather than in this skill's own ([HLD-010](../../docs/hlds/010-skills-distribution/),
+LADR-01). This folder is where Heimdallr's own contract (`SKILL.md`, `AGENTS.md`) lives.
 
 | Field | Source |
 |---|---|

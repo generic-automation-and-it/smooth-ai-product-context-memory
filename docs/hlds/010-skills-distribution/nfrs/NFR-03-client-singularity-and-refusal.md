@@ -1,6 +1,6 @@
 # NFR-03: Client singularity and refusal
 
-**Status:** Draft
+**Status:** Accepted
 
 <!-- One file per quality attribute. This NFR is a horizontal concern spanning the whole HLD. Status lifecycle: Draft → Prototype → Accepted. -->
 
