@@ -71,12 +71,13 @@ try {
     console.log(`OK: ${name} ${args.join(" ")}`);
   }
 
-  // Heimdallr has no bin, but kvasir's autofill runs the packed copy, and that copy screens tickets
-  // with odin's redact.py found by sibling path. If the allowlist ever drops odin's scripts, the scan
-  // still exits 0 and only reports `ticketsUnavailable`, so assert that field, not the exit code.
+  // Heimdallr has no bin, but kvasir's autofill runs the shared copy, and that copy screens tickets
+  // with the redactor found in the same shared folder. If the allowlist ever drops the shared folder,
+  // the scan still exits 0 and only reports `ticketsUnavailable`, so assert that field, not the exit
+  // code.
   const heimdallr = join(
     installDir, "node_modules", "@generic-automation-and-it", "mimisbrunnr-skills",
-    ".agents", "skills", "mimisbrunnr-heimdallr-find-session-metadata", "scripts",
+    ".agents", "skills", "_mimisbrunnr-shared", "scripts",
     "find_session_metadata.py",
   );
   const scan = JSON.parse(

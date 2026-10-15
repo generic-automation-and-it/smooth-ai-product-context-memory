@@ -311,8 +311,9 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
   repository (even a different repo) can then load that folder.
 - **This is an export, not a write.** It changes nothing in the store.
 - The dump is written to the gitignored `.context/` tree, so it is not committed.
-- **The content is redacted before the file is written**, by `mimisbrunnr-odin-context-memory`'s
-  `redact.py`, and the rule names hit are reported. If the redactor cannot run, the dump is refused and
+- **The content is redacted before the file is written**, by the shared `redact.py` (the capture
+  skill's redactor, reached through the plugin's shared script folder — see
+  [HLD-010](../../docs/hlds/010-skills-distribution/)), and the rule names hit are reported. If the redactor cannot run, the dump is refused and
   nothing is written. This is the second net; the first is never pasting a credential into a dump.
 - **Personal data is redacted too, but only what has a shape.** A personal-data pass after the secret
   pass replaces email addresses and UPN-style `user@domain` identifiers (rule `email-address`; an SSH
@@ -374,4 +375,4 @@ Committed harness: `python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/t
 - `docs/hlds/007-understanding-transfer/` — design (LADR-01…09), NFRs.
 - `.agents/skills/ai-understanding/` — writes the `.understanding.md` files and stores this skill loads.
 - `docs/brd/003-understanding-transfer/` — business requirements (BR-38…BR-45).
-- `.agents/skills/mimisbrunnr-odin-context-memory/` — the capture skill (sole writer) an `export` funnels through; `import` only reads the store through its read client.
+- `.agents/skills/mimisbrunnr-odin-context-memory/` — the capture skill (sole writer) an `export` funnels through; `import` only reads the store through its read client. Both scripts now live in the plugin's shared script folder, [`_mimisbrunnr-shared/scripts/`](../_mimisbrunnr-shared/AGENTS.md), and this client reaches them there rather than into odin's folder.

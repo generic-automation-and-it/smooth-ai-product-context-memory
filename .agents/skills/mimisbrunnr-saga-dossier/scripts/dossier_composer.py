@@ -43,17 +43,19 @@ from typing import Callable, Optional
 from urllib.parse import urlparse
 import subprocess
 
-# The sibling capture client is the authoritative loader of the machine credential file. Importing it
+# The shared script folder every Mímisbrunnr skill references (HLD-010 LADR-01): two levels up is
+# the skills root, then the shared folder — never a peer skill's. The capture client found there is
+# the authoritative loader of the machine credential file. Importing it
 # runs its own seed (read token + base URL only, at import) and never makes the write token ambient —
 # this skill is read-only (LADR-08 / NFR-06) and refuses a write token, so a write token must never be
 # loaded. Reuse the one loader rather than writing a third.
-_ODIN_SCRIPTS = (Path(__file__).resolve().parents[2]
-                 / "mimisbrunnr-odin-context-memory" / "scripts")
-if str(_ODIN_SCRIPTS) not in sys.path:
-    sys.path.insert(0, str(_ODIN_SCRIPTS))
+_SHARED_SCRIPTS = (Path(__file__).resolve().parents[2]
+                   / "_mimisbrunnr-shared" / "scripts")
+if str(_SHARED_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SHARED_SCRIPTS))
 import context_memory_client as _store_client  # noqa: E402
 
-# The credential names and the machine file, re-exported from the sibling client so this module reads
+# The credential names and the machine file, re-exported from the shared client so this module reads
 # and refuses through one place rather than restating the variable names.
 _ENV_BASE_URL = _store_client.ENV_BASE_URL
 _ENV_READ_TOKEN = _store_client.ENV_READ_TOKEN
@@ -63,9 +65,7 @@ _MACHINE_CREDENTIAL_FILE = _store_client.MACHINE_CREDENTIAL_FILE
 # Heimdallr session-metadata reporter, resolved relative to this file so the
 # lookup holds under any skills root (.agents/skills, .claude/skills,
 # .codex/skills): two levels up is the skills root, never a hardcoded prefix.
-HEIMDALLR_SCRIPT = (Path(__file__).resolve().parents[2]
-                    / "mimisbrunnr-heimdallr-find-session-metadata"
-                    / "scripts" / "find_session_metadata.py")
+HEIMDALLR_SCRIPT = _SHARED_SCRIPTS / "find_session_metadata.py"
 _HEIMDALLR_CHOICES = ("true", "false")
 
 
@@ -1396,7 +1396,8 @@ def _sources_overlap(origins):
 def near_miss_findings(payload):
     """Evidence-only near-miss-tag reporting, delegated to the shared helper (LADR-10).
 
-    Reuses ``mimisbrunnr-odin-context-memory/scripts/near_miss_tags.py``. The helper validates approved
+    Reuses ``near_miss_tags.py`` from the shared script folder (HLD-010 LADR-01; it is the capture
+    skill's helper, reached by reference rather than copied). The helper validates approved
     examined evidence and exact tag mismatch; it performs no search, widens no scope and makes no
     store-wide claim. No evidence means no finding. This module never extends into a tag graph.
     """
@@ -1430,10 +1431,10 @@ def near_miss_findings(payload):
 
 
 def _near_miss_helper_path():
-    # The shared evidence-only helper lives in the sibling skill's scripts dir. This skill's own
-    # directory never contains a nested copy, so there is no usable fallback — a missing helper must
-    # fail loudly in the caller rather than point at a path that can never resolve (R3).
-    return Path(__file__).resolve().parents[2] / "mimisbrunnr-odin-context-memory" / "scripts" / "near_miss_tags.py"
+    # The shared evidence-only helper lives in the plugin's shared scripts dir (HLD-010 LADR-01). This
+    # skill's own directory never contains a nested copy, so there is no usable fallback — a missing
+    # helper must fail loudly in the caller rather than point at a path that can never resolve (R3).
+    return _SHARED_SCRIPTS / "near_miss_tags.py"
 
 
 # ---------------------------------------------------------------------------- CLI (read-only)

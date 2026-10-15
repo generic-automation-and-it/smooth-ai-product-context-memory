@@ -197,7 +197,7 @@ and its memories by identity + version (LADR-13). Findings are focus-invariant i
   focus and confidentiality (LADR-15). Its load/import is a separate capability owned by
   `mimisbrunnr-kvasir-understanding`, not this skill.
 - **`near-miss-tag` is evidence-only** (LADR-10). Write the shared
-  `mimisbrunnr-odin-context-memory/scripts/near_miss_tags.py` helper's input to
+  `_mimisbrunnr-shared/scripts/near_miss_tags.py` helper's input to
   `.context/mimisbrunnr-saga-dossier/scratch/near-miss.json` and pass it as `compose
   --near-miss-evidence`; the helper validates it and its findings name their supporting memory. A
   near-miss-tag written into `--judgements` is refused, as is one naming no memory. No evidence
@@ -229,6 +229,7 @@ Committed harness: `python3 -B .agents/skills/mimisbrunnr-saga-dossier/tests/run
 
 - `docs/hlds/005-contextual-export/` — design (LADRs, NFRs), the determinism boundary, the contract.
 - `.agents/skills/mimisbrunnr-odin-context-memory/` — the capture skill (sole **writer**). This dossier
-  skill is a reader; do not conflate the two. Reuses its `near_miss_tags.py` helper.
+  skill is a reader; do not conflate the two. It reuses that skill's `near_miss_tags.py` helper through
+  the plugin's shared script folder ([`_mimisbrunnr-shared/scripts/`](../_mimisbrunnr-shared/AGENTS.md), HLD-010 LADR-01).
 - `.agents/skills/mimisbrunnr-kvasir-understanding/` — the load/transfer sibling (HLD-007); owns the
   Understanding kind's load/import, which this read-only skill does not.

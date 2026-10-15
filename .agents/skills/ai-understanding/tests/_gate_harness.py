@@ -26,7 +26,10 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[4]
 AI_SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
-ORIG_SCRIPTS = REPO / ".agents/skills/mimisbrunnr-odin-context-memory/scripts"
+# HLD-010 LADR-01: the original the WET copy was taken from lives in the plugin's one shared script
+# folder — `mimisbrunnr-odin-context-memory` owns the capture contract, but the code is shared by
+# reference inside the plugin (LADR-03: location is packaging, ownership is contract).
+ORIG_SCRIPTS = REPO / ".agents/skills/_mimisbrunnr-shared/scripts"
 
 GATE = AI_SCRIPTS / "decisions_gate.py"
 REDACTOR = AI_SCRIPTS / "redact.py"

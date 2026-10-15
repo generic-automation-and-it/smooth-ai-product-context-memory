@@ -83,7 +83,7 @@ publishing the key there would hand a read-only credential a second secret.
 **Check it before enabling it:**
 
 ```bash
-python3 -B .agents/skills/mimisbrunnr-odin-context-memory/scripts/context_memory_client.py decisions-probe
+python3 -B .agents/skills/_mimisbrunnr-shared/scripts/context_memory_client.py decisions-probe
 ```
 
 Reports `disabled`, `unreachable`, `model-missing`, or `ok`, and the endpoint origin — never the key.

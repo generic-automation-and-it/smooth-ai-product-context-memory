@@ -29,15 +29,19 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
-SCRIPTS = HERE.parent / "scripts"
+# HLD-010 LADR-01: every script used by more than one Mímisbrunnr skill lives in the one shared
+# folder, referenced from here; only odin's own two composition helpers stay local.
+SHARED_SCRIPTS = HERE.parent.parent / "_mimisbrunnr-shared" / "scripts"
+ODIN_SCRIPTS = HERE.parent / "scripts"
 # The fixture the 2026-09-29-balanced run was taken against, frozen when the live fixture's model
 # input changed. A recorded run is re-scored against what that model saw, not against today's file.
 BALANCED_FIXTURE = HERE / "fixtures" / "scenarios-2026-09-29-balanced.json"
-sys.path.insert(0, str(SCRIPTS))
+sys.path.insert(0, str(SHARED_SCRIPTS))
+sys.path.insert(0, str(ODIN_SCRIPTS))
 
 
-def _load(name):
-    spec = importlib.util.spec_from_file_location(name, SCRIPTS / f"{name}.py")
+def _load(name, scripts=SHARED_SCRIPTS):
+    spec = importlib.util.spec_from_file_location(name, scripts / f"{name}.py")
     module = importlib.util.module_from_spec(spec)
     # Register before exec so a module that imports a sibling gets *this* object rather than a second
     # copy: `deepsearch` imports `context_memory_client`, and two copies means two `ClientError` classes
@@ -64,8 +68,8 @@ deepsearch = _load("deepsearch")
 sys.modules["context_memory_client"] = client
 sys.modules["deepsearch"] = deepsearch
 read_client = _load("context_memory_read_client")
-divergence = _load("divergence")
-authority = _load("authority")
+divergence = _load("divergence", ODIN_SCRIPTS)
+authority = _load("authority", ODIN_SCRIPTS)
 
 # Marker isolation (HLD-007 LADR-11): query/set/preflight now key markers to the
 # harness session id, which is present in a real agent shell. Without this, cases
@@ -80,7 +84,7 @@ for _name in ("CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "OPENCODE_SESSION_ID"
 def _run_atomicity(batch):
     """Drive atomicity.py end to end, so the description/statement split is covered, not just classify()."""
     completed = subprocess.run(
-        [sys.executable, str(SCRIPTS / "atomicity.py")],
+        [sys.executable, str(SHARED_SCRIPTS / "atomicity.py")],
         input=json.dumps(batch),
         capture_output=True,
         text=True,
@@ -114,7 +118,7 @@ def _split_banner(out: str) -> tuple[str, dict]:
 
 def _load_sibling(skill: str, module: str):
     """Load a script from a sibling skill, for asserting a shared contract rather than restating it."""
-    path = SCRIPTS.parent.parent / skill / "scripts" / f"{module}.py"
+    path = HERE.parent.parent / skill / "scripts" / f"{module}.py"
     spec = importlib.util.spec_from_file_location(f"_sibling_{module}", path)
     loaded = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(loaded)
@@ -448,7 +452,7 @@ class RecallFramingTests(unittest.TestCase):
         treat as boilerplate. The procedure is also the only place that can say what to *do* with a
         record whose statement reads like an instruction — which is the whole point of framing it.
         """
-        contract = (SCRIPTS.parent / "references" / "read-path.md").read_text(encoding="utf-8")
+        contract = (HERE.parent / "references" / "read-path.md").read_text(encoding="utf-8")
         self.assertIn("recallNotice", contract,
                       "the read path is not told to read the framing its own responses carry")
         self.assertIn("uuid/version", contract,
@@ -1082,7 +1086,7 @@ class ScratchInputConsumeTests(unittest.TestCase):
         return path
 
     def _run(self, script, *args):
-        return subprocess.run([sys.executable, "-B", str(SCRIPTS / script), *args],
+        return subprocess.run([sys.executable, "-B", str(SHARED_SCRIPTS / script), *args],
                               capture_output=True, text=True, timeout=30)
 
     def test_each_offline_script_removes_its_input_and_answers_the_same(self):
@@ -1115,7 +1119,7 @@ class ScratchInputConsumeTests(unittest.TestCase):
                 path.chmod(0o644)
                 env = {**os.environ, "CONTEXT_MEMORY_BASE_URL": "http://127.0.0.1:9"}
                 refused = subprocess.run(
-                    [sys.executable, "-B", str(SCRIPTS / script), *flag, str(path), "--consume"],
+                    [sys.executable, "-B", str(SHARED_SCRIPTS / script), *flag, str(path), "--consume"],
                     capture_output=True, text=True, timeout=30, env=env)
                 self.assertNotEqual(refused.returncode, 0)
                 self.assertIn("owner-only", refused.stderr + refused.stdout)
@@ -1136,7 +1140,7 @@ class ScratchInputConsumeTests(unittest.TestCase):
     def test_consume_without_an_input_file_is_refused(self):
         for script in ("redact.py", "atomicity.py"):
             with self.subTest(script=script):
-                completed = subprocess.run([sys.executable, "-B", str(SCRIPTS / script), "--consume"],
+                completed = subprocess.run([sys.executable, "-B", str(SHARED_SCRIPTS / script), "--consume"],
                                            input="[]", capture_output=True, text=True, timeout=30)
                 self.assertEqual(completed.returncode, 1)
                 self.assertIn("--consume needs --input", completed.stderr)
@@ -1167,7 +1171,7 @@ class ScratchInputConsumeTests(unittest.TestCase):
                 with self.subTest(script=script, command=command):
                     env = _without_write_tokens(os.environ)
                     completed = subprocess.run(
-                        [sys.executable, "-B", str(SCRIPTS / script), command, "--help"],
+                        [sys.executable, "-B", str(SHARED_SCRIPTS / script), command, "--help"],
                         capture_output=True, text=True, timeout=30, env=env)
                     self.assertIn("--consume", completed.stdout)
 class AtomicityTests(unittest.TestCase):
@@ -1537,7 +1541,7 @@ class WritePayloadTests(unittest.TestCase):
                            client.ENV_READ_TOKEN: "read-only"}))
         for script in ("context_memory_client.py", "context_memory_read_client.py"):
             with self.subTest(script=script):
-                completed = subprocess.run([sys.executable, "-B", str(SCRIPTS / script), "labels"],
+                completed = subprocess.run([sys.executable, "-B", str(SHARED_SCRIPTS / script), "labels"],
                                            capture_output=True, text=True, env=env, timeout=30)
                 self.assertEqual(completed.returncode, 1)
                 self.assertIn("bad-base-url", completed.stderr)
@@ -1571,7 +1575,7 @@ class WritePayloadTests(unittest.TestCase):
         for script in ("context_memory_client.py", "context_memory_read_client.py"):
             with self.subTest(script=script):
                 completed = subprocess.run(
-                    [sys.executable, "-B", str(SCRIPTS / script),
+                    [sys.executable, "-B", str(SHARED_SCRIPTS / script),
                      "--base-url", "http://operator:s3cret@memory.example:5141", "probe"],
                     capture_output=True, text=True, env=env, timeout=30)
                 self.assertEqual(completed.returncode, 1)
@@ -3355,7 +3359,7 @@ class AgentContractTests(unittest.TestCase):
 
     def test_read_client_refuses_environment_with_write_credential(self):
         completed = subprocess.run(
-            [sys.executable, str(SCRIPTS / "context_memory_read_client.py"), "probe"],
+            [sys.executable, str(SHARED_SCRIPTS / "context_memory_read_client.py"), "probe"],
             env={**os.environ, client.ENV_READ_TOKEN: "read", client.ENV_WRITE_TOKEN: "write"},
             capture_output=True,
             text=True,
@@ -3379,7 +3383,7 @@ class AgentContractTests(unittest.TestCase):
                      "Parameters__api-write-token"):
             with self.subTest(name=name):
                 completed = subprocess.run(
-                    [sys.executable, "-B", str(SCRIPTS / "context_memory_read_client.py"), "probe"],
+                    [sys.executable, "-B", str(SHARED_SCRIPTS / "context_memory_read_client.py"), "probe"],
                     env={**base, name: planted}, capture_output=True, text=True, check=False,
                     timeout=30)
                 self.assertEqual(completed.returncode, 2, completed.stderr)

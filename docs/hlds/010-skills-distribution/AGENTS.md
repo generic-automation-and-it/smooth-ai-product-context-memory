@@ -8,14 +8,15 @@ AI Context: HLD for Shared Skill Code Distribution. Updated: 2026-10-14
 
 ## TL;DR
 
-One model for shared skill code (shared folder inside the plugin, WET copies across it); intent in README, decisions in ladrs/, quality bar in nfrs/.
+One model for shared skill code (shared folder inside the plugin, WET copies across it); **implemented** — `_mimisbrunnr-shared/scripts/` ships. Intent in README, decisions in ladrs/, quality bar in nfrs/.
 
 ## Non-Negotiables
 
 - Do not collapse the inside/across split — a shared-folder reference inside the plugin and a WET copy across plugins solve different install realities (LADR-01 vs LADR-02).
 - Do not duplicate the read client, the write client, or the refusal boundary — one of each, always (LADR-03).
 - Do not leave shims at old peer paths — a stale reference must fail loudly, never run a second copy (LADR-01).
-- LADRs are Draft status — flag deviations rather than silently overriding.
+- LADRs are **Accepted**. Flag deviations rather than silently overriding them, and record the deviation in this file's changelog.
+- `_mimisbrunnr-shared/` is not a skill and never becomes one: no `SKILL.md`, no `skills`-array entry, no slash command. Its context lives in `_mimisbrunnr-shared/AGENTS.md`.
 
 ## Architecture Decisions
 
@@ -44,4 +45,5 @@ Measurable NFRs live in [`./nfrs/`](./nfrs/). Constraints that change how code i
 
 | Date | Change | Ref |
 | :---- | :---- | :---- |
+| 2026-10-14 | **B2 landed; HLD promoted to Accepted — implemented.** `.agents/skills/_mimisbrunnr-shared/scripts/` now holds nine scripts plus `conflict_menus.json` moved out of odin's folder, the Heimdallr reporter moved out of its own skill's, and kvasir's WET `decisions_rubric.json` / `session_marker.py` collapsed into the shared copy. The three peer reaches are gone (heimdallr's redactor, kvasir's client, saga-dossier's composer), `ai-understanding`'s parity harness compares against the shared copy, `package.json#files` carries the folder, and the PR gate gained a peer-reach grep. NFR-04 was re-verified on all three routes with the real move in a clean-profile marketplace install, an `npm pack`/install smoke, and the symlinked mirrors. | issue 222 |
 | 2026-10-14 | HLD authored (B1 decision record: rule, B0 evidence, inventory, invariants) | issue 222 |

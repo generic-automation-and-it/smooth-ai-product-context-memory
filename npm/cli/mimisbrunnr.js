@@ -4,7 +4,7 @@
 import { runClient } from "./_run.js";
 
 const COMMANDS = {
-  "context-memory": ".agents/skills/mimisbrunnr-odin-context-memory/scripts/context_memory_client.py",
+  "context-memory": ".agents/skills/_mimisbrunnr-shared/scripts/context_memory_client.py",
   "understanding": ".agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding_client.py",
 };
 

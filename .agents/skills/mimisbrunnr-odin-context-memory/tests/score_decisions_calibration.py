@@ -28,8 +28,8 @@ import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 FIXTURE = HERE / "fixtures" / "decisions_calibration.json"
-GATE = HERE.parent / "scripts" / "decisions_gate.py"
-RUBRIC = HERE.parent / "scripts" / "decisions_rubric.json"
+GATE = HERE.parent.parent / "_mimisbrunnr-shared" / "scripts" / "decisions_gate.py"
+RUBRIC = HERE.parent.parent / "_mimisbrunnr-shared" / "scripts" / "decisions_rubric.json"
 
 
 def load():
