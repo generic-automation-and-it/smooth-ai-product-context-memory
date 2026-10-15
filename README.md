@@ -109,12 +109,26 @@ The store is a **service**, not a per-repository fixture: start it once on a mac
 repository talks to the same memory. `scripts/run.sh` publishes the credentials to
 `~/.mimisbrunnr/credentials` — outside every checkout — so a repository never has to provision anything.
 
-**Copy the skills in:**
+**Install the skills** — one command, re-run to update. It finds `.agents/skills`, `.claude/skills` or
+`.codex/skills`, and only replaces the skills you have not switched off in
+`.agents/skills/_mimisbrunnr-shared/installation.json`:
 
 ```bash
-mkdir -p .agents/skills
-cp -R <this-repo>/.agents/skills/mimisbrunnr-* .agents/skills/
+curl -fsSL https://raw.githubusercontent.com/generic-automation-and-it/smooth-ai-product-context-memory/main/scripts/install-skills.sh | bash
 ```
+
+```powershell
+irm https://raw.githubusercontent.com/generic-automation-and-it/smooth-ai-product-context-memory/main/scripts/install-skills.ps1 | iex
+```
+
+Two other routes, if one fits you better:
+
+| | |
+|---|---|
+| **npm** — the client CLIs, not the skills | `npm i -g @generic-automation-and-it/mimisbrunnr-skills` |
+| **Marketplace** — Claude Code plugins | `claude plugin marketplace add generic-automation-and-it/smooth-ai-product-context-memory` then `claude plugin install mimisbrunnr@mimisbrunnr` |
+
+Details: [`scripts/SKILLS_INSTALLER.md`](scripts/SKILLS_INSTALLER.md).
 
 That's the whole setup for reading. The clients find the credential automatically — no env file, no
 `source`, no per-repository secret. Verify with:
