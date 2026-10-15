@@ -43,7 +43,7 @@ implicitly** (register first, like initiatives).
 
 ### Attribution and disclosure
 
-- A memory is "of product X" when its group's **initiative** is linked to X, or (Part F) its group's
+- A memory is "of product X" when its group's **initiative** is linked to X, or its group's
   **repo** is linked to X.
 - A **shared** initiative (linked to more than one product) returns memories of every product linked to it;
   responses disclose this via `sharedInitiative`. Per-memory or per-group product edges are rejected for now.
