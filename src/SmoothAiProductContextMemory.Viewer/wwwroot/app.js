@@ -7,8 +7,10 @@
 import { initBrowse } from './browse.js';
 import { initStatus } from './status.js';
 import { initDetail } from './detail.js';
+import { initGraph } from './graph.js';
 
 let statusInitialized = false;
+let graphInitialized = false;
 
 const nav = document.querySelector('#nav');
 const panes = document.querySelectorAll('.pane');
@@ -29,6 +31,12 @@ nav.addEventListener('click', (event) => {
   if (link.dataset.pane === 'status' && !statusInitialized) {
     statusInitialized = true;
     initStatus();
+  }
+  // The graph draws nothing until a root is chosen explicitly, so it initialises lazily like Status:
+  // walking is a request the practitioner makes, not one a pane switch makes for them.
+  if (link.dataset.pane === 'graph' && !graphInitialized) {
+    graphInitialized = true;
+    initGraph();
   }
 });
 

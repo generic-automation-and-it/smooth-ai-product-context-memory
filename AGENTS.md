@@ -93,6 +93,7 @@ One-liners; full detail in git history and the linked PRs/issues.
 
 | Date | Change | Ref |
 |---|---|---|
+| 2026-10-15 | **Phase P3 (graph) lands in the viewer SPA** — bounded force layout of `/paths` path chains, explicit root, `maxDepth` always sent, edge-type narrowing server-side, click-to-label hops via a new read-only `GET /memories/{uuid}` (hop uuids had no addressable endpoint). Ticket graph surface with its disclosure and cap flags. No write path. | HLD-009 |
 | 2026-10-15 | **Renamed `src/SmoothAiProductContextMemory.ViewerPod/` → `src/SmoothAiProductContextMemory.Viewer/`** — the project is named for the Console it ships, not its container topology; runtime names (`mimir-viewer` resource, `mimisbrunnr-viewer` container) unchanged. | PR #229 |
 | 2026-10-15 | **Phase P2 (detail + provenance) lands in the viewer SPA** — selecting a browse row opens a reader pane (two-pane/slide-over) with the LADR-07 evidence frame, provenance, version history, and on-demand blob (`?scope=` passed); selection persists in `?uuid`. Frontend only. | PR #229 |
 | 2026-10-15 | **Phase P1 (browse + filters) land in the viewer SPA** — browse table, 1:1 filter bar, active-filter chips, honest-limit prompt, distinct states; Status recall-feedback view with required date controls. Frontend only in `src/SmoothAiProductContextMemory.Viewer/wwwroot/`; no Host/API change. | PR #229 |

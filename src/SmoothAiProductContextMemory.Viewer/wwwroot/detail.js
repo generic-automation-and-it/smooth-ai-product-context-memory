@@ -149,6 +149,15 @@ function closeDetail() {
   history.replaceState(null, '', `${url.pathname}${url.search}`);
 }
 
+/**
+ * The memory currently open in the detail pane, or null. The Graph reads this only when a practitioner
+ * presses "use the memory open in Browse": selecting in Browse must never silently re-root the Graph,
+ * so this is an accessor, not a subscription.
+ */
+export function selectedMemory() {
+  return currentMemory;
+}
+
 export function maybeOpenFromUrl(rows) {
   const uuid = new URLSearchParams(window.location.search).get('uuid');
   if (!uuid) return;

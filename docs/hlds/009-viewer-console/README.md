@@ -264,7 +264,9 @@ invent a neighbourhood the API did not walk.
 - **A node is a hop's uuid; a labelled node is one whose `CheapMemory` the response carries.** The selected
   source and each path's `Endpoint` arrive with a `CheapMemory` and are labelled. **Intermediate hops are
   uuid references** — the UI renders them as compact ids and fetches their `CheapMemory` **on click**, not
-  in a burst (NFR-05), so a long chain never triggers N reads on render.
+  in a burst (NFR-05), so a long chain never triggers N reads on render. The read is
+  `GET /api/context/memories/{uuid}?scope=` (current version, cheap fields, scope-gated): the query
+  endpoint cannot address a uuid, so this read exists for the graph hop label.
 - **An edge is a hop: `SourceUuid → TargetUuid` with a `Relation` and a `Reason`.** Edge colour encodes
   `Relation` type; a legend maps colour → relation, and hovering/selecting an edge shows the `Reason`.
 - **Edge-type filtering is server-side, not a client-side filter.** `FindPaths.Request` exposes `Relation`,
@@ -532,7 +534,7 @@ relevant phase is built. They are stated so the design does not silently assume 
 |---|---|---|---|
 | **G1** | **Are proposals persisted with `Status = proposed`?** `SetMemories` validates `Proposed`/`Approved`, so a proposal *can* be stored proposed; PR #208 kept the review queue client-side ("no Host/API change"). If the capture path holds proposals client-side rather than persisting them, the queue is **not** in the store and a `Status = proposed` query returns nothing. | P4 Review queue (LADR-10) | Confirm whether the capture path writes proposals with `Status = proposed`. If not, P4 needs either a store write on propose, or the bridge must read the skill's queue state. This is the biggest open dependency |
 | **G2** | **Approve transition.** An approve moves a proposal proposed → approved. Whether the store exposes that as an explicit transition, or as a `set` version-bump with `Status = approved`, is unconfirmed. | P4 approve action | Confirm the transition path before P4 builds |
-| **G3** | **FindPaths node labelling.** `PathResult` carries a `CheapMemory` for the endpoint, but intermediate hops are uuid references. The start node is the selected `CheapMemory`. Mid-chain labels must be fetched on click (NFR-05). | P3 graph | Confirm the start node's `CheapMemory` is always available from the selection (it is), and that no render-time N-fetch is introduced |
+| **G3** | ~~**FindPaths node labelling.**~~ **Resolved 2026-10-15 (P3).** `PathResult` carries a `CheapMemory` for the endpoint, but intermediate hops are uuid references and `POST /query` has no uuid predicate — so labelling a mid-chain hop had **no endpoint to call**. `GET /api/context/memories/{uuid}?scope=` was added: the current version's cheap fields by identity, Read capability, scope-gated like the blob and version-history proxies, 404 on an unknown uuid. The Graph calls it once per hop click, never per node at render. | P3 graph | Closed — landed with P3 |
 | **G4** | **Initiative / label list endpoints.** `GET /initiatives` → `InitiativeRow(Name, Description, Status)`; `GET /labels` → `LabelRow(Name, Status, Uses)`. These serve the filter dropdowns. Confirm they are unpaginated and the shape is stable. | P1 filter bar | No action if stable; note pagination if the corpus grows |
 | **G5** | **Recall-feedback limits.** `never-recalled` defaults to a limit that may exceed the query `MaxLimit` (200). Confirm the recall-feedback endpoint's own bound, and that the UI honours it rather than assuming the browse cap. | Status view | Clamp the UI to the recall-feedback endpoint's declared bound |
 
