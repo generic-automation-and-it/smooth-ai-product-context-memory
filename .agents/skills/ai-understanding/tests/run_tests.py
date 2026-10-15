@@ -1151,8 +1151,10 @@ class SessionMarkerCLITests(unittest.TestCase):
 
     def test_an_unreadable_marker_refuses_the_default_boundary(self):
         """A corrupt marker is not an absent one: `boundary` refuses (exit 2); `--all` still answers."""
+        import session_marker as sm
         os.environ["PI_SESSION_ID"] = "ses-ai-corrupt"
-        Path(self.tmp.name, "ai-understanding-ses-ai-corrupt.json").write_text("{nope", encoding="utf-8")
+        sm.marker_path("ai-understanding", "ses-ai-corrupt", Path(self.tmp.name)).write_text(
+            "{nope", encoding="utf-8")
         rc, out, _ = self._run("boundary", "--type", "ai-understanding")
         self.assertEqual(rc, 2, out)
         self.assertIn("Boundary: refused", out)
@@ -1175,31 +1177,40 @@ class SessionMarkerCLITests(unittest.TestCase):
         self.assertRegex(names[0], r"^ai-understanding-team_a-[0-9a-f]{8}\.json$")
 
     def test_an_id_that_needs_no_sanitising_keeps_its_plain_marker_name(self):
+        import session_marker as sm
         os.environ["PI_SESSION_ID"] = "ses-plain-1"
         self._run("record", "--type", "ai-understanding", "--slug", "slug-1::Q?")
-        self.assertTrue(Path(self.tmp.name, "ai-understanding-ses-plain-1.json").is_file())
+        self.assertTrue(sm.marker_path("ai-understanding", "ses-plain-1", Path(self.tmp.name)).is_file())
 
     def test_a_marker_recorded_for_another_session_is_refused_not_read(self):
         """The stored session is checked on load, so a file that landed under the wrong name is not
         trusted as this session's boundary."""
+        import session_marker as sm
         os.environ["PI_SESSION_ID"] = "ses-owner"
         self._run("record", "--type", "ai-understanding", "--slug", "slug-1::Q?")
-        shutil.copy(Path(self.tmp.name, "ai-understanding-ses-owner.json"),
-                    Path(self.tmp.name, "ai-understanding-ses-other.json"))
+        shutil.copy(sm.marker_path("ai-understanding", "ses-owner", Path(self.tmp.name)),
+                    sm.marker_path("ai-understanding", "ses-other", Path(self.tmp.name)))
         os.environ["PI_SESSION_ID"] = "ses-other"
         rc, out, _ = self._run("boundary", "--type", "ai-understanding")
         self.assertEqual(rc, 2, out)
         self.assertIn("Boundary: refused", out)
 
     def test_marker_holds_references_never_content(self):
+        """A marker entry carries identities and nothing else. Asserting each item's key set is not
+        enough on its own: a marker entry could grow a field carrying the unit body and every item would
+        still pass, so the entry's own key set is pinned too."""
         import json as _json
+        import session_marker as sm
         os.environ["CODEX_THREAD_ID"] = "ses-ai-4"
-        self._run("record", "--type", "ai-understanding",
-                  "--item", "slug-1::What is this?")
-        raw = Path(self.tmp.name, "ai-understanding-ses-ai-4.json").read_text(encoding="utf-8")
+        rc, out, _ = self._run("record", "--type", "ai-understanding",
+                               "--item", "slug-1::What is this?")
+        self.assertEqual(rc, 0, out)
+        raw = sm.marker_path("ai-understanding", "ses-ai-4", Path(self.tmp.name)).read_text(encoding="utf-8")
         data = _json.loads(raw)
         self.assertEqual(data["type"], "ai-understanding")
         for entry in data["imports"]:
+            self.assertLessEqual(set(entry), {"at", "verb", "nomarker", "items", "slugs", "path", "selector"},
+                                 "a marker entry may carry identities and nothing else")
             for item in entry.get("items", []):
                 self.assertEqual(set(item), {"id", "version", "subject"})
 
@@ -1211,6 +1222,7 @@ class SessionMarkerCLITests(unittest.TestCase):
 
     def test_slug_and_path_identity_round_trip(self):
         import json as _json
+        import session_marker as sm
         os.environ["PI_SESSION_ID"] = "ses-ai-6"
         rc, out, _ = self._run("record", "--type", "ai-understanding", "--verb", "export",
                                "--slug", "unit-a::What is unit a?",
@@ -1220,7 +1232,7 @@ class SessionMarkerCLITests(unittest.TestCase):
         rc, out, _ = self._run("boundary", "--type", "ai-understanding")
         self.assertIn("Boundary: marker", out)
         self.assertIn("1 excluded", out)
-        data = _json.loads(Path(self.tmp.name, "ai-understanding-ses-ai-6.json")
+        data = _json.loads(sm.marker_path("ai-understanding", "ses-ai-6", Path(self.tmp.name))
                            .read_text(encoding="utf-8"))
         entry = data["imports"][-1]
         self.assertEqual(entry["slugs"], ["unit-a"])
