@@ -112,6 +112,32 @@ def load_marker(marker_type: str, session: str,
     return data
 
 
+class MarkerUnreadable(ValueError):
+    """A marker file exists but does not read as this type's marker. ``str()`` is its path."""
+
+
+def read_marker(marker_type: str, session: str,
+                root: Path | None = None) -> dict | None:
+    """``load_marker`` for a default selection: a missing marker is None, an unreadable one raises.
+
+    ``load_marker`` reads both as None, and a default export that took an unreadable marker for an
+    absent one reported ``Boundary: none`` and re-proposed everything the session imported. The file
+    still names real exclusions, so selection refuses instead (``unreadable_line``); ``--all`` is the
+    explicit way past it.
+    """
+    marker = load_marker(marker_type, session, root)
+    path = marker_path(marker_type, session, root)
+    if marker is None and path.is_file():
+        raise MarkerUnreadable(str(path))
+    return marker
+
+
+def unreadable_line(error: MarkerUnreadable) -> str:
+    """The refusal a default export prints for an unreadable marker."""
+    return (f"Boundary: refused (session marker {error} is unreadable, so a default export cannot "
+            f"tell what this session imported; inspect or move the file, or pass --all to send in full)")
+
+
 def exclusion_set(marker: dict | None) -> tuple[set[str], dict[str, str], str, int]:
     """Return (ids, subject->id, boundary, count) for a loaded marker.
 
@@ -417,7 +443,12 @@ def _cli_boundary(argv: list[str]) -> int:
     if not sid:
         print(boundary_line(None))
         return 0
-    print(boundary_line(load_marker(args.type, sid)))
+    try:
+        marker = read_marker(args.type, sid)
+    except MarkerUnreadable as error:
+        print(unreadable_line(error))
+        return 2
+    print(boundary_line(marker))
     return 0
 
 

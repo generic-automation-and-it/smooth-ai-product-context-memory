@@ -54,6 +54,13 @@ REQUIRED_FIELDS = ("slug", "description", "scope", "confidence")
 # `recheck` is optional too — one command that re-checks the unit, printed by `--review` beside a
 # staleness flag. Both are validated only for a left-in placeholder; absence is legitimate.
 OPTIONAL_TEXT_FIELDS = ("question", "recheck")
+REQUIRED_PROVENANCE_FIELDS = ("learned", "session", "source")
+# Fields with their own missing-or-placeholder message above; the generic sweep skips them so one
+# left-in placeholder is reported once.
+EXPLICITLY_CHECKED_FIELDS = frozenset(
+    (*REQUIRED_FIELDS, *OPTIONAL_TEXT_FIELDS, "updated", "provenance.inherited",
+     *(f"provenance.{key}" for key in REQUIRED_PROVENANCE_FIELDS))
+)
 VALID_SCOPES = ("portable", "repo-specific")
 VALID_CONFIDENCE = ("observed", "verified", "contested")
 UNFILED = "_unfiled"
@@ -224,15 +231,20 @@ def read_unit(unit_file: Path, subject: str, root: Path | None = None) -> tuple[
     updated = fields.get("updated")
     if not isinstance(updated, str) or not updated or placeholder(updated):
         problems.append(f"{where}: 'updated' is missing or still a placeholder")
+    elif not iso_date(updated):
+        problems.append(f"{where}: 'updated' '{updated}' is not an ISO date (YYYY-MM-DD)")
 
     provenance = fields.get("provenance")
     if not isinstance(provenance, dict) or not provenance:
         problems.append(f"{where}: 'provenance' is missing")
     else:
-        for key in ("learned", "session", "source"):
+        for key in REQUIRED_PROVENANCE_FIELDS:
             value = provenance.get(key)
             if not isinstance(value, str) or not value or placeholder(value):
                 problems.append(f"{where}: 'provenance.{key}' is missing or still a placeholder")
+        learned = provenance.get("learned")
+        if isinstance(learned, str) and learned and not placeholder(learned) and not iso_date(learned):
+            problems.append(f"{where}: 'provenance.learned' '{learned}' is not an ISO date (YYYY-MM-DD)")
 
         inherited = provenance.get("inherited")
         if isinstance(inherited, list):
@@ -250,6 +262,8 @@ def read_unit(unit_file: Path, subject: str, root: Path | None = None) -> tuple[
                 f"{where}: 'provenance.inherited' must be a block list of [[slug]] entries — "
                 "rewrite it as one, or omit it"
             )
+
+    problems.extend(leftover_placeholders(fields, where))
 
     context = fields.get("agents_context")
     if isinstance(context, str) and context and not placeholder(context):
@@ -281,6 +295,48 @@ def read_unit(unit_file: Path, subject: str, root: Path | None = None) -> tuple[
     fields["subject"] = subject
     fields["path"] = f"{subject}/{unit_file.name}"
     return fields, problems
+
+
+ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+def iso_date(value: str) -> bool:
+    """True for a real calendar date written exactly YYYY-MM-DD; `fromisoformat` alone also takes `20261005`."""
+    value = value.strip()
+    if not ISO_DATE.fullmatch(value):
+        return False
+    try:
+        date.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
+
+
+def leftover_placeholders(fields: dict, where: str) -> list[str]:
+    """Catch a template `<...>` placeholder left in any field the explicit checks do not cover.
+
+    The template carries placeholders in optional scalars (`agents_context`, `provenance.supersedes`)
+    and in every list (`links`, `skills`, `provenance.inherited`). Absence of those fields is
+    legitimate, so without this sweep a copied template that kept them passed with exit 0.
+    """
+    problems = []
+    for field, value in iter_all_values(fields):
+        if field not in EXPLICITLY_CHECKED_FIELDS and placeholder(value):
+            problems.append(f"{where}: '{field}' still holds a template placeholder — fill it or omit the field")
+    return problems
+
+
+def iter_all_values(fields: dict):
+    """Yield every (field-path, string) the parser produced, including list entries, at both levels."""
+    for key, value in fields.items():
+        if key in ("folder", "subject", "path"):
+            continue
+        for sub_key, sub_value in (value.items() if isinstance(value, dict) else [(None, value)]):
+            field = key if sub_key is None else f"{key}.{sub_key}"
+            entries = sub_value if isinstance(sub_value, list) else [sub_value]
+            for entry in entries:
+                if isinstance(entry, str):
+                    yield field, entry.strip()
 
 
 def looks_like_flow_sequence(value) -> bool:

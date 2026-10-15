@@ -44,12 +44,6 @@ SCRIPTS = Path(__file__).resolve().parent
 MENUS = SCRIPTS / "conflict_menus.json"
 REDACTOR = SCRIPTS / "redact.py"
 
-# Fields of a held candidate that a secret could hide in. Every one is scrubbed before the line is
-# written, so the queue carries no value the candidate's own redaction missed.
-CANDIDATE_TEXT_FIELDS = (
-    "subject", "description", "statement", "contentSummary", "boundaries",
-    "tags", "facets", "kind", "scope", "name", "answer", "why",
-)
 
 
 class QueueError(RuntimeError):
@@ -131,29 +125,64 @@ def is_capture_choice(conflict_type, choice, _menus=None):
 
 
 def redact_candidate(candidate):
-    """Scrub every free-text field of a candidate, or refuse.
+    """Scrub every string a candidate carries, at any depth, or refuse."""
+    if not isinstance(candidate, dict):
+        raise QueueError("bad-candidate", "a held candidate must be an object")
+    return redact_value(candidate)
+
+
+def redact_value(value):
+    """Scrub every string leaf of `value` — dict values and list entries at any depth — or refuse.
+
+    A named field list missed lists (`tags`, `facets`), nested objects and the entry's own `reason` and
+    `evidence`, so a secret in any of them reached the queue verbatim. Every persisted string is a leaf
+    here, which is the only list that cannot drift from the record's shape. Keys are structure and are
+    not scrubbed.
 
     The redactor answers positionally over stdin, so content never reaches a process table. Fails
     closed: a redactor that cannot run means the queue cannot guarantee no secret is on disk, and the
     queue's whole value is that it is safe to leave on a machine that is not this checkout.
     """
-    if not isinstance(candidate, dict):
-        raise QueueError("bad-candidate", "a held candidate must be an object")
+    texts = []
+    _collect_strings(value, texts)
+    if not texts:
+        return _rebuild(value, iter(()))
+    return _rebuild(value, iter(redact_texts(texts)))
+
+
+def _collect_strings(value, out):
+    if isinstance(value, str):
+        if value:
+            out.append(value)
+    elif isinstance(value, dict):
+        for item in value.values():
+            _collect_strings(item, out)
+    elif isinstance(value, list):
+        for item in value:
+            _collect_strings(item, out)
+
+
+def _rebuild(value, scrubbed):
+    """`value` with each non-empty string replaced, in `_collect_strings` order, by the next scrubbed one."""
+    if isinstance(value, str):
+        return next(scrubbed) if value else value
+    if isinstance(value, dict):
+        return {key: _rebuild(item, scrubbed) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_rebuild(item, scrubbed) for item in value]
+    return value
+
+
+def redact_texts(texts):
+    """The redactor's scrubbed form of each text, positionally, or a `QueueError`. No entry is written on refusal."""
     if not REDACTOR.is_file():
         raise QueueError("redactor-unavailable", "the redactor script is missing; no entry was written")
-
-    texts = [candidate[field] for field in CANDIDATE_TEXT_FIELDS
-             if isinstance(candidate.get(field), str) and candidate[field]]
-    if not texts:
-        candidate = dict(candidate)
-        return candidate
-
     try:
         proc = subprocess.run(
             [sys.executable, "-B", str(REDACTOR)],
             input=json.dumps(texts), capture_output=True, text=True, encoding="utf-8", timeout=60,
         )
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
         raise QueueError("redactor-unavailable",
                          f"the redactor could not run ({type(exc).__name__}); no entry was written")
 
@@ -170,18 +199,13 @@ def redact_candidate(candidate):
                          f"the redactor returned {len(results) if isinstance(results, list) else 'a non-list'} "
                          f"result(s) for {len(texts)} field(s); no entry was written")
 
-    scrubbed = {}
-    for field, redacted in zip(texts, results):
-        if not isinstance(redacted, dict) or "redacted" not in redacted:
+    scrubbed = []
+    for redacted in results:
+        if not isinstance(redacted, dict) or not isinstance(redacted.get("redacted"), str):
             raise QueueError("redactor-unavailable",
-                             "a redactor result carried no 'redacted' field; no entry was written")
-        scrubbed[field] = redacted["redacted"]
-
-    out = dict(candidate)
-    for field in CANDIDATE_TEXT_FIELDS:
-        if isinstance(candidate.get(field), str) and candidate[field] in scrubbed:
-            out[field] = scrubbed[candidate[field]]
-    return out
+                             "a redactor result carried no 'redacted' text; no entry was written")
+        scrubbed.append(redacted["redacted"])
+    return scrubbed
 
 
 def entry_cap():
@@ -239,8 +263,11 @@ def _read_entries():
 
 
 def entry_count():
-    """The number of unresolved entry records (kind=entry). Resolutions are records, not entries."""
-    return sum(1 for record in _read_entries() if record.get("kind") == "entry")
+    """The number of unresolved entries. Resolutions are records, not entries, and a resolved entry no
+    longer counts — the cap message tells a reviewer to resolve entries to make room, so it must."""
+    records = _read_entries()
+    resolved = {record.get("id") for record in records if record.get("kind") == "resolution"}
+    return sum(1 for record in records if record.get("kind") == "entry" and record.get("id") not in resolved)
 
 
 def _ensure_permissions(path):
@@ -274,6 +301,8 @@ def append(entry):
     choices = choices_for(conflict_type, menus)
 
     candidate = redact_candidate(entry.get("candidate") or {})
+    reason = redact_value(entry.get("reason") or "")
+    evidence = redact_value(entry.get("evidence") or {})
     source = entry.get("source") or ""
     record = {
         "kind": "entry",
@@ -281,8 +310,8 @@ def append(entry):
         "heldAt": entry.get("heldAt") or datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "heldBy": entry.get("heldBy") or "conflict",
         "conflictType": conflict_type,
-        "reason": entry.get("reason") or "",
-        "evidence": entry.get("evidence") or {},
+        "reason": reason,
+        "evidence": evidence,
         "candidate": candidate,
         "binding": entry.get("binding") or {},
         "source": source,
@@ -290,11 +319,12 @@ def append(entry):
         "menu": choices,
     }
 
-    if entry_count() + 1 > entry_cap():
+    open_entries = entry_count()
+    if open_entries + 1 > entry_cap():
         # Refused, not truncated: a queue that silently drops its oldest held candidate would lose the
         # very record a reviewer was about to act on.
         raise QueueError("queue-full",
-                         f"the review queue holds {entry_count()} entry(ies); the {entry_cap()}-entry "
+                         f"the review queue holds {open_entries} unresolved entry(ies); the {entry_cap()}-entry "
                          "cap is reached. Review or resolve the queue before adding more.")
 
     path = queue_path()
@@ -406,9 +436,16 @@ def cmd_resolve(args):
     if args.edit:
         try:
             with open(args.edit, encoding="utf-8") as handle:
-                resolution["edited"] = handle.read()
+                edited = handle.read()
         except OSError as exc:
             print(f"REFUSED: the edit file could not be read ({type(exc).__name__})", file=sys.stderr)
+            return 1
+        # An edited rewrite is persisted beside the entry, so it takes the entry's redaction contract:
+        # scrubbed, or the resolution is refused.
+        try:
+            resolution["edited"] = redact_value(edited)
+        except QueueError as exc:
+            print(f"REFUSED: {exc.detail}", file=sys.stderr)
             return 1
 
     path = queue_path()

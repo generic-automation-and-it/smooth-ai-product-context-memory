@@ -24,6 +24,7 @@ import unittest
 from unittest import mock
 from contextlib import redirect_stdout, redirect_stderr
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
@@ -4128,6 +4129,75 @@ class SessionMarkerTests(unittest.TestCase):
              uc.resolve_group, uc._run_capture_client) = originals
         self.assertIn("Boundary: marker", out)
         self.assertIn("Excluded 1 echo", out)
+
+    def test_a_budget_cut_record_is_not_marked(self):
+        """Only rendered records are marked: one the budget cut never reached the session (review #10)."""
+        sid = self._sid()
+        long = "A long answer worth keeping. " * 40
+        first = dict(self._record("u-rendered-1", 1, "First?"), statement=long)
+        second = dict(self._record("u-cut-2", 1, "Second?"), statement=long)
+        src = self._store_file([first, second])
+        rc, out, _ = run(["load", src, "--format", "store", "--max-chars", str(len(long) + 400)])
+        self.assertEqual(rc, 0, out)
+        self.assertIn("1 record(s) cut", out)
+        ids, _, _, _ = self.sm.exclusion_set(self.sm.load_marker("kvasir", sid))
+        self.assertEqual(ids, {"u-rendered-1"})
+
+    def test_a_loaded_understanding_file_is_excluded_by_slug(self):
+        """A file unit has a slug and no uuid; its load excludes the slug, not nothing (review #50)."""
+        sid = self._sid()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write(tmp, "npgsql-enum.understanding.md",
+                         unit_text("npgsql-enum", "Register the enum on the data source builder."))
+            rc, out, _ = run(["load", path])
+        self.assertEqual(rc, 0, out)
+        self.assertIn("Marker: set", out)
+        self.assertEqual(self.sm.exclusion_slugs(self.sm.load_marker("kvasir", sid)), {"npgsql-enum"})
+
+    def test_an_unreadable_marker_refuses_a_default_export(self):
+        """A corrupt marker still names real exclusions: a default export refuses before any write."""
+        sid = self._sid()
+        path = self.sm.marker_path("kvasir", sid)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{nope", encoding="utf-8")
+        src = self._store_file([self._record("u-corrupt-1", 1, "What stores data?")])
+        calls = []
+        original = uc._run_capture_client
+        uc._run_capture_client = lambda s, a, pl: calls.append(a) or (0, "{}", "")
+        try:
+            rc, out, err = run(["export", "--dryrun", src, "--heimdallr", "false"], expect=1)
+        finally:
+            uc._run_capture_client = original
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("Boundary: refused", err)
+        self.assertEqual(calls, [], "nothing reaches the capture client")
+
+    def test_held_candidates_are_persisted_in_capped_batches(self):
+        """Over MAX_CANDIDATES held candidates split into batches, each with its own preflight, veto and
+        write — one over-cap preflight was refused and none reached the review queue (review #18)."""
+        total = uc.MAX_CANDIDATES * 2 + 3
+        held = [{"subject": f"Held subject {i}", "statement": f"Held claim {i}."} for i in range(total)]
+        calls = []
+
+        def capture(script, argv, payload):
+            calls.append((tuple(argv), payload))
+            if argv[0] == "preflight":
+                return 0, json.dumps({"candidates": []}), ""
+            return 0, json.dumps({"created": len(payload["items"])}), ""
+
+        original = uc._run_capture_client
+        uc._run_capture_client = capture
+        try:
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                proposed, queued = uc._persist_proposed(
+                    SimpleNamespace(nomarker=True, session=None), held, "g-1", {"tags": ""})
+        finally:
+            uc._run_capture_client = original
+        self.assertEqual((proposed, queued), (total, 0))
+        preflights = [p["candidates"] for a, p in calls if a == ("preflight",)]
+        self.assertEqual([len(c) for c in preflights], [uc.MAX_CANDIDATES, uc.MAX_CANDIDATES, 3])
+        self.assertEqual(sum(1 for a, _ in calls if a == ("set", "--dryrun")), 3, "a veto per batch")
+        self.assertEqual(sum(1 for a, _ in calls if a == ("set",)), 3)
 
     def test_export_all_ignores_the_marker(self):
         sid = self._sid()
