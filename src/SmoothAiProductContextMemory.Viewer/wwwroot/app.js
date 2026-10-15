@@ -8,9 +8,11 @@ import { initBrowse } from './browse.js';
 import { initStatus } from './status.js';
 import { initDetail } from './detail.js';
 import { initGraph } from './graph.js';
+import { initReview } from './review.js';
 
 let statusInitialized = false;
 let graphInitialized = false;
+let reviewInitialized = false;
 
 const nav = document.querySelector('#nav');
 const panes = document.querySelectorAll('.pane');
@@ -37,6 +39,10 @@ nav.addEventListener('click', (event) => {
   if (link.dataset.pane === 'graph' && !graphInitialized) {
     graphInitialized = true;
     initGraph();
+  }
+  if (link.dataset.pane === 'review' && !reviewInitialized) {
+    reviewInitialized = true;
+    initReview();
   }
 });
 
