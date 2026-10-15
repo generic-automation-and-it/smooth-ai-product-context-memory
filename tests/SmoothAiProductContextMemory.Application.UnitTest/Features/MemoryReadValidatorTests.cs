@@ -31,6 +31,32 @@ public class GetMemoryBlobValidatorTests
     }
 }
 
+public class GetMemoryValidatorTests
+{
+    private readonly GetMemory.Validator _validator = new();
+
+    [Fact]
+    public void Requires_nonempty_uuid()
+    {
+        _validator.TestValidate(new GetMemory.Request(Guid.Empty))
+            .ShouldHaveValidationErrorFor(x => x.Uuid);
+    }
+
+    [Fact]
+    public void Rejects_an_overlong_scope_dimension()
+    {
+        _validator.TestValidate(new GetMemory.Request(Guid.NewGuid(), new string('x', 33)))
+            .ShouldHaveValidationErrorFor(x => x.ScopeDimension);
+    }
+
+    [Fact]
+    public void Accepts_valid_request()
+    {
+        _validator.TestValidate(new GetMemory.Request(Guid.NewGuid(), "product"))
+            .ShouldNotHaveAnyValidationErrors();
+    }
+}
+
 public class GetMemoryVersionsValidatorTests
 {
     private readonly GetMemoryVersions.Validator _validator = new();

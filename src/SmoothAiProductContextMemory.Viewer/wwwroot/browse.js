@@ -6,7 +6,7 @@
 // states (NFR-05). A result set equal to the limit surfaces a narrow-your-
 // filters prompt rather than silently truncating or paging (no cursor).
 import { postQuery, getInitiatives } from './api.js';
-import { esc, shortUuid, fmtInstant, plural } from './util.js';
+import { esc, shortUuid, fmtInstant, plural, fmtValidity } from './util.js';
 import { openDetail, maybeOpenFromUrl } from './detail.js';
 
 const $ = (selector) => document.querySelector(selector);
@@ -63,12 +63,6 @@ const state = {
 let currentRows = [];
 let requestSeq = 0;
 
-function fmtValidity(memory) {
-  const from = memory.validFrom ? fmtInstant(memory.validFrom) : '';
-  if (!memory.validUntil) return from ? `${from} → open` : 'open';
-  return `${from} → ${fmtInstant(memory.validUntil)}`;
-}
-
 function collectOptions() {
   const kinds = new Set();
   const statuses = new Set();
@@ -108,7 +102,7 @@ function renderChips() {
   if (state.initiativeName) chips.push({ label: 'Initiative', value: state.initiativeName, remove: () => { state.initiativeName = ''; els.initiative.value = ''; } });
   if (state.repo) chips.push({ label: 'Repo', value: state.repo, remove: () => { state.repo = ''; els.repo.value = ''; } });
   if (state.groupUuid) chips.push({ label: 'Group', value: state.groupUuid, remove: () => { state.groupUuid = ''; } });
-  if (state.validity === 'asof' && state.asOf) chips.push({ label: 'As of', value: state.asOf, remove: () => { state.validity = 'current'; state.asOf = ''; document.querySelector('input[name="validity"][value="current"]').checked = true; } });
+  if (state.validity === 'asof' && state.asOf) chips.push({ label: 'As of', value: state.asOf, remove: () => { state.validity = 'current'; state.asOf = ''; els.asof.value = ''; els.asof.hidden = true; document.querySelector('input[name="validity"][value="current"]').checked = true; } });
 
   els.chips.innerHTML = chips.map((c, i) => (
     `<span class="chip" role="listitem">${esc(c.label)}: ${esc(c.value)}` +
@@ -171,7 +165,7 @@ function renderTable() {
     const lineage = row.ticketProvider
       ? `${shortUuid(row.groupUuid)} · ${esc(row.ticketProvider)}:${esc(row.ticketKey)}`
       : shortUuid(row.groupUuid);
-    return `<tr class="browse-row" data-index="${index}" tabindex="0">
+    return `<tr class="browse-row" data-index="${index}" tabindex="0" role="row">
       <td>${esc(row.name)}</td>
       <td>${esc(row.kind)}</td>
       <td>${esc(row.status)}</td>
@@ -207,8 +201,13 @@ function selectRow(index) {
   els.body.querySelectorAll('.browse-row').forEach((row) => {
     const selected = Number(row.dataset.index) === index;
     row.classList.toggle('is-selected', selected);
-    if (selected) row.setAttribute('aria-selected', 'true');
-    else row.removeAttribute('aria-selected');
+    if (selected) {
+      row.setAttribute('aria-selected', 'true');
+      // Arrow-key walks must keep going from the new row (focus) and keep it visible (scroll);
+      // a click lands focus here harmlessly.
+      row.focus({ preventScroll: true });
+      row.scrollIntoView({ block: 'nearest' });
+    } else row.removeAttribute('aria-selected');
   });
   openDetail(currentRows[index]);
 }

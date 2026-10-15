@@ -52,7 +52,6 @@ This is a unified AI development experience folder that centralizes skills, prom
 | `.claude` → `.agents` | Symbolic link for Claude Code compatibility |
 | `.codex` → `.agents` | Symbolic link for OpenAI Codex compatibility |
 | `.cursor` → `.agents` | Symbolic link for Cursor AI compatibility |
-| `CLAUDE.md` → `AGENTS.md` | Symbolic link alias for Claude-compatible root context discovery |
 | `GEMINI.md` → `AGENTS.md` | Symbolic link alias for Gemini-compatible root context discovery |
 | `.agents/rules` → `../.github/instructions` | Symlink exposing the rule files to path-specific consumers; `.github/instructions/` is the real directory holding `**.instructions.md`, read natively by GitHub Copilot |
 
@@ -120,7 +119,7 @@ This is a unified AI development experience folder that centralizes skills, prom
 
 ## 📊 Setup Instructions
 
-**The rule files physically live in `.github/instructions/` (a real, committed directory). Symlinks (`.claude`, `.codex`, `.cursor`, `CLAUDE.md`, `GEMINI.md`, and `.agents/rules → ../.github/instructions`) are committed to git and available immediately after clone. GitHub Copilot reads path-specific rules natively from `.github/instructions/**.instructions.md` (no symlink resolution required) and repo-wide context from root `AGENTS.md`, so no setup script is required.**
+**The rule files physically live in `.github/instructions/` (a real, committed directory). Symlinks (`.claude`, `.codex`, `.cursor`, `GEMINI.md`, and `.agents/rules → ../.github/instructions`) are committed to git and available immediately after clone. GitHub Copilot reads path-specific rules natively from `.github/instructions/**.instructions.md` (no symlink resolution required) and repo-wide context from root `AGENTS.md`, so no setup script is required.**
 
 ```bash
 # Verify links are present after clone

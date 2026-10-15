@@ -1895,6 +1895,75 @@ def _handle_cross_kind_409(items: list[dict], candidates: list[dict], group_uuid
     return found
 
 
+def _persist_proposed(args: argparse.Namespace, candidates: list[dict], group_uuid: str,
+                      binding: dict) -> tuple[int, int]:
+    """Persist held candidates as Status=proposed memories (G1).
+
+    The Console review queue is a store query (`Status = proposed` with `IncludeProposed`), so a held
+    candidate must reach the store to be reviewable there — the local queue file alone is invisible
+    to it. The file append stays: it is the local audit trail and the CLI review mechanism, and it
+    remains the only home for what the store cannot take.
+
+    Only pure creates persist. A preflight match in the export's group stays queue-file-only: a
+    version bump would flip that memory's current version to proposed and hide approved canon from
+    default reads. Same-subject pairs within the batch collapse the same way. The `set --dryrun`
+    veto runs first, so a held candidate gets the same pre-write check as a clean one.
+
+    Returns (proposed, queued_only). Never raises: persistence is additive to an export whose main
+    write already succeeded, so a failure is a NOTE and the candidates stay queued — never a refusal
+    that undoes or blocks the export.
+    """
+    if not candidates:
+        return 0, 0
+    now = dt.datetime.now(dt.timezone.utc)
+    rc, out, err = _run_capture_client(
+        WRITE_CLIENT, ["preflight"],
+        {"candidates": [{"description": _subject(c), "kind": KIND_UNDERSTANDING,
+                         "facets": ["understanding"], "groupUuid": group_uuid} for c in candidates]})
+    if rc != 0:
+        print(f"NOTE: the held-candidate preflight failed ({err.strip()[:200] or f'exit {rc}'}); "
+              f"{len(candidates)} held stayed in the review queue file.", file=sys.stderr)
+        return 0, len(candidates)
+    version_map = build_version_map(out, group_uuid)
+    persist, seen = [], set()
+    queued_only = 0
+    for index, candidate in enumerate(candidates):
+        subject = _subject(candidate)
+        if index in version_map or subject in seen:
+            queued_only += 1
+            continue
+        seen.add(subject)
+        persist.append(candidate)
+    if not persist:
+        return 0, queued_only
+    items = set_items(persist, binding, now)
+    for item in items:
+        item["status"] = "proposed"
+    rc, out, err = _run_capture_client(
+        WRITE_CLIENT, ["set", "--dryrun"], {"groupUuid": group_uuid, "items": items,
+                                            "links": [], "labelsProposed": []})
+    if rc != 0:
+        print(f"NOTE: the proposed-write veto refused ({(err.strip() or out.strip())[:200]}); "
+              f"{len(persist)} held stayed in the review queue file.", file=sys.stderr)
+        return 0, queued_only + len(persist)
+    rc, out, err = _run_capture_client(
+        WRITE_CLIENT, ["set"], {"groupUuid": group_uuid, "items": items,
+                                "links": [], "labelsProposed": []})
+    if rc != 0:
+        print(f"NOTE: persisting proposed memories failed ({(err.strip() or out.strip())[:200]}); "
+              f"{len(persist)} held stayed in the review queue file.", file=sys.stderr)
+        return 0, queued_only + len(persist)
+    print(f"\nPROPOSED ({len(persist)} held -> store as Status=proposed):\n{out.strip()[:1200]}")
+    # The marker follows the receipt: proposed rows reached the store, so they are recorded like
+    # any other write from this session.
+    _mark_export_receipt(args, [{"id": item["uuid"] or item["createUuid"],
+                                 "version": candidate.get("originVersion"),
+                                 "subject": item["description"]}
+                                for candidate, item in zip(persist, items)
+                                if item["uuid"] or item["createUuid"]])
+    return len(persist), queued_only
+
+
 def cmd_export(args: argparse.Namespace) -> int:
     """SESSION -> STORE. Orchestrate the capture path and write; `--dryrun` writes nothing.
 
@@ -2117,7 +2186,13 @@ def cmd_export(args: argparse.Namespace) -> int:
     if queued:
         print(f"  {queued} held -> review queue {_review_queue_path()}")
     if held or held_verdicts:
-        print("  A held candidate is never written past the flag. Review the queue, or split/drop it.")
+        print("  Held candidates persist as Status=proposed on a write (the review queue in the "
+              "store); nothing is approved past the flag. Review the queue, or split/drop them.")
+    if held and not args.write:
+        # No group exists to preflight against, so duplicates cannot be told from creates here —
+        # the count is an upper bound, stated as one.
+        print(f"  would propose: up to {len(held)} held as Status=proposed "
+              f"(duplicates stay queue-file-only)")
     if held_verdicts:
         print(f"  {len(held_verdicts)} also held by the decision gate (below threshold) -> "
               f"{_review_queue_path()}")
@@ -2132,12 +2207,18 @@ def cmd_export(args: argparse.Namespace) -> int:
         print("NOTE: no selectors supplied, so no association is made "
               "(--tickets/--tags/--repository/--scope/--initiative).")
     if not clean:
-        # Every candidate was held back by the atomicity gate: there is no writable batch. Stopping
-        # here also means a write does not create a group for nothing.
-        print("Nothing to capture: every candidate was held back by the atomicity gate. "
-              "Nothing was written.", file=sys.stderr)
-        _mark_export_receipt(args, [])
-        return 1
+        # Every candidate was held back: there is no clean batch. On a write with persistable held,
+        # the export still has work — resolving the group to persist them as proposed (G1) — so only
+        # a dry run, or nothing persistable at all, stops here. Stopping here also means a dry run
+        # does not create a group for nothing.
+        persistable = list(held) + [c for c, _ in held_verdicts]
+        if not args.write or not persistable:
+            print("Nothing to capture: every candidate was held back by the atomicity gate. "
+                  "Nothing was written.", file=sys.stderr)
+            _mark_export_receipt(args, [])
+            return 1
+        print("No clean candidates: every candidate was held back. Resolving the group to persist "
+              f"{len(persistable)} held as Status=proposed; nothing is approved past the flag.")
 
     group, group_state = resolve_group(binding, args.name, args.body, dryrun=not args.write)
     if args.write:
@@ -2277,6 +2358,19 @@ def cmd_export(args: argparse.Namespace) -> int:
                                      "subject": item["description"]}
                                     for candidate, item in zip(chunk, items)
                                     if item["uuid"] or item["createUuid"]])
+
+    # G1: held candidates persist as Status=proposed, so the Console review queue (a store query)
+    # can see them. Write path only — a dry run has no resolved group to preflight against, and
+    # creates nothing by contract. Runs after the chunks so a held subject the chunks just wrote
+    # preflights as a match and stays queue-file-only instead of double-persisting.
+    proposed = queued_only = 0
+    if args.write:
+        persistable = list(held) + [c for c, _ in held_verdicts]
+        if persistable:
+            proposed, queued_only = _persist_proposed(args, persistable, group_uuid, binding)
+            print(f"  {proposed} held -> store as Status=proposed"
+                  + (f"; {queued_only} held -> review queue file only (duplicate subject)"
+                     if queued_only else ""))
 
     if not args.write:
         # `set --dryrun` is the veto point, and it needs a resolved `groupUuid` — which a dry run

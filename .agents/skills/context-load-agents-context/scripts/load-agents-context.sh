@@ -172,7 +172,7 @@ if [ -n "$REPO_ROOT" ]; then
             ;;
     esac
     case "$(basename "$ABS_PATH")" in
-        AGENTS.md|CLAUDE.md|GEMINI.md|*AGENTS.md)
+        AGENTS.md|GEMINI.md|*AGENTS.md)
             inject_if_new "${REPO_ROOT}/.agents/rules/meta/knowledge-conventional-contexts-quality.instructions.md"
             ;;
     esac

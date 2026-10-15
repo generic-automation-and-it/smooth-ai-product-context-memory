@@ -131,6 +131,7 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
             (HttpMethod.Post, "/api/context/preflight"),
             (HttpMethod.Post, "/api/context/memories"),
             (HttpMethod.Post, "/api/context/query"),
+            (HttpMethod.Get, $"/api/context/memories/{Guid.NewGuid()}"),
             (HttpMethod.Get, $"/api/context/memories/{Guid.NewGuid()}/versions"),
             (HttpMethod.Get, $"/api/context/memories/{Guid.NewGuid()}/versions/1/blob"),
             (HttpMethod.Post, "/api/context/groups/resolve"),
@@ -256,6 +257,60 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
 
         using HttpResponseMessage allowed = await _http.GetAsync(
             $"/api/context/memories/{uuid}/versions?scope={MemoryGroup.ScopeDimensionValue.Program}",
+            Ct);
+        allowed.StatusCode.ShouldBe(HttpStatusCode.OK);
+    }
+
+    /// <summary>
+    /// The graph hop label read: a traversal hands back uuid references for intermediate hops, so the
+    /// cheap current-version read by identity is what labels a node. It returns cheap fields only — no
+    /// blob — and it carries the scope rule, because a uuid in a path chain is not authority to read a
+    /// dimension the scope rule hides.
+    /// </summary>
+    [Fact]
+    public async Task Memory_read_by_identity_returns_the_current_version()
+    {
+        Guid group = await ResolveGroup(MemoryGroup.ScopeDimensionValue.Product);
+        JsonElement created = await SetMemory(
+            group,
+            "Identity read subject",
+            "Claim v1",
+            MemoryVersion.MemoryVersionStatus.Approved,
+            content: "identity-body");
+        Guid uuid = created.GetProperty("items")[0].GetProperty("uuid").GetGuid();
+        await SetMemory(group, "Identity read subject", "Claim v2",
+            MemoryVersion.MemoryVersionStatus.Approved, uuid: uuid);
+
+        using HttpResponseMessage response = await _http.GetAsync($"/api/context/memories/{uuid}", Ct);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        JsonElement item = (await response.Content.ReadFromJsonAsync<JsonElement>(Json, Ct)).GetProperty("item");
+        item.GetProperty("uuid").GetGuid().ShouldBe(uuid);
+        item.GetProperty("version").GetInt32().ShouldBe(2);
+        item.GetProperty("statement").GetString().ShouldBe("Claim v2");
+        item.GetProperty("isCurrent").GetBoolean().ShouldBeTrue();
+        // Cheap fields only: the body is never carried by this read (NFR-05).
+        item.TryGetProperty("blobAddress", out _).ShouldBeFalse();
+
+        using HttpResponseMessage missing = await _http.GetAsync($"/api/context/memories/{Guid.NewGuid()}", Ct);
+        missing.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task Program_memory_read_by_identity_needs_an_explicit_scope()
+    {
+        Guid group = await ResolveGroup(MemoryGroup.ScopeDimensionValue.Program);
+        JsonElement created = await SetMemory(
+            group,
+            "Programme identity subject",
+            "Programme claim",
+            MemoryVersion.MemoryVersionStatus.Approved);
+        Guid uuid = created.GetProperty("items")[0].GetProperty("uuid").GetGuid();
+
+        using HttpResponseMessage blocked = await _http.GetAsync($"/api/context/memories/{uuid}", Ct);
+        blocked.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+
+        using HttpResponseMessage allowed = await _http.GetAsync(
+            $"/api/context/memories/{uuid}?scope={MemoryGroup.ScopeDimensionValue.Program}",
             Ct);
         allowed.StatusCode.ShouldBe(HttpStatusCode.OK);
     }
@@ -678,6 +733,7 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
         ["POST /api/context/query"] = ApiCapability.Read,
         ["POST /api/context/paths"] = ApiCapability.Read,
         ["POST /api/context/tickets/paths"] = ApiCapability.Read,
+        ["GET /api/context/memories/{uuid:guid}"] = ApiCapability.Read,
         ["GET /api/context/memories/{uuid:guid}/versions"] = ApiCapability.Read,
         ["GET /api/context/memories/{uuid:guid}/versions/{version:int}/blob"] = ApiCapability.Read,
         ["POST /api/context/dossier/bundle"] = ApiCapability.Read,

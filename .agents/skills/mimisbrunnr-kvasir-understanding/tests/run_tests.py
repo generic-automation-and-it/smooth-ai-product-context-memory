@@ -1775,6 +1775,155 @@ class ExportVersionBumpTests(unittest.TestCase):
             self.assertIn("share a subject", err)
 
 
+class ProposedPersistenceTests(unittest.TestCase):
+    """G1: the capture path persists held candidates as Status=proposed, so the Console review
+    queue (a store query) can see them. Only pure creates persist; duplicates stay queued."""
+
+    PROSE = "The retry budget is three attempts, counted by the gate itself.\n"
+
+    def _run_export(self, tmp, preflight):
+        """Drive the real `export` write path with bundled atomicity verdicts (everything held)."""
+        src = write(tmp, "notes.md", self.PROSE)
+        originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                     uc.resolve_group, uc._run_capture_client)
+        uc.gate_redaction = lambda texts: (list(texts), {})
+        uc.gate_atomicity = lambda c: [{"verdict": "bundled", "signals": ["conjunction"]}
+                                       for _ in c]
+        uc.initiative_exists = lambda name: (True, "present")
+        uc.resolve_group = lambda b, n, d, dryrun: ({"groupUuid": "g-1", "created": False}, "ok")
+        calls = []
+
+        def record(script, argv, payload):
+            calls.append((tuple(argv), payload))
+            if argv[0] == "preflight":
+                return preflight()
+            return 0, json.dumps({"created": 1, "versioned": 0, "linked": 0,
+                                  "skipped": 0}), ""
+
+        uc._run_capture_client = record
+        env = {"CONTEXT_MEMORY_DECISIONS_ENABLED": "false",
+               "CONTEXT_MEMORY_REVIEW_QUEUE": str(Path(tmp) / "queue.jsonl")}
+        try:
+            with mock.patch.dict(os.environ, env):
+                rc, out, err = run(["export", src, "--heimdallr", "false"])
+        finally:
+            (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+             uc.resolve_group, uc._run_capture_client) = originals
+        return rc, out, err, calls
+
+    def _no_match(self):
+        return 0, json.dumps({"candidates": []}), ""
+
+    def test_held_persists_as_proposed_after_veto(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, err, calls = self._run_export(tmp, self._no_match)
+            combined = out + err
+            self.assertEqual(rc, 0, combined)
+            order = [a for a, _ in calls]
+            self.assertIn(("set", "--dryrun"), order, "the veto runs first")
+            self.assertLess(order.index(("set", "--dryrun")), order.index(("set",)),
+                            "veto before write")
+            set_payloads = [p for a, p in calls if a == ("set",)]
+            self.assertEqual(len(set_payloads), 1)
+            items = set_payloads[0]["items"]
+            self.assertTrue(items, "the held candidate reaches the store")
+            for item in items:
+                self.assertEqual(item["status"], "proposed")
+                self.assertTrue(item["createUuid"], "creates only, never a version bump")
+                self.assertIsNone(item["uuid"])
+                self.assertTrue(item["statement"], "the full claim persists, not a stub")
+                self.assertEqual(item["kind"], "understanding")
+            self.assertIn("held -> store as Status=proposed", combined)
+
+    def test_preflight_match_stays_queue_only(self):
+        def matched():
+            return 0, json.dumps({"candidates": [
+                {"index": 0, "matches": [{"uuid": "u-held", "groupUuid": "g-1"}],
+                 "ticketConflict": None}]}), ""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, err, calls = self._run_export(tmp, matched)
+            combined = out + err
+            self.assertEqual(rc, 0, combined)
+            self.assertEqual([a for a, _ in calls if a == ("set",)], [],
+                             "a duplicate subject is never persisted, even as proposed")
+            self.assertIn("review queue file only (duplicate subject)", combined)
+
+    def test_same_subject_held_pair_persists_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md", self.PROSE + "\n" + self.PROSE)
+            originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                         uc.resolve_group, uc._run_capture_client)
+            uc.gate_redaction = lambda texts: (list(texts), {})
+            uc.gate_atomicity = lambda c: [{"verdict": "bundled", "signals": ["conjunction"]}
+                                           for _ in c]
+            uc.initiative_exists = lambda name: (True, "present")
+            uc.resolve_group = lambda b, n, d, dryrun: ({"groupUuid": "g-1",
+                                                         "created": False}, "ok")
+            calls = []
+
+            def record(script, argv, payload):
+                calls.append((tuple(argv), payload))
+                if argv[0] == "preflight":
+                    return 0, json.dumps({"candidates": []}), ""
+                return 0, json.dumps({"created": 1, "versioned": 0, "linked": 0,
+                                      "skipped": 0}), ""
+
+            uc._run_capture_client = record
+            env = {"CONTEXT_MEMORY_DECISIONS_ENABLED": "false",
+                   "CONTEXT_MEMORY_REVIEW_QUEUE": str(Path(tmp) / "queue.jsonl")}
+            try:
+                with mock.patch.dict(os.environ, env):
+                    rc, out, err = run(["export", src, "--heimdallr", "false"])
+            finally:
+                (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                 uc.resolve_group, uc._run_capture_client) = originals
+            combined = out + err
+            self.assertEqual(rc, 0, combined)
+            set_payloads = [p for a, p in calls if a == ("set",)]
+            self.assertEqual(len(set_payloads), 1)
+            self.assertEqual(len(set_payloads[0]["items"]), 1,
+                             "two same-subject held persist as one; the twin stays queued")
+            self.assertIn("review queue file only (duplicate subject)", combined)
+
+    def test_preflight_failure_keeps_held_queued(self):
+        def down():
+            return 1, "", "connection refused"
+
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, err, calls = self._run_export(tmp, down)
+            combined = out + err
+            self.assertEqual(rc, 0, "a blind write is worse than a queued hold: " + combined)
+            self.assertEqual([a for a, _ in calls if a == ("set",)], [])
+            self.assertIn("held-candidate preflight failed", combined)
+
+    def test_dryrun_proposes_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md", self.PROSE)
+            originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                         uc.resolve_group, uc._run_capture_client)
+            uc.gate_redaction = lambda texts: (list(texts), {})
+            uc.gate_atomicity = lambda c: [{"verdict": "bundled", "signals": ["conjunction"]}
+                                           for _ in c]
+            uc.initiative_exists = lambda name: (True, "present")
+            uc.resolve_group = lambda b, n, d, dryrun: (None, "dry-run")
+            calls = []
+            uc._run_capture_client = lambda s, a, p: (calls.append(tuple(a)), (0, "{}", ""))[1]
+            env = {"CONTEXT_MEMORY_DECISIONS_ENABLED": "false",
+                   "CONTEXT_MEMORY_REVIEW_QUEUE": str(Path(tmp) / "queue.jsonl")}
+            try:
+                with mock.patch.dict(os.environ, env):
+                    rc, out, err = run(["export", "--dryrun", src, "--heimdallr", "false"])
+            finally:
+                (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                 uc.resolve_group, uc._run_capture_client) = originals
+            combined = out + err
+            self.assertEqual(rc, 1, "an all-held dry run writes nothing: " + combined)
+            self.assertEqual([a for a in calls if a[0] == "set"], [],
+                             "a dry run reaches no store write")
+            self.assertIn("would propose: up to 1 held as Status=proposed", combined)
+
+
 class ImportTests(unittest.TestCase):
     def test_import_refused_with_an_input_path(self):
         """NFR-02: no write path without --store."""
@@ -3788,13 +3937,23 @@ class SubjectLessGateRegressionTests(unittest.TestCase):
                 (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
                  uc.resolve_group, uc._run_capture_client) = originals
             combined = out + err
-            self.assertEqual(rc, 1, "an export with every record held writes nothing: " + combined)
+            # G1: an export with every record held persists the held as Status=proposed and
+            # approves nothing — the exit is success because proposed rows reached the store.
+            self.assertEqual(rc, 0, "an all-held export persists proposed: " + combined)
             self.assertIn("0 kept, 3 held", combined,
                           "every prose record must be scored, none kept unscored")
             self.assertNotIn("not scored", combined)
             self.assertIn("also held by the decision gate", combined)
-            self.assertEqual([a for a, _ in sent["calls"] if a == ("set",)], [],
-                             "held records must never reach the write")
+            set_payloads = [p for a, p in sent["calls"] if a == ("set",)]
+            self.assertEqual(len(set_payloads), 1, "one proposed write: " + combined)
+            for item in set_payloads[0]["items"]:
+                self.assertEqual(item["status"], "proposed",
+                                 "a held record is proposed, never approved past the flag")
+                self.assertTrue(item["createUuid"], "held records persist as creates only")
+                self.assertIsNone(item["uuid"], "no version bump: current stays approved")
+            vetoes = [a for a, _ in sent["calls"] if a == ("set", "--dryrun")]
+            self.assertEqual(len(vetoes), 1, "the veto runs before the proposed write")
+            self.assertIn("held -> store as Status=proposed", combined)
             after = json.loads(Path(ledger).read_text(encoding="utf-8"))
             for n in range(3):
                 key = f"sha256:{hashlib.sha256(f'index:{n}'.encode('utf-8')).hexdigest()}"

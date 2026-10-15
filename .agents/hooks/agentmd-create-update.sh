@@ -14,7 +14,7 @@ AGENTS.md Creation/Update Rules (from knowledge-conventional-contexts-quality.in
 
 ## Template to use
 Base all new AGENTS.md files on: .agents/templates/AI_WORKTASK_PROMOTE_STANDALONE_TEMPLATE.md
-(Root CLAUDE.md/AGENTS.md is exempt from template requirements)
+(Root AGENTS.md is exempt from template requirements)
 
 ## Required Structure (in this order — omit empty sections except Changelog)
 1. TL;DR — One line: what it does + most important constraint

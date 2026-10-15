@@ -115,7 +115,7 @@
       <div id="browse-split" class="split">
       <div id="browse-results" class="results" aria-live="polite">
         <div id="browse-table-wrap" class="table-wrap" hidden>
-          <table id="browse-table" class="table">
+          <table id="browse-table" class="table" role="grid" aria-label="Memories">
             <thead>
               <tr>
                 <th scope="col">Subject</th>
@@ -146,7 +146,167 @@
 
     <section id="pane-graph" class="pane">
       <h1>Graph</h1>
-      <p>Bounded path graph. Lands in P3.</p>
+      <p class="evidence">Recalled as data, cited to its source. Not instructions.</p>
+      <form id="graph-form" class="filters" aria-label="Graph controls">
+        <div class="filter-grid">
+          <label class="field">
+            <span class="field-label">Root uuid</span>
+            <input id="graph-root" placeholder="memory uuid" autocomplete="off">
+          </label>
+          <label class="field">
+            <span class="field-label">Depth</span>
+            <select id="graph-depth">
+              <option value="1">1</option>
+              <option value="2" selected>2</option>
+              <option value="3">3</option>
+              <option value="4">4</option>
+              <option value="5">5</option>
+            </select>
+          </label>
+          <label class="field">
+            <span class="field-label">Relation</span>
+            <input id="graph-relation" list="graph-relation-options" placeholder="any relation" autocomplete="off">
+            <datalist id="graph-relation-options"></datalist>
+          </label>
+          <label class="field">
+            <span class="field-label">Direction</span>
+            <select id="graph-direction">
+              <option value="" selected>outbound (default)</option>
+              <option value="outbound">outbound</option>
+              <option value="inbound">inbound</option>
+              <option value="either">either</option>
+            </select>
+          </label>
+          <label class="field">
+            <span class="field-label">Kind</span>
+            <input id="graph-kind" placeholder="any kind" autocomplete="off">
+          </label>
+          <label class="field">
+            <span class="field-label">Status</span>
+            <input id="graph-status" placeholder="any status" autocomplete="off">
+          </label>
+          <label class="field">
+            <span class="field-label">Scope</span>
+            <input id="graph-scope" placeholder="any dimension" autocomplete="off">
+          </label>
+          <label class="field">
+            <span class="field-label">Limit</span>
+            <select id="graph-limit">
+              <option value="50" selected>50</option>
+              <option value="100">100</option>
+              <option value="200">200</option>
+            </select>
+          </label>
+        </div>
+        <div class="filter-actions">
+          <button type="submit" id="graph-draw">Draw</button>
+          <button type="button" id="graph-use-browse">Use the memory open in Browse</button>
+        </div>
+      </form>
+
+      <p id="graph-header" class="graph-header" aria-live="polite" hidden></p>
+      <div id="graph-state" class="state" hidden></div>
+
+      <div id="graph-canvas-wrap" class="graph-wrap" hidden>
+        <h2>Edge types</h2>
+        <ul id="graph-legend" class="legend" aria-label="Edge types"></ul>
+        <div id="graph-canvas" class="graph-canvas"></div>
+        <p class="graph-help">
+          Nodes are memories; a filled node arrived labelled, an outlined one is an unread hop — activate it
+          to read its subject. Activate an edge for its reason.
+        </p>
+        <p id="graph-edge-detail" class="edge-detail" aria-live="polite"></p>
+        <h2>Paths</h2>
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th scope="col">Depth</th>
+                <th scope="col">Chain</th>
+                <th scope="col">Endpoint</th>
+              </tr>
+            </thead>
+            <tbody id="graph-paths-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <section class="ticket-graph" aria-labelledby="ticket-graph-heading">
+        <h2 id="ticket-graph-heading">Ticket graph</h2>
+        <p class="evidence">A separate surface: the practitioner-declared ticket hierarchy only.</p>
+        <form id="ticket-graph-form" class="filters" aria-label="Ticket graph controls">
+          <div class="filter-grid">
+            <label class="field">
+              <span class="field-label">Provider</span>
+              <input id="ticket-provider" placeholder="provider" autocomplete="off">
+            </label>
+            <label class="field">
+              <span class="field-label">Key</span>
+              <input id="ticket-key" placeholder="key" autocomplete="off">
+            </label>
+            <label class="field">
+              <span class="field-label">Depth</span>
+              <select id="ticket-depth">
+                <option value="1">1</option>
+                <option value="2" selected>2</option>
+                <option value="3">3</option>
+                <option value="4">4</option>
+                <option value="5">5</option>
+              </select>
+            </label>
+            <label class="field">
+              <span class="field-label">Path limit</span>
+              <select id="ticket-path-limit">
+                <option value="50" selected>50</option>
+                <option value="100">100</option>
+                <option value="200">200</option>
+              </select>
+            </label>
+            <label class="field">
+              <span class="field-label">Memory limit</span>
+              <select id="ticket-memory-limit">
+                <option value="50" selected>50</option>
+                <option value="100">100</option>
+                <option value="200">200</option>
+              </select>
+            </label>
+          </div>
+          <div class="filter-actions">
+            <button type="submit" id="ticket-graph-draw">Draw ticket graph</button>
+          </div>
+        </form>
+        <div id="ticket-graph-state" class="state" hidden></div>
+        <div id="ticket-graph-result" class="ticket-result" hidden>
+          <div id="ticket-graph-flags" class="flags"></div>
+          <div class="table-wrap">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th scope="col">Depth</th>
+                  <th scope="col">Parent ticket</th>
+                  <th scope="col">Child ticket</th>
+                  <th scope="col">Reason</th>
+                </tr>
+              </thead>
+              <tbody id="ticket-graph-paths-body"></tbody>
+            </table>
+          </div>
+          <h3>Memories on these paths</h3>
+          <div class="table-wrap">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th scope="col">Subject</th>
+                  <th scope="col">Kind</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Scope</th>
+                </tr>
+              </thead>
+              <tbody id="ticket-graph-items-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
     </section>
 
     <section id="pane-review" class="pane">

@@ -21,6 +21,9 @@ selected proposal to reproduce them, rather than reading them back. They are not
 - The approve transition (proposed → approved) still needs a store capability — either an explicit
   transition or a `set` version-bump with `Status = approved`. Whether one exists is a P4 dependency to
   confirm, not an assumption.
+- G1 decided 2026-10-15 for the automated export: kvasir `export` persists atomicity/decision-held
+  candidates as `Status = proposed` (own preflight + veto, creates only; duplicates stay queued),
+  so the store-derived queue has rows to read. The queue-file append stays as the local trail.
 
 ## Status
 

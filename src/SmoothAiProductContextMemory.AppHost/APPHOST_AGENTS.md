@@ -108,7 +108,9 @@ Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgr
   published viewer image is not yet released). The `mimir-viewer` container runs Caddy (serves the
   no-build SPA, injects the read token, proxies `/api` to the Host) plus the Python bridge stub.
   `ViewerConfiguration:Image` (default `smooth-ai-product-context-memory-viewer:local`) must be built
-  (`docker build src/SmoothAiProductContextMemory.Viewer`) before a dev run, and
+  from the repo root (`docker build -f src/SmoothAiProductContextMemory.Viewer/Dockerfile .`) before a
+  dev run — the Dockerfile vendors the capture scripts from the shared skill folder (HLD-009 LADR-09),
+  which a Viewer-only context cannot reach — and
   `ViewerConfiguration:Port` (5441, the `5141 + "mimi"` ASCII offset) is the pod's published port.
 - MinIO credentials are committed in `appsettings.Development.json` (local dev only, firewall-isolated).
   Bucket creation is lazy: the storage adapter ensures the bucket exists on first write, so no separate
@@ -274,6 +276,7 @@ Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgr
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-15 | **Viewer image builds from the repo root.** `docker build -f src/SmoothAiProductContextMemory.Viewer/Dockerfile .` — the Dockerfile vendors the capture scripts into `/bridge/capture/` (`PYTHONPATH` set) for the P4 bridge (HLD-009 LADR-09); a Viewer-only context cannot reach the shared skill folder. Root `.dockerignore` re-includes only that folder. The stub bridge is unchanged (still stdlib-only, no store touch). | HLD-009 F2 |
 | 2026-10-15 | **Workload ports shifted by the "mimi" ASCII offset (+300) in `run.sh`; viewer port set to 5441.** `ViewerConfiguration:Port` default moved 5180 → 5441 (`5141 + "mimi"`). `run.sh` default external ports for postgres/blob/seq shifted 5432/9000/9001/5341 → 5732/9300/9301/5641 so a local postgres/minio/seq on the standard ports does not collide; the API stays on 5141 (the base-URL-linked port). | port scheme |
 | 2026-10-14 | **Added the Viewer Console pod (Phase A of HLD-009/BRD-004).** | HLD-009, BRD-004 |
 | 2026-10-02 | **`docker.md`'s `host-context` volume name corrected to the AppHost constant.** The standalone `snapshot`/`restore` commands — and the new upgrade step — mounted `mimisbrunnr-context`, a volume this repo never creates. The Host mounts `HostContextVolume` = `mimisbrunnr-host-context` (dev) / `mimisbrunnr-{installation-id}-host-context` (release). Docker auto-creates a named volume, so the command *succeeded* while writing `snapshot-metadata.json` where the Host never reads it — and the new startup migration line then reported `no snapshot recorded` for a backup just taken. All three occurrences now name the real volume, and the standalone section states both forms. LADR-003 keeps these names in sync with the C# constants; this was the docs drifting from them, not the constants. | HLD-006 |

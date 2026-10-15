@@ -235,6 +235,12 @@ discrete facts:
   `N held -> review queue <path>`. Review it with `review list` / `review show <id>` /
   `review resolve <id> --choice <menu-key>` — a resolve takes only a choice from `conflict_menus.json`,
   and a choice that leads to a capture routes through the export's dry-run veto, never a direct write.
+- **A held candidate is also persisted as `Status = proposed` (G1).** Approval gating governs status,
+  not persistence, so a held-back candidate is written to the store with `Status = proposed` (full
+  fields, its own preflight plus the `set --dryrun` veto first) — that is what the Console review
+  queue reads. Only pure creates persist: an in-group preflight match, a same-subject twin, a dedup
+  duplicate or a cross-kind holder stays queue-file-only, because a version bump would flip that
+  memory's current version to proposed. The queue-file append above stays as the local trail.
 
 ## Write Pipeline (fixed order, do not re-sequence)
 

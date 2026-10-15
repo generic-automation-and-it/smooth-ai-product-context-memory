@@ -123,7 +123,6 @@ if (Test-Tool "claude") {
   Write-Host "==> Section B: Claude Code symlinks (also lays the Cursor symlink — same scaffold)"
   New-Item -ItemType SymbolicLink -Name .claude   -Target .agents   -Force | Out-Null
   New-Item -ItemType SymbolicLink -Name .cursor   -Target .agents   -Force | Out-Null
-  New-Item -ItemType SymbolicLink -Name CLAUDE.md -Target AGENTS.md -Force | Out-Null
   New-Item -ItemType SymbolicLink -Name GEMINI.md -Target AGENTS.md -Force | Out-Null
 }
 if (Test-Tool "codex") {
