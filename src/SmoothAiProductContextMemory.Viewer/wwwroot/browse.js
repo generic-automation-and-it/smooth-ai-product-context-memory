@@ -207,8 +207,13 @@ function selectRow(index) {
   els.body.querySelectorAll('.browse-row').forEach((row) => {
     const selected = Number(row.dataset.index) === index;
     row.classList.toggle('is-selected', selected);
-    if (selected) row.setAttribute('aria-selected', 'true');
-    else row.removeAttribute('aria-selected');
+    if (selected) {
+      row.setAttribute('aria-selected', 'true');
+      // Arrow-key walks must keep going from the new row (focus) and keep it visible (scroll);
+      // a click lands focus here harmlessly.
+      row.focus({ preventScroll: true });
+      row.scrollIntoView({ block: 'nearest' });
+    } else row.removeAttribute('aria-selected');
   });
   openDetail(currentRows[index]);
 }
