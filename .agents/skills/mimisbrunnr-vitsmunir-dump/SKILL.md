@@ -1,6 +1,6 @@
 ---
 name: mimisbrunnr-vitsmunir-dump
-description: Vitsmunir is the Old Norse word for "intelligence," "wits," and "the power of comprehension." This is an AI Brain / Intelligence Dump. Start and run a listen-first braindump session for tickets, issues, ADRs, worktasks, PR descriptions, requirements, designs, or implementation plans. Use when the user says they want to braindump, think out loud, capture rough requirements, or provide context incrementally before asking the agent to synthesize, update a ticket, create docs, or perform implementation work. Also triggers on /mimisbrunnr-vitsmunir-dump and /ai-brain-dump.
+description: Vitsmunir is the Old Norse word for "intelligence," "wits," and "the power of comprehension." This is an AI Brain / Intelligence Dump. Start and run a listen-first braindump session for tickets, issues, ADRs, worktasks, PR descriptions, requirements, designs, or implementation plans. Use when the user says they want to braindump, think out loud, capture rough requirements, or provide context incrementally before asking the agent to synthesize, update a ticket, create docs, or perform implementation work. Also triggers on /mimisbrunnr-vitsmunir-dump. (`ai-brain-dump` is a separate owned skill — the upstream form without this repo's redaction and ticket-binding hardening — so that trigger is its own, not an alias of this one.)
 effort: medium  # listen-first capture; deep reasoning belongs to the skills its output feeds
 ---
 
