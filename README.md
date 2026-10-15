@@ -8,13 +8,21 @@
 
 > **What is special with Mímisbrunnr?** Deliberate capture, no model in the server, append-only versions, index-first retrieval — [how it differs from MemOS, second-brain and session-memory rivals](docs/wiki/what-is-special.md).
 
-## Install
+## Service Installation
 
 No checkout, no .NET SDK — just `bash`, `docker` and `curl`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/generic-automation-and-it/smooth-ai-product-context-memory/main/scripts/run.sh | bash -s -- up
 ```
+
+## Client Skills Installation
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/generic-automation-and-it/smooth-ai-product-context-memory/main/scripts/install-skills.sh | bash
+```
+
+Installs the nine owned skills — details: [Use it in another repository](#use-it-in-another-repository).
 
 ## Run it
 
@@ -120,6 +128,8 @@ curl -fsSL https://raw.githubusercontent.com/generic-automation-and-it/smooth-ai
 ```powershell
 irm https://raw.githubusercontent.com/generic-automation-and-it/smooth-ai-product-context-memory/main/scripts/install-skills.ps1 | iex
 ```
+
+It installs the nine skills owned here — the seven `mimisbrunnr-*` skills plus `ai-understanding` and `ai-brain-dump` — and nothing else. Local skills of your own are left alone and never enter the manifest.
 
 Two other routes, if one fits you better:
 

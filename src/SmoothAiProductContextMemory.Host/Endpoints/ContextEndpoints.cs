@@ -35,6 +35,13 @@ internal static class ContextEndpoints
             mediator.Send(body with { DryRun = dryRun || body.DryRun }, ct))
             .RequireCapability(ApiCapability.Write);
 
+        group.MapPost("/memories/ticket-references", (
+            AddTicketReferences.Request body,
+            IMediator mediator,
+            CancellationToken ct) =>
+            mediator.Send(body, ct))
+            .RequireCapability(ApiCapability.Write);
+
         group.MapPost("/query", (QueryMemories.Request body, IMediator mediator, CancellationToken ct) =>
             mediator.Send(body, ct))
             .RequireCapability(ApiCapability.Read);

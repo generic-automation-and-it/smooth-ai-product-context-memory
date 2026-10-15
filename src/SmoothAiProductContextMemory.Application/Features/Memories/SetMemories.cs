@@ -51,6 +51,7 @@ public static class SetMemories
         IReadOnlyList<MemoryWrite> Items,
         IReadOnlyList<LinkWrite>? Links,
         IReadOnlyList<string>? LabelsProposed,
+        IReadOnlyList<TicketReferenceInput>? TicketReferences = null,
         bool DryRun = false) : IRequest<Response>;
 
     /// <summary>
@@ -69,6 +70,8 @@ public static class SetMemories
         int Diverged,
         int Skipped,
         int LabelsProposed,
+        int TicketReferencesCreated,
+        int TicketReferencesAlreadyPresent,
         IReadOnlyList<ItemResult> Items);
 
     public sealed class Validator : AbstractValidator<Request>
@@ -127,6 +130,21 @@ public static class SetMemories
             RuleForEach(x => x.LabelsProposed)
                 .NotEmpty()
                 .MaximumLength(100);
+            RuleFor(x => x.TicketReferences)
+                .Must(r => r is null || r.Count <= 20)
+                .WithMessage("At most 20 ticket references may be supplied per request.");
+            RuleForEach(x => x.TicketReferences).ChildRules(ticketRef =>
+            {
+                ticketRef.RuleFor(r => r.Provider).NotEmpty().MaximumLength(512);
+                ticketRef.RuleFor(r => r.Key).NotEmpty().MaximumLength(512);
+                ticketRef.RuleFor(r => r.Provider)
+                    .Must(p => p is null || !p.Contains('\0'))
+                    .WithMessage("Provider must not contain a null character.");
+                ticketRef.RuleFor(r => r.Key)
+                    .Must(k => k is null || !k.Contains('\0'))
+                    .WithMessage("Key must not contain a null character.");
+                ticketRef.RuleFor(r => r.Reason).MaximumLength(4000);
+            });
         }
     }
 
@@ -153,7 +171,10 @@ public static class SetMemories
         MemoryGroup Group,
         IReadOnlyList<PlannedItem> Items,
         IReadOnlyList<PlannedLink> Links,
-        IReadOnlyList<string> LabelsToInsert);
+        IReadOnlyList<string> LabelsToInsert,
+        IReadOnlyList<TicketReferenceInput> TicketReferences);
+
+    private const string DefaultAboutReason = "captured under referenced ticket";
 
     public sealed class Handler(
         IApplicationDbContext db,
@@ -344,8 +365,10 @@ public static class SetMemories
 
             IReadOnlyList<PlannedLink> links = await PlanLinksAsync(request.Links, items, cancellationToken);
             IReadOnlyList<string> labels = await PlanLabelsAsync(request.LabelsProposed, cancellationToken);
+            IReadOnlyList<TicketReferenceInput> references =
+                await PlanReferencesAsync(request.TicketReferences, group, cancellationToken);
 
-            return new WritePlan(group, items, links, labels);
+            return new WritePlan(group, items, links, labels, references);
         }
 
         private async Task<IReadOnlyList<PlannedLink>> PlanLinksAsync(
@@ -443,6 +466,50 @@ public static class SetMemories
             return toInsert;
         }
 
+        /// <summary>
+        /// Resolves each ticket reference to its one owning group. An unknown or unowned ticket, or a
+        /// ticket the writing group already owns, is refused here — the same verdict for dry run and
+        /// write, so neither path can diverge. Returns the deduplicated, valid reference set.
+        /// </summary>
+        private async Task<IReadOnlyList<TicketReferenceInput>> PlanReferencesAsync(
+            IReadOnlyList<TicketReferenceInput>? references,
+            MemoryGroup group,
+            CancellationToken cancellationToken)
+        {
+            if (references is not { Count: > 0 })
+            {
+                return [];
+            }
+
+            // The ABOUT edge is per (memory, ticket); a repeated identity in the request is one edge.
+            var distinct = new Dictionary<(string Provider, string Key), TicketReferenceInput>();
+            foreach (TicketReferenceInput reference in references)
+            {
+                distinct.TryAdd((reference.Provider, reference.Key), reference);
+            }
+
+            var validated = new List<TicketReferenceInput>(distinct.Count);
+            foreach (TicketReferenceInput reference in distinct.Values)
+            {
+                MemoryGroup? owner = await TicketLookup.FindGroupByTicketAsync(
+                    db, reference.Provider, reference.Key, cancellationToken);
+                if (owner is null)
+                {
+                    throw new NotFoundException($"Ticket '{reference.Provider}:{reference.Key}' was not found.");
+                }
+
+                if (owner.Id == group.Id)
+                {
+                    throw new ConflictException(
+                        $"Ticket '{reference.Provider}:{reference.Key}' is owned by the writing group; referencing an owned ticket is not required.");
+                }
+
+                validated.Add(reference);
+            }
+
+            return validated;
+        }
+
         /// <summary>The dry-run verdict — plan counts and resolved identities, with no blob.</summary>
         private static Response Predict(WritePlan plan)
         {
@@ -455,6 +522,8 @@ public static class SetMemories
                 diverged,
                 plan.Links.Count(l => l.Skip),
                 labels,
+                plan.TicketReferences.Count * plan.Items.Count,
+                0,
                 [.. plan.Items.Select(i => new ItemResult(i.Uuid, null, i.Mode == ItemMode.Version, i.Mode == ItemMode.Unchanged))]);
         }
 
@@ -532,10 +601,36 @@ public static class SetMemories
                     skipped += linkCreated ? 0 : 1;
                 }
 
+                // Reference edges are request-level and apply to every (now-persisted) memory in the
+                // batch. They run in the same transaction as the memories, and after the memory vertices
+                // exist — the graph MERGEs each memory on demand, and the ticket vertex already exists.
+                int referencesCreated = 0;
+                int referencesAlreadyPresent = 0;
+                foreach (ItemResult result in results)
+                {
+                    foreach (TicketReferenceInput reference in plan.TicketReferences)
+                    {
+                        bool edgeCreated = await graph.CreateAboutAsync(
+                            result.Uuid!.Value,
+                            reference.Provider,
+                            reference.Key,
+                            reference.Reason ?? DefaultAboutReason,
+                            cancellationToken);
+                        if (edgeCreated)
+                        {
+                            referencesCreated++;
+                        }
+                        else
+                        {
+                            referencesAlreadyPresent++;
+                        }
+                    }
+                }
+
                 await transaction.CommitAsync(cancellationToken);
 
                 (int created, int versioned, int unchanged, int diverged, int labels) = Counts(plan);
-                return new Response(created, versioned, unchanged, linked, diverged, skipped, labels, results);
+                return new Response(created, versioned, unchanged, linked, diverged, skipped, labels, referencesCreated, referencesAlreadyPresent, results);
             }
             catch
             {

@@ -1,8 +1,10 @@
 using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
+using NodaTime;
 using Npgsql;
 using SmoothAiProductContextMemory.Application.Abstractions;
+using SmoothAiProductContextMemory.Application.Common.Exceptions;
 
 namespace SmoothAiProductContextMemory.Infrastructure.Persistence;
 
@@ -129,6 +131,87 @@ public sealed class NpgsqlMemoryGraph(SmoothAiProductContextMemoryDbContext db) 
         }
 
         return [.. byTriple.Values.Where(e => uuidSet.Contains(e.SourceUuid) && uuidSet.Contains(e.TargetUuid))];
+    }
+
+    public async Task<bool> AboutExistsAsync(
+        Guid memoryUuid,
+        string provider,
+        string key,
+        CancellationToken cancellationToken)
+    {
+        // Property predicates (LADR-06): the memory anchor is served by ix_memory_vertex_uuid, and the
+        // ticket identity by the Ticket provider/key indexes, rather than a MERGE inline map.
+        string cypher = $"""
+            MATCH (s:{AgeSession.VertexLabel})-[e:{AgeSession.AboutEdgeLabel}]->(t:{AgeSession.TicketLabel})
+            WHERE s.memory_uuid = {Quote(memoryUuid)}
+              AND t.provider = {Quote(provider)}
+              AND t.key = {Quote(key)}
+            RETURN count(e)
+            """;
+        string? count = await ExecuteScalarAsync(cypher, cancellationToken);
+        return ParseAgtypeInteger(count) > 0;
+    }
+
+    public async Task<bool> CreateAboutAsync(
+        Guid memoryUuid,
+        string provider,
+        string key,
+        string reason,
+        CancellationToken cancellationToken)
+    {
+        if (db.Database.CurrentTransaction is null)
+        {
+            await using IDbContextTransaction transaction =
+                await db.Database.BeginTransactionAsync(cancellationToken);
+            bool created = await CreateAboutWithinTransactionAsync(
+                memoryUuid, provider, key, reason, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return created;
+        }
+
+        return await CreateAboutWithinTransactionAsync(
+            memoryUuid, provider, key, reason, cancellationToken);
+    }
+
+    private async Task<bool> CreateAboutWithinTransactionAsync(
+        Guid memoryUuid,
+        string provider,
+        string key,
+        string reason,
+        CancellationToken cancellationToken)
+    {
+        await AcquireLinkWriteLockAsync(cancellationToken);
+        if (await AboutExistsAsync(memoryUuid, provider, key, cancellationToken))
+        {
+            return false;
+        }
+
+        // The Memory vertex is MERGEd on demand; the Ticket vertex must already exist — the group
+        // membership trigger owns it, and the write path validated ownership before this call. MATCH
+        // (not MERGE) on the ticket so a reference can never invent an unowned ticket vertex. The
+        // ticket anchor is a property predicate, not an inline map: the map form compiles to
+        // `properties @>` and sequentially scans, while the predicate is served by the Ticket
+        // provider/key indexes (LADR-06) — the same reason AboutExistsAsync is written that way.
+        // MERGE keeps its inline map, as LADR-06 prescribes for the create side.
+        string cypher = $$"""
+            MATCH (t:{{AgeSession.TicketLabel}})
+            WHERE t.provider = {{Quote(provider)}}
+              AND t.key = {{Quote(key)}}
+            MERGE (s:{{AgeSession.VertexLabel}} {memory_uuid: {{Quote(memoryUuid)}}})
+            CREATE (s)-[:{{AgeSession.AboutEdgeLabel}} {reason: {{Quote(reason)}}, declaredAt: {{Quote(SystemClock.Instance.GetCurrentInstant().ToString())}}}]->(t)
+            RETURN 1
+            """;
+        // Zero rows means the ticket vertex is gone — released concurrently between the ownership
+        // check and this write. Reporting success would count an edge that was never created, so the
+        // write fails loudly instead; `false` is reserved for "already present".
+        string? written = await ExecuteScalarAsync(cypher, cancellationToken);
+        if (written is null)
+        {
+            throw new ConflictException(
+                $"Ticket '{provider}:{key}' is no longer an owned ticket; the reference was not created.");
+        }
+
+        return true;
     }
 
     /// <summary>
