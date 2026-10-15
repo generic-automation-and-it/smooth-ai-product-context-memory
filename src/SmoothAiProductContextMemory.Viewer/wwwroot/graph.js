@@ -71,7 +71,7 @@ const els = {
 const state = {
   rootUuid: '',
   rootLabel: '',
-  labeledRoot: '',
+  labelledRoot: '',
   paths: [],
   relations: [],
   selectedEdge: null,
@@ -249,7 +249,6 @@ function renderLegend(relations) {
   }
   els.legend.innerHTML = relations.map((relation) => {
     const style = relationStyle(relation);
-    const dash = style.dash ? `stroke-dasharray: ${style.dash}` : '';
     return `<li><span class="legend-swatch" style="border-top: 3px ${style.dash ? 'dashed' : 'solid'} ${style.colour}" aria-hidden="true"></span>` +
       `<span class="legend-colour" style="background:${style.colour}" aria-hidden="true"></span>${esc(relation)}</li>`;
   }).join('');
@@ -325,12 +324,15 @@ function renderCanvas(graph) {
     `${edges}${nodes}</svg>`;
 
   els.canvas.querySelectorAll('.edge').forEach((element) => {
-    const show = () => selectEdge(graph, element.dataset.edge);
+    const peek = () => peekEdge(graph, element.dataset.edge);
+    const show = () => selectEdge(element.dataset.edge);
     element.addEventListener('click', show);
     element.addEventListener('keydown', (event) => {
       if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); show(); }
     });
-    element.addEventListener('mouseenter', show);
+    // Hover *and* keyboard focus preview the reason; only an explicit activate selects.
+    element.addEventListener('mouseenter', peek);
+    element.addEventListener('focus', peek);
   });
   els.canvas.querySelectorAll('.node').forEach((element) => {
     const activate = () => labelNode(graph, element.dataset.node);
@@ -352,13 +354,32 @@ function draw() {
   renderCanvas(graph);
 }
 
-function selectEdge(graph, edgeId) {
-  state.selectedEdge = edgeId;
+function edgeText(graph, edgeId) {
   const edge = graph.edges.find((candidate) => candidate.id === edgeId);
-  els.edgeDetail.textContent = edge
+  return edge
     ? `${edge.relation}: ${edge.reason} (${shortUuid(edge.source)} → ${shortUuid(edge.target)}, on ${plural(edge.paths, 'path', 'paths')})`
     : '';
-  renderCanvas(graph);
+}
+
+// Hover/focus preview only: it names the edge without replacing the canvas, so the element under
+// the pointer (or holding focus) is never destroyed by the render it triggered.
+function peekEdge(graph, edgeId) {
+  els.edgeDetail.textContent = edgeText(graph, edgeId);
+}
+
+function updateEdgeSelection() {
+  els.canvas.querySelectorAll('.edge').forEach((element) => {
+    const selected = state.selectedEdge === element.dataset.edge;
+    element.classList.toggle('is-selected', selected);
+    const line = element.querySelector('line');
+    if (line) line.setAttribute('stroke-width', selected ? '3.5' : '2');
+  });
+}
+
+function selectEdge(edgeId) {
+  state.selectedEdge = edgeId;
+  if (state.graph) els.edgeDetail.textContent = edgeText(state.graph, edgeId);
+  updateEdgeSelection();
 }
 
 /**
@@ -386,6 +407,8 @@ async function labelNode(graph, uuid) {
   state.labels.set(uuid, node.label);
   draw();
   els.edgeDetail.textContent = `${shortUuid(uuid)} → ${node.label}`;
+  // The draw replaced the canvas, so the keyboard focus the node held is gone with it — hand it back.
+  els.canvas.querySelector(`[data-node="${CSS.escape(uuid)}"]`)?.focus?.({ preventScroll: true });
 }
 
 function buildRequest() {
@@ -409,15 +432,6 @@ function renderPaths(result) {
 
   const paths = (result.data && Array.isArray(result.data.paths)) ? result.data.paths : [];
   state.paths = paths;
-  const limit = Number(els.limit.value);
-  const bound = paths.length === limit
-    ? ` · showing the first ${limit} ${plural(limit, 'path', 'paths')} — narrow by relation or direction`
-    : '';
-
-  const graph = buildGraph(paths);
-  const nodeBound = graph.truncated
-    ? ` · drawing the first ${MAX_RENDERED_NODES} ${plural(MAX_RENDERED_NODES, 'node', 'nodes')}`
-    : '';
 
   if (paths.length === 0) {
     hideState(els.header);
@@ -427,12 +441,22 @@ function renderPaths(result) {
     return;
   }
 
+  // One build per render: draw() assembles state.graph, and the header reads back from it.
   hideState(els.state);
   els.wrap.hidden = false;
-  els.header.textContent = `depth ≤ ${els.depth.value} · ${paths.length} ${plural(paths.length, 'path', 'paths')} · ${graph.edges.length} ${plural(graph.edges.length, 'edge', 'edges')}${bound}${nodeBound}`;
+  els.header.hidden = false;
   state.selectedEdge = null;
   els.edgeDetail.textContent = '';
   draw();
+  const graph = state.graph;
+  const limit = Number(els.limit.value);
+  const bound = paths.length === limit
+    ? ` · showing the first ${limit} ${plural(limit, 'path', 'paths')} — narrow by relation or direction`
+    : '';
+  const nodeBound = graph.truncated
+    ? ` · drawing the first ${MAX_RENDERED_NODES} ${plural(MAX_RENDERED_NODES, 'node', 'nodes')}`
+    : '';
+  els.header.textContent = `depth ≤ ${els.depth.value} · ${paths.length} ${plural(paths.length, 'path', 'paths')} · ${graph.edges.length} ${plural(graph.edges.length, 'edge', 'edges')}${bound}${nodeBound}`;
   collectRelationOptions();
 }
 
@@ -450,13 +474,15 @@ async function runPaths() {
   els.wrap.hidden = true;
 
   // The traversal never returns the root's own CheapMemory, so the label is one read — cached per
-  // root, never re-fetched for every filter change.
+  // root and scope, never re-fetched for every filter change.
+  const scope = els.scope.value.trim();
+  const cacheKey = `${rootUuid}|${scope}`;
   let root = { ok: true };
-  if (state.labeledRoot !== rootUuid) {
-    root = await getMemory(rootUuid, els.scope.value.trim());
+  if (state.labelledRoot !== cacheKey) {
+    root = await getMemory(rootUuid, scope);
     if (seq !== state.seq) return;
     if (root.ok) {
-      state.labeledRoot = rootUuid;
+      state.labelledRoot = cacheKey;
       state.rootLabel = root.data?.item?.name || root.data?.item?.description || '';
     }
   }
@@ -524,14 +550,18 @@ async function runTicketPaths() {
   els.ticketResult.hidden = true;
   showState(els.ticketState, 'loading', 'Walking the declared ticket hierarchy…');
 
-  const request = {
-    anchor: { provider, key },
-    maxDepth: Number(els.ticketDepth.value),
-    pathLimit: Number(els.ticketPathLimit.value),
-    memoryLimit: Number(els.ticketMemoryLimit.value),
-  };
-  const result = await postTicketPaths(request);
-  ticketInFlight = false;
+  let result;
+  try {
+    const request = {
+      anchor: { provider, key },
+      maxDepth: Number(els.ticketDepth.value),
+      pathLimit: Number(els.ticketPathLimit.value),
+      memoryLimit: Number(els.ticketMemoryLimit.value),
+    };
+    result = await postTicketPaths(request);
+  } finally {
+    ticketInFlight = false;
+  }
   if (result.ok) {
     hideState(els.ticketState);
     els.ticketResult.hidden = false;
@@ -552,14 +582,17 @@ export function initGraph() {
     els.root.value = memory.uuid;
     runPaths();
   });
-  [els.depth, els.direction, els.limit].forEach((control) => {
+  // Every filter control re-runs the walk once a root exists: narrowing is always a new bounded
+  // request, never a trim of what came back. Text fields fire `change` (blur/Enter), not `input`,
+  // so typing never walks per keystroke.
+  [els.depth, els.direction, els.limit, els.relation, els.kind, els.status, els.scope].forEach((control) => {
     control.addEventListener('change', () => { if (state.rootUuid) runPaths(); });
   });
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape' || !state.selectedEdge) return;
     state.selectedEdge = null;
     els.edgeDetail.textContent = '';
-    if (state.graph) renderCanvas(state.graph);
+    updateEdgeSelection();
   });
   els.ticketForm.addEventListener('submit', (event) => { event.preventDefault(); runTicketPaths(); });
 }
