@@ -318,8 +318,16 @@ for port in sh; do
   for runner in $port; do
     root="$(make_root "corrupt-$runner" alpha)"
     printf '{ not json' >"$root/_mimisbrunnr-shared/installation.json"
-    # A non-zero exit is the expected outcome here, so it must not trip the harness's own set -e.
-    if [ "$runner" = sh ]; then run_sh "$root" >/dev/null 2>&1 || true; else run_ps1 "$root" >/dev/null 2>&1 || true; fi
+    # A non-zero exit is the expected outcome here. `|| st=$?` (not `|| true`) keeps the harness's own
+    # `set -e` from tripping while still capturing the status — swallowing it would let an installer that
+    # exits 0 on corrupt input pass while violating the hard-error contract.
+    st=0
+    if [ "$runner" = sh ]; then run_sh "$root" >/dev/null 2>&1 || st=$?; else run_ps1 "$root" >/dev/null 2>&1 || st=$?; fi
+    if [ "$st" -ne 0 ]; then
+      ok "[$runner] a corrupt manifest exits non-zero"
+    else
+      no "[$runner] a corrupt manifest exits non-zero" "exit was 0"
+    fi
     if [ "$(cat "$root/_mimisbrunnr-shared/installation.json")" = "{ not json" ]; then
       ok "[$runner] a corrupt manifest is refused and left untouched"
     else
