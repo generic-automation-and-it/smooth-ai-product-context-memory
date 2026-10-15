@@ -41,15 +41,25 @@ public sealed class AddAboutReference : Migration
 
             -- Count the incoming ABOUT edges for a ticket. The read path and the D1 guard both need
             -- this; a count() over an empty match still yields one row of 0 (LADR-06 property tests).
+            -- AGE's cypher() only resolves through dynamic EXECUTE (a static call fails 42883 on the
+            -- unknown/text signature), so this mirrors public.ticket_graph_cypher: rotate a dollar tag
+            -- clear of the query text, then EXECUTE with the qualified ag_catalog.agtype column type.
             CREATE OR REPLACE FUNCTION public.ticket_graph_about_count(t_provider text, t_key text)
             RETURNS bigint AS $fn$
-            DECLARE n text;
+            DECLARE
+                tag text := '$about$';
+                query text;
+                n text;
             BEGIN
-                SELECT v::text INTO n
-                FROM ag_catalog.cypher('memory_graph',
-                    'MATCH ()-[e:ABOUT]->(v:Ticket) WHERE v.provider = ' || to_json(t_provider)::text
-                    || ' AND v.key = ' || to_json(t_key)::text || ' RETURN count(e)') AS (v agtype);
-                RETURN COALESCE((regexp_replace(COALESCE(n, '0'), '::.*$', ''))::bigint, 0);
+                query := format(
+                    'MATCH ()-[e:ABOUT]->(v:Ticket) WHERE v.provider = %s AND v.key = %s RETURN count(e)',
+                    to_json(t_provider)::text, to_json(t_key)::text);
+                WHILE position(tag in query) > 0 LOOP
+                    tag := '$about_' || md5(tag) || '$';
+                END LOOP;
+                EXECUTE 'SELECT v::text FROM ag_catalog.cypher(''memory_graph'', '
+                    || tag || query || tag || ') AS (v ag_catalog.agtype)' INTO n;
+                RETURN COALESCE(regexp_replace(COALESCE(n, '0'), '::.*$', '')::bigint, 0);
             END;
             $fn$ LANGUAGE plpgsql;
 
@@ -93,7 +103,7 @@ public sealed class AddAboutReference : Migration
                 RETURN NULL;
             END;
             $fn$ LANGUAGE plpgsql;
-            """, suppressTransaction: true);
+            """);
     }
 
     protected override void Down(MigrationBuilder migrationBuilder)
