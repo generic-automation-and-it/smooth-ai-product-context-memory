@@ -19,7 +19,13 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 installer_sh="$repo_root/scripts/install-skills.sh"
 installer_ps1="$repo_root/scripts/install-skills.ps1"
 source_repo="$repo_root"
-source_branch="$(git -C "$repo_root" rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
+# Empty unless HEAD really is a branch. `git rev-parse --abbrev-ref HEAD` answers the literal string
+# "HEAD" in a detached checkout — which is what actions/checkout produces — and that is not a valid
+# `git clone --branch` argument, so passing it through made every case die at the clone on the gate while
+# the same harness passed on a developer machine. `symbolic-ref` answers nothing at all when detached,
+# which is the honest signal that there is no branch to name. **A green run here does not prove this
+# works:** on a branch, both spellings agree, so the fix is only observable in a detached checkout.
+source_branch="$(git -C "$repo_root" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
 
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT

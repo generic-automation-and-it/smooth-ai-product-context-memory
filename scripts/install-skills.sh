@@ -27,7 +27,11 @@
 set -euo pipefail
 
 SKILLS_REPO="${SKILLS_REPO:-https://github.com/generic-automation-and-it/smooth-ai-product-context-memory.git}"
-SKILLS_BRANCH="${SKILLS_BRANCH:-main}"
+# `-` not `:-`, and that single character is load-bearing. `:-` substitutes the default for an EMPTY
+# value as well as an unset one, so `SKILLS_BRANCH=''` — which means "whatever the remote's default is",
+# and is the only honest answer in a detached checkout where there is no branch name to pass — silently
+# became "main" and then failed on any source that has no main branch. `-` substitutes only when unset.
+SKILLS_BRANCH="${SKILLS_BRANCH-main}"
 
 die() { echo "install-skills: $*" >&2; exit 1; }
 log() { echo "install-skills: $*" >&2; }
@@ -204,9 +208,30 @@ clone_source() {
   INSTALL_TMP="$(mktemp -d)"
   trap 'rm -rf "${INSTALL_TMP:-}"' EXIT INT TERM HUP
 
-  log "Cloning $SKILLS_REPO ($SKILLS_BRANCH)…"
-  git clone --depth 1 --branch "$SKILLS_BRANCH" "$SKILLS_REPO" "$INSTALL_TMP/repo" >/dev/null 2>&1 \
-    || die "Failed to clone $SKILLS_REPO"
+  log "Cloning $SKILLS_REPO (${SKILLS_BRANCH:-default branch})…"
+  # SKILLS_BRANCH is optional, and that is not a convenience: `git rev-parse --abbrev-ref HEAD` returns
+  # the literal string "HEAD" in a detached checkout, which is exactly what actions/checkout produces.
+  # `git clone --branch HEAD` is not valid — HEAD is not a branch or tag name — so a harness or an
+  # operator that passed the obvious-looking value got a run that died at the clone with the branch name
+  # printed in its own error. An empty branch means "whatever the remote's default is", which is what
+  # HEAD means everywhere else in this comment.
+  # A bare local path is normalised to file:// so --depth applies. git ignores --depth in a local clone
+  # ("use file:// instead"), which is a quiet downgrade — the whole clone is taken instead of one commit —
+  # and the clone fails outright when the local repository has no branch of that name, which is exactly the
+  # detached-HEAD case this whole branch of the logic exists to handle.
+  clone_url="$SKILLS_REPO"
+  case "$clone_url" in
+    *://* | /*) ;;
+    *) clone_url="file://$PWD/$clone_url" ;;
+  esac
+
+  if [ -n "$SKILLS_BRANCH" ]; then
+    git clone --depth 1 --branch "$SKILLS_BRANCH" "$clone_url" "$INSTALL_TMP/repo" >/dev/null 2>&1 \
+      || die "Failed to clone $SKILLS_REPO (branch '$SKILLS_BRANCH' — set SKILLS_BRANCH empty for the default)"
+  else
+    git clone --depth 1 "$clone_url" "$INSTALL_TMP/repo" >/dev/null 2>&1 \
+      || die "Failed to clone $SKILLS_REPO"
+  fi
 }
 
 update_installed_skills() {

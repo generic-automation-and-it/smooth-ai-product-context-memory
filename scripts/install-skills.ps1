@@ -34,8 +34,11 @@
 #>
 [CmdletBinding()]
 param(
-    [string] $SkillsRepo = $(if ($env:SKILLS_REPO) { $env:SKILLS_REPO } else { 'https://github.com/generic-automation-and-it/smooth-ai-product-context-memory.git' }),
-    [string] $SkillsBranch = $(if ($env:SKILLS_BRANCH) { $env:SKILLS_BRANCH } else { 'main' }),
+    [string] $SkillsRepo = $(if ($null -ne $env:SKILLS_REPO -and $env:SKILLS_REPO -ne '') { $env:SKILLS_REPO } else { 'https://github.com/generic-automation-and-it/smooth-ai-product-context-memory.git' }),
+    # $null -ne rather than a truthiness test: an env var that is set but EMPTY is the "use the remote's
+    # default branch" case, and `if ($env:SKILLS_BRANCH)` cannot tell it from an unset var — it would fall
+    # back to 'main' and name a branch that may not exist on a fork or in a detached checkout.
+    [string] $SkillsBranch = $(if ($null -ne $env:SKILLS_BRANCH) { $env:SKILLS_BRANCH } else { 'main' }),
     [string] $SkillsRoot = $env:SKILLS_ROOT
 )
 
@@ -188,10 +191,29 @@ function Invoke-SourceClone {
     $script:TempRepo = Join-Path $script:TempRoot 'repo'
     New-Item -ItemType Directory -Path $script:TempRoot -Force | Out-Null
 
-    Write-Info "Cloning $Repo ($Branch)..."
+    Write-Info "Cloning $Repo ($($Branch ? $Branch : 'default branch'))..."
     # git writes progress to stderr, and a 2>&1 redirect in PowerShell turns that into error records -
     # which $ErrorActionPreference = Stop would then throw on a successful clone.
-    $gitOutput = & git clone --depth 1 --branch $Branch $Repo $script:TempRepo 2>&1
+    #
+    # An empty $Branch means "whatever the remote's default is", and that case is load-bearing rather than
+    # cosmetic: `git rev-parse --abbrev-ref HEAD` returns the literal string "HEAD" in a detached checkout
+    # - exactly what actions/checkout produces - and `git clone --branch HEAD` is not valid, because HEAD is
+    # not a branch or tag name.
+    #
+    # A bare local path is normalised to file:// so --depth applies. git ignores --depth in a local clone
+    # ("use file:// instead"), which is a quiet downgrade: the entire clone is taken instead of one commit,
+    # and the clone fails outright when the local repository has no branch of that name - the detached-HEAD
+    # case again, reported by git as "Remote branch main not found", naming neither the cause nor the path.
+    $cloneUrl = $Repo -replace '\\', '/'
+    if ($cloneUrl -notmatch '^[a-zA-Z][a-zA-Z0-9+.-]*://' -and -not $cloneUrl.StartsWith('/')) {
+        $cloneUrl = "file:///$cloneUrl"
+    }
+    if ($Branch) {
+        $gitOutput = & git clone --depth 1 --branch $Branch $cloneUrl $script:TempRepo 2>&1
+    }
+    else {
+        $gitOutput = & git clone --depth 1 $cloneUrl $script:TempRepo 2>&1
+    }
     if ($LASTEXITCODE -ne 0) {
         Fail "failed to clone $Repo - $($gitOutput -join ' ')"
     }
