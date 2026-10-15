@@ -114,22 +114,29 @@ check_first_run() {
   local root="$1" runner="$2" names
   local manifest="$1/_mimisbrunnr-shared/installation.json"
   if [ ! -f "$manifest" ]; then no "[$runner] first run creates installation.json"; return; fi
-  # The catalogue is source ∪ disk: the skills the clone offers (real names from this checkout) plus the
-  # synthetic ones this case planted (alpha/beta). A manifest derived from disk alone would omit every
-  # real skill and make a first install into an empty folder a no-op.
+  # The catalogue is the owned union: owned source skills (real names from this checkout) plus owned
+  # skills already on disk. alpha/beta are synthetic and UNOWNED, so they must stay out — the case that
+  # caught the installer pulling local-only skills (epic-breakdown, jira-ticket-task-from-diff) into a
+  # foreign manifest. A manifest derived from disk alone would omit every real skill and make a first
+  # install into an empty folder a no-op.
   names=" $(manifest_names "$root") "
-  for expected in alpha beta ai-terse mimisbrunnr-odin-context-memory; do
+  for expected in mimisbrunnr-odin-context-memory ai-brain-dump ai-understanding; do
     case "$names" in
       *" $expected "*) ;;
-      *) no "[$runner] first run lists source skills as well as those on disk" "$expected missing from: $names"; return ;;
+      *) no "[$runner] first run lists owned source skills" "$expected missing from: $names"; return ;;
     esac
   done
-  if [ "$(manifest_flag "$root" alpha)" != "true" ] || [ "$(manifest_flag "$root" beta)" != "true" ] || [ "$(manifest_flag "$root" ai-terse)" != "true" ]; then
-    no "[$runner] first run marks skills installed:true" "alpha=$(manifest_flag "$root" alpha) beta=$(manifest_flag "$root" beta) ai-terse=$(manifest_flag "$root" ai-terse)"
+  for excluded in alpha beta; do
+    case "$names" in
+      *" $excluded "*) no "[$runner] first run excludes unowned disk skills" "$excluded leaked into: $names"; return ;;
+    esac
+  done
+  if [ "$(manifest_flag "$root" mimisbrunnr-odin-context-memory)" != "true" ] || [ "$(manifest_flag "$root" ai-brain-dump)" != "true" ]; then
+    no "[$runner] first run marks owned skills installed:true" "odin=$(manifest_flag "$root" mimisbrunnr-odin-context-memory) brain=$(manifest_flag "$root" ai-brain-dump)"
     return
   fi
   if ! manifest_timestamp_ok "$root"; then no "[$runner] first run stamps an ISO-8601 UTC time"; return; fi
-  ok "[$runner] first run: manifest from source ∪ disk, all installed:true, ISO-8601 UTC stamp"
+  ok "[$runner] first run: manifest from the owned catalogue, all installed:true, ISO-8601 UTC stamp"
 }
 
 for port in sh; do
@@ -148,47 +155,47 @@ done
 for port in sh; do
   [ "$have_pwsh" = 1 ] && port="sh ps1"
   for runner in $port; do
+    # alpha/beta/gamma are synthetic and UNOWNED: they exercise the exclusion, not the catalogue.
     root="$(make_root "reconcile-$runner" alpha beta gamma)"
     if [ "$runner" = sh ]; then run_sh "$root" >/dev/null 2>&1; else run_ps1 "$root" >/dev/null 2>&1; fi
 
-    # The operator switches alpha off.
+    # The operator switches an OWNED skill off.
     python3 - "$root/_mimisbrunnr-shared/installation.json" <<'PYEOF'
 import json, sys
 path = sys.argv[1]
 data = json.load(open(path))
 for entry in data["skills"]:
-    if entry["name"] == "alpha":
+    if entry["name"] == "ai-brain-dump":
         entry["installed"] = False
 json.dump(data, open(path, "w"), indent=2)
 PYEOF
-    # …and a skill is removed from disk while another is added.
+    # …and an unowned skill is removed from disk while another unowned one is added.
     rm -rf "$root/gamma"
     mkdir -p "$root/delta"; printf '# delta\n' >"$root/delta/SKILL.md"
 
     if [ "$runner" = sh ]; then run_sh "$root" >/dev/null 2>&1; else run_ps1 "$root" >/dev/null 2>&1; fi
 
-    # gamma is in neither the source nor disk any more, so it must go; delta is new and must join.
-    # The real source skills stay, so "dropped" cannot pass by emptying the manifest.
+    # Neither unowned skill may appear, whenever it was seen. The owned source skills stay, so
+    # "excluded" cannot pass by emptying the manifest.
     names=" $(manifest_names "$root") "
+    leaked=""
+    for excluded in alpha beta gamma delta; do
+      case "$names" in
+        *" $excluded "*) leaked="$leaked $excluded" ;;
+      esac
+    done
+    if [ -z "$leaked" ]; then
+      ok "[$runner] reconcile: unowned skills stay out of the manifest"
+    else
+      no "[$runner] reconcile: unowned skills stay out of the manifest" "leaked into:$leaked"
+    fi
     case "$names" in
-      *" gamma "*) no "[$runner] reconcile: a removed skill is dropped" "gamma survived in:$names" ;;
-      *" alpha "*) ok "[$runner] reconcile: a removed skill is dropped" ;;
-      *) no "[$runner] reconcile: a removed skill is dropped" "alpha went missing too — the manifest was rebuilt, not reconciled:$names" ;;
+      *" mimisbrunnr-odin-context-memory "*) ok "[$runner] reconcile: owned source skills are retained" ;;
+      *) no "[$runner] reconcile: owned source skills are retained" "odin missing from:$names" ;;
     esac
-    case "$names" in
-      *" delta "*) ok "[$runner] reconcile: a newly seen skill is added" ;;
-      *) no "[$runner] reconcile: a newly seen skill is added" "delta missing from:$names" ;;
-    esac
-    case "$names" in
-      *" ai-terse "*) ok "[$runner] reconcile: source skills are retained" ;;
-      *) no "[$runner] reconcile: source skills are retained" "ai-terse missing from:$names" ;;
-    esac
-    [ "$(manifest_flag "$root" alpha)" = "false" ] \
+    [ "$(manifest_flag "$root" ai-brain-dump)" = "false" ] \
       && ok "[$runner] reconcile: an operator's installed:false survives the sync" \
-      || no "[$runner] reconcile: an operator's installed:false survives the sync" "alpha=$(manifest_flag "$root" alpha)"
-    [ "$(manifest_flag "$root" delta)" = "true" ] \
-      && ok "[$runner] reconcile: a newly seen skill joins as installed:true" \
-      || no "[$runner] reconcile: a newly seen skill joins as installed:true" "delta=$(manifest_flag "$root" delta)"
+      || no "[$runner] reconcile: an operator's installed:false survives the sync" "ai-brain-dump=$(manifest_flag "$root" ai-brain-dump)"
   done
 done
 
@@ -268,16 +275,18 @@ done
 for port in sh; do
   [ "$have_pwsh" = 1 ] && port="sh ps1"
   for runner in $port; do
-    # ai-terse and mimisbrunnr-odin-context-memory both exist in the checkout, so both are real
-    # clone-and-copy cases rather than synthetic names that would only exercise the warning branch.
-    root="$(make_root "update-$runner" ai-terse mimisbrunnr-odin-context-memory)"
-    printf 'operator edit\n' >"$root/ai-terse/SKILL.md"
+    # ai-brain-dump and mimisbrunnr-odin-context-memory both exist in the checkout and are both
+    # owned, so both are real clone-and-copy cases rather than synthetic names that would only
+    # exercise the warning branch. (ai-terse would also clone, but it is NOT owned — it now belongs
+    # in the exclusion case below, not here.)
+    root="$(make_root "update-$runner" ai-brain-dump mimisbrunnr-odin-context-memory)"
+    printf 'operator edit\n' >"$root/ai-brain-dump/SKILL.md"
     if [ "$runner" = sh ]; then run_sh "$root" >/dev/null 2>&1; else run_ps1 "$root" >/dev/null 2>&1; fi
 
-    if grep -q '^name:' "$root/ai-terse/SKILL.md" 2>/dev/null; then
+    if grep -q '^name:' "$root/ai-brain-dump/SKILL.md" 2>/dev/null; then
       ok "[$runner] an installed:true skill is replaced from the clone source"
     else
-      no "[$runner] an installed:true skill is replaced from the clone source" "SKILL.md still: $(head -1 "$root/ai-terse/SKILL.md")"
+      no "[$runner] an installed:true skill is replaced from the clone source" "SKILL.md still: $(head -1 "$root/ai-brain-dump/SKILL.md")"
     fi
     if [ -d "$root/mimisbrunnr-odin-context-memory/scripts" ]; then
       ok "[$runner] the copied skill carries its scripts folder"
@@ -288,10 +297,10 @@ for port in sh; do
     # Now the same run with one skill switched off: the off folder must be left exactly as it is.
     # The manifest has to exist before it can be switched off, so this is a first run followed by an
     # edit: that is the operator's actual sequence (install, then turn a skill off).
-    root2="$(make_root "update-off-$runner" ai-terse mimisbrunnr-odin-context-memory)"
-    printf 'operator edit\n' >"$root2/ai-terse/SKILL.md"
+    root2="$(make_root "update-off-$runner" ai-brain-dump mimisbrunnr-odin-context-memory)"
+    printf 'operator edit\n' >"$root2/ai-brain-dump/SKILL.md"
     if [ "$runner" = sh ]; then run_sh "$root2" >/dev/null 2>&1; else run_ps1 "$root2" >/dev/null 2>&1; fi
-    printf 'operator edit\n' >"$root2/ai-terse/SKILL.md"
+    printf 'operator edit\n' >"$root2/ai-brain-dump/SKILL.md"
     python3 - "$root2/_mimisbrunnr-shared/installation.json" <<'PYEOF'
 import json, sys
 path = sys.argv[1]
@@ -301,10 +310,57 @@ for entry in data["skills"]:
 json.dump(data, open(path, "w"), indent=2)
 PYEOF
     if [ "$runner" = sh ]; then run_sh "$root2" >/dev/null 2>&1; else run_ps1 "$root2" >/dev/null 2>&1; fi
-    if [ "$(cat "$root2/ai-terse/SKILL.md")" = "operator edit" ]; then
+    if [ "$(cat "$root2/ai-brain-dump/SKILL.md")" = "operator edit" ]; then
       ok "[$runner] an installed:false skill is never overwritten"
     else
-      no "[$runner] an installed:false skill is never overwritten" "content is now: $(head -1 "$root2/ai-terse/SKILL.md")"
+      no "[$runner] an installed:false skill is never overwritten" "content is now: $(head -1 "$root2/ai-brain-dump/SKILL.md")"
+    fi
+  done
+done
+
+# ---------------------------------------------------------------------------------------------
+# 4b. skills outside the owned set are never touched and never listed
+# ---------------------------------------------------------------------------------------------
+
+# The case this gate exists for: a target repo carries local-only skills (here `epic-breakdown`, shaped
+# like the real one — a folder with a SKILL.md the source has never heard of). The installer must leave
+# the folder byte-identical, keep it out of the manifest, and refuse to install it even when a
+# hand-edited manifest names it installed:true.
+for port in sh; do
+  [ "$have_pwsh" = 1 ] && port="sh ps1"
+  for runner in $port; do
+    root="$(make_root "excluded-$runner" epic-breakdown)"
+    printf 'operator content\n' >"$root/epic-breakdown/SKILL.md"
+    printf 'operator content\n' >"$root/epic-breakdown/notes.md"
+    if [ "$runner" = sh ]; then run_sh "$root" >/dev/null 2>&1; else run_ps1 "$root" >/dev/null 2>&1; fi
+    if [ "$(cat "$root/epic-breakdown/SKILL.md")" = "operator content" ] && [ -f "$root/epic-breakdown/notes.md" ]; then
+      ok "[$runner] an unowned disk skill is left byte-identical"
+    else
+      no "[$runner] an unowned disk skill is left byte-identical" "the folder was modified"
+    fi
+    case " $(manifest_names "$root") " in
+      *" epic-breakdown "*) no "[$runner] an unowned disk skill never enters the manifest" "it was listed" ;;
+      *) ok "[$runner] an unowned disk skill never enters the manifest" ;;
+    esac
+
+    # …and a manifest that was hand-edited to ask for an unowned skill the SOURCE HAS is refused, not
+    # honoured. epic-breakdown would prove nothing here — it is absent from the source, so the
+    # not-in-source branch would spare it regardless of ownership. ai-terse exists in the source checkout
+    # but is not owned, so only the ownership guard stands between it and a copy.
+    mkdir -p "$root/ai-terse"
+    printf 'operator content\n' >"$root/ai-terse/SKILL.md"
+    python3 - "$root/_mimisbrunnr-shared/installation.json" <<'PYEOF'
+import json, sys
+path = sys.argv[1]
+data = json.load(open(path))
+data["skills"].append({"name": "ai-terse", "installed": True})
+json.dump(data, open(path, "w"), indent=2)
+PYEOF
+    if [ "$runner" = sh ]; then run_sh "$root" >/dev/null 2>&1; else run_ps1 "$root" >/dev/null 2>&1; fi
+    if [ "$(cat "$root/ai-terse/SKILL.md")" = "operator content" ]; then
+      ok "[$runner] a hand-edited manifest cannot opt an unowned skill into updates"
+    else
+      no "[$runner] a hand-edited manifest cannot opt an unowned skill into updates" "the folder was replaced"
     fi
   done
 done

@@ -7,15 +7,21 @@
 # Contract:
 #   1. Finds the skills root in order: .agents/skills → .claude/skills → .codex/skills, and errors
 #      when none exists. It never creates one: a folder the operator did not ask for is not an install.
-#   2. Reads <root>/_mimisbrunnr-shared/installation.json.
-#      - Missing  → creates it with every skill on disk, installed:true, UTC timestamp.
-#      - Present  → syncs: adds new skills, drops skills no longer on disk, keeps every
+#   2. Installs only the skills owned here: `mimisbrunnr-*`, `ai-understanding`, `ai-brain-dump`
+#      (plus `_mimisbrunnr-shared/`, which is infrastructure, not a skill). Anything else on disk —
+#      local coding skills, operator experiments — is left untouched and never enters the manifest.
+#   3. Reads <root>/_mimisbrunnr-shared/installation.json.
+#      - Missing  → creates it from the owned catalogue, installed:true, UTC timestamp.
+#      - Present  → syncs: adds new owned skills, drops skills no longer owned or on disk, keeps every
 #                   installed flag the operator already set. A corrupt file is a hard error,
 #                   never a silent reset of the whole manifest.
-#   3. Updates only the skills marked installed:true, cloning the repo once and copying those folders
-#      (plus the shared scripts folder) out of it.
-#   4. Writes the updated installation.json back with a fresh UTC timestamp — after the update, so
+#   4. Updates only the owned skills marked installed:true, cloning the repo once and copying those
+#      folders (plus the shared scripts folder) out of it.
+#   5. Writes the updated installation.json back with a fresh UTC timestamp — after the update, so
 #      refreshing the shared folder cannot clobber the manifest that update read.
+#
+# The owned set lives in `is_owned_skill()` below AND in the PowerShell port's `Test-OwnedSkill`.
+# The two must match; `test-install-skills.sh` holds them to each other (parity cases).
 #
 # Dependencies: bash, git, python3 (already a dependency of every mimisbrunnr-* skill).
 #
@@ -52,8 +58,20 @@ find_skills_root() {
 }
 
 # ---------------------------------------------------------------------------
-# 2. List skills on disk (dirs with SKILL.md, excluding _mimisbrunnr-shared)
+# 2. Owned set + listing
 # ---------------------------------------------------------------------------
+
+# The only skills this installer manages. Everything else that happens to sit in a skills root —
+# local coding skills, operator experiments — is somebody else's to update and is never touched.
+is_owned_skill() {
+  case "$1" in
+    mimisbrunnr-*) return 0 ;;
+    ai-understanding | ai-brain-dump) return 0 ;;
+  esac
+  return 1
+}
+
+# List skills on disk (dirs with SKILL.md, excluding _mimisbrunnr-shared)
 
 list_disk_skills() {
   local skills_root="$1"
@@ -114,7 +132,9 @@ build_installation_json() {
   local skills_root="$1" existing_json="$2" source_skills_json="$3"
   local disk_skills_json
 
-  disk_skills_json="$(list_disk_skills "$skills_root" | python3 -c "
+  disk_skills_json="$(list_disk_skills "$skills_root" | while IFS= read -r name; do
+    is_owned_skill "$name" && printf '%s\n' "$name"
+  done | python3 -c "
 import json, sys
 skills = sorted(line.strip() for line in sys.stdin if line.strip())
 print(json.dumps(skills))
@@ -128,9 +148,10 @@ disk_skills = set(json.loads(sys.argv[1]))
 existing_raw = sys.argv[2].strip()
 source_skills = set(json.loads(sys.argv[3]))
 
-# The catalogue is the union: what the source offers, plus anything already here. A skill the operator
-# added by hand is in neither the source nor the manifest until it has a SKILL.md, and dropping it would
-# delete state the operator owns.
+# The catalogue is the owned union: what the source offers plus what is already here. Both lists arrive
+# pre-filtered through `is_owned_skill` (the disk loop above and its twin at the source-listing call
+# site) — that shell function is the single gate, and it is what the harness pins. A manifest entry for a
+# skill that has since left the owned set drops out here because neither list can carry it anymore.
 catalog = source_skills | disk_skills
 
 now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -251,6 +272,12 @@ for s in data.get('skills', []):
   local name
   while IFS= read -r name; do
     [ -n "$name" ] || continue
+    # Defense in depth: the manifest only ever names owned skills, but a hand-edited manifest could name
+    # anything. Never copy a folder this installer does not own.
+    if ! is_owned_skill "$name"; then
+      log "WARNING: $name is not owned here — left on disk untouched"
+      continue
+    fi
     if [ -d "$INSTALL_TMP/repo/.agents/skills/$name" ]; then
       rm -rf "$skills_root/$name"
       cp -R "$INSTALL_TMP/repo/.agents/skills/$name" "$skills_root/$name"
@@ -310,7 +337,9 @@ main() {
 
   log "Syncing installation.json…"
   new_json="$(build_installation_json "$skills_root" "$existing_json" \
-    "$(list_source_skills "$INSTALL_TMP/repo/.agents/skills" | python3 -c "
+    "$(list_source_skills "$INSTALL_TMP/repo/.agents/skills" | while IFS= read -r name; do
+      is_owned_skill "$name" && printf '%s\n' "$name"
+    done | python3 -c "
 import json, sys
 print(json.dumps(sorted(line.strip() for line in sys.stdin if line.strip())))
 ")")"
