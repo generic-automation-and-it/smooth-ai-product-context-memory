@@ -3,7 +3,9 @@ using System.Globalization;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
 using SmoothAiProductContextMemory.Application.Abstractions;
+using SmoothAiProductContextMemory.Application.Common.Models;
 using SmoothAiProductContextMemory.Application.Common.Retrieval;
+using SmoothAiProductContextMemory.Domain;
 using SmoothAiProductContextMemory.Domain.Entities;
 using SmoothAiProductContextMemory.Infrastructure.Persistence;
 
@@ -125,5 +127,80 @@ public sealed class TicketTraversalBenchmarkTests(AspireFixture aspire) : Persis
             groups.Add(TestEntities.NewGroup(scope, tickets: [TicketDocument.Create("jira", key, "https://tracker/bench")]));
             return new TicketIdentity("jira", key);
         }
+    }
+
+    [Theory]
+    [InlineData(100)]
+    [InlineData(500)]
+    [InlineData(1000)]
+    public async Task TicketQueryWithReferences_P95Within100Ms(int referenceCount)
+    {
+        Assert.SkipUnless(Environment.GetEnvironmentVariable("SMOOTH_AGE_BENCH") == "1",
+            "Set SMOOTH_AGE_BENCH=1 to record ticket-with-references measurements.");
+
+        // Arrange: an owner group with a ticket, plus a second group whose memories carry ABOUT
+        // references to that ticket — the union the recall path must evaluate.
+        var ownerGroup = TestEntities.NewGroup("product", tickets: [TicketDocument.Create("github", "231", "https://tracker/bench")]);
+        var referencingGroup = TestEntities.NewGroup("product");
+        Db.MemoryGroups.AddRange(ownerGroup, referencingGroup);
+        await Db.SaveChangesAsync(Ct);
+
+        var ownerMemories = Enumerable.Range(0, 3).Select(i =>
+            TestEntities.NewMemory(ownerGroup.Id, $"Owner {i}", $"Owner subject {i}")).ToArray();
+        var referencingMemories = Enumerable.Range(0, referenceCount).Select(i =>
+            TestEntities.NewMemory(referencingGroup.Id, $"Ref {i}", $"Ref subject {i}")).ToArray();
+        Db.Memories.AddRange(ownerMemories);
+        Db.Memories.AddRange(referencingMemories);
+        await Db.SaveChangesAsync(Ct);
+
+        Db.MemoryVersions.AddRange(ownerMemories.Select(m => TestEntities.NewVersion(m.Id, 1, "Owner claim", kind: "decision")));
+        Db.MemoryVersions.AddRange(referencingMemories.Select(m => TestEntities.NewVersion(m.Id, 1, "Ref claim", kind: "decision")));
+        await Db.SaveChangesAsync(Ct);
+
+        var graph = new NpgsqlMemoryGraph(Db);
+        foreach (var memory in referencingMemories)
+            await graph.CreateAboutAsync(memory.Uuid, "github", "231", "Benchmark reference", Ct);
+
+        await Db.Database.ExecuteSqlRawAsync("""
+            ANALYZE public.memory_group; ANALYZE public.memory; ANALYZE public.memory_version;
+            ANALYZE memory_graph."Memory"; ANALYZE memory_graph."ABOUT"; ANALYZE memory_graph."Ticket";
+            """, Ct);
+
+        // Resolve the referencing uuids the same way QueryMemories does.
+        var referencedUuids = await graph.ListAboutAsync("github", "231", Ct);
+        referencedUuids.Count.ShouldBe(referenceCount);
+
+        var search = new NpgsqlMemorySearch(Db);
+        var criteria = new MemorySearchCriteria
+        {
+            GroupId = ownerGroup.Id,
+            ReferencedUuids = referencedUuids,
+            RequiredScopeDimension = "product",
+            CurrentOnly = true,
+            Kind = "decision",
+            Limit = 200,
+        };
+
+        // Act + assert: warmup, then measure p95 over 100 samples.
+        for (int i = 0; i < 20; i++) await search.SearchAsync(criteria, Ct);
+
+        var samples = new double[100];
+        for (int i = 0; i < samples.Length; i++)
+        {
+            long start = Stopwatch.GetTimestamp();
+            await search.SearchAsync(criteria, Ct);
+            samples[i] = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
+        }
+
+        Array.Sort(samples);
+        double p95 = samples[94] * 0.95 + samples[95] * 0.05;
+
+        var report = new StringBuilder();
+        report.AppendLine(CultureInfo.InvariantCulture,
+            $"referenceCount={referenceCount}; warmups=20; samples=100; p50={(samples[49] + samples[50]) / 2:F3}ms; p95={p95:F3}ms; target<=100ms");
+        TestContext.Current.TestOutputHelper?.WriteLine(report.ToString());
+
+        p95.ShouldBeLessThanOrEqualTo(100,
+            $"ticket query with {referenceCount} references must meet p95 <= 100 ms");
     }
 }
