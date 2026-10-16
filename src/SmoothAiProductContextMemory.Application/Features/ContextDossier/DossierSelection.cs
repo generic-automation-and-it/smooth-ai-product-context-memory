@@ -34,6 +34,7 @@ public sealed record DossierSelectionResult(
     bool DepthLimitReached,
     bool HiddenPathDropped,
     bool LimitReached,
+    int ReferencedAnchors,
     IReadOnlyList<MemoryRelationship> Edges);
 
 /// <summary>
@@ -80,17 +81,30 @@ public static class DossierSelection
         // before the row ceiling, rather than intersecting an already-truncated result set (HLD-005
         // NFR-03). Ticket identity grants no scope consent; the traversal is scope-gated separately.
         TicketTraversalResult? ticketResult = null;
+        HashSet<Guid> referenceUuids = new();
         if (anchor.Ticket is { } ticket)
         {
             ticketResult = await ticketGraph.TraverseAsync(
                 filter.TicketTraversal(ticket, anchor.WidenDepth),
                 cancellationToken);
+            // The anchor is the union of the ticket's owned/hierarchy identities and the memories
+            // carrying an ABOUT reference to it — the same union the recall query uses (HLD-003
+            // LADR-09), so the dossier sees the copies a ticket search would.
+            referenceUuids = (await graph.ListAboutAsync(
+                ticket.Provider, ticket.Key, cancellationToken)).ToHashSet();
         }
 
         bool ticketSupplied = anchor.Ticket is { };
-        HashSet<Guid>? ticketUuids = ticketResult is null
-            ? null
-            : new HashSet<Guid>(ticketResult.Items.Select(i => i.Uuid));
+        HashSet<Guid>? ticketUuids = null;
+        if (ticketResult is { } result)
+        {
+            ticketUuids = new HashSet<Guid>(result.Items.Select(i => i.Uuid));
+            ticketUuids.UnionWith(referenceUuids);
+        }
+        else if (referenceUuids.Count > 0)
+        {
+            ticketUuids = new HashSet<Guid>(referenceUuids);
+        }
 
         // The ticket traversal's disclosure applies to every return below, the two no-match ones
         // included: a ticket walk that was cut short can leave the anchor search with nothing to
@@ -114,6 +128,7 @@ public static class DossierSelection
                 DepthLimitReached: ticketDepthLimitReached,
                 HiddenPathDropped: false,
                 LimitReached: ticketLimitReached,
+                ReferencedAnchors: 0,
                 Edges: []);
         }
 
@@ -124,6 +139,10 @@ public static class DossierSelection
             ticketSupplied ? [.. ticketUuids!] : null);
 
         IReadOnlyList<CheapMemory> matched = await search.SearchAsync(criteria, cancellationToken);
+
+        int referencedAnchors = referenceUuids.Count > 0
+            ? matched.Count(m => referenceUuids.Contains(m.Uuid))
+            : 0;
 
         HashSet<Guid> anchorUuids = new(matched.Select(m => m.Uuid));
         var reachedVia = new Dictionary<Guid, List<string>>();
@@ -143,6 +162,7 @@ public static class DossierSelection
                 DepthLimitReached: ticketDepthLimitReached,
                 HiddenPathDropped: false,
                 LimitReached: ticketLimitReached,
+                ReferencedAnchors: 0,
                 Edges: []);
         }
 
@@ -195,6 +215,7 @@ public static class DossierSelection
             DepthLimitReached: depthLimitReached,
             HiddenPathDropped: widened.HiddenPathDropped,
             LimitReached: limitReached,
+            ReferencedAnchors: referencedAnchors,
             Edges: edges);
     }
 

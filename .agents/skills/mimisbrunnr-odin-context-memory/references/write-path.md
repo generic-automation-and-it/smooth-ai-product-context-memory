@@ -10,14 +10,15 @@ checkpoint, with the deliberate write step the skill's `SKILL.md` names —
 `set -a && source ~/.mimisbrunnr/credentials && set +a` (source the file `CONTEXT_MEMORY_CREDENTIAL_FILE`
 names instead, when it is set — it is the file the clients read) — and **only inside a subshell around each
 write-route invocation** (`preflight`, `set`, `resolve-group`, `upsert-initiative`, `update-group`,
-`append-description`, `create-link`, `propose-label`, `ticket-parent` — the `WRITE_ROUTES` set in
+`append-description`, `create-link`, `propose-label`, `ticket-parent`, `add-ticket-references` — the
+`WRITE_ROUTES` set in
 `context_memory_client.py`; `preflight` persists nothing but still authenticates write-only), so the
 token never persists in the session's shell, where the read client would
 then refuse to start:
 
 ```bash
 ( set -a && source ~/.mimisbrunnr/credentials && set +a && \
-  python3 -B <skills-root>/_mimisbrunnr-shared/scripts/context_memory_client.py <preflight|set|resolve-group|upsert-initiative|update-group|append-description|create-link|propose-label|ticket-parent> ... )
+  python3 -B <skills-root>/_mimisbrunnr-shared/scripts/context_memory_client.py <preflight|set|resolve-group|upsert-initiative|update-group|append-description|create-link|propose-label|ticket-parent|add-ticket-references> ... )
 # same subshell wrapper around each write-route invocation; never export the token into the session shell
 ```
 

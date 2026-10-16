@@ -109,7 +109,11 @@ controller expects is refused before anything changes. To carry a corpus across:
 Five values, all random on first run: the PostgreSQL password, the blob store key and secret, and
 distinct read and write API tokens. Resolution order is **environment → stored file → generate**,
 and the file is only ever *added to* — a stored value is never rewritten or dropped, because release
-mode binds the tokens into the running Host and rotating one 403s every client that holds it.
+mode binds the tokens into the running Host and rotating one 403s every client that holds it. The one
+exception is `CONTEXT_MEMORY_BASE_URL`, which is not one of the five: it describes the port this run
+publishes rather than a secret, and it is refreshed on every run — see *the machine credential file is
+the launcher's to keep current*, below. (`run.ps1` publishes no machine credential file at all, so this
+is a `run.sh` property; on Windows, `provision-credentials.sh` writes the base URL instead.)
 
 **This file alone is not enough for a checkout's skills.** It carries the container's `Parameters__*`
 names; the skills read `CONTEXT_MEMORY_*`, which `scripts/provision-credentials.sh` writes to
@@ -172,6 +176,26 @@ context-memory client defaults to, so moving them here would break every skill a
 a controller started. `MIMIS_SHIFT_PORTS=1` restores a set of shifted ports (`25141 / 25432 / …`) for the
 rare case of running a controller and the development AppHost side by side. The launcher refuses to start
 on a port already in use rather than letting the engine report it later.
+
+**The machine credential file is the launcher's to keep current, and `CONTEXT_MEMORY_BASE_URL` is the one
+key the add-only write does not cover.** It describes the port this run publishes rather than an
+operator setting: a shifted start would otherwise leave every client calling `5141` while the stack served
+`25141`, with no run failing and nothing logging the disagreement. A hand-edited value is corrected on
+the next run — the clients refuse a non-loopback base URL anyway, and the tokens beside it are bound into
+this Host, so a value pointing elsewhere cannot be anything but stale. Every *other* key in that file, the
+tokens and the decision-gate settings included, is still only ever added to. `run.sh` only; `run.ps1`
+publishes no machine credential file.
+
+**A credential file that cannot be used is refused, not overwritten — and the refusal covers all three.**
+`run.sh` asks the same four questions of `$env_file` and of both machine credential files before it
+writes any of them: not a symlink, a regular file, readable, and free of NUL bytes. The interesting ones
+are the last two, because nothing used to catch them. An unreadable `controller.env` was regenerated in
+full — five fresh secrets at exit 0, a new token pair on the Host and a 403 for every client still
+holding the old one — and a NUL byte made the text filter that copies a credential file treat it as
+binary and emit nothing, silently replacing an operator's keys with the defaults. Both now stop the run
+and name the file. A symlink is refused for the same reason as before: `[ -f ]` follows it, so the
+`mv` replaced a shared credentials file with a regular one and froze every client reading the shared
+path on tokens the run had rotated away.
 
 ## Platform differences
 

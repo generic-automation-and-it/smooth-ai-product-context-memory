@@ -53,6 +53,16 @@ public interface IMemoryGraph
         string key,
         string reason,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Lists the memory uuids carrying an <c>ABOUT</c> edge to the ticket <paramref name="provider"/>:<paramref name="key"/>.
+    /// Bounded and index-served (LADR-06) — the recall reference union resolves the set of memories that
+    /// reference a ticket without scanning the whole edge table.
+    /// </summary>
+    Task<IReadOnlyList<Guid>> ListAboutAsync(
+        string provider,
+        string key,
+        CancellationToken cancellationToken);
 }
 
 public sealed record MemoryRelationship(Guid SourceUuid, Guid TargetUuid, string Relation, string Reason);

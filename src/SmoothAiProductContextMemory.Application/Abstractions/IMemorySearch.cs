@@ -53,6 +53,19 @@ public sealed record MemorySearchCriteria
     public long? GroupId { get; init; }
 
     /// <summary>
+    /// Memory uuids carrying an <c>ABOUT</c> reference to the ticket, disjunctive with
+    /// <see cref="GroupId"/> — a reference row is selected without being in the owner group. Distinct
+    /// from <see cref="UuidFilter"/>, which is conjunctive; the two meanings are kept explicit.
+    /// </summary>
+    public IReadOnlyList<Guid>? ReferencedUuids { get; init; }
+
+    /// <summary>Scope dimension required of the reference branch of a union (D2).</summary>
+    public string? ReferencedRequiredScopeDimension { get; init; }
+
+    /// <summary>Scope dimensions the reference branch of a union must not return (D2).</summary>
+    public IReadOnlyList<string> ReferencedExcludedScopeDimensions { get; init; } = [];
+
+    /// <summary>
     /// Narrow the search to these memory identities before the row ceiling is applied. Lets a ticket
     /// (or other pre-resolved) anchor conjunctively restrict the search in SQL rather than by filtering
     /// an already-truncated result set in memory (HLD-005 NFR-03).

@@ -57,7 +57,7 @@ public sealed class CliRestoreExitCodeTests(AspireFixture aspire)
     }
 
     private static SnapshotCapture Graph(Guid[] vertices, SnapshotEdge[] edges) =>
-        new([], [], [], [], [], [], [.. vertices.Select(v => new SnapshotVertex(v))], edges, [], [], [], [], [], [], []);
+        new([], [], [], [], [], [], [.. vertices.Select(v => new SnapshotVertex(v))], edges, [], [], [], [], [], [], [], []);
 
     private async Task<(int Exit, string Printed, long Edges)> RestoreAsync(SnapshotCapture capture)
     {

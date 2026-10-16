@@ -70,8 +70,9 @@ SRC_PN_INIT="$(count_label "$SOURCE_DB" Initiative)"
 SRC_PN_REPO="$(count_label "$SOURCE_DB" Repo)"
 SRC_HAS_INIT="$(count_label "$SOURCE_DB" HAS_INITIATIVE)"
 SRC_HAS_REPO="$(count_label "$SOURCE_DB" HAS_REPO)"
-echo "   product-name vertices: product=$SRC_PN_VERTICES initiatives=$SRC_PN_INIT repos=$SRC_PN_REPO | HAS_INITIATIVE=$SRC_HAS_INIT HAS_REPO=$SRC_HAS_REPO"
-if [ "$SRC_EDGES" -eq 0 ] && [ "$SRC_HAS_INIT" -eq 0 ] && [ "$SRC_HAS_REPO" -eq 0 ]; then
+SRC_ABOUT="$(count_label "$SOURCE_DB" ABOUT)"
+echo "   product-name vertices: product=$SRC_PN_VERTICES initiatives=$SRC_PN_INIT repos=$SRC_PN_REPO | HAS_INITIATIVE=$SRC_HAS_INIT HAS_REPO=$SRC_HAS_REPO | ABOUT=$SRC_ABOUT"
+if [ "$SRC_EDGES" -eq 0 ] && [ "$SRC_HAS_INIT" -eq 0 ] && [ "$SRC_HAS_REPO" -eq 0 ] && [ "$SRC_ABOUT" -eq 0 ]; then
     echo "FAIL: source has zero edges — a restore check against an empty graph proves nothing" >&2
     echo "      populate relationships first, then re-run" >&2
     exit 1
@@ -97,7 +98,8 @@ DST_PN_INIT="$(count_label "$RESTORE_DB" Initiative)"
 DST_PN_REPO="$(count_label "$RESTORE_DB" Repo)"
 DST_HAS_INIT="$(count_label "$RESTORE_DB" HAS_INITIATIVE)"
 DST_HAS_REPO="$(count_label "$RESTORE_DB" HAS_REPO)"
-echo "   product-name vertices: product=$DST_PN_VERTICES initiatives=$DST_PN_INIT repos=$DST_PN_REPO | HAS_INITIATIVE=$DST_HAS_INIT HAS_REPO=$DST_HAS_REPO"
+DST_ABOUT="$(count_label "$RESTORE_DB" ABOUT)"
+echo "   product-name vertices: product=$DST_PN_VERTICES initiatives=$DST_PN_INIT repos=$DST_PN_REPO | HAS_INITIATIVE=$DST_HAS_INIT HAS_REPO=$DST_HAS_REPO | ABOUT=$DST_ABOUT"
 
 echo "== traversal against the restored database"
 TRAVERSAL_HOPS="$(psql_in -d "$RESTORE_DB" -tAc "
@@ -127,8 +129,9 @@ assert_equal "initiative vertex count" "$SRC_PN_INIT" "$DST_PN_INIT"
 assert_equal "repo vertex count" "$SRC_PN_REPO" "$DST_PN_REPO"
 assert_equal "HAS_INITIATIVE edge count" "$SRC_HAS_INIT" "$DST_HAS_INIT"
 assert_equal "HAS_REPO edge count" "$SRC_HAS_REPO" "$DST_HAS_REPO"
+assert_equal "ABOUT edge count" "$SRC_ABOUT" "$DST_ABOUT"
 
-if [ "$DST_EDGES" -eq 0 ] && [ "$DST_HAS_INIT" -eq 0 ] && [ "$DST_HAS_REPO" -eq 0 ]; then
+if [ "$DST_EDGES" -eq 0 ] && [ "$DST_HAS_INIT" -eq 0 ] && [ "$DST_HAS_REPO" -eq 0 ] && [ "$DST_ABOUT" -eq 0 ]; then
     echo "FAIL: restored edge count is zero — the backup omitted graph data" >&2
     FAILED=1
 fi

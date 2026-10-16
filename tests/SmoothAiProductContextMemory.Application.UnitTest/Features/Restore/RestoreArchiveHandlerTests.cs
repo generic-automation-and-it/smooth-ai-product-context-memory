@@ -93,7 +93,7 @@ public sealed class RestoreArchiveHandlerTests
             [],
             [],
             [],
-            [], [], [], [], [], []);
+            [], [], [], [], [], [], []);
 
     private sealed class FakeArchive(string address, byte[] archivedBody, string? contentType) : ISnapshotArchive
     {
@@ -109,7 +109,7 @@ public sealed class RestoreArchiveHandlerTests
             var manifest = new SnapshotManifest(
                 SnapshotFormat.Version,
                 [new SnapshotArchiveEntry($"blobs/{address}", "unused", archivedBody.Length, contentType)],
-                new SnapshotCounts(1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0),
+                new SnapshotCounts(1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0),
                 new SnapshotExclusions(["recall_feedback"]));
             return Task.FromResult(new SnapshotArchive(
                 manifest,
@@ -180,6 +180,7 @@ public sealed class RestoreArchiveHandlerTests
                 expected.Edges,
                 expected.TicketVertices,
                 expected.TicketEdges,
+                expected.AboutEdges,
                 expected.ProductVertices,
                 expected.InitiativeVertices,
                 expected.RepoVertices,

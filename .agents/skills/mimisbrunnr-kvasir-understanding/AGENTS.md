@@ -53,6 +53,7 @@ These IDs are HLD-007's; `SKILL.md`, the README, the scripts and the tests cite 
 
 | Date | Change | Ref |
 | :---- | :---- | :---- |
+| 2026-10-16 | `export --reference-tickets <list>` sends the tickets as `ticketReferences` (ABOUT) instead of binding them for group resolution; the group binds `--tickets` when given, else a deterministic synthetic owner ticket `local:wet-<initiative-slug>-<provider>-<key>` so a re-export reuses one group. One `relates_to` twin link per candidate whose exact preflight match sits in the referenced ticket's owner group — mechanical (explicit flag + exact subject), never a semantic judgement. `initiative_mismatch_refusal` gained a fourth option; `import --table` renders a `Match` column when the query was ticket-filtered. | HLD-003 LADR-09 |
 | 2026-10-16 | `import --product-name` recalls **through** the product-name registry — the read-side twin of the `export` flag that declares the product's graph edge: same spelling, opposite direction. A query field, so the server resolves the product to its initiatives and repos; an unregistered product is the same `404` naming `upsert-product-name`, never a silent empty. It is not the `product` scope dimension. Added because the Console generates per-memory import commands and had no way to express a product-level recall | — |
 | 2026-10-15 | Ralph loop: the queue record's session comes from the marker's resolver, not a third one; the write-only `_supersession` flag is gone | — |
 | 2026-09-19 | `--all` with `--asof` counts both omission reasons separately | — |

@@ -70,6 +70,10 @@ public sealed record DossierSelectionPlan(
 /// <summary>
 /// What the selection reached and what it stopped short of. No hidden count is disclosed (NFR-01);
 /// <see cref="HiddenPathDropped"/> is a generic disclosure, not an itemized list.
+/// <para>
+/// <see cref="ReferencedAnchors"/> is how many of the anchors reached a memory through an <c>ABOUT</c>
+/// reference rather than ticket ownership/hierarchy, so a reader can tell originals from copies.
+/// </para>
 /// </summary>
 public sealed record DossierReach(
     int WidenDepth,
@@ -77,7 +81,8 @@ public sealed record DossierReach(
     int Widened,
     int Selected,
     int Edges,
-    bool HiddenPathDropped);
+    bool HiddenPathDropped,
+    int ReferencedAnchors);
 
 /// <summary>One limit actually reached, named (NFR-03).</summary>
 public sealed record DossierLimitHit(string Limit, int Value);

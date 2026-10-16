@@ -411,7 +411,7 @@ shape of the problem and never the value.
 
 ## Test
 
-Committed harness: `python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/tests/run_tests.py`.
+Committed harness, **in this repository** (an installed copy ships no `tests/`): `python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/tests/run_tests.py`.
 
 ## Related
 

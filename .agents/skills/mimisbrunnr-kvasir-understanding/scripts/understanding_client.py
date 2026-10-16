@@ -44,6 +44,7 @@ import os
 import re
 import subprocess
 import sys
+import unicodedata
 import uuid
 from pathlib import Path
 
@@ -295,6 +296,18 @@ def slugify(text: str, fallback: str = "session") -> str:
     return slug or fallback
 
 
+def synthetic_owner_ticket(initiative: str, reference_ticket: str) -> str:
+    """A deterministic synthetic owner ticket for a WET-copy export.
+
+    Derived from the initiative and the reference ticket's identity, so two exports of the same
+    material under the same initiative reuse one group (a ticketless export creates a new group every
+    run). Diacritics are folded first, so `Mímisbrunnr-MVP` gives `mimisbrunnr-mvp`, not `m-misbrunnr-mvp`.
+    """
+    folded = unicodedata.normalize("NFKD", initiative or "").encode("ascii", "ignore").decode("ascii")
+    provider, _, key = reference_ticket.partition(":")
+    return f"local:wet-{slugify(folded)}-{provider}-{key}"
+
+
 def read_input(path: str) -> str:
     if path == "-":
         return sys.stdin.read()
@@ -392,6 +405,9 @@ def five_parts(record: dict) -> dict:
         # never flagged, so the least trustworthy record lost its warning (review #2).
         "confidence": "" if record.get("confidence") is None else record.get("confidence"),
         "portability": record.get("portability") or "",
+        # Set only by a ticket-filtered query: "owner" when the memory is in the ticket's owner group,
+        # "reference" when it reached the query through an ABOUT reference.
+        "ticketMatch": record.get("ticketMatch") or "",
     }
 
 
@@ -845,6 +861,7 @@ def render_table(records: list[dict], all_kinds: bool, asof: dt.date | None,
     """
     rows, rendered_records, cut, non_kind, out_of_window = [], [], [], 0, 0
     used = len(DATA_NOTICE) + 200
+    show_match = any(five_parts(r).get("ticketMatch") for r in records)
     for record in records:
         parts = five_parts(record)
         if not all_kinds and parts["kind"] != KIND_UNDERSTANDING:
@@ -857,8 +874,10 @@ def render_table(records: list[dict], all_kinds: bool, asof: dt.date | None,
         if len(answer) > TABLE_ANSWER_CHARS:
             answer = answer[:TABLE_ANSWER_CHARS - 1] + "…"
         scope = parts["scope"] or "-"
+        match_cell = f" {_cell(parts['ticketMatch'] or '-')} |" if show_match else ""
         row = (f"| {_cell(parts['subject'])} | {_cell(answer)} | {_cell(parts['kind'])} | "
-               f"{_cell(parts['status'])} | {_cell(parts['confidence'])} | {_cell(scope)} | "
+               f"{_cell(parts['status'])} | {_cell(parts['confidence'])} | {_cell(scope)} |"
+               f"{match_cell} "
                f"{_short(parts['uuid'])} v{parts['version'] or '-'} | "
                f"{(parts['createdOn'] or '-')[:10]} |")
         cost = len(row) + 1
@@ -869,9 +888,10 @@ def render_table(records: list[dict], all_kinds: bool, asof: dt.date | None,
         rendered_records.append(record)
         used += cost
 
+    header_match = " Match |" if show_match else ""
     out = [
-        "| Subject | Answer | Kind | Status | Confidence | Scope | Memory · v | Captured |",
-        "|---|---|---|---|---|---|---|---|",
+        f"| Subject | Answer | Kind | Status | Confidence | Scope |{header_match} Memory · v | Captured |",
+        f"|---|---|---|---|---|---|{'---|' if show_match else ''}---|---|",
         *rows,
     ]
     skipped = non_kind + out_of_window
@@ -1522,9 +1542,11 @@ def initiative_mismatch_refusal(binding: dict, group: dict, initiative_source: s
         f"so writing now would version memories under '{got}', not '{wanted}'.{create_line} "
         f"Either re-run without the initiative to capture into '{got}', re-bind to "
         f"tickets that resolve nowhere (a new group under '{wanted}' — same subjects "
-        f"become new memories, never version bumps), or re-point the group first with "
-        f"update-group. Nothing was written; the group {group_uuid} was already "
-        f"resolved and remains."
+        f"become new memories, never version bumps), re-point the group first with "
+        f"update-group, or capture a WET copy that references the shared ticket: re-run with "
+        f"--reference-tickets <ticket> (optionally --tickets <a ticket your group owns>), which "
+        f"writes into '{wanted}' and declares an ABOUT reference to the shared ticket. Nothing "
+        f"was written; the group {group_uuid} was already resolved and remains."
     )
 
 
@@ -1828,6 +1850,67 @@ def set_items(candidates: list[dict], binding: dict, now: dt.datetime) -> list[d
             "summaryPromptVersion": "export-1",
         })
     return items
+
+
+def _reference_ticket_payload(reference_tickets: list[str]) -> list[dict]:
+    """The set payload's `ticketReferences` for a WET-copy export (ABOUT edges).
+
+    Each ticket is sent as a reference, not a group binding; the group owns its own (synthetic) ticket.
+    """
+    out = []
+    for ref in reference_tickets:
+        provider, _, key = ref.partition(":")
+        if provider and key:
+            out.append({"provider": provider, "key": key,
+                        "reason": f"WET copy across initiatives of {provider}:{key}"})
+    return out
+
+
+def _twin_link_reason(reference_tickets: list[str]) -> str:
+    provider, _, key = reference_tickets[0].partition(":")
+    return f"WET copy across initiatives of {provider}:{key}"
+
+
+def _reference_owner_group_uuid(reference_tickets: list[str], dryrun: bool) -> str | None:
+    """The referenced ticket's owning group uuid, for twin links. None when a dry run or unresolved.
+    """
+    if dryrun or not reference_tickets:
+        return None
+    provider, _, key = reference_tickets[0].partition(":")
+    rc, out, err = _run_capture_client(
+        WRITE_CLIENT, ["resolve-group"], _group_body({"tickets": [f"{provider}:{key}"]}, None, None))
+    if rc != 0:
+        return None
+    group = _first_json_object(out)
+    return _group_uuid(group) if isinstance(group, dict) else None
+
+
+def _build_twin_links(preflight_output: str, items: list[dict], reference_owner_group: str | None,
+                      twin_reason: str | None) -> list[dict]:
+    """`relates_to` links from the export's new items to the same-subject memory in the referenced
+    ticket's owner group. One link per candidate whose preflight match sits in that group (exact per
+    the preflight's own matching); mechanical, never a semantic judgement.
+    """
+    if not reference_owner_group or not twin_reason:
+        return []
+    try:
+        results = (json.loads(preflight_output) or {}).get("candidates") or []
+    except (ValueError, AttributeError):
+        return []
+    links = []
+    for result in results:
+        index = result.get("index")
+        if not isinstance(index, int) or index >= len(items):
+            continue
+        for match in result.get("matches") or []:
+            if isinstance(match, dict) and match.get("groupUuid") == reference_owner_group:
+                target = match.get("uuid")
+                source = items[index].get("uuid") or items[index].get("createUuid")
+                if source and target:
+                    links.append({"sourceUuid": source, "targetUuid": target,
+                                  "relation": "relates_to", "reason": twin_reason})
+                break
+    return links
 
 
 def _review_queue_path() -> str:
@@ -2213,6 +2296,26 @@ def cmd_export(args: argparse.Namespace) -> int:
               + json.dumps({k: v for k, v in recorded.items() if v}, ensure_ascii=False)
               + "; an explicit flag overrides it.")
 
+    reference_tickets = split_list(args.reference_tickets)
+    if reference_tickets:
+        for ref in reference_tickets:
+            provider, _, key = ref.partition(":")
+            if not provider or not key:
+                print(f"REFUSED: --reference-tickets wants provider:key, got {ref!r}. "
+                      "Nothing was written.", file=sys.stderr)
+                return 1
+        if not binding["initiative"]:
+            print("REFUSED: --reference-tickets needs --initiative (the WET copy's own initiative). "
+                  "Nothing was written.", file=sys.stderr)
+            return 1
+        if not args.tickets:
+            # A WET copy under a second initiative must reuse one group across re-exports, so the group
+            # owns a deterministic synthetic ticket, not a ticket discovered by Heimdallr or recorded in
+            # the dump — those name the shared ticket (or an unrelated one), which would resolve the
+            # owner's group instead. A ticketless export creates a new group every run (observed).
+            binding["tickets"] = [synthetic_owner_ticket(binding["initiative"], reference_tickets[0])]
+            print(f"Binding synthetic owner ticket: {binding['tickets'][0]} (a re-export reuses this group)")
+
     # A product edge points at an initiative or a repo, so an export binding neither has no node to
     # attach it to. Refused here, before any gate runs, rather than after the memories have landed: a
     # link that cannot be declared is not a reason to have written them first.
@@ -2442,6 +2545,13 @@ def cmd_export(args: argparse.Namespace) -> int:
 
     total_candidates = 0
     matched = 0
+    ticket_references = _reference_ticket_payload(reference_tickets)
+    twin_reason = _twin_link_reason(reference_tickets) if reference_tickets else None
+    reference_owner_group = _reference_owner_group_uuid(reference_tickets, dryrun=not args.write)
+    if reference_tickets:
+        print(f"References (ABOUT): {', '.join(reference_tickets)}"
+              + (f"; twin links into group {reference_owner_group}"
+                 if reference_owner_group else ""))
     for batch_no, chunk in enumerate(chunks, start=1):
         multi = total_chunks > 1
         tag = f" [batch {batch_no}/{total_chunks}]" if multi else ""
@@ -2513,9 +2623,14 @@ def cmd_export(args: argparse.Namespace) -> int:
         if not args.write:
             continue
 
+        twin_links = _build_twin_links(preflight, items, reference_owner_group, twin_reason) if rc == 0 else []
+        set_payload = {"groupUuid": group_uuid, "items": items, "links": twin_links,
+                       "labelsProposed": []}
+        if ticket_references:
+            set_payload["ticketReferences"] = ticket_references
+
         rc, out, err = _run_capture_client(
-            WRITE_CLIENT, ["set", "--dryrun"], {"groupUuid": group_uuid, "items": items,
-                                                "links": [], "labelsProposed": []})
+            WRITE_CLIENT, ["set", "--dryrun"], set_payload)
         if rc != 0:
             early = ("Earlier batch(es) were already written and remain; " if batch_no > 1 else "")
             veto_text = f"{err.strip() or out.strip()}"
@@ -2536,9 +2651,7 @@ def cmd_export(args: argparse.Namespace) -> int:
             return 1
         print(f"\nset --dryrun (the veto point){tag}:\n{out.strip()[:1200]}")
 
-        rc, out, err = _run_capture_client(
-            WRITE_CLIENT, ["set"], {"groupUuid": group_uuid, "items": items,
-                                    "links": [], "labelsProposed": []})
+        rc, out, err = _run_capture_client(WRITE_CLIENT, ["set"], set_payload)
         if rc != 0:
             print(f"WRITE FAILED{tag}: {err.strip() or out.strip()}", file=sys.stderr)
             if batch_no > 1:
@@ -3502,6 +3615,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     exp.add_argument("--write", action="store_true", dest="write_deprecated",
                      help=argparse.SUPPRESS)
     exp.add_argument("--tickets", help="Comma-separated ticket keys: #12, github:12, provider:key.")
+    exp.add_argument("--reference-tickets", dest="reference_tickets",
+                     help="Comma-separated tickets this WET copy is about, sent as ticketReferences "
+                          "(ABOUT). These do NOT drive group resolution; the group owns its own ticket "
+                          "from --tickets, or a deterministic synthetic owner ticket when --tickets is "
+                          "omitted, so a re-export reuses one group.")
     exp.add_argument("--tags", help="Comma-separated tags/facets to bind.")
     exp.add_argument("--repository", help="Repository to associate with the group.")
     exp.add_argument("--scope", help="scope:identifier, e.g. product:invitations.")

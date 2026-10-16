@@ -211,6 +211,58 @@ public sealed class SnapshotRestoreRoundTripTests : PersistenceTestBase
     }
 
     [Fact]
+    public async Task SnapshotThenRestore_PreservesAboutReferences_AndReconciles()
+    {
+        // A memory in one group references a ticket owned by another group (the cross-initiative
+        // case HLD-003 LADR-09 exists for). An ABOUT edge that is not snapshotted is silently lost
+        // on restore, so this proves the edge survives the capture -> verify -> restore round trip
+        // and that reconciliation counts it.
+        var ownerGroup = TestEntities.NewGroup(tickets: [TicketDocument.Create(Provider, "T-1", "https://tracker/T-1")]);
+        var refGroup = TestEntities.NewGroup();
+        Db.MemoryGroups.AddRange(ownerGroup, refGroup);
+        await Db.SaveChangesAsync(Ct);
+
+        var ownerMem = TestEntities.NewMemory(ownerGroup.Id, "owned", "owned subject");
+        var refMem = TestEntities.NewMemory(refGroup.Id, "ref", "ref subject");
+        Db.Memories.AddRange(ownerMem, refMem);
+        await Db.SaveChangesAsync(Ct);
+
+        Db.MemoryVersions.Add(TestEntities.NewVersion(ownerMem.Id, 1, "owner claim", isCurrent: true));
+        Db.MemoryVersions.Add(TestEntities.NewVersion(refMem.Id, 1, "ref claim", isCurrent: true));
+        await Db.SaveChangesAsync(Ct);
+
+        await new NpgsqlMemoryGraph(Db).CreateAboutAsync(refMem.Uuid, Provider, "T-1", "about ref", Ct);
+
+        SnapshotStore.Response snapshot = await new SnapshotStore.Handler(
+            Repository, Archive, Blob, new FileSnapshotMetadataStore(CreateMetadataOptions()),
+            Loggers.CreateLogger<SnapshotStore.Handler>())
+            .Handle(new SnapshotStore.Request(ConnectionString, Path.Combine(Path.GetTempPath(), $"snap-{Guid.NewGuid():N}.tar")), Ct);
+
+        (await new VerifyArchive.Handler(Archive, Loggers.CreateLogger<VerifyArchive.Handler>())
+            .Handle(new VerifyArchive.Request(snapshot.DestinationPath), Ct)).IsClean.ShouldBeTrue();
+
+        await using SmoothAiProductContextMemoryTestDatabase target = await SmoothAiProductContextMemoryTestDatabase.CreateAsync(
+            _aspire, $"infra-about-{Guid.NewGuid():N}", Ct);
+        await using NpgsqlDataSource targetDataSource = NpgsqlDataSourceFactory.Create(target.ConnectionString);
+        await MigrateAsync(targetDataSource, Ct);
+        await using var targetDb = new SmoothAiProductContextMemoryDbContext(
+            new DbContextOptionsBuilder<SmoothAiProductContextMemoryDbContext>()
+                .UseNpgsql(targetDataSource, npgsql => npgsql.UseNodaTime().UseSmoothAiProductContextMemoryHistory())
+                .Options);
+        await using S3BlobStorage targetBlob = CreateBlob("snap-about-target");
+
+        RestoreArchive.Response restore = await new RestoreArchive.Handler(
+            new NpgsqlSnapshotRepository(targetBlob, targetBlob),
+            Archive, targetBlob,
+            Loggers.CreateLogger<RestoreArchive.Handler>())
+            .Handle(new RestoreArchive.Request(snapshot.DestinationPath, target.ConnectionString), Ct);
+
+        restore.Reconciled.ShouldBeTrue();
+        restore.Restored.Committed.ShouldBeTrue();
+        restore.Restored.AboutEdges.ShouldBe(1);
+    }
+
+    [Fact]
     public async Task Restore_MissingBlobEntry_FailsLoudly_NoPartialSuccess()
     {
         var source = await SeedCorpusAsync();
@@ -359,7 +411,7 @@ public sealed class SnapshotRestoreRoundTripTests : PersistenceTestBase
         await Should.ThrowAsync<InvalidOperationException>(() => Repository.RestoreAsync(
             target.ConnectionString,
             EmptyCapture,
-            new SnapshotCounts(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+            new SnapshotCounts(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
             overrideNonEmpty: false,
             Ct));
 
@@ -460,7 +512,7 @@ public sealed class SnapshotRestoreRoundTripTests : PersistenceTestBase
             Task<RestoreResults> restore = budgeted.RestoreAsync(
                 target.ConnectionString,
                 EmptyCapture,
-                new SnapshotCounts(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+                new SnapshotCounts(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
                 overrideNonEmpty: false,
                 Ct);
             Task finished = await Task.WhenAny(restore, Task.Delay(TimeSpan.FromSeconds(30), Ct));
@@ -522,7 +574,7 @@ public sealed class SnapshotRestoreRoundTripTests : PersistenceTestBase
         RestoreResults restored = await Repository.RestoreAsync(
             target.ConnectionString,
             EmptyCapture,
-            new SnapshotCounts(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+            new SnapshotCounts(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
             overrideNonEmpty: false,
             Ct);
 
@@ -545,7 +597,7 @@ public sealed class SnapshotRestoreRoundTripTests : PersistenceTestBase
     }
 
     /// <summary>A capture with nothing in it: enough shape for the refusal, which is all these use.</summary>
-    private static SnapshotCapture EmptyCapture => new([], [], [], [], [], [], [], [], [], [], [], [], [], [], []);
+    private static SnapshotCapture EmptyCapture => new([], [], [], [], [], [], [], [], [], [], [], [], [], [], [], []);
 
     private async Task<(int Memories, int Versions, int Vertices, int Edges, int TicketVertices, int TicketEdges, string Address)> SeedCorpusAsync()
     {

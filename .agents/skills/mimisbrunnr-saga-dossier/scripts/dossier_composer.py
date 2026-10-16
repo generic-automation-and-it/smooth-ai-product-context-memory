@@ -58,6 +58,7 @@ import context_memory_client as _store_client  # noqa: E402
 # The credential names and the machine file, re-exported from the shared client so this module reads
 # and refuses through one place rather than restating the variable names.
 _ENV_BASE_URL = _store_client.ENV_BASE_URL
+_DEFAULT_BASE_URL = _store_client.DEFAULT_BASE_URL
 _ENV_READ_TOKEN = _store_client.ENV_READ_TOKEN
 _ENV_WRITE_TOKEN = _store_client.ENV_WRITE_TOKEN
 _MACHINE_CREDENTIAL_FILE = _store_client.MACHINE_CREDENTIAL_FILE
@@ -1544,7 +1545,10 @@ def _resolve_read_credentials(base_url):
     present = _store_client.write_tokens_present()
     if present:
         raise ValueError(f"{', '.join(present)} must not be present in a read-only bundle request")
-    base = (base_url or os.environ.get(_ENV_BASE_URL, "http://localhost:5141")).rstrip("/")
+    # The default comes from the shared client rather than a literal here: the env var name was
+    # already borrowed from it, so re-stating the port was the one value that could drift away from
+    # the value every other client falls back to.
+    base = (base_url or os.environ.get(_ENV_BASE_URL, _DEFAULT_BASE_URL)).rstrip("/")
     _assert_loopback(base)
     token = os.environ.get(_ENV_READ_TOKEN)
     if not token:
