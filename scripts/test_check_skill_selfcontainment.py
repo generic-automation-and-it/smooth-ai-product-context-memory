@@ -260,6 +260,73 @@ class SelfContainmentTests(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertEqual(installer_owns(name, INSTALLER_PS1), is_owned(name))
 
+    # --- the fourth copy of the owned set: which PRs the gate even runs on ----------------------
+
+    def test_the_gate_triggers_on_every_owned_skill(self):
+        """`pr-gate.yml`'s `paths:` filter is a fourth copy of the owned set, and it is the one copy
+        that used to have nothing holding it.
+
+        The other three — `install-skills.sh`, `install-skills.ps1`, `check_skill_selfcontainment.py` —
+        are compared to each other by the cases above, so an addition to the owned set that missed one
+        of them turned the harness red. The gate filter was not in that set, and that is why
+        `ai-memory-context` shipped with its harness step at `:120` unreachable: a PR touching only
+        that folder never started the workflow, so nothing ran, and nothing said so.
+
+        GitHub evaluates `paths:` before a runner exists, so this list cannot be derived the way the
+        other three are derived — it has to be *asserted*, which is the same mechanism applied to the
+        one consumer that cannot compute the answer.
+        """
+        push, pull_request = gate_skill_filters()
+        # Both blocks are meant to be the same filter; a skill added to one and not the other would
+        # pass the gate on a PR and not on the push, which is close to unobservable in a diff.
+        self.assertEqual(push, pull_request, "the push and pull_request path filters have diverged")
+
+        # A synthetic prefixed name as well as the real folders: the owned set is `mimisbrunnr-*` plus
+        # three exact names, so the *next* prefixed skill has to be covered by the shape of the filter
+        # rather than by a line someone remembers to add.
+        owned = [p.name for p in SKILLS.iterdir() if p.is_dir() and installer_owns(p.name)]
+        owned += ["mimisbrunnr-a-skill-not-yet-written"]
+        for name in owned:
+            if name == "_mimisbrunnr-shared":
+                continue  # infrastructure, listed explicitly rather than by the owned rule
+            with self.subTest(name=name):
+                self.assertTrue(
+                    filter_covers(push, name),
+                    f"pr-gate.yml has no paths: entry covering the owned skill {name!r}, so a PR "
+                    f"touching only that folder never runs the gate. Owned set: {push}",
+                )
+
+
+def gate_skill_filters():
+    """The `.agents/skills/...` entries of the gate's `push:` and `pull_request:` `paths:` filters.
+
+    Split on the `pull_request:` key rather than parsed as YAML: PyYAML is not a declared dependency
+    of this repository, and the filter is a flat list of string literals under two known keys. Each
+    half is read independently so a skill present in one and absent from the other is a *difference*,
+    not an artefact of the split.
+    """
+    text = (SKILLS.parents[1] / ".github" / "workflows" / "pr-gate.yml").read_text(encoding="utf-8")
+    # Both lists sit *after* their key, so it is the discarded tail that holds the filter — the first
+    # version of this took the head and read an empty filter from both blocks.
+    before_pr, _, pull_request = text.partition("  pull_request:\n")
+    _, _, push = before_pr.partition("  push:\n")
+
+    def entries(segment):
+        return [line.split("- ", 1)[1].strip().strip("'\"")
+                for line in segment.splitlines()
+                if line.strip().startswith("- .agents/skills/")]
+
+    return entries(push), entries(pull_request)
+
+
+def filter_covers(entries, name):
+    """True when any filter entry matches `name`. Globs count, so `agile-github-*` covers its two."""
+    import fnmatch
+
+    return any(fnmatch.fnmatch(name, entry[len(".agents/skills/"):].rstrip("/*"))
+               or fnmatch.fnmatch(name, entry[len(".agents/skills/"):].removesuffix("/**"))
+               for entry in entries)
+
 
 class GateEntryPointTests(unittest.TestCase):
     """The checks above call the functions; these run the gate the way CI does.

@@ -20,13 +20,13 @@ on:
       - npm/**
       - package.json
       - .agents/skills/_mimisbrunnr-shared/**
-      - .agents/skills/mimisbrunnr-odin-context-memory/**
-      - .agents/skills/mimisbrunnr-kvasir-understanding/**
-      - .agents/skills/mimisbrunnr-saga-dossier/**
+      # One glob, not a line per skill: the next `mimisbrunnr-*` is covered by the shape
+      # of the filter instead of by a remembered edit. `test_check_skill_selfcontainment`
+      # asserts every owned skill is reachable from here, so this cannot go stale silently.
+      - .agents/skills/mimisbrunnr-*/**
+      - .agents/skills/ai-brain-dump/**
+      - .agents/skills/ai-memory-context/**
       - .agents/skills/ai-understanding/**
-      - .agents/skills/mimisbrunnr-muninn-recall-feedback/**
-      - .agents/skills/mimisbrunnr-ymir-bootstrap/**
-      - .agents/skills/mimisbrunnr-heimdallr-find-session-metadata/**
       - .agents/skills/agile-github-*/**
       - .github/actions/**
       - .github/scripts/**
@@ -51,13 +51,13 @@ on:
       - npm/**
       - package.json
       - .agents/skills/_mimisbrunnr-shared/**
-      - .agents/skills/mimisbrunnr-odin-context-memory/**
-      - .agents/skills/mimisbrunnr-kvasir-understanding/**
-      - .agents/skills/mimisbrunnr-saga-dossier/**
+      # One glob, not a line per skill: the next `mimisbrunnr-*` is covered by the shape
+      # of the filter instead of by a remembered edit. `test_check_skill_selfcontainment`
+      # asserts every owned skill is reachable from here, so this cannot go stale silently.
+      - .agents/skills/mimisbrunnr-*/**
+      - .agents/skills/ai-brain-dump/**
+      - .agents/skills/ai-memory-context/**
       - .agents/skills/ai-understanding/**
-      - .agents/skills/mimisbrunnr-muninn-recall-feedback/**
-      - .agents/skills/mimisbrunnr-ymir-bootstrap/**
-      - .agents/skills/mimisbrunnr-heimdallr-find-session-metadata/**
       - .agents/skills/agile-github-*/**
       - .github/actions/**
       - .github/scripts/**
