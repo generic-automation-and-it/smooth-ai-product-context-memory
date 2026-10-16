@@ -8,7 +8,7 @@
 import { postQuery, getInitiatives, getProductNames } from './api.js';
 import { esc, shortUuid, fmtInstant, plural, fmtValidity } from './util.js';
 import { openDetail, maybeOpenFromUrl } from './detail.js';
-import { resolveKind, setQueryProductName, onViewContext } from './view-context.js';
+import { resolveKind, setQueryProductName, queryProductNameValue, onViewContext } from './view-context.js';
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -67,6 +67,71 @@ const state = {
 
 let currentRows = [];
 let requestSeq = 0;
+
+// Shareable browse state: every filter lives in the URL query string (plus the
+// open detail's `uuid`), so a copied URL reproduces the view. `refresh()` writes
+// it with `replaceState` (no history spam); init/popstate read it back into the
+// controls before querying. Facets/tags repeat as `?facet=a&facet=b`.
+const LIMIT_OPTIONS = ['50', '100', '200'];
+
+function writeUrlParams() {
+  const url = new URL(window.location.href);
+  const params = new URLSearchParams();
+  const uuid = url.searchParams.get('uuid');
+  if (uuid) params.set('uuid', uuid);
+  if (state.query) params.set('q', state.query);
+  for (const facet of state.facets) params.append('facet', facet);
+  if (state.facets.length) params.set('facetMode', state.facetMatchMode);
+  for (const tag of state.tags) params.append('tag', tag);
+  if (state.kind) params.set('kind', state.kind);
+  if (state.status) params.set('status', state.status);
+  if (state.includeProposed) params.set('proposed', '1');
+  if (state.ticketProvider && state.ticketKey) {
+    params.set('ticketProvider', state.ticketProvider);
+    params.set('ticketKey', state.ticketKey);
+  }
+  if (state.initiativeName) params.set('initiative', state.initiativeName);
+  if (state.repo) params.set('repo', state.repo);
+  if (state.productName) params.set('product', state.productName);
+  if (state.groupUuid) params.set('group', state.groupUuid);
+  if (state.validity === 'asof' && state.asOf) {
+    params.set('validity', 'asof');
+    params.set('asOf', state.asOf);
+  }
+  if (state.limit !== 50) params.set('limit', String(state.limit));
+  const next = params.toString();
+  const target = `${url.pathname}${next ? `?${next}` : ''}${url.hash}`;
+  if (target !== `${url.pathname}${url.search}${url.hash}`) history.replaceState(null, '', target);
+}
+
+function applyUrlParams() {
+  const params = new URLSearchParams(window.location.search);
+  els.query.value = params.get('q') || '';
+  state.facets = params.getAll('facet');
+  state.facetMatchMode = params.get('facetMode') === 'all' ? 'all' : 'any';
+  document.querySelectorAll('input[name="facet-mode"]').forEach((radio) => {
+    radio.checked = radio.value === state.facetMatchMode;
+  });
+  state.tags = params.getAll('tag');
+  els.kind.value = params.get('kind') || '';
+  els.status.value = params.get('status') || '';
+  els.includeProposed.checked = params.get('proposed') === '1';
+  els.provider.value = params.get('ticketProvider') || '';
+  els.key.value = params.get('ticketKey') || '';
+  els.initiative.value = params.get('initiative') || '';
+  els.product.value = params.get('product') || '';
+  els.repo.value = params.get('repo') || '';
+  state.groupUuid = params.get('group') || '';
+  const limit = params.get('limit');
+  els.limit.value = limit && LIMIT_OPTIONS.includes(limit) ? limit : '50';
+  const validity = params.get('validity') === 'asof' ? 'asof' : 'current';
+  document.querySelectorAll('input[name="validity"]').forEach((radio) => {
+    radio.checked = radio.value === validity;
+  });
+  els.asof.value = validity === 'asof' ? (params.get('asOf') || '') : '';
+  els.asof.hidden = validity !== 'asof';
+  renderListChips();
+}
 
 function collectOptions() {
   const kinds = new Set();
@@ -197,6 +262,22 @@ function lineageOf(row) {
   return `${group} · ${tickets.length} tickets (${tickets.map(ticketLabel).join(', ')})`;
 }
 
+// Dedicated columns (Lineage keeps the group + pin): tickets bound to the row,
+// and the product the query resolved the row through. `productMatch` is only set
+// when the query carried `productName`, so the column reads `—` otherwise — the
+// row carries no product name of its own; the registry does.
+function ticketsCell(row) {
+  const tickets = (row.tickets || []).filter((ticket) => ticket.provider && ticket.key);
+  if (tickets.length === 0) return '—';
+  return tickets.map((ticket) => ticketLabel(ticket)).join(', ');
+}
+
+function productCell(row) {
+  if (!row.productMatch) return '—';
+  const product = queryProductNameValue();
+  return product ? `${product} · via ${row.productMatch}` : `via ${row.productMatch}`;
+}
+
 function renderTable() {
   els.state.hidden = true;
   els.tableWrap.hidden = false;
@@ -209,6 +290,8 @@ function renderTable() {
       <td>v${row.version ?? ''}${row.isCurrent ? ' · current' : ''}</td>
       <td>${esc(fmtValidity(row))}</td>
       <td>${esc(row.scopeDimension || '')}${row.scopeIdentifier ? ` · ${esc(row.scopeIdentifier)}` : ''}</td>
+      <td>${esc(ticketsCell(row))}</td>
+      <td>${esc(productCell(row))}</td>
       <td>${lineage}<button type="button" class="pin" data-index="${index}" title="Narrow to this group">pin group</button></td>
       <td>${fmtInstant(row.createdOn)}</td>
     </tr>`;
@@ -285,6 +368,7 @@ function scheduleReload(delay) {
 async function refresh() {
   updateState();
   renderChips();
+  writeUrlParams();
   const seq = ++requestSeq;
   els.results.querySelector('.limit-note')?.remove();
   setState('loading', 'Loading memories…');
@@ -417,13 +501,19 @@ export async function initBrowse() {
     viewContextSubscribed = true;
     onViewContext((reason) => { if (reason === 'kind') refresh(); });
   }
+  // Restore shared state: a copied URL carries the filters, so they land in the
+  // controls before the first query (initiative/product options are loaded above).
+  applyUrlParams();
   await refresh();
   maybeOpenFromUrl(currentRows);
 }
 
 // Cross-pane re-entry: refresh rows and open the URL-selected memory, but
 // never re-wire controls (initBrowse is for the first activation only).
+// Back/forward may carry a different filter set, so the controls re-sync from
+// the URL first — refresh() reads the controls, not the URL.
 export async function reopenFromUrl() {
+  applyUrlParams();
   await refresh();
   maybeOpenFromUrl(currentRows);
 }
