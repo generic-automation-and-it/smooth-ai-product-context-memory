@@ -19,7 +19,7 @@ Read [`SKILL.md`](./SKILL.md) first — switches, store layout, the reconcile/ex
   (LADR-014). The changelog records each.
 - **`scripts/decisions_gate.py`, `decisions_rubric.json`, `redact.py` and `session_marker.py` are
   byte-identical copies of `_mimisbrunnr-shared/scripts/`** — never imported, so the skill runs where no
-  `mimisbrunnr-*` is installed; `tests/parity_decisions_gate.py` holds them equal. `gate_decisions.py` is
+  `mimisbrunnr-*` is installed; the repository's `tests/parity_decisions_gate.py` holds them equal (no `tests/` ships in an installed copy). `gate_decisions.py` is
   owned here. The gate reads `CONTEXT_MEMORY_DECISIONS_*` (ten keys seeded from `~/.mimisbrunnr/credentials`;
   `LEDGER_MAX_ENTRIES` env-only) and no store token; `CONTEXT_MEMORY_DECISIONS_API_KEY` reaches only
   `decisions_gate.py`, as the bearer header.

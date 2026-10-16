@@ -223,7 +223,7 @@ a fragment is refused, and a trailing slash is ignored.
 
 ## Test
 
-Committed harness: `python3 -B .agents/skills/mimisbrunnr-saga-dossier/tests/run_tests.py`.
+Committed harness, **in this repository** (an installed copy ships no `tests/`): `python3 -B .agents/skills/mimisbrunnr-saga-dossier/tests/run_tests.py`.
 
 ## Related
 

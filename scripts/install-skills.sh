@@ -219,6 +219,37 @@ sweep_stale_entries() {
   done
 }
 
+# prune_non_shippable DEST — remove what does not belong in an installed copy of a skill.
+#
+# Copy-then-remove, deliberately, rather than `tar --exclude` or a copy filter. Every alternative
+# buys its portability somewhere else: `tar --exclude` differs between GNU and BSD in flag spelling,
+# and `rsync --exclude` is a third dependency for the same job. `cp -R` is already here and means the
+# same thing on both platforms, and the prune is a plain `rm -rf` on two known names.
+#
+# The list is short because it is a *runtime* list. `agents/`, `references/` and `assets/` are
+# runtime-referenced — odin reads `references/read-path.md` and `write-path.md` mid-skill, and
+# ai-understanding renders `assets/UNDERSTANDING.template.md` — so stripping them ships a skill that
+# documents a file it cannot open. Only two names are excluded:
+#
+#   tests/       Harnesses. A test asserts against the repository's own tree (paths, the shared
+#                original behind a WET copy), so it is meaningless outside it and is the bulk of what
+#                an installed skill does not need. This is not a security boundary: nothing in a
+#                skill reads its own tests at runtime, and the exclusion exists to keep an installed
+#                copy down to what runs rather than to hide anything.
+#   __pycache__/ Interpreter output, never tracked, regenerated on first run. Removed recursively,
+#                because a previous run — or an operator running the scripts directly inside their
+#                install — leaves it at any depth. The npm `files` allowlist already excludes it for
+#                the shared folder for the same reason.
+#
+# Only the destination is pruned. The clone source stays byte-identical, which is what keeps
+# `sweep_stale_entries` able to compare against it.
+prune_non_shippable() {
+  local dest="$1" dir
+  [ -d "$dest" ] || return 0
+  rm -rf "$dest/tests"
+  find "$dest" -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true
+}
+
 # ---------------------------------------------------------------------------
 # 5. Update installed skills from the repo
 # ---------------------------------------------------------------------------
@@ -286,6 +317,7 @@ for s in data.get('skills', []):
     if [ -d "$INSTALL_TMP/repo/.agents/skills/$name" ]; then
       rm -rf "$skills_root/$name"
       cp -R "$INSTALL_TMP/repo/.agents/skills/$name" "$skills_root/$name"
+      prune_non_shippable "$skills_root/$name"
       log "Updated $name"
     else
       log "WARNING: $name not found in repo — left on disk untouched"
@@ -309,6 +341,12 @@ for s in data.get('skills', []):
     # still has *as a folder* while leaving the files inside it that the source dropped, which is where
     # a retired script actually goes.
     sweep_stale_entries "$shared_dest" "$shared_source"
+    # Swept first, pruned second, and that order is deliberate. `sweep_stale_entries` compares the
+    # destination against the source and needs to see the same files on both sides; pruning first
+    # would leave the destination missing a `__pycache__` the source still had, and the sweep would
+    # read that as an upstream deletion — harmless here, but it makes the two steps look
+    # interchangeable when they are not.
+    prune_non_shippable "$shared_dest"
     log "Updated _mimisbrunnr-shared"
   fi
 }
