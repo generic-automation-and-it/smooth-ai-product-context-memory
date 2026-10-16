@@ -195,7 +195,7 @@ detail pane and, in the Graph view, can seed the graph root.
 | **Version** | `Version` / `IsCurrent` | `v3` plus a "current/superseded" dot |
 | **Validity** | `ValidFrom` … `ValidUntil` | `ValidUntil` null shown as "open"; a superseded row shows its replaced window |
 | **Scope** | `ScopeDimension`:`ScopeIdentifier` | Compact pill |
-| **Lineage** | `GroupUuid` + the group's `tickets` | One ticket reads as `group · system:reference`; several read as `group · N tickets (…)`, because a group accumulates tickets and naming one would hide the rest |
+| **Lineage** | `GroupUuid` + `tickets` | One ticket reads as `group · system:reference`; several read as `group · N tickets (…)`, because a group accumulates tickets and naming one would hide the rest. A ticket the memory **references** (an `ABOUT` edge, not group-owned) is marked `(referenced)` |
 | **Created** | `CreatedOn` | Default sort |
 
 - **Default sort: `CreatedOn` descending.** The newest capture is first, which is what a practitioner
@@ -319,8 +319,10 @@ The pane renders, top to bottom:
    captured time. Selecting a version fetches **that version's** blob body on demand.
 7. **Blob body.** Fetched on selection via the blob endpoint; never fetched for the whole list (NFR-05).
 8. **Load into a session.** A copy-able `mimisbrunnr-kvasir-understanding import` command pre-filled with
-   this memory's bindings — `--ticket system:reference` (the first of the group's tickets, said so when
-   there are more), `--initiative`, `--repository`, and `--product-name` when the Browse query carried one.
+   this memory's bindings — `--ticket system:reference` (the first ticket the **group owns**, said so when
+   there are more; a ticket this memory only *references* is not bound, because `--ticket` resolves the
+   owning group and would recall that other group's memories), `--initiative`, `--repository`, and
+   `--product-name` when the Browse query carried one.
    `import` reads `kind = understanding` only, so any other kind carries `--all`; without it the command
    would return nothing and read as "the store has no context". Values are shell-quoted, and a flag is
    emitted only for a binding the memory actually has.
