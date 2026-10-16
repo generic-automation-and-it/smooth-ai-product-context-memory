@@ -177,5 +177,8 @@ public class DossierSelectionTests
 
         public Task<bool> CreateAboutAsync(Guid memoryUuid, string provider, string key, string reason, CancellationToken cancellationToken) =>
             throw new NotSupportedException();
+
+        public Task<IReadOnlyList<Guid>> ListAboutAsync(string provider, string key, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<Guid>>([]);
     }
 }

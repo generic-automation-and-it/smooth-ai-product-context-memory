@@ -203,7 +203,7 @@ public class DossierBundleTests
 
 
     private static DossierReach Reach() =>
-        new(WidenDepth: 3, Anchors: 1, Widened: 0, Selected: 1, Edges: 0, HiddenPathDropped: false);
+        new(WidenDepth: 3, Anchors: 1, Widened: 0, Selected: 1, Edges: 0, HiddenPathDropped: false, ReferencedAnchors: 0);
 
     private static DossierMemory MemoryItem(Guid uuid, Guid groupUuid, string body, bool isCollapsed) =>
         new(
@@ -295,5 +295,6 @@ public class DossierBundleTests
             DepthLimitReached: false,
             HiddenPathDropped: false,
             LimitReached: limitReached,
+            ReferencedAnchors: 0,
             Edges: []);
 }

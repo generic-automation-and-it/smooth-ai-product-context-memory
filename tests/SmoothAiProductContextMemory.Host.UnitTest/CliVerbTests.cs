@@ -193,7 +193,7 @@ public sealed class CliVerbTests
         {
             await new TarSnapshotArchive().WriteAsync(
                 path,
-                new SnapshotCapture([], [], [], [], [], [], [], [], [], [], [], [], [], [], []),
+                new SnapshotCapture([], [], [], [], [], [], [], [], [], [], [], [], [], [], [], []),
                 new SnapshotWalkResult([], 0, 0),
                 (_, _) => throw new InvalidOperationException("an empty capture cites no body"),
                 TestContext.Current.CancellationToken);

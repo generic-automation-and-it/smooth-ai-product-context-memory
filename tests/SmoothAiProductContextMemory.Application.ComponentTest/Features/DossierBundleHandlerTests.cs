@@ -202,6 +202,40 @@ public sealed class DossierBundleHandlerTests : HandlerTestBase
     }
 
     [Fact]
+    public async Task Ticket_anchor_includes_references_and_reports_referencedAnchors()
+    {
+        var owner = Group(Guid.NewGuid(), MemoryGroup.ScopeDimensionValue.Product);
+        owner.Tickets = [TicketDocument.Create("jira", "ACM-999", "https://tracker/ACM-999")];
+        Db.MemoryGroups.Add(owner);
+        await Db.SaveChangesAsync(Ct);
+
+        var refGroup = Group(Guid.NewGuid(), MemoryGroup.ScopeDimensionValue.Product);
+        Db.MemoryGroups.Add(refGroup);
+        await Db.SaveChangesAsync(Ct);
+
+        Memory ownerMem = MemoryRow(owner.Id, Guid.NewGuid(), "Owner", "Owner fact", ["tag-1"], "architecture");
+        Memory refMem = MemoryRow(refGroup.Id, Guid.NewGuid(), "Reference", "Reference fact", ["tag-1"], "architecture");
+        Db.Memories.AddRange(ownerMem, refMem);
+        await Db.SaveChangesAsync(Ct);
+
+        Db.MemoryVersions.Add(Version(ownerMem.Id, 1, "owner claim", true, MemoryVersion.KindValue.Decision));
+        Db.MemoryVersions.Add(Version(refMem.Id, 1, "reference claim", true, MemoryVersion.KindValue.Decision));
+        await Db.SaveChangesAsync(Ct);
+
+        await Graph.CreateAboutAsync(refMem.Uuid, "jira", "ACM-999", "about ref", Ct);
+
+        var blobs = new DictionaryBlobStorage();
+        CreateDossierBundle.Response response = await BundleHandler(blobs)
+            .Handle(BundleRequest(ticketProvider: "jira", ticketKey: "ACM-999"), Ct);
+
+        // The reference copy is an anchor reached through ABOUT, so it is selected and disclosed as
+        // a reference rather than as an owned/hierarchy identity.
+        response.Bundle.Manifest.NoMatch.ShouldBeFalse();
+        response.Bundle.Manifest.Reach.ReferencedAnchors.ShouldBe(1);
+        response.Bundle.Items.ShouldContain(i => i.Statement == "reference claim");
+    }
+
+    [Fact]
     public async Task Ticket_anchor_with_a_status_reaches_the_memory_the_manifest_says_it_reached()
     {
         // The ticket traversal's identity set is the filter the anchor search then applies its own

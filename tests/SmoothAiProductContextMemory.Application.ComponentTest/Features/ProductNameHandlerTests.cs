@@ -302,7 +302,7 @@ public sealed class ProductNameHandlerTests(AspireFixture aspire) : HandlerTestB
         new(ProductGraph, Loggers.CreateLogger<LinkProductRepo.Handler>());
 
     private QueryMemories.Handler NewQuery() =>
-        new(AppDb, Search, new NoopRecallFeedback(), ProductGraph, Loggers.CreateLogger<QueryMemories.Handler>());
+        new(AppDb, Search, new NoopRecallFeedback(), ProductGraph, Graph, Loggers.CreateLogger<QueryMemories.Handler>());
 
     private SetMemories.Handler NewSet() =>
         new(AppDb, Graph, Blob, ErrorMapper, ProductGraph, Loggers.CreateLogger<SetMemories.Handler>());
