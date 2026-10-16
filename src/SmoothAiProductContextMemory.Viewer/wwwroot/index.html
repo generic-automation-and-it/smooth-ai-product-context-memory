@@ -205,6 +205,16 @@
             <input id="graph-root" placeholder="memory uuid" autocomplete="off">
           </label>
           <label class="field">
+            <span class="field-label">Initiative (anchor)</span>
+            <input id="graph-initiative" list="graph-initiative-options" placeholder="any initiative" autocomplete="off">
+            <datalist id="graph-initiative-options"></datalist>
+          </label>
+          <label class="field">
+            <span class="field-label">Product name (anchor)</span>
+            <input id="graph-product" list="graph-product-options" placeholder="any product" autocomplete="off">
+            <datalist id="graph-product-options"></datalist>
+          </label>
+          <label class="field">
             <span class="field-label">Depth</span>
             <select id="graph-depth">
               <option value="1">1</option>
@@ -253,6 +263,7 @@
           <button type="submit" id="graph-draw">Draw</button>
           <button type="button" id="graph-use-browse">Use the memory open in Browse</button>
         </div>
+        <p class="hint">A root uuid walks captured edges; an initiative/product anchor draws the membership cluster instead — every anchor has a graph, even with no edges. Activate a cluster node to walk from it.</p>
       </form>
 
       <p id="graph-header" class="graph-header" aria-live="polite" hidden></p>

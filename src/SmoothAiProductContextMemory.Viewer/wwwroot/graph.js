@@ -13,7 +13,7 @@
 //
 // The layout is a force simulation run to convergence and then frozen — a static picture, so
 // reduced motion is honoured by construction and there is no animation loop to leak CPU.
-import { postPaths, postTicketPaths, getMemory } from './api.js';
+import { postPaths, postTicketPaths, getMemory, postQuery, getInitiatives, getProductNames } from './api.js';
 import { esc, shortUuid, plural } from './util.js';
 import { selectedMemory } from './detail.js';
 import { resolveKind, onViewContext } from './view-context.js';
@@ -41,6 +41,10 @@ const els = {
   form: $('#graph-form'),
   root: $('#graph-root'),
   useBrowse: $('#graph-use-browse'),
+  initiative: $('#graph-initiative'),
+  initiativeOptions: $('#graph-initiative-options'),
+  product: $('#graph-product'),
+  productOptions: $('#graph-product-options'),
   depth: $('#graph-depth'),
   relation: $('#graph-relation'),
   relationOptions: $('#graph-relation-options'),
@@ -81,6 +85,10 @@ const state = {
   truncated: false,
   labels: new Map(),
   seq: 0,
+  // Anchor mode: an initiative/product resolves to its member memories through
+  // the query API and renders as a cluster. Edges stay LINKS-only and are walked
+  // per node on demand — the cluster is membership, not a claim of edges.
+  anchor: null,
 };
 
 let ticketInFlight = false;
@@ -122,6 +130,11 @@ function hash(text) {
   return value >>> 0;
 }
 
+// The pinned centre: the walk root, or the anchor pseudo-node in anchor mode.
+function centerId() {
+  return state.anchor ? `anchor:${state.anchor.type}:${state.anchor.value}` : state.rootUuid;
+}
+
 /**
  * A spring–repulsion layout run to a fixed number of iterations and then frozen. Deterministic
  * (positions are seeded from the uuid, not from Math.random), so the same paths always draw the
@@ -130,7 +143,7 @@ function hash(text) {
 function layout(nodes, edges) {
   const positions = new Map();
   for (const node of nodes) {
-    if (node.id === state.rootUuid) {
+    if (node.id === centerId()) {
       positions.set(node.id, { x: CANVAS_WIDTH / 2, y: CANVAS_HEIGHT / 2 });
       continue;
     }
@@ -182,7 +195,7 @@ function layout(nodes, edges) {
     }
 
     for (const node of nodes) {
-      if (node.id === state.rootUuid) continue;
+      if (node.id === centerId()) continue;
       const point = positions.get(node.id);
       const delta = displacement.get(node.id);
       point.x = Math.min(Math.max(point.x + delta.dx, 40), CANVAS_WIDTH - 40);
@@ -209,7 +222,7 @@ function buildGraph(paths) {
       return existing;
     }
     if (nodes.size >= MAX_RENDERED_NODES) { truncated = true; return null; }
-    const created = { id, label: label || state.labels.get(id) || '', root: id === state.rootUuid };
+    const created = { id, label: label || state.labels.get(id) || '', root: id === centerId() };
     nodes.set(id, created);
     return created;
   };
@@ -308,13 +321,18 @@ function renderCanvas(graph) {
     const radius = node.root ? 13 : 9;
     const fill = node.root ? '#2458b0' : labelled ? '#0d6b62' : '#ffffff';
     const stroke = node.root ? '#12336a' : labelled ? '#0a4a44' : '#55555c';
-    const kind = node.root ? 'root' : labelled ? 'labelled memory' : 'unlabelled hop';
+    const kind = node.root
+      ? (state.anchor ? 'anchor' : 'root')
+      : (labelled ? (state.anchor ? 'anchor member' : 'labelled memory') : 'unlabelled hop');
+    const action = state.anchor
+      ? (node.root ? 'The anchor itself.' : 'Activate to walk from here.')
+      : (labelled ? 'Labelled already.' : 'Activate to read its subject.');
     // Labels sit above a node in the lower half and below one in the upper half, so two neighbours
     // rarely write over each other's subject.
     const below = point.y <= CANVAS_HEIGHT / 2;
     const labelY = below ? point.y + radius + 12 : point.y - radius - 6;
     return `<g class="node${node.root ? ' is-root' : ''}${labelled ? ' is-labelled' : ''}" data-node="${esc(node.id)}" tabindex="0" role="button"` +
-      ` aria-label="${esc(kind)}: ${esc(node.label || shortUuid(node.id))}. ${labelled ? 'Labelled already.' : 'Activate to read its subject.'}">` +
+      ` aria-label="${esc(kind)}: ${esc(node.label || shortUuid(node.id))}. ${esc(action)}">` +
       `<circle cx="${point.x.toFixed(1)}" cy="${point.y.toFixed(1)}" r="${radius}" fill="${fill}" stroke="${stroke}" stroke-width="1.5" />` +
       `<text x="${point.x.toFixed(1)}" y="${labelY.toFixed(1)}" class="node-label" text-anchor="middle">${esc(nodeLabel(node))}</text>` +
       `</g>`;
@@ -345,14 +363,40 @@ function renderCanvas(graph) {
 }
 
 function draw() {
-  const graph = buildGraph(state.paths);
+  const graph = state.anchor ? buildAnchor(state.anchor) : buildGraph(state.paths);
   state.graph = graph;
   state.relations = graph.relations;
   state.truncated = graph.truncated;
   renderLegend(graph.relations);
-  renderPathsTable(state.paths);
+  if (!state.anchor) renderPathsTable(state.paths);
   state.positions = layout(graph.nodes, graph.edges);
   renderCanvas(graph);
+}
+
+// Anchor cluster: the anchor is the pinned centre, every member memory a
+// labelled node grouped around it. No edges are invented: LINKS are walked per
+// node on demand (activate a node to walk from it), so a corpus with no captured
+// edges still draws its membership instead of an empty state.
+function buildAnchor(anchor) {
+  const center = { id: `anchor:${anchor.type}:${anchor.value}`, label: anchor.value, root: true };
+  const nodes = [center];
+  const seen = new Set([center.id]);
+  let truncated = false;
+  for (const item of anchor.items) {
+    if (!item.uuid || seen.has(item.uuid)) continue;
+    if (nodes.length >= MAX_RENDERED_NODES) { truncated = true; break; }
+    seen.add(item.uuid);
+    nodes.push({ id: item.uuid, label: item.name || '', root: false });
+  }
+  return { nodes, edges: [], relations: [], truncated };
+}
+
+function renderAnchorTable(anchor) {
+  els.pathsBody.innerHTML = anchor.items.length
+    ? anchor.items.map((item) => (
+      `<tr><td>·</td><td>${esc(item.name || shortUuid(item.uuid))}</td>` +
+      `<td>${esc(item.scopeDimension || '')}${esc(item.kind ? ` · ${item.kind}` : '')}</td></tr>`)).join('')
+    : '<tr><td colspan="3">No memories carry this anchor.</td></tr>';
 }
 
 function edgeText(graph, edgeId) {
@@ -390,7 +434,19 @@ function selectEdge(edgeId) {
  */
 async function labelNode(graph, uuid) {
   const node = graph.nodes.find((candidate) => candidate.id === uuid);
-  if (!node || node.label) return;
+  if (!node) return;
+  // Anchor members arrive labelled (they came from the query, not the walk), so
+  // activating one walks from it instead of labelling it. The centre is the anchor
+  // itself and has nowhere to walk to.
+  if (state.anchor) {
+    if (node.root) return;
+    els.root.value = uuid;
+    els.initiative.value = '';
+    els.product.value = '';
+    runPaths();
+    return;
+  }
+  if (node.label) return;
   els.edgeDetail.textContent = `Reading ${shortUuid(uuid)}…`;
   const result = await getMemory(uuid, els.scope.value.trim());
   if (result.timedOut) { els.edgeDetail.textContent = `Reading ${shortUuid(uuid)} timed out.`; return; }
@@ -467,12 +523,13 @@ function renderPaths(result) {
 async function runPaths() {
   const rootUuid = els.root.value.trim();
   if (!UUID_PATTERN.test(rootUuid)) {
-    showState(els.state, 'error', 'Choose a root explicitly: paste a memory uuid, or use the memory open in Browse.');
+    showState(els.state, 'error', 'Choose a root explicitly: paste a memory uuid, or anchor by initiative/product below, or use the memory open in Browse.');
     els.wrap.hidden = true;
     return;
   }
 
   const seq = ++state.seq;
+  state.anchor = null;
   state.rootUuid = rootUuid;
   showState(els.state, 'loading', `Reading the root ${shortUuid(rootUuid)}…`);
   els.wrap.hidden = true;
@@ -501,6 +558,61 @@ async function runPaths() {
   const result = await postPaths(buildRequest());
   if (seq !== state.seq) return;
   renderPaths(result);
+}
+
+/**
+ * Anchor mode: an initiative or product name resolves to its member memories
+ * through the query API and draws the membership as a cluster around a pinned
+ * centre — so every initiative/product has a graph even when no LINKS were ever
+ * captured. Edges are never invented: activate a member node to walk from it.
+ */
+async function runAnchor() {
+  const initiative = els.initiative.value.trim();
+  const product = els.product.value.trim();
+  if (!initiative && !product) return false;
+
+  const seq = ++state.seq;
+  state.anchor = null;
+  state.rootUuid = '';
+  const label = initiative ? `initiative ${initiative}` : `product ${product}`;
+  showState(els.state, 'loading', `Resolving ${label}…`);
+  els.wrap.hidden = true;
+
+  const request = { currentOnly: true, limit: Number(els.limit.value) };
+  if (initiative) request.initiativeName = initiative;
+  if (product) request.productName = product;
+  const kind = resolveKind(els.kind.value);
+  if (kind) request.kind = kind;
+
+  const result = await postQuery(request);
+  if (seq !== state.seq) return true;
+  if (result.timedOut) { showState(els.state, 'timed-out', 'Resolving the anchor timed out. Try again.'); return true; }
+  if (result.unreachable) { showState(els.state, 'unreachable', failureMessage(result, 'Resolving the anchor')); return true; }
+  if (!result.ok) {
+    // An unregistered product is a 404 with its own wording naming the fix — show
+    // it, not a bare status that reads as "no memories".
+    const detail = result.data && (result.data.detail || result.data.title);
+    showState(els.state, 'error', detail ? String(detail) : `Resolving the anchor failed — HTTP ${result.status}.`);
+    return true;
+  }
+
+  const items = (result.data && Array.isArray(result.data.items)) ? result.data.items : [];
+  state.anchor = { type: initiative ? 'initiative' : 'product', value: initiative || product, items };
+  state.paths = [];
+  hideState(els.state);
+  els.wrap.hidden = false;
+  els.header.hidden = false;
+  state.selectedEdge = null;
+  els.edgeDetail.textContent = '';
+  draw();
+  renderAnchorTable(state.anchor);
+  const limit = Number(els.limit.value);
+  const bound = items.length === limit
+    ? ` · showing the first ${limit} — the query has no cursor, narrow by kind`
+    : '';
+  const truncated = state.truncated ? ` · drawing the first ${MAX_RENDERED_NODES} nodes` : '';
+  els.header.textContent = `anchor ${label} · ${items.length} ${plural(items.length, 'memory', 'memories')} (membership — no edges invented; activate a node to walk from it)${bound}${truncated}`;
+  return true;
 }
 
 function ticketFailure(result) {
@@ -575,8 +687,41 @@ async function runTicketPaths() {
   ticketFailure(result);
 }
 
+let graphListsLoaded = false;
+
+async function loadGraphLists() {
+  if (graphListsLoaded) return;
+  graphListsLoaded = true;
+  const initiatives = await getInitiatives();
+  if (initiatives.ok && Array.isArray(initiatives.data?.items)) {
+    for (const init of initiatives.data.items) {
+      if (!init || !init.name) continue;
+      const option = document.createElement('option');
+      option.value = init.name;
+      els.initiativeOptions.appendChild(option);
+    }
+  }
+  const products = await getProductNames();
+  if (products.ok && Array.isArray(products.data?.items)) {
+    for (const product of products.data?.items) {
+      if (!product || !product.name) continue;
+      const option = document.createElement('option');
+      option.value = product.name;
+      els.productOptions.appendChild(option);
+    }
+  }
+}
+
 export function initGraph() {
-  els.form.addEventListener('submit', (event) => { event.preventDefault(); runPaths(); });
+  // A submit walks edges from the root when one is pasted, else draws the
+  // initiative/product membership cluster. A root always wins: an anchor plus a
+  // root is a walk, never a mix.
+  els.form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    if (els.root.value.trim()) runPaths();
+    else if (els.initiative.value.trim() || els.product.value.trim()) runAnchor();
+    else showState(els.state, 'error', 'Choose a root uuid or an initiative/product anchor, or use the memory open in Browse.');
+  });
   els.useBrowse.addEventListener('click', () => {
     const memory = selectedMemory();
     if (!memory) {
@@ -584,17 +729,34 @@ export function initGraph() {
       return;
     }
     els.root.value = memory.uuid;
+    els.initiative.value = '';
+    els.product.value = '';
     runPaths();
   });
-  // Every filter control re-runs the walk once a root exists: narrowing is always a new bounded
-  // request, never a trim of what came back. Text fields fire `change` (blur/Enter), not `input`,
-  // so typing never walks per keystroke.
+  // Every filter control re-runs the current view once one exists: narrowing is
+  // always a new bounded request, never a trim of what came back. Text fields
+  // fire `change` (blur/Enter), not `input`, so typing never walks per keystroke.
   [els.depth, els.direction, els.limit, els.relation, els.kind, els.status, els.scope].forEach((control) => {
-    control.addEventListener('change', () => { if (state.rootUuid) runPaths(); });
+    control.addEventListener('change', () => {
+      if (state.anchor) runAnchor();
+      else if (state.rootUuid) runPaths();
+    });
   });
-  // A shared kind-scope change re-walks only when a root was already chosen: the pane draws
-  // nothing until then, and a scope switch must not pick a root the practitioner never chose.
-  onViewContext((reason) => { if (reason === 'kind' && state.rootUuid) runPaths(); });
+  [els.initiative, els.product].forEach((control) => {
+    control.addEventListener('change', () => {
+      if (els.root.value.trim()) return;
+      if (state.anchor || els.initiative.value.trim() || els.product.value.trim()) runAnchor();
+    });
+  });
+  // A shared kind-scope change re-runs the current view when one exists: the pane
+  // draws nothing until a root or anchor is chosen, and a scope switch must not
+  // pick either the practitioner never chose.
+  onViewContext((reason) => {
+    if (reason !== 'kind') return;
+    if (state.anchor) runAnchor();
+    else if (state.rootUuid) runPaths();
+  });
+  loadGraphLists();
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape' || !state.selectedEdge) return;
     state.selectedEdge = null;
