@@ -120,13 +120,36 @@ class LayoutContractTests(unittest.TestCase):
         self.assertEqual(1, len(current_m))
 
     def test_the_shared_constants_agree(self):
+        """Every genuinely shared constant must be present on **both** sides and equal.
+
+        The previous version skipped a constant missing from either module, which read as deliberate
+        — `ai-understanding` legitimately owns `PUBLISH_DIR_NAME` and this skill has no publish — but
+        the `or` made it swallow a one-sided *deletion* too: remove `UNFILED` from one indexer and the
+        parity check passes. A gate that cannot tell "intentionally absent" from "accidentally
+        deleted" is not a gate.
+
+        The one-sided case is therefore asserted rather than skipped: present on its owner, absent on
+        the other. That is a stronger statement than the skip was — it fails both if the constant is
+        deleted and if it is quietly copied across.
+        """
         for name in ("UNFILED", "VALID_SCOPES", "VALID_CONFIDENCE", "REQUIRED_FIELDS",
-                     "REQUIRED_PROVENANCE_FIELDS", "STALE_AFTER_DAYS",
-                     "STALE_AFTER_DAYS_OUTCOME", "ASSETS_SUFFIX", "PUBLISH_DIR_NAME"):
-            if not hasattr(u, name) or not hasattr(m, name):
-                continue  # publish/consumer constants belong to ai-understanding alone
+                     "REQUIRED_PROVENANCE_FIELDS", "STALE_AFTER_DAYS", "STALE_AFTER_DAYS_OUTCOME",
+                     "ASSETS_SUFFIX"):
             with self.subTest(constant=name):
+                self.assertTrue(hasattr(u, name), f"{name} missing from ai-understanding")
+                self.assertTrue(hasattr(m, name), f"{name} missing from ai-memory-context")
                 self.assertEqual(getattr(u, name), getattr(m, name))
+
+    def test_the_one_sided_constants_are_present_on_their_owner_and_absent_elsewhere(self):
+        """Deliberately one-sided, asserted in both directions rather than skipped over."""
+        for name, owner, absent in (
+            ("PUBLISH_DIR_NAME", u, m),  # ai-understanding owns --publish; this skill has none
+        ):
+            with self.subTest(constant=name):
+                self.assertTrue(hasattr(owner, name), f"{name} missing from its owner")
+                self.assertFalse(hasattr(absent, name),
+                                 f"{name} is documented as one-sided but has leaked into the "
+                                 f"other indexer — re-check LADR-001 before allowing it")
 
     def test_the_session_id_ladder_agrees(self):
         """Both read the same environment names, so a file cannot be filed under one session by one

@@ -263,12 +263,41 @@ class PackerTests(unittest.TestCase):
     # --- the real skills still pack -------------------------------------------------------------
 
     def test_every_self_contained_skill_packs_and_passes_its_own_checks(self):
-        """The gate the desktop route actually depends on, run against the real tree."""
-        for name in ("ai-understanding", "ai-brain-dump", "ai-memory-context"):
-            with self.subTest(skill=name):
-                skill = REPO / ".agents" / "skills" / name
-                archive, skipped = pack.build(skill, self.out)
-                self.assertEqual([], pack.check(skill, archive), f"{name}: {skipped}")
+        """The gate the desktop route actually depends on, run against the real tree.
+
+        `setUp` points `pack.REPO` at the fixture root so the link cases can stage an in-repo link.
+        This case must put it back, or "inside the repository" is judged against a temp directory and
+        the production *materialise* path is never exercised on the real skills — the exact behaviour
+        finding 4 turned out to be missing.
+        """
+        real_repo = pack.REPO
+        pack.REPO = REPO.resolve()
+        try:
+            # Asserted rather than assumed. No skill in the tree ships a symlink today, so the wrong
+            # REPO produces the same archive and the case passes either way — which is why the first
+            # version of this fix was not detected by any test. The assertion is what makes it stick.
+            self.assertEqual(REPO.resolve(), pack.REPO)
+            for name in ("ai-understanding", "ai-brain-dump", "ai-memory-context"):
+                with self.subTest(skill=name):
+                    skill = REPO / ".agents" / "skills" / name
+                    archive, skipped = pack.build(skill, self.out)
+                    self.assertEqual([], pack.check(skill, archive), f"{name}: {skipped}")
+        finally:
+            pack.REPO = real_repo
+
+    def test_a_self_referential_link_in_a_real_skill_is_not_duplicated(self):
+        """The same property, checked against the real tree with the real repository root."""
+        real_repo = pack.REPO
+        pack.REPO = REPO.resolve()
+        try:
+            members = pack.members(REPO / ".agents" / "skills" / "ai-understanding",
+                                   REPO.resolve(), pack.installer_excludes())
+        finally:
+            pack.REPO = real_repo
+        arcs = [arc for _src, arc in members]
+        self.assertEqual(len(arcs), len(set(arcs)), "a file is packed twice")
+        self.assertFalse([a for a in arcs if a.startswith("self")], "a cycle was materialised")
+
 
 
 if __name__ == "__main__":
