@@ -59,7 +59,8 @@ endpoints, not whole-graph algorithms.
 Vertices exist solely to give edges something to attach to. `Memory` carries only `memory_uuid`;
 LADR-08's implemented `Ticket` carries exact `provider` and `key` only. No subject,
 claim, scope or validity is copied. Ticket membership remains group JSONB; all descriptive fields
-remain relational.
+remain relational. `Memory` and `Ticket` remain identity-only; `Product` is the deliberate exception
+and carries `description` and `status` per LADR-10.
 
 This keeps descriptive facts in one authoritative location. Identity anchoring is the deliberate
 exception: Ticket identity follows JSONB membership transactionally, while scope and ownership are

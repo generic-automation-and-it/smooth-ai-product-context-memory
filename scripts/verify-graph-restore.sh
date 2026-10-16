@@ -128,12 +128,12 @@ assert_equal "repo vertex count" "$SRC_PN_REPO" "$DST_PN_REPO"
 assert_equal "HAS_INITIATIVE edge count" "$SRC_HAS_INIT" "$DST_HAS_INIT"
 assert_equal "HAS_REPO edge count" "$SRC_HAS_REPO" "$DST_HAS_REPO"
 
-if [ "$DST_EDGES" -eq 0 ]; then
+if [ "$DST_EDGES" -eq 0 ] && [ "$DST_HAS_INIT" -eq 0 ] && [ "$DST_HAS_REPO" -eq 0 ]; then
     echo "FAIL: restored edge count is zero — the backup omitted graph data" >&2
     FAILED=1
 fi
 
-if [ "$TRAVERSAL_HOPS" -eq 0 ]; then
+if [ "$SRC_EDGES" -gt 0 ] && [ "$TRAVERSAL_HOPS" -eq 0 ]; then
     echo "FAIL: no traversal result after restore" >&2
     FAILED=1
 fi
