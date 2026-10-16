@@ -51,13 +51,27 @@ FALLBACK_EXCLUDES = ("tests", "__pycache__")
 
 
 def installer_excludes() -> tuple[str, ...]:
-    """The excluded directory names, read out of the installer itself."""
+    """The excluded directory names, read out of the installer itself.
+
+    Falls back to `FALLBACK_EXCLUDES` rather than raising when the anchor is gone. The previous
+    version called `str.index` twice with no guard, so renaming or restructuring
+    `prune_non_shippable` in the installer turned the packer into a `ValueError` at the first call —
+    and `FALLBACK_EXCLUDES`, the value that was supposed to cover exactly this, was unreachable. The
+    fallback is worse than reading the installer, so it should degrade *to* it rather than crash: the
+    archive then carries `tests/` and the operator sees a packer complaint instead of a traceback.
+    """
     try:
         text = INSTALLER.read_text(encoding="utf-8")
     except OSError:
         return FALLBACK_EXCLUDES
-    body = text[text.index("prune_non_shippable() {"):]
-    body = body[: body.index("\n}\n")]
+    start = text.find("prune_non_shippable() {")
+    if start == -1:
+        return FALLBACK_EXCLUDES
+    body = text[start:]
+    end = body.find("\n}\n")
+    if end == -1:
+        return FALLBACK_EXCLUDES
+    body = body[:end]
     names = set(FALLBACK_EXCLUDES)
     for match in re.finditer(r'rm -rf "\$dest/([^"]+)"', body):
         names.add(match.group(1))

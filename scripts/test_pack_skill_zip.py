@@ -185,6 +185,30 @@ class PackerTests(unittest.TestCase):
                                 cwd=REPO, capture_output=True, text=True)
         self.assertEqual(2, result.returncode)
 
+    def test_installer_excludes_falls_back_when_the_anchor_is_gone(self):
+        """Finding 6. The previous version called `str.index` with no guard, so renaming
+        `prune_non_shippable` made the packer raise `ValueError` at the first call — and
+        `FALLBACK_EXCLUDES`, the value meant to cover exactly that, was unreachable."""
+        real = pack.INSTALLER
+        try:
+            renamed = self.tmp / "install-skills.sh"
+            renamed.write_text("#!/bin/bash\nprune_non_shippable_RENAMED() {\n  :\n}\n",
+                               encoding="utf-8")
+            pack.INSTALLER = renamed
+            self.assertEqual(pack.FALLBACK_EXCLUDES, pack.installer_excludes())
+        finally:
+            pack.INSTALLER = real
+
+    def test_installer_excludes_falls_back_when_the_body_never_closes(self):
+        real = pack.INSTALLER
+        try:
+            truncated = self.tmp / "truncated.sh"
+            truncated.write_text("#!/bin/bash\nprune_non_shippable() {\n  :\n", encoding="utf-8")
+            pack.INSTALLER = truncated
+            self.assertEqual(pack.FALLBACK_EXCLUDES, pack.installer_excludes())
+        finally:
+            pack.INSTALLER = real
+
     def test_check_on_an_absent_archive_exits_two(self):
         result = subprocess.run([sys.executable, "-B", str(SCRIPT), "ai-understanding",
                                  "--check", "--out", str(self.out)],
