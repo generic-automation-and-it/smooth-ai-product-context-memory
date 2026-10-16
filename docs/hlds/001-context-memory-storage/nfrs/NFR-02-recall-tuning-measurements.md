@@ -12,6 +12,13 @@
 > (stemming, trigram rejected) is unaffected — that is why HLD-002 and the skill docs still cite this
 > document as the authority for recall tuning rather than the numbers.
 
+> **Reporting convention (eval-honesty).** The next re-measurement of this NFR — or of any accuracy NFR —
+> states upfront, in the same document as the numbers: the per-setting conversations/models and retrieval
+> configuration, what differs between settings, and the reproduction gap (what reproducing the figures
+> requires, and what the harness does not cover). A figure is reportable only alongside the method that
+> produced it; a number without its per-setting method is a different claim. This is the BEAM-report shape
+> the Cognee comparison surfaced.
+
 ## Question
 
 HLD-001 deferred two candidate-recall improvements — stemming and trigram similarity — "until
