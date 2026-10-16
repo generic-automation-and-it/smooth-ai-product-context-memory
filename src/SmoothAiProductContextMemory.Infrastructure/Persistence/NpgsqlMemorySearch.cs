@@ -204,6 +204,30 @@ public sealed class NpgsqlMemorySearch(SmoothAiProductContextMemoryDbContext db)
         ];
     }
 
+    public async Task<MemorySearchInspection> InspectAsync(
+        MemorySearchCriteria criteria,
+        CancellationToken cancellationToken)
+    {
+        // The tsquery the FTS predicate translates to, decomposed to its lexemes. Computed over a
+        // parameter — never in the statement text — with the same provider operator the predicate uses,
+        // so the reported lexemes and the matched rows cannot disagree.
+        string? tsQuery = null;
+        if (criteria.FreeText is { } text)
+        {
+            tsQuery = await db.Database
+                .SqlQueryRaw<string>(
+                    "SELECT plainto_tsquery('" + TextSearchConfig + "', {0})::text AS \"Value\"",
+                    text)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+
+        // Ground "what the read path would return" by running that retrieval itself. Materialising the
+        // bounded page then keeping only its size is unusual for a hot path but free of drift — the page
+        // is exactly what the read path returns, so no second query shape can disagree with it.
+        int matched = (await SearchAsync(criteria, cancellationToken)).Count;
+        return new MemorySearchInspection(tsQuery, matched, matched == criteria.Limit);
+    }
+
     /// <summary>
     /// The memory set narrowed by the facet/tag array operator — overlap (<c>&amp;&amp;</c>, "any")
     /// by default, containment (<c>@&gt;</c>, "all") opt-in. Falls back to the plain set when neither

@@ -30,6 +30,11 @@ Memory-set dry-run runs the real plan; ticket-parent local dry-run validates sha
 - **Every traversal is bounded, and the bound is on the wire.** `POST /api/context/paths` requires `maxDepth`
   (1–5); there is no server-side default, because a default is a bound the caller never considered. The store
   layer refuses an out-of-range depth as well, so a direct caller cannot bypass the validator (HLD-003 LADR-07).
+- **Traversal input is never executed verbatim against the graph engine.** A caller supplies structure —
+  depth, direction, bounds, identities — never Cypher or any query expression. Any future expression-input
+  feature needs an explicit opt-in *and* a server-side flag, off by default: a readable-but-writable query
+  language turns read access into write access. The negative test pins that no traversal request exposes a
+  raw query/expression field (`NoVerbatimTraversalPolicyTests`), so adding one is a deliberate, reviewed change.
 - **A hop is a uuid, so a read by identity is part of the traversal surface.** `GetMemory` returns one
   memory's current cheap fields by uuid; without it an intermediate hop has no endpoint a caller could
   label. It is a by-identity read like blob and version history (not a search), so it does not go through
@@ -247,6 +252,8 @@ sequenceDiagram
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-16 | `QueryMemories.Request` gained `Inspect` (read-only): returns the evidence set the read path resolved (traversal anchors, scope plan, tsquery lexemes, facet/tag predicates, matched count) instead of rows, never records recall feedback, and never skips scope enforcement. `IMemorySearch.InspectAsync` + `MemorySearchInspection` added; `NpgsqlMemorySearch.InspectAsync` grounds the count by reusing `SearchAsync`. | cognee adoption part A |
+| 2026-10-16 | No-verbatim-traversal Non-Negotiable added: traversal input is never executed verbatim against the graph engine; a future expression-input feature needs an explicit opt-in plus a default-off server flag. Pinned by `NoVerbatimTraversalPolicyTests`. | cognee adoption part B |
 | 2026-10-16 | `QueryMemories` with a ticket now returns the **union** of the ticket's owner group and the memories carrying an `ABOUT` reference to it, each item marked `ticketMatch` (`owner`/`reference`). The reference branch carries the non-group-context scope plan (D2: a ticket grants no consent), every other filter stays AND-ed over the union, and the limit is applied after the union in SQL. `MemorySearchCriteria` gained `ReferencedUuids` (disjunctive, distinct from the conjunctive `UuidFilter`) and the reference-branch scope fields; `IMemoryGraph` gained `ListAboutAsync`. | HLD-003 LADR-09 |
 | 2026-10-15 | Added `Memories/GetMemory` — the cheap fields of a memory's **current** version, read by identity (`uuid` + optional `scopeDimension`, `NotFoundException` on an unknown uuid). It exists because a traversal returns uuid references for every intermediate hop and no other read can address a uuid: `POST /query` has no uuid predicate and `GET .../versions` returns the whole chain. It stays a *cheap* read (no blob, no version history) and carries the same scope rule as the blob and version-history proxies — a uuid in a path chain is not authority to read a dimension the scope rule hides. Its consumer is the Console graph's click-to-label hop read (HLD-009 P3). | HLD-009 P3 |
 | 2026-10-14 | `SetMemories` now compares an incoming version target's claim against the claim it would follow; an identical re-send plans `ItemMode.Unchanged` and writes no row (D1: `ValidFrom`/`SummaryStamp` outside the claim; `MemoryClaim` comparer). `Response`/`ItemResult` gained `unchanged`; `IBlobStorage`'s content address documented as `ContentAddress.Compute`. | version-bug |

@@ -462,6 +462,79 @@ public sealed class QueryMemoriesHandlerTests(AspireFixture aspire) : HandlerTes
         response.Items.Single(i => i.Description == "Unrelated fact").Tickets.ShouldBeEmpty();
     }
 
+    [Fact]
+    public async Task Inspect_reports_scope_and_match_count_without_rows()
+    {
+        var product = TestEntities.NewGroup();
+        var program = TestEntities.NewGroup(MemoryGroup.ScopeDimensionValue.Program);
+        Db.MemoryGroups.AddRange(product, program);
+        await Db.SaveChangesAsync(Ct);
+
+        await NewSet().Handle(Approved(product.Uuid, "Product fact"), Ct);
+        await NewSet().Handle(Approved(program.Uuid, "Program fact"), Ct);
+
+        QueryMemories.Response response = await NewQuery().Handle(Query() with { Inspect = true }, Ct);
+
+        // Inspection ships evidence, never the matched rows.
+        response.Items.ShouldBeEmpty();
+        QueryMemories.Inspection inspection = response.Inspection.ShouldNotBeNull();
+        inspection.IsInspection.ShouldBeTrue();
+        inspection.Note.ShouldBeNull();
+
+        // Scope is enforced, not skipped: an open search hides programme and the count reflects it.
+        inspection.RequiredScopeDimension.ShouldBeNull();
+        inspection.ExcludedScopeDimensions.ShouldContain(MemoryGroup.ScopeDimensionValue.Program);
+        inspection.MatchedCount.ShouldBe(1);
+        inspection.Limited.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Inspect_records_no_recall_feedback()
+    {
+        var group = TestEntities.NewGroup();
+        Db.MemoryGroups.Add(group);
+        await Db.SaveChangesAsync(Ct);
+        await NewSet().Handle(Approved(group.Uuid, "Fact"), Ct);
+
+        var feedback = new TrackingRecallFeedback();
+        QueryMemories.Response response = await NewQuery(feedback).Handle(Query() with { Inspect = true }, Ct);
+
+        response.Inspection.ShouldNotBeNull();
+        feedback.Records.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Inspect_reports_the_tsquery_lexemes_for_free_text()
+    {
+        var group = TestEntities.NewGroup();
+        Db.MemoryGroups.Add(group);
+        await Db.SaveChangesAsync(Ct);
+
+        await NewSet().Handle(Approved(group.Uuid, "The storage engine", "We chose PostgreSQL"), Ct);
+
+        QueryMemories.Inspection inspection = (await NewQuery().Handle(
+            Query() with { Inspect = true, Query = "storage" }, Ct)).Inspection.ShouldNotBeNull();
+
+        // The decomposed predicate the FTS index compares against: the stemmed lexeme, not the raw text.
+        inspection.FreeText.ShouldBe("storage");
+        inspection.TsQuery.ShouldNotBeNull().ShouldContain("storag");
+        inspection.MatchedCount.ShouldBeGreaterThanOrEqualTo(1);
+    }
+
+    [Fact]
+    public async Task Inspect_unknown_ticket_returns_miss_note_without_rows_or_feedback()
+    {
+        var feedback = new TrackingRecallFeedback();
+        QueryMemories.Response response = await NewQuery(feedback).Handle(
+            Query() with { Inspect = true, TicketProvider = "jira", TicketKey = "NOPE-1" }, Ct);
+
+        response.Items.ShouldBeEmpty();
+        QueryMemories.Inspection inspection = response.Inspection.ShouldNotBeNull();
+        inspection.Note.ShouldBe("ticket-miss");
+        inspection.MatchedCount.ShouldBe(0);
+        feedback.Records.ShouldBeEmpty();
+    }
+
     /// <summary>
     /// A malformed membership element must not cost the practitioner the page: the read is unnested in
     /// SQL, so the half-ticket is dropped and the page still renders.
@@ -486,11 +559,21 @@ public sealed class QueryMemoriesHandlerTests(AspireFixture aspire) : HandlerTes
     private QueryMemories.Handler NewQuery() =>
         new(AppDb, Search, new NoopRecallFeedback(), ProductGraph, Graph, Loggers.CreateLogger<QueryMemories.Handler>());
 
+    private QueryMemories.Handler NewQuery(IRecallFeedback feedback) =>
+        new(AppDb, Search, feedback, ProductGraph, Graph, Loggers.CreateLogger<QueryMemories.Handler>());
+
     private sealed class NoopRecallFeedback : IRecallFeedback
     {
         public void Record(RecallFeedbackRecord[] records)
         {
         }
+    }
+
+    private sealed class TrackingRecallFeedback : IRecallFeedback
+    {
+        public List<RecallFeedbackRecord> Records { get; } = [];
+
+        public void Record(RecallFeedbackRecord[] records) => Records.AddRange(records);
     }
 
     private static QueryMemories.Request Query() =>

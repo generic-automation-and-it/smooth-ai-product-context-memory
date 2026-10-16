@@ -40,9 +40,49 @@ public static class QueryMemories
         Instant? AsOf = null,
         int Limit = MemorySearchDefaults.Limit,
         string FacetMatchMode = FacetMatchModeValue.Any,
-        string? ProductName = null) : IRequest<Response>;
+        string? ProductName = null,
+        bool Inspect = false) : IRequest<Response>;
 
-    public sealed record Response(IReadOnlyList<CheapMemory> Items);
+    /// <summary>
+    /// The retrieval response. <see cref="Inspection"/> is null for a normal retrieval (carrying the
+    /// matched <see cref="Items"/>); non-null marks the response as inspection, with <see cref="Items"/>
+    /// empty and the evidence set in <see cref="Inspection"/>.
+    /// </summary>
+    public sealed record Response(IReadOnlyList<CheapMemory> Items, Inspection? Inspection = null);
+
+    /// <summary>
+    /// The evidence a retrieval resolved and what it would match, without shipping the memory content.
+    /// Produced only by <see cref="Request.Inspect"/>; it is never written as recall feedback and never
+    /// skips scope enforcement — the same identity/traversal/scope resolution runs as for a retrieval.
+    /// </summary>
+    public sealed record Inspection(
+        bool IsInspection,
+        string? Note,
+        string? FreeText,
+        string? TsQuery,
+        IReadOnlyList<string> Facets,
+        IReadOnlyList<string> Tags,
+        string FacetMatchMode,
+        string? Kind,
+        string? Status,
+        string? RequiredScopeDimension,
+        IReadOnlyList<string> ExcludedScopeDimensions,
+        bool HasGroupContext,
+        string? TicketProvider,
+        string? TicketKey,
+        Guid? OwnerGroupUuid,
+        long? TicketGroupId,
+        int ReferencedUuids,
+        string? Repo,
+        string? InitiativeName,
+        IReadOnlyList<string>? ProductInitiatives,
+        IReadOnlyList<string>? ProductRepos,
+        bool CurrentOnly,
+        bool IncludeProposed,
+        Instant? AsOf,
+        int Limit,
+        int MatchedCount,
+        bool Limited);
 
     public sealed class Validator : AbstractValidator<Request>
     {
@@ -87,6 +127,7 @@ public static class QueryMemories
             string shape = RecallShapeClassifier.Classify(request);
             Guid retrievalId = Guid.NewGuid();
             Instant occurredOn = SystemClock.Instance.GetCurrentInstant();
+            bool inspect = request.Inspect;
 
             bool hasTicket = !string.IsNullOrWhiteSpace(request.TicketProvider)
                 && !string.IsNullOrWhiteSpace(request.TicketKey);
@@ -104,6 +145,11 @@ public static class QueryMemories
                     // A miss is a signal the caller acts on, not an error. With no owner group there can
                     // be no ABOUT reference either (D1: the membership trigger owns the ticket vertex a
                     // reference requires), so this is empty by invariant.
+                    if (inspect)
+                    {
+                        return new Response([], InspectFrom(request, null, null, null, null, null, null, null, "ticket-miss"));
+                    }
+
                     logger.LogInformation("Query memories completed. Count: {Count}", 0);
                     Emit([new RecallFeedbackRecord(retrievalId, null, shape, occurredOn)]);
                     return new Response([]);
@@ -169,6 +215,12 @@ public static class QueryMemories
                 productRepos = await productGraph.GetRepoNamesAsync(request.ProductName, cancellationToken);
                 if (productInitiatives.Count == 0 && productRepos.Count == 0)
                 {
+                    if (inspect)
+                    {
+                        return new Response([], InspectFrom(request, criteria, null, ownerGroupUuid, groupId,
+                            referencedUuids, null, null, "product-no-links"));
+                    }
+
                     logger.LogInformation("Query memories completed. Count: {Count}", 0);
                     Emit([new RecallFeedbackRecord(retrievalId, null, shape, occurredOn)]);
                     return new Response([]);
@@ -188,6 +240,15 @@ public static class QueryMemories
                 criteria.ExcludedScopeDimensions.Count,
                 criteria.AsOf,
                 criteria.Limit);
+
+            if (inspect)
+            {
+                MemorySearchInspection inspectResult = await search.InspectAsync(criteria, cancellationToken);
+                logger.LogInformation("Query memories inspection completed. MatchedCount: {Count}",
+                    inspectResult.MatchedCount);
+                return new Response([], InspectFrom(request, criteria, inspectResult,
+                    ownerGroupUuid, groupId, referencedUuids, productInitiatives, productRepos, null));
+            }
 
             IReadOnlyList<CheapMemory> items = await search.SearchAsync(criteria, cancellationToken);
 
@@ -228,6 +289,67 @@ public static class QueryMemories
             }
 
             return new Response(items);
+        }
+
+        private static Inspection InspectFrom(
+            Request request,
+            MemorySearchCriteria? criteria,
+            MemorySearchInspection? result,
+            Guid? ownerGroupUuid,
+            long? groupId,
+            IReadOnlyList<Guid>? referencedUuids,
+            IReadOnlyList<string>? productInitiatives,
+            IReadOnlyList<string>? productRepos,
+            string? note)
+        {
+            // A miss path (ticket-miss, product-no-links) has no criteria and no search result: the
+            // evidence is simply "no owner group" or "no product links". The matched count stays zero and
+            // no predicate is reported as though it had run.
+            MemorySearchCriteria resolved = criteria ?? new MemorySearchCriteria
+            {
+                FreeText = string.IsNullOrWhiteSpace(request.Query) ? null : request.Query,
+                Facets = request.Facets ?? [],
+                Tags = request.Tags ?? [],
+                Kind = string.IsNullOrWhiteSpace(request.Kind) ? null : request.Kind,
+                Status = string.IsNullOrWhiteSpace(request.Status) ? null : request.Status,
+                ExcludeProposed = !request.IncludeProposed,
+                GroupUuid = request.GroupUuid,
+                Repo = string.IsNullOrWhiteSpace(request.Repo) ? null : request.Repo,
+                InitiativeName = string.IsNullOrWhiteSpace(request.InitiativeName) ? null : request.InitiativeName,
+                AsOf = request.AsOf,
+                CurrentOnly = request.CurrentOnly,
+                Limit = request.Limit,
+                FacetMatchMode = request.FacetMatchMode,
+            };
+
+            return new Inspection(
+                IsInspection: true,
+                Note: note,
+                FreeText: resolved.FreeText,
+                TsQuery: result?.TsQuery,
+                Facets: resolved.Facets,
+                Tags: resolved.Tags,
+                FacetMatchMode: resolved.FacetMatchMode,
+                Kind: resolved.Kind,
+                Status: resolved.Status,
+                RequiredScopeDimension: resolved.RequiredScopeDimension,
+                ExcludedScopeDimensions: resolved.ExcludedScopeDimensions,
+                HasGroupContext: resolved.GroupId is not null || resolved.GroupUuid is not null,
+                TicketProvider: request.TicketProvider,
+                TicketKey: request.TicketKey,
+                OwnerGroupUuid: ownerGroupUuid,
+                TicketGroupId: groupId,
+                ReferencedUuids: referencedUuids?.Count ?? 0,
+                Repo: resolved.Repo,
+                InitiativeName: resolved.InitiativeName,
+                ProductInitiatives: productInitiatives,
+                ProductRepos: productRepos,
+                CurrentOnly: resolved.CurrentOnly,
+                IncludeProposed: !resolved.ExcludeProposed,
+                AsOf: resolved.AsOf,
+                Limit: resolved.Limit,
+                MatchedCount: result?.MatchedCount ?? 0,
+                Limited: result?.Limited ?? false);
         }
 
         private async Task<IReadOnlyList<CheapMemory>> EnrichProductMatchesAsync(

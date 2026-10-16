@@ -53,6 +53,11 @@ endpoints, not whole-graph algorithms.
 - Traversal can be filtered by relation type and direction (outbound, inbound, either).
 - The existing one-hop reverse lookup remains available and returns the same results as before — pinned by a depth-1-inbound parity test against `ListTouchingAsync`.
 - Every traversal is bounded: the depth limit is a `required` property of the query type, so an unbounded path query does not compile (LADR-07).
+- **Traversal input is never executed verbatim against the graph engine.** A caller supplies structure — depth,
+  direction, bounds, identities — never Cypher. Caller-supplied strings travel as parameters, never as
+  statement text, so a snippet the caller typed cannot become part of the query. Any future expression-input
+  feature requires an explicit opt-in *and* a server-side flag, off by default (the `ALLOW_CYPHER_QUERY`
+  shape), because a readable-but-writable query language turns read access into write access.
 
 ### 2. Edges only — the graph never owns an entity
 

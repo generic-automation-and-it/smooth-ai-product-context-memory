@@ -121,6 +121,9 @@ public class DossierSelectionTests
             Criteria = criteria;
             return Task.FromResult(result);
         }
+
+        public Task<MemorySearchInspection> InspectAsync(MemorySearchCriteria criteria, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
     }
 
     private sealed class RecordingTraversal : IMemoryTraversal
