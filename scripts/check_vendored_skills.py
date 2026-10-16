@@ -13,7 +13,9 @@ RULE_PATH = re.compile(r"`(?:\.github/instructions|\.agents/rules)/[^`]*\.instru
 def is_owned(name):
     """The installer's owned set. `scripts/install-skills.sh` `is_owned_skill` is the source of truth;
     `test_check_vendored_skills.py` holds the two to each other."""
-    return name.startswith("mimisbrunnr-") or name in ("ai-understanding", "ai-brain-dump")
+    return name.startswith("mimisbrunnr-") or name in (
+        "ai-understanding", "ai-brain-dump", "ai-memory-context",
+    )
 
 
 def is_vendored(name):

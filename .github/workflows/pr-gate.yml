@@ -114,6 +114,14 @@ jobs:
       - name: Test dossier skill
         run: python3 -B .agents/skills/mimisbrunnr-saga-dossier/tests/run_tests.py
 
+      # The local-first memory store. `parity_shared_scripts.py` is load-bearing rather than
+      # ceremonial: the three vendored scripts are duplicated so the skill ships as one zip, and
+      # that duplication is only safe while both sides are equal.
+      - name: Test ai-memory-context skill
+        run: |
+          python3 -B .agents/skills/ai-memory-context/tests/run_tests.py
+          python3 -B .agents/skills/ai-memory-context/tests/parity_shared_scripts.py
+
       - name: Test ai-understanding skill
         run: |
           python3 -B .agents/skills/ai-understanding/tests/run_tests.py
