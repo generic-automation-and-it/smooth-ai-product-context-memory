@@ -249,6 +249,28 @@ internal static class ContextEndpoints
         group.MapPost("/recall-feedback/reset", (IMediator mediator, CancellationToken ct) =>
             mediator.Send(new ResetRecallFeedback.Request(), ct))
             .RequireCapability(ApiCapability.Write);
+
+        // Capability probe for the Console login (HLD-009): reports which tier the presented
+        // credential grants, so a read-only session is told apart from a read+write one without
+        // attempting a write. Read-gated — the middleware accepts either token — the handler
+        // resolves which one it was.
+        group.MapGet("/capabilities", (
+            HttpContext http,
+            ApiAccessAuthorizer authorizer) =>
+        {
+            ApiCapability? resolved = authorizer.ResolveCapability(
+                http.Request.Headers.Authorization.FirstOrDefault());
+            if (resolved is null)
+            {
+                return Results.Forbid();
+            }
+
+            string[] capabilities = resolved == ApiCapability.Write
+                ? ["read", "write"]
+                : ["read"];
+            return Results.Ok(new { capabilities });
+        })
+        .RequireCapability(ApiCapability.Read);
     }
 
     private static Instant ParseInstant(string value)

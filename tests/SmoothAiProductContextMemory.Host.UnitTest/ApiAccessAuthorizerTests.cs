@@ -65,4 +65,30 @@ public sealed class ApiAccessAuthorizerTests
         authorizer.Authorize("Bearer write-token", ApiCapability.Read).ShouldBeTrue();
         authorizer.Authorize("Bearer write-token", ApiCapability.Write).ShouldBeTrue();
     }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("Basic dXNlcjpwYXNz")]
+    [InlineData("Bearer")]
+    [InlineData("Bearer not-a-token")]
+    public void ResolveCapability_returns_null_for_absent_or_unknown(string? authorization)
+    {
+        ApiAccessAuthorizer authorizer = Create();
+        authorizer.ResolveCapability(authorization).ShouldBeNull();
+    }
+
+    [Fact]
+    public void ResolveCapability_returns_read_for_the_read_token()
+    {
+        ApiAccessAuthorizer authorizer = Create(read: "read-token", write: "write-token");
+        authorizer.ResolveCapability("Bearer read-token").ShouldBe(ApiCapability.Read);
+    }
+
+    [Fact]
+    public void ResolveCapability_returns_write_for_the_write_token()
+    {
+        ApiAccessAuthorizer authorizer = Create(read: "read-token", write: "write-token");
+        authorizer.ResolveCapability("Bearer write-token").ShouldBe(ApiCapability.Write);
+    }
 }

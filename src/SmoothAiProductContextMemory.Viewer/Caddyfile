@@ -12,12 +12,21 @@
 	encode zstd gzip
 	file_server
 
-	# /api/* → Host. The read token is injected by Caddy (LADR-02); the SPA sends
-	# no Authorization header, and a client-supplied one must never override it.
+	# The Console is credential-gated (HLD-009): the SPA sends the user's
+	# CONTEXT_TOKEN as a Bearer header and Caddy forwards it to the Host, which
+	# validates it. No token is injected here — a request without one is 403 on
+	# the Host. The token lives only in the browser session + this proxy.
+	header {
+		Content-Security-Policy "default-src 'self'; connect-src 'self'; script-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
+		X-Content-Type-Options nosniff
+	}
+
+	# /api/* → Host. The SPA sends no Authorization *value* of its own beyond the
+	# session's bearer token; Caddy forwards it verbatim and never overrides it.
 	handle /api/* {
 		reverse_proxy {$HOST_BASE_URL} {
 			header_up Host {upstream_hostport}
-			header_up Authorization "Bearer {$API_READ_TOKEN}"
+			header_up Authorization {http.request.header.Authorization}
 		}
 	}
 

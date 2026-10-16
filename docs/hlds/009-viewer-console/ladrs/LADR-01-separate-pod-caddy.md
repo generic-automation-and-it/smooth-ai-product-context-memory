@@ -9,7 +9,8 @@ the API image.
 ## Decision
 
 Deploy the Console as its own **viewer pod** fronted by **Caddy**. Caddy serves the static SPA on a single
-entry published on loopback, reverse-proxies `/api` to the Host, and injects the read token. The viewer pod also runs a
+entry published on loopback, reverse-proxies `/api` to the Host, and forwards the session's credential
+(LADR-02). The viewer pod also runs a
 small bridge that drives the capture pipeline.
 
 Loopback here means the *published* port, not the in-container bind: Caddy listens on all container

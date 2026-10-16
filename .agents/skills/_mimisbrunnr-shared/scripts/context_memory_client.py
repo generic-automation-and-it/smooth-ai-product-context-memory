@@ -407,7 +407,7 @@ def is_write_route(method, path):
     return any(method == verb and template.fullmatch(path) for verb, template in WRITE_ROUTE_TEMPLATES)
 
 
-def _request(method, path, payload=None, query=None, timeout=None):
+def _request(method, path, payload=None, query=None, timeout=None, token=None):
     url = base_url() + path
     if query:
         from urllib.parse import urlencode
@@ -417,7 +417,10 @@ def _request(method, path, payload=None, query=None, timeout=None):
     body = None
     write = is_write_route(method, path)
     token_name = ENV_WRITE_TOKEN if write else ENV_READ_TOKEN
-    token = os.environ.get(token_name)
+    # A caller-supplied token wins (the Console bridges forward a per-request
+    # credential); otherwise fall back to the process environment, as before.
+    if token is None:
+        token = os.environ.get(token_name)
     if not token:
         raise ClientError(0, "missing-credential", f"{token_name} is required")
     headers = {"Accept": "application/json", "Authorization": f"Bearer {token}"}

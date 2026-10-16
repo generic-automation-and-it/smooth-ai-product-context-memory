@@ -79,7 +79,12 @@ function setBlobSection(html) {
   else els.body.insertAdjacentHTML('beforeend', html);
 }
 
+let detailWired = false;
+
 export function initDetail() {
+  // Re-login re-runs boot(); wire once so listeners do not double.
+  if (detailWired) return;
+  detailWired = true;
   els.close.addEventListener('click', closeDetail);
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && !els.pane.hidden) closeDetail();

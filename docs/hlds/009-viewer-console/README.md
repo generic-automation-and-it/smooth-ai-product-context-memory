@@ -87,7 +87,7 @@ sequence (redaction → atomicity → dedup → `set --dryrun` → write) throug
 
 - A pending proposal is viewable with its surrounding memory context.
 - A conflict choice is the same choice the capture path presents.
-- The browser holds no write token; the write token is server-side and exercised only on approve.
+- A write-capable session presents the write token and the approve is exercised only on explicit human confirmation.
 
 ### 5. Recall quality is visible
 
@@ -114,8 +114,9 @@ a judgement the skill does not already make.
 
 > A Console that bypasses a gate is a defect, not a convenience.
 
-- **Read is ambient; write is gated.** The read token is injected client-side by Caddy; the write token
-  is server-side and used only on an explicit human approve.
+- **The Console is credential-gated.** The practitioner presents a `CONTEXT_TOKEN` at login; the SPA
+  forwards it, Caddy and the bridges pass it through, and the Host resolves the capability and enforces it
+  (LADR-02). Read grants the read views; read+write additionally enables the approve surfaces.
 - **No reimplementation.** Redaction, atomicity, dedup and the value gate are the skill's; the bridge
   calls them. The browser renders their outcome.
 - **Bounded and honest.** The graph shows what the store holds; the traversal is bounded. The Console
@@ -130,14 +131,16 @@ a judgement the skill does not already make.
 ## Integration & correctness
 
 - **Same-origin, no CORS.** The SPA is served by Caddy and calls `/api` on the same origin, so no CORS
-  configuration is needed. The SPA sends **no `Authorization` header** — Caddy injects the read token into
-  the `/api` proxy; a client-supplied header is not required and must not override it.
+  configuration is needed. The SPA sends the session's `Authorization: Bearer` header; Caddy and the
+  bridges forward it verbatim to the Host, which resolves the capability and refuses an absent or
+  unknown credential.
 - **The bridge is Python.** A small Python HTTP service in the viewer pod imports the capture skill client
   and reuses its redactor, atomicity detector, dedup and value gate as a library. No new toolchain beyond
   what the skills already require; the optional value-gate decision model stays in the skill layer (off by
   default), so it never lands in the Host or in bridge logic — the bridge invokes it, it does not contain it.
-- **The bridge holds both tokens, the SPA holds none.** Read token (for any Host read the bridge does) and
-  write token (for an approved capture) come from the pod's credentials. The SPA never holds either (LADR-02).
+- **No token is ambient.** The SPA holds the session credential (in `sessionStorage`, dropped with the
+  tab); the pod carries none in its image or environment, and the bridges take the credential per request
+  and pass it to the Host. The Host is the capability authority (LADR-02, NFR-02).
 - **As-of is UTC.** `AsOf` must be a UTC instant with a `Z` or explicit offset (`InstantJson.Parse` rejects
   a naive string with a 400). The as-of date control serializes a UTC instant; validity windows are rendered
   in the user's local timezone but are sent/stored as UTC.
@@ -368,7 +371,7 @@ The two actions:
   a store capability — flag, don't assume.
 
 *Approve flow is accepted when* approving re-runs the capture gates, the digest is shown before any write,
-and the browser holds no write token.
+and only a read+write session can reach the approve surface.
 
 ### Empty, loading, error and offline states
 
@@ -502,7 +505,7 @@ See [`./ladrs/`](./ladrs/).
 | LADR | Decision | Status |
 |------|----------|--------|
 | [LADR-01](./ladrs/LADR-01-separate-pod-caddy.md) | Viewer is a separate pod fronted by Caddy, not served by the Host | Draft |
-| [LADR-02](./ladrs/LADR-02-read-ambient-write-never.md) | Browser holds no token; Caddy injects the read token; write token server-side only | Draft |
+| [LADR-02](./ladrs/LADR-02-read-ambient-write-never.md) | Credential-gated Console; the session token is forwarded to the Host, which is the capability authority | Accepted |
 | [LADR-03](./ladrs/LADR-03-drive-capture-pipeline.md) | The Console drives the existing capture pipeline via a bridge; never reimplements the gates | Draft |
 | [LADR-04](./ladrs/LADR-04-no-build-spa.md) | The SPA is static no-build (vendored libs), served by Caddy; no Node toolchain | Draft |
 | [LADR-05](./ladrs/LADR-05-bounded-graph.md) | The graph view renders `/paths` + `/tickets/paths` with bounded traversal, not a graph DB | Draft |
