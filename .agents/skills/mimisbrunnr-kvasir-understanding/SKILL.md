@@ -144,7 +144,7 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
   `(Product)-[:HAS_INITIATIVE]->(Initiative)` edge: same spelling, opposite direction, and — as on
   `export` — an unregistered product is a `404` naming `upsert-product-name`, never a silent empty.
   It is not the `product` scope dimension: a memory scoped to `product` is not part of any named
-  product unless the registry links it.
+  product unless the registry links it. The spelling `--productname` is accepted as an alias.
 - **Three distinct outcomes, never collapsed.** A store that refuses the connection is `unreachable`
   (exit 3, an operator action); a store that hangs past its budget is `timed-out` (exit 4, worth a
   retry); a store that answers with nothing is empty (exit 0, "widen the filters"). A hung store must
