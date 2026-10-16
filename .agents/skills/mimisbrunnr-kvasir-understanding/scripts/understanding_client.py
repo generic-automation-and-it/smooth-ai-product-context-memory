@@ -2297,6 +2297,12 @@ def cmd_export(args: argparse.Namespace) -> int:
 
     reference_tickets = split_list(args.reference_tickets)
     if reference_tickets:
+        for ref in reference_tickets:
+            provider, _, key = ref.partition(":")
+            if not provider or not key:
+                print(f"REFUSED: --reference-tickets wants provider:key, got {ref!r}. "
+                      "Nothing was written.", file=sys.stderr)
+                return 1
         if not binding["initiative"]:
             print("REFUSED: --reference-tickets needs --initiative (the WET copy's own initiative). "
                   "Nothing was written.", file=sys.stderr)
