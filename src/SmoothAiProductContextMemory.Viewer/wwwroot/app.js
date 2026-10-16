@@ -10,7 +10,7 @@ import { initBrowse, reopenFromUrl } from './browse.js';
 import { initStatus } from './status.js';
 import { initDetail } from './detail.js';
 import { initGraph } from './graph.js';
-import { initReview } from './review.js';
+import { initReview, refreshReview } from './review.js';
 import { getToken, setToken, clearToken, isAuthed } from './auth.js';
 import { getCapabilities } from './api.js';
 
@@ -113,6 +113,10 @@ function boot() {
   initDetail();
   initBrowse();
   applyCapability();
+  // Re-login can change the tier (read-only ↔ read+write). Review's
+  // Approve/Reject buttons are rendered from the capability, so re-render the
+  // pane if it was already initialised — its listeners stay wired once.
+  if (reviewInitialized) refreshReview();
   loginOverlay.hidden = true;
 }
 

@@ -238,3 +238,9 @@ export function initReview() {
   wireControls();
   refresh();
 }
+
+// Re-render the queue without re-wiring: the capability gate on Approve/Reject
+// is read at render time, so a re-login with a different tier needs a refresh.
+export function refreshReview() {
+  refresh();
+}

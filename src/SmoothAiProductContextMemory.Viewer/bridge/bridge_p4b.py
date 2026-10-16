@@ -60,22 +60,11 @@ def _alias_env():
         os.environ[_BASE_URL_NAME] = os.environ[_BASE_URL_ALIAS]
 
 
-def _refuse_without_write_token():
-    """NFR-02: the write token is no longer ambient env.
-
-    The Console session supplies it per request, so this bridge must start
-    without one and forward the request's bearer token to the Host instead.
-    An empty env is expected, not a misconfiguration.
-    """
-    return
-
-
 _alias_env()
-_refuse_without_write_token()
 
-# Import after the guards. The capture client's import-time
-# `load_machine_credentials` reads the write token from the machine credential
-# file; any of the env names above would already have been rejected if absent.
+# Import after aliasing. The capture client's import-time `load_machine_credentials`
+# seeds the read token from the machine credential file; the write token is never
+# ambient (NFR-02) and arrives per request.
 import context_memory_client as client  # noqa: E402
 
 
@@ -132,7 +121,7 @@ def _run_capture_set(payload, dryrun, token=None):
         json.dump(payload, tmp)
         tmp_path = tmp.name
     os.chmod(tmp_path, 0o600)
-    env = {**os.environ, "CONTEXT_MEMORY_WRITE_TOKEN": token} if token else None
+    env = {**os.environ, client.ENV_WRITE_TOKEN: token} if token else None
     try:
         proc = subprocess.run(
             argv + ["--payload", tmp_path],  # safer than /dev/stdin on some platforms
