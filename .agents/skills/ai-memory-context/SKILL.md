@@ -22,17 +22,27 @@ The pipeline is Odin's, with the store-bound stages removed. See [Provenance](#p
 
 ## Switches
 
-| Operation | Direction | Network |
-|---|---|---|
-| **export** (default) | session → local store | no |
-| **import** | local store → session | no |
-| **review** | store → advisory report | no |
+**Only three things here are commands.** Everything else is a procedure switch the agent honours while
+following this skill — so do not look for a script to invoke.
 
-`--dryrun` runs the whole pipeline and previews, writing nothing. `--all` re-exports the whole scope
-as upserts. `--nomarker` exports normally but records no marker. `--dontask` takes the recommended
-option without asking. There is **no `--approve` and no `--deepsearch`**: there is no proposed/approved
-state without a store, and nothing to search remotely. The human veto stays at the proposal step,
-before anything is written.
+| Command | What it does |
+|---|---|
+| `memory_index.py [store] [--review]` | validate, version-chain and index the store; `--review` adds the advisory decay report |
+| `memory_index.py --run-folder [SESSION_ID]` | print the complete run folder, stamped once |
+| `memory_index.py --stamp` | print the bare creation stamp |
+
+**The export is a procedure, not a verb.** There is no `--export` command: you read the session, run
+stages 1-4 below, and write the files yourself.
+
+| Procedure switch | Effect |
+|---|---|
+| `--dryrun` | **You** run stages 1-3, present the proposal, and write nothing. No script implements this — honouring it is the procedure. |
+| `--all` | re-export every in-scope unit as an upsert. Also `--ignore` on the marker CLI. |
+| `--nomarker` | export normally but record no marker. Also a flag on `scripts/session_marker.py`. |
+| `--dontask` | no-op here: this skill asks nothing to begin with — the proposal *is* the ask. Accepted so a caller may pass it. |
+
+There is **no `--approve` and no `--deepsearch`**: no proposed/approved state without a store, and
+nothing to search remotely. The human veto stays at the proposal step, before anything is written.
 
 ## Store layout
 
