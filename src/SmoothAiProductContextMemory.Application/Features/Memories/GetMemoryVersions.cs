@@ -2,6 +2,7 @@ using FluentValidation;
 using Mediator;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using SmoothAiProductContextMemory.Application.Abstractions;
 using SmoothAiProductContextMemory.Application.Common.Exceptions;
 using SmoothAiProductContextMemory.Application.Common.Models;
 using SmoothAiProductContextMemory.Application.Common.Persistence;
@@ -25,7 +26,10 @@ public static class GetMemoryVersions
         }
     }
 
-    public sealed class Handler(IApplicationDbContext db, ILogger<Handler> logger) : IRequestHandler<Request, Response>
+    public sealed class Handler(
+        IApplicationDbContext db,
+        IMemoryGraph graph,
+        ILogger<Handler> logger) : IRequestHandler<Request, Response>
     {
         public async ValueTask<Response> Handle(Request request, CancellationToken cancellationToken)
         {
@@ -78,14 +82,17 @@ public static class GetMemoryVersions
                         v.Sources,
                         v.CreatedOn)
                     {
-                        Tickets = [.. group.Tickets.Select(t => new TicketRef(t.Provider, t.Key))],
                         Repository = group.Repo,
                         InitiativeName = initiativeName,
                     })
             ];
 
-            logger.LogInformation("Get memory versions completed. Count: {Count}", items.Count);
-            return new Response(items);
+            // Same assembly as the query path, so a version row and a list row never disagree about a
+            // memory's binding.
+            IReadOnlyList<CheapMemory> enriched = await TicketIdentityLookup.EnrichAsync(db, graph, items, cancellationToken);
+
+            logger.LogInformation("Get memory versions completed. Count: {Count}", enriched.Count);
+            return new Response(enriched);
         }
     }
 }

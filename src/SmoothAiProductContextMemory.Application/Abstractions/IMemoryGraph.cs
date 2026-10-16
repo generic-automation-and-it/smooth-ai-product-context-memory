@@ -63,6 +63,19 @@ public interface IMemoryGraph
         string provider,
         string key,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The same edges read from the other end: the tickets the given memories reference, in one
+    /// bounded read. Anchored on the selection, so the cost is bounded by the number of memories asked
+    /// for (a page of rows) rather than by the whole edge set — a list view that names each row's
+    /// binding must not issue a query per row.
+    /// </summary>
+    Task<IReadOnlyList<MemoryTicketReference>> FindAboutAsync(
+        IReadOnlyCollection<Guid> memoryUuids,
+        CancellationToken cancellationToken);
 }
 
 public sealed record MemoryRelationship(Guid SourceUuid, Guid TargetUuid, string Relation, string Reason);
+
+/// <summary>One <c>(Memory)-[:ABOUT]->(Ticket)</c> edge: identity plus the declaration that made it.</summary>
+public sealed record MemoryTicketReference(Guid MemoryUuid, string Provider, string Key, string Reason);

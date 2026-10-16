@@ -152,12 +152,12 @@ public sealed class NpgsqlMemorySearch(SmoothAiProductContextMemoryDbContext db)
                     .Matches(EF.Functions.PlainToTsQuery(TextSearchConfig, text)));
         }
 
-        // The group's identity rides along with the row: the read path already carries the group, so
-        // the ticket / repo / initiative the query filtered on is free here and is what a card shows.
-        // The initiative name is a correlated subquery (one indexed lookup per row, bounded by the
-        // limit) because a left join would change which groups match; the tickets are a JSONB column
-        // with a value converter, so they are narrowed to provider/key after materialisation rather
-        // than projected in SQL.
+        // The group's repo rides along with the row, and the initiative name is a correlated subquery
+        // (one indexed lookup per row, bounded by the limit) because a left join would change which
+        // groups match. Tickets are deliberately NOT projected here: they live in two stores (the
+        // group's membership array and the graph's ABOUT edges), and reading the array per row would
+        // ship every stored ticket document on every row. `TicketIdentityLookup` assembles them once per
+        // page instead.
         var projected = await rows
             .OrderByDescending(x => x.version.ValidFrom)
             .ThenBy(x => x.memory.Uuid)
@@ -198,7 +198,6 @@ public sealed class NpgsqlMemorySearch(SmoothAiProductContextMemoryDbContext db)
                 x.version.Sources,
                 x.version.CreatedOn)
             {
-                Tickets = [.. x.grp.Tickets.Select(t => new TicketRef(t.Provider, t.Key))],
                 Repository = x.grp.Repo,
                 InitiativeName = x.InitiativeName,
             })
