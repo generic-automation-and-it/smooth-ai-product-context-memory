@@ -176,6 +176,15 @@ jobs:
           python3 scripts/check_skill_selfcontainment.py
           python3 -B -m unittest discover -s scripts -p 'test_check_skill_selfcontainment.py' -v
 
+      # Two more harnesses for scripts/ that had none. `pack-skill-zip.py` produces the artifact a
+      # desktop runtime loads, and it shipped a zip containing a bogus empty directory entry while
+      # reporting itself fit to upload. `test_store_layout_parity.py` holds the store-layout contract
+      # equal across the two indexers that implement it, which is the property LADR-002 rests on.
+      - name: Test the skill zip packer and the store-layout parity
+        run: |
+          python3 -B scripts/test_pack_skill_zip.py
+          python3 -B scripts/test_store_layout_parity.py
+
       # Without --postgres only the Docker-free transport checks run; the disposable-container
       # fixture stays an operator-run check (scripts/AGENTS.md).
       - name: Test ticket-ownership preflight
