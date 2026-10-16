@@ -22,521 +22,77 @@ curl -fsSL https://raw.githubusercontent.com/generic-automation-and-it/smooth-ai
 curl -fsSL https://raw.githubusercontent.com/generic-automation-and-it/smooth-ai-product-context-memory/main/scripts/install-skills.sh | bash
 ```
 
-Installs the nine owned skills — details: [Use it in another repository](#use-it-in-another-repository).
+Installs the nine owned skills. They find `~/.mimisbrunnr/credentials` from the service install, so
+no per-repo setup is needed.
 
-## Run it
+## Running
 
-**No .NET toolchain required.** Two commands, on macOS and Linux:
+| Service | URL | Notes |
+|---|---|---|
+| **Mímisbrunnr Viewer** | http://localhost:5441 | Loopback Mímisbrunnr Console (HLD-009) — browse, filter, read |
+| **API (Host)** | http://localhost:5141 | Scalar UI at `/scalar/v1`; OpenAPI at `/openapi/v1.json` |
+| **Aspire dashboard** | http://localhost:15278 | Login URL `/login?t=<token>` is printed in the container logs at startup |
 
-```bash
-scripts/provision-credentials.sh   # 1. write the API tokens
-scripts/run.sh                     # 2. pull the controller image and start the whole stack
-```
-
-**Step 1 is what puts `CONTEXT_MEMORY_READ_TOKEN` / `CONTEXT_MEMORY_WRITE_TOKEN` in a checkout.**
-They are the names the skills authenticate with, and `provision-credentials.sh` is the only thing that
-writes them inside a repository — both launchers adopt the pair from it rather than minting their own.
-Skip it and the stack starts fine: `scripts/run.sh` publishes the read half to
-`~/.mimisbrunnr/credentials`, which the clients load at startup, so **reads keep working** and only
-writes fail, with `missing-credential: CONTEXT_MEMORY_WRITE_TOKEN is required` until you take the
-deliberate write step below. `scripts/run.ps1` publishes no machine file, so on Windows step 1 is
-required for reads too. Run `run.sh` alone only if you want the API and nothing is going to write to it.
-
-Step 1 is idempotent: re-running reuses the existing tokens rather than rotating them, because the
-running Host holds them and a rotation 403s every client until each one is re-pointed.
-
-`run.sh` starts one controller container, which starts the API, PostgreSQL, blob storage and Seq. It
-waits for the API to answer and exits non-zero if it does not, so a green run means a running API:
-
-| | |
-|---|---|
-| API | http://localhost:5141 |
-| Dashboard | http://localhost:15278 — use the `/login?t=…` URL it prints |
-| PostgreSQL | `127.0.0.1:5432` · blob `9000`/`9001` · Seq `5341` |
-
-### Put the credentials in your shell
-
-The skills need no setup — they read `~/.mimisbrunnr/credentials` themselves. Export them anyway when
-something else needs them (a script, an editor, a tool that is not a skill):
-
-```bash
-scripts/run.sh env-export --profile ~/.zshrc
-```
-
-That writes the API URL and both tokens into `~/.zshrc` as one managed block:
-
-```bash
-# >>> mimisbrunnr — managed by scripts/run.sh env-export --profile >>>
-export CONTEXT_MEMORY_BASE_URL='http://localhost:5141'
-export CONTEXT_MEMORY_READ_TOKEN='…'
-export CONTEXT_MEMORY_WRITE_TOKEN='…'
-# <<< mimisbrunnr <<<
-```
-
-Re-run it whenever you want to rotate: it rewrites those three lines **in place**, so it never
-duplicates and never leaves an old token behind in a file that is typically world-readable. Nothing
-outside the markers is touched, and a profile it has not written before is backed up first.
-
-**Use `~/.zshrc`, not `~/.zprofile`.** `.zshrc` is read by every interactive shell; `.zprofile` is read
-only by *login* shells, so values put there are invisible to a plain `zsh` session and to most
-non-shell tooling. Pass a different path if you want one — `~/.zprofile`, `$PROFILE` on Windows, or any
-file — but `~/.zshrc` is the default because it is the one that works everywhere.
-
-> **Never use a shell redirect.** `scripts/run.sh env-export > ~/.zshrc` differs from the safe form by
-> one character and silently **empties the file**. There is no recovery path — no Time Machine snapshot,
-> no dotfiles repo, no editor history, no shell-tool backup — and the loss is whatever you had not backed
-> up. This is not hypothetical: it happened to the author of this file while writing it, and the
-> recovery rebuilt a three-month-old copy. `--profile` cannot truncate, because it never rewrites the
-> whole file.
-
-To print instead of writing — to paste somewhere, or to capture in a script:
-
-```bash
-scripts/run.sh env-export              # macOS / Linux
-scripts/run.sh env-export powershell   # Windows PowerShell
-```
-
-Only `CONTEXT_MEMORY_*` names are ever emitted: the controller's own `Parameters__*` names contain hyphens
-and no shell can assign them, which is why those travel by `--env-file` and never by export.
-
-`env-export` is its own verb on purpose. `scripts/run.sh` prints ports and the dashboard URL but **never
-a token** — a credential written to a terminal that gets scrolled back, recorded, or read over a
-shoulder is disclosed. You choose to print one and choose where it goes.
-
-Run it again to pull a newer release and restart; data is preserved. `scripts/run.sh stop` stops it,
-`status` and `logs` report on it.
-
-**Windows (PowerShell 7):** the launcher is `pwsh ./scripts/run.ps1`. Step 1 is still
-`scripts/provision-credentials.sh`, which is a bash script — there is no `.ps1` equivalent, so run it
-from Git Bash or WSL in this checkout. Both launchers **adopt** the provisioned token pair rather than
-minting their own, so the controller and the skills hold the same credentials on either platform.
-
-### Use it in another repository
-
-The store is a **service**, not a per-repository fixture: start it once on a machine, and every
-repository talks to the same memory. `scripts/run.sh` publishes the credentials to
-`~/.mimisbrunnr/credentials` — outside every checkout — so a repository never has to provision anything.
-
-**Install the skills** — one command, re-run to update. It finds `.agents/skills`, `.claude/skills` or
-`.codex/skills`, and only replaces the skills you have not switched off in
-`.agents/skills/_mimisbrunnr-shared/installation.json`:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/generic-automation-and-it/smooth-ai-product-context-memory/main/scripts/install-skills.sh | bash
-```
-
-```powershell
-irm https://raw.githubusercontent.com/generic-automation-and-it/smooth-ai-product-context-memory/main/scripts/install-skills.ps1 | iex
-```
-
-It installs the nine skills owned here — the seven `mimisbrunnr-*` skills plus `ai-understanding` and `ai-brain-dump` — and nothing else. Local skills of your own are left alone and never enter the manifest.
-
-Two other routes, if one fits you better:
-
-| | |
-|---|---|
-| **npm** — the client CLIs, not the skills | `npm i -g @generic-automation-and-it/mimisbrunnr-skills` |
-| **Marketplace** — Claude Code plugins | `claude plugin marketplace add generic-automation-and-it/smooth-ai-product-context-memory` then `claude plugin install mimisbrunnr@mimisbrunnr` |
-
-Details: [`scripts/SKILLS_INSTALLER.md`](scripts/SKILLS_INSTALLER.md).
-
-That's the whole setup for reading. The clients find the credential automatically — no env file, no
-`source`, no per-repository secret. Verify with:
-
-```bash
-python3 .agents/skills/_mimisbrunnr-shared/scripts/context_memory_client.py probe
-```
-
-**Writing costs one deliberate step**, because a write credential is deliberately never ambient:
-
-```bash
-set -a && source ~/.mimisbrunnr/credentials && set +a
-```
-
-Without it, writes fail closed with `missing-credential: CONTEXT_MEMORY_WRITE_TOKEN is required`; reads
-keep working. That asymmetry is the design — a credential that grants mutation should cost a deliberate
-act to obtain.
-
-Because the store is shared, so are its tokens: every repository authenticates to the same corpus and
-can read what the others captured. Cross-repo recall is the point, but it also means a repository holding
-a write token can write anywhere. Keep the credential file mode `600` and the store on a private
-interface.
-
-<details>
-<summary>Working on the code? These are the source-mode paths</summary>
-
-```bash
-dotnet run --project src/SmoothAiProductContextMemory.AppHost   # Aspire dev stack, Host from the working tree
-dotnet run --project src/SmoothAiProductContextMemory.Host       # API on its own; tokens: see [API credentials](#api-credentials) below
-docker build -t smooth-ai-product-context-memory:local .        # Host image; run contract in docs/wiki/docker.md
-```
-
-The dev AppHost and the controller both want ports `5141`, `5432`, `9000`, `9001`, `5341` and `15278`,
-so stop one before starting the other. `MIMIS_SHIFT_PORTS=1 scripts/run.sh` moves the controller's
-ports clear if you need them side by side.
-
-Aspire uses Docker by default. To run the dev AppHost on Podman, start the machine and set the runtime:
-
-```bash
-podman machine start
-DOTNET_ASPIRE_CONTAINER_RUNTIME=podman dotnet run --project src/SmoothAiProductContextMemory.AppHost
-```
-
-</details>
+Provisioning, the credential model, run modes and the `run.sh` verbs live in
+[Setup & Credentials](docs/wiki/setup.md) and [`scripts/CONTROLLER_LAUNCHER.md`](scripts/CONTROLLER_LAUNCHER.md).
 
 ## What We're Building
 
-AI language models are stateless — sessions are ephemeral and lost in time, deleted or submerged by chaos. This project is building the connective tissue to bring cohesion to the lifecycle. Context is no longer lost, instead, it gets refined to the latest, most relevant versions while still keeping track of the history and previous thought process, from both humans and agents. The connective tissue is layered tagging: what a session leaves behind is broken into atomic facts, each anchored by initiative, scope, repository, ticket, subject, tags and facets — and the anchors that matter for reachability are edges, so memories link to each other and tickets link into a hierarchy. A session is therefore not a transcript to be found again but a referenced graph to be walked. This project builds **persistent AI memory** so coding agents can recall relevant context over long periods, even after their working memory is gone, the sessions are impossible to find or the human in the loop no longer remembers why something got to be the way it got to be.
+AI language models are stateless — sessions are ephemeral and lost in time, deleted or submerged by
+chaos. This project is the connective tissue that brings cohesion to the lifecycle. Context is no
+longer lost; it gets refined to the latest, most relevant versions while still keeping track of the
+history and previous thought process, from both humans and agents. The connective tissue is layered
+tagging: what a session leaves behind is broken into atomic facts, each anchored by initiative,
+scope, repository, ticket, subject, tags and facets — and the anchors that matter for reachability
+are edges, so memories link to each other and tickets link into a hierarchy. A session is therefore
+not a transcript to be found again but a referenced graph to be walked.
 
 The core idea (inspired by the [unified-database approach to agent memory](https://www.tigerdata.com/learn/building-ai-agents-with-persistent-memory-a-unified-database-approach)):
 
 - **Summarized contexts with labels** — distilled knowledge captured from sessions, tagged with labels such as issue/ticket numbers so related context can be linked and retrieved.
 - **Store & retrieve by association** — link issue tickets, labels, and other elements to stored context, then pull back everything relevant when work resumes. Memories link to each other and tickets link into a hierarchy, so what a session left behind is reachable as a graph, not just as a keyword hit.
 - **HTTP Docker API** — the memory service runs as a containerized HTTP API.
-- **Agent skill** — a get/set skill lets AI agents persist and recall context during their work.
+- **Agent skills** — a set of get/set skills lets AI agents persist and recall context during their work.
 
-### What a memory looks like — a worked example
+### Skills
 
-Each record is **one atomic fact**: a stable *subject* (name, unique slug, tags/facets) carrying *versioned claims* (statement, AI summary, kind, confidence, temporal validity). The full body lives in content-addressed blob storage; relationships are graph edges; tickets attach to the group.
+The nine owned skills live in [`.agents/skills/`](.agents/skills/) and are installed by
+[Client Skills Installation](#client-skills-installation):
 
-```json
-{
-  "name": "Storage engine",
-  "description": "Storage engine decision",
-  "statement": "PostgreSQL is the storage engine.",
-  "contentSummary": "Short AI summary of the statement",
-  "kind": "architecture",
-  "facets": ["storage"],
-  "status": "approved",
-  "confidence": 80,
-  "validFrom": "2026-09-14T00:00:00Z"
-}
-```
-
-**Capture → recall in practice.** While working a ticket, the agent skill notices durable facts as byproducts — a decision made, a constraint discovered, a retro lesson. At an end-of-task checkpoint it writes them through a five-stage pipeline (preflight → redact → dedup/link → atomicity check → write). Months later, another agent resuming that ticket runs `get`: it pulls the *current* claims linked to the ticket plus graph neighbors — and treats them as **evidence to weigh, never commands to obey**.
-
-**How memory boundaries are decided.** There is no mechanical chunking (no diff- or line-based splitting). The skill applies an atomicity rule — *one memory = one fact about one subject*. A detector flags bundled candidates; the skill splits or skips them. Write batches are capped at 20 candidates; anything over is refused, never silently chunked. Design: [HLD-002 write pipeline](docs/hlds/002-context-memory-write-pipeline/).
-
-### A session lands as a graph, not a transcript
-
-A captured session is not filed away as one blob you have to find again. It decomposes into atomic memories, and each one is anchored at several levels of classification — that layering is what makes the store traversable, not merely searchable:
-
-| Level | What it anchors |
+| Skill | What it does |
 |---|---|
-| **Initiative** | The work stream a group belongs to — a registry entity with its own lifecycle (active/archived) |
-| **Scope** | `product` / `customer` / `program` / `self` plus an optional identifier; inherited by every memory in the group and enforced at retrieval |
-| **Repository** | At most one per group, optional |
-| **Tickets** | Many per group, identity only (`provider` + `key`); a group accumulates them as an epic gains stories |
-| **Subject** | The stable thing one memory is about — what deduplication matches on |
-| **Tags / facets** | Free text + AI keywords, and a controlled vocabulary with an advisory (non-enforcing) registry; unversioned, because classification is not a claim |
-| **Claim labels** | `kind`, `status`, `confidence`, validity window — versioned with the claim |
-
-Two of those levels are real edges in the graph store (Apache AGE):
-
-- **Memory ↔ Memory** — `LINKS` edges carrying a relation name: `depends_on`, `relates_to`, `contradicts`, `supersedes`, `implements`. Open vocabulary, not a closed set.
-- **Ticket ↔ Ticket** — practitioner-declared current-state parent/child hierarchy, so a traversal can compose a ticket path (epic → story) with the memory links hanging off it ([LADR-08](docs/hlds/003-graph-edges-on-age/ladrs/LADR-08-captured-ticket-hierarchy.md)).
-
-The other levels stay relational predicates on purpose — *if it needs a join, it is a table; if it needs a path, it is an edge*. Filtering by facet, scope, ticket, repository or validity window is a multi-predicate problem indexes solve and traversal does not; measured access here is about four parts filter to one part traverse, so the graph is additive over the authoritative relational core rather than a second home for the data ([HLD-003](docs/hlds/003-graph-edges-on-age/)). Deliberately absent: a tag graph, and any mirror of an upstream tracker's structure.
-
-So recall is not "locate the old session". It is: land on an anchor — a ticket, a facet, a subject — then walk bounded edges out to what that fact depends on, contradicts, or has already superseded. The session that produced the memories is provenance (episodic), never the unit you retrieve.
-
-### Why the store grows but retrieved context doesn't
-
-The store is append-heavy by design, yet the read path stays small — a deep well, a small cup:
-
-- **Supersession is a version bump**, not a new record; retrieval defaults to current-only claims ([HLD-001](docs/hlds/001-context-memory-storage/)).
-- **Write-time deduplication** on the subject, within the group being written to — a memory's identity is `(group, uuid)` — with recall *and* precision measured on same-group pairs plus one cross-group control, with balanced controls ([HLD-002 NFR-02](docs/hlds/002-context-memory-write-pipeline/nfrs/NFR-02-deduplication-accuracy.md)).
-- **Every graph traversal carries its bound** — depth is required (1–5, no server default), result limits are capped ([HLD-003 LADR-07](docs/hlds/003-graph-edges-on-age/ladrs/LADR-07-every-traversal-carries-its-bound.md)).
-- **Cheap fields first** — summaries and metadata by default; blob bodies only on explicit drill-down.
-- **Temporal validity** (`valid_from` / `valid_until`) filters claims outside their validity window when callers supply `asOf`; default queries do not apply this filter.
-- **Recall feedback** records hits, misses and never-recalled memories to sharpen retrieval over time; its retention bound is specified but not yet enforced ([HLD-004](docs/hlds/004-memory-recall-feedback/)).
-
-The store optimizes for durability; the read path optimizes for precision-per-token. Back it up as one
-self-verifying corpus snapshot (relational + graph + blob bodies in a single tar + manifest), validate it
-offline, and restore it into an empty target. `preflight` and `snapshot` run on the running API
-(`POST /api/context/snapshot` and `/snapshot/preflight`); `snapshot` is also available as a one-shot
-verb, and `verify`/`restore` run as one-shot verbs only — all via Docker, no .NET SDK. Commands in
-[docs/wiki/docker.md](docs/wiki/docker.md).
-
-### Memory model
-
-Drawing on the three memory types from the unified-database approach:
-
-| Memory type | What it holds | Role here |
-|---|---|---|
-| Semantic | Summarized contexts, labelled | The primary store — distilled knowledge retrievable by label/ticket, facets and full-text lexemes. Free prose does **not** retrieve by similarity (see *Where Mímisbrunnr loses* below) |
-| Episodic | Timestamped events (sessions, decisions) | Provenance — when and where a context was captured |
-| Procedural | Preferences, learned behaviors | Agent/user settings that persist across sessions |
-
-Temporal validity (`valid_from` / `valid_until`) keeps retrieved context current, and hybrid search (label + keyword + full-text) finds the right context fast. Free-text recall is AND-of-lexemes under the `english` configuration — stemming forgives inflections, not sentence structure — so a natural-language question defeats it. See *Where Mímisbrunnr loses* below.
-
-### Understanding — the distilled skill
-
-Memory is the full, scoped record (product / customer / program / self, one repo, tickets) — and it can
-be redundant with code or an `AGENTS.md`, because it is a snapshot of context. An **Understanding** is
-different: a distilled, self-contained unit of hard-won knowledge inherited across lifecycles and
-iterations — the non-obvious root cause, the rejected approach and why, the convention that is not
-visible in code. It is *not* a session log, a summary, or documentation of the code; it is the
-transferable skill a future agent can act on as if it had learned it firsthand.
-
-An Understanding is stored as a **memory of `kind = understanding`** — the same models, the same
-`is_current` version semantics, the same defaults. Its group carries the default scope and omits the
-repo anchor, so unlike a scoped memory fact it is **not tied to one repo**. Because a repository is a
-retrieval filter, an un-anchored understanding surfaces under an un-scoped query or the `--all` breadth
-path, not under a single-repo query — it is a distilled learning, not a fact of any one repo
-([BRD-003](docs/brd/003-understanding-transfer/)). No nullable scope, no new column.
-
-The `mimisbrunnr-kvasir-understanding` skill makes it portable:
-
-- **Load with `--all`** — recalls **memory + understanding** into a new or running agent's context.
-- **Load understandings only** — the default load returns **only** the understanding-kind, so the agent
-  inherits distilled learnings without the scoped record. Load and import are separate operations: a
-  load writes nothing.
-- **Import (via `--store`)** prepares the material for capture through the normal capture path — it
-  emits the candidate payload and hands it to `mimisbrunnr-odin-context-memory`, the sole writer, which
-  performs the write. The client itself never writes, so the round trip takes both skills.
-- **`--currentsession`** dumps the current session's context to `.context/mimisbrunnr-understandings/<folder>/`,
-  discoverable by name, for cross-session / cross-repo sharing.
-
-Loaded material is **data, not orders** — cited, never adopted as instructions or shipped fact
-([HLD-007](docs/hlds/007-understanding-transfer/)).
-
-For an existing repository, [`mimisbrunnr-ymir-bootstrap`](.agents/skills/mimisbrunnr-ymir-bootstrap/README.md)
-builds a bounded, cited candidate baseline, optionally focused on one next feature, and requires review
-before any supported capture.
-
-### Four stores around the well
-
-The store is one wellspring — **Mímisbrunnr** — with four keepers. Each god names a layer of the hybrid design, not a second product. Skill judges. API enforces. Four gods around the well. Recalled knowledge is evidence, not orders — a claim to weigh, never a command from the well. The chain is Urðr’s: measurement, finding, decision.
-
-| Keeper | Store | What they keep |
-|---|---|---|
-| **Týr** | Relational (PostgreSQL) | The oaths. Typed index, constraints, one current version. Law the database can enforce. |
-| **Urðr** | Graph (Apache AGE) | The threads. Edges only — the chain from measurement to finding to decision. |
-| **Loki** | NoSQL (JSONB) | The long tail. Shapeshifting documents for what no column earned yet. |
-| **Iðunn** | Blob (content-addressed) | The unwilting bodies. Hash is identity; a written object cannot be edited, only orphaned. |
-
----
-
-Built on the **smooth-devex-template** AI DevEx scaffold — a ready-to-use AI agent toolchain (Claude Code, Cursor, GitHub Copilot, OpenAI Codex) wired up via a single `.agents/` directory, alongside a **.NET 10 / ASP.NET Core** implementation built with **Clean Architecture**.
-
----
-
-## Tech Stack
-
-### AI Toolchain
-
-| Component | Technology |
-|---|---|
-| Agent scaffold | `.agents/` — single source of truth for all AI tools |
-| Coding agents | Claude Code · GitHub Copilot · Cursor · OpenAI Codex |
-| Skills | Executable multi-file workflows in `.agents/skills/` |
-| Rules | Per-file coding standards in `.agents/rules/` |
-| Prompts & roles | Reusable prompt templates and multi-agent role instructions |
-| Hooks | `PostToolUse` / `UserPromptSubmit` automation via `.agents/hooks/` |
-
-### .NET Reference Implementation
-
-| Component | Technology |
-|---|---|
-| Framework | ASP.NET Core (.NET 10) |
-| Architecture | Clean Architecture — `Domain` / `Application` / `Infrastructure` / `Host` |
-| API style | Minimal API endpoints (`src/SmoothAiProductContextMemory.Host`) |
-| Mediator | [`martinothamar/Mediator`](https://github.com/martinothamar/Mediator) — source-gen CQRS dispatch |
-| Validation | FluentValidation in a fail-fast Mediator pipeline |
-| Persistence | EF Core + PostgreSQL (`Npgsql.EntityFrameworkCore.PostgreSQL`) |
-| Observability | Serilog + OpenTelemetry, Scalar OpenAPI UI |
-| Testing | xunit.v3 · Shouldly · a fresh database per test (no Respawn) |
-
----
-
-## API credentials
-
-The API requires two **distinct** Bearer tokens — one read, one write — in **every** run mode, and
-there is **no default**: if either is blank or the two match, the process exits at startup. Set them
-before running anything. The two tokens are the same values the host-side skills read under different
-names; the one-command provisioner writes both name forms to **two** gitignored files, split by
-parser grammar.
-
-```bash
-scripts/provision-credentials.sh           # writes .context/mimisbrunnr.env and .context/mimisbrunnr.env.controller, both mode 600
-set -a && source .context/mimisbrunnr.env && set +a
-```
-
-Two files, not one: `.context/mimisbrunnr.env` is sourceable (every name is a valid shell identifier)
-and the container's `--env-file` for the API tokens; `.context/mimisbrunnr.env.controller` carries
-the `Parameters__*` names, which contain hyphens and are **not** shell identifiers, so keeping them
-out of the first file is what stops `source` from printing a token as "command not found". Both hold
-the same two token values. See [setup.md](docs/wiki/setup.md) for the full name mapping.
-
-To run the API on its own (without the provisioner), generate the values rather than inventing them
-(`openssl rand -hex 32`, twice) and pass them under the server-side names — they must differ:
-
-```bash
-ApiAccess__ReadToken='some-random-read-token' \
-ApiAccess__WriteToken='a-different-random-write-token' \
-  dotnet run --project src/SmoothAiProductContextMemory.Host
-```
-
-The skills read the **same two values** as `CONTEXT_MEMORY_READ_TOKEN`, `CONTEXT_MEMORY_WRITE_TOKEN`
-and `CONTEXT_MEMORY_BASE_URL` (default `http://localhost:5141`). See
-[docs/wiki/setup.md](docs/wiki/setup.md) for the full credential model, the name mapping and the
-regeneration procedure — rotation invalidates no data, because the tokens are never written to the store.
-
----
-
-## Getting Started
-
-### Prerequisites
-
-To run the stack — enough for [Run it](#run-it) above:
-
-- A container runtime — Docker Desktop, Rancher Desktop or Colima. Rootless Docker and Podman are not wired up; see [`CONTROLLER_LAUNCHER.md`](scripts/CONTROLLER_LAUNCHER.md)
-- **Python 3 runtime** — required for agent skills (stdlib-only scripts). Do not rely on macOS `/usr/bin/python3` (Xcode stub).
-
-To build or modify the code:
-
-- **.NET 10 SDK**
-
-  macOS ([Homebrew `python@3.14`](https://formulae.brew.sh/formula/python@3.14)):
-
-  ```bash
-  brew install python@3.14
-  ```
-
-  Windows ([WinGet `Python.Python.3.14`](https://learn.microsoft.com/en-us/windows/dev-environment/python/beginners)):
-
-  ```powershell
-  winget install -e --id Python.Python.3.14
-  ```
-
-  Latest installers: [macOS](https://www.python.org/downloads/macos/) · [Windows](https://www.python.org/downloads/windows/)
-
-### One-time AI-agent setup
-
-The repository drives four AI coding agents from a single `.agents/` directory via symlinks (`.claude`, `.codex`, `.cursor` → `.agents`, and `GEMINI.md` → `AGENTS.md`). Run the setup script once after cloning so the agents can discover skills, hooks, and rules:
-
-```bash
-# Mac/Linux
-bash .agents/setup/scripts/agents-setup.sh
-```
-
-```powershell
-# Windows (requires admin; enable Developer Mode for symlink support)
-powershell -ExecutionPolicy Bypass -File .agents/setup/scripts/agents-setup.ps1
-```
-
-> On Windows, enable Developer Mode (**Settings → System → For developers → Developer Mode**) so symlinks resolve.
-
-### Build & Test
-
-```bash
-dotnet restore SmoothAiProductContextMemory.slnx
-dotnet build   SmoothAiProductContextMemory.slnx --configuration Release
-dotnet test    SmoothAiProductContextMemory.slnx
-```
-
-Target a single test project directly when iterating, e.g. `dotnet test tests/SmoothAiProductContextMemory.Domain.UnitTest`.
-
-Once the stack is up:
-
-| Interface | URL |
-|---|---|
-| Aspire dashboard | `http://localhost:15278` (use the `/login?t=…` URL printed at startup) |
-| Scalar API Docs | `/scalar/v1` on the Host |
-| OpenAPI schema | `/openapi/v1.json` on the Host |
-| MinIO console | `http://localhost:9001` |
-
----
-
-## SmoothAiProductContextMemory Structure
-
-```
-.agents/                         # All AI tooling — single source of truth
-  hooks/                         # PostToolUse / UserPromptSubmit automation
-  prompts/                       # Reusable prompt templates
-  roles/                         # Multi-agent role instructions (PO, Architect, QA, …)
-  rules/                         # Per-file coding standards (auto-loaded by agents)
-  skills/                        # Executable multi-file workflows
-  setup/                         # One-time symlink / config setup scripts
-  settings.json                  # Tool permissions, compile/test commands
-
-src/
-  SmoothAiProductContextMemory.Domain/          # Entities, value objects, invariants — no external deps
-  SmoothAiProductContextMemory.Application/     # Vertical-slice use cases (Features/<Name>/) + Mediator handlers
-  SmoothAiProductContextMemory.Infrastructure/  # EF Core + PostgreSQL persistence, HTTP clients
-  SmoothAiProductContextMemory.Host/            # Minimal API composition, middleware, observability
-
-tests/
-  SmoothAiProductContextMemory.*.UnitTest/          # L0 — no I/O, in-process
-  SmoothAiProductContextMemory.*.ComponentTest/     # L1 — real isolated PostgreSQL via Aspire (per-test DB)
-  SmoothAiProductContextMemory.*.IntegrationTest/   # L2 — full stack, real PostgreSQL
-  SmoothAiProductContextMemory.TestFramework/       # Shared fixtures
-  SmoothAiProductContextMemory.TestFramework.Aspire/ # Aspire dependency host (PostgreSQL/AGE + MinIO blob)
-```
-
----
-
-## Where Mímisbrunnr loses
-
-Stated, not apologised for. Each is a property of the design, and each is a thing to check before
-relying on the well for it.
-
-- **One machine, one practitioner.** Today's default deployment posture is a local Aspire stack —
-  Postgres+AGE, MinIO and Seq on one host, reached over loopback. There is no multi-tenant isolation, no
-  per-user identity, and no horizontal scale-out. Scope is enforced as a *filter on retrieval*, not as a
-  security boundary between users. A non-loopback posture is documented
-  ([`docs/wiki/docker.md`](docs/wiki/docker.md)) but the target deployment posture is one of the open
-  owner decisions below, not a settled property.
-- **No real-time multi-agent coordination.** Two agents do not converse through the store. Capture is an
-  explicit end-of-task checkpoint, so a fact held by one agent is invisible to another until someone
-  finalizes. There is no queue, no lock-across-agents protocol and no partial-progress write.
-- **The write path's judgement lives in the skill, so a weaker model degrades capture.** Semantic
-  deduplication, atomicity scoring, link derivation and summary generation are model decisions the
-  database cannot express as constraints. The mechanical half fails closed; the judgement half degrades
-  quietly. A weaker model produces more compound records and coarser labels, not an error.
-- **Redaction is a gate on recognisable shapes.** `set` refuses to write when the scrubber cannot run, so
-  the gate never fails open — but the rules are fixed-shape fingerprints (`AKIA…`, `gh[pousr]_…`, PEM
-  blocks, `secret=`/`token:`/`password=` assignments). A bare high-entropy value, an unlabelled blob, an
-  unusual vendor token format or a password in prose passes through.
-- **Scope is declared, not discovered.** Programme versus product knowledge is set on the group by the
-  caller and enforced on read (the stored value is `program`). A capture under the wrong scope dimension
-  is stored correctly and retrieved wrongly; nothing infers the right dimension for you.
-- **A cross-group duplicate is invisible to the store.** A memory's identity is `(group, uuid)`, chosen so
-  the write path needs no cross-group lock ordering. The same subject captured under a second group is a
-  separate memory, not a version — the store neither detects nor merges it.
-- **Recall is lexeme-AND, not semantic.** `/query` free text matches every lexeme under the `english`
-  configuration, so a natural-language question defeats it. Structured facets, tags, kind and traversal
-  are the reliable paths in; free prose is not.
-- **Nothing is deletable on the write path.** Content addressing makes a blob immutable and unrefcounted.
-  A superseded body is orphaned, never edited or removed — which is what makes a redaction a one-way
-  operation, by design.
-- **What "done" means is not written down, and six decisions are still open.** No tracked document defines
-  MVP, so a completion asserted against a gitignored worktask is currently the only record. Six owner
-  decisions — scope record, deployment posture, the redaction-gate question, untracked capture identity,
-  the dossier collapse rule, and whether a design may be accepted over draft children — gate the rest of
-  the backlog. Everything behind them is written down and waiting; none of it is guessed.
-
----
+| `mimisbrunnr-odin-context-memory` | The sole writer — captures, redacts, dedups and writes memories through the five-stage pipeline |
+| `mimisbrunnr-kvasir-understanding` | Loads distilled learnings across sessions and repos; the transfer layer for hard-won knowledge |
+| `mimisbrunnr-vitsmunir-dump` | Listen-first braindump mode — defers to you, captures when you stop |
+| `mimisbrunnr-saga-dossier` | Composes a cited context dossier for a slice of the store — catches you up on a repo, ticket or initiative |
+| `mimisbrunnr-muninn-recall-feedback` | Runs the three recall-feedback tuning queries — never-recalled list, miss rate over a window, baseline reset |
+| `mimisbrunnr-heimdallr-find-session-metadata` | Reports the current session's binding — tickets, repository, initiative |
+| `mimisbrunnr-ymir-bootstrap` | Builds a bounded, cited candidate baseline for an existing repository |
+| `ai-brain-dump` | Listen-first capture for tickets, ADRs, designs, plans — the same posture, broader scope |
+| `ai-understanding` | Exports this session's hard-won knowledge as an Understanding (memory of `kind = understanding`) |
+
+For the full design — atomicity rules, write-pipeline stages, scope model, the four stores around
+the well — see [docs/wiki/architecture.md](docs/wiki/architecture.md), the
+[HLDs](docs/hlds/) and [docs/wiki/limits.md](docs/wiki/limits.md) for the honest trade-offs.
 
 ## Documentation
 
 | Topic | Location |
 |---|---|
-| **Business intent & requirements** | [`docs/brd/001-context-memory/`](docs/brd/001-context-memory/) |
 | **What is special** (vs MemOS, second-brain, session-memory rivals) | [`docs/wiki/what-is-special.md`](docs/wiki/what-is-special.md) |
+| **Setup & credentials** (tokens, name mapping, provisioning, run modes) | [`docs/wiki/setup.md`](docs/wiki/setup.md) |
+| **Architecture** (clean architecture, four stores, layered tagging) | [`docs/wiki/architecture.md`](docs/wiki/architecture.md) |
+| **Tech stack** (AI toolchain + .NET reference implementation) | [`docs/wiki/tech-stack.md`](docs/wiki/tech-stack.md) |
+| **AI tooling setup** | [`docs/wiki/ai-tooling.md`](docs/wiki/ai-tooling.md) |
+| **Where Mímisbrunnr loses** (honest limits) | [`docs/wiki/limits.md`](docs/wiki/limits.md) |
+| **Testing strategy** | [`docs/wiki/testing.md`](docs/wiki/testing.md) |
+| **CI/CD pipeline** | [`docs/wiki/ci.md`](docs/wiki/ci.md) |
+| **Container images & durability** (`snapshot` / `verify` / `restore`) | [`docs/wiki/docker.md`](docs/wiki/docker.md) |
+| **Controller launcher** (`run.sh` / `.ps1`) | [`scripts/CONTROLLER_LAUNCHER.md`](scripts/CONTROLLER_LAUNCHER.md) |
+| **Skills installer** (`install-skills.sh` / `.ps1`) | [`scripts/SKILLS_INSTALLER.md`](scripts/SKILLS_INSTALLER.md) |
+| **Business intent & requirements** | [`docs/brd/`](docs/brd/) |
+| **Architecture decisions & NFRs** | [`docs/hlds/`](docs/hlds/) |
 | AI agent context & coding rules | [`AGENTS.md`](AGENTS.md) · [`.agents/`](.agents/) |
-| Architecture & design | [`docs/wiki/architecture.md`](docs/wiki/architecture.md) |
-| AI tooling setup | [`docs/wiki/ai-tooling.md`](docs/wiki/ai-tooling.md) |
-| Testing strategy | [`docs/wiki/testing.md`](docs/wiki/testing.md) |
-| CI/CD pipeline | [`docs/wiki/ci.md`](docs/wiki/ci.md) |
-| Container images & durability (`snapshot`/`verify`/`restore`) | [`docs/wiki/docker.md`](docs/wiki/docker.md) |
-| Setup & credentials (tokens, name mapping, provisioning) | [`docs/wiki/setup.md`](docs/wiki/setup.md) |
-| One-command controller launcher (`run.sh` / `.ps1`) | [`scripts/CONTROLLER_LAUNCHER.md`](scripts/CONTROLLER_LAUNCHER.md) |
-| Installing/updating the skills (`install-skills.sh` / `.ps1`) | [`scripts/SKILLS_INSTALLER.md`](scripts/SKILLS_INSTALLER.md) |
-| Architecture decisions & NFRs | [`docs/hlds/`](docs/hlds/) |
-
----
 
 ## Contributing
 
@@ -549,15 +105,11 @@ trip people up. By taking part you agree to the [Code of Conduct](CODE_OF_CONDUC
 
 Found a vulnerability? Do not open an issue — follow the [Security Policy](SECURITY.md).
 
----
-
 ## Be like Odin, drink from the well
 
 <p align="center">
-  <img src="docs/banner/odin-am-brunnen-der-weisheit.jpg" alt="Odin drinks from Mímisbrunnr as Mímir looks on (1903). A work by Robert Engels. Public domain." width="1280">
+  <img src="docs/banner/odin-am-brunnen-der-weisheit.jpg" alt="Odin drinks from Mímisbrunnr as Mímir looks on (1903). A work by Robert Engels. Public domain." width="420">
 </p>
-
----
 
 ## Credits
 
