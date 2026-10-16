@@ -142,3 +142,4 @@ These IDs are HLD-007's; `SKILL.md`, the README, the scripts and the tests cite 
 | 2026-10-15 | Consumer review 5535929651: `load`/`import` mark only the records they rendered (`render_store_records` / `render_table_records`), not… | — |
 | 2026-10-15 | G1: `export` persists held candidates as `Status = proposed` | — |
 | 2026-10-15 | Cut to HLD shape: SKILL.md pointer + non-SKILL.md traps only | — |
+| 2026-10-16 | `export --product-name` declares `(Product)-[:HAS_INITIATIVE]->(Initiative)`, or `(Product)-[:HAS_REPO]->(Repo)` when no initiative is bound, after the memories are written; the register is read for a preview, so a dry run still needs no write credential. Initiative wins when both are bound (the repo edge is the one that can 409). Refused up front when the export binds neither anchor, and an unregistered product is named with its `upsert-product-name` fix. `--productname` accepted as an alias | — |
