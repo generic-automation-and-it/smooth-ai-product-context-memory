@@ -1,0 +1,33 @@
+{
+  "updated": "2026-10-16T14:52:24Z",
+  "skills": [
+    {
+      "name": "ai-asset-sync",
+      "installed": true
+    },
+    {
+      "name": "ai-ralph-loop",
+      "installed": true
+    },
+    {
+      "name": "ai-template-sync",
+      "installed": true
+    },
+    {
+      "name": "ai-terse",
+      "installed": true
+    },
+    {
+      "name": "create-hld",
+      "installed": true
+    },
+    {
+      "name": "create-worktask",
+      "installed": true
+    },
+    {
+      "name": "manage-rule-system",
+      "installed": true
+    }
+  ]
+}

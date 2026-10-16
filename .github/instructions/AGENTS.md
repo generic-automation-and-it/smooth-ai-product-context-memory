@@ -70,3 +70,11 @@ Index of every `*.instructions.md` in `.agents/rules/` (→ `.github/instruction
 | Date | Change | Ref |
 |:-----|:-------|:----|
 | 2026-10-15 | Created — index of every rule file, split by folder, frontmatter fields as columns. | this PR |
+
+## Installed subset (installer-owned-rules-subset)
+
+| Scope | Rules |
+| :---- | :---- |
+| `**` | `code-review-standards` · `git/git-policy` |
+| `**/*AGENTS.md` | `meta/knowledge-conventional-contexts-quality` |
+| `.agents/rules/**` | `meta/rules` |
