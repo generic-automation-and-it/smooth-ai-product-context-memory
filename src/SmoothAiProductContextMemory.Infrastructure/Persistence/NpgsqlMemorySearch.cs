@@ -93,7 +93,20 @@ public sealed class NpgsqlMemorySearch(SmoothAiProductContextMemoryDbContext db)
             rows = rows.Where(x => x.grp.Uuid == groupUuid);
         }
 
-        if (criteria.GroupId is { } groupId)
+        if (criteria.ReferencedUuids is { Count: > 0 } referenced && criteria.GroupId is { } ownerId)
+        {
+            // The reference union: the owner group's memories OR the memories carrying an ABOUT
+            // reference to the ticket. The reference branch applies its own (non-group-context) scope
+            // plan, so a programme-scoped reference is hidden unless that scope was requested (D2).
+            List<string> refExcluded = [.. criteria.ReferencedExcludedScopeDimensions];
+            string? refRequired = criteria.ReferencedRequiredScopeDimension;
+            rows = rows.Where(x =>
+                x.memory.GroupId == ownerId
+                || (referenced.Contains(x.memory.Uuid)
+                    && (refRequired == null || x.grp.ScopeDimension == refRequired)
+                    && !refExcluded.Contains(x.grp.ScopeDimension)));
+        }
+        else if (criteria.GroupId is { } groupId)
         {
             rows = rows.Where(x => x.memory.GroupId == groupId);
         }

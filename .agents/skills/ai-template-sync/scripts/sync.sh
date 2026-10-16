@@ -126,6 +126,24 @@ fi
 cd "$LANDING"
 git config core.symlinks true 2>/dev/null || true
 
+# Rules land in .github/instructions/ and are symlinked from .agents/rules. Every
+# tool reads the rules from .agents (Claude via the .claude symlink, Codex via
+# .codex, Copilot via the .github path), so the copy + symlink run regardless of
+# --tools. The Copilot-only `copilot-instructions.md` stays in Section D.
+mkdir -p .github
+if [ "$OVERWRITE" = "global" ] || [ ! -d .github/instructions ]; then
+  rm -rf .github/instructions
+  cp -R "$TEMPLATE/.github/instructions" .github/instructions
+fi
+# .agents/rules must be a symlink back to the real instructions dir. Refuse to
+# clobber a real directory (a landing repo's own rule set) — only replace a symlink.
+if [ -e .agents/rules ] && [ ! -L .agents/rules ]; then
+  echo "    refusing: .agents/rules is a real directory, not a symlink — leaving it untouched" >&2
+  exit 65
+fi
+rm -f .agents/rules
+ln -sf ../.github/instructions .agents/rules
+
 # Section B — Claude Code (also lays the Cursor symlink — same scaffold)
 if has_tool claude; then
   echo "==> Section B: Claude Code symlinks"
@@ -142,20 +160,7 @@ fi
 
 # Section D — GitHub Copilot
 if has_tool copilot; then
-  echo "==> Section D: Copilot rules dir + instructions"
-  mkdir -p .github
-  if [ "$OVERWRITE" = "global" ] || [ ! -d .github/instructions ]; then
-    rm -rf .github/instructions
-    cp -R "$TEMPLATE/.github/instructions" .github/instructions
-  fi
-  # .agents/rules must be a symlink back to the real instructions dir. Refuse to
-  # clobber a real directory (a landing repo's own rule set) — only replace a symlink.
-  if [ -e .agents/rules ] && [ ! -L .agents/rules ]; then
-    echo "    refusing: .agents/rules is a real directory, not a symlink — leaving it untouched" >&2
-    exit 65
-  fi
-  rm -f .agents/rules
-  ln -sf ../.github/instructions .agents/rules
+  echo "==> Section D: Copilot instructions file"
   if [ "$OVERWRITE" = "global" ] || [ ! -f .github/copilot-instructions.md ]; then
     cp "$TEMPLATE/.github/copilot-instructions.md" .github/copilot-instructions.md
   fi

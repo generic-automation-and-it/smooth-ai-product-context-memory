@@ -172,6 +172,11 @@ fi
 # keeps the file's own value rather than resetting a custom origin to the default. The kept value was
 # written by an earlier run or by hand, so it is re-validated before it is written back. An explicit
 # `--base-url` that differs from the file's value rewrites the pair, keeping the tokens.
+#
+# `run.sh` does the opposite for the same key name, in `~/.mimisbrunnr/credentials`, and that is not an
+# inconsistency: that file describes a *running* installation, so its base URL must track the port the
+# run published, while this one is a checkout-local artefact no process is serving. Whichever file a
+# change touches, the two behaviours are deliberate in opposite directions.
 rewrite_reason=""
 existing_base=""
 if [[ -f "$ENV_FILE" ]]; then

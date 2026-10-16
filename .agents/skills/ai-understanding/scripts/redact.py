@@ -403,7 +403,10 @@ def _set_spec():
     item = {field: TEXT for field in SET_TEXT_FIELDS}
     item.update({field: [TEXT] for field in SET_LIST_FIELDS})
     item["sources"] = [{field: TEXT for field in SET_SOURCE_FIELDS}]
-    return {"items": [item], "links": [{"reason": TEXT}], "labelsProposed": [TEXT]}
+    # A ticket reference's `reason` is free text persisted on the ABOUT edge; `provider`/`key` are
+    # ticket identities matched exactly, so they are deliberately not walked (see WRITE_SPECS).
+    return {"items": [item], "links": [{"reason": TEXT}], "labelsProposed": [TEXT],
+            "ticketReferences": [{"reason": TEXT}]}
 
 
 def _fold(name):
@@ -485,6 +488,7 @@ WRITE_SPECS = {
     "link_product_initiative": {"productName": TEXT, "initiativeName": TEXT, "reason": TEXT, "source": TEXT},
     "link_product_repo": {"productName": TEXT, "repo": TEXT, "reason": TEXT, "source": TEXT},
     "unlink_product_initiative": {"productName": TEXT, "initiativeName": TEXT},
+    "add_ticket_references": {"tickets": [{"reason": TEXT}], "reason": TEXT},
 }
 
 

@@ -15,6 +15,7 @@ Read [`SKILL.md`](./SKILL.md) first — preview, bundle, compose, focus, finding
 
 | Date | Change | Ref |
 | :---- | :---- | :---- |
+| 2026-10-16 | The base-URL default comes from the shared client (`client.DEFAULT_BASE_URL`) instead of a re-stated `http://localhost:5141` literal — the env var name was already borrowed from it, so the port was the one value that could drift away from every other client's fallback | — |
 | 2026-10-15 | Ralph loop: `version: true` is refused as the near-miss path already refuses it; a non-object bundle answer is a refusal; five dead symbols removed | — |
 | 2026-09-23 | Composer, invocation contract and L0 harness implemented | — |
 | 2026-09-24 | NFR-05 attribution test can no longer pass vacuously | #99 |

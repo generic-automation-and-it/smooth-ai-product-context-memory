@@ -67,6 +67,7 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
             await writeEntry(SnapshotEntryNames.Edges, Serialize(capture.Edges));
             await writeEntry(SnapshotEntryNames.TicketVertices, Serialize(capture.TicketVertices));
             await writeEntry(SnapshotEntryNames.TicketEdges, Serialize(capture.TicketEdges));
+            await writeEntry(SnapshotEntryNames.AboutEdges, Serialize(capture.AboutEdges));
             await writeEntry(SnapshotEntryNames.ProductVertices, Serialize(capture.ProductVertices));
             await writeEntry(SnapshotEntryNames.InitiativeVertices, Serialize(capture.InitiativeVertices));
             await writeEntry(SnapshotEntryNames.RepoVertices, Serialize(capture.RepoVertices));
@@ -108,6 +109,7 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
                 objects,
                 capture.TicketVertices.Count,
                 capture.TicketEdges.Count,
+                capture.AboutEdges.Count,
                 capture.ProductVertices.Count,
                 capture.InitiativeVertices.Count,
                 capture.RepoVertices.Count,
@@ -375,6 +377,7 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
             Deserialize<SnapshotEdge[]>(Require(entries, SnapshotEntryNames.Edges)),
             Deserialize<SnapshotTicketVertex[]>(Require(entries, SnapshotEntryNames.TicketVertices)),
             Deserialize<SnapshotTicketEdge[]>(Require(entries, SnapshotEntryNames.TicketEdges)),
+            Deserialize<SnapshotAboutEdge[]>(Require(entries, SnapshotEntryNames.AboutEdges)),
             Deserialize<SnapshotProductVertex[]>(Require(entries, SnapshotEntryNames.ProductVertices)),
             Deserialize<SnapshotNamedVertex[]>(Require(entries, SnapshotEntryNames.InitiativeVertices)),
             Deserialize<SnapshotNamedVertex[]>(Require(entries, SnapshotEntryNames.RepoVertices)),
@@ -416,6 +419,7 @@ public sealed class TarSnapshotArchive : ISnapshotArchive
         CheckCount(entries, SnapshotEntryNames.Edges, manifest.Counts.Edges, "graph edge", findings);
         CheckCount(entries, SnapshotEntryNames.TicketVertices, manifest.Counts.TicketVertices, "ticket vertex", findings);
         CheckCount(entries, SnapshotEntryNames.TicketEdges, manifest.Counts.TicketEdges, "ticket edge", findings);
+        CheckCount(entries, SnapshotEntryNames.AboutEdges, manifest.Counts.AboutEdges, "about edge", findings);
         CheckCount(entries, SnapshotEntryNames.ProductVertices, manifest.Counts.ProductVertices, "product vertex", findings);
         CheckCount(entries, SnapshotEntryNames.InitiativeVertices, manifest.Counts.InitiativeVertices, "initiative vertex", findings);
         CheckCount(entries, SnapshotEntryNames.RepoVertices, manifest.Counts.RepoVertices, "repo vertex", findings);

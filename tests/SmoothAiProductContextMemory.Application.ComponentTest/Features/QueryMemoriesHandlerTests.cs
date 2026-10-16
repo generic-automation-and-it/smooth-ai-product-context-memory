@@ -1,6 +1,7 @@
 using NodaTime;
 using Microsoft.Extensions.Logging;
 using SmoothAiProductContextMemory.Application.Abstractions;
+using SmoothAiProductContextMemory.Application.Common.Models;
 using SmoothAiProductContextMemory.Application.Features.Memories;
 using SmoothAiProductContextMemory.Domain.Entities;
 
@@ -266,11 +267,115 @@ public sealed class QueryMemoriesHandlerTests(AspireFixture aspire) : HandlerTes
         response.Items.ShouldBeEmpty();
     }
 
+    [Fact]
+    public async Task Ticket_query_returns_the_owner_group_union_its_references()
+    {
+        var alpha = new Initiative { Name = "InitiativeAlpha" };
+        var beta = new Initiative { Name = "InitiativeBeta" };
+        Db.Initiatives.AddRange(alpha, beta);
+        await Db.SaveChangesAsync(Ct);
+
+        var owner = TestEntities.NewGroup(tickets: [TicketDocument.Create("github", "231", "https://tracker/231")]);
+        owner.InitiativeId = alpha.Id;
+        var referenceGroup = TestEntities.NewGroup();
+        referenceGroup.InitiativeId = beta.Id;
+        Db.MemoryGroups.AddRange(owner, referenceGroup);
+        await Db.SaveChangesAsync(Ct);
+
+        SetMemories.Handler set = NewSet();
+        await set.Handle(Approved(owner.Uuid, "Owner fact"), Ct);
+        SetMemories.Request reference = Approved(referenceGroup.Uuid, "Referencing fact");
+        reference = reference with { TicketReferences = [new TicketReferenceInput("github", "231")] };
+        await set.Handle(reference, Ct);
+
+        QueryMemories.Handler query = NewQuery();
+
+        var union = await query.Handle(
+            Query() with { TicketProvider = "github", TicketKey = "231" }, Ct);
+        union.Items.Select(i => i.Description).ShouldBe(["Owner fact", "Referencing fact"], ignoreOrder: true);
+
+        union.Items.Single(i => i.Description == "Owner fact").TicketMatch.ShouldBe("owner");
+        union.Items.Single(i => i.Description == "Referencing fact").TicketMatch.ShouldBe("reference");
+
+        // Every other filter stays conjunctive over the union: an initiative narrows to one branch.
+        (await query.Handle(
+            Query() with { TicketProvider = "github", TicketKey = "231", InitiativeName = "InitiativeAlpha" }, Ct))
+            .Items.Select(i => i.Description).ShouldBe(["Owner fact"]);
+        (await query.Handle(
+            Query() with { TicketProvider = "github", TicketKey = "231", InitiativeName = "InitiativeBeta" }, Ct))
+            .Items.Select(i => i.Description).ShouldBe(["Referencing fact"]);
+    }
+
+    [Fact]
+    public async Task Ticket_query_hides_a_program_scoped_reference_without_explicit_scope()
+    {
+        var alpha = new Initiative { Name = "InitiativeAlpha" };
+        var beta = new Initiative { Name = "InitiativeBeta" };
+        Db.Initiatives.AddRange(alpha, beta);
+        await Db.SaveChangesAsync(Ct);
+
+        var owner = TestEntities.NewGroup(tickets: [TicketDocument.Create("github", "231", "https://tracker/231")]);
+        owner.InitiativeId = alpha.Id;
+        var referenceProgram = TestEntities.NewGroup(scopeDimension: MemoryGroup.ScopeDimensionValue.Program);
+        referenceProgram.InitiativeId = beta.Id;
+        Db.MemoryGroups.AddRange(owner, referenceProgram);
+        await Db.SaveChangesAsync(Ct);
+
+        SetMemories.Handler set = NewSet();
+        await set.Handle(Approved(owner.Uuid, "Owner fact"), Ct);
+        SetMemories.Request reference = Approved(referenceProgram.Uuid, "Program reference");
+        reference = reference with { TicketReferences = [new TicketReferenceInput("github", "231")] };
+        await set.Handle(reference, Ct);
+
+        QueryMemories.Handler query = NewQuery();
+
+        // D2: a reference is not in-group context, so programme is hidden unless the scope was asked for.
+        (await query.Handle(Query() with { TicketProvider = "github", TicketKey = "231" }, Ct))
+            .Items.Select(i => i.Description).ShouldBe(["Owner fact"]);
+
+        // The owner group keeps group context, so an owner-group programme memory is still returned.
+        var ownerProgram = TestEntities.NewGroup(scopeDimension: MemoryGroup.ScopeDimensionValue.Program);
+        ownerProgram.InitiativeId = alpha.Id;
+        Db.MemoryGroups.Add(ownerProgram);
+        await Db.SaveChangesAsync(Ct);
+        await set.Handle(Approved(ownerProgram.Uuid, "Owner programme fact"), Ct);
+
+        (await query.Handle(Query() with { TicketProvider = "github", TicketKey = "231", ScopeDimension = MemoryGroup.ScopeDimensionValue.Program }, Ct))
+            .Items.Select(i => i.Description).ShouldContain("Program reference");
+    }
+
+    [Fact]
+    public async Task Ticket_query_applies_the_limit_after_the_union()
+    {
+        var alpha = new Initiative { Name = "InitiativeAlpha" };
+        var beta = new Initiative { Name = "InitiativeBeta" };
+        Db.Initiatives.AddRange(alpha, beta);
+        await Db.SaveChangesAsync(Ct);
+
+        var owner = TestEntities.NewGroup(tickets: [TicketDocument.Create("github", "231", "https://tracker/231")]);
+        owner.InitiativeId = alpha.Id;
+        var referenceGroup = TestEntities.NewGroup();
+        referenceGroup.InitiativeId = beta.Id;
+        Db.MemoryGroups.AddRange(owner, referenceGroup);
+        await Db.SaveChangesAsync(Ct);
+
+        SetMemories.Handler set = NewSet();
+        await set.Handle(Approved(owner.Uuid, "Owner one"), Ct);
+        await set.Handle(Approved(owner.Uuid, "Owner two"), Ct);
+        await set.Handle(Approved(referenceGroup.Uuid, "Reference one") with { TicketReferences = [new TicketReferenceInput("github", "231")] }, Ct);
+        await set.Handle(Approved(referenceGroup.Uuid, "Reference two") with { TicketReferences = [new TicketReferenceInput("github", "231")] }, Ct);
+
+        var response = await NewQuery().Handle(
+            Query() with { TicketProvider = "github", TicketKey = "231", Limit = 3 }, Ct);
+
+        response.Items.Count.ShouldBe(3);
+    }
+
     private SetMemories.Handler NewSet() =>
         new(AppDb, Graph, Blob, ErrorMapper, ProductGraph, Loggers.CreateLogger<SetMemories.Handler>());
 
     private QueryMemories.Handler NewQuery() =>
-        new(AppDb, Search, new NoopRecallFeedback(), ProductGraph, Loggers.CreateLogger<QueryMemories.Handler>());
+        new(AppDb, Search, new NoopRecallFeedback(), ProductGraph, Graph, Loggers.CreateLogger<QueryMemories.Handler>());
 
     private sealed class NoopRecallFeedback : IRecallFeedback
     {

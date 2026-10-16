@@ -401,7 +401,7 @@ public class TarSnapshotArchiveTests
             ],
             0,
             0);
-        var capture = new SnapshotCapture([], [], [], [], [], [], [], [], [], [], [], [], [], [], []);
+        var capture = new SnapshotCapture([], [], [], [], [], [], [], [], [], [], [], [], [], [], [], []);
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
         var tokensSeen = new List<CancellationToken>();
 
@@ -508,7 +508,7 @@ public class TarSnapshotArchiveTests
             [
                 new SnapshotTicketEdge("jira", "CHILD", "jira", "PARENT", "depends_on", "api", SystemClock.Instance.GetCurrentInstant(), null),
             ],
-            [], [], [], [], []);
+            [], [], [], [], [], []);
         var walk = new SnapshotWalkResult([new SnapshotBlob(address, SnapshotBlobState.Ok)], 0, 0);
 
         await _archive.WriteAsync(path, capture, walk, (_, _) => Task.FromResult((Body, ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
@@ -520,12 +520,38 @@ public class TarSnapshotArchiveTests
     }
 
     [Fact]
+    public async Task AboutEdges_RoundTrip_PreservingMemoryAndTicketIdentity()
+    {
+        string path = TempArchive();
+        string address = ContentAddress.Compute(Body);
+        var memoryUuid = Guid.NewGuid();
+        var declaredAt = SystemClock.Instance.GetCurrentInstant();
+        var capture = new SnapshotCapture(
+            [], [], [], [], [], [], [], [],
+            [new SnapshotTicketVertex("jira", "REF-1")],
+            [],
+            [new SnapshotAboutEdge(memoryUuid, "jira", "REF-1", "about reference", declaredAt)],
+            [], [], [], [], []);
+        var walk = new SnapshotWalkResult([new SnapshotBlob(address, SnapshotBlobState.Ok)], 0, 0);
+
+        await _archive.WriteAsync(path, capture, walk, (_, _) => Task.FromResult((Body, ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
+
+        SnapshotCapture round = (await _archive.ReadAsync(path, TestContext.Current.CancellationToken)).Capture;
+        round.AboutEdges.Count.ShouldBe(1);
+        round.AboutEdges[0].MemoryUuid.ShouldBe(memoryUuid);
+        round.AboutEdges[0].Provider.ShouldBe("jira");
+        round.AboutEdges[0].Key.ShouldBe("REF-1");
+        round.AboutEdges[0].Reason.ShouldBe("about reference");
+        round.AboutEdges[0].DeclaredAt.ShouldBe(declaredAt);
+    }
+
+    [Fact]
     public async Task ProductNameGraph_RoundTrip()
     {
         string path = TempArchive();
         string address = ContentAddress.Compute(Body);
         var capture = new SnapshotCapture(
-            [], [], [], [], [], [], [], [], [], [],
+            [], [], [], [], [], [], [], [], [], [], [],
             [new SnapshotProductVertex("gmail", "Google mail", "active")],
             [new SnapshotNamedVertex("alpha")],
             [new SnapshotNamedVertex("acme/widgets")],
@@ -829,7 +855,7 @@ public class TarSnapshotArchiveTests
             [new SnapshotEdge(memory.Uuid, memory.Uuid, "relates_to", "reason")],
             [],
             [],
-            [], [], [], [], []);
+            [], [], [], [], [], []);
 
         var walk = new SnapshotWalkResult([new SnapshotBlob(address, state)], state == SnapshotBlobState.Missing ? 1 : 0, 0);
         return (capture, walk);

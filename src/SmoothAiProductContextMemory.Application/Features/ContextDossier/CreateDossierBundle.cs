@@ -296,7 +296,8 @@ public static class CreateDossierBundle
                 selection.WidenedCount,
                 selection.Selected.Count,
                 selection.EdgeCount,
-                selection.HiddenPathDropped);
+                selection.HiddenPathDropped,
+                selection.ReferencedAnchors);
 
             return new DossierManifest(plan, selectedCount, reach, limitsHit, NoMatch: false);
         }

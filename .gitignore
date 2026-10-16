@@ -409,6 +409,13 @@ MigrationBackup/
 # Local AI context / work tasks (not tracked in source control)
 .context/
 
+# Ad-hoc scratch data homes — `MIMIS_HOME` / `MIMIS_DATA_ROOT` targets created while poking the
+# launcher by hand. Each holds a machine credential file (`credentials`, `credentials-read-only`,
+# `controller.env`) and a `volumes/` tree, so a blanket `git add -A` would put live API tokens in
+# history. Ignored at the root only; the files stay on disk for Conductor to copy into a workspace.
+/env/
+/nonsense/
+
 # Disposable generated local state — never commit: memory Markdown export
 # (.context/mimisbrunnr-memories/), understanding store (.context/understandings/),
 # session dumps (.context/mimisbrunnr-understandings/).

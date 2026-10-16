@@ -214,6 +214,30 @@ public sealed class NpgsqlMemoryGraph(SmoothAiProductContextMemoryDbContext db) 
         return true;
     }
 
+    public async Task<IReadOnlyList<Guid>> ListAboutAsync(
+        string provider,
+        string key,
+        CancellationToken cancellationToken)
+    {
+        // Property predicates (LADR-06): the Ticket provider/key equality is served by the Ticket
+        // HASH expression indexes, not a whole-table scan, and the memory anchor is returned directly.
+        string cypher = $"""
+            MATCH (s:{AgeSession.VertexLabel})-[e:{AgeSession.AboutEdgeLabel}]->(t:{AgeSession.TicketLabel})
+            WHERE t.provider = {Quote(provider)}
+              AND t.key = {Quote(key)}
+            RETURN s.memory_uuid
+            """;
+        await using NpgsqlCommand command = await CreateCommandAsync(cypher, "(v agtype)", cancellationToken);
+        await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+        var uuids = new List<Guid>();
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            uuids.Add(Guid.Parse(AgtypeArrayReader.ReadAgtypeString(reader, 0)));
+        }
+
+        return uuids;
+    }
+
     /// <summary>
     /// The one-hop lookup — outbound and inbound edges of one memory — exposed so the NFR-02 benchmark
     /// plans the statement the store runs rather than a hand-written copy of it.

@@ -69,7 +69,7 @@ public sealed class NfrEvidenceTests : PersistenceTestBase
         new(DataSource, Loggers.CreateLogger<NpgsqlRecallFeedbackQuery>());
 
     private QueryMemories.Handler Handler(IRecallFeedback feedback) =>
-        new(Db, Search, feedback, new NpgsqlProductGraph(Db), Loggers.CreateLogger<QueryMemories.Handler>());
+        new(Db, Search, feedback, new NpgsqlProductGraph(Db), new NpgsqlMemoryGraph(Db), Loggers.CreateLogger<QueryMemories.Handler>());
 
     private static QueryMemories.Request Req(string? query, int limit) => new(
         Query: query,
@@ -325,6 +325,7 @@ public sealed class NfrEvidenceTests : PersistenceTestBase
             await using SmoothAiProductContextMemoryDbContext workerDb = NewDbContext();
             QueryMemories.Handler h = new(
                 workerDb, new NpgsqlMemorySearch(workerDb), Writer, new NpgsqlProductGraph(workerDb),
+                new NpgsqlMemoryGraph(workerDb),
                 Loggers.CreateLogger<QueryMemories.Handler>());
             var sw = new Stopwatch();
             for (int i = 0; i < OperationsPerWorker; i++)
