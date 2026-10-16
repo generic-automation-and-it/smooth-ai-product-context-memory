@@ -68,7 +68,7 @@ resolved live. Copying descriptive fields would reintroduce the drift this desig
 
 **Acceptance criteria / DoD**
 
-- A vertex exposes identity and label only; asserting on any descriptive property fails.
+- Except `Product` per LADR-10, a vertex exposes identity and label only; asserting on any other vertex's descriptive property fails.
 - Answering any question about a memory's content requires joining back to the relational row.
 - Adding a memory property requires no graph change.
 
