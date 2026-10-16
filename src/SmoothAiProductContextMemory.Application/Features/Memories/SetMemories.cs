@@ -52,7 +52,8 @@ public static class SetMemories
         IReadOnlyList<LinkWrite>? Links,
         IReadOnlyList<string>? LabelsProposed,
         IReadOnlyList<TicketReferenceInput>? TicketReferences = null,
-        bool DryRun = false) : IRequest<Response>;
+        bool DryRun = false,
+        string? ProductName = null) : IRequest<Response>;
 
     /// <summary>
     /// <see cref="Uuid"/> is stable on dry-run when the caller supplied <c>createUuid</c>; legacy
@@ -72,7 +73,8 @@ public static class SetMemories
         int LabelsProposed,
         int TicketReferencesCreated,
         int TicketReferencesAlreadyPresent,
-        IReadOnlyList<ItemResult> Items);
+        IReadOnlyList<ItemResult> Items,
+        int ProductLinks = 0);
 
     public sealed class Validator : AbstractValidator<Request>
     {
@@ -145,6 +147,12 @@ public static class SetMemories
                     .WithMessage("Key must not contain a null character.");
                 ticketRef.RuleFor(r => r.Reason).MaximumLength(4000);
             });
+            RuleFor(x => x.ProductName)
+                .NotEmpty()
+                .MaximumLength(200)
+                .Must(p => p.Trim() == p && !p.Any(char.IsControl))
+                .When(x => !string.IsNullOrWhiteSpace(x.ProductName))
+                .WithMessage("ProductName must not have leading/trailing whitespace or control characters.");
         }
     }
 
@@ -172,7 +180,10 @@ public static class SetMemories
         IReadOnlyList<PlannedItem> Items,
         IReadOnlyList<PlannedLink> Links,
         IReadOnlyList<string> LabelsToInsert,
-        IReadOnlyList<TicketReferenceInput> TicketReferences);
+        IReadOnlyList<TicketReferenceInput> TicketReferences,
+        string? ProductName,
+        string? ProductInitiativeName,
+        bool WouldLinkProduct);
 
     private const string DefaultAboutReason = "captured under referenced ticket";
 
@@ -181,6 +192,7 @@ public static class SetMemories
         IMemoryGraph graph,
         IBlobStorage blobStorage,
         IDbErrorMapper errorMapper,
+        IProductGraph productGraph,
         ILogger<Handler> logger) : IRequestHandler<Request, Response>
     {
         public async ValueTask<Response> Handle(Request request, CancellationToken cancellationToken)
@@ -368,7 +380,31 @@ public static class SetMemories
             IReadOnlyList<TicketReferenceInput> references =
                 await PlanReferencesAsync(request.TicketReferences, group, cancellationToken);
 
-            return new WritePlan(group, items, links, labels, references);
+            // Product → initiative is declared at capture and rides the memory write transaction. An
+            // unregistered product is refused before anything is written (dry run included); a group
+            // with no initiative simply carries no link (D3 reminder, not a refusal).
+            string? productName = null;
+            string? productInitiativeName = null;
+            bool wouldLinkProduct = false;
+            if (!string.IsNullOrWhiteSpace(request.ProductName))
+            {
+                if (!await productGraph.ExistsAsync(request.ProductName, cancellationToken))
+                {
+                    throw new NotFoundException(
+                        $"Product '{request.ProductName}' is not registered. Register it with 'upsert-product-name' first.");
+                }
+
+                productName = request.ProductName;
+                Initiative? initiative = await db.Initiatives
+                    .SingleOrDefaultAsync(i => i.Id == group.InitiativeId, cancellationToken);
+                productInitiativeName = initiative?.Name;
+                wouldLinkProduct = productInitiativeName is not null
+                    && !(await productGraph.GetInitiativeNamesAsync(productName, cancellationToken))
+                        .Contains(productInitiativeName);
+            }
+
+            return new WritePlan(
+                group, items, links, labels, references, productName, productInitiativeName, wouldLinkProduct);
         }
 
         private async Task<IReadOnlyList<PlannedLink>> PlanLinksAsync(
@@ -524,7 +560,8 @@ public static class SetMemories
                 labels,
                 plan.TicketReferences.Count * plan.Items.Count,
                 0,
-                [.. plan.Items.Select(i => new ItemResult(i.Uuid, null, i.Mode == ItemMode.Version, i.Mode == ItemMode.Unchanged))]);
+                [.. plan.Items.Select(i => new ItemResult(i.Uuid, null, i.Mode == ItemMode.Version, i.Mode == ItemMode.Unchanged))],
+                plan.WouldLinkProduct ? 1 : 0);
         }
 
         /// <summary>
@@ -627,10 +664,24 @@ public static class SetMemories
                     }
                 }
 
+                // Product → initiative rides the same transaction: the edge is declared at capture, and
+                // the group's initiative was resolved in the plan. A group with no initiative links nothing.
+                int productLinks = 0;
+                if (plan.ProductName is not null && plan.ProductInitiativeName is not null)
+                {
+                    bool linkCreated = await productGraph.LinkInitiativeAsync(
+                        plan.ProductName,
+                        plan.ProductInitiativeName,
+                        "bound at capture",
+                        "set",
+                        cancellationToken);
+                    productLinks = linkCreated ? 1 : 0;
+                }
+
                 await transaction.CommitAsync(cancellationToken);
 
                 (int created, int versioned, int unchanged, int diverged, int labels) = Counts(plan);
-                return new Response(created, versioned, unchanged, linked, diverged, skipped, labels, referencesCreated, referencesAlreadyPresent, results);
+                return new Response(created, versioned, unchanged, linked, diverged, skipped, labels, referencesCreated, referencesAlreadyPresent, results, productLinks);
             }
             catch
             {

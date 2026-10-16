@@ -80,6 +80,7 @@ public static class DependencyInjection
         services.AddScoped<IMemoryGraph, NpgsqlMemoryGraph>();
         services.AddScoped<IMemoryTraversal, NpgsqlMemoryTraversal>();
         services.AddScoped<ITicketGraph, NpgsqlTicketGraph>();
+        services.AddScoped<IProductGraph, NpgsqlProductGraph>();
         services.AddScoped<IRecallFeedback, NpgsqlRecallFeedback>();
         services.AddScoped<IRecallFeedbackQuery, NpgsqlRecallFeedbackQuery>();
         services.AddSingleton<IDbErrorMapper, NpgsqlDbErrorMapper>();

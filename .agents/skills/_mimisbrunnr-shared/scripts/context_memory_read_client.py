@@ -14,7 +14,7 @@ import deepsearch
 # and not placed in one of the two sets below is a test failure, not a silently unframed surface.
 READ_COMMANDS = frozenset({
     "probe", "query", "deepsearch", "get-versions", "get-blob", "paths", "ticket-paths", "labels",
-    "initiatives",
+    "initiatives", "product-names", "product-links",
 })
 
 # The opt-out, with its reason recorded. Each entry must carry no recalled content, or it is a surface
@@ -73,6 +73,12 @@ def main():
     command = sub.add_parser("initiatives")
     command.add_argument("--status")
     command.set_defaults(func=client.cmd_initiatives)
+    command = sub.add_parser("product-names")
+    command.set_defaults(func=client.cmd_product_names)
+    command = sub.add_parser("product-links")
+    command.add_argument("--product-name")
+    command.add_argument("--initiative-name")
+    command.set_defaults(func=client.cmd_product_links)
     command = sub.add_parser("deepsearch")
     client.add_payload_arguments(command)
     command.set_defaults(func=lambda args: print_deepsearch(args))

@@ -63,6 +63,17 @@ public sealed record MemorySearchCriteria
 
     public string? InitiativeName { get; init; }
 
+    /// <summary>
+    /// Initiative names resolved from a product, applied as <c>initiative IN (...)</c>. Combined with
+    /// <see cref="RepoNames"/> as a single OR predicate: a group matches when its initiative is in
+    /// <see cref="InitiativeNames"/> OR its repo is in <see cref="RepoNames"/>. Only set by the product
+    /// read path; the single <see cref="InitiativeName"/> is the direct query form.
+    /// </summary>
+    public IReadOnlyList<string>? InitiativeNames { get; init; }
+
+    /// <summary>Repo names resolved from a product; see <see cref="InitiativeNames"/> for the OR semantics.</summary>
+    public IReadOnlyList<string>? RepoNames { get; init; }
+
     /// <summary>Business-time instant the claim must be valid at. Null means no temporal narrowing.</summary>
     public Instant? AsOf { get; init; }
 

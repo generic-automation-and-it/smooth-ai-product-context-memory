@@ -1,8 +1,10 @@
 using NodaTime;
 using FluentValidation;
 using Mediator;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using SmoothAiProductContextMemory.Application.Abstractions;
+using SmoothAiProductContextMemory.Application.Common.Exceptions;
 using SmoothAiProductContextMemory.Application.Common.Models;
 using SmoothAiProductContextMemory.Application.Common.Persistence;
 using SmoothAiProductContextMemory.Application.Common.Retrieval;
@@ -37,7 +39,8 @@ public static class QueryMemories
         bool CurrentOnly = true,
         Instant? AsOf = null,
         int Limit = MemorySearchDefaults.Limit,
-        string FacetMatchMode = FacetMatchModeValue.Any) : IRequest<Response>;
+        string FacetMatchMode = FacetMatchModeValue.Any,
+        string? ProductName = null) : IRequest<Response>;
 
     public sealed record Response(IReadOnlyList<CheapMemory> Items);
 
@@ -60,6 +63,12 @@ public static class QueryMemories
                 .NotEmpty()
                 .When(x => !string.IsNullOrWhiteSpace(x.TicketKey))
                 .WithMessage("TicketProvider is required when TicketKey is supplied.");
+            RuleFor(x => x.ProductName)
+                .NotEmpty()
+                .MaximumLength(200)
+                .Must(p => p.Trim() == p && !p.Any(char.IsControl))
+                .When(x => !string.IsNullOrWhiteSpace(x.ProductName))
+                .WithMessage("ProductName must not have leading/trailing whitespace or control characters.");
         }
     }
 
@@ -67,6 +76,7 @@ public static class QueryMemories
         IApplicationDbContext db,
         IMemorySearch search,
         IRecallFeedback feedback,
+        IProductGraph productGraph,
         ILogger<Handler> logger) : IRequestHandler<Request, Response>
     {
         public async ValueTask<Response> Handle(Request request, CancellationToken cancellationToken)
@@ -120,6 +130,34 @@ public static class QueryMemories
                 FacetMatchMode = request.FacetMatchMode,
             };
 
+            // Product affinity is resolved through the graph first, then applied in SQL before the row
+            // ceiling — an unknown product is a 404, never an empty result that looks like a miss.
+            IReadOnlyList<string>? productInitiatives = null;
+            IReadOnlyList<string>? productRepos = null;
+            if (!string.IsNullOrWhiteSpace(request.ProductName))
+            {
+                if (!await productGraph.ExistsAsync(request.ProductName, cancellationToken))
+                {
+                    throw new NotFoundException(
+                        $"Product '{request.ProductName}' is not registered. Register it with 'upsert-product-name' first.");
+                }
+
+                productInitiatives = await productGraph.GetInitiativeNamesAsync(request.ProductName, cancellationToken);
+                productRepos = await productGraph.GetRepoNamesAsync(request.ProductName, cancellationToken);
+                if (productInitiatives.Count == 0 && productRepos.Count == 0)
+                {
+                    logger.LogInformation("Query memories completed. Count: {Count}", 0);
+                    Emit([new RecallFeedbackRecord(retrievalId, null, shape, occurredOn)]);
+                    return new Response([]);
+                }
+
+                criteria = criteria with
+                {
+                    InitiativeNames = productInitiatives,
+                    RepoNames = productRepos,
+                };
+            }
+
             logger.LogDebug(
                 "Query criteria. CurrentOnly: {CurrentOnly} RequiredScope: {RequiredScope} ExcludedScopes: {ExcludedScopes} AsOf: {AsOf} Limit: {Limit}",
                 criteria.CurrentOnly,
@@ -129,6 +167,11 @@ public static class QueryMemories
                 criteria.Limit);
 
             IReadOnlyList<CheapMemory> items = await search.SearchAsync(criteria, cancellationToken);
+
+            if (productInitiatives is not null)
+            {
+                items = await EnrichProductMatchesAsync(items, productInitiatives, productRepos!, cancellationToken);
+            }
 
             logger.LogInformation("Query memories completed. Count: {Count}", items.Count);
 
@@ -151,6 +194,59 @@ public static class QueryMemories
             }
 
             return new Response(items);
+        }
+
+        private async Task<IReadOnlyList<CheapMemory>> EnrichProductMatchesAsync(
+            IReadOnlyList<CheapMemory> items,
+            IReadOnlyList<string> productInitiatives,
+            IReadOnlyList<string> productRepos,
+            CancellationToken cancellationToken)
+        {
+            if (items.Count == 0)
+            {
+                return items;
+            }
+
+            MemoryGroup[] groups = await db.MemoryGroups
+                .AsNoTracking()
+                .Where(g => items.Select(i => i.GroupUuid).Distinct().Contains(g.Uuid))
+                .Select(g => new MemoryGroup { Uuid = g.Uuid, InitiativeId = g.InitiativeId, Repo = g.Repo })
+                .ToArrayAsync(cancellationToken);
+            Dictionary<Guid, MemoryGroup> groupsByUuid = groups.ToDictionary(g => g.Uuid);
+
+            long[] initiativeIds = groups.Select(g => g.InitiativeId).Distinct().ToArray();
+            Dictionary<long, string> initiativeNames = await db.Initiatives
+                .AsNoTracking()
+                .Where(i => initiativeIds.Contains(i.Id))
+                .ToDictionaryAsync(i => i.Id, i => i.Name, cancellationToken);
+
+            string[] distinctInitiativeNames = groups
+                .Select(g => initiativeNames.GetValueOrDefault(g.InitiativeId))
+                .OfType<string>()
+                .Distinct()
+                .ToArray();
+            IReadOnlyDictionary<string, int> sharedCounts = await productGraph.CountProductsPerInitiativeAsync(
+                distinctInitiativeNames, cancellationToken);
+
+            var initiativeSet = new HashSet<string>(productInitiatives);
+            var repoSet = new HashSet<string>(productRepos);
+
+            return [.. items.Select(item =>
+            {
+                if (!groupsByUuid.TryGetValue(item.GroupUuid, out MemoryGroup? group))
+                {
+                    return item with { ProductMatch = null, SharedInitiative = false };
+                }
+
+                string? initiativeName = initiativeNames.GetValueOrDefault(group.InitiativeId);
+                string? productMatch = initiativeName is not null && initiativeSet.Contains(initiativeName)
+                    ? "initiative"
+                    : group.Repo is not null && repoSet.Contains(group.Repo)
+                        ? "repo"
+                        : null;
+                bool shared = initiativeName is not null && sharedCounts.GetValueOrDefault(initiativeName) > 1;
+                return item with { ProductMatch = productMatch, SharedInitiative = shared };
+            })];
         }
 
         private void Emit(RecallFeedbackRecord[] records)

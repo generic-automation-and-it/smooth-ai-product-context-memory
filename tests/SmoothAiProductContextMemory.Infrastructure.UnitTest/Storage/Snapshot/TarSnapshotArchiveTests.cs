@@ -401,7 +401,7 @@ public class TarSnapshotArchiveTests
             ],
             0,
             0);
-        var capture = new SnapshotCapture([], [], [], [], [], [], [], [], [], []);
+        var capture = new SnapshotCapture([], [], [], [], [], [], [], [], [], [], [], [], [], [], []);
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
         var tokensSeen = new List<CancellationToken>();
 
@@ -507,7 +507,8 @@ public class TarSnapshotArchiveTests
             ],
             [
                 new SnapshotTicketEdge("jira", "CHILD", "jira", "PARENT", "depends_on", "api", SystemClock.Instance.GetCurrentInstant(), null),
-            ]);
+            ],
+            [], [], [], [], []);
         var walk = new SnapshotWalkResult([new SnapshotBlob(address, SnapshotBlobState.Ok)], 0, 0);
 
         await _archive.WriteAsync(path, capture, walk, (_, _) => Task.FromResult((Body, ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
@@ -516,6 +517,35 @@ public class TarSnapshotArchiveTests
         round.TicketEdges.Count.ShouldBe(1);
         round.TicketEdges[0].Key.ShouldBe("CHILD");
         round.TicketEdges[0].ParentKey.ShouldBe("PARENT");
+    }
+
+    [Fact]
+    public async Task ProductNameGraph_RoundTrip()
+    {
+        string path = TempArchive();
+        string address = ContentAddress.Compute(Body);
+        var capture = new SnapshotCapture(
+            [], [], [], [], [], [], [], [], [], [],
+            [new SnapshotProductVertex("gmail", "Google mail", "active")],
+            [new SnapshotNamedVertex("alpha")],
+            [new SnapshotNamedVertex("acme/widgets")],
+            [new SnapshotProductInitiativeEdge("gmail", "alpha", "bundles", "api", SystemClock.Instance.GetCurrentInstant())],
+            [new SnapshotProductRepoEdge("gmail", "acme/widgets", "repo", "api", SystemClock.Instance.GetCurrentInstant())]);
+        var walk = new SnapshotWalkResult([new SnapshotBlob(address, SnapshotBlobState.Ok)], 0, 0);
+
+        await _archive.WriteAsync(path, capture, walk, (_, _) => Task.FromResult((Body, ContentAddress.Hash(Body), (string?)null)), TestContext.Current.CancellationToken);
+
+        SnapshotCapture round = (await _archive.ReadAsync(path, TestContext.Current.CancellationToken)).Capture;
+        round.ProductVertices.Count.ShouldBe(1);
+        round.ProductVertices[0].Name.ShouldBe("gmail");
+        round.ProductVertices[0].Description.ShouldBe("Google mail");
+        round.ProductVertices[0].Status.ShouldBe("active");
+        round.InitiativeVertices.Single().Name.ShouldBe("alpha");
+        round.RepoVertices.Single().Name.ShouldBe("acme/widgets");
+        round.ProductInitiativeEdges.Single().ProductName.ShouldBe("gmail");
+        round.ProductInitiativeEdges.Single().InitiativeName.ShouldBe("alpha");
+        round.ProductRepoEdges.Single().ProductName.ShouldBe("gmail");
+        round.ProductRepoEdges.Single().RepoName.ShouldBe("acme/widgets");
     }
 
     [Fact]
@@ -798,7 +828,8 @@ public class TarSnapshotArchiveTests
             [new SnapshotVertex(memory.Uuid)],
             [new SnapshotEdge(memory.Uuid, memory.Uuid, "relates_to", "reason")],
             [],
-            []);
+            [],
+            [], [], [], [], []);
 
         var walk = new SnapshotWalkResult([new SnapshotBlob(address, state)], state == SnapshotBlobState.Missing ? 1 : 0, 0);
         return (capture, walk);

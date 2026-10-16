@@ -390,6 +390,10 @@ WRITE_ROUTES = frozenset({
     ("PUT", "/api/context/tickets/parent"),
     ("POST", "/api/context/labels"),
     ("POST", "/api/context/initiatives"),
+    ("POST", "/api/context/product-names"),
+    ("PUT", "/api/context/product-names/initiatives"),
+    ("PUT", "/api/context/product-names/repos"),
+    ("POST", "/api/context/product-names/initiatives/unlink"),
 })
 WRITE_ROUTE_TEMPLATES = (
     ("PATCH", re.compile(r"/api/context/groups/" + _UUID_PATTERN)),
@@ -1126,6 +1130,54 @@ def cmd_upsert_initiative(args):
     return resp
 
 
+def cmd_upsert_product_name(args):
+    resp = scrubbed_write("upsert_product_name", "POST", "/api/context/product-names", payload_of(args))
+    print(json.dumps(resp, indent=2))
+    return resp
+
+
+def cmd_link_product_initiative(args):
+    resp = scrubbed_write("link_product_initiative", "PUT", "/api/context/product-names/initiatives", payload_of(args))
+    print(json.dumps(resp, indent=2))
+    return resp
+
+
+def cmd_link_product_repo(args):
+    resp = scrubbed_write("link_product_repo", "PUT", "/api/context/product-names/repos", payload_of(args))
+    print(json.dumps(resp, indent=2))
+    return resp
+
+
+def cmd_unlink_product_initiative(args):
+    resp = scrubbed_write(
+        "unlink_product_initiative", "POST", "/api/context/product-names/initiatives/unlink", payload_of(args))
+    print(json.dumps(resp, indent=2))
+    return resp
+
+
+def cmd_product_names(args):
+    resp = require_lists(_request("GET", "/api/context/product-names"), "product-names", "items")
+    print(json.dumps(resp, indent=2))
+    return resp
+
+
+def cmd_product_links(args):
+    product_name = getattr(args, "product_name", None)
+    initiative_name = getattr(args, "initiative_name", None)
+    if bool(product_name) == bool(initiative_name):
+        raise ClientError(0, "bad-input",
+                          "'product-links' requires exactly one of '--product-name' or '--initiative-name'")
+    query = {}
+    if product_name:
+        query["productName"] = product_name
+    if initiative_name:
+        query["initiativeName"] = initiative_name
+    resp = require_lists(
+        _request("GET", "/api/context/product-names/links", query=query), "product-links", "items")
+    print(json.dumps(resp, indent=2))
+    return resp
+
+
 def cmd_paths(args):
     """POST /api/context/paths. Bounded multi-hop traversal from a source memory.
 
@@ -1289,7 +1341,7 @@ RAW_BODY_COMMANDS = frozenset({"get-blob"})
 # listings unframed, so the same stored text arrived with the recall notice from one client and
 # without it from the other (issue 190). Every read surface frames; this is the capture client's list.
 FRAMED_COMMANDS = frozenset({"query", "get-versions", "get-blob", "paths", "ticket-paths", "labels",
-                             "initiatives"})
+                             "initiatives", "product-names", "product-links"})
 
 
 def run_framed(args):
@@ -1450,9 +1502,33 @@ def main():
     p.add_argument("--status", help="active or archived")
     p.set_defaults(func=cmd_initiatives)
 
+    p = sub.add_parser("product-names", help="GET /api/context/product-names")
+    p.set_defaults(func=cmd_product_names)
+
+    p = sub.add_parser("product-links", help="GET /api/context/product-names/links")
+    p.add_argument("--product-name")
+    p.add_argument("--initiative-name")
+    p.set_defaults(func=cmd_product_links)
+
     p = sub.add_parser("upsert-initiative", help="POST /api/context/initiatives")
     add_payload_arguments(p)
     p.set_defaults(func=cmd_upsert_initiative)
+
+    p = sub.add_parser("upsert-product-name", help="POST /api/context/product-names")
+    add_payload_arguments(p)
+    p.set_defaults(func=cmd_upsert_product_name)
+
+    p = sub.add_parser("link-product-initiative", help="PUT /api/context/product-names/initiatives")
+    add_payload_arguments(p)
+    p.set_defaults(func=cmd_link_product_initiative)
+
+    p = sub.add_parser("link-product-repo", help="PUT /api/context/product-names/repos")
+    add_payload_arguments(p)
+    p.set_defaults(func=cmd_link_product_repo)
+
+    p = sub.add_parser("unlink-product-initiative", help="POST /api/context/product-names/initiatives/unlink")
+    add_payload_arguments(p)
+    p.set_defaults(func=cmd_unlink_product_initiative)
 
     p = sub.add_parser("paths", help="POST /api/context/paths (bounded multi-hop traversal)")
     add_payload_arguments(p)

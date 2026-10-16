@@ -58,7 +58,7 @@ public sealed class MigrationPostureTests(AspireFixture aspire) : IAsyncLifetime
     {
         _metadata.Metadata = new SnapshotMetadata(
             SystemClock.Instance.GetCurrentInstant().Plus(Duration.FromDays(-3)),
-            new SnapshotCounts(0, 0, 0, 0, 0, 0, 0),
+            new SnapshotCounts(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
             DanglingReferences: 0,
             UnreferencedObjects: 0);
 

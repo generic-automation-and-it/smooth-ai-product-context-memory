@@ -113,6 +113,21 @@ public sealed class NpgsqlMemorySearch(SmoothAiProductContextMemoryDbContext db)
             rows = rows.Where(x => db.Initiatives.Any(i => i.Id == x.grp.InitiativeId && i.Name == initiative));
         }
 
+        // Product affinity is one OR predicate, not two ANDed ones: a group belongs to the product
+        // when its initiative is linked to it OR its repo is linked to it (LADR-10, Part F). Both
+        // projections are resolved by the handler and applied before the row ceiling in SQL.
+        IReadOnlyList<string>? initiativeNames = criteria.InitiativeNames;
+        IReadOnlyList<string>? repoNames = criteria.RepoNames;
+        bool matchInitiatives = initiativeNames is { Count: > 0 };
+        bool matchRepos = repoNames is { Count: > 0 };
+        if (matchInitiatives || matchRepos)
+        {
+            rows = rows.Where(x =>
+                (matchInitiatives
+                    && db.Initiatives.Any(i => i.Id == x.grp.InitiativeId && initiativeNames!.Contains(i.Name)))
+                || (matchRepos && repoNames!.Contains(x.grp.Repo)));
+        }
+
         if (criteria.FreeText is { } text)
         {
             // plainto_tsquery stays inside the expression tree. Hoisting it into a local would call it

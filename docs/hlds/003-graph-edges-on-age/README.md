@@ -59,7 +59,8 @@ endpoints, not whole-graph algorithms.
 Vertices exist solely to give edges something to attach to. `Memory` carries only `memory_uuid`;
 LADR-08's implemented `Ticket` carries exact `provider` and `key` only. No subject,
 claim, scope or validity is copied. Ticket membership remains group JSONB; all descriptive fields
-remain relational.
+remain relational. `Memory` and `Ticket` remain identity-only; `Product` is the deliberate exception
+and carries `description` and `status` per LADR-10.
 
 This keeps descriptive facts in one authoritative location. Identity anchoring is the deliberate
 exception: Ticket identity follows JSONB membership transactionally, while scope and ownership are
@@ -67,7 +68,7 @@ resolved live. Copying descriptive fields would reintroduce the drift this desig
 
 **Acceptance criteria / DoD**
 
-- A vertex exposes identity and label only; asserting on any descriptive property fails.
+- Except `Product` per LADR-10, a vertex exposes identity and label only; asserting on any other vertex's descriptive property fails.
 - Answering any question about a memory's content requires joining back to the relational row.
 - Adding a memory property requires no graph change.
 
@@ -144,6 +145,24 @@ and grants no scope consent (D2). Releasing the last owner of a referenced ticke
   reference twice yields one edge.
 - Deleting a memory removes its `ABOUT` edges; releasing the last owner of a referenced ticket is refused.
 
+### 7. Product names are a graph-only registry
+
+**Implemented by this change.** [LADR-10](./ladrs/LADR-10-product-names-are-graph-only-registry.md)
+models products as a graph-only `product-name` registry: a `Product` vertex links many-to-many to
+identity-only `Initiative` vertices and optionally one-to-many to `Repo` vertices via `HAS_INITIATIVE` /
+`HAS_REPO` edges. No relational table, no group column; unrelated to the `product` scope dimension.
+An initiative linked to more than one product is disclosed as shared; `/query productName` is a 404 for an
+unregistered product and items report `productMatch`/`sharedInitiative`.
+
+**Acceptance criteria / DoD**
+
+- A product links to initiatives (many-to-many) and optionally to repos (one product per repo).
+- An unknown `product-name` is refused on link, on `set` (nothing written) and on `/query` (404);
+  case-folded and padded names are refused.
+- `/query productName` returns exactly the memories of the product's initiatives/repos, AND-ed with other
+  filters and bounded after SQL resolution; items carry `productMatch` and `sharedInitiative`.
+- Snapshot → verify → restore keeps every new vertex and edge; the archive format version was bumped.
+
 ## Core Separation of Concerns
 
 > AGE holds relationships. Relational tables hold entities. Neither takes the other's job.
@@ -176,7 +195,7 @@ question tables answer badly, and is given nothing else.
 
 ## Architecture Decisions (LADRs)
 
-LADRs 01–03 are strategic (*what* and *why*); 04–07 are tactical (*how*); 08 replaces 02 for the ticket extension, and 09 adds a memory→ticket reference edge. Each is a single
+LADRs 01–03 are strategic (*what* and *why*); 04–07 are tactical (*how*); 08 replaces 02 for the ticket extension, 09 adds a memory→ticket reference edge, and 10 adds the product-name registry. Each is a single
 decision — a horizontal concern spanning this HLD. See [`./ladrs/`](./ladrs/).
 
 | LADR | Decision | Status |
@@ -190,6 +209,7 @@ decision — a horizontal concern spanning this HLD. See [`./ladrs/`](./ladrs/).
 | [LADR-07](./ladrs/LADR-07-every-traversal-carries-its-bound.md) | The depth bound is a `required` property of the query type | Accepted |
 | [LADR-08](./ladrs/LADR-08-captured-ticket-hierarchy.md) | Identity-only tickets and practitioner-declared current-state hierarchy | Accepted; implemented, release gates passed |
 | [LADR-09](./ladrs/LADR-09-memory-references-ticket.md) | Memory references a ticket it does not own, via a declared `ABOUT` edge | Accepted; owner-approved, implemented by this change |
+| [LADR-10](./ladrs/LADR-10-product-names-are-graph-only-registry.md) | Product names are a graph-only registry linked to initiatives and repos | Accepted; owner-approved, implemented by this change |
 
 ## Non-Functional Requirements
 

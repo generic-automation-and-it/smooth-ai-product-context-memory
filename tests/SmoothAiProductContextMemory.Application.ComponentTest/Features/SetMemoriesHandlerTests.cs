@@ -335,6 +335,7 @@ public sealed class SetMemoriesHandlerTests(AspireFixture aspire) : HandlerTestB
             failingGraph,
             Blob,
             ErrorMapper,
+            ProductGraph,
             Loggers.CreateLogger<SetMemories.Handler>());
         SetMemories.Request request = Write(group.Uuid, "Rollback A", "A") with
         {
@@ -476,7 +477,7 @@ public sealed class SetMemoriesHandlerTests(AspireFixture aspire) : HandlerTestB
     }
 
     private SetMemories.Handler NewHandler() =>
-        new(AppDb, Graph, Blob, ErrorMapper, Loggers.CreateLogger<SetMemories.Handler>());
+        new(AppDb, Graph, Blob, ErrorMapper, ProductGraph, Loggers.CreateLogger<SetMemories.Handler>());
 
     /// <summary>
     /// A version target must resolve inside the group the write names. The lookup was by uuid alone
