@@ -46,13 +46,20 @@ public static class GetMemoryVersions
                     $"This memory is '{dimension}'-scoped. Request it with scope '{dimension}' to read it.");
             }
 
+            MemoryGroup group = memory.Group!;
+            string? initiativeName = await db.Initiatives
+                .AsNoTracking()
+                .Where(i => i.Id == group.InitiativeId)
+                .Select(i => i.Name)
+                .SingleOrDefaultAsync(cancellationToken);
+
             List<CheapMemory> items =
             [
                 .. memory.Versions
                     .OrderBy(v => v.Version)
                     .Select(v => new CheapMemory(
                         memory.Uuid,
-                        memory.Group!.Uuid,
+                        group.Uuid,
                         memory.Name,
                         memory.Description,
                         v.Statement,
@@ -62,14 +69,19 @@ public static class GetMemoryVersions
                         memory.Tags,
                         v.Status,
                         v.Confidence,
-                        memory.Group.ScopeDimension,
-                        memory.Group.ScopeIdentifier,
+                        group.ScopeDimension,
+                        group.ScopeIdentifier,
                         v.ValidFrom,
                         v.ValidUntil,
                         v.Version,
                         v.IsCurrent,
                         v.Sources,
-                        v.CreatedOn))
+                        v.CreatedOn)
+                    {
+                        Tickets = [.. group.Tickets.Select(t => new TicketRef(t.Provider, t.Key))],
+                        Repository = group.Repo,
+                        InitiativeName = initiativeName,
+                    })
             ];
 
             logger.LogInformation("Get memory versions completed. Count: {Count}", items.Count);

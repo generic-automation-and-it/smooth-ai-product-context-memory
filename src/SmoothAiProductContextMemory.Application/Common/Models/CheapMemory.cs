@@ -3,6 +3,9 @@ using SmoothAiProductContextMemory.Domain.Entities;
 
 namespace SmoothAiProductContextMemory.Application.Common.Models;
 
+/// <summary>One ticket reference on the memory's group. A group accumulates tickets over time.</summary>
+public sealed record TicketRef(string Provider, string Key);
+
 public sealed record CheapMemory(
     Guid Uuid,
     Guid GroupUuid,
@@ -32,4 +35,15 @@ public sealed record CheapMemory(
 
     /// <summary>True when the group's initiative is linked to more than one product. Only set with <c>productName</c>.</summary>
     public bool SharedInitiative { get; init; }
+
+    /// <summary>
+    /// The group's identity, projected with the row. These are the group's own bindings — the same
+    /// fields the query filters on — not the memory's scope, so they are not a scope leak: the group
+    /// is the memory's container and the row already carries its uuid.
+    /// </summary>
+    public IReadOnlyList<TicketRef> Tickets { get; init; } = [];
+
+    public string? Repository { get; init; }
+
+    public string? InitiativeName { get; init; }
 }

@@ -139,12 +139,32 @@ public sealed class NpgsqlMemorySearch(SmoothAiProductContextMemoryDbContext db)
                     .Matches(EF.Functions.PlainToTsQuery(TextSearchConfig, text)));
         }
 
-        return await rows
+        // The group's identity rides along with the row: the read path already carries the group, so
+        // the ticket / repo / initiative the query filtered on is free here and is what a card shows.
+        // The initiative name is a correlated subquery (one indexed lookup per row, bounded by the
+        // limit) because a left join would change which groups match; the tickets are a JSONB column
+        // with a value converter, so they are narrowed to provider/key after materialisation rather
+        // than projected in SQL.
+        var projected = await rows
             .OrderByDescending(x => x.version.ValidFrom)
             .ThenBy(x => x.memory.Uuid)
             .ThenBy(x => x.version.Version)
             .Take(criteria.Limit)
-            .Select(x => new CheapMemory(
+            .Select(x => new
+            {
+                x.version,
+                x.memory,
+                x.grp,
+                InitiativeName = db.Initiatives
+                    .Where(i => i.Id == x.grp.InitiativeId)
+                    .Select(i => i.Name)
+                    .FirstOrDefault(),
+            })
+            .ToListAsync(cancellationToken);
+
+        return
+        [
+            .. projected.Select(x => new CheapMemory(
                 x.memory.Uuid,
                 x.grp.Uuid,
                 x.memory.Name,
@@ -163,8 +183,13 @@ public sealed class NpgsqlMemorySearch(SmoothAiProductContextMemoryDbContext db)
                 x.version.Version,
                 x.version.IsCurrent,
                 x.version.Sources,
-                x.version.CreatedOn))
-            .ToListAsync(cancellationToken);
+                x.version.CreatedOn)
+            {
+                Tickets = [.. x.grp.Tickets.Select(t => new TicketRef(t.Provider, t.Key))],
+                Repository = x.grp.Repo,
+                InitiativeName = x.InitiativeName,
+            })
+        ];
     }
 
     /// <summary>
