@@ -13,6 +13,7 @@ import { initGraph } from './graph.js';
 import { initReview, refreshReview } from './review.js';
 import { getToken, setToken, clearToken, isAuthed } from './auth.js';
 import { getCapabilities } from './api.js';
+import { initViewContext } from './view-context.js';
 
 let statusInitialized = false;
 let graphInitialized = false;
@@ -155,6 +156,9 @@ function handleSignOut() {
 
 loginForm.addEventListener('submit', handleLogin);
 signOut.addEventListener('click', handleSignOut);
+// Wired before login: the kind scope is a navigation-level control, not a view's, and it holds
+// no state of its own — signing out and back in leaves it where the practitioner put it.
+initViewContext();
 
 async function start() {
   if (!isAuthed()) {

@@ -80,7 +80,7 @@ Wait for user answers before proceeding.
 
 The template's contract is: **`.github/instructions/` is the real directory** that holds the rule files, and **`.agents/rules` is a symlink pointing to it**. A landing repo may not follow this — it may keep `.agents/rules` as a real directory of its own rules, or symlinked somewhere else.
 
-This matters because Section D of the sync (`scripts/sync.sh`) **unconditionally** runs `rm -rf .agents/rules` and re-points the symlink — in *both* overwrite modes. If `.agents/rules` is a real directory, that step **destroys the repo's own rules**. So this check runs regardless of the Phase 1 overwrite choice, and only when `copilot` is among the selected tools (Section D runs only then).
+This matters because the sync script **unconditionally** runs `rm -rf .agents/rules` and re-points the symlink at `.github/instructions` — in *both* overwrite modes — for every tool selection (the rules layout is shared by Claude/Cursor/Codex/Copilot via the `.agents` tree, so it cannot be scoped to a single tool). If `.agents/rules` is a real directory, that step **destroys the repo's own rules**. So this check runs regardless of the Phase 1 overwrite choice, and regardless of the tool selection.
 
 Inspect the landing repo:
 
@@ -102,8 +102,8 @@ Move your existing rules into `.github/instructions/` and re-point
 `.agents/rules` at it as part of this update? [y/n]
 ```
 
-- **y** → before invoking the script, move the existing rule files into `.github/instructions/` (merge, don't clobber the template rules), then let Section D re-point the `.agents/rules` symlink. The repo's own rules are preserved.
-- **n** → do **not** run with `copilot` in `--tools` (Section D would still `rm -rf .agents/rules`). Either drop `copilot` from the tools list, or sync the other tools first and handle Copilot's rules dir manually. Leave the existing layout untouched.
+- **y** → before invoking the script, move the existing rule files into `.github/instructions/` (merge, don't clobber the template rules), then let the script re-point the `.agents/rules` symlink. The repo's own rules are preserved. The rules-layout pre-flight runs for every tool selection, so the symlink never gets replaced without the operator's confirmation regardless of which tools they sync.
+- **n** → the pre-flight refuses to replace `.agents/rules` (exit 65) if it is a real directory. Move the existing rules into `.github/instructions/` first (per the `y` path) or leave the existing layout untouched. The pre-flight fires for Claude-only, Codex-only, Copilot-only, and full syncs alike.
 
 If `.agents/rules` already symlinks to `.github/instructions`, or neither path exists, take no action and proceed.
 
@@ -118,7 +118,7 @@ Skip if user chose **Global overwrite**.
 | Category | Files / paths |
 |----------|--------------|
 | Base scaffold | `.agents/**` (all files recursively) · `AGENTS.md` |
-| Claude Code | `.claude` (symlink) · `GEMINI.md` (symlink) |
+| Claude Code | `.claude` (symlink) · `GEMINI.md` (symlink) — Claude Code reads root `AGENTS.md` natively, no `CLAUDE.md` |
 | Codex | `.codex` (symlink) |
 | Copilot | `.github/copilot-instructions.md` · `.github/instructions` (**real directory** — holds the rule files; `.agents/rules` symlinks to it) |
 | Setup scripts | `.agents/setup/scripts/agents-setup.sh` · `.agents/setup/scripts/agents-setup.ps1` · `.agents/setup/scripts/agents-terminals.sh` · `.agents/setup/scripts/agents-terminals.ps1` |
@@ -180,7 +180,7 @@ What each section does (now inside the script):
 - **A — `.agents/` base tree**: `rsync` (global = overwrite, none = `--ignore-existing`); never deletes landing-only files.
 - **B — Claude Code**: `.claude`→`.agents`, `GEMINI.md`→`AGENTS.md` symlinks + `git config core.symlinks true`.
 - **C — Codex**: `.codex`→`.agents` symlink.
-- **D — Copilot**: copies the real `.github/instructions/` dir, re-points `.agents/rules` symlink at it, copies `copilot-instructions.md`.
+- **D — Copilot**: copies `copilot-instructions.md` (the only Copilot-specific file; the `.github/instructions/` and `.agents/rules` setup runs unconditionally above the tool branches).
 - **E — .NET**: copies `Directory.*.props`, `NuGet.Config`, `*.slnx`, `src/`, `tests/` only when absent. **Rename `Project.*` → `<ActualProjectName>` afterwards** (the script prints this reminder; the rename itself is the agent's job).
 
 > **Selective overwrite (Phase 1 Q3 = B):** the script handles `global` and `none` only. For true per-file selection, copy the user-approved files manually first, then run the script with `--overwrite none` so it adds the remainder without clobbering anything.
@@ -203,7 +203,7 @@ Distribute or update the **rule system as a package** — `.github/instructions/
 Semantics:
 
 - `--overwrite global` updates same-named rule files to the pinned version; `none` only adds missing ones. **Landing-only rule files are never deleted** in either mode (UPSERT) — a consumer's own rules survive updates.
-- `--tools` / `--dotnet` are ignored; Phases 1 and 3 don't apply. The Phase 2 rules-layout pre-flight is **built into the script** here: it refuses (exit 65) if `.agents/rules` is a real directory.
+- `--tools` / `--dotnet` are ignored; Phases 1 and 3 don't apply. The Phase 2 rules-layout pre-flight is **built into the script** here: it refuses (exit 65) if `.agents/rules` is a real directory, regardless of which tools the operator chose to sync.
 - Re-run with a newer `--template-ref` to upgrade — this is the supported way to consume this repo's rules from other repositories.
 
 ---

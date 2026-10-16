@@ -173,6 +173,7 @@ operability and compatibility. Two shape how code is written rather than merely 
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-16 | **`ABOUT` edges are now readable from the memory side.** `IMemoryGraph.FindAboutAsync` returns the tickets a given set of memories reference in one statement anchored on the page (property predicates, so `ix_memory_vertex_uuid` serves it) — never a query per row. It backs `CheapMemory.Tickets`, which is assembled per page by `TicketIdentityLookup` from the group's ownership array plus these edges. Ownership stays with the array (LADR-08): an `ABOUT` edge on a ticket the group already owns is one binding, not two, and an array element without a non-empty provider/key is dropped in SQL rather than surfacing as a half-ticket. | LADR-09, HLD-009 |
 | 2026-10-16 | LADR-09 read half landed: `ABOUT` references are now read by recall (owner ∪ referencing-memories union with `ticketMatch`), snapshotted (format v5), surfaced in the dossier (`referencedAnchors`) and written by the kvasir `--reference-tickets` flag (synthetic owner ticket + twin links). Release gates passed. | LADR-09 |
 | 2026-09-15 | Added read-only legacy ticket ownership preflight and guarded operator-only pre-migration remediation; duplicate migration guard unchanged. | PR #63 review finding 3; [runbook](./ticket-migration-runbook.md) |
 | 2026-09-15 | Corrected NFR-02's evidence attribution: original pre-merge checkpoint is historical; dated post-review revalidation supplies the later measured results. | PR #63 review finding 1 |

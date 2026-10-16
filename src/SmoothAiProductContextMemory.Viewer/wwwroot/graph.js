@@ -16,6 +16,7 @@
 import { postPaths, postTicketPaths, getMemory } from './api.js';
 import { esc, shortUuid, plural } from './util.js';
 import { selectedMemory } from './detail.js';
+import { resolveKind, onViewContext } from './view-context.js';
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -415,7 +416,10 @@ function buildRequest() {
   const request = { sourceUuid: state.rootUuid, maxDepth: Number(els.depth.value), limit: Number(els.limit.value) };
   if (els.relation.value.trim()) request.relation = els.relation.value.trim();
   if (els.direction.value) request.direction = els.direction.value;
-  if (els.kind.value.trim()) request.kind = els.kind.value.trim();
+  // The pane's own Kind is the full vocabulary; the shared scope is the fallback. One wire
+  // field takes one value, and a redraw is a new bounded request, never a client-side trim.
+  const kind = resolveKind(els.kind.value);
+  if (kind) request.kind = kind;
   if (els.status.value.trim()) request.status = els.status.value.trim();
   if (els.scope.value.trim()) request.scopeDimension = els.scope.value.trim();
   return request;
@@ -588,6 +592,9 @@ export function initGraph() {
   [els.depth, els.direction, els.limit, els.relation, els.kind, els.status, els.scope].forEach((control) => {
     control.addEventListener('change', () => { if (state.rootUuid) runPaths(); });
   });
+  // A shared kind-scope change re-walks only when a root was already chosen: the pane draws
+  // nothing until then, and a scope switch must not pick a root the practitioner never chose.
+  onViewContext((reason) => { if (reason === 'kind' && state.rootUuid) runPaths(); });
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape' || !state.selectedEdge) return;
     state.selectedEdge = null;

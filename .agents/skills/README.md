@@ -24,6 +24,7 @@ The one folder here that is **not** a skill is `_mimisbrunnr-shared/`: it holds 
 | **mimisbrunnr-heimdallr-find-session-metadata** | Scan the current session for tickets, repository and initiative; print to console — Heimdallr watches, the operator binds | `/mimisbrunnr-heimdallr-find-session-metadata [--json] [--initiative NAME]` |
 | **mimisbrunnr-muninn-recall-feedback** | Run the three recall-feedback tuning queries — never-recalled list, miss rate over a window, baseline reset | `/mimisbrunnr-muninn-recall-feedback` |
 | **ai-understanding** | Export this session's hard-won knowledge as Understandings; import, publish and consume the store | `/ai-understanding [--export] [--import] [--publish] [--consume <zip>]` |
+| **ai-memory-context** | Local-first memory store — Odin's capture pipeline writing to `.context/context-memories/`, no server and no network, so it ships as one zip | `/ai-memory-context [--export] [--dryrun] [--all] [--review]` |
 | **mimisbrunnr-ymir-bootstrap** | Build a cited, reviewable durable-context baseline for one existing project, optionally focused on its next feature. Ymir is the first being of Norse myth, from whose body the gods shaped the world — as this baseline is shaped from the repository that already exists. | `/mimisbrunnr-ymir-bootstrap <repository> [next-feature focus]` |
 | **create-hld** | Author a design-only High-Level Design under `docs/hlds/NNN-<slug>/` | `/create-hld <kebab-slug>` |
 | **git-commit** | Commit with conventional format | `/git-commit [--autonomous]` |
@@ -161,7 +162,7 @@ Skills are flat under `.agents/skills/`; the category lives in the folder-name p
 | Prefix | Skills |
 |--------|--------|
 | `agile-` | `agile-github-breakdown`, `agile-github-task-from-diff` |
-| `ai-` | `ai-review`, `ai-terse`, `ai-template-sync`, `ai-understanding` |
+| `ai-` | `ai-review`, `ai-terse`, `ai-template-sync`, `ai-understanding`, `ai-memory-context` |
 | `context-` | `context-load-agents-context`, `context-load-context` |
 | `mimisbrunnr-` | `mimisbrunnr-vitsmunir-dump`, `mimisbrunnr-ymir-bootstrap`, `mimisbrunnr-odin-context-memory`, `mimisbrunnr-saga-dossier`, `mimisbrunnr-muninn-recall-feedback`, `mimisbrunnr-kvasir-understanding` |
 | `git-` | `git-commit`, `git-commit-push`, `git-commit-push-pr`, `git-commit-review-push`, `git-sync` |

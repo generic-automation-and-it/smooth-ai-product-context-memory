@@ -180,5 +180,10 @@ public class DossierSelectionTests
 
         public Task<IReadOnlyList<Guid>> ListAboutAsync(string provider, string key, CancellationToken cancellationToken) =>
             Task.FromResult<IReadOnlyList<Guid>>([]);
+
+        public Task<IReadOnlyList<MemoryTicketReference>> FindAboutAsync(
+            IReadOnlyCollection<Guid> memoryUuids,
+            CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<MemoryTicketReference>>([]);
     }
 }

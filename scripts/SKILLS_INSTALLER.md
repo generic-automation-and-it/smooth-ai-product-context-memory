@@ -6,7 +6,7 @@ Codex and Copilot discover.
 | Script | Platform | Interpreter |
 |---|---|---|
 | [`install-skills.sh`](install-skills.sh) | macOS, Linux | bash, `git`, `python3` |
-| [`install-skills.ps1`](install-skills.ps1) | Windows, or anywhere `pwsh` 7 runs | PowerShell 7.0 or later, `git` |
+| [`install-skills.ps1`](install-skills.ps1) | Windows, or anywhere `pwsh` 7 runs | PowerShell 7.2 or later, `git` |
 
 The bash script needs `python3` only to read and write the manifest JSON; it is already a dependency of
 every `mimisbrunnr-*` skill, so nothing new is introduced. The PowerShell port has no such dependency —
@@ -41,8 +41,8 @@ never asked for is not an install. Set `SKILLS_ROOT` to install somewhere else.
 In this repository `.claude/skills` and `.codex/skills` are symlinks to `.agents/skills`, so all three
 paths resolve to the same tree and the first match is the real one.
 
-**2. Reconcile the manifest — for the owned skills only.** The installer manages exactly nine skills:
-the seven `mimisbrunnr-*` skills plus `ai-understanding` and `ai-brain-dump`. The catalogue is the
+**2. Reconcile the manifest — for the owned skills only.** The installer manages exactly ten skills:
+the seven `mimisbrunnr-*` skills plus `ai-understanding`, `ai-brain-dump` and `ai-memory-context`. The catalogue is the
 **owned union** of what the clone source offers and what is already on disk. Anything else in the
 target tree — local coding skills, operator experiments — is left untouched and never enters the
 manifest. Deriving the catalogue from disk alone would make a first install into an empty folder a
@@ -89,6 +89,16 @@ security one — nothing in a skill reads its own tests.
 Note the divergence from the npm package: `package.json`'s `files` allowlist packs selected `scripts/`
 directories only, and ships no `SKILL.md` at all, while an install ships the whole skill minus the two
 pruned names.
+
+**3a. Symlinks are resolved on the way in.** A symlink pointing **inside** the clone is copied as the
+file or folder it points at, so an installed skill is **self-contained** — it can be zipped and
+imported into a runtime with no repository behind it. A link pointing **outside** the repo, one with
+no target, and one that would form a cycle are copied as links, so the consumer's machine keeps the
+author's intent and the run still terminates. Practical effect: a skill can share one file between two
+names without shipping a dangling pointer.
+
+Only symlinks matter for the bundled skills — none ships one today, so this changes nothing you can
+observe until someone adopts symlink authoring.
 
 **4. Refresh `_mimisbrunnr-shared`.** That folder is not a skill and never appears in the manifest, but
 every installed skill that calls a shared script is broken without it — so it refreshes on every run,
@@ -144,10 +154,10 @@ or move the change somewhere the installer does not own.
 bash scripts/test-install-skills.sh
 ```
 
-50 cases across both ports, no network and no container engine needed: the clone source is the checkout
+53 cases across both ports, no network and no container engine needed: the clone source is the checkout
 itself (`SKILLS_REPO` pointed at the repo, `SKILLS_BRANCH` at the current branch), so a harness that
 reached GitHub would be red for reasons unrelated to the code. Runs in the PR gate. Verified green on
-macOS (bash 3.2 with `pwsh` present — 50/50) and on GNU/Linux in `ubuntu:24.04` (`pwsh` absent).
+macOS (bash 3.2 with `pwsh` present — 53/53) and on GNU/Linux in `ubuntu:24.04` (`pwsh` absent).
 
 The `ps1` cases and the cross-port parity cases are **skipped with a stated reason** when `pwsh` is not
 installed — which is the case on the `ubuntu-latest` gate runner. They are exercised locally where `pwsh`

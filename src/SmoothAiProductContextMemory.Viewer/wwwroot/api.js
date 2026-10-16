@@ -85,6 +85,13 @@ export function getInitiatives(status) {
   return requestJson(`/api/context/initiatives${query}`);
 }
 
+// The product-name registry (graph-side: a product linked to its initiatives and repos).
+// It is not the `product` scope dimension — a memory scoped to `product` is not
+// automatically part of any named product. The dropdown lists registered products only.
+export function getProductNames() {
+  return requestJson('/api/context/product-names');
+}
+
 export function getNeverRecalled(asOf, limit) {
   return requestJson(`/api/context/recall-feedback/never-recalled?asOf=${encodeURIComponent(asOf)}&limit=${limit}`);
 }
@@ -101,8 +108,12 @@ export function getCapabilities() {
 
 // P4a: the review queue and the dedup preview. Same-origin; the session's
 // bearer token is forwarded to the bridge, which forwards it to the Host.
-export function getReviewQueue(limit = 500) {
-  return requestJson(`/bridge/review-queue?limit=${limit}`);
+// `limit` is the *query* cap (200); the bridge clamps it, so an over-cap value
+// narrows to the cap instead of becoming a 400 the bridge reports as a 502.
+export function getReviewQueue(limit = 200, kind = '') {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (kind) params.set('kind', kind);
+  return requestJson(`/bridge/review-queue?${params.toString()}`);
 }
 
 export function postDedupPreview(requestBody) {

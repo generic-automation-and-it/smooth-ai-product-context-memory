@@ -230,5 +230,5 @@ public sealed class GetMemoryVersionsHandlerTests(AspireFixture aspire) : Handle
     };
 
     private GetMemoryVersions.Handler NewHandler() =>
-        new(AppDb, Loggers.CreateLogger<GetMemoryVersions.Handler>());
+        new(AppDb, Graph, Loggers.CreateLogger<GetMemoryVersions.Handler>());
 }

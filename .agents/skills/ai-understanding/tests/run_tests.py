@@ -92,6 +92,16 @@ def write_unit(store: Path, subject: str, slug: str, updated: str = "2026-09-30"
     )
 
 
+def write_run_unit(store: Path, run: str, category: str, slug: str,
+                   updated: str = "2026-09-30") -> None:
+    """A unit in the current shape: `<yyyyMMdd-HHmm>-<session-id>/<category>/<slug>`."""
+    folder = store / run / category
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / f"{slug}{ui.UNIT_SUFFIX}").write_text(
+        UNIT_FRONTMATTER.format(slug=slug, updated=updated), encoding="utf-8"
+    )
+
+
 def publish(store: Path, name: str, *unit_paths: str) -> None:
     """Write a real archive holding the given `<subject>/<slug>.understanding.md` store paths."""
     publish_with(store, name, zipfile.ZIP_STORED, *unit_paths)
@@ -1315,6 +1325,302 @@ class SessionMarkerCLITests(unittest.TestCase):
                  / "scripts" / "session_marker.py"]
         bodies = [r.read_text(encoding="utf-8") for r in roots]
         self.assertEqual(bodies[0], bodies[1])
+
+
+class RunFolderLayoutTests(unittest.TestCase):
+    """The store layout: a run folder `<yyyyMMdd-HHmm>-<session-id>` holding dateless categories.
+
+    Both shapes are read; only the new one is written. The cases that matter most here are the ones
+    that would silently mark the wrong copy current, because a store that lists a stale version is
+    worse than a store that refuses to list anything.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(lambda: shutil.rmtree(self.tmp, ignore_errors=True))
+        self.repo = make_repo(self.tmp, ignore_store=True)
+        self.store = self.repo / ".context" / "understandings"
+        self.store.mkdir(parents=True)
+
+    def current_slugs(self):
+        units, _superseded, _problems = ui.load_units(self.store)
+        return sorted(u["slug"] for u in units)
+
+    # --- both shapes read -----------------------------------------------------------------------
+
+    def test_a_current_shape_unit_is_found_and_indexed_under_its_category(self):
+        write_run_unit(self.store, "20261016-1432-ses_20261016-1432-a1b2", "installer", "prune-list")
+        self.assertEqual(["prune-list"], self.current_slugs())
+        units, _, _ = ui.load_units(self.store)
+        self.assertEqual("installer", units[0]["subject"])
+
+    def test_a_legacy_shape_unit_still_reads(self):
+        write_unit(self.store, "legacy-subject-20261014-0800", "old-one")
+        self.assertEqual(["old-one"], self.current_slugs())
+
+    def test_a_mixed_store_indexes_both_shapes_without_complaining(self):
+        write_unit(self.store, "legacy-subject-20261014-0800", "old-one")
+        write_run_unit(self.store, "20261016-1432-ses_a", "installer", "new-one")
+        _units, _superseded, problems = ui.load_units(self.store)
+        self.assertEqual([], problems)
+        self.assertEqual(["new-one", "old-one"], self.current_slugs())
+
+    def test_unfiled_still_reads_and_still_sorts_oldest(self):
+        write_unit(self.store, ui.UNFILED, "loose")
+        write_run_unit(self.store, "20260101-0000-ses_a", "cat", "newer")
+        units, superseded, problems = ui.load_units(self.store)
+        self.assertEqual([], problems)
+        self.assertEqual(["loose", "newer"], sorted(u["slug"] for u in units))
+        # `_unfiled` carries no stamp, so a stamped copy of the same slug always supersedes it.
+        write_run_unit(self.store, "20260101-0000-ses_a", "cat", "loose", "2026-01-01")
+        units, superseded, _ = ui.load_units(self.store)
+        self.assertEqual(["loose", "newer"], sorted(u["slug"] for u in units))
+        loose = next(u for u in units if u["slug"] == "loose")
+        self.assertTrue(loose["path"].startswith("20260101-0000-ses_a/"),
+                        f"the stamped copy must win, got {loose['path']}")
+        self.assertEqual(["loose"], [u["slug"] for u in superseded])
+
+    # --- version chains ------------------------------------------------------------------------
+
+    def test_the_newest_run_wins_across_run_folders(self):
+        write_run_unit(self.store, "20261015-0900-ses_a", "installer", "prune-list", "2026-10-15")
+        write_run_unit(self.store, "20261016-1432-ses_b", "installer", "prune-list", "2026-10-16")
+        units, superseded, _ = ui.load_units(self.store)
+        self.assertEqual(1, len(units))
+        self.assertEqual("2026-10-16", units[0]["updated"])
+        self.assertEqual(1, len(superseded))
+
+    def test_two_runs_in_the_same_minute_are_separated_by_the_session_id(self):
+        """The regression the whole layout was measured against.
+
+        `updated` is required but date-only, so two runs landing in the same minute tie on both the
+        stamp and `updated`. Ordering has to fall to something deterministic — and it must not be
+        the path, which is the one comparison that makes the answer depend on directory layout.
+        """
+        write_run_unit(self.store, "20261016-1432-ses_aaa", "cat", "tie", "2026-10-16")
+        write_run_unit(self.store, "20261016-1432-ses_zzz", "cat", "tie", "2026-10-16")
+        units, superseded, _ = ui.load_units(self.store)
+        self.assertEqual(1, len(units))
+        self.assertEqual(1, len(superseded))
+        self.assertEqual("20261016-1432-ses_zzz/cat", units[0]["path"].rsplit("/", 1)[0])
+        zzz = {"run": "20261016-1432-ses_zzz", "unit": {"updated": "2026-10-16"}, "path": "z"}
+        aaa = {"run": "20261016-1432-ses_aaa", "unit": {"updated": "2026-10-16"}, "path": "a"}
+        # The two keys must differ, and the same record must key identically every time.
+        self.assertNotEqual(ui.version_key(zzz), ui.version_key(aaa))
+        self.assertEqual(ui.version_key(zzz), ui.version_key(dict(zzz)))
+
+    def test_the_same_minute_resolution_is_deterministic_and_order_independent(self):
+        """What actually holds at the same-minute boundary, stated as what it is.
+
+        Two runs in one minute tie on both the stamp and `updated` (`updated` is required but
+        date-only), so the winner is settled by the run folder — and because the run folder is the
+        path's first segment, that settles it before the category is even compared. The property
+        worth pinning is that the answer is **stable and independent of iteration order**, not that
+        any particular field decides it: a `version_key` that lost the session would still answer
+        correctly, and a test pretending otherwise would be testing an accident of the layout.
+        """
+        write_run_unit(self.store, "20261016-1432-ses_aaa", "zcat", "tie", "2026-10-16")
+        write_run_unit(self.store, "20261016-1432-ses_zzz", "acat", "tie", "2026-10-16")
+        winners = set()
+        for _ in range(5):
+            units, superseded, _ = ui.load_units(self.store)
+            self.assertEqual(1, len(units))
+            self.assertEqual(1, len(superseded))
+            winners.add(units[0]["path"])
+        self.assertEqual(1, len(winners), f"resolution was not stable: {winners}")
+        # And it is the higher run folder, whichever category each one holds.
+        self.assertEqual({"20261016-1432-ses_zzz/acat/tie.understanding.md"}, winners)
+
+    def test_a_legacy_copy_and_a_run_copy_order_by_stamp_not_by_shape(self):
+        write_unit(self.store, "legacy-subject-20260901-1000", "shared", "2026-09-01")
+        write_run_unit(self.store, "20261016-1432-ses_b", "cat", "shared", "2026-10-16")
+        units, superseded, _ = ui.load_units(self.store)
+        self.assertEqual(1, len(units))
+        self.assertTrue(units[0]["path"].startswith("20261016-1432-"))
+        self.assertEqual(1, len(superseded))
+
+    # --- stamp parsing -------------------------------------------------------------------------
+
+    def test_stamp_and_session_parse_from_both_shapes(self):
+        self.assertEqual("20261016-1432", ui.stamp_of("20261016-1432-ses_abc"))
+        self.assertEqual("ses_abc", ui.session_of("20261016-1432-ses_abc"))
+        self.assertEqual("20261016-1432", ui.stamp_of("subject-20261016-1432"))
+        self.assertEqual("", ui.session_of("subject-20261016-1432"))
+        self.assertEqual("", ui.stamp_of(ui.UNFILED))
+        self.assertEqual("", ui.stamp_of("unstamped"))
+
+    def test_a_date_only_run_folder_is_not_a_stamp(self):
+        """The shape this change was measured to reject: it sorts as `_unfiled` does, so every
+        export in a day would tie and the current version would be arbitrary."""
+        self.assertEqual("", ui.stamp_of("20261016-ses_abc"))
+        self.assertFalse(ui.RUN_STAMP_RE.match("20261016-ses_abc"))
+
+    def test_a_run_folder_without_a_session_id_is_reported(self):
+        (self.store / "20261016-1432").mkdir()
+        _units, _superseded, problems = ui.load_units(self.store)
+        self.assertTrue(any("no session id" in p for p in problems), problems)
+
+    def test_an_empty_run_folder_is_reported_rather_than_silently_empty(self):
+        (self.store / "20261016-1432-ses_a").mkdir()
+        _units, _superseded, problems = ui.load_units(self.store)
+        self.assertTrue(any("contains no Understandings" in p for p in problems), problems)
+
+    def test_a_stray_at_the_store_root_names_the_current_shape(self):
+        (self.store / f"stray{ui.UNIT_SUFFIX}").write_text("", encoding="utf-8")
+        _units, _superseded, problems = ui.load_units(self.store)
+        self.assertTrue(
+            any("yyyyMMdd-HHmm>-<session-id>/<category>" in p for p in problems), problems
+        )
+
+    def test_a_mixed_run_folder_is_read_as_nested_and_its_strays_are_named(self):
+        """Findings 1 and 3 of the ai-review round, and the pair has to land together.
+
+        The dispatch read `nested = not direct and bool(categories)`, so a folder holding units *and*
+        categories was taken as legacy: every nested category subtree vanished from the index, a stale
+        copy stayed current, and the generator exited 0 having named nothing. Worse, one stray unit at
+        the run root was itself enough to suppress the nested branch -- so the run-root sweep was
+        unreachable in the only case that needed it. Categories now win whenever they exist, and the
+        losing side is named rather than dropped.
+        """
+        write_run_unit(self.store, "20261016-1432-ses_a", "installer", "nested-one")
+        # A unit left at the run root: the legacy habit, in a folder that now holds categories.
+        folder = self.store / "20261016-1432-ses_a"
+        (folder / f"misplaced{ui.UNIT_SUFFIX}").write_text(
+            UNIT_FRONTMATTER.format(slug="misplaced", updated="2026-10-16"), encoding="utf-8")
+        units, _superseded, problems = ui.load_units(self.store)
+        # The nested unit is indexed -- it used to be dropped without a word.
+        self.assertEqual(["nested-one"], [u["slug"] for u in units])
+        self.assertTrue(any("misplaced" in p and "run root" in p for p in problems), problems)
+
+    def test_run_root_strays_are_named_in_a_purely_nested_folder(self):
+        """Finding 3 on its own. Both shapes of stray, with and without the postfix."""
+        write_run_unit(self.store, "20261016-1432-ses_a", "installer", "nested-one")
+        folder = self.store / "20261016-1432-ses_a"
+        (folder / f"stray{ui.UNIT_SUFFIX}").write_text(
+            UNIT_FRONTMATTER.format(slug="stray", updated="2026-10-16"), encoding="utf-8")
+        (folder / "bare.md").write_text("x", encoding="utf-8")
+        _units, _superseded, problems = ui.load_units(self.store)
+        self.assertTrue(any("stray" in p and "run root" in p for p in problems), problems)
+        self.assertTrue(any("bare.md" in p and "run root" in p for p in problems), problems)
+
+    def test_a_legacy_folder_carrying_an_assets_sibling_is_still_legacy(self):
+        """Finding 3, and a regression this branch introduced rather than inherited.
+
+        `categories` counted every subdirectory, and a `<slug>.assets/` folder is a sibling of a unit
+        at every level of the layout — the unit's evidence, not a category holding units. So a purely
+        legacy folder that carried one read as a current run folder of categories: its unit was
+        reported as "sits at the run root" and **nothing was indexed at all**. One unit became zero,
+        with two problems naming a move that would not have helped. Strictly worse than the silent
+        drop it replaced, and it hit the shape the layout documents as normal.
+
+        The regression that caught this is not cosmetic either: the earlier dispatch fix passed a
+        fixture with no assets folder, so it could not see the damage it had done.
+        """
+        write_unit(self.store, "legacysubject-20261014-0800", "keep")
+        assets = self.store / "legacysubject-20261014-0800" / f"keep{ui.ASSETS_SUFFIX}"
+        assets.mkdir()
+        (assets / "evidence.md").write_text("x", encoding="utf-8")
+        units, _superseded, problems = ui.load_units(self.store)
+        self.assertEqual(["keep"], [u["slug"] for u in units])
+        self.assertEqual([], problems, "an assets sibling is not a category and not a misplaced unit")
+
+    def test_an_assets_sibling_inside_a_category_does_not_hide_its_units(self):
+        """The other direction: excluding assets folders must not make a real category look empty."""
+        write_run_unit(self.store, "20261016-1432-ses_a", "cat", "keep")
+        assets = self.store / "20261016-1432-ses_a" / "cat" / f"keep{ui.ASSETS_SUFFIX}"
+        assets.mkdir()
+        (assets / "evidence.md").write_text("x", encoding="utf-8")
+        units, _superseded, problems = ui.load_units(self.store)
+        self.assertEqual(["keep"], [u["slug"] for u in units])
+        self.assertEqual([], problems)
+
+    def test_a_purely_legacy_folder_is_still_read_as_legacy(self):
+        """The dispatch change must not cost the old shape: a folder with no categories keeps the
+        legacy reading, or every existing store would read as empty."""
+        write_unit(self.store, "legacysubject-20261014-0800", "old-one")
+        units, _superseded, problems = ui.load_units(self.store)
+        self.assertEqual([], problems)
+        self.assertEqual(["old-one"], [u["slug"] for u in units])
+
+    def test_the_category_holding_only_unpostfixed_files_is_named(self):
+        folder = self.store / "20261016-1432-ses_a" / "installer"
+        folder.mkdir(parents=True)
+        (folder / "no-postfix.md").write_text("x", encoding="utf-8")
+        _units, _superseded, problems = ui.load_units(self.store)
+        self.assertTrue(any("missing the" in p and "installer/no-postfix.md" in p for p in problems),
+                        problems)
+
+
+class RunFolderVerbTests(unittest.TestCase):
+    """`--run-folder`: the whole run folder resolved in one call, stamped once.
+
+    An export writes its units across many file operations performed by the *agent*, not by one
+    process. A stamp re-read between two units can land either side of a minute boundary and split one
+    run across two folders, each holding half — a version chain broken in a way no later check repairs.
+    Printing the finished name once is what makes the run folder a value, not a convention.
+    """
+
+    SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "understanding_index.py"
+
+    def call(self, *args, env=None):
+        environment = {k: v for k, v in os.environ.items() if not k.endswith("_SESSION_ID")}
+        environment.update(env or {})
+        return subprocess.run([sys.executable, "-B", str(self.SCRIPT), *args],
+                              capture_output=True, text=True, env=environment)
+
+    def test_it_prints_a_run_folder_that_satisfies_the_stamp_shape(self):
+        result = self.call("--run-folder", "ses_abc123")
+        self.assertEqual(0, result.returncode, result.stderr)
+        name = result.stdout.strip()
+        self.assertTrue(ui.RUN_STAMP_RE.match(name), name)
+        self.assertEqual("ses_abc123", ui.session_of(name))
+        self.assertEqual(13, len(ui.stamp_of(name)))
+
+    def test_it_reads_the_session_id_from_the_environment(self):
+        result = self.call("--run-folder", env={"OPENCODE_SESSION_ID": "ses_from_env"})
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual("ses_from_env", ui.session_of(result.stdout.strip()))
+
+    def test_an_explicit_id_outranks_the_environment(self):
+        result = self.call("--run-folder", "ses_explicit",
+                           env={"OPENCODE_SESSION_ID": "ses_from_env"})
+        self.assertEqual("ses_explicit", ui.session_of(result.stdout.strip()))
+
+    def test_no_session_id_refuses_rather_than_inventing_one(self):
+        """A guess here would put every session's exports in one folder."""
+        result = self.call("--run-folder")
+        self.assertEqual(2, result.returncode)
+        self.assertIn("needs a session id", result.stderr)
+
+    def test_an_id_with_a_separator_cannot_nest_the_units(self):
+        """The failure this prevents is silent: a `/` lands the units one level deeper, the run
+        folder never gets a valid stamp shape, and every unit in the export drops out of the index."""
+        result = self.call("--run-folder", "weird/id with spaces")
+        self.assertEqual(0, result.returncode, result.stderr)
+        name = result.stdout.strip()
+        self.assertNotIn("/", name)
+        self.assertNotIn(" ", name)
+        self.assertTrue(ui.RUN_STAMP_RE.match(name), name)
+
+    def test_two_ids_that_sanitise_alike_still_get_separate_folders(self):
+        self.assertNotEqual(ui.safe_session_id("a/b"), ui.safe_session_id("a_b"))
+        self.assertEqual("a_b", ui.safe_session_id("a_b"))
+
+    def test_the_stamp_is_resolved_once_per_call_not_per_unit(self):
+        """Two calls in the same minute agree; that is the property a capture-and-reuse caller relies
+        on, and it is why the caller must not re-derive the stamp per unit."""
+        first = self.call("--run-folder", "ses_a").stdout.strip()
+        second = self.call("--run-folder", "ses_a").stdout.strip()
+        self.assertEqual(first, second)
+
+    def test_too_many_arguments_are_refused(self):
+        self.assertEqual(2, self.call("--run-folder", "a", "b").returncode)
+
+    def test_stamp_alone_still_prints_only_the_stamp(self):
+        result = self.call("--stamp")
+        self.assertEqual(0, result.returncode, result.stderr)
+        value = result.stdout.strip()
+        self.assertRegex(value, r"^\d{8}-\d{4}$")
 
 
 if __name__ == "__main__":

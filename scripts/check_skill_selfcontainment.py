@@ -15,6 +15,13 @@ So this gate covers **both** ways a skill acquires a dependency it cannot carry 
 2. **Documented invocation.** An interpreter command in a skill's prose that names a path escaping the
    skill folder. This is the mechanism that actually bites: odin has *no* shared import in its own
    scripts, and is still broken alone, because its SKILL.md tells the agent to shell out to a sibling.
+3. **Filesystem symlinks.** A link inside a skill that points outside it — dangling, escaping the skills
+   root, or crossing into a sibling skill. The third mechanism, and the one that needs neither code nor
+   prose: a `references/` link is an authoring convenience that ships as a pointer into a path the
+   consumer does not have. The installer now materialises an in-repo link on copy, so such a link
+   becomes a *duplicate* rather than a pointer, and one escaping the repository is copied live and
+   resolves to nothing on the consumer's machine. Neither is visible to a code-and-prose scan, which is
+   why upstream's installer enables symlink authoring and this gate had to learn to see it.
 
 A dependency is not a defect — the `mimisbrunnr-*` skills are built on the shared folder on purpose.
 The defect is an *undeclared* one, so the shared-dependent skills are named in
@@ -32,6 +39,7 @@ this writes nothing at all.
 
 from __future__ import annotations
 
+import os
 import re
 import sys
 from pathlib import Path
@@ -42,7 +50,7 @@ SHARED = "_mimisbrunnr-shared"
 # The installer's owned set, mirrored from `is_owned_skill` in scripts/install-skills.sh and
 # `Test-OwnedSkill` in install-skills.ps1. `test_check_skill_selfcontainment.py` runs all three
 # against each other, so a fourth copy cannot drift unnoticed.
-OWNED = ("mimisbrunnr-", "ai-understanding", "ai-brain-dump")
+OWNED = ("mimisbrunnr-", "ai-understanding", "ai-brain-dump", "ai-memory-context")
 
 # The skills that depend on the shared folder by design. Verified against the tree, not assumed:
 #   odin        SKILL.md:344-352 documents seven `python3 .../_mimisbrunnr-shared/scripts/...` calls;
@@ -54,7 +62,10 @@ OWNED = ("mimisbrunnr-", "ai-understanding", "ai-brain-dump")
 #   heimdallr   SKILL.md:19 shells to the shared find_session_metadata.py; it ships no scripts/ of
 #               its own either, so it is wholly dependent rather than merely degraded.
 # `mimisbrunnr-muninn-recall-feedback` is deliberately absent: its only script is recall_feedback.sh,
-# which references nothing outside itself.
+# which references nothing outside itself. Neither is `ai-memory-context`, which WET-vendors three
+# scripts and reaches nothing outside its own folder -- asserted structurally by
+# `ai-memory-context/tests/parity_shared_scripts.py`, which fails on a `parents[2]` or `sys.path`
+# insert in any vendored copy.
 SHARED_DEPENDENT = (
     "mimisbrunnr-heimdallr-find-session-metadata",
     "mimisbrunnr-kvasir-understanding",
@@ -115,6 +126,8 @@ def python_escapes(folder: Path) -> list[tuple[str, int, str]]:
     """
     found = []
     for script in runtime_python(folder):
+        if script.is_symlink():
+            continue  # `link_escapes` owns this; reading through the link reads something else
         text = script.read_text(encoding="utf-8")
         rel = script.relative_to(folder.parent)
         for match in PY_ESCAPE.finditer(text):
@@ -130,7 +143,12 @@ def python_escapes(folder: Path) -> list[tuple[str, int, str]]:
 
 def prose_escapes(folder: Path) -> list[tuple[str, int, str]]:
     found = []
-    for doc in sorted([*folder.rglob("*.md"), *folder.rglob("*.yaml")]):
+    # Symlinks are excluded here and owned by `link_escapes` instead. Reading one is wrong twice
+    # over: a dangling link cannot be read at all, and a link that escapes the repository would have
+    # its *target* scanned as though it were this skill's prose — a file outside the skills tree,
+    # under this skill's name.
+    docs = [d for d in [*folder.rglob("*.md"), *folder.rglob("*.yaml")] if not d.is_symlink()]
+    for doc in sorted(docs):
         for number, line in enumerate(doc.read_text(encoding="utf-8").splitlines(), 1):
             if not INTERPRETER.search(line):
                 continue
@@ -140,19 +158,67 @@ def prose_escapes(folder: Path) -> list[tuple[str, int, str]]:
     return found
 
 
-def escapes_for(folder: Path) -> list[tuple[str, int, str]]:
-    return python_escapes(folder) + prose_escapes(folder)
+def link_escapes(folder: Path, skills_root: Path) -> list[tuple[str, int, str]]:
+    """Filesystem symlinks inside a skill that point outside it.
+
+    The third mechanism, and the one that appears first in practice. The other two are code and prose;
+    this one needs neither — a `references/` symlink to a sibling skill's file is an authoring
+    convenience that ships as a pointer into a path the consumer does not have, and an installed copy
+    of that skill is broken in a way no script in it can report.
+
+    Not a hypothetical: the installer materialises an in-repo link on copy, so a link that escapes the
+    skill is materialised into a *duplicate* rather than a pointer, and a link that escapes the
+    repository is copied as a live link that resolves to nothing on the consumer's machine. Both are
+    invisible to a code-and-prose scan.
+
+    Cycles and dangling links are reported too, not passed over: a cycle cannot be materialised by
+    the installer (it is copied as a link, and the copy is then a loop in the consumer's tree).
+    """
+    found: list[tuple[str, int, str]] = []
+    skill_root = folder.resolve()
+    for link in sorted(p for p in folder.rglob("*") if p.is_symlink()):
+        rel = link.relative_to(folder)
+        target = Path(os.path.realpath(link))
+        if not target.exists():
+            found.append((f"{folder.name}/{rel}", 0, "dangling symlink"))
+            continue
+        if target == skill_root or skill_root in target.parents:
+            continue  # points inside this skill: self-contained
+        if target.is_relative_to(skills_root):
+            # Inside the repository but outside this skill: the installer materialises it as a
+            # duplicate, so the skill is self-contained in content but not in authoring. Still worth
+            # naming, because "self-contained" is the property being asserted.
+            found.append((f"{folder.name}/{rel}", 0,
+                          f"symlink to {target} — outside this skill, so it materialises as a "
+                          f"duplicate rather than resolving"))
+            continue
+        found.append((f"{folder.name}/{rel}", 0,
+                      f"symlink escapes the skills root: {target}"))
+    return found
+
+
+def escapes_for(folder: Path, skills_root: Path | None = None) -> list[tuple[str, int, str]]:
+    escapes = python_escapes(folder) + prose_escapes(folder)
+    if skills_root is not None:
+        escapes += link_escapes(folder, skills_root)
+    return escapes
 
 
 def owned_skills(skills: Path = SKILLS) -> list[Path]:
     return [p for p in sorted(skills.iterdir()) if p.is_dir() and is_owned(p.name)]
 
 
+def _root(skills: Path) -> Path:
+    """The skills root, canonicalised once — `link_escapes` compares against it per link."""
+    return skills.resolve()
+
+
 def violations(skills: Path = SKILLS) -> list[str]:
     """Escapes in skills that are not declared shared-dependent."""
     found = []
+    root = _root(skills)
     for folder in owned_skills(skills):
-        escapes = escapes_for(folder)
+        escapes = escapes_for(folder, root)
         if not escapes:
             continue
         if is_shared_dependent(folder.name):
@@ -176,7 +242,7 @@ def declaration_problems(skills: Path = SKILLS) -> list[str]:
         folder = skills / name
         if not folder.is_dir():
             found.append(f"SHARED_DEPENDENT names '{name}', which is not a skill folder")
-        elif not escapes_for(folder):
+        elif not escapes_for(folder, _root(skills)):
             # The declaration must describe the tree, not the other way round: a declared consumer
             # that no longer escapes has quietly become zippable, and leaving it declared keeps the
             # next reviewer reading a false row out of the table.
@@ -188,8 +254,9 @@ def declaration_problems(skills: Path = SKILLS) -> list[str]:
 
 def rows(skills: Path = SKILLS) -> list[tuple[str, str, int]]:
     out = []
+    root = _root(skills)
     for folder in owned_skills(skills):
-        escapes = escapes_for(folder)
+        escapes = escapes_for(folder, root)
         out.append(
             (
                 folder.name,
@@ -212,7 +279,7 @@ def main() -> int:
         if not folder.is_dir():
             print(f"::error::no such skill folder: {name}")
             return 1
-        escapes = escapes_for(folder)
+        escapes = escapes_for(folder, _root(SKILLS))
         if escapes or is_shared_dependent(name):
             print(f"{name}: NOT zippable alone — needs {SHARED}/ alongside it")
             for where, _, why in escapes:

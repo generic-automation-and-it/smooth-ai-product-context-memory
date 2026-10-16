@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ralph Loop"
+  short_description: "Review, fix and verify the current change in fresh-eyes loops until clean; ends with a fix table"
+  default_prompt: "Run the ai-ralph-loop skill: loop review, fix and verify over the branch diff until a full pass finds nothing or the loop cap is hit, then output the fix table. Never commit."

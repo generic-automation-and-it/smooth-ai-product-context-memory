@@ -684,6 +684,90 @@ check_prune_function sh
 [ "$have_pwsh" = 1 ] && check_prune_function ps1 || echo "  skip pwsh not installed — prune function not run on the PowerShell port (not a failure)"
 
 # ---------------------------------------------------------------------------------------------
+# 13. WET: a symlink that points inside the clone is copied as what it points at
+# ---------------------------------------------------------------------------------------------
+#
+# The point of the whole mechanism: an installed skill is self-contained, so it can be zipped and
+# imported into a runtime that has no repository to resolve a link against. A link copied as a link
+# ships a pointer into a path the consumer does not have.
+#
+# The fixture is upstream's own, from its PR notes — a skill file link, a skill folder link, an
+# outside link, a dangling link and a `self -> .` cycle — because those five together are the whole
+# decision space: materialise, or keep the link, or stop.
+check_wet() {
+  local runner="$1" tree="$2"
+  mkdir -p "$tree/src/sk/refs"
+  printf 'REAL CONTENT\n' >"$tree/src/sk/refs/shared.md"
+  mkdir -p "$tree/src/sk/deep"
+  ln -s refs/shared.md "$tree/src/sk/REF.md"       # in-tree file link  -> materialise
+  ln -s refs "$tree/src/sk/refs-link"              # in-tree folder link -> materialise
+  ln -s ../refs "$tree/src/sk/deep/up.md"          # in-tree, relative .. -> materialise
+  ln -s /etc/hosts "$tree/src/sk/outside.md"       # outside the repo     -> keep as a link
+  ln -s /nowhere-at-all "$tree/src/sk/dangling.md" # no target             -> keep as a link
+  ln -s . "$tree/src/sk/self"                      # cycle                -> keep as a link
+
+  if [ "$runner" = sh ]; then
+    bash -c "$(extract_wet_sh)
+      CLONE_ROOT=\"\$(cd -P \"\$1\" && pwd)\"
+      copy_wet \"\$2\" \"\$3\"" _ "$tree/src" "$tree/src/sk" "$tree/dst/sk"
+  else
+    pwsh -NoProfile -File "$repo_root/scripts/_wet_probe.ps1" "$tree/src" "$tree/src/sk" "$tree/dst/sk" \
+      >"$scratch/wet.out" 2>&1 || { no "[$runner] WET copy" "$(cat "$scratch/wet.out")"; return; }
+  fi
+
+  local f
+  for f in REF.md refs-link deep/up.md; do
+    if [ -L "$tree/dst/sk/$f" ]; then
+      no "[$runner] WET copy materialises an in-clone link" "$f stayed a link"
+      return
+    fi
+  done
+  [ -f "$tree/dst/sk/REF.md" ] && grep -q 'REAL CONTENT' "$tree/dst/sk/REF.md" || {
+    no "[$runner] WET copy materialises an in-clone link" "REF.md content wrong"; return; }
+  [ -f "$tree/dst/sk/refs-link/shared.md" ] || {
+    no "[$runner] WET copy materialises an in-clone folder link" "refs-link/shared.md missing"; return; }
+
+  for f in outside.md dangling.md self; do
+    if [ ! -L "$tree/dst/sk/$f" ]; then
+      no "[$runner] WET copy keeps an outside, dangling or cyclic link" "$f was materialised"
+      return
+    fi
+  done
+  ok "[$runner] WET: in-clone links materialised, outside/dangling/cyclic kept as links"
+}
+
+extract_wet_sh() {
+  awk '/^real_path\(\) \{/,/^\}/' "$installer_sh"
+  awk '/^inside_clone\(\) \{/,/^\}/' "$installer_sh"
+  awk '/^copy_wet\(\) \{/,/^\}/' "$installer_sh"
+}
+
+check_wet sh "$(mktemp -d)"
+if [ "$have_pwsh" = 1 ]; then
+  check_wet ps1 "$(mktemp -d)"
+else
+  echo "  skip pwsh not installed — the WET case ran on the bash port only (not a failure)"
+fi
+
+# An inherited CLONE_ROOT must not widen "inside the clone". Run with a value pointing at the
+# fixture's own destination: materialising a link to a *destination* path is the failure this stops.
+check_clone_root_reset() {
+  local tree="$1" out
+  mkdir -p "$tree/src/sk"; printf 'REAL\n' >"$tree/src/sk/real.md"
+  ln -s ../../escape.md "$tree/src/sk/link.md"
+  printf 'ESCAPED\n' >"$tree/escape.md"
+  out="$(CLONE_ROOT="$tree" bash -c "$(extract_wet_sh)
+    CLONE_ROOT=\"\$(cd -P \"\$1\" && pwd)\"
+    copy_wet \"\$2\" \"\$3\" && echo done" _ "$tree/src" "$tree/src/sk" "$tree/dst/sk" 2>&1)"
+  if [ -e "$tree/dst/sk/link.md" ] && [ ! -L "$tree/dst/sk/link.md" ]; then
+    no "an inherited CLONE_ROOT cannot widen the clone boundary" "a link outside the clone was materialised"
+    return
+  fi
+  ok "an inherited CLONE_ROOT cannot widen the clone boundary"
+}
+check_clone_root_reset "$(mktemp -d)"
+
+# ---------------------------------------------------------------------------------------------
 
 echo
 echo "passed: $passed  failed: $failed"

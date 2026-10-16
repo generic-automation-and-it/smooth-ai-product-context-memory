@@ -12,7 +12,7 @@ durability boundary is the archive a human keeps.
 
 | Tier | Path | Tracked | Lifetime | Purpose |
 |------|------|---------|----------|---------|
-| Working memory | `.context/understandings/<subject>-<yyyyMMdd-HHmm>/<slug>.understanding.md` | No | This workspace | Where export lands — one stamped folder per export run; a slug repeated across folders is a version chain, newest current |
+| Working memory | `.context/understandings/<yyyyMMdd-HHmm>-<session-id>/<category>/<slug>.understanding.md` | No | This workspace | Where export lands — one stamped folder per export run; a slug repeated across folders is a version chain, newest current |
 | Published archive | `.context/understandings-publish/understandings-<YYYYMMDD-HHMMSS>.zip` by default, or `--path` when given | No | Whoever keeps the file | A snapshot of the store's **current** units, mailed, dropped in a channel, or copied to a stick — superseded copies stay in the working store |
 
 Nothing is published implicitly — it takes the `--publish` invocation. No approval prompt gates the
@@ -40,7 +40,7 @@ acting on it.
 
 1. Read the working store's index; select every unit, or only `portable` units with `--portable-only`. The index lists the **current** version of each slug, so only current versions are archived: superseded copies are workspace-local history and are never published (issue 182). A consumer receives the newest knowledge, not its revision chain, and the durability guard warns about unpublished current units only — a warning `--publish` could never clear would only teach the operator to ignore it.
 2. No approval needed — the default archive path, or an explicit `--path`, is the consent. Step 7 reports the slug list and the path after writing.
-3. Archive each `<subject>-<yyyyMMdd-HHmm>/<slug>.understanding.md`, plus its `<slug>.assets/` when it has one. Filter per Understanding, never per subject — one subject routinely mixes scopes. Subject folders keep their stamp verbatim: publishing never re-stamps, because the stamp records when the knowledge was learned and the archive name already records when it was sent.
+3. Archive each `<yyyyMMdd-HHmm>-<session-id>/<category>/<slug>.understanding.md`, plus its `<slug>.assets/` when it has one. Filter per Understanding, never per category — one category routinely mixes scopes. Run folders keep their stamp verbatim: publishing never re-stamps, because the stamp records when the knowledge was learned and the archive name already records when it was sent. The legacy `<subject>-<stamp>/<slug>` shape archives under its own path unchanged.
 4. When `--portable-only` excludes a unit that an archived unit's `links` or `provenance.inherited` names, drop the brackets around that `[[slug]]` in the archived copy and keep the entry — the same convention the store uses for a pruned ancestor. Without `--portable-only` every unit is present and the case cannot arise.
 5. On each archived copy, set `provenance.published_from` and leave the working copy untouched.
 6. Regenerate an `INDEX.md` inside the archive covering only the archived units, using the index script against the staged tree.
@@ -147,10 +147,10 @@ After reconciling, regenerate the working index.
 ## Lifecycle
 
 ```
-session → .context/understandings/<subject>-<yyyyMMdd-HHmm>/<slug>.understanding.md  (--export, one folder per run; newest copy of a slug is current)
+session → .context/understandings/<yyyyMMdd-HHmm>-<session-id>/<category>/<slug>.understanding.md  (--export, one folder per run; newest copy of a slug is current)
         → .context/understandings-publish/understandings-<stamp>.zip                 (--publish, per-unit scope filter)
         → handed over out of band                                                    (mail, chat, drive)
-        → .context/understandings/<subject>-<yyyyMMdd-HHmm>/<slug>.understanding.md  (--consume, into that workspace's store)
+        → .context/understandings/<yyyyMMdd-HHmm>-<session-id>/<category>/<slug>.understanding.md  (--consume, into that workspace's store)
         → session                                                                    (--import, matched by question)
         → *AGENTS.md  or  .github/instructions/                                      (--promote, when it stops being an observation)
 ```

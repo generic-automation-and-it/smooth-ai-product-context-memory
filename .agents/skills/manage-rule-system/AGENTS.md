@@ -18,6 +18,5 @@ Read [`SKILL.md`](./SKILL.md) first — rule directory, frontmatter contract and
 
 | Date | Change | Ref |
 | :---- | :---- | :---- |
-| 2026-06-12 | Initial version | — |
-| 2026-09-27 | Documented `skills/` as the canonical upstream path exception to the usual two-rule category threshold | #85 |
+| 2026-06-12 | Initial | #40 |
 | 2026-10-15 | Cut to HLD shape: SKILL.md pointer + non-SKILL.md traps only | — |

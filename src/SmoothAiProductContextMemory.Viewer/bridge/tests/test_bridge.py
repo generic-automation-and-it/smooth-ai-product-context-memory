@@ -106,9 +106,15 @@ class QueuePayloadTests(unittest.TestCase):
     must set the three switches the work-task DoD names — `status`,
     `includeProposed`, `currentOnly: false` (per LADR-10, a reviewer wants
     the full proposed history, not just the latest).
+
+    The limit is the *query* cap, not the recall-feedback cap. The queue is a
+    memory query, so a limit above `MaxLimit` (200) is a store 400 that this
+    bridge reports as 502 — the defect this pins. A kind narrowing is omitted
+    when unset, never sent as null: the store reads a missing `kind` as
+    breadth, which is what the Console's "All" scope means.
     """
 
-    def test_default_payload(self):
+    def _payload(self, expression):
         tmp = _stage_bridge()
         env = {
             "PYTHONPATH": str(tmp / "capture") + os.pathsep + str(tmp / "bridge"),
@@ -117,18 +123,55 @@ class QueuePayloadTests(unittest.TestCase):
             "CONTEXT_MEMORY_CREDENTIAL_FILE": os.devnull,
         }
         proc = subprocess.run(
-            [sys.executable, "-c", (
-                "import bridge, json; "
-                "print(json.dumps(bridge._review_queue_payload(500)))"
-            )],
+            [sys.executable, "-c", f"import bridge, json; print(json.dumps({expression}))"],
             env=env, capture_output=True, text=True, encoding="utf-8",
         )
         self.assertEqual(proc.returncode, 0, msg=proc.stderr)
-        payload = json.loads(proc.stdout)
+        return json.loads(proc.stdout)
+
+    def test_default_payload(self):
+        payload = self._payload("bridge._review_queue_payload(bridge._QUEUE_DEFAULT_LIMIT)")
+
         self.assertEqual(payload["status"], "proposed")
         self.assertTrue(payload["includeProposed"])
         self.assertFalse(payload["currentOnly"])
-        self.assertEqual(payload["limit"], 500)
+        self.assertEqual(payload["limit"], 200)
+        self.assertNotIn("kind", payload)
+
+    def test_default_limit_matches_the_query_cap(self):
+        self.assertEqual(
+            self._payload("[bridge._QUEUE_DEFAULT_LIMIT, bridge._QUERY_MAX_LIMIT]"),
+            [200, 200],
+        )
+
+    def test_an_over_cap_limit_is_clamped_rather_than_forwarded(self):
+        # 5000 is the recall-feedback `never-recalled` bound. Forwarding it is exactly
+        # how the review pane ended up rendering "the bridge returned HTTP 502".
+        self.assertEqual(
+            self._payload("bridge._parse_queue_params('limit=5000')")[0],
+            200,
+        )
+
+    def test_kind_narrows_the_queue_when_given(self):
+        payload = self._payload("bridge._review_queue_payload(50, 'understanding')")
+
+        self.assertEqual(payload["kind"], "understanding")
+        self.assertEqual(payload["limit"], 50)
+
+    def test_an_unparseable_limit_is_refused(self):
+        tmp = _stage_bridge()
+        env = {
+            "PYTHONPATH": str(tmp / "capture") + os.pathsep + str(tmp / "bridge"),
+            "CONTEXT_MEMORY_BASE_URL": "http://127.0.0.1:9",
+            "CONTEXT_MEMORY_READ_TOKEN": "harness-token",
+            "CONTEXT_MEMORY_CREDENTIAL_FILE": os.devnull,
+        }
+        proc = subprocess.run(
+            [sys.executable, "-c", "import bridge; bridge._parse_queue_params('limit=lots')"],
+            env=env, capture_output=True, text=True, encoding="utf-8",
+        )
+        self.assertNotEqual(proc.returncode, 0, msg="a non-integer limit must not reach the store")
+        self.assertIn("limit must be an integer", proc.stderr)
 
 
 if __name__ == "__main__":
