@@ -121,7 +121,8 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
 
 ```bash
 python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding_client.py \
-  import [--ticket provider:key] [--repository REPO] [--initiative NAME] [--scope scope:id] \
+  import [--ticket provider:key] [--repository REPO] [--initiative NAME] \
+  [--product-name NAME] [--scope scope:id] \
   [--tags TAG,...] [--query WORD] [--status STATUS] [--limit N] [--asof YYYY-MM-DD] \
   [--all] [--table] [--max-chars N] [--nomarker] [--session ID]
 ```
@@ -133,10 +134,17 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
   `--initiative "Mímisbrunnr-MVP"` recalls the whole initiative even from a ticketed branch.
 - A successful `import` writes the session marker (see above) unless `--nomarker`.
 - **Filters map one-for-one onto the read API's declared fields**, so the server does the narrowing:
-  `--ticket provider:key`, `--repository`, `--initiative`, `--scope`, `--tags`, `--query` (free text,
-  stemmed AND-of-lexemes — one or two words, not a sentence), `--status`, `--asof` (validity window),
-  `--limit` (default **200**), and `--all` (union memory and understanding, by omitting `kind` rather
-  than sending `null`).
+  `--ticket provider:key`, `--repository`, `--initiative`, `--product-name`, `--scope`, `--tags`,
+  `--query` (free text, stemmed AND-of-lexemes — one or two words, not a sentence), `--status`, `--asof`
+  (validity window), `--limit` (default **200**), and `--all` (union memory and understanding, by
+  omitting `kind` rather than sending `null`).
+- **`--product-name` recalls *through* the registry; it declares nothing.** The store resolves the
+  product to its initiatives and repos and returns the memories they carry, so the rows come back
+  with their product match marked. It is the read-side twin of the `export` flag that declares the
+  `(Product)-[:HAS_INITIATIVE]->(Initiative)` edge: same spelling, opposite direction, and — as on
+  `export` — an unregistered product is a `404` naming `upsert-product-name`, never a silent empty.
+  It is not the `product` scope dimension: a memory scoped to `product` is not part of any named
+  product unless the registry links it.
 - **Three distinct outcomes, never collapsed.** A store that refuses the connection is `unreachable`
   (exit 3, an operator action); a store that hangs past its budget is `timed-out` (exit 4, worth a
   retry); a store that answers with nothing is empty (exit 0, "widen the filters"). A hung store must
