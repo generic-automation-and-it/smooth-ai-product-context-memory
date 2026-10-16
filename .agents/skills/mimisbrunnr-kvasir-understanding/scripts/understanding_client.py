@@ -276,7 +276,7 @@ def heimdallr_initiative(scan: dict) -> str | None:
         return initiative
     return None
 _STAMP = re.compile(r"-(\d{8}-\d{4})$")
-DEFAULT_MAX_CHARS = 12000
+DEFAULT_MAX_CHARS = 120000
 # A candidate below this is punctuation, a stray word, or a table rule — never a fact. Short
 # candidates are reported rather than dropped in silence: this client never discards input
 # without saying so (SKILL.md, AGENTS.md "never splits or discards a fact itself").
