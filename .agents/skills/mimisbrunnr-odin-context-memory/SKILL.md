@@ -23,6 +23,7 @@ client has `import` only; it has no write command to alias.
 | `--dryrun` | When the target **`groupUuid` is known read-only** — Initialize's ticket `query` returned it, which happens only when the group exists **and already holds memories** — run the full write pipeline (preflight, redaction detection, dedup, link derivation, atomicity, ticket-uniqueness, `set --dryrun`) and produce the digest **without writing any memory, link, group or initiative** — the preflight and recall `query` calls it makes still leave server-side recall feedback (HLD-004 LADR-01), which is tuning data, not capture. Otherwise — a group that does not exist yet, or an existing group with no memories, whose `groupUuid` no read-only call can return (`resolve-group` would create or commit) — `set` cannot run, so the dry run previews the plan offline and says the set stage was not tested. Report what *would* be created / versioned / linked / skipped. **This is the only pre-write veto point when the `groupUuid` is known** — see Finalization Output. |
 | `--approve` | Write gated kinds (`rule`, `nfr`, `decision`) as `approved` instead of `proposed`. **Only usable when the human explicitly confirms.** Without it, a gated `--export` still writes, but with `status: proposed` — excluded or flagged on retrieval until promoted. |
 | `--deepsearch` | Runs bounded expansion: up to four keyword queries of 25 and five depth-one traversals of 20, with 400 unique UUID/version candidates overall. More inspection, never more authority or irreversibility. |
+| `--product-name <NAME>` | Declare the product's graph edge at the checkpoint, for the anchor the caller bound — `(Product)-[:HAS_INITIATIVE]->(Initiative)` when an initiative was bound, else `(Product)-[:HAS_REPO]->(Repo)`. A **second write, after the memories**: the two are not one transaction, so an edge that fails leaves them written and the checkpoint reports the failure rather than claiming success. The product must already be registered — nothing is created implicitly, and an unknown one is a `404` naming `upsert-product-name`. **Caller-supplied only**: the git scan reports repository, tickets and initiative, never a product, so nothing autofills it. The initiative is preferred when both anchors are bound, because either alone attributes the memory and the repo edge is the one that can conflict. |
 
 **Session marker (HLD-007 LADR-11).** A marked `--import`/`query` sets the session's working
 point in `.context/session-markers/odin-<session-id>.json` (an ID with characters outside `A-Za-z0-9._-` gets a short digest suffix so distinct IDs never share a file; references only — ids, versions,
@@ -49,9 +50,10 @@ recall that must mark runs through this client's `query`/`import`.
 | `--nomarker` (`set`/`export` only) | Send normally but write no marker entry. |
 | `--session <id>` (`query`/`import`, `set`/`export`, `preflight`) | Explicit session id for the marker (else the harness env chain). |
 
-**Implication rule:** `--approve` is the only switch that widens what the write path *does*; all other
-switches (`--dryrun`, `--deepsearch`, `--import`, `--nomarker`) change *how much work* is done, *which
-direction*, or *which state is kept* — never *how irreversible* it is. `--nomarker` may combine
+**Implication rule:** `--approve` and `--product-name` are the only switches that widen what the write
+path *does* — `--approve` by writing gated kinds as canon, `--product-name` by declaring a graph edge
+beside the memories; all other switches (`--dryrun`, `--deepsearch`, `--import`, `--nomarker`) change
+*how much work* is done, *which direction*, or *which state is kept* — never *how irreversible* it is. `--nomarker` may combine
 with `--approve`: the write still lands as approved, but no marker entry is written. `--dryrun` and `--approve` are mutually exclusive —
 `--dryrun` writes nothing, `--approve` is the permission to write. Treat a request for both as an
 error: ask which one is meant.
@@ -135,6 +137,9 @@ automatic form of this. Tags are never autofilled: derive them from the material
 - Untracked work (no ticket) receives a **synthetic `local:<guid>` ticket**. Never propose an illegal,
   empty-ticket group.
 - An unnamed initiative is proposed as the seeded `to-be-decided` sentinel.
+- A `--product-name` is carried as the proposal's product and declared at the checkpoint. **Nothing
+  autofills it** — the git scan reports repository, tickets and initiative only — so a session with no
+  `--product-name` proposes none, and the product is never inferred from the repository name.
 - If the target is ambiguous, still begin accumulating; do not block the session.
 
 **At the `--export` checkpoint, before preflight,** the write path turns the proposal into a group:
@@ -155,6 +160,17 @@ automatic form of this. Tags are never autofilled: derive them from the material
   the group and initiative as *would create*, exactly as `mimisbrunnr-kvasir-understanding --export`
   does. That is a plan preview, not a reusable `set --dryrun` payload: build the `set` payload with the
   resolved `groupUuid` after the authorised write creates the group.
+- **Under `--product-name`, the edge is declared after `set`, never before it.** The anchor **kind**
+  comes from what the caller bound — the initiative if one was bound, else the repository — and the
+  *name* comes from the resolved group when the kind is the initiative. Keep the two apart: a group
+  that resolves under some initiative must not retarget a repository-bound capture, because a
+  `--dryrun` resolves no group and could never have previewed that. The product must already be
+  registered: `link-product-initiative` and
+  `link-product-repo` are the only verbs, an unknown product is a `404` naming `upsert-product-name`,
+  and a repository already owned by another product is a `409` naming the owner. Neither verb is part
+  of the `set` transaction, so an edge that fails leaves the memories written and is reported as a
+  failed checkpoint step, never rolled back. `--dryrun` declares nothing and reports the edge as
+  *would declare* from a read of the register, so it still needs no write credential.
 
 ### 2. Listen (Accumulate Candidates)
 
@@ -258,6 +274,12 @@ stale, not an alternative reading.
 | 3 | **Dedupe / derive links** | The cross-group subject match and link derivation, applied to the write decision from the preflight. Locate existing subjects; the result decides version-bump vs new-memory vs skip **qualified by group**: a match inside this group is a version bump, a match in another group is a new memory here plus a typed link (a foreign `uuid` target is a `404`, never a bump). |
 | 4 | **Atomicity check** | Confirm each record is one atomic fact. Split bundled candidates; route the unprocessable remainder to `skipped`. |
 | 5 | **Write** | Single transactional `set`. Version bump ordering: flip the old `is_current` to `false` *before* inserting the new current, both **in one transaction**, or a failure between them strands zero current versions. |
+
+**The product edge follows stage 5, and is not a stage.** Under `--product-name` one
+`link-product-initiative` (or `link-product-repo`, when no initiative is bound) runs after the `set`
+has committed, through the same credential subshell. It is deliberately outside the numbered stages:
+it writes no memory and no claim, so folding it into stage 5 would misdescribe the `set` as the whole
+of the checkpoint's persistence. See [references/write-path.md](references/write-path.md).
 
 ## Deterministic Components
 

@@ -250,7 +250,14 @@ async function refresh() {
   renderResult(result);
 }
 
+let controlsWired = false;
+let initiativesLoaded = false;
+
 function wireControls() {
+  // Sign-out then sign-in re-runs `initBrowse`; wiring twice would double every
+  // listener (two queries per Apply). Wire once for the page's lifetime.
+  if (controlsWired) return;
+  controlsWired = true;
   const changeReload = () => scheduleReload(0);
   els.query.addEventListener('input', () => scheduleReload(300));
   [els.kind, els.status, els.repo, els.provider, els.key].forEach((input) => {
@@ -317,13 +324,18 @@ async function clearAll() {
 export async function initBrowse() {
   wireControls();
   renderListChips();
-  const initiatives = await getInitiatives();
-  if (initiatives.ok && Array.isArray(initiatives.data?.items)) {
-    for (const init of initiatives.data.items) {
-      const option = document.createElement('option');
-      option.value = init.name;
-      option.textContent = init.name;
-      els.initiative.appendChild(option);
+  // Re-login re-runs initBrowse; populate the initiative list once so options
+  // neither duplicate nor reset a selection the practitioner already made.
+  if (!initiativesLoaded) {
+    const initiatives = await getInitiatives();
+    if (initiatives.ok && Array.isArray(initiatives.data?.items)) {
+      initiativesLoaded = true;
+      for (const init of initiatives.data.items) {
+        const option = document.createElement('option');
+        option.value = init.name;
+        option.textContent = init.name;
+        els.initiative.appendChild(option);
+      }
     }
   }
   await refresh();

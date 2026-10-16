@@ -71,6 +71,11 @@ WRITE_CLIENT = _SHARED_SCRIPTS / "context_memory_client.py"
 REVIEW_QUEUE = _SHARED_SCRIPTS / "review_queue.py"
 DEDUP = _SHARED_SCRIPTS / "dedup.py"
 DEDUP_ENABLED = "CONTEXT_MEMORY_DECISIONS_DEDUP_ENABLED"
+# `--product-name` declares `(Product)-[:HAS_INITIATIVE]->(Initiative)`, and the store requires a
+# non-empty reason on that edge. A fixed string naming the operation that made it is honest and
+# reproducible; a caller-supplied one would be a second switch nobody asked for.
+PRODUCT_LINK_REASON = "declared by a mimisbrunnr-kvasir-understanding export"
+PRODUCT_LINK_SOURCE = "kvasir-export"
 # The write-token spellings the read client refuses to start with, folded as it folds them. Kept equal
 # to the capture client's `WRITE_TOKEN_NAMES` by a test rather than imported: importing that module
 # would make its redactor import a startup dependency of this client.
@@ -1522,6 +1527,19 @@ def initiative_mismatch_refusal(binding: dict, group: dict, initiative_source: s
     )
 
 
+def _read_collection(document: object, *keys: str) -> list | None:
+    """The list a read answer holds under one of `keys`, or None when it holds none of them.
+
+    A bare array counts. An answer with no collection in it is unreadable, not empty: reading it as
+    "nothing there" turns a malformed reply into a write remedy against a store that may hold the row.
+    """
+    if isinstance(document, list):
+        return document
+    if isinstance(document, dict):
+        return next((document[key] for key in keys if isinstance(document.get(key), list)), None)
+    return None
+
+
 def initiative_exists(name: str) -> tuple[bool, str]:
     """Whether the named initiative is already in the store. A read, so a dry run may use it.
 
@@ -1537,14 +1555,8 @@ def initiative_exists(name: str) -> tuple[bool, str]:
         # `None` (not `False`) is "the read failed" — distinct from "the initiative is absent", so a
         # down store or an auth refusal is never reported as a missing initiative with a write remedy.
         return None, err.strip() or "initiatives read failed"
-    document = _first_json_object(out)
-    items: object = None
-    if isinstance(document, list):
-        items = document
-    elif isinstance(document, dict):
-        items = next((document[key] for key in ("items", "initiatives")
-                      if isinstance(document.get(key), list)), None)
-    if not isinstance(items, list):
+    items = _read_collection(_first_json_object(out), "items", "initiatives")
+    if items is None:
         # An answer with no collection in it is unreadable, not empty: reading it as "missing" turned
         # a malformed reply into a write remedy against a store that may hold the initiative (issue 186).
         return None, "unreadable initiatives response"
@@ -1552,6 +1564,134 @@ def initiative_exists(name: str) -> tuple[bool, str]:
         if isinstance(item, dict) and item.get("name") == name:
             return True, "ok"
     return False, "missing"
+
+
+def registered_products() -> tuple[set[str] | None, str]:
+    """The registered product names, or (None, why) when the read failed.
+
+    A read, so a dry run may use it: `--product-name` previews without a write credential.
+    """
+    rc, out, err = _run_capture_client(READ_CLIENT, ["product-names"], None)
+    if rc != 0:
+        return None, err.strip() or "product-names read failed"
+    items = _read_collection(_first_json_object(out), "items")
+    if items is None:
+        return None, "unreadable product-names response"
+    return {str(item["name"]) for item in items
+            if isinstance(item, dict) and item.get("name")}, "ok"
+
+
+def _link_product(verb: str, payload: dict) -> tuple[bool, str]:
+    """Run one product-edge write through the capture skill's write client.
+
+    Idempotent — an already-present pair answers `changed: false`. Never reached on a dry run: the
+    preview reports from the read client instead, so it needs no write credential.
+    """
+    rc, out, err = _run_capture_client(WRITE_CLIENT, [verb], payload)
+    if rc != 0:
+        return False, err.strip() or out.strip() or f"{verb} failed"
+    return True, out.strip()
+
+
+def link_product_to_initiative(product: str, initiative: str) -> tuple[bool, str]:
+    """Declare `(Product)-[:HAS_INITIATIVE]->(Initiative)`."""
+    return _link_product("link-product-initiative", {
+        "productName": product, "initiativeName": initiative,
+        "reason": PRODUCT_LINK_REASON, "source": PRODUCT_LINK_SOURCE})
+
+
+def link_product_to_repo(product: str, repo: str) -> tuple[bool, str]:
+    """Declare `(Product)-[:HAS_REPO]->(Repo)`.
+
+    The sharper claim of the two: a repo has at most one incoming `HAS_REPO`, so this one answers
+    `409` naming the product that already owns the repo, where the initiative edge can only `404`.
+    """
+    return _link_product("link-product-repo", {
+        "productName": product, "repo": repo,
+        "reason": PRODUCT_LINK_REASON, "source": PRODUCT_LINK_SOURCE})
+
+
+# Keyed by the anchor kind `_product_target` returns, so a third anchor is a new entry rather than
+# another branch at the call site.
+_PRODUCT_LINKERS = {"initiative": link_product_to_initiative, "repo": link_product_to_repo}
+
+
+def _product_target(binding: dict, resolved_initiative: str | None = None) -> tuple[str, str] | None:
+    """The anchor a `--product-name` edge names, or None when the export binds neither.
+
+    The anchor *kind* comes from what the caller bound, so a preview and the write that follows it
+    name the same node; `resolved_initiative` only refines the *name*, once a group has been resolved
+    (the reply is authoritative, where the binding is a copy of it).
+
+    Initiative first because it is the primary attribution anchor (LADR-10) and the safer write: an
+    initiative may be shared by several products, while a repo belongs to exactly one, so the repo
+    edge is the claim that can conflict. Either anchor alone makes the memory "of product X", so the
+    repo is not also declared beside an initiative.
+    """
+    if binding.get("initiative"):
+        return "initiative", resolved_initiative or binding["initiative"]
+    repo = binding.get("repository")
+    return ("repo", repo) if repo else None
+
+
+def _product_register_hint(product: str) -> str:
+    return (f"Register it first:\n"
+            f"  echo '{{\"name\": \"{product}\", \"status\": \"active\"}}' | "
+            f"python3 -B {WRITE_CLIENT} upsert-product-name")
+
+
+def _preview_product_link(args: argparse.Namespace, target: tuple[str, str] | None) -> None:
+    """Report the edge a write would declare, from a read of the register.
+
+    A read, so a preview needs no write credential. An unreadable register is reported as such rather
+    than as an absent product: a down store must not send the operator to register one it may hold.
+    """
+    product = getattr(args, "product_name", None)
+    if not product:
+        return
+    kind, name = target
+    names, why = registered_products()
+    if names is None:
+        print(f"Product: '{product}' — the register read failed ({why}), so this preview cannot say "
+              f"whether the link would be declared or refused.")
+    elif product in names:
+        print(f"Product: would link '{product}' -> {kind} '{name}'.")
+    else:
+        print(f"Product: '{product}' is not registered, so a write would refuse with 404. "
+              f"{_product_register_hint(product)}")
+
+
+def _warn_product_link_skipped(args: argparse.Namespace) -> None:
+    """Say that a requested edge was not declared, when a refusal stopped the export mid-batch.
+
+    The edge is written once every batch has landed, so a refusal in a later batch leaves the earlier
+    batches' memories written and associated with no product — and the refusal message already tells
+    the operator those batches remain, so silence about the edge would read as it having been made.
+    """
+    product = getattr(args, "product_name", None)
+    if product:
+        print(f"  The product edge for '{product}' was NOT declared: it is written once every batch "
+              f"has landed, and this export stopped early. Re-run once the refusal is cleared.",
+              file=sys.stderr)
+
+
+def _declare_product_link(args: argparse.Namespace, target: tuple[str, str] | None) -> bool:
+    """Declare the `--product-name` edge, returning whether the caller's request was honoured.
+
+    A failed link does not undo the memories, but it is still a requested step that did not happen,
+    so the export does not report success.
+    """
+    product = getattr(args, "product_name", None)
+    if not product:
+        return True
+    kind, name = target
+    linked, detail = _PRODUCT_LINKERS[kind](product, name)
+    if linked:
+        print(f"Product: linked '{product}' -> {kind} '{name}' ({detail[:200]})")
+        return True
+    print(f"NOTE: the memories were written, but the product link failed: {detail[:300]}. The edge is "
+          f"not rolled back with them. {_product_register_hint(product)}", file=sys.stderr)
+    return False
 
 
 def _subject(candidate: dict) -> str:
@@ -2072,6 +2212,17 @@ def cmd_export(args: argparse.Namespace) -> int:
               + json.dumps({k: v for k, v in recorded.items() if v}, ensure_ascii=False)
               + "; an explicit flag overrides it.")
 
+    # A product edge points at an initiative or a repo, so an export binding neither has no node to
+    # attach it to. Refused here, before any gate runs, rather than after the memories have landed: a
+    # link that cannot be declared is not a reason to have written them first.
+    product_name = getattr(args, "product_name", None)
+    if product_name and _product_target(binding) is None:
+        print(f"REFUSED: --product-name '{product_name}' has nothing to link to — the edge is "
+              f"(Product)-[:HAS_INITIATIVE]->(Initiative) or (Product)-[:HAS_REPO]->(Repo), and this "
+              f"export binds neither. Pass --initiative <name> or --repository <owner/name>. "
+              f"Nothing was written.", file=sys.stderr)
+        return 1
+
     print(f"EXPORT PREPARED from {src} ({source_kind}) — via mimisbrunnr-odin-context-memory, the sole writer.")
     try:
         marker, boundary = _export_boundary(args)
@@ -2286,6 +2437,7 @@ def cmd_export(args: argparse.Namespace) -> int:
                   f"another initiative, the bound initiative '{binding['initiative']}' is "
                   f"ignored and the write refuses; drop it to capture there, re-bind for a "
                   f"new group, or re-point with update-group.")
+        _preview_product_link(args, _product_target(binding))
 
     total_candidates = 0
     matched = 0
@@ -2378,6 +2530,8 @@ def cmd_export(args: argparse.Namespace) -> int:
             if cross_kind:
                 print(f"  The cross-kind candidate(s) above are queued for review -> "
                       f"{_review_queue_path()}", file=sys.stderr)
+            if batch_no > 1:
+                _warn_product_link_skipped(args)
             return 1
         print(f"\nset --dryrun (the veto point){tag}:\n{out.strip()[:1200]}")
 
@@ -2386,6 +2540,8 @@ def cmd_export(args: argparse.Namespace) -> int:
                                     "links": [], "labelsProposed": []})
         if rc != 0:
             print(f"WRITE FAILED{tag}: {err.strip() or out.strip()}", file=sys.stderr)
+            if batch_no > 1:
+                _warn_product_link_skipped(args)
             return 1
         print(f"\nWROTE{tag}:\n{out.strip()[:1200]}")
         # The marker follows the receipt, never the plan: one export entry per
@@ -2437,6 +2593,17 @@ def cmd_export(args: argparse.Namespace) -> int:
         _mark_export_receipt(args, [])
         return 0
 
+    # After the memories, not before: the edge describes where this export belongs, and a link
+    # declared ahead of a refused write would claim an association for material that never landed.
+    # The two are not one transaction — a link that fails leaves the memories written, and says so.
+    # Reached only past the dry-run return above, so a preview cannot get here.
+    # The resolved group's own initiative is authoritative: the mismatch guard has already refused a
+    # bound one that differs, but it fails open when the reply carries no usable name, and this edge
+    # would then name an initiative the group does not belong to. It is passed as a preference, not a
+    # substitution — a repo-bound export has no resolved initiative to prefer.
+    link_failed = not _declare_product_link(
+        args, _product_target(binding, _group_initiative(group)))
+
     if total_chunks > 1:
         print("\nNon-atomic multi-batch write: each batch was written independently, so a failure in a "
               "later batch leaves earlier batch(es) committed.")
@@ -2445,7 +2612,7 @@ def cmd_export(args: argparse.Namespace) -> int:
     print("Records written as `kind = understanding`, which does NOT pass the gated-kind approval: "
           "a `decision`/`rule`/`nfr` captured through this path is an understanding of one, not "
           "approved canon.")
-    return 0
+    return 1 if link_failed else 0
 
 
 def _mark_export_receipt(args: argparse.Namespace, written: list[dict],
@@ -3333,6 +3500,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     exp.add_argument("--repository", help="Repository to associate with the group.")
     exp.add_argument("--scope", help="scope:identifier, e.g. product:invitations.")
     exp.add_argument("--initiative", help="Initiative the group belongs to; must already exist.")
+    exp.add_argument("--product-name", "--productname", dest="product_name",
+                     help="Declare the product's graph edge for the anchor this export binds to: "
+                          "(Product)-[:HAS_INITIATIVE]->(Initiative), or (Product)-[:HAS_REPO]->(Repo) "
+                          "when no initiative is bound. The product must already be registered "
+                          "(upsert-product-name) — nothing is created implicitly. Declared after the "
+                          "memories are written; a dry run reports it from a read instead.")
     exp.add_argument("--name", help="Group name, written only when the group is created.")
     exp.add_argument("--body", help="Group description, written only when the group is created.")
     exp.add_argument("--heimdallr", choices=_HEIMDALLR_CHOICES, default="true",

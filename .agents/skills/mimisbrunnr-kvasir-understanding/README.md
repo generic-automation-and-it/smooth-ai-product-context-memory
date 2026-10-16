@@ -30,7 +30,8 @@ python3 .../understanding_client.py import \
 
 # Capture material into the store through the capture path (writes unless --dryrun)
 python3 .../understanding_client.py export <input> [--dryrun] [--all] [--nomarker] \
-  [--tickets A,1] [--tags tag] [--repository repo] [--scope product:x]
+  [--tickets A,1] [--tags tag] [--repository repo] [--scope product:x] [--initiative NAME] \
+  [--product-name NAME]   # declares Product->Initiative, else Product->Repo when no initiative
 
 # Dump the current session's context to a discoverable local folder (export, no write)
 python3 .../understanding_client.py dump --currentsession --from <session-file|-> [--out .context/mimisbrunnr-understandings/<folder>]

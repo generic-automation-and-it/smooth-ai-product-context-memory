@@ -45,17 +45,30 @@ internal sealed class ApiAccessAuthorizer
 
     public bool Authorize(string? authorization, ApiCapability required)
     {
+        ApiCapability? resolved = ResolveCapability(authorization);
+        return resolved == ApiCapability.Write
+            || (resolved == ApiCapability.Read && required == ApiCapability.Read);
+    }
+
+    // Resolve which token a credential is, without enforcing a requirement. The Console's
+    // capability probe uses this to report read-only vs read+write to a logged-in session.
+    public ApiCapability? ResolveCapability(string? authorization)
+    {
         const string Prefix = "Bearer ";
         if (authorization is null || !authorization.StartsWith(Prefix, StringComparison.Ordinal))
         {
-            return false;
+            return null;
         }
 
         byte[] supplied = Hash(authorization[Prefix.Length..]);
-        bool write = CryptographicOperations.FixedTimeEquals(supplied, _writeTokenHash);
-        bool read = required == ApiCapability.Read
-            && CryptographicOperations.FixedTimeEquals(supplied, _readTokenHash);
-        return write || read;
+        if (CryptographicOperations.FixedTimeEquals(supplied, _writeTokenHash))
+        {
+            return ApiCapability.Write;
+        }
+
+        return CryptographicOperations.FixedTimeEquals(supplied, _readTokenHash)
+            ? ApiCapability.Read
+            : null;
     }
 
     private static byte[] Hash(string value) => SHA256.HashData(Encoding.UTF8.GetBytes(value));
