@@ -371,7 +371,7 @@ a secret sits on disk; it is never how personal data is removed — that happene
 | `authority.py` | `python3 .../mimisbrunnr-odin-context-memory/scripts/authority.py` | 3 (authority resolution) | Converts a stated-authority judgement into one or two ordered version writes. Existing-winner cases record the losing candidate as history, then restore the winner as current in the same transaction. |
 | `divergence.py` | `python3 .../mimisbrunnr-odin-context-memory/scripts/divergence.py` | 3 (conflict composition) | Converts an explicit same-subject genuine-conflict judgement into a separately identified claim, proposed divergence memory and two contradiction links; rejects cross-scope and recursive evidence and deduplicates exact claim pairs. |
 | `near_miss_tags.py` | `python3 .../_mimisbrunnr-shared/scripts/near_miss_tags.py < approved-evidence.json` | Read-only reporting | Bounded stdin JSON validation, exact tag comparison, scoped `near-miss-tag` output. No network, file output, vocabulary lookup or semantic heuristic. See Evidence-only Near Misses below. |
-| `decisions_gate.py` | `python3 .../_mimisbrunnr-shared/scripts/decisions_gate.py score [--state-file PATH] < <batch-file>` | Optional value gate | Scores each record for value to each target role via a **local decision model**. **Off by default** (`CONTEXT_MEMORY_DECISIONS_ENABLED=false`). Carries no model in the Host or Application — everything here is client-side. Two subcommands: `score` and `probe`. See the Value Gate below. |
+| `decisions_gate.py` | `python3 .../_mimisbrunnr-shared/scripts/decisions_gate.py score [--state-file PATH] [--snapshot-file PATH] < <batch-file>` | Optional value gate | Scores each record for value to each target role via a **local decision model**. **Off by default** (`CONTEXT_MEMORY_DECISIONS_ENABLED=false`). Carries no model in the Host or Application — everything here is client-side. Two subcommands: `score` and `probe`. See the Value Gate below. |
 
 ### Value Gate (optional, off by default)
 
@@ -408,6 +408,14 @@ buys nothing and the subject never reaches the file. The identity is the subject
 record its `groupUuid`, or, before the group exists, a `group` object describing the binding it will be
 resolved from — a memory is `(group, subject)`, and a record carrying neither shares one budget with the
 same subject in every other group.
+
+`--snapshot-file` additionally writes **this run's verdicts**, whole, beside the budget ledger: replaced
+never appended, and naming the ledger it complements. The budget ledger keeps only the best attempt per
+record and the next run overwrites it, so a hold a later run released leaves no trace — the snapshot is
+the only place that decision exists. Optional, and a failure to write it costs nothing but the file. It carries each record's
+**ledger digest**, never the subject itself — the same rule the budget file follows, and for the
+same reason: the identity is the subject, a subject can carry personal data, and it is built
+from the *unredacted* record. A snapshot per run accumulates in `.context/`; nothing prunes it.
 
 **A record with no `subject`, `description` or `name` gets no persistent budget at all.** It is keyed by
 *position within the batch*, so every call scores it as a first attempt and nothing is ever written to

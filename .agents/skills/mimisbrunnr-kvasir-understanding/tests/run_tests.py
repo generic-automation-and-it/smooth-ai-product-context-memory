@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import contextlib
 import io
 import json
 import re
@@ -5214,7 +5215,7 @@ class LedgerPathTests(unittest.TestCase):
     """
 
     def test_the_product_name_names_the_budget_ledger(self):
-        budget = uc.ledger_paths("Mímisbrunnr", "org/repo", "agentic-installer")
+        budget = uc.budget_ledger_path("Mímisbrunnr", "org/repo", "agentic-installer")
         self.assertEqual(".context/M-misbrunnr-agentic-installer-decisions-ledger.json",
                          budget.as_posix())
 
@@ -5222,14 +5223,14 @@ class LedgerPathTests(unittest.TestCase):
         """Two products can share a repository, so the fallback is coarser than the product name —
         but a name is always present, because a ledger with a leading separator is not a name."""
         self.assertEqual(".context/org-repo-agentic-installer-decisions-ledger.json",
-                         uc.ledger_paths(None, "org/repo", "agentic-installer").as_posix())
+                         uc.budget_ledger_path(None, "org/repo", "agentic-installer").as_posix())
         self.assertEqual(".context/unbound-unbound-decisions-ledger.json",
-                         uc.ledger_paths(None, None, None).as_posix())
+                         uc.budget_ledger_path(None, None, None).as_posix())
 
     def test_two_initiatives_never_share_one_budget(self):
         """Sharing would let one initiative's attempts spend another's."""
-        a = uc.ledger_paths("Mimisbrunnr", "org/repo", "one")
-        b = uc.ledger_paths("Mimisbrunnr", "org/repo", "two")
+        a = uc.budget_ledger_path("Mimisbrunnr", "org/repo", "one")
+        b = uc.budget_ledger_path("Mimisbrunnr", "org/repo", "two")
         self.assertNotEqual(a, b)
 
     def test_a_product_name_cannot_steer_the_write_out_of_the_context_folder(self):
@@ -5237,7 +5238,7 @@ class LedgerPathTests(unittest.TestCase):
         unfiltered, `../../elsewhere` would aim the ledger outside `.context/` entirely."""
         for hostile in ("../../elsewhere/attempt", "a/../../../b", "..", "  ", "x" * 200):
             with self.subTest(name=hostile):
-                budget = uc.ledger_paths(hostile, "acme/repo", "init-1")
+                budget = uc.budget_ledger_path(hostile, "acme/repo", "init-1")
                 self.assertEqual(Path(".context"), budget.parent,
                                  f"{hostile!r} escaped the context folder")
                 self.assertNotIn("/", budget.name, "a separator survived into the filename")
@@ -5246,7 +5247,7 @@ class LedgerPathTests(unittest.TestCase):
                                      "an unbounded name must still be bounded")
 
     def test_the_snapshot_is_stamped_beside_the_budget_it_names(self):
-        budget = uc.ledger_paths("Mimisbrunnr", "org/repo", "agentic-installer")
+        budget = uc.budget_ledger_path("Mimisbrunnr", "org/repo", "agentic-installer")
         now = dt.datetime(2026, 10, 16, 19, 9, 31, tzinfo=dt.timezone.utc)
         snap = uc.snapshot_for(budget, now)
         self.assertEqual(".context/Mimisbrunnr-agentic-installer-20261016-190931-decisions-ledger.json",
@@ -5275,6 +5276,38 @@ class GateIdentityTests(unittest.TestCase):
     every foreign export scored on position, for ever, with no symptom other than a ledger file that
     never appeared.
     """
+
+    def test_the_printed_paths_are_the_ones_the_gate_used_not_a_recomputation(self):
+        """RL-001. The export used to recompute the snapshot path *after* the gate ran, so the two
+        `now()` calls straddled the scoring and the operator was told a file that did not exist —
+        confirmed: printed `...184017...` while the file on disk was `...184012...`. With a real batch
+        the gap is a minute, so it was wrong essentially every run. The gate's report is the authority
+        on what it used, and a canary path proves the value is echoed rather than recalculated."""
+        canary = ".context/CANARY-184017-decisions-ledger.json"
+        report = json.dumps({"outcome": "ok", "belowThreshold": "hold",
+                             "stateFile": ".context/canary-budget.json",
+                             "snapshotFile": canary,
+                             "records": [{"index": 0, "outcome": "scored", "passed": True,
+                                          "passingRoles": ["tester"], "durable": True}]})
+        candidates = [{"subject": "x", "statement": "A claim.", "description": "x"}]
+        original = uc.gate_decisions
+        previous = os.environ.get("CONTEXT_MEMORY_DECISIONS_ENABLED")
+        os.environ["CONTEXT_MEMORY_DECISIONS_ENABLED"] = "true"
+        uc.gate_decisions = _stub_gate_transport(lambda: _Result(0, report))
+        try:
+            buffer = io.StringIO()
+            with contextlib.redirect_stdout(buffer):
+                uc.gate_decisions(candidates)
+            printed = buffer.getvalue()
+        finally:
+            uc.gate_decisions = original
+            if previous is None:
+                os.environ.pop("CONTEXT_MEMORY_DECISIONS_ENABLED", None)
+            else:
+                os.environ["CONTEXT_MEMORY_DECISIONS_ENABLED"] = previous
+        self.assertIn(canary, printed,
+                      "the printed snapshot path is not the one the gate reported")
+        self.assertIn("canary-budget.json", printed)
 
     def test_the_foreign_splitter_emits_no_description(self):
         """The precondition this fix exists for. If this ever starts emitting one, the gate subject

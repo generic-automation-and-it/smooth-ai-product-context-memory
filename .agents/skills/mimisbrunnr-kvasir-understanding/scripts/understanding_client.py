@@ -1103,15 +1103,13 @@ def ledger_slug(value: str | None, fallback: str) -> str:
     return cleaned or fallback
 
 
-def ledger_paths(product_name: str | None, repository: str | None, initiative: str | None) -> Path:
-    """The budget ledger and this run's score snapshot.
+def budget_ledger_path(product_name: str | None, repository: str | None,
+                        initiative: str | None) -> Path:
+    """The stable budget ledger for this product and initiative.
 
-    Two files, deliberately. The budget ledger is **stable** -- it must outlive a single run, or
-    the three-attempt bound it exists to enforce can never bind and a record an agent rewrote
-    three times is scored a fourth. The snapshot carries the run's timestamp, because the ledger
-    answers only "how many attempts has this record had" while keeping the single best one: a hold
-    that a later run released leaves no trace there, and the run that made the decision is the only
-    place it exists.
+    **Stable, deliberately** -- it must outlive a single run, or the three-attempt bound it exists
+    to enforce can never bind and a record an agent rewrote three times is scored a fourth. That is
+    the whole difference between it and the run's snapshot, which `snapshot_for` names and explains.
 
     Project first, then initiative, so two initiatives of one product never share a budget. The
     product name is the registry's own term for it; the repository is the fallback because it is
@@ -1125,6 +1123,11 @@ def ledger_paths(product_name: str | None, repository: str | None, initiative: s
 
 def snapshot_for(budget: Path, now: dt.datetime) -> Path:
     """This run's score snapshot, named beside the budget ledger it complements.
+
+    The other half of a deliberate pair. The budget ledger answers only "how many attempts has this
+    record had" while keeping the single best of them, so a hold a later run released leaves no
+    trace; the run that made the decision exists nowhere else. The snapshot is where it lives, which
+    is why it is stamped and the ledger is not.
 
     Derived from the budget rather than from `.context/`, which is what keeps a run that points the
     budget somewhere else -- every test, and any operator using `MIMIS_DECISIONS_STATE` -- from
@@ -1332,21 +1335,20 @@ def gate_decisions(candidates: list[dict], state_file: Path | None = None,
               "skipped and the export continued.", file=sys.stderr)
         return candidates, "decisions: skipped (gate script missing)"
 
-    # An explicit path wins, then the environment override the tests and an operator use,
-    # then the stable default. The snapshot is opt-in because the gate is also reached with no
-    # ledger at all, and a run that has no budget must not leave a snapshot behind either.
     # Precedence: the environment override first, then the path the caller derived, then the stable
     # default. The override outranks the derived path deliberately -- pointing MIMIS_DECISIONS_STATE at
     # a temp file has to keep the whole run, ledger and snapshot, out of the working tree, and a
     # derived path passed in by the caller would otherwise silently outrank it.
     env_state = os.environ.get("MIMIS_DECISIONS_STATE")
-    state_file = Path(env_state) if env_state else (state_file or Path(".context/decisions-ledger.json"))
+    state_file = Path(env_state) if env_state else (
+        state_file or DECISIONS_CONTEXT / "decisions-ledger.json")
     if snapshot_file is None:
         snapshot_file = snapshot_for(state_file, dt.datetime.now(dt.timezone.utc))
+    # Unconditional: the line above resolves `None`, so a guard here tested a condition that could
+    # never be false. It read as though a caller could reach the gate with no snapshot at all, which
+    # is exactly the belief that let the caller-side print recompute a path the gate had not used.
     gate_argv = [sys.executable, "-B", str(DECISIONS_GATE), "score",
-                 "--state-file", str(state_file)]
-    if snapshot_file is not None:
-        gate_argv += ["--snapshot-file", str(snapshot_file)]
+                 "--state-file", str(state_file), "--snapshot-file", str(snapshot_file)]
     try:
         proc = subprocess.run(
             gate_argv,
@@ -1393,6 +1395,14 @@ def gate_decisions(candidates: list[dict], state_file: Path | None = None,
 
     for line in _ledger_disclosures(report):
         print(line, file=sys.stderr)
+
+    # Printed from the gate's own report, which is the authority on what it actually used. Recomputing
+    # the path here would produce a *different* answer from the one passed in: scoring takes seconds
+    # to minutes between the two `now()` calls, so a recomputed timestamp names a file that does not
+    # exist. Verified before this change: the export printed `...184017...` and wrote `...184012...`.
+    used = [f"budget ledger {report['stateFile']}" if report.get("stateFile") else None,
+            f"run snapshot {report['snapshotFile']}" if report.get("snapshotFile") else None]
+    print("  decisions: " + " | ".join(part for part in used if part))
 
     if report.get("outcome") == "disabled":
         return candidates, "decisions: disabled"
@@ -2523,11 +2533,9 @@ def cmd_export(args: argparse.Namespace) -> int:
         # The subject is added to the gate's **copy**, not to the candidate. Capture and dedup key on
         # the store's own subject, and moving that is a decision about capture, not about a ledger.
         gated = [dict(c, group=ledger_group, subject=_subject(c)) for c in clean]
-        budget_file = ledger_paths(getattr(args, "product_name", None),
-                                   binding.get("repository"), binding.get("initiative"))
+        budget_file = budget_ledger_path(getattr(args, "product_name", None),
+                                         binding.get("repository"), binding.get("initiative"))
         clean, decision_note = gate_decisions(gated, budget_file)
-        print(f"  decisions: budget ledger {budget_file} | run snapshot "
-              f"{snapshot_for(budget_file, dt.datetime.now(dt.timezone.utc))}")
         held_verdicts = [(c, c["_gateVerdict"]) for c in gated if "_gateVerdict" in c]
     else:
         decision_note = probe_decisions(len(clean))

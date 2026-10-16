@@ -890,6 +890,35 @@ def write_snapshot(path_str: str, payload: dict, state_file: str | None) -> None
     os.replace(temp, path)
 
 
+def snapshot_payload(payload: dict) -> dict:
+    """The report with every record identity replaced by its ledger key.
+
+    The budget ledger stores `sha256:<digest>` and never the identity itself, because the identity
+    *is* the record's subject and a subject can carry personal data — a name, an email, a customer.
+    That reasoning applies to the snapshot equally, and it is not hypothetical: the identity is built
+    from the **unredacted** record (`record_identity(original, index)`), so a snapshot written verbatim
+    puts exactly the text the ledger was designed to keep off disk back onto it, in plaintext, in a
+    file an operator keeps by default.
+
+    The digest is what a snapshot needs anyway. It is the same string the budget file is keyed by, so
+    a verdict here joins up to a budget entry there, and a snapshot stays interpretable next to its
+    ledger without becoming a second, unhashed copy of every subject exported.
+
+    The printed report is untouched: the caller reads outcomes and scores, never the identity, and the
+    two must not drift into disagreeing about what was scored.
+    """
+    out = dict(payload)
+    records = []
+    for record in payload.get("records", []):
+        copy = dict(record)
+        identity = copy.get("identity")
+        if isinstance(identity, str):
+            copy["identity"] = ledger_key(identity)
+        records.append(copy)
+    out["records"] = records
+    return out
+
+
 def has_subject(record):
     """True when the record carries a durable identity: `subject`, else `description`, else `name`.
 
@@ -1223,7 +1252,18 @@ def cmd_score(args):
             )
     if args.snapshot_file:
         payload["snapshotFile"] = str(args.snapshot_file)
-        write_snapshot(args.snapshot_file, payload, args.state_file)
+        # The snapshot is a record of the run, not the run itself: a failure to write it must not
+        # cost the verdicts. It is written *before* the report is printed, so an unhandled OSError --
+        # a read-only `.context`, a full disk, a parent path that is a regular file -- would propagate
+        # out of `cmd_score` with stdout empty, and the caller would lose every score it needed over a
+        # file nothing depends on. The budget ledger above is different: it carries the bound, so its
+        # failure is allowed to stop the run.
+        try:
+            write_snapshot(args.snapshot_file, snapshot_payload(payload), args.state_file)
+        except OSError as exc:
+            payload["snapshotError"] = f"{type(exc).__name__}: {exc}"
+            print(f"NOTE: the run snapshot at {args.snapshot_file} was not written ({exc}); the "
+                  f"verdicts below are unaffected.", file=sys.stderr)
     print(json.dumps(payload, indent=2))
     return 0
 

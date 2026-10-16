@@ -2585,7 +2585,13 @@ class SnapshotTests(GateTestCase):
             document = json.loads(snap.read_text(encoding="utf-8"))
             self.assertEqual(str(budget), document["stateFile"],
                              "a snapshot whose companion ledger cannot be found is not interpretable")
-            self.assertEqual(report["records"], document["payload"]["records"],
+            # Equal modulo identity: RL-008 made the snapshot carry the ledger's digest where the
+            # report carries the subject, and that difference is the point rather than a drift.
+            def without_identity(records):
+                return [{k: v for k, v in r.items() if k != "identity"} for r in records]
+
+            self.assertEqual(without_identity(report["records"]),
+                             without_identity(document["payload"]["records"]),
                              "the snapshot must hold this run's verdicts, not a summary of them")
             self.assertEqual(str(snap), report["snapshotFile"])
 
@@ -2603,13 +2609,61 @@ class SnapshotTests(GateTestCase):
             document = json.loads(snap.read_text(encoding="utf-8"))
             identities = [r["identity"] for r in document["payload"]["records"]]
             self.assertEqual(1, len(identities), f"the snapshot accumulated runs: {identities}")
-            self.assertIn("Queue transport decision", json.dumps(document))
-            self.assertNotIn("Storage engine decision", json.dumps(document),
-                             "the first run's verdict survived into the second run's snapshot")
+            # Which run this is, told apart by the *budget* each record was charged to rather than by
+            # subject text: RL-008 means a snapshot no longer carries the subject at all.
+            budget = json.loads((Path(tmp) / "b.json").read_text(encoding="utf-8"))
+            self.assertIn(identities[0], budget,
+                          "the snapshot's record is not one this budget accounts for")
+            self.assertEqual(2, len(budget), "both runs should be accounted for in the budget")
             # A file count, not a byte count: appending would leave two documents in one file, and a
             # size comparison cannot tell that from a subject that happened to be one character longer.
             self.assertEqual(1, snap.read_text(encoding="utf-8").count('"snapshotOf"'),
                              "the file holds more than one run's document — it was appended to")
+
+    def test_a_snapshot_never_writes_a_record_identity_in_plaintext(self):
+        """RL-008. The budget ledger stores `sha256:<digest>` and never the identity itself, because
+        the identity *is* the record's subject and a subject can carry personal data. A snapshot
+        written verbatim undid exactly that: the identity is built from the **unredacted** record, so
+        the text the ledger was designed to keep off disk was landing on it in plaintext, in a file an
+        operator keeps by default.
+
+        The digest is also what the snapshot needs: it is the key the budget file is stored under, so a
+        verdict joins up to a budget entry without becoming a second unhashed copy of every subject.
+        """
+        marker = "PLAINTEXT-SUBJECT-MARKER-9f3a"
+        record = dict(RECORD, subject=marker, description=marker)
+        with tempfile.TemporaryDirectory() as tmp:
+            budget = Path(tmp) / "b.json"
+            snap = Path(tmp) / "acme-init-20261016-190931-decisions-ledger.json"
+            self.score(records=[record], state_file=str(budget), snapshot_file=str(snap))
+            raw = snap.read_text(encoding="utf-8")
+            self.assertNotIn(marker, raw, "the snapshot wrote the subject in plaintext")
+            document = json.loads(raw)
+            identity = document["payload"]["records"][0]["identity"]
+            self.assertTrue(identity.startswith("sha256:"), identity)
+            # The same digest the budget is keyed by, so the two files join up.
+            self.assertIn(identity, json.loads(budget.read_text(encoding="utf-8")))
+            # And the snapshot is still a record of the run: the scores survive.
+            self.assertTrue(document["payload"]["records"][0]["scores"])
+
+    def test_a_snapshot_that_cannot_be_written_costs_neither_the_run_nor_the_verdicts(self):
+        """RL-002. The snapshot is written *before* the report is printed, so an unhandled OSError
+        propagated out of `cmd_score` with stdout empty and the caller lost every score it needed --
+        over a file nothing depends on. A read-only `.context` or a full disk must not stop a capture."""
+        with tempfile.TemporaryDirectory() as tmp:
+            # The parent is a regular *file*, so the write raises NotADirectoryError. A read-only
+            # directory would be the obvious choice and is wrong: root ignores the mode, so the case
+            # would pass on a CI runner that runs privileged and fail on a developer's machine.
+            blocker = Path(tmp) / "a-regular-file"
+            blocker.write_text("not a directory", encoding="utf-8")
+            budget = Path(tmp) / "b.json"
+            snap = blocker / "snapshot.json"
+            proc, report = self.score(state_file=str(budget), snapshot_file=str(snap))
+        self.assertEqual(0, proc.returncode, proc.stderr)
+        self.assertIsNotNone(report, "the report was lost, so every verdict was lost with it")
+        self.assertEqual("scored", report["records"][0]["outcome"])
+        self.assertIn("snapshotError", report, "the failure was swallowed rather than reported")
+        self.assertIn("verdicts below are unaffected", proc.stderr)
 
     def test_no_snapshot_flag_writes_no_snapshot(self):
         """Opt-in, because a probe or a caller with no ledger must not leave one behind."""
