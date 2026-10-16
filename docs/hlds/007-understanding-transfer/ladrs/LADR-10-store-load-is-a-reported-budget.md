@@ -15,7 +15,7 @@ mid-sentence is a corrupted fact, and an agent cannot tell a truncated claim fro
 
 ## Decision
 
-One `--max-chars` budget (default `DEFAULT_MAX_CHARS`, 12000) applies to **both** render surfaces — a
+One `--max-chars` budget (default `DEFAULT_MAX_CHARS`, 120000) applies to **both** render surfaces — a
 store export and foreign material. On a store export:
 
 - the budget bounds the **rendered records**, not the header or the closing notice;
@@ -49,11 +49,17 @@ non-default cap always states itself in a `Budget:` line, `0 record(s) cut` incl
 
 - A load is bounded, and its shortfall is **reported** rather than silent: the cap, the rendered size, the
   count cut and each cut record's identity are all in the output.
-- The under-budget path is unchanged byte-for-byte, so the cap never touches a representative load. The
-  walk harness re-run at the default is identical (1682 / 2006 / 2238 chars) — the cap bounds the
-  pathological corpus, not the normal one.
+- The under-budget path is unchanged byte-for-byte, so the cap never touches a load that fits it. The
+  walk harness re-run at the default is identical (1682 / 2006 / 2238 chars) — those surfaces sit far
+  under any cap. How often the cap fires on a *normal* corpus is a property of the default, not of the
+  mechanism: at 12000 it fired on an ordinary initiative import (see the raise below).
 - A budget below the smallest record narrows to **zero** records rather than truncating one. That is the
   honest extreme of "narrow and report"; the default never reaches it.
+- The default was raised 12000 → **120000** (2026-10-16). A 45-record initiative-scoped import rendered 11
+  records and cut 34 at the old default, so it truncated an ordinary import rather than the pathological
+  corpus it was sized for. The decision is unchanged — one reported budget, whole records, tail cut; only
+  the number moved. A foreign load shares the number, so a pasted transcript up to 120000 characters now
+  renders whole instead of truncating at 12000.
 - The dossier is **out of scope**: its omission reasons are a bounded set fixed before first use, and
   adding a budget reason there is a separate decision.
 
