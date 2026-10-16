@@ -22,7 +22,11 @@
 	}
 
 	# /bridge/{review-queue,dedup-preview,health} → P4a bridge (read-only, no write token).
-	handle /bridge/review-queue /bridge/dedup-preview /bridge/health {
+	# Caddy's handle takes one matcher; multiple paths need a named path matcher.
+	@bridge-read {
+		path /bridge/review-queue /bridge/dedup-preview /bridge/health
+	}
+	handle @bridge-read {
 		reverse_proxy 127.0.0.1:5181
 	}
 
@@ -32,7 +36,10 @@
 	# guard. NFR-02 by process isolation. /bridge/health stays on P4a so a
 	# monitor probing the gateway sees the read phase; P4b declares its own
 	# phase on /bridge/p4b-health.
-	handle /bridge/approve /bridge/reject /bridge/amend /bridge/p4b-health {
+	@bridge-write {
+		path /bridge/approve /bridge/reject /bridge/amend /bridge/p4b-health
+	}
+	handle @bridge-write {
 		reverse_proxy 127.0.0.1:5182
 	}
 }

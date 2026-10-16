@@ -103,15 +103,17 @@ Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgr
   `BlobConfiguration:Port` (9000), `BlobConfiguration:ConsolePort` (9001), `SeqConfiguration:Port`
   (5341), `HostConfiguration:Port` (5141, image mode). `appsettings.json` must keep these values in sync with the code defaults and with the table
   above — a divergence here is invisible until something binds the wrong port.
-- **The Viewer Console pod is Phase A of HLD-009.** It is registered only when
-  `ViewerConfiguration:Enabled` is true (default `true` in Development, `false` in Release — the
-  published viewer image is not yet released). The `mimir-viewer` container runs Caddy (serves the
-  no-build SPA, injects the read token, proxies `/api` to the Host) plus the Python bridge stub.
-  `ViewerConfiguration:Image` (default `smooth-ai-product-context-memory-viewer:local`) must be built
-  from the repo root (`docker build -f src/SmoothAiProductContextMemory.Viewer/Dockerfile .`) before a
-  dev run — the Dockerfile vendors the capture scripts from the shared skill folder (HLD-009 LADR-09),
-  which a Viewer-only context cannot reach — and
+- **The Viewer Console pod is HLD-009's Mímisbrunnr Console.** It is registered when
+  `ViewerConfiguration:Enabled` is true (default `true` in Development; the **release controller bakes
+  it on** — `Dockerfile.apphost` sets `ViewerConfiguration__Enabled=true` plus a digest-pinned
+  `ViewerConfiguration:Image`, so the operator stack starts `mimir-viewer` too). The `mimir-viewer`
+  container runs Caddy (serves the no-build SPA, injects the read token, proxies `/api` to the Host) plus
+  the Python bridge.
+  `ViewerConfiguration:Image` defaults to `smooth-ai-product-context-memory-viewer:local` in Development,
+  where the AppHost **auto-builds it** (`WithDockerfile` → the repo-root Dockerfile, which vendors the
+  capture scripts from the shared skill folder, HLD-009 LADR-09) — no manual `docker build` needed.
   `ViewerConfiguration:Port` (5441, the `5141 + "mimi"` ASCII offset) is the pod's published port.
+  In Release the image is `ghcr.io/...-viewer@<digest>`, published by `publish-image.yml`.
 - MinIO credentials are committed in `appsettings.Development.json` (local dev only, firewall-isolated).
   Bucket creation is lazy: the storage adapter ensures the bucket exists on first write, so no separate
   `mc`/init container is required. The dev bucket is `smooth-mimisbrunnr-memory-well`; renaming it
@@ -276,6 +278,7 @@ Test fixture (separate AppHost) uses `15432` / `mimisbrunnr-testcontainer-postgr
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-15 | **Viewer enabled in the release controller + dev auto-build + image published.** `Dockerfile.apphost` now bakes `ViewerConfiguration__Image` (digest-pinned, via new `VIEWER_IMAGE` build-arg) and `ViewerConfiguration__Enabled=true`, so the operator stack (`run.sh`) starts `mimir-viewer` with the rest of the workloads. In Development the AppHost auto-builds the viewer image (`AddViewer` uses `WithDockerfile` → repo-root Dockerfile), so `dotnet run AppHost` no longer needs a pre-built `:local` tag. `publish-image.yml` gained a `build-viewer` job (build + push `ghcr.io/...-viewer`) and wires the viewer digest into the controller build and smoke. `run.sh` now knows the `viewer` workload (port, URL print, orphan sweep). | HLD-009 deploy |
 | 2026-10-15 | **Viewer image builds from the repo root.** `docker build -f src/SmoothAiProductContextMemory.Viewer/Dockerfile .` — the Dockerfile vendors the capture scripts into `/bridge/capture/` (`PYTHONPATH` set) for the P4 bridge (HLD-009 LADR-09); a Viewer-only context cannot reach the shared skill folder. Root `.dockerignore` re-includes only that folder. The stub bridge is unchanged (still stdlib-only, no store touch). | HLD-009 F2 |
 | 2026-10-15 | **Workload ports shifted by the "mimi" ASCII offset (+300) in `run.sh`; viewer port set to 5441.** `ViewerConfiguration:Port` default moved 5180 → 5441 (`5141 + "mimi"`). `run.sh` default external ports for postgres/blob/seq shifted 5432/9000/9001/5341 → 5732/9300/9301/5641 so a local postgres/minio/seq on the standard ports does not collide; the API stays on 5141 (the base-URL-linked port). | port scheme |
 | 2026-10-14 | **Added the Viewer Console pod (Phase A of HLD-009/BRD-004).** | HLD-009, BRD-004 |
