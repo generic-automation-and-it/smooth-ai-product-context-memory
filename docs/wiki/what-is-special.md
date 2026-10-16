@@ -4,7 +4,8 @@ Compares Mímisbrunnr against guidance projects researched during the MVP
 (MemOS, ICM Architect, Utopia, MegaMemory, OpenViking, holoself) and the
 wider session-memory / second-brain landscape (mem0, Zep/Graphiti, Letta,
 Cognee, LangMem, Supermemory, OpenMemory, CortexDB, OKF Agent Memory,
-Obsidian). Researched 2026-10-13; CortexDB and OKF added 2026-10-14.
+Obsidian). Researched 2026-10-13; CortexDB and OKF added 2026-10-14;
+Cognee row enriched 2026-10-16.
 
 ## Guidance projects (compared feature-by-feature in-session)
 
@@ -29,7 +30,7 @@ both since delivered). Utopia is recorded as the local Understanding
 | [mem0ai/mem0](https://github.com/mem0ai/mem0) | Drop-in memory layer | Pluggable vector + graph | Auto LLM extract | Semantic+BM25+entity fused | V3 accumulates; API update/delete exposed | Multi-user/app SDK+Cloud. Apache-2.0 |
 | [getzep/zep + graphiti](https://github.com/getzep/zep) / [graphiti](https://github.com/getzep/graphiti) | Temporal context-graph infra | Proprietary graph / Neo4j/FalkorDB | Auto episode ingestion | Hybrid + bi-temporal traversal | Auto invalidation, history kept | Multi-user enterprise |
 | [letta-ai/letta](https://github.com/letta-ai/letta) (ex-MemGPT) | Stateful self-editing agents | Postgres: core blocks + archival | Agent self-writes + dreaming | Pinned blocks + archival search | Agent rewrites own blocks | Multi-user platform. Apache-2.0 |
-| [topoteretes/cognee](https://github.com/topoteretes/cognee) | "Company brain" ETL | Graph+vector+relational | `remember()` pipelines | `recall()` auto-routed hybrid | `improve()`/`forget()` | Local→multi-tenant. Apache-2.0 |
+| [topoteretes/cognee](https://github.com/topoteretes/cognee) | AI memory platform: ETL into knowledge graph | Relational + vector (LanceDB/PGVector) + graph (Kùzu/Neo4j); one-Postgres mode is demo-only | `remember()`: permanent ETL (LLM, or keyless GLiNER+local embeddings) vs session-cache raw write + background bridge; Drive/Gmail/dlt connectors, code-graph ingest | `recall()`: `HYBRID_COMPLETION` default, 3-rule router, 15+ `query_type`s, `CYPHER` never auto-routed (opt-in); session-aware, `only_context` inspect | `improve()`: 10 fixed stages (feedback weights, session persist/distill→`session_learnings`, conflict review, global-context index); `forget()`: item/dataset/everything/memory-only, no LLM cost | Dataset + user isolation, access control on by default, local→multi-tenant. Apache-2.0 |
 | [langchain-ai/langmem](https://github.com/langchain-ai/langmem) | LangGraph memory toolkit | Bring-your-own store | Hot-path tools + background manager | Namespaced semantic search | Agent-managed create/update | Library. MIT |
 | [supermemoryai/supermemory](https://github.com/supermemoryai/supermemory) | Memory+context engine/API | Hosted graph + Postgres | Auto extract + connectors | Hybrid `search()`+`profile()` | Auto supersede/expire | Multi-user/app. MIT repo |
 | [mem0ai/openmemory](https://github.com/mem0ai/openmemory) | Session porter for coding CLIs | Local session files | `port --from/--to` | TUI list, no semantic search | Selective re-export | Single-dev. MIT |
