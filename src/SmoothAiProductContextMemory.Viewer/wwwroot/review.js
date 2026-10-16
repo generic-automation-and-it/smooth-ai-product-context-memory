@@ -11,6 +11,7 @@
 // write token (HLD-009); a read-only session sees them disabled.
 import { getReviewQueue, postDedupPreview, postApprove, postReject } from './api.js';
 import { esc, shortUuid, fmtValidity } from './util.js';
+import { kindScopeValue, onViewContext } from './view-context.js';
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -35,8 +36,10 @@ function setState(stateName, message) {
 
 function bindingChips(memory) {
   const chips = [];
-  if (memory.ticketProvider && memory.ticketKey) {
-    chips.push(`Ticket: ${esc(memory.ticketProvider)}:${esc(memory.ticketKey)}`);
+  // A group accumulates tickets, so every one is listed; a reviewer approving a proposal needs
+  // the whole binding, not whichever ticket happened to be first.
+  for (const ticket of memory.tickets || []) {
+    if (ticket.provider && ticket.key) chips.push(`Ticket: ${esc(ticket.provider)}:${esc(ticket.key)}`);
   }
   if (memory.repository) chips.push(`Repo: ${esc(memory.repository)}`);
   if (memory.initiativeName) chips.push(`Initiative: ${esc(memory.initiativeName)}`);
@@ -211,6 +214,7 @@ async function rejectProposal(uuid) {
 }
 
 function renderResult(result) {
+  els.list.querySelector('.limit-note')?.remove();
   if (result.timedOut) { setState('timed-out', 'The review queue request timed out. Try again.'); return; }
   if (result.unreachable) { setState('unreachable', 'The Console cannot reach the bridge. Is the AppHost stack running?'); return; }
   if (!result.ok) { setState('error', `The bridge returned HTTP ${result.status}.`); return; }
@@ -218,20 +222,39 @@ function renderResult(result) {
   currentRows = items;
   if (items.length === 0) { setState('empty', 'No proposed memories are awaiting review.'); return; }
   renderList();
+  // The query has no cursor, so a full page means the backlog may be longer than what is shown.
+  // Say so: a queue that reads as the whole backlog when it is the first 200 is a review hazard.
+  const limit = Number(els.limit.value) || 200;
+  if (items.length >= limit) {
+    const note = document.createElement('p');
+    note.className = 'limit-note';
+    note.textContent = `Showing the first ${limit} of a queue that may hold more — the store returns no cursor, so a longer backlog cannot be paged through here.`;
+    els.list.insertAdjacentElement('afterend', note);
+  }
 }
 
 async function refresh() {
-  const limit = Number(els.limit.value) || 500;
+  // The fallback is the query cap, not the recall-feedback cap: the queue is a memory query and
+  // an over-cap limit is a store 400 the bridge reports as 502 (the "HTTP 502" this pane showed).
+  const limit = Number(els.limit.value) || 200;
   const seq = ++requestSeq;
+  els.list.querySelector('.limit-note')?.remove();
   setState('loading', 'Loading proposed memories…');
-  const result = await getReviewQueue(limit);
+  const result = await getReviewQueue(limit, kindScopeValue());
   if (seq !== requestSeq) return;
   renderResult(result);
 }
 
+let controlsWired = false;
+
 function wireControls() {
+  // Re-login re-runs initReview; wiring twice would double every listener.
+  if (controlsWired) return;
+  controlsWired = true;
   els.refresh.addEventListener('click', () => refresh());
   els.limit.addEventListener('change', () => refresh());
+  // Proposals of one kind are a subset of the queue, so a scope change is a new request.
+  onViewContext((reason) => { if (reason === 'kind') refresh(); });
 }
 
 export function initReview() {
