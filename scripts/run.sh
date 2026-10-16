@@ -744,7 +744,7 @@ remove_existing_controller() {
   docker rm "$controller_name" >/dev/null 2>&1 || true
 
   # A hard kill can leave workloads behind with no controller owning them. Only the Host (Session,
-  # recreated each restart) is torn down here; postgres/blob/seq are Persistent (APPHOST_AGENTS.md),
+  # recreated each restart) and the viewer are torn down here; postgres/blob/seq are Persistent (APPHOST_AGENTS.md),
   # so they survive a restart and the recreated controller adopts them by name — the orphan sweep must
   # not delete them or the reuse this controller enables is dead on the `up` path. A foreign container
   # occupying one of the names is refused by the controller's own preflight rather than deleted here.
@@ -768,7 +768,7 @@ remove_existing_controller() {
   # the recreated Host free their ports, which is what `preflight` requires free.
   local waited=0
   while [ "$waited" -lt 15 ]; do
-    port_is_free "$p_dashboard" && port_is_free "$p_otlp" && port_is_free "$p_host" && return 0
+    port_is_free "$p_dashboard" && port_is_free "$p_otlp" && port_is_free "$p_host" && port_is_free "$p_viewer" && return 0
     sleep 1
     waited=$((waited + 1))
   done
