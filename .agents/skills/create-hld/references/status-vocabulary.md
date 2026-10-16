@@ -1,7 +1,7 @@
 # HLD Status Vocabulary
 
 Shared lifecycle vocabulary for discovery/prototyping HLDs. Use consistently across
-README, AGENTS.md, LADRs, and NFRs.
+README, LADRs, and NFRs — the HLD AGENTS.md does not restate statuses.
 
 | Term | Applies to | Meaning |
 |---|---|---|

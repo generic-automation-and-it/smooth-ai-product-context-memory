@@ -49,11 +49,10 @@ elseif (-not $Template) {
   $Template = (git rev-parse --show-toplevel 2>$null)
   if (-not $Template) { $Template = (Get-Location).Path }
 }
+try {
 if (-not (Test-Path (Join-Path $Template ".agents"))) {
   throw "template does not look like the scaffold (no .agents/): $Template"
 }
-
-try {
 
 # Rules-only mode — distribute/update the rule system and nothing else.
 if ($RulesOnly) {
@@ -119,6 +118,28 @@ else {
 Set-Location $Landing
 try { git config core.symlinks true } catch {}
 
+# Rules land in .github\instructions\ and are symlinked from .agents\rules. Every tool
+# reads the rules from .agents (Claude via the .claude symlink, Codex via .codex, Copilot
+# via the .github path), so the copy + symlink run regardless of --tools. The Copilot-only
+# `copilot-instructions.md` stays in Section D.
+New-Item -ItemType Directory -Path .github -Force | Out-Null
+if ($Overwrite -eq "global" -or -not (Test-Path .github\instructions)) {
+  Remove-Item .github\instructions -Recurse -Force -ErrorAction SilentlyContinue
+  Copy-Item (Join-Path $Template ".github\instructions") .github\instructions -Recurse -Force
+}
+# .agents\rules must be a symlink to the real instructions dir. Refuse to clobber
+# a real directory (a landing repo's own rule set) — only replace a reparse point.
+if (Test-Path .agents\rules) {
+  $rulesItem = Get-Item .agents\rules -Force
+  if (-not ($rulesItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+    throw "refusing: .agents\rules is a real directory, not a symlink — leaving it untouched"
+  }
+  # Delete the link itself, never recurse — -Recurse on a junction/symlink can
+  # delete the TARGET's contents (here: .github\instructions) on some PS versions.
+  $rulesItem.Delete()
+}
+New-Item -ItemType SymbolicLink -Name .agents\rules -Target ..\.github\instructions -Force | Out-Null
+
 if (Test-Tool "claude") {
   Write-Host "==> Section B: Claude Code symlinks (also lays the Cursor symlink — same scaffold)"
   New-Item -ItemType SymbolicLink -Name .claude   -Target .agents   -Force | Out-Null
@@ -130,24 +151,7 @@ if (Test-Tool "codex") {
   New-Item -ItemType SymbolicLink -Name .codex -Target .agents -Force | Out-Null
 }
 if (Test-Tool "copilot") {
-  Write-Host "==> Section D: Copilot rules dir + instructions"
-  New-Item -ItemType Directory -Path .github -Force | Out-Null
-  if ($Overwrite -eq "global" -or -not (Test-Path .github\instructions)) {
-    Remove-Item .github\instructions -Recurse -Force -ErrorAction SilentlyContinue
-    Copy-Item (Join-Path $Template ".github\instructions") .github\instructions -Recurse -Force
-  }
-  # .agents\rules must be a symlink to the real instructions dir. Refuse to clobber
-  # a real directory (a landing repo's own rule set) — only replace a reparse point.
-  if (Test-Path .agents\rules) {
-    $rulesItem = Get-Item .agents\rules -Force
-    if (-not ($rulesItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
-      throw "refusing: .agents\rules is a real directory, not a symlink — leaving it untouched"
-    }
-    # Delete the link itself, never recurse — -Recurse on a junction/symlink can
-    # delete the TARGET's contents (here: .github\instructions) on some PS versions.
-    $rulesItem.Delete()
-  }
-  New-Item -ItemType SymbolicLink -Name .agents\rules -Target ..\.github\instructions -Force | Out-Null
+  Write-Host "==> Section D: Copilot instructions file"
   if ($Overwrite -eq "global" -or -not (Test-Path .github\copilot-instructions.md)) {
     Copy-Item (Join-Path $Template ".github\copilot-instructions.md") .github\copilot-instructions.md -Force
   }
