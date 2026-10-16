@@ -547,6 +547,16 @@ def load_units(store: Path) -> tuple[list[dict], list[dict], list[str]]:
         nested = not direct and bool(categories)
 
         if nested:
+            # A `.md` file directly at the run root is one level up from the category it belongs to,
+            # so the category walk never sees it and it is silently absent from the index. The legacy
+            # branch reports this class at run level; the nested branch must run the same sweep before
+            # it moves on.
+            for stray in sorted(run_dir.glob("*.md")):
+                problems.append(
+                    f"{run}/{stray.name} sits at the run root — move it to "
+                    f"<category>/{stray.stem}{UNIT_SUFFIX} inside this run folder "
+                    f"(use '{UNFILED}' when it belongs to no subject)"
+                )
             for category_dir in categories:
                 category = category_dir.name
                 units = sorted(category_dir.glob(UNIT_GLOB))

@@ -56,8 +56,14 @@ def installer_excludes() -> tuple[str, ...]:
         text = INSTALLER.read_text(encoding="utf-8")
     except OSError:
         return FALLBACK_EXCLUDES
-    body = text[text.index("prune_non_shippable() {"):]
-    body = body[: body.index("\n}\n")]
+    try:
+        body = text[text.index("prune_non_shippable() {"):]
+        body = body[: body.index("\n}\n")]
+    except ValueError:
+        # The marker this lookup keys on is gone — the installer function was renamed or reshaped.
+        # The safe answer is the exclusion list the packer already knows, not a crash on the way to
+        # building an archive.
+        return FALLBACK_EXCLUDES
     names = set(FALLBACK_EXCLUDES)
     for match in re.finditer(r'rm -rf "\$dest/([^"]+)"', body):
         names.add(match.group(1))
@@ -91,10 +97,17 @@ def members(skill: Path, root: Path, excludes: tuple[str, ...],
             if target is not None and target.is_file() and is_inside(target, root):
                 out.append((target, str(rel)))
             elif target is not None and target.is_dir():
-                # A link that resolves to a directory — most often a `self -> .` cycle. It cannot be
-                # a file member, and handing it to `zipfile.write` produces an empty directory entry
-                # that `check()` passes, so the archive ships a hole nobody sees. Skipped and named.
-                skipped.append(f"{rel} -> {os.readlink(path)} (resolves to a directory)")
+                # An in-repo directory link is materialised the way the installer materialises it —
+                # the archive carries the folder's files under the link's name, so folder-link
+                # authoring ships a complete skill instead of a silent hole. A link into its own
+                # subtree (a `self -> .` cycle) cannot be expanded without looping, and an outside
+                # directory is the author's business, so both stay skipped and named.
+                if is_inside(target, root) and not is_inside(path, target):
+                    for f in sorted(target.rglob("*")):
+                        if f.is_file() and not f.is_symlink():
+                            out.append((f, str(Path(rel) / f.relative_to(target))))
+                else:
+                    skipped.append(f"{rel} -> {os.readlink(path)} (resolves to a directory)")
             else:
                 skipped.append(f"{rel} -> {os.readlink(path)}")
             continue
