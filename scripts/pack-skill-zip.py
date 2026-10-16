@@ -102,18 +102,85 @@ def members(skill: Path, root: Path, excludes: tuple[str, ...],
             continue
         if path.is_symlink():
             target = resolve(path)
-            if target is not None and target.is_file() and is_inside(target, root):
-                out.append((target, str(rel)))
-            elif target is not None and target.is_dir():
-                # A link that resolves to a directory — most often a `self -> .` cycle. It cannot be
-                # a file member, and handing it to `zipfile.write` produces an empty directory entry
-                # that `check()` passes, so the archive ships a hole nobody sees. Skipped and named.
-                skipped.append(f"{rel} -> {os.readlink(path)} (resolves to a directory)")
-            else:
+            if target is None:
                 skipped.append(f"{rel} -> {os.readlink(path)}")
+                continue
+            if not is_inside(target, root):
+                skipped.append(f"{rel} -> {os.readlink(path)}")
+                continue
+            if target.is_file():
+                out.append((target, str(rel)))
+                continue
+            if is_ancestor(target, path.parent):
+                # A cycle: the link points at one of its own ancestors, so materialising it would
+                # copy the enclosing folder inside itself — and every file in it twice. `copy_wet`
+                # keeps these as links for the same reason. Skipped and named, never walked.
+                skipped.append(f"{rel} -> {os.readlink(path)} (cycle: points at an ancestor)")
+                continue
+            if target.is_dir():
+                # An in-repo **directory** link is materialised and walked — because `copy_wet` in
+                # the installer does exactly that. The two paths have to agree: when the packer
+                # dropped one and the installer materialised it, the same skill shipped a complete
+                # `references/` folder by install and an empty one by zip, and `check()` passed both.
+                # Verified against the installer, not assumed.
+                for child, child_rel in _walk_directory(target, root, excludes, skipped):
+                    out.append((child, str(rel / child_rel)))
+                continue
+            skipped.append(f"{rel} -> {os.readlink(path)}")
             continue
         if path.is_file():
             out.append((path, str(rel)))
+    return out
+
+
+def is_ancestor(candidate: Path, path: Path) -> bool:
+    """True when `candidate` is `path` or one of its ancestors — i.e. a link that points upward.
+
+    Component-wise rather than by string prefix, for the same reason `inside_clone` is: `/repo-other`
+    starts with `/repo` as text and is a different place.
+    """
+    try:
+        resolved = path.resolve()
+        return resolved == candidate or candidate in resolved.parents
+    except OSError:
+        return False
+
+
+def _walk_directory(folder: Path, root: Path, excludes: tuple[str, ...],
+                    skipped: list[str], depth: int = 0) -> list[tuple[Path, str]]:
+    """Every file under `folder`, following the same link rules, with a depth bound.
+
+    The bound is not defensive padding: a `self -> .` cycle inside the target resolves to a
+    directory that contains itself, and without a ceiling this recurses until the interpreter gives
+    up. At the ceiling the entry is skipped and **named**, which is what keeps a cycle visible in the
+    packer's output instead of silently truncating.
+    """
+    if depth > 16:
+        # Skipped *and named*. The previous version guarded the child-symlink branch with
+        # `depth < 16` instead, so the ceiling dropped the entry with no message at all — the cycle
+        # vanished from both the archive and the report.
+        skipped.append(f"{folder.name}/ (recursion ceiling reached — a cycle inside a directory link)")
+        return []
+    out: list[tuple[Path, str]] = []
+    for child in sorted(folder.iterdir()):
+        rel = child.relative_to(folder)
+        if any(part in excludes for part in rel.parts):
+            continue
+        if child.is_symlink():
+            target = resolve(child)
+            if target is None or not is_inside(target, root):
+                skipped.append(f"{rel} -> {os.readlink(child)}")
+            elif target.is_file():
+                out.append((target, str(rel)))
+            elif is_ancestor(target, child.parent):
+                skipped.append(f"{rel} -> {os.readlink(child)} (cycle: points at an ancestor)")
+            else:
+                out += _walk_directory(target, root, excludes, skipped, depth + 1)
+            continue
+        if child.is_dir():
+            out += _walk_directory(child, root, excludes, skipped, depth + 1)
+        elif child.is_file():
+            out.append((child, str(rel)))
     return out
 
 

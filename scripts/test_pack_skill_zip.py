@@ -113,14 +113,59 @@ class PackerTests(unittest.TestCase):
 
     def test_a_link_resolving_to_a_directory_is_skipped_and_named(self):
         """A `self -> .` cycle. `zipfile.write` on a directory writes an empty entry rather than
-        raising, so the first version of this shipped a hole in the skill and `check()` passed it."""
+        raising, so the first version of this shipped a hole in the skill and `check()` passed it.
+
+        Since finding 4 the rule is narrower and sharper: an in-repo directory link is *materialised*,
+        because the installer materialises it — but one that points at its own ancestor is a cycle and
+        is skipped. Asserted on the property (skipped, named, not duplicated) rather than on the
+        classification word, which is what a later re-wording would otherwise break.
+        """
         os.symlink(".", self.skill / "self")
         archive, skipped = self.build()
         with zipfile.ZipFile(archive) as zf:
-            self.assertEqual(["ai-understanding/SKILL.md", "ai-understanding/references/guide.md",
-                              "ai-understanding/scripts/run.py"], sorted(zf.namelist()))
+            names = sorted(zf.namelist())
+        # Not duplicated: the whole skill must not appear again under `self/`.
+        self.assertEqual(["ai-understanding/SKILL.md", "ai-understanding/references/guide.md",
+                          "ai-understanding/scripts/run.py"], names)
         self.assertEqual(1, len(skipped))
-        self.assertIn("directory", skipped[0])
+        self.assertIn("self", skipped[0])
+
+    def test_an_in_repo_directory_link_is_materialised_like_the_installer_does(self):
+        """Finding 4.
+
+        `copy_wet` in the installer materialises an in-repo *directory* link — verified: it produced
+        `refs/doc.md` as a real file. The packer skipped it, so the same skill shipped a complete
+        `references/` folder by install and an empty one by zip, and `check()` passed both. Two code
+        paths describing one layout cannot be allowed to disagree about it.
+        """
+        shared = self.root / "shared-ref"
+        shared.mkdir()
+        (shared / "doc.md").write_text("X\n", encoding="utf-8")
+        os.symlink("../../../shared-ref", self.skill / "refs")
+        archive, skipped = self.build()
+        with zipfile.ZipFile(archive) as zf:
+            names = set(zf.namelist())
+        self.assertIn("ai-understanding/refs/doc.md", names)
+        self.assertEqual("X\n", zipfile.ZipFile(archive).read(
+            "ai-understanding/refs/doc.md").decode())
+        self.assertEqual([], skipped)
+
+    def test_a_cycle_inside_a_directory_link_terminates_and_is_named(self):
+        """A `self -> .` inside the target resolves to a directory containing itself. Without a depth
+        bound this recurses until the interpreter gives up; the ceiling skips and names it so the cycle
+        stays visible instead of silently truncating."""
+        shared = self.root / "loop-ref"
+        shared.mkdir()
+        (shared / "doc.md").write_text("X\n", encoding="utf-8")
+        os.symlink(".", shared / "self")
+        os.symlink("../../../loop-ref", self.skill / "refs")
+        archive, skipped = self.build()
+        with zipfile.ZipFile(archive) as zf:
+            names = zf.namelist()
+        self.assertIn("ai-understanding/refs/doc.md", names)
+        # The cycle is named rather than silently truncated, and nothing is duplicated.
+        self.assertTrue(any("cycle" in s or "ceiling" in s for s in skipped), skipped)
+        self.assertEqual(len(names), len(set(names)))
 
     def test_no_member_is_a_directory_entry(self):
         """The check that would have caught the hole: an archive member must be a file."""
