@@ -125,8 +125,9 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
             .StatusCode.ShouldBe(HttpStatusCode.Forbidden);
         (await read.GetAsync("/api/context/product-names", Ct))
             .StatusCode.ShouldBe(HttpStatusCode.OK);
+        // Unknown product is a 404 on the query path and on this read route - never an empty OK.
         (await read.GetAsync("/api/context/product-names/links?productName=x", Ct))
-            .StatusCode.ShouldBeOneOf(HttpStatusCode.OK, HttpStatusCode.NotFound);
+            .StatusCode.ShouldBe(HttpStatusCode.NotFound);
         (await read.GetAsync($"/api/context/recall-feedback/miss-rate?from={WebUtility.UrlEncode(DateTimeOffset.UtcNow.ToString("O"))}&to={WebUtility.UrlEncode(DateTimeOffset.UtcNow.ToString("O"))}", Ct))
             .StatusCode.ShouldBe(HttpStatusCode.OK);
         (await read.PostAsJsonAsync("/api/context/recall-feedback/reset", new { }, Ct))
