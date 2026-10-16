@@ -544,7 +544,15 @@ def load_units(store: Path) -> tuple[list[dict], list[dict], list[str]]:
         # folder of categories, so an empty one still yields a problem naming itself.
         direct = sorted(run_dir.glob(UNIT_GLOB))
         categories = sorted(p for p in run_dir.iterdir() if p.is_dir())
-        nested = not direct and bool(categories)
+        # Categories win the moment any exist, whether or not units also sit at the run root. The
+        # first version read it the other way round — nested only when there were *no* direct units —
+        # which contradicted the contract stated above and failed in the worst direction: a folder
+        # holding both was taken as legacy, so every nested category subtree silently vanished from
+        # the index, a stale copy stayed current, and the generator exited 0 having named nothing.
+        # Worse, the condition made its own remedy unreachable: one stray unit at the run root was
+        # itself enough to suppress the nested branch, so the run-root sweep below could never fire
+        # in the only case that needed it.
+        nested = bool(categories)
 
         if nested:
             for category_dir in categories:
@@ -567,6 +575,26 @@ def load_units(store: Path) -> tuple[list[dict], list[dict], list[str]]:
                 for unit_file in units:
                     records.append(
                         _record(unit_file, run, category, root)
+                    )
+
+            # The run root itself, swept before the `continue`. Without this a unit written at the
+            # run root — the legacy `<run>/<slug>` habit — is invisible: the nested branch only
+            # ever globs inside a category, so the file is neither indexed nor named and the
+            # generator exits 0 having quietly dropped it. The legacy branch reports exactly this
+            # class one branch down, so the two now say the same thing about it.
+            for misplaced in sorted(
+                p for p in run_dir.glob("*.md") if p.name != "INDEX.md"
+            ):
+                if misplaced.name.endswith(UNIT_SUFFIX):
+                    problems.append(
+                        f"{run}/{misplaced.name} sits at the run root — this folder holds "
+                        f"categories, so move it to {run}/<category>/{misplaced.name}"
+                    )
+                else:
+                    problems.append(
+                        f"{run}/{misplaced.name} sits at the run root and is missing the "
+                        f"'{UNIT_SUFFIX}' postfix — move it to {run}/<category>/"
+                        f"{misplaced.stem}{UNIT_SUFFIX}"
                     )
             continue
 

@@ -1472,6 +1472,45 @@ class RunFolderLayoutTests(unittest.TestCase):
             any("yyyyMMdd-HHmm>-<session-id>/<category>" in p for p in problems), problems
         )
 
+    def test_a_mixed_run_folder_is_read_as_nested_and_its_strays_are_named(self):
+        """Findings 1 and 3 of the ai-review round, and the pair has to land together.
+
+        The dispatch read `nested = not direct and bool(categories)`, so a folder holding units *and*
+        categories was taken as legacy: every nested category subtree vanished from the index, a stale
+        copy stayed current, and the generator exited 0 having named nothing. Worse, one stray unit at
+        the run root was itself enough to suppress the nested branch -- so the run-root sweep was
+        unreachable in the only case that needed it. Categories now win whenever they exist, and the
+        losing side is named rather than dropped.
+        """
+        write_run_unit(self.store, "20261016-1432-ses_a", "installer", "nested-one")
+        # A unit left at the run root: the legacy habit, in a folder that now holds categories.
+        folder = self.store / "20261016-1432-ses_a"
+        (folder / f"misplaced{ui.UNIT_SUFFIX}").write_text(
+            UNIT_FRONTMATTER.format(slug="misplaced", updated="2026-10-16"), encoding="utf-8")
+        units, _superseded, problems = ui.load_units(self.store)
+        # The nested unit is indexed -- it used to be dropped without a word.
+        self.assertEqual(["nested-one"], [u["slug"] for u in units])
+        self.assertTrue(any("misplaced" in p and "run root" in p for p in problems), problems)
+
+    def test_run_root_strays_are_named_in_a_purely_nested_folder(self):
+        """Finding 3 on its own. Both shapes of stray, with and without the postfix."""
+        write_run_unit(self.store, "20261016-1432-ses_a", "installer", "nested-one")
+        folder = self.store / "20261016-1432-ses_a"
+        (folder / f"stray{ui.UNIT_SUFFIX}").write_text(
+            UNIT_FRONTMATTER.format(slug="stray", updated="2026-10-16"), encoding="utf-8")
+        (folder / "bare.md").write_text("x", encoding="utf-8")
+        _units, _superseded, problems = ui.load_units(self.store)
+        self.assertTrue(any("stray" in p and "run root" in p for p in problems), problems)
+        self.assertTrue(any("bare.md" in p and "run root" in p for p in problems), problems)
+
+    def test_a_purely_legacy_folder_is_still_read_as_legacy(self):
+        """The dispatch change must not cost the old shape: a folder with no categories keeps the
+        legacy reading, or every existing store would read as empty."""
+        write_unit(self.store, "legacysubject-20261014-0800", "old-one")
+        units, _superseded, problems = ui.load_units(self.store)
+        self.assertEqual([], problems)
+        self.assertEqual(["old-one"], [u["slug"] for u in units])
+
     def test_the_category_holding_only_unpostfixed_files_is_named(self):
         folder = self.store / "20261016-1432-ses_a" / "installer"
         folder.mkdir(parents=True)
