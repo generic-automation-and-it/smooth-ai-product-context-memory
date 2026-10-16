@@ -32,6 +32,7 @@ no per-repo setup is needed.
 | **Mímisbrunnr Viewer** | http://localhost:5441 | Loopback Mímisbrunnr Console (HLD-009) — sign in with a `CONTEXT_TOKEN`; browse, filter, read (approve with the write token) |
 | **API (Host)** | http://localhost:5141 | Scalar UI at `/scalar/v1`; OpenAPI at `/openapi/v1.json` |
 | **Aspire dashboard** | http://localhost:15278 | Login URL `/login?t=<token>` is printed in the container logs at startup |
+| **Decisions model** | your choosing (default `http://localhost:11434`) | `CONTEXT_MEMORY_DECISIONS_ENABLED=true` utilizes a decisions model to improve memory and Understandings export quality |
 
 Provisioning, the credential model, run modes and the `run.sh` verbs live in
 [Setup & Credentials](docs/wiki/setup.md) and [`scripts/CONTROLLER_LAUNCHER.md`](scripts/CONTROLLER_LAUNCHER.md).
