@@ -229,9 +229,12 @@ public sealed class DossierBundleHandlerTests : HandlerTestBase
             .Handle(BundleRequest(ticketProvider: "jira", ticketKey: "ACM-999"), Ct);
 
         // The reference copy is an anchor reached through ABOUT, so it is selected and disclosed as
-        // a reference rather than as an owned/hierarchy identity.
+        // a reference rather than as an owned/hierarchy identity. Both sides of the union are
+        // asserted: a regression that keeps references but drops owned identities must not green.
         response.Bundle.Manifest.NoMatch.ShouldBeFalse();
         response.Bundle.Manifest.Reach.ReferencedAnchors.ShouldBe(1);
+        response.Bundle.Manifest.Reach.Anchors.ShouldBe(2);
+        response.Bundle.Items.ShouldContain(i => i.Statement == "owner claim");
         response.Bundle.Items.ShouldContain(i => i.Statement == "reference claim");
     }
 
