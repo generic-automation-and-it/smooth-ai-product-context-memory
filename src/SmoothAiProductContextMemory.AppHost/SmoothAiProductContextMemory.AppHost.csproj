@@ -23,7 +23,7 @@
   <ItemGroup>
     <PackageReference Include="Aspire.Hosting.PostgreSQL" />
     <PackageReference Include="Aspire.Hosting.Seq" />
-    <!-- MessagePack pinned transitively (via Aspire) to the patched 2.5.301+ line — fixes NU1902/NU1903 audit advisories on CI. -->
+    <!-- MessagePack pinned transitively (via Aspire) to the patched 2.5.303+ line — fixes the NU1902 audit advisories on CI (GHSA-qhrr-8q5h-9q3h). Version lives in Directory.Packages.props. -->
     <PackageReference Include="MessagePack" />
   </ItemGroup>
 
