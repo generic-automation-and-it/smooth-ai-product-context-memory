@@ -1503,6 +1503,37 @@ class RunFolderLayoutTests(unittest.TestCase):
         self.assertTrue(any("stray" in p and "run root" in p for p in problems), problems)
         self.assertTrue(any("bare.md" in p and "run root" in p for p in problems), problems)
 
+    def test_a_legacy_folder_carrying_an_assets_sibling_is_still_legacy(self):
+        """Finding 3, and a regression this branch introduced rather than inherited.
+
+        `categories` counted every subdirectory, and a `<slug>.assets/` folder is a sibling of a unit
+        at every level of the layout — the unit's evidence, not a category holding units. So a purely
+        legacy folder that carried one read as a current run folder of categories: its unit was
+        reported as "sits at the run root" and **nothing was indexed at all**. One unit became zero,
+        with two problems naming a move that would not have helped. Strictly worse than the silent
+        drop it replaced, and it hit the shape the layout documents as normal.
+
+        The regression that caught this is not cosmetic either: the earlier dispatch fix passed a
+        fixture with no assets folder, so it could not see the damage it had done.
+        """
+        write_unit(self.store, "legacysubject-20261014-0800", "keep")
+        assets = self.store / "legacysubject-20261014-0800" / f"keep{ui.ASSETS_SUFFIX}"
+        assets.mkdir()
+        (assets / "evidence.md").write_text("x", encoding="utf-8")
+        units, _superseded, problems = ui.load_units(self.store)
+        self.assertEqual(["keep"], [u["slug"] for u in units])
+        self.assertEqual([], problems, "an assets sibling is not a category and not a misplaced unit")
+
+    def test_an_assets_sibling_inside_a_category_does_not_hide_its_units(self):
+        """The other direction: excluding assets folders must not make a real category look empty."""
+        write_run_unit(self.store, "20261016-1432-ses_a", "cat", "keep")
+        assets = self.store / "20261016-1432-ses_a" / "cat" / f"keep{ui.ASSETS_SUFFIX}"
+        assets.mkdir()
+        (assets / "evidence.md").write_text("x", encoding="utf-8")
+        units, _superseded, problems = ui.load_units(self.store)
+        self.assertEqual(["keep"], [u["slug"] for u in units])
+        self.assertEqual([], problems)
+
     def test_a_purely_legacy_folder_is_still_read_as_legacy(self):
         """The dispatch change must not cost the old shape: a folder with no categories keeps the
         legacy reading, or every existing store would read as empty."""

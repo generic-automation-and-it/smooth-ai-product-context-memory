@@ -543,7 +543,15 @@ def load_units(store: Path) -> tuple[list[dict], list[dict], list[str]]:
         # nested layout at all. A folder with no units directly inside it is read as a current run
         # folder of categories, so an empty one still yields a problem naming itself.
         direct = sorted(run_dir.glob(UNIT_GLOB))
-        categories = sorted(p for p in run_dir.iterdir() if p.is_dir())
+        # An assets folder is a *sibling of a unit*, not a category holding units — the unit's
+        # evidence lives beside it, at every level of the layout. Counting one as a category made a
+        # purely legacy folder that carried a `<slug>.assets/` read as a current run folder of
+        # categories, so its units were "misplaced at the run root" and nothing was indexed at all:
+        # one unit became zero, with two bogus problems naming a move that would not help. Excluded by
+        # the same suffix `published_paths` uses to find them, so the two agree on what an assets
+        # folder is.
+        categories = sorted(p for p in run_dir.iterdir()
+                            if p.is_dir() and not p.name.endswith(ASSETS_SUFFIX))
         # Categories win the moment any exist, whether or not units also sit at the run root. The
         # first version read it the other way round — nested only when there were *no* direct units —
         # which contradicted the contract stated above and failed in the worst direction: a folder
