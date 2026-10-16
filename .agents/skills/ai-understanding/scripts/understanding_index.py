@@ -817,15 +817,16 @@ def published_paths(store: Path) -> set[str]:
                 restorable = {info.filename for info in zf.infolist()
                               if entry_type_ok(info) and member_reads_cleanly(zf, info)}
                 for info in zf.infolist():
-                    # Exactly `<subject-folder>/<slug>.understanding.md`, the only shape publish writes.
-                    # Taking the last two parts of any name let `../x/slug…`, `a/b/slug…` or an
-                    # absolute path mark the unit at `x/slug…` published while no consume would put it
-                    # there (issue 186).
+                    # Exactly the two shapes publish archives hold: legacy `<subject>/<slug>.md` and
+                    # current `<run>/<category>/<slug>.md`. Taking the last two parts of any name let
+                    # `../x/slug…`, `a/b/slug…` or an absolute path mark the unit at `x/slug…` published
+                    # while no consume would put it there (issue 186); the full name must match a local unit.
                     name = info.filename
                     parts = name.split("/")
-                    if (len(parts) != 2 or any(part in ("", ".", "..") for part in parts)
-                            or "\\" in name or re.match(r"^[A-Za-z]:", name)
-                            or not parts[1].endswith(UNIT_SUFFIX)):
+                    if not ((len(parts) == 2 or len(parts) == 3)
+                            and all(part not in ("", ".", "..") for part in parts)
+                            and "\\" not in name and not re.match(r"^[A-Za-z]:", name)
+                            and parts[-1].endswith(UNIT_SUFFIX)):
                         continue
                     # A symlink entry is a pointer, not the unit: consume refuses it, so it can never
                     # land the unit anywhere and proves nothing was captured (issue 188).
@@ -842,10 +843,10 @@ def published_paths(store: Path) -> set[str]:
                     # A unit travels with its `<slug>.assets/` evidence (publish-consume step 3). An
                     # archive holding the unit file but not every local asset file would restore it
                     # without its repro or diagram, yet credited it published (review 5432012955 #3).
-                    assets = store / parts[0] / (parts[1][: -len(UNIT_SUFFIX)] + ASSETS_SUFFIX)
+                    assets = store / "/".join(parts[:-1]) / (parts[-1][: -len(UNIT_SUFFIX)] + ASSETS_SUFFIX)
                     if assets.is_dir():
                         local_assets = {
-                            f"{parts[0]}/{assets.name}/{f.relative_to(assets).as_posix()}": f
+                            f"{'/'.join(parts[:-1])}/{assets.name}/{f.relative_to(assets).as_posix()}": f
                             for f in assets.rglob("*") if f.is_file()}
                         if not set(local_assets) <= restorable or any(
                                 zf.read(member) != path.read_bytes()

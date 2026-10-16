@@ -24,9 +24,12 @@ on:
       - .agents/skills/mimisbrunnr-kvasir-understanding/**
       - .agents/skills/mimisbrunnr-saga-dossier/**
       - .agents/skills/ai-understanding/**
+      - .agents/skills/ai-memory-context/**
+      - .agents/skills/ai-brain-dump/**
       - .agents/skills/mimisbrunnr-muninn-recall-feedback/**
       - .agents/skills/mimisbrunnr-ymir-bootstrap/**
       - .agents/skills/mimisbrunnr-heimdallr-find-session-metadata/**
+      - .agents/skills/mimisbrunnr-vitsmunir-dump/**
       - .agents/skills/agile-github-*/**
       - .github/actions/**
       - .github/scripts/**
@@ -55,9 +58,12 @@ on:
       - .agents/skills/mimisbrunnr-kvasir-understanding/**
       - .agents/skills/mimisbrunnr-saga-dossier/**
       - .agents/skills/ai-understanding/**
+      - .agents/skills/ai-memory-context/**
+      - .agents/skills/ai-brain-dump/**
       - .agents/skills/mimisbrunnr-muninn-recall-feedback/**
       - .agents/skills/mimisbrunnr-ymir-bootstrap/**
       - .agents/skills/mimisbrunnr-heimdallr-find-session-metadata/**
+      - .agents/skills/mimisbrunnr-vitsmunir-dump/**
       - .agents/skills/agile-github-*/**
       - .github/actions/**
       - .github/scripts/**

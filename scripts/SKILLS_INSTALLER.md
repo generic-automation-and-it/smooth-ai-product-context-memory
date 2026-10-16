@@ -6,7 +6,7 @@ Codex and Copilot discover.
 | Script | Platform | Interpreter |
 |---|---|---|
 | [`install-skills.sh`](install-skills.sh) | macOS, Linux | bash, `git`, `python3` |
-| [`install-skills.ps1`](install-skills.ps1) | Windows, or anywhere `pwsh` 7 runs | PowerShell 7.0 or later, `git` |
+| [`install-skills.ps1`](install-skills.ps1) | Windows, or anywhere `pwsh` 7 runs | PowerShell 7.2 or later, `git` |
 
 The bash script needs `python3` only to read and write the manifest JSON; it is already a dependency of
 every `mimisbrunnr-*` skill, so nothing new is introduced. The PowerShell port has no such dependency —
@@ -41,8 +41,8 @@ never asked for is not an install. Set `SKILLS_ROOT` to install somewhere else.
 In this repository `.claude/skills` and `.codex/skills` are symlinks to `.agents/skills`, so all three
 paths resolve to the same tree and the first match is the real one.
 
-**2. Reconcile the manifest — for the owned skills only.** The installer manages exactly nine skills:
-the seven `mimisbrunnr-*` skills plus `ai-understanding` and `ai-brain-dump`. The catalogue is the
+**2. Reconcile the manifest — for the owned skills only.** The installer manages exactly ten skills:
+the seven `mimisbrunnr-*` skills plus `ai-understanding`, `ai-brain-dump` and `ai-memory-context`. The catalogue is the
 **owned union** of what the clone source offers and what is already on disk. Anything else in the
 target tree — local coding skills, operator experiments — is left untouched and never enters the
 manifest. Deriving the catalogue from disk alone would make a first install into an empty folder a

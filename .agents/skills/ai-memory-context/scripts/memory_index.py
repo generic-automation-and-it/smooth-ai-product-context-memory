@@ -412,6 +412,8 @@ def case_collisions(records: list[dict]) -> list[str]:
         buckets: dict[str, set[str]] = {}
         for record in records:
             value = str(record.get(field) or "")
+            if field == "category" and value:
+                value = f"{record.get('run')}/{value}"
             if value:
                 buckets.setdefault(value.casefold(), set()).add(value)
         for names in sorted(buckets.values(), key=sorted):
