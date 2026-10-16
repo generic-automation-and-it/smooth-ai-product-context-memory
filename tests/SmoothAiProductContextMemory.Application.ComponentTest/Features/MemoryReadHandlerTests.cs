@@ -166,7 +166,7 @@ public sealed class GetMemoryHandlerTests(AspireFixture aspire) : HandlerTestBas
     };
 
     private GetMemory.Handler NewHandler() =>
-        new(AppDb, Loggers.CreateLogger<GetMemory.Handler>());
+        new(AppDb, Graph, Loggers.CreateLogger<GetMemory.Handler>());
 }
 
 public sealed class GetMemoryVersionsHandlerTests(AspireFixture aspire) : HandlerTestBase(aspire)
