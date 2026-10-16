@@ -77,6 +77,7 @@ public static class QueryMemories
         IMemorySearch search,
         IRecallFeedback feedback,
         IProductGraph productGraph,
+        IMemoryGraph graph,
         ILogger<Handler> logger) : IRequestHandler<Request, Response>
     {
         public async ValueTask<Response> Handle(Request request, CancellationToken cancellationToken)
@@ -92,19 +93,26 @@ public static class QueryMemories
             bool hasGroupContext = request.GroupUuid is not null || hasTicket;
 
             long? groupId = null;
+            Guid? ownerGroupUuid = null;
+            IReadOnlyList<Guid>? referencedUuids = null;
             if (hasTicket)
             {
                 MemoryGroup? ticketGroup = await TicketLookup.FindGroupByTicketAsync(
                     db, request.TicketProvider!, request.TicketKey!, cancellationToken);
                 if (ticketGroup is null)
                 {
-                    // A miss is a signal the caller acts on, not an error.
+                    // A miss is a signal the caller acts on, not an error. With no owner group there can
+                    // be no ABOUT reference either (D1: the membership trigger owns the ticket vertex a
+                    // reference requires), so this is empty by invariant.
                     logger.LogInformation("Query memories completed. Count: {Count}", 0);
                     Emit([new RecallFeedbackRecord(retrievalId, null, shape, occurredOn)]);
                     return new Response([]);
                 }
 
                 groupId = ticketGroup.Id;
+                ownerGroupUuid = ticketGroup.Uuid;
+                referencedUuids = await graph.ListAboutAsync(
+                    request.TicketProvider!, request.TicketKey!, cancellationToken);
             }
 
             MemoryScopeFilter.ScopeFilterPlan scope =
@@ -129,6 +137,21 @@ public static class QueryMemories
                 Limit = request.Limit,
                 FacetMatchMode = request.FacetMatchMode,
             };
+
+            // The reference branch of the union is not in-group context, so it carries the
+            // non-group-context scope plan: programme is hidden unless the caller asked for that
+            // scope (D2). The owner group keeps group context. Both are pushed into SQL together.
+            if (referencedUuids is { Count: > 0 })
+            {
+                MemoryScopeFilter.ScopeFilterPlan referencedScope =
+                    MemoryScopeFilter.Plan(request.ScopeDimension, hasGroupContext: false);
+                criteria = criteria with
+                {
+                    ReferencedUuids = referencedUuids,
+                    ReferencedRequiredScopeDimension = referencedScope.RequiredDimension,
+                    ReferencedExcludedScopeDimensions = referencedScope.ExcludedDimensions,
+                };
+            }
 
             // Product affinity is resolved through the graph first, then applied in SQL before the row
             // ceiling — an unknown product is a 404, never an empty result that looks like a miss.
@@ -171,6 +194,13 @@ public static class QueryMemories
             if (productInitiatives is not null)
             {
                 items = await EnrichProductMatchesAsync(items, productInitiatives, productRepos!, cancellationToken);
+            }
+
+            if (ownerGroupUuid is { } ownerUuid)
+            {
+                // A memory both in the owner group and referenced (refused by the write path, but
+                // defended) is reported as the owner, per the union's ordering.
+                items = [.. items.Select(i => i with { TicketMatch = i.GroupUuid == ownerUuid ? "owner" : "reference" })];
             }
 
             logger.LogInformation("Query memories completed. Count: {Count}", items.Count);

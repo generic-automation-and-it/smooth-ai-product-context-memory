@@ -86,7 +86,7 @@ public sealed class RecallFeedbackHandlerTests(AspireFixture aspire) : HandlerTe
     }
 
     private QueryMemories.Handler NewQuery(IRecallFeedback feedback) =>
-        new(AppDb, Search, feedback, ProductGraph, Loggers.CreateLogger<QueryMemories.Handler>());
+        new(AppDb, Search, feedback, ProductGraph, Graph, Loggers.CreateLogger<QueryMemories.Handler>());
 
     private SetMemories.Handler NewSet() =>
         new(AppDb, Graph, Blob, ErrorMapper, ProductGraph, Loggers.CreateLogger<SetMemories.Handler>());

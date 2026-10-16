@@ -394,6 +394,7 @@ WRITE_ROUTES = frozenset({
     ("PUT", "/api/context/product-names/initiatives"),
     ("PUT", "/api/context/product-names/repos"),
     ("POST", "/api/context/product-names/initiatives/unlink"),
+    ("POST", "/api/context/memories/ticket-references"),
 })
 WRITE_ROUTE_TEMPLATES = (
     ("PATCH", re.compile(r"/api/context/groups/" + _UUID_PATTERN)),
@@ -1108,6 +1109,13 @@ def cmd_create_link(args):
     return resp
 
 
+def cmd_add_ticket_references(args):
+    resp = scrubbed_write(
+        "add_ticket_references", "POST", "/api/context/memories/ticket-references", payload_of(args))
+    print(json.dumps(resp, indent=2))
+    return resp
+
+
 def cmd_labels(args):
     resp = require_lists(_request("GET", "/api/context/labels"), "labels", "items")
     print(json.dumps(resp, indent=2))
@@ -1493,6 +1501,10 @@ def main():
     p = sub.add_parser("create-link", help="POST /api/context/links")
     add_payload_arguments(p)
     p.set_defaults(func=cmd_create_link)
+
+    p = sub.add_parser("add-ticket-references", help="POST /api/context/memories/ticket-references")
+    add_payload_arguments(p)
+    p.set_defaults(func=cmd_add_ticket_references)
 
     p = sub.add_parser("labels", help="GET /api/context/labels")
     p.set_defaults(func=cmd_labels)

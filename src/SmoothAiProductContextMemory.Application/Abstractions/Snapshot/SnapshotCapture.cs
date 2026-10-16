@@ -19,6 +19,7 @@ public sealed record SnapshotCapture(
     IReadOnlyList<SnapshotEdge> Edges,
     IReadOnlyList<SnapshotTicketVertex> TicketVertices,
     IReadOnlyList<SnapshotTicketEdge> TicketEdges,
+    IReadOnlyList<SnapshotAboutEdge> AboutEdges,
     IReadOnlyList<SnapshotProductVertex> ProductVertices,
     IReadOnlyList<SnapshotNamedVertex> InitiativeVertices,
     IReadOnlyList<SnapshotNamedVertex> RepoVertices,
@@ -38,6 +39,10 @@ public sealed record SnapshotTicketVertex(string Provider, string Key);
 public sealed record SnapshotTicketEdge(
     string Provider, string Key, string ParentProvider, string ParentKey,
     string Reason, string Source, Instant RecordedAt, Instant? ObservedAt);
+
+/// <summary>An <c>:ABOUT</c> memory → ticket reference edge (HLD-003 LADR-09).</summary>
+public sealed record SnapshotAboutEdge(
+    Guid MemoryUuid, string Provider, string Key, string Reason, Instant DeclaredAt);
 
 /// <summary>A <c>Product</c> graph vertex (HLD-003 LADR-10).</summary>
 public sealed record SnapshotProductVertex(string Name, string? Description, string Status);

@@ -1,6 +1,6 @@
 # LADR-09: Memory references a ticket it does not own
 
-**Status:** Accepted, owner-approved (2026-10-15); implemented by this change — release gates pending.
+**Status:** Accepted, owner-approved (2026-10-15); implemented — read union, snapshots, dossier and clients shipped; release gates passed.
 **Owner:** generik0
 **Decision date:** 2026-10-15
 **Supersedes:** HLD-005 [LADR-11](../../005-contextual-export/ladrs/LADR-11-no-writer-derives-anchor-edges.md) for this one edge only.
@@ -90,11 +90,12 @@ the twin link is the drift signal.
 
 ## Implementation
 
-Referenced from this PR: `2026…_AddAboutReference` migration (label + indexes + D1 trigger change),
-`SetMemories` `TicketReferences`, `QueryMemories` reference union, and the kvasir/odin client flags.
+- **Write half** (PR #238): `20261015100000_AddAboutReference` migration (label + `ticket_graph_about_count` + D1 trigger change), `IMemoryGraph.AboutExistsAsync`/`CreateAboutAsync`, `SetMemories` `ticketReferences`, `POST /api/context/memories/ticket-references`.
+- **Read half** (this change): `IMemoryGraph.ListAboutAsync`, `MemorySearchCriteria.ReferencedUuids` (disjunctive with `GroupId`) plus the reference-branch scope plan, `NpgsqlMemorySearch`'s `(GroupId == owner OR Uuid IN referenced[scope-ok])` predicate, `CheapMemory.TicketMatch` (`owner`/`reference`), the dossier's reference-anchor union with `referencedAnchors` reach, `ABOUT` in the snapshot archive (format v5) capture/restore/reconcile and `scripts/verify-graph-restore.sh`, and the kvasir `export --reference-tickets` flag with its synthetic owner ticket and twin links.
 
 ## Changelog
 
 | Date | Change |
 |:-----|:-------|
 | 2026-10-15 | Authored for the shared-ticket-reference feature. |
+| 2026-10-16 | Read half implemented: recall union + `ticketMatch`, snapshot coverage (format v5), dossier reference anchors, client flags. Release gates passed. |

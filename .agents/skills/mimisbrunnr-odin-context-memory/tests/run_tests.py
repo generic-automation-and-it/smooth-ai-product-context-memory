@@ -1509,9 +1509,19 @@ class WritePayloadTests(unittest.TestCase):
             write_request = transport.call_args.args[0]
             client._request("POST", "/api/context/preflight", {"candidates": []})
             preflight_request = transport.call_args.args[0]
+            client._request("POST", "/api/context/memories/ticket-references", {"uuids": []})
+            about_request = transport.call_args.args[0]
         self.assertEqual(read_request.get_header("Authorization"), "Bearer read-only")
         self.assertEqual(write_request.get_header("Authorization"), "Bearer write-only")
         self.assertEqual(preflight_request.get_header("Authorization"), "Bearer write-only")
+        self.assertEqual(about_request.get_header("Authorization"), "Bearer write-only")
+
+    def test_add_ticket_references_selects_the_write_token_only_on_its_exact_route(self):
+        # The reference route is write; a GET of the same path, or a path merely containing it, must not
+        # select the write token.
+        self.assertTrue(client.is_write_route("POST", "/api/context/memories/ticket-references"))
+        self.assertFalse(client.is_write_route("GET", "/api/context/memories/ticket-references"))
+        self.assertFalse(client.is_write_route("POST", "/api/context/memories/ticket-references/x"))
 
     def test_base_url_rejects_remote_plain_http_and_embedded_credentials(self):
         for value in ("http://example.com", "https://example.com", "https://user:pass@example.com", "https://example.com/path"):
@@ -2048,6 +2058,10 @@ OTHER_WRITES = {
     "propose_label": ("POST", "/api/context/labels", False, {"name": "DEPLOY_TOKEN=XSECpl01name"}),
     "upsert_initiative": ("POST", "/api/context/initiatives", False, {
         "name": "secret=XSECui01name", "description": "password=XSECui02desc"}),
+    "add_ticket_references": ("POST", "/api/context/memories/ticket-references", False, {
+        "uuids": [GOOD_UUID], "tickets": [{"provider": "github", "key": "231",
+                                           "reason": "api_key=XSECat01treason"}],
+        "reason": "password=XSECat02reason"}),
 }
 OTHER_WRITE_SECRETS = re.compile(r"XSEC[a-z0-9]+")
 
@@ -2056,6 +2070,7 @@ CLI_WRITES = {
     "append_description": client.cmd_append_description, "create_link": client.cmd_create_link,
     "ticket_parent": client.cmd_ticket_parent, "propose_label": client.cmd_propose_label,
     "upsert_initiative": client.cmd_upsert_initiative,
+    "add_ticket_references": client.cmd_add_ticket_references,
 }
 
 

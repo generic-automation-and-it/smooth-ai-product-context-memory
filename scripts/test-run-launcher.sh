@@ -39,6 +39,10 @@ file_mode() {
 }
 
 ok() { passed=$((passed + 1)); echo "  ok   $1"; }
+# Neither pass nor fail, with the reason stated: a precondition this user cannot create makes a case
+# untestable here, which is not the same as the property being false, and counting it either way would
+# put a wrong number in the summary.
+skip() { echo "  skip $1"; [ -n "${2:-}" ] && echo "       $2"; return 0; }
 no() {
   failed=$((failed + 1))
   echo "  FAIL $1"
@@ -67,12 +71,24 @@ sed_inplace() {
 # Run the launcher against a scratch home. Never inherits the operator's MIMIS_* overrides, and points
 # the machine-credential publication at the scratch tree as well — the launcher derives that path from
 # MIMIS_HOME, and a harness that only redirected the home would still write to the real ~/.mimisbrunnr.
-run_launcher() {
+#
+# The home is a separate entry point rather than an optional leading argument: `run_launcher env` is
+# how every other case in this file calls it, and a leading argument would read the verb `env` as a
+# directory — which fails late, as a usage message, in cases that have nothing to do with homes.
+run_launcher_in() {
+  local home="$1"
+  shift
+  # Never hand-roll this call. The unset list is the whole point — a case that inherited an operator's
+  # CONTEXT_MEMORY_READ_TOKEN would exercise the reuse path against a token it did not write — and a
+  # caller that omits it loses both MIMIS_* redirects, which is how this harness once wrote to the
+  # operator's real ~/.mimisbrunnr.
   env -u MIMIS_TOKEN_FILE -u CONTEXT_MEMORY_READ_TOKEN -u CONTEXT_MEMORY_WRITE_TOKEN \
     -u CONTEXT_MEMORY_BASE_URL -u CONTEXT_MEMORY_CREDENTIAL_FILE \
-    MIMIS_HOME="$scratch/home" MIMIS_MACHINE_CREDENTIALS="$scratch/home/credentials" \
+    MIMIS_HOME="$home" MIMIS_MACHINE_CREDENTIALS="$home/credentials" \
     "$launcher" "$@"
 }
+
+run_launcher() { run_launcher_in "$scratch/home" "$@"; }
 
 expect_ok() {
   local name="$1"
@@ -439,6 +455,247 @@ for key in CONTEXT_MEMORY_BASE_URL CONTEXT_MEMORY_READ_TOKEN CONTEXT_MEMORY_WRIT
     no "machine file still carries $key after a re-run" "absent or empty"
   fi
 done
+
+# ---------------------------------------------------------------------------------------------
+# the base URL is refreshed, not preserved
+# ---------------------------------------------------------------------------------------------
+
+# CONTEXT_MEMORY_BASE_URL is the one managed key the add-only pattern does *not* cover: it is derived
+# from the port this run publishes, so a stored value is stale the moment that port changes. The
+# case that found it: a MIMIS_SHIFT_PORTS=1 run serves the API on 25141 while the file keeps saying
+# 5141, so every client on the machine calls a port the stack does not serve — no run fails and
+# nothing logs it. Its own scratch home, because a shifted run must not disturb the cases above.
+shift_home="$scratch/home-shifted"
+mkdir -p "$shift_home"
+cp "$scratch/home/credentials" "$shift_home/credentials"
+# Both files are seeded, and the write-side one is seeded with a *duplicated* base URL: a case that
+# started from a missing key would pass against the old add-only behaviour, and one that started from
+# a single line cannot tell "refreshed" from "left alone".
+cp "$scratch/home/credentials-read-only" "$shift_home/credentials-read-only"
+printf 'CONTEXT_MEMORY_BASE_URL=http://localhost:1234\n' >>"$shift_home/credentials"
+read_token_before="$(sed -n 's/^CONTEXT_MEMORY_READ_TOKEN=//p' "$shift_home/credentials")"
+
+# The shift is exported inside a subshell rather than prefixed onto the call: `VAR=x func` leaks the
+# assignment past the function in bash 3.2, and a leaked MIMIS_SHIFT_PORTS would silently move the
+# ports for every case after this one.
+if (export MIMIS_SHIFT_PORTS=1; run_launcher_in "$shift_home" env) >"$scratch/out" 2>"$scratch/err"; then
+  ok "a shifted-ports run succeeds against a scratch home"
+else
+  no "a shifted-ports run succeeds against a scratch home" "exit $? — $(tail -1 "$scratch/err")"
+fi
+
+# The value, not just the key: a harness that only asserted presence would pass against the old
+# add-only behaviour, which kept the key and the wrong value together.
+if grep -q '^CONTEXT_MEMORY_BASE_URL=http://localhost:25141$' "$shift_home/credentials"; then
+  ok "a shifted run rewrites the published base URL to its own port"
+else
+  no "a shifted run rewrites the published base URL to its own port" \
+    "got $(sed -n 's/^CONTEXT_MEMORY_BASE_URL=//p' "$shift_home/credentials")"
+fi
+
+# Exactly one assignment. Two lines whose winner depends on the reader is the state the refresh
+# exists to prevent, and a hand-edited file can already be in it.
+if [ "$(grep -c '^CONTEXT_MEMORY_BASE_URL=' "$shift_home/credentials")" = "1" ]; then
+  ok "the base URL is written once, not appended to an existing line"
+else
+  no "the base URL is written once, not appended to an existing line" \
+    "$(grep -c '^CONTEXT_MEMORY_BASE_URL=' "$shift_home/credentials") occurrences"
+fi
+
+# The read-only file is a second, independent copy, so it is where a half-finished refresh shows.
+if grep -q '^CONTEXT_MEMORY_BASE_URL=http://localhost:25141$' "$shift_home/credentials-read-only"; then
+  ok "the read-only credential file carries the same refreshed base URL"
+else
+  no "the read-only credential file carries the same refreshed base URL" \
+    "got $(sed -n 's/^CONTEXT_MEMORY_BASE_URL=//p' "$shift_home/credentials-read-only")"
+fi
+
+# Refreshing the URL must not become rotating a token: a changed read token 403s every client
+# holding the old one, which is the split-pair failure adoption exists to prevent.
+if [ "$(sed -n 's/^CONTEXT_MEMORY_READ_TOKEN=//p' "$shift_home/credentials")" = "$read_token_before" ]; then
+  ok "refreshing the base URL leaves the read token untouched"
+else
+  no "refreshing the base URL leaves the read token untouched" "the token changed"
+fi
+
+# A hand-edited URL is corrected rather than trusted, and the tokens around it still survive — the
+# two halves of the contract, asserted together because the fix edits the same write.
+sed_inplace "$shift_home/credentials" 's#^CONTEXT_MEMORY_BASE_URL=.*#CONTEXT_MEMORY_BASE_URL=http://localhost:9999#'
+# A second occurrence, so the correction case cannot be satisfied by rewriting only the line it seeded.
+printf 'CONTEXT_MEMORY_BASE_URL=http://localhost:9998\n' >>"$shift_home/credentials"
+run_launcher_in "$shift_home" env >"$scratch/out" 2>"$scratch/err"
+if grep -q '^CONTEXT_MEMORY_BASE_URL=http://localhost:5141$' "$shift_home/credentials" &&
+   grep -q "^CONTEXT_MEMORY_READ_TOKEN=$read_token_before\$" "$shift_home/credentials"; then
+  ok "a hand-edited base URL is corrected to the default port, tokens preserved"
+else
+  no "a hand-edited base URL is corrected to the default port, tokens preserved" \
+    "got $(sed -n 's/^CONTEXT_MEMORY_BASE_URL=//p' "$shift_home/credentials")"
+fi
+
+# ---------------------------------------------------------------------------------------------
+# a credential file that cannot be read whole is refused, not rewritten smaller
+# ---------------------------------------------------------------------------------------------
+
+# The filter that replaced `cat` returns 0 on a file it cannot read and 0 on one it cannot read *as
+# text*, so the protection `set -e` used to give for free is gone unless it is stated. Left unguarded,
+# a root-owned or restored-backup file is rewritten with only the keys this run could resolve: every
+# operator key dropped, the decision settings reset to their defaults, exit 0. Each case asserts the
+# file still carries what it did, not merely that the run failed.
+#
+# Own scratch home per case, so a refusal cannot disturb the cases above.
+#
+# The `chmod 000` case is the only one that needs the root guard: root reads a 000 file, so the
+# precondition cannot be created there. The NUL case must NOT share that guard — root writes NUL bytes
+# perfectly well, so it is testable as root, and guarding it too dropped it in exactly the environment
+# this repository mandates (the `ubuntu:24.04` container run is root), leaving it uncovered in CI.
+if [ "$(id -u)" = "0" ]; then
+  skip "the unreadable machine credential file refusal" "running as root: a 000 file is still readable"
+else
+  unreadable_home="$scratch/home-unreadable"
+  mkdir -p "$unreadable_home"
+  cp "$shift_home/credentials" "$unreadable_home/credentials"
+  printf 'MY_OPERATOR_KEY=keep-me\n' >>"$unreadable_home/credentials"
+  chmod 000 "$unreadable_home/credentials"
+  if run_launcher_in "$unreadable_home" env >"$scratch/out" 2>"$scratch/err"; then
+    no "an unreadable credential file fails the run" "exited 0 — it would have been rewritten smaller"
+  else
+    ok "an unreadable credential file fails the run"
+  fi
+  # Restore the mode before asserting: the run refused to read the file, so a grep here would fail on
+  # permissions and report a lost key for a file that is in fact untouched. What is being asserted is
+  # that the refusal left the *content* alone.
+  chmod 600 "$unreadable_home/credentials"
+  if grep -q 'MY_OPERATOR_KEY=keep-me' "$unreadable_home/credentials"; then
+    ok "an unreadable credential file is left untouched, operator key intact"
+  else
+    no "an unreadable credential file is left untouched, operator key intact" "the key is gone"
+  fi
+fi
+
+nul_home="$scratch/home-nul"
+mkdir -p "$nul_home"
+cp "$shift_home/credentials" "$nul_home/credentials"
+printf 'MY_OPERATOR_KEY=keep-me\n' >>"$nul_home/credentials"
+# printf, not a literal: a NUL in the harness source would truncate this line for every reader.
+printf 'CORRUPT=one\000two\n' >>"$nul_home/credentials"
+if run_launcher_in "$nul_home" env >"$scratch/out" 2>"$scratch/err"; then
+  no "a credential file holding a NUL byte fails the run" "exited 0 — grep read it as binary and emitted nothing"
+else
+  ok "a credential file holding a NUL byte fails the run"
+fi
+if grep -q 'MY_OPERATOR_KEY=keep-me' "$nul_home/credentials"; then
+  ok "a NUL-bearing credential file is left untouched, operator key intact"
+else
+  no "a NUL-bearing credential file is left untouched, operator key intact" "the key is gone"
+fi
+
+# The container credential file gets the same guard, and it is the one with teeth: regenerating it
+# produces a *new* read/write token pair while `~/.mimisbrunnr/credentials` still holds the old one,
+# so every skill on the machine 403s against a Host that never said anything was wrong. Asserted on
+# the file's checksum, because "the run failed" alone would also pass against a run that died for an
+# unrelated reason after having already rewritten it.
+if [ "$(id -u)" = "0" ]; then
+  skip "the unreadable controller.env refusal" "running as root: a 000 file is still readable"
+else
+  controller_home="$scratch/home-unreadable-env"
+  mkdir -p "$controller_home"
+  cp "$shift_home/../home/controller.env" "$controller_home/controller.env" 2>/dev/null ||
+    cp "$scratch/home/controller.env" "$controller_home/controller.env"
+  cp "$shift_home/credentials" "$controller_home/credentials"
+  before_sum="$(cksum <"$controller_home/controller.env")"
+  chmod 000 "$controller_home/controller.env"
+  if run_launcher_in "$controller_home" env >"$scratch/out" 2>"$scratch/err"; then
+    no "an unreadable controller.env fails the run" "exited 0 — it regenerates all five secrets"
+  else
+    ok "an unreadable controller.env fails the run"
+  fi
+  chmod 600 "$controller_home/controller.env"
+  if [ "$(cksum <"$controller_home/controller.env")" = "$before_sum" ]; then
+    ok "an unreadable controller.env is left untouched, no token pair rotated"
+  else
+    no "an unreadable controller.env is left untouched, no token pair rotated" "the file changed"
+  fi
+fi
+
+# A symlink at the machine-credential path: `[ -f ]` follows it, so `mv` used to replace the link with
+# a regular file and freeze every client reading the shared path on tokens this run had rotated away.
+# No root dependency, so unlike the `chmod 000` cases this one runs everywhere — including the
+# container run where they do not.
+link_home="$scratch/home-symlink"
+mkdir -p "$link_home/shared"
+cp "$shift_home/credentials" "$link_home/shared/credentials"
+printf 'SHARED_OPERATOR_KEY=keep-me\n' >>"$link_home/shared/credentials"
+ln -s "$link_home/shared/credentials" "$link_home/credentials"
+if run_launcher_in "$link_home" env >"$scratch/out" 2>"$scratch/err"; then
+  no "a symlinked machine credential file is refused" "it wrote through the link"
+elif grep -q "symlink" "$scratch/err"; then
+  ok "a symlinked machine credential file is refused"
+else
+  no "a symlinked machine credential file is refused" "$(tail -1 "$scratch/err")"
+fi
+if [ -L "$link_home/credentials" ]; then
+  ok "the refused symlink is still a symlink, not replaced by a regular file"
+else
+  no "the refused symlink is still a symlink, not replaced by a regular file" "it was overwritten"
+fi
+if grep -q 'SHARED_OPERATOR_KEY=keep-me' "$link_home/shared/credentials"; then
+  ok "the shared target behind the refused symlink is untouched"
+else
+  no "the shared target behind the refused symlink is untouched" "the target changed"
+fi
+
+# The interrupt-cleanup contract, asserted on the function rather than on an interrupt: sending
+# SIGINT into the window between `mktemp` and `mv` would be a timing test that passes on a slow
+# machine and hangs on a fast one. The launcher already extracts `file_value` and evaluates it, so
+# this follows the harness's existing idiom — the temp list is newline-delimited, and the second path
+# carries a space because a space-delimited list would split there.
+temp_dir="$scratch/cleanup-temps"
+mkdir -p "$temp_dir"
+printf 'secret\n' >"$temp_dir/one.XXXXXX"
+printf 'secret\n' >"$temp_dir/two with space.XXXXXX"
+cleanup_assert() {
+  bash -c '
+    set -euo pipefail
+    launcher="$1"; src="$2"; dir="$3"
+    temp_env=""
+    temp_credentials="$4
+$5
+"
+    eval "$(sed -n "/^cleanup()/,/^}/p" "$src")"
+    cleanup
+  ' _ "$launcher" "$launcher" "$temp_dir" "$temp_dir/one.XXXXXX" "$temp_dir/two with space.XXXXXX"
+}
+if cleanup_assert && [ ! -e "$temp_dir/one.XXXXXX" ] && [ ! -e "$temp_dir/two with space.XXXXXX" ]; then
+  ok "cleanup removes both registered credential temp files, space in a path included"
+else
+  no "cleanup removes both registered credential temp files, space in a path included" \
+    "$(ls "$temp_dir" 2>/dev/null | tr '\n' ' ')"
+fi
+leftover="$temp_dir/three.XXXXXX"
+printf 'secret\n' >"$leftover"
+if bash -c '
+  set -euo pipefail
+  launcher="$1"
+  temp_env=""
+  temp_credentials=""
+  eval "$(sed -n "/^cleanup()/,/^}/p" "$launcher")"
+  cleanup
+' _ "$launcher" && [ -e "$leftover" ]; then
+  ok "cleanup with nothing registered removes nothing"
+else
+  no "cleanup with nothing registered removes nothing" "an unregistered file was removed"
+fi
+
+# …and that `write_machine_credentials` registers the path it creates, which the two cases above
+# cannot see: they set `temp_credentials` themselves, so they pass against a launcher that never
+# registers anything — which is the pre-fix state. Asserted structurally, as labelled, because the
+# behavioural version needs a SIGINT to land between `mktemp` and `mv`.
+write_machine_credentials_body="$(sed -n '/^write_machine_credentials()/,/^}/p' "$launcher")"
+if printf '%s' "$write_machine_credentials_body" | grep -q 'temp_credentials="\$temp_credentials\$tmp'; then
+  ok "write_machine_credentials registers its temp path for interrupt cleanup"
+else
+  no "write_machine_credentials registers its temp path for interrupt cleanup" "no registration in the function body"
+fi
 
 # ---------------------------------------------------------------------------------------------
 # decision-gate settings
