@@ -765,7 +765,7 @@ remove_existing_controller() {
   # The ports stay bound for a moment after a container goes; wait rather than fail the free-port
   # check on a race that resolves itself in under a second. postgres/blob/seq are Persistent, so a
   # restart keeps them running and their ports stay bound — only the controller (dashboard/OTLP) and
-  # the recreated Host free their ports, which is what `preflight` requires free.
+  # the recreated Host and viewer free their ports, which is what `preflight` requires free.
   local waited=0
   while [ "$waited" -lt 15 ]; do
     port_is_free "$p_dashboard" && port_is_free "$p_otlp" && port_is_free "$p_host" && port_is_free "$p_viewer" && return 0
