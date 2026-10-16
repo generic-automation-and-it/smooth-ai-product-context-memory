@@ -140,8 +140,9 @@ public static class DossierSelection
 
         IReadOnlyList<CheapMemory> matched = await search.SearchAsync(criteria, cancellationToken);
 
+        HashSet<Guid> ownedUuids = new(ticketResult?.Items.Select(i => i.Uuid) ?? Enumerable.Empty<Guid>());
         int referencedAnchors = referenceUuids.Count > 0
-            ? matched.Count(m => referenceUuids.Contains(m.Uuid))
+            ? matched.Count(m => referenceUuids.Contains(m.Uuid) && !ownedUuids.Contains(m.Uuid))
             : 0;
 
         HashSet<Guid> anchorUuids = new(matched.Select(m => m.Uuid));
