@@ -798,6 +798,7 @@ public sealed class ContextApiTests(HostWebAppFixture fixture) : IClassFixture<H
         ["POST /api/context/paths"] = ApiCapability.Read,
         ["POST /api/context/tickets/paths"] = ApiCapability.Read,
         ["GET /api/context/memories/{uuid:guid}"] = ApiCapability.Read,
+        ["GET /api/context/capabilities"] = ApiCapability.Read,   // Console login: resolves read vs read+write (HLD-009)
         ["GET /api/context/memories/{uuid:guid}/versions"] = ApiCapability.Read,
         ["GET /api/context/memories/{uuid:guid}/versions/{version:int}/blob"] = ApiCapability.Read,
         ["POST /api/context/dossier/bundle"] = ApiCapability.Read,

@@ -7,6 +7,19 @@
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
+  <div id="login-overlay" class="login-overlay" role="dialog" aria-modal="true" aria-labelledby="login-title">
+    <form id="login-form" class="login-card">
+      <h1 id="login-title">Mímisbrunnr Console</h1>
+      <p class="login-hint">Enter your CONTEXT_TOKEN to continue. The read token grants read-only access; the write token grants read + write.</p>
+      <label class="field">
+        <span class="field-label">CONTEXT_TOKEN</span>
+        <input id="login-token" type="password" autocomplete="off" required placeholder="Bearer token">
+      </label>
+      <button type="submit" class="login-submit">Sign in</button>
+      <p id="login-error" class="login-error" role="alert" hidden></p>
+    </form>
+  </div>
+
   <header class="topbar">
     <a class="skip" href="#browse-results">Skip to results</a>
     <span class="brand">Mímisbrunnr</span>
@@ -16,6 +29,8 @@
       <a href="#review" class="nav-link" data-pane="review">Review</a>
       <a href="#status" class="nav-link" data-pane="status">Status</a>
     </nav>
+    <span id="capability-badge" class="capability-badge" hidden></span>
+    <button type="button" id="sign-out" class="sign-out" hidden>Sign out</button>
   </header>
 
   <main>
@@ -331,10 +346,10 @@
       <div id="review-state" class="state" hidden></div>
       <div id="review-list" class="review-list" aria-live="polite" hidden></div>
       <p class="review-help">
-        Approve and Reject are placeholders for P4b (gated on the G2 approve transition).
-        The "Conflicts" section re-runs <code>dedup</code> on the selected proposal and is
-        the read-side conflict-choice menu (new version, new memory, skip) — its buttons
-        are disabled until P4b lands.
+        Approve and Reject are the P4b write path: enabled only when the session presents the
+        write token (HLD-009). The "Conflicts" section re-runs <code>dedup</code> on the
+        selected proposal and is the read-side conflict-choice menu (new version, new memory,
+        skip) — its buttons are still placeholders until P4b lands.
       </p>
     </section>
 

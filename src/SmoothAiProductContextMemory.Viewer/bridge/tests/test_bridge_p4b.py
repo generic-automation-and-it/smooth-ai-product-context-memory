@@ -85,9 +85,10 @@ class WriteTokenGuardTests(unittest.TestCase):
         self.assertEqual(code, 0, msg=f"P4b refused to load with a write token: {err!r}")
         self.assertNotIn("refusing to start", err)
 
-    def test_p4b_refuses_without_write_token(self):
-        # All canonical env names absent. Stage cleanly once — the previous
-        # `_stage_bridge() and ...` boolean hack abandoned a temp dir.
+    def test_p4b_loads_without_write_token(self):
+        # Per-request auth (HLD-009): the write token is supplied by the Console
+        # session, never ambient env, so P4b must load with all write-token
+        # env names absent.
         tmp = _stage_bridge()
         env = {
             "PYTHONPATH": str(tmp / "capture") + os.pathsep + str(tmp / "bridge"),
@@ -99,12 +100,13 @@ class WriteTokenGuardTests(unittest.TestCase):
             [sys.executable, "-c", "import bridge_p4b"],
             env=env, capture_output=True, text=True, encoding="utf-8",
         )
-        self.assertNotEqual(proc.returncode, 0,
-                            msg="P4b must refuse to start without a write token")
-        self.assertIn("refusing to start", proc.stderr)
-        self.assertIn("P4b requires a write-token env var", proc.stderr)
+        self.assertEqual(proc.returncode, 0,
+                         msg=f"P4b must load without an ambient write token: {proc.stderr!r}")
+        self.assertNotIn("refusing to start", proc.stderr)
+        self.assertNotIn("requires a write-token env var", proc.stderr)
 
-    def test_p4b_refuses_with_empty_write_token(self):
+    def test_p4b_loads_with_empty_write_token(self):
+        # An empty write-token env is not a token; P4b ignores it and loads.
         tmp = _stage_bridge()
         env = {
             "PYTHONPATH": str(tmp / "capture") + os.pathsep + str(tmp / "bridge"),
@@ -117,12 +119,12 @@ class WriteTokenGuardTests(unittest.TestCase):
             [sys.executable, "-c", "import bridge_p4b"],
             env=env, capture_output=True, text=True, encoding="utf-8",
         )
-        self.assertNotEqual(proc.returncode, 0,
-                            msg="P4b must refuse when the only token is empty")
+        self.assertEqual(proc.returncode, 0,
+                         msg=f"P4b must load with an empty write-token env: {proc.stderr!r}")
 
-    def test_p4b_aliases_friendly_write_token_name(self):
-        # The AppHost injects under API_WRITE_TOKEN; the bridge must alias to
-        # the canonical CONTEXT_MEMORY_WRITE_TOKEN before the client imports.
+    def test_p4b_does_not_make_write_token_ambient(self):
+        # Per-request auth (NFR-02): a friendly API_WRITE_TOKEN must not be
+        # surfaced as an ambient CONTEXT_MEMORY_WRITE_TOKEN env var.
         tmp = _stage_bridge()
         env = {
             "PYTHONPATH": str(tmp / "capture") + os.pathsep + str(tmp / "bridge"),
@@ -133,11 +135,11 @@ class WriteTokenGuardTests(unittest.TestCase):
         }
         proc = subprocess.run(
             [sys.executable, "-c",
-             "import os, bridge_p4b; assert os.environ['CONTEXT_MEMORY_WRITE_TOKEN'] == 'harness-write-token'"],
+             "import os, bridge_p4b; assert 'CONTEXT_MEMORY_WRITE_TOKEN' not in os.environ, 'write token became ambient'"],
             env=env, capture_output=True, text=True, encoding="utf-8",
         )
         self.assertEqual(proc.returncode, 0,
-                         msg=f"P4b must alias API_WRITE_TOKEN: {proc.stderr!r}")
+                         msg=f"P4b must not make the write token ambient: {proc.stderr!r}")
 
 
 class RouteShapeTests(unittest.TestCase):

@@ -67,6 +67,7 @@ data_root_setting="${MIMIS_DATA_ROOT:-}"
 # side-by-side case.
 if [ "${MIMIS_SHIFT_PORTS:-0}" = 1 ]; then
   p_host="${P_HOST:-25141}"
+  p_viewer="${P_VIEWER:-25441}"
   p_postgres="${P_POSTGRES:-25432}"
   p_blob="${P_BLOB:-29000}"
   p_blob_console="${P_BLOB_CONSOLE:-29001}"
@@ -78,6 +79,7 @@ if [ "${MIMIS_SHIFT_PORTS:-0}" = 1 ]; then
   p_otlp="${P_OTLP:-29075}"
 else
   p_host="${P_HOST:-5141}"
+  p_viewer="${P_VIEWER:-5441}"
   p_postgres="${P_POSTGRES:-5732}"
   p_blob="${P_BLOB:-9300}"
   p_blob_console="${P_BLOB_CONSOLE:-9301}"
@@ -749,6 +751,7 @@ preflight() {
   require_port "$p_dashboard" dashboard P_DASHBOARD
   require_port "$p_otlp" OTLP P_OTLP
   require_port "$p_host" API P_HOST
+  require_port "$p_viewer" viewer P_VIEWER
   # postgres/blob/seq are Persistent (APPHOST_AGENTS.md); a restart reuses the running containers, so
   # their ports must NOT be required free — only refuse a foreign holder via require_port_or_reuse.
   require_port_or_reuse "$p_postgres" PostgreSQL P_POSTGRES postgres
@@ -813,7 +816,7 @@ remove_existing_controller() {
   docker rm "$controller_name" >/dev/null 2>&1 || true
 
   # A hard kill can leave workloads behind with no controller owning them. Only the Host (Session,
-  # recreated each restart) is torn down here; postgres/blob/seq are Persistent (APPHOST_AGENTS.md),
+  # recreated each restart) and the viewer are torn down here; postgres/blob/seq are Persistent (APPHOST_AGENTS.md),
   # so they survive a restart and the recreated controller adopts them by name — the orphan sweep must
   # not delete them or the reuse this controller enables is dead on the `up` path. A foreign container
   # occupying one of the names is refused by the controller's own preflight rather than deleted here.
@@ -823,7 +826,7 @@ remove_existing_controller() {
     printf '%s\n' "$leftover" | while IFS= read -r name; do
       [ -n "$name" ] || continue
       case "$name" in
-        "mimisbrunnr-${installation_id}-host") ;;
+        "mimisbrunnr-${installation_id}-host"|"mimisbrunnr-${installation_id}-viewer") ;;
         *) continue ;;
       esac
       docker stop --time 60 "$name" >/dev/null 2>&1 || true
@@ -834,10 +837,10 @@ remove_existing_controller() {
   # The ports stay bound for a moment after a container goes; wait rather than fail the free-port
   # check on a race that resolves itself in under a second. postgres/blob/seq are Persistent, so a
   # restart keeps them running and their ports stay bound — only the controller (dashboard/OTLP) and
-  # the recreated Host free their ports, which is what `preflight` requires free.
+  # the recreated Host and viewer free their ports, which is what `preflight` requires free.
   local waited=0
   while [ "$waited" -lt 15 ]; do
-    port_is_free "$p_dashboard" && port_is_free "$p_otlp" && port_is_free "$p_host" && return 0
+    port_is_free "$p_dashboard" && port_is_free "$p_otlp" && port_is_free "$p_host" && port_is_free "$p_viewer" && return 0
     sleep 1
     waited=$((waited + 1))
   done
@@ -845,7 +848,7 @@ remove_existing_controller() {
 
 owned_workload_containers() {
   local suffix name
-  for suffix in host postgres blob-well seq; do
+  for suffix in host viewer postgres blob-well seq; do
     name="mimisbrunnr-${installation_id}-${suffix}"
     if docker container inspect "$name" >/dev/null 2>&1 &&
       [ "$(docker container inspect --format "{{index .Config.Labels \"io.smooth-mimisbrunnr.installation\"}}" "$name" 2>/dev/null)" = "$installation_id" ]; then
@@ -894,6 +897,7 @@ up() {
     -e "EngineConfiguration__BindAddress=$bind_address" \
     -e "ControllerConfiguration__DataRootMount=$container_data_root" \
     -e "HostConfiguration__Port=$p_host" \
+    -e "ViewerConfiguration__Port=$p_viewer" \
     -e "PostgresConfiguration__Port=$p_postgres" \
     -e "BlobConfiguration__Port=$p_blob" \
     -e "BlobConfiguration__ConsolePort=$p_blob_console" \
@@ -905,6 +909,7 @@ up() {
   echo
   printf '  dashboard   %s   (login URL below)\n' "$dashboard_host"
   printf '  API         http://localhost:%s\n' "$p_host"
+  printf '  Viewer      http://localhost:%s\n' "$p_viewer"
   printf '  PostgreSQL  127.0.0.1:%s   blob 127.0.0.1:%s/%s   Seq 127.0.0.1:%s\n' "$p_postgres" "$p_blob" "$p_blob_console" "$p_seq"
   printf '  group       %s\n' "$group_name"
   if [ "$use_data_root" = 1 ]; then
