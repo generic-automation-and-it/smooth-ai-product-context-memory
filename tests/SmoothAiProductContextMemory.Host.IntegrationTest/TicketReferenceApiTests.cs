@@ -81,7 +81,8 @@ public sealed class TicketReferenceApiTests(HostWebAppFixture fixture) : IClassF
             new
             {
                 uuids = new[] { copyMemory },
-                tickets = new[] { new { ticket.Provider, ticket.Key, reason = "shared ticket" } },                reason = "cross-initiative copy",
+                tickets = new[] { new { ticket.Provider, ticket.Key, reason = "shared ticket" } },
+                reason = "cross-initiative copy",
             },
             Ct);
         added.StatusCode.ShouldBe(HttpStatusCode.OK, await added.Content.ReadAsStringAsync(Ct));
