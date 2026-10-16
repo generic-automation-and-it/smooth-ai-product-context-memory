@@ -16,6 +16,7 @@ import contextlib
 import hashlib
 import http.server
 import io
+import ast
 import json
 import os
 import re
@@ -31,6 +32,10 @@ from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "_mimisbrunnr-shared" / "scripts"
 GATE = SCRIPTS / "decisions_gate.py"
+# The WET copy `ai-understanding` ships. Held byte-equal by that skill's own parity harness, but
+# this file raises the floor guard too: it is a second import path to the same source, and a
+# future edit that lands in one copy and not the other would break 3.9 there only.
+GATE_COPY = SCRIPTS.parents[1] / "ai-understanding" / "scripts" / "decisions_gate.py"
 REDACTOR = SCRIPTS / "redact.py"
 RUBRIC = SCRIPTS / "decisions_rubric.json"
 
@@ -2619,6 +2624,32 @@ class SnapshotTests(GateTestCase):
             # size comparison cannot tell that from a subject that happened to be one character longer.
             self.assertEqual(1, snap.read_text(encoding="utf-8").count('"snapshotOf"'),
                              "the file holds more than one run's document — it was appended to")
+
+    def test_the_module_keeps_the_python_floor_its_docstring_declares(self):
+        """The file declares `Python 3.9+, stdlib only`, and a PEP 604 union in an annotation is a
+        `TypeError` at import below 3.10 — so one `str | None` made the module unimportable on 3.9
+        while every local run, on 3.13, stayed green. The 3.9 matrix job is what caught it.
+
+        Checked here so the next one is local: annotations are safe only when they are deferred, so
+        either the future import is present or the module must not use the modern spelling at all.
+        """
+        for gate in (GATE, GATE_COPY):
+            if gate is None:
+                continue
+            with self.subTest(gate=gate.name):
+                source = gate.read_text(encoding="utf-8")
+                deferred = "from __future__ import annotations" in source
+                unions = [
+                    (node.lineno, ast.unparse(node.annotation))
+                    for node in ast.walk(ast.parse(source))
+                    if isinstance(node, ast.arg) and node.annotation is not None
+                    and "|" in ast.unparse(node.annotation)
+                ]
+                self.assertTrue(
+                    deferred or not unions,
+                    f"{gate.name} uses PEP 604 unions at "
+                    f"{[u[0] for u in unions]} without `from __future__ import annotations`, "
+                    f"so it needs Python 3.10 and breaks the 3.9 matrix job")
 
     def test_a_snapshot_never_writes_a_record_identity_in_plaintext(self):
         """RL-008. The budget ledger stores `sha256:<digest>` and never the identity itself, because

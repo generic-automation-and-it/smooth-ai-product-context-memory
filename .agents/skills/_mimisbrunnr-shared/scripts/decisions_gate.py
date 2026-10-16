@@ -29,6 +29,12 @@ Design rules that the harness pins, each of which exists because the cheaper ver
 Python 3.9+, stdlib only.
 """
 
+# The floor is 3.9, where `X | Y` in an annotation is a TypeError at import: PEP 604 unions
+# need 3.10. Deferring every annotation makes them strings, so the file can be written in the
+# modern spelling without silently raising its own floor. A CI matrix job on 3.9 catches a
+# missing import; `test_decisions_gate.py` catches it locally first.
+from __future__ import annotations
+
 import argparse
 import datetime
 import hashlib
