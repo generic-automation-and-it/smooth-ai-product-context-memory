@@ -75,10 +75,27 @@ folders are copied over the existing ones. A skill marked `false` is never touch
 inside one survives every run until you set its flag back. A skill outside the owned set is never
 copied even when a hand-edited manifest asks for it.
 
+Each copied folder is then pruned: **`tests/` and `__pycache__/` are removed** (the second at any
+depth), and nothing else. An installed copy carries what runs, not what tests it — a harness asserts
+against this repository's own tree and is meaningless outside it, and `__pycache__/` is interpreter
+output that regenerates on first use. `__pycache__/` is gitignored, so it can never arrive through the
+clone; it appears when someone runs the installed scripts directly.
+
+`agents/`, `references/` and `assets/` are **kept**, because they are runtime: odin reads
+`references/read-path.md` mid-skill and ai-understanding renders `assets/UNDERSTANDING.template.md`, so
+stripping them would ship a skill that documents a file it cannot open. This is a runtime rule, not a
+security one — nothing in a skill reads its own tests.
+
+Note the divergence from the npm package: `package.json`'s `files` allowlist packs selected `scripts/`
+directories only, and ships no `SKILL.md` at all, while an install ships the whole skill minus the two
+pruned names.
+
 **4. Refresh `_mimisbrunnr-shared`.** That folder is not a skill and never appears in the manifest, but
 every installed skill that calls a shared script is broken without it — so it refreshes on every run,
 whatever the flags say. Its contents are reconciled rather than merged: an entry the source no longer has
-is removed, except `installation.json` itself, which is this script's own state.
+is removed, except `installation.json` itself, which is this script's own state. The same prune then
+runs, *after* the sweep rather than before it — the sweep compares the destination against the source
+and needs to see the same files on both sides.
 
 **5. Write the manifest last**, stamped with the current UTC time. That ordering is deliberate — see
 [Write ordering](#write-ordering-is-load-bearing).
@@ -127,11 +144,17 @@ or move the change somewhere the installer does not own.
 bash scripts/test-install-skills.sh
 ```
 
-42 cases across both ports, no network and no container engine needed: the clone source is the checkout
+48 cases across both ports, no network and no container engine needed: the clone source is the checkout
 itself (`SKILLS_REPO` pointed at the repo, `SKILLS_BRANCH` at the current branch), so a harness that
 reached GitHub would be red for reasons unrelated to the code. Runs in the PR gate. Verified green on
-macOS (bash 3.2 with `pwsh` present — 42/42) and on GNU/Linux in `ubuntu:24.04` (20/20, `pwsh` absent).
+macOS (bash 3.2 with `pwsh` present — 48/48) and on GNU/Linux in `ubuntu:24.04` (`pwsh` absent).
 
 The `ps1` cases and the cross-port parity cases are **skipped with a stated reason** when `pwsh` is not
 installed — which is the case on the `ubuntu-latest` gate runner. They are exercised locally where `pwsh`
 is present. See `scripts/AGENTS.md` → Test References for what that gap does and does not cover.
+
+Six of the cases cover the prune. Four run end-to-end (tests/ absent, runtime files present, the shared
+folder still refreshed, the clone source untouched, plus a skill marked `installed: false` left
+byte-identical), and two drive `prune_non_shippable` / `Remove-NonShippable` **directly** on a planted
+tree. The direct pair is not redundancy: `__pycache__/` is gitignored, so a clone can never carry one and
+an end-to-end assertion about it would be vacuously true forever.

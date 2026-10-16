@@ -481,6 +481,162 @@ else
 fi
 
 # ---------------------------------------------------------------------------------------------
+# 11. an installed skill carries what runs, not what tests it
+# ---------------------------------------------------------------------------------------------
+#
+# The clone source is this checkout, and every mimisbrunnr-* skill here has a tests/ folder, so the
+# exclusion is observable without planting anything. A synthetic skill carrying an empty tests/ would
+# also prove the case, but it would prove it against a folder the real tree never ships — and the
+# regression this exists to catch is someone re-adding a harness dir to a real skill.
+
+check_pruned() {
+  local root="$1" runner="$2"
+  local odin="$root/mimisbrunnr-odin-context-memory"
+
+  # tests/ gone. ai-understanding and odin both ship one in the source, so a prune that never ran
+  # leaves them here.
+  for skill in mimisbrunnr-odin-context-memory ai-understanding mimisbrunnr-saga-dossier; do
+    if [ -d "$root/$skill/tests" ]; then
+      no "[$runner] an installed skill ships without tests/" "$skill/tests survived the install"
+      return
+    fi
+  done
+
+  # What *does* ship. agents/ and references/ are runtime-referenced — odin's SKILL.md tells the agent
+  # to read references/read-path.md, and an install without it is a skill documenting a missing file —
+  # so the exclusion list must not have grown to cover them.
+  for path in SKILL.md AGENTS.md agents scripts references; do
+    if [ ! -e "$odin/$path" ]; then
+      no "[$runner] an installed skill keeps its runtime files" "odin/$path missing"
+      return
+    fi
+  done
+  # ai-understanding renders its template at export time, so assets/ is runtime too.
+  if [ ! -e "$root/ai-understanding/assets/UNDERSTANDING.template.md" ]; then
+    no "[$runner] an installed skill keeps its runtime files" "ai-understanding/assets template missing"
+    return
+  fi
+
+  # The scripts the skill actually invokes must still be there. A prune that removed `scripts/` would
+  # leave a skill whose own SKILL.md names a file that no longer exists.
+  if [ ! -e "$root/mimisbrunnr-odin-context-memory/scripts/authority.py" ]; then
+    no "[$runner] an installed skill keeps its scripts" "odin/scripts/authority.py missing"
+    return
+  fi
+  if [ ! -e "$root/_mimisbrunnr-shared/scripts/redact.py" ]; then
+    no "[$runner] the shared folder still refreshes" "shared redact.py missing"
+    return
+  fi
+
+  # __pycache__ at any depth, including the shared folder. Recursive on purpose: an operator running
+  # the scripts directly inside their install leaves one wherever Python happened to be.
+  local stray
+  stray="$(find "$root" -type d -name __pycache__ 2>/dev/null | head -5)"
+  if [ -n "$stray" ]; then
+    no "[$runner] an installed skill ships without __pycache__" "$stray"
+    return
+  fi
+
+  # And the clone source itself must be untouched: pruning the destination twice, or pruning the
+  # source, would make every later run's source differ from this checkout.
+  if [ ! -d "$source_repo/.agents/skills/ai-understanding/tests" ]; then
+    no "[$runner] pruning leaves the clone source alone" "source tests/ was removed"
+    return
+  fi
+
+  ok "[$runner] an installed skill carries its runtime files and neither tests/ nor __pycache__/"
+}
+
+# A skill marked installed:false is never copied, so the prune must not touch it either — that is the
+# one case where a prune running against the wrong path would be visible.
+check_pruned_skips_disabled() {
+  local root="$1" runner="$2"
+  local kept="$root/ai-brain-dump/tests"
+  mkdir -p "$kept"
+  printf '# local edit\n' >"$kept/keep.py"
+  python3 - "$root/_mimisbrunnr-shared/installation.json" <<'PYEOF'
+import json, sys
+path = sys.argv[1]
+data = json.load(open(path))
+for entry in data["skills"]:
+    if entry["name"] == "ai-brain-dump":
+        entry["installed"] = False
+json.dump(data, open(path, "w"), indent=2)
+PYEOF
+  if [ "$runner" = sh ]; then run_sh "$root" >/dev/null 2>&1; else run_ps1 "$root" >/dev/null 2>&1; fi
+  if [ ! -f "$kept/keep.py" ]; then
+    no "[$runner] a disabled skill is left byte-identical" "ai-brain-dump/tests was pruned"
+    return
+  fi
+  ok "[$runner] a disabled skill is left byte-identical (the prune never sees it)"
+}
+
+for port in sh; do
+  [ "$have_pwsh" = 1 ] && port="sh ps1"
+  for runner in $port; do
+    root="$(make_root "prune-$runner")"
+    if [ "$runner" = sh ]; then run_sh "$root" >/dev/null 2>&1 || true; else run_ps1 "$root" >/dev/null 2>&1 || true; fi
+    check_pruned "$root" "$runner"
+
+    root2="$(make_root "prune-off-$runner")"
+    if [ "$runner" = sh ]; then run_sh "$root2" >/dev/null 2>&1 || true; else run_ps1 "$root2" >/dev/null 2>&1 || true; fi
+    check_pruned_skips_disabled "$root2" "$runner"
+  done
+done
+
+# A `__pycache__` cannot be planted through the clone path: it is gitignored, so a clone never
+# carries one and an end-to-end assertion about it is vacuously true forever. So the prune is also
+# exercised directly, on a tree planted with one — extracted from each installer rather than restated,
+# the same way the parity cases read `is_owned_skill` out of the file that ships.
+check_prune_function() {
+  local runner="$1" tree="$scratch/prune-fn-$runner"
+  mkdir -p "$tree/tests" "$tree/scripts/__pycache__" "$tree/agents/openai/nested/__pycache__"
+  printf '# harness\n' >"$tree/tests/run_tests.py"
+  printf '# runtime\n' >"$tree/scripts/keep.py"
+  printf 'cached\n' >"$tree/scripts/__pycache__/keep.cpython-311.pyc"
+  printf 'cached\n' >"$tree/agents/openai/nested/__pycache__/x.cpython-311.pyc"
+  printf '# kept\n' >"$tree/agents/openai.yaml"
+
+  if [ "$runner" = sh ]; then
+    bash -c "$(extract_prune_sh)
+      prune_non_shippable \"\$1\"" _ "$tree"
+  else
+    pwsh -NoProfile -Command "$(extract_prune_ps1)
+      Remove-NonShippable -Dest '$tree'" >/dev/null
+  fi
+
+  if [ -d "$tree/tests" ]; then
+    no "[$runner] prune removes tests/" "tests/ survived"
+    return
+  fi
+  local stray
+  stray="$(find "$tree" -type d -name __pycache__ 2>/dev/null | head -3)"
+  if [ -n "$stray" ]; then
+    no "[$runner] prune removes __pycache__ at any depth" "$stray"
+    return
+  fi
+  # The runtime files the prune is *not* allowed to touch — the whole reason the list is two names.
+  for path in scripts/keep.py agents/openai.yaml; do
+    if [ ! -f "$tree/$path" ]; then
+      no "[$runner] prune keeps runtime files" "$path was removed"
+      return
+    fi
+  done
+  ok "[$runner] prune removes tests/ and nested __pycache__/ and keeps everything else"
+}
+
+extract_prune_sh() {
+  awk '/^prune_non_shippable\(\) \{/,/^\}/' "$installer_sh"
+}
+
+extract_prune_ps1() {
+  awk '/^function Remove-NonShippable \{/,/^\}/' "$installer_ps1"
+}
+
+check_prune_function sh
+[ "$have_pwsh" = 1 ] && check_prune_function ps1 || echo "  skip pwsh not installed — prune function not run on the PowerShell port (not a failure)"
+
+# ---------------------------------------------------------------------------------------------
 
 echo
 echo "passed: $passed  failed: $failed"
