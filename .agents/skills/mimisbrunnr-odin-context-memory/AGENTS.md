@@ -71,6 +71,7 @@ Read [`SKILL.md`](./SKILL.md) first — the five-stage write pipeline, modes, sw
 
 | Date | Change | Ref |
 | :---- | :---- | :---- |
+| 2026-10-16 | **The value-gate contract now states the subject-less case.** The ledger key is the subject *and its group*, and the group half was documented — but a record carrying no `subject`/`description`/`name` is keyed by **position within the batch**, scored as a first attempt every call, and never written to disk. That is exactly what `ai-memory-context`/`mimisbrunnr-kvasir-understanding` did: the gate ran, reported a healthy verdict count, and the three-attempt bound was dead code. The symptom is one flag (`durable: false`) and an absent file. Documentation only. | PR #278 |
 | 2026-10-15 | Ralph loop: four fixes in the shared capture client and queue, verified by the odin and queue suites | — |
 | 2026-09-10 | Five-stage pipeline with preflight first | — |
 | 2026-09-10 | Contract-coherence pass | — |

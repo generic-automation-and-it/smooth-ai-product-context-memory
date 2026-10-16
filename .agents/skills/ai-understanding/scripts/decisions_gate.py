@@ -29,6 +29,12 @@ Design rules that the harness pins, each of which exists because the cheaper ver
 Python 3.9+, stdlib only.
 """
 
+# The floor is 3.9, where `X | Y` in an annotation is a TypeError at import: PEP 604 unions
+# need 3.10. Deferring every annotation makes them strings, so the file can be written in the
+# modern spelling without silently raising its own floor. A CI matrix job on 3.9 catches a
+# missing import; `test_decisions_gate.py` catches it locally first.
+from __future__ import annotations
+
 import argparse
 import datetime
 import hashlib
@@ -869,6 +875,56 @@ def write_ledger(state_file, ledger):
     os.replace(temp, path)
 
 
+def write_snapshot(path_str: str, payload: dict, state_file: str | None) -> None:
+    """One run's verdicts, written whole.
+
+    Write-only by construction: a temp file plus `os.replace`, so the file is replaced rather
+    than appended to, and a partial write can never be read back as a complete run. The budget
+    ledger answers "how many attempts has this record had"; this answers "what did this run
+    decide", which the ledger cannot -- it keeps only the best attempt per record and is
+    overwritten by the next run, so a hold that a later run released leaves no trace.
+
+    Carries the ledger path it complements, because a snapshot whose companion budget file cannot
+    be located is not interpretable on its own.
+    """
+    path = Path(path_str)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    document = {"snapshotOf": "decisions_gate score", "stateFile": state_file, "payload": payload}
+    temp = path.with_suffix(path.suffix + ".tmp")
+    with open(temp, "w", encoding="utf-8") as handle:
+        json.dump(document, handle, indent=2, sort_keys=True)
+    os.replace(temp, path)
+
+
+def snapshot_payload(payload: dict) -> dict:
+    """The report with every record identity replaced by its ledger key.
+
+    The budget ledger stores `sha256:<digest>` and never the identity itself, because the identity
+    *is* the record's subject and a subject can carry personal data — a name, an email, a customer.
+    That reasoning applies to the snapshot equally, and it is not hypothetical: the identity is built
+    from the **unredacted** record (`record_identity(original, index)`), so a snapshot written verbatim
+    puts exactly the text the ledger was designed to keep off disk back onto it, in plaintext, in a
+    file an operator keeps by default.
+
+    The digest is what a snapshot needs anyway. It is the same string the budget file is keyed by, so
+    a verdict here joins up to a budget entry there, and a snapshot stays interpretable next to its
+    ledger without becoming a second, unhashed copy of every subject exported.
+
+    The printed report is untouched: the caller reads outcomes and scores, never the identity, and the
+    two must not drift into disagreeing about what was scored.
+    """
+    out = dict(payload)
+    records = []
+    for record in payload.get("records", []):
+        copy = dict(record)
+        identity = copy.get("identity")
+        if isinstance(identity, str):
+            copy["identity"] = ledger_key(identity)
+        records.append(copy)
+    out["records"] = records
+    return out
+
+
 def has_subject(record):
     """True when the record carries a durable identity: `subject`, else `description`, else `name`.
 
@@ -1200,6 +1256,20 @@ def cmd_score(args):
                 "empty; every record's attempt budget begins again. This is reported so a cleared "
                 "bound is never mistaken for a first attempt."
             )
+    if args.snapshot_file:
+        payload["snapshotFile"] = str(args.snapshot_file)
+        # The snapshot is a record of the run, not the run itself: a failure to write it must not
+        # cost the verdicts. It is written *before* the report is printed, so an unhandled OSError --
+        # a read-only `.context`, a full disk, a parent path that is a regular file -- would propagate
+        # out of `cmd_score` with stdout empty, and the caller would lose every score it needed over a
+        # file nothing depends on. The budget ledger above is different: it carries the bound, so its
+        # failure is allowed to stop the run.
+        try:
+            write_snapshot(args.snapshot_file, snapshot_payload(payload), args.state_file)
+        except OSError as exc:
+            payload["snapshotError"] = f"{type(exc).__name__}: {exc}"
+            print(f"NOTE: the run snapshot at {args.snapshot_file} was not written ({exc}); the "
+                  f"verdicts below are unaffected.", file=sys.stderr)
     print(json.dumps(payload, indent=2))
     return 0
 
@@ -1251,6 +1321,8 @@ def main():
 
     score = sub.add_parser("score", help="score records from stdin")
     score.add_argument("--state-file", help="ledger path bounding the attempt loop")
+    score.add_argument("--snapshot-file",
+                       help="per-run score snapshot path; written whole each run, never appended to")
     score.set_defaults(func=cmd_score)
 
     probe = sub.add_parser("probe", help="report availability")

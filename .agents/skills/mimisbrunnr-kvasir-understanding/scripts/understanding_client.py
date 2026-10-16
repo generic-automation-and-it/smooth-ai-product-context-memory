@@ -1087,6 +1087,58 @@ def gate_atomicity(candidates: list[dict]) -> list[dict] | None:
 
 
 DECISIONS_GATE = _SHARED_SCRIPTS / "decisions_gate.py"
+DECISIONS_CONTEXT = Path(".context")
+
+
+def ledger_slug(value: str | None, fallback: str) -> str:
+    """A filesystem-safe fragment for a ledger filename, never empty.
+
+    A product name is registry- or operator-supplied free text, so it may carry a separator, a
+    space, or a character the filesystem rejects. Collapsing to a safe alphabet keeps the name
+    readable and, more importantly, keeps a name from *becoming* a path: a product called
+    `../../elsewhere` must not steer the write out of `.context/`.
+    """
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", (value or "").strip()).strip("-.")
+    cleaned = re.sub(r"-{2,}", "-", cleaned)[:60].strip("-.")
+    return cleaned or fallback
+
+
+def budget_ledger_path(product_name: str | None, repository: str | None,
+                        initiative: str | None) -> Path:
+    """The stable budget ledger for this product and initiative.
+
+    **Stable, deliberately** -- it must outlive a single run, or the three-attempt bound it exists
+    to enforce can never bind and a record an agent rewrote three times is scored a fourth. That is
+    the whole difference between it and the run's snapshot, which `snapshot_for` names and explains.
+
+    Project first, then initiative, so two initiatives of one product never share a budget. The
+    product name is the registry's own term for it; the repository is the fallback because it is
+    bound by the time a write happens, and `unbound` is the last resort so the name stays valid
+    rather than starting with a separator.
+    """
+    project = ledger_slug(product_name, ledger_slug(repository, "unbound"))
+    slug = f"{project}-{ledger_slug(initiative, 'unbound')}"
+    return DECISIONS_CONTEXT / f"{slug}-decisions-ledger.json"
+
+
+def snapshot_for(budget: Path, now: dt.datetime) -> Path:
+    """This run's score snapshot, named beside the budget ledger it complements.
+
+    The other half of a deliberate pair. The budget ledger answers only "how many attempts has this
+    record had" while keeping the single best of them, so a hold a later run released leaves no
+    trace; the run that made the decision exists nowhere else. The snapshot is where it lives, which
+    is why it is stamped and the ledger is not.
+
+    Derived from the budget rather than from `.context/`, which is what keeps a run that points the
+    budget somewhere else -- every test, and any operator using `MIMIS_DECISIONS_STATE` -- from
+    leaving a snapshot behind in the working tree.
+    """
+    stamp = now.astimezone(dt.timezone.utc).strftime("%Y%m%d-%H%M%S")
+    stem = budget.name[:-len(".json")] if budget.name.endswith(".json") else budget.name
+    marker = "-decisions-ledger"
+    if stem.endswith(marker):
+        stem = stem[: -len(marker)]
+    return budget.with_name(f"{stem}-{stamp}-decisions-ledger.json")
 DECISIONS_ENABLED = "CONTEXT_MEMORY_DECISIONS_ENABLED"
 # The one note `gate_decisions` returns for a refusal rather than a skip. It is a named constant because
 # `cmd_export` has to act on it: a refusal says "Nothing was written", so a refusal that only labelled the
@@ -1255,7 +1307,8 @@ def _ledger_disclosures(report: dict) -> list[str]:
     return lines
 
 
-def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str]:
+def gate_decisions(candidates: list[dict], state_file: Path | None = None,
+                   snapshot_file: Path | None = None) -> tuple[list[dict], str]:
     """Score each candidate's role value through the capture skill's decision gate.
 
     Returns `(survivors, note)`. Every failure mode except `redactor-unavailable` and a bad
@@ -1282,11 +1335,23 @@ def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str]:
               "skipped and the export continued.", file=sys.stderr)
         return candidates, "decisions: skipped (gate script missing)"
 
-    state_file = Path(os.environ.get("MIMIS_DECISIONS_STATE",
-                                     ".context/decisions-ledger.json"))
+    # Precedence: the environment override first, then the path the caller derived, then the stable
+    # default. The override outranks the derived path deliberately -- pointing MIMIS_DECISIONS_STATE at
+    # a temp file has to keep the whole run, ledger and snapshot, out of the working tree, and a
+    # derived path passed in by the caller would otherwise silently outrank it.
+    env_state = os.environ.get("MIMIS_DECISIONS_STATE")
+    state_file = Path(env_state) if env_state else (
+        state_file or DECISIONS_CONTEXT / "decisions-ledger.json")
+    if snapshot_file is None:
+        snapshot_file = snapshot_for(state_file, dt.datetime.now(dt.timezone.utc))
+    # Unconditional: the line above resolves `None`, so a guard here tested a condition that could
+    # never be false. It read as though a caller could reach the gate with no snapshot at all, which
+    # is exactly the belief that let the caller-side print recompute a path the gate had not used.
+    gate_argv = [sys.executable, "-B", str(DECISIONS_GATE), "score",
+                 "--state-file", str(state_file), "--snapshot-file", str(snapshot_file)]
     try:
         proc = subprocess.run(
-            [sys.executable, "-B", str(DECISIONS_GATE), "score", "--state-file", str(state_file)],
+            gate_argv,
             input=json.dumps(candidates), capture_output=True, text=True, encoding="utf-8",
             timeout=GATE_TIMEOUT_SECONDS,
         )
@@ -1330,6 +1395,14 @@ def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str]:
 
     for line in _ledger_disclosures(report):
         print(line, file=sys.stderr)
+
+    # Printed from the gate's own report, which is the authority on what it actually used. Recomputing
+    # the path here would produce a *different* answer from the one passed in: scoring takes seconds
+    # to minutes between the two `now()` calls, so a recomputed timestamp names a file that does not
+    # exist. Verified before this change: the export printed `...184017...` and wrote `...184012...`.
+    used = [f"budget ledger {report['stateFile']}" if report.get("stateFile") else None,
+            f"run snapshot {report['snapshotFile']}" if report.get("snapshotFile") else None]
+    print("  decisions: " + " | ".join(part for part in used if part))
 
     if report.get("outcome") == "disabled":
         return candidates, "decisions: disabled"
@@ -1422,6 +1495,13 @@ def gate_decisions(candidates: list[dict]) -> tuple[list[dict], str]:
         note += f", {unscored} not scored and kept (a failed gate is never a low score)"
     if malformed:
         note += f", {malformed} unreadable verdict(s) ignored (the affected records were kept)"
+    # A record the ledger could not key is one whose attempt budget does not survive this call. It is
+    # reported rather than absorbed, because the symptom is invisible otherwise: the gate scores
+    # every run, looks healthy, and the bound it appears to enforce was never applied.
+    ephemeral = sum(1 for r in records if r.get("outcome") == "scored" and not r.get("durable"))
+    if ephemeral:
+        note += (f", {ephemeral} record(s) scored without a durable identity, so their attempt budget "
+                 f"does not persist (a record with no subject, description or name is keyed by position)")
     return survivors, note
 
 
@@ -2444,8 +2524,18 @@ def cmd_export(args: argparse.Namespace) -> int:
         # The gate's attempt ledger keys a record by its group as well as its subject; the group is
         # not resolved yet, so the binding it will be resolved from stands in for it (issue 186).
         ledger_group = {key: binding.get(key) for key in ("repository", "scope", "initiative", "tickets")}
-        gated = [dict(c, group=ledger_group) for c in clean]
-        clean, decision_note = gate_decisions(gated)
+        # The gate keys its attempt ledger on `subject`, falling back to `description` then `name`,
+        # and a record carrying none is scored as a first attempt on **every** call -- its budget is
+        # for that call alone and nothing is ever written to disk. That is how a foreign-prose export,
+        # whose candidates carry `description: None` by construction, ran the gate correctly and still
+        # left no ledger: the bound it appeared to enforce was never applied to anything.
+        #
+        # The subject is added to the gate's **copy**, not to the candidate. Capture and dedup key on
+        # the store's own subject, and moving that is a decision about capture, not about a ledger.
+        gated = [dict(c, group=ledger_group, subject=_subject(c)) for c in clean]
+        budget_file = budget_ledger_path(getattr(args, "product_name", None),
+                                         binding.get("repository"), binding.get("initiative"))
+        clean, decision_note = gate_decisions(gated, budget_file)
         held_verdicts = [(c, c["_gateVerdict"]) for c in gated if "_gateVerdict" in c]
     else:
         decision_note = probe_decisions(len(clean))
