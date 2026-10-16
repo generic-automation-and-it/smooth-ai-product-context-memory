@@ -471,7 +471,7 @@ preflight is exact-match recall over the subject, so a claim body would change n
    "kind": "architecture", "facets": ["storage"], "tags": [], "status": "approved",
    "confidence": 80, "content": "…", "sources": [], "validFrom": "2026-09-14T00:00:00Z",
    "validUntil": null, "summaryModel": "…", "summaryPromptVersion": "…"}
-], "links": [], "labelsProposed": []}
+], "links": [], "labelsProposed": [], "ticketReferences": []}
 ```
 
 `uuid` non-null is the version-bump target, and it must be owned by the request's `groupUuid` — a version
@@ -482,14 +482,34 @@ write share identities and links can target any new item. Legacy clients may omi
 server-identified create. `groupUuid` sits on the **request**, never on an item. `--dryrun` appends
 `?dryRun=true`.
 
+`ticketReferences` (`[{"provider": "github", "key": "231", "reason": "…"}]`) declares an
+`(Memory)-[:ABOUT]->(Ticket)` reference to a ticket the group does **not** own — the shared-ticket case
+for a WET copy in a second initiative. The ticket must have an owner at write time; a ticket the
+memory's own group owns is refused. A reference grants no scope consent: a `query --ticket` that reaches
+a memory through a reference still applies the non-group-context scope plan.
+
+### `ticket-references` — add references to existing memories
+
+```json
+{"uuids": ["<memory-uuid>"], "tickets": [{"provider": "github", "key": "231", "reason": "…"}],
+ "reason": "cross-initiative copy"}
+```
+
+`POST /api/context/memories/ticket-references` adds the same `ABOUT` edge to memories already stored,
+idempotently (a repeated `(memory, ticket)` is counted `alreadyPresent`, not created). Per-ticket
+`reason` overrides the request-level one.
+
 ### `query` — recall
 
 ```json
 {"query": null, "facets": [], "tags": [], "kind": null, "status": null, "scopeDimension": null,
  "groupUuid": null, "ticketProvider": null, "ticketKey": null, "repo": null,
  "initiativeName": null, "includeProposed": true, "currentOnly": true, "asOf": null,
- "limit": 200, "facetMatchMode": "any"}
+ "limit": 200, "facetMatchMode": "any", "productName": null}
 ```
+
+A `query` carrying a ticket returns the owner group's memories **and** the memories referencing that
+ticket; each item carries `ticketMatch` (`"owner"` or `"reference"`, null when no ticket was supplied).
 
 `facetMatchMode` — **singular `facet`**. `"facetsMatchMode"` is rejected as an unknown property.
 

@@ -18,6 +18,7 @@ Read [`scripts/`](./scripts) first — the scripts and JSON data used by more th
 
 | Date | Change | Ref |
 | :---- | :---- | :---- |
+| 2026-10-16 | `context_memory_client.py` gained `add-ticket-references` (`POST /api/context/memories/ticket-references`), a write route; `redact.py` scrubs `ticketReferences[].reason` in the `set` body and declares the `add_ticket_references` write spec. | HLD-003 LADR-09 |
 | 2026-10-15 | Ralph loop: an error body that cannot be read is still classified; `main` catches `ValueError` like the read client's does; the raw-body banner is unconditional; the receipt's item filter tests the item, not the payload; `park` states what a resolution does; a marker that cannot be moved aside is refused, not overwritten | — |
 | 2026-10-14 | Folder created; B2 move landed | #222 |
 | 2026-10-15 | consumer review 5538013336: `review_queue.py` serialises every write behind an exclusively-created lock file (portable | — |

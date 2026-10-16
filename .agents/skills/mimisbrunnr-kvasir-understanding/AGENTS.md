@@ -53,6 +53,7 @@ These IDs are HLD-007's; `SKILL.md`, the README, the scripts and the tests cite 
 
 | Date | Change | Ref |
 | :---- | :---- | :---- |
+| 2026-10-16 | `export --reference-tickets <list>` sends the tickets as `ticketReferences` (ABOUT) instead of binding them for group resolution; the group binds `--tickets` when given, else a deterministic synthetic owner ticket `local:wet-<initiative-slug>-<provider>-<key>` so a re-export reuses one group. One `relates_to` twin link per candidate whose exact preflight match sits in the referenced ticket's owner group — mechanical (explicit flag + exact subject), never a semantic judgement. `initiative_mismatch_refusal` gained a fourth option; `import --table` renders a `Match` column when the query was ticket-filtered. | HLD-003 LADR-09 |
 | 2026-10-15 | Ralph loop: the queue record's session comes from the marker's resolver, not a third one; the write-only `_supersession` flag is gone | — |
 | 2026-09-19 | `--all` with `--asof` counts both omission reasons separately | — |
 | 2026-09-19 | Store-export import is understanding-only | — |

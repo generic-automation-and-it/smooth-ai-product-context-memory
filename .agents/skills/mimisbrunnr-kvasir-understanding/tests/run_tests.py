@@ -1500,6 +1500,122 @@ class ExportOrchestrationTests(unittest.TestCase):
                          [{"provider": "local", "key": "roadmap", "url": ""}])
 
 
+class ExportReferenceTicketTests(unittest.TestCase):
+    """`export --reference-tickets` sends ABOUT references and reuses one synthetic-owner group.
+
+    A WET copy under a second initiative binds its own (synthetic) ticket for group resolution and
+    sends the shared ticket as a reference, so `query --ticket <shared>` finds it. A ticketless export
+    creates a new group every run, which is what the synthetic owner prevents.
+    """
+
+    def _with_gates(self, fn):
+        originals = (uc.gate_redaction, uc.gate_atomicity, uc.store_query,
+                     uc.initiative_exists, uc.resolve_group, uc._run_capture_client)
+        uc.gate_redaction = lambda texts: (list(texts), {})
+        uc.gate_atomicity = lambda c: [{"verdict": "simple", "signals": []} for _ in c]
+        uc.initiative_exists = lambda name: (True, "ok")
+        uc.resolve_group = lambda b, n, d, dryrun: ((None if dryrun else {"groupUuid": "g-wet",
+                                                                          "created": False}),
+                                                    "dry-run" if dryrun else "ok")
+        calls = []
+
+        def record(script, argv, payload):
+            calls.append((tuple(argv), payload))
+            if argv[0] == "preflight":
+                return 0, json.dumps({"candidates": []}), ""
+            return 0, json.dumps({"groupUuid": "g-wet", "created": False}), ""
+
+        uc._run_capture_client = record
+        try:
+            return fn(calls)
+        finally:
+            (uc.gate_redaction, uc.gate_atomicity, uc.store_query,
+             uc.initiative_exists, uc.resolve_group, uc._run_capture_client) = originals
+
+    def test_reference_export_sends_references_and_a_synthetic_owner_ticket(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md", "The decision-gate ledger records each score.")
+
+            def body(calls):
+                rc, out, _ = run(["export", src, "--initiative", "Mímisbrunnr-MVP",
+                                  "--reference-tickets", "github:231"])
+                self.assertEqual(rc, 0)
+                sets = [p for a, p in calls if a[0] == "set"]
+                self.assertTrue(sets, "a write must reach `set`")
+                self.assertEqual(sets[-1]["ticketReferences"],
+                                 [{"provider": "github", "key": "231",
+                                   "reason": "WET copy across initiatives of github:231"}])
+                # The synthetic owner ticket is what the group binds, not the shared one.
+                self.assertIn("local:wet-mimisbrunnr-mvp-github-231", out)
+                return out
+
+            self._with_gates(body)
+
+    def test_a_second_reference_export_reuses_the_same_synthetic_owner(self):
+        # Two runs with the same initiative + reference resolve the same synthetic owner ticket, so the
+        # group (and therefore the memories) is reused rather than duplicated.
+        tickets = []
+        for _ in range(2):
+            with tempfile.TemporaryDirectory() as tmp:
+                src = write(tmp, "notes.md", "The decision-gate ledger records each score.")
+
+                def body(calls):
+                    rc, _, _ = run(["export", src, "--initiative", "Mímisbrunnr-MVP",
+                                    "--reference-tickets", "github:231"])
+                    self.assertEqual(rc, 0)
+                    tickets.append([p for a, p in calls if a[0] == "resolve-group"][-1])
+                    return rc
+
+                self._with_gates(body)
+        self.assertEqual(tickets[0], tickets[1])
+
+    def test_a_reference_dry_run_writes_nothing_and_shows_the_plan(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md", "The decision-gate ledger records each score.")
+
+            def body(calls):
+                rc, out, _ = run(["export", "--dryrun", src, "--initiative", "Mímisbrunnr-MVP",
+                                  "--reference-tickets", "github:231"])
+                self.assertEqual(rc, 0)
+                invoked = [a[0] for a, _ in calls]
+                self.assertNotIn("set", invoked)
+                self.assertNotIn("resolve-group", invoked)
+                self.assertIn("local:wet-mimisbrunnr-mvp-github-231", out)
+                self.assertIn("github:231", out)
+                self.assertIn("nothing was written", out.lower())
+                return out
+
+            self._with_gates(body)
+
+    def test_reference_tickets_without_initiative_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md", "The decision-gate ledger records each score.")
+
+            def body(calls):
+                rc, _, err = run(["export", "--dryrun", src, "--reference-tickets", "github:231"],
+                                 expect=1)
+                self.assertEqual(rc, 1)
+                self.assertIn("--initiative", err)
+                return err
+
+            self._with_gates(body)
+
+    def test_refusal_offers_the_reference_option(self):
+        binding = {"initiative": "Mímisbrunnr-MVP"}
+        group = {"groupUuid": "g-1", "created": False, "initiativeName": "Mímisbrunnr-Search"}
+        text = uc.initiative_mismatch_refusal(binding, group, uc.INITIATIVE_SOURCE_FLAG, True)
+        self.assertIsNotNone(text)
+        self.assertIn("--reference-tickets", text)
+
+    def test_table_shows_a_match_column_only_when_a_ticket_filter_was_used(self):
+        with_ticket = [{"name": "A", "statement": "s", "kind": "understanding", "ticketMatch": "reference"}]
+        without = [{"name": "A", "statement": "s", "kind": "understanding"}]
+        rows_with, _ = uc.render_table(with_ticket, True, None, None)
+        rows_without, _ = uc.render_table(without, True, None, None)
+        self.assertIn("Match", rows_with[0])
+        self.assertNotIn("Match", rows_without[0])
+
+
 class ExportVersionBumpTests(unittest.TestCase):
     """A candidate whose subject already exists in the export's group is a version bump, not a create
     (the preflight match's uuid is fed back as the item's `uuid`, XOR `createUuid`). A same-subject

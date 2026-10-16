@@ -109,6 +109,7 @@ Read [`SKILL.md`](./SKILL.md) first — switches, store layout, the reconcile/ex
 
 | Date | Change | Ref |
 | :---- | :---- | :---- |
+| 2026-10-16 | `redact.py` re-copied from `_mimisbrunnr-shared/scripts/`: the `set` body scrubs `ticketReferences[].reason` and the `add_ticket_references` write spec is declared. | HLD-003 LADR-09 |
 | 2026-10-15 | Ralph loop: a non-UTF-8 unit and a unit without a slug are reported rather than raised; an unscoreable decision row is disclosed; the advisory ledger is a context manager; `unit_record` emits the key `record_state` reads | — |
 | 2026-09-19 | Initial version | — |
 | 2026-09-19 | Term provenance recorded so the name is not genericized into session logs | — |
