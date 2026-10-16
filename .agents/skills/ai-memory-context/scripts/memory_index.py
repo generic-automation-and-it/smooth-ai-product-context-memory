@@ -381,12 +381,49 @@ def load_units(store: Path) -> tuple[list[dict], list[dict], list[str]]:
         for unit_file in direct:
             records.append(_record(unit_file, run, ""))
 
+    problems.extend(case_collisions(records))
     current, superseded = group_versions(records)
     for record in current:
         problems.extend(record["problems"])
     return ([r["unit"] for r in current if r["unit"]],
             [r["unit"] for r in superseded if r["unit"]],
             problems)
+
+
+def case_collisions(records: list[dict]) -> list[str]:
+    """Memory files that are distinct names but the same entry on some filesystem.
+
+    On a case-insensitive filesystem (the default on macOS and Windows) `Deploy-Pipeline.memory.md`
+    and `deploy-pipeline.memory.md` are one file, and the second write silently replaces the first.
+    Ordinal comparison cannot see it, so neither can the version grouping: the two are treated as
+    unrelated memories and both stay current.
+
+    Running here catches a store that **already holds** a collision and makes it reportable. It cannot
+    undo an overwrite — the second write is gone by the time this runs. What prevents the overwrite is
+    the export procedure: a slug differing only by case from one already in the store is an
+    *improved* copy of that slug, not a new one, so it must reuse the existing name.
+
+    `casefold` rather than `lower` because it is the full Unicode case-folding operation, and it is
+    what a filesystem compares: 'ss' folds from 'ss' and 'fi' from 'fi', so two names `lower` keeps
+    apart are one file on disk.
+    """
+    problems = []
+    for field, kind in (("path", "memory file"), ("category", "category folder")):
+        buckets: dict[str, set[str]] = {}
+        for record in records:
+            value = str(record.get(field) or "")
+            if value:
+                buckets.setdefault(value.casefold(), set()).add(value)
+        for names in sorted(buckets.values(), key=sorted):
+            # One distinct name cannot collide with itself; only a genuine disagreement is a problem.
+            if len(names) > 1:
+                rendered = ", ".join(f"'{n}'" for n in sorted(names))
+                problems.append(
+                    f"{rendered} differ only by case and are one file on a case-insensitive "
+                    f"filesystem — rename so each {kind} is distinct, or the later write silently "
+                    f"replaces the earlier one"
+                )
+    return problems
 
 
 def version_key(record: dict) -> tuple[str, str, str, str]:
