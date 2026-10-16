@@ -4399,6 +4399,27 @@ class SessionMarkerTests(unittest.TestCase):
                 client.cmd_set(SimpleNamespace(payload=None, dryrun=True, export_all=False,
                                                session=None))
 
+    def test_send_receipt_records_the_scrubbed_subject(self):
+        """The receipt describes the bytes SENT. `scrub_or_refuse` returns a copy, so a subject the
+        redactor altered reached the marker file on disk in its original form."""
+        import session_marker as sm
+        os.environ["CLAUDE_CODE_SESSION_ID"] = "ses-odin-scrub"
+        secret = "AKIAIOSFODNN7EXAMPLE"
+        payload = {"groupUuid": "g-1", "items": [{"createUuid": "new-id-scrub",
+                                                  "description": f"Key {secret} rotated",
+                                                  "statement": "CockroachDB stores it."}]}
+        args = SimpleNamespace(payload=None, dryrun=False, export_all=False, session=None)
+        with patch.object(client, "read_payload", return_value=payload), \
+                patch.object(client, "_request", return_value={"created": 1}), \
+                redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as err:
+            client.cmd_set(args)
+        self.assertIn("Marker: set (export,", err.getvalue())
+        marker = sm.load_marker("odin", "ses-odin-scrub")
+        recorded = json.dumps(marker, ensure_ascii=False)
+        self.assertNotIn(secret, recorded, "the marker persisted the unscrubbed subject")
+        self.assertIn("<redacted-aws-access-key>", recorded,
+                      "the receipt must record the scrubbed subject")
+
     def test_send_nomarker_writes_but_marks_nothing(self):
         import session_marker as sm
         os.environ["CLAUDE_CODE_SESSION_ID"] = "ses-odin-h"

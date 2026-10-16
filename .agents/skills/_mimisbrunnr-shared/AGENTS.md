@@ -18,8 +18,10 @@ Read [`scripts/`](./scripts) first — the scripts and JSON data used by more th
 
 | Date | Change | Ref |
 | :---- | :---- | :---- |
+| 2026-10-15 | Ralph loop: an error body that cannot be read is still classified; `main` catches `ValueError` like the read client's does; the raw-body banner is unconditional; the receipt's item filter tests the item, not the payload; `park` states what a resolution does; a marker that cannot be moved aside is refused, not overwritten | — |
 | 2026-10-14 | Folder created; B2 move landed | #222 |
 | 2026-10-15 | consumer review 5538013336: `review_queue.py` serialises every write behind an exclusively-created lock file (portable | — |
+| 2026-10-15 | Consumer review 5539567320: `scrubbed_send` returns the scrubbed payload so the `set` receipt records what was **sent**; a resolution closes the hold it follows, so a re-held candidate is open again and counts toward the cap | — |
 | 2026-10-15 | Review-loop simplifications | — |
 | 2026-10-15 | Consumer review 5535929651 closed in the shared scripts | — |
 | 2026-10-15 | Cut to HLD shape: SKILL.md pointer + non-SKILL.md traps only | — |

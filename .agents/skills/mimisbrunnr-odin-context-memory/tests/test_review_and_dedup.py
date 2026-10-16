@@ -8,7 +8,10 @@ closed menu never accepts free text, a down model never reads as "no duplicate")
 live model cannot pin.
 """
 
+import argparse
+import contextlib
 import http.server
+import io
 import json
 import os
 import socket
@@ -201,6 +204,20 @@ class ReviewQueueTests(unittest.TestCase):
         text = self.queue.read_text(encoding="utf-8")
         self.assertNotIn("hunter2", text)
         self.assertIn("rewritten:", text)
+
+    def test_a_resolution_closes_only_the_hold_it_followed(self):
+        """A candidate held again after it was resolved is open again: it lists as open, and its new
+        hold counts toward the cap. Resolving by id alone left it reading resolved and out of the count,
+        so a reviewer was told the queue had room while a live hold sat in it."""
+        eid = rq.append(self._entry())
+        self.assertEqual(self._run(["resolve", eid, "--choice", "drop"]), 0)
+        rq.append(self._entry())
+        self.assertEqual(rq.entry_count(), 1, "the re-held candidate is an unresolved entry again")
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            self.assertEqual(rq.cmd_list(argparse.Namespace(held_by=None, table=True)), 0)
+        states = [line.split("\t")[3] for line in buffer.getvalue().strip().splitlines()]
+        self.assertEqual(states, ["resolved", "open"])
 
     def test_a_resolved_entry_frees_its_cap_slot(self):
         """The cap counts unresolved entries: resolving one is what the refusal tells a reviewer to do."""

@@ -236,7 +236,9 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
   differs from theirs, are refused with nothing sent — export each scope separately with a matching
   `--scope`.
 - **Every gate is a gate.** A redactor that cannot run, an atomicity detector that cannot run, or a
-  write's `set --dryrun` veto refusal all stop with nothing written rather than bypassing the boundary.
+  write's `set --dryrun` veto refusal all stop that batch with nothing of it written rather than
+  bypassing the boundary. Earlier chunks of a multi-chunk write are already persisted, so the refusal
+  is reported per batch, never as a rollback of the whole export.
   The `MAX_CANDIDATES` (20) cap is not a refusal: an over-cap batch auto-splits into consecutive ≤20
   chunks, each processed end to end (its own preflight, its own `set --dryrun` veto, its own write) and
   reported as `Batch k/N: n candidate(s)`; a multi-chunk write is disclosed as non-atomic across

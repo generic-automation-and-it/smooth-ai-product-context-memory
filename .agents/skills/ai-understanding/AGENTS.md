@@ -109,6 +109,7 @@ Read [`SKILL.md`](./SKILL.md) first — switches, store layout, the reconcile/ex
 
 | Date | Change | Ref |
 | :---- | :---- | :---- |
+| 2026-10-15 | Ralph loop: a non-UTF-8 unit and a unit without a slug are reported rather than raised; an unscoreable decision row is disclosed; the advisory ledger is a context manager; `unit_record` emits the key `record_state` reads | — |
 | 2026-09-19 | Initial version | — |
 | 2026-09-19 | Term provenance recorded so the name is not genericized into session logs | — |
 | 2026-09-19 | Eval | — |
@@ -164,6 +165,8 @@ Read [`SKILL.md`](./SKILL.md) first — switches, store layout, the reconcile/ex
 | 2026-10-14 | WET gate copy's parity target moved to the shared folder | #222 |
 | 2026-10-14 | WET gate copy takes the subject-less ledger fix | #222 |
 | 2026-10-14 | Session marker: import sets the export boundary (HLD-007 LADR-11) | — |
+| 2026-10-15 | Consumer review 5539567320: a marked import records `--slug` per unit — `--selector` supplements and never replaces it, since the exclusion is by slug | — |
+| 2026-10-15 | Consumer review 5539567320: marker tests resolve paths with `marker_path`, and the reference-only case pins the entry's key set as well as each item's | — |
 | 2026-10-15 | consumer review 5538013336: `session_marker.py` re-copied (digest suffix for sanitised IDs, stored-session check) | — |
 | 2026-10-15 | Consumer review 5535929651: `understanding_index.py` takes back the strict ISO-date check on `updated` / `provenance.learned`… | — |
 | 2026-10-15 | Cut to HLD shape: SKILL.md pointer + non-SKILL.md traps only | — |
