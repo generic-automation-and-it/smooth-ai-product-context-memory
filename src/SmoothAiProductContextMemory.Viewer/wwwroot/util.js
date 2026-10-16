@@ -26,3 +26,11 @@ export function fmtValidity(memory) {
 export function plural(count, singular, pluralForm) {
   return count === 1 ? singular : pluralForm;
 }
+
+// POSIX single-quoting: the only escape inside a single-quoted string is an ended quote and a
+// literal quote, so a value that carries shell metacharacters cannot become part of the command.
+// A copy-paste command is a command someone will run — quoting is what makes it the value and
+// not an instruction.
+export function shellQuote(value) {
+  return `'${String(value ?? '').replace(/'/g, `'\\''`)}'`;
+}

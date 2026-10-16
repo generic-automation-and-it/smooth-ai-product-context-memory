@@ -83,34 +83,70 @@ _refuse_if_write_token_present()
 import context_memory_client as client  # noqa: E402
 import dedup as dedup_module  # noqa: E402
 
-_QUEUE_DEFAULT_LIMIT = 500
+_QUEUE_DEFAULT_LIMIT = 200
+# The queue is a memory *query*, so it obeys the query cap (`MemorySearchDefaults.MaxLimit`), not
+# the recall-feedback cap: a limit above it is a 400 from the store, which surfaces here as a 502
+# `store-refused` and in the SPA as "the bridge returned HTTP 502".
+_QUERY_MAX_LIMIT = 200
+# The queue's kind narrowing. `None` means no kind predicate — the full proposed queue.
+_QUEUE_MAX_KIND_LENGTH = 64
 # Cap the per-blob read subprocess. The capture client's HTTP timeout is 30s;
 # a blob read that exceeds this hung the bridge's HTTP handler indefinitely.
 _BLOB_TIMEOUT = 30
 
 
-def _review_queue_payload(limit):
+def _review_queue_payload(limit, kind=None):
     """LADR-10: the queue is a query for proposed memories.
 
     `currentOnly: false` is deliberate — a proposed version superseded by a
     newer proposed is still reviewable, and the reviewer wants the full
     proposed history. `includeProposed: true` is the read client's switch
     (the default excludes proposed so they don't leak into browse/detail).
+
+    `kind` narrows the queue to proposals of one kind, which is the Console's
+    tab-level kind scope. Omitted, not sent as null: the store reads a missing
+    `kind` as breadth.
     """
-    return {
+    payload = {
         "status": "proposed",
         "includeProposed": True,
         "currentOnly": False,
         "limit": limit,
     }
+    if kind:
+        payload["kind"] = kind
+    return payload
 
 
-def _load_queue(limit, token=None):
+def _parse_queue_params(query):
+    """Parse `?limit=N&kind=K` into the queue's arguments.
+
+    The limit is clamped to the *query* cap. Over-cap is a refusal, not a
+    silent truncation: the store validates `Limit` and answers 400, and the
+    bridge must not be the thing that turns a 400 into a 502.
+    """
+    limit = _QUEUE_DEFAULT_LIMIT
+    kind = None
+    for part in query.split("&"):
+        name, _, value = part.partition("=")
+        if name == "limit":
+            try:
+                limit = max(1, min(_QUERY_MAX_LIMIT, int(value)))
+            except ValueError:
+                raise ValueError("limit must be an integer")
+        elif name == "kind":
+            kind = value.strip() or None
+            if kind and len(kind) > _QUEUE_MAX_KIND_LENGTH:
+                raise ValueError(f"kind must be at most {_QUEUE_MAX_KIND_LENGTH} characters")
+    return limit, kind
+
+
+def _load_queue(limit, kind, token=None):
     # Direct _request call rather than `cmd_query`: the library function
     # `print`s the response to stdout, which would contaminate the HTTP body
     # the bridge is about to write. _request is the no-side-effects seam.
     resp = client._request("POST", "/api/context/query",
-                           payload=_review_queue_payload(limit), token=token)
+                           payload=_review_queue_payload(limit, kind), token=token)
     if not isinstance(resp, dict):
         raise ValueError("query response was not a JSON object")
     items = resp.get("items")
@@ -259,20 +295,20 @@ class Handler(BaseHTTPRequestHandler):
         if not token:
             self._reply(401, {"error": "unauthorized", "detail": "missing bearer token"})
             return
-        # Parse optional `?limit=N` (default 500, max 5000 to mirror the
-        # recall-feedback never-recalled endpoint's cap from G5).
+        # `?limit=N&kind=K`, both optional. The limit is clamped to the query cap
+        # (`_parse_queue_params`) so the queue cannot ask the store for a page it
+        # will refuse; an unparseable value is a 400 naming the field, not a 502.
         limit = _QUEUE_DEFAULT_LIMIT
+        kind = None
         if "?" in self.path:
             _, _, query = self.path.partition("?")
-            for part in query.split("&"):
-                if part.startswith("limit="):
-                    try:
-                        limit = max(1, min(5000, int(part.split("=", 1)[1])))
-                    except ValueError:
-                        self._reply(400, {"error": "bad-input", "detail": "limit must be an integer"})
-                        return
+            try:
+                limit, kind = _parse_queue_params(query)
+            except ValueError as exc:
+                self._reply(400, {"error": "bad-input", "detail": str(exc)})
+                return
         try:
-            items = _load_queue(limit, token)
+            items = _load_queue(limit, kind, token)
         except client.ClientError as exc:
             _log(f"review-queue: refused ({exc.status_text})")
             self._reply(502, {"error": "store-refused", "detail": exc.status_text, "status": exc.status})
@@ -282,7 +318,7 @@ class Handler(BaseHTTPRequestHandler):
             self._reply(503, {"error": "store-unreachable", "detail": type(exc).__name__})
             return
         _log(f"review-queue: {len(items)} item(s)")
-        self._reply(200, {"items": items, "limit": limit})
+        self._reply(200, {"items": items, "limit": limit, "kind": kind})
 
     def _handle_dedup_preview(self):
         body = self._read_json()

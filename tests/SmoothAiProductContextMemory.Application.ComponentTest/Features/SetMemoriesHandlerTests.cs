@@ -477,6 +477,11 @@ public sealed class SetMemoriesHandlerTests(AspireFixture aspire) : HandlerTestB
 
         public Task<IReadOnlyList<Guid>> ListAboutAsync(string provider, string key, CancellationToken cancellationToken) =>
             inner.ListAboutAsync(provider, key, cancellationToken);
+
+        public Task<IReadOnlyList<MemoryTicketReference>> FindAboutAsync(
+            IReadOnlyCollection<Guid> memoryUuids,
+            CancellationToken cancellationToken) =>
+            inner.FindAboutAsync(memoryUuids, cancellationToken);
     }
 
     private SetMemories.Handler NewHandler() =>
