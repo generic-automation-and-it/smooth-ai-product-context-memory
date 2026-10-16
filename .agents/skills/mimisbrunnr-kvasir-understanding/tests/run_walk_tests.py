@@ -39,10 +39,11 @@ Measured run (recorded 2026-09-30, a cold agent per surface, 0 tools used, score
   load_all      : present 4/4 correct · absent 1/1 declined · 0 confabulations · 2006 chars (~502 est tokens)
   dossier_slice : present 4/4 correct · absent 1/1 declined · 0 confabulations · 2238 chars (~560 est tokens)
 
-Re-measured 2026-10-01, after the store-load cap (`--max-chars`, default 12000 chars) was added: the
-sizes are unchanged — 1682 / 2006 / 2238 chars — because every surface is far under the cap, so the cap
-does not fire on a representative load. Both runs are recorded here; the cap bounds the pathological
-corpus (and cuts whole records, reported by identity), not this one. Every surface is also well under
+Re-measured 2026-10-01, after the store-load cap (`--max-chars`, default 12000 chars at the time; raised
+to 120000 on 2026-10-16) was added: the sizes are unchanged — 1682 / 2006 / 2238 chars — because every
+surface is far under the cap, so the cap does not fire on any of them. Both runs are recorded here; the
+cap bounds the pathological corpus (and cuts whole records, reported by identity), not this one. Every
+surface is also well under
 the ICM 8k-token band, so there is no band finding either. The two are independent: the ICM band is a
 finding threshold, the cap is a store-load budget.
 """
