@@ -158,7 +158,7 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
 python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding_client.py \
   export [<input> | --input <path>] [--dryrun] [--all] [--nomarker] [--session ID] \
   [--tickets TICKET,...] [--tags TAG,...] [--repository REPO] [--scope scope:id] \
-  [--initiative NAME] [--name NAME] [--body TEXT] [--heimdallr true]
+  [--initiative NAME] [--product-name NAME] [--name NAME] [--body TEXT] [--heimdallr true]
 ```
 
 - `export` orchestrates the capture skill end to end — redaction gate, atomicity gate, the optional value
@@ -231,6 +231,22 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
   default, below) fills repository and branch tickets that neither supplied. So an export with **no
   explicit selector** can still be bound; only when the input, the flags and autofill all supply nothing
   is no association made (`--heimdallr false` skips autofill).
+- **`--product-name` declares a graph edge, not a field on a memory.** The store keeps products in a
+  registry linked to initiatives and repos, so the switch declares `(Product)-[:HAS_INITIATIVE]->
+  (Initiative)` for the initiative this export binds to — **after** the memories are written. With no
+  initiative bound it declares `(Product)-[:HAS_REPO]->(Repo)` instead — the common case, since
+  Heimdallr autofill binds the repository from the git remote by default, so a bare `--product-name`
+  inside a checkout already has a repo anchor. When **both** are bound only
+  the initiative is declared, because either anchor alone makes the memory "of product X" and the repo
+  edge is the one that can conflict (a repo belongs to exactly one product, so it answers `409` naming
+  the owner, where the initiative edge can only `404`). The link is not one transaction with the
+  memories: one that fails leaves them written, and the export exits non-zero rather than reporting
+  success. The product must already be registered — nothing is created implicitly, and an unknown one
+  is a `404` naming `upsert-product-name` — so an export binding neither anchor is refused before
+  anything is sent. That refusal is a backstop for `--heimdallr false` with no `--initiative` and no
+  `--repository`, not a normal path: with autofill on, a checkout supplies the repo. A dry run reports
+  it from a **read** of the register, so a preview still needs no write credential. The spelling
+  `--productname` is accepted as an alias.
 - **A store export keeps its records' scope.** With no `--scope`, a single scope shared by the source
   records becomes the group's scope and is printed. Records in more than one scope, or a `--scope` that
   differs from theirs, are refused with nothing sent — export each scope separately with a matching

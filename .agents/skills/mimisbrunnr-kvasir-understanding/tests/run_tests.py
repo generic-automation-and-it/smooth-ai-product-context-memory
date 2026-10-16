@@ -1500,6 +1500,292 @@ class ExportOrchestrationTests(unittest.TestCase):
                          [{"provider": "local", "key": "roadmap", "url": ""}])
 
 
+class ProductLinkTests(unittest.TestCase):
+    """`--product-name` declares `(Product)-[:HAS_INITIATIVE]->(Initiative)` — a second write, after
+    the memories, with its own failure mode. The store keeps products in a graph registry rather than
+    as a field on a memory, so the edge is the only thing the switch can mean, and it needs an
+    initiative to point at. A preview reads the register instead of writing, so it stays credential-free.
+    """
+
+    def _with_gates(self, fn, *, products=("Mímisbrunnr",), link_rc=0, read_ok=True,
+                    group=None, link_err="404 product not registered"):
+        originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists, uc.resolve_group,
+                     uc._run_capture_client, uc.registered_products)
+        uc.gate_redaction = lambda texts: (list(texts), {})
+        uc.gate_atomicity = lambda c: [{"verdict": "simple", "signals": []} for _ in c]
+        uc.initiative_exists = lambda name: (True, "ok")
+        resolved = group or {"groupUuid": "g-1", "created": False}
+        uc.resolve_group = lambda b, n, d, dryrun: (
+            (None if dryrun else resolved), "dry-run" if dryrun else "ok")
+        uc.registered_products = lambda: (set(products), "ok") if read_ok else (None, "read failed")
+        calls = []
+
+        def record(script, argv, payload):
+            calls.append((argv[0], payload))
+            if argv[0].startswith("link-product-"):
+                field = "initiativeName" if argv[0] == "link-product-initiative" else "repo"
+                body = json.dumps({"productName": payload["productName"],
+                                   field: payload[field], "changed": True})
+                return link_rc, body, "" if link_rc == 0 else link_err
+            if argv[0] == "preflight":
+                return 0, json.dumps({"candidates": []}), ""
+            if argv[0] == "resolve-group":
+                return 0, json.dumps({"groupUuid": "g-1", "created": False}), ""
+            return 0, json.dumps({"created": 1, "versioned": 0, "linked": 0, "skipped": 0}), ""
+
+        uc._run_capture_client = record
+        try:
+            return fn(calls)
+        finally:
+            (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists, uc.resolve_group,
+             uc._run_capture_client, uc.registered_products) = originals
+
+    def test_a_write_declares_the_edge_after_the_memories(self):
+        """The order is the contract: an edge declared before a refused write would claim an
+        association for material that never landed."""
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
+
+            def body(calls):
+                rc, out, _ = run(["export", src, "--initiative", "Mímisbrunnr-MVP",
+                                  "--product-name", "Mímisbrunnr", "--heimdallr", "false"])
+                self.assertEqual(rc, 0)
+                verbs = [verb for verb, _ in calls]
+                self.assertIn("link-product-initiative", verbs)
+                self.assertLess(verbs.index("set"), verbs.index("link-product-initiative"),
+                                "the edge must follow the memories, never precede them")
+                payload = next(p for verb, p in calls if verb == "link-product-initiative")
+                self.assertEqual(payload["productName"], "Mímisbrunnr")
+                self.assertEqual(payload["initiativeName"], "Mímisbrunnr-MVP")
+                self.assertTrue(payload["reason"], "the store refuses an empty reason")
+                self.assertIn("linked 'Mímisbrunnr' -> initiative 'Mímisbrunnr-MVP'", out)
+                return out
+
+            self._with_gates(body)
+
+    def test_the_resolved_groups_own_initiative_is_what_the_edge_names(self):
+        """The mismatch guard fails open when the reply carries no usable initiative name, so the
+        binding is a proxy for the group's initiative, never a substitute. The reply is what was
+        actually resolved, and an edge naming the proxy would attach the product to the wrong node."""
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
+
+            def body(calls):
+                rc, _, _ = run(["export", src, "--initiative", "Bound", "--product-name",
+                                "Mímisbrunnr", "--heimdallr", "false"])
+                self.assertEqual(rc, 0)
+                payload = next(p for verb, p in calls if verb == "link-product-initiative")
+                self.assertEqual(payload["initiativeName"], "FromTheReply")
+                return payload
+
+            self._with_gates(body, group={"groupUuid": "g-1", "created": True,
+                                          "initiativeName": "FromTheReply"})
+
+    def test_a_dry_run_reports_the_edge_from_a_read_and_never_links(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
+
+            def body(calls):
+                rc, out, _ = run(["export", "--dryrun", src, "--initiative", "Mímisbrunnr-MVP",
+                                  "--product-name", "Mímisbrunnr", "--heimdallr", "false"])
+                self.assertEqual(rc, 0)
+                self.assertNotIn("link-product-initiative", [verb for verb, _ in calls],
+                                 "a preview may not reach the write client")
+                self.assertIn("would link 'Mímisbrunnr' -> initiative 'Mímisbrunnr-MVP'", out)
+                return out
+
+            self._with_gates(body)
+
+    def test_an_unregistered_product_is_reported_in_the_preview(self):
+        """A 404 at write time would otherwise be the first news of it."""
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
+
+            def body(calls):
+                rc, out, _ = run(["export", "--dryrun", src, "--initiative", "Mímisbrunnr-MVP",
+                                  "--product-name", "Absent", "--heimdallr", "false"])
+                self.assertEqual(rc, 0)
+                self.assertIn("'Absent' is not registered", out)
+                self.assertIn("upsert-product-name", out, "the exact command must be named")
+                return out
+
+            self._with_gates(body, products=("Mímisbrunnr",))
+
+    def test_a_repo_bound_export_declares_the_repo_edge(self):
+        """LADR-10 attributes a memory to a product through the group's initiative **or** its repo,
+        so an export that binds only a repo still has an anchor to declare."""
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
+
+            def body(calls):
+                rc, out, _ = run(["export", src, "--repository", "org/repo",
+                                  "--product-name", "Mímisbrunnr", "--heimdallr", "false"])
+                self.assertEqual(rc, 0)
+                payload = next(p for verb, p in calls if verb == "link-product-repo")
+                self.assertEqual(payload["repo"], "org/repo")
+                self.assertNotIn("initiativeName", payload)
+                self.assertTrue(payload["reason"], "the store refuses an empty reason")
+                self.assertIn("linked 'Mímisbrunnr' -> repo 'org/repo'", out)
+                return out
+
+            self._with_gates(body)
+
+    def test_an_initiative_is_preferred_over_a_repo_when_both_are_bound(self):
+        """Either anchor alone attributes the memory, so the second is not also claimed: the repo
+        edge is the one that can conflict (one product per repo), and it buys nothing here."""
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
+
+            def body(calls):
+                rc, _, _ = run(["export", src, "--initiative", "Mímisbrunnr-MVP",
+                                "--repository", "org/repo", "--product-name", "Mímisbrunnr",
+                                "--heimdallr", "false"])
+                self.assertEqual(rc, 0)
+                verbs = [verb for verb, _ in calls]
+                self.assertIn("link-product-initiative", verbs)
+                self.assertNotIn("link-product-repo", verbs)
+                return verbs
+
+            self._with_gates(body)
+
+    def test_a_refusal_after_a_written_batch_says_the_edge_was_not_declared(self):
+        """The edge is written once every batch has landed, so a later batch's refusal leaves the
+        earlier batch's memories written and associated with no product. The refusal message already
+        tells the operator those memories remain, so silence about the edge would read as it having
+        been made."""
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "store.json", json.dumps({"understandings": [
+                {"uuid": "11111111-1111-1111-1111-111111111111", "version": 1,
+                 "description": "First question", "statement": "First answer.",
+                 "kind": "understanding", "status": "approved", "sources": []},
+                {"uuid": "22222222-2222-2222-2222-222222222222", "version": 1,
+                 "description": "Second question", "statement": "Second answer.",
+                 "kind": "understanding", "status": "approved", "sources": []},
+            ]}))
+            original = (uc.MAX_CANDIDATES, uc.gate_redaction, uc.gate_atomicity,
+                        uc.initiative_exists, uc.resolve_group, uc._run_capture_client)
+            uc.MAX_CANDIDATES = 1
+            uc.gate_redaction = lambda texts: (list(texts), {})
+            uc.gate_atomicity = lambda c: [{"verdict": "simple", "signals": []} for _ in c]
+            uc.initiative_exists = lambda name: (True, "ok")
+            uc.resolve_group = lambda b, n, d, dryrun: ({"groupUuid": "g-1", "created": False}, "ok")
+            writes, links = [], []
+
+            def record(script, argv, payload):
+                if argv[0] == "preflight":
+                    return 0, json.dumps({"candidates": []}), ""
+                if argv[0] == "resolve-group":
+                    return 0, json.dumps({"groupUuid": "g-1", "created": False}), ""
+                if argv[0].startswith("link-product-"):
+                    links.append(argv[0])
+                    return 0, "{}", ""
+                if argv[0] == "set" and "--dryrun" not in argv:
+                    writes.append(1)
+                    return (0, json.dumps({"created": 1}), "") if len(writes) == 1 else (1, "", "veto")
+                return 0, json.dumps({"created": 1, "versioned": 0, "linked": 0, "skipped": 0}), ""
+
+            uc._run_capture_client = record
+            try:
+                rc, _, err = run(["export", src, "--initiative", "Mímisbrunnr-MVP",
+                                  "--product-name", "Mímisbrunnr", "--heimdallr", "false"])
+            finally:
+                (uc.MAX_CANDIDATES, uc.gate_redaction, uc.gate_atomicity,
+                 uc.initiative_exists, uc.resolve_group, uc._run_capture_client) = original
+            self.assertEqual(rc, 1)
+            self.assertEqual(len(writes), 2, "the first batch must have been written")
+            self.assertEqual(links, [], "the edge follows every batch, never a partial run")
+            self.assertIn("was NOT declared", err)
+
+    def test_the_replys_initiative_does_not_retarget_a_repo_bound_export(self):
+        """The anchor kind comes from what the caller bound, so the preview and the write that
+        follows it name the same node. A group reply carrying an initiative must not silently move a
+        repo-bound export onto the initiative edge — a dry run resolves no group and could never have
+        predicted it, so the receipt would contradict the preview the operator approved."""
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
+
+            def body(calls):
+                rc, _, _ = run(["export", src, "--repository", "org/repo",
+                                "--product-name", "Mímisbrunnr", "--heimdallr", "false"])
+                self.assertEqual(rc, 0)
+                verbs = [verb for verb, _ in calls]
+                self.assertIn("link-product-repo", verbs)
+                self.assertNotIn("link-product-initiative", verbs)
+                return verbs
+
+            self._with_gates(body, group={"groupUuid": "g-1", "created": True,
+                                          "initiativeName": "SomethingElse"})
+
+    def test_binding_neither_anchor_is_refused_naming_both_flags(self):
+        """The edge is Product->Initiative or Product->Repo, so an export binding neither has no node
+        to attach it to. Refused up front rather than after the memories have landed."""
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
+
+            def body(calls):
+                rc, _, err = run(["export", src, "--product-name", "Mímisbrunnr",
+                                  "--heimdallr", "false"])
+                self.assertEqual(rc, 1)
+                self.assertIn("REFUSED", err)
+                self.assertIn("--initiative", err)
+                self.assertIn("--repository", err)
+                self.assertEqual(calls, [], "nothing may be sent when the edge has no anchor")
+                return err
+
+            self._with_gates(body)
+
+    def test_a_repo_already_owned_by_another_product_fails_the_export(self):
+        """The repo edge answers 409 naming the owner, where the initiative edge can only 404. That
+        detail has to reach the operator — it is the only thing that explains the refusal."""
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
+
+            def body(calls):
+                rc, out, err = run(["export", src, "--repository", "org/repo",
+                                    "--product-name", "Mímisbrunnr", "--heimdallr", "false"])
+                self.assertEqual(rc, 1)
+                self.assertIn("WROTE", out, "the memories were written and the receipt says so")
+                self.assertIn("409", err)
+                self.assertIn("OtherProduct", err)
+                return err
+
+            self._with_gates(body, link_rc=1,
+                             link_err="409 repo already linked to product 'OtherProduct'")
+
+    def test_a_failed_link_leaves_the_memories_written_and_fails_the_export(self):
+        """The two are not one transaction. The memories stand, and the export still reports that a
+        requested step did not happen rather than exiting as though it had."""
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
+
+            def body(calls):
+                rc, out, err = run(["export", src, "--initiative", "Mímisbrunnr-MVP",
+                                    "--product-name", "Mímisbrunnr", "--heimdallr", "false"])
+                self.assertEqual(rc, 1)
+                self.assertIn("WROTE", out, "the memories were written and the receipt says so")
+                self.assertIn("product link failed", err)
+                self.assertIn("not rolled back", err)
+                return err
+
+            self._with_gates(body, link_rc=1)
+
+    def test_a_failed_register_read_is_not_read_as_an_absent_product(self):
+        """A down store must not be reported as "not registered" — that would send the operator to
+        register a product the store may already hold."""
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
+
+            def body(calls):
+                rc, out, _ = run(["export", "--dryrun", src, "--initiative", "Mímisbrunnr-MVP",
+                                  "--product-name", "Mímisbrunnr", "--heimdallr", "false"])
+                self.assertEqual(rc, 0)
+                self.assertIn("the register read failed", out)
+                self.assertNotIn("is not registered", out)
+                return out
+
+            self._with_gates(body, read_ok=False)
+
+
 class ExportVersionBumpTests(unittest.TestCase):
     """A candidate whose subject already exists in the export's group is a version bump, not a create
     (the preflight match's uuid is fed back as the item's `uuid`, XOR `createUuid`). A same-subject
