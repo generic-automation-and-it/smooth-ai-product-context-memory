@@ -42,6 +42,13 @@ SKILLS_BRANCH="${SKILLS_BRANCH-main}"
 die() { echo "install-skills: $*" >&2; exit 1; }
 log() { echo "install-skills: $*" >&2; }
 
+# The canonical path of the clone source, and the boundary that decides which symlinks `copy_wet`
+# materialises. Assigned unconditionally here, and only ever set from this run's own clone: an
+# inherited `CLONE_ROOT` from the environment would otherwise widen "inside the clone" to wherever
+# the caller said, and a link pointing anywhere under that path would be materialised into a skill
+# that has no business holding it.
+CLONE_ROOT=""
+
 # ---------------------------------------------------------------------------
 # 1. Find skills root
 # ---------------------------------------------------------------------------
@@ -208,15 +215,122 @@ sweep_stale_entries() {
   local dest="$1" source="$2"
   local entry name
   for entry in "$dest"/* "$dest"/.[!.]*; do
-    [ -e "$entry" ] || continue
+    # `-L` as well as `-e`: a DANGLING symlink fails `-e` because that test follows the link, so
+    # testing only `-e` skipped every broken link — which kept the ones the source still has (right)
+    # and equally the ones the source deleted (a retired link living forever, which is the exact
+    # bug this sweep exists to prevent, just with a symlink instead of a file).
+    [ -e "$entry" ] || [ -L "$entry" ] || continue
     name="$(basename "$entry")"
     [ "$name" = "installation.json" ] && continue
     if [ -d "$source/$name" ] && [ -d "$entry" ]; then
       sweep_stale_entries "$entry" "$source/$name"
-    elif [ ! -e "$source/$name" ]; then
+    elif [ ! -e "$source/$name" ] && [ ! -L "$source/$name" ]; then
       rm -rf "$entry"
     fi
   done
+}
+
+# real_path PATH — the canonical absolute path, following every link, or '' when it does not resolve.
+#
+# `readlink -f` is GNU-only; BSD ships `realpath` but macOS's only gained a default in 13, and this
+# installer supports macOS bash 3.2. So the resolution is done by hand with `cd -P`, which is the
+# same primitive both platforms agree on. A dangling target yields '' rather than a partial path,
+# because a link with no target is a link to keep, not a path to place.
+real_path() {
+  local path="$1" hops=0 target dir
+  # Follow the final component while it is a symlink. Bounded, so a link that points at itself
+  # through a chain of names cannot spin here; the hop count is generous and never reached in
+  # practice, but its absence would turn a malformed link into a hang.
+  while [ -L "$path" ] && [ "$hops" -lt 40 ]; do
+    hops=$((hops + 1))
+    target="$(readlink "$path")"
+    case "$target" in
+      /*) path="$target" ;;
+      *)  path="$(dirname "$path")/$target" ;;
+    esac
+  done
+  # Still a link after 40 hops: a loop, so there is no canonical path to report.
+  [ -L "$path" ] && return 0
+  # A link with no target is a link to keep, not a path to place.
+  [ -e "$path" ] || return 0
+  # `cd -P` into a directory resolves every component including a trailing `.`, which is what makes
+  # a `self -> .` link canonicalise to the folder itself and therefore match the expansion stack.
+  # Without it the path keeps a `/.` tail, never compares equal to its own directory, and a cycle
+  # is materialised instead of being kept as a link.
+  if [ -d "$path" ]; then
+    (cd -P "$path" 2>/dev/null && pwd) && return 0
+    return 0
+  fi
+  dir="$(cd -P "$(dirname "$path")" 2>/dev/null && pwd)" || return 0
+  printf '%s/%s\n' "$dir" "$(basename "$path")"
+}
+
+# inside_clone PATH — true when PATH resolves to somewhere under the clone source.
+#
+# Compared canonically and component-wise, never as a string prefix: `/repo-other/x` starts with
+# `/repo` as text and is a different repository. The trailing separator is what stops that.
+inside_clone() {
+  local candidate="$1"
+  [ -n "$CLONE_ROOT" ] || return 1
+  case "$candidate" in
+    "$CLONE_ROOT"/*) return 0 ;;
+    "$CLONE_ROOT") return 0 ;;
+  esac
+  return 1
+}
+
+# copy_wet SRC DST [STACK] — copy SRC to DST, materialising a symlink whose target is inside the clone.
+#
+# The point is a *self-contained* installed skill. A symlink that points inside the clone is an
+# authoring convenience — one file shared by two skills — and copying the link would ship a pointer
+# into a path the consumer does not have, so it is copied as what it points at. A link pointing
+# outside the clone, or one with no target, is the author's business and is copied as a link.
+#
+# Cycles are copied as links. A link to its own ancestor, or to something already being expanded,
+# would otherwise recurse forever; recording the chain we are inside and stopping at a repeat makes
+# the run terminate while leaving the link visible rather than silently materialising a loop.
+copy_wet() {
+  local src="$1" dst="$2" stack="${3:-}"
+  local target real name entry
+
+  if [ -L "$src" ]; then
+    target="$(readlink "$src")"
+    case "$target" in
+      /*) real="$(real_path "$target")" ;;
+      *)  real="$(real_path "$(dirname "$src")/$target")" ;;
+    esac
+
+    # No target: keep the link.
+    if [ -z "$real" ]; then
+      cp -P "$src" "$dst"
+      return 0
+    fi
+    # Already being expanded: a cycle. Keep the link so the run terminates.
+    case ":$stack:" in
+      *":$real:"*) cp -P "$src" "$dst"; return 0 ;;
+    esac
+    # Outside the clone: the consumer may legitimately want a link to their own machine.
+    if ! inside_clone "$real"; then
+      cp -P "$src" "$dst"
+      return 0
+    fi
+    copy_wet "$real" "$dst" "$stack:$real"
+    return 0
+  fi
+
+  if [ -d "$src" ]; then
+    real="$(real_path "$src")"
+    mkdir -p "$dst"
+    for entry in "$src"/* "$src"/.[!.]*; do
+      [ -e "$entry" ] || [ -L "$entry" ] || continue
+      name="$(basename "$entry")"
+      copy_wet "$entry" "$dst/$name" "$stack:$real"
+    done
+    return 0
+  fi
+
+  [ -f "$src" ] || return 0
+  cp -p "$src" "$dst"
 }
 
 # prune_non_shippable DEST — remove what does not belong in an installed copy of a skill.
@@ -264,6 +378,8 @@ clone_source() {
   # every real work had already succeeded.
   INSTALL_TMP="$(mktemp -d)"
   trap 'rm -rf "${INSTALL_TMP:-}"' EXIT INT TERM HUP
+  # Assigned after the temp dir exists, so it can only ever name this run's clone.
+  CLONE_ROOT="$(cd -P "$INSTALL_TMP" && pwd)/repo"
 
   log "Cloning $SKILLS_REPO (${SKILLS_BRANCH:-default branch})…"
   # SKILLS_BRANCH is optional, and that is not a convenience: `git rev-parse --abbrev-ref HEAD` returns
@@ -316,7 +432,7 @@ for s in data.get('skills', []):
     fi
     if [ -d "$INSTALL_TMP/repo/.agents/skills/$name" ]; then
       rm -rf "$skills_root/$name"
-      cp -R "$INSTALL_TMP/repo/.agents/skills/$name" "$skills_root/$name"
+      copy_wet "$INSTALL_TMP/repo/.agents/skills/$name" "$skills_root/$name"
       prune_non_shippable "$skills_root/$name"
       log "Updated $name"
     else
@@ -336,7 +452,7 @@ for s in data.get('skills', []):
   if [ -d "$shared_source" ]; then
     local shared_dest="$skills_root/_mimisbrunnr-shared"
     mkdir -p "$shared_dest"
-    cp -R "$shared_source/." "$shared_dest"
+    copy_wet "$shared_source" "$shared_dest"
     # Recursive, and that recursion is the point: a top-level-only sweep keeps every entry the source
     # still has *as a folder* while leaving the files inside it that the source dropped, which is where
     # a retired script actually goes.

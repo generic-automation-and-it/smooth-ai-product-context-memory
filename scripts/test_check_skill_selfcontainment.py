@@ -1,3 +1,4 @@
+import os
 import subprocess
 import sys
 import tempfile
@@ -140,6 +141,71 @@ class SelfContainmentTests(unittest.TestCase):
         root = self.tree({
             "ai-understanding/SKILL.md": "python3 .../understanding_client.py load <input>\n",
         })
+        self.assertEqual([], violations(root))
+
+    # --- mechanism 3: filesystem symlinks ---------------------------------------------------------
+
+    def link_tree(self, link_rel, target_rel, create_target=True):
+        """A skills root holding one skill with one symlink at `link_rel` pointing at `target_rel`.
+
+        The target file is created **where the link will actually resolve**, not where the argument
+        reads from the root: a relative symlink resolves against the link's own directory, so writing
+        `root/target_rel` and linking `references/alias -> ../../x` produces a dangling link and the
+        case quietly tests something else entirely.
+
+        `create_target=False` for the dangling case, and — the reason this is a parameter rather than
+        a convention — for an absolute target outside the tree. A harness that always creates its
+        target would, given `/etc/hosts`, try to *write* it.
+        """
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: subprocess.run(["rm", "-rf", str(root)]))
+        skill = root / "ai-understanding"
+        link_path = skill / link_rel
+        link_path.parent.mkdir(parents=True, exist_ok=True)
+        (skill / "SKILL.md").write_text("x\n", encoding="utf-8")
+
+        if create_target:
+            target_path = (Path(target_rel) if Path(target_rel).is_absolute()
+                           else (link_path.parent / target_rel))
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            target_path.write_text("shared\n", encoding="utf-8")
+        os.symlink(target_rel, link_path)
+        return root
+
+    def test_a_symlink_out_of_the_skills_root_is_reported(self):
+        """The mechanism the installer cannot paper over.
+
+        The other two mechanisms are code and prose; this one needs neither. A link to a sibling
+        skill's file is an authoring convenience that ships as a pointer into a path the consumer
+        does not have, and an installed copy of that skill is broken in a way no script inside it can
+        report.
+        """
+        root = self.link_tree("references/shared.md", "/etc/hosts", create_target=False)
+        found = violations(root)
+        self.assertTrue(any("escapes the skills root" in f for f in found), found)
+
+    def test_a_symlink_out_of_the_skill_but_inside_the_repo_is_reported(self):
+        """Inside the repository, so the installer *materialises* it as a duplicate. Content is
+        self-contained but the authoring is not, which is still worth naming."""
+        # The link sits in `references/`, so a relative target has to climb out of it first —
+        # otherwise it resolves inside the skill and the case silently becomes a different one.
+        root = self.link_tree("references/shared.md", "../../ai-brain-dump/SKILL.md")
+        found = violations(root)
+        self.assertTrue(any("outside this skill" in f for f in found), found)
+
+    def test_a_dangling_symlink_is_reported(self):
+        root = self.link_tree("references/shared.md", "nowhere-at-all", create_target=False)
+        found = violations(root)
+        self.assertTrue(any("dangling" in f for f in found), found)
+
+    def test_a_link_inside_its_own_skill_is_not_an_escape(self):
+        """The authoring case this whole mechanism exists to permit: one file, two names, inside the
+        same skill."""
+        root = self.link_tree("references/alias.md", "../assets/shared.md")
+        self.assertEqual([], violations(root))
+
+    def test_a_skill_with_no_symlinks_is_unaffected(self):
+        root = self.tree({"ai-understanding/SKILL.md": "nothing to see\n"})
         self.assertEqual([], violations(root))
 
     # --- the declaration itself -------------------------------------------------------------------

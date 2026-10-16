@@ -28,6 +28,7 @@ containment verdict from `check_skill_selfcontainment`. Read-only; creates nothi
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -43,6 +44,10 @@ SELF_CONTAINMENT = REPO / "scripts" / "check_skill_selfcontainment.py"
 # two hand-maintained lists would drift silently, and the drift would only show up as a desktop
 # install carrying a test suite.
 FALLBACK_EXCLUDES = ("tests", "__pycache__")
+
+# Links the packer declined to follow, reported on the way out. Module-level because `members`
+# recurses through `build` and the caller needs the list afterwards.
+MEMBERS_SKIPPED: list[str] = []
 
 
 def installer_excludes() -> tuple[str, ...]:
@@ -61,30 +66,63 @@ def installer_excludes() -> tuple[str, ...]:
     return tuple(sorted(names))
 
 
-def members(skill: Path, excludes: tuple[str, ...]) -> list[Path]:
-    """Every file to pack, as paths relative to the skill folder."""
-    out = []
+def members(skill: Path, root: Path, excludes: tuple[str, ...]) -> list[tuple[Path, str]]:
+    """Every file to pack, as (source path, arcname relative to the skill folder).
+
+    A symlink whose target resolves **inside the repository** is materialised — the archive carries
+    what it points at, so the zip is self-contained and imports into a desktop runtime, which has no
+    repository to resolve a link against. This is the same rule the installer applies when copying,
+    and for the same reason: a link is an authoring convenience, and shipping it would ship a pointer
+    into a path the consumer does not have.
+
+    A link pointing outside the repository, or one with no target, is **skipped and reported** rather
+    than followed. Storing it would make the zip's extraction differ by platform, and following an
+    outside link would pack a file the skill never referenced — for `/etc/hosts`, a system file.
+    """
+    out: list[tuple[Path, str]] = []
+    skipped: list[str] = []
     for path in sorted(skill.rglob("*")):
-        if not path.is_file() or path.is_symlink():
-            # A symlink is skipped rather than followed: a zip that stores one as a link is a zip
-            # whose extraction differs by platform, and the shared folder is the place those would
-            # appear. `check_skill_selfcontainment` is the gate for whether one was needed at all.
-            continue
         rel = path.relative_to(skill)
         if any(part in excludes for part in rel.parts):
             continue
-        out.append(path)
+        if path.is_symlink():
+            target = resolve(path)
+            if target is not None and is_inside(target, root):
+                out.append((target, str(rel)))
+            else:
+                skipped.append(f"{rel} -> {os.readlink(path)}")
+            continue
+        if path.is_file():
+            out.append((path, str(rel)))
+    MEMBERS_SKIPPED.extend(skipped)
     return out
+
+
+def resolve(link: Path) -> Path | None:
+    """The canonical target of a link, or None when it does not resolve (dangling or a loop)."""
+    try:
+        return Path(os.path.realpath(link))
+    except OSError:
+        return None
+
+
+def is_inside(path: Path, root: Path) -> bool:
+    """True when `path` is under `root`, component-wise rather than as a text prefix."""
+    try:
+        return path.is_relative_to(root)
+    except ValueError:
+        return False
 
 
 def build(skill: Path, out_dir: Path) -> Path:
     excludes = installer_excludes()
     archive = out_dir / f"{skill.name}.zip"
     out_dir.mkdir(parents=True, exist_ok=True)
+    root = REPO.resolve()
     with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zf:
-        for path in members(skill, excludes):
+        for path, rel in members(skill, root, excludes):
             # `arcname` keeps the skill folder as the single top-level entry.
-            zf.write(path, arcname=str(Path(skill.name) / path.relative_to(skill)))
+            zf.write(path, arcname=str(Path(skill.name) / rel))
     return archive
 
 
@@ -156,6 +194,8 @@ def main() -> int:
     archive = build(skill, Path(args.out))
     problems = check(skill, archive)
     print(f"packed {archive.relative_to(REPO) if archive.is_relative_to(REPO) else archive}")
+    for entry in MEMBERS_SKIPPED:
+        print(f"  skipped link outside the repo (kept out of the archive): {entry}")
     if problems:
         print("::error::the archive does not pass its own checks")
         print("\n".join(f"  {p}" for p in problems))

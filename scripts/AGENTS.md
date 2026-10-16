@@ -98,6 +98,45 @@ Operational checks support operator decisions; a preflight must never repair the
   the deliberate act. Two properties that are load-bearing: the runtime scan excludes `tests/`, and it
   scans the file **text** with a window rather than line by line, because saga's resolution wraps across
   two lines and a line-oriented scan reads it as self-contained.
+- **Every copy goes through `copy_wet` / `Copy-Wet`: a symlink whose target resolves inside the clone is
+  materialised, and one that does not is kept as a link.** The point is a **self-contained installed
+  skill** — one that can be zipped and imported into a runtime with no repository behind it. Copying a
+  link would ship a pointer into a path the consumer does not have. So a link pointing inside the
+  clone (an authoring convenience — one file, two names) is copied as what it points at, while a link
+  pointing outside the repo, or one with no target, is copied as a link, because that is the author's
+  business and following `/etc/hosts` would pack a system file.
+  - **Cycles are kept as links**, which is what makes the run terminate: a link to its own ancestor, or
+    to something already being expanded, would otherwise recurse forever. The expansion stack stops at
+    a repeat, leaving the link visible rather than materialising a loop.
+  - **`CLONE_ROOT` is assigned unconditionally at script scope and only ever from this run's clone, and
+    it is canonicalised.** An inherited `CLONE_ROOT` would widen "inside the clone" to a path the caller
+    chose. Canonicalisation is not tidiness: `mktemp -d` returns the *unresolved* path — on macOS
+    `/var/folders/…`, which `cd -P` reports as `/private/var/folders/…` — while every path `copy_wet`
+    compares against it has been through `real_path`. With the two spellings differing, `inside_clone`
+    is always false and **every** symlink is copied as a link: the exact failure the mechanism prevents,
+    invisible on Linux because `/tmp` is not a symlink. The harness case that caught it is why the
+    fixture runs on macOS paths.
+  - **`real_path` resolves by hand, not with `readlink -f`** (GNU-only; BSD/macOS lack it) — follow the
+    final component with `readlink` in a bounded loop, then `cd -P` the directory. The `cd -P` on a
+    directory is what makes a `self -> .` link canonicalise to the folder itself and therefore match the
+    expansion stack; without it the path keeps a `/.` tail, never compares equal, and the cycle is
+    materialised instead of kept.
+  - **The sweep distinguishes a dangling link from an absent one.** `-e`/`Test-Path` follow links, so a
+    broken link reads as absent on *both* sides: the sweep would delete one the source still has, and
+    could not tell it from one the source deleted — a retired link living forever, which is the bug the
+    recursive sweep exists to prevent, with a symlink instead of a file.
+  - **ps1 uses `LinkTarget`, not `LinkType`** (hence the `#requires -Version 7.2` floor): `LinkType` also
+    reports `HardLink`, so testing it would recurse into a hard link as though it were a symlink and
+    materialise it, turning a shared file into a duplicate per consumer. `Test-Symlink` guards `$null`,
+    which is load-bearing under `Set-StrictMode -Version Latest`: reading a property off `$null` throws
+    there, and the sweep asks about paths that may not exist, so without the guard the first missing entry
+    aborted the whole sweep and every stale file below it survived.
+- **We install no rules and no hooks**, so unlike the upstream installer there is no
+  `<agent-root>/rules/` destination and no `rules -> ../.github/instructions` link to write through. The
+  repo *has* that symlink — `.agents/rules`, tracked in git — but it is a repository artefact, and neither
+  port mentions `.github/instructions` at all. Matching upstream's "do not create it" by not having the
+  capability is the safer of the two arrangements; adopting owned rules later means the write-through
+  rule arrives with them.
 - `release_policy.py` permits publication only for `push` on `refs/heads/main`. PRs, tag pushes, releases, and manual dispatch fail closed. Candidates include source SHA/run/attempt; stale main builds cannot promote `latest`. No version-tag or GitHub Release creation path remains.
 - A clean snapshot is not a reservation: writers must remain stopped from the final precheck through migration. Host startup applies migrations, so checking after startup is too late.
 - Same-group repeated memberships are not cross-group ownership conflicts. Malformed containers or identity types block preflight even though some live reads treat them as absent; silently skipping them would claim migration readiness without establishing it.
@@ -129,6 +168,7 @@ The ignore-refusal coverage is **three** cases, because `check-ignore` gives two
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-16 | **Every copy goes through `copy_wet` / `Copy-Wet`, so an installed skill is self-contained.** A symlink resolving inside the clone is materialised; one resolving outside, one dangling, and one cyclic are kept as links. Brings this installer level with the upstream template's installer. **`CLONE_ROOT` is reset at script scope (an inherited value cannot widen the boundary) and canonicalised — and that second half was a live bug:** `mktemp -d` returns the unresolved path, `/var` versus `/private/var` on macOS, so `inside_clone` was always false and every symlink was copied as a link, on exactly the macOS path the harness runs. The sweep now distinguishes a dangling link from an absent one (`-e` follows links, so a retired link could never be swept); ps1 moved to `#requires -Version 7.2` with `LinkTarget` rather than `LinkType`, which also reports `HardLink`. Two of the four bugs this introduced were caught by running the code rather than reading it: a `real_path` that returned a link's own path for a file target, and `Test-Symlink` throwing on `$null` under strict mode, which silently disabled the entire ps1 sweep. Harness 50 → 53, both ports. | skill distribution |
 | 2026-10-16 | **`ai-memory-context` added to the owned set** in both ports and in `check_skill_selfcontainment.py`, with the gate's parity cases updated so all three copies of that set are held together again. The skill is local-first — no server, no network, no sibling script folder — and three WET-vendored scripts make it shippable as one zip. **No marketplace plugin entry**: `ai-brain-dump` is the existing precedent for an owned skill that is installed rather than plugin-distributed, so the non-prefixed-entry question needed no new rule. | skill distribution |
 | 2026-10-16 | **`pack-skill-zip.py` added** — packs an owned skill into an upload-shaped zip and refuses anything that would not work. Three requirements taken from the claude.ai packaging guidance rather than preference: the zip root is the skill folder (a plain `zip -r` produces the "incorrect structure" the same page names); symlinks are skipped rather than followed so extraction cannot differ by platform; and the exclusion list is **read out of `install-skills.sh` at run time**, so the zip and the installer cannot drift — `tests/` matters here because `ai-understanding/tests/` references `_mimisbrunnr-shared` by a `parents[2]` escape that cannot work where it lands. Self-containment is settled **before** the archive is written, so a refusal leaves nothing on disk for the next person to upload. `--check` verifies an existing archive without writing one. | desktop distribution |
 | 2026-10-16 | **An installed skill is pruned to what runs — `tests/` and `__pycache__/` removed, nothing else.** `prune_non_shippable()` / `Remove-NonShippable`, copy-then-remove rather than `tar --exclude` (GNU and BSD differ) or an `rsync` filter (a third dependency). `agents/`, `references/` and `assets/` are deliberately kept: they are runtime-referenced, so widening the list ships a skill documenting a file it cannot open. Runs after the shared sweep, since the sweep compares destination against source. The harness grew 42 → 50, mutation-verified on all five properties (drop the call, drop either prune, over-prune to `references/`, drop the ps1 call — each fails). **Two of the eight new cases drive the prune directly rather than end-to-end, and that is not redundancy:** `__pycache__` is gitignored, so a clone can never carry one and an end-to-end assertion about it would be vacuously true forever — the first version of this case was exactly that. | skill distribution |
