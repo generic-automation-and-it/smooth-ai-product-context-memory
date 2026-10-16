@@ -171,10 +171,16 @@ public sealed class TicketTraversalBenchmarkTests(AspireFixture aspire) : Persis
         referencedUuids.Count.ShouldBe(referenceCount);
 
         var search = new NpgsqlMemorySearch(Db);
+        // The reference branch carries its own non-group-context scope plan (D2), exactly as the
+        // handler builds it (QueryMemories resolves it via MemoryScopeFilter.Plan) — without these
+        // fields the benchmark would time a weaker predicate than the shipped one.
+        var referencedScope = MemoryScopeFilter.Plan(null, hasGroupContext: false);
         var criteria = new MemorySearchCriteria
         {
             GroupId = ownerGroup.Id,
             ReferencedUuids = referencedUuids,
+            ReferencedRequiredScopeDimension = referencedScope.RequiredDimension,
+            ReferencedExcludedScopeDimensions = referencedScope.ExcludedDimensions,
             RequiredScopeDimension = "product",
             CurrentOnly = true,
             Kind = "decision",
