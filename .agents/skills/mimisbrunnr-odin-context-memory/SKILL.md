@@ -407,7 +407,13 @@ digest of the record identity in the file passed as `--state-file`, so re-asking
 buys nothing and the subject never reaches the file. The identity is the subject **and its group**: give each
 record its `groupUuid`, or, before the group exists, a `group` object describing the binding it will be
 resolved from — a memory is `(group, subject)`, and a record carrying neither shares one budget with the
-same subject in every other group. It also
+same subject in every other group.
+
+**A record with no `subject`, `description` or `name` gets no persistent budget at all.** It is keyed by
+*position within the batch*, so every call scores it as a first attempt and nothing is ever written to
+the ledger — the gate runs, reports a healthy verdict count, and the bound it appears to enforce was
+never applied. The only trace is `durable: false` on the record. Supply the subject, or read that flag:
+a `false` there means the cap is not in force for that record. It also
 carries the **best** attempt across rounds, so `best` is the highest-scoring version seen and
 `bestThisRound` says whether *this* rewrite actually improved on the source. **A `false` there means the
 rewrite scored lower than what came before** — surface that rather than reporting the round as progress.

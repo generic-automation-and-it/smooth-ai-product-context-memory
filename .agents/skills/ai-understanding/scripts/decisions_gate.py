@@ -869,6 +869,27 @@ def write_ledger(state_file, ledger):
     os.replace(temp, path)
 
 
+def write_snapshot(path_str: str, payload: dict, state_file: str | None) -> None:
+    """One run's verdicts, written whole.
+
+    Write-only by construction: a temp file plus `os.replace`, so the file is replaced rather
+    than appended to, and a partial write can never be read back as a complete run. The budget
+    ledger answers "how many attempts has this record had"; this answers "what did this run
+    decide", which the ledger cannot -- it keeps only the best attempt per record and is
+    overwritten by the next run, so a hold that a later run released leaves no trace.
+
+    Carries the ledger path it complements, because a snapshot whose companion budget file cannot
+    be located is not interpretable on its own.
+    """
+    path = Path(path_str)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    document = {"snapshotOf": "decisions_gate score", "stateFile": state_file, "payload": payload}
+    temp = path.with_suffix(path.suffix + ".tmp")
+    with open(temp, "w", encoding="utf-8") as handle:
+        json.dump(document, handle, indent=2, sort_keys=True)
+    os.replace(temp, path)
+
+
 def has_subject(record):
     """True when the record carries a durable identity: `subject`, else `description`, else `name`.
 
@@ -1200,6 +1221,9 @@ def cmd_score(args):
                 "empty; every record's attempt budget begins again. This is reported so a cleared "
                 "bound is never mistaken for a first attempt."
             )
+    if args.snapshot_file:
+        payload["snapshotFile"] = str(args.snapshot_file)
+        write_snapshot(args.snapshot_file, payload, args.state_file)
     print(json.dumps(payload, indent=2))
     return 0
 
@@ -1251,6 +1275,8 @@ def main():
 
     score = sub.add_parser("score", help="score records from stdin")
     score.add_argument("--state-file", help="ledger path bounding the attempt loop")
+    score.add_argument("--snapshot-file",
+                       help="per-run score snapshot path; written whole each run, never appended to")
     score.set_defaults(func=cmd_score)
 
     probe = sub.add_parser("probe", help="report availability")

@@ -274,9 +274,11 @@ class GateTestCase(unittest.TestCase):
         env.update(overrides)
         return env
 
-    def score(self, records=None, state_file=None, **overrides):
+    def score(self, records=None, state_file=None, snapshot_file=None, **overrides):
         payload = json.dumps(records if records is not None else [RECORD])
         args = ["score"] + (["--state-file", state_file] if state_file else [])
+        if snapshot_file:
+            args += ["--snapshot-file", snapshot_file]
         proc = run_gate(args, payload, self.gate_env(**overrides))
         return proc, (json.loads(proc.stdout) if proc.stdout.strip() else None)
 
@@ -2562,6 +2564,59 @@ def tearDownModule():
     if changed:
         raise AssertionError(f"the suite left shipped file(s) changed: {', '.join(changed)}")
 
+
+
+
+class SnapshotTests(GateTestCase):
+    """The per-run snapshot: written whole, never appended to, and naming its budget ledger.
+
+    It exists because the budget ledger cannot answer "what did this run decide" -- it keeps the
+    single best attempt per record and the next run overwrites it, so a hold that a later run
+    released leaves no trace. The snapshot is the only place that decision exists.
+    """
+
+    def test_a_snapshot_is_written_and_names_the_ledger_it_complements(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            budget = Path(tmp) / "acme-init-declarations-decisions-ledger.json"
+            snap = Path(tmp) / "acme-init-declarations-20261016-190931-decisions-ledger.json"
+            proc, report = self.score(state_file=str(budget), snapshot_file=str(snap))
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertTrue(snap.is_file(), "the snapshot was not written")
+            document = json.loads(snap.read_text(encoding="utf-8"))
+            self.assertEqual(str(budget), document["stateFile"],
+                             "a snapshot whose companion ledger cannot be found is not interpretable")
+            self.assertEqual(report["records"], document["payload"]["records"],
+                             "the snapshot must hold this run's verdicts, not a summary of them")
+            self.assertEqual(str(snap), report["snapshotFile"])
+
+    def test_a_second_run_replaces_the_snapshot_rather_than_appending_to_it(self):
+        """The property the write mode exists for. Appending would make the file grow without
+        bound and leave an operator unable to tell which run a verdict belongs to."""
+        other = dict(RECORD, subject="Queue transport decision",
+                     description="Queue transport decision",
+                     statement="The filesystem is the transport, chosen for local-first capture.")
+        with tempfile.TemporaryDirectory() as tmp:
+            budget = Path(tmp) / "b.json"
+            snap = Path(tmp) / "acme-init-20261016-190931-decisions-ledger.json"
+            self.score(state_file=str(budget), snapshot_file=str(snap))
+            self.score(records=[other], state_file=str(budget), snapshot_file=str(snap))
+            document = json.loads(snap.read_text(encoding="utf-8"))
+            identities = [r["identity"] for r in document["payload"]["records"]]
+            self.assertEqual(1, len(identities), f"the snapshot accumulated runs: {identities}")
+            self.assertIn("Queue transport decision", json.dumps(document))
+            self.assertNotIn("Storage engine decision", json.dumps(document),
+                             "the first run's verdict survived into the second run's snapshot")
+            # A file count, not a byte count: appending would leave two documents in one file, and a
+            # size comparison cannot tell that from a subject that happened to be one character longer.
+            self.assertEqual(1, snap.read_text(encoding="utf-8").count('"snapshotOf"'),
+                             "the file holds more than one run's document — it was appended to")
+
+    def test_no_snapshot_flag_writes_no_snapshot(self):
+        """Opt-in, because a probe or a caller with no ledger must not leave one behind."""
+        with tempfile.TemporaryDirectory() as tmp:
+            before = set(Path(tmp).iterdir())
+            self.score()
+            self.assertEqual(before, set(Path(tmp).iterdir()))
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
