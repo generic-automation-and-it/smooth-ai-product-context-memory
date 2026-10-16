@@ -92,6 +92,7 @@ the twin link is the drift signal.
 
 - **Write half** (PR #238): `20261015100000_AddAboutReference` migration (label + `ticket_graph_about_count` + D1 trigger change), `IMemoryGraph.AboutExistsAsync`/`CreateAboutAsync`, `SetMemories` `ticketReferences`, `POST /api/context/memories/ticket-references`.
 - **Read half** (this change): `IMemoryGraph.ListAboutAsync`, `MemorySearchCriteria.ReferencedUuids` (disjunctive with `GroupId`) plus the reference-branch scope plan, `NpgsqlMemorySearch`'s `(GroupId == owner OR Uuid IN referenced[scope-ok])` predicate, `CheapMemory.TicketMatch` (`owner`/`reference`), the dossier's reference-anchor union with `referencedAnchors` reach, `ABOUT` in the snapshot archive (format v5) capture/restore/reconcile and `scripts/verify-graph-restore.sh`, and the kvasir `export --reference-tickets` flag with its synthetic owner ticket and twin links.
+- **Row-level binding read** (HLD-009): `IMemoryGraph.FindAboutAsync` reads the same edges from the memory side — one statement anchored on a page of memory uuids, never a loop per row — so `CheapMemory.Tickets` can name a memory's owned **and** referenced tickets. Ownership is still decided by the group's membership array (LADR-08), so an `ABOUT` edge on a ticket the group owns is one binding, not two. The write-time refusal above makes that state unreachable through the API; the read defends it anyway.
 
 ## Changelog
 
@@ -99,3 +100,4 @@ the twin link is the drift signal.
 |:-----|:-------|
 | 2026-10-15 | Authored for the shared-ticket-reference feature. |
 | 2026-10-16 | Read half implemented: recall union + `ticketMatch`, snapshot coverage (format v5), dossier reference anchors, client flags. Release gates passed. |
+| 2026-10-16 | Row-level binding read: `FindAboutAsync` + `CheapMemory.Tickets` assembled per page from the ownership array and `ABOUT` edges (HLD-009). |

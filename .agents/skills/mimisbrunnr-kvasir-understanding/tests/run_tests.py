@@ -491,6 +491,44 @@ class StoreImportTests(unittest.TestCase):
             uc.store_query = original
         self.assertNotIn("kind", captured)
 
+    def test_product_name_recalls_through_the_registry(self):
+        """`--product-name` is a query field, so the store does the resolution — nothing is filtered here.
+
+        The read-side twin of the `export` flag that declares the product's graph edge: same
+        spelling, opposite direction. It composes with `--all`, because a product's memories are
+        not all of kind `understanding`.
+        """
+        captured = {}
+        original = uc.store_query
+        uc.store_query = lambda f: (captured.update(f) or ([], "ok"))
+        try:
+            run(["import", "--product-name", "Mímisbrunnr"])
+        finally:
+            uc.store_query = original
+        self.assertEqual(captured["productName"], "Mímisbrunnr")
+        self.assertEqual(captured["kind"], uc.KIND_UNDERSTANDING)
+
+        captured.clear()
+        original = uc.store_query
+        uc.store_query = lambda f: (captured.update(f) or ([], "ok"))
+        try:
+            run(["import", "--all", "--productname", "Mímisbrunnr"])
+        finally:
+            uc.store_query = original
+        self.assertEqual(captured["productName"], "Mímisbrunnr")
+        self.assertNotIn("kind", captured)
+
+    def test_no_product_name_sends_no_product_field(self):
+        """An absent flag must send no field at all: the store reads a missing key as breadth."""
+        captured = {}
+        original = uc.store_query
+        uc.store_query = lambda f: (captured.update(f) or ([], "ok"))
+        try:
+            run(["import"])
+        finally:
+            uc.store_query = original
+        self.assertNotIn("productName", captured)
+
     def test_a_malformed_ticket_is_refused_before_any_store_call(self):
         called = []
         original = uc.store_query

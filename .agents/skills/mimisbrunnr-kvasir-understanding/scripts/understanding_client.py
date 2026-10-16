@@ -831,6 +831,7 @@ def query_filters(args: argparse.Namespace, all_kinds: bool) -> dict:
             raise ValueError(f"--ticket wants provider:key, got {args.ticket!r}")
         filters["ticketProvider"], filters["ticketKey"] = provider, key
     for flag, field in (("repository", "repo"), ("initiative", "initiativeName"),
+                        ("product_name", "productName"),
                         ("query", "query"), ("status", "status")):
         value = getattr(args, flag, None)
         if value:
@@ -3574,6 +3575,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     imp.add_argument("--ticket", help="provider:key, e.g. github:157. Narrows by the memory's group.")
     imp.add_argument("--repository", help="Narrow by the group's repository.")
     imp.add_argument("--initiative", help="Narrow by the group's initiative.")
+    imp.add_argument("--product-name", "--productname", dest="product_name",
+                     help="Recall through the product-name registry: the store resolves the product "
+                          "to its initiatives and repos and returns the memories they carry. The "
+                          "product must already be registered (upsert-product-name) — an unknown "
+                          "one is a 404 naming it, never a silent empty.")
     imp.add_argument("--scope", help="scope[:identifier], e.g. product:context-memory.")
     imp.add_argument("--tags", help="Comma-separated tags to match on the memory.")
     imp.add_argument("--query", help="Free text: stemmed AND-of-lexemes, so one or two words, "

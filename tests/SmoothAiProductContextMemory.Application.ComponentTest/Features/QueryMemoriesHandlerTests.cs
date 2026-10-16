@@ -371,6 +371,115 @@ public sealed class QueryMemoriesHandlerTests(AspireFixture aspire) : HandlerTes
         response.Items.Count.ShouldBe(3);
     }
 
+    /// <summary>
+    /// A row's ticket list is assembled from both homes of the binding — the group's membership array
+    /// and the graph's <c>ABOUT</c> edges — so a card names every ticket the memory is bound to and says
+    /// which is which. Without the reference leg the UI would hide a binding the query can find.
+    /// </summary>
+    [Fact]
+    public async Task A_row_carries_the_group_owned_and_the_referenced_tickets_each_marked()
+    {
+        var owner = TestEntities.NewGroup(tickets:
+        [
+            TicketDocument.Create("github", "231", "https://tracker/231"),
+            TicketDocument.Create("jira", "GPA-234", "https://tracker/GPA-234"),
+        ]);
+        var target = TestEntities.NewGroup(tickets: [TicketDocument.Create("github", "999", "https://tracker/999")]);
+        var referencing = TestEntities.NewGroup();
+        Db.MemoryGroups.AddRange(owner, target, referencing);
+        await Db.SaveChangesAsync(Ct);
+
+        SetMemories.Handler set = NewSet();
+        await set.Handle(Approved(owner.Uuid, "Owner fact"), Ct);
+        await set.Handle(Approved(target.Uuid, "Target fact"), Ct);
+        await set.Handle(Approved(referencing.Uuid, "Referencing fact") with
+        {
+            TicketReferences = [new TicketReferenceInput("github", "999")],
+        }, Ct);
+
+        QueryMemories.Response response = await NewQuery().Handle(Query(), Ct);
+
+        CheapMemory owned = response.Items.Single(i => i.Description == "Owner fact");
+        owned.Tickets
+            .Select(t => (t.Provider, t.Key, t.Match))
+            .ShouldBe(
+                [
+                    ("github", "231", TicketMatchValue.Owner),
+                    ("jira", "GPA-234", TicketMatchValue.Owner),
+                ],
+                ignoreOrder: true);
+
+        CheapMemory referenced = response.Items.Single(i => i.Description == "Referencing fact");
+        referenced.Tickets
+            .Select(t => (t.Provider, t.Key, t.Match))
+            .ShouldBe([("github", "999", TicketMatchValue.Reference)]);
+    }
+
+    /// <summary>
+    /// The membership array is the ownership authority (LADR-08), so a duplicate <c>ABOUT</c> edge on a
+    /// ticket the group already owns is one binding, not two — otherwise the card would name it twice.
+    /// The write path refuses such a reference, so the edge is created directly to reach the defence.
+    /// </summary>
+    [Fact]
+    public async Task An_owned_ticket_referenced_by_its_own_group_is_one_owner_binding()
+    {
+        var group = TestEntities.NewGroup(tickets: [TicketDocument.Create("github", "231", "https://tracker/231")]);
+        Db.MemoryGroups.Add(group);
+        await Db.SaveChangesAsync(Ct);
+
+        var memory = (await NewSet().Handle(Approved(group.Uuid, "Doubly bound fact"), Ct)).Items[0];
+        await Graph.CreateAboutAsync(memory.Uuid!.Value, "github", "231", "declared outside the write path", Ct);
+
+        CheapMemory row = (await NewQuery().Handle(Query(), Ct)).Items.ShouldHaveSingleItem();
+
+        row.Tickets
+            .Select(t => (t.Provider, t.Key, t.Match))
+            .ShouldBe([("github", "231", TicketMatchValue.Owner)]);
+    }
+
+    /// <summary>
+    /// The assembly is anchored on the returned page, so one memory's reference must not surface on a
+    /// sibling row of the same query.
+    /// </summary>
+    [Fact]
+    public async Task A_reference_stays_on_its_own_row_within_the_page()
+    {
+        var target = TestEntities.NewGroup(tickets: [TicketDocument.Create("github", "999", "https://tracker/999")]);
+        var group = TestEntities.NewGroup();
+        Db.MemoryGroups.AddRange(target, group);
+        await Db.SaveChangesAsync(Ct);
+
+        SetMemories.Handler set = NewSet();
+        await set.Handle(Approved(target.Uuid, "Target fact"), Ct);
+        await set.Handle(Approved(group.Uuid, "Referencing fact") with
+        {
+            TicketReferences = [new TicketReferenceInput("github", "999")],
+        }, Ct);
+        await set.Handle(Approved(group.Uuid, "Unrelated fact"), Ct);
+
+        QueryMemories.Response response = await NewQuery().Handle(Query(), Ct);
+
+        response.Items.Single(i => i.Description == "Unrelated fact").Tickets.ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// A malformed membership element must not cost the practitioner the page: the read is unnested in
+    /// SQL, so the half-ticket is dropped and the page still renders.
+    /// </summary>
+    [Fact]
+    public async Task A_membership_element_without_a_provider_or_key_is_left_out()
+    {
+        var group = TestEntities.NewGroup();
+        group.Tickets.Add(new TicketDocument { Key = "no-provider", Url = "https://tracker/no-provider" });
+        Db.MemoryGroups.Add(group);
+        await Db.SaveChangesAsync(Ct);
+
+        await NewSet().Handle(Approved(group.Uuid, "Half bound fact"), Ct);
+
+        CheapMemory row = (await NewQuery().Handle(Query(), Ct)).Items.ShouldHaveSingleItem();
+        row.Tickets.ShouldBeEmpty();
+    }
+
     private SetMemories.Handler NewSet() =>
         new(AppDb, Graph, Blob, ErrorMapper, ProductGraph, Loggers.CreateLogger<SetMemories.Handler>());
 

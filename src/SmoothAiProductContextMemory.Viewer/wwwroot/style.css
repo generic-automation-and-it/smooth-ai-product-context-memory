@@ -48,6 +48,41 @@ body {
 .nav-link:hover { background: var(--bg); }
 .nav-link.is-active { background: var(--bg); font-weight: 600; }
 
+/* Kind scope — a topbar control, not a pane's. Each pane's own Kind field still carries the
+   full vocabulary; this narrows every read pane at once. */
+.visually-hidden {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+.kind-scope {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px 6px;
+  margin: 0;
+  font: inherit;
+}
+.kind-scope-label { font-size: 12px; color: var(--muted); font-weight: 600; margin-right: 4px; }
+.kind-scope-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.kind-scope-option:hover { background: var(--bg); }
+.kind-scope-option:has(input:checked) { background: var(--bg); font-weight: 600; }
+.kind-scope-option:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+
 main { padding: 20px 16px; max-width: min(1600px, 96vw); margin: 0 auto; }
 .pane { display: none; }
 .pane.is-active { display: block; }
@@ -65,6 +100,9 @@ h1 { font-size: 20px; margin: 0 0 12px; }
 .filter-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
 .field { display: flex; flex-direction: column; gap: 4px; border: 0; padding: 0; margin: 0; font: inherit; }
 .field-label { font-size: 12px; color: var(--muted); font-weight: 600; }
+.subfield { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.subfield-label { font-size: 12px; color: var(--muted); }
+.subfield input { font: inherit; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--fg); }
 .field input, .field select {
   font: inherit;
   padding: 6px 8px;
@@ -193,6 +231,21 @@ button:hover { background: var(--bg); }
 .body-head { display: flex; justify-content: space-between; align-items: center; }
 .body-head h3 { margin: 0; }
 .blob { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px; font-size: 13px; white-space: pre-wrap; word-break: break-word; margin: 8px 0 0; }
+
+/* The generated import command: readable, selectable, never colour-only. */
+.command {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+  font-size: 13px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 8px 0 0;
+}
+#import-copy { padding: 4px 10px; font: inherit; cursor: pointer; }
+.import-note { font-size: 13px; color: var(--muted); margin: 6px 0 0; min-height: 1em; }
+.import-notes { font-size: 12px; color: var(--muted); margin: 6px 0 0; padding-left: 18px; }
 
 @media (max-width: 900px) {
   .split { display: block; }

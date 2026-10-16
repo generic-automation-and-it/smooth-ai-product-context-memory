@@ -29,6 +29,22 @@
       <a href="#review" class="nav-link" data-pane="review">Review</a>
       <a href="#status" class="nav-link" data-pane="status">Status</a>
     </nav>
+    <fieldset id="kind-scope" class="kind-scope">
+      <legend class="visually-hidden">Kind scope, applied to every read pane</legend>
+      <span class="kind-scope-label" aria-hidden="true">Kind</span>
+      <label class="kind-scope-option">
+        <input type="radio" name="kind-scope" value="" checked>
+        All
+      </label>
+      <label class="kind-scope-option">
+        <input type="radio" name="kind-scope" value="memory">
+        Memory
+      </label>
+      <label class="kind-scope-option">
+        <input type="radio" name="kind-scope" value="understanding">
+        Understanding
+      </label>
+    </fieldset>
     <span id="capability-badge" class="capability-badge" hidden></span>
     <button type="button" id="sign-out" class="sign-out" hidden>Sign out</button>
   </header>
@@ -60,7 +76,14 @@
           </label>
           <label class="field">
             <span class="field-label">Repo</span>
-            <input id="f-repo" placeholder="repository" autocomplete="off">
+            <input id="f-repo" list="repo-options" placeholder="repository" autocomplete="off">
+            <datalist id="repo-options"></datalist>
+          </label>
+          <label class="field">
+            <span class="field-label">Product name</span>
+            <select id="f-product">
+              <option value="">any product</option>
+            </select>
           </label>
         </div>
 
@@ -91,10 +114,19 @@
 
           <fieldset class="field">
             <legend class="field-label">Ticket</legend>
-            <div class="pair">
-              <input id="f-ticket-provider" placeholder="provider" autocomplete="off">
-              <input id="f-ticket-key" placeholder="key" autocomplete="off">
-            </div>
+            <label class="subfield">
+              <span class="subfield-label">System</span>
+              <input id="f-ticket-provider" list="ticket-system-options" placeholder="github" autocomplete="off">
+              <datalist id="ticket-system-options">
+                <option value="github"></option>
+                <option value="jira"></option>
+                <option value="azure-devops"></option>
+              </datalist>
+            </label>
+            <label class="subfield">
+              <span class="subfield-label">Reference</span>
+              <input id="f-ticket-key" placeholder="GPA-234" autocomplete="off">
+            </label>
           </fieldset>
 
           <fieldset class="field">
@@ -334,8 +366,7 @@
             <select id="review-limit">
               <option value="50">50</option>
               <option value="100">100</option>
-              <option value="200">200</option>
-              <option value="500" selected>500</option>
+              <option value="200" selected>200</option>
             </select>
           </label>
         </div>

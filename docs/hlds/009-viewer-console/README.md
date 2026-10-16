@@ -195,7 +195,7 @@ detail pane and, in the Graph view, can seed the graph root.
 | **Version** | `Version` / `IsCurrent` | `v3` plus a "current/superseded" dot |
 | **Validity** | `ValidFrom` … `ValidUntil` | `ValidUntil` null shown as "open"; a superseded row shows its replaced window |
 | **Scope** | `ScopeDimension`:`ScopeIdentifier` | Compact pill |
-| **Lineage** | `GroupUuid` / ticket | Ticket provider:key pill; group uuid on hover |
+| **Lineage** | `GroupUuid` + `tickets` | One ticket reads as `group · system:reference`; several read as `group · N tickets (…)`, because a group accumulates tickets and naming one would hide the rest. A ticket the memory **references** (an `ABOUT` edge, not group-owned) is marked `(referenced)` |
 | **Created** | `CreatedOn` | Default sort |
 
 - **Default sort: `CreatedOn` descending.** The newest capture is first, which is what a practitioner
@@ -228,11 +228,18 @@ never re-filters the returned rows.
 | **Tag** (chip input) | `Tags` | Free labels; the "any-tag" safety net, so label drift does not break recall |
 | **Kind** (select, auto-complete) | `Kind` | Open vocabulary; options are inferred from the kinds in the rows already returned — there is no distinct-kinds endpoint, and adding one to serve an autocomplete is not worth a new route (deliberate, 2026-10-15); `understanding` is a first-class option |
 | **Status** (select) | `Status` | proposed / current, plus the `IncludeProposed` toggle |
-| **Ticket** (provider + key) | `TicketProvider` + `TicketKey` | **Paired** — both required together; provider auto-completes (e.g. `github`, `jira`). Matches the API validator |
+| **Ticket** (System + Reference) | `TicketProvider` + `TicketKey` | **Paired** — both required together; matches the API validator. Labelled **System** (the tracker: `github`, `jira`, `azure-devops`, suggestions plus the trackers seen on the rows) and **Reference** (the key: `262`, `GPA-234`); the wire names are unchanged — a label is not a rename |
 | **Initiative** (select) | `InitiativeName` | Populated from `GET /initiatives` |
-| **Repo** (select/free) | `Repo` | Populated from scope; free text allowed |
+| **Repo** (combo) | `Repo` | Suggests the repositories on the rows; free text stays, so an unseen repository is typeable |
+| **Product name** (select) | `ProductName` | The registered products from `GET /product-names` (graph registry, **not** the `product` scope dimension). The store resolves the product to its initiatives and repos; an unregistered product is a 404 that shows the store's own wording, never a silent empty |
 | **Group** (implicit) | `GroupUuid` | Set by selecting an element's group, shown as a pill, removable |
 | **Validity** (toggle) | `CurrentOnly` / `AsOf` | Default current-only; an as-of date is a separate, explicit control |
+
+**Kind scope is a topbar control, not a filter on this bar.** `All | Memory | Understanding` narrows Browse,
+Graph and Review at once. It is a fixed scope rather than a derived list because the options come from the
+store, not from the rows on screen: a list inferred from the returned rows would collapse to the one kind it
+had just narrowed to. The full vocabulary (`rule`, `nfr`, `decision`, `divergence`, …) stays on the per-pane
+Kind control, and that control wins when both are set — one wire field takes one value.
 
 - **Facet vs tag mental model, shown, not hidden.** Facets are the controlled structured axis (reliable
   cross-reference); tags are the forgiving free-label net. The UI separates them visually and never forces
@@ -295,7 +302,8 @@ legible and labelled, and the ticket graph surfaces its disclosure and limit fla
 
 Selecting an element opens a **detail pane** (P2). On a wide screen it is a two-pane layout (list + detail);
 on a narrow screen it is a slide-over. The pane is a **reader**, not a form — the store is append-only, so
-there are no edit/delete controls. The only actions are "open in graph" and "view blob".
+there are no edit/delete controls. The only actions are "open in graph", "view blob" and "copy import
+command".
 
 The pane renders, top to bottom:
 
@@ -304,12 +312,24 @@ The pane renders, top to bottom:
 2. **Subject + kind.** `Name`, `Kind` badge, `Status`, `Confidence`, `Version` / `IsCurrent`.
 3. **Statement.** The claim itself (`Statement` + `ContentSummary`).
 4. **Provenance.** `Sources` (each with its identity and, where present, citation), a scope pill, group
-   lineage (group uuid + any ticket provider:key), and the validity window
+   lineage (group uuid + the group's tickets), and the validity window
    (`ValidFrom` … `ValidUntil`, `ValidUntil` null shown as "open").
 5. **Facets & tags.** Shown as chips; distinct from one another (facets = structured, tags = free).
 6. **Version history.** The list of versions, current marked (and superseded marked), each with its
    captured time. Selecting a version fetches **that version's** blob body on demand.
 7. **Blob body.** Fetched on selection via the blob endpoint; never fetched for the whole list (NFR-05).
+8. **Load into a session.** A copy-able `mimisbrunnr-kvasir-understanding import` command pre-filled with
+   this memory's bindings — `--ticket system:reference` (the first ticket the **group owns**, said so when
+   there are more; a ticket this memory only *references* is not bound, because `--ticket` resolves the
+   owning group and would recall that other group's memories), `--initiative`, `--repository`, and
+   `--product-name` when the Browse query carried one.
+   `import` reads `kind = understanding` only, so any other kind carries `--all`; without it the command
+   would return nothing and read as "the store has no context". Values are shell-quoted, and a flag is
+   emitted only for a binding the memory actually has.
+
+- **The Console copies the command; it never runs it.** It holds a store token and has no session to
+  inject into, so the action is a copy with a stated fallback (select the text) when the clipboard is
+  unavailable — a success message that did not copy is worse than none.
 
 - **The cheap list never carries the body.** The pane issues a second call only when an element is
   selected (or a version is chosen). No lazy-load storm on scroll.
@@ -335,6 +355,14 @@ authoritative.
 `QueryMemories` filters on `Status` + `IncludeProposed`. So the Review view's queue is simply a query for
 proposed memories — it does not need a new Host resource and is not dependent on the skill's transient
 working state.
+
+**Because the queue is a query, its limit is the query cap.** `MaxLimit` is **200**, so the bridge clamps
+`?limit=` to it and the UI offers 50 / 100 / 200. Clamping against a different endpoint's bound (the
+recall-feedback `never-recalled` cap of 5000) forwards a limit the store refuses with a 400, which the
+bridge reports as `502 store-refused` — a queue that cannot be loaded at all. There is no cursor, so a
+backlog above 200 proposals is a known limit of the store, not a page the Console can turn; the view says
+so rather than showing a truncated queue as if it were the whole backlog. `?kind=` narrows the queue with
+the shared kind scope.
 
 A pending proposal renders:
 

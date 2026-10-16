@@ -6,7 +6,8 @@
 // (NFR-05). Both the versions and blob reads pass the element's scope dimension,
 // or the scope rule hides the very dimensions this pane is showing.
 import { getMemoryVersions, getMemoryBlob } from './api.js';
-import { esc, fmtInstant, plural, fmtValidity } from './util.js';
+import { esc, fmtInstant, plural, fmtValidity, shellQuote } from './util.js';
+import { queryProductNameValue } from './view-context.js';
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -24,6 +25,62 @@ function chipRow(items, label) {
   return `<div class="chip-group"><h3>${label}</h3><div class="chip-list">` +
     items.map((item) => `<span class="chip">${esc(item)}</span>`).join('') +
     '</div></div>';
+}
+
+const IMPORT_CLIENT = '.agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding_client.py';
+const KIND_UNDERSTANDING = 'understanding';
+const TICKET_MATCH_REFERENCE = 'reference';
+
+/**
+ * The command that loads this memory's neighbourhood into a session: the kvasir `import` verb
+ * (store → session), pre-filled with the bindings this memory actually carries.
+ *
+ * It is a copy string, not an execution — the Console holds a read or write *store* token and
+ * has no session to inject into, so it can only hand the command over. Three rules keep it honest:
+ * a flag is emitted only when the binding exists; `import` is `kind = understanding` by
+ * default, so any other kind carries `--all` — otherwise the command would return nothing and
+ * read as "the store has no context"; and only *owned* tickets are bound, because `--ticket`
+ * resolves the group that owns the ticket — binding a ticket this memory merely references
+ * would recall that other group's memories, not this one's neighbourhood.
+ */
+function importCommand(memory) {
+  const tickets = memory.tickets || [];
+  const owned = tickets.filter((ticket) => ticket.provider && ticket.key && ticket.match !== TICKET_MATCH_REFERENCE);
+  const referenced = tickets.filter((ticket) => ticket.provider && ticket.key && ticket.match === TICKET_MATCH_REFERENCE);
+  const parts = [`python3 -B ${IMPORT_CLIENT} import`];
+  if (memory.kind !== KIND_UNDERSTANDING) parts.push('--all');
+  if (owned.length) parts.push(`--ticket ${shellQuote(`${owned[0].provider}:${owned[0].key}`)}`);
+  if (memory.initiativeName) parts.push(`--initiative ${shellQuote(memory.initiativeName)}`);
+  if (memory.repository) parts.push(`--repository ${shellQuote(memory.repository)}`);
+  const product = queryProductNameValue();
+  if (product) parts.push(`--product-name ${shellQuote(product)}`);
+  return { command: parts.join(' '), ownedCount: owned.length, referencedCount: referenced.length };
+}
+
+function renderImportCommand(memory) {
+  const { command, ownedCount, referencedCount } = importCommand(memory);
+  const notes = [
+    'Copies a command; the Console cannot run a skill. Hand it to an agent or run it yourself.',
+  ];
+  if (memory.kind !== KIND_UNDERSTANDING) {
+    notes.push(`\`import\` reads understandings only, so this carries \`--all\` for kind \`${memory.kind}\`.`);
+  }
+  if (ownedCount > 1) {
+    notes.push(`The group owns ${ownedCount} tickets and \`--ticket\` takes one, so the first is bound.`);
+  }
+  if (referencedCount > 0) {
+    notes.push(`${referencedCount} referenced ticket${referencedCount === 1 ? ' is' : 's are'} not bound: \`--ticket\` resolves the owning group, so a reference would recall another group's memories.`);
+  }
+  if (!queryProductNameValue()) {
+    notes.push('No product was in the Browse query, so no \`--product-name\` is included.');
+  }
+  return `<section class="detail-section" data-import>
+    <div class="body-head"><h3>Load into a session</h3>
+      <button type="button" id="import-copy">Copy import command</button></div>
+    <pre class="command" id="import-command" tabindex="0">${esc(command)}</pre>
+    <p class="import-note" id="import-status" role="status"></p>
+    <ul class="import-notes">${notes.map((note) => `<li>${esc(note)}</li>`).join('')}</ul>
+  </section>`;
 }
 
 function renderStatic(memory) {
@@ -52,6 +109,7 @@ function renderStatic(memory) {
       </dl>
     </section>
     <section class="detail-section"><div class="chip-groups">${chipRow(memory.facets, 'Facets')}${chipRow(memory.tags, 'Tags')}</div></section>
+    ${renderImportCommand(memory)}
   `;
 }
 
@@ -102,8 +160,39 @@ export function initDetail() {
         blob.hidden = !blob.hidden;
         toggle.textContent = blob.hidden ? 'Show body' : 'Hide body';
       }
+      return;
     }
+    if (event.target.closest('#import-copy')) copyImportCommand();
   });
+}
+
+/**
+ * Copy the generated command. The async clipboard is unavailable outside a secure context — the
+ * Console is loopback HTTP, which browsers treat as trustworthy, but a proxy reaching it by
+ * hostname is not — so the fallback selects the text and says what to press, rather than
+ * reporting a success that did not happen.
+ */
+async function copyImportCommand() {
+  const pre = els.body.querySelector('#import-command');
+  const status = els.body.querySelector('#import-status');
+  if (!pre || !status) return;
+  if (navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(pre.textContent);
+      status.textContent = 'Copied.';
+      return;
+    } catch {
+      // Fall through to the selection fallback.
+    }
+  }
+  const selection = window.getSelection();
+  if (selection) {
+    const range = document.createRange();
+    range.selectNodeContents(pre);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+  status.textContent = 'The clipboard is unavailable in this context — the command is selected; copy it with your usual shortcut.';
 }
 
 async function loadVersion(memory, version) {

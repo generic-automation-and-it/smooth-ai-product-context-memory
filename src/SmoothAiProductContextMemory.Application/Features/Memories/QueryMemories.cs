@@ -191,6 +191,10 @@ public static class QueryMemories
 
             IReadOnlyList<CheapMemory> items = await search.SearchAsync(criteria, cancellationToken);
 
+            // The ticket binding lives in two stores — the group's membership array and the graph's
+            // ABOUT edges — so it is assembled after the rows are materialised, once, bounded by the page.
+            items = await TicketIdentityLookup.EnrichAsync(db, graph, items, cancellationToken);
+
             if (productInitiatives is not null)
             {
                 items = await EnrichProductMatchesAsync(items, productInitiatives, productRepos!, cancellationToken);

@@ -239,6 +239,45 @@ public sealed class NpgsqlMemoryGraph(SmoothAiProductContextMemoryDbContext db) 
     }
 
     /// <summary>
+    /// One statement for the whole page: an anchored <c>IN</c> over the memory uuids, not a loop of
+    /// per-uuid queries. Property predicates (LADR-06) — the memory anchor is served by
+    /// ix_memory_vertex_uuid and the ticket identity by the Ticket provider/key indexes.
+    /// </summary>
+    public async Task<IReadOnlyList<MemoryTicketReference>> FindAboutAsync(
+        IReadOnlyCollection<Guid> memoryUuids,
+        CancellationToken cancellationToken)
+    {
+        if (memoryUuids.Count == 0)
+        {
+            return [];
+        }
+
+        string anchors = string.Join(", ", memoryUuids.Select(uuid => Quote(uuid)));
+        string cypher = $"""
+            MATCH (s:{AgeSession.VertexLabel})-[e:{AgeSession.AboutEdgeLabel}]->(t:{AgeSession.TicketLabel})
+            WHERE s.memory_uuid IN [{anchors}]
+            RETURN s.memory_uuid, t.provider, t.key, e.reason
+            """;
+
+        await using NpgsqlCommand command = await CreateCommandAsync(
+            cypher,
+            "(s agtype, t agtype, r agtype, reason agtype)",
+            cancellationToken);
+        await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+        var references = new List<MemoryTicketReference>();
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            references.Add(new MemoryTicketReference(
+                Guid.Parse(AgtypeArrayReader.ReadAgtypeString(reader, 0)),
+                AgtypeArrayReader.ReadAgtypeString(reader, 1),
+                AgtypeArrayReader.ReadAgtypeString(reader, 2),
+                AgtypeArrayReader.ReadAgtypeString(reader, 3)));
+        }
+
+        return references;
+    }
+
+    /// <summary>
     /// The one-hop lookup — outbound and inbound edges of one memory — exposed so the NFR-02 benchmark
     /// plans the statement the store runs rather than a hand-written copy of it.
     /// </summary>
