@@ -144,17 +144,19 @@ or move the change somewhere the installer does not own.
 bash scripts/test-install-skills.sh
 ```
 
-48 cases across both ports, no network and no container engine needed: the clone source is the checkout
+50 cases across both ports, no network and no container engine needed: the clone source is the checkout
 itself (`SKILLS_REPO` pointed at the repo, `SKILLS_BRANCH` at the current branch), so a harness that
 reached GitHub would be red for reasons unrelated to the code. Runs in the PR gate. Verified green on
-macOS (bash 3.2 with `pwsh` present — 48/48) and on GNU/Linux in `ubuntu:24.04` (`pwsh` absent).
+macOS (bash 3.2 with `pwsh` present — 50/50) and on GNU/Linux in `ubuntu:24.04` (`pwsh` absent).
 
 The `ps1` cases and the cross-port parity cases are **skipped with a stated reason** when `pwsh` is not
 installed — which is the case on the `ubuntu-latest` gate runner. They are exercised locally where `pwsh`
 is present. See `scripts/AGENTS.md` → Test References for what that gap does and does not cover.
 
-Six of the cases cover the prune. Four run end-to-end (tests/ absent, runtime files present, the shared
+Eight of the cases cover the prune. Four run end-to-end (tests/ absent, runtime files present, the shared
 folder still refreshed, the clone source untouched, plus a skill marked `installed: false` left
 byte-identical), and two drive `prune_non_shippable` / `Remove-NonShippable` **directly** on a planted
 tree. The direct pair is not redundancy: `__pycache__/` is gitignored, so a clone can never carry one and
-an end-to-end assertion about it would be vacuously true forever.
+an end-to-end assertion about it would be vacuously true forever. The other two assert that no
+*installed* document links into a pruned path — the failure the prune creates rather than the one it
+prevents, and invisible in the repository because `tests/` is right there.
