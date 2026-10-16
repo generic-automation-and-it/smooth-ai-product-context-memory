@@ -178,15 +178,23 @@ function setState(stateName, message) {
   els.state.textContent = message;
 }
 
-// A group accumulates tickets over time, so the honest rendering is the whole list:
-// one ticket reads as `group · system:reference`, several read as a count rather than
-// an arbitrary one standing in for the group.
+// A group accumulates tickets over time, and a memory may also reference a ticket it does not own,
+// so the honest rendering is the whole set with each binding marked: one ticket reads as
+// `group · system:reference`, several read as a count. Naming only the group's own ticket would hide
+// a reference the memory genuinely carries.
+const TICKET_MATCH_REFERENCE = 'reference';
+
+function ticketLabel(ticket) {
+  const identity = `${esc(ticket.provider)}:${esc(ticket.key)}`;
+  return ticket.match === TICKET_MATCH_REFERENCE ? `${identity} (referenced)` : identity;
+}
+
 function lineageOf(row) {
   const group = shortUuid(row.groupUuid);
   const tickets = (row.tickets || []).filter((ticket) => ticket.provider && ticket.key);
   if (tickets.length === 0) return group;
-  if (tickets.length === 1) return `${group} · ${esc(tickets[0].provider)}:${esc(tickets[0].key)}`;
-  return `${group} · ${tickets.length} tickets (${tickets.map((t) => esc(t.provider)).join(', ')})`;
+  if (tickets.length === 1) return `${group} · ${ticketLabel(tickets[0])}`;
+  return `${group} · ${tickets.length} tickets (${tickets.map(ticketLabel).join(', ')})`;
 }
 
 function renderTable() {

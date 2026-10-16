@@ -34,12 +34,18 @@ function setState(stateName, message) {
   els.state.textContent = message;
 }
 
+const TICKET_MATCH_REFERENCE = 'reference';
+
 function bindingChips(memory) {
   const chips = [];
-  // A group accumulates tickets, so every one is listed; a reviewer approving a proposal needs
-  // the whole binding, not whichever ticket happened to be first.
+  // A group accumulates tickets and a memory may reference one it does not own, so every binding is
+  // listed and marked: a reviewer approving a proposal needs to know which ticket the group owns and
+  // which one this memory merely points at.
   for (const ticket of memory.tickets || []) {
-    if (ticket.provider && ticket.key) chips.push(`Ticket: ${esc(ticket.provider)}:${esc(ticket.key)}`);
+    if (!ticket.provider || !ticket.key) continue;
+    const identity = `${esc(ticket.provider)}:${esc(ticket.key)}`;
+    const mark = ticket.match === TICKET_MATCH_REFERENCE ? ' (referenced)' : '';
+    chips.push(`Ticket: ${identity}${mark}`);
   }
   if (memory.repository) chips.push(`Repo: ${esc(memory.repository)}`);
   if (memory.initiativeName) chips.push(`Initiative: ${esc(memory.initiativeName)}`);
