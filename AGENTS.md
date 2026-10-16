@@ -86,6 +86,7 @@ One-liners; full detail in git history and the linked PRs/issues.
 
 | Date | Change | Ref |
 |---|---|---|
+| 2026-10-16 | **Credential-gated Mímisbrunnr Console** — the viewer SPA now requires a CONTEXT_TOKEN at login (read vs read+write), forwarded by Caddy and the bridges to the Host, which enforces the capability; no token is ambient in the image (NFR-02). New `GET /api/context/capabilities`. Localized homes: HLD-009, HOST_AGENTS. | this PR |
 | 2026-10-16 | **Bumped the `MessagePack` audit pin `2.5.302` → `2.5.303`** — GHSA-qhrr-8q5h-9q3h / CVE-2026-92707 (moderate) was published to the advisory database on 2026-10-15 and covers `< 2.5.303`, so `dotnet restore` failed the PR gate with `NU1902` as an error. Audit-only: no project deserializes MessagePack, and no hub protocol is enabled. | PR #255 |
 | 2026-10-15 | **README `Install` split into Service vs Client Skills Installation** — one one-liner each (`run.sh`, `install-skills.sh`), skills side linking to the full explanation. Root changelog is the record home (no localized file covers `README.md`). | PR #246 |
 | 2026-10-15 | **Phase P3 (graph) lands in the viewer SPA** — bounded force layout of `/paths` path chains, explicit root, `maxDepth` always sent, edge-type narrowing server-side, click-to-label hops via a new read-only `GET /memories/{uuid}` (hop uuids had no addressable endpoint). Ticket graph surface with its disclosure and cap flags. No write path. | HLD-009 |

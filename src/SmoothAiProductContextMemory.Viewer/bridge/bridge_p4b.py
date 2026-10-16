@@ -1,12 +1,13 @@
 # Mímisbrunnr Console bridge — Phase P4b (write path: approve, reject, amend).
 #
-# Companion to bridge.py (P4a, read-side). Same image, different process; the
-# write token is required here and forbidden there. NFR-02 satisfied by process
-# isolation: the P4b process is the only one that may hold the write token, and
-# it refuses to start without one.
+# Companion to bridge.py (P4a, read-side). Same image, different process. The
+# write token is no longer ambient env: the Console session supplies it per
+# request, and this bridge forwards it to the Host, which enforces the
+# capability. P4a still refuses any write-token env; this bridge has none either
+# (NFR-02: write is never ambient in the image).
 #
 # Routes:
-#   GET  /bridge/p4b-health        liveness; declares p4b-write phase + write-token presence
+#   GET  /bridge/p4b-health        liveness; declares p4b-write phase + per-request auth mode
 #   POST /bridge/approve           two-phase: dryrun digest, then confirm + write
 #   POST /bridge/reject            record the decision; no write
 #   POST /bridge/amend             re-send the proposal with Status=proposed on existing Uuid
@@ -34,20 +35,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 HOST = "127.0.0.1"
 PORT = 5182
 
-# Mirrors `context_memory_client.write_tokens_present`: the set of env var
-# names that carry a write token. P4b requires at least one; the import-time
-# check below runs before the capture client imports.
-WRITE_TOKEN_NAMES = {
-    "CONTEXT_MEMORY_WRITE_TOKEN",
-    "ApiAccess__WriteToken",
-    "Parameters__api-write-token",
-}
-
+# Env-name aliasing: the AppHost injects the read token and Host base URL under
+# friendly names; the capture client reads them under the canonical names. The
+# write token is never ambient (NFR-02) — it is supplied per request.
 _READ_TOKEN_NAME = "CONTEXT_MEMORY_READ_TOKEN"
 _BASE_URL_NAME = "CONTEXT_MEMORY_BASE_URL"
 _READ_TOKEN_ALIAS = "API_READ_TOKEN"
 _BASE_URL_ALIAS = "HOST_BASE_URL"
-_WRITE_TOKEN_ALIAS = "API_WRITE_TOKEN"
 
 _CAPTURE_TIMEOUT = 30
 _REJECT_LOG_PATH = os.environ.get("BRIDGE_P4B_REJECT_LOG", "/tmp/bridge_p4b_rejects.log")
@@ -56,36 +50,24 @@ _REJECT_LOG_PATH = os.environ.get("BRIDGE_P4B_REJECT_LOG", "/tmp/bridge_p4b_reje
 def _alias_env():
     """Map the AppHost's env names onto the capture client's canonical names.
 
-    The AppHost injects the write token under a friendly name; the capture
-    client reads it under the canonical `CONTEXT_MEMORY_WRITE_TOKEN`. The
-    alias is set before the client is imported, so the client sees its
-    expected names.
+    The read token and Host base URL are aliased before the client imports so
+    it sees its expected names. The write token is never aliased here — it is
+    supplied per request (NFR-02) and injected into the subprocess env.
     """
     if _READ_TOKEN_ALIAS in os.environ and _READ_TOKEN_NAME not in os.environ:
         os.environ[_READ_TOKEN_NAME] = os.environ[_READ_TOKEN_ALIAS]
     if _BASE_URL_ALIAS in os.environ and _BASE_URL_NAME not in os.environ:
         os.environ[_BASE_URL_NAME] = os.environ[_BASE_URL_ALIAS]
-    if (_WRITE_TOKEN_ALIAS in os.environ
-            and not os.environ.get("CONTEXT_MEMORY_WRITE_TOKEN")
-            and os.environ.get(_WRITE_TOKEN_ALIAS)):
-        os.environ["CONTEXT_MEMORY_WRITE_TOKEN"] = os.environ[_WRITE_TOKEN_ALIAS]
 
 
 def _refuse_without_write_token():
-    """NFR-02 (inverse of P4a): refuse to load when no write token is present.
+    """NFR-02: the write token is no longer ambient env.
 
-    Empty values do not count; the capture client's own check requires the same.
-    The two are independent gates against a misconfigured orchestrator.
+    The Console session supplies it per request, so this bridge must start
+    without one and forward the request's bearer token to the Host instead.
+    An empty env is expected, not a misconfiguration.
     """
-    present = sorted(
-        name for name, value in os.environ.items()
-        if value and name in WRITE_TOKEN_NAMES
-    )
-    if not present:
-        raise SystemExit(
-            "refusing to start: P4b requires a write-token env var; none present "
-            "(NFR-02: write is never ambient; P4a holds the read token, P4b holds the write token)"
-        )
+    return
 
 
 _alias_env()
@@ -130,12 +112,14 @@ def _strip_banner(text):
     return text
 
 
-def _run_capture_set(payload, dryrun):
+def _run_capture_set(payload, dryrun, token=None):
     """Subprocess the capture client's `set` and return its JSON response.
 
     The capture client reads the payload from `--payload <file>`. The file is
     written with owner-only permissions (0600) to satisfy
     `redact.require_owner_only`. `--consume` deletes the file after read.
+    The write credential is the session's bearer token, injected as env for the
+    subprocess only (never the bridge's own env).
     """
     argv = [sys.executable, "-B", _capture_client_path(), "set",
             "--payload", "-", "--consume"]
@@ -148,10 +132,12 @@ def _run_capture_set(payload, dryrun):
         json.dump(payload, tmp)
         tmp_path = tmp.name
     os.chmod(tmp_path, 0o600)
+    env = {**os.environ, "CONTEXT_MEMORY_WRITE_TOKEN": token} if token else None
     try:
         proc = subprocess.run(
             argv + ["--payload", tmp_path],  # safer than /dev/stdin on some platforms
             capture_output=True, text=True, encoding="utf-8", timeout=_CAPTURE_TIMEOUT,
+            env=env,
         )
     finally:
         try:
@@ -176,7 +162,7 @@ def _fingerprint(digest):
     ).hexdigest()
 
 
-def _fetch_current_version(uuid, scope):
+def _fetch_current_version(uuid, scope, token=None):
     """Read the current version of a memory (cheap fields).
 
     Uses `client._request` directly — the library function `cmd_get_versions`
@@ -184,7 +170,7 @@ def _fetch_current_version(uuid, scope):
     pattern, used here for the same reason.
     """
     query = {"scope": scope} if scope else None
-    resp = client._request("GET", f"/api/context/memories/{uuid}", query=query)
+    resp = client._request("GET", f"/api/context/memories/{uuid}", query=query, token=token)
     if not isinstance(resp, dict):
         raise ValueError("memory read returned non-object response")
     return resp
@@ -244,13 +230,19 @@ class Handler(BaseHTTPRequestHandler):
             return None
         return data
 
+    def _bearer(self):
+        auth = self.headers.get("Authorization") or ""
+        if auth.startswith("Bearer "):
+            return auth[len("Bearer "):].strip()
+        return ""
+
     def do_GET(self):
         if self.path == "/bridge/p4b-health":
             self._reply(200, {
                 "status": "ok",
                 "phase": "p4b-write",
                 "routes": ["/bridge/p4b-health", "/bridge/approve", "/bridge/reject", "/bridge/amend"],
-                "writeTokenPresent": bool(client.write_tokens_present()),
+                "authMode": "per-request",
             })
             return
         self._reply(404, {"error": "not-found", "route": self.path})
@@ -271,6 +263,10 @@ class Handler(BaseHTTPRequestHandler):
         body = self._read_json()
         if body is None:
             return
+        token = self._bearer()
+        if not token:
+            self._reply(401, {"error": "unauthorized", "detail": "missing bearer token"})
+            return
         uuid = body.get("uuid")
         scope = body.get("scope") or ""
         confirm = bool(body.get("confirm"))
@@ -283,7 +279,7 @@ class Handler(BaseHTTPRequestHandler):
             self._reply(400, {"error": "bad-input", "detail": "overrides must be an object"})
             return
         try:
-            memory = _fetch_current_version(uuid.strip(), scope)
+            memory = _fetch_current_version(uuid.strip(), scope, token)
         except (client.ClientError, OSError, ValueError) as exc:
             _log(f"approve read: refused ({type(exc).__name__})")
             self._reply(502, {"error": "store-refused", "detail": type(exc).__name__})
@@ -296,7 +292,7 @@ class Handler(BaseHTTPRequestHandler):
         payload = _build_set_payload(memory, group_uuid, overrides)
         payload["items"][0]["status"] = "approved"
         try:
-            dryrun_resp = _run_capture_set(payload, dryrun=True)
+            dryrun_resp = _run_capture_set(payload, dryrun=True, token=token)
         except (RuntimeError, subprocess.TimeoutExpired) as exc:
             _log(f"approve dryrun: refused ({type(exc).__name__})")
             self._reply(503, {"error": "capture-failed", "detail": type(exc).__name__})
@@ -333,7 +329,7 @@ class Handler(BaseHTTPRequestHandler):
             })
             return
         try:
-            written = _run_capture_set(payload, dryrun=False)
+            written = _run_capture_set(payload, dryrun=False, token=token)
         except (RuntimeError, subprocess.TimeoutExpired) as exc:
             _log(f"approve write: refused ({type(exc).__name__})")
             self._reply(503, {"error": "write-failed", "detail": type(exc).__name__})
@@ -344,6 +340,10 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_reject(self):
         body = self._read_json()
         if body is None:
+            return
+        token = self._bearer()
+        if not token:
+            self._reply(401, {"error": "unauthorized", "detail": "missing bearer token"})
             return
         uuid = body.get("uuid")
         reason = body.get("reason") or ""
@@ -368,6 +368,10 @@ class Handler(BaseHTTPRequestHandler):
         body = self._read_json()
         if body is None:
             return
+        token = self._bearer()
+        if not token:
+            self._reply(401, {"error": "unauthorized", "detail": "missing bearer token"})
+            return
         uuid = body.get("uuid")
         scope = body.get("scope") or ""
         overrides = body.get("overrides") or {}
@@ -381,7 +385,7 @@ class Handler(BaseHTTPRequestHandler):
             self._reply(400, {"error": "bad-input", "detail": "overrides is empty: nothing to amend"})
             return
         try:
-            memory = _fetch_current_version(uuid.strip(), scope)
+            memory = _fetch_current_version(uuid.strip(), scope, token)
         except (client.ClientError, OSError, ValueError) as exc:
             _log(f"amend read: refused ({type(exc).__name__})")
             self._reply(502, {"error": "store-refused", "detail": type(exc).__name__})
@@ -394,7 +398,7 @@ class Handler(BaseHTTPRequestHandler):
         payload = _build_set_payload(memory, group_uuid, overrides)
         payload["items"][0]["status"] = "proposed"
         try:
-            written = _run_capture_set(payload, dryrun=False)
+            written = _run_capture_set(payload, dryrun=False, token=token)
         except (RuntimeError, subprocess.TimeoutExpired) as exc:
             _log(f"amend: refused ({type(exc).__name__})")
             self._reply(503, {"error": "amend-failed", "detail": type(exc).__name__})
@@ -409,7 +413,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    _log(f"start host={HOST} port={PORT} phase=p4b-write writeToken=present")
+    _log(f"start host={HOST} port={PORT} phase=p4b-write authMode=per-request")
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
 
 

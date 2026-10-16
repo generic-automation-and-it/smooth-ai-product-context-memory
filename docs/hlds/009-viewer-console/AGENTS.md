@@ -5,17 +5,19 @@ AI Context: HLD for the viewer/management UI. Updated: 2026-10-15
 ## TL;DR
 
 A loopback human-facing Console over the store API. Separate viewer pod fronted by Caddy; the bridge
-drives the capture pipeline rather than reimplementing it; the browser holds no write token;
+drives the capture pipeline rather than reimplementing it; the browser holds the session token (read or
+write) and the Host enforces the capability;
 [README.md](./README.md) is the design, with LADRs under [`./ladrs/`](./ladrs/) and NFRs under
 [`./nfrs/`](./nfrs/). Business authority: BRD-004 (`BR-46` … `BR-53`).
 
 ## Non-Negotiables
 
-- **The P4a bridge never holds the write token and never writes; the P4b bridge writes only by
-  driving the capture `set` pipeline (never a judge).** The "sole writer" invariant (HLD-002) and the
-  no-model rule (HLD-005 §2.6) hold (LADR-03). Neither bridge reimplements a capture gate.
-- **Read is ambient, write is never ambient.** Caddy injects the read token into the `/api` proxy; the
-  write token is server-side and used only on an explicit approve (LADR-02, NFR-02).
+- **The P4a bridge never drives a write; the P4b bridge writes only by driving the capture `set`
+  pipeline (never a judge).** The "sole writer" invariant (HLD-002) and the no-model rule (HLD-005 §2.6)
+  hold (LADR-03). Neither bridge reimplements a capture gate.
+- **The Console is credential-gated.** The practitioner supplies a CONTEXT_TOKEN (read or write) at
+  login; the SPA holds it for the session, Caddy forwards it to the Host, which enforces the capability
+  (NFR-02). No token is ambient: the image carries none, and a read-only token can never write.
 - **Loopback only** (NFR-01). Published on loopback only; the container binds all interfaces so the Aspire/DCP proxy can reach it.
 - **Browse filters map 1:1 onto the query API** — no client-side re-filtering after materialisation
   (LADR-06). Filtering in the browser would defeat the server indexes.
@@ -36,7 +38,7 @@ C4Context
   System_Ext(db, "Postgres + AGE")
   System_Ext(blob, "MinIO")
   Rel(p, console, "opening loopback URL")
-  Rel(console, host, "/api + read token")
+  Rel(console, host, "/api + session bearer token")
   Rel(host, db, "queries")
   Rel(host, blob, "bodies")
 ```
@@ -46,7 +48,7 @@ C4Context
 The high-impact ones — see [`./ladrs/`](./ladrs/) for detail:
 
 - **LADR-01** — separate pod fronted by Caddy (Host image stays pure).
-- **LADR-02** — Caddy injects read token; write token server-side only.
+- **LADR-02** — credential-gated console: the session's bearer token is forwarded to the Host, which is the capability authority.
 - **LADR-03** — the bridge drives the capture pipeline; never reimplements the gates.
 - **LADR-06** — browse filters map 1:1 onto the query fields.
 - **LADR-08** — read-first phasing.
@@ -79,6 +81,7 @@ The high-impact ones — see [`./ladrs/`](./ladrs/) for detail:
 
 | Date | Change | Ref |
 |:-----|:-------|:----|
+| 2026-10-16 | **Credential-gated Console (HLD-009).** The SPA now asks for a CONTEXT_TOKEN at login — read grants browse/detail/graph/queue; the write token additionally enables Approve/Reject. The session token is forwarded by Caddy and the bridges to the Host, which is the capability authority (new `GET /api/context/capabilities` resolves the tier). Caddy no longer injects a read token and no token is ambient in the image (NFR-02); `_request` gained a per-call token; P4b starts without an ambient write token; a CSP is set on the served SPA. | this PR |
 | 2026-10-15 | **G1 verified.** Held candidates now reach the store as `Status=proposed` through the gated capture path (preflight + `set --dryrun` veto + `set`); full candidate fields persisted; the queue is a `POST /query` filtered to proposed with `IncludeProposed=true`. Default `ExcludeProposed` keeps proposed rows out of browse/detail. DoD 1–4 met by `feat[233]`. | this PR |
 | 2026-10-15 | **Phase P4a implemented (read-side review queue).** The bridge imports the capture client and `dedup` as libraries; it refuses to load if any write-token env var is present (NFR-02 defense in depth, in addition to the container not exporting one). New routes: `GET /bridge/review-queue?limit=500` (read-side, default `currentOnly: false` so a reviewer sees the full proposed history) and `POST /bridge/dedup-preview` (re-runs `dedup.stage` on a selected proposal; no write). No write route exists on the bridge; `set --dryrun`/approve/reject are P4b (gated on G2). Bridge log lines are start/finish + counts only (NFR-04). SPA Review pane: list of proposals with subject, kind, statement, binding (ticket/repo/initiative/scope/tags), version + status chips, evidence frame, and a "Conflicts" subsection rendered from `dedup-preview`. "Open in Browse" cross-nav. Approve/Reject are visible placeholders disabled until P4b. The queue query re-uses the read client; the dedup re-run re-uses the model gate (default off). | this PR |
 | 2026-10-15 | **G2 closed — approve transition is a gated `set` version-bump.** No new Host endpoint: the bridge re-sends a `MemoryWrite` with `Status=approved` on the existing `Uuid` of the proposed memory, producing a new `MemoryVersion` (v2) via the existing `VersionExistingAsync` path. v1 (proposed) becomes superseded; v2 (approved) is current. Append-only preserved. **No validator special-case** — `Status` is validated as `proposed`/`approved` exactly as before, because a fresh approved create is the capture path's normal shape (`set_items` defaults status=approved on a create). `proposed` is reserved for gate-held candidates; the approve transition is just a version-bump with `Status=approved`, which the standard `set` path already accepts. A same-`Uuid` `approved`→`approved` bump with a different claim is a legitimate revision of an approved memory; a same-claim re-approve is a no-op via `MemoryClaim.Same`. The amend surface is a version-bump with `Status=proposed` on the same `Uuid` (P4b scope); LADR-11 added. | this PR |

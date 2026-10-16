@@ -1,9 +1,11 @@
 // Mímisbrunnr Console — read API client.
 //
-// All calls go to the same origin; Caddy injects the read token (LADR-02), so
-// this module never sets an Authorization header. Every call distinguishes
-// three failure modes: an HTTP error (non-2xx), a timeout, and a network
-// failure — the browse view renders them as distinct states (NFR-05, P1.5).
+// All calls go to the same origin; the session's bearer token (auth.js) is
+// attached to every request and Caddy forwards it to the Host, which validates
+// it (HLD-009). Every call distinguishes three failure modes: an HTTP error
+// (non-2xx), a timeout, and a network failure — the browse view renders them as
+// distinct states (NFR-05, P1.5).
+import { authHeaders } from './auth.js';
 
 const DEFAULT_TIMEOUT = 10_000;
 
@@ -13,7 +15,7 @@ async function requestJson(path, { method = 'GET', body, timeoutMs = DEFAULT_TIM
   try {
     const response = await fetch(path, {
       method,
-      headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+      headers: { ...authHeaders(), ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: controller.signal,
     });
@@ -64,7 +66,10 @@ export async function getMemoryBlob(uuid, version, scope) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT);
   try {
-    const response = await fetch(`/api/context/memories/${uuid}/versions/${version}/blob${query}`, { signal: controller.signal });
+    const response = await fetch(`/api/context/memories/${uuid}/versions/${version}/blob${query}`, {
+      headers: authHeaders(),
+      signal: controller.signal,
+    });
     const text = await response.text();
     return { ok: response.ok, status: response.status, text };
   } catch (error) {
@@ -88,12 +93,32 @@ export function getMissRate(from, to) {
   return requestJson(`/api/context/recall-feedback/miss-rate?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
 }
 
-// P4a: the review queue and the dedup preview. Same-origin; the bridge holds
-// the read token. The SPA sends no Authorization header.
+// Capability probe (HLD-009): which tier the presented credential grants. The
+// console gates write surfaces on this; read-only tokens cannot write.
+export function getCapabilities() {
+  return requestJson('/api/context/capabilities');
+}
+
+// P4a: the review queue and the dedup preview. Same-origin; the session's
+// bearer token is forwarded to the bridge, which forwards it to the Host.
 export function getReviewQueue(limit = 500) {
   return requestJson(`/bridge/review-queue?limit=${limit}`);
 }
 
 export function postDedupPreview(requestBody) {
   return requestJson('/bridge/dedup-preview', { method: 'POST', body: requestBody });
+}
+
+// P4b: the write surface. Approve is two-phase — a dryrun digest, then a
+// confirm with the fingerprint the digest returned (the human veto, P4b.2).
+export function postApprove(requestBody) {
+  return requestJson('/bridge/approve', { method: 'POST', body: requestBody });
+}
+
+export function postReject(requestBody) {
+  return requestJson('/bridge/reject', { method: 'POST', body: requestBody });
+}
+
+export function postAmend(requestBody) {
+  return requestJson('/bridge/amend', { method: 'POST', body: requestBody });
 }

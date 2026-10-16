@@ -1,21 +1,55 @@
 // Mímisbrunnr Console shell — nav + view wiring.
 //
-// Browse is the default view (the first read view reachable through the
-// loopback entry, P1). Status is initialised lazily on first activation so a
-// browse-only session never issues the recall-feedback requests. The SPA sends
-// no Authorization header; Caddy injects the read token (LADR-02).
+// The Console is credential-gated (HLD-009): no token, no console. On load the
+// shell probes the presented token's capability (read vs read+write) and only
+// then initialises the views. Browse is the default view (the first read view
+// reachable through the loopback entry, P1). Status is initialised lazily on
+// first activation so a browse-only session never issues the recall-feedback
+// requests.
 import { initBrowse, reopenFromUrl } from './browse.js';
 import { initStatus } from './status.js';
 import { initDetail } from './detail.js';
 import { initGraph } from './graph.js';
 import { initReview } from './review.js';
+import { getToken, setToken, clearToken, isAuthed } from './auth.js';
+import { getCapabilities } from './api.js';
 
 let statusInitialized = false;
 let graphInitialized = false;
 let reviewInitialized = false;
 
+let capability = null;
+
 const nav = document.querySelector('#nav');
 const panes = document.querySelectorAll('.pane');
+const loginOverlay = document.querySelector('#login-overlay');
+const loginForm = document.querySelector('#login-form');
+const loginToken = document.querySelector('#login-token');
+const loginError = document.querySelector('#login-error');
+const capabilityBadge = document.querySelector('#capability-badge');
+const signOut = document.querySelector('#sign-out');
+
+function applyCapability() {
+  const isWrite = capability === 'write';
+  capabilityBadge.textContent = isWrite ? 'Read + write' : 'Read-only';
+  capabilityBadge.hidden = false;
+  signOut.hidden = false;
+  document.body.dataset.capability = capability;
+}
+
+function showLogin() {
+  loginOverlay.hidden = false;
+  loginToken.focus();
+}
+
+async function probeCapability() {
+  const result = await getCapabilities();
+  if (result.timedOut || result.unreachable || !result.ok) {
+    throw new Error('Could not verify the token. Check it and try again.');
+  }
+  const caps = Array.isArray(result.data?.capabilities) ? result.data.capabilities : [];
+  capability = caps.includes('write') ? 'write' : 'read';
+}
 
 function activatePane(pane) {
   document.querySelectorAll('.nav-link').forEach((node) => {
@@ -75,5 +109,62 @@ window.addEventListener('hashchange', () => {
   if (pane) activatePane(pane);
 });
 
-initDetail();
-initBrowse();
+function boot() {
+  initDetail();
+  initBrowse();
+  applyCapability();
+  loginOverlay.hidden = true;
+}
+
+async function handleLogin(event) {
+  event.preventDefault();
+  const value = loginToken.value.trim();
+  if (!value) {
+    loginError.textContent = 'Enter a token.';
+    loginError.hidden = false;
+    return;
+  }
+  setToken(value);
+  loginError.hidden = true;
+  loginToken.disabled = true;
+  try {
+    await probeCapability();
+    boot();
+  } catch {
+    clearToken();
+    loginToken.disabled = false;
+    loginError.textContent = 'The token was not accepted by the API. Check it and try again.';
+    loginError.hidden = false;
+  }
+}
+
+function handleSignOut() {
+  clearToken();
+  capability = null;
+  delete document.body.dataset.capability;
+  capabilityBadge.hidden = true;
+  signOut.hidden = true;
+  loginToken.disabled = false;
+  loginToken.value = '';
+  showLogin();
+}
+
+loginForm.addEventListener('submit', handleLogin);
+signOut.addEventListener('click', handleSignOut);
+
+async function start() {
+  if (!isAuthed()) {
+    showLogin();
+    return;
+  }
+  try {
+    await probeCapability();
+    boot();
+  } catch {
+    // Stale or rotated credential — require a fresh login.
+    clearToken();
+    showLogin();
+  }
+}
+
+start();

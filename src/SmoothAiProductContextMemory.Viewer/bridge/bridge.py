@@ -105,12 +105,12 @@ def _review_queue_payload(limit):
     }
 
 
-def _load_queue(limit):
+def _load_queue(limit, token=None):
     # Direct _request call rather than `cmd_query`: the library function
     # `print`s the response to stdout, which would contaminate the HTTP body
     # the bridge is about to write. _request is the no-side-effects seam.
     resp = client._request("POST", "/api/context/query",
-                           payload=_review_queue_payload(limit))
+                           payload=_review_queue_payload(limit), token=token)
     if not isinstance(resp, dict):
         raise ValueError("query response was not a JSON object")
     items = resp.get("items")
@@ -135,20 +135,20 @@ def _reconstruct_candidate(memory, blob_text):
     }
 
 
-def _fetch_versions(uuid, scope):
+def _fetch_versions(uuid, scope, token=None):
     """Cheap current-version read via `_request` (no stdout side effects).
 
     `cmd_get_versions` `print`s the response; the bridge's HTTP body is on
     stdout too, so library-call reuse would contaminate the body.
     """
     query = {"scope": scope} if scope else None
-    resp = client._request("GET", client.memory_versions_path(uuid), query=query)
+    resp = client._request("GET", client.memory_versions_path(uuid), query=query, token=token)
     if not isinstance(resp, dict):
         raise ValueError("versions read returned a non-object response")
     return resp
 
 
-def _fetch_blob(uuid, version, scope):
+def _fetch_blob(uuid, version, scope, token=None):
     """Body read via the read CLI subprocess (the `cmd_get_blob` library
     function writes to stdout, not the return value, so library-call reuse
     is impossible — match the pattern dedup._store_lexical_query uses).
@@ -158,8 +158,9 @@ def _fetch_blob(uuid, version, scope):
             uuid, str(version)]
     if scope:
         argv.extend(["--scope", scope])
+    env = {**os.environ, client.ENV_READ_TOKEN: token} if token else None
     proc = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8",
-                          timeout=_BLOB_TIMEOUT)
+                          timeout=_BLOB_TIMEOUT, env=env)
     if proc.returncode != 0:
         return ""
     out = proc.stdout
@@ -168,14 +169,14 @@ def _fetch_blob(uuid, version, scope):
     return out
 
 
-def _dedup_preview(uuid, scope):
+def _dedup_preview(uuid, scope, token=None):
     """Re-run `dedup.stage` on the selected proposal. Read-only.
 
     Returns a list of proposals in the same shape the capture path sees, so
     the SPA can render the conflict-choice menu (`new version / new memory /
     skip`) from the same data structure the operator's CLI shows.
     """
-    versions_resp = _fetch_versions(uuid, scope)
+    versions_resp = _fetch_versions(uuid, scope, token)
     versions = versions_resp.get("items")
     if not isinstance(versions, list) or not versions:
         raise ValueError("versions read returned no versions")
@@ -188,7 +189,7 @@ def _dedup_preview(uuid, scope):
     blob_text = ""
     version = memory.get("version")
     if isinstance(version, int):
-        blob_text = _fetch_blob(uuid, version, scope) or ""
+        blob_text = _fetch_blob(uuid, version, scope, token) or ""
     candidate = _reconstruct_candidate(memory, blob_text)
     proposals = dedup_module.stage(
         [candidate],
@@ -227,6 +228,12 @@ class Handler(BaseHTTPRequestHandler):
             return None
         return data
 
+    def _bearer(self):
+        auth = self.headers.get("Authorization") or ""
+        if auth.startswith("Bearer "):
+            return auth[len("Bearer "):].strip()
+        return ""
+
     def do_GET(self):
         if self.path == "/bridge/health":
             self._reply(200, {
@@ -248,6 +255,10 @@ class Handler(BaseHTTPRequestHandler):
         self._reply(404, {"error": "not-found", "route": self.path})
 
     def _handle_review_queue(self):
+        token = self._bearer()
+        if not token:
+            self._reply(401, {"error": "unauthorized", "detail": "missing bearer token"})
+            return
         # Parse optional `?limit=N` (default 500, max 5000 to mirror the
         # recall-feedback never-recalled endpoint's cap from G5).
         limit = _QUEUE_DEFAULT_LIMIT
@@ -261,7 +272,7 @@ class Handler(BaseHTTPRequestHandler):
                         self._reply(400, {"error": "bad-input", "detail": "limit must be an integer"})
                         return
         try:
-            items = _load_queue(limit)
+            items = _load_queue(limit, token)
         except client.ClientError as exc:
             _log(f"review-queue: refused ({exc.status_text})")
             self._reply(502, {"error": "store-refused", "detail": exc.status_text, "status": exc.status})
@@ -277,13 +288,17 @@ class Handler(BaseHTTPRequestHandler):
         body = self._read_json()
         if body is None:
             return
+        token = self._bearer()
+        if not token:
+            self._reply(401, {"error": "unauthorized", "detail": "missing bearer token"})
+            return
         uuid = body.get("uuid")
         scope = body.get("scope") or ""
         if not isinstance(uuid, str) or not uuid.strip():
             self._reply(400, {"error": "bad-input", "detail": "uuid is required"})
             return
         try:
-            proposals = _dedup_preview(uuid.strip(), scope)
+            proposals = _dedup_preview(uuid.strip(), scope, token)
         except client.ClientError as exc:
             _log(f"dedup-preview: refused ({exc.status_text})")
             self._reply(502, {"error": "store-refused", "detail": exc.status_text, "status": exc.status})
