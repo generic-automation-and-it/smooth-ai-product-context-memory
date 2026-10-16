@@ -224,8 +224,10 @@ public sealed class NpgsqlMemorySearch(SmoothAiProductContextMemoryDbContext db)
         // Ground "what the read path would return" by running that retrieval itself. Materialising the
         // bounded page then keeping only its size is unusual for a hot path but free of drift — the page
         // is exactly what the read path returns, so no second query shape can disagree with it.
-        int matched = (await SearchAsync(criteria, cancellationToken)).Count;
-        return new MemorySearchInspection(tsQuery, matched, matched == criteria.Limit);
+        // Probe one extra row to disambiguate the ceiling: a page whose true total is exactly the
+        // limit is complete, not truncated, but `matched == limit` cannot tell the two apart on its own.
+        int probe = (await SearchAsync(criteria with { Limit = criteria.Limit + 1 }, cancellationToken)).Count;
+        return new MemorySearchInspection(tsQuery, Math.Min(probe, criteria.Limit), probe > criteria.Limit);
     }
 
     /// <summary>
