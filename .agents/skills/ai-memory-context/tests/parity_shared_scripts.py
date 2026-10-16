@@ -28,11 +28,28 @@ class ParityTests(unittest.TestCase):
                 )
 
     def test_no_vendored_script_reaches_outside_the_skill(self):
-        """The reason the copies exist. A `parents[2]` or a `sys.path` insert would reintroduce the
-        exact dependency that makes a zipped copy of this skill broken."""
+        """The reason the copies exist. Any path expression that climbs out of the skill folder, or a
+        `sys.path` mutation of any kind, would reintroduce the exact dependency that makes a zipped
+        copy of this skill broken.
+
+        Broader than it looks, deliberately. `sys.path.insert` alone missed `sys.path.append` — which
+        is the same escape with a different method name — and missed a `.parent` / `.parent.parent`
+        chain built without the `parents[N]` subscript. All three reintroduce the dependency while the
+        suite stays green, which is the one failure mode a parity gate exists to prevent.
+        """
         import re
 
-        escape = re.compile(r"parents\s*\[\s*[2-9]\s*\]|sys\.path\.insert")
+        escape = re.compile(
+            # Climbing out of the script's own directory. Anchored on `__file__` on purpose: a bare
+            # `.parent` is also how any Path is walked (`mpath.parent.mkdir(...)` in the marker is
+            # ordinary code), so matching it unqualified flagged the real vendored scripts and would
+            # have trained the reader to ignore this check.
+            r"__file__\)?\s*\.\s*parent"
+            r"|parents\s*\[\s*[2-9]\s*\]"
+            # Any mutation of the import path, whatever it is called. `sys.path.append` is the same
+            # escape as `sys.path.insert` with a different method name.
+            r"|sys\.path\s*\.\s*\w+"
+        )
         for name in VENDORED:
             with self.subTest(script=name):
                 body = (SCRIPTS / name).read_text(encoding="utf-8")
