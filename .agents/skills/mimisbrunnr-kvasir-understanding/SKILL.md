@@ -144,7 +144,9 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
 - **`--table` is an overview, not the rendered records**: one row per record (Subject, Answer, Kind,
   Status, Confidence, Scope, Memory · version, Captured). The answer cell is truncated for readability
   and the truncation is stated; the stored claim is whole. Tickets and repo belong to the group, so an
-  item carries only `groupUuid` — they filter but are **not** shown.
+  item carries only `groupUuid` — they filter but are **not** shown. When the query is ticket-filtered
+  (`--ticket`), a `Match` column is added showing `owner` (the ticket's own group) or `reference`
+  (a WET copy reached through an `ABOUT` edge); absent when the query had no ticket.
 - **The old spelling is deprecated, not repurposed.** `import <input> --store` used to prepare a capture
   payload; that direction is now `export`. The old spelling prints a deprecation and exits `1`, so an
   invocation that used to write never starts reading.
@@ -158,7 +160,8 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
 python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding_client.py \
   export [<input> | --input <path>] [--dryrun] [--all] [--nomarker] [--session ID] \
   [--tickets TICKET,...] [--tags TAG,...] [--repository REPO] [--scope scope:id] \
-  [--initiative NAME] [--product-name NAME] [--name NAME] [--body TEXT] [--heimdallr true]
+  [--initiative NAME] [--product-name NAME] [--name NAME] [--body TEXT] [--heimdallr true] \
+  [--reference-tickets TICKET,...]
 ```
 
 - `export` orchestrates the capture skill end to end — redaction gate, atomicity gate, the optional value
@@ -226,6 +229,18 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
   dry run binds no group and cannot know its initiative, so it warns whenever tickets and an
   initiative are bound together. Initiative is create-path-only; WET duplication needs a
   non-resolving binding.
+- **`--reference-tickets <list>` captures a WET copy with an `ABOUT` reference to a shared ticket.**
+  The listed tickets are sent as `ticketReferences` on the `set` payload — not bound for group
+  resolution — so each memory carries a `(Memory)-[:ABOUT]->(Ticket)` edge declaring "this is about
+  that ticket" without moving ownership. The group resolves from `--initiative` plus its own ticket:
+  `--tickets` when given, else a deterministic synthetic owner ticket
+  (`local:wet-<initiative-slug>-<provider>-<key>`, e.g. `local:wet-mimisbrunnr-mvp-github-231`), so a
+  re-export reuses the same group instead of creating a new one every run. One `relates_to` twin
+  link per candidate whose exact-subject preflight match sits in the referenced ticket's owner
+  group — mechanical (explicit flag + exact subject), never a semantic judgement. The
+  initiative-mismatch refusal gains a fourth option pointing at this flag. A dry run shows the
+  target group (would create, with its synthetic ticket), the references, and the twin links per
+  candidate, and writes nothing.
 - **The binding comes from the input or the flags.** A dump folder carries its binding as structured
   metadata (`_dump.json`), read as the default; an explicit flag overrides it; Heimdallr autofill (on by
   default, below) fills repository and branch tickets that neither supplied. So an export with **no
