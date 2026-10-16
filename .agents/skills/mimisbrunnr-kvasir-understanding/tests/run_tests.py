@@ -1884,10 +1884,15 @@ class ExportReferenceTicketTests(unittest.TestCase):
                 src = write(tmp, "notes.md", "The decision-gate ledger records each score.")
 
                 def body(calls):
-                    rc, _, _ = run(["export", src, "--initiative", "Mímisbrunnr-MVP",
-                                    "--reference-tickets", "github:231"])
+                    rc, out, _ = run(["export", src, "--initiative", "Mímisbrunnr-MVP",
+                                      "--reference-tickets", "github:231"])
                     self.assertEqual(rc, 0)
-                    tickets.append([p for a, p in calls if a[0] == "resolve-group"][-1])
+                    # The reuse property is the synthetic owner ticket the export binds, not the
+                    # reference-ticket lookup payload (identical every run by construction, so
+                    # comparing it passes even when the synthetic ticket is non-deterministic).
+                    m = re.search(r"Binding synthetic owner ticket: (\S+)", out)
+                    self.assertIsNotNone(m, "the export reports the synthetic owner ticket it binds")
+                    tickets.append(m.group(1))
                     return rc
 
                 self._with_gates(body)
