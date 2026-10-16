@@ -1481,5 +1481,77 @@ class RunFolderLayoutTests(unittest.TestCase):
                         problems)
 
 
+class RunFolderVerbTests(unittest.TestCase):
+    """`--run-folder`: the whole run folder resolved in one call, stamped once.
+
+    An export writes its units across many file operations performed by the *agent*, not by one
+    process. A stamp re-read between two units can land either side of a minute boundary and split one
+    run across two folders, each holding half — a version chain broken in a way no later check repairs.
+    Printing the finished name once is what makes the run folder a value, not a convention.
+    """
+
+    SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "understanding_index.py"
+
+    def call(self, *args, env=None):
+        environment = {k: v for k, v in os.environ.items() if not k.endswith("_SESSION_ID")}
+        environment.update(env or {})
+        return subprocess.run([sys.executable, "-B", str(self.SCRIPT), *args],
+                              capture_output=True, text=True, env=environment)
+
+    def test_it_prints_a_run_folder_that_satisfies_the_stamp_shape(self):
+        result = self.call("--run-folder", "ses_abc123")
+        self.assertEqual(0, result.returncode, result.stderr)
+        name = result.stdout.strip()
+        self.assertTrue(ui.RUN_STAMP_RE.match(name), name)
+        self.assertEqual("ses_abc123", ui.session_of(name))
+        self.assertEqual(13, len(ui.stamp_of(name)))
+
+    def test_it_reads_the_session_id_from_the_environment(self):
+        result = self.call("--run-folder", env={"OPENCODE_SESSION_ID": "ses_from_env"})
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual("ses_from_env", ui.session_of(result.stdout.strip()))
+
+    def test_an_explicit_id_outranks_the_environment(self):
+        result = self.call("--run-folder", "ses_explicit",
+                           env={"OPENCODE_SESSION_ID": "ses_from_env"})
+        self.assertEqual("ses_explicit", ui.session_of(result.stdout.strip()))
+
+    def test_no_session_id_refuses_rather_than_inventing_one(self):
+        """A guess here would put every session's exports in one folder."""
+        result = self.call("--run-folder")
+        self.assertEqual(2, result.returncode)
+        self.assertIn("needs a session id", result.stderr)
+
+    def test_an_id_with_a_separator_cannot_nest_the_units(self):
+        """The failure this prevents is silent: a `/` lands the units one level deeper, the run
+        folder never gets a valid stamp shape, and every unit in the export drops out of the index."""
+        result = self.call("--run-folder", "weird/id with spaces")
+        self.assertEqual(0, result.returncode, result.stderr)
+        name = result.stdout.strip()
+        self.assertNotIn("/", name)
+        self.assertNotIn(" ", name)
+        self.assertTrue(ui.RUN_STAMP_RE.match(name), name)
+
+    def test_two_ids_that_sanitise_alike_still_get_separate_folders(self):
+        self.assertNotEqual(ui.safe_session_id("a/b"), ui.safe_session_id("a_b"))
+        self.assertEqual("a_b", ui.safe_session_id("a_b"))
+
+    def test_the_stamp_is_resolved_once_per_call_not_per_unit(self):
+        """Two calls in the same minute agree; that is the property a capture-and-reuse caller relies
+        on, and it is why the caller must not re-derive the stamp per unit."""
+        first = self.call("--run-folder", "ses_a").stdout.strip()
+        second = self.call("--run-folder", "ses_a").stdout.strip()
+        self.assertEqual(first, second)
+
+    def test_too_many_arguments_are_refused(self):
+        self.assertEqual(2, self.call("--run-folder", "a", "b").returncode)
+
+    def test_stamp_alone_still_prints_only_the_stamp(self):
+        result = self.call("--stamp")
+        self.assertEqual(0, result.returncode, result.stderr)
+        value = result.stdout.strip()
+        self.assertRegex(value, r"^\d{8}-\d{4}$")
+
+
 if __name__ == "__main__":
     unittest.main()

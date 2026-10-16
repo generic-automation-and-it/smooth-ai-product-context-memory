@@ -44,6 +44,7 @@ Exits 1 when a current unit fails validation — the index is still written so t
 from __future__ import annotations
 
 import os
+import hashlib
 import re
 import subprocess
 import sys
@@ -1282,6 +1283,7 @@ def render(units: list[dict]) -> str:
 USAGE = f"""usage: understanding_index.py [store-dir] [--review] [--decisions]
        understanding_index.py --consume-check <zip> [store-dir]
        understanding_index.py --stamp
+       understanding_index.py --run-folder [SESSION_ID]
 
 Regenerate INDEX.md from the <yyyyMMdd-HHmm>-<session-id>/<category>/<slug>.understanding.md units.
 The legacy <subject>-<yyyyMMdd-HHmm>/<slug>.understanding.md shape is still read, never written.
@@ -1294,10 +1296,84 @@ decision gate, and says so when the gate is not configured or a unit could not b
 
 --consume-check lists <zip> without extracting it and refuses the whole archive on an escaping path,
 a symlink entry or a case-folded collision with another entry or with the target store.
---stamp prints the current UTC subject-folder stamp (yyyyMMdd-HHmm).
+--stamp prints the current UTC creation stamp (yyyyMMdd-HHmm) on its own.
+--run-folder prints the COMPLETE run folder (<yyyyMMdd-HHmm>-<session-id>) in one call, for a session id
+given as an argument or taken from the environment. Call it ONCE per export run and reuse the value for
+every unit: the stamp is resolved here, so a run cannot straddle a minute boundary. An id carrying
+characters outside [A-Za-z0-9._-] is rewritten with a digest appended, since a separator would nest the
+units and drop them from the index. Exits 2 when no session id is available -- it will not invent one.
 
 Exit codes: 0 clean · 1 validation problems (index still written) or archive refused ·
 2 store not found, bad arguments, or an unreadable archive."""
+
+
+# Session ids are resolved from the environment rather than guessed, using the same ladder and the
+# same sanitising rule as the sibling marker scripts — see `_mimisbrunnr-shared/scripts/session_marker.py`.
+# Sharing the convention is the point: two skills that each invent their own reading of a session id
+# will eventually disagree about which session a file belongs to.
+SESSION_ID_VARS = (
+    "CLAUDE_CODE_SESSION_ID",
+    "CODEX_THREAD_ID",
+    "OPENCODE_SESSION_ID",
+    "COPILOT_AGENT_SESSION_ID",
+    "PI_SESSION_ID",
+)
+# Anything outside this set would either break the folder shape or collide with another session.
+_UNSAFE_SESSION_RE = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def safe_session_id(session: str) -> str:
+    """A session id that can sit inside a folder name without changing its shape.
+
+    A `/` is the dangerous case and it is not hypothetical: an unsanitised id lands the units in a
+    *nested* directory, the run folder never gets a `SKILL`-valid stamp shape, and every unit in the
+    export silently falls out of the index. A digest of the original is appended whenever the id had
+    to be rewritten, so two distinct ids that sanitise to the same string still get separate folders.
+    """
+    safe = _UNSAFE_SESSION_RE.sub("_", session).strip("._") or "session"
+    if safe != session:
+        safe = f"{safe}-{hashlib.sha256(session.encode('utf-8')).hexdigest()[:8]}"
+    return safe
+
+
+def resolve_session(explicit: str | None = None) -> str | None:
+    """The caller's session id: an explicit one wins, else the first environment name that is set."""
+    if explicit:
+        return explicit
+    for name in SESSION_ID_VARS:
+        value = os.environ.get(name)
+        if value and value.strip():
+            return value.strip()
+    return None
+
+
+def run_folder_name(session: str) -> str:
+    """The complete run folder for `session`, stamped once.
+
+    Resolving the clock here and returning the whole name is the point of this function. An export
+    writes its units across many separate file operations performed by the *agent*, not by one
+    process, so a stamp re-read between two units can land either side of a minute boundary and split
+    a single export run across two folders — each then holding half a run, and the version chain
+    broken in a way no later check can repair. Printing the finished name once makes the run folder a
+    value the caller captures and reuses verbatim.
+    """
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M")
+    return f"{stamp}-{safe_session_id(session)}"
+
+
+def _run_folder(session: str | None) -> int:
+    resolved = resolve_session(session)
+    if not resolved:
+        # A guess here would put every session's exports in one folder, so this refuses rather than
+        # inventing an id — the same refusal the marker scripts make.
+        print(
+            "--run-folder needs a session id: pass one, or set one of "
+            f"{', '.join(SESSION_ID_VARS)}",
+            file=sys.stderr,
+        )
+        return 2
+    print(run_folder_name(resolved))
+    return 0
 
 
 def main(argv: list[str]) -> int:
@@ -1305,10 +1381,15 @@ def main(argv: list[str]) -> int:
     if any(a in ("-h", "--help") for a in args):
         print(USAGE)
         return 0
+    if args and args[0] == "--run-folder":
+        if len(args) > 2:
+            print(f"--run-folder takes at most one session id\n\n{USAGE}", file=sys.stderr)
+            return 2
+        return _run_folder(args[1] if len(args) == 2 else None)
     if args == ["--stamp"]:
         # Just the `yyyyMMdd-HHmm` half, as before: a run folder is that stamp plus a session id, and
         # the session belongs to the caller rather than to the clock, so printing one would be a
-        # guess. The caller appends its own id.
+        # guess. The caller appends its own id — or uses `--run-folder`, which does both at once.
         print(datetime.now(timezone.utc).strftime("%Y%m%d-%H%M"))
         return 0
     if args and args[0] == "--consume-check":

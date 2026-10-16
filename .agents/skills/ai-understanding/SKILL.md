@@ -343,11 +343,28 @@ uses in the store — `INDEX.md` groups current units by subject, and the Glob t
 Subject **folder**: always new, always this run. Create `<yyyyMMdd-HHmm>-<session-id>/` (current UTC
 time, 24-hour (`python3 .agents/skills/ai-understanding/scripts/understanding_index.py --stamp`, e.g.
 `20260919-1432`), and write this run's output into it. Never
-write into a folder an earlier run created. **Append this session's id** to the stamp to get the run
-folder (`20260919-1432-ses_…`); prefer an id that begins with its own timestamp, which makes two runs
-in the same minute resolve by recency rather than lexically. The one exception is a second export in the
-same minute **for the same session**: the name collides, so write into it — it is the same run for
-practical purposes, and the stamp does not gain seconds to avoid this.
+write into a folder an earlier run created.
+
+**Resolve the run folder once, then reuse the value verbatim for every unit of this run:**
+
+```bash
+python3 .agents/skills/ai-understanding/scripts/understanding_index.py --run-folder
+```
+
+It takes the session id as an argument or from the environment, resolves the clock once, and prints the
+finished folder name. **Call it once per export and copy the output into every path you write** — do
+not re-run it per unit. Re-deriving the stamp between two units can land either side of a minute
+boundary and split one run across two folders, each holding half of it, which breaks the version chain
+in a way no later check repairs. An id containing a character outside `[A-Za-z0-9._-]` is rewritten
+with a digest appended, because a separator would nest the units and drop them from the index silently.
+
+Prefer a session id that begins with its own timestamp (`ses_20260919-1432-…`): it makes two runs in
+the same minute resolve by recency rather than lexically. Nothing enforces that, so treat it as a
+preference, not a guarantee.
+
+The one exception is a second export in the same minute **for the same session**: the name collides, so
+write into it — it is the same run for practical purposes, and the stamp does not gain seconds to avoid
+this.
 
 **Category**: kebab-case, the subject a unit is filed under, nested inside the run folder and dateless
 — the same category recurs across runs, which is what makes `**/<category>/*.md` answer "all X ever".
