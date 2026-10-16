@@ -1,6 +1,6 @@
 ---
 name: ai-understanding
-description: Export this session's hard-won knowledge into Understandings under .context/understandings/<subject>-<yyyyMMdd-HHmm>/<slug>.understanding.md (one file per unit, grouped into a subject folder stamped with when it was created), import matching ones back at task start, and publish/consume them across workspaces as a zip. Trigger on "export the understandings", "make an Understanding of this", "encode this", "what did we learn", "/ai-understanding", or when a session resolved something that cost real effort and would cost the same again. Not a session log and not code documentation.
+description: Export this session's hard-won knowledge into Understandings under .context/understandings/<yyyyMMdd-HHmm>-<session-id>/<category>/<slug>.understanding.md (one file per unit, grouped into a subject folder stamped with when it was created), import matching ones back at task start, and publish/consume them across workspaces as a zip. Trigger on "export the understandings", "make an Understanding of this", "encode this", "what did we learn", "/ai-understanding", or when a session resolved something that cost real effort and would cost the same again. Not a session log and not code documentation.
 allowed-tools:
   - Bash(python3 .agents/skills/ai-understanding/scripts/understanding_index.py:*)
   - Bash(python3 .agents/skills/ai-understanding/scripts/session_marker.py:*)
@@ -20,7 +20,7 @@ Export and import are about **this session's memory**: export writes what the se
 
 | Switch | Effect |
 |--------|--------|
-| `--export [--path <dir>]` _(default)_ | **Reconcile against `INDEX.md`**, then write this run's new and improved units to a new `.context/understandings/<subject>-<yyyyMMdd-HHmm>/`, or under `--path` when given. Proposes the split first; writes nothing and creates no folder when nothing changed |
+| `--export [--path <dir>]` _(default)_ | **Reconcile against `INDEX.md`**, then write this run's new and improved units to a new `.context/understandings/<yyyyMMdd-HHmm>-<session-id>/`, or under `--path` when given. Proposes the split first; writes nothing and creates no folder when nothing changed |
 | `--export --all [--path <dir>]` | Same, but skip the split ask **and re-export the whole scope as upserts instead of this run's delta** — an unchanged in-scope unit is re-written, not skipped. **Never loosens the qualifying bar and never bypasses the decision threshold** (LADR-014) |
 | `--export --dontask [--path <dir>]` | Same, but skips the "Export split" ask and takes the recommended option as analysed by the AI. **Does not** re-export the whole scope — it writes this run's delta, exactly as a normal export does |
 | `--import [--nomarker]` | Load Understandings whose question matches one the task will make you ask; a marked import sets the session marker (below) |
@@ -96,7 +96,7 @@ The working store is **local and disposable** (`.context/` is gitignored). That 
 
 ## TL;DR
 
-1. Working store: `.context/understandings/<subject>-<yyyyMMdd-HHmm>/<slug>.understanding.md` — a stamped folder is **one export run**, holding only what that run produced.
+1. Working store: `.context/understandings/<yyyyMMdd-HHmm>-<session-id>/<category>/<slug>.understanding.md` — a stamped folder is **one export run**, holding only what that run produced.
 2. `.context/understandings/INDEX.md` is a generated table of **unit + description + question**, one row per slug resolving to its newest version — the only file an agent reads to decide what to load, and the **first thing an export reads**.
 3. One session may yield **several** Understandings; each is its own file, each stands alone, and they share a `provenance.session` value.
 4. A slug is a version key, not a unique name. Same question → reuse the slug and write the complete improved unit into this run's folder. Different question → distinct slug. Never edit or delete a previous copy; newest wins.
@@ -107,13 +107,20 @@ The working store is **local and disposable** (`.context/` is gitignored). That 
 ```
 .context/understandings/
   INDEX.md                    # generated — one row per slug, resolving to its newest version
-  <subject>-<yyyyMMdd-HHmm>/  # ONE EXPORT RUN — holds only what that run produced
-    <slug>.understanding.md   # one Understanding (frontmatter + body)
-    <slug>.assets/            # only when a unit carries artifacts — repro, log excerpt, diagram
-  _unfiled/                   # exempt from the stamp — a permanent catch-all, not a body of work
+  <yyyyMMdd-HHmm>-<session-id>/  # ONE EXPORT RUN — holds only what that run produced
+    <category>/                # dateless subject; recurs across runs
+      <slug>.understanding.md  # one Understanding (frontmatter + body)
+      <slug>.assets/           # only when a unit carries artifacts — repro, log excerpt, diagram
+  _unfiled/                    # exempt from the stamp — a permanent catch-all, not a body of work
 ```
 
-**A stamped folder is one export run; a slug is the knowledge.** The same slug appearing in several stamped folders is a **version chain**, not an error: the newest stamp is the current version, the rest are history. `INDEX.md` lists the current version only. The subject *name* is reused across runs so a body of work stays browsable together; the *stamp* is new every run. Use `_unfiled/` for an Understanding belonging to no particular topic.
+The legacy `<subject>-<yyyyMMdd-HHmm>/<slug>.understanding.md` shape is **still read and never
+written**: existing stores keep working untouched, and a new run writes beside them rather than
+moving anything.
+
+**A run folder is one export run; a slug is the knowledge.** The same slug appearing in several run folders is a **version chain**, not an error: the newest stamp is the current version, the rest are history. `INDEX.md` lists the current version only. The *category* is reused across runs so a body of work stays browsable together; the *stamp and session* are new every run. Use `_unfiled/` for an Understanding belonging to no particular topic.
+
+The stamp keeps its `-HHmm`, and that is load-bearing rather than incidental: the stamp is the sort key that decides which copy of a slug is current, and the `updated` fallback is a required but **date-only** field. A date-only stamp would collapse every export on one day into one recency bucket and silently mark the wrong version current. One export run per minute is the assumption that keeps it correct.
 
 Almost every unit is a single file — evidence normally belongs inline, quoted in the body, where a reader sees it without opening anything.
 
@@ -227,12 +234,12 @@ units are never scored. The gate is a subprocess CLI copied into this skill's `s
 
 ### What a run writes
 
-- **A run that produces something writes one new stamped folder** `<subject>-<yyyyMMdd-HHmm>/`, holding
+- **A run that produces something writes one new run folder** `<yyyyMMdd-HHmm>-<session-id>/`, holding
   **only that run's output** — the `new` and `improved` units (except under `--all`, which re-exports every in-scope unit as an upsert per LADR-014). It is not a snapshot of the store, and an
   unchanged unit is never copied into it on the normal delta path.
 - **A run that produces nothing writes nothing and creates no folder.** An export reporting only
   `already known` is a **correct outcome**, not a failure — say so, or agents pad the store to look
-  productive. An empty stamped folder is reported as a problem by the generator.
+  productive. An empty run folder is reported as a problem by the generator.
 - **Export is idempotent.** Export twice in one session and the second run writes nothing, leaving the
   store byte-identical. State that: it is the property that makes the reconcile step worth having.
 - **An improved unit is written in full**, standing alone and readable without the version it replaces —
@@ -327,22 +334,45 @@ never as an `improved` unit: nothing about the knowledge changed.
 
 ### Writing one
 
-Copy `assets/UNDERSTANDING.template.md` to `.context/understandings/<subject>-<yyyyMMdd-HHmm>/<slug>.understanding.md` — or under `--path` when given — and fill it.
+Copy `assets/UNDERSTANDING.template.md` to `.context/understandings/<yyyyMMdd-HHmm>-<session-id>/<category>/<slug>.understanding.md` — or under `--path` when given — and fill it.
 
 Subject **name**: kebab-case, names the topic or piece of work. Reuse the name a body of work already
 uses in the store — `INDEX.md` groups current units by subject, and the Glob tool on
 `.context/understandings/*/*.understanding.md` lists every folder — so its runs stay browsable together.
 
-Subject **folder**: always new, always this run. Create `<subject>-<yyyyMMdd-HHmm>/` with the current UTC
+Subject **folder**: always new, always this run. Create `<yyyyMMdd-HHmm>-<session-id>/` (current UTC
 time, 24-hour (`python3 .agents/skills/ai-understanding/scripts/understanding_index.py --stamp`, e.g.
 `20260919-1432`), and write this run's output into it. Never
-write into a folder an earlier run created. The one exception is a second export in the same minute with
-the same subject: the name collides, so write into it — it is the same run for practical purposes, and the
-stamp does not gain seconds to avoid this.
+write into a folder an earlier run created.
+
+**Resolve the run folder once, then reuse the value verbatim for every unit of this run:**
+
+```bash
+python3 .agents/skills/ai-understanding/scripts/understanding_index.py --run-folder
+```
+
+It takes the session id as an argument or from the environment, resolves the clock once, and prints the
+finished folder name. **Call it once per export and copy the output into every path you write** — do
+not re-run it per unit. Re-deriving the stamp between two units can land either side of a minute
+boundary and split one run across two folders, each holding half of it, which breaks the version chain
+in a way no later check repairs. An id containing a character outside `[A-Za-z0-9._-]` is rewritten
+with a digest appended, because a separator would nest the units and drop them from the index silently.
+
+Prefer a session id that begins with its own timestamp (`ses_20260919-1432-…`): it makes two runs in
+the same minute resolve by recency rather than lexically. Nothing enforces that, so treat it as a
+preference, not a guarantee.
+
+The one exception is a second export in the same minute **for the same session**: the name collides, so
+write into it — it is the same run for practical purposes, and the stamp does not gain seconds to avoid
+this.
+
+**Category**: kebab-case, the subject a unit is filed under, nested inside the run folder and dateless
+— the same category recurs across runs, which is what makes `**/<category>/*.md` answer "all X ever".
+The browsing group is derived from that directory, so it is never written into frontmatter and cannot
+drift.
 
 `_unfiled` is the home for a one-off that belongs to no topic, carries no stamp, and sorts oldest when it
-holds a copy of a versioned slug. The subject is derived from the parent folder, so it is never written
-into frontmatter and cannot drift.
+holds a copy of a versioned slug.
 
 Slug: kebab-case, names the **knowledge**, not the incident. `npgsql-enum-mapping-needs-datasource` — not `tuesday-db-bug`. The file is the slug plus the `.understanding.md` postfix — `npgsql-enum-mapping-needs-datasource.understanding.md` — which is what a path glob selects on, so a unit written without it is invisible to the generator and reported as a rename.
 
@@ -547,7 +577,7 @@ gitignored, so an archive that someone keeps is the only form that survives the 
 The store is never shared through the repository (LADR-008).
 
 - Destination: `.context/understandings-publish/understandings-<YYYYMMDD-HHMMSS>.zip` by default, or `--path` (a file or directory) when given. Outside the store, so the index generator never mistakes it for a subject folder, and never a tracked path.
-- The archive mirrors the store's **current** units: `<subject>-<yyyyMMdd-HHmm>/<slug>.understanding.md` with stamps carried verbatim — never re-stamped — plus each unit's `<slug>.assets/` and a regenerated `INDEX.md` covering only the published units.
+- The archive mirrors the store's **current** units: `<yyyyMMdd-HHmm>-<session-id>/<category>/<slug>.understanding.md` with stamps carried verbatim — never re-stamped — plus each unit's `<slug>.assets/` and a regenerated `INDEX.md` covering only the published units.
 - Publishing filters **per Understanding, not per subject** — a subject folder routinely mixes scopes. By default every current unit publishes (superseded copies never do); pass `--portable-only` to restrict the archive to `scope: portable` units, for the cross-repo case. Never let `--portable-only` publish a `repo-specific` unit — that filter is the only thing preventing a local quirk from being shipped to another repo with provenance that makes it look universally verified.
 - When `--portable-only` excludes a unit that a published unit links to, the archived copy drops the brackets around that `[[slug]]` and keeps the entry, so the archive's own index validates.
 - Each archived copy records `provenance.published_from`; the working copy is left in place.

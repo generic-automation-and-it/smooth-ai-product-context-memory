@@ -1,4 +1,4 @@
-#requires -Version 7.0
+#requires -Version 7.2
 <#
 .SYNOPSIS
     Cross-platform skills installer for Windows / macOS / Linux (PowerShell 7).
@@ -56,6 +56,108 @@ if (Get-Variable -Name PSNativeCommandArgumentPassing -ErrorAction SilentlyConti
 }
 
 function Write-Info { param([string] $Message) Write-Host "install-skills: $Message" }
+
+# The canonical path of the clone source, and the boundary deciding which symlinks `Copy-Wet`
+# materialises. Assigned unconditionally, so an inherited `$env:CLONE_ROOT` cannot widen "inside the
+# clone" to a path the caller chose; `Copy-CloneSource` overwrites it with this run's own clone.
+$script:CloneRoot = ''
+
+# `LinkTarget` rather than `LinkType`. This needs .NET 6 (hence the 7.2 floor), but it is the
+# property that actually answers the question: `LinkType` also reports 'HardLink', so testing it
+# would recurse into a hard link as though it were a symlink and materialise it - turning an
+# ordinary shared file into a duplicate copy per consumer.
+function Test-Symlink {
+    # The null guard is not defensive padding: this script runs under `Set-StrictMode -Version
+    # Latest`, where reading a property off $null THROWS rather than yielding $null. The sweep asks
+    # this question about a source path that may not exist, so without the guard the first missing
+    # entry aborts the whole sweep and every stale file below it survives - which looks exactly like
+    # a sweep that does nothing.
+    param([System.IO.FileSystemInfo] $Item)
+    if ($null -eq $Item) { return $false }
+    return [bool]$Item.LinkTarget
+}
+
+# Canonical path of an existing path, following every link. Empty when it does not resolve, which is
+# how a dangling link is told apart from a real one: the former is kept as a link, never placed.
+function Get-RealPath {
+    param([string] $Path)
+    $current = $Path
+    for ($hop = 0; $hop -lt 40; $hop++) {
+        $item = Get-Item -LiteralPath $current -Force -ErrorAction SilentlyContinue
+        if (-not $item -or -not $item.LinkTarget) { break }
+        $target = [string]$item.LinkTarget
+        if ([System.IO.Path]::IsPathRooted($target)) { $current = $target }
+        else { $current = Join-Path (Split-Path -Parent $current) $target }
+    }
+    $item = Get-Item -LiteralPath $current -Force -ErrorAction SilentlyContinue
+    if (-not $item -or $item.LinkTarget) { return '' }   # a link loop, or nothing there
+    if (-not (Test-Path -LiteralPath $current)) { return '' }
+    # Resolve-Path reports the provider path; on macOS `/var` becomes `/private/var`, and the clone
+    # root is resolved the same way, so the two compare on the same spelling.
+    try { return (Resolve-Path -LiteralPath $current -ErrorAction Stop).Path } catch { return '' }
+}
+
+function Test-InsideClone {
+    param([string] $Path)
+    if (-not $script:CloneRoot -or -not $Path) { return $false }
+    # Component-wise, never a string prefix: /repo-other starts with /repo as text and is elsewhere.
+    $root = $script:CloneRoot.TrimEnd([System.IO.Path]::DirectorySeparatorChar)
+    return $Path -eq $root -or $Path.StartsWith($root + [System.IO.Path]::DirectorySeparatorChar)
+}
+
+# Copy-Wet SRC DST [Stack] - copy SRC to DST, materialising a symlink that points inside the clone.
+#
+# The point is a self-contained installed skill: a symlink pointing inside the clone is an authoring
+# convenience (one file shared by two skills), and copying the link would ship a pointer into a path
+# the consumer does not have. A link outside the clone, or with no target, is the author's business
+# and is kept as a link.
+#
+# Cycles are kept as links. A link to its own ancestor, or to something already being expanded, would
+# otherwise recurse forever; the expansion stack stops at a repeat, which terminates the run while
+# leaving the link visible instead of materialising a loop.
+function Copy-Wet {
+    param([string] $Src, [string] $Dst, [string[]] $Stack = @())
+
+    $item = Get-Item -LiteralPath $Src -Force -ErrorAction SilentlyContinue
+    if (-not $item) { return }
+
+    if (Test-Symlink -Item $item) {
+        $target = [string]$item.LinkTarget
+        if ([System.IO.Path]::IsPathRooted($target)) { $resolvedTarget = $target }
+        else { $resolvedTarget = Join-Path (Split-Path -Parent $Src) $target }
+        $real = Get-RealPath -Path $resolvedTarget
+        if (-not $real) { Copy-Link -Src $Src -Dst $Dst; return }          # dangling: keep it
+        if ($Stack -contains $real) { Copy-Link -Src $Src -Dst $Dst; return }  # cycle: keep it
+        if (-not (Test-InsideClone -Path $real)) { Copy-Link -Src $Src -Dst $Dst; return }
+        Copy-Wet -Src $real -Dst $Dst -Stack ($Stack + @($real))
+        return
+    }
+
+    if ($item.PSIsContainer) {
+        $real = Get-RealPath -Path $Src
+        New-Item -ItemType Directory -Path $Dst -Force | Out-Null
+        foreach ($child in Get-ChildItem -LiteralPath $Src -Force) {
+            Copy-Wet -Src $child.FullName -Dst (Join-Path $Dst $child.Name) -Stack ($Stack + @($real))
+        }
+        return
+    }
+
+    Copy-Item -LiteralPath $Src -Destination $Dst -Force
+}
+
+# Copy-Link - recreate a symlink rather than its contents. Without symlink privilege (a Windows
+# account without Developer Mode) this warns and skips rather than silently writing a copy of the
+# target, which would claim a link was preserved when it was not.
+function Copy-Link {
+    param([string] $Src, [string] $Dst)
+    $target = [string](Get-Item -LiteralPath $Src -Force).LinkTarget
+    New-Item -ItemType Directory -Path (Split-Path -Parent $Dst) -Force | Out-Null
+    try {
+        New-Item -ItemType SymbolicLink -Path $Dst -Target $target -ErrorAction Stop | Out-Null
+    } catch {
+        Write-Info "WARNING: cannot recreate symlink '$Dst' -> '$target' ($($_.Exception.Message)); skipped"
+    }
+}
 # One line on stderr, matching the bash launcher. Write-Error renders a full error record - position,
 # frame and all - which buries the one sentence the operator has to act on.
 function Fail { param([string] $Message) [Console]::Error.WriteLine("install-skills: $Message"); exit 1 }
@@ -84,7 +186,7 @@ function Test-OwnedSkill {
     # Case-SENSITIVE match, mirroring the bash gate: on a case-sensitive filesystem `Mimisbrunnr-X`
     # is a different folder, and matching it here while bash refuses it is a cross-port divergence.
     if ($Name -clike 'mimisbrunnr-*') { return $true }
-    if ($Name -ceq 'ai-understanding' -or $Name -ceq 'ai-brain-dump') { return $true }
+    if ($Name -ceq 'ai-understanding' -or $Name -ceq 'ai-brain-dump' -or $Name -ceq 'ai-memory-context') { return $true }
     return $false
 }
 
@@ -206,7 +308,10 @@ function Remove-StaleEntries {
     foreach ($entry in Get-ChildItem -LiteralPath $Dest -Force) {
         if ($entry.Name -eq 'installation.json') { continue }
         $sourcePath = Join-Path $Source $entry.Name
-        $hasSource = Test-Path -LiteralPath $sourcePath
+        # `Test-Path` follows a symlink, so a DANGLING one reads as absent on both sides: the sweep
+        # would then delete a link the source still has, and - had the source also dropped it - could
+        # not tell the two apart. `LinkTarget` asks about the entry itself.
+        $hasSource = (Test-Path -LiteralPath $sourcePath) -or (Test-Symlink -Item (Get-Item -LiteralPath $sourcePath -Force -ErrorAction SilentlyContinue))
         if ($hasSource -and $entry.PSIsContainer) {
             Remove-StaleEntries -Dest $entry.FullName -Source $sourcePath
         }
@@ -228,6 +333,8 @@ function Invoke-SourceClone {
 
     $script:TempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('install-skills-' + [guid]::NewGuid().ToString('N'))
     $script:TempRepo = Join-Path $script:TempRoot 'repo'
+    # Only ever this run's clone, so an inherited $env:CLONE_ROOT cannot widen the boundary.
+    $script:CloneRoot = $script:TempRepo
     New-Item -ItemType Directory -Path $script:TempRoot -Force | Out-Null
 
     Write-Info "Cloning $Repo ($($Branch ? $Branch : 'default branch'))..."
@@ -286,7 +393,7 @@ function Update-InstalledSkills {
         if (Test-Path -LiteralPath $source -PathType Container) {
             $dest = Join-Path $SkillsRoot $name
             if (Test-Path -LiteralPath $dest) { Remove-Item -LiteralPath $dest -Recurse -Force }
-            Copy-Item -LiteralPath $source -Destination $dest -Recurse -Force
+            Copy-Wet -Src $source -Dst $dest
             Remove-NonShippable -Dest $dest
             Write-Info "Updated $name"
         } else {
@@ -307,7 +414,7 @@ function Update-InstalledSkills {
     if (Test-Path -LiteralPath $sharedSource -PathType Container) {
         $sharedDest = Join-Path $SkillsRoot '_mimisbrunnr-shared'
         New-Item -ItemType Directory -Path $sharedDest -Force | Out-Null
-        Copy-Item -Path (Join-Path $sharedSource '*') -Destination $sharedDest -Recurse -Force
+        Copy-Wet -Src $sharedSource -Dst $sharedDest
         Remove-StaleEntries -Dest $sharedDest -Source $sharedSource
         # Swept first, pruned second: the sweep compares the destination against the source and needs
         # to see the same files on both sides. See the bash port for why the order is not free.
