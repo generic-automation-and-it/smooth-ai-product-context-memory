@@ -5,7 +5,7 @@
 // the blob is fetched only when the element (or a specific version) is selected
 // (NFR-05). Both the versions and blob reads pass the element's scope dimension,
 // or the scope rule hides the very dimensions this pane is showing.
-import { getMemoryVersions, getMemoryBlob } from './api.js';
+import { getMemoryVersions, getMemoryBlob, getMemory, postPaths } from './api.js';
 import { esc, fmtInstant, plural, fmtValidity, shellQuote } from './util.js';
 import { queryProductNameValue } from './view-context.js';
 
@@ -19,6 +19,14 @@ const els = {
 
 let currentMemory = null;
 let blobSeq = 0;
+let linksSeq = 0;
+
+// The mini Links section: one bounded depth-1 walk, so opening a row costs one
+// extra request, never a burst. Depth-1 endpoints arrive labelled (they are the
+// neighbour's own CheapMemory), so no per-node read is needed to draw. A peer is
+// read only when the practitioner activates it — one request, like a graph hop.
+const LINKS_LIMIT = 50;
+const LINKS_RENDER_MAX = 24;
 
 function chipRow(items, label) {
   if (!items || items.length === 0) return '';
@@ -203,6 +211,107 @@ function setBlobSection(html) {
   else els.body.insertAdjacentHTML('beforeend', html);
 }
 
+function linksPlaceholder() {
+  return `<section class="detail-section" data-links><h3>Links · depth 1</h3>` +
+    `<p class="import-note">Reading direct links…</p></section>`;
+}
+
+function renderMiniGraph(memory, peers) {
+  const width = 400;
+  const height = 200;
+  const cx = width / 2;
+  const cy = height / 2;
+  const shown = peers.slice(0, LINKS_RENDER_MAX);
+  const hidden = peers.length - shown.length;
+  const edges = shown.map((peer) => {
+    const a = { x: cx, y: cy };
+    const b = peer.point;
+    return `<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="#2458b0" stroke-width="1.5" />` +
+      (shown.length <= 12 ? `<text x="${((a.x + b.x) / 2).toFixed(1)}" y="${((a.y + b.y) / 2 - 4).toFixed(1)}" class="mini-edge-relation" text-anchor="middle">${esc(peer.relation)}</text>` : '');
+  }).join('');
+  const nodes = shown.map((peer) => {
+    const below = peer.point.y <= cy;
+    const labelY = below ? peer.point.y + 7 + 11 : peer.point.y - 7 - 5;
+    const labelled = Boolean(peer.label);
+    return `<g class="node${labelled ? ' is-labelled' : ''}" data-peer="${esc(peer.uuid)}" tabindex="0" role="button"` +
+      ` aria-label="${labelled ? 'Memory' : 'Unlabelled memory'} ${esc(peer.label || peer.uuid.slice(0, 8))}, ${esc(peer.relation)}. Activate to open it.">` +
+      `<circle cx="${peer.point.x.toFixed(1)}" cy="${peer.point.y.toFixed(1)}" r="7" fill="${labelled ? '#0d6b62' : '#ffffff'}" stroke="${labelled ? '#0a4a44' : '#55555c'}" stroke-width="1.5" />` +
+      `<text x="${peer.point.x.toFixed(1)}" y="${labelY.toFixed(1)}" class="mini-node-label" text-anchor="middle">${esc(peer.label ? truncateLabel(peer.label) : peer.uuid.slice(0, 8))}</text>` +
+      `</g>`;
+  }).join('');
+  const center = `<g class="node is-root"><circle cx="${cx}" cy="${cy}" r="11" fill="#2458b0" stroke="#12336a" stroke-width="1.5" />` +
+    `<text x="${cx}" y="${(cy + 26).toFixed(1)}" class="mini-node-label" text-anchor="middle">${esc(truncateLabel(memory.name || 'this memory'))}</text></g>`;
+  return `<h3>Links · depth 1 (${peers.length})</h3>` +
+    `<div class="mini-graph"><svg viewBox="0 0 ${width} ${height}" role="group" aria-label="Direct links of ${esc(memory.name || 'this memory')}: ${peers.length} neighbours">${edges}${center}${nodes}</svg></div>` +
+    (hidden > 0 ? `<p class="import-note">Showing ${shown.length} of ${peers.length} — narrow with kind/scope in the Graph pane for the rest.</p>` : '') +
+    `<p class="import-note">Activate a node to open it.</p><p class="import-note" data-peer-status role="status"></p>`;
+}
+
+function truncateLabel(value) {
+  const text = String(value ?? '');
+  return text.length > 22 ? `${text.slice(0, 21)}…` : text;
+}
+
+async function openPeer(section, uuid, scope) {
+  const status = section.querySelector('[data-peer-status]');
+  if (status) status.textContent = 'Reading…';
+  const result = await getMemory(uuid, scope);
+  if (!currentMemory) return;
+  if (result.timedOut || result.unreachable || !result.ok || !result.data?.item) {
+    if (status) status.textContent = `Could not open it${result.status ? ` (HTTP ${result.status})` : ''}.`;
+    return;
+  }
+  openDetail(result.data.item);
+}
+
+async function loadLinks(memory) {
+  const seq = ++linksSeq;
+  // The memory's own dimension rides along, like the versions and blob reads —
+  // a uuid alone is not authority for a hidden dimension.
+  const result = await postPaths({
+    sourceUuid: memory.uuid, maxDepth: 1, limit: LINKS_LIMIT, scopeDimension: memory.scopeDimension,
+  });
+  if (currentMemory?.uuid !== memory.uuid || seq !== linksSeq) return;
+  const section = els.body.querySelector('.detail-section[data-links]');
+  if (!section) return;
+  if (result.timedOut || result.unreachable || !result.ok) {
+    section.innerHTML = `<h3>Links · depth 1</h3><p class="import-note">Direct links unavailable` +
+      `${result.status ? ` (HTTP ${result.status})` : ''} — the versions and body above are unaffected.</p>`;
+    return;
+  }
+  const peers = [];
+  const seen = new Set();
+  for (const path of result.data?.paths || []) {
+    const hop = (path.hops || [])[0];
+    if (!hop || !hop.targetUuid || hop.targetUuid === memory.uuid || seen.has(hop.targetUuid)) continue;
+    seen.add(hop.targetUuid);
+    const endpoint = path.endpoint?.uuid === hop.targetUuid ? path.endpoint : null;
+    peers.push({
+      uuid: hop.targetUuid,
+      label: endpoint?.name || '',
+      relation: hop.relation || '',
+      reason: hop.reason || '',
+    });
+  }
+  if (peers.length === 0) {
+    section.innerHTML = `<h3>Links · depth 1</h3><p class="import-note">No direct links — ` +
+      `the graph only holds edges where they were captured.</p>`;
+    return;
+  }
+  peers.forEach((peer, index) => {
+    const angle = -Math.PI / 2 + (index / peers.slice(0, LINKS_RENDER_MAX).length) * Math.PI * 2;
+    peer.point = { x: 200 + Math.cos(angle) * 148, y: 100 + Math.sin(angle) * 70 };
+  });
+  section.innerHTML = renderMiniGraph(memory, peers);
+  section.querySelectorAll('[data-peer]').forEach((element) => {
+    const activate = () => openPeer(section, element.dataset.peer, memory.scopeDimension);
+    element.addEventListener('click', activate);
+    element.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); activate(); }
+    });
+  });
+}
+
 let detailWired = false;
 
 export function initDetail() {
@@ -292,7 +401,9 @@ export function openDetail(memory) {
     }
     // Recall sits directly under Versions: the version list says what exists, the recall
     // section says how to load this memory's neighbourhood back into a session.
+    els.body.insertAdjacentHTML('beforeend', linksPlaceholder());
     els.body.insertAdjacentHTML('beforeend', renderImportCommand(opened));
+    loadLinks(opened);
     loadVersion(opened, opened.version);
   });
 }
