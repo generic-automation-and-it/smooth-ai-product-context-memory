@@ -345,8 +345,19 @@ def load_units(store: Path) -> tuple[list[dict], list[dict], list[str]]:
             problems.append(stamp_problem(run))
 
         direct = sorted(run_dir.glob(UNIT_GLOB))
-        categories = sorted(p for p in run_dir.iterdir() if p.is_dir())
-        nested = not direct and bool(categories)
+        # An assets folder is a sibling of a unit, not a category holding units -- the unit's
+        # evidence lives beside it at every level of the layout. Counted as a category, a purely
+        # legacy folder carrying one reads as a current run folder and its units vanish.
+        categories = sorted(p for p in run_dir.iterdir()
+                            if p.is_dir() and not p.name.endswith(ASSETS_SUFFIX))
+        # Categories win the moment any exist, whether or not units also sit at the run root. Read
+        # the other way round -- nested only when there were *no* direct units -- a run folder
+        # holding both was taken as legacy, so every nested category subtree silently vanished from
+        # the index with no problem and exit 0, producing a complete-looking INDEX.md missing every
+        # categorised memory in that run. One stray unit at the run root was itself enough to
+        # suppress the nested branch, which also made the run-root sweep unreachable in the only
+        # case that needed it.
+        nested = bool(categories)
 
         if nested:
             for category_dir in categories:
@@ -365,6 +376,24 @@ def load_units(store: Path) -> tuple[list[dict], list[dict], list[str]]:
                     continue
                 for unit_file in units:
                     records.append(_record(unit_file, run, category))
+
+            # The run root itself, swept before the `continue`. Fixing the dispatch above stops the
+            # category half being dropped; without this the *other* half is dropped instead -- a unit
+            # written at the run root is in no category, so the walk never reaches it and the file is
+            # neither indexed nor named. The legacy branch reports exactly this class one branch
+            # down, so the two now say the same thing about it.
+            for misplaced in sorted(p for p in run_dir.glob("*.md") if p.name != "INDEX.md"):
+                if misplaced.name.endswith(UNIT_SUFFIX):
+                    problems.append(
+                        f"{run}/{misplaced.name} sits at the run root - this folder holds "
+                        f"categories, so move it to {run}/<category>/{misplaced.name}"
+                    )
+                else:
+                    problems.append(
+                        f"{run}/{misplaced.name} sits at the run root and is missing the "
+                        f"'{UNIT_SUFFIX}' postfix - move it to {run}/<category>/"
+                        f"{misplaced.stem}{UNIT_SUFFIX}"
+                    )
             continue
 
         unpostfixed = sorted(p for p in run_dir.glob("*.md")

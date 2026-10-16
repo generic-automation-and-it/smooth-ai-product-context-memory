@@ -110,6 +110,41 @@ class StoreLayoutTests(unittest.TestCase):
         self.assertEqual(["prune-order"], [u["slug"] for u in units])
         self.assertEqual("pipeline", units[0]["subject"])
 
+    def test_a_run_folder_holding_both_shapes_indexes_everything_and_names_the_strays(self):
+        """Finding 1. A run folder holding units *and* category subfolders.
+
+        The dispatch read `nested = not direct and bool(categories)`, so a mixed folder was taken as
+        legacy and every nested category subtree vanished from the index -- with no problem and exit
+        0, producing a complete-looking INDEX.md missing every categorised memory in that run. One
+        stray unit at the run root was itself enough to suppress the nested branch.
+
+        Both halves now survive, and the losing side is named rather than dropped: fixing the dispatch
+        alone would have stopped the category half disappearing and left the run-root half silently
+        discarded in its place, which is the same defect with the other name on it.
+        """
+        write(self.store, "20261016-1432-ses_a", "pipeline", "nested-one")
+        folder = self.store / "20261016-1432-ses_a"
+        (folder / f"direct-one{mi.UNIT_SUFFIX}").write_text(unit_text(slug="direct-one"),
+                                                           encoding="utf-8")
+        units, _sup, problems = mi.load_units(self.store)
+        self.assertEqual(["nested-one"], [u["slug"] for u in units],
+                         "the categorised memory was silently dropped")
+        self.assertTrue(any("direct-one" in p and "run root" in p for p in problems), problems)
+
+    def test_an_assets_sibling_does_not_turn_a_legacy_folder_into_a_nested_one(self):
+        """The reason `categories` excludes `ASSETS_SUFFIX`. Applied here without inheriting the
+        regression that exclusion was written to fix in the sibling indexer: a `<slug>.assets/` folder
+        is a unit's evidence, not a category, so counting one emptied a legacy folder entirely."""
+        folder = self.store / "legacysubject-20261014-0800"
+        folder.mkdir(parents=True)
+        (folder / f"keep{mi.UNIT_SUFFIX}").write_text(unit_text(slug="keep"), encoding="utf-8")
+        assets = folder / f"keep{mi.ASSETS_SUFFIX}"
+        assets.mkdir()
+        (assets / "evidence.md").write_text("x", encoding="utf-8")
+        units, _sup, problems = mi.load_units(self.store)
+        self.assertEqual(["keep"], [u["slug"] for u in units])
+        self.assertEqual([], problems)
+
     def test_a_legacy_shaped_store_still_reads(self):
         folder = self.store / "legacysubject-20261014-0800"
         folder.mkdir(parents=True)
