@@ -584,6 +584,53 @@ for port in sh; do
   done
 done
 
+# A shipped document that links into a pruned path is a dangling link in every installed copy. This is
+# the failure mode the prune *creates* rather than the one it prevents, and it is invisible in the
+# repository, where `tests/` is right there: `mimisbrunnr-ymir-bootstrap/README.md` linked
+# `[behavioral test guide](tests/README.md)` and every install of that skill shipped a dead link.
+#
+# Scoped to the two pruned names on purpose. A blanket "no dead links" check would report every skill
+# in the repository for unrelated reasons, and a check that is red for reasons outside the change is a
+# check that gets deleted.
+pruned_link_refs() {
+  python3 - "$1" <<'PYEOF'
+import re, sys
+from pathlib import Path
+root = Path(sys.argv[1])
+link = re.compile(r"\[[^\]]*\]\(([^)#\s]+)(?:#[^)]*)?\)")
+found = []
+for doc in sorted([*root.glob("*/SKILL.md"), *root.glob("*/AGENTS.md"),
+                   *root.glob("*/README.md"), *root.glob("*/references/*.md")]):
+    for number, line in enumerate(doc.read_text(encoding="utf-8").splitlines(), 1):
+        for target in link.findall(line):
+            if re.match(r"[a-z]+:", target) or target.startswith("/"):
+                continue
+            head = target.split("/", 1)[0]
+            if head in ("tests", "__pycache__") and not (doc.parent / target).exists():
+                found.append(f"{doc.relative_to(root)}:{number} -> {target}")
+print("\n".join(found))
+PYEOF
+}
+
+check_no_dangling_pruned_links() {
+  local root="$1" runner="$2" refs
+  refs="$(pruned_link_refs "$root")"
+  if [ -n "$refs" ]; then
+    no "[$runner] no installed doc links into a pruned path" "$refs"
+    return
+  fi
+  ok "[$runner] no installed doc links into a pruned path"
+}
+
+for port in sh; do
+  [ "$have_pwsh" = 1 ] && port="sh ps1"
+  for runner in $port; do
+    root="$(make_root "links-$runner")"
+    if [ "$runner" = sh ]; then run_sh "$root" >/dev/null 2>&1 || true; else run_ps1 "$root" >/dev/null 2>&1 || true; fi
+    check_no_dangling_pruned_links "$root" "$runner"
+  done
+done
+
 # A `__pycache__` cannot be planted through the clone path: it is gitignored, so a clone never
 # carries one and an end-to-end assertion about it is vacuously true forever. So the prune is also
 # exercised directly, on a tree planted with one — extracted from each installer rather than restated,

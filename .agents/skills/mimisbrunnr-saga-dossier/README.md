@@ -142,6 +142,8 @@ reason `outside-focus`.
 
 ## Test
 
+In this repository (an installed copy ships no `tests/`):
+
 ```bash
 python3 -B .agents/skills/mimisbrunnr-saga-dossier/tests/run_tests.py
 ```

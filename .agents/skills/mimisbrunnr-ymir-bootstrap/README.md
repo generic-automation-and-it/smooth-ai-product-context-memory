@@ -120,5 +120,6 @@ candidates and coverage gaps; a bounded baseline is never “complete repository
   and comparison coverage.
 - **A source conflict appears:** keep both positions and ask which authority or lifecycle applies.
 
-See the [behavioral test guide](tests/README.md) for the synthetic preview scenarios used to evaluate the
-skill. Those fixtures illustrate behavior; they are not evidence about a real or private project.
+In this repository, see `tests/README.md` (the behavioral test guide) for the synthetic preview
+scenarios used to evaluate the skill. It is named rather than linked because no `tests/` ships in an
+installed copy, and a link to it would be dead in every install. Those fixtures illustrate behavior; they are not evidence about a real or private project.
