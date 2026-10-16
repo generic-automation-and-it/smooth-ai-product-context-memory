@@ -71,7 +71,7 @@ is_owned_skill() {
   case "$1" in *[/]* | *..*) return 1 ;; esac
   case "$1" in
     mimisbrunnr-*) return 0 ;;
-    ai-understanding | ai-brain-dump) return 0 ;;
+    ai-understanding | ai-brain-dump | ai-memory-context) return 0 ;;
   esac
   return 1
 }

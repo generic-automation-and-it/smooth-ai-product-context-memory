@@ -177,8 +177,8 @@ class SelfContainmentTests(unittest.TestCase):
 
     def test_ownership_matches_the_bash_installer(self):
         names = [p.name for p in SKILLS.iterdir() if p.is_dir()] + [
-            "mimisbrunnr-new", "ai-understanding", "ai-brain-dump", "ai-review", "mimisbrunnr",
-            "_mimisbrunnr-shared",
+            "mimisbrunnr-new", "ai-understanding", "ai-brain-dump", "ai-memory-context",
+            "ai-review", "mimisbrunnr", "_mimisbrunnr-shared",
         ]
         for name in names:
             with self.subTest(name=name):

@@ -42,7 +42,7 @@ SHARED = "_mimisbrunnr-shared"
 # The installer's owned set, mirrored from `is_owned_skill` in scripts/install-skills.sh and
 # `Test-OwnedSkill` in install-skills.ps1. `test_check_skill_selfcontainment.py` runs all three
 # against each other, so a fourth copy cannot drift unnoticed.
-OWNED = ("mimisbrunnr-", "ai-understanding", "ai-brain-dump")
+OWNED = ("mimisbrunnr-", "ai-understanding", "ai-brain-dump", "ai-memory-context")
 
 # The skills that depend on the shared folder by design. Verified against the tree, not assumed:
 #   odin        SKILL.md:344-352 documents seven `python3 .../_mimisbrunnr-shared/scripts/...` calls;
@@ -54,7 +54,10 @@ OWNED = ("mimisbrunnr-", "ai-understanding", "ai-brain-dump")
 #   heimdallr   SKILL.md:19 shells to the shared find_session_metadata.py; it ships no scripts/ of
 #               its own either, so it is wholly dependent rather than merely degraded.
 # `mimisbrunnr-muninn-recall-feedback` is deliberately absent: its only script is recall_feedback.sh,
-# which references nothing outside itself.
+# which references nothing outside itself. Neither is `ai-memory-context`, which WET-vendors three
+# scripts and reaches nothing outside its own folder -- asserted structurally by
+# `ai-memory-context/tests/parity_shared_scripts.py`, which fails on a `parents[2]` or `sys.path`
+# insert in any vendored copy.
 SHARED_DEPENDENT = (
     "mimisbrunnr-heimdallr-find-session-metadata",
     "mimisbrunnr-kvasir-understanding",

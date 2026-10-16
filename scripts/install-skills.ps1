@@ -84,7 +84,7 @@ function Test-OwnedSkill {
     # Case-SENSITIVE match, mirroring the bash gate: on a case-sensitive filesystem `Mimisbrunnr-X`
     # is a different folder, and matching it here while bash refuses it is a cross-port divergence.
     if ($Name -clike 'mimisbrunnr-*') { return $true }
-    if ($Name -ceq 'ai-understanding' -or $Name -ceq 'ai-brain-dump') { return $true }
+    if ($Name -ceq 'ai-understanding' -or $Name -ceq 'ai-brain-dump' -or $Name -ceq 'ai-memory-context') { return $true }
     return $false
 }
 
