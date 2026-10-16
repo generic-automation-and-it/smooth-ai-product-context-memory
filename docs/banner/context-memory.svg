@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="title desc">
-  <title id="title">Mímisbrunnr — Smooth AI Product Context Memory. Reasoning that outlives the session. Drawn from Mímisbrunnr, not lost with it — four keepers, one wellspring, the why still attached.</title>
-  <desc id="desc">Private local memory for AI-assisted work. Capture at a checkpoint through an AI skill; the HTTP API owns mechanics. Four-level hybrid storage around Mímisbrunnr (Mímir's wellspring): Týr the relational PostgreSQL index, Loki the JSONB long tail, Urðr the Apache AGE graph edges, and Iðunn the content-addressed blob store. Single-user, offline, evidence not instruction.</desc>
+  <title id="title">Mímisbrunnr — Smooth AI Product Context Memory. Reasoning that outlives the session. Drawn from Mímisbrunnr, not lost with it — four keepers, one judge, one wellspring, the why still attached.</title>
+  <desc id="desc">Private local memory for AI-assisted work. Capture at a checkpoint through an AI skill; the HTTP API owns mechanics. Four-level hybrid storage around Mímisbrunnr (Mímir's wellspring): Týr the relational PostgreSQL index, Loki the JSONB long tail, Urðr the Apache AGE graph edges, and Iðunn the content-addressed blob store — five nodes in a star with Forseti the LLM judge, ringed by an original rune ring. Mímir's eye watches from the water, Huginn and Muninn aloft. Single-user, offline, evidence not instruction.</desc>
 
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
@@ -54,29 +54,30 @@
 
   <text x="108" y="42" fill="#6EA8FF" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="11" font-weight="700" letter-spacing="3.2">SMOOTH AI · CONTEXT MEMORY</text>
   <text x="108" y="70" fill="#F2F5FA" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="26" font-weight="700">Reasoning that outlives the session</text>
-  <text x="108" y="92" fill="#C9D2E3" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="13" font-weight="600">Drawn from Mímisbrunnr, not lost with the session — four keepers, one wellspring, the why still attached.</text>
+  <text x="108" y="92" fill="#C9D2E3" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="13" font-weight="600">Drawn from Mímisbrunnr, not lost with the session — four keepers, one judge, one wellspring, the why still attached.</text>
   <text x="108" y="112" fill="#93A0B8" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12">Týr indexes. Urðr threads. Loki shapeshifts. Iðunn never withers. Odin paid an eye. You keep the reasoning.</text>
 
   <rect x="40" y="128" width="740" height="412" rx="20" fill="url(#panel)" stroke="#243049"/>
 
   <g font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif">
-    <rect x="60" y="148" width="168" height="72" rx="12" fill="#1B2338" stroke="#33405C"/>
+    <rect x="60" y="148" width="156" height="72" rx="12" fill="#1B2338" stroke="#33405C"/>
     <circle cx="88" cy="172" r="9" fill="none" stroke="#3EE0B8" stroke-width="1.7"/>
     <path d="M77 194c4-9 18-9 22 0" fill="none" stroke="#3EE0B8" stroke-width="1.7" stroke-linecap="round"/>
     <text x="108" y="176" fill="#F2F5FA" font-size="13" font-weight="700">Practitioner</text>
     <text x="108" y="194" fill="#93A0B8" font-size="10">sole user · local</text>
 
-    <path d="M238 184 H258" stroke="#5C6B84" stroke-width="2"/>
-    <polygon points="258,179 270,184 258,189" fill="#5C6B84"/>
+    <path d="M222 184 H240" stroke="#5C6B84" stroke-width="2"/>
+    <polygon points="240,179 252,184 240,189" fill="#5C6B84"/>
 
-    <rect x="278" y="148" width="210" height="72" rx="12" fill="#1B2338" stroke="#3EE0B8"/>
-    <text x="298" y="176" fill="#F2F5FA" font-size="13" font-weight="700">AI skill · judgement</text>
-    <text x="298" y="194" fill="#93A0B8" font-size="10">checkpoint · never a chore</text>
+    <rect x="252" y="148" width="258" height="72" rx="12" fill="#1B2338" stroke="#3EE0B8"/>
+    <text x="264" y="176" fill="#F2F5FA" font-size="11" font-weight="700">AI skill · judgement and decision score</text>
+    <text x="264" y="194" fill="#93A0B8" font-size="10">checkpoint · never a chore</text>
+    <text x="264" y="206" fill="#93A0B8" font-size="10">local/remote decision model</text>
 
-    <path d="M498 184 H518" stroke="#5C6B84" stroke-width="2"/>
-    <polygon points="518,179 530,184 518,189" fill="#5C6B84"/>
+    <path d="M510 184 H528" stroke="#5C6B84" stroke-width="2"/>
+    <polygon points="528,179 540,184 528,189" fill="#5C6B84"/>
 
-    <rect x="538" y="148" width="220" height="72" rx="12" fill="#1B2338" stroke="#6EA8FF"/>
+    <rect x="540" y="148" width="218" height="72" rx="12" fill="#1B2338" stroke="#6EA8FF"/>
     <text x="558" y="176" fill="#F2F5FA" font-size="13" font-weight="700">HTTP API · mechanics</text>
     <text x="558" y="194" fill="#93A0B8" font-size="10">one transaction · digest</text>
 
@@ -94,17 +95,20 @@
     <text x="634" y="285" fill="#3EE0B8" font-size="11" font-weight="700">5 Write</text>
 
     <text x="60" y="332" fill="#5C6B84" font-size="10" font-weight="700" letter-spacing="1.6">WHAT STAYS TRUE</text>
-    <text x="60" y="358" fill="#F2F5FA" font-size="14" font-weight="700">Skill judges. API enforces. Four gods around the well.</text>
+    <text x="60" y="358" fill="#F2F5FA" font-size="14" font-weight="700">Skill judges. API enforces. Four keepers, one judge around the well.</text>
     <text x="60" y="382" fill="#93A0B8" font-size="12">Evidence, not orders — a claim to weigh, never a command from the well.</text>
     <text x="60" y="402" fill="#93A0B8" font-size="12">The chain is Urðr’s: measurement, finding, decision.</text>
 
-    <rect x="60" y="424" width="210" height="44" rx="10" fill="#1B2338" stroke="#33405C"/>
-    <text x="76" y="451" fill="#F2F5FA" font-size="12" font-weight="600">Zero dedicated upkeep</text>
-    <rect x="282" y="424" width="210" height="44" rx="10" fill="#1B2338" stroke="#33405C"/>
-    <text x="298" y="451" fill="#F2F5FA" font-size="12" font-weight="600">Yours · offline · private</text>
-    <rect x="504" y="424" width="254" height="44" rx="10" fill="#1B2338" stroke="#33405C"/>
-    <text x="520" y="451" fill="#F2F5FA" font-size="12" font-weight="600">Cross-product recall</text>
-    <text x="60" y="500" fill="#5C6B84" font-size="11">Four gods around the well. Evidence, not orders. Urðr holds the chain.</text>
+    <rect x="60" y="424" width="165" height="44" rx="10" fill="#1B2338" stroke="#33405C"/>
+    <text x="142" y="451" text-anchor="middle" fill="#F2F5FA" font-size="11" font-weight="600" textLength="148" lengthAdjust="spacingAndGlyphs">Zero dedicated upkeep</text>
+    <rect x="237" y="424" width="165" height="44" rx="10" fill="#1B2338" stroke="#33405C"/>
+    <text x="319" y="451" text-anchor="middle" fill="#F2F5FA" font-size="11" font-weight="600" textLength="148" lengthAdjust="spacingAndGlyphs">Yours · offline · private</text>
+    <rect x="414" y="424" width="165" height="44" rx="10" fill="#1B2338" stroke="#33405C"/>
+    <text x="496" y="451" text-anchor="middle" fill="#F2F5FA" font-size="11" font-weight="600" textLength="148" lengthAdjust="spacingAndGlyphs">Cross-product recall</text>
+    <rect x="591" y="424" width="165" height="44" rx="10" fill="#1B2338" stroke="#3EE0B8"/>
+    <text x="673" y="443" text-anchor="middle" fill="#F2F5FA" font-size="10" font-weight="600">validation of value</text>
+    <text x="673" y="457" text-anchor="middle" fill="#F2F5FA" font-size="10" font-weight="600">with LLM decisions</text>
+    <text x="60" y="500" fill="#5C6B84" font-size="11">Four keepers, one judge around the well. Evidence, not orders. Urðr holds the chain.</text>
   </g>
 
   <rect x="800" y="128" width="440" height="412" rx="20" fill="#0C1222" stroke="#243049"/>
@@ -134,15 +138,18 @@
     <circle cx="1180" cy="300" r="0.6"/>
   </g>
 
+  <g fill="none" opacity="0.75">
+    <circle cx="1020" cy="348" r="164" stroke="#3A4663" stroke-width="1"/>
+    <circle cx="1020" cy="348" r="156" stroke="#3A4663" stroke-width="3" stroke-dasharray="4 36.84"/>
+  </g>
+
   <g fill="none" stroke="#3A4663" stroke-width="1" stroke-dasharray="2 5" opacity="0.75">
-    <path d="M1020 348 L886 250"/>
-    <path d="M1020 348 L1154 250"/>
-    <path d="M1020 348 L886 446"/>
-    <path d="M1020 348 L1154 446"/>
-    <path d="M886 250 L1154 250"/>
-    <path d="M886 446 L1154 446"/>
-    <path d="M886 250 L886 446"/>
-    <path d="M1154 250 L1154 446"/>
+    <path d="M1020 278 L1061 405 L953 326 L1087 326 L979 405 L1020 278 Z"/>
+    <path d="M1020 278 L1020 348"/>
+    <path d="M1087 326 L1020 348"/>
+    <path d="M1061 405 L1020 348"/>
+    <path d="M979 405 L1020 348"/>
+    <path d="M953 326 L1020 348"/>
   </g>
 
   <text x="1020" y="158" text-anchor="middle" fill="#8EA0C4" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="9" font-weight="700" letter-spacing="2.6">MÍMISBRUNNR</text>
@@ -152,41 +159,57 @@
     <circle r="34" fill="none" stroke="#6D7C96" stroke-width="5"/>
     <circle r="34" fill="none" stroke="#C5D0E2" stroke-width="1.2" opacity="0.55"/>
     <circle r="27" fill="url(#wellWater)"/>
-    <ellipse cx="-4" cy="-6" rx="10" ry="4.5" fill="#7EB0E0" opacity="0.28"/>
-    <circle cx="-6" cy="-5" r="2.2" fill="#F6E9A2" opacity="0.85" filter="url(#softGlow)"/>
-    <path d="M-22,-2 C-8,6 8,6 22,-2" fill="none" stroke="#3EE0B8" stroke-width="1" opacity="0.45"/>
+    <path d="M-24 -2 C-12 -14 12 -14 24 -2 C12 8 -12 8 -24 -2 Z" fill="#0B1020" stroke="#7EB0E0" stroke-width="1.4" opacity="0.95"/>
+    <circle cx="0" cy="-3" r="8.5" fill="#2A4A6E" stroke="#7EB0E0" stroke-width="1"/>
+    <circle cx="0" cy="-3" r="4" fill="#05080F"/>
+    <circle cx="-2.5" cy="-5.5" r="1.6" fill="#F6E9A2" filter="url(#softGlow)"/>
   </g>
   <text x="1020" y="398" text-anchor="middle" fill="#F2F5FA" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="13" font-weight="700">Mímisbrunnr</text>
   <text x="1020" y="414" text-anchor="middle" fill="#93A0B8" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="10">Mímir's wellspring</text>
 
   <g font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif">
-    <circle cx="886" cy="250" r="8" fill="#0C1222" stroke="#6EA8FF" stroke-width="1.8"/>
-    <circle cx="886" cy="250" r="3" fill="#6EA8FF"/>
-    <rect x="820" y="168" width="132" height="54" rx="9" fill="#16243C" stroke="#2A4570"/>
-    <text x="886" y="188" text-anchor="middle" fill="#6EA8FF" font-size="11" font-weight="700">Týr</text>
-    <text x="886" y="204" text-anchor="middle" fill="#93A0B8" font-size="9" letter-spacing="1.1">RELATIONAL</text>
-    <text x="886" y="216" text-anchor="middle" fill="#F2F5FA" font-size="10">law · typed index</text>
+    <circle cx="1020" cy="278" r="8" fill="#0C1222" stroke="#6EA8FF" stroke-width="1.8"/>
+    <circle cx="1020" cy="278" r="3" fill="#6EA8FF"/>
+    <path d="M1020 269 L1020 225" fill="none" stroke="#3A4663" stroke-width="1"/>
+    <rect x="954" y="171" width="132" height="54" rx="9" fill="#16243C" stroke="#2A4570"/>
+    <text x="1020" y="191" text-anchor="middle" fill="#6EA8FF" font-size="11" font-weight="700">Forseti</text>
+    <text x="1020" y="207" text-anchor="middle" fill="#93A0B8" font-size="9" letter-spacing="1.1">LLM</text>
+    <text x="1020" y="219" text-anchor="middle" fill="#F2F5FA" font-size="10">decisions</text>
 
-    <circle cx="1154" cy="250" r="8" fill="#0C1222" stroke="#A78BFA" stroke-width="1.8"/>
-    <circle cx="1154" cy="250" r="3" fill="#A78BFA"/>
-    <rect x="1088" y="168" width="132" height="54" rx="9" fill="#241B3A" stroke="#5B4A86"/>
-    <text x="1154" y="188" text-anchor="middle" fill="#A78BFA" font-size="11" font-weight="700">Urðr</text>
-    <text x="1154" y="204" text-anchor="middle" fill="#93A0B8" font-size="9" letter-spacing="1.1">GRAPH</text>
-    <text x="1154" y="216" text-anchor="middle" fill="#F2F5FA" font-size="10">threads · edges</text>
+    <circle cx="1087" cy="326" r="8" fill="#0C1222" stroke="#6EA8FF" stroke-width="1.8"/>
+    <circle cx="1087" cy="326" r="3" fill="#6EA8FF"/>
+    <rect x="1097" y="275" width="132" height="54" rx="9" fill="#16243C" stroke="#2A4570"/>
+    <text x="1163" y="295" text-anchor="middle" fill="#6EA8FF" font-size="11" font-weight="700">Urðr</text>
+    <text x="1163" y="311" text-anchor="middle" fill="#93A0B8" font-size="9" letter-spacing="1.1">GRAPH</text>
+    <text x="1163" y="323" text-anchor="middle" fill="#F2F5FA" font-size="10">threads · edges</text>
 
-    <circle cx="886" cy="446" r="8" fill="#0C1222" stroke="#3EE0B8" stroke-width="1.8"/>
-    <circle cx="886" cy="446" r="3" fill="#3EE0B8"/>
-    <rect x="820" y="462" width="132" height="54" rx="9" fill="#14302C" stroke="#2A6B5C"/>
-    <text x="886" y="482" text-anchor="middle" fill="#3EE0B8" font-size="11" font-weight="700">Loki</text>
-    <text x="886" y="498" text-anchor="middle" fill="#93A0B8" font-size="9" letter-spacing="1.1">NoSQL</text>
-    <text x="886" y="510" text-anchor="middle" fill="#F2F5FA" font-size="10">JSONB long tail</text>
+    <circle cx="1061" cy="405" r="8" fill="#0C1222" stroke="#6EA8FF" stroke-width="1.8"/>
+    <circle cx="1061" cy="405" r="3" fill="#6EA8FF"/>
+    <path d="M1066 412 L1089 442" fill="none" stroke="#3A4663" stroke-width="1"/>
+    <rect x="1042" y="442" width="132" height="54" rx="9" fill="#16243C" stroke="#2A4570"/>
+    <text x="1108" y="462" text-anchor="middle" fill="#6EA8FF" font-size="11" font-weight="700">Iðunn</text>
+    <text x="1108" y="478" text-anchor="middle" fill="#93A0B8" font-size="9" letter-spacing="1.1">BLOB</text>
+    <text x="1108" y="490" text-anchor="middle" fill="#F2F5FA" font-size="10">unwilting bodies</text>
 
-    <circle cx="1154" cy="446" r="8" fill="#0C1222" stroke="#F0A36B" stroke-width="1.8"/>
-    <circle cx="1154" cy="446" r="3" fill="#F0A36B"/>
-    <rect x="1088" y="462" width="132" height="54" rx="9" fill="#2A1C14" stroke="#8A5A38"/>
-    <text x="1154" y="482" text-anchor="middle" fill="#F0A36B" font-size="11" font-weight="700">Iðunn</text>
-    <text x="1154" y="498" text-anchor="middle" fill="#93A0B8" font-size="9" letter-spacing="1.1">BLOB</text>
-    <text x="1154" y="510" text-anchor="middle" fill="#F2F5FA" font-size="10">unwilting bodies</text>
+    <circle cx="979" cy="405" r="8" fill="#0C1222" stroke="#6EA8FF" stroke-width="1.8"/>
+    <circle cx="979" cy="405" r="3" fill="#6EA8FF"/>
+    <path d="M974 412 L951 442" fill="none" stroke="#3A4663" stroke-width="1"/>
+    <rect x="866" y="442" width="132" height="54" rx="9" fill="#16243C" stroke="#2A4570"/>
+    <text x="932" y="462" text-anchor="middle" fill="#6EA8FF" font-size="11" font-weight="700">Loki</text>
+    <text x="932" y="478" text-anchor="middle" fill="#93A0B8" font-size="9" letter-spacing="1.1">NoSQL</text>
+    <text x="932" y="490" text-anchor="middle" fill="#F2F5FA" font-size="10">JSONB long tail</text>
+
+    <circle cx="953" cy="326" r="8" fill="#0C1222" stroke="#6EA8FF" stroke-width="1.8"/>
+    <circle cx="953" cy="326" r="3" fill="#6EA8FF"/>
+    <rect x="811" y="275" width="132" height="54" rx="9" fill="#16243C" stroke="#2A4570"/>
+    <text x="877" y="295" text-anchor="middle" fill="#6EA8FF" font-size="11" font-weight="700">Týr</text>
+    <text x="877" y="311" text-anchor="middle" fill="#93A0B8" font-size="9" letter-spacing="1.1">RELATIONAL</text>
+    <text x="877" y="323" text-anchor="middle" fill="#F2F5FA" font-size="10">law · typed index</text>
+  </g>
+
+  <g fill="none" stroke="#C9D2E3" stroke-width="1.6" stroke-linecap="round" opacity="0.85">
+    <path d="M877 225 Q886 216 895 223 Q904 216 913 225"/>
+    <path d="M1132 405 Q1141 396 1150 403 Q1159 396 1168 405"/>
   </g>
 
   <g font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif">
