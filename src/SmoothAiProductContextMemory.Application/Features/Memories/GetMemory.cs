@@ -2,6 +2,7 @@ using FluentValidation;
 using Mediator;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using SmoothAiProductContextMemory.Application.Abstractions;
 using SmoothAiProductContextMemory.Application.Common.Exceptions;
 using SmoothAiProductContextMemory.Application.Common.Models;
 using SmoothAiProductContextMemory.Application.Common.Persistence;
@@ -35,7 +36,7 @@ public static class GetMemory
         }
     }
 
-    public sealed class Handler(IApplicationDbContext db, ILogger<Handler> logger)
+    public sealed class Handler(IApplicationDbContext db, IMemoryGraph graph, ILogger<Handler> logger)
         : IRequestHandler<Request, Response>
     {
         public async ValueTask<Response> Handle(Request request, CancellationToken cancellationToken)
@@ -64,7 +65,14 @@ public static class GetMemory
                     $"This memory is '{dimension}'-scoped. Request it with scope '{dimension}' to read it.");
             }
 
-            CheapMemory item = new(
+            MemoryGroup group = memory.Group;
+            string? initiativeName = await db.Initiatives
+                .AsNoTracking()
+                .Where(i => i.Id == group.InitiativeId)
+                .Select(i => i.Name)
+                .SingleOrDefaultAsync(cancellationToken);
+
+            CheapMemory bare = new(
                 memory.Uuid,
                 memory.Group.Uuid,
                 memory.Name,
@@ -83,10 +91,19 @@ public static class GetMemory
                 current.Version,
                 current.IsCurrent,
                 current.Sources,
-                current.CreatedOn);
+                current.CreatedOn)
+            {
+                Repository = group.Repo,
+                InitiativeName = initiativeName,
+            };
+
+            // Same assembly as the query and version-history paths, so a hop label and a
+            // list row never disagree about a memory's binding (tickets live in two stores).
+            IReadOnlyList<CheapMemory> enriched =
+                await TicketIdentityLookup.EnrichAsync(db, graph, [bare], cancellationToken);
 
             logger.LogInformation("Get memory completed. Version: {Version}", current.Version);
-            return new Response(item);
+            return new Response(enriched[0]);
         }
     }
 }

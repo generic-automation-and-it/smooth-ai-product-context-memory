@@ -28,11 +28,12 @@ function chipRow(items, label) {
 }
 
 const IMPORT_CLIENT = '.agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding_client.py';
+const IMPORT_SLASH = '/mimisbrunnr-kvasir-understanding';
 const KIND_UNDERSTANDING = 'understanding';
 const TICKET_MATCH_REFERENCE = 'reference';
 
 /**
- * The command that loads this memory's neighbourhood into a session: the kvasir `import` verb
+ * The flags that load this memory's neighbourhood into a session: the kvasir `import` verb
  * (store → session), pre-filled with the bindings this memory actually carries.
  *
  * It is a copy string, not an execution — the Console holds a read or write *store* token and
@@ -43,22 +44,33 @@ const TICKET_MATCH_REFERENCE = 'reference';
  * resolves the group that owns the ticket — binding a ticket this memory merely references
  * would recall that other group's memories, not this one's neighbourhood.
  */
-function importCommand(memory) {
+function importFlags(memory) {
   const tickets = memory.tickets || [];
   const owned = tickets.filter((ticket) => ticket.provider && ticket.key && ticket.match !== TICKET_MATCH_REFERENCE);
   const referenced = tickets.filter((ticket) => ticket.provider && ticket.key && ticket.match === TICKET_MATCH_REFERENCE);
-  const parts = [`python3 -B ${IMPORT_CLIENT} import`];
-  if (memory.kind !== KIND_UNDERSTANDING) parts.push('--all');
-  if (owned.length) parts.push(`--ticket ${shellQuote(`${owned[0].provider}:${owned[0].key}`)}`);
-  if (memory.initiativeName) parts.push(`--initiative ${shellQuote(memory.initiativeName)}`);
-  if (memory.repository) parts.push(`--repository ${shellQuote(memory.repository)}`);
+  const flags = [];
+  if (memory.kind !== KIND_UNDERSTANDING) flags.push('--all');
+  if (owned.length) flags.push(`--ticket ${shellQuote(`${owned[0].provider}:${owned[0].key}`)}`);
+  if (memory.initiativeName) flags.push(`--initiative ${shellQuote(memory.initiativeName)}`);
+  if (memory.repository) flags.push(`--repository ${shellQuote(memory.repository)}`);
   const product = queryProductNameValue();
-  if (product) parts.push(`--product-name ${shellQuote(product)}`);
-  return { command: parts.join(' '), ownedCount: owned.length, referencedCount: referenced.length };
+  if (product) flags.push(`--product-name ${shellQuote(product)}`);
+  return { flags: flags.join(' '), ownedCount: owned.length, referencedCount: referenced.length };
+}
+
+function importCommand(memory) {
+  const { flags, ownedCount, referencedCount } = importFlags(memory);
+  return { command: `python3 -B ${IMPORT_CLIENT} import${flags ? ` ${flags}` : ''}`, ownedCount, referencedCount };
+}
+
+function slashCommand(memory) {
+  const { flags, ownedCount, referencedCount } = importFlags(memory);
+  return { command: `${IMPORT_SLASH} import${flags ? ` ${flags}` : ''}`, ownedCount, referencedCount };
 }
 
 function renderImportCommand(memory) {
   const { command, ownedCount, referencedCount } = importCommand(memory);
+  const { command: slash } = slashCommand(memory);
   const notes = [
     'Copies a command; the Console cannot run a skill. Hand it to an agent or run it yourself.',
   ];
@@ -75,41 +87,95 @@ function renderImportCommand(memory) {
     notes.push('No product was in the Browse query, so no \`--product-name\` is included.');
   }
   return `<section class="detail-section" data-import>
-    <div class="body-head"><h3>Load into a session</h3>
-      <button type="button" id="import-copy">Copy import command</button></div>
+    <div class="body-head"><h3>Recall</h3>
+      <span class="button-row"><button type="button" id="recall-copy">Copy slash</button>
+      <button type="button" id="import-copy">Copy import command</button></span></div>
+    <p class="import-note">Slash skill (terminal):</p>
+    <pre class="command" id="recall-slash" tabindex="0">${esc(slash)}</pre>
+    <p class="import-note">Python equivalent:</p>
     <pre class="command" id="import-command" tabindex="0">${esc(command)}</pre>
     <p class="import-note" id="import-status" role="status"></p>
     <ul class="import-notes">${notes.map((note) => `<li>${esc(note)}</li>`).join('')}</ul>
   </section>`;
 }
 
+function badgeRow(memory) {
+  const badges = [
+    esc(memory.kind),
+    esc(memory.status),
+    `confidence ${esc(memory.confidence)}`,
+    `v${esc(memory.version)}${memory.isCurrent ? ' · current' : ''}`,
+  ];
+  if (memory.initiativeName) badges.push(`Initiative: ${esc(memory.initiativeName)}`);
+  if (memory.repository) badges.push(`Repo: ${esc(memory.repository)}`);
+  for (const ticket of memory.tickets || []) {
+    if (!ticket.provider || !ticket.key) continue;
+    const mark = ticket.match === TICKET_MATCH_REFERENCE ? ' (referenced)' : '';
+    badges.push(`Ticket: ${esc(ticket.provider)}:${esc(ticket.key)}${mark}`);
+  }
+  if (memory.scopeDimension) {
+    badges.push(`Scope: ${esc(memory.scopeDimension)}${memory.scopeIdentifier ? `:${esc(memory.scopeIdentifier)}` : ''}`);
+  }
+  if (memory.productMatch) badges.push(`Product: via ${esc(memory.productMatch)}`);
+  if (memory.ticketMatch) badges.push(`Matched: ${esc(memory.ticketMatch)}`);
+  if (memory.groupUuid) badges.push(`Group: ${esc(String(memory.groupUuid).slice(0, 8))}`);
+  return `<div class="badges">${badges.map((badge) => `<span class="badge">${badge}</span>`).join('')}</div>`;
+}
+
+function chipRowOrNone(items, label, noneText) {
+  const chips = (items || []).map((item) => `<span class="chip">${esc(item)}</span>`).join('');
+  return `<div class="chip-group"><h3>${label}</h3>` +
+    (chips ? `<div class="chip-list">${chips}</div>` : `<p class="import-note">${noneText}</p>`) +
+    '</div>';
+}
+
+function bindingSection(memory) {
+  const chips = [];
+  chips.push(memory.initiativeName
+    ? `<span class="chip">Initiative: ${esc(memory.initiativeName)}</span>`
+    : '<span class="chip">Initiative: —</span>');
+  chips.push(memory.repository
+    ? `<span class="chip">Repo: ${esc(memory.repository)}</span>`
+    : '<span class="chip">Repo: —</span>');
+  const tickets = (memory.tickets || []).filter((ticket) => ticket.provider && ticket.key);
+  if (tickets.length) {
+    for (const ticket of tickets) {
+      const mark = ticket.match === TICKET_MATCH_REFERENCE ? ' (referenced)' : '';
+      chips.push(`<span class="chip">Ticket: ${esc(ticket.provider)}:${esc(ticket.key)}${mark}</span>`);
+    }
+  } else {
+    chips.push('<span class="chip">Tickets: none bound</span>');
+  }
+  return `<section class="detail-section"><div class="chip-group"><h3>Binding</h3><div class="chip-list">${chips.join('')}</div></div></section>`;
+}
+
 function renderStatic(memory) {
+  // One version may cite several source documents (e.g. the file it was
+  // captured from plus the session it came out of) — grouped under a single
+  // term so the label does not repeat per source.
   const sources = (memory.sources || []).map((source) => {
     const when = source.capturedAt ? ` · ${fmtInstant(source.capturedAt)}` : '';
-    return `<dt>Source</dt><dd>${esc(source.kind)}: ${esc(source.reference)}${when}</dd>`;
+    return `<dd>${esc(source.kind)}: ${esc(source.reference)}${when}</dd>`;
   }).join('');
 
   return `
     <h2 class="detail-subject">${esc(memory.name)}</h2>
-    <div class="badges">
-      <span class="badge">${esc(memory.kind)}</span>
-      <span class="badge">${esc(memory.status)}</span>
-      <span class="badge">confidence ${esc(memory.confidence)}</span>
-      <span class="badge">v${esc(memory.version)}${memory.isCurrent ? ' · current' : ''}</span>
-    </div>
+    ${badgeRow(memory)}
     <section class="detail-section"><h3>Statement</h3><p class="statement">${esc(memory.statement)}</p></section>
     ${memory.contentSummary ? `<section class="detail-section"><h3>Summary</h3><p>${esc(memory.contentSummary)}</p></section>` : ''}
     <section class="detail-section">
       <h3>Provenance</h3>
       <dl class="provenance">
-        ${sources}
+        ${sources ? `<dt>Sources</dt>${sources}` : ''}
         <dt>Scope</dt><dd>${esc(memory.scopeDimension || '—')}${memory.scopeIdentifier ? ` · ${esc(memory.scopeIdentifier)}` : ''}</dd>
+        <dt>Initiative</dt><dd>${esc(memory.initiativeName || '—')}</dd>
+        <dt>Repository</dt><dd>${esc(memory.repository || '—')}</dd>
         <dt>Group</dt><dd><code>${esc(memory.groupUuid)}</code></dd>
         <dt>Validity</dt><dd>${esc(fmtValidity(memory))}</dd>
       </dl>
     </section>
-    <section class="detail-section"><div class="chip-groups">${chipRow(memory.facets, 'Facets')}${chipRow(memory.tags, 'Tags')}</div></section>
-    ${renderImportCommand(memory)}
+    ${bindingSection(memory)}
+    <section class="detail-section"><div class="chip-groups">${chipRow(memory.facets, 'Facets')}${chipRowOrNone(memory.tags, 'Tags', 'No tags.')}</div></section>
   `;
 }
 
@@ -162,7 +228,8 @@ export function initDetail() {
       }
       return;
     }
-    if (event.target.closest('#import-copy')) copyImportCommand();
+    if (event.target.closest('#import-copy')) copyCommand('#import-command');
+    if (event.target.closest('#recall-copy')) copyCommand('#recall-slash');
   });
 }
 
@@ -172,8 +239,8 @@ export function initDetail() {
  * hostname is not — so the fallback selects the text and says what to press, rather than
  * reporting a success that did not happen.
  */
-async function copyImportCommand() {
-  const pre = els.body.querySelector('#import-command');
+async function copyCommand(selector) {
+  const pre = els.body.querySelector(selector);
   const status = els.body.querySelector('#import-status');
   if (!pre || !status) return;
   if (navigator.clipboard && window.isSecureContext) {
@@ -223,6 +290,9 @@ export function openDetail(memory) {
     if (versionsResult.ok && Array.isArray(versionsResult.data?.items)) {
       els.body.insertAdjacentHTML('beforeend', renderVersions(versionsResult.data.items));
     }
+    // Recall sits directly under Versions: the version list says what exists, the recall
+    // section says how to load this memory's neighbourhood back into a session.
+    els.body.insertAdjacentHTML('beforeend', renderImportCommand(opened));
     loadVersion(opened, opened.version);
   });
 }

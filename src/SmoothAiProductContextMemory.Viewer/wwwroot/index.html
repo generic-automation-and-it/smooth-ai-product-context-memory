@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Mímisbrunnr Console</title>
   <link rel="stylesheet" href="/style.css">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
 </head>
 <body>
   <div id="login-overlay" class="login-overlay" role="dialog" aria-modal="true" aria-labelledby="login-title">
@@ -22,7 +23,7 @@
 
   <header class="topbar">
     <a class="skip" href="#browse-results">Skip to results</a>
-    <span class="brand">Mímisbrunnr</span>
+    <span class="brand"><img src="/icon.svg" class="brand-icon" alt="" aria-hidden="true">Mímisbrunnr</span>
     <nav id="nav" aria-label="Console">
       <a href="#browse" class="nav-link is-active" data-pane="browse" aria-current="page">Browse</a>
       <a href="#graph" class="nav-link" data-pane="graph">Graph</a>
@@ -127,6 +128,7 @@
               <span class="subfield-label">Reference</span>
               <input id="f-ticket-key" placeholder="GPA-234" autocomplete="off">
             </label>
+            <p class="hint">System + Reference filter together, exact match — either alone does nothing, and there is no wildcard or free-text search.</p>
           </fieldset>
 
           <fieldset class="field">
@@ -171,6 +173,8 @@
                 <th scope="col">Version</th>
                 <th scope="col">Validity</th>
                 <th scope="col">Scope</th>
+                <th scope="col">Tickets</th>
+                <th scope="col">Product</th>
                 <th scope="col">Lineage</th>
                 <th scope="col">Created</th>
               </tr>
