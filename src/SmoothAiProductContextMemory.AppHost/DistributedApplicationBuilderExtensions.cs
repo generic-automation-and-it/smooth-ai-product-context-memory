@@ -248,12 +248,14 @@ internal static class DistributedApplicationBuilderExtensions
             {
                 // Build the viewer image from its Dockerfile so `dotnet run AppHost` spins the pod up
                 // without a pre-built :local tag. The Dockerfile needs the repository-root context (it
-                // COPYs the shared capture scripts and the Viewer source). Paths are resolved from the
-                // AppHost project directory, which is the working directory under `dotnet run`.
-                string appHostDirectory = Directory.GetCurrentDirectory();
+                // COPYs the shared capture scripts and the Viewer source). Anchor to the AppHost
+                // assembly location, not the process working directory: `dotnet run --project <path>`
+                // leaves the caller's CWD unchanged, so GetCurrentDirectory() lands outside the repo
+                // when invoked from the repo root.
+                string repoRoot = FindRepoRoot(AppContext.BaseDirectory);
                 viewer = viewer.WithDockerfile(
-                    contextPath: Path.GetFullPath(Path.Combine(appHostDirectory, "..", "..")),
-                    dockerfilePath: Path.GetFullPath(Path.Combine(appHostDirectory, "..", "SmoothAiProductContextMemory.Viewer", "Dockerfile")));
+                    contextPath: repoRoot,
+                    dockerfilePath: Path.Combine(repoRoot, "src", "SmoothAiProductContextMemory.Viewer", "Dockerfile"));
             }
 
             viewer
@@ -268,6 +270,23 @@ internal static class DistributedApplicationBuilderExtensions
                     "--label", $"{AppHostConfiguration.ManagedLabel}=true");
 
             builder.ConfigureReleaseEndpoint(viewer, "http", configuration);
+        }
+
+        private static string FindRepoRoot(string startDirectory)
+        {
+            string? directory = Path.GetFullPath(startDirectory);
+            for (int depth = 0; depth < 12 && directory is not null; depth++)
+            {
+                if (File.Exists(Path.Combine(directory, "SmoothAiProductContextMemory.slnx")) &&
+                    File.Exists(Path.Combine(directory, "src", "SmoothAiProductContextMemory.Viewer", "Dockerfile")))
+                {
+                    return directory;
+                }
+
+                directory = Directory.GetParent(directory)?.FullName;
+            }
+
+            throw new InvalidOperationException("Could not locate the repository root (SmoothAiProductContextMemory.slnx) from the AppHost assembly directory.");
         }
 
         private IResourceBuilder<T> ConfigureReleaseEndpoint<T>(
