@@ -187,8 +187,8 @@ function Remove-NonShippable {
     if (Test-Path -LiteralPath $tests) { Remove-Item -LiteralPath $tests -Recurse -Force }
     # Depth-first, and the result collected before deleting: Get-ChildItem evaluates lazily, so
     # removing while enumerating drops the entries it had not reached yet.
-    Get-ChildItem -LiteralPath $Dest -Directory -Recurse -Filter '__pycache__' -Force -ErrorAction SilentlyContinue |
-        ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
+    $stale = @(Get-ChildItem -LiteralPath $Dest -Directory -Recurse -Filter '__pycache__' -Force -ErrorAction SilentlyContinue)
+    foreach ($dir in $stale) { Remove-Item -LiteralPath $dir.FullName -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
 function Remove-StaleEntries {

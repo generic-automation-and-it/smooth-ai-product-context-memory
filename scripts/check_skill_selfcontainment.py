@@ -81,6 +81,8 @@ INTERPRETER = re.compile(r"\b(?:python3?|node|bash|sh)\b")
 
 
 def is_owned(name: str) -> bool:
+    if "/" in name or ".." in name:
+        return False
     return name.startswith(OWNED[0]) or name in OWNED[1:]
 
 
@@ -201,7 +203,11 @@ def rows(skills: Path = SKILLS) -> list[tuple[str, str, int]]:
 def main() -> int:
     args = set(sys.argv[1:])
     if "--zip" in args:
-        name = sys.argv[sys.argv.index("--zip") + 1]
+        idx = sys.argv.index("--zip")
+        if idx + 1 >= len(sys.argv):
+            print("::error::--zip needs a skill name")
+            return 1
+        name = sys.argv[idx + 1]
         folder = SKILLS / name
         if not folder.is_dir():
             print(f"::error::no such skill folder: {name}")
