@@ -32,4 +32,10 @@ public sealed record CheapMemory(
 
     /// <summary>True when the group's initiative is linked to more than one product. Only set with <c>productName</c>.</summary>
     public bool SharedInitiative { get; init; }
+
+    /// <summary>
+    /// <c>"owner"</c> when the memory is in the ticket's owner group, <c>"reference"</c> when it reached
+    /// the query via an <c>ABOUT</c> reference, null when the query carried no ticket.
+    /// </summary>
+    public string? TicketMatch { get; init; }
 }

@@ -58,6 +58,7 @@ public sealed record RestoreResults(
     int Edges,
     int TicketVertices,
     int TicketEdges,
+    int AboutEdges,
     int ProductVertices,
     int InitiativeVertices,
     int RepoVertices,

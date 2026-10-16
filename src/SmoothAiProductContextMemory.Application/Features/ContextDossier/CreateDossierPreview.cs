@@ -91,7 +91,8 @@ public static class CreateDossierPreview
                 selection.WidenedCount,
                 selection.Selected.Count,
                 selection.EdgeCount,
-                selection.HiddenPathDropped);
+                selection.HiddenPathDropped,
+                selection.ReferencedAnchors);
 
             IReadOnlyList<DossierLimitHit> limitsHit = DossierSelection.BuildLimitsHit(selection, anchor);
 
