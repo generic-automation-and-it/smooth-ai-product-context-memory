@@ -156,6 +156,18 @@ jobs:
           python3 scripts/check_vendored_skills.py
           python3 -B -m unittest discover -s scripts -p 'test_check_vendored_skills.py' -v
 
+      # A separate question from the one above, and deliberately not folded into it. NFR-05 is "does
+      # this skill reach into *this repository's* tree"; this is "does this skill reach outside *itself*",
+      # which is what decides whether it can ship as a zip on its own. Two mechanisms, and the second
+      # is the one that bites: a runtime path resolution, and a command the SKILL.md documents. Odin has
+      # no shared import anywhere in its own scripts and is still broken alone, because its SKILL.md
+      # tells the agent to shell out to a sibling. A declared dependency is fine — failing on an
+      # *undeclared* one is the point.
+      - name: Check skill self-containment is declared
+        run: |
+          python3 scripts/check_skill_selfcontainment.py
+          python3 -B -m unittest discover -s scripts -p 'test_check_skill_selfcontainment.py' -v
+
       # Without --postgres only the Docker-free transport checks run; the disposable-container
       # fixture stays an operator-run check (scripts/AGENTS.md).
       - name: Test ticket-ownership preflight

@@ -67,6 +67,8 @@ Business authority: [BRD-003](https://github.com/generic-automation-and-it/smoot
 
 ## Test
 
+In this repository (an installed copy ships no `tests/`):
+
 ```bash
 python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/tests/run_tests.py
 ```

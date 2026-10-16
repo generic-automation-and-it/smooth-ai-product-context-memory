@@ -172,6 +172,25 @@ function Build-InstallationJson {
     return "{`n  `"updated`": $updatedJson,`n  `"skills`": [`n$joined  ]`n}"
 }
 
+# Remove what does not belong in an installed copy of a skill: the `tests/` harnesses, which assert
+# against the repository's own tree and are meaningless outside it, and `__pycache__/`, which is
+# interpreter output that regenerates on first run.
+#
+# `agents/`, `references/` and `assets/` are deliberately kept — they are runtime-referenced (odin
+# reads `references/read-path.md` mid-skill; ai-understanding renders `assets/UNDERSTANDING.template.md`),
+# so stripping them ships a skill documenting a file it cannot open. Mirrors `prune_non_shippable()`
+# in install-skills.sh, including the order it runs in relative to the sweep.
+function Remove-NonShippable {
+    param([string] $Dest)
+    if (-not (Test-Path -LiteralPath $Dest -PathType Container)) { return }
+    $tests = Join-Path $Dest 'tests'
+    if (Test-Path -LiteralPath $tests) { Remove-Item -LiteralPath $tests -Recurse -Force }
+    # Depth-first, and the result collected before deleting: Get-ChildItem evaluates lazily, so
+    # removing while enumerating drops the entries it had not reached yet.
+    $stale = @(Get-ChildItem -LiteralPath $Dest -Directory -Recurse -Filter '__pycache__' -Force -ErrorAction SilentlyContinue)
+    foreach ($dir in $stale) { Remove-Item -LiteralPath $dir.FullName -Recurse -Force -ErrorAction SilentlyContinue }
+}
+
 function Remove-StaleEntries {
     # Remove from Dest everything Source does not have, recursively.
     #
@@ -268,6 +287,7 @@ function Update-InstalledSkills {
             $dest = Join-Path $SkillsRoot $name
             if (Test-Path -LiteralPath $dest) { Remove-Item -LiteralPath $dest -Recurse -Force }
             Copy-Item -LiteralPath $source -Destination $dest -Recurse -Force
+            Remove-NonShippable -Dest $dest
             Write-Info "Updated $name"
         } else {
             Write-Info "WARNING: $name not found in repo - left on disk untouched"
@@ -289,6 +309,9 @@ function Update-InstalledSkills {
         New-Item -ItemType Directory -Path $sharedDest -Force | Out-Null
         Copy-Item -Path (Join-Path $sharedSource '*') -Destination $sharedDest -Recurse -Force
         Remove-StaleEntries -Dest $sharedDest -Source $sharedSource
+        # Swept first, pruned second: the sweep compares the destination against the source and needs
+        # to see the same files on both sides. See the bash port for why the order is not free.
+        Remove-NonShippable -Dest $sharedDest
         Write-Info 'Updated _mimisbrunnr-shared'
     }
 }
