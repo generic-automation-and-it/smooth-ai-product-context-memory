@@ -43,8 +43,8 @@ Read [`SKILL.md`](./SKILL.md) first — switches, store layout, the reconcile/ex
 
 ### LADR-007 — Subject folder is stamped when created
 
-- **Status:** Accepted — uniqueness and folder-reuse clauses superseded by LADR-010 · **Date:** 2026-09-19
-- **Decision:** `<subject>-<yyyyMMdd-HHmm>`, 24-hour UTC, set once; `_unfiled` exempt; publish never re-stamps.
+- **Status:** Accepted — uniqueness and folder-reuse clauses superseded by LADR-010; **folder shape superseded by LADR-015** · **Date:** 2026-09-19
+- **Decision:** `<subject>-<yyyyMMdd-HHmm>`, 24-hour UTC, set once; `_unfiled` exempt; publish never re-stamps. *(The name is now read, never written — see LADR-015.)*
 - **Consequence:** only the stamp rules stand; "reuse the existing stamped folder" is void.
 
 ### LADR-008 — Publish is a zip under `.context/`; the store is never shared through the repository
@@ -73,6 +73,9 @@ Read [`SKILL.md`](./SKILL.md) first — switches, store layout, the reconcile/ex
   shows the newest copy per slug. Rejected: merge-in-place (rewrites history, loses revision depth).
 - **Consequence:** never restore a store-wide duplicate-slug check — it disables versioning. A typo'd
   slug colliding with unrelated knowledge is now uncaught by design; only the reconcile step guards it.
+- **Status amendment:** the *stamped folder* half is unchanged by LADR-015 — one run, one folder, one
+  stamp. What moved is the name's **shape** and where the subject lives inside it. The minute
+  precision is now load-bearing on its own terms (LADR-015), not merely a uniqueness device.
 
 ### LADR-011 — `--all` skips the cut; its bar-widening half is superseded by LADR-014
 
@@ -105,10 +108,39 @@ Read [`SKILL.md`](./SKILL.md) first — switches, store layout, the reconcile/ex
 - **Consequence:** the version chain grows for unchanged units. Rejected: `--all` loosening the bar — it
   would be the one mode the value gate does not bind.
 
+### LADR-015 — A run folder is `<stamp>-<session-id>` and holds dateless categories
+
+- **Status:** Accepted — supersedes LADR-007's folder shape · **Date:** 2026-10-16
+- **Decision:** The store is `<yyyyMMdd-HHmm>-<session-id>/<category>/<slug>.understanding.md`. One
+  export run makes one folder; the subject is a dateless `<category>/` nested inside it and recurs
+  across runs. The legacy `<subject>-<yyyyMMdd-HHmm>/<slug>.understanding.md` shape is **read, never
+  written**, with no migration: existing trees are left exactly where they are and the writer only
+  adds new-shape folders beside them.
+- **Consequence:** the stamp had to move to the *front* of the folder name. `SUBJECT_STAMP_RE` is
+  `$`-anchored, so appending a session id to the legacy name makes the folder fail the stamp check,
+  fail `stamp_of()`, and sort as `_unfiled` does — every run in the store reading as oldest.
+- **Consequence:** the stamp **keeps `-HHmm`**, and this is now load-bearing rather than incidental.
+  The stamp is the primary sort key for "which copy of a slug is current", and the `updated` fallback
+  is required but **date-only** (`:238-242`, `iso_date`). A date-only stamp collapses every export on
+  one day into one recency bucket and silently marks the wrong version current — measured, not
+  hypothesised. One export run per minute is the assumption that holds it correct.
+- **Consequence:** the walk dispatches on **observed shape**, not on the folder name: a top-level
+  folder with no unit files directly inside it is read as a run folder of categories. Dispatching by
+  name alone would leave the walk unable to see the nested layout at all, because during the
+  transition every real folder is a legacy run folder. A folder satisfying both readings — units *and*
+  categories — is read as nested, which is the shape the writer produces.
+- **Consequence:** the same-minute tiebreak is `session` then `path`, and the session component is
+  **redundant with the path today** (the run folder is the path's first segment; 36 same-stamp pairs,
+  zero disagreements). It is kept because the ordering is then visible in the key itself rather than
+  resting on a reader knowing that, and because it stops being redundant the moment a layout puts the
+  category above the run folder. An id is opaque, so this is a *deterministic* tiebreak and not a
+  recency one.
+
 ## Changelog
 
 | Date | Change | Ref |
 | :---- | :---- | :---- |
+| 2026-10-16 | **Store layout: `<yyyyMMdd-HHmm>-<session-id>/<category>/<slug>.understanding.md`** (LADR-015). One run folder per export run, subject is a dateless nested category recurring across runs. Legacy `<subject>-<stamp>/<slug>` read dual-shape, never written, no migration. The stamp moves to the front of the name — the legacy regex is `$`-anchored, so a trailing session id made every folder sort as `_unfiled`. **The minute is kept and is now load-bearing:** `updated` is required but date-only, so a date-only stamp would collapse a day's exports into one recency bucket and mark the wrong version current. Walk dispatches on observed shape rather than folder name, since during the transition every real folder is a legacy one. Harness 92 → 106; mutation-verified. | LADR-015 |
 | 2026-10-15 | Ralph loop: a non-UTF-8 unit and a unit without a slug are reported rather than raised; an unscoreable decision row is disclosed; the advisory ledger is a context manager; `unit_record` emits the key `record_state` reads | — |
 | 2026-09-19 | Initial version | — |
 | 2026-09-19 | Term provenance recorded so the name is not genericized into session logs | — |
