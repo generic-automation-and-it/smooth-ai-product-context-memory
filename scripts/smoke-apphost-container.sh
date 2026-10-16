@@ -16,6 +16,7 @@ postgres_port="${POSTGRES_PORT:-35432}"
 blob_port="${BLOB_PORT:-39000}"
 blob_console_port="${BLOB_CONSOLE_PORT:-39001}"
 seq_port="${SEQ_PORT:-35341}"
+viewer_port="${VIEWER_PORT:-35441}"
 data_root="${DATA_ROOT:-}"
 controller_name="mimisbrunnr-${installation_id}-controller"
 state_volume="mimisbrunnr-${installation_id}-smoke-state"
@@ -100,6 +101,7 @@ controller_args=(
     -e "BlobConfiguration__Port=$blob_port" \
     -e "BlobConfiguration__ConsolePort=$blob_console_port" \
     -e "SeqConfiguration__Port=$seq_port" \
+    -e "ViewerConfiguration__Port=$viewer_port" \
     -e "Parameters__api-read-token=$api_read_token" \
     -e "Parameters__api-write-token=$api_write_token"
 )
@@ -193,6 +195,8 @@ dump_health_diagnostics() {
   engine logs --tail 80 "$controller_name" >&2 2>&1 || true
   echo "--- API container (mimisbrunnr-${installation_id}-host) log, tail 80 ---" >&2
   engine logs --tail 80 "mimisbrunnr-${installation_id}-host" >&2 2>&1 || true
+  echo "--- viewer container (mimisbrunnr-${installation_id}-viewer) log, tail 40 ---" >&2
+  engine logs --tail 40 "mimisbrunnr-${installation_id}-viewer" >&2 2>&1 || true
 }
 
 wait_for_health() {
@@ -233,6 +237,38 @@ wait_for_reconciled_health() {
   echo "reconciled API did not become healthy within 120 seconds" >&2
   dump_health_diagnostics "reconciled health timeout"
   return 1
+}
+
+# Viewer servability: the Console root must return 200 (Caddy file_server on
+# :5180) and the workload must be Running. Label-only ownership checks pass for
+# an exited/500 viewer, so probe HTTP explicitly after every healthy point.
+probe_viewer() {
+  curl --fail --silent "http://$engine_bind_address:$viewer_port/" >/dev/null
+}
+
+wait_for_viewer() {
+  for _ in $(seq 1 60); do
+    if probe_viewer; then
+      return
+    fi
+
+    if [ "$(engine inspect --format '{{.State.Running}}' "mimisbrunnr-${installation_id}-viewer" 2>/dev/null || true)" != true ]; then
+      echo "viewer exited before becoming servable" >&2
+      dump_health_diagnostics "viewer exited"
+      return 1
+    fi
+
+    sleep 1
+  done
+
+  echo "viewer did not become servable within 60 seconds" >&2
+  dump_health_diagnostics "viewer timeout"
+  return 1
+}
+
+assert_viewer_servable() {
+  [ "$(engine inspect --format '{{.State.Running}}' "mimisbrunnr-${installation_id}-viewer")" = true ]
+  probe_viewer
 }
 
 assert_owned_resources() {
@@ -325,9 +361,11 @@ wait_for_health
 assert_owned_resources
 assert_volumes_exist
 curl --fail --silent "http://$engine_bind_address:$dashboard_port/" >/dev/null
+wait_for_viewer
+assert_viewer_servable
 capture_fixture
 assert_fixture
-echo "Initial API, blob, graph, and ownership checks passed."
+echo "Initial API, blob, graph, viewer, and ownership checks passed."
 
 engine stop --timeout 180 "$controller_name" >/dev/null
 for suffix in postgres blob-well seq host viewer; do
@@ -342,6 +380,8 @@ echo "Graceful stop removed workloads and retained data volumes."
 
 start_controller
 wait_for_health
+wait_for_viewer
+assert_viewer_servable
 assert_fixture
 echo "Graceful restart retained relational, graph, and blob data."
 
@@ -351,6 +391,8 @@ engine rm "$controller_name" >/dev/null
 start_controller
 wait_for_reconciled_health "$previous_host_id"
 assert_owned_resources
+wait_for_viewer
+assert_viewer_servable
 assert_fixture
 echo "Forced-stop recovery reconciled workloads and retained data."
 
