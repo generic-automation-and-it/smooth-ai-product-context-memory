@@ -340,7 +340,7 @@ class RecallFramingTests(unittest.TestCase):
             "labels": ([], {}),
             "initiatives": ([], {}),
             "product-names": ([], {}),
-            "product-links": ([], {}),
+            "product-links": (["--product-name", "x"], {}),
             "paths": ([], {"sourceUuid": uuid, "maxDepth": 2}),
             "ticket-paths": ([], {"anchor": {"provider": "github", "key": "1"}, "maxDepth": 2}),
         }
