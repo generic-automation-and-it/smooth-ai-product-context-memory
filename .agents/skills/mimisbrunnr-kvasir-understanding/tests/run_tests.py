@@ -1886,6 +1886,22 @@ class ExportReferenceTicketTests(unittest.TestCase):
 
             self._with_gates(body)
 
+    def test_a_malformed_reference_ticket_is_refused(self):
+        # A reference ticket is split on the first ":", so an entry with no key would reach the
+        # synthetic owner ticket as an empty segment and send no reference at all — a silent
+        # half-write. Refused up front instead.
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write(tmp, "notes.md", "The decision-gate ledger records each score.")
+
+            def body(calls):
+                rc, _, err = run(["export", "--dryrun", src, "--initiative", "Mímisbrunnr-MVP",
+                                  "--reference-tickets", "github231"], expect=1)
+                self.assertEqual(rc, 1)
+                self.assertIn("provider:key", err)
+                return err
+
+            self._with_gates(body)
+
     def test_refusal_offers_the_reference_option(self):
         binding = {"initiative": "Mímisbrunnr-MVP"}
         group = {"groupUuid": "g-1", "created": False, "initiativeName": "Mímisbrunnr-Search"}
