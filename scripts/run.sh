@@ -112,19 +112,49 @@ case "$installation_id" in
 esac
 [ "${#installation_id}" -le 32 ] || die "MIMIS_ID must be at most 32 characters"
 
-# A secret file that is a symlink would send this run's credentials wherever the link points, and a
-# directory would make the write fail after the values were already chosen. Test the link itself: `-f`
-# follows it, so a link to a perfectly ordinary file passes a plain `[ -f ]` test.
-if [ -L "$env_file" ]; then
-  die "$env_file is a symlink; refusing to write secrets through it"
-fi
-if [ -e "$env_file" ] && [ ! -f "$env_file" ]; then
-  die "$env_file exists but is not a regular file; refusing to write secrets through it"
-fi
+# One guard for every file this script writes credentials into, asked before anything is written to
+# any of them. A file that is a symlink sends the credentials wherever the link points; one that is
+# not a regular file fails the write after the values are already chosen; one this process cannot read
+# is regenerated in full — five fresh secrets at exit 0, a new token pair on the Host and 403s for
+# every client still holding the old one; one carrying a NUL byte is treated as binary by the text
+# filter that copies it and is replaced by a smaller valid file. In each case the file is corrupt or
+# managed somewhere this script does not own, so the answer is to stop and name it rather than to
+# overwrite it. Test the link itself: `[ -f ]` follows a symlink, so a link to a perfectly ordinary
+# file passes a plain `[ -f ]` test — and a *broken* link fails `[ -e ]`, hence the second test.
+refuse_unusable_credential_file() {
+  local path="$1"
+  if [ ! -e "$path" ] && [ ! -L "$path" ]; then
+    return 0
+  fi
+  [ -L "$path" ] && die "$path is a symlink; refusing to write secrets through it"
+  [ -f "$path" ] || die "$path exists but is not a regular file; refusing to write secrets through it"
+  [ -r "$path" ] ||
+    die "cannot read $path (root-owned, an ACL, or a restored backup) — refusing to rewrite it; fix the permissions and re-run"
+  # A NUL byte is not a case a credential file can legitimately hold — they are KEY=VALUE text — so its
+  # presence is corruption, and overwriting a corrupt file with a smaller valid one destroys the
+  # evidence along with the keys.
+  [ "$(wc -c <"$path" | tr -d ' ')" = "$(tr -d '\000' <"$path" | wc -c | tr -d ' ')" ] ||
+    die "$path contains a NUL byte — refusing to rewrite a corrupt credential file"
+}
 
-# Removes a half-written credential file if the run is interrupted between mktemp and mv.
+refuse_unusable_credential_file "$env_file"
+
+# Removes a half-written credential file if the run is interrupted between mktemp and mv — both of
+# them. `temp_credentials` is a newline-delimited list rather than one path because a single temp file
+# cannot serve two files with different contents, and a space-delimited one would split on a data root
+# containing a space. The machine credential temps are registered *outside* the subshell that writes
+# them, because a trap runs in this shell and a variable assigned in a subshell is gone by the time a
+# Ctrl-C arrives — with both tokens still in the file it named.
 temp_env=""
-cleanup() { [ -z "$temp_env" ] || rm -f "$temp_env"; }
+temp_credentials=""
+cleanup() {
+  [ -z "$temp_env" ] || rm -f "$temp_env"
+  if [ -n "$temp_credentials" ]; then
+    printf '%s' "$temp_credentials" | while IFS= read -r temp; do
+      if [ -n "$temp" ]; then rm -f "$temp"; fi
+    done
+  fi
+}
 trap cleanup EXIT INT TERM HUP
 
 use_data_root=1
@@ -266,28 +296,65 @@ write_machine_credentials() {
   write_token="$(file_value Parameters__api-write-token || true)"
   [ -n "$read_token" ] && [ -n "$write_token" ] || return 0
 
+  # The same guard as for `$env_file`, asked of both files before either is touched: a file this
+  # process cannot read, or cannot read as text, would otherwise be rewritten below with only the
+  # keys this run could resolve — every operator key dropped, the decision settings reset to their
+  # defaults — and the run would still report success. The previous shape was protected by accident
+  # rather than by design: `cat` failing tripped `set -e`, and the filter that replaced it returns 0
+  # in both cases (grep exits 2 on a read error and 0 while printing "Binary file matches"), so the
+  # protection has to be asked for or it is lost with the `cat`.
+  #
+  # The symlink refusal is the same property the launcher already applied to `$env_file`: `[ -f ]`
+  # follows a link, so a shared credentials file was silently replaced by a regular one, freezing
+  # every client reading the shared path on tokens this run had rotated away.
+  local file
+  refuse_unusable_credential_file "$machine_credentials"
+  refuse_unusable_credential_file "$machine_credentials_read_only"
+
   # Two files, both add-only: every key the file already carries is preserved verbatim, and only
   # missing keys are appended. A full rewrite would silently drop a key the operator or a new
   # feature added — the defect this pattern closes, and one that would reset a feature flag to its
-  # default on every start.
+  # default on every start. CONTEXT_MEMORY_BASE_URL is the single exception, re-emitted below.
   #
   # The read-only half is written the same way and holds the same extra keys, minus the write token:
   # a read-only worker that sourced both would hold a write capability, and the read client refuses
   # to start in that state by design.
   local tmp key stored
-  ( umask 077
-    for file in "$machine_credentials" "$machine_credentials_read_only"; do
-      tmp="$(mktemp "$file.XXXXXX")"
+  for file in "$machine_credentials" "$machine_credentials_read_only"; do
+    # The temp path is created here rather than inside the writing subshell, and registered with
+    # `cleanup()` on the way past. A trap runs in this shell: a `tmp` assigned in the subshell is
+    # gone by the time a Ctrl-C arrives, and the file it named holds both tokens.
+    tmp="$(mktemp "$file.XXXXXX")"
+    temp_credentials="$temp_credentials$tmp
+"
+    ( umask 077
       {
-        [ -f "$file" ] && cat "$file"
-        for key in CONTEXT_MEMORY_BASE_URL CONTEXT_MEMORY_READ_TOKEN CONTEXT_MEMORY_WRITE_TOKEN; do
+        # Every key is carried over verbatim except CONTEXT_MEMORY_BASE_URL, which is dropped here
+        # and re-emitted from `$api_base_url` on every run. It is not operator config: it describes
+        # the port *this* run publishes, so a stored value is stale the moment the port changes. A
+        # MIMIS_SHIFT_PORTS=1 start (25141) or a P_HOST override left the stored 5141 in place, and
+        # every client on the machine then kept calling a port this stack does not serve — the file
+        # and the running API disagreeing silently, with no run failing and nothing logging it.
+        # Refreshing rather than preserving is also the safe direction: the tokens beside it are
+        # bound into this Host, and the client refuses a non-loopback origin in `base_url()`
+        # (`.agents/skills/_mimisbrunnr-shared/scripts/context_memory_client.py`, "must be loopback"),
+        # so a hand-edited URL here cannot be anything but stale. Dropping every occurrence also keeps
+        # a duplicated line from surviving as two assignments whose winner depends on the reader.
+        #
+        # `|| true` covers grep's exit 1 — "no line matched", a success for a file that held only the
+        # base URL. The read and NUL-byte failures that make this lossy are refused above, where a
+        # `die` reaches the script; in here they would only exit the subshell.
+        if [ -f "$file" ]; then
+          grep -v '^CONTEXT_MEMORY_BASE_URL=' "$file" || true
+        fi
+        echo "CONTEXT_MEMORY_BASE_URL=$api_base_url"
+        for key in CONTEXT_MEMORY_READ_TOKEN CONTEXT_MEMORY_WRITE_TOKEN; do
           if [ "$file" = "$machine_credentials_read_only" ] && [ "$key" = "CONTEXT_MEMORY_WRITE_TOKEN" ]; then
             continue
           fi
           stored="$(file_value "$key" "$file" || true)"
           if [ -z "$stored" ]; then
             case "$key" in
-              CONTEXT_MEMORY_BASE_URL) echo "$key=$api_base_url" ;;
               CONTEXT_MEMORY_READ_TOKEN) echo "$key=$read_token" ;;
               CONTEXT_MEMORY_WRITE_TOKEN) echo "$key=$write_token" ;;
             esac
@@ -306,8 +373,13 @@ write_machine_credentials() {
         fi
       } >"$tmp"
       mv "$tmp" "$file"
-    done
-  )
+    )
+    # The path is gone now, so stop tracking it: leaving it registered would make a later failure in
+    # this function delete a path another run may have since reused. The expansion is quoted because
+    # an unquoted one inside `${…}` is a *pattern*, and a data root containing `[` would then match
+    # more than the one line it names.
+    temp_credentials="${temp_credentials%"$tmp"$'\n'}"
+  done
   log "machine credentials written: $machine_credentials"
 }
 
