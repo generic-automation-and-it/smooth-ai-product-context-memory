@@ -20,7 +20,7 @@ All rule files live under a single `.agents/rules/` tree, organized into categor
 | Location | Use for |
 |----------|---------|
 | `.agents/rules/*.instructions.md` (flat) | Cross-cutting rules that don't share a category with ≥1 other rule (AI workflow, code-review false-positive guidance, project overview) |
-| `.agents/rules/<category>/` | A category folder is created when 2+ rules share a topic. Current: `backend/` (.NET / EF Core / API+Mediator / migrations / WireMock / logging), `git/` (git policy, PR standards), `meta/` (rule-file convention, AGENTS.md quality) |
+| `.agents/rules/<category>/` | A category folder is created when 2+ rules share a topic. Current: `backend/`, `git/`, `meta/`; `skills/` retains the canonical secret-handling path with one member. |
 
 To make a rule narrow to certain files, set its frontmatter scope fields (e.g. `paths: ["**/*.cs"]`); to make it always-apply, use `"**"` / `alwaysApply: true`. The folder is organizational only — it does not change loading.
 

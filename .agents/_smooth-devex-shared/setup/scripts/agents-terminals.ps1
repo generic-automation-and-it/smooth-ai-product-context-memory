@@ -10,7 +10,7 @@ $terminals = @(
 )
 
 # Get the repo root
-$repoRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))
+$repoRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)))
 
 Write-Host "Launching AI Agent Tool terminals..." -ForegroundColor Cyan
 Write-Host ""

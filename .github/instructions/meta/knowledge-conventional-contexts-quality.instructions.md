@@ -40,7 +40,7 @@ Use exactly these sections, in this order. Omit any section (other than Changelo
 4. **Architecture Decisions** *(code folders only — a design folder's decisions live in its `ladrs/`)* — LADR format (LADR-NNN, Date, Status, Context, Decision, Consequences). Only decisions whose rejected alternative would look reasonable to an AI coder: it has real trade-offs, the reasoning isn't obvious from code, or getting it wrong has non-obvious consequences (production failures, data corruption, silent sync issues).
 5. **Key Behaviors** — Non-obvious behaviors, edge cases, cross-cutting concerns NOT apparent from source code.
 6. **Test References** — Test tier (L0/L1/L2, as defined in root `AGENTS.md`) and sub-folder path within test projects. Updated when tests are added or modified.
-7. **Quality Constraints** — Feature-specific non-functional requirements beyond root `AGENTS.md`, `.docs/hlds/` NFRs and the rule files, and only those that change how code is written.
+7. **Quality Constraints** — Feature-specific non-functional requirements beyond root `AGENTS.md`, `docs/hlds/` NFRs and the rule files, and only those that change how code is written.
 8. **Migration Plans** — Planned migrations, deprecations or debt affecting new code: what changes, the target state, what not to build on.
 9. **Changelog** — Always include the header, even if empty: `| Date | Change | Ref |`; Ref is an issue/PR (`#88`) or `—`. A row is the shortest text an agent can still act on:
    - **Fragment, not sentence.** What changed in the guidance, plus IDs. No rationale, no narration of the authoring process, no restating the file's content, no counts that go stale ("21 open questions").
@@ -62,7 +62,7 @@ Gate 1 alone keeps every restated LADR. Gates 2 and 4 are [clean-code](../clean-
 
 ## Design-Documentation Folders
 
-Applies to `.docs/hlds/NNN-*/AGENTS.md` (authored by the `create-hld` skill). The HLD — README, LADRs, NFRs, diagrams — is written for humans **and** AI coders; its AGENTS.md holds only agent-relevant content found in **none** of them: a tie to a repo rule the HLD does not mention, a constraint from a source document the HLD omits, a vocabulary trap the HLD does not define.
+Applies to `docs/hlds/NNN-*/AGENTS.md` (authored by the `create-hld` skill). The HLD — README, LADRs, NFRs, diagrams — is written for humans **and** AI coders; its AGENTS.md holds only agent-relevant content found in **none** of them: a tie to a repo rule the HLD does not mention, a constraint from a source document the HLD omits, a vocabulary trap the HLD does not define.
 
 - **TL;DR is one line pointing at `README.md`** — agents auto-load AGENTS.md, not README.md. The only pointer line; any other link sits inside the Non-Negotiable that needs it.
 - **Omit** System Context (diagrams live in `diagrams/`), Architecture Decisions (the README LADR table and `ladrs/` are the home), Key Behaviors, Test References and Migration Plans (nothing runs yet; rollout is the tracker's). Omit Quality Constraints unless it states something no NFR does.
@@ -70,7 +70,7 @@ Applies to `.docs/hlds/NNN-*/AGENTS.md` (authored by the `create-hld` skill). Th
 - **Draft and Prototype LADRs bind as intent**: flag a deviation, never silently override it. Stated here once — do not repeat it per HLD.
 - **A TL;DR, at most one or two Non-Negotiables and a Changelog is the expected result**, not an incomplete one. Zero Non-Negotiables is valid.
 
-Example (`.docs/hlds/001-pallet-allocation/AGENTS.md` — shape only; do not copy its trap into an HLD that lacks it):
+Example (`docs/hlds/001-pallet-allocation/AGENTS.md` — shape only; do not copy its trap into an HLD that lacks it):
 
 ```markdown
 # AGENTS.md - Pallet Allocation

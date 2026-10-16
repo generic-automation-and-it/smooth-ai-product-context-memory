@@ -3,7 +3,7 @@
 # Opens separate terminal tabs/windows for different AI tools and models
 
 # Get the repo root
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../" && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../../" && pwd)"
 cd "$REPO_ROOT"
 
 # Check if we're on macOS or Linux
