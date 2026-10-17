@@ -247,7 +247,7 @@ try:
     else:
         print("value=fallback|pct=0|keep=false|confidence=0|fallback=true")
         sys.exit(0)
-except (json.JSONDecodeError, KeyError, ValueError):
+except (json.JSONDecodeError, KeyError, ValueError, TypeError):
     print("value=fallback|pct=0|keep=false|confidence=0|fallback=true")
     sys.exit(0)
 PYEOF

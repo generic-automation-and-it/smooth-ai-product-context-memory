@@ -68,9 +68,9 @@ value=positive|pct=72|necessity=should_fix|keep=true|confidence=0.35|fallback=fa
 
 | Field | Meaning |
 |-------|---------|
-| `value` | Net value label from the legend (`negative`, `neutral`, `positive`, `high`) |
+| `value` | Code mode: `primary_value_category` (`correctness`, `security`, `test_coverage`, `maintainability`); Plan mode: legend short-label |
 | `pct` | Decision percentage (0-100) — probability the fix has positive or high net value |
-| `necessity` | Fix necessity choice (`must_fix`, `should_fix`, `can_defer`, `skip_fix`) |
+| `necessity` | Code mode: template choice (`essential`, `important`, `optional`, `unnecessary`); Plan mode: `design_necessity` |
 | `keep` | Whether the probability meets the threshold |
 | `confidence` | Model confidence score |
 | `fallback` | `true` when the service was unreachable or returned invalid data |
