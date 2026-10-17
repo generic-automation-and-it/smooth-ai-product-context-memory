@@ -1,4 +1,0 @@
-interface:
-  display_name: "Ralph Loop"
-  short_description: "Review, fix and verify code and L0/L1/L2 test coverage — or a plan via --plan — until clean"
-  default_prompt: "Run the ai-ralph-loop skill: loop review, fix and verify over the branch diff (or the plan document when --plan is passed), including L0/L1/L2 test existence, coverage, placement and quality, until a full pass finds nothing or the loop cap is hit. Honor --notests when supplied: do not create new tests, but retain coverage review and existing-suite verification, and report deferred test gaps. Apply Test focus alongside the existing finding categories, then output the fix table and honest test verification status. Never commit."
