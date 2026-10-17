@@ -63,7 +63,7 @@ Use `SMOOTH_DEVEX_DECISIONS_TEMPLATE` to select the plan template when running i
 Pipe-delimited on stdout:
 
 ```
-value=positive|pct=72|necessity=should_fix|keep=true|confidence=0.35|fallback=false
+value=correctness|pct=72|necessity=essential|keep=true|confidence=0.35|fallback=false
 ```
 
 | Field | Meaning |
