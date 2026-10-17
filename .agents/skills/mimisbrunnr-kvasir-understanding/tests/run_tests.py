@@ -1669,9 +1669,10 @@ class ProductLinkTests(unittest.TestCase):
 
             self._with_gates(body)
 
-    def test_an_initiative_is_preferred_over_a_repo_when_both_are_bound(self):
-        """Either anchor alone attributes the memory, so the second is not also claimed: the repo
-        edge is the one that can conflict (one product per repo), and it buys nothing here."""
+    def test_an_export_binding_both_anchors_declares_both_edges(self):
+        """LADR-10 attributes a memory to a product through the group's initiative **or** its repo, and a
+        product may link to both. An export binding both anchors declares both edges; a repo conflict
+        (one product per repo) is reported, not silently skipped, and never withholds the initiative."""
         with tempfile.TemporaryDirectory() as tmp:
             src = write(tmp, "notes.md", "The graph store was chosen for provenance paths.")
 
@@ -1682,7 +1683,7 @@ class ProductLinkTests(unittest.TestCase):
                 self.assertEqual(rc, 0)
                 verbs = [verb for verb, _ in calls]
                 self.assertIn("link-product-initiative", verbs)
-                self.assertNotIn("link-product-repo", verbs)
+                self.assertIn("link-product-repo", verbs)
                 return verbs
 
             self._with_gates(body)
@@ -1802,7 +1803,7 @@ class ProductLinkTests(unittest.TestCase):
                                     "--product-name", "Mímisbrunnr", "--heimdallr", "false"])
                 self.assertEqual(rc, 1)
                 self.assertIn("WROTE", out, "the memories were written and the receipt says so")
-                self.assertIn("product link failed", err)
+                self.assertIn("was NOT declared", err)
                 self.assertIn("not rolled back", err)
                 return err
 
