@@ -1,5 +1,6 @@
 {
-  "updated": "2026-10-16T14:52:24Z",
+  "updated": "2026-10-17T15:22:07Z",
+  "decisions_enabled": false,
   "skills": [
     {
       "name": "ai-asset-sync",
