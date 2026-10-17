@@ -37,7 +37,10 @@ Store payloads in BOTH primary database and secondary storage (e.g. object store
 
 ### DR-003: Component Tests Cover Domain Logic
 
-Simple domain models tested through repository layer, not isolated unit tests. Unit tests reserved for complex business logic only. Lack of separate unit test files is intentional.
+Simple domain models may be covered through component tests; lack of a separate unit test file is not
+itself a finding. Use L0 for applicable exception contracts, mappings, low-level maths and deterministic
+result-oriented logic without I/O. Use L1 for component-level unhappy paths and L2 for at least one
+full-stack happy path per feature. Do not require trivial getter/setter tests or a unit test per class.
 
 ### DR-004: Suppressed Validation for Unlimited String Columns
 
@@ -85,3 +88,4 @@ Modern .NET SDK auto-enables the latest C# version. `<LangVersion>` in csproj is
 | Date | Change |
 |:-----|:-------|
 | 2026-05-30 | Initial version. |
+| 2026-10-16 | DR-003: L0 logic contracts, L1 unhappy paths, minimum L2 happy path per feature. |
