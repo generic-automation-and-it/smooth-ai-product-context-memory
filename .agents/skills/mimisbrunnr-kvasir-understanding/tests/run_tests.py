@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import contextlib
 import io
 import json
 import re
@@ -972,7 +973,7 @@ class ExportOrchestrationTests(unittest.TestCase):
             uc.initiative_exists = lambda name: (False, "missing")
             uc.resolve_group = resolve
             scored, called = [], []
-            uc.gate_decisions = lambda c: (scored.append(len(c)), (c, "Decision gate: disabled."))[1]
+            uc.gate_decisions = lambda c, *_a, **_k: (scored.append(len(c)), (c, "Decision gate: disabled."))[1]
 
             def capture(script, args, payload):
                 called.append(args[0])
@@ -1022,7 +1023,7 @@ class ExportOrchestrationTests(unittest.TestCase):
             uc.initiative_exists = lambda name: (True, "ok")
             uc.resolve_group = lambda b, n, d, dryrun: (None if dryrun else group,
                                                         "dry-run" if dryrun else "ok")
-            uc.gate_decisions = lambda c: (c, "Decision gate: disabled.")
+            uc.gate_decisions = lambda c, *_a, **_k: (c, "Decision gate: disabled.")
             called = []
 
             def capture(script, args, payload):
@@ -3631,6 +3632,63 @@ class DecisionsGateIntegrationTests(unittest.TestCase):
 class ExportTagsAndScopeTests(unittest.TestCase):
     """What the write payload carries: the gate's audience tags (issue 179) and the source scope."""
 
+    def test_every_candidate_handed_to_the_gate_carries_a_durable_identity(self):
+        """The load-bearing case: what actually reaches the gate, not the helper in isolation.
+
+        The gate budgets a record to three attempts and stores that count on disk. A record with no
+        `subject`, `description` or `name` is keyed by its **position** instead, so it is scored as a
+        first attempt on every call and nothing is ever written -- the gate runs, reports a healthy
+        number of verdicts, and the bound it appears to enforce was never applied to anything.
+        Foreign prose is where that happened: the splitter emits `description: None` by construction,
+        so every foreign export scored on position, for ever, with no symptom but a ledger file that
+        never appeared.
+        """
+        seen = []
+        originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
+                     uc.resolve_group, uc._run_capture_client, uc.gate_decisions)
+        previous = os.environ.get("CONTEXT_MEMORY_DECISIONS_ENABLED")
+        uc.gate_redaction = lambda texts: (list(texts), {})
+        uc.gate_atomicity = lambda c: [{"verdict": "simple", "signals": []} for _ in c]
+        uc.initiative_exists = lambda name: (True, "present")
+        uc.resolve_group = lambda binding, name, body, dryrun: (
+            {"groupUuid": "g-1", "created": False}, "ok")
+
+        def capture(script, args, payload):
+            if args[0] == "preflight":
+                return 0, json.dumps({"candidates": []}), ""
+            return 0, json.dumps({"created": 1, "versioned": 0, "linked": 0, "skipped": 0}), ""
+
+        def watch(candidates, *_args, **_kwargs):
+            seen.extend(candidates)
+            return candidates, "decisions: skipped (test)"
+
+        uc._run_capture_client = capture
+        uc.gate_decisions = watch
+        os.environ["CONTEXT_MEMORY_DECISIONS_ENABLED"] = "true"
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                src = write(tmp, "notes.md",
+                            "A ledger path that changes every run cannot bound anything at all.\n\n"
+                            "An entry point left above a class hides the cases it appears to run.")
+                rc, _out, err = run(["export", src, "--initiative", "Present",
+                                     "--heimdallr", "false", "--tickets", "github:1"])
+        finally:
+            for name, value in zip(("gate_redaction", "gate_atomicity", "initiative_exists",
+                                    "resolve_group", "_run_capture_client", "gate_decisions"),
+                                   originals):
+                setattr(uc, name, value)
+            if previous is None:
+                os.environ.pop("CONTEXT_MEMORY_DECISIONS_ENABLED", None)
+            else:
+                os.environ["CONTEXT_MEMORY_DECISIONS_ENABLED"] = previous
+        self.assertEqual(0, rc, err)
+        self.assertTrue(seen, f"the export never reached the gate, so nothing was proved ({err})")
+        for candidate in seen:
+            with self.subTest(candidate=str(candidate.get("subject"))[:40]):
+                self.assertTrue(candidate.get("subject") or candidate.get("description")
+                                or candidate.get("name"),
+                                "a candidate with no identity is scored on position forever")
+
     def _export(self, src, argv, gate=None):
         """Run a writing `export` with every gate and the capture client stubbed; return what was sent."""
         originals = (uc.gate_redaction, uc.gate_atomicity, uc.initiative_exists,
@@ -3679,7 +3737,7 @@ class ExportTagsAndScopeTests(unittest.TestCase):
         seen = []
         original = uc.gate_decisions
 
-        def gate(candidates):
+        def gate(candidates, *_args, **_kwargs):
             seen.extend(candidates)
             return candidates, "decisions: skipped (test)"
         with tempfile.TemporaryDirectory() as tmp:
@@ -3911,7 +3969,7 @@ def _stub_gate_transport(fake):
     """
     real = uc.gate_decisions
 
-    def gate_decisions(candidates):
+    def gate_decisions(candidates, *_args, **_kwargs):
         original = uc.subprocess.run
         uc.subprocess.run = lambda *a, **k: fake()
         try:
@@ -5152,5 +5210,171 @@ class SessionMarkerTests(unittest.TestCase):
                          "from the shared folder (LADR-02: the copy direction is shared -> plugin)")
 
 
+
+class LedgerPathTests(unittest.TestCase):
+    """Where the decision gate's two files land, and what may not steer that.
+
+    The budget ledger has to be **stable** — it bounds a record to three attempts, which is a claim
+    about the record across runs, so a name that changed every run would make the bound dead code.
+    The snapshot is stamped, because the ledger keeps only the best attempt per record and the next
+    run overwrites it: a hold a later run released leaves no trace there.
+    """
+
+    def test_the_product_name_names_the_budget_ledger(self):
+        budget = uc.budget_ledger_path("Mímisbrunnr", "org/repo", "agentic-installer")
+        self.assertEqual(".context/M-misbrunnr-agentic-installer-decisions-ledger.json",
+                         budget.as_posix())
+
+    def test_the_repository_is_the_fallback_and_unbound_is_the_last_resort(self):
+        """Two products can share a repository, so the fallback is coarser than the product name —
+        but a name is always present, because a ledger with a leading separator is not a name."""
+        self.assertEqual(".context/org-repo-agentic-installer-decisions-ledger.json",
+                         uc.budget_ledger_path(None, "org/repo", "agentic-installer").as_posix())
+        self.assertEqual(".context/unbound-unbound-decisions-ledger.json",
+                         uc.budget_ledger_path(None, None, None).as_posix())
+
+    def test_two_initiatives_never_share_one_budget(self):
+        """Sharing would let one initiative's attempts spend another's."""
+        a = uc.budget_ledger_path("Mimisbrunnr", "org/repo", "one")
+        b = uc.budget_ledger_path("Mimisbrunnr", "org/repo", "two")
+        self.assertNotEqual(a, b)
+
+    def test_a_product_name_cannot_steer_the_write_out_of_the_context_folder(self):
+        """A product name is registry- or operator-supplied free text. If it reached the path
+        unfiltered, `../../elsewhere` would aim the ledger outside `.context/` entirely."""
+        for hostile in ("../../elsewhere/attempt", "a/../../../b", "..", "  ", "x" * 200):
+            with self.subTest(name=hostile):
+                budget = uc.budget_ledger_path(hostile, "acme/repo", "init-1")
+                self.assertEqual(Path(".context"), budget.parent,
+                                 f"{hostile!r} escaped the context folder")
+                self.assertNotIn("/", budget.name, "a separator survived into the filename")
+                self.assertTrue(budget.name.endswith("-decisions-ledger.json"))
+                self.assertLessEqual(len(uc.ledger_slug(hostile, "acme-repo")), 60,
+                                     "an unbounded name must still be bounded")
+
+    def test_the_snapshot_is_stamped_beside_the_budget_it_names(self):
+        budget = uc.budget_ledger_path("Mimisbrunnr", "org/repo", "agentic-installer")
+        now = dt.datetime(2026, 10, 16, 19, 9, 31, tzinfo=dt.timezone.utc)
+        snap = uc.snapshot_for(budget, now)
+        self.assertEqual(".context/Mimisbrunnr-agentic-installer-20261016-190931-decisions-ledger.json",
+                         snap.as_posix())
+        self.assertEqual(budget.parent, snap.parent,
+                         "a snapshot separated from its ledger is not interpretable")
+
+    def test_a_snapshot_follows_a_budget_that_was_aimed_elsewhere(self):
+        """What keeps `MIMIS_DECISIONS_STATE` hermetic: pointing the budget at a temp file has to
+        take the snapshot with it, or every test run leaves one in the working tree."""
+        temp = Path("/tmp/somewhere/ledger.json")
+        snap = uc.snapshot_for(temp, dt.datetime(2026, 1, 2, 3, 4, 5, tzinfo=dt.timezone.utc))
+        self.assertEqual(temp.parent, snap.parent)
+        self.assertTrue(snap.name.endswith("-decisions-ledger.json"), snap.name)
+
+
+class GateIdentityTests(unittest.TestCase):
+    """Every candidate must reach the decision gate with an identity the ledger can key on.
+
+    The gate budgets a record to three attempts and stores that count on disk. A record with no
+    `subject`, `description` or `name` is keyed by its **position** instead, which means it is
+    scored as a first attempt on every call and nothing is ever written: the gate runs, reports a
+    healthy number of verdicts, and the bound it appears to enforce was never applied to anything.
+
+    Foreign prose is where that happened. The splitter emits `description: None` by construction, so
+    every foreign export scored on position, for ever, with no symptom other than a ledger file that
+    never appeared.
+    """
+
+    def test_the_printed_paths_are_the_ones_the_gate_used_not_a_recomputation(self):
+        """RL-001. The export used to recompute the snapshot path *after* the gate ran, so the two
+        `now()` calls straddled the scoring and the operator was told a file that did not exist —
+        confirmed: printed `...184017...` while the file on disk was `...184012...`. With a real batch
+        the gap is a minute, so it was wrong essentially every run. The gate's report is the authority
+        on what it used, and a canary path proves the value is echoed rather than recalculated."""
+        canary = ".context/CANARY-184017-decisions-ledger.json"
+        report = json.dumps({"outcome": "ok", "belowThreshold": "hold",
+                             "stateFile": ".context/canary-budget.json",
+                             "snapshotFile": canary,
+                             "records": [{"index": 0, "outcome": "scored", "passed": True,
+                                          "passingRoles": ["tester"], "durable": True}]})
+        candidates = [{"subject": "x", "statement": "A claim.", "description": "x"}]
+        original = uc.gate_decisions
+        previous = os.environ.get("CONTEXT_MEMORY_DECISIONS_ENABLED")
+        os.environ["CONTEXT_MEMORY_DECISIONS_ENABLED"] = "true"
+        uc.gate_decisions = _stub_gate_transport(lambda: _Result(0, report))
+        try:
+            buffer = io.StringIO()
+            with contextlib.redirect_stdout(buffer):
+                uc.gate_decisions(candidates)
+            printed = buffer.getvalue()
+        finally:
+            uc.gate_decisions = original
+            if previous is None:
+                os.environ.pop("CONTEXT_MEMORY_DECISIONS_ENABLED", None)
+            else:
+                os.environ["CONTEXT_MEMORY_DECISIONS_ENABLED"] = previous
+        self.assertIn(canary, printed,
+                      "the printed snapshot path is not the one the gate reported")
+        self.assertIn("canary-budget.json", printed)
+
+    def test_the_foreign_splitter_emits_no_description(self):
+        """The precondition this fix exists for. If this ever starts emitting one, the gate subject
+        is redundant rather than wrong -- but it should be noticed, not discovered again."""
+        body = ("\n\n".join([
+            "A ledger path that changes every run cannot bound anything, because the bound is a "
+            "claim about a record across runs.",
+            "An entry point left above a newly added class makes the new cases invisible while every "
+            "reported count stays green.",
+        ]))
+        candidates, _skips = uc.export_candidates(None, body)
+        self.assertTrue(candidates)
+        self.assertTrue(all(c["description"] is None for c in candidates),
+                        "the splitter now supplies a description; revisit the gate subject")
+
+    def test_a_record_the_ledger_cannot_key_is_reported_rather_than_absorbed(self):
+        """The other half of the fix. Without this the bug was invisible: the gate scores every run,
+        reports a healthy verdict count, and the bound it appears to enforce was never applied. The
+        only trace was `durable: false` inside a JSON payload the export discarded."""
+        report = json.dumps({"outcome": "ok", "belowThreshold": "hold", "records": [
+            {"index": 0, "outcome": "scored", "passed": False, "passingRoles": [],
+             "durable": False}]})
+        candidates = [{"subject": "x", "statement": "A claim.", "description": "x"}]
+        original = uc.gate_decisions
+        # Set here, not inherited: the flag is seeded from the operator's credential file at import,
+        # so a case that does not set it tests whatever that machine happens to have configured.
+        previous = os.environ.get("CONTEXT_MEMORY_DECISIONS_ENABLED")
+        os.environ["CONTEXT_MEMORY_DECISIONS_ENABLED"] = "true"
+        uc.gate_decisions = _stub_gate_transport(lambda: _Result(0, report))
+        try:
+            _survivors, note = uc.gate_decisions(candidates)
+        finally:
+            uc.gate_decisions = original
+            if previous is None:
+                os.environ.pop("CONTEXT_MEMORY_DECISIONS_ENABLED", None)
+            else:
+                os.environ["CONTEXT_MEMORY_DECISIONS_ENABLED"] = previous
+        self.assertIn("without a durable identity", note,
+                      "a record with no persistent budget must be named in the note")
+
+    def test_the_note_is_quiet_when_every_record_is_durable(self):
+        report = json.dumps({"outcome": "ok", "belowThreshold": "hold", "records": [
+            {"index": 0, "outcome": "scored", "passed": True, "passingRoles": ["tester"],
+             "durable": True}]})
+        candidates = [{"subject": "x", "statement": "A claim.", "description": "x"}]
+        original = uc.gate_decisions
+        # Set here, not inherited: the flag is seeded from the operator's credential file at import,
+        # so a case that does not set it tests whatever that machine happens to have configured.
+        previous = os.environ.get("CONTEXT_MEMORY_DECISIONS_ENABLED")
+        os.environ["CONTEXT_MEMORY_DECISIONS_ENABLED"] = "true"
+        uc.gate_decisions = _stub_gate_transport(lambda: _Result(0, report))
+        try:
+            _survivors, note = uc.gate_decisions(candidates)
+        finally:
+            uc.gate_decisions = original
+            if previous is None:
+                os.environ.pop("CONTEXT_MEMORY_DECISIONS_ENABLED", None)
+            else:
+                os.environ["CONTEXT_MEMORY_DECISIONS_ENABLED"] = previous
+        self.assertNotIn("durable identity", note)
+
+
 if __name__ == "__main__":
-    unittest.main(verbosity=2)
+    unittest.main()

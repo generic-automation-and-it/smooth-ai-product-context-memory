@@ -16,6 +16,7 @@ import contextlib
 import hashlib
 import http.server
 import io
+import ast
 import json
 import os
 import re
@@ -31,6 +32,10 @@ from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "_mimisbrunnr-shared" / "scripts"
 GATE = SCRIPTS / "decisions_gate.py"
+# The WET copy `ai-understanding` ships. Held byte-equal by that skill's own parity harness, but
+# this file raises the floor guard too: it is a second import path to the same source, and a
+# future edit that lands in one copy and not the other would break 3.9 there only.
+GATE_COPY = SCRIPTS.parents[1] / "ai-understanding" / "scripts" / "decisions_gate.py"
 REDACTOR = SCRIPTS / "redact.py"
 RUBRIC = SCRIPTS / "decisions_rubric.json"
 
@@ -274,9 +279,11 @@ class GateTestCase(unittest.TestCase):
         env.update(overrides)
         return env
 
-    def score(self, records=None, state_file=None, **overrides):
+    def score(self, records=None, state_file=None, snapshot_file=None, **overrides):
         payload = json.dumps(records if records is not None else [RECORD])
         args = ["score"] + (["--state-file", state_file] if state_file else [])
+        if snapshot_file:
+            args += ["--snapshot-file", snapshot_file]
         proc = run_gate(args, payload, self.gate_env(**overrides))
         return proc, (json.loads(proc.stdout) if proc.stdout.strip() else None)
 
@@ -2562,6 +2569,139 @@ def tearDownModule():
     if changed:
         raise AssertionError(f"the suite left shipped file(s) changed: {', '.join(changed)}")
 
+
+
+
+class SnapshotTests(GateTestCase):
+    """The per-run snapshot: written whole, never appended to, and naming its budget ledger.
+
+    It exists because the budget ledger cannot answer "what did this run decide" -- it keeps the
+    single best attempt per record and the next run overwrites it, so a hold that a later run
+    released leaves no trace. The snapshot is the only place that decision exists.
+    """
+
+    def test_a_snapshot_is_written_and_names_the_ledger_it_complements(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            budget = Path(tmp) / "acme-init-declarations-decisions-ledger.json"
+            snap = Path(tmp) / "acme-init-declarations-20261016-190931-decisions-ledger.json"
+            proc, report = self.score(state_file=str(budget), snapshot_file=str(snap))
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertTrue(snap.is_file(), "the snapshot was not written")
+            document = json.loads(snap.read_text(encoding="utf-8"))
+            self.assertEqual(str(budget), document["stateFile"],
+                             "a snapshot whose companion ledger cannot be found is not interpretable")
+            # Equal modulo identity: RL-008 made the snapshot carry the ledger's digest where the
+            # report carries the subject, and that difference is the point rather than a drift.
+            def without_identity(records):
+                return [{k: v for k, v in r.items() if k != "identity"} for r in records]
+
+            self.assertEqual(without_identity(report["records"]),
+                             without_identity(document["payload"]["records"]),
+                             "the snapshot must hold this run's verdicts, not a summary of them")
+            self.assertEqual(str(snap), report["snapshotFile"])
+
+    def test_a_second_run_replaces_the_snapshot_rather_than_appending_to_it(self):
+        """The property the write mode exists for. Appending would make the file grow without
+        bound and leave an operator unable to tell which run a verdict belongs to."""
+        other = dict(RECORD, subject="Queue transport decision",
+                     description="Queue transport decision",
+                     statement="The filesystem is the transport, chosen for local-first capture.")
+        with tempfile.TemporaryDirectory() as tmp:
+            budget = Path(tmp) / "b.json"
+            snap = Path(tmp) / "acme-init-20261016-190931-decisions-ledger.json"
+            self.score(state_file=str(budget), snapshot_file=str(snap))
+            self.score(records=[other], state_file=str(budget), snapshot_file=str(snap))
+            document = json.loads(snap.read_text(encoding="utf-8"))
+            identities = [r["identity"] for r in document["payload"]["records"]]
+            self.assertEqual(1, len(identities), f"the snapshot accumulated runs: {identities}")
+            # Which run this is, told apart by the *budget* each record was charged to rather than by
+            # subject text: RL-008 means a snapshot no longer carries the subject at all.
+            budget = json.loads((Path(tmp) / "b.json").read_text(encoding="utf-8"))
+            self.assertIn(identities[0], budget,
+                          "the snapshot's record is not one this budget accounts for")
+            self.assertEqual(2, len(budget), "both runs should be accounted for in the budget")
+            # A file count, not a byte count: appending would leave two documents in one file, and a
+            # size comparison cannot tell that from a subject that happened to be one character longer.
+            self.assertEqual(1, snap.read_text(encoding="utf-8").count('"snapshotOf"'),
+                             "the file holds more than one run's document — it was appended to")
+
+    def test_the_module_keeps_the_python_floor_its_docstring_declares(self):
+        """The file declares `Python 3.9+, stdlib only`, and a PEP 604 union in an annotation is a
+        `TypeError` at import below 3.10 — so one `str | None` made the module unimportable on 3.9
+        while every local run, on 3.13, stayed green. The 3.9 matrix job is what caught it.
+
+        Checked here so the next one is local: annotations are safe only when they are deferred, so
+        either the future import is present or the module must not use the modern spelling at all.
+        """
+        for gate in (GATE, GATE_COPY):
+            if gate is None:
+                continue
+            with self.subTest(gate=gate.name):
+                source = gate.read_text(encoding="utf-8")
+                deferred = "from __future__ import annotations" in source
+                unions = [
+                    (node.lineno, ast.unparse(node.annotation))
+                    for node in ast.walk(ast.parse(source))
+                    if isinstance(node, ast.arg) and node.annotation is not None
+                    and "|" in ast.unparse(node.annotation)
+                ]
+                self.assertTrue(
+                    deferred or not unions,
+                    f"{gate.name} uses PEP 604 unions at "
+                    f"{[u[0] for u in unions]} without `from __future__ import annotations`, "
+                    f"so it needs Python 3.10 and breaks the 3.9 matrix job")
+
+    def test_a_snapshot_never_writes_a_record_identity_in_plaintext(self):
+        """RL-008. The budget ledger stores `sha256:<digest>` and never the identity itself, because
+        the identity *is* the record's subject and a subject can carry personal data. A snapshot
+        written verbatim undid exactly that: the identity is built from the **unredacted** record, so
+        the text the ledger was designed to keep off disk was landing on it in plaintext, in a file an
+        operator keeps by default.
+
+        The digest is also what the snapshot needs: it is the key the budget file is stored under, so a
+        verdict joins up to a budget entry without becoming a second unhashed copy of every subject.
+        """
+        marker = "PLAINTEXT-SUBJECT-MARKER-9f3a"
+        record = dict(RECORD, subject=marker, description=marker)
+        with tempfile.TemporaryDirectory() as tmp:
+            budget = Path(tmp) / "b.json"
+            snap = Path(tmp) / "acme-init-20261016-190931-decisions-ledger.json"
+            self.score(records=[record], state_file=str(budget), snapshot_file=str(snap))
+            raw = snap.read_text(encoding="utf-8")
+            self.assertNotIn(marker, raw, "the snapshot wrote the subject in plaintext")
+            document = json.loads(raw)
+            identity = document["payload"]["records"][0]["identity"]
+            self.assertTrue(identity.startswith("sha256:"), identity)
+            # The same digest the budget is keyed by, so the two files join up.
+            self.assertIn(identity, json.loads(budget.read_text(encoding="utf-8")))
+            # And the snapshot is still a record of the run: the scores survive.
+            self.assertTrue(document["payload"]["records"][0]["scores"])
+
+    def test_a_snapshot_that_cannot_be_written_costs_neither_the_run_nor_the_verdicts(self):
+        """RL-002. The snapshot is written *before* the report is printed, so an unhandled OSError
+        propagated out of `cmd_score` with stdout empty and the caller lost every score it needed --
+        over a file nothing depends on. A read-only `.context` or a full disk must not stop a capture."""
+        with tempfile.TemporaryDirectory() as tmp:
+            # The parent is a regular *file*, so the write raises NotADirectoryError. A read-only
+            # directory would be the obvious choice and is wrong: root ignores the mode, so the case
+            # would pass on a CI runner that runs privileged and fail on a developer's machine.
+            blocker = Path(tmp) / "a-regular-file"
+            blocker.write_text("not a directory", encoding="utf-8")
+            budget = Path(tmp) / "b.json"
+            snap = blocker / "snapshot.json"
+            proc, report = self.score(state_file=str(budget), snapshot_file=str(snap))
+        self.assertEqual(0, proc.returncode, proc.stderr)
+        self.assertIsNotNone(report, "the report was lost, so every verdict was lost with it")
+        self.assertEqual("scored", report["records"][0]["outcome"])
+        self.assertIn("snapshotError", report, "the failure was swallowed rather than reported")
+        self.assertIn("verdicts below are unaffected", proc.stderr)
+
+    def test_no_snapshot_flag_writes_no_snapshot(self):
+        """Opt-in, because a probe or a caller with no ledger must not leave one behind."""
+        with tempfile.TemporaryDirectory() as tmp:
+            before = set(Path(tmp).iterdir())
+            self.score()
+            self.assertEqual(before, set(Path(tmp).iterdir()))
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

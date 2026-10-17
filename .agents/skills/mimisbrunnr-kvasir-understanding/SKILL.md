@@ -212,8 +212,21 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
   spent budgets — `ledgerReset` (the ledger was unreadable and restarted empty) or `ledgerEvicted: n`
   (entries dropped past its 5000-entry cap) — and the client prints one stderr line for each
   (`decisions: attempt ledger evicted N entries past its cap; those records' attempt budgets restart`),
-  because such a record can be scored again. Absent, zero or unreadable values print nothing. The rubric is `scripts/decisions_rubric.json`, **a copy shared with the capture
+  because such a record can be scored again. Absent, zero or unreadable values print nothing.
+  The rubric is `scripts/decisions_rubric.json`, **a copy shared with the capture
   skill** — the two must not drift, so an edit belongs in both. Full contract:
+  **Where the gate's files land, and what they are.** A scoring export writes two under `.context/`,
+  named for the product (falling back to the repository, then `unbound`) and the initiative:
+  `<project>-<initiative>-decisions-ledger.json` is the **budget** — stable across runs, because the
+  three-attempt bound is a claim about a record *over* runs — and
+  `<project>-<initiative>-<yyyymmdd-HHMMSS>-decisions-ledger.json` is that run's **snapshot**, stamped
+  because the budget keeps only the best attempt per record and the next run overwrites it, so a hold
+  a later run released leaves no trace anywhere else. The snapshot carries each record's ledger
+  **digest**, never the subject; it is written whole rather than appended to, and a failure to write it
+  costs nothing but the file. The export prints both paths, read from the gate's own report rather than
+  recomputed. `MIMIS_DECISIONS_STATE` overrides the location and outranks the derived name, which is what
+  keeps a test or a sandboxed run out of the working tree; a snapshot per run accumulates and nothing
+  prunes it.
   [`mimisbrunnr-odin-context-memory` → Value Gate](../mimisbrunnr-odin-context-memory/SKILL.md).
   **A dry run never scores.** Scoring spends each record's attempt budget in the gate's ledger, so a
   dry run runs the gate's content-free `probe` instead and reports `decisions: not scored (dry run …)`
