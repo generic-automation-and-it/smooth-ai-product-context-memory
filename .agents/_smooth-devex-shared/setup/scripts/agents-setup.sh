@@ -3,7 +3,7 @@
 # Supports: Claude Code, GitHub Copilot, Cursor, OpenAI Codex
 
 # Get the repo root (parent of .agents)
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../../" && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../" && pwd)"
 cd "$REPO_ROOT"
 
 # Helper function to create symlink
