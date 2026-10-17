@@ -254,18 +254,18 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
   default, below) fills repository and branch tickets that neither supplied. So an export with **no
   explicit selector** can still be bound; only when the input, the flags and autofill all supply nothing
   is no association made (`--heimdallr false` skips autofill).
-- **`--product-name` declares a graph edge, not a field on a memory.** The store keeps products in a
+- **`--product-name` declares graph edges, not a field on a memory.** The store keeps products in a
   registry linked to initiatives and repos, so the switch declares `(Product)-[:HAS_INITIATIVE]->
-  (Initiative)` for the initiative this export binds to — **after** the memories are written. With no
-  initiative bound it declares `(Product)-[:HAS_REPO]->(Repo)` instead — the common case, since
-  Heimdallr autofill binds the repository from the git remote by default, so a bare `--product-name`
-  inside a checkout already has a repo anchor. When **both** are bound only
-  the initiative is declared, because either anchor alone makes the memory "of product X" and the repo
-  edge is the one that can conflict (a repo belongs to exactly one product, so it answers `409` naming
-  the owner, where the initiative edge can only `404`). The link is not one transaction with the
-  memories: one that fails leaves them written, and the export exits non-zero rather than reporting
-  success. The product must already be registered — nothing is created implicitly, and an unknown one
-  is a `404` naming `upsert-product-name` — so an export binding neither anchor is refused before
+  (Initiative)` for the initiative this export binds to — **after** the memories are written. With a
+  repo bound it also declares `(Product)-[:HAS_REPO]->(Repo)` — Heimdallr autofill binds the repository
+  from the git remote by default, so a checkout-bound export typically declares both. Either anchor
+  alone makes the memory "of product X" (LADR-10); when both are bound both edges are declared,
+  initiative first. A repo conflict (a repo belongs to exactly one product, so it answers `409` naming
+  the owner, where the initiative edge can only `404`) is reported as a NOTE, not a silent skip, but it
+  does not fail an export whose primary anchor already landed (LADR-10 "either alone attributes").
+  No edge landed → not clean. The link is not one transaction with the memories: one that fails leaves
+  them written. The product must already be registered — nothing is created implicitly, and an unknown
+  one is a `404` naming `upsert-product-name` — so an export binding neither anchor is refused before
   anything is sent. That refusal is a backstop for `--heimdallr false` with no `--initiative` and no
   `--repository`, not a normal path: with autofill on, a checkout supplies the repo. A dry run reports
   it from a **read** of the register, so a preview still needs no write credential. The spelling

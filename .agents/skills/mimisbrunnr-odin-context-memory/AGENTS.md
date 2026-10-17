@@ -71,6 +71,7 @@ Read [`SKILL.md`](./SKILL.md) first — the five-stage write pipeline, modes, sw
 
 | Date | Change | Ref |
 | :---- | :---- | :---- |
+| 2026-10-17 | `--product-name` now declares BOTH `(Product)-[:HAS_INITIATIVE]->(Initiative)` AND `(Product)-[:HAS_REPO]->(Repo)` when both anchors are bound; either alone attributes the memory (LADR-10), a repo conflict (`409`) is a NOTE, not a silent skip, and does not fail an export whose primary anchor already landed. The "initiative wins" heuristic is gone | — |
 | 2026-10-15 | Ralph loop: four fixes in the shared capture client and queue, verified by the odin and queue suites | — |
 | 2026-09-10 | Five-stage pipeline with preflight first | — |
 | 2026-09-10 | Contract-coherence pass | — |

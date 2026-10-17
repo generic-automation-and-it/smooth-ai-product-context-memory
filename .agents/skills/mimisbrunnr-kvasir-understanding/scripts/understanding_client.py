@@ -1639,8 +1639,9 @@ def link_product_to_repo(product: str, repo: str) -> tuple[bool, str]:
 _PRODUCT_LINKERS = {"initiative": link_product_to_initiative, "repo": link_product_to_repo}
 
 
-def _product_target(binding: dict, resolved_initiative: str | None = None) -> tuple[str, str] | None:
-    """The anchor a `--product-name` edge names, or None when the export binds neither.
+def _product_target(binding: dict, resolved_initiative: str | None = None) -> list[tuple[str, str]]:
+    """Every anchor a `--product-name` edge names, in declaration order, or [] when the export binds
+    neither.
 
     The anchor *kind* comes from what the caller bound, so a preview and the write that follows it
     name the same node; `resolved_initiative` only refines the *name*, once a group has been resolved
@@ -1648,13 +1649,16 @@ def _product_target(binding: dict, resolved_initiative: str | None = None) -> tu
 
     Initiative first because it is the primary attribution anchor (LADR-10) and the safer write: an
     initiative may be shared by several products, while a repo belongs to exactly one, so the repo
-    edge is the claim that can conflict. Either anchor alone makes the memory "of product X", so the
-    repo is not also declared beside an initiative.
+    edge is the claim that can conflict. Either anchor alone makes the memory "of product X", so both
+    edges are declared — a conflict on the repo is reported, never silently skipped, and never a
+    reason to withhold the initiative edge.
     """
+    targets: list[tuple[str, str]] = []
     if binding.get("initiative"):
-        return "initiative", resolved_initiative or binding["initiative"]
-    repo = binding.get("repository")
-    return ("repo", repo) if repo else None
+        targets.append(("initiative", resolved_initiative or binding["initiative"]))
+    if binding.get("repository"):
+        targets.append(("repo", binding["repository"]))
+    return targets
 
 
 def _product_register_hint(product: str) -> str:
@@ -1663,8 +1667,8 @@ def _product_register_hint(product: str) -> str:
             f"python3 -B {WRITE_CLIENT} upsert-product-name")
 
 
-def _preview_product_link(args: argparse.Namespace, target: tuple[str, str] | None) -> None:
-    """Report the edge a write would declare, from a read of the register.
+def _preview_product_link(args: argparse.Namespace, targets: list[tuple[str, str]]) -> None:
+    """Report the edges a write would declare, from a read of the register.
 
     A read, so a preview needs no write credential. An unreadable register is reported as such rather
     than as an absent product: a down store must not send the operator to register one it may hold.
@@ -1672,13 +1676,13 @@ def _preview_product_link(args: argparse.Namespace, target: tuple[str, str] | No
     product = getattr(args, "product_name", None)
     if not product:
         return
-    kind, name = target
     names, why = registered_products()
     if names is None:
         print(f"Product: '{product}' — the register read failed ({why}), so this preview cannot say "
               f"whether the link would be declared or refused.")
     elif product in names:
-        print(f"Product: would link '{product}' -> {kind} '{name}'.")
+        for kind, name in targets:
+            print(f"Product: would link '{product}' -> {kind} '{name}'.")
     else:
         print(f"Product: '{product}' is not registered, so a write would refuse with 404. "
               f"{_product_register_hint(product)}")
@@ -1698,23 +1702,30 @@ def _warn_product_link_skipped(args: argparse.Namespace) -> None:
               file=sys.stderr)
 
 
-def _declare_product_link(args: argparse.Namespace, target: tuple[str, str] | None) -> bool:
-    """Declare the `--product-name` edge, returning whether the caller's request was honoured.
+def _declare_product_link(args: argparse.Namespace, targets: list[tuple[str, str]]) -> bool:
+    """Declare every `--product-name` edge, returning whether the export is clean.
 
-    A failed link does not undo the memories, but it is still a requested step that did not happen,
-    so the export does not report success.
+    Clean means the product was attributed: at least one edge landed, because either anchor alone
+    makes the memory "of product X" (LADR-10). A conflict on a supplementary edge (the repo is owned
+    by a different product) is reported as a NOTE, never a silent skip — but it does not fail an
+    export whose primary anchor already landed (LADR-10 "either alone"). No edge landed is not clean.
     """
     product = getattr(args, "product_name", None)
     if not product:
         return True
-    kind, name = target
-    linked, detail = _PRODUCT_LINKERS[kind](product, name)
-    if linked:
-        print(f"Product: linked '{product}' -> {kind} '{name}' ({detail[:200]})")
-        return True
-    print(f"NOTE: the memories were written, but the product link failed: {detail[:300]}. The edge is "
-          f"not rolled back with them. {_product_register_hint(product)}", file=sys.stderr)
-    return False
+    landed = 0
+    for kind, name in targets:
+        linked, detail = _PRODUCT_LINKERS[kind](product, name)
+        if linked:
+            print(f"Product: linked '{product}' -> {kind} '{name}' ({detail[:200]})")
+            landed += 1
+        else:
+            print(f"NOTE: the product link '{product}' -> {kind} '{name}' was NOT declared: "
+                  f"{detail[:300]}. The edge is not rolled back with the memories.", file=sys.stderr)
+    if landed and landed < len(targets):
+        print(f"NOTE: product '{product}' linked to {landed} of {len(targets)} anchors; "
+              f"{len(targets) - landed} declined.", file=sys.stderr)
+    return landed > 0
 
 
 def _subject(candidate: dict) -> str:
@@ -2320,7 +2331,7 @@ def cmd_export(args: argparse.Namespace) -> int:
     # attach it to. Refused here, before any gate runs, rather than after the memories have landed: a
     # link that cannot be declared is not a reason to have written them first.
     product_name = getattr(args, "product_name", None)
-    if product_name and _product_target(binding) is None:
+    if product_name and not _product_target(binding):
         print(f"REFUSED: --product-name '{product_name}' has nothing to link to — the edge is "
               f"(Product)-[:HAS_INITIATIVE]->(Initiative) or (Product)-[:HAS_REPO]->(Repo), and this "
               f"export binds neither. Pass --initiative <name> or --repository <owner/name>. "

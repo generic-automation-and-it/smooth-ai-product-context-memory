@@ -60,14 +60,16 @@ Run exactly once in fixed order:
    queue-file-only.
 
 **Under `--product-name`, one more write follows stage 5 — and it is not a stage.** After the `set` has
-committed, declare the product's graph edge through the same credential subshell:
+committed, declare the product's graph edges through the same credential subshell:
 
-- **Anchor**: the **kind** comes from what the caller bound — the initiative if one was bound, else the
-  repository — and the *name* comes from the resolved group when the kind is the initiative. The two
-  stay apart: a group that resolves under some initiative must not retarget a repository-bound capture.
-  The initiative wins when both are bound — either alone attributes the memory, and the repo edge is the
-  one that can conflict (a repository has at most one owning product, so it answers `409` naming the
-  owner, where the initiative edge can only `404`).
+- **Anchors**: every anchor the caller bound is declared — initiative (if bound) and repo (if bound),
+  in that order. The *initiative name* comes from the resolved group when the kind is the initiative;
+  the *repo name* stays what the caller bound. The two stay apart: a group that resolves under some
+  initiative must not retarget a repository-bound capture. When both are bound both edges are declared
+  — either alone attributes the memory (LADR-10), so a repo conflict (a repository has at most one
+  owning product, so it answers `409` naming the owner, where the initiative edge can only `404`) is
+  reported as a NOTE, not a silent skip — but it does not fail an export whose primary anchor already
+  landed. No edge landed → not clean.
 - **Verb**: `link-product-initiative` (`{"productName", "initiativeName", "reason", "source"}`) or
   `link-product-repo` (`{"productName", "repo", "reason", "source"}`). Both require a non-empty
   `reason`; the store sets `declaredAt`. Idempotent — an already-present pair answers `changed: false`.
