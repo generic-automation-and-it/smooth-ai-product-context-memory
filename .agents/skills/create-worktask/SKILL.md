@@ -84,7 +84,7 @@ or describe the work in natural language and follow the workflow.
 
 5. **Fill Contexts** — every resource a standalone coder needs, each one verified in step 2:
    - Domain/feature `*AGENTS.md` files governing the code being touched
-   - ADRs and NFRs that apply (`.docs/hlds/`, `code-review-standards.instructions.md`)
+   - ADRs and NFRs that apply (`docs/hlds/`, `code-review-standards.instructions.md`)
    - Rule files that apply (logging conventions, git policy, workflow rules)
    - Root `AGENTS.md` for system context; existing similar features to follow
    - Schema / API surfaces where the change touches them

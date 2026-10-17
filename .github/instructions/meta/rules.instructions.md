@@ -28,7 +28,7 @@ Rules are organized into category subfolders for navigation only — folder plac
 | Location | Use for |
 |----------|---------|
 | `.agents/rules/*.instructions.md` (flat) | Cross-cutting rules with no ≥2-member category (AI workflow, code-review guidance, project overview) |
-| `.agents/rules/<category>/` | A folder created when 2+ rules share a topic — currently `backend/`, `git/`, `meta/`; `skills/` retains the canonical secret-handling path with one member |
+| `.agents/rules/<category>/` | A folder created when 2+ rules share a topic — currently `backend/`, `git/`, `meta/` |
 
 See `.agents/skills/manage-rule-system/SKILL.md` for the directory contract.
 

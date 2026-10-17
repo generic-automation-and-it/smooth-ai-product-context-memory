@@ -14,7 +14,7 @@ effort: xhigh  # multi-step clarification gates + architectural judgment
 
 ## TL;DR
 
-Produce a `.docs/hlds/NNN-<slug>/` folder that captures **intent + spec** for a design at
+Produce a `docs/hlds/NNN-<slug>/` folder that captures **intent + spec** for a design at
 discovery/prototyping phase. The HLD says *what* we are building, *why*, the decisions behind
 it (LADRs), the quality bar it must meet (NFRs), and its architecture (diagrams). It does
 **not** say *how to build it* — no implementation plan, no phasing, no code (except an optional
@@ -80,7 +80,7 @@ a neighbour, or narrate the authoring process.
 ## Output structure (the contract)
 
 ```
-.docs/hlds/NNN-<kebab-slug>/
+docs/hlds/NNN-<kebab-slug>/
 ├── README.md            # human entry point: intent + spec (no impl, no code)
 ├── AGENTS.md            # README pointer + only what README, LADRs, NFRs do not state
 ├── diagrams/
