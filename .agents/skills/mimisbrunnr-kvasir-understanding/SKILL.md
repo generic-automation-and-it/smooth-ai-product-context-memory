@@ -41,6 +41,65 @@ Use this skill when a practitioner wants to seed an agent with prior knowledge, 
 already written somewhere into the store so it compounds. It is the **load/transfer** counterpart to
 `mimisbrunnr-odin-context-memory` (the sole writer of clean facts).
 
+## Export this session to the store — agent workflow
+
+For a practitioner's explicit request to export, capture or save this session's learnings. Each step is
+detailed under *Export (session → store)* and *Session export* below; stop at the first step that
+cannot be satisfied and say why.
+
+1. **Use a complete client.** `understanding_client.py` imports the shared scripts beside it
+   (`_mimisbrunnr-shared/scripts/`), so it is not a standalone download. Run it from a complete skills
+   install or checkout, or through the npm launcher `mimisbrunnr-kvasir-understanding` (runtime only — it
+   does not install this `SKILL.md`). Never fetch scripts one at a time. If no complete route can run
+   (e.g. an upload-only runtime with no shell), stop and report that.
+2. **Decide what is eligible before writing anything.** Take only durable learnings from this session that
+   are not already answered where they are documented, and honour any rule of the repository or
+   practitioner about what may be stored. A topic that is documented is not a reason to drop genuinely new
+   reasoning; a tool that is itself the product being built is product knowledge. Nothing eligible: say so
+   and stop — no filler unit, no empty dump, no edit to other documentation.
+3. **Check what was authorised.** An explicit export request authorises the normal write path through the
+   gates, with no extra "the store is live" confirmation. "Any learnings?", an unsolicited proposal,
+   selectors with no outbound verb, or a preview request do not authorise a write: propose, clarify or
+   preview. Ask only a real open question (eligibility, destination, a conflict).
+4. **Distil and dump.** Generalise personal data, then pipe the distilled text on stdin, one claim per
+   list item or blank-line block (headings are not facts). Note the folder printed after
+   `SESSION DUMP WRITTEN:`.
+
+   ```bash
+   python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding_client.py \
+     dump --currentsession --from - --tickets github:123 --repository owner/repo --initiative NAME <<'EOF'
+   - A re-run of the import with an unchanged file writes a new empty version.
+   - Rows with a blank key are skipped and reported, never dropped silently.
+   EOF
+   ```
+5. **Recall before writing.** `import --nomarker --query WORD` with matching `--ticket`, `--repository`
+   or `--initiative` filters (import autofills nothing), one short word per query. A paraphrase of a recalled memory goes through the capture skill's
+   Compare-or-Clarify or is dropped; exact-subject dedup is not semantic. An empty result, an unreachable
+   store and a timeout are three different outcomes, and a failed recall is not evidence of novelty.
+6. **Optionally preview** with `export <folder> --dryrun`, passing the same binding flags plus
+   `--product-name NAME` if one applies (`export` only; `dump` rejects it). A preview is not proof a write
+   will succeed; see *Preview limits* below.
+7. **Write** by re-running the same command without `--dryrun`, with the explicit folder from step 4. Do
+   not add `--all` or `--nomarker`, and do not bypass a gate to make a candidate pass.
+8. **Report from the actual output**, never from an intention or an exit code alone: preview only, no
+   eligible candidates, refused, held, complete, or partial. Separate ordinary writes, `proposed` writes,
+   queue-only holds, failed or unknown items, the marker line and the product-edge result. A write whose
+   response was lost is *unknown persistence*: read the store back before any targeted retry, and never
+   replay the whole dump.
+
+### Preview limits
+
+`export --dryrun` runs the local redaction and atomicity gates and prints what it would write. It does
+not create a memory, group, initiative or product edge. It is **not** free of side effects or network
+reads: it may read the initiative and product registers, and it appends held candidates to the local
+review queue. It resolves no group, so it cannot show the group's initiative matches and the server-side
+`set --dryrun` veto runs only on a real write; the optional value gate is probed, not scored, so its
+count is an upper bound. If every candidate is held by atomicity it exits 1 right after the hold report,
+before group, product-registry or preflight steps — not a crash and not a reason to retry blindly.
+Atomicity `signals` (`discourse`, `split-ref`) are evidence for your judgement, not a split plan or a
+verdict; split along claims that stand alone, or drop, and never reword only to pass the detector.
+Redaction and atomicity run locally: their output proves neither store connectivity nor write access.
+
 ## Session marker (LADR-11)
 
 A marked `load`/`import` sets the session's working point; a default `export` excludes

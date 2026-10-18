@@ -941,7 +941,7 @@ def cmd_import(args: argparse.Namespace) -> int:
     if args.store:
         print("DEPRECATED: `import <input> --store` prepared a capture payload. That direction is "
               "now `export`; `import` reads the store INTO the session. Nothing was written.\n"
-              "  to review:  understanding_client.py export <input>\n"
+              "  to review:  understanding_client.py export <input> --dryrun\n"
               "  to capture: understanding_client.py export <input>",
               file=sys.stderr)
         return 1
@@ -949,7 +949,7 @@ def cmd_import(args: argparse.Namespace) -> int:
         print("DEPRECATED: `--heimdallr` autofill was never an inbound step; `import` binds only "
               "what the caller passes, so a session on a ticketed branch recalls the whole "
               "initiative. It is an `export`/`dump` switch. Nothing was written.\n"
-              "  to review:  understanding_client.py export <input>\n"
+              "  to review:  understanding_client.py export <input> --dryrun\n"
               "  to capture: understanding_client.py export <input>\n"
               "  to dump:    understanding_client.py dump --currentsession --from <session-summary-file|->",
               file=sys.stderr)
@@ -3711,8 +3711,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                      help="Explicit input; with neither, the newest session dump (this session's when "
                           "one exists).")
     exp.add_argument("--dryrun", action="store_true",
-                     help="Run every gate and the preview, then stop before anything is written: no "
-                          "initiative, no group, no memory.")
+                     help="Run the local content gates and the preview, then stop before the store is written: "
+                          "no initiative, no group, no memory. It may still read the registry and append "
+                          "held candidates to the local review queue; it resolves no group, so the "
+                          "server-side veto runs only on a real write.")
     exp.add_argument("--write", action="store_true", dest="write_deprecated",
                      help=argparse.SUPPRESS)
     exp.add_argument("--tickets", help="Comma-separated ticket keys: #12, github:12, provider:key.")
@@ -3726,11 +3728,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     exp.add_argument("--scope", help="scope:identifier, e.g. product:invitations.")
     exp.add_argument("--initiative", help="Initiative the group belongs to; must already exist.")
     exp.add_argument("--product-name", "--productname", dest="product_name",
-                     help="Declare the product's graph edge for the anchor this export binds to: "
-                          "(Product)-[:HAS_INITIATIVE]->(Initiative), or (Product)-[:HAS_REPO]->(Repo) "
-                          "when no initiative is bound. The product must already be registered "
-                          "(upsert-product-name) — nothing is created implicitly. Declared after the "
-                          "memories are written; a dry run reports it from a read instead.")
+                     help="Declare the product's graph edges for the anchors this export binds: "
+                          "(Product)-[:HAS_INITIATIVE]->(Initiative) when an initiative is bound and "
+                          "(Product)-[:HAS_REPO]->(Repo) when a repository is bound (both when both "
+                          "are). The product must already be registered (upsert-product-name) — "
+                          "nothing is created implicitly. Declared after the memories are written; a "
+                          "dry run reports it from a read instead.")
     exp.add_argument("--name", help="Group name, written only when the group is created.")
     exp.add_argument("--body", help="Group description, written only when the group is created.")
     exp.add_argument("--heimdallr", choices=_HEIMDALLR_CHOICES, default="true",

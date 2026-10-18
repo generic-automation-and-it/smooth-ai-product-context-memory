@@ -1,7 +1,8 @@
 ## Switches
 
 The four operations are **never conflated** — a load is context-injection, an import reads the store, an
-export writes it, and a dump writes the session to a local folder. All switches are **off by default**.
+export writes it, and a dump writes the session to a local folder. Switches default per verb; most are
+off, but Heimdallr autofill (`--heimdallr`) is **on** for `export` and `dump`.
 
 | Operation | Direction | Reads store? | Writes store? |
 |---|---|---|---|
@@ -31,11 +32,31 @@ python3 .../understanding_client.py import \
 # Capture material into the store through the capture path (writes unless --dryrun)
 python3 .../understanding_client.py export <input> [--dryrun] [--all] [--nomarker] \
   [--tickets A,1] [--tags tag] [--repository repo] [--scope product:x] [--initiative NAME] \
-  [--product-name NAME]   # declares Product->Initiative, else Product->Repo when no initiative
+  [--product-name NAME]   # declares Product->Initiative and Product->Repo for each of those anchors bound
 
 # Dump the current session's context to a discoverable local folder (export, no write)
 python3 .../understanding_client.py dump --currentsession --from <session-file|-> [--out .context/mimisbrunnr-understandings/<folder>]
 ```
+
+## Exporting this session's learnings
+
+`export` is the only verb that writes the store, and it needs a complete client — the shared scripts
+beside `understanding_client.py` (a skills install or checkout), or the npm launcher
+`mimisbrunnr-kvasir-understanding` (runtime only; it does not install the skill instructions). Do not
+download the client script on its own.
+
+1. Keep only durable, not-yet-documented learnings; if there are none, stop — write nothing.
+2. Generalise personal data, then pipe the distilled text in, one claim per list item:
+   `dump --currentsession --from - [--tickets …] [--repository …] [--initiative …]`. The folder is printed.
+3. Recall first with `import --nomarker --query WORD`; route paraphrases through the capture skill.
+4. Optionally `export <folder> --dryrun` (it appends held candidates to the local review queue, resolves
+   no group and spends no value-gate budget), then `export <folder>` to write. `--product-name` belongs on
+   `export`, never `dump`.
+5. Report what the output shows: ordinary, proposed and queue-only held items, partial writes and
+   unknown persistence are different outcomes.
+
+An explicit export request authorises the write path; "any learnings?" or a preview request does not.
+[`SKILL.md`](./SKILL.md) is the authoritative procedure.
 
 ## Design
 
