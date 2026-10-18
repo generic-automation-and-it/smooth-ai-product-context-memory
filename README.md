@@ -4,9 +4,55 @@
   <img src="docs/banner/context-memory.svg" alt="Reasoning that outlives the session. Drawn from Mímisbrunnr, not lost with it." width="1280">
 </p>
 
-> Wisdom drawn from **Mímisbrunnr** — not forgotten when the session ends. One eye for a drink; the why stays in the well. Huginn flies the session; Muninn keeps the store. Roots under every product, one well, the reasoning still attached.
+> Wisdom drawn from **Mímisbrunnr** — not forgotten when the session ends. One eye for a drink; the why stays in the well. Huginn flies the session; Muninn keeps the store. Odin paid an eye for the right to drink — so writing to the well costs deliberation, never happens by accident. Kvasir, born when all the gods pooled their wisdom, walks from hall to hall carrying it to whoever asks next. Roots under every product, one well, the reasoning still attached.
 
 > **What is special with Mímisbrunnr?** Deliberate capture, no model in the server, append-only versions, index-first retrieval — [how it differs from MemOS, second-brain and session-memory rivals](docs/wiki/what-is-special.md).
+
+## Contents
+
+- [Not a Code Context Graph](#not-a-code-context-graph)
+- [Service Installation](#service-installation)
+- [Client Skills Installation](#client-skills-installation)
+- [Running](#running)
+- [What We're Building](#what-were-building) · [Skills](#skills)
+- [Documentation](#documentation)
+- [Contributing](#contributing)
+- [Credits](#credits)
+
+## Not a Code Context Graph
+
+**Mímisbrunnr is not a code context graph.** Context graphs are the sensors and the search
+index: they ingest automatically — AST parsing, LLM extraction, session hooks — store
+artifacts and episodes (code, docs, conversations), and retrieve by traversal or similarity,
+ranked by confidence. Mímisbrunnr is the **system of record** that sits on top of them.
+
+That difference is why Mímisbrunnr is as useful to **management, product and project people,
+designers, architects and testers as it is to coders**: its unit is not a code symbol but a
+claim — a decision, requirement, constraint or lesson — scoped to the ticket, initiative,
+repository and program level, which is how decisions are actually owned.
+
+What context graphs typically lack, and Mímisbrunnr adds:
+
+- **Authority** — only reviewed, approved claims count as canon; everything else stays
+  evidence. In a context graph, an inferred edge, a captured chat turn and a vetted fact all
+  sit in the same store.
+- **Validity over time** — claims are versioned and superseded. Some context graphs have no
+  notion of supersession at all; others track it only within the bounds of a single project.
+- **Organisational scope** — ticket, initiative, repo and program, not a single project or
+  dataset.
+- **Write governance** — redact, atomicity, dedup, dry-run. Context graphs ingest first and
+  filter later.
+- **Capability separation** — read tokens cannot write; working agents can't change the
+  record.
+- **Reproducible provenance** — deterministic, cited dossiers; contradictions reported
+  instead of blended.
+
+The two are complementary: context graphs feed Mímisbrunnr candidates (session lessons, code
+facts, doc links worth promoting), structure it lacks (the code graph, doc-to-code links,
+connectors) and evidence to cite when a claim is written or reviewed.
+
+> **One-line rule:** context graphs answer *"what can we find?"* — Mímisbrunnr answers
+> *"what are we allowed to rely on?"*
 
 ## Service Installation
 
