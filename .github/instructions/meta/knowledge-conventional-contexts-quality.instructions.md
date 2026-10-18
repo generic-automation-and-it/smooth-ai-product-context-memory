@@ -42,12 +42,14 @@ Use exactly these sections, in this order. Omit any section (other than Changelo
 6. **Test References** — Test tier (L0/L1/L2, as defined in root `AGENTS.md`) and sub-folder path within test projects. Updated when tests are added or modified.
 7. **Quality Constraints** — Feature-specific non-functional requirements beyond root `AGENTS.md`, `docs/hlds/` NFRs and the rule files, and only those that change how code is written.
 8. **Migration Plans** — Planned migrations, deprecations or debt affecting new code: what changes, the target state, what not to build on.
-9. **Changelog** — Always include the header, even if empty: `| Date | Change | Ref |`; Ref is an issue/PR (`#88`) or `—`. A row is the shortest text an agent can still act on:
-   - **Fragment, not sentence.** What changed in the guidance, plus IDs. No rationale, no narration of the authoring process, no restating the file's content, no counts that go stale ("21 open questions").
+9. **Changelog** — Always include the header, even if empty: `| Date | Change | Ref |`; Ref is an issue/PR (`#88`) or `—`. A row is the **minimum characters** an agent needs — together with the git diff of the referenced PR — to know what was done. The diff holds the detail; the row only names and locates the change. Rows are loaded every session, so every character costs tokens:
+   - **Fragment, not sentence.** What changed, where, plus IDs. No rationale, no mechanism or detail the diff already shows, no narration of the authoring process, no restating the file's content, no counts that go stale ("21 open questions").
+   - **No scoping justifications.** Never append why the row lives in this file ("Root changelog is the record home…") — the scoping rule is stated once, not per row.
    - **One row per change that alters agent guidance.** Same-day rows for one change merge into one. Keep bug/gotcha/pitfall rows.
-   - **A row earns extra words only to warn an agent** — e.g. that old IDs are void.
+   - **A row earns extra words only to warn an agent** — e.g. that old IDs are void, or an archive format is refused.
    - ✅ `| 2026-10-07 | Cut to non-HLD content; README pointer | — |` · `| 2026-10-07 | HLD rewritten: one LADR, OQ-1..4; older IDs void | — |` · `| 2026-10-06 | Scaffolded (LADR-01..04) | — |`
    - ❌ `| 2026-10-06 | Added HLD-002 with three LADRs covering persistence, caching and retries, plus 14 open questions |` — a multi-clause HLD summary, stale the moment the HLD changes.
+   - ❌ `| 2026-10-16 | **Banner gains X** — long dash-joined description of every visual element, sizes and wording changes. Root changelog is the record home (no localized file covers docs/banner/). |` — detail the diff shows, plus a per-row scoping justification.
 
 ## Value Gate
 
@@ -121,3 +123,4 @@ A code or design change MUST update the `*AGENTS.md` sections it makes untrue.
 |:-----|:-------|
 | 2026-05-30 | Initial version. |
 | 2026-10-07 | Conjunctive value gate; design-folder (HLD) section; terse changelog rows; tiers L0–L2 |
+| 2026-10-18 | Changelog rows: minimum chars, diff holds detail; no per-row scoping justifications |
