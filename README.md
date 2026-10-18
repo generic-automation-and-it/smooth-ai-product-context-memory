@@ -52,7 +52,7 @@ facts, doc links worth promoting), structure it lacks (the code graph, doc-to-co
 connectors) and evidence to cite when a claim is written or reviewed.
 
 > **One-line rule:** context graphs answer *"what can we find?"* — Mímisbrunnr answers
-> *"what are we allowed to rely on?"*
+> *"what are we allowed to rely on — and why?"*
 
 ## Service Installation
 
