@@ -27,7 +27,6 @@ on:
       - .agents/skills/ai-brain-dump/**
       - .agents/skills/ai-memory-context/**
       - .agents/skills/ai-understanding/**
-      - .agents/skills/agile-github-*/**
       - .github/actions/**
       - .github/scripts/**
       - .github/workflows/pr-gate.yml
@@ -58,7 +57,6 @@ on:
       - .agents/skills/ai-brain-dump/**
       - .agents/skills/ai-memory-context/**
       - .agents/skills/ai-understanding/**
-      - .agents/skills/agile-github-*/**
       - .github/actions/**
       - .github/scripts/**
       - .github/workflows/pr-gate.yml
@@ -133,11 +131,6 @@ jobs:
 
       - name: Test session-metadata skill
         run: python3 -B .agents/skills/mimisbrunnr-heimdallr-find-session-metadata/tests/run_tests.py
-
-      - name: Test agile GitHub skills
-        run: |
-          python3 -B .agents/skills/agile-github-breakdown/scripts/test_skill_scripts.py
-          python3 -B .agents/skills/agile-github-task-from-diff/scripts/test_create_github_task_from_diff.py
 
       # HLD-010 NFR-01: zero peer-skill path references in shipped skill scripts. Inside the plugin
       # the only legitimate shared-code target is `_mimisbrunnr-shared/scripts/`; across a plugin
