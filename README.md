@@ -90,7 +90,7 @@ $script = [scriptblock]::Create((irm https://raw.githubusercontent.com/generic-a
 | _(none)_ | Install into the repo you are standing in. A `.agents/skills`, `.claude/skills` or `.codex/skills` folder must already exist |
 | `-g` | Install globally: a store at `~/.smooth-ai-mimisbrunnr`, symlinked into `~/.claude/skills`, `~/.codex/skills` and `~/.config/opencode/skills` for each tool that is installed |
 | `--uninstall` | With `-g` only (`-Uninstall` in PowerShell). Removes exactly the links `-g` made; the store and everything else stay |
-| `-s` `-r` `-h` | With `-g`, narrow the run to skills, rules or hooks. This repo owns no rules or hooks yet, so `-g` installs skills only |
+| `-s` `-r` `-h` | With `-g` only, narrow the run to skills, rules or hooks (refused without `-g`). This repo owns no rules or hooks yet, so `-g` installs skills only |
 
 Turning one skill or one tool off, config locations and what is edited where:
 [`scripts/SKILLS_INSTALLER.md`](scripts/SKILLS_INSTALLER.md).
