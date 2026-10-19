@@ -28,26 +28,13 @@ This is a unified AI development experience folder that centralizes skills, prom
 | `.agents/settings.json` | Claude Code config — tool permissions, compile/test commands, hook registrations; every script in `.agents/hooks/` MUST be registered here or it silently never fires (#32) |
 | `.agents/config.toml` | OpenAI Codex config (read via the `.codex` symlink) — the Codex counterpart of `settings.json`. Mirrors what Codex's TOML schema supports: `approval_policy`/`sandbox_mode` (Codex has no per-command ACLs or hooks), root-doc fallback, web search |
 | `.agents/skills/` | Executable skills (multi-file workflows) — flat dirs, category-prefixed folder names |
-| `.agents/skills/agile-github-breakdown/` | Turn a braindump or existing Feature into GitHub Feature + Task issues |
-| `.agents/skills/agile-github-task-from-diff/` | Create a GitHub Task (sub-issue) from the current git diff vs main |
 | `.agents/skills/mimisbrunnr-vitsmunir-dump/` | AI Brain / Intelligence Dump — listen-first capture; synthesize on request. Vitsmunir is Old Norse for intelligence, wits, and the power of comprehension. |
 | `.agents/skills/ai-review/` | Local consumer of a remote AI code-review report |
-| `.agents/skills/ai-terse/` | Reformat this turn's reply into terse, high-density output with a TL;DR |
-| `.agents/skills/ai-template-sync/` | UPSERT the smooth-devex-template agentic scaffold into an existing repo |
 | `.agents/skills/ai-understanding/` | Export a session's Understandings to `.context/understandings/`, import matching ones back, publish/consume across workspaces as a zip — plain Markdown, no store |
-| `.agents/skills/context-load-context/` | Load or create functional `*AGENTS.md` context files |
-| `.agents/skills/context-load-agents-context/` | Load ancestor AGENTS.md context for a target file |
 | `.agents/skills/mimisbrunnr-odin-context-memory/` | Skill to store/retrieve persistent context memories (sole authority on the write path; the `mimisbrunnr-kvasir-understanding` skill is a reader + conditional importer) |
 | `.agents/skills/mimisbrunnr-ymir-bootstrap/` | Build a cited, practitioner-reviewed durable-context baseline for one existing project, optionally focused on its next feature; without registered capability-limited workers it stops after the offline preview |
 | `.agents/skills/mimisbrunnr-muninn-recall-feedback/` | Run the three HLD-004 NFR-03 recall-feedback tuning queries against the Host API |
 | `.agents/skills/mimisbrunnr-kvasir-understanding/` | Load memory + understanding out of the store into an agent, import foreign material back in, dump the current session |
-| `.agents/skills/create-hld/` | Author a design-only High-Level Design under `docs/hlds/NNN-<slug>/` |
-| `.agents/skills/git-commit/` | Commit with conventional format |
-| `.agents/skills/git-commit-push/` | Commit and push to remote |
-| `.agents/skills/git-commit-push-pr/` | Commit, push, and create/update PRs |
-| `.agents/skills/git-commit-review-push/` | Commit + push + open a PR with an embedded full AI review |
-| `.agents/skills/git-sync/` | Sync with main (optionally auto-resolve conflicts) |
-| `.agents/skills/manage-rule-system/` | Create/update rule files in `.agents/rules/` |
 | `.agents/templates/` | Document templates (AGENTS.md, README.md, work task promote templates) |
 | `.claude` → `.agents` | Symbolic link for Claude Code compatibility |
 | `.codex` → `.agents` | Symbolic link for OpenAI Codex compatibility |
@@ -143,6 +130,7 @@ ls -la | grep -E '(\.claude|\.codex|\.cursor)'
 
 | Date | Change | Reason |
 | :---- | :---- | :---- |
+| 2026-10-18 | Dropped the folder-table rows and `settings.json` `Skill(...)` allow-list entries for the skills #291 removed (`agile-github-*`, `ai-terse`, `ai-template-sync`, `context-load-*`, `create-hld`, `git-*`, `manage-rule-system`). | #291 |
 | 2026-09-20 | Registered `mimisbrunnr-ymir-bootstrap`: bounded project-context candidate preview with optional feature focus; comparison, capture and recall require capability-limited workers and have no direct-client fallback. | BR-46 local proposal |
 | 2026-09-20 | Added `ai-understanding` and `mimisbrunnr-kvasir-understanding` to the skills inventory — both shipped without an inventory row. | PR #86 review |
 | 2026-09-19 | Added `mimisbrunnr-muninn-recall-feedback` to the skills inventory. | HLD-004 NFR-03 |
