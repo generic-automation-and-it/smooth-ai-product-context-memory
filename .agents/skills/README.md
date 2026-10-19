@@ -11,7 +11,6 @@ The one folder here that is **not** a skill is `_mimisbrunnr-shared/`: it holds 
 | Skill | Purpose | Usage |
 |-------|---------|-------|
 | **mimisbrunnr-vitsmunir-dump** | AI Brain / Intelligence Dump — listen-first capture; synthesize on request. Vitsmunir is Old Norse for intelligence, wits, and the power of comprehension. | `/mimisbrunnr-vitsmunir-dump [--oktoask] [--thinking] [--oktoreaddocs] [--oktowebsearch] [--all]` |
-| **ai-review** | Analyze and execute AI PR review feedback (fix/skip) | `/ai-review <pr> [1=fix 2=skip …]` |
 | **mimisbrunnr-odin-context-memory** | Get/set persistent context-memory records; sole authority on the write path to the store | `/mimisbrunnr-odin-context-memory [--dryrun] [--approve]` |
 | **mimisbrunnr-saga-dossier** | Compose a read-only, cited context dossier for a slice of the store — document plus findings, no write capability | `/mimisbrunnr-saga-dossier` |
 | **mimisbrunnr-kvasir-understanding** | Load an Understanding export (or prior material) into agent context; `import` recalls from the store, `export` sends session material through the capture path (`--dryrun` previews), `dump --currentsession` writes the session to a local folder | `/mimisbrunnr-kvasir-understanding load\|import\|export\|dump [--dryrun] [--all]` |
@@ -81,7 +80,7 @@ Skills never pick a model, and never differ per provider — every skill runs on
 
 A harness that honours skill `effort` applies it on invocation; a harness with a coarser scale uses its nearest supported level. When a skill invokes another skill as a sub-agent, run it at the **callee's** `effort` on the session's model. `effort` governs the agent that *drives* a skill — the models the review gate itself calls are chosen separately by its GitHub Variables (`OPENCODE_REVIEW_REPORT_MODEL_*`, see `docs/wiki/ci.md`).
 
-Two parents own some skills here, and their SKILL.md files are kept byte-identical to them: `smooth-devex-template` (`mimisbrunnr-vitsmunir-dump` ← `ai-brain-dump`) and `smooth-ai-report-review` (`ai-review`). `ai-understanding` is template-owned but carries accepted local divergences recorded in `.agents/skills/ai-understanding/AGENTS.md`'s changelog, so a template sync would revert them. The `mimisbrunnr-` context-memory skills are owned by this repo.
+One parent owns some skills here, and their SKILL.md files are kept byte-identical to it: `smooth-devex-template` (`mimisbrunnr-vitsmunir-dump` ← `ai-brain-dump`). `ai-understanding` is template-owned but carries accepted local divergences recorded in `.agents/skills/ai-understanding/AGENTS.md`'s changelog, so a template sync would revert them. The `mimisbrunnr-` context-memory skills are owned by this repo.
 
 ### Skill effort levels
 
@@ -89,7 +88,6 @@ Two parents own some skills here, and their SKILL.md files are kept byte-identic
 |-------|--------|-----------|
 | **mimisbrunnr-vitsmunir-dump** | medium | Listen-first capture — `high` would be re-paid on every turn of a long session. Deep reasoning happens downstream, in the skills its output feeds (`ai-understanding`, `ai-memory-context`) |
 | **mimisbrunnr-muninn-recall-feedback** | medium | Three fixed recall-feedback API queries plus interpretation |
-| **ai-review** | high | Review analysis, fix/skip judgment + multi-file code fixes (`smooth-ai-report-review`) |
 | **ai-understanding** | high | Judging what qualifies as transferable knowledge + merge/promotion decisions |
 | **mimisbrunnr-saga-dossier** | high | Equivalence, contradiction and gap judgement across a whole store slice |
 | **mimisbrunnr-kvasir-understanding** | high | Judgement on understanding vs scoped fact, and capture-path funneling |
@@ -111,15 +109,13 @@ effort: <low|medium|high|xhigh>  # one-line rationale
 ---
 ```
 
-The two `smooth-ai-report-review` skills keep that parent's shape verbatim — `ai-review` also carries a `switches:` list, and both align the rationale comment to a column.
-
 ## Naming & Ordering
 
 Skills are flat under `.agents/skills/`; the category lives in the folder-name prefix so a sorted listing groups by category:
 
 | Prefix | Skills |
 |--------|--------|
-| `ai-` | `ai-review`, `ai-brain-dump`, `ai-understanding`, `ai-memory-context` |
+| `ai-` | `ai-brain-dump`, `ai-understanding`, `ai-memory-context` |
 | `mimisbrunnr-` | `mimisbrunnr-vitsmunir-dump`, `mimisbrunnr-ymir-bootstrap`, `mimisbrunnr-odin-context-memory`, `mimisbrunnr-saga-dossier`, `mimisbrunnr-muninn-recall-feedback`, `mimisbrunnr-kvasir-understanding` |
 
 A skill's folder name MUST equal its `name:` frontmatter (this is the slash-command name). When adding a skill, pick the prefix of its category and keep the folder one level under `.agents/skills/`.

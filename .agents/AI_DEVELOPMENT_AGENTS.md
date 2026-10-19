@@ -29,7 +29,6 @@ This is a unified AI development experience folder that centralizes skills, prom
 | `.agents/config.toml` | OpenAI Codex config (read via the `.codex` symlink) — the Codex counterpart of `settings.json`. Mirrors what Codex's TOML schema supports: `approval_policy`/`sandbox_mode` (Codex has no per-command ACLs or hooks), root-doc fallback, web search |
 | `.agents/skills/` | Executable skills (multi-file workflows) — flat dirs, category-prefixed folder names |
 | `.agents/skills/mimisbrunnr-vitsmunir-dump/` | AI Brain / Intelligence Dump — listen-first capture; synthesize on request. Vitsmunir is Old Norse for intelligence, wits, and the power of comprehension. |
-| `.agents/skills/ai-review/` | Local consumer of a remote AI code-review report |
 | `.agents/skills/ai-understanding/` | Export a session's Understandings to `.context/understandings/`, import matching ones back, publish/consume across workspaces as a zip — plain Markdown, no store |
 | `.agents/skills/mimisbrunnr-odin-context-memory/` | Skill to store/retrieve persistent context memories (sole authority on the write path; the `mimisbrunnr-kvasir-understanding` skill is a reader + conditional importer) |
 | `.agents/skills/mimisbrunnr-ymir-bootstrap/` | Build a cited, practitioner-reviewed durable-context baseline for one existing project, optionally focused on its next feature; without registered capability-limited workers it stops after the offline preview |
