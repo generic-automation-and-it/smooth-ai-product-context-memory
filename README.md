@@ -18,12 +18,36 @@ curl -fsSL https://raw.githubusercontent.com/generic-automation-and-it/smooth-ai
 
 ## Client Skills Installation
 
+Installs the ten owned skills ([below](#skills)). They find `~/.mimisbrunnr/credentials` from the service
+install, so no per-repo setup is needed.
+
 ```bash
+# Mac/Linux: into the repo you are standing in
 curl -fsSL https://raw.githubusercontent.com/generic-automation-and-it/smooth-ai-product-context-memory/main/scripts/install-skills.sh | bash
+# Or globally: one store, wired into Claude Code, Codex and OpenCode
+curl -fsSL https://raw.githubusercontent.com/generic-automation-and-it/smooth-ai-product-context-memory/main/scripts/install-skills.sh | bash -s -- -g
+# Remove that global install
+curl -fsSL https://raw.githubusercontent.com/generic-automation-and-it/smooth-ai-product-context-memory/main/scripts/install-skills.sh | bash -s -- -g --uninstall
 ```
 
-Installs the nine owned skills. They find `~/.mimisbrunnr/credentials` from the service install, so
-no per-repo setup is needed.
+```powershell
+# Windows: into the repo you are standing in
+$script = [scriptblock]::Create((irm https://raw.githubusercontent.com/generic-automation-and-it/smooth-ai-product-context-memory/main/scripts/install-skills.ps1)); & $script
+# Or globally
+$script = [scriptblock]::Create((irm https://raw.githubusercontent.com/generic-automation-and-it/smooth-ai-product-context-memory/main/scripts/install-skills.ps1)); & $script -g
+# Remove that global install
+$script = [scriptblock]::Create((irm https://raw.githubusercontent.com/generic-automation-and-it/smooth-ai-product-context-memory/main/scripts/install-skills.ps1)); & $script -g -Uninstall
+```
+
+| Switch | Meaning |
+|---|---|
+| _(none)_ | Install into the repo you are standing in. A `.agents/skills`, `.claude/skills` or `.codex/skills` folder must already exist |
+| `-g` | Install globally: a store at `~/.smooth-ai-mimisbrunnr`, symlinked into `~/.claude/skills`, `~/.codex/skills` and `~/.config/opencode/skills` for each tool that is installed |
+| `--uninstall` | With `-g` only (`-Uninstall` in PowerShell). Removes exactly the links `-g` made; the store and everything else stay |
+| `-s` `-r` `-h` | With `-g`, narrow the run to skills, rules or hooks. This repo owns no rules or hooks yet, so `-g` installs skills only |
+
+Turning one skill or one tool off, config locations and what is edited where:
+[`scripts/SKILLS_INSTALLER.md`](scripts/SKILLS_INSTALLER.md).
 
 ## Running
 
@@ -57,7 +81,7 @@ The core idea (inspired by the [unified-database approach to agent memory](https
 
 ### Skills
 
-The nine owned skills live in [`.agents/skills/`](.agents/skills/) and are installed by
+The ten owned skills live in [`.agents/skills/`](.agents/skills/) and are installed by
 [Client Skills Installation](#client-skills-installation):
 
 | Skill | What it does |
@@ -71,6 +95,7 @@ The nine owned skills live in [`.agents/skills/`](.agents/skills/) and are insta
 | `mimisbrunnr-ymir-bootstrap` | Builds a bounded, cited candidate baseline for an existing repository |
 | `ai-brain-dump` | Listen-first capture for tickets, ADRs, designs, plans — the same posture, broader scope |
 | `ai-understanding` | Exports this session's hard-won knowledge as an Understanding (memory of `kind = understanding`) |
+| `ai-memory-context` | Local-first capture of this session's durable knowledge into a gitignored, zip-shippable store — no server, no network |
 
 For the full design — atomicity rules, write-pipeline stages, scope model, the four stores around
 the well — see [docs/wiki/architecture.md](docs/wiki/architecture.md), the
