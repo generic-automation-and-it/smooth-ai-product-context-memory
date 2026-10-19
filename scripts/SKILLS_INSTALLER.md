@@ -148,16 +148,110 @@ An `installed: true` skill is **replaced** on every run, so an edit inside one i
 install. That is the point of an updater, but it is a real hazard: either set the flag to `false` first,
 or move the change somewhere the installer does not own.
 
+## Global install (`-g`)
+
+```bash
+scripts/install-skills.sh -g              # install the owned skills once, machine-wide
+scripts/install-skills.sh -g --uninstall  # remove exactly what was wired
+./scripts/install-skills.ps1 -g           # PowerShell: -g, -Uninstall
+```
+
+The per-repo install above puts skills in the repo you stand in. `-g` installs the same owned set **once**
+into a store of its own and wires that store into every AI tool found on the machine, so the skills are
+available in every project. Per-repo mode is unchanged and is still what a bare run does.
+
+| | |
+|---|---|
+| Store | `~/.smooth-ai-mimisbrunnr/{skills,rules,hooks}` and `installation.json` (`SMOOTH_MIMISBRUNNR_HOME` overrides; must be absolute) |
+| Switches | `-s` skills, `-r` rules, `-h` hooks (none = all three), `--uninstall` (`-Uninstall` in PowerShell). `-r`, `-h` and `--uninstall` are refused without `-g`; `-g` is refused with `SKILLS_ROOT` |
+| Dependencies | the same as the per-repo install |
+
+### Where each tool keeps its config
+
+| Tool | macOS / Linux | Windows | Override |
+|---|---|---|---|
+| Claude Code | `~/.claude` | `%USERPROFILE%\.claude` | `CLAUDE_CONFIG_DIR` |
+| Codex | `~/.codex` | `%USERPROFILE%\.codex` | `CODEX_HOME` |
+| OpenCode | `~/.config/opencode` | `%USERPROFILE%\.config\opencode` — **not verified**; OpenCode documents `~/.config/opencode` and a managed path under `%ProgramData%` only | `XDG_CONFIG_HOME` |
+
+A tool whose config folder does not exist is **skipped, never created**. The overrides are the tools' own
+variables; this installer invents none, because `OPENCODE_CONFIG` in particular means "path to a config
+file" to OpenCode.
+
+### What is wired where
+
+| | Skills | Rules | Hooks |
+|---|---|---|---|
+| Claude Code | symlink each into `~/.claude/skills` | symlink into `~/.claude/rules`, subfolders kept | not wired (its hooks live in `settings.json`, which this installer does not edit) |
+| Codex | symlink each into `~/.codex/skills`, beside the tool's own `.system/` (never touched) | a delimited **index** block in `~/.codex/AGENTS.md` | JSON-merged into `~/.codex/hooks.json` under `UserPromptSubmit` only, absolute commands |
+| OpenCode | symlink each into `~/.config/opencode/skills` | one absolute path per rule in `opencode.json` `instructions` | not wired |
+
+- **`_mimisbrunnr-shared` is linked too.** A skill resolves `../_mimisbrunnr-shared` against the folder it
+  was found in, so each tool's `skills/` folder needs the shared folder beside the skills, not only the store.
+- **Codex gets an index, not the rules.** Codex has no `@path` import and caps combined `AGENTS.md` content at
+  32 KiB, so the block lists each rule's path, scope and one-line description and tells the model to open the
+  ones that apply. That is documented behaviour, not observed against a live Codex session.
+- **Codex `.rules` files are not instructions** (they are `prefix_rule()` command-approval policy), and there is
+  no policy in this repo to derive one from, so none is written.
+- **OpenCode entries are per file, never a `rules/**` glob**: a glob cannot exclude one rule.
+- **This repo owns no rules and no hooks today.** `OWNED_RULES` and `OWNED_HOOKS` are empty, so a default `-g`
+  touches skills and the manifest only — it does not create, parse or snapshot `AGENTS.md`, `hooks.json` or
+  `opencode.json`. The machinery is built and held by the harness through synthetic names; owning a real rule
+  or hook is adding its name to the list in both ports.
+
+### The manifest and per-item control
+
+`~/.smooth-ai-mimisbrunnr/installation.json` carries `updated`, `harnesses`, `skills`, `rules`, `hooks` and
+`links`, in that order. `skills`, `rules` and `hooks` are `{name, installed}` lists reconciled every run (a new
+name joins as `true`, the operator's flag is kept, a name no longer owned is dropped). A category-only run
+(`-g -r`) reconciles just its own list and carries the others forward.
+
+- `installed: false` on a **skill** stops it being refreshed; an existing link stays.
+- `installed: false` on a **rule or hook** also **unwires** it from every place it was wired. The store copy stays.
+- `harnesses` is `{"claude-code": true, "codex": true, "opencode": true}`. `false` installs nothing into that
+  tool and removes what is there, found **on disk** by where a link points, so a lost record cannot leave a
+  live link. A real file, a directory, or a link into any other store is never touched.
+- Each symlink record carries `enabled`, a status recomputed every run (is the link on disk and pointing where
+  recorded). It is not a control.
+
+### Sharing a machine with smooth-devex-template's installer
+
+That installer keeps `~/.smooth-ai-devex` and edits the **same three config files**. The two cannot share a
+store: it reconciles its manifest against its own owned set and purges every tool symlink whose target is under
+its store, so a shared store would let each installer delete the other's links. They can share the config files,
+which is why this installer:
+
+- uses its **own** block markers (`mimisbrunnr-owned-global-instructions`) and snapshot suffix
+  (`.smooth-mimisbrunnr-<UTC stamp>`), so neither's block or snapshot is mistaken for the other's;
+- edits a file only when the edit changes something, snapshotting a pre-existing file once before the first edit;
+- on `--uninstall`, **removes its own entries and leaves the rest**. It does not restore a snapshot over the
+  file — that would erase whatever the other installer wrote since. Snapshots taken at install stay as a
+  safety copy, and a JSON file edited at uninstall is snapshotted again as `.smooth-mimisbrunnr-uninstall-<stamp>`;
+- deletes a file only if it created it and nothing else is in it.
+
+A file that does not parse (`opencode.json` with `//` comments, a broken `hooks.json`) is a hard error naming the
+file and is never overwritten — but only when there is something to write. A default run never reads them.
+
+### Windows
+
+Directory links fall back to a **junction** when symlinks are not permitted; git records a junction's contents
+as files, so treat that as degraded. A rule is a file, which has no junction fallback, so without symlink rights
+it is skipped with a warning. The PowerShell port is exercised on macOS and Linux only; replay it on Windows
+before trusting it there.
+
 ## Testing
 
 ```bash
 bash scripts/test-install-skills.sh
 ```
 
-53 cases across both ports, no network and no container engine needed: the clone source is the checkout
-itself (`SKILLS_REPO` pointed at the repo, `SKILLS_BRANCH` at the current branch), so a harness that
-reached GitHub would be red for reasons unrelated to the code. Runs in the PR gate. Verified green on
-macOS (bash 3.2 with `pwsh` present — 53/53) and on GNU/Linux in `ubuntu:24.04` (`pwsh` absent).
+101 cases across both ports (50 when `pwsh` is absent), no network and no container engine needed: the clone
+source is the checkout itself (`SKILLS_REPO` pointed at the repo, `SKILLS_BRANCH` at the current branch) for the
+per-repo cases and a fixture repository for the `-g` cases, so a harness that reached GitHub would be red for
+reasons unrelated to the code. Every `-g` case runs in a throwaway `HOME` with each tool's config location
+pinned and from that directory, so a red run cannot touch the operator's real config, either store, or this
+checkout. Runs in the PR gate. Verified green on macOS (bash 3.2 with `pwsh` present — 101/101) and on
+GNU/Linux in `ubuntu:24.04` (`pwsh` absent — 50/50).
 
 The `ps1` cases and the cross-port parity cases are **skipped with a stated reason** when `pwsh` is not
 installed — which is the case on the `ubuntu-latest` gate runner. They are exercised locally where `pwsh`

@@ -36,7 +36,7 @@ trap 'exit 143' TERM
 passed=0
 failed=0
 have_pwsh=0
-[ -n "${SKILLS_TEST_SKIP_PS1:-}" ] || command -v pwsh >/dev/null 2>&1 && have_pwsh=1
+[ -z "${SKILLS_TEST_SKIP_PS1:-}" ] && command -v pwsh >/dev/null 2>&1 && have_pwsh=1
 
 ok() { passed=$((passed + 1)); echo "  ok   $1"; }
 no() {
@@ -766,6 +766,696 @@ check_clone_root_reset() {
   ok "an inherited CLONE_ROOT cannot widen the clone boundary"
 }
 check_clone_root_reset "$(mktemp -d)"
+
+# ---------------------------------------------------------------------------------------------
+# 12. global install (-g)
+#
+# Each case gets its own throwaway HOME with every location pinned (HOME, SMOOTH_MIMISBRUNNR_HOME,
+# CODEX_HOME, CLAUDE_CONFIG_DIR, XDG_CONFIG_HOME) and SKILLS_ROOT cleared, so a red run cannot touch the
+# operator's real ~/.claude, ~/.codex, ~/.config/opencode or either store. The clone source is a fixture
+# repository built here, not the checkout: -g reads rules from .github/instructions and hooks from
+# .agents/hooks, and this repo owns neither, so the rule/hook machinery is driven with synthetic owned names
+# through SKILLS_TEST_OWNED_RULES_EXTRA / SKILLS_TEST_OWNED_HOOKS_EXTRA (production never sets them).
+# ---------------------------------------------------------------------------------------------
+
+g_source="$scratch/g-source"
+make_g_source() {
+  local d="$g_source"
+  mkdir -p "$d/.agents/skills/mimisbrunnr-demo-skill/scripts" "$d/.agents/skills/mimisbrunnr-demo-skill/tests" \
+    "$d/.agents/skills/ai-brain-dump" "$d/.agents/skills/unowned-local" \
+    "$d/.agents/skills/_mimisbrunnr-shared/scripts" "$d/.github/instructions/sub" "$d/.agents/hooks"
+  printf '# demo\n' >"$d/.agents/skills/mimisbrunnr-demo-skill/SKILL.md"
+  printf 'echo demo\n' >"$d/.agents/skills/mimisbrunnr-demo-skill/scripts/run.sh"
+  printf 'assert 1\n' >"$d/.agents/skills/mimisbrunnr-demo-skill/tests/t.py"
+  printf '# brain\n' >"$d/.agents/skills/ai-brain-dump/SKILL.md"
+  printf '# local\n' >"$d/.agents/skills/unowned-local/SKILL.md"
+  printf 'x = 1\n' >"$d/.agents/skills/_mimisbrunnr-shared/scripts/shared.py"
+  printf -- "---\ndescription: 'Top rule'\napplyTo: '**'\n---\n# Top\n" >"$d/.github/instructions/test-rule.instructions.md"
+  printf -- '---\ndescription: Cs rule\napplyTo: "**/*.cs"\n---\n# Cs\n' >"$d/.github/instructions/sub/other.instructions.md"
+  printf '#!/bin/sh\necho test\n' >"$d/.agents/hooks/test-hook.sh"
+  printf '#!/bin/sh\necho other\n' >"$d/.agents/hooks/other-hook.sh"
+  chmod +x "$d/.agents/hooks/test-hook.sh" "$d/.agents/hooks/other-hook.sh"
+  git -C "$d" init -q -b main
+  git -C "$d" add -A
+  git -C "$d" -c user.name=harness -c user.email=harness@example.invalid commit -q -m fixture
+}
+make_g_source
+
+# g_home CASE RUNNER — a fresh HOME with the three tools present and Codex's own .system/ in place.
+g_home() {
+  local gh="$scratch/g-$1-$2"
+  rm -rf "$gh"
+  mkdir -p "$gh/.claude" "$gh/.codex/skills/.system" "$gh/.config/opencode"
+  printf 'keep\n' >"$gh/.codex/skills/.system/keep"
+  printf '%s\n' "$gh"
+}
+
+# _run_g RUNNER HOME RULES HOOKS ARGS... — ARGS use bash spelling; UNINSTALL becomes the port's own.
+_run_g() {
+  local runner="$1" gh="$2" rules="$3" hooks="$4" a
+  shift 4
+  local args=()
+  for a in "$@"; do
+    case "$a" in
+      UNINSTALL) if [ "$runner" = sh ]; then args+=(--uninstall); else args+=(-Uninstall); fi ;;
+      *) args+=("$a") ;;
+    esac
+  done
+  local rc=0
+  (
+    # Run from the scratch HOME, never the checkout. Without SKILLS_ROOT the per-repo install searches the
+    # current directory's .agents/skills, so a refusal that regressed (-r without -g falling through to
+    # per-repo mode) would otherwise install the fixture's skills over this repository's own.
+    cd "$gh"
+    unset SKILLS_ROOT
+    export HOME="$gh" SMOOTH_MIMISBRUNNR_HOME="${G_STORE:-$gh/store}" CODEX_HOME="$gh/.codex" CLAUDE_CONFIG_DIR="$gh/.claude" \
+      XDG_CONFIG_HOME="$gh/.config" SKILLS_REPO="$g_source" SKILLS_BRANCH=main \
+      SKILLS_TEST_OWNED_RULES_EXTRA="$rules" SKILLS_TEST_OWNED_HOOKS_EXTRA="$hooks"
+    if [ "$runner" = sh ]; then
+      bash "$installer_sh" ${args[@]+"${args[@]}"}
+    else
+      pwsh -NoProfile -File "$installer_ps1" ${args[@]+"${args[@]}"}
+    fi
+  ) >"$scratch/out" 2>"$scratch/err" || rc=$?
+  return "$rc"
+}
+run_g() { local r="$1" gh="$2"; shift 2; _run_g "$r" "$gh" "" "" "$@"; }
+run_gx() { _run_g "$@"; }
+
+# G_STORE overrides the store path for one call; set it, call, and clear it (a VAR=x prefix on a function leaks in bash 3.2).
+G_STORE=""
+g_rules="test-rule.instructions.md sub/other.instructions.md"
+g_hooks="test-hook.sh other-hook.sh"
+
+pj() { python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(eval(sys.argv[2]))" "$1" "$2"; }
+# norm_json FILE HOME — the file's JSON without its timestamps, key-sorted, with the scratch HOME masked.
+norm_json() {
+  python3 -c "
+import json, re, sys
+d = json.load(open(sys.argv[1]))
+d.pop('updated', None)
+text = json.dumps(d, sort_keys=True).replace(sys.argv[2], '@H')
+# A snapshot path carries the second it was taken in; two ports run seconds apart.
+print(re.sub(r'\d{8}-\d{6}', '@T', text))
+" "$1" "$2"
+}
+set_flag() {
+  python3 -c "
+import json, sys
+p, key, name, val = sys.argv[1:5]
+d = json.load(open(p))
+for e in d[key]:
+    if e['name'] == name:
+        e['installed'] = (val == 'true')
+json.dump(d, open(p, 'w'), indent=2)
+" "$@"
+}
+set_harness() {
+  python3 -c "
+import json, sys
+p, name, val = sys.argv[1:4]
+d = json.load(open(p))
+d['harnesses'][name] = (val == 'true')
+json.dump(d, open(p, 'w'), indent=2)
+" "$@"
+}
+sum_of() { cksum <"$1" | cut -d' ' -f1,2; }
+count_glob() { local n=0 f; for f in "$@"; do [ -e "$f" ] && n=$((n + 1)); done; echo "$n"; }
+err_tail() { cat "$scratch/out" "$scratch/err" | tail -3 | tr '\n' ' '; }
+logged() { cat "$scratch/out" "$scratch/err"; }
+
+g_runners="sh"
+[ "$have_pwsh" = 1 ] && g_runners="sh ps1"
+
+check_g_first_run() {
+  local r="$1" gh store t n
+  gh="$(g_home first "$r")"; store="$gh/store"
+  if ! run_g "$r" "$gh" -g; then no "[$r] -g first run exits 0" "$(err_tail)"; return; fi
+  for t in .claude/skills .codex/skills .config/opencode/skills; do
+    for n in mimisbrunnr-demo-skill ai-brain-dump _mimisbrunnr-shared; do
+      if [ "$(readlink "$gh/$t/$n" 2>/dev/null)" != "$store/skills/$n" ]; then
+        no "[$r] -g links $n into $t" "got: $(readlink "$gh/$t/$n" 2>&1)"; return
+      fi
+    done
+    if [ -e "$gh/$t/unowned-local" ] || [ -e "$store/skills/unowned-local" ]; then
+      no "[$r] -g never carries an unowned skill" "unowned-local reached $t or the store"; return
+    fi
+  done
+  if [ ! -f "$store/skills/mimisbrunnr-demo-skill/scripts/run.sh" ] || [ -e "$store/skills/mimisbrunnr-demo-skill/tests" ]; then
+    no "[$r] -g stores a pruned, self-contained skill" "run.sh missing or tests/ shipped"; return
+  fi
+  if [ "$(pj "$store/installation.json" "list(d)")" != "['updated', 'harnesses', 'skills', 'rules', 'hooks', 'links']" ]; then
+    no "[$r] -g manifest keys are in the fixed order" "$(pj "$store/installation.json" "list(d)")"; return
+  fi
+  if [ "$(pj "$store/installation.json" "all(l.get('enabled') for l in d['links']) and len(d['links']) == 9")" != "True" ]; then
+    no "[$r] -g records nine enabled links (3 per tool)" "$(pj "$store/installation.json" "len(d['links'])")"; return
+  fi
+  if [ "$(pj "$store/installation.json" "d['harnesses']")" != "{'claude-code': True, 'codex': True, 'opencode': True}" ]; then
+    no "[$r] -g defaults every tool to on"; return
+  fi
+  if [ -e "$gh/.codex/AGENTS.md" ] || [ -e "$gh/.codex/hooks.json" ] || [ -e "$gh/.config/opencode/opencode.json" ]; then
+    no "[$r] -g creates no config file when there is no rule or hook to wire"; return
+  fi
+  if [ "$(cat "$gh/.codex/skills/.system/keep")" != "keep" ]; then no "[$r] -g leaves Codex's .system/ alone"; return; fi
+  ok "[$r] -g: store, pruned skills, shared folder and 9 enabled links; no config file created; .system/ intact"
+}
+
+check_g_idempotent() {
+  local r="$1" gh store before after
+  gh="$(g_home idem "$r")"; store="$gh/store"
+  run_g "$r" "$gh" -g || { no "[$r] -g first run for idempotency" "$(err_tail)"; return; }
+  before="$(pj "$store/installation.json" "sorted((l['type'], l['path'], l.get('detail')) for l in d['links'])")"
+  run_g "$r" "$gh" -g || { no "[$r] -g re-run exits 0" "$(err_tail)"; return; }
+  after="$(pj "$store/installation.json" "sorted((l['type'], l['path'], l.get('detail')) for l in d['links'])")"
+  if [ "$before" != "$after" ]; then no "[$r] -g re-run converges: same link records"; return; fi
+  if logged | grep -q WARNING; then no "[$r] -g re-run raises no warning" "$(logged | grep WARNING | head -2)"; return; fi
+  ok "[$r] -g re-run converges: identical link records, no warnings"
+}
+
+check_g_default_leaves_config() {
+  local r="$1" gh before_o before_a before_h
+  gh="$(g_home noedit "$r")"
+  printf '{ // a comment makes this invalid JSON\n  "instructions": []\n}\n' >"$gh/.config/opencode/opencode.json"
+  printf 'operator\n' >"$gh/.codex/AGENTS.md"
+  printf '{ not json' >"$gh/.codex/hooks.json"
+  before_o="$(sum_of "$gh/.config/opencode/opencode.json")"; before_a="$(sum_of "$gh/.codex/AGENTS.md")"; before_h="$(sum_of "$gh/.codex/hooks.json")"
+  if ! run_g "$r" "$gh" -g; then no "[$r] -g with nothing to wire ignores unparseable operator config" "$(err_tail)"; return; fi
+  if [ "$(sum_of "$gh/.config/opencode/opencode.json")" != "$before_o" ] || [ "$(sum_of "$gh/.codex/AGENTS.md")" != "$before_a" ] \
+     || [ "$(sum_of "$gh/.codex/hooks.json")" != "$before_h" ]; then
+    no "[$r] -g with nothing to wire leaves opencode.json, AGENTS.md and hooks.json byte-identical"; return
+  fi
+  if [ "$(count_glob "$gh"/.config/opencode/opencode.json.smooth-mimisbrunnr-* "$gh"/.codex/AGENTS.md.smooth-mimisbrunnr-* "$gh"/.codex/hooks.json.smooth-mimisbrunnr-*)" != 0 ]; then
+    no "[$r] -g with nothing to wire takes no snapshot"; return
+  fi
+  ok "[$r] -g with nothing to wire never parses or touches operator config (invalid JSON tolerated, no snapshot)"
+}
+
+check_g_absent_tool() {
+  local r="$1" gh
+  gh="$scratch/g-absent-$r"; rm -rf "$gh"; mkdir -p "$gh/.claude"
+  if ! run_g "$r" "$gh" -g; then no "[$r] -g with only Claude present exits 0" "$(err_tail)"; return; fi
+  if [ ! -L "$gh/.claude/skills/ai-brain-dump" ]; then no "[$r] -g wires the tool that exists"; return; fi
+  if [ -e "$gh/.codex" ] || [ -e "$gh/.config" ]; then no "[$r] -g never creates a tool's config folder" "$(ls -a "$gh")"; return; fi
+  ok "[$r] -g wires only the tools that exist and creates no tool folder"
+}
+
+check_g_foreign() {
+  local r="$1" gh elsewhere
+  gh="$(g_home foreign "$r")"; elsewhere="$scratch/g-elsewhere-$r"
+  mkdir -p "$elsewhere" "$gh/.claude/skills/ai-brain-dump"
+  printf 'mine\n' >"$gh/.claude/skills/ai-brain-dump/own.txt"
+  ln -s "$elsewhere" "$gh/.codex/skills/mimisbrunnr-demo-skill"
+  run_g "$r" "$gh" -g || { no "[$r] -g beside foreign entries exits 0" "$(err_tail)"; return; }
+  if [ ! -f "$gh/.claude/skills/ai-brain-dump/own.txt" ] || [ -L "$gh/.claude/skills/ai-brain-dump" ]; then
+    no "[$r] -g leaves a real directory at a skill path alone"; return
+  fi
+  if [ "$(readlink "$gh/.codex/skills/mimisbrunnr-demo-skill")" != "$elsewhere" ]; then
+    no "[$r] -g leaves a link to somewhere else alone"; return
+  fi
+  if [ "$(pj "$gh/store/installation.json" "any(l['path'].endswith('claude/skills/ai-brain-dump') or l['path'].endswith('codex/skills/mimisbrunnr-demo-skill') for l in d['links'])")" != "False" ]; then
+    no "[$r] -g records neither the real directory nor the foreign link"; return
+  fi
+  if ! logged | grep -q WARNING; then no "[$r] -g warns about both foreign entries"; return; fi
+  ok "[$r] -g keeps a real directory and a foreign link, warns, and records neither"
+}
+
+check_g_refusals() {
+  local r="$1" gh rc=0
+  gh="$(g_home refuse "$r")"
+  # run_g clears SKILLS_ROOT, so force it here the way an operator would.
+  ( cd "$gh"; export HOME="$gh" SMOOTH_MIMISBRUNNR_HOME="$gh/store" SKILLS_ROOT="$gh/.claude" SKILLS_REPO="$g_source" SKILLS_BRANCH=main
+    if [ "$r" = sh ]; then bash "$installer_sh" -g; else pwsh -NoProfile -File "$installer_ps1" -g; fi ) >/dev/null 2>"$scratch/err" || rc=$?
+  if [ "$rc" = 0 ] || [ -e "$gh/store" ]; then no "[$r] -g refuses SKILLS_ROOT and writes nothing" "rc=$rc"; return; fi
+  if run_g "$r" "$gh" UNINSTALL; then no "[$r] --uninstall without -g is refused"; return; fi
+  if run_g "$r" "$gh" -r; then no "[$r] -r without -g is refused"; return; fi
+  if run_g "$r" "$gh" -h; then no "[$r] -h without -g is refused"; return; fi
+  if [ -e "$gh/store" ]; then no "[$r] refusals write nothing"; return; fi
+  ok "[$r] -g+SKILLS_ROOT, bare --uninstall, bare -r and bare -h are refused and write nothing"
+}
+
+check_g_corrupt_manifest() {
+  local r="$1" gh bad
+  gh="$(g_home corrupt "$r")"; mkdir -p "$gh/store"
+  for bad in '{broken' ''; do
+    printf '%s' "$bad" >"$gh/store/installation.json"
+    if run_g "$r" "$gh" -g; then no "[$r] -g refuses an unreadable manifest (${bad:-empty})"; return; fi
+    if [ "$(cat "$gh/store/installation.json")" != "$bad" ]; then no "[$r] -g leaves an unreadable manifest untouched"; return; fi
+  done
+  ok "[$r] -g refuses a corrupt or empty manifest and leaves it untouched"
+}
+
+check_g_skill_flag() {
+  local r="$1" gh store
+  gh="$(g_home flag "$r")"; store="$gh/store"
+  run_g "$r" "$gh" -g || { no "[$r] -g for the skill flag case" "$(err_tail)"; return; }
+  set_flag "$store/installation.json" skills mimisbrunnr-demo-skill false
+  printf 'local edit\n' >"$store/skills/mimisbrunnr-demo-skill/edited.txt"
+  rm "$gh/.claude/skills/mimisbrunnr-demo-skill"
+  run_g "$r" "$gh" -g || { no "[$r] -g re-run with a skill switched off" "$(err_tail)"; return; }
+  if [ ! -f "$store/skills/mimisbrunnr-demo-skill/edited.txt" ]; then no "[$r] installed:false skill is not refreshed (local edit survives)"; return; fi
+  if [ -e "$gh/.claude/skills/mimisbrunnr-demo-skill" ]; then no "[$r] installed:false skill is not re-linked"; return; fi
+  if [ ! -L "$gh/.codex/skills/mimisbrunnr-demo-skill" ]; then no "[$r] installed:false skill keeps an existing link"; return; fi
+  ok "[$r] installed:false skill: store copy not refreshed, not re-linked, existing link kept"
+}
+
+check_g_tool_off() {
+  local r="$1" gh store
+  gh="$(g_home off "$r")"; store="$gh/store"
+  run_g "$r" "$gh" -g || { no "[$r] -g for the tool-off case" "$(err_tail)"; return; }
+  ln -s "$store/skills/ai-brain-dump" "$gh/.codex/skills/unrecorded-link"
+  set_harness "$store/installation.json" codex false
+  run_g "$r" "$gh" -g || { no "[$r] -g with codex off" "$(err_tail)"; return; }
+  if [ -n "$(find "$gh/.codex/skills" -maxdepth 1 -type l 2>/dev/null)" ]; then
+    no "[$r] codex off removes every store link, including an unrecorded one" "$(find "$gh/.codex/skills" -maxdepth 1 -type l)"; return
+  fi
+  if [ ! -L "$gh/.claude/skills/ai-brain-dump" ] || [ ! -L "$gh/.config/opencode/skills/ai-brain-dump" ]; then
+    no "[$r] codex off leaves the other tools wired"; return
+  fi
+  if [ "$(cat "$gh/.codex/skills/.system/keep")" != "keep" ]; then no "[$r] codex off leaves .system/ alone"; return; fi
+  if [ "$(pj "$store/installation.json" "[l['enabled'] for l in d['links'] if l['type'] == 'codex-skill'][0]")" != "False" ]; then
+    no "[$r] a link the installer unwired is recorded with enabled:false"; return
+  fi
+  set_harness "$store/installation.json" codex true
+  run_g "$r" "$gh" -g || { no "[$r] -g with codex back on" "$(err_tail)"; return; }
+  if [ ! -L "$gh/.codex/skills/ai-brain-dump" ]; then no "[$r] codex back on rewires it"; return; fi
+  if [ "$(pj "$store/installation.json" "all(l['enabled'] for l in d['links'])")" != "True" ]; then
+    no "[$r] re-enabling recomputes enabled:true"; return
+  fi
+  ok "[$r] a tool switched off is cleaned (unrecorded link too), others stay wired, enabled follows the disk, back on rewires"
+}
+
+check_g_uninstall() {
+  local r="$1" gh store
+  gh="$(g_home uninstall "$r")"; store="$gh/store"
+  mkdir -p "$gh/.claude/skills/mine"
+  run_g "$r" "$gh" -g || { no "[$r] -g before uninstall" "$(err_tail)"; return; }
+  set_harness "$store/installation.json" codex false
+  if ! run_g "$r" "$gh" UNINSTALL -g; then no "[$r] -g --uninstall exits 0" "$(err_tail)"; return; fi
+  if [ -n "$(find "$gh/.claude/skills" "$gh/.codex/skills" "$gh/.config/opencode/skills" -maxdepth 1 -type l 2>/dev/null)" ]; then
+    no "[$r] --uninstall removes every recorded link"; return
+  fi
+  if [ ! -d "$gh/.claude/skills/mine" ] || [ "$(cat "$gh/.codex/skills/.system/keep")" != "keep" ]; then
+    no "[$r] --uninstall leaves the operator's folders and .system/ alone"; return
+  fi
+  if [ ! -d "$store/skills/ai-brain-dump" ]; then no "[$r] --uninstall leaves the store in place"; return; fi
+  if [ "$(pj "$store/installation.json" "d['links']")" != "[]" ] || [ "$(pj "$store/installation.json" "d['harnesses']['codex']")" != "False" ]; then
+    no "[$r] --uninstall clears the link history but keeps the operator's flags"; return
+  fi
+  ok "[$r] --uninstall removes exactly the recorded links, keeps the store, folders, .system/ and the operator's flags"
+}
+
+check_g_categories() {
+  local r="$1" gh store skills_before
+  gh="$(g_home cat "$r")"; store="$gh/store"
+  run_g "$r" "$gh" -g -s || { no "[$r] -g -s" "$(err_tail)"; return; }
+  if [ "$(pj "$store/installation.json" "list(d)")" != "['updated', 'harnesses', 'skills', 'links']" ]; then
+    no "[$r] -g -s writes no rules or hooks list" "$(pj "$store/installation.json" "list(d)")"; return
+  fi
+  skills_before="$(pj "$store/installation.json" "d['skills']")"
+  run_g "$r" "$gh" -g -r || { no "[$r] -g -r" "$(err_tail)"; return; }
+  if [ "$(pj "$store/installation.json" "list(d)")" != "['updated', 'harnesses', 'skills', 'rules', 'links']" ] \
+     || [ "$(pj "$store/installation.json" "d['skills']")" != "$skills_before" ]; then
+    no "[$r] -g -r adds the rules list and carries skills forward" "$(pj "$store/installation.json" "list(d)")"; return
+  fi
+  run_g "$r" "$gh" -g -h || { no "[$r] -g -h" "$(err_tail)"; return; }
+  if [ "$(pj "$store/installation.json" "list(d)")" != "['updated', 'harnesses', 'skills', 'rules', 'hooks', 'links']" ]; then
+    no "[$r] -g -h adds the hooks list"; return
+  fi
+  if [ "$(pj "$store/installation.json" "(d['rules'], d['hooks'])")" != "([], [])" ]; then
+    no "[$r] production owns no rules or hooks" "$(pj "$store/installation.json" "(d['rules'], d['hooks'])")"; return
+  fi
+  ok "[$r] category switches reconcile only their own list and carry the others forward; production lists are empty"
+}
+
+check_g_shared_resolves() {
+  local r="$1" gh
+  gh="$(g_home shared "$r")"
+  run_g "$r" "$gh" -g || { no "[$r] -g for the shared-folder case" "$(err_tail)"; return; }
+  # A skill resolves ../_mimisbrunnr-shared against the folder it was found in, so the tool's skills
+  # folder must hold the shared folder as well - not only the store.
+  if [ ! -f "$gh/.claude/skills/_mimisbrunnr-shared/scripts/shared.py" ] || [ ! -f "$gh/.codex/skills/_mimisbrunnr-shared/scripts/shared.py" ] \
+     || [ ! -f "$gh/.config/opencode/skills/_mimisbrunnr-shared/scripts/shared.py" ]; then
+    no "[$r] every tool's skills folder reaches the shared scripts"; return
+  fi
+  ok "[$r] the shared folder is linked beside the skills, in all three tools"
+}
+
+check_g_rules() {
+  local r="$1" gh store a o sa so
+  gh="$(g_home rules "$r")"; store="$gh/store"
+  printf 'operator text\n' >"$gh/.codex/AGENTS.md"
+  printf '{\n  "keep": 1,\n  "instructions": [\n    "mine.md"\n  ]\n}\n' >"$gh/.config/opencode/opencode.json"
+  cp "$gh/.config/opencode/opencode.json" "$scratch/orig-opencode-$r"
+  run_gx "$r" "$gh" "$g_rules" "" -g -r || { no "[$r] -g -r with rules" "$(err_tail)"; return; }
+  if [ ! -f "$store/rules/test-rule.instructions.md" ] || [ ! -f "$store/rules/sub/other.instructions.md" ]; then
+    no "[$r] rules are stored with their relative paths"; return
+  fi
+  if [ "$(readlink "$gh/.claude/rules/sub/other.instructions.md")" != "$store/rules/sub/other.instructions.md" ] \
+     || [ "$(readlink "$gh/.claude/rules/test-rule.instructions.md")" != "$store/rules/test-rule.instructions.md" ]; then
+    no "[$r] Claude rules are linked, subfolders kept"; return
+  fi
+  a="$gh/.codex/AGENTS.md"
+  if [ "$(head -1 "$a")" != "operator text" ] || ! grep -q 'mimisbrunnr-owned-global-instructions' "$a" \
+     || ! grep -q 'end of mimisbrunnr install-skills global rules' "$a" || ! grep -qF "$store/rules/test-rule.instructions.md" "$a" \
+     || ! grep -q 'Read at the start of every task' "$a" || ! grep -qF 'When editing files matching `**/*.cs`' "$a"; then
+    no "[$r] Codex gets a delimited index block after the operator's text, grouped by scope" "$(head -12 "$a")"; return
+  fi
+  o="$gh/.config/opencode/opencode.json"
+  if [ "$(pj "$o" "(d['keep'], d['instructions'][0], sorted(d['instructions'][1:]))")" != "(1, 'mine.md', ['$store/rules/sub/other.instructions.md', '$store/rules/test-rule.instructions.md'])" ]; then
+    no "[$r] OpenCode gets one entry per rule beside the operator's" "$(pj "$o" "d")"; return
+  fi
+  if [ "$(cat "$(ls "$a".smooth-mimisbrunnr-[0-9]*)")" != "operator text" ] || ! cmp -s "$o".smooth-mimisbrunnr-[0-9]* "$scratch/orig-opencode-$r"; then
+    no "[$r] the pre-existing AGENTS.md and opencode.json are snapshotted once, unmodified"; return
+  fi
+  sa="$(sum_of "$a")"; so="$(sum_of "$o")"
+  run_gx "$r" "$gh" "$g_rules" "" -g -r || { no "[$r] -g -r re-run" "$(err_tail)"; return; }
+  if [ "$(sum_of "$a")" != "$sa" ] || [ "$(sum_of "$o")" != "$so" ]; then no "[$r] -g -r re-run changes nothing"; return; fi
+  if [ "$(count_glob "$a".smooth-mimisbrunnr-[0-9]*)" != 1 ] || [ "$(count_glob "$o".smooth-mimisbrunnr-[0-9]*)" != 1 ]; then
+    no "[$r] a re-run never snapshots our own block"; return
+  fi
+  ok "[$r] rules: stored, linked for Claude, indexed for Codex, listed per file for OpenCode; snapshotted once; re-run is a no-op"
+}
+
+check_g_rule_flag() {
+  local r="$1" gh store
+  gh="$(g_home ruleflag "$r")"; store="$gh/store"
+  printf '{\n  "instructions": []\n}\n' >"$gh/.config/opencode/opencode.json"
+  run_gx "$r" "$gh" "$g_rules" "" -g -r || { no "[$r] -g -r for the rule flag case" "$(err_tail)"; return; }
+  set_flag "$store/installation.json" rules sub/other.instructions.md false
+  run_gx "$r" "$gh" "$g_rules" "" -g -r || { no "[$r] -g -r with a rule off" "$(err_tail)"; return; }
+  if [ -e "$gh/.claude/rules/sub/other.instructions.md" ] || grep -qF 'other.instructions' "$gh/.codex/AGENTS.md" \
+     || [ "$(pj "$gh/.config/opencode/opencode.json" "len(d['instructions'])")" != 1 ]; then
+    no "[$r] installed:false rule is unwired from Claude, Codex and OpenCode"; return
+  fi
+  if [ ! -f "$store/rules/sub/other.instructions.md" ]; then no "[$r] installed:false rule keeps its store copy"; return; fi
+  set_flag "$store/installation.json" rules sub/other.instructions.md true
+  run_gx "$r" "$gh" "$g_rules" "" -g -r || { no "[$r] -g -r with the rule back on" "$(err_tail)"; return; }
+  if [ ! -L "$gh/.claude/rules/sub/other.instructions.md" ] || ! grep -qF 'other.instructions' "$gh/.codex/AGENTS.md" \
+     || [ "$(pj "$gh/.config/opencode/opencode.json" "len(d['instructions'])")" != 2 ]; then
+    no "[$r] re-enabling a rule rewires it"; return
+  fi
+  ok "[$r] a rule switched off is unwired everywhere and keeps its store copy; back on rewires it"
+}
+
+check_g_hooks() {
+  local r="$1" gh store h before
+  gh="$(g_home hooks "$r")"; store="$gh/store"; h="$gh/.codex/hooks.json"
+  printf '{\n  "hooks": {\n    "UserPromptSubmit": [\n      {\n        "hooks": [\n          {\n            "command": "/opt/gk/hook.sh",\n            "type": "command"\n          }\n        ]\n      }\n    ]\n  }\n}\n' >"$h"
+  cp "$h" "$scratch/orig-hooks-$r"
+  run_gx "$r" "$gh" "" "$g_hooks" -g -h || { no "[$r] -g -h with hooks" "$(err_tail)"; return; }
+  if [ ! -x "$store/hooks/test-hook.sh" ] && [ "$r" = sh ]; then no "[$r] a stored hook keeps its exec bit"; return; fi
+  if [ "$(pj "$h" "len(d['hooks']['UserPromptSubmit'])")" != 2 ] \
+     || [ "$(pj "$h" "d['hooks']['UserPromptSubmit'][0]['hooks'][0]['command']")" != "/opt/gk/hook.sh" ]; then
+    no "[$r] the operator's own hook group is kept first and untouched" "$(pj "$h" "d")"; return
+  fi
+  if [ "$(pj "$h" "sorted(x['command'] for x in d['hooks']['UserPromptSubmit'][1]['hooks'])")" != "['$store/hooks/other-hook.sh', '$store/hooks/test-hook.sh']" ] \
+     || [ "$(pj "$h" "'matcher' in d['hooks']['UserPromptSubmit'][1]")" != "False" ]; then
+    no "[$r] hooks register as absolute store commands under UserPromptSubmit, no matcher" "$(pj "$h" "d")"; return
+  fi
+  if ! cmp -s "$h".smooth-mimisbrunnr-[0-9]* "$scratch/orig-hooks-$r"; then no "[$r] hooks.json is snapshotted once, unmodified"; return; fi
+  before="$(sum_of "$h")"
+  run_gx "$r" "$gh" "" "$g_hooks" -g -h || { no "[$r] -g -h re-run" "$(err_tail)"; return; }
+  if [ "$(sum_of "$h")" != "$before" ] || [ "$(count_glob "$h".smooth-mimisbrunnr-[0-9]*)" != 1 ]; then
+    no "[$r] hooks re-run adds no duplicate and no second snapshot"; return
+  fi
+  set_flag "$store/installation.json" hooks other-hook.sh false
+  run_gx "$r" "$gh" "" "$g_hooks" -g -h || { no "[$r] -g -h with a hook off" "$(err_tail)"; return; }
+  if [ "$(pj "$h" "[x['command'] for x in d['hooks']['UserPromptSubmit'][1]['hooks']]")" != "['$store/hooks/test-hook.sh']" ] \
+     || [ ! -f "$store/hooks/other-hook.sh" ]; then
+    no "[$r] installed:false hook is unregistered and keeps its store copy"; return
+  fi
+  set_harness "$store/installation.json" codex false
+  run_gx "$r" "$gh" "" "$g_hooks" -g -h || { no "[$r] -g -h with codex off" "$(err_tail)"; return; }
+  if [ "$(pj "$h" "(len(d['hooks']['UserPromptSubmit']), d['hooks']['UserPromptSubmit'][0]['hooks'][0]['command'])")" != "(1, '/opt/gk/hook.sh')" ]; then
+    no "[$r] codex off removes every store hook and keeps the operator's" "$(pj "$h" "d")"; return
+  fi
+  ok "[$r] hooks: absolute UserPromptSubmit commands, operator group kept, one snapshot, flags and codex-off unregister"
+}
+
+check_g_uninstall_edits() {
+  local r="$1" gh store
+  # (a) the files existed before the install: their operator content must come back.
+  gh="$(g_home unedit "$r")"; store="$gh/store"
+  printf 'operator text\n' >"$gh/.codex/AGENTS.md"
+  printf '{\n  "keep": 1,\n  "instructions": [\n    "mine.md"\n  ]\n}\n' >"$gh/.config/opencode/opencode.json"
+  printf '{\n  "hooks": {\n    "UserPromptSubmit": [\n      {\n        "hooks": [\n          {\n            "command": "/opt/gk/hook.sh",\n            "type": "command"\n          }\n        ]\n      }\n    ]\n  }\n}\n' >"$gh/.codex/hooks.json"
+  cp "$gh/.codex/AGENTS.md" "$scratch/u-a-$r"; cp "$gh/.config/opencode/opencode.json" "$scratch/u-o-$r"; cp "$gh/.codex/hooks.json" "$scratch/u-h-$r"
+  run_gx "$r" "$gh" "$g_rules" "$g_hooks" -g || { no "[$r] -g with rules and hooks before uninstall" "$(err_tail)"; return; }
+  run_gx "$r" "$gh" "$g_rules" "$g_hooks" UNINSTALL -g || { no "[$r] --uninstall after rules and hooks" "$(err_tail)"; return; }
+  if ! cmp -s "$gh/.codex/AGENTS.md" "$scratch/u-a-$r"; then no "[$r] --uninstall returns AGENTS.md to the operator's bytes" "$(cat "$gh/.codex/AGENTS.md")"; return; fi
+  if [ "$(pj "$gh/.config/opencode/opencode.json" "d")" != "$(pj "$scratch/u-o-$r" "d")" ] || [ "$(pj "$gh/.codex/hooks.json" "d")" != "$(pj "$scratch/u-h-$r" "d")" ]; then
+    no "[$r] --uninstall returns opencode.json and hooks.json to the operator's content" "$(pj "$gh/.config/opencode/opencode.json" "d") / $(pj "$gh/.codex/hooks.json" "d")"; return
+  fi
+  if [ "$(count_glob "$gh"/.config/opencode/opencode.json.smooth-mimisbrunnr-uninstall-* "$gh"/.codex/hooks.json.smooth-mimisbrunnr-uninstall-*)" != 2 ] \
+     || [ "$(count_glob "$gh"/.codex/AGENTS.md.smooth-mimisbrunnr-uninstall-*)" != 0 ]; then
+    no "[$r] --uninstall snapshots the two JSON files it edits, and not AGENTS.md"; return
+  fi
+  if [ -n "$(find "$gh/.claude/rules" -type l 2>/dev/null)" ]; then no "[$r] --uninstall removes the Claude rule links"; return; fi
+  # (b) the files did not exist: the installer created them, so uninstall removes them.
+  gh="$(g_home uncreate "$r")"; store="$gh/store"; rm -rf "$gh/.config/opencode"; mkdir -p "$gh/.config/opencode"
+  run_gx "$r" "$gh" "$g_rules" "$g_hooks" -g || { no "[$r] -g creating AGENTS.md and hooks.json" "$(err_tail)"; return; }
+  if [ ! -f "$gh/.codex/AGENTS.md" ] || [ ! -f "$gh/.codex/hooks.json" ]; then no "[$r] -g creates AGENTS.md and hooks.json when there are none"; return; fi
+  run_gx "$r" "$gh" "$g_rules" "$g_hooks" UNINSTALL -g || { no "[$r] --uninstall of created files" "$(err_tail)"; return; }
+  if [ -e "$gh/.codex/AGENTS.md" ] || [ -e "$gh/.codex/hooks.json" ] || [ "$(count_glob "$gh"/.codex/*.smooth-mimisbrunnr-*)" != 0 ]; then
+    no "[$r] --uninstall removes files the installer created, with no litter" "$(ls -a "$gh/.codex" | tr '\n' ' ')"; return
+  fi
+  # (c) an AGENTS.md that existed but was empty is still the operator's: removing our block leaves it empty
+  # and it must stay, because the installer did not create it.
+  gh="$(g_home unempty "$r")"; : >"$gh/.codex/AGENTS.md"
+  run_gx "$r" "$gh" "$g_rules" "" -g -r || { no "[$r] -g -r over an empty AGENTS.md" "$(err_tail)"; return; }
+  run_gx "$r" "$gh" "$g_rules" "" UNINSTALL -g || { no "[$r] --uninstall over an empty AGENTS.md" "$(err_tail)"; return; }
+  if [ ! -f "$gh/.codex/AGENTS.md" ] || [ -s "$gh/.codex/AGENTS.md" ]; then
+    no "[$r] --uninstall keeps an operator's empty AGENTS.md as an empty file"; return
+  fi
+  ok "[$r] --uninstall: operator bytes/content restored, created files removed, an empty operator file kept, no litter"
+}
+
+check_g_coexist() {
+  local r="$1" gh store tdv
+  gh="$(g_home coexist "$r")"; store="$gh/store"; tdv="$gh/.smooth-ai-devex"
+  mkdir -p "$tdv/skills/foreign-skill" "$tdv/hooks" "$tdv/rules"
+  ln -s "$tdv/skills/foreign-skill" "$gh/.claude/skills/foreign-skill" 2>/dev/null || { mkdir -p "$gh/.claude/skills"; ln -s "$tdv/skills/foreign-skill" "$gh/.claude/skills/foreign-skill"; }
+  # What smooth-devex-template's installer leaves behind: its own block, snapshot, hook and instruction.
+  printf 'operator\n\n<!-- installer-owned-global-instructions (added by install-skills): regenerated on every run -->\ntemplate index\n<!-- end of install-skills global rules -->\n' >"$gh/.codex/AGENTS.md"
+  printf 'template snapshot\n' >"$gh/.codex/AGENTS.md.smooth-devex-20260101-000000"
+  printf '{\n  "hooks": {\n    "UserPromptSubmit": [\n      {\n        "hooks": [\n          {\n            "command": "%s/hooks/t.sh",\n            "type": "command"\n          }\n        ]\n      }\n    ]\n  }\n}\n' "$tdv" >"$gh/.codex/hooks.json"
+  printf '{\n  "instructions": [\n    "%s/rules/t.md"\n  ]\n}\n' "$tdv" >"$gh/.config/opencode/opencode.json"
+  cp "$gh/.codex/AGENTS.md" "$scratch/co-a-$r"; cp "$gh/.codex/hooks.json" "$scratch/co-h-$r"; cp "$gh/.config/opencode/opencode.json" "$scratch/co-o-$r"
+  run_gx "$r" "$gh" "$g_rules" "$g_hooks" -g || { no "[$r] -g beside the template installer's edits" "$(err_tail)"; return; }
+  if [ "$(count_glob "$gh"/.codex/AGENTS.md.smooth-mimisbrunnr-[0-9]*)" != 1 ]; then
+    no "[$r] the template's snapshot does not suppress ours"; return
+  fi
+  if ! grep -q 'template index' "$gh/.codex/AGENTS.md" || ! grep -q 'mimisbrunnr-owned-global-instructions' "$gh/.codex/AGENTS.md"; then
+    no "[$r] both installers' blocks coexist in AGENTS.md"; return
+  fi
+  set_harness "$store/installation.json" claude-code false
+  run_gx "$r" "$gh" "$g_rules" "$g_hooks" -g || { no "[$r] -g with claude off beside a foreign store" "$(err_tail)"; return; }
+  if [ "$(readlink "$gh/.claude/skills/foreign-skill")" != "$tdv/skills/foreign-skill" ]; then
+    no "[$r] turning a tool off never purges links into another installer's store"; return
+  fi
+  run_gx "$r" "$gh" "$g_rules" "$g_hooks" UNINSTALL -g || { no "[$r] --uninstall beside the template installer" "$(err_tail)"; return; }
+  if ! cmp -s "$gh/.codex/AGENTS.md" "$scratch/co-a-$r" || ! cmp -s "$gh/.codex/hooks.json" "$scratch/co-h-$r" \
+     || [ "$(pj "$gh/.config/opencode/opencode.json" "d")" != "$(pj "$scratch/co-o-$r" "d")" ]; then
+    no "[$r] --uninstall leaves the template installer's block, hook and instruction exactly as they were"; return
+  fi
+  ok "[$r] coexists with the template installer: own markers/snapshots, never purges its links, uninstall leaves its edits intact"
+}
+
+check_g_invalid_json() {
+  local r="$1" gh o h bad
+  gh="$(g_home badjson "$r")"; o="$gh/.config/opencode/opencode.json"; h="$gh/.codex/hooks.json"
+  bad='{ // comment
+  "instructions": []
+}'
+  printf '%s\n' "$bad" >"$o"
+  if run_gx "$r" "$gh" "$g_rules" "" -g -r; then no "[$r] -g -r refuses an opencode.json that does not parse"; return; fi
+  if ! grep -q 'opencode.json' "$scratch/err" || [ "$(cat "$o")" != "$bad" ] || [ "$(count_glob "$o".smooth-mimisbrunnr-*)" != 0 ]; then
+    no "[$r] an unparseable opencode.json is named in the error, untouched and not snapshotted"; return
+  fi
+  rm "$o"; printf '{ not json' >"$h"
+  if run_gx "$r" "$gh" "" "$g_hooks" -g -h; then no "[$r] -g -h refuses a hooks.json that does not parse"; return; fi
+  if ! grep -q 'hooks.json' "$scratch/err" || [ "$(cat "$h")" != "{ not json" ]; then
+    no "[$r] an unparseable hooks.json is named in the error and untouched"; return
+  fi
+  ok "[$r] an unparseable opencode.json or hooks.json is a named hard error and is never overwritten"
+}
+
+check_g_per_repo_switch() {
+  local r="$1" root rc=0
+  root="$(make_root "perrepo-$r" mimisbrunnr-demo-skill)"
+  (
+    cd "$scratch"
+    export SKILLS_ROOT="$root" SKILLS_REPO="$g_source" SKILLS_BRANCH=main
+    if [ "$r" = sh ]; then bash "$installer_sh" -s; else pwsh -NoProfile -File "$installer_ps1" -s; fi
+  ) >"$scratch/out" 2>"$scratch/err" || rc=$?
+  if [ "$rc" != 0 ] || [ ! -f "$root/_mimisbrunnr-shared/installation.json" ]; then no "[$r] per-repo -s still works" "$(err_tail)"; return; fi
+  ok "[$r] per-repo mode is unchanged and accepts -s"
+}
+
+check_g_store_spelling() {
+  local r="$1" gh store
+  gh="$(g_home slash "$r")"; store="$gh/store"
+  G_STORE="$store/"
+  if ! run_g "$r" "$gh" -g; then G_STORE=""; no "[$r] -g with a trailing slash on the store exits 0" "$(err_tail)"; return; fi
+  G_STORE=""
+  if ! run_g "$r" "$gh" -g; then no "[$r] -g re-run without the trailing slash exits 0" "$(err_tail)"; return; fi
+  if logged | grep -q WARNING; then
+    no "[$r] one spelling of the store: no 'somewhere else' warning after a trailing-slash install" "$(logged | grep WARNING | head -1)"; return
+  fi
+  if [ "$(readlink "$gh/.claude/skills/ai-brain-dump")" != "$store/skills/ai-brain-dump" ]; then
+    no "[$r] links are created through the normalised store path" "$(readlink "$gh/.claude/skills/ai-brain-dump")"; return
+  fi
+  set_harness "$store/installation.json" claude-code false
+  run_g "$r" "$gh" -g || { no "[$r] -g with claude off after a trailing-slash install" "$(err_tail)"; return; }
+  if [ -n "$(find "$gh/.claude/skills" -maxdepth 1 -type l 2>/dev/null)" ]; then
+    no "[$r] a tool-off purge reaches links made through a trailing-slash store"; return
+  fi
+  ok "[$r] the store has one spelling: a trailing slash neither warns on re-run nor hides links from a purge"
+}
+
+check_g_relative_store() {
+  local r="$1" gh
+  gh="$(g_home relstore "$r")"
+  G_STORE="relative/store"
+  if run_g "$r" "$gh" -g; then G_STORE=""; no "[$r] a relative SMOOTH_MIMISBRUNNR_HOME is refused"; return; fi
+  G_STORE=""
+  if ! logged | grep -q SMOOTH_MIMISBRUNNR_HOME || [ -e "$gh/relative" ] || [ -e "$gh/store" ]; then
+    no "[$r] the refusal names the variable and writes nothing" "$(err_tail)"; return
+  fi
+  ok "[$r] a relative store path is refused, naming the variable, and nothing is written"
+}
+
+check_g_tool_off_rules() {
+  local r="$1" gh store o a
+  gh="$(g_home offrules "$r")"; store="$gh/store"; o="$gh/.config/opencode/opencode.json"; a="$gh/.codex/AGENTS.md"
+  printf 'operator text\n' >"$a"
+  printf '{\n  "instructions": [\n    "mine.md"\n  ]\n}\n' >"$o"
+  cp "$a" "$scratch/or-a-$r"
+  run_gx "$r" "$gh" "$g_rules" "" -g -r || { no "[$r] -g -r before switching tools off" "$(err_tail)"; return; }
+  set_harness "$store/installation.json" claude-code false
+  run_gx "$r" "$gh" "$g_rules" "" -g -r || { no "[$r] -g -r with claude off" "$(err_tail)"; return; }
+  if [ -n "$(find "$gh/.claude/rules" -type l 2>/dev/null)" ] || ! grep -q 'mimisbrunnr-owned-global-instructions' "$a" \
+     || [ "$(pj "$o" "len(d['instructions'])")" != 3 ]; then
+    no "[$r] claude off removes its rule links and leaves Codex and OpenCode wired"; return
+  fi
+  set_harness "$store/installation.json" opencode false
+  run_gx "$r" "$gh" "$g_rules" "" -g -r || { no "[$r] -g -r with opencode off" "$(err_tail)"; return; }
+  if [ "$(pj "$o" "d['instructions']")" != "['mine.md']" ] || ! grep -q 'mimisbrunnr-owned-global-instructions' "$a"; then
+    no "[$r] opencode off removes only our entries and leaves Codex wired" "$(pj "$o" "d")"; return
+  fi
+  set_harness "$store/installation.json" codex false
+  run_gx "$r" "$gh" "$g_rules" "" -g -r || { no "[$r] -g -r with codex off" "$(err_tail)"; return; }
+  if ! cmp -s "$a" "$scratch/or-a-$r"; then no "[$r] codex off removes our block and leaves the operator's AGENTS.md byte-identical" "$(cat "$a")"; return; fi
+  set_harness "$store/installation.json" claude-code true
+  set_harness "$store/installation.json" opencode true
+  set_harness "$store/installation.json" codex true
+  run_gx "$r" "$gh" "$g_rules" "" -g -r || { no "[$r] -g -r with every tool back on" "$(err_tail)"; return; }
+  if [ ! -L "$gh/.claude/rules/test-rule.instructions.md" ] || ! grep -q 'mimisbrunnr-owned-global-instructions' "$a" \
+     || [ "$(pj "$o" "len(d['instructions'])")" != 3 ]; then
+    no "[$r] switching every tool back on rewires rules for all three"; return
+  fi
+  ok "[$r] each tool switched off unwires only its own rules (links, index block, instructions); back on rewires all"
+}
+
+check_g_preserves_values() {
+  local r="$1" gh o want
+  gh="$(g_home values "$r")"; o="$gh/.config/opencode/opencode.json"
+  printf '{\n  "stamp": "2026-01-01T10:00:00+02:00",\n  "day": "2026-01-01",\n  "big": 12345678901234567890,\n  "name": "Zoë ✓",\n  "nested": {"list": [1, [2], {"a": null}], "flag": false},\n  "instructions": ["mine.md"]\n}\n' >"$o"
+  run_gx "$r" "$gh" "$g_rules" "" -g -r || { no "[$r] -g -r over an opencode.json with varied values" "$(err_tail)"; return; }
+  want="('2026-01-01T10:00:00+02:00', '2026-01-01', 12345678901234567890, 'Zoë ✓', {'list': [1, [2], {'a': None}], 'flag': False}, 'mine.md')"
+  if [ "$(pj "$o" "(d['stamp'], d['day'], d['big'], d['name'], d['nested'], d['instructions'][0])")" != "$want" ]; then
+    no "[$r] an edit keeps every operator value exactly (offset timestamps, big integers, unicode, nesting)" "$(pj "$o" "d")"; return
+  fi
+  ok "[$r] editing opencode.json preserves the operator's values exactly (offset timestamp, big integer, unicode, nesting)"
+}
+
+# The owned rule/hook lists live in both ports. Owning a real name means adding it to each, and nothing
+# else would notice one port missing it - the production lists are empty, so the synthetic-name cases
+# above cannot tell.
+check_owned_lists_parity() {
+  local verdict
+  verdict="$(python3 - "$installer_sh" "$installer_ps1" <<'PYEOF'
+import re, sys
+sh, ps = open(sys.argv[1]).read(), open(sys.argv[2]).read()
+
+def from_sh(name):
+    m = re.search(r'^' + name + r'=\(([^)]*)\)', sh, re.M)
+    if not m:
+        return None
+    return sorted(w for line in m.group(1).splitlines() for w in line.split('#')[0].split())
+
+def from_ps(name):
+    m = re.search(r'^\$script:' + name + r' = @\(([^)]*)\)', ps, re.M)
+    if not m:
+        return None
+    return sorted(re.findall(r"'([^']+)'", m.group(1)))
+
+bad = []
+for sh_name, ps_name in (('OWNED_RULES', 'OwnedRules'), ('OWNED_HOOKS', 'OwnedHooks')):
+    a, b = from_sh(sh_name), from_ps(ps_name)
+    if a is None or b is None or a != b:
+        bad.append('%s: sh=%s ps1=%s' % (sh_name, a, b))
+print('; '.join(bad) if bad else 'ok')
+PYEOF
+)"
+  if [ "$verdict" != ok ]; then no "the owned rule and hook lists are identical in both ports" "$verdict"; return; fi
+  ok "the owned rule and hook lists are identical in both ports"
+}
+
+for g_r in $g_runners; do
+  check_g_first_run "$g_r"
+  check_g_idempotent "$g_r"
+  check_g_default_leaves_config "$g_r"
+  check_g_absent_tool "$g_r"
+  check_g_foreign "$g_r"
+  check_g_refusals "$g_r"
+  check_g_corrupt_manifest "$g_r"
+  check_g_skill_flag "$g_r"
+  check_g_tool_off "$g_r"
+  check_g_uninstall "$g_r"
+  check_g_categories "$g_r"
+  check_g_shared_resolves "$g_r"
+  check_g_rules "$g_r"
+  check_g_rule_flag "$g_r"
+  check_g_hooks "$g_r"
+  check_g_uninstall_edits "$g_r"
+  check_g_coexist "$g_r"
+  check_g_invalid_json "$g_r"
+  check_g_per_repo_switch "$g_r"
+  check_g_store_spelling "$g_r"
+  check_g_relative_store "$g_r"
+  check_g_tool_off_rules "$g_r"
+  check_g_preserves_values "$g_r"
+done
+check_owned_lists_parity
+[ "$have_pwsh" = 1 ] || echo "  skip pwsh not installed — the global install ran on the bash port only (not a failure)"
+
+# Both ports must leave the same bytes, not merely the same shape: the same machine can be installed by
+# either one, and a re-run by the other must find nothing to change.
+check_g_port_parity() {
+  local ghs ghp gh sub sa
+  ghs="$(g_home paritysh sh)"; ghp="$(g_home paritysh ps1)"
+  for gh in "$ghs" "$ghp"; do
+    printf 'operator text\n' >"$gh/.codex/AGENTS.md"
+    printf '{\n  "keep": 1,\n  "instructions": [\n    "mine.md"\n  ]\n}\n' >"$gh/.config/opencode/opencode.json"
+  done
+  run_gx sh "$ghs" "$g_rules" "$g_hooks" -g || { no "[parity] bash port install" "$(err_tail)"; return; }
+  run_gx ps1 "$ghp" "$g_rules" "$g_hooks" -g || { no "[parity] ps1 port install" "$(err_tail)"; return; }
+  if [ "$(sed "s#$ghs#@H#g" "$ghs/.codex/AGENTS.md")" != "$(sed "s#$ghp#@H#g" "$ghp/.codex/AGENTS.md")" ]; then
+    no "[parity] both ports write the same AGENTS.md block"; return
+  fi
+  for sub in .config/opencode/opencode.json .codex/hooks.json store/installation.json; do
+    if [ "$(norm_json "$ghs/$sub" "$ghs")" != "$(norm_json "$ghp/$sub" "$ghp")" ]; then
+      no "[parity] both ports write the same $sub"; return
+    fi
+  done
+  # A re-run by the other port finds nothing to change.
+  sa="$(sum_of "$ghs/.codex/AGENTS.md")"
+  run_gx ps1 "$ghs" "$g_rules" "$g_hooks" -g || { no "[parity] ps1 re-run over a bash install" "$(err_tail)"; return; }
+  if [ "$(sum_of "$ghs/.codex/AGENTS.md")" != "$sa" ]; then no "[parity] a re-run by the other port rewrites AGENTS.md"; return; fi
+  ok "[parity] bash and PowerShell write the same AGENTS.md, opencode.json, hooks.json and manifest, and re-run each other's installs unchanged"
+}
+if [ "$have_pwsh" = 1 ]; then check_g_port_parity; fi
 
 # ---------------------------------------------------------------------------------------------
 
