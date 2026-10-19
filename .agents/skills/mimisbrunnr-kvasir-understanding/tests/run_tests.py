@@ -4539,6 +4539,123 @@ class DumpHandoffDocsTests(unittest.TestCase):
                 self.assertIn("--from", command)
 
 
+class SessionExportGuidanceTests(unittest.TestCase):
+    """The entry points an agent reads first must agree with the client: current verbs, the outbound
+    Heimdallr default, both product edges, review-only commands that really are review-only, and a
+    worked stdin example that survives dump -> export extraction with the intended candidate count."""
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    @staticmethod
+    def _norm(text):
+        return " ".join(text.split())
+
+    def test_the_skills_index_row_names_current_verbs_not_the_deprecated_store_switch(self):
+        index = (self.ROOT.parent / "README.md").read_text(encoding="utf-8")
+        row = next(line for line in index.splitlines() if "**mimisbrunnr-kvasir-understanding**" in line)
+        self.assertNotIn("--store", row)
+        for verb in ("import", "export", "dump"):
+            self.assertIn(verb, row)
+
+    def test_the_readme_does_not_claim_every_switch_is_off_by_default(self):
+        readme = self._norm((self.ROOT / "README.md").read_text(encoding="utf-8"))
+        self.assertNotIn("All switches are **off by default**", readme)
+        self.assertIn("Heimdallr autofill (`--heimdallr`) is **on** for `export` and `dump`", readme)
+
+    def test_product_edge_text_declares_both_anchors_everywhere(self):
+        with contextlib.redirect_stdout(io.StringIO()) as captured, self.assertRaises(SystemExit):
+            uc.parse_args(["export", "--help"])
+        export_help = self._norm(captured.getvalue())
+        self.assertIn("(Product)-[:HAS_INITIATIVE]->(Initiative) when an initiative is bound", export_help)
+        self.assertIn("(Product)-[:HAS_REPO]->(Repo) when a repository is bound", export_help)
+        self.assertNotIn("when no initiative is bound", export_help)
+        readme = self._norm((self.ROOT / "README.md").read_text(encoding="utf-8"))
+        self.assertNotIn("else Product->Repo when no initiative", readme)
+
+    def test_dryrun_help_does_not_overstate_the_preview(self):
+        with contextlib.redirect_stdout(io.StringIO()) as captured, self.assertRaises(SystemExit):
+            uc.parse_args(["export", "--help"])
+        text = self._norm(captured.getvalue())
+        self.assertNotIn("Run every gate and the preview", text)
+        self.assertIn("local review queue", text)
+        self.assertIn("resolves no group", text)
+
+    def test_a_review_suggestion_in_a_deprecation_never_writes(self):
+        """`export <input>` writes by default, so a line labelled "to review" must carry `--dryrun`."""
+        for argv in (["import", "x", "--store"], ["import", "--heimdallr", "true"]):
+            with self.subTest(argv=argv):
+                rc, _, err = run(argv, expect=1)
+                self.assertEqual(rc, 1)
+                reviews = [line for line in err.splitlines() if line.strip().startswith("to review:")]
+                self.assertTrue(reviews)
+                for line in reviews:
+                    self.assertIn("--dryrun", line)
+                captures = [line for line in err.splitlines() if line.strip().startswith("to capture:")]
+                for line in captures:
+                    self.assertNotIn("--dryrun", line)
+
+    def test_the_skill_leads_with_the_session_export_workflow(self):
+        skill = (self.ROOT / "SKILL.md").read_text(encoding="utf-8")
+        flow = skill.index("## Export this session to the store")
+        self.assertLess(flow, skill.index("## Session marker"))
+        self.assertLess(flow, skill.index("## Load (default)"))
+        text = self._norm(skill)
+        for meaning in ("not a standalone download",
+                        "Nothing eligible: say so and stop",
+                        "An explicit export request authorises the normal write path",
+                        "a failed recall is not evidence of novelty",
+                        "unknown persistence",
+                        "never replay the whole dump",
+                        "not a split plan or a verdict"):
+            with self.subTest(meaning=meaning):
+                self.assertIn(meaning, text)
+
+    def _documented_stdin_example(self):
+        skill = (self.ROOT / "SKILL.md").read_text(encoding="utf-8")
+        flow = skill[skill.index("## Export this session to the store"):skill.index("## Session marker")]
+        command = re.search(r"```bash\n(.*?)\n\s*EOF\n\s*```", flow, flags=re.S)
+        self.assertIsNotNone(command, "the workflow carries a runnable stdin dump example")
+        shell, _, body = command.group(1).partition("<<'EOF'\n")
+        import textwrap
+        return shell, textwrap.dedent(body)
+
+    def test_the_documented_dump_example_is_valid_and_export_dry_runs_one_candidate_per_claim(self):
+        shell, body = self._documented_stdin_example()
+        argv = shell.replace("\\\n", " ").split()
+        argv = argv[argv.index("dump"):]
+        self.assertEqual(argv[:3], ["dump", "--currentsession", "--from"])
+        self.assertEqual(argv[3], "-")
+        self.assertNotIn("--product-name", argv, "export-only flags never appear on a dump example")
+        claims = [line for line in body.splitlines() if line.startswith("- ")]
+        self.assertEqual(len(claims), 2)
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = str(Path(tmp) / "example-session")
+            with mock.patch("sys.stdin", io.StringIO(body)):
+                rc, out, _ = run(argv + ["--out", folder, "--heimdallr", "false", "--nomarker"])
+            self.assertEqual(rc, 0)
+            dumped = (Path(folder) / "_session.md").read_text(encoding="utf-8")
+            for claim in claims:
+                self.assertIn(claim, dumped)
+            self.assertNotIn(self._norm(uc.SESSION_TEMPLATE), self._norm(dumped))
+            binding = json.loads((Path(folder) / uc.METADATA_FILE).read_text(encoding="utf-8"))["binding"]
+            self.assertEqual(binding["tickets"], ["github:123"])
+            self.assertEqual(binding["repository"], "owner/repo")
+
+            seen = []
+            with with_stubbed("gate_redaction", lambda texts: (list(texts), {})), \
+                    with_stubbed("gate_atomicity",
+                                 lambda c: [{"verdict": "simple", "signals": []} for _ in c]), \
+                    with_stubbed("initiative_exists", lambda name: (True, "ok")), \
+                    with_stubbed("_run_capture_client",
+                                 lambda s, a, p: (seen.append(a[0]), (0, json.dumps({"candidates": []}), ""))[1]):
+                rc, out, _ = run(["export", folder, "--dryrun", "--heimdallr", "false", "--nomarker"])
+            self.assertEqual(rc, 0, out)
+            self.assertIn("Candidates: 2 to capture", out)
+            self.assertNotIn("set", seen)
+            self.assertNotIn("resolve-group", seen)
+            self.assertNotIn("Session Understanding dump", out.split("Candidates:")[-1])
+
+
 class ExportDedupClaimTests(unittest.TestCase):
     """Review 5432012955 #2: the docs said export runs "dedup/link" while it sends `links: []` and
     matches subjects exactly. Semantic dedup is planned, not implemented, so the docs must not claim it

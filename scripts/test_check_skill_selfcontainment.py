@@ -320,7 +320,7 @@ def gate_skill_filters():
 
 
 def filter_covers(entries, name):
-    """True when any filter entry matches `name`. Globs count, so `agile-github-*` covers its two."""
+    """True when any filter entry matches `name`. Globs count, so `mimisbrunnr-*` covers every prefixed skill."""
     import fnmatch
 
     return any(fnmatch.fnmatch(name, entry[len(".agents/skills/"):].rstrip("/*"))
