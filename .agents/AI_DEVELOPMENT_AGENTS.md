@@ -129,6 +129,7 @@ ls -la | grep -E '(\.claude|\.codex|\.cursor)'
 
 | Date | Change | Reason |
 | :---- | :---- | :---- |
+| 2026-10-19 | Removed `.agents/skills/ai-review/` folder-table row (`ai-review` retired). | ticket 295 |
 | 2026-10-18 | Dropped the folder-table rows and `settings.json` `Skill(...)` allow-list entries for the skills #291 removed (`agile-github-*`, `ai-terse`, `ai-template-sync`, `context-load-*`, `create-hld`, `git-*`, `manage-rule-system`). | #291 |
 | 2026-09-20 | Registered `mimisbrunnr-ymir-bootstrap`: bounded project-context candidate preview with optional feature focus; comparison, capture and recall require capability-limited workers and have no direct-client fallback. | BR-46 local proposal |
 | 2026-09-20 | Added `ai-understanding` and `mimisbrunnr-kvasir-understanding` to the skills inventory — both shipped without an inventory row. | PR #86 review |

@@ -1121,6 +1121,10 @@ new = [{'command': c, 'type': 'command'} for c in cmds if c not in existing]
 changed = bool(new) or removed > 0
 backup = ''
 deleted = 0
+# Captured before any snapshot copy below: the delete decision must answer whether a
+# snapshot pre-dated this run, not whether this run just took one. Re-globbing after
+# the copy sees our own backup and keeps an installer-created file as an empty {}.
+had_snapshot = bool(glob.glob(path + '.smooth-mimisbrunnr-[0-9]*'))
 if changed:
     # Snapshot a pre-existing file once, before our first edit. On a re-run the dedupe above makes
     # `new` empty, so our own earlier hooks are never snapshotted.
@@ -1138,7 +1142,7 @@ if changed:
         data['hooks'] = hooks
     else:
         data.pop('hooks', None)
-    if not data and not glob.glob(path + '.smooth-mimisbrunnr-[0-9]*'):
+    if not data and not had_snapshot:
         os.remove(path)
         deleted = 1
     else:

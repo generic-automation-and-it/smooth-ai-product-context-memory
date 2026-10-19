@@ -922,7 +922,7 @@ function Edit-OpencodeInstructions {
     # one rule. The operator's own entries are kept. Returns @{ Changed; Present; Backup }.
     param([string] $Config, [string[]] $Wanted, [bool] $Snapshot)
     $data = Read-OperatorJson -Path $Config
-    if ($data.Contains('instructions') -and ($null -eq $data['instructions'] -or $data['instructions'] -is [string] -or $data['instructions'] -isnot [System.Collections.IEnumerable])) {
+    if ($data.Contains('instructions') -and ($null -eq $data['instructions'] -or $data['instructions'] -is [string] -or $data['instructions'] -is [System.Collections.IDictionary] -or $data['instructions'] -isnot [System.Collections.IEnumerable])) {
         Fail "$Config has an unexpected shape (instructions is not a list); fix it, then re-run"
     }
     $prefix = ((Join-Path $script:GlbRoot 'rules') -replace '\\', '/') + '/'
@@ -961,7 +961,8 @@ function Sync-OpencodeInstructions {
     if (-not $script:HarnessOpencode) { $wanted = @() }
     # Nothing to add and nothing of ours in the file: do not even parse the operator's opencode.json.
     $prefix = ((Join-Path $script:GlbRoot 'rules') -replace '\\', '/') + '/'
-    if ($wanted.Count -eq 0 -and -not (Get-Content -LiteralPath $config -Raw).Contains($prefix)) { return }
+    $rawConfig = Get-Content -LiteralPath $config -Raw
+    if ($wanted.Count -eq 0 -and -not ($rawConfig -and $rawConfig.Contains($prefix))) { return }
     $result = Edit-OpencodeInstructions -Config $config -Wanted $wanted -Snapshot $true
     if ($result.Backup) { Write-Info "Backed up $config -> $($result.Backup)" }
     if ($result.Changed) { Write-Info "Updated global rules instructions in $config" }
@@ -1038,13 +1039,16 @@ function Edit-CodexHooks {
     $changed = ($new.Count -gt 0) -or ($removed -gt 0)
     $backup = ''
     $deleted = $false
+    # Captured before any snapshot copy below, mirroring edit_codex_hooks: re-testing after
+    # the copy sees our own backup and keeps an installer-created file as an empty {}.
+    $hadSnapshot = Test-InstallSnapshot -Path $HooksFile
     if ($changed) {
         if ($existed -and $Snapshot) { $backup = Backup-Inplace -Path $HooksFile }
         # UserPromptSubmit ignores `matcher`, so the new group omits it.
         if ($new.Count -gt 0) { $pruned.Add([ordered]@{ hooks = $new }) }
         if ($pruned.Count -gt 0) { $hooks['UserPromptSubmit'] = $pruned } else { [void] $hooks.Remove('UserPromptSubmit') }
         if ($hooks.Count -gt 0) { $data['hooks'] = $hooks } else { [void] $data.Remove('hooks') }
-        if ($data.Count -eq 0 -and -not ($existed -and (Test-InstallSnapshot -Path $HooksFile))) {
+        if ($data.Count -eq 0 -and -not ($existed -and $hadSnapshot)) {
             if ($existed) { Remove-Item -LiteralPath $HooksFile -Force }
             $deleted = $true
         } else {
@@ -1092,7 +1096,8 @@ function Sync-CodexHooks {
     }
     # Nothing to add and no file of ours to clean: do not even parse the operator's hooks.json.
     if ($enabled.Count -eq 0) {
-        $holdsOurs = (Test-Path -LiteralPath $hooksFile -PathType Leaf) -and (Get-Content -LiteralPath $hooksFile -Raw).Contains($storeHooks)
+        $rawHooks = if (Test-Path -LiteralPath $hooksFile -PathType Leaf) { Get-Content -LiteralPath $hooksFile -Raw } else { $null }
+        $holdsOurs = [bool]($rawHooks -and $rawHooks.Contains($storeHooks))
         if (-not $holdsOurs) { return }
     }
     $result = Edit-CodexHooks -HooksFile $hooksFile -Enabled $enabled -Disabled $disabled -PurgePrefix $purgePrefix -Snapshot $true
@@ -1286,14 +1291,16 @@ function Uninstall-Global {
                 Remove-CodexBlock -File $path
             }
             'opencode-config' {
-                if ((Test-Path -LiteralPath $path -PathType Leaf) -and (Get-Content -LiteralPath $path -Raw).Contains($rulesPrefix)) {
+                $rawUninstall = if (Test-Path -LiteralPath $path -PathType Leaf) { Get-Content -LiteralPath $path -Raw } else { $null }
+                if ($rawUninstall -and $rawUninstall.Contains($rulesPrefix)) {
                     Copy-Item -LiteralPath $path -Destination $snapshot -Force
                     [void] (Edit-OpencodeInstructions -Config $path -Wanted @() -Snapshot $false)
                     Write-Info "Removed the store rules from $path (previous content kept at $snapshot)"
                 }
             }
             'hooks-merge' {
-                if ((Test-Path -LiteralPath $path -PathType Leaf) -and (Get-Content -LiteralPath $path -Raw).Contains($hooksPrefix)) {
+                $rawUninstallHooks = if (Test-Path -LiteralPath $path -PathType Leaf) { Get-Content -LiteralPath $path -Raw } else { $null }
+                if ($rawUninstallHooks -and $rawUninstallHooks.Contains($hooksPrefix)) {
                     Copy-Item -LiteralPath $path -Destination $snapshot -Force
                     $result = Edit-CodexHooks -HooksFile $path -Enabled @() -Disabled @() -PurgePrefix $hooksPrefix -Snapshot $false
                     if ($result.Deleted) {
