@@ -29,7 +29,6 @@ This is a unified AI development experience folder that centralizes skills, prom
 | `.agents/config.toml` | OpenAI Codex config (read via the `.codex` symlink) — the Codex counterpart of `settings.json`. Mirrors what Codex's TOML schema supports: `approval_policy`/`sandbox_mode` (Codex has no per-command ACLs or hooks), root-doc fallback, web search |
 | `.agents/skills/` | Executable skills (multi-file workflows) — flat dirs, category-prefixed folder names |
 | `.agents/skills/mimisbrunnr-vitsmunir-dump/` | AI Brain / Intelligence Dump — listen-first capture; synthesize on request. Vitsmunir is Old Norse for intelligence, wits, and the power of comprehension. |
-| `.agents/skills/ai-review/` | Local consumer of a remote AI code-review report |
 | `.agents/skills/ai-understanding/` | Export a session's Understandings to `.context/understandings/`, import matching ones back, publish/consume across workspaces as a zip — plain Markdown, no store |
 | `.agents/skills/mimisbrunnr-odin-context-memory/` | Skill to store/retrieve persistent context memories (sole authority on the write path; the `mimisbrunnr-kvasir-understanding` skill is a reader + conditional importer) |
 | `.agents/skills/mimisbrunnr-ymir-bootstrap/` | Build a cited, practitioner-reviewed durable-context baseline for one existing project, optionally focused on its next feature; without registered capability-limited workers it stops after the offline preview |
@@ -130,6 +129,7 @@ ls -la | grep -E '(\.claude|\.codex|\.cursor)'
 
 | Date | Change | Reason |
 | :---- | :---- | :---- |
+| 2026-10-19 | Removed `.agents/skills/ai-review/` folder-table row (`ai-review` retired). | ticket 295 |
 | 2026-10-18 | Dropped the folder-table rows and `settings.json` `Skill(...)` allow-list entries for the skills #291 removed (`agile-github-*`, `ai-terse`, `ai-template-sync`, `context-load-*`, `create-hld`, `git-*`, `manage-rule-system`). | #291 |
 | 2026-09-20 | Registered `mimisbrunnr-ymir-bootstrap`: bounded project-context candidate preview with optional feature focus; comparison, capture and recall require capability-limited workers and have no direct-client fallback. | BR-46 local proposal |
 | 2026-09-20 | Added `ai-understanding` and `mimisbrunnr-kvasir-understanding` to the skills inventory — both shipped without an inventory row. | PR #86 review |

@@ -14,6 +14,7 @@ Read [`README.md`](./README.md) first — skill index, switches, effort levels a
 
 | Date | Change | Ref |
 | :---- | :---- | :---- |
+| 2026-10-19 | `ai-review` removed; `README.md` index, effort, naming and parent-ownership text updated | #295 |
 | 2026-10-18 | **`README.md` index, effort table, naming table and switch sections no longer list the skills #291 removed** (`agile-github-*`, `ai-terse`, `ai-template-sync`, `context-load-*`, `create-hld`, `git-*`, `manage-rule-system`), and the parent-ownership paragraph names only the parents that still own a skill here. The same removal reached `.agents/AI_DEVELOPMENT_AGENTS.md`'s folder table and `.agents/settings.json`'s `Skill(...)` allow-list. | — |
 | 2026-10-16 | **`ai-memory-context` added** — a local-first memory store. Odin's redact→dedupe→atomicity pipeline writing to `.context/context-memories/`, with no server, no network and no sibling script folder, so the whole skill ships as a single zip. Owned by this repo (not a template parent), installer-distributed with **no marketplace plugin entry** — following `ai-brain-dump`, the existing precedent for an owned skill that is not plugin-distributed. Three scripts are WET-vendored from `_mimisbrunnr-shared/` and held byte-equal by `tests/parity_shared_scripts.py`, which also fails if a vendored copy gains a `parents[2]` or `sys.path` insert. | — |
 | 2026-06-21 | Initial version | #52 |
