@@ -82,32 +82,19 @@ class SettingsTests(unittest.TestCase):
         ok, reason, _ = gd.gate_status(env=enabled_env(stub))
         self.assertTrue(ok, reason)
 
-    def test_file_only_settings_enable(self):
-        stub = h.Stub()
-        self.addCleanup(stub.close)
-        cf = Path(tempfile.mkdtemp()) / "credentials"
-        cf.write_text("CONTEXT_MEMORY_DECISIONS_ENABLED=true\n", encoding="utf-8")
-        env = h.gate_subprocess_env({
-            "CONTEXT_MEMORY_CREDENTIAL_FILE": str(cf),
-            "CONTEXT_MEMORY_DECISIONS_BASE_URL": stub.base_url,
-        })
-        ok, reason, _ = gd.gate_status(env=env)
-        self.assertTrue(ok, reason)
-
-    def test_file_only_settings_mutate_removes_file_fails(self):
-        # The file source is load-bearing: drop it and the file-only case stops enabling.
+    def test_a_credential_file_never_enables(self):
+        # The settings are environment variables only. A credential file that says enabled and names a
+        # live stub must leave the gate off — the file used to win whenever the environment was not
+        # inherited, which replaced an operator's own endpoint with the launcher's defaults.
         stub = h.Stub()
         self.addCleanup(stub.close)
         cf = Path(tempfile.mkdtemp()) / "credentials"
         cf.write_text("CONTEXT_MEMORY_DECISIONS_ENABLED=true\nCONTEXT_MEMORY_DECISIONS_BASE_URL=%s\n"
                       % stub.base_url, encoding="utf-8")
-        with_file = h.gate_subprocess_env({"CONTEXT_MEMORY_CREDENTIAL_FILE": str(cf)})
-        ok_with, _, _ = gd.gate_status(env=with_file)
-        self.assertTrue(ok_with)
-        # Same env, but the file is gone: the gate must fall back to disabled/not-configured.
-        cf.unlink()
-        ok_without, _, _ = gd.gate_status(env=with_file)
-        self.assertFalse(ok_without)
+        ok, reason, line = gd.gate_status(env=h.gate_subprocess_env({"CONTEXT_MEMORY_CREDENTIAL_FILE": str(cf)}))
+        self.assertFalse(ok)
+        self.assertEqual(reason, "not-configured", line)
+        self.assertEqual(stub.requests, [], "the gate reached the endpoint named only in the file")
 
 
 class VerdictTests(unittest.TestCase):

@@ -35,11 +35,10 @@ RAW_BODY_COMMANDS = client.RAW_BODY_COMMANDS
 
 
 def main():
-    # The read token and base URL were seeded from the machine credential file when this module was
-    # imported, so there is nothing to load here. Loading again would be a no-op in every normal path
-    # and would restore a deliberately cleared token in the only path where it acts, so a caller could
-    # never establish that this surface fails closed without a credential - which is the guarantee the
-    # check below exists to support.
+    # The read token and base URL are environment variables, and nothing loads them from a file: a
+    # caller that deliberately clears the token is refused, which is how this surface is shown to fail
+    # closed without a credential. The write token's file is read only on the write path, which this
+    # client never reaches.
     present = client.write_tokens_present()
     if present:
         print(f"{', '.join(present)} must not be present in the read worker environment "

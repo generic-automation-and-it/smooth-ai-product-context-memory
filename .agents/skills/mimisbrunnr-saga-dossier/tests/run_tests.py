@@ -1546,9 +1546,8 @@ class BundleBodyContractTests(unittest.TestCase):
 
 
 class BundleCredentialTests(_CleanCredentialEnv, unittest.TestCase):
-    """The two credential defects: the machine credential file must seed the read token and base URL
-    (so a clean shell gets 200, not 403), and the write token must never be loaded or reach the bundle
-    request (read-only, LADR-08 / NFR-06)."""
+    """The read token and base URL are environment variables, never loaded from a file, and the write
+    token must never be loaded or reach the bundle request (read-only, LADR-08 / NFR-06)."""
 
     def test_missing_read_token_is_a_missing_credential_error(self):
         os.environ[dc._ENV_BASE_URL] = "http://localhost:5141"
@@ -1557,26 +1556,32 @@ class BundleCredentialTests(_CleanCredentialEnv, unittest.TestCase):
         self.assertIn("missing-credential", str(caught.exception))
         self.assertIn(dc._ENV_READ_TOKEN, str(caught.exception))
 
-    def test_machine_credential_file_seeds_only_read_token_and_base_url(self):
+    def test_importing_the_client_loads_nothing_from_the_credential_file(self):
+        """A file carrying every client name must leave the environment as it was: the read side comes
+        from the environment alone, and the write token is read only on the write path, never into
+        `os.environ`. Checked in a fresh process, because the import is where a loader would run."""
+        import subprocess
         import tempfile
         with tempfile.NamedTemporaryFile("w", suffix=".cred", delete=False) as fh:
-            fh.write("CONTEXT_MEMORY_READ_TOKEN=test-read-token\n")
-            fh.write("CONTEXT_MEMORY_BASE_URL=http://localhost:5141\n")
+            fh.write("CONTEXT_MEMORY_READ_TOKEN=must-not-load\n")
+            fh.write("CONTEXT_MEMORY_BASE_URL=http://localhost:5999\n")
             fh.write("CONTEXT_MEMORY_WRITE_TOKEN=must-not-load\n")
             fh.write("ApiAccess__WriteToken=must-not-load\n")
             path = fh.name
-        original = dc._store_client.MACHINE_CREDENTIAL_FILE
-        dc._store_client.MACHINE_CREDENTIAL_FILE = path
+        names = [dc._ENV_READ_TOKEN, dc._ENV_BASE_URL, *_WRITE_TOKEN_SPELLINGS]
+        env = {k: v for k, v in os.environ.items() if k not in names}
+        env["CONTEXT_MEMORY_CREDENTIAL_FILE"] = path
+        probe = ("import json, os, sys; sys.path.insert(0, sys.argv[1]); import context_memory_client; "
+                 "print(json.dumps({n: os.environ.get(n) for n in sys.argv[2:]}))")
         try:
-            dc._store_client.load_machine_credentials(dc._ENV_READ_TOKEN, dc._ENV_BASE_URL)
-            self.assertEqual(os.environ.get(dc._ENV_READ_TOKEN), "test-read-token")
-            self.assertEqual(os.environ.get(dc._ENV_BASE_URL), "http://localhost:5141")
-            # The write token is never loaded, under either spelling, even when the file carries it.
-            for name in _WRITE_TOKEN_SPELLINGS:
-                self.assertNotIn(name, os.environ)
+            proc = subprocess.run([sys.executable, "-B", "-c", probe,
+                                   str(dc._SHARED_SCRIPTS), *names],
+                                  capture_output=True, text=True, env=env, timeout=60)
         finally:
-            dc._store_client.MACHINE_CREDENTIAL_FILE = original
             os.unlink(path)
+        self.assertEqual(proc.returncode, 0, proc.stderr[-2000:])
+        self.assertEqual(json.loads(proc.stdout.strip().splitlines()[-1]),
+                         {name: None for name in names})
 
     def test_either_write_token_spelling_refuses_the_bundle_request(self):
         """Both spellings of the write credential refuse, and the message names the one present

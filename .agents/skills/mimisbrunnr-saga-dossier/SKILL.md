@@ -206,11 +206,11 @@ and its memories by identity + version (LADR-13). Findings are focus-invariant i
 ## Base URL / token
 
 The preview and the bundle are requested from the Host API. The base URL is read from `CONTEXT_MEMORY_BASE_URL`
-(default `http://localhost:5141`) and the read token from `CONTEXT_MEMORY_READ_TOKEN`, both seeded at
-import from the machine credential file (`~/.mimisbrunnr/credentials`) — read token and base URL only;
-the write token is never loaded, and a write token present in the environment refuses the bundle
-request (read-only, LADR-08 / NFR-06). A missing read token is a `missing-credential` error naming the
-variable and the file, never an unauthenticated request that gets 403. The token value never appears in
+(default `http://localhost:5141`) and the read token from `CONTEXT_MEMORY_READ_TOKEN` — environment
+variables only, which `scripts/run.sh` adds to your shell profile; nothing is loaded from a file, the
+write token is never loaded, and a write token present in the environment refuses the bundle request
+(read-only, LADR-08 / NFR-06). A missing read token is a `missing-credential` error naming the variable,
+never an unauthenticated request that gets 403. The token value never appears in
 a committed file (skill-secret-handling). `--base-url` overrides for a one-off. The base must be a bare
 http(s) loopback origin (`localhost`, `127.0.0.1` or `::1`) — userinfo, a path, `;params`, a query or
 a fragment is refused, and a trailing slash is ignored.

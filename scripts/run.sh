@@ -21,6 +21,7 @@
 # Host layout (data root, so the corpus is a folder you can see, back up and delete):
 #
 #   ~/.mimisbrunnr/controller.env                      # 600, the five release secrets
+#   ~/.mimisbrunnr/credentials                         # 600, the client write token only
 #   ~/.mimisbrunnr/volumes/<id>/postgres-data/
 #   ~/.mimisbrunnr/volumes/<id>/blob-well-data/
 #   ~/.mimisbrunnr/volumes/<id>/seq-data/
@@ -29,12 +30,25 @@
 #
 # Verbs: up (default, and a restart when one is already running) | env | status | stop | logs
 # Env:   MIMIS_ID, CONTROLLER_IMAGE, MIMIS_DATA_ROOT (set to "off" for engine-managed volumes),
-#        MIMIS_BIND_ADDRESS, MIMIS_SELINUX, and the P_* ports below.
+#        MIMIS_BIND_ADDRESS, MIMIS_SELINUX, MIMIS_PROFILE (the shell profile holding the client
+#        environment; "off" to leave every profile alone), and the P_* ports below.
+#
+# Client settings are environment variables. CONTEXT_MEMORY_BASE_URL, CONTEXT_MEMORY_READ_TOKEN and
+# CONTEXT_MEMORY_WRITE_TOKEN, when already set, are the master: the controller is started on the
+# base URL's port and with those tokens. Anything missing is added to the managed block in the shell
+# profile — except the write token, which lives in ~/.mimisbrunnr/credentials, because an exported
+# write token reaches every process the shell starts and the read client refuses to run beside one.
 set -euo pipefail
 # Narrow at the top rather than around each write: the credential temp file, the data-root folders and
 # the final rename then all inherit it, and there is no create-then-chmod window in which a secret is
 # briefly group-readable.
 umask 077
+
+die() { echo "run.sh: $*" >&2; exit 1; }
+# Diagnostics go to stderr, never stdout. stdout is a data channel here - `env-export` is captured with
+# $(...) and eval'd into a shell - so a status line written there becomes a command the shell tries to
+# run. Caught by sourcing the export, which failed on "run.sh: ...: command not found".
+log() { echo "run.sh: $*" >&2; }
 
 # The checkout, if this file was run from one. Only the version-drift report uses it, so a copy in
 # ~/bin or on a jump host works with no repository present.
@@ -54,8 +68,47 @@ env_file="$data_home/controller.env"
 # a scratch home still overwrote live credentials, which is the one thing an operator-launcher test must
 # never do. The default is unchanged for normal use, because data_home defaults to ~/.mimisbrunnr.
 machine_credentials="${MIMIS_MACHINE_CREDENTIALS:-$data_home/credentials}"
+# The read-only half is retired: the read token is an environment variable now, so nothing reads this
+# file. It is named only so `up` can say it is safe to delete — never deleted on the operator's behalf.
 machine_credentials_read_only="${machine_credentials%.env}-read-only"
 data_root_setting="${MIMIS_DATA_ROOT:-}"
+
+# The shell profile the managed client-environment block lives in. MIMIS_PROFILE names it outright, and
+# "off" leaves every profile untouched; otherwise the login shell picks it, because a block written to a
+# profile the operator's shell never reads exports nothing.
+default_profile() {
+  if [ -n "${MIMIS_PROFILE:-}" ]; then
+    printf '%s' "$MIMIS_PROFILE"
+    return 0
+  fi
+  case "${SHELL:-}" in
+    */bash) printf '%s' "$HOME/.bashrc" ;;
+    */zsh | "") printf '%s' "$HOME/.zshrc" ;;
+    *) printf '%s' "$HOME/.profile" ;;
+  esac
+}
+profile_file="$(default_profile)"
+
+# profile_value KEY [FILE] — the value of the last `export KEY=…` line in a POSIX profile, one level of
+# matching quotes removed. Last, because that is the assignment a shell sourcing the file ends up with.
+# Prints nothing and exits 0 for a missing key, like `file_value`; non-zero only for a missing file.
+profile_value() {
+  local target="${2:-$profile_file}"
+  [ "$target" != off ] && [ -f "$target" ] || return 1
+  sed -nE "s/^[[:space:]]*export[[:space:]]+$1=//p" "$target" | tail -1 |
+    sed -E "s/^'(.*)'\$/\\1/; s/^\"(.*)\"\$/\\1/"
+}
+
+# The value the operator configured: the process environment, else the profile. The profile is asked
+# because `run.sh` is often started from a shell that has not sourced it — a fresh terminal tab opened
+# before the block existed, or a GUI-launched agent — and treating the variable as absent there would
+# add a second, different value under the operator's own.
+configured_value() {
+  local value
+  value="$(printenv "$1" 2>/dev/null || true)"
+  [ -n "$value" ] || value="$(profile_value "$1" || true)"
+  printf '%s' "$value"
+}
 
 # The API port stays on 5141: provision-credentials.sh writes it into CONTEXT_MEMORY_BASE_URL and the
 # context-memory client defaults to it, so moving it would break every skill and client once a
@@ -87,7 +140,25 @@ else
   p_dashboard="${P_DASHBOARD:-15278}"
   p_otlp="${P_OTLP:-19075}"
 fi
-api_base_url="http://localhost:${p_host}"
+
+# CONTEXT_MEMORY_BASE_URL is the master when it exists: the API is published on its port, so every
+# client holding it reaches this stack. Deriving the URL from the port instead let a port shift serve
+# 25141 while every client kept calling 5141 — no run failing and nothing logging it. A P_HOST that
+# disagrees is refused rather than resolved, because either answer silently strands one side.
+master_base_url="$(configured_value CONTEXT_MEMORY_BASE_URL)"
+if [ -n "$master_base_url" ]; then
+  master_port="$(printf '%s' "$master_base_url" |
+    sed -nE 's#^http://(localhost|127\.0\.0\.1|\[::1\]):([0-9]+)/?$#\2#p')"
+  [ -n "$master_port" ] ||
+    die "CONTEXT_MEMORY_BASE_URL must be http://localhost:<port> (loopback, explicit port), not '$master_base_url'"
+  if [ -n "${P_HOST:-}" ] && [ "$P_HOST" != "$master_port" ]; then
+    die "P_HOST=$P_HOST disagrees with CONTEXT_MEMORY_BASE_URL=$master_base_url; the base URL is the master — change it there"
+  fi
+  p_host="$master_port"
+  api_base_url="${master_base_url%/}"
+else
+  api_base_url="http://localhost:${p_host}"
+fi
 
 # Docker Desktop on macOS and Windows and native Linux all expose the socket at this path inside the
 # VM; only rootless engines differ, and that is a documented override rather than a guess.
@@ -100,12 +171,6 @@ postgres_volume="mimisbrunnr-${installation_id}-postgres-data"
 group_name="smooth-mímisbrunnr-release-${installation_id}"
 dashboard_host="http://localhost:${p_dashboard}"
 container_data_root="/var/lib/mimisbrunnr-data"
-
-die() { echo "run.sh: $*" >&2; exit 1; }
-# Diagnostics go to stderr, never stdout. stdout is a data channel here - `env-export` is captured with
-# $(...) and eval'd into a shell - so a status line written there becomes a command the shell tries to
-# run. Caught by sourcing the export, which failed on "run.sh: ...: command not found".
-log() { echo "run.sh: $*" >&2; }
 
 # The entrypoint validates this too, but it does so after the image has started. Validating here keeps
 # the id out of resource names, labels and paths until it is known to be a plain lowercase slug.
@@ -287,121 +352,57 @@ secret() {
   fi
 }
 
-# Publish the tokens at machine level, outside every repository, so the skills work in any checkout
-# without that repository's provisioner. Written here rather than read from a per-repo file because a
-# gitignored .context/ cannot exist in a repo the skill has never been installed into — which is the
-# whole cross-repo case. Two files, not one: a read-only worker that sources both would hold a write
-# token, and the read client refuses to start in that state by design.
+# The write token is the one client credential that is not an environment variable. An exported
+# variable reaches every process the shell starts — every agent, subagent and read-only worker — and the
+# read client refuses to start beside a write token, which is the guarantee that the read surface can
+# never mutate. So it is published here instead, in a file only the capture client reads, and only when
+# CONTEXT_MEMORY_WRITE_TOKEN is not already in its environment. Nothing else rides this file any more:
+# the base URL, the read token and the decision settings are environment variables (see write_profile).
+#
+# Rewritten whole rather than added to, because it has exactly one key. The guard is the same one every
+# credential file gets, asked before the write: a symlink would send the token wherever the link points,
+# and a file this run cannot read was not written by it.
 write_machine_credentials() {
-  local read_token write_token
-  read_token="$(file_value Parameters__api-read-token || true)"
+  local write_token desired tmp
   write_token="$(file_value Parameters__api-write-token || true)"
-  [ -n "$read_token" ] && [ -n "$write_token" ] || return 0
+  [ -n "$write_token" ] || return 0
 
-  # The same guard as for `$env_file`, asked of both files before either is touched: a file this
-  # process cannot read, or cannot read as text, would otherwise be rewritten below with only the
-  # keys this run could resolve — every operator key dropped, the decision settings reset to their
-  # defaults — and the run would still report success. The previous shape was protected by accident
-  # rather than by design: `cat` failing tripped `set -e`, and the filter that replaced it returns 0
-  # in both cases (grep exits 2 on a read error and 0 while printing "Binary file matches"), so the
-  # protection has to be asked for or it is lost with the `cat`.
-  #
-  # The symlink refusal is the same property the launcher already applied to `$env_file`: `[ -f ]`
-  # follows a link, so a shared credentials file was silently replaced by a regular one, freezing
-  # every client reading the shared path on tokens this run had rotated away.
-  local file
   refuse_unusable_credential_file "$machine_credentials"
-  refuse_unusable_credential_file "$machine_credentials_read_only"
+  desired="# Mímisbrunnr write token — machine level, outside any repository.
+# Written by scripts/run.sh. Read by the capture client only when CONTEXT_MEMORY_WRITE_TOKEN is not
+# in its environment. Every other client setting is an environment variable (your shell profile).
+CONTEXT_MEMORY_WRITE_TOKEN=$write_token"
+  if [ -f "$machine_credentials" ] && [ "$(cat "$machine_credentials")" = "$desired" ]; then
+    chmod 600 "$machine_credentials" 2>/dev/null || die "cannot restrict permissions on $machine_credentials"
+    return 0
+  fi
 
-  # Two files, both add-only: every key the file already carries is preserved verbatim, and only
-  # missing keys are appended. A full rewrite would silently drop a key the operator or a new
-  # feature added — the defect this pattern closes, and one that would reset a feature flag to its
-  # default on every start. CONTEXT_MEMORY_BASE_URL is the single exception, re-emitted below.
-  #
-  # The read-only half is written the same way and holds the same extra keys, minus the write token:
-  # a read-only worker that sourced both would hold a write capability, and the read client refuses
-  # to start in that state by design.
-  local tmp key stored
-  for file in "$machine_credentials" "$machine_credentials_read_only"; do
-    # The temp path is created here rather than inside the writing subshell, and registered with
-    # `cleanup()` on the way past. A trap runs in this shell: a `tmp` assigned in the subshell is
-    # gone by the time a Ctrl-C arrives, and the file it named holds both tokens.
-    tmp="$(mktemp "$file.XXXXXX")"
-    temp_credentials="$temp_credentials$tmp
+  # The temp path is created here rather than inside a subshell, and registered with `cleanup()` on the
+  # way past. A trap runs in this shell: a path assigned in a subshell is gone by the time a Ctrl-C
+  # arrives, and the file it named holds the write token.
+  tmp="$(mktemp "$machine_credentials.XXXXXX")"
+  temp_credentials="$temp_credentials$tmp
 "
-    ( umask 077
-      {
-        # Every key is carried over verbatim except CONTEXT_MEMORY_BASE_URL, which is dropped here
-        # and re-emitted from `$api_base_url` on every run. It is not operator config: it describes
-        # the port *this* run publishes, so a stored value is stale the moment the port changes. A
-        # MIMIS_SHIFT_PORTS=1 start (25141) or a P_HOST override left the stored 5141 in place, and
-        # every client on the machine then kept calling a port this stack does not serve — the file
-        # and the running API disagreeing silently, with no run failing and nothing logging it.
-        # Refreshing rather than preserving is also the safe direction: the tokens beside it are
-        # bound into this Host, and the client refuses a non-loopback origin in `base_url()`
-        # (`.agents/skills/_mimisbrunnr-shared/scripts/context_memory_client.py`, "must be loopback"),
-        # so a hand-edited URL here cannot be anything but stale. Dropping every occurrence also keeps
-        # a duplicated line from surviving as two assignments whose winner depends on the reader.
-        #
-        # `|| true` covers grep's exit 1 — "no line matched", a success for a file that held only the
-        # base URL. The read and NUL-byte failures that make this lossy are refused above, where a
-        # `die` reaches the script; in here they would only exit the subshell.
-        if [ -f "$file" ]; then
-          grep -v '^CONTEXT_MEMORY_BASE_URL=' "$file" || true
-        fi
-        echo "CONTEXT_MEMORY_BASE_URL=$api_base_url"
-        for key in CONTEXT_MEMORY_READ_TOKEN CONTEXT_MEMORY_WRITE_TOKEN; do
-          if [ "$file" = "$machine_credentials_read_only" ] && [ "$key" = "CONTEXT_MEMORY_WRITE_TOKEN" ]; then
-            continue
-          fi
-          stored="$(file_value "$key" "$file" || true)"
-          if [ -z "$stored" ]; then
-            case "$key" in
-              CONTEXT_MEMORY_READ_TOKEN) echo "$key=$read_token" ;;
-              CONTEXT_MEMORY_WRITE_TOKEN) echo "$key=$write_token" ;;
-            esac
-          fi
-        done
-        # The decision settings ride the write-side file only. The read-only file stays minimal: a
-        # worker that must not mutate has no use for a decision endpoint, and publishing the API key
-        # there would hand a read-only credential a second secret.
-        if [ "$file" = "$machine_credentials" ]; then
-          while read -r setting; do
-            [ -z "$setting" ] && continue
-            key="${setting%%=*}"
-            [ -n "$(file_value "$key" "$file" || true)" ] && continue
-            echo "$setting"
-          done < <(decision_settings)
-        fi
-      } >"$tmp"
-      mv "$tmp" "$file"
-    )
-    # The path is gone now, so stop tracking it: leaving it registered would make a later failure in
-    # this function delete a path another run may have since reused. The expansion is quoted because
-    # an unquoted one inside `${…}` is a *pattern*, and a data root containing `[` would then match
-    # more than the one line it names.
-    temp_credentials="${temp_credentials%"$tmp"$'\n'}"
-  done
-  log "machine credentials written: $machine_credentials"
+  printf '%s\n' "$desired" >"$tmp"
+  chmod 600 "$tmp"
+  mv "$tmp" "$machine_credentials"
+  # The path is gone now, so stop tracking it: leaving it registered would make a later failure delete a
+  # path another run may have since reused. Quoted, because an unquoted expansion inside `${…}` is a
+  # *pattern*, and a data root containing `[` would then match more than the one line it names.
+  temp_credentials="${temp_credentials%"$tmp"$'\n'}"
+  log "write token published: $machine_credentials"
+
+  if [ -f "$machine_credentials_read_only" ]; then
+    log "NOTE: $machine_credentials_read_only is no longer read by any client; delete it when convenient."
+  fi
 }
 
-# Print the credentials in the form a shell can consume, for operators who want them in their profile
-# rather than relying on the machine file. Deliberately a separate verb: `up` must never print a token
-# to a terminal that may be scrolled back, captured by a screen recording, or read over someone's
-# shoulder. The caller chooses to run this and to redirect it.
-#
-# Only CONTEXT_MEMORY_* names are printed. They are valid shell identifiers, so `export` accepts them;
-# the container's Parameters__* names contain hyphens and cannot be assigned by any shell at all.
-#
-# A real environment variable always wins over the machine file in the clients, so exporting these
-# changes nothing except where the value is read from — it does not fork the credential.
-# The decision-gate settings, as "KEY default" pairs. One table, three consumers: the machine
-# credential file, `env-export`, and the profile block all derive from it, so a setting cannot be
-# published to one surface and forgotten on the others.
+# The decision-gate settings, as "KEY=default" lines. One table, two consumers: the profile block and
+# `env-export` both derive from it, so a setting cannot be published to one and forgotten on the other.
 #
 # The API key defaults to empty and is only ever *read* from the environment — never a literal here.
 # It is not a generated secret: a local Ollama needs none, and a hosted endpoint's key belongs in the
-# operator's environment, not in a file this script writes.
+# operator's environment, set by the operator. Neither consumer publishes it.
 decision_settings() {
   cat <<'DECISIONS'
 CONTEXT_MEMORY_DECISIONS_ENABLED=false
@@ -422,110 +423,149 @@ CONTEXT_MEMORY_DECISIONS_DEDUP_MAX_RESULTS=5
 DECISIONS
 }
 
-# The effective value of one decision setting: what the operator actually configured, else the default.
-#
-# `env_export` used to emit the defaults table verbatim, so `env-export --profile` overwrote an
-# operator's own `CONTEXT_MEMORY_DECISIONS_ENABLED=true` in their shell profile with `false` — the one
-# tool meant to publish the setting silently discarded it, and the profile then disagreed with the
-# credential file that everything else reads. The credential file is authoritative: it is what the
-# add-only write maintains, and what any other repository or agent finds without this checkout.
-decision_setting() {
-  local line="$1" key default stored
-  key="${line%%=*}"
-  default="${line#*=}"
-  stored="$(file_value "$key" "$machine_credentials" || true)"
-  printf '%s=%s' "$key" "${stored:-$default}"
+# Every client setting the profile block and `env-export` publish, as "KEY=value" lines: the base URL
+# this run serves, the read token the Host holds, and the decision settings at their defaults. The write
+# token and the decision API key are deliberately absent (see write_machine_credentials and above).
+client_settings() {
+  local read_token
+  read_token="$(file_value Parameters__api-read-token || true)"
+  echo "CONTEXT_MEMORY_BASE_URL=$api_base_url"
+  echo "CONTEXT_MEMORY_READ_TOKEN=$read_token"
+  decision_settings | grep -v '^CONTEXT_MEMORY_DECISIONS_API_KEY='
 }
 
+# The effective value of one setting line: what the operator configured, else the line's own value.
+#
+# `env_export` once emitted the defaults verbatim, so `env-export --profile` overwrote an operator's own
+# `CONTEXT_MEMORY_DECISIONS_ENABLED=true` with `false` — the one tool meant to publish the setting
+# silently discarded it. The environment is the master; the default only fills a gap.
+effective_setting() {
+  local line="$1" key default configured
+  key="${line%%=*}"
+  default="${line#*=}"
+  configured="$(configured_value "$key")"
+  printf '%s=%s' "$key" "${configured:-$default}"
+}
+
+# Print the client settings in the form a shell can consume. Deliberately a separate verb: `up` must
+# never print a token to a terminal that may be scrolled back, captured by a screen recording, or read
+# over someone's shoulder. The caller chooses to run this and to redirect it.
+#
+# Only CONTEXT_MEMORY_* names are printed. They are valid shell identifiers, so `export` accepts them;
+# the container's Parameters__* names contain hyphens and cannot be assigned by any shell at all. The
+# write token is not printed: evaluating it would make it ambient (see write_machine_credentials).
 env_export() {
   local format="${1:-posix}"
-  local read_token write_token
+  local read_token write_token effective
   read_token="$(file_value Parameters__api-read-token || true)"
   write_token="$(file_value Parameters__api-write-token || true)"
   [ -n "$read_token" ] && [ -n "$write_token" ] ||
     die "no credentials in $env_file yet — run this script first (or its 'env' verb)"
 
   case "$format" in
-    posix | sh | bash | zsh)
-      echo "export CONTEXT_MEMORY_BASE_URL='$api_base_url'"
-      echo "export CONTEXT_MEMORY_READ_TOKEN='$read_token'"
-      echo "export CONTEXT_MEMORY_WRITE_TOKEN='$write_token'"
-      while read -r setting; do
-        [ -z "$setting" ] && continue
-        # The API key is a secret when non-empty, so it is never printed: a token written to a
-        # terminal that gets scrolled back, recorded, or read over a shoulder is disclosed.
-        # `env-export` is the verb that prints; the key belongs in the environment, sourced.
-        case "$setting" in
-          CONTEXT_MEMORY_DECISIONS_API_KEY=*) continue ;;
-        esac
-        echo "export $(decision_setting "$setting")"
-      done < <(decision_settings)
-      ;;
-    powershell | ps1 | pwsh)
-      echo "\$env:CONTEXT_MEMORY_BASE_URL = '$api_base_url'"
-      echo "\$env:CONTEXT_MEMORY_READ_TOKEN = '$read_token'"
-      echo "\$env:CONTEXT_MEMORY_WRITE_TOKEN = '$write_token'"
-      while read -r setting; do
-        [ -z "$setting" ] && continue
-        case "$setting" in
-          CONTEXT_MEMORY_DECISIONS_API_KEY=*) continue ;;
-        esac
-        effective="$(decision_setting "$setting")"
-        echo "\$env:${effective%%=*} = '${effective#*=}'"
-      done < <(decision_settings)
-      ;;
-    *)
-      die "format must be posix or powershell, not '$format'"
-      ;;
+    posix | sh | bash | zsh | powershell | ps1 | pwsh) ;;
+    *) die "format must be posix or powershell, not '$format'" ;;
+  esac
+  while read -r setting; do
+    [ -z "$setting" ] && continue
+    effective="$(effective_setting "$setting")"
+    profile_line "$format" "${effective%%=*}" "${effective#*=}"
+  done < <(client_settings)
+  log "the write token is not exported; the capture client reads it from $machine_credentials"
+}
+
+# profile_line FORMAT KEY VALUE — one assignment in the target shell's syntax.
+profile_line() {
+  case "$1" in
+    powershell | ps1 | pwsh) echo "\$env:$2 = '$3'" ;;
+    *) echo "export $2='$3'" ;;
+  esac
+}
+
+# profile_assigns FILE FORMAT KEY — whether FILE already assigns KEY anywhere, inside the managed block
+# or out of it. An operator's own assignment outside the block is theirs, and adding a second one under
+# it would make which value wins depend on line order.
+profile_assigns() {
+  [ -f "$1" ] || return 1
+  case "$2" in
+    powershell | ps1 | pwsh) grep -qE "^[[:space:]]*\\\$env:$3[[:space:]]*=" "$1" ;;
+    *) grep -qE "^[[:space:]]*export[[:space:]]+$3=" "$1" ;;
   esac
 }
 
 PROFILE_BEGIN="# >>> mimisbrunnr — managed by scripts/run.sh env-export --profile >>>"
 PROFILE_END="# <<< mimisbrunnr <<<"
 
-# Write the credentials into a shell profile as a marked, replaceable block.
+# Add every missing client setting to a shell profile, inside a marked block.
 #
-# This exists because the operator-facing alternative is a shell redirect, and the two operators differ
-# by one character: `>` truncates the whole profile and `>>` appends, so a habit formed on one is a
-# destroyed .zshrc on the other. A profile is replaced wholesale by anyone typing at it. The block is
-# bounded by markers so a rotation rewrites three lines instead of adding three more, which is the other
-# half of the same hazard: an appended stale token sits in a world-readable profile forever and, because a
-# real environment variable beats the credential file, overrides the fresh one.
+# Add-only, because the environment is the master: a setting the operator already has — exported in
+# this process, or assigned anywhere in the profile — is never added again and never changed, so a
+# hand-tuned value survives every run. Only a missing setting is added, at its default (or, for the base
+# URL and read token, at the value this stack serves). The one removal is a write-token assignment inside
+# the managed block: an earlier release wrote it there, and an exported write token makes every read
+# client refuse to start. Its value is not lost — it was the master for this run, and is in the
+# credential file now.
 #
-# Only the region between the markers is ever touched. Anything else in the file is preserved byte for
-# byte, including on the first write, so a target that already has content is never emptied.
+# The block exists because the operator-facing alternative is a shell redirect, and the two operators
+# differ by one character: `>` truncates the whole profile and `>>` appends. Only the region between the
+# markers is ever touched; anything else in the file is preserved byte for byte, including on the first
+# write, so a target that already has content is never emptied.
 write_profile() {
   local target="$1" format="${2:-posix}"
   case "$target" in
-    "" | -) target="$HOME/.zshrc" ;;
+    "" | -) target="$profile_file" ;;
   esac
+  [ "$target" != off ] || return 0
   [ -L "$target" ] && die "$target is a symlink; refusing to write a credential through it"
 
   local dir
   dir="$(dirname -- "$target")"
   [ -d "$dir" ] || die "the directory for $target does not exist"
 
+  local existing="" additions="" removed=0 setting key
+  if [ -f "$target" ]; then
+    existing="$(awk -v b="$PROFILE_BEGIN" -v e="$PROFILE_END" '
+      $0 == b { inside = 1; next }
+      $0 == e { inside = 0; next }
+      inside == 1 { print }
+    ' "$target")"
+  fi
+  if printf '%s\n' "$existing" | grep -qE 'CONTEXT_MEMORY_WRITE_TOKEN[[:space:]]*='; then
+    existing="$(printf '%s\n' "$existing" | grep -vE 'CONTEXT_MEMORY_WRITE_TOKEN[[:space:]]*=' || true)"
+    removed=1
+  fi
+
+  while read -r setting; do
+    [ -z "$setting" ] && continue
+    key="${setting%%=*}"
+    printenv "$key" >/dev/null 2>&1 && continue
+    profile_assigns "$target" "$format" "$key" && continue
+    additions="$additions$(profile_line "$format" "$key" "${setting#*=}")
+"
+  done < <(client_settings)
+
+  if [ -z "$additions" ] && [ "$removed" = 0 ]; then
+    return 0
+  fi
+
   local body
-  body="$(env_export "$format")"
+  body="$(printf '%s\n%s' "$existing" "$additions" | sed '/^[[:space:]]*$/d')"
 
   local temp
   temp="$(mktemp "$dir/.mimis-profile.XXXXXX")" || die "could not create a temporary file in $dir"
 
-  # Back up the original before any modification, so a first write, a re-rotate, or a replacement
-  # that goes wrong never destroys the profile the operator was editing — the loss an earlier
-  # release shipped. Named with the timestamp (plus a random guard) so a rotation chain stays
-  # recoverable even across rapid re-writes within the same second.
+  # Back up the original before any modification, so a first write or a later addition that goes wrong
+  # never destroys the profile the operator was editing — the loss an earlier release shipped. Named
+  # with the timestamp (plus a random guard) so a chain of writes stays recoverable.
   local backup=""
   if [ -f "$target" ]; then
     backup="$target-mimisbrunnr-$(date +%Y%m%d%H%M%S)-$RANDOM"
     cp -p -- "$target" "$backup" || die "could not back up $target; refusing to write"
     # `cp -p` carries the profile's own mode across, and a first write starts from a normally
-    # world-readable `~/.zshrc`. From the second run on, the file being copied already holds the
-    # managed block, so without this the backup sits in `$HOME` world-readable with the token in it —
-    # the very leak the mode 600 on the new profile below exists to prevent.
-    # A chmod that fails leaves the backup exactly as wide as the profile was, which is the leak this
-    # line exists to close — so it is removed rather than left behind. Deleting it costs nothing: the
-    # target is not written until the final `mv` below, so it still holds the profile verbatim.
+    # world-readable profile. From the second write on, the file being copied already holds the read
+    # token, so without this the backup sits in `$HOME` world-readable with it. A chmod that fails
+    # leaves the backup exactly as wide as the profile was, so it is removed rather than left behind;
+    # the target is not written until the final `mv`, so it still holds the profile verbatim.
     chmod 600 "$backup" || { rm -f "$backup"; die "cannot restrict permissions on $backup"; }
   fi
 
@@ -534,16 +574,14 @@ write_profile() {
       # Replace the marked region in place. awk, not a read-modify-write of the whole file, so the
       # bytes outside the markers survive untouched even if the file has no trailing newline.
       # `body` is passed through the environment, not `-v`: a multiline value in an awk `-v`
-      # assignment is parsed as program text by some awks and aborts with "newline in string",
-      # which is what a second `env-export --profile` on an existing block hit.
+      # assignment is parsed as program text by some awks and aborts with "newline in string".
       body="$body" awk -v b="$PROFILE_BEGIN" -v e="$PROFILE_END" '
-        $0 == b { print b; print ENVIRON["body"]; print e; skip = 1; next }
+        $0 == b { print b; if (ENVIRON["body"] != "") print ENVIRON["body"]; print e; skip = 1; next }
         $0 == e { skip = 0; next }
         skip != 1 { print }
       ' "$target" >"$temp"
     else
-      # No managed block. Append the block after the target's own content — the first write — keeping
-      # every byte the operator already had.
+      # No managed block. Append it after the target's own content, keeping every byte already there.
       {
         cat -- "$target"
         [ -s "$target" ] && [ "$(tail -c1 -- "$target" | wc -l)" -eq 0 ] && echo
@@ -563,7 +601,11 @@ write_profile() {
   chmod 600 "$temp"
   mv -- "$temp" "$target"
   [ -n "$backup" ] && log "backed up the original profile to $backup"
-  log "wrote the managed block to $target (mode 600); re-run to rotate it in place"
+  [ "$removed" = 1 ] &&
+    log "removed CONTEXT_MEMORY_WRITE_TOKEN from the managed block; it lives in $machine_credentials"
+  [ -n "$additions" ] &&
+    log "added $(printf '%s' "$additions" | grep -c .) missing setting(s) to $target (mode 600); open a new shell to load them"
+  return 0
 }
 
 write_credentials() {
@@ -572,20 +614,36 @@ write_credentials() {
 # exists, so on a machine with no provision file — a fresh clone, a CI container — it is never assigned,
 # and `set -u` aborts on the log line that reads it. A checkout that has run the provisioner hides this,
 # which is why it survived until the harness ran without one.
-local key value from_env stored generated=0 ephemeral=0 missing=0 adopted=0
+local key value from_env stored master generated=0 ephemeral=0 missing=0 adopted=0 mastered=0
   local pg_password blob_key blob_secret read_token write_token
   local -a persisted=()
   # Resolved once, before the loop, and only as a matched pair - see provisioned_tokens.
   local provisioned_pair
   provisioned_pair="$(provisioned_tokens || true)"
 
+  # The client tokens the operator already holds are the master: the Host is started with them, so every
+  # client reading CONTEXT_MEMORY_* reaches it without a 403. The write token is also looked up in the
+  # machine credential file, because that — not the profile — is where it lives (write_machine_credentials).
+  refuse_unusable_credential_file "$machine_credentials"
+  local master_read master_write
+  master_read="$(configured_value CONTEXT_MEMORY_READ_TOKEN)"
+  master_write="$(configured_value CONTEXT_MEMORY_WRITE_TOKEN)"
+  [ -n "$master_write" ] || master_write="$(file_value CONTEXT_MEMORY_WRITE_TOKEN "$machine_credentials" || true)"
+
   for key in $keys; do
     from_env="$(env_value "$key")"
     stored="$(file_value "$key" || true)"
+    case "$key" in
+      Parameters__api-read-token) master="$master_read" ;;
+      Parameters__api-write-token) master="$master_write" ;;
+      *) master="" ;;
+    esac
 
     if [ -n "$from_env" ]; then
       value="$from_env"
       ephemeral=$((ephemeral + 1))
+    elif [ -n "$master" ]; then
+      value="$master"
     elif [ -n "$stored" ]; then
       value="$stored"
     else
@@ -603,11 +661,15 @@ local key value from_env stored generated=0 ephemeral=0 missing=0 adopted=0
       fi
     fi
 
-    # The file is rewritten only to fill gaps, and never loses a key it already had. An earlier draft
-    # persisted only the values this run selected, so exporting one variable silently dropped the
-    # stored token for it — and the next run without that variable minted a different one, 403ing a
-    # Host that was already running with the old value.
-    if [ -n "$stored" ]; then
+    # The file is rewritten to fill gaps and to follow the master, and never otherwise loses a key it
+    # already had. An earlier draft persisted only the values this run selected, so exporting one
+    # Parameters__* variable silently dropped the stored token for it — and the next run without that
+    # variable minted a different one, 403ing a Host that was already running with the old value. A
+    # master token is different: it is what every client holds, so the stored copy follows it.
+    if [ -n "$master" ]; then
+      persisted+=("$key=$master")
+      [ "$master" = "$stored" ] || mastered=$((mastered + 1))
+    elif [ -n "$stored" ]; then
       persisted+=("$key=$stored")
     else
       persisted+=("$key=$value")
@@ -625,7 +687,7 @@ local key value from_env stored generated=0 ephemeral=0 missing=0 adopted=0
 
   [ "$read_token" != "$write_token" ] || die "read and write tokens are identical; the read/write capability split would be void"
 
-  if [ "$missing" -gt 0 ]; then
+  if [ "$missing" -gt 0 ] || [ "$mastered" -gt 0 ]; then
     temp_env="$(mktemp "$data_home/controller.env.XXXXXX" 2>/dev/null || mktemp "${TMPDIR:-/tmp}/mimisbrunnr.env.XXXXXX")"
     {
       echo "# Release-controller secrets for installation '$installation_id'."
@@ -635,14 +697,19 @@ local key value from_env stored generated=0 ephemeral=0 missing=0 adopted=0
     } >"$temp_env"
     mv "$temp_env" "$env_file"
     temp_env=""
-    log "wrote $env_file (mode 600) — $generated generated, $adopted adopted from provision-credentials.sh, $missing new"
+    log "wrote $env_file (mode 600) — $generated generated, $adopted adopted from provision-credentials.sh, $missing new, $mastered taken from your CONTEXT_MEMORY_* tokens"
     [ "$adopted" -gt 0 ] && log "  tokens match the CONTEXT_MEMORY_* values your skills hold, so they will not 403"
   fi
 
-  # Every run, not only one that wrote the file: the machine credential file is what makes the skills
-  # work in a checkout that has never run this repository's provisioner, so a stack that started before
-  # that file existed would leave every other repo unable to authenticate.
+  # Every run, not only one that wrote the file: the client settings are what make the skills work in a
+  # checkout that has never run this repository's provisioner, so a stack that started before they were
+  # published would leave every other repo unable to authenticate.
   write_machine_credentials
+  write_profile "$profile_file" posix
+  if printenv CONTEXT_MEMORY_WRITE_TOKEN >/dev/null 2>&1; then
+    log "NOTE: CONTEXT_MEMORY_WRITE_TOKEN is exported in this shell; a read client started from it refuses to run."
+    log "      Remove the export — the capture client reads the token from $machine_credentials."
+  fi
 
   # Re-assert the mode on every run, not only when writing. A file widened by a backup restore or a
   # careless copy would otherwise stay group-readable for the life of the installation, and no test

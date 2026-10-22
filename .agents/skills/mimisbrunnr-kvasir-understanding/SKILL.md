@@ -266,7 +266,7 @@ python3 -B .agents/skills/mimisbrunnr-kvasir-understanding/scripts/understanding
   made. With `CONTEXT_MEMORY_DECISIONS_ENABLED=true`,
   `CONTEXT_MEMORY_DECISIONS_BELOW_THRESHOLD=hold` keeps the candidate out of the store; `mark` exports it with
   `audience:<role>` tags, which are written beside the binding's `--tags`. The setting in force is the
-  one the gate reports (`belowThreshold`) — it may come from `~/.mimisbrunnr/credentials` — and a report
+  one the gate reports (`belowThreshold`) — read from the environment — and a report
   without a readable value keeps every candidate. The gate also reports when its attempt ledger forgot
   spent budgets — `ledgerReset` (the ledger was unreadable and restarted empty) or `ledgerEvicted: n`
   (entries dropped past its 5000-entry cap) — and the client prints one stderr line for each

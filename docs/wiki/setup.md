@@ -72,13 +72,16 @@ no API change. The gate is a quality signal only: a score never changes `status`
 | `CONTEXT_MEMORY_DECISIONS_DEDUP_MAX_PAIRS_PER_BATCH` | `20` | Most pairs stage 3 asks across a batch; beyond it, `unexamined (budget)` is disclosed per candidate |
 | `CONTEXT_MEMORY_DECISIONS_DEDUP_MAX_RESULTS` | `5` | Most lexical candidates stage 2 retrieves per subject |
 
-**Where the settings live.** `scripts/run.sh` writes all fifteen with their defaults to
-`~/.mimisbrunnr/credentials` — **add-only**, so turning the gate on survives every restart, which is the
-case a write-every-time rewrite cannot survive. `env-export` publishes the fourteen non-secret ones to a shell
-profile; the API key is deliberately excluded, because a token written to a terminal that gets scrolled
-back, recorded, or read over a shoulder is disclosed. The read-only credential file stays minimal and
-carries **no** decision settings: a worker that cannot mutate has no use for a decision endpoint, and
-publishing the key there would hand a read-only credential a second secret.
+**Where the settings live: in the environment, and nowhere else.** The gate and every client read the
+process environment only. `scripts/run.sh` adds each of the fourteen non-secret settings that is
+**missing** to a marked block in your shell profile (`~/.zshrc`, `~/.bashrc` or `~/.profile` by login
+shell; `MIMIS_PROFILE` names another, `MIMIS_PROFILE=off` leaves profiles alone) — **add-only**: a setting
+already exported, or assigned anywhere in the profile, is never added again and never changed, so your own
+endpoint, model and threshold survive every restart. `run.ps1` does the same on Windows with User-scope
+environment variables. The API key is never written by either: it is your secret to export. A session
+started before the profile changed has not inherited the new values — open a new shell, or restart the
+app that launched the agent. No file is consulted, so the gate never silently falls back to a
+launcher default you did not choose.
 
 **Check it before enabling it:**
 
@@ -232,9 +235,9 @@ pwsh ./scripts/run.ps1             #    Windows / PowerShell 7
 Step 2 pulls the published controller image and starts the whole stack in one command. Step 1 is the
 same provisioner every other run mode on this page uses, and here it is not optional: the launcher
 **adopts** that file's token pair rather than minting its own, so the controller and the skills hold the
-same values. Without it the stack starts and every skill request returns `403` — `run.sh` also publishes
-the client-facing values to `~/.mimisbrunnr/credentials`, but `run.ps1` writes only its own
-`Parameters__*` file.
+same values. Without it the stack starts and every skill request returns `403`. Both launchers then
+publish the client-facing values: the base URL and read token as environment variables (shell profile
+for `run.sh`, User scope for `run.ps1` on Windows), the write token to `~/.mimisbrunnr/credentials`.
 
 The launcher generates the five release secrets on first run — the three engine values
 (`PostgresConfiguration__Password`, `BlobConfiguration__AccessKey`,
@@ -243,19 +246,26 @@ The launcher generates the five release secrets on first run — the three engin
 `~/.mimisbrunnr/controller.env` (mode 600) so restarts do not rotate a token a running Host already
 holds.
 
-Your environment wins over the stored file, and a value supplied that way is deliberately not written
-to disk. The token names contain hyphens, so they cannot be exported by a shell at all — use
-`env 'Parameters__api-read-token=…' ./run.sh up` or PowerShell's `$env:` provider.
+**`CONTEXT_MEMORY_BASE_URL`, `CONTEXT_MEMORY_READ_TOKEN` and `CONTEXT_MEMORY_WRITE_TOKEN` are the
+master when they exist** — in the environment, or (for `run.sh`) in the shell profile, and for the write
+token in `~/.mimisbrunnr/credentials`. The API is published on the base URL's port (a `P_HOST` /
+`-HostPort` that disagrees is refused) and the controller is started with those tokens, overwriting its
+stored pair, so every client holding them reaches the Host without a `403`. The `Parameters__*` names
+also win for one run but are deliberately not written to disk; they contain hyphens, so they cannot be
+exported by a shell at all — use `env 'Parameters__api-read-token=…' ./run.sh up` or PowerShell's `$env:`
+provider.
 
 Options, the data-root layout, platform differences and the security notes are in
 [`scripts/CONTROLLER_LAUNCHER.md`](../../scripts/CONTROLLER_LAUNCHER.md).
 
-**Using the skills from another repository:** the store is a service started once per machine, and
-`run.sh` also publishes the API credentials to `~/.mimisbrunnr/credentials` — outside every checkout. A
-second repository therefore needs neither `provision-credentials.sh` nor a credential file of its own:
-copy `.agents/skills/mimisbrunnr-*` across, and the clients find the credential on their own. Reads are
-ambient; a write needs `set -a && source ~/.mimisbrunnr/credentials && set +a`, because a write
-credential is deliberately never loaded implicitly. The full sequence, and what sharing one store means
+**Using the skills from another repository:** the store is a service started once per machine, and the
+launcher publishes the client settings outside every checkout — environment variables for the base URL
+and read token, `~/.mimisbrunnr/credentials` for the write token alone. A second repository therefore
+needs neither `provision-credentials.sh` nor a credential file of its own: copy
+`.agents/skills/mimisbrunnr-*` across. Reads use the environment; a write reads the token from
+`~/.mimisbrunnr/credentials` (or `set -a && source ~/.mimisbrunnr/credentials && set +a` in a subshell),
+because an exported write token would reach every process — and the read client refuses to start beside
+one. The full sequence, and what sharing one store means
 for repository isolation, is in the README's *Use it in another repository*.
 
 ### Direct Host run

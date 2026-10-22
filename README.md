@@ -64,8 +64,9 @@ curl -fsSL https://raw.githubusercontent.com/generic-automation-and-it/smooth-ai
 
 ## Client Skills Installation
 
-Installs the ten owned skills ([below](#skills)). They find `~/.mimisbrunnr/credentials` from the service
-install, so no per-repo setup is needed.
+Installs the ten owned skills ([below](#skills)). They read the environment variables the service install
+adds to your shell profile (and the write token from `~/.mimisbrunnr/credentials`), so no per-repo setup
+is needed.
 
 ```bash
 # Mac/Linux: into the repo you are standing in

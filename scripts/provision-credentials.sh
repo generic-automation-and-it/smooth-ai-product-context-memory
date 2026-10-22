@@ -173,10 +173,10 @@ fi
 # written by an earlier run or by hand, so it is re-validated before it is written back. An explicit
 # `--base-url` that differs from the file's value rewrites the pair, keeping the tokens.
 #
-# `run.sh` does the opposite for the same key name, in `~/.mimisbrunnr/credentials`, and that is not an
-# inconsistency: that file describes a *running* installation, so its base URL must track the port the
-# run published, while this one is a checkout-local artefact no process is serving. Whichever file a
-# change touches, the two behaviours are deliberate in opposite directions.
+# `run.sh` treats the same key name differently, and that is not an inconsistency: there an existing
+# `CONTEXT_MEMORY_BASE_URL` in the operator's environment or shell profile is the *master* that decides
+# which port a running installation publishes, while this file is a checkout-local artefact no process
+# is serving. Whichever a change touches, the two behaviours are deliberate.
 rewrite_reason=""
 existing_base=""
 if [[ -f "$ENV_FILE" ]]; then

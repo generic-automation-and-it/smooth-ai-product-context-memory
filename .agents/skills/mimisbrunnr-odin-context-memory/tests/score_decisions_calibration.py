@@ -51,13 +51,13 @@ def emit_model_input(doc):
 def gate_environment(threshold, endpoint, model, base=None):
     """The gate's environment for a calibration run: what this run states, and nothing the operator set.
 
-    The gate resolves every `CONTEXT_MEMORY_DECISIONS_*` setting from the environment and, at import,
-    seeds the unset ones from the machine credential file. Inheriting either let the operator's own
+    The gate resolves every `CONTEXT_MEMORY_DECISIONS_*` setting from the environment (it once also
+    seeded unset ones from the machine credential file). Inheriting either let the operator's own
     roles, request path, API key, below-threshold mode, timeout or attempt budget into a measurement
     that is compared with a committed run recorded without them — so a drifted figure could be the
     operator's configuration rather than the model (issue 184; issue 179 finding 41). Every decision
-    setting is dropped, the credential-file pointer is redirected at an empty file rather than merely
-    unset (an unset pointer falls back to `~/.mimisbrunnr/credentials`), and the run sets only the four
+    setting is dropped, the credential-file pointer is still redirected at an empty file as a guard
+    against a reintroduced loader, and the run sets only the four
     it measures; the rest take the gate's shipped defaults, which is what the recorded run used.
     """
     env = {key: value for key, value in (os.environ if base is None else base).items()

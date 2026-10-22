@@ -1147,36 +1147,6 @@ DECISIONS_REFUSED = "decisions: refused"
 _GATE_REDACTOR_REFUSAL = ("REFUSED: the decision gate's redactor could not run, so record content would "
                           "have been sent unscrubbed. Nothing was written.")
 
-# Seed **only** the flag, and only so this client knows whether to shell out at all. The other nine
-# settings — including the API key, which is a secret — are loaded by the gate subprocess from the same
-# file, so nothing credential-bearing is pulled into this client's environment. This client deliberately
-# carries no credential handling, and loading a token here would defeat that.
-#
-# Parsed rather than imported: `context_memory_client` does `import redact` at module scope, so importing
-# it would make the redactor a startup dependency of this client too. Same contract as the capture
-# client's own loader, asserted equal by the harness.
-def _seed_decisions_enabled() -> None:
-    import os as _os
-    path = _os.environ.get(
-        "CONTEXT_MEMORY_CREDENTIAL_FILE",
-        str(Path(_os.path.expanduser("~")) / ".mimisbrunnr" / "credentials"))
-    try:
-        with open(path, encoding="utf-8") as handle:
-            lines = handle.readlines()
-    except OSError:
-        return
-    for line in lines:
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        # Presence, not truthiness, like the capture client's loader (review #4).
-        if key.strip() == DECISIONS_ENABLED and value and DECISIONS_ENABLED not in _os.environ:
-            _os.environ[DECISIONS_ENABLED] = value.strip()
-            return
-
-
-_seed_decisions_enabled()
 
 # The outer bound on one gate subprocess. Without it a hung gate blocks the export indefinitely,
 # which is the one outcome the note text below promises cannot happen: every failure mode is supposed
@@ -1324,10 +1294,8 @@ def gate_decisions(candidates: list[dict], state_file: Path | None = None,
 
     The gate runs its own redaction first, so a candidate's text is scrubbed before any model call.
     """
-    # The flag is read the way the gate reads it: seeded from the machine credential file at import,
-    # environment winning. Reading `os.environ` directly here tested only the process environment, so an
-    # operator who set ENABLED=true in `~/.mimisbrunnr/credentials` — the file the launcher maintains — was
-    # told the gate was disabled while the gate itself would have run.
+    # The flag is read the way the gate reads it: from the process environment, the one source of truth
+    # for every decision setting, so this client and the gate cannot disagree about whether it is on.
     if os.environ.get(DECISIONS_ENABLED, "").lower() != "true":
         return candidates, "decisions: disabled"
     if not DECISIONS_GATE.is_file():
@@ -1407,10 +1375,10 @@ def gate_decisions(candidates: list[dict], state_file: Path | None = None,
     if report.get("outcome") == "disabled":
         return candidates, "decisions: disabled"
 
-    # The gate's own report is the authority on hold-vs-mark, never this process's environment: the
-    # gate resolves the setting from the machine credential file as well, so an operator who set `mark`
-    # there saw the gate run under `mark` while this client defaulted to `hold` and silently dropped
-    # every below-threshold record (issue 179). A value this client cannot read is not guessed at.
+    # The gate's own report is the authority on hold-vs-mark, never a second reading here: when the two
+    # resolved the setting from different sources, an operator who set `mark` saw the gate run under
+    # `mark` while this client defaulted to `hold` and silently dropped every below-threshold record
+    # (issue 179). A value this client cannot read is not guessed at.
     below = report.get("belowThreshold")
     if below not in ("hold", "mark"):
         print(f"NOTE: the decision gate reported no usable belowThreshold ({below!r}); the gate was "

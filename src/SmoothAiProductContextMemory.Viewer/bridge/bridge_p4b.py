@@ -62,9 +62,8 @@ def _alias_env():
 
 _alias_env()
 
-# Import after aliasing. The capture client's import-time `load_machine_credentials`
-# seeds the read token from the machine credential file; the write token is never
-# ambient (NFR-02) and arrives per request.
+# Import after aliasing. The read token is an environment variable; the write
+# token is never ambient (NFR-02) and arrives per request.
 import context_memory_client as client  # noqa: E402
 
 
