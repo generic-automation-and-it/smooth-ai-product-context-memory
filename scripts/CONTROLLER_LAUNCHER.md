@@ -342,7 +342,6 @@ it without bound. That is the wrong thing to leave to a habit, so the flag write
 # >>> mimisbrunnr — managed by scripts/run.sh env-export --profile >>>
 export CONTEXT_MEMORY_BASE_URL='…'
 export CONTEXT_MEMORY_READ_TOKEN='…'
-export CONTEXT_MEMORY_WRITE_TOKEN='…'
 # <<< mimisbrunnr <<<
 ```
 

@@ -90,7 +90,7 @@ def machine_write_token():
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, value = line.partition("=")
-        if key.strip() == ENV_WRITE_TOKEN and value.strip():
+        if key.strip().casefold().replace(":", "__") in WRITE_TOKEN_NAMES and value.strip():
             return value.strip()
     return None
 

@@ -1538,7 +1538,7 @@ def _resolve_read_credentials(base_url):
     `Parameters__api-write-token` or a case variant stay ambient past this refusal (consumer review
     5440964552 #1). Loopback is asserted before the token is read, so a non-loopback base
     refuses before any request is considered. A missing token is a ``missing-credential`` error naming
-    the variable and the file — never an unauthenticated request that would come back 403.
+    the variable and the shell profile — never an unauthenticated request that would come back 403.
     """
     present = _store_client.write_tokens_present()
     if present:

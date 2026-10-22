@@ -72,7 +72,7 @@ no API change. The gate is a quality signal only: a score never changes `status`
 | `CONTEXT_MEMORY_DECISIONS_DEDUP_MAX_PAIRS_PER_BATCH` | `20` | Most pairs stage 3 asks across a batch; beyond it, `unexamined (budget)` is disclosed per candidate |
 | `CONTEXT_MEMORY_DECISIONS_DEDUP_MAX_RESULTS` | `5` | Most lexical candidates stage 2 retrieves per subject |
 
-**Where the settings live: in the environment, and nowhere else.** The gate and every client read the
+**Where the decision settings live: in the environment, and nowhere else.** The gate and the read settings (base URL, read token) read the
 process environment only. `scripts/run.sh` adds each of the fourteen non-secret settings that is
 **missing** to a marked block in your shell profile (`~/.zshrc`, `~/.bashrc` or `~/.profile` by login
 shell; `MIMIS_PROFILE` names another, `MIMIS_PROFILE=off` leaves profiles alone) — **add-only**: a setting
@@ -80,7 +80,7 @@ already exported, or assigned anywhere in the profile, is never added again and 
 endpoint, model and threshold survive every restart. `run.ps1` does the same on Windows with User-scope
 environment variables. The API key is never written by either: it is your secret to export. A session
 started before the profile changed has not inherited the new values — open a new shell, or restart the
-app that launched the agent. No file is consulted, so the gate never silently falls back to a
+app that launched the agent. The one exception is the write token, which a write route reads from `~/.mimisbrunnr/credentials` when it is not already in the environment. No other file is consulted, so the gate never silently falls back to a
 launcher default you did not choose.
 
 **Check it before enabling it:**
