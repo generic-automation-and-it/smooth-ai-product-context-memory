@@ -85,7 +85,9 @@ if (Get-Variable -Name PSNativeCommandArgumentPassing -ErrorAction SilentlyConti
 $script:ControllerName = "mimisbrunnr-$Id-controller"
 $script:StateVolume = "mimisbrunnr-$Id-controller-state"
 $script:GroupName = "smooth-mímisbrunnr-release-$Id"
-$script:UseDataRoot = $null -ne $DataRoot
+# A [string] parameter that was never passed is "", not $null, so testing for $null made every run take
+# the data-root branch and die in Split-Path on an empty path.
+$script:UseDataRoot = -not [string]::IsNullOrEmpty($DataRoot)
 # The credential file sits in the data *home*, one level above the volumes folder - the same place
 # run.sh puts it. Deriving the home as the parent of an explicitly-given -DataRoot wrote controller.env
 # to $HOME\controller.env instead, so an operator moving an installation between the two launchers did
