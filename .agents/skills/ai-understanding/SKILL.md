@@ -206,9 +206,9 @@ units are never scored. The gate is a subprocess CLI copied into this skill's `s
 
 - **Settings** — the eleven `CONTEXT_MEMORY_DECISIONS_*` keys (`ENABLED`, `BASE_URL`, `PATH`, `MODEL`,
   `API_KEY`, `MIN_PROBABILITY`, `MAX_ATTEMPTS`, `ROLES`, `BELOW_THRESHOLD`, `TIMEOUT`,
-  `LEDGER_MAX_ENTRIES`). Read from the process environment first, then `~/.mimisbrunnr/credentials`
-  **if it exists** (decision keys only — never a token; `LEDGER_MAX_ENTRIES` env-only), then the built-in defaults. The skill never writes
-  that file; Mímisbrunnr's run scripts own it. **The 5 `DEDUP_*` keys are not this skill's** — ignore them.
+  `LEDGER_MAX_ENTRIES`). Read from the process environment only, then the built-in defaults — never
+  from a file. Mímisbrunnr's run scripts add the missing ones to your shell profile; the skill never
+  writes them. **The 5 `DEDUP_*` keys are not this skill's** — ignore them.
   Off unless configured: absent settings or a non-`true` flag skips the gate, makes **zero network calls**,
   and the export report says `decisions: not configured` or `decisions: disabled` once.
 - **For each new/improved unit:** build a record with `gate_decisions.unit_record(unit)`, send the batch to

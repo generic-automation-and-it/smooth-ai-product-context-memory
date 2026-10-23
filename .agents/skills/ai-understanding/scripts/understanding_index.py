@@ -1230,7 +1230,7 @@ def decisions_column(units: list[dict], env: dict | None = None) -> list[str]:
 
     The `--review --decisions` half of the report. It never changes the exit code and never rewrites a
     unit; it is skipped (with `decisions:` disclosed) when the gate is not configured. Scored against
-    the gate's own settings, which are read from the environment and the machine credential file.
+    the gate's own settings, which are read from the environment.
     """
     import gate_decisions as gd
 

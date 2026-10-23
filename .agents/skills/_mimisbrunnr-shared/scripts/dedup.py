@@ -33,10 +33,9 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-# Reuse the capture skill's decision-model transport. Importing the module seeds the decision settings
-# from the machine credential file (its own import-time side effect), and it does not import the
-# redactor at module scope, so it is safe here — the redactor runs over stdin as a subprocess, never as
-# a startup dependency.
+# Reuse the capture skill's decision-model transport. Importing the module reads nothing from disk, and
+# it does not import the redactor at module scope, so it is safe here — the redactor runs over stdin as
+# a subprocess, never as a startup dependency.
 import context_memory_client as client
 import decisions_gate as gate
 

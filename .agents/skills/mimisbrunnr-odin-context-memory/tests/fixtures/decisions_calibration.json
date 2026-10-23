@@ -17,7 +17,7 @@
     "re-measuring must FAIL CalibrationEvidenceTests -- the digest catches an edit that keeps the",
     "version -- so a recorded run can never certify a rubric it did not score.",
     "`bar` is the shipped default: the gate's built-in DEFAULT_MIN_PROBABILITY and the value",
-    "scripts/run.sh publishes into the machine credential file. `atBar05` holds the earlier 0.5 run."
+    "scripts/run.sh adds to the shell profile when it is missing. `atBar05` holds the earlier 0.5 run."
   ],
   "rubricVersion": "2",
   "rubricSha256": "e7b391a21b6f593bd7e50f9b4fff8ff321e7df0295dec6573ee994f7f2b8612c",

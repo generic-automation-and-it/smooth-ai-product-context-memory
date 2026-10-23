@@ -21,9 +21,6 @@ GATE = SCRIPTS / "decisions_gate.py"
 
 ENABLED = "CONTEXT_MEMORY_DECISIONS_ENABLED"
 BELOW_THRESHOLD = "CONTEXT_MEMORY_DECISIONS_BELOW_THRESHOLD"
-# The credential file path is resolved per-call, never cached at import: a test or a sibling session
-# may point `CONTEXT_MEMORY_CREDENTIAL_FILE` somewhere else, and a cached value would keep reading a
-# real operator's file. Decision keys only — the gate never loads a token.
 # Where a held unit's attempt budget must NOT live: the store is wiped by sibling sessions.
 DEFAULT_LEDGER = os.path.join(
     os.environ.get("TMPDIR", os.path.expanduser("~")), "mimisbrunnr-ai-understanding-ledger.json"
@@ -64,28 +61,10 @@ def _run_gate(args, stdin=None, env=None, timeout=30):
     )
 
 
-def _credential_file(env=None):
-    env = env or os.environ
-    return env.get("CONTEXT_MEMORY_CREDENTIAL_FILE",
-                   os.path.join(os.path.expanduser("~"), ".mimisbrunnr", "credentials"))
-
-
 def _flag_set_nowhere(env=None):
-    """True when ENABLED appears in neither the environment nor the machine credential file."""
+    """True when ENABLED is absent from the environment — the one place the decision settings live."""
     env = env or os.environ
-    if ENABLED in env:
-        return False
-    try:
-        with open(_credential_file(env), encoding="utf-8") as handle:
-            for line in handle:
-                line = line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                if line.partition("=")[0].strip() == ENABLED:
-                    return False
-    except OSError:
-        pass
-    return True
+    return ENABLED not in env
 
 
 def gate_status(env=None, timeout=None):

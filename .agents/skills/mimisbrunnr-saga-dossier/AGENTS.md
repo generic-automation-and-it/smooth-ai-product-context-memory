@@ -7,7 +7,7 @@ Read [`SKILL.md`](./SKILL.md) first — preview, bundle, compose, focus, finding
 ## Non-Negotiables
 
 - **Env vars and who receives them.** The composer reads `CONTEXT_MEMORY_READ_TOKEN` and
-  `CONTEXT_MEMORY_BASE_URL`, seeded from the machine credential file by importing the shared client — never a
+  `CONTEXT_MEMORY_BASE_URL` from the environment only — nothing is loaded from a file, and never a
   write token. Only its read-only transport sends the token, as the `Authorization` header of the
   `preview` and `bundle` requests.
 
@@ -15,6 +15,7 @@ Read [`SKILL.md`](./SKILL.md) first — preview, bundle, compose, focus, finding
 
 | Date | Change | Ref |
 | :---- | :---- | :---- |
+| 2026-10-22 | **Read token and base URL are environment-only (APPHOST LADR-007).** The shared client no longer seeds them from the machine credential file; the missing-credential message names the variable and where `run.sh` puts it. The file-seeding case became one asserting that importing the client loads nothing from a file carrying every client name. | LADR-007 |
 | 2026-10-16 | The base-URL default comes from the shared client (`client.DEFAULT_BASE_URL`) instead of a re-stated `http://localhost:5141` literal — the env var name was already borrowed from it, so the port was the one value that could drift away from every other client's fallback | — |
 | 2026-10-15 | Ralph loop: `version: true` is refused as the near-miss path already refuses it; a non-object bundle answer is a refusal; five dead symbols removed | — |
 | 2026-09-23 | Composer, invocation contract and L0 harness implemented | — |

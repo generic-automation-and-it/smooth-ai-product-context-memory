@@ -62,58 +62,38 @@ def without_write_tokens(environ=None):
 # preflight batch without touching pipeline logic. Mirrors Preflight.MaxCandidates.
 MAX_CANDIDATES = 20
 
-# Machine-level credential file, outside every repository. scripts/run.sh writes it when the stack
-# starts, so the skills work in any checkout with nothing to provision per repo — which is the point:
-# a credential that lives inside a gitignored `.context/` needs that repository's provisioner, and a
-# repository is exactly what a cross-repo skill cannot assume it has.
-#
-# Only the requested names are loaded, and a name already in the environment always wins. That matters
-# for the read-only client, which refuses to start when a write token is present: loading the whole file
-# into os.environ would hand it a write token and break the very check that keeps the read surface
-# read-only. Parse-and-select rather than source — these are KEY=value lines, and `source` on a file
-# holding unquoted values would re-split anything with a space in it.
+# Every client setting is an environment variable — the base URL, the read token and the decision
+# settings — and `scripts/run.sh` publishes any that are missing to the operator's shell profile. The one
+# exception is the write token. An exported variable reaches every process the shell starts, and the read
+# client refuses to start when a write token is present, which is what keeps the read surface read-only;
+# so the write token lives in this machine-level file instead, outside every repository, and is read only
+# on the write path (`_request`) when it is not already in the environment.
 MACHINE_CREDENTIAL_FILE = os.environ.get(
     "CONTEXT_MEMORY_CREDENTIAL_FILE",
     os.path.join(os.path.expanduser("~"), ".mimisbrunnr", "credentials"))
 
 
-def load_machine_credentials(*names):
-    """Seed the named variables from the machine credential file when they are not already set.
+def machine_write_token():
+    """The write token from the machine credential file, or None. Never written into os.environ.
 
-    Returns the file it read, or None. A malformed line is skipped rather than raised: a partial file
-    must not turn one working variable into an import-time crash, and the missing variable still fails
-    closed at the point of use with the error that names it.
+    Parse-and-select rather than source — these are KEY=value lines, and `source` on a file holding
+    unquoted values would re-split anything with a space in it. A malformed line is skipped rather than
+    raised, so a damaged file fails closed at the point of use with the error that names the variable.
     """
-    path = MACHINE_CREDENTIAL_FILE
     try:
-        with open(path, encoding="utf-8") as handle:
+        with open(MACHINE_CREDENTIAL_FILE, encoding="utf-8") as handle:
             lines = handle.readlines()
     except OSError:
         return None
-    wanted = set(names)
     for line in lines:
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, value = line.partition("=")
-        key = key.strip()
-        # Presence, not truthiness: an explicitly set empty value is the operator turning a setting
-        # off, and filling it from the file silently overrode them (review #4).
-        if key in wanted and value and key not in os.environ:
-            os.environ[key] = value.strip()
-    return path
+        if key.strip().casefold().replace(":", "__") in WRITE_TOKEN_NAMES and value.strip():
+            return value.strip()
+    return None
 
-
-# Seeded once at import, never per call. A per-call fallback would defeat the fail-closed behaviour the
-# read-only contract depends on: a caller that deliberately clears the token to prove the client refuses
-# without it would be handed one from this file anyway, so the absence could never be established. Loaded
-# at start-up like any dotenv, so a cleared environment afterwards means what it says.
-#
-# The read token and the base URL only. The write token is deliberately **not** ambient: this module is
-# imported by the read client, which refuses to start when a write token is present, so seeding one here
-# would trip that check in every read worker — and ambient write capability is the wrong default anyway.
-# To write, source the credential file.
-load_machine_credentials(ENV_READ_TOKEN, ENV_BASE_URL)
 
 # Query recall limit for the semantic-dedup surface (decision 1). Mirrors MemorySearchDefaults.MaxLimit.
 MAX_QUERY_LIMIT = 200
@@ -419,11 +399,16 @@ def _request(method, path, payload=None, query=None, timeout=None, token=None):
     write = is_write_route(method, path)
     token_name = ENV_WRITE_TOKEN if write else ENV_READ_TOKEN
     # A caller-supplied token wins (the Console bridges forward a per-request
-    # credential); otherwise fall back to the process environment, as before.
+    # credential); otherwise the process environment. A write falls back to the
+    # machine credential file, where the write token lives so it is never ambient;
+    # a read never does, so a read worker cannot be handed write capability here.
     if token is None:
         token = os.environ.get(token_name)
+    if not token and write:
+        token = machine_write_token()
     if not token:
-        raise ClientError(0, "missing-credential", f"{token_name} is required")
+        where = f" (environment or {MACHINE_CREDENTIAL_FILE})" if write else " (environment)"
+        raise ClientError(0, "missing-credential", f"{token_name} is required{where}")
     headers = {"Accept": "application/json", "Authorization": f"Bearer {token}"}
     if payload is not None:
         body = json.dumps(payload).encode("utf-8")
