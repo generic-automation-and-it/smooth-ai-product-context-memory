@@ -147,15 +147,18 @@ _PLACEHOLDER = re.compile(r"\{\{([^{}]*)\}\}")
 def read_asset(name: str) -> str:
     """Read one message from this skill's `assets/`, or raise `AssetUnavailable`.
 
-    Fail-closed on every path: a missing file, an unreadable one and an empty one are one class of
-    failure. The error names the file and never its body, so no message content reaches a log.
+    Fail-closed on every path: a missing file, an unreadable one, one holding bytes that are not
+    UTF-8, and an empty one are one class of failure. The error names the file and never its body,
+    so no message content reaches a log.
     """
     path = _SKILL_ASSETS / name
     try:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError:
         raise AssetUnavailable(f"asset-missing: {name}") from None
-    except OSError:
+    except (OSError, UnicodeDecodeError):
+        # `UnicodeDecodeError` is a `ValueError`, not an `OSError`: without it here, a corrupt asset
+        # escaped both this guard and `main` as a traceback echoing byte offsets.
         raise AssetUnavailable(f"asset-unreadable: {name}") from None
     if text.endswith("\n"):
         text = text[:-1]

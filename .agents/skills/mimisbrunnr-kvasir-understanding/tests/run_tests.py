@@ -5579,6 +5579,13 @@ class SkillAssetTests(unittest.TestCase):
                 with self.assertRaises(uc.AssetUnavailable) as unreadable:
                     uc.read_asset("a-directory.md")
                 self.assertEqual("asset-unreadable: a-directory.md", str(unreadable.exception))
+                # Bytes that are not UTF-8 raise UnicodeDecodeError — a ValueError, not an OSError —
+                # so it escaped this loader and main as a traceback echoing byte offsets until this
+                # case existed. A corrupt asset is the broken-install path this guard exists for.
+                (Path(tmp) / "not-utf8.md").write_bytes(b"REFUSED: \xff\xfe not utf-8")
+                with self.assertRaises(uc.AssetUnavailable) as undecodable:
+                    uc.read_asset("not-utf8.md")
+                self.assertEqual("asset-unreadable: not-utf8.md", str(undecodable.exception))
 
     def test_an_empty_asset_is_a_refusal_not_an_empty_message(self):
         with tempfile.TemporaryDirectory() as tmp:
