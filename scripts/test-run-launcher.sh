@@ -2,8 +2,9 @@
 # Harness for the operator controller launchers (`run.sh`).
 #
 # Scope: everything that does not need a container engine. It never starts, stops or pulls anything, and
-# it never reads the operator's real credentials — every case runs against a scratch MIMIS_HOME, so a
-# red run cannot leave a token file behind or rotate a credential a running Host holds.
+# it never reads the operator's real credentials or shell profile — every case runs in a cleared
+# environment against a scratch MIMIS_HOME, HOME and profile, so a red run cannot leave a token file
+# behind, rotate a credential a running Host holds, or add a line to the operator's ~/.zshrc.
 #
 # `run.ps1` has no equivalent here. Its credential path is the same algorithm as this one, and the
 # Windows-specific parts (named-pipe socket, ACL inheritance, the `-v` label branch) cannot be executed
@@ -68,24 +69,46 @@ sed_inplace() {
   mv "$sed_tmp" "$1"
 }
 
-# Run the launcher against a scratch home. Never inherits the operator's MIMIS_* overrides, and points
-# the machine-credential publication at the scratch tree as well — the launcher derives that path from
-# MIMIS_HOME, and a harness that only redirected the home would still write to the real ~/.mimisbrunnr.
+# Run the launcher against a scratch home, in a cleared environment.
 #
-# The home is a separate entry point rather than an optional leading argument: `run_launcher env` is
-# how every other case in this file calls it, and a leading argument would read the verb `env` as a
-# directory — which fails late, as a usage message, in cases that have nothing to do with homes.
+# `env -i`, not a list of unsets. The launcher now takes CONTEXT_MEMORY_BASE_URL and both tokens as the
+# master, reads the decision settings from the environment, and writes the shell profile — so a case
+# that inherited any CONTEXT_MEMORY_* name from the operator's shell would exercise the operator's
+# configuration, and one that inherited HOME would add a block to their real ~/.zshrc. An unset list has
+# to name every such variable and silently misses the next one; a cleared environment cannot.
+# MIMIS_MACHINE_CREDENTIALS and MIMIS_PROFILE are pinned as well, because the launcher derives both from
+# the home and a harness that redirected only MIMIS_HOME once wrote to the operator's real ~/.mimisbrunnr.
+#
+# Leading NAME=value arguments are added to that environment, so a case states every variable it depends
+# on at the call site. The home is a separate entry point rather than an optional leading argument:
+# `run_launcher env` is how every other case calls it, and a leading argument would read the verb `env`
+# as a directory — which fails late, as a usage message, in cases that have nothing to do with homes.
 run_launcher_in() {
   local home="$1"
   shift
-  # Never hand-roll this call. The unset list is the whole point — a case that inherited an operator's
-  # CONTEXT_MEMORY_READ_TOKEN would exercise the reuse path against a token it did not write — and a
-  # caller that omits it loses both MIMIS_* redirects, which is how this harness once wrote to the
-  # operator's real ~/.mimisbrunnr.
-  env -u MIMIS_TOKEN_FILE -u CONTEXT_MEMORY_READ_TOKEN -u CONTEXT_MEMORY_WRITE_TOKEN \
-    -u CONTEXT_MEMORY_BASE_URL -u CONTEXT_MEMORY_CREDENTIAL_FILE \
-    MIMIS_HOME="$home" MIMIS_MACHINE_CREDENTIALS="$home/credentials" \
-    "$launcher" "$@"
+  local -a extra=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      *=*) extra+=("$1"); shift ;;
+      *) break ;;
+    esac
+  done
+  env -i PATH="$PATH" TMPDIR="${TMPDIR:-/tmp}" HOME="$home/fake-home" SHELL=/bin/zsh     MIMIS_HOME="$home" MIMIS_MACHINE_CREDENTIALS="$home/credentials" MIMIS_PROFILE="$home/.zshrc"     ${extra[@]+"${extra[@]}"} "$launcher" "$@"
+}
+
+# How many profile backups exist beside a profile. A glob loop rather than `ls | wc -l`: `ls` on a
+# pattern with no match exits non-zero, and under `pipefail` that aborts the harness mid-run.
+count_backups() {
+  local n=0 f
+  for f in "$1"-mimisbrunnr-*; do
+    [ -e "$f" ] && n=$((n + 1))
+  done
+  echo "$n"
+}
+
+# The read token a POSIX profile block exports, quotes removed.
+profile_read_token() {
+  sed -n "s/^export CONTEXT_MEMORY_READ_TOKEN='\(.*\)'\$/\1/p" "$1"
 }
 
 run_launcher() { run_launcher_in "$scratch/home" "$@"; }
@@ -123,9 +146,7 @@ echo "run.sh harness — scratch home $scratch/home"
 # `env MIMIS_ID=… env …` would re-exec `env` without forwarding the assignment and silently test nothing.
 expect_fail_id() {
   local name="$1" needle="$2" id="$3"
-  if env -u MIMIS_TOKEN_FILE MIMIS_ID="$id" MIMIS_HOME="$scratch/home" \
-    MIMIS_MACHINE_CREDENTIALS="$scratch/home/credentials" "$launcher" env \
-    >"$scratch/out" 2>"$scratch/err"; then
+  if run_launcher MIMIS_ID="$id" env >"$scratch/out" 2>"$scratch/err"; then
     no "$name" "expected failure, got exit 0"
   elif grep -qF "$needle" "$scratch/out" "$scratch/err"; then
     ok "$name"
@@ -198,9 +219,7 @@ fi
 # A supplied value wins for the run and is never written to disk. Writing a secret the operator did
 # not ask to store is the surprise; the omission is not.
 supplied="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-env -u MIMIS_TOKEN_FILE \
-  MIMIS_HOME="$scratch/home" "Parameters__api-write-token=$supplied" \
-  "$launcher" env >/dev/null 2>&1
+run_launcher "Parameters__api-write-token=$supplied" env >/dev/null 2>&1
 if grep -qF "$supplied" "$credential_file"; then
   no "a supplied secret is not written to disk" "it was persisted"
 else
@@ -211,9 +230,7 @@ fi
 # values the current run selected, so supplying one variable silently dropped the stored token for it —
 # and the next run without that variable minted a different one, 403ing a Host already running.
 stored_read="$(sed -n 's/^Parameters__api-read-token=//p' "$credential_file")"
-env -u MIMIS_TOKEN_FILE \
-  MIMIS_HOME="$scratch/home" "Parameters__api-read-token=$supplied" \
-  "$launcher" env >/dev/null 2>&1
+run_launcher "Parameters__api-read-token=$supplied" env >/dev/null 2>&1
 if [ "$(sed -n 's/^Parameters__api-read-token=//p' "$credential_file")" = "$stored_read" ]; then
   ok "an env-sourced value does not displace the stored one"
 else
@@ -226,7 +243,7 @@ symlink_dir="$scratch/symlink"
 mkdir -p "$symlink_dir"
 printf 'target\n' >"$symlink_dir/target"
 ln -s "$symlink_dir/target" "$symlink_dir/controller.env"
-if MIMIS_HOME="$symlink_dir" "$launcher" env >"$scratch/out" 2>"$scratch/err"; then
+if run_launcher_in "$symlink_dir" env >"$scratch/out" 2>"$scratch/err"; then
   no "refuses a symlinked credential file" "it wrote through the link"
 elif grep -q "symlink" "$scratch/err"; then
   ok "refuses a symlinked credential file"
@@ -237,6 +254,278 @@ if [ "$(cat "$symlink_dir/target")" = "target" ]; then
   ok "the symlink target was not written through"
 else
   no "the symlink target was not written through" "target was modified"
+fi
+
+# ---------------------------------------------------------------------------------------------
+# the shell profile: every missing client setting is added, nothing present is touched
+# ---------------------------------------------------------------------------------------------
+
+# The run above (`env`, against the scratch home) published the client environment into the scratch
+# profile `run_launcher_in` names. These cases read what landed there.
+home_profile="$scratch/home/.zshrc"
+
+for key in CONTEXT_MEMORY_BASE_URL CONTEXT_MEMORY_READ_TOKEN CONTEXT_MEMORY_DECISIONS_ENABLED \
+  CONTEXT_MEMORY_DECISIONS_BASE_URL CONTEXT_MEMORY_DECISIONS_MODEL CONTEXT_MEMORY_DECISIONS_TIMEOUT; do
+  if [ "$(grep -c "^export $key=" "$home_profile" 2>/dev/null)" = "1" ]; then
+    ok "the profile exports $key exactly once"
+  else
+    no "the profile exports $key exactly once" "count $(grep -c "^export $key=" "$home_profile" 2>/dev/null)"
+  fi
+done
+
+# The write token is the one client credential that must never be exported: it would reach every
+# process the shell starts, and the read client refuses to run beside one.
+if grep -q 'CONTEXT_MEMORY_WRITE_TOKEN' "$home_profile"; then
+  no "the profile never exports the write token" "it does"
+else
+  ok "the profile never exports the write token"
+fi
+
+# The decision API key is the operator's own secret, never a launcher default.
+if grep -q 'CONTEXT_MEMORY_DECISIONS_API_KEY' "$home_profile"; then
+  no "the profile never carries the decision API key" "it does"
+else
+  ok "the profile never carries the decision API key"
+fi
+
+# The gate is OFF by default: a launcher that shipped ENABLED=true would score every export on a
+# machine with no decision model.
+if grep -q "^export CONTEXT_MEMORY_DECISIONS_ENABLED='false'$" "$home_profile"; then
+  ok "the decision gate defaults to disabled"
+else
+  no "the decision gate defaults to disabled" "$(grep DECISIONS_ENABLED "$home_profile")"
+fi
+
+# The read token in the profile is the one the Host is started with — a mismatch is a 403 on every read.
+if [ "$(profile_read_token "$home_profile")" = "$(sed -n 's/^Parameters__api-read-token=//p' "$credential_file")" ]; then
+  ok "the profile's read token is the one the controller holds"
+else
+  no "the profile's read token is the one the controller holds" "they differ"
+fi
+
+if [ "$(file_mode "$home_profile")" = "600" ]; then
+  ok "the profile is written mode 600"
+else
+  no "the profile is written mode 600" "mode is $(file_mode "$home_profile")"
+fi
+
+# Idempotence: with nothing missing, a re-run leaves the profile byte-identical and takes no backup.
+before="$(cksum <"$home_profile")"
+backups_before="$(count_backups "$home_profile")"
+run_launcher env >/dev/null 2>&1
+if [ "$before" = "$(cksum <"$home_profile")" ] &&
+  [ "$backups_before" = "$(count_backups "$home_profile")" ]; then
+  ok "a re-run with nothing missing leaves the profile untouched"
+else
+  no "a re-run with nothing missing leaves the profile untouched" "the profile changed or was backed up"
+fi
+
+# The environment is the master: an operator's hand-tuned value inside the block survives every run.
+sed_inplace "$home_profile" "s|^export CONTEXT_MEMORY_DECISIONS_MODEL=.*|export CONTEXT_MEMORY_DECISIONS_MODEL='openjev'|"
+sed_inplace "$home_profile" '/^export CONTEXT_MEMORY_DECISIONS_TIMEOUT=/d'
+run_launcher env >/dev/null 2>&1
+if grep -q "^export CONTEXT_MEMORY_DECISIONS_MODEL='openjev'$" "$home_profile"; then
+  ok "a re-run preserves an operator's edited value"
+else
+  no "a re-run preserves an operator's edited value" "$(grep DECISIONS_MODEL "$home_profile")"
+fi
+if [ "$(grep -c '^export CONTEXT_MEMORY_DECISIONS_TIMEOUT=' "$home_profile")" = "1" ]; then
+  ok "a re-run adds back a setting that went missing"
+else
+  no "a re-run adds back a setting that went missing" "count $(grep -c '^export CONTEXT_MEMORY_DECISIONS_TIMEOUT=' "$home_profile")"
+fi
+
+# A setting the operator already has in the environment is never added: the environment is the master,
+# and a second assignment in the profile would override it in every new shell.
+env_home="$scratch/home-env-set"
+mkdir -p "$env_home"
+run_launcher_in "$env_home" CONTEXT_MEMORY_DECISIONS_ENABLED=true env >/dev/null 2>&1
+if grep -q 'CONTEXT_MEMORY_DECISIONS_ENABLED' "$env_home/.zshrc"; then
+  no "a setting already in the environment is not added to the profile" "it was added"
+else
+  ok "a setting already in the environment is not added to the profile"
+fi
+
+# …and one the operator assigned *outside* the managed block is theirs, not a gap to fill.
+own_home="$scratch/home-own-line"
+mkdir -p "$own_home"
+printf '# mine\nexport CONTEXT_MEMORY_DECISIONS_MODEL=mine\n' >"$own_home/.zshrc"
+run_launcher_in "$own_home" env >/dev/null 2>&1
+if [ "$(grep -c 'CONTEXT_MEMORY_DECISIONS_MODEL' "$own_home/.zshrc")" = "1" ] &&
+  grep -q '^export CONTEXT_MEMORY_DECISIONS_MODEL=mine$' "$own_home/.zshrc"; then
+  ok "an assignment outside the managed block is respected, not duplicated"
+else
+  no "an assignment outside the managed block is respected, not duplicated" "$(grep DECISIONS_MODEL "$own_home/.zshrc" | tr '\n' ' ')"
+fi
+if grep -q '^# mine$' "$own_home/.zshrc"; then
+  ok "the profile's own content is preserved"
+else
+  no "the profile's own content is preserved" "it was lost"
+fi
+
+# MIMIS_PROFILE=off leaves every profile alone.
+off_home="$scratch/home-profile-off"
+mkdir -p "$off_home"
+if run_launcher_in "$off_home" MIMIS_PROFILE=off env >/dev/null 2>&1 && [ ! -e "$off_home/.zshrc" ] &&
+  [ ! -e "$off_home/off" ]; then
+  ok "MIMIS_PROFILE=off writes no profile"
+else
+  no "MIMIS_PROFILE=off writes no profile" "a profile was written"
+fi
+
+# ---------------------------------------------------------------------------------------------
+# the client environment is the master for the base URL and the tokens
+# ---------------------------------------------------------------------------------------------
+
+master_home="$scratch/home-master"
+mkdir -p "$master_home"
+master_read="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+master_write="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+run_launcher_in "$master_home" env >/dev/null 2>&1
+run_launcher_in "$master_home" CONTEXT_MEMORY_BASE_URL=http://localhost:6141 \
+  "CONTEXT_MEMORY_READ_TOKEN=$master_read" "CONTEXT_MEMORY_WRITE_TOKEN=$master_write" env \
+  >"$scratch/out" 2>"$scratch/err"
+if grep -q "^Parameters__api-read-token=$master_read$" "$master_home/controller.env" &&
+  grep -q "^Parameters__api-write-token=$master_write$" "$master_home/controller.env"; then
+  ok "exported tokens overwrite the controller's stored pair"
+else
+  no "exported tokens overwrite the controller's stored pair" "$(grep api- "$master_home/controller.env" | cut -c1-40 | tr '\n' ' ')"
+fi
+if grep -q "^CONTEXT_MEMORY_WRITE_TOKEN=$master_write$" "$master_home/credentials"; then
+  ok "the exported write token is what the credential file publishes"
+else
+  no "the exported write token is what the credential file publishes" "it is not"
+fi
+if grep -q 'NOTE: CONTEXT_MEMORY_WRITE_TOKEN is exported' "$scratch/err"; then
+  ok "an exported write token is reported, because it stops the read client"
+else
+  no "an exported write token is reported, because it stops the read client" "no note"
+fi
+# The profile already holds a base URL and read token from the first run, so neither is re-added
+# under the exported ones — the environment wins in every shell, not the profile.
+if [ "$(grep -c '^export CONTEXT_MEMORY_BASE_URL=' "$master_home/.zshrc")" = "1" ]; then
+  ok "an exported base URL adds no second assignment"
+else
+  no "an exported base URL adds no second assignment" "count $(grep -c '^export CONTEXT_MEMORY_BASE_URL=' "$master_home/.zshrc")"
+fi
+
+# The base URL decides the published port, which env-export reports back.
+run_launcher_in "$master_home" CONTEXT_MEMORY_BASE_URL=http://localhost:6141 env-export \
+  >"$scratch/out" 2>/dev/null
+if grep -q "^export CONTEXT_MEMORY_BASE_URL='http://localhost:6141'$" "$scratch/out"; then
+  ok "an exported base URL is the one the stack serves"
+else
+  no "an exported base URL is the one the stack serves" "$(grep BASE_URL= "$scratch/out" | head -1)"
+fi
+
+# A base URL that lives only in the profile — a shell that has not sourced it yet — is still the master.
+profile_url_home="$scratch/home-profile-url"
+mkdir -p "$profile_url_home"
+printf "export CONTEXT_MEMORY_BASE_URL='http://localhost:7141'\n" >"$profile_url_home/.zshrc"
+run_launcher_in "$profile_url_home" env-export >"$scratch/out" 2>/dev/null
+if grep -q "^export CONTEXT_MEMORY_BASE_URL='http://localhost:7141'$" "$scratch/out"; then
+  ok "a base URL held only in the profile is still the master"
+else
+  no "a base URL held only in the profile is still the master" "$(grep BASE_URL= "$scratch/out" | head -1)"
+fi
+
+expect_fail "a P_HOST that disagrees with the base URL is refused" "the base URL is the master" \
+  CONTEXT_MEMORY_BASE_URL=http://localhost:6141 P_HOST=7000 env
+expect_fail "a non-loopback base URL is refused" "loopback, explicit port" \
+  CONTEXT_MEMORY_BASE_URL=http://example.com:6141 env
+expect_fail "a base URL without a port is refused" "loopback, explicit port" \
+  CONTEXT_MEMORY_BASE_URL=http://localhost env
+
+# One value exported as both tokens would void the read/write split for every client holding it.
+expect_fail "identical exported read and write tokens are refused" "read and write tokens are identical" \
+  "CONTEXT_MEMORY_READ_TOKEN=$master_read" "CONTEXT_MEMORY_WRITE_TOKEN=$master_read" env
+
+# With no base URL anywhere, the run's own port is published — the shifted one under MIMIS_SHIFT_PORTS.
+shift_home="$scratch/home-shifted"
+mkdir -p "$shift_home"
+run_launcher_in "$shift_home" MIMIS_SHIFT_PORTS=1 env >/dev/null 2>&1
+if grep -q "^export CONTEXT_MEMORY_BASE_URL='http://localhost:25141'$" "$shift_home/.zshrc"; then
+  ok "a shifted run publishes its own port when no base URL exists"
+else
+  no "a shifted run publishes its own port when no base URL exists" "$(grep BASE_URL "$shift_home/.zshrc")"
+fi
+
+# The write token lives in the credential file, and with no controller.env it is still the master: the
+# next start rebuilds the pair around it rather than minting a new write token.
+rebuild_home="$scratch/home-rebuild"
+mkdir -p "$rebuild_home"
+run_launcher_in "$rebuild_home" env >/dev/null 2>&1
+kept_write="$(sed -n 's/^CONTEXT_MEMORY_WRITE_TOKEN=//p' "$rebuild_home/credentials")"
+rm -f "$rebuild_home/controller.env"
+run_launcher_in "$rebuild_home" env >/dev/null 2>&1
+if [ -n "$kept_write" ] && grep -q "^Parameters__api-write-token=$kept_write$" "$rebuild_home/controller.env"; then
+  ok "the stored write token is the master when controller.env is rebuilt"
+else
+  no "the stored write token is the master when controller.env is rebuilt" "a new write token was minted"
+fi
+
+# ---------------------------------------------------------------------------------------------
+# migration: a profile and a credential file written by an earlier release
+# ---------------------------------------------------------------------------------------------
+
+migrate_home="$scratch/home-migrate"
+mkdir -p "$migrate_home"
+{
+  echo "# >>> mimisbrunnr — managed by scripts/run.sh env-export --profile >>>"
+  echo "export CONTEXT_MEMORY_BASE_URL='http://localhost:5141'"
+  echo "export CONTEXT_MEMORY_DECISIONS_BASE_URL=http://127.0.0.1:1234"
+  echo "export CONTEXT_MEMORY_WRITE_TOKEN=$master_write"
+  echo "# <<< mimisbrunnr <<<"
+} >"$migrate_home/.zshrc"
+{
+  echo "CONTEXT_MEMORY_READ_TOKEN=old-read"
+  echo "CONTEXT_MEMORY_WRITE_TOKEN=old-write"
+  echo "CONTEXT_MEMORY_DECISIONS_BASE_URL=http://localhost:11434"
+  echo "CONTEXT_MEMORY_DECISIONS_API_KEY="
+  echo "CONTEXT_MEMORY_DECISIONS_API_KEY="
+  echo "CONTEXT_MEMORY_BASE_URL=http://localhost:5141"
+} >"$migrate_home/credentials"
+printf 'CONTEXT_MEMORY_READ_TOKEN=old-read\n' >"$migrate_home/credentials-read-only"
+run_launcher_in "$migrate_home" env >"$scratch/out" 2>"$scratch/err"
+
+if grep -q 'CONTEXT_MEMORY_WRITE_TOKEN' "$migrate_home/.zshrc"; then
+  no "a write token in the managed block is removed" "it is still exported"
+else
+  ok "a write token in the managed block is removed"
+fi
+# The profile's write token was the master, so it — not the stale file's — is what the file now holds.
+if [ "$(grep -c . "$migrate_home/credentials" | tr -d ' ')" = "4" ] &&
+  grep -q "^CONTEXT_MEMORY_WRITE_TOKEN=$master_write$" "$migrate_home/credentials"; then
+  ok "the credential file is reduced to the master write token"
+else
+  no "the credential file is reduced to the master write token" "$(grep -v '^#' "$migrate_home/credentials" | cut -c1-40 | tr '\n' ' ')"
+fi
+if grep -q "^export CONTEXT_MEMORY_DECISIONS_BASE_URL=http://127.0.0.1:1234$" "$migrate_home/.zshrc"; then
+  ok "the operator's decision endpoint in the block survives the migration"
+else
+  no "the operator's decision endpoint in the block survives the migration" "$(grep DECISIONS_BASE_URL "$migrate_home/.zshrc")"
+fi
+if [ -f "$migrate_home/credentials-read-only" ] && grep -q 'no longer read by any client' "$scratch/err"; then
+  ok "the retired read-only file is named, never deleted"
+else
+  no "the retired read-only file is named, never deleted" "it was removed or not mentioned"
+fi
+
+# The removal must not depend on something else being missing: a block that is otherwise complete and
+# only carries a write token is still rewritten without it.
+sed_inplace "$migrate_home/.zshrc" "s|^# <<< mimisbrunnr <<<\$|export CONTEXT_MEMORY_WRITE_TOKEN=$master_write\\
+# <<< mimisbrunnr <<<|"
+run_launcher_in "$migrate_home" env >/dev/null 2>&1
+if grep -q 'CONTEXT_MEMORY_WRITE_TOKEN' "$migrate_home/.zshrc"; then
+  no "a write token is removed from an otherwise complete block" "it is still exported"
+else
+  ok "a write token is removed from an otherwise complete block"
+fi
+
+if [ "$(file_mode "$migrate_home/credentials")" = "600" ]; then
+  ok "the credential file is mode 600"
+else
+  no "the credential file is mode 600" "mode is $(file_mode "$migrate_home/credentials")"
 fi
 
 # ---------------------------------------------------------------------------------------------
@@ -264,8 +553,6 @@ else
   no "--profile writes exactly one credential block" "count $(grep -c 'CONTEXT_MEMORY_BASE_URL' "$profile")"
 fi
 
-# Idempotence is the whole reason the flag exists: an appended block duplicates on every run, and the
-# stale copy of a rotated token survives in a world-readable file while overriding the fresh one.
 before="$(cksum <"$profile")"
 run_launcher env-export --profile "$profile" >/dev/null 2>&1
 run_launcher env-export --profile "$profile" >/dev/null 2>&1
@@ -275,14 +562,6 @@ else
   no "--profile is idempotent across repeated runs" "the file changed on a re-run"
 fi
 
-if [ "$(grep -c 'CONTEXT_MEMORY_READ_TOKEN' "$profile")" = "1" ]; then
-  ok "a re-run rotates in place rather than appending a second token"
-else
-  no "a re-run rotates in place rather than appending a second token" "count $(grep -c 'CONTEXT_MEMORY_READ_TOKEN' "$profile")"
-fi
-
-# A first write must not empty a file that has content — the `>` failure mode, reached through the
-# script rather than a redirect.
 if [ -s "$profile" ]; then
   ok "--profile never truncates a populated target"
 else
@@ -296,19 +575,18 @@ else
 fi
 
 # A profile is backed up before any modification, so the operator never loses the version they were
-# editing — regardless of whether it already carried a managed block.
-if [ -n "$(ls "$profile_dir"/.zshrc-mimisbrunnr-* 2>/dev/null | head -1)" ]; then
+# editing — the first write, and every later write that adds something.
+if [ "$(count_backups "$profile")" -ge 1 ]; then
   ok "--profile backs up a target that had no managed block"
 else
   no "--profile backs up a target that had no managed block" "no backup file"
 fi
-
-# The re-rotate path (lines above ran two more `--profile` writes) must also leave a pre-rotation
-# copy, not only the first-time append.
-if [ "$(ls "$profile_dir"/.zshrc-mimisbrunnr-* 2>/dev/null | wc -l)" -ge 2 ]; then
-  ok "--profile backs up on a re-rotate too"
+sed_inplace "$profile" '/^export CONTEXT_MEMORY_DECISIONS_PATH=/d'
+run_launcher env-export --profile "$profile" >/dev/null 2>&1
+if [ "$(count_backups "$profile")" -ge 2 ]; then
+  ok "--profile backs up again when a later write adds a setting"
 else
-  no "--profile backs up on a re-rotate too" "only $(ls "$profile_dir"/.zshrc-mimisbrunnr-* 2>/dev/null | wc -l) backup(s)"
+  no "--profile backs up again when a later write adds a setting" "only $(count_backups "$profile") backup(s)"
 fi
 
 link_target="$scratch/profile-link-target"
@@ -339,6 +617,13 @@ if grep -q '^\$env:CONTEXT_MEMORY_READ_TOKEN' "$profile_dir/p.ps1"; then
   ok "--profile honours the powershell format"
 else
   no "--profile honours the powershell format" "no \$env: assignment"
+fi
+before="$(cksum <"$profile_dir/p.ps1")"
+run_launcher env-export --profile "$profile_dir/p.ps1" powershell >/dev/null 2>&1
+if [ "$before" = "$(cksum <"$profile_dir/p.ps1")" ]; then
+  ok "--profile is idempotent in the powershell format"
+else
+  no "--profile is idempotent in the powershell format" "the file changed on a re-run"
 fi
 
 # The flag must win over the format slot, or `env-export --profile <file>` reads as a format.
@@ -377,11 +662,16 @@ if eval "$(cat "$scratch/export.sh")" 2>/dev/null && [ -n "${CONTEXT_MEMORY_READ
 else
   no "the exported form evaluates in a shell" "eval did not define the token"
 fi
+unset CONTEXT_MEMORY_READ_TOKEN CONTEXT_MEMORY_BASE_URL 2>/dev/null || true
+for exported in $(sed -n 's/^export \(CONTEXT_MEMORY_DECISIONS_[A-Z_]*\)=.*/\1/p' "$scratch/export.sh"); do
+  unset "$exported"
+done
 
+# Evaluating it must never make the write token ambient.
 if grep -q "CONTEXT_MEMORY_WRITE_TOKEN" "$scratch/export.sh"; then
-  ok "env-export includes the write token"
+  no "env-export omits the write token" "it is present"
 else
-  no "env-export includes the write token" "absent"
+  ok "env-export omits the write token"
 fi
 
 # The container's own names cannot be exported by any shell, so they must not appear.
@@ -401,8 +691,33 @@ fi
 expect_fail "env-export rejects an unknown format" "format must be posix or powershell" \
   env-export tcsh
 
+# env-export publishes what the operator CONFIGURED, not the built-in default — from the environment,
+# else from the profile, else the default.
+run_launcher CONTEXT_MEMORY_DECISIONS_ENABLED=true CONTEXT_MEMORY_DECISIONS_API_KEY=sk-planted-export-key \
+  env-export >"$scratch/decisions-export.sh" 2>/dev/null
+if grep -q "^export CONTEXT_MEMORY_DECISIONS_ENABLED='true'$" "$scratch/decisions-export.sh"; then
+  ok "env-export publishes the environment's value, not the default"
+else
+  no "env-export publishes the environment's value, not the default" "$(grep DECISIONS_ENABLED "$scratch/decisions-export.sh")"
+fi
+if grep -q "^export CONTEXT_MEMORY_DECISIONS_MODEL='openjev'$" "$scratch/decisions-export.sh"; then
+  ok "env-export publishes the profile's value when the environment has none"
+else
+  no "env-export publishes the profile's value when the environment has none" "$(grep DECISIONS_MODEL "$scratch/decisions-export.sh")"
+fi
+if grep -q "^export CONTEXT_MEMORY_DECISIONS_BELOW_THRESHOLD='hold'$" "$scratch/decisions-export.sh"; then
+  ok "env-export still publishes defaults for untouched settings"
+else
+  no "env-export still publishes defaults for untouched settings" "$(grep BELOW_THRESHOLD "$scratch/decisions-export.sh")"
+fi
+if grep -qF 'sk-planted-export-key' "$scratch/decisions-export.sh"; then
+  no "env-export never prints the decision API key" "the planted value reached stdout"
+else
+  ok "env-export never prints the decision API key"
+fi
+
 # ---------------------------------------------------------------------------------------------
-# machine credential publication
+# the machine credential file holds the write token and nothing else
 # ---------------------------------------------------------------------------------------------
 
 if [ -f "$scratch/home/credentials" ]; then
@@ -415,121 +730,21 @@ if [ "$(file_mode "$scratch/home/credentials")" = "600" ]; then
 else
   no "machine credential file is mode 600" "mode is $(file_mode "$scratch/home/credentials")"
 fi
-if [ -f "$scratch/home/credentials-read-only" ]; then
-  ok "publishes a read-only credential file"
+if [ "$(sed -n 's/^CONTEXT_MEMORY_WRITE_TOKEN=//p' "$scratch/home/credentials")" = \
+  "$(sed -n 's/^Parameters__api-write-token=//p' "$credential_file")" ]; then
+  ok "machine file carries the controller's write token"
 else
-  no "publishes a read-only credential file" "absent"
+  no "machine file carries the controller's write token" "they differ"
 fi
-
-# The read-only file must not carry a write token: a read-only worker sourcing it would otherwise hold
-# write capability, and the read client refuses to start when one is present.
-if grep -q "CONTEXT_MEMORY_WRITE_TOKEN" "$scratch/home/credentials-read-only"; then
-  no "the read-only file carries no write token" "it does"
+if [ "$(grep -v '^#' "$scratch/home/credentials" | grep -c .)" = "1" ]; then
+  ok "machine file carries no other setting"
 else
-  ok "the read-only file carries no write token"
+  no "machine file carries no other setting" "$(grep -v '^#' "$scratch/home/credentials" | cut -d= -f1 | tr '\n' ' ')"
 fi
-
-# The machine file must publish the CONTEXT_MEMORY_* names the clients read, not the container's.
-if grep -q "CONTEXT_MEMORY_READ_TOKEN=.\+" "$scratch/home/credentials"; then
-  ok "machine file carries CONTEXT_MEMORY_READ_TOKEN"
+if [ -e "$scratch/home/credentials-read-only" ]; then
+  no "no read-only credential file is published" "one exists"
 else
-  no "machine file carries CONTEXT_MEMORY_READ_TOKEN" "absent or empty"
-fi
-
-# The add-only pattern: a key the operator or a previous feature added must survive a re-run.
-# A full rewrite would silently drop it — the defect this pattern closes.
-operator_key="CONTEXT_MEMORY_DECISIONS_ENABLED=true"
-printf '%s\n' "$operator_key" >>"$scratch/home/credentials"
-run_launcher env >/dev/null 2>&1
-if grep -qF "$operator_key" "$scratch/home/credentials"; then
-  ok "a re-run preserves an operator-added key in the machine credential file"
-else
-  no "a re-run preserves an operator-added key in the machine credential file" "the key was dropped"
-fi
-
-# The three managed keys must still be present after the re-run above.
-for key in CONTEXT_MEMORY_BASE_URL CONTEXT_MEMORY_READ_TOKEN CONTEXT_MEMORY_WRITE_TOKEN; do
-  if grep -q "^$key=.\+" "$scratch/home/credentials"; then
-    ok "machine file still carries $key after a re-run"
-  else
-    no "machine file still carries $key after a re-run" "absent or empty"
-  fi
-done
-
-# ---------------------------------------------------------------------------------------------
-# the base URL is refreshed, not preserved
-# ---------------------------------------------------------------------------------------------
-
-# CONTEXT_MEMORY_BASE_URL is the one managed key the add-only pattern does *not* cover: it is derived
-# from the port this run publishes, so a stored value is stale the moment that port changes. The
-# case that found it: a MIMIS_SHIFT_PORTS=1 run serves the API on 25141 while the file keeps saying
-# 5141, so every client on the machine calls a port the stack does not serve — no run fails and
-# nothing logs it. Its own scratch home, because a shifted run must not disturb the cases above.
-shift_home="$scratch/home-shifted"
-mkdir -p "$shift_home"
-cp "$scratch/home/credentials" "$shift_home/credentials"
-# Both files are seeded, and the write-side one is seeded with a *duplicated* base URL: a case that
-# started from a missing key would pass against the old add-only behaviour, and one that started from
-# a single line cannot tell "refreshed" from "left alone".
-cp "$scratch/home/credentials-read-only" "$shift_home/credentials-read-only"
-printf 'CONTEXT_MEMORY_BASE_URL=http://localhost:1234\n' >>"$shift_home/credentials"
-read_token_before="$(sed -n 's/^CONTEXT_MEMORY_READ_TOKEN=//p' "$shift_home/credentials")"
-
-# The shift is exported inside a subshell rather than prefixed onto the call: `VAR=x func` leaks the
-# assignment past the function in bash 3.2, and a leaked MIMIS_SHIFT_PORTS would silently move the
-# ports for every case after this one.
-if (export MIMIS_SHIFT_PORTS=1; run_launcher_in "$shift_home" env) >"$scratch/out" 2>"$scratch/err"; then
-  ok "a shifted-ports run succeeds against a scratch home"
-else
-  no "a shifted-ports run succeeds against a scratch home" "exit $? — $(tail -1 "$scratch/err")"
-fi
-
-# The value, not just the key: a harness that only asserted presence would pass against the old
-# add-only behaviour, which kept the key and the wrong value together.
-if grep -q '^CONTEXT_MEMORY_BASE_URL=http://localhost:25141$' "$shift_home/credentials"; then
-  ok "a shifted run rewrites the published base URL to its own port"
-else
-  no "a shifted run rewrites the published base URL to its own port" \
-    "got $(sed -n 's/^CONTEXT_MEMORY_BASE_URL=//p' "$shift_home/credentials")"
-fi
-
-# Exactly one assignment. Two lines whose winner depends on the reader is the state the refresh
-# exists to prevent, and a hand-edited file can already be in it.
-if [ "$(grep -c '^CONTEXT_MEMORY_BASE_URL=' "$shift_home/credentials")" = "1" ]; then
-  ok "the base URL is written once, not appended to an existing line"
-else
-  no "the base URL is written once, not appended to an existing line" \
-    "$(grep -c '^CONTEXT_MEMORY_BASE_URL=' "$shift_home/credentials") occurrences"
-fi
-
-# The read-only file is a second, independent copy, so it is where a half-finished refresh shows.
-if grep -q '^CONTEXT_MEMORY_BASE_URL=http://localhost:25141$' "$shift_home/credentials-read-only"; then
-  ok "the read-only credential file carries the same refreshed base URL"
-else
-  no "the read-only credential file carries the same refreshed base URL" \
-    "got $(sed -n 's/^CONTEXT_MEMORY_BASE_URL=//p' "$shift_home/credentials-read-only")"
-fi
-
-# Refreshing the URL must not become rotating a token: a changed read token 403s every client
-# holding the old one, which is the split-pair failure adoption exists to prevent.
-if [ "$(sed -n 's/^CONTEXT_MEMORY_READ_TOKEN=//p' "$shift_home/credentials")" = "$read_token_before" ]; then
-  ok "refreshing the base URL leaves the read token untouched"
-else
-  no "refreshing the base URL leaves the read token untouched" "the token changed"
-fi
-
-# A hand-edited URL is corrected rather than trusted, and the tokens around it still survive — the
-# two halves of the contract, asserted together because the fix edits the same write.
-sed_inplace "$shift_home/credentials" 's#^CONTEXT_MEMORY_BASE_URL=.*#CONTEXT_MEMORY_BASE_URL=http://localhost:9999#'
-# A second occurrence, so the correction case cannot be satisfied by rewriting only the line it seeded.
-printf 'CONTEXT_MEMORY_BASE_URL=http://localhost:9998\n' >>"$shift_home/credentials"
-run_launcher_in "$shift_home" env >"$scratch/out" 2>"$scratch/err"
-if grep -q '^CONTEXT_MEMORY_BASE_URL=http://localhost:5141$' "$shift_home/credentials" &&
-   grep -q "^CONTEXT_MEMORY_READ_TOKEN=$read_token_before\$" "$shift_home/credentials"; then
-  ok "a hand-edited base URL is corrected to the default port, tokens preserved"
-else
-  no "a hand-edited base URL is corrected to the default port, tokens preserved" \
-    "got $(sed -n 's/^CONTEXT_MEMORY_BASE_URL=//p' "$shift_home/credentials")"
+  ok "no read-only credential file is published"
 fi
 
 # ---------------------------------------------------------------------------------------------
@@ -553,7 +768,7 @@ if [ "$(id -u)" = "0" ]; then
 else
   unreadable_home="$scratch/home-unreadable"
   mkdir -p "$unreadable_home"
-  cp "$shift_home/credentials" "$unreadable_home/credentials"
+  cp "$scratch/home/credentials" "$unreadable_home/credentials"
   printf 'MY_OPERATOR_KEY=keep-me\n' >>"$unreadable_home/credentials"
   chmod 000 "$unreadable_home/credentials"
   if run_launcher_in "$unreadable_home" env >"$scratch/out" 2>"$scratch/err"; then
@@ -574,7 +789,7 @@ fi
 
 nul_home="$scratch/home-nul"
 mkdir -p "$nul_home"
-cp "$shift_home/credentials" "$nul_home/credentials"
+cp "$scratch/home/credentials" "$nul_home/credentials"
 printf 'MY_OPERATOR_KEY=keep-me\n' >>"$nul_home/credentials"
 # printf, not a literal: a NUL in the harness source would truncate this line for every reader.
 printf 'CORRUPT=one\000two\n' >>"$nul_home/credentials"
@@ -599,9 +814,8 @@ if [ "$(id -u)" = "0" ]; then
 else
   controller_home="$scratch/home-unreadable-env"
   mkdir -p "$controller_home"
-  cp "$shift_home/../home/controller.env" "$controller_home/controller.env" 2>/dev/null ||
-    cp "$scratch/home/controller.env" "$controller_home/controller.env"
-  cp "$shift_home/credentials" "$controller_home/credentials"
+  cp "$scratch/home/controller.env" "$controller_home/controller.env"
+  cp "$scratch/home/credentials" "$controller_home/credentials"
   before_sum="$(cksum <"$controller_home/controller.env")"
   chmod 000 "$controller_home/controller.env"
   if run_launcher_in "$controller_home" env >"$scratch/out" 2>"$scratch/err"; then
@@ -623,7 +837,7 @@ fi
 # container run where they do not.
 link_home="$scratch/home-symlink"
 mkdir -p "$link_home/shared"
-cp "$shift_home/credentials" "$link_home/shared/credentials"
+cp "$scratch/home/credentials" "$link_home/shared/credentials"
 printf 'SHARED_OPERATOR_KEY=keep-me\n' >>"$link_home/shared/credentials"
 ln -s "$link_home/shared/credentials" "$link_home/credentials"
 if run_launcher_in "$link_home" env >"$scratch/out" 2>"$scratch/err"; then
@@ -695,193 +909,6 @@ if printf '%s' "$write_machine_credentials_body" | grep -q 'temp_credentials="\$
   ok "write_machine_credentials registers its temp path for interrupt cleanup"
 else
   no "write_machine_credentials registers its temp path for interrupt cleanup" "no registration in the function body"
-fi
-
-# ---------------------------------------------------------------------------------------------
-# decision-gate settings
-# ---------------------------------------------------------------------------------------------
-
-# All ten ride the write-side file with their documented default. A missing one means an operator
-# cannot discover the setting exists without reading this repository.
-decision_keys="CONTEXT_MEMORY_DECISIONS_ENABLED CONTEXT_MEMORY_DECISIONS_BASE_URL \
-CONTEXT_MEMORY_DECISIONS_PATH CONTEXT_MEMORY_DECISIONS_MODEL CONTEXT_MEMORY_DECISIONS_API_KEY \
-CONTEXT_MEMORY_DECISIONS_MIN_PROBABILITY CONTEXT_MEMORY_DECISIONS_MAX_ATTEMPTS \
-CONTEXT_MEMORY_DECISIONS_ROLES CONTEXT_MEMORY_DECISIONS_BELOW_THRESHOLD \
-CONTEXT_MEMORY_DECISIONS_TIMEOUT"
-
-for key in $decision_keys; do
-  if grep -q "^$key=" "$scratch/home/credentials"; then
-    ok "machine file carries $key"
-  else
-    no "machine file carries $key" "absent"
-  fi
-done
-
-# The gate is OFF by default, and that default must be the disabled one: a launcher that shipped
-# ENABLED=true would score every export on a machine with no decision model.
-if grep -q '^CONTEXT_MEMORY_DECISIONS_ENABLED=false$' "$scratch/home/credentials"; then
-  ok "the decision gate defaults to disabled"
-else
-  no "the decision gate defaults to disabled" \
-     "got $(sed -n 's/^CONTEXT_MEMORY_DECISIONS_ENABLED=//p' "$scratch/home/credentials")"
-fi
-
-# The read-only file stays minimal. A read-only worker has no use for a decision endpoint, and the
-# API key must never ride a file a read-only consumer can read.
-if grep -q '^CONTEXT_MEMORY_DECISIONS_' "$scratch/home/credentials-read-only"; then
-  no "the read-only file carries no decision settings" "it publishes the endpoint and the key"
-else
-  ok "the read-only file carries no decision settings"
-fi
-
-# An operator who turns the gate on must keep it on. This is the case the add-only pattern exists
-# for: a write-every-time rewrite resets ENABLED to false on every single start, so the gate could
-# never be left enabled between runs.
-sed_inplace "$scratch/home/credentials" \
-  's/^CONTEXT_MEMORY_DECISIONS_ENABLED=false$/CONTEXT_MEMORY_DECISIONS_ENABLED=true/'
-run_launcher env >/dev/null 2>&1
-if grep -q '^CONTEXT_MEMORY_DECISIONS_ENABLED=true$' "$scratch/home/credentials"; then
-  ok "a re-run preserves an operator's ENABLED=true"
-else
-  no "a re-run preserves an operator's ENABLED=true" \
-     "got $(sed -n 's/^CONTEXT_MEMORY_DECISIONS_ENABLED=//p' "$scratch/home/credentials")"
-fi
-
-# A remote endpoint's API key is a secret and must survive a re-run without ever being printed.
-planted_key="sk-decisions-planted-0123456789abcdef"
-sed_inplace "$scratch/home/credentials" \
-  "s|^CONTEXT_MEMORY_DECISIONS_API_KEY=.*|CONTEXT_MEMORY_DECISIONS_API_KEY=$planted_key|"
-run_launcher env >/dev/null 2>&1
-if grep -q "^CONTEXT_MEMORY_DECISIONS_API_KEY=$planted_key$" "$scratch/home/credentials"; then
-  ok "a re-run preserves a stored decision API key"
-else
-  no "a re-run preserves a stored decision API key" "the stored key was replaced"
-fi
-
-# env-export prints credentials, so it must not print the decision key. The setting is published by
-# name with an empty default; the value belongs in the environment, sourced, never in a terminal.
-run_launcher env-export >"$scratch/decisions-export.sh" 2>/dev/null
-if grep -qF "$planted_key" "$scratch/decisions-export.sh"; then
-  no "env-export never prints the decision API key" "the planted value reached stdout"
-else
-  ok "env-export never prints the decision API key"
-fi
-
-# The other nine settings ARE printed, so `env-export --profile` gives an operator the gate's
-# configuration rather than leaving it discoverable only in this repository.
-for key in CONTEXT_MEMORY_DECISIONS_ENABLED CONTEXT_MEMORY_DECISIONS_BASE_URL \
-  CONTEXT_MEMORY_DECISIONS_MODEL CONTEXT_MEMORY_DECISIONS_MIN_PROBABILITY \
-  CONTEXT_MEMORY_DECISIONS_MAX_ATTEMPTS CONTEXT_MEMORY_DECISIONS_ROLES \
-  CONTEXT_MEMORY_DECISIONS_BELOW_THRESHOLD CONTEXT_MEMORY_DECISIONS_TIMEOUT; do
-  if grep -q "^export $key=" "$scratch/decisions-export.sh"; then
-    ok "env-export publishes $key"
-  else
-    no "env-export publishes $key" "absent from the export"
-  fi
-done
-
-# env-export must publish what the operator CONFIGURED, not the built-in default. It used to emit the
-# defaults table verbatim, so `env-export --profile` overwrote a stored ENABLED=true with false — the one
-# tool meant to publish the setting silently discarded it, and the profile then disagreed with the
-# credential file that every other surface reads. Verified against the shipped launcher: with the file
-# set to true, env-export emitted false.
-export_dir="$scratch/export-effective"
-mkdir -p "$export_dir"
-env -u MIMIS_TOKEN_FILE MIMIS_HOME="$export_dir" MIMIS_MACHINE_CREDENTIALS="$export_dir/credentials" \
-  "$launcher" env >/dev/null 2>&1
-sed_inplace "$export_dir/credentials" \
-  's/^CONTEXT_MEMORY_DECISIONS_ENABLED=false$/CONTEXT_MEMORY_DECISIONS_ENABLED=true/'
-sed_inplace "$export_dir/credentials" \
-  's|^CONTEXT_MEMORY_DECISIONS_MODEL=nimble$|CONTEXT_MEMORY_DECISIONS_MODEL=some-other-model|'
-env -u MIMIS_TOKEN_FILE MIMIS_HOME="$export_dir" MIMIS_MACHINE_CREDENTIALS="$export_dir/credentials" \
-  "$launcher" env-export >"$export_dir/out.sh" 2>/dev/null
-if grep -q "^export CONTEXT_MEMORY_DECISIONS_ENABLED=true$" "$export_dir/out.sh"; then
-  ok "env-export publishes the operator's stored ENABLED value, not the default"
-else
-  no "env-export publishes the operator's stored ENABLED value, not the default" \
-     "got $(grep 'DECISIONS_ENABLED' "$export_dir/out.sh")"
-fi
-if grep -q "^export CONTEXT_MEMORY_DECISIONS_MODEL=some-other-model$" "$export_dir/out.sh"; then
-  ok "env-export publishes the operator's stored MODEL value"
-else
-  no "env-export publishes the operator's stored MODEL value" \
-     "got $(grep 'DECISIONS_MODEL' "$export_dir/out.sh")"
-fi
-
-# ...and a setting the operator has never touched still gets its default, rather than nothing.
-if grep -q "^export CONTEXT_MEMORY_DECISIONS_BELOW_THRESHOLD=hold$" "$export_dir/out.sh"; then
-  ok "env-export still publishes defaults for untouched settings"
-else
-  no "env-export still publishes defaults for untouched settings" \
-     "got $(grep 'DECISIONS_BELOW_THRESHOLD' "$export_dir/out.sh")"
-fi
-
-# The profile must carry the configured value too, or the shell and the store disagree.
-export_profile="$export_dir/.zshrc"
-env -u MIMIS_TOKEN_FILE MIMIS_HOME="$export_dir" MIMIS_MACHINE_CREDENTIALS="$export_dir/credentials" \
-  "$launcher" env-export --profile "$export_profile" >/dev/null 2>&1
-if grep -q "^export CONTEXT_MEMORY_DECISIONS_ENABLED=true$" "$export_profile"; then
-  ok "--profile writes the operator's stored value, not the default"
-else
-  no "--profile writes the operator's stored value, not the default" \
-     "got $(grep 'DECISIONS_ENABLED' "$export_profile")"
-fi
-
-# The API key stays excluded even though it is now read from the file rather than the defaults table.
-key_dir="$scratch/export-key"
-mkdir -p "$key_dir"
-env -u MIMIS_TOKEN_FILE MIMIS_HOME="$key_dir" MIMIS_MACHINE_CREDENTIALS="$key_dir/credentials" \
-  "$launcher" env >/dev/null 2>&1
-sed_inplace "$key_dir/credentials" \
-  "s|^CONTEXT_MEMORY_DECISIONS_API_KEY=.*|CONTEXT_MEMORY_DECISIONS_API_KEY=sk-planted-export-key|"
-env -u MIMIS_TOKEN_FILE MIMIS_HOME="$key_dir" MIMIS_MACHINE_CREDENTIALS="$key_dir/credentials" \
-  "$launcher" env-export >"$key_dir/out.sh" 2>/dev/null
-if grep -qF 'sk-planted-export-key' "$key_dir/out.sh"; then
-  no "env-export excludes a stored API key" "the stored value reached stdout"
-else
-  ok "env-export excludes a stored API key"
-fi
-
-# The profile block round-trips: the decision settings are written once and rotate in place, exactly
-# like the credentials. An appended block would leave a stale copy of a rotated token behind.
-profile="$scratch/profile/.zshrc"
-before="$(cksum <"$profile")"
-run_launcher env-export --profile "$profile" >/dev/null 2>&1
-if [ "$(grep -c 'CONTEXT_MEMORY_DECISIONS_ENABLED' "$profile")" = "1" ]; then
-  ok "--profile writes exactly one decision block"
-else
-  no "--profile writes exactly one decision block" \
-     "count $(grep -c 'CONTEXT_MEMORY_DECISIONS_ENABLED' "$profile")"
-fi
-run_launcher env-export --profile "$profile" >/dev/null 2>&1
-if [ "$(grep -c 'CONTEXT_MEMORY_DECISIONS_ENABLED' "$profile")" = "1" ]; then
-  ok "--profile is idempotent for the decision settings"
-else
-  no "--profile is idempotent for the decision settings" \
-     "count $(grep -c 'CONTEXT_MEMORY_DECISIONS_ENABLED' "$profile")"
-fi
-
-# The read-only half gets the same add-only treatment, so an operator's key survives there too. On
-# its own scratch home: the write-side cases above mutate `$scratch/home/credentials`, and sharing
-# that state made a failure here indistinguishable from one there.
-ro_dir="$scratch/readonly-preserve"
-mkdir -p "$ro_dir"
-env -u MIMIS_TOKEN_FILE MIMIS_HOME="$ro_dir" MIMIS_MACHINE_CREDENTIALS="$ro_dir/credentials" \
-  "$launcher" env >/dev/null 2>&1
-printf 'CONTEXT_MEMORY_DECISIONS_ENABLED=true\n' >>"$ro_dir/credentials-read-only"
-env -u MIMIS_TOKEN_FILE MIMIS_HOME="$ro_dir" MIMIS_MACHINE_CREDENTIALS="$ro_dir/credentials" \
-  "$launcher" env >/dev/null 2>&1
-if grep -q '^CONTEXT_MEMORY_DECISIONS_ENABLED=true$' "$ro_dir/credentials-read-only"; then
-  ok "a re-run preserves an operator-added key in the read-only file"
-else
-  no "a re-run preserves an operator-added key in the read-only file" "the key was dropped"
-fi
-# The read-only file must still not acquire a write token by the operator's own hand: the read client
-# refuses to start when one is present, so this is a guard on the operator, not on the launcher.
-if grep -q '^CONTEXT_MEMORY_WRITE_TOKEN=' "$ro_dir/credentials-read-only"; then
-  no "the read-only file gains no write token" "one is present"
-else
-  ok "the read-only file gains no write token"
 fi
 
 # ---------------------------------------------------------------------------------------------
@@ -981,8 +1008,7 @@ provisioned_write="2222222222222222222222222222222222222222222222222222222222222
 printf 'Parameters__api-read-token=%s\nParameters__api-write-token=%s\n' \
   "$provisioned_read" "$provisioned_write" >"$adopt_dir/mimisbrunnr.env.controller"
 
-MIMIS_HOME="$adopt_dir" MIMIS_MACHINE_CREDENTIALS="$adopt_dir/credentials" MIMIS_TOKEN_FILE="$adopt_dir/mimisbrunnr.env.controller" \
-  "$launcher" env >/dev/null 2>&1
+run_launcher_in "$adopt_dir" MIMIS_TOKEN_FILE="$adopt_dir/mimisbrunnr.env.controller" env >/dev/null 2>&1
 adopted_file="$adopt_dir/controller.env"
 if [ "$(sed -n 's/^Parameters__api-read-token=//p' "$adopted_file")" = "$provisioned_read" ]; then
   ok "adopts the provisioned read token verbatim"
@@ -1000,8 +1026,7 @@ fi
 half_dir="$scratch/half"
 mkdir -p "$half_dir"
 printf 'Parameters__api-read-token=%s\n' "$provisioned_read" >"$half_dir/mimisbrunnr.env.controller"
-MIMIS_HOME="$half_dir" MIMIS_MACHINE_CREDENTIALS="$half_dir/credentials" MIMIS_TOKEN_FILE="$half_dir/mimisbrunnr.env.controller" \
-  "$launcher" env >/dev/null 2>&1
+run_launcher_in "$half_dir" MIMIS_TOKEN_FILE="$half_dir/mimisbrunnr.env.controller" env >/dev/null 2>&1
 half_read="$(sed -n 's/^Parameters__api-read-token=//p' "$half_dir/controller.env")"
 half_write="$(sed -n 's/^Parameters__api-write-token=//p' "$half_dir/controller.env")"
 if [ "$half_read" != "$provisioned_read" ] && [ "$half_write" != "2222222222222222222222222222222222222222222222222222222222222222" ]; then

@@ -107,22 +107,22 @@ controller expects is refused before anything changes. To carry a corpus across:
 ## Credentials
 
 Five values, all random on first run: the PostgreSQL password, the blob store key and secret, and
-distinct read and write API tokens. Resolution order is **environment → stored file → generate**,
-and the file is only ever *added to* — a stored value is never rewritten or dropped, because release
-mode binds the tokens into the running Host and rotating one 403s every client that holds it. The one
-exception is `CONTEXT_MEMORY_BASE_URL`, which is not one of the five: it describes the port this run
-publishes rather than a secret, and it is refreshed on every run — see *the machine credential file is
-the launcher's to keep current*, below. (`run.ps1` publishes no machine credential file at all, so this
-is a `run.sh` property; on Windows, `provision-credentials.sh` writes the base URL instead.)
+distinct read and write API tokens. Resolution order for the two tokens is **your `CONTEXT_MEMORY_*`
+tokens → stored file → adopt-provisioned → generate**; for the three engine secrets it is **environment
+→ stored file → generate**. The client tokens you already hold are the **master**: when
+`CONTEXT_MEMORY_READ_TOKEN` / `CONTEXT_MEMORY_WRITE_TOKEN` exist (environment; for `run.sh` also the
+shell profile; for the write token also `~/.mimisbrunnr/credentials`), the controller is started with
+them and its stored pair follows them. Otherwise a stored value is never rewritten or dropped, because
+release mode binds the tokens into the running Host and rotating one 403s every client that holds it.
 
 **This file alone is not enough for a checkout's skills.** It carries the container's `Parameters__*`
 names; the skills read `CONTEXT_MEMORY_*`, which `scripts/provision-credentials.sh` writes to
 `.context/mimisbrunnr.env`. When that file exists the launcher **adopts** its token values rather than
-minting its own, so the two halves are the same values and cannot drift into a 403. `run.sh` also
-publishes `CONTEXT_MEMORY_BASE_URL` and `CONTEXT_MEMORY_READ_TOKEN` to `~/.mimisbrunnr/credentials`,
-which the clients read on their own — so on macOS and Linux **reads need no provisioner at all**, and
-only writes do, because the client never seeds a write token by itself. `run.ps1` writes no such file,
-so on Windows run `scripts/provision-credentials.sh` first unless nothing but the API will talk to it.
+minting its own, so the two halves are the same values and cannot drift into a 403. Both launchers then
+publish the client side: `CONTEXT_MEMORY_BASE_URL`, `CONTEXT_MEMORY_READ_TOKEN` and the decision-gate
+settings as **environment variables** — `run.sh` adds each one that is missing to a marked block in your
+shell profile, `run.ps1` sets it in the Windows User scope — and the write token alone to
+`~/.mimisbrunnr/credentials`. So **no provisioner is needed** for the skills on any platform.
 
 They are generated once and reused. Deleting the file re-provisions from scratch; there is no
 `--rotate`, deliberately, because a rotation is an operational decision rather than a side effect of
@@ -169,6 +169,8 @@ not identifiers. See [`scripts/AGENTS.md`](AGENTS.md).
 | `MIMIS_BIND_ADDRESS` | `-BindAddress` | `127.0.0.1` | Address the controller binds workload ports on |
 | `MIMIS_SELINUX` | *(auto)* | auto | Force the `:z` bind label on or off |
 | `P_HOST`, `P_POSTGRES`, `P_BLOB`, `P_BLOB_CONSOLE`, `P_SEQ`, `P_DASHBOARD`, `P_OTLP` | `-HostPort`, `-PostgresPort`, … | see below | Host ports |
+| `MIMIS_PROFILE` | *(User-scope env vars)* | by login shell | Shell profile the client settings are added to; `off` leaves every profile alone |
+| `CONTEXT_MEMORY_BASE_URL` | `CONTEXT_MEMORY_BASE_URL` | — | When set, the master for the API port; a disagreeing `P_HOST` / `-HostPort` is refused |
 
 Defaults are the documented release ports — `5141 / 5432 / 9000 / 9001 / 5341 / 15278 / 19075`. They
 are also what `provision-credentials.sh` writes into `CONTEXT_MEMORY_BASE_URL` and what the
@@ -177,18 +179,30 @@ a controller started. `MIMIS_SHIFT_PORTS=1` restores a set of shifted ports (`25
 rare case of running a controller and the development AppHost side by side. The launcher refuses to start
 on a port already in use rather than letting the engine report it later.
 
-**The machine credential file is the launcher's to keep current, and `CONTEXT_MEMORY_BASE_URL` is the one
-key the add-only write does not cover.** It describes the port this run publishes rather than an
-operator setting: a shifted start would otherwise leave every client calling `5141` while the stack served
-`25141`, with no run failing and nothing logging the disagreement. A hand-edited value is corrected on
-the next run — the clients refuse a non-loopback base URL anyway, and the tokens beside it are bound into
-this Host, so a value pointing elsewhere cannot be anything but stale. Every *other* key in that file, the
-tokens and the decision-gate settings included, is still only ever added to. `run.sh` only; `run.ps1`
-publishes no machine credential file.
+**`CONTEXT_MEMORY_BASE_URL` is the master for the API port.** When it exists — in the environment, or in
+the shell profile for `run.sh` — the API is published on its port, and a `P_HOST` / `-HostPort` that
+disagrees is refused rather than resolved, because either answer silently strands one side. It must be a
+loopback `http://localhost:<port>` with an explicit port. When it does not exist, the run's own port
+(`5141`, or `25141` under `MIMIS_SHIFT_PORTS=1`) is what gets published.
+
+**Client settings are environment variables; the write token is the one exception.** An exported variable
+reaches every process the shell starts, and the read client refuses to start beside a write token — the
+guarantee that the read surface can never mutate. So the write token lives only in
+`~/.mimisbrunnr/credentials` (mode 600, rewritten to hold that one key), the capture client reads it there
+on a write route when it is not in its environment, and the launcher removes a write-token export it
+finds in its own managed profile block. A `~/.mimisbrunnr/credentials-read-only` left by an earlier
+release is no longer read by anything; the launcher names it and leaves deleting it to you.
+
+**The profile block is add-only.** A setting already exported, or assigned anywhere in the profile, is
+never added again and never changed, so a hand-tuned value survives every run; a setting that is missing
+is added at its default (or, for the base URL and read token, at the value this stack serves). A run
+with nothing missing leaves the profile byte-identical. Every write is preceded by a mode-600 backup.
+`MIMIS_PROFILE` names the profile; by default it follows your login shell (`~/.zshrc`, `~/.bashrc`, else
+`~/.profile`), and `MIMIS_PROFILE=off` leaves every profile alone.
 
 **A credential file that cannot be used is refused, not overwritten — and the refusal covers all three.**
-`run.sh` asks the same four questions of `$env_file` and of both machine credential files before it
-writes any of them: not a symlink, a regular file, readable, and free of NUL bytes. The interesting ones
+`run.sh` asks the same four questions of `$env_file` and of the machine credential file before it
+reads or writes either: not a symlink, a regular file, readable, and free of NUL bytes. The interesting ones
 are the last two, because nothing used to catch them. An unreadable `controller.env` was regenerated in
 full — five fresh secrets at exit 0, a new token pair on the Host and a 403 for every client still
 holding the old one — and a NUL byte made the text filter that copies a credential file treat it as
@@ -275,34 +289,25 @@ the installation and re-provision. Adopting a data root is a fresh start, not a 
 
 ## Using the credentials from your shell
 
-The clients read `~/.mimisbrunnr/credentials` on their own, so nothing needs sourcing. To put the
-credentials in your shell profile instead — so every terminal and every agent session has them without
-reaching for the file — print them in a form your shell accepts:
+`up` already adds every missing client setting to your shell profile, so there is usually nothing to do
+but open a new shell. To print the settings instead — for a different shell, or to inspect them:
 
 ```bash
 scripts/run.sh env-export                    # macOS / Linux:  export KEY='value'
 scripts/run.sh env-export powershell         # Windows:          $env:KEY = 'value'
+scripts/run.sh env-export --profile ~/.bashrc  # add the missing ones to another profile
 ```
 
-Then either paste the output, or append it:
+Each value printed is the one you configured — environment, else profile — and the default only where
+you have none.
 
-```bash
-scripts/run.sh env-export >> ~/.zshrc        # or ~/.bashrc
-```
-
-**A real environment variable always wins over the file.** Verified by exporting a deliberately wrong
-token and watching an authenticated call be rejected with `403` rather than silently falling back — so
-exporting changes where the value is read from, not which value it is. One credential, two sources.
-
-Three things to know before you write a token into a profile:
-
-- **The file is mode 600; your profile usually is not.** Anything that can read your `~/.zshrc` can read
-  the write token, and every shell you open inherits it. On a shared or backed-up machine, prefer the
-  file and leave the profile alone.
-- **It lands in your shell history.** `eval "$(scripts/run.sh env-export)"` is the shape to avoid;
-  appending to the profile is the safer of the two.
+- **The write token is never printed.** Evaluating it would make it ambient, and the read client refuses
+  to start beside one. It lives in `~/.mimisbrunnr/credentials`, which the capture client reads itself.
+- **Neither is the decision API key.** It is your secret to export; the launcher never writes it.
 - **Only `CONTEXT_MEMORY_*` names are printed.** The controller's own `Parameters__*` names contain
   hyphens and cannot be assigned by any shell — which is why they only ever travel by `--env-file`.
+- **A session started before the profile changed has not inherited it.** Open a new terminal, or restart
+  the app that launched the agent.
 
 `env-export` is deliberately its own verb: `up` never prints a token to a terminal that may be
 scrolled back, recorded, or read over someone's shoulder. You choose to run it, and choose where it
@@ -310,14 +315,16 @@ goes.
 
 ## Harness
 
-`scripts/test-run-launcher.sh` covers the credential and validation paths against a scratch
+`scripts/test-run-launcher.sh` covers the credential, profile and validation paths against a scratch
 `MIMIS_HOME` — no container engine, no network, and it never reads or writes the operator's real
-credentials. It runs in the PR gate ("Test controller launcher").
+credentials or shell profile. It runs in the PR gate ("Test controller launcher").
 
-Every case redirects both `MIMIS_HOME` and the machine-credential path, because the launcher derives
-the second from the first; an earlier version redirected only the home and the harness overwrote live
-credentials. `run.ps1` has no equivalent — its Windows-specific paths cannot be executed on a Linux or
-macOS runner at all, and remain parse-verified only.
+Every case runs under `env -i` with a scratch `HOME`, `MIMIS_HOME`, machine-credential path and
+`MIMIS_PROFILE`: the launcher now takes the base URL and tokens from the environment and writes the
+profile, so an inherited `CONTEXT_MEMORY_*` name would test the operator's configuration and an inherited
+`HOME` would edit their `~/.zshrc`. An earlier version redirected only the home and overwrote live
+credentials. `run.ps1` has no equivalent harness; its non-Windows path runs under `pwsh` on macOS, and the
+Windows User-scope branch is unverified on any runner.
 
 ## Writing the credentials into a shell profile
 
@@ -335,7 +342,6 @@ it without bound. That is the wrong thing to leave to a habit, so the flag write
 # >>> mimisbrunnr — managed by scripts/run.sh env-export --profile >>>
 export CONTEXT_MEMORY_BASE_URL='…'
 export CONTEXT_MEMORY_READ_TOKEN='…'
-export CONTEXT_MEMORY_WRITE_TOKEN='…'
 # <<< mimisbrunnr <<<
 ```
 

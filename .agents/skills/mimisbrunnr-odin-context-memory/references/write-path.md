@@ -4,9 +4,11 @@ How the session captures into the store at the authorized `--export` (or `--dryr
 is no separate write agent: the session that runs the skill follows this procedure itself.
 
 Run the write client, `context_memory_client.py`, on discrete candidate facts and target metadata.
-Never a raw transcript. The write credential is never ambient: the client seeds only the read token and
-base URL, so `CONTEXT_MEMORY_WRITE_TOKEN` is absent until you load it. Load it only at the authorized
-checkpoint, with the deliberate write step the skill's `SKILL.md` names —
+Never a raw transcript. The write credential is never ambient: the base URL, the read token and the
+decision settings are environment variables, while the write token lives only in
+`~/.mimisbrunnr/credentials`, which the client reads on a write route when `CONTEXT_MEMORY_WRITE_TOKEN`
+is not in its environment — and never on a read. Load it only at the authorized checkpoint, with the
+deliberate write step the skill's `SKILL.md` names —
 `set -a && source ~/.mimisbrunnr/credentials && set +a` (source the file `CONTEXT_MEMORY_CREDENTIAL_FILE`
 names instead, when it is set — it is the file the clients read) — and **only inside a subshell around each
 write-route invocation** (`preflight`, `set`, `resolve-group`, `upsert-initiative`, `update-group`,

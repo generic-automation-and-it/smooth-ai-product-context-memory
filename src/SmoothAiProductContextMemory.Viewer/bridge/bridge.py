@@ -15,8 +15,8 @@
 # is present. The container does not export one (NFR-02 in the image), and the
 # capture client also refuses to start with one present, but defense in depth
 # keeps a misconfigured orchestrator from quietly making the bridge writeable.
-# The check runs before the library import — the capture client's import-time
-# `load_machine_credentials` is the trigger.
+# The check runs before the library import, so nothing the import does can mask
+# a write token the environment already holds.
 import json
 import os
 import subprocess
@@ -76,10 +76,9 @@ def _refuse_if_write_token_present():
 _alias_env()
 _refuse_if_write_token_present()
 
-# Import after the guards. The capture client's import-time
-# `load_machine_credentials` seeds the read token from the machine credential
-# file, never the write token, and any write-token present in the env would
-# already have been rejected above.
+# Import after the guards. The read token is an environment variable; the
+# capture client loads nothing at import, and any write token present in the
+# env would already have been rejected above.
 import context_memory_client as client  # noqa: E402
 import dedup as dedup_module  # noqa: E402
 

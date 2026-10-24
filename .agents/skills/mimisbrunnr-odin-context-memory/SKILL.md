@@ -100,7 +100,9 @@ which hold in every harness.
 - `context_memory_read_client.py` exposes no write operation and refuses to start with any write-token
   spelling present (`CONTEXT_MEMORY_WRITE_TOKEN`, the Host's `ApiAccess__WriteToken`, or the
   controller's `Parameters__api-write-token`, any case, `:` read as `__`).
-- The write credential is never ambient. Load it with the deliberate write step
+- The base URL, read token and decision settings are environment variables (`scripts/run.sh` adds any
+  missing ones to your shell profile). The write credential is never ambient: it lives only in
+  `~/.mimisbrunnr/credentials`. Load it with the deliberate write step
   (`set -a && source ~/.mimisbrunnr/credentials && set +a`; the file `CONTEXT_MEMORY_CREDENTIAL_FILE`
   names instead, when set) **only inside a subshell around each
   write-route invocation** (any subcommand taking the write credential — `preflight`, `set`,

@@ -44,24 +44,22 @@ from urllib.parse import urlparse
 import subprocess
 
 # The shared script folder every Mímisbrunnr skill references (HLD-010 LADR-01): two levels up is
-# the skills root, then the shared folder — never a peer skill's. The capture client found there is
-# the authoritative loader of the machine credential file. Importing it
-# runs its own seed (read token + base URL only, at import) and never makes the write token ambient —
-# this skill is read-only (LADR-08 / NFR-06) and refuses a write token, so a write token must never be
-# loaded. Reuse the one loader rather than writing a third.
+# the skills root, then the shared folder — never a peer skill's. The capture client found there owns
+# the credential names. The read token and base URL are environment variables, and importing it loads
+# nothing; the write token's file is read only on its write path, which this read-only skill (LADR-08 /
+# NFR-06) never reaches — it refuses a write token outright.
 _SHARED_SCRIPTS = (Path(__file__).resolve().parents[2]
                    / "_mimisbrunnr-shared" / "scripts")
 if str(_SHARED_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SHARED_SCRIPTS))
 import context_memory_client as _store_client  # noqa: E402
 
-# The credential names and the machine file, re-exported from the shared client so this module reads
-# and refuses through one place rather than restating the variable names.
+# The credential names, re-exported from the shared client so this module reads and refuses through one
+# place rather than restating the variable names.
 _ENV_BASE_URL = _store_client.ENV_BASE_URL
 _DEFAULT_BASE_URL = _store_client.DEFAULT_BASE_URL
 _ENV_READ_TOKEN = _store_client.ENV_READ_TOKEN
 _ENV_WRITE_TOKEN = _store_client.ENV_WRITE_TOKEN
-_MACHINE_CREDENTIAL_FILE = _store_client.MACHINE_CREDENTIAL_FILE
 
 # Heimdallr session-metadata reporter, resolved relative to this file so the
 # lookup holds under any skills root (.agents/skills, .claude/skills,
@@ -1532,7 +1530,7 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 def _resolve_read_credentials(base_url):
     """Return ``(base, token)`` for the read-only bundle request, or fail closed.
 
-    The machine credential file was seeded at import; nothing is reloaded per call, so a caller that
+    The token is read from the environment only; nothing is loaded from a file, so a caller that
     deliberately cleared the token to prove a refusal is not handed one back. A write token present is
     refused before anything else (read-only, LADR-08 / NFR-06) — a read-only worker that sources it
     gains write capability. Every spelling the sibling read client refuses is refused here, through its
@@ -1540,7 +1538,7 @@ def _resolve_read_credentials(base_url):
     `Parameters__api-write-token` or a case variant stay ambient past this refusal (consumer review
     5440964552 #1). Loopback is asserted before the token is read, so a non-loopback base
     refuses before any request is considered. A missing token is a ``missing-credential`` error naming
-    the variable and the file — never an unauthenticated request that would come back 403.
+    the variable and the shell profile — never an unauthenticated request that would come back 403.
     """
     present = _store_client.write_tokens_present()
     if present:
@@ -1554,8 +1552,8 @@ def _resolve_read_credentials(base_url):
     if not token:
         raise ValueError(
             "missing-credential: "
-            f"{_ENV_READ_TOKEN} is required (seeded from the machine credential file "
-            f"{_MACHINE_CREDENTIAL_FILE})")
+            f"{_ENV_READ_TOKEN} is required (an environment variable; scripts/run.sh "
+            "adds it to your shell profile)")
     return base, token
 
 

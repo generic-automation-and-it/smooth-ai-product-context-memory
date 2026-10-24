@@ -30,12 +30,12 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 # Offline by construction (issue 186). A case that does not stub the capture clients runs the real ones
-# as subprocesses, and they read the store origin and the read token from the environment or the
-# operator's machine credential file — so on a machine with a running store, an unstubbed dry-run export
-# posted this suite's candidates to it. The pointers are redirected, not merely the values: the file
-# pointer to a path with no credentials and the origin to a loopback port nothing listens on, so an
-# unstubbed call fails fast as unreachable. Write tokens in every spelling are dropped. Set before the
-# client is imported, because it seeds the gate flag from the credential file at import.
+# as subprocesses, and they read the store origin and the read token from the environment (and the write
+# token from the operator's machine credential file) — so on a machine with a running store, an unstubbed
+# dry-run export posted this suite's candidates to it. The pointers are redirected, not merely the values:
+# the file pointer to a path with no credentials and the origin to a loopback port nothing listens on, so
+# an unstubbed call fails fast as unreachable. Write tokens in every spelling are dropped. Set before the
+# client is imported, so nothing the import does can see the operator's configuration.
 os.environ["CONTEXT_MEMORY_CREDENTIAL_FILE"] = os.devnull
 os.environ["CONTEXT_MEMORY_BASE_URL"] = "http://127.0.0.1:9"
 # Marker isolation (LADR-11): the client keys markers to the harness session id,
@@ -578,8 +578,8 @@ class StoreImportTests(unittest.TestCase):
 
     def test_write_token_names_match_the_read_clients_refusal_set(self):
         """kvasir strips exactly the spellings the read client refuses (issue 184)."""
-        # Parsed, not imported: importing the client seeds the operator's machine credentials into
-        # this process at import, which would make the suite read real configuration.
+        # Parsed, not imported: importing the client pulls `redact` in at module scope, and this
+        # case only needs one constant from it.
         import ast
         tree = ast.parse((uc._SHARED_SCRIPTS / "context_memory_client.py").read_text(encoding="utf-8"))
         names = None
@@ -3533,12 +3533,11 @@ class DecisionsGateIntegrationTests(unittest.TestCase):
                 # of `gate_decisions` runs for real here and only its transport is replaced.
                 uc.gate_decisions = _stub_gate_transport(
                     lambda: _Result(1, "", json.dumps({"outcome": outcome})))
-                # The flag is set **here**, not left to the machine. `understanding_client` seeds
-                # `DECISIONS_ENABLED` from `~/.mimisbrunnr/credentials` at import, so a case that does
-                # not set it runs only where that file happens to enable the gate — which is why these
+                # The flag is set **here**, not left to the machine. `understanding_client` once seeded
+                # `DECISIONS_ENABLED` from `~/.mimisbrunnr/credentials` at import, so a case that did
+                # not set it ran only where that file happened to enable the gate — which is why these
                 # two passed locally and failed on the gate with `0 != 1`. A test's result must not
-                # depend on the operator's configuration; see `HarnessIsolationTests`' counterpart in
-                # the capture skill, where the same leak had the same shape.
+                # depend on the operator's configuration, environment included.
                 previous = os.environ.get("CONTEXT_MEMORY_DECISIONS_ENABLED")
                 os.environ["CONTEXT_MEMORY_DECISIONS_ENABLED"] = "true"
                 try:
@@ -3597,8 +3596,8 @@ class DecisionsGateIntegrationTests(unittest.TestCase):
         self.assertIn("skipped", note)
 
     def test_the_reports_below_threshold_wins_over_this_process_environment(self):
-        """Regression (issue 179): the gate resolves hold-vs-mark from the machine credential file as
-        well as the environment, and this client read only its own environment with a `hold` default.
+        """Regression (issue 179): the gate once resolved hold-vs-mark from the machine credential file
+        as well as the environment, and this client read only its own environment with a `hold` default.
         A gate run under `mark` was therefore applied as `hold`, and every below-threshold record was
         silently dropped. The report's `belowThreshold` is the setting that was actually in force."""
         verdicts = [

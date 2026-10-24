@@ -43,8 +43,9 @@ sys.path.insert(0, str(SCRIPTS))
 import importlib.util as _ilu
 _spec = _ilu.spec_from_file_location("_decisions_gate_under_test", GATE)
 _gate = _ilu.module_from_spec(_spec)
-# The gate seeds `os.environ` from the machine credential file at import, so the in-process copy is
-# loaded against an absent file too — otherwise the operator's decision settings land in this process.
+# The gate once seeded `os.environ` from the machine credential file at import. It reads the environment
+# only now; the in-process copy is still loaded against an absent file, so a reintroduced loader could
+# not land the operator's settings in this process before `EnvironmentOnlySettingsTests` caught it.
 _saved_credential_file = os.environ.get("CONTEXT_MEMORY_CREDENTIAL_FILE")
 os.environ["CONTEXT_MEMORY_CREDENTIAL_FILE"] = str(
     Path(tempfile.gettempdir()) / "mimisbrunnr-gate-harness-absent-credentials")
@@ -210,7 +211,8 @@ def gate_subprocess_env(env_extra=None):
             env.pop(key)
     # Point the credential-file lookup at a path that does not exist, unless the case names its own.
     #
-    # The gate seeds its settings from this file **at import**, so without this every case in this
+    # The gate once seeded its settings from this file **at import** (it reads the environment only now;
+    # the redirect stays as the guard against a reintroduced loader), and without this every case in this
     # suite silently inherited the operator's real `~/.mimisbrunnr/credentials` — the one file on the
     # machine describing the machine's real decision configuration. Three failures came from that and
     # none of them looked like it: cases whose stub endpoint was overridden by the file's
@@ -1719,14 +1721,14 @@ class LedgerPrivacyTests(unittest.TestCase):
         self.assertEqual(_gate.migrate_ledger(ledger), (ledger, False))
 
 
-class CredentialLoadingTests(GateTestCase):
-    """The gate must see the settings `run.sh` publishes to the machine credential file.
+class EnvironmentOnlySettingsTests(GateTestCase):
+    """The decision settings come from the process environment and nowhere else.
 
-    They are duplicated rather than imported, because `context_memory_client` imports `redact` at module
-    scope — importing it here would make the redactor a startup dependency of the gate, and a test that
-    substitutes a stub redactor would have the stub execute at import and consume the gate's own stdin.
-    That is not hypothetical: the first version of the fix imported it and broke four redactor tests
-    exactly that way. So the duplication is guarded by an agreement test instead.
+    The gate used to seed unset settings from the machine credential file at import. That made the file
+    a second source of truth that won whenever the environment was not inherited — a session started
+    before the operator's profile was edited ran against the launcher's 11434/nimble defaults while the
+    operator's own endpoint sat in their shell, and every attempt was `unreachable`. These cases pin the
+    removal: a credential file holding decision settings must change nothing.
     """
 
     def _credential_file(self):
@@ -1736,65 +1738,41 @@ class CredentialLoadingTests(GateTestCase):
         with open(self._credential_file(), "w", encoding="utf-8") as handle:
             handle.write(body)
 
-    def test_the_gate_reads_the_flag_from_the_file(self):
-        """The defect itself: the file says enabled, the process environment is clean, and the gate
-        still skipped."""
+    def test_a_credential_file_never_enables_the_gate(self):
+        """The defect inverted: the file says enabled, the environment is clean, and the gate stays off."""
         self._write("CONTEXT_MEMORY_DECISIONS_ENABLED=true\n")
         proc = run_gate(["probe"], "", {
             "CONTEXT_MEMORY_CREDENTIAL_FILE": self._credential_file(),
-        })
-        self.assertNotEqual(json.loads(proc.stdout)["outcome"], "disabled",
-                            "the gate ignored the machine credential file")
-
-    def test_a_real_environment_variable_still_wins(self):
-        """Load-only-if-absent, the same precedence the capture client uses."""
-        self._write("CONTEXT_MEMORY_DECISIONS_ENABLED=true\n")
-        proc = run_gate(["probe"], "", {
-            "CONTEXT_MEMORY_CREDENTIAL_FILE": self._credential_file(),
-            "CONTEXT_MEMORY_DECISIONS_ENABLED": "false",
         })
         self.assertEqual(json.loads(proc.stdout)["outcome"], "disabled",
-                         "the environment must beat the file")
+                         "the gate read a setting from the machine credential file")
 
-    def test_the_model_and_endpoint_are_read_from_the_file(self):
+    def test_the_model_and_endpoint_never_come_from_a_file(self):
         self._write("CONTEXT_MEMORY_DECISIONS_MODEL=some-other-model\n"
                     "CONTEXT_MEMORY_DECISIONS_BASE_URL=http://127.0.0.1:9\n")
         proc = run_gate(["probe"], "", {
             "CONTEXT_MEMORY_CREDENTIAL_FILE": self._credential_file(),
         })
         report = json.loads(proc.stdout)
+        self.assertEqual(report["model"], _gate.DEFAULT_MODEL)
+        self.assertEqual(report["endpoint"], _gate.DEFAULT_BASE_URL)
+
+    def test_the_environment_supplies_every_setting(self):
+        """The positive half, so the two cases above cannot pass against a gate that reads nothing at
+        all: the same settings, exported, are the ones the gate reports."""
+        proc = run_gate(["probe"], "", {
+            "CONTEXT_MEMORY_DECISIONS_MODEL": "some-other-model",
+            "CONTEXT_MEMORY_DECISIONS_BASE_URL": "http://127.0.0.1:9",
+        })
+        report = json.loads(proc.stdout)
         self.assertEqual(report["model"], "some-other-model")
         self.assertEqual(report["endpoint"], "http://127.0.0.1:9")
 
-    def test_only_the_named_keys_are_seeded(self):
-        """A machine file holding an unrelated secret must not pull it into this process — the read
-        client's refusal to start with a write token present depends on that discipline.
-
-        The endpoint is the harness's stub, passed explicitly. This case previously passed **only**
-        the credential file, so `CONTEXT_MEMORY_DECISIONS_BASE_URL` fell back to its documented default
-        of `http://localhost:11434` and the assertion was really "a decision model answered somewhere on
-        this developer's machine". It passed locally and failed in CI with `unreachable`, because CI has
-        no Ollama. The docstring claimed the endpoint came from the stub; it never did. A test that
-        silently depends on a developer's local daemon is not hermetic, and it is green for the wrong
-        reason on exactly the machine least able to catch it.
-        """
+    def test_importing_the_gate_adds_nothing_to_the_environment(self):
+        """Driven in a subprocess that reports what its own environment holds after the import, so a
+        loader reintroduced at module scope — for any key — is caught here rather than by its symptom."""
         self._write("CONTEXT_MEMORY_DECISIONS_ENABLED=true\n"
                     "SOME_OTHER_SECRET=should-not-be-loaded\n")
-        proc = run_gate(["probe"], "", self.gate_env(
-            CONTEXT_MEMORY_CREDENTIAL_FILE=self._credential_file()))
-        self.assertEqual(json.loads(proc.stdout)["outcome"], "ok",
-                         "enabled from the file, and the stub answered")
-
-        # The case is named for the *exclusion*, and reaching `ok` only proves the inclusion — the
-        # named flag was read. Nothing here asserted the unlisted key stayed out, so a loader that
-        # seeded every key in the file would have passed.
-        #
-        # Driven in a subprocess that reports what its own environment holds. Loading the gate
-        # in-process was the obvious alternative and it leaked: the loader runs at import, so the
-        # unlisted key landed in `os.environ` for the rest of the process, and the sibling
-        # loader-agreement test — which passes that same name as a *wanted* key and relies on
-        # "a value already in the environment wins" — then diverged. One test's environment became
-        # another's input. A subprocess cannot do that.
         probe = ("import os,sys;sys.path.insert(0, %r);"
                  "import importlib.util as u;"
                  "s=u.spec_from_file_location('g', %r);m=u.module_from_spec(s);s.loader.exec_module(m);"
@@ -1807,54 +1785,8 @@ class CredentialLoadingTests(GateTestCase):
         result = subprocess.run([sys.executable, "-B", "-c", probe],
                                 capture_output=True, text=True, env=clean)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.strip(), "'true' None",
-                         "the named key must be seeded from the file and the unlisted key must not")
-
-    LOADER_KEYS = ("CONTEXT_MEMORY_DECISIONS_ENABLED", "SPACED",
-                   "CONTEXT_MEMORY_DECISIONS_MODEL", "SOME_OTHER_SECRET")
-
-    def _loader_result(self, script, wanted):
-        """What `script`'s loader seeds from this case's file, read in a fresh process.
-
-        A fresh process because both scripts fix the file path when they are imported: the previous
-        in-process version set `CONTEXT_MEMORY_CREDENTIAL_FILE` after import, so both loaders read the
-        operator's real file (or none) and agreed on whatever it held — on CI, all-None on both sides
-        (issue 182). A script that fails to import is a failure here, never a skip.
-        """
-        probe = ("import importlib.util as u, json, os, sys\n"
-                 "sys.path.insert(0, sys.argv[1])\n"
-                 "s = u.spec_from_file_location('loader_under_test', sys.argv[2])\n"
-                 "m = u.module_from_spec(s); s.loader.exec_module(m)\n"
-                 "m.load_machine_credentials(*json.loads(sys.argv[3]))\n"
-                 "print(json.dumps({k: os.environ.get(k) for k in json.loads(sys.argv[4])}))\n")
-        env = {k: v for k, v in os.environ.items()
-               if k not in self.LOADER_KEYS and not k.startswith("CONTEXT_MEMORY_")}
-        env["CONTEXT_MEMORY_CREDENTIAL_FILE"] = self._credential_file()
-        proc = subprocess.run(
-            [sys.executable, "-B", "-c", probe, str(SCRIPTS), str(script),
-             json.dumps(wanted), json.dumps(self.LOADER_KEYS)],
-            capture_output=True, text=True, env=env)
-        self.assertEqual(proc.returncode, 0,
-                         f"{script.name} could not be loaded for comparison: {proc.stderr[-400:]}")
-        return json.loads(proc.stdout.strip().splitlines()[-1])
-
-    def test_the_two_loaders_agree(self):
-        """The duplication guard: the gate's loader and the capture client's must produce the same
-        environment from the same file. This is the test that makes the duplication safe.
-
-        Agreement alone is satisfied by two loaders that both read nothing, so the expected values are
-        asserted too — `SPACED` proves the file was really parsed (key and value both trimmed)."""
-        self._write("# comment\nCONTEXT_MEMORY_DECISIONS_ENABLED=true\n"
-                    "malformed line without a delimiter\n"
-                    "  SPACED = value  \nCONTEXT_MEMORY_DECISIONS_MODEL=nimble\n")
-        wanted = ["CONTEXT_MEMORY_DECISIONS_ENABLED", "CONTEXT_MEMORY_DECISIONS_MODEL", "SPACED"]
-        gate = self._loader_result(GATE, wanted)
-        capture = self._loader_result(SCRIPTS / "context_memory_client.py", wanted)
-        self.assertEqual(gate, {"CONTEXT_MEMORY_DECISIONS_ENABLED": "true", "SPACED": "value",
-                                "CONTEXT_MEMORY_DECISIONS_MODEL": "nimble",
-                                "SOME_OTHER_SECRET": None})
-        self.assertEqual(capture, gate,
-                         "the two loaders diverged; the duplication is only safe while they agree")
+        self.assertEqual(result.stdout.strip(), "None None",
+                         "importing the gate loaded a setting from the machine credential file")
 
 
 class RubricValidationTests(GateTestCase):
@@ -2453,11 +2385,10 @@ class DiscriminationDisclosureTests(GateTestCase):
 class HarnessIsolationTests(GateTestCase):
     """The suite's result must depend on the code under test, not on who is running it.
 
-    These three defects shared one cause: the gate seeds its settings from the machine credential file
+    These defects shared one cause: the gate once seeded its settings from the machine credential file
     at import, and the harness scrubbed the settings from the *environment* without redirecting the
-    file *pointer*. Every case therefore inherited the operator's real configuration. It is worth a
-    class of its own because the symptom is invisible by construction — the tests that break are the
-    ones that touch a stub endpoint or an empty setting, so the suite still looks comprehensive.
+    file *pointer*. Every case therefore inherited the operator's real configuration. The gate reads the
+    environment only now, and these cases stay as the guard that a reintroduced file read would trip.
     """
 
     def test_a_case_does_not_inherit_the_operators_credential_file(self):
@@ -2480,10 +2411,10 @@ class HarnessIsolationTests(GateTestCase):
         self.assertEqual(report["outcome"], "disabled",
                          "an empty flag must not be seeded from anywhere")
 
-    def test_an_explicitly_empty_setting_wins_over_the_operator_file(self):
-        """Review #4: the loader filled any setting that was empty, so `CONTEXT_MEMORY_DECISIONS_ENABLED=`
-        did not turn off a gate the credential file enabled, and records went to the model. An
-        explicitly set value — empty included — wins over the file."""
+    def test_a_credential_file_cannot_enable_the_gate_set_or_unset(self):
+        """Review #4 was an empty `CONTEXT_MEMORY_DECISIONS_ENABLED=` that the file loader refilled, so
+        records went to the model. With the loader gone the file cannot enable the gate at all — whether
+        the flag is explicitly empty or not set."""
         credentials = os.path.join(self.tmp, "credentials")
         with open(credentials, "w", encoding="utf-8") as handle:
             handle.write("CONTEXT_MEMORY_DECISIONS_ENABLED=true\n")
@@ -2494,8 +2425,8 @@ class HarnessIsolationTests(GateTestCase):
         env = {k: v for k, v in self.gate_env().items() if k != "CONTEXT_MEMORY_DECISIONS_ENABLED"}
         proc = run_gate(["score"], json.dumps([RECORD]),
                         dict(env, CONTEXT_MEMORY_CREDENTIAL_FILE=credentials))
-        self.assertNotEqual(json.loads(proc.stdout)["outcome"], "disabled",
-                            "control: an unset flag is seeded from the file")
+        self.assertEqual(json.loads(proc.stdout)["outcome"], "disabled",
+                         "an unset flag must not be seeded from the file")
 
     def test_the_harness_points_the_credential_file_at_a_path_that_does_not_exist(self):
         """The isolation itself, asserted on the environment `run_gate` actually builds. The previous

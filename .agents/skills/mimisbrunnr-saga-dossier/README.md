@@ -93,8 +93,8 @@ tracked or un-ignored destination (a `README.md`, say) is refused, as is a path 
 and the file is written readable by you only. Leave `--out` off to print to stdout instead. `--asof YYYY-MM-DD` composes lifecycle and staleness as of that date; a date
 that does not parse is refused rather than silently read as today.
 
-The read token and base URL are seeded from the machine credential file (`~/.mimisbrunnr/credentials`)
-at import, so the skill works from any checkout with nothing to provision per repo. The bundle stays
+The read token and base URL are environment variables, which the service launcher adds to your shell
+profile, so the skill works from any checkout with nothing to provision per repo. The bundle stays
 read-only: a write token present refuses to run.
 
 ## Focus: reading the same material for a different purpose
